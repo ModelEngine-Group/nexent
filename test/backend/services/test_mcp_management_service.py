@@ -7,6 +7,9 @@ from unittest.mock import patch, MagicMock, AsyncMock
 import sys
 import os
 
+import pytest
+
+
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../../backend"))
 sys.modules['boto3'] = MagicMock()
 from unittest.mock import patch as _patch
@@ -79,6 +82,67 @@ import backend.services.mcp_management_service as svc_mod
 svc_mod.McpNotFoundError = McpNotFoundError
 svc_mod.McpNameConflictError = McpNameConflictError
 svc_mod.UnauthorizedError = UnauthorizedError
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("role,owner_tenant,owner_user,allowed", [
+    ("ADMIN", "tid", "publisher", True),
+    ("ADMIN", "other", "publisher", False),
+    ("ADMIN", None, "publisher", False),
+    ("DEV", "tid", "admin", True),
+    ("DEV", "tid", "publisher", False),
+    ("USER", "tid", "admin", False),
+    ("SU", "other", "publisher", True),
+])
+async def test_mcp_deletion_checks_role_and_tenant(mocker, role, owner_tenant, owner_user, allowed):
+    mocker.patch.object(svc_mod, "_get_user_role", return_value=role)
+    mocker.patch.object(svc_mod, "get_mcp_market_record_by_id", return_value={
+        "market_id": 1, "tenant_id": owner_tenant, "user_id": owner_user
+    })
+    delete = mocker.patch.object(svc_mod, "delete_mcp_market_record_by_id")
+    clear = mocker.patch.object(svc_mod, "clear_mcp_record_market_id")
+    notify = mocker.patch.object(svc_mod, "deactivate_notifications")
+    if allowed:
+        await svc_mod.delete_community_mcp_service(tenant_id="tid", user_id="admin", market_id=1)
+        delete.assert_called_once()
+        clear.assert_called_once()
+    else:
+        with pytest.raises(svc_mod.ForbiddenError):
+            await svc_mod.delete_community_mcp_service(tenant_id="tid", user_id="admin", market_id=1)
+        delete.assert_not_called()
+        clear.assert_not_called()
+        notify.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_admin_cannot_edit_another_tenants_mcp_to_pending_review(mocker):
+    mocker.patch.object(svc_mod, "_get_user_role", return_value="ADMIN")
+    mocker.patch.object(svc_mod, "get_mcp_market_record_by_id", return_value={
+        "market_id": 1, "tenant_id": "other", "review_status": "shared"
+    })
+    update = mocker.patch.object(svc_mod, "update_mcp_market_record")
+    status = mocker.patch.object(svc_mod, "update_mcp_market_status")
+    with pytest.raises(svc_mod.ForbiddenError):
+        await svc_mod.update_community_mcp_service(
+            tenant_id="tid", user_id="admin", market_id=1,
+            name=None, description=None, tags=None, registry_json=None,
+        )
+    update.assert_not_called()
+    status.assert_not_called()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("role,expected", [
+    ("ADMIN", [True, False]), ("USER", [False, False]), ("SU", [True, True])
+])
+async def test_mcp_repository_take_down_permission_is_tenant_scoped(mocker, role, expected):
+    mocker.patch.object(svc_mod, "_get_user_role", return_value=role)
+    mocker.patch.object(svc_mod, "get_mcp_market_records", return_value={"items": [
+        {"tenant_id": "tid", "review_status": "shared"},
+        {"tenant_id": "other", "review_status": "shared"},
+    ]})
+    result = await svc_mod.list_community_mcp_services(tenant_id="tid", user_id="admin")
+    assert [item["canTakeDown"] for item in result["items"]] == expected
 
 MARKET_RECORD = {
     "market_id": 1,
@@ -714,7 +778,7 @@ class TestUpdateCommunityMcpService(unittest.IsolatedAsyncioTestCase):
     @patch('backend.services.mcp_management_service.get_mcp_market_record_by_id')
     async def test_update_success(self, mock_get, mock_check, mock_email, mock_update_record, mock_update_status):
         mock_get.return_value = {
-            "market_id": 1, "mcp_name": "svc",
+            "market_id": 1, "tenant_id": "tid", "mcp_name": "svc",
             "config_json": None, "registry_json": None,
         }
         mock_check.return_value = False
@@ -743,7 +807,7 @@ class TestUpdateCommunityMcpService(unittest.IsolatedAsyncioTestCase):
     @patch('backend.services.mcp_management_service.get_mcp_market_record_by_id')
     async def test_update_name_conflict(self, mock_get, mock_check):
         mock_get.return_value = {
-            "market_id": 1, "mcp_name": "old-name",
+            "market_id": 1, "tenant_id": "tid", "mcp_name": "old-name",
             "config_json": None, "registry_json": None,
         }
         mock_check.return_value = True
@@ -760,7 +824,7 @@ class TestUpdateCommunityMcpService(unittest.IsolatedAsyncioTestCase):
     @patch('backend.services.mcp_management_service.get_mcp_market_record_by_id')
     async def test_update_same_name_skips_check(self, mock_get, mock_check, mock_email, mock_update_record, mock_update_status):
         mock_get.return_value = {
-            "market_id": 1, "mcp_name": "svc",
+            "market_id": 1, "tenant_id": "tid", "mcp_name": "svc",
             "config_json": None, "registry_json": None,
         }
         await update_community_mcp_service(
@@ -777,7 +841,7 @@ class TestUpdateCommunityMcpService(unittest.IsolatedAsyncioTestCase):
     async def test_update_with_shared_fields(self, mock_upd_mcp, mock_get, mock_email, mock_update_record, mock_update_status):
         """update_community_mcp_service should update shared_fields on source MCP record."""
         mock_get.return_value = {
-            "market_id": 1, "mcp_name": "svc", "mcp_server": "http://srv",
+            "market_id": 1, "tenant_id": "tid", "mcp_name": "svc", "mcp_server": "http://srv",
             "config_json": None, "registry_json": None,
             "source_mcp_id": 10, "tags": [],
         }
@@ -801,7 +865,7 @@ class TestUpdateCommunityMcpService(unittest.IsolatedAsyncioTestCase):
     @patch('backend.services.mcp_management_service.get_mcp_market_record_by_id')
     async def test_update_infers_transport_type(self, mock_get, mock_email, mock_update_record, mock_update_status):
         mock_get.return_value = {
-            "market_id": 1, "mcp_name": "svc",
+            "market_id": 1, "tenant_id": "tid", "mcp_name": "svc",
             "config_json": None, "registry_json": None,
         }
         mock_email.return_value = "user@test.com"
@@ -1010,7 +1074,8 @@ class TestDeleteCommunityMcpService(unittest.IsolatedAsyncioTestCase):
     @patch('backend.services.mcp_management_service.clear_mcp_record_market_id')
     @patch('backend.services.mcp_management_service.delete_mcp_market_record_by_id')
     @patch('backend.services.mcp_management_service.get_mcp_market_record_by_id')
-    async def test_delete_success(self, mock_get, mock_delete, mock_clear):
+    @patch('backend.services.mcp_management_service._get_user_role', return_value='ADMIN')
+    async def test_delete_success(self, mock_role, mock_get, mock_delete, mock_clear):
         mock_get.return_value = {"market_id": 1, "tenant_id": "tid"}
         await delete_community_mcp_service(
             tenant_id="tid", user_id="uid", market_id=1,

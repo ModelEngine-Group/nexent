@@ -1,8 +1,15 @@
 "use client";
 
 import type { MenuProps } from "antd";
-import { Button, Card, Dropdown } from "antd";
-import { Bot, Copy, Download, Eye, MoreHorizontal, PackageX } from "lucide-react";
+import { Button, Card, Dropdown, Tooltip } from "antd";
+import {
+  Bot,
+  Copy,
+  Download,
+  Eye,
+  MoreHorizontal,
+  PackageX,
+} from "lucide-react";
 import { useTranslation } from "react-i18next";
 import type { AgentRepositoryListingItem } from "@/types/agentRepository";
 
@@ -26,7 +33,9 @@ export function AgentRepositoryCard({
   const { t } = useTranslation("common");
 
   const title =
-    listing.display_name?.trim() || listing.name?.trim() || t("agentRepository.card.untitled");
+    listing.display_name?.trim() ||
+    listing.name?.trim() ||
+    t("agentRepository.card.untitled");
   const author = listing.author?.trim();
   const tags = listing.tags?.filter((tag) => tag.trim()) ?? [];
   const toolCount = listing.tool_count ?? 0;
@@ -34,16 +43,31 @@ export function AgentRepositoryCard({
   const downloads = listing.downloads ?? 0;
   const showTagsRow = tags.length > 0 || toolCount > 0;
   const showMenu = showAdminMenu && onTakeDown != null;
+  const canTakeDown = listing.can_take_down === true;
 
   const menuItems: MenuProps["items"] = showMenu
     ? [
         {
           key: "takeDown",
-          label: t("repository.listingStatus.takeDown"),
+          label: (
+            <Tooltip
+              title={
+                !canTakeDown
+                  ? t("repository.listingStatus.takeDownTenantOnly")
+                  : undefined
+              }
+            >
+              <span className="block">
+                {t("repository.listingStatus.takeDown")}
+              </span>
+            </Tooltip>
+          ),
           icon: <PackageX className="size-3.5" aria-hidden />,
           danger: true,
-          disabled: isTakingDown,
-          onClick: () => onTakeDown(listing),
+          disabled: !canTakeDown || isTakingDown,
+          onClick: () => {
+            if (canTakeDown && !isTakingDown) onTakeDown(listing);
+          },
         },
       ]
     : [];

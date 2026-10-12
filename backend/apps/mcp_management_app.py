@@ -6,6 +6,7 @@ from fastapi.responses import JSONResponse
 from http import HTTPStatus
 
 from consts.exceptions import (
+    ForbiddenError,
     MCPConnectionError,
     McpNameConflictError,
     McpNotFoundError,
@@ -453,6 +454,8 @@ async def update_community_mcp_service_api(
         return JSONResponse(status_code=HTTPStatus.OK, content={"status": "success"})
     except McpNotFoundError as exc:
         raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail=str(exc))
+    except ForbiddenError as exc:
+        raise HTTPException(status_code=HTTPStatus.FORBIDDEN, detail=str(exc))
     except McpValidationError as exc:
         raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail=str(exc))
     except McpNameConflictError as exc:
@@ -486,6 +489,8 @@ async def delete_community_mcp_service_api(
         return JSONResponse(status_code=HTTPStatus.OK, content={"status": "success"})
     except McpNotFoundError as exc:
         raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail=str(exc))
+    except ForbiddenError as exc:
+        raise HTTPException(status_code=HTTPStatus.FORBIDDEN, detail=str(exc))
     except UnauthorizedError as exc:
         raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(exc))
     except HTTPException:

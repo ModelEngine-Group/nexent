@@ -938,8 +938,7 @@ async def list_published_agents_impl(
                 "unavailable_reasons": unavailable_reasons,
             })
 
-        # Handle duplicate name/display_name: keep the earliest created agent available,
-        # mark later ones as unavailable due to duplication.
+        # Mark all conflicting agents unavailable until their names are corrected.
         _apply_duplicate_name_availability_rules(enriched_agents)
 
         # Build the final simple agent list

@@ -47,6 +47,15 @@ client = TestClient(app)
 AUTH_HEADER = {"Authorization": "Bearer test_token"}
 
 
+def test_cross_tenant_mcp_delete_returns_forbidden(mocker):
+    mocker.patch.object(mgmt_app, "get_current_user_info", return_value=("admin", "tid", "en"))
+    mocker.patch.object(mgmt_app, "delete_community_mcp_service", new=AsyncMock(
+        side_effect=mgmt_app.ForbiddenError("Not authorized to delete this marketplace listing")
+    ))
+    response = client.delete("/mcp-tools/community/1", headers=AUTH_HEADER)
+    assert response.status_code == HTTPStatus.FORBIDDEN
+
+
 # ============================================================================
 # GET /mcp-tools/registry/list
 # ============================================================================

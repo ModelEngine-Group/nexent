@@ -7,6 +7,7 @@ from consts.agent_repository import (
     OWNERSHIP_CREATED,
     OWNERSHIP_OTHERS,
     STATUS_NOT_SHARED,
+    STATUS_SHARED,
 )
 from consts.const import (
     CAN_EDIT_ALL_USER_ROLES,
@@ -164,16 +165,17 @@ def upsert_agent_repository_record(
 
 
 def list_agent_repository_summaries(
-    publisher_tenant_id: str,
+    publisher_tenant_id: Optional[str],
     *,
     status: Optional[str] = None,
     agent_id: Optional[int] = None,
 ) -> List[dict]:
-    """List active repository summaries for a publisher tenant without heavy JSON blobs."""
+    """List shared marketplace entries globally and scope review entries to the publisher tenant."""
     with get_db_session() as session:
         query = session.query(
             AgentRepository.agent_repository_id,
             AgentRepository.agent_id,
+            AgentRepository.publisher_tenant_id,
             AgentRepository.author,
             AgentRepository.submitted_by,
             AgentRepository.name,
@@ -189,6 +191,8 @@ def list_agent_repository_summaries(
         ).filter(
             AgentRepository.delete_flag != "Y",
         )
+        if status != STATUS_SHARED and publisher_tenant_id is not None:
+            query = query.filter(AgentRepository.publisher_tenant_id == publisher_tenant_id)
         if status:
             query = query.filter(AgentRepository.status == status)
         if agent_id is not None:
@@ -198,6 +202,7 @@ def list_agent_repository_summaries(
             {
                 "agent_repository_id": row.agent_repository_id,
                 "agent_id": row.agent_id,
+                "publisher_tenant_id": row.publisher_tenant_id,
                 "author": row.author,
                 "submitted_by": row.submitted_by,
                 "name": row.name,

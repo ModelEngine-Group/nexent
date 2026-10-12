@@ -3071,10 +3071,10 @@ async def test_list_all_agent_info_impl_duplicate_names(
 
     assert len(result) == 2
 
-    # The earliest created agent (agent_id=1) should remain available
+    # Every agent with a conflicting variable name is unavailable
     agent1 = next(a for a in result if a["agent_id"] == 1)
-    assert agent1["is_available"] is True
-    assert "duplicate_name" not in agent1["unavailable_reasons"]
+    assert agent1["is_available"] is False
+    assert "duplicate_name" in agent1["unavailable_reasons"]
     assert agent1["group_ids"] == [10]
     assert agent1["is_published"] == False  # current_version_no is missing/None
 
@@ -5779,9 +5779,9 @@ def test_apply_duplicate_name_availability_rules_handles_missing_fields():
     _apply_duplicate_name_availability_rules(enriched_agents)
 
     assert enriched_agents[0]["unavailable_reasons"] == []
-    assert "duplicate_name" not in enriched_agents[1]["unavailable_reasons"]
+    assert "duplicate_name" in enriched_agents[1]["unavailable_reasons"]
     assert "duplicate_name" in enriched_agents[2]["unavailable_reasons"]
-    assert "duplicate_display_name" not in enriched_agents[3]["unavailable_reasons"]
+    assert "duplicate_display_name" in enriched_agents[3]["unavailable_reasons"]
     assert "duplicate_display_name" in enriched_agents[4]["unavailable_reasons"]
 
 
@@ -16962,3 +16962,51 @@ def test_resolve_user_tenant_language_honors_explicit_identity(
 def test_get_user_group_ids_returns_empty_string_on_query_failure(mock_query_group_ids):
     assert agent_service._get_user_group_ids("user-1", "tenant-1") == ""
     mock_query_group_ids.assert_called_once_with("user-1")
+
+
+@pytest.mark.parametrize("existing, imported, conflict", [
+    ([{"agent_id": 1, "tenant_id": "tenant_a", "name": "same"}], ["same"], True),
+    ([], ["same", "same"], True),
+    ([{"agent_id": 1, "tenant_id": "tenant_b", "name": "same"}], ["same"], False),
+    ([], ["first", "second"], False),
+])
+def test_import_name_validation_before_writes(existing, imported, conflict):
+    from types import SimpleNamespace
+    from backend.services import agent_service
+
+    payload = SimpleNamespace(agent_info={
+        str(index): SimpleNamespace(name=name) for index, name in enumerate(imported)
+    })
+    with patch("backend.services.agent_service.query_all_agent_info_by_tenant_id", return_value=existing):
+        if conflict:
+            with pytest.raises(agent_service.AgentNameConflictError, match="already exists"):
+                agent_service._validate_import_agent_names(payload, "tenant_a")
+        else:
+            agent_service._validate_import_agent_names(payload, "tenant_a")
+
+
+@pytest.mark.asyncio
+async def test_name_resolution_preserves_conflict_error():
+    from backend.services import agent_service
+
+    with patch("backend.services.agent_service.search_agent_id_by_agent_name",
+               side_effect=agent_service.AgentNameConflictError("multiple agents")):
+        with pytest.raises(agent_service.AgentNameConflictError, match="multiple agents"):
+            agent_service.get_agent_by_name_impl("same", "tenant_a")
+        with pytest.raises(agent_service.AgentNameConflictError, match="multiple agents"):
+            await agent_service.get_agent_id_by_name("same", "tenant_a")
+
+
+@pytest.mark.asyncio
+async def test_force_import_rejects_conflict_before_creating_agents():
+    from types import SimpleNamespace
+    from backend.services import agent_service
+
+    payload = SimpleNamespace(agent_id=1, agent_info={"1": SimpleNamespace(name="same")})
+    with patch("backend.services.agent_service.get_current_user_info", return_value=("user", "tenant_a", "en")), \
+         patch("backend.services.agent_service.query_all_agent_info_by_tenant_id",
+               return_value=[{"agent_id": 2, "tenant_id": "tenant_a", "name": "same"}]), \
+         patch("backend.services.agent_service.import_agent_by_agent_id", new_callable=AsyncMock) as create:
+        with pytest.raises(agent_service.AgentNameConflictError):
+            await agent_service.import_agent_impl(payload, "token", force_import=True)
+        create.assert_not_called()

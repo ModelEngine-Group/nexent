@@ -3,7 +3,6 @@ SQL Database Tool Base Classes
 
 Provides common functionality for all SQL database tools including:
 - Security validation (SQL blacklist, WHERE clause enforcement)
-- SQL dialect conversion (LIMIT clause adaptation)
 - Result formatting
 """
 import json
@@ -43,7 +42,6 @@ class SqlDatabaseBaseTool(Tool):
 
     Provides common functionality:
     - Security validation (SQL blacklist, WHERE clause enforcement)
-    - SQL dialect conversion (LIMIT clause adaptation)
     - Result formatting
     """
 
@@ -100,16 +98,16 @@ class SqlDatabaseBaseTool(Tool):
         self,
         sql: str,
         parameters: Optional[List[Any]] = None,
-        max_rows: Optional[int] = 100,
+        max_rows: Optional[int] = None,
         timeout: Optional[int] = 10,
     ) -> str:
         """
         Execute SQL query on the database.
 
         Args:
-            sql: SQL query to execute (supports standard ANSI SQL)
+            sql: SQL query in the target database dialect
             parameters: Optional list of parameter values for parameterized queries
-            max_rows: Maximum number of rows to return (default 100)
+            max_rows: Maximum number of rows to return (default unlimited; does not modify SQL)
             timeout: Query timeout in seconds (default 10)
 
         Returns:
@@ -131,7 +129,7 @@ class SqlDatabaseBaseTool(Tool):
                 self.observer.add_message("", ProcessType.TOOL, running_prompt)
 
             if max_rows is None:
-                max_rows = 100
+                max_rows = 0
             if timeout is None:
                 timeout = 10
 

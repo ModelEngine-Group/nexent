@@ -996,6 +996,28 @@ def test_repository_list_and_detail_success():
     _user_tenant_db_mock.get_user_tenant_by_user_id.assert_not_called()
 
 
+@pytest.mark.parametrize("publisher_tenant_id,expected", [("tenant-1", True), ("tenant-2", False), (None, False)])
+def test_admin_repository_take_down_permission_is_tenant_scoped(mocker, publisher_tenant_id, expected):
+    record = {**_repository_record(status="shared"), "publisher_tenant_id": publisher_tenant_id}
+    mocker.patch.object(srs, "list_skill_repository_summaries", return_value={"items": [record]})
+    mocker.patch.object(srs, "_get_user_role", return_value="ADMIN")
+    result = srs.list_skill_repository_listings_impl("tenant-1", user_id="admin-1", status="shared")
+    assert result["items"][0]["can_take_down"] is expected
+
+
+def test_admin_cannot_take_down_another_tenants_skill(mocker):
+    mocker.patch.object(srs, "_get_user_role", return_value="ADMIN")
+    mocker.patch.object(srs, "get_skill_repository_by_id_and_publisher", return_value={
+        **_repository_record(status="shared"), "publisher_tenant_id": "tenant-2"
+    })
+    update = mocker.patch.object(srs, "update_skill_repository_status_by_id")
+    with pytest.raises(srs.ForbiddenError):
+        srs.update_skill_repository_status_impl(
+            skill_repository_id=1, status="not_shared", user_id="admin-1", tenant_id="tenant-1"
+        )
+    update.assert_not_called()
+
+
 def test_repository_list_does_not_grant_take_down_to_regular_user():
     _skill_repo_db_mock.list_skill_repository_summaries.return_value = {
         "items": [_repository_record(status="shared")],

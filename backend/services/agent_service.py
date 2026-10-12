@@ -22,7 +22,7 @@ from utils.prompt_template_utils import normalize_prompt_generate_template_conte
 from consts.const import TOOL_TYPE_MAPPING, \
     LANGUAGE, MESSAGE_ROLE, MODEL_CONFIG_MAPPING, CAN_EDIT_ALL_USER_ROLES, PERMISSION_PRIVATE, STREAM_STATUS_EVENT, \
     DEFAULT_EN_TITLE, DEFAULT_ZH_TITLE, RUNTIME_CANCEL_POLL_INTERVAL_SECONDS
-from consts.exceptions import AppException, ForbiddenError, MemoryPreparationException, SkillDuplicateError
+from consts.exceptions import AgentNameConflictError, AppException, ForbiddenError, MemoryPreparationException, SkillDuplicateError
 from consts.error_code import ErrorCode
 from consts.agent_unavailable_reasons import AgentUnavailableReason
 from nexent.core.utils.observer import ProcessType
@@ -1821,6 +1821,8 @@ async def update_agent_info_impl(request: AgentInfoRequest, authorization: str =
             request.prompt_template_id = prompt_template_id
             request.prompt_template_name = prompt_template_name
             update_agent(agent_id, request, user_id)
+    except AgentNameConflictError:
+        raise
     except Exception as e:
         logger.error(f"Failed to update agent info: {str(e)}")
         raise ValueError(f"Failed to update agent info: {str(e)}")
@@ -2360,6 +2362,24 @@ async def export_agent_by_agent_id(
     return agent_info
 
 
+def _validate_import_agent_names(agent_info: ExportAndImportDataFormat, tenant_id: str) -> None:
+    """Reject conflicting variable names before importing agents or bundled skills."""
+    existing_agents = [
+        agent for agent in query_all_agent_info_by_tenant_id(tenant_id)
+        if agent.get("tenant_id", tenant_id) == tenant_id
+    ]
+    imported_names: set[str] = set()
+    for imported in agent_info.agent_info.values():
+        name = imported.name
+        if name and (name in imported_names or _check_agent_name_duplicate(
+            name, tenant_id, agents_cache=existing_agents
+        )):
+            raise AgentNameConflictError(
+                f"Agent variable name '{name}' already exists in this tenant or import. Choose a different variable name."
+            )
+        imported_names.add(name)
+
+
 async def import_agent_impl(
     agent_info: ExportAndImportDataFormat,
     authorization: str = Header(None),
@@ -2377,6 +2397,8 @@ async def import_agent_impl(
     """
     user_id, tenant_id, _ = get_current_user_info(authorization)
     agent_id = agent_info.agent_id
+
+    _validate_import_agent_names(agent_info, tenant_id)
 
     agent_stack = deque([agent_id])
     agent_id_set = set()
@@ -2662,8 +2684,7 @@ async def list_all_agent_info_impl(tenant_id: str, user_id: str) -> list[dict]:
                 "unavailable_reasons": unavailable_reasons,
             })
 
-        # Handle duplicate name/display_name: keep the earliest created agent available,
-        # mark later ones as unavailable due to duplication.
+        # Mark all conflicting agents unavailable until their names are corrected.
         _apply_duplicate_name_availability_rules(enriched_agents)
 
         simple_agent_list: list[dict] = []
@@ -2720,9 +2741,7 @@ async def list_all_agent_info_impl(tenant_id: str, user_id: str) -> list[dict]:
 
 def _apply_duplicate_name_availability_rules(enriched_agents: list[dict]) -> None:
     """
-    For agents that share the same name or display_name, only the earliest created
-    agent should remain available (if it has no other unavailable reasons).
-    All later-created agents in the same group become unavailable due to duplication.
+    Mark every conflicting agent unavailable instead of choosing an arbitrary winner.
     """
     # Group by name and display_name
     name_groups: dict[str, list[dict]] = {}
@@ -2740,19 +2759,10 @@ def _apply_duplicate_name_availability_rules(enriched_agents: list[dict]) -> Non
 
     def _mark_duplicates(groups: dict[str, list[dict]], reason_key: str) -> None:
         for entries in groups.values():
-            if len(entries) <= 1:
+            if len({entry["raw_agent"].get("agent_id") for entry in entries}) <= 1:
                 continue
-
-            # Sort by create_time ascending so the earliest created agent comes first
-            sorted_entries = sorted(
-                entries,
-                key=lambda e: e["raw_agent"].get("create_time"),
-            )
-
-            # The first (earliest) agent keeps its current availability;
-            # subsequent agents are marked as duplicates.
-            for duplicate_entry in sorted_entries[1:]:
-                duplicate_entry["unavailable_reasons"].append(reason_key)
+            for entry in entries:
+                entry["unavailable_reasons"].append(reason_key)
 
     _mark_duplicates(name_groups, AgentUnavailableReason.DUPLICATE_NAME)
     _mark_duplicates(display_name_groups,
@@ -3652,6 +3662,8 @@ async def get_agent_id_by_name(agent_name: str, tenant_id: str) -> int:
         raise Exception("agent_name required")
     try:
         return search_agent_id_by_agent_name(agent_name, tenant_id)
+    except AgentNameConflictError:
+        raise
     except Exception as _:
         logger.error(
             f"Failed to find agent id with '{agent_name}' in tenant {tenant_id}")
@@ -3672,6 +3684,8 @@ def get_agent_by_name_impl(agent_name: str, tenant_id: str) -> dict:
         versions = query_version_list(agent_id, tenant_id)
         latest_version = versions[0]["version_no"] if versions else None
         return {"agent_id": agent_id, "latest_version_no": latest_version}
+    except AgentNameConflictError:
+        raise
     except Exception as _:
         logger.error(
             f"Failed to find agent '{agent_name}' in tenant {tenant_id}")
@@ -3874,6 +3888,7 @@ async def import_agent_with_skills_impl(
     from services.skill_service import SkillService
 
     user_id, tenant_id, _ = get_current_user_info(authorization)
+    _validate_import_agent_names(agent_info, tenant_id)
 
     skill_name_to_zip_base64 = {
         entry.skill_name: entry.skill_zip_base64 for entry in skills}

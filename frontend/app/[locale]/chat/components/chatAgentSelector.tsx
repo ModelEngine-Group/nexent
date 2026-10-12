@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect, useRef, useMemo } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
 import { ChevronDown, MousePointerClick, AlertCircle } from "lucide-react";
@@ -35,39 +35,6 @@ export function ChatAgentSelector({
     (agent: Agent) => agent.id === String(selectedAgentId)
   );
 
-  // Detect duplicate agent names and mark later-added agents as disabled
-  // For agents with the same name, keep the first one (smallest ID) enabled, disable the rest
-  const duplicateAgentInfo = useMemo(() => {
-    // Create a map to track agents by name
-    const nameToAgents = new Map<string, Agent[]>();
-
-    agents.forEach((agent: Agent) => {
-      const agentName = agent.name;
-      if (!nameToAgents.has(agentName)) {
-        nameToAgents.set(agentName, []);
-      }
-      nameToAgents.get(agentName)!.push(agent);
-    });
-
-    // For each group of agents with the same name, sort by ID (smallest first)
-    // Mark all except the first one as disabled
-    const disabledAgentIds = new Set<string>();
-
-    nameToAgents.forEach((agents, name) => {
-      if (agents.length > 1) {
-        // Sort by id (smallest first)
-        const sortedAgents = [...agents].sort((a, b) => Number(a.id) - Number(b.id));
-
-        // Mark all except the first one as disabled
-        for (let i = 1; i < sortedAgents.length; i++) {
-          disabledAgentIds.add(sortedAgents[i].id);
-        }
-      }
-    });
-
-    return { disabledAgentIds, nameToAgents };
-  }, [agents]);
-
   /**
    * Handle URL parameter auto-selection logic for Agent
    */
@@ -84,8 +51,7 @@ export function ChatAgentSelector({
     const agent = agents.find((a: Agent) => a.id === agentId);
     if (agent) {
       const isAvailableTool = agent.is_available !== false;
-      const isDuplicateDisabled = duplicateAgentInfo.disabledAgentIds.has(agent.id);
-      const isEffectivelyAvailable = isAvailableTool && !isDuplicateDisabled;
+      const isEffectivelyAvailable = isAvailableTool;
 
       if (isEffectivelyAvailable) {
         handleAgentSelect(agent.id);
@@ -98,7 +64,7 @@ export function ChatAgentSelector({
   useEffect(() => {
     handleAutoSelectAgent();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [agents, duplicateAgentInfo]);
+  }, [agents]);
 
   // Calculate dropdown position
   useEffect(() => {
@@ -185,8 +151,7 @@ export function ChatAgentSelector({
       const agent = agents.find((a: Agent) => a.id === agentId);
       if (agent) {
         const isAvailableTool = agent.is_available !== false;
-        const isDuplicateDisabled = duplicateAgentInfo.disabledAgentIds.has(agent.id);
-        const isEffectivelyAvailable = isAvailableTool && !isDuplicateDisabled;
+        const isEffectivelyAvailable = isAvailableTool;
 
         if (!isEffectivelyAvailable) {
           return; // Unavailable agents cannot be selected
@@ -209,8 +174,15 @@ export function ChatAgentSelector({
       }
     }
 
-    const agent = agentId !== null ? agents.find((a: Agent) => a.id === agentId) : null;
-    onAgentSelect(agentId, agent?.greeting_message, agent?.example_questions, agent?.model_ids, agent?.model_names);
+    const agent =
+      agentId !== null ? agents.find((a: Agent) => a.id === agentId) : null;
+    onAgentSelect(
+      agentId,
+      agent?.greeting_message,
+      agent?.example_questions,
+      agent?.model_ids,
+      agent?.model_names
+    );
     setIsOpen(false);
 
     // If it's an iframe embedded page, send postMessage to the parent page
@@ -348,20 +320,18 @@ export function ChatAgentSelector({
                 ) : (
                   allAgents.map((agent: Agent, idx: number) => {
                     const isAvailableTool = agent.is_available !== false;
-                    const isDuplicateDisabled = duplicateAgentInfo.disabledAgentIds.has(agent.id);
-                    const isEffectivelyAvailable = isAvailableTool && !isDuplicateDisabled;
+                    const isEffectivelyAvailable = isAvailableTool;
 
                     // Determine the reason for unavailability
                     let unavailableReason: string | null = null;
                     if (!isEffectivelyAvailable) {
-                      if (isDuplicateDisabled) {
-                        unavailableReason = t("subAgentPool.tooltip.duplicateNameDisabled");
-                      } else if (!isAvailableTool) {
+                      if (!isAvailableTool) {
                         const reasons = agent.unavailable_reasons || [];
                         const labels = getUnavailableReasonLabels(reasons, t);
-                        unavailableReason = labels.length > 0
-                          ? labels.join(", ")
-                          : t("agentSelector.agentUnavailable");
+                        unavailableReason =
+                          labels.length > 0
+                            ? labels.join(", ")
+                            : t("agentSelector.agentUnavailable");
                       }
                     }
 
@@ -419,9 +389,11 @@ export function ChatAgentSelector({
                           >
                             <div className="flex items-center gap-1.5">
                               {/* NEW badge - placed before display_name */}
-                              {(agent as any).is_new && agent.display_name && (
+                              {agent.is_new && agent.display_name && (
                                 <span className="inline-flex items-center px-1 h-5 bg-amber-50 dark:bg-amber-900/10 text-amber-700 dark:text-amber-300 rounded-full text-[11px] font-medium border border-amber-200 flex-shrink-0 leading-none mr-0.5">
-                                  <span className="px-0.5">{t("space.new", "NEW")}</span>
+                                  <span className="px-0.5">
+                                    {t("space.new", "NEW")}
+                                  </span>
                                 </span>
                               )}
                               {agent.display_name && (

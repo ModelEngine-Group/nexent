@@ -725,12 +725,14 @@ Additional Args:
 
     @staticmethod
     def _ensure_context_within_hard_budget(final_context: Any) -> None:
-        """Stop before the provider call when safe compaction cannot fit input."""
+        """Warn when input exceeds the local estimate and let the provider enforce its limit."""
         evidence = final_context.evidence
         if evidence.over_hard_budget is True:
-            raise ValueError(
-                "Context input remains over the model hard budget after compaction: "
-                f"{evidence.final_token_estimate} > {evidence.hard_budget} tokens"
+            logger.warning(
+                "Context input remains over the configured budget after compaction: %s > %s tokens; "
+                "continuing the model request",
+                evidence.final_token_estimate,
+                evidence.hard_budget,
             )
 
     def _emit_history_summary_event(self) -> None:

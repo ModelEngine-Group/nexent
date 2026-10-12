@@ -352,6 +352,10 @@ def update_agent_snapshot(
     Returns: number of rows affected
     """
     with get_db_session() as session:
+        if "name" in agent_data:
+            from database.agent_db import ensure_agent_name_unique
+
+            ensure_agent_name_unique(session, agent_data["name"], tenant_id, agent_id)
         result = session.execute(
             update(AgentInfo)
             .where(
@@ -471,6 +475,9 @@ def restore_agent_draft(
     """
 
     with get_db_session() as session:
+        from database.agent_db import ensure_agent_name_unique
+
+        ensure_agent_name_unique(session, target_agent_snapshot.get("name"), tenant_id, agent_id)
         # 1. Hard-delete current draft tools to free up (tool_instance_id, version_no=0) keys
         session.execute(
             delete(ToolInstance).where(

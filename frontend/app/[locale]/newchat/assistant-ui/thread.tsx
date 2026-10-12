@@ -1002,7 +1002,13 @@ const AssistantMessage: FC<{
                   return (
                     <div className="mt-2 flex items-start gap-2 rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-700 dark:border-red-900 dark:bg-red-950/30 dark:text-red-300">
                       <XCircleIcon className="mt-0.5 size-4 shrink-0 text-red-500 dark:text-red-400" />
-                      <span className="break-all">{textPart.text}</span>
+                      <span className="break-all">
+                        {/context_length_exceeded|maximum context length|input tokens? exceed|token limit exceeded/i.test(
+                          textPart.text ?? ""
+                        )
+                          ? t("chat.error.inputTooLong")
+                          : textPart.text}
+                      </span>
                     </div>
                   );
                 }

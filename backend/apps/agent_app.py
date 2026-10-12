@@ -27,6 +27,7 @@ from consts.model import (
     NL2AgentRunRequest,
 )
 from consts.exceptions import (
+    AgentNameConflictError,
     ForbiddenError,
     SkillDuplicateError,
     AppException,
@@ -186,6 +187,8 @@ async def get_agent_by_name_api(
         effective_tenant_id = tenant_id or auth_tenant_id
         result = get_agent_by_name_impl(agent_name, effective_tenant_id)
         return JSONResponse(status_code=HTTPStatus.OK, content=result)
+    except AgentNameConflictError as exc:
+        raise HTTPException(status_code=HTTPStatus.CONFLICT, detail=str(exc)) from exc
     except Exception as e:
         logger.error(f"Agent by name lookup error: {str(e)}")
         raise HTTPException(
@@ -213,6 +216,8 @@ async def update_agent_info_api(request: AgentInfoRequest, authorization: Option
     try:
         result = await update_agent_info_impl(request, authorization)
         return result or {}
+    except AgentNameConflictError as exc:
+        raise HTTPException(status_code=HTTPStatus.CONFLICT, detail=str(exc)) from exc
     except Exception as e:
         logger.error(f"Agent update error: {str(e)}")
         raise HTTPException(
@@ -343,6 +348,8 @@ async def import_agent_api(request: AgentImportRequest, authorization: Optional[
                 force_import=request.force_import
             )
         return {}
+    except AgentNameConflictError as exc:
+        raise HTTPException(status_code=HTTPStatus.CONFLICT, detail=str(exc)) from exc
     except SkillDuplicateError as exc:
         raise HTTPException(status_code=409, detail={
             "type": "skill_duplicate",

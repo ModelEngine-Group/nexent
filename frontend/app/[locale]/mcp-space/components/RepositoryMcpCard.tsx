@@ -1,4 +1,4 @@
-import { Button, Dropdown, type MenuProps } from "antd";
+import { Button, Dropdown, Tooltip, type MenuProps } from "antd";
 import { Download, Eye, MoreHorizontal, Trash2 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import type { CommunityMcpCard } from "@/types/mcpTools";
@@ -33,13 +33,27 @@ export default function RepositoryMcpCard({
   const toolCount = resolveToolCount(service);
 
   const actionItems: MenuProps["items"] = [];
+  const canTakeDown = service.canTakeDown === true;
   if (isAdmin) {
     actionItems.push({
       key: "offline",
-      label: t("mcpTools.repository.offline"),
+      label: (
+        <Tooltip
+          title={
+            !canTakeDown
+              ? t("repository.listingStatus.takeDownTenantOnly")
+              : undefined
+          }
+        >
+          <span className="block">{t("mcpTools.repository.offline")}</span>
+        </Tooltip>
+      ),
       icon: <Trash2 className="h-3.5 w-3.5" />,
       danger: true,
-      onClick: () => onOffline(service),
+      disabled: !canTakeDown,
+      onClick: () => {
+        if (canTakeDown) onOffline(service);
+      },
     });
   }
 
@@ -64,7 +78,11 @@ export default function RepositoryMcpCard({
           </div>
         </div>
         {actionItems.length > 0 ? (
-          <Dropdown menu={{ items: actionItems }} trigger={["click"]} placement="bottomRight">
+          <Dropdown
+            menu={{ items: actionItems }}
+            trigger={["click"]}
+            placement="bottomRight"
+          >
             <Button
               type="text"
               size="small"
@@ -96,7 +114,9 @@ export default function RepositoryMcpCard({
           </span>
         ))}
         {tags.length > 3 ? (
-          <span className="rounded-md bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-500">+{tags.length - 3}</span>
+          <span className="rounded-md bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-500">
+            +{tags.length - 3}
+          </span>
         ) : null}
         <span className="rounded-md border border-slate-200 px-2 py-0.5 text-xs text-slate-500">
           {t("mcpTools.repository.toolCount", { count: toolCount })}

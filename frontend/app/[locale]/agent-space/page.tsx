@@ -71,7 +71,7 @@ export default function AgentRepositoryPage() {
   const params = useParams<{ locale: string }>();
   const locale = params.locale || "en";
   const { user } = useAuthorizationContext();
-  const isAdmin = user?.role === USER_ROLES.ADMIN;
+  const isAdmin = user?.role === USER_ROLES.ADMIN || user?.role === USER_ROLES.SU;
 
   const [tab, setTab] = useState<AgentRepositoryTab>(() => {
     const backTab = searchParams.get("back_tab");

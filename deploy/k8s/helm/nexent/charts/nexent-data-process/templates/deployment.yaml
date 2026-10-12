@@ -48,6 +48,8 @@ spec:
             - secretRef:
                 name: nexent-secrets
           env:
+            - name: TZ
+              value: {{ default "Asia/Shanghai" .Values.global.backendTimezone | quote }}
             - name: NEXENT_SQL_STARTUP_MODE
               value: "off"
             - name: DEPLOYMENT_VERSION

@@ -25,7 +25,8 @@ RUN --mount=type=cache,id=nexent-data-process-apt-cache-${TARGETARCH},target=/va
         done; \
     fi && \
     apt-get update && \
-    apt-get install -y --no-install-recommends --fix-missing \
+    DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends --fix-missing \
+        tzdata \
         curl \
         postgresql-client \
         libmagic1 \

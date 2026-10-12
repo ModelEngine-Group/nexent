@@ -174,6 +174,70 @@ def _pending_review_reset_calls(
     ]
 
 
+@pytest.mark.parametrize("publisher_tenant_id,expected", [("tenant_a", True), ("tenant_b", False), (None, False)])
+def test_repository_take_down_permission_is_tenant_scoped(mocker, publisher_tenant_id, expected):
+    mocker.patch.object(ars, "list_agent_repository_summaries", return_value=[
+        _repository_record(status="shared", publisher_tenant_id=publisher_tenant_id)
+    ])
+    result = ars.list_agent_repository_listings_impl("tenant_a", status="shared")
+    assert result["items"][0]["can_take_down"] is expected
+
+
+def test_admin_cannot_take_down_another_tenants_agent(mocker):
+    mocker.patch.object(ars, "_get_user_role", return_value="ADMIN")
+    mocker.patch.object(ars, "get_agent_repository_by_id", return_value=
+        _repository_record(status="shared", publisher_tenant_id="tenant_b"))
+    update = mocker.patch.object(ars, "update_agent_repository_status_by_id")
+    with pytest.raises(ForbiddenError):
+        ars.update_agent_repository_status_impl(
+            agent_repository_id=1, status="not_shared", user_id="admin_a", tenant_id="tenant_a"
+        )
+    update.assert_not_called()
+
+
+@pytest.mark.parametrize("role,expected_scope", [("ADMIN", "tenant_a"), ("SU", None)])
+def test_review_list_uses_authenticated_admin_scope(mocker, role, expected_scope):
+    mocker.patch.object(ars, "_get_user_role", return_value=role)
+    lookup = mocker.patch.object(ars, "list_agent_repository_summaries", return_value=[])
+    ars.list_agent_repository_listings_impl("tenant_a", user_id="reviewer", status="pending_review")
+    lookup.assert_called_once_with(publisher_tenant_id=expected_scope, status="pending_review", agent_id=None)
+
+
+@pytest.mark.parametrize("role", ["DEV", "USER", ""])
+def test_non_admin_cannot_read_review_queue(mocker, role):
+    mocker.patch.object(ars, "_get_user_role", return_value=role)
+    lookup = mocker.patch.object(ars, "list_agent_repository_summaries")
+    with pytest.raises(ForbiddenError):
+        ars.list_agent_repository_listings_impl("tenant_a", user_id="viewer", status="pending_review")
+    lookup.assert_not_called()
+
+
+def test_su_can_review_another_tenants_agent(mocker):
+    record = _repository_record(status="pending_review", publisher_tenant_id="tenant_b")
+    mocker.patch.object(ars, "_get_user_role", return_value="SU")
+    mocker.patch.object(ars, "get_agent_repository_by_id", side_effect=[record, {**record, "status": "shared"}])
+    update = mocker.patch.object(ars, "update_agent_repository_status_by_id", return_value=1)
+    reset = mocker.patch.object(ars, "_reset_repository_peer_statuses")
+    ars.update_agent_repository_status_impl(
+        agent_repository_id=1, status="shared", user_id="su", tenant_id="tenant_a",
+    )
+    assert update.call_args.kwargs["filter_publisher_tenant_id"] == "tenant_b"
+    assert reset.call_args.kwargs["publisher_tenant_id"] == "tenant_b"
+
+
+@pytest.mark.parametrize("status", ["shared", "not_shared", "pending_review"])
+def test_admin_cannot_review_or_rewrite_another_tenants_agent(mocker, status):
+    mocker.patch.object(ars, "_get_user_role", return_value="ADMIN")
+    mocker.patch.object(ars, "get_agent_repository_by_id", return_value=
+        _repository_record(status="pending_review", publisher_tenant_id="tenant_b"))
+    update = mocker.patch.object(ars, "update_agent_repository_status_by_id")
+    with pytest.raises(ForbiddenError):
+        ars.update_agent_repository_status_impl(
+            agent_repository_id=1, status=status, user_id="admin", tenant_id="tenant_a",
+        )
+    update.assert_not_called()
+
+
 def test_list_repository_listings_passes_agent_id_to_db():
     with patch.object(
         ars,
@@ -1228,6 +1292,7 @@ def test_update_status_user_role_rejected(mock_status_update_deps):
 
 def test_update_status_same_status_noop(mock_status_update_deps):
     deps = mock_status_update_deps
+    deps["get_user_role"].return_value = {"user_role": "ADMIN"}
     record = _repository_record(status="shared")
     deps["get_by_id"].side_effect = [record, record]
     deps["update_status"].return_value = 1
@@ -1240,7 +1305,7 @@ def test_update_status_same_status_noop(mock_status_update_deps):
     )
 
     assert result["status"] == "shared"
-    deps["get_user_role"].assert_not_called()
+    deps["get_user_role"].assert_called_once_with("any_user")
     deps["update_status"].assert_called_once_with(
         repository_id=1,
         status="shared",
@@ -1281,6 +1346,24 @@ def test_list_repository_listings_includes_submitted_by():
     assert result["items"][0]["submitted_by"] == "reviewer@example.com"
     assert result["items"][0]["content"] == "Please review this listing"
     assert result["pagination"]["total"] == 1
+
+
+@pytest.mark.parametrize("role,status,allowed", [
+    ("ADMIN", "pending_review", False),
+    ("ADMIN", "rejected", False),
+    ("SU", "pending_review", True),
+    ("ADMIN", "shared", True),
+])
+def test_foreign_agent_review_detail_access(mocker, role, status, allowed):
+    mocker.patch.object(ars, "_get_user_role", return_value=role)
+    mocker.patch.object(ars, "get_agent_repository_by_id", return_value=
+        _repository_record(status=status, publisher_tenant_id="tenant_b"))
+    if allowed:
+        result = ars.get_agent_repository_listing_detail_impl(1, "tenant_a", user_id="viewer")
+        assert result["status"] == status
+    else:
+        with pytest.raises(ForbiddenError):
+            ars.get_agent_repository_listing_detail_impl(1, "tenant_a", user_id="viewer")
 
 
 def test_get_agent_repository_listing_detail_impl_scopes_by_tenant():

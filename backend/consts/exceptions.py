@@ -28,6 +28,10 @@ from typing import List
 # ==================== New Framework: AppException with ErrorCode ====================
 
 
+class AgentNameConflictError(ValueError):
+    """An agent variable name is already used or resolves to multiple agents."""
+
+
 class AppException(Exception):
     """
     Base application exception with ErrorCode.

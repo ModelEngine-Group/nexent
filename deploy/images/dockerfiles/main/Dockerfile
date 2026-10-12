@@ -23,7 +23,7 @@ RUN --mount=type=cache,id=nexent-main-apt-cache-${TARGETARCH},target=/var/cache/
                 "$apt_source"; \
         done; \
     fi && \
-    apt-get update && apt-get install -y --no-install-recommends curl postgresql-client
+    apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends tzdata curl postgresql-client
 
 FROM base AS builder
 ARG MIRROR

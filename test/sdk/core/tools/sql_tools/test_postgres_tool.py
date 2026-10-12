@@ -37,7 +37,7 @@ class TestClassAttributes:
 
     def test_inputs_has_max_rows(self):
         assert "max_rows" in PostgreSqlTool.inputs
-        assert PostgreSqlTool.inputs["max_rows"]["default"] == 100
+        assert PostgreSqlTool.inputs["max_rows"]["default"] is None
 
     def test_inputs_has_timeout(self):
         assert "timeout" in PostgreSqlTool.inputs
@@ -166,7 +166,7 @@ class TestExecuteQuery:
     @patch("sdk.nexent.core.tools.sql_tools.postgres_tool.psycopg2")
     def test_execute_query_success(self, mock_psycopg2):
         mock_cursor = MagicMock()
-        mock_cursor.fetchall.return_value = [("val1", "val2")]
+        mock_cursor.fetchmany.return_value = [("val1", "val2")]
         mock_cursor.description = [("col1",), ("col2",)]
 
         mock_conn = MagicMock()
@@ -183,7 +183,7 @@ class TestExecuteQuery:
     @patch("sdk.nexent.core.tools.sql_tools.postgres_tool.psycopg2")
     def test_execute_query_with_params(self, mock_psycopg2):
         mock_cursor = MagicMock()
-        mock_cursor.fetchall.return_value = [(1, "Alice")]
+        mock_cursor.fetchmany.return_value = [(1, "Alice")]
         mock_cursor.description = [("id",), ("name",)]
 
         mock_conn = MagicMock()
@@ -216,7 +216,7 @@ class TestExecuteQuery:
     @patch("sdk.nexent.core.tools.sql_tools.postgres_tool.psycopg2")
     def test_execute_query_empty_result(self, mock_psycopg2):
         mock_cursor = MagicMock()
-        mock_cursor.fetchall.return_value = []
+        mock_cursor.fetchmany.return_value = []
         mock_cursor.description = []
 
         mock_conn = MagicMock()
@@ -232,7 +232,7 @@ class TestExecuteQuery:
     @patch("sdk.nexent.core.tools.sql_tools.postgres_tool.psycopg2")
     def test_execute_query_connects_with_timeout(self, mock_psycopg2):
         mock_cursor = MagicMock()
-        mock_cursor.fetchall.return_value = []
+        mock_cursor.fetchmany.return_value = []
         mock_cursor.description = []
 
         mock_conn = MagicMock()

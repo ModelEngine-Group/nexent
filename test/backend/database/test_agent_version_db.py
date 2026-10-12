@@ -67,6 +67,9 @@ sys.modules['database.db_models'] = db_models_mock
 sys.modules['backend.database.client'] = client_mock
 sys.modules['backend.database.db_models'] = db_models_mock
 
+agent_db_mock = MagicMock()
+sys.modules['database.agent_db'] = agent_db_mock
+
 # Now we can safely import the module being tested
 import backend.database.agent_version_db as agent_version_db_module
 from backend.database.agent_version_db import (

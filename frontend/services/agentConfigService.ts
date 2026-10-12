@@ -5,6 +5,70 @@ import { getAuthHeaders } from "@/lib/auth";
 import { convertParamType } from "@/lib/utils";
 import log from "@/lib/logger";
 import yaml from "js-yaml";
+import i18n from "i18next";
+
+function skillRequestErrorMessage(
+  errorData: { detail?: unknown; message?: unknown },
+  status: number,
+  files?: Array<{ path: string; content: string }>
+): string {
+  const detail = errorData?.detail ?? errorData?.message;
+  if (Array.isArray(detail)) {
+    const errors = detail.map((item) => {
+      const location: Array<string | number> = Array.isArray(item?.loc)
+        ? item.loc.filter((part: unknown) => part !== "body")
+        : [];
+      const fileIndex = location[0] === "files" ? location[1] : undefined;
+      const filePath =
+        typeof fileIndex === "number" ? files?.[fileIndex]?.path : undefined;
+      const fieldName = location[0];
+      const field = [
+        "name",
+        "description",
+        "source",
+        "tags",
+        "content",
+      ].includes(String(fieldName))
+        ? i18n.t(`skillManagement.form.${fieldName}`)
+        : location.join(".");
+      const reason =
+        item?.type === "string_type"
+          ? i18n.t("skillManagement.message.textRequired")
+          : typeof item?.msg === "string"
+            ? item.msg
+            : i18n.t("skillManagement.message.invalidValue");
+      return filePath
+        ? i18n.t("skillManagement.message.fileValidationFailed", {
+            path: filePath,
+            reason,
+          })
+        : field
+          ? i18n.t("skillManagement.message.fieldValidationFailed", {
+              field,
+              reason,
+            })
+          : reason;
+    });
+    if (errors.length > 0) return errors.join("; ");
+  }
+  if (typeof detail === "string" && detail.trim()) return detail;
+  const statusKeys: Record<number, string> = {
+    401: "sessionExpired",
+    403: "permissionDenied",
+    404: "skillNotFound",
+    422: "validationFailed",
+  };
+  return i18n.t(
+    `skillManagement.message.${statusKeys[status] || "requestFailed"}`,
+    { status }
+  );
+}
+
+function skillSubmissionErrorMessage(error: unknown, fallback: string): string {
+  if (error instanceof TypeError)
+    return i18n.t("skillManagement.message.networkFailed");
+  return error instanceof Error ? error.message : fallback;
+}
 
 /** Normalize tags field: Ant Design mode="tags" sends a string when only one tag is entered. */
 function normalizeTags(tags: unknown): string[] {
@@ -460,6 +524,17 @@ export const updateAgentInfo = async (payload: UpdateAgentInfoPayload) => {
     });
 
     if (!response.ok) {
+      const errorData = await response.json().catch(() => ({}));
+      if (response.status === 409) {
+        return {
+          success: false,
+          data: null,
+          message:
+            errorData.detail ||
+            errorData.message ||
+            "Agent variable name already exists",
+        };
+      }
       throw new Error(`Request failed: ${response.status}`);
     }
 
@@ -629,7 +704,10 @@ export const importAgent = async (
 
     if (!response.ok) {
       const errorData = await response.json().catch(() => ({}));
-      const errMsg = errorData?.message;
+      const errMsg = errorData?.detail ?? errorData?.message;
+      if (response.status === 409 && typeof errMsg === "string") {
+        return { success: false, data: null, message: errMsg };
+      }
       if (typeof errMsg === "object" && errMsg !== null) {
         return {
           success: false,
@@ -1313,7 +1391,9 @@ export const createSkill = async (skillData: {
 
     if (!response.ok) {
       const errorData = await response.json().catch(() => ({}));
-      throw new Error(errorData.detail || `Request failed: ${response.status}`);
+      throw new Error(
+        skillRequestErrorMessage(errorData, response.status, skillData.files)
+      );
     }
 
     const data = await response.json();
@@ -1328,8 +1408,7 @@ export const createSkill = async (skillData: {
     return {
       success: false,
       data: null,
-      message:
-        error instanceof Error ? error.message : "Failed to create skill",
+      message: skillSubmissionErrorMessage(error, "Failed to create skill"),
     };
   }
 };
@@ -1385,7 +1464,9 @@ export const updateSkill = async (
 
     if (!response.ok) {
       const errorData = await response.json().catch(() => ({}));
-      throw new Error(errorData.detail || `Request failed: ${response.status}`);
+      throw new Error(
+        skillRequestErrorMessage(errorData, response.status, skillData.files)
+      );
     }
 
     const data = await response.json();
@@ -1400,8 +1481,7 @@ export const updateSkill = async (
     return {
       success: false,
       data: null,
-      message:
-        error instanceof Error ? error.message : "Failed to update skill",
+      message: skillSubmissionErrorMessage(error, "Failed to update skill"),
     };
   }
 };
@@ -1453,7 +1533,9 @@ export const updateSkillById = async (
 
     if (!response.ok) {
       const errorData = await response.json().catch(() => ({}));
-      throw new Error(errorData.detail || `Request failed: ${response.status}`);
+      throw new Error(
+        skillRequestErrorMessage(errorData, response.status, skillData.files)
+      );
     }
 
     const data = await response.json();
@@ -1468,8 +1550,7 @@ export const updateSkillById = async (
     return {
       success: false,
       data: null,
-      message:
-        error instanceof Error ? error.message : "Failed to update skill",
+      message: skillSubmissionErrorMessage(error, "Failed to update skill"),
     };
   }
 };
@@ -1553,15 +1634,7 @@ export const createSkillFromFile = async (
         // JSON parse failed
       }
 
-      const errorMessage =
-        typeof errorData.detail === "string"
-          ? errorData.detail
-          : Array.isArray(errorData.detail)
-            ? errorData.detail
-              .map((e: any) => e.msg || JSON.stringify(e))
-              .join("; ")
-            : JSON.stringify(errorData.detail);
-      throw new Error(errorMessage || `Request failed: ${response.status}`);
+      throw new Error(skillRequestErrorMessage(errorData, response.status));
     }
 
     const data = await response.json();
@@ -1576,10 +1649,10 @@ export const createSkillFromFile = async (
     return {
       success: false,
       data: null,
-      message:
-        error instanceof Error
-          ? error.message
-          : "Failed to create skill from file",
+      message: skillSubmissionErrorMessage(
+        error,
+        "Failed to create skill from file"
+      ),
     };
   }
 };
@@ -1706,7 +1779,13 @@ export const fetchSkillFileContent = async (
       throw new Error(`Request failed: ${response.status}`);
     }
     const data = await response.json();
-    return data.content || data;
+    if (typeof data === "string") {
+      return data;
+    }
+    if (typeof data?.content === "string") {
+      return data.content;
+    }
+    throw new Error("Invalid skill file content response");
   } catch (error) {
     log.error("Error fetching skill file content:", error);
     return null;

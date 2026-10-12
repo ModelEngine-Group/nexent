@@ -1,9 +1,12 @@
 import sys
+from pathlib import Path
 import pytest
 from unittest.mock import patch, MagicMock
 
 # 首先模拟consts模块，避免ModuleNotFoundError
 consts_mock = MagicMock()
+consts_mock.__spec__ = None
+consts_mock.__path__ = [str(Path(__file__).resolve().parents[3] / "backend" / "consts")]
 consts_mock.const = MagicMock()
 # 设置consts.const中需要的常量
 consts_mock.const.MINIO_ENDPOINT = "http://localhost:9000"
@@ -152,6 +155,8 @@ def mock_session():
     mock_session = MagicMock()
     mock_query = MagicMock()
     mock_session.query.return_value = mock_query
+    mock_query.filter.return_value.first.return_value = None
+    mock_query.filter.return_value.filter.return_value.first.return_value = None
     return mock_session, mock_query
 
 def test_search_agent_info_by_agent_id_success(monkeypatch, mock_session):
@@ -163,6 +168,7 @@ def test_search_agent_info_by_agent_id_success(monkeypatch, mock_session):
     mock_first.return_value = mock_agent
     mock_filter = MagicMock()
     mock_filter.first = mock_first
+    mock_filter.filter.return_value.first.return_value = None
     query.filter.return_value = mock_filter
 
     mock_ctx = MagicMock()
@@ -184,6 +190,7 @@ def test_search_agent_info_by_agent_id_not_found(monkeypatch, mock_session):
     mock_first.return_value = None
     mock_filter = MagicMock()
     mock_filter.first = mock_first
+    mock_filter.filter.return_value.first.return_value = None
     query.filter.return_value = mock_filter
 
     mock_ctx = MagicMock()
@@ -202,7 +209,7 @@ def test_search_agent_id_by_agent_name_success(monkeypatch, mock_session):
     mock_first = MagicMock()
     mock_first.return_value = mock_agent
     mock_filter = MagicMock()
-    mock_filter.first = mock_first
+    mock_filter.limit.return_value.all.return_value = [mock_agent]
     query.filter.return_value = mock_filter
 
     mock_ctx = MagicMock()
@@ -220,7 +227,7 @@ def test_search_agent_id_by_agent_name_not_found(monkeypatch, mock_session):
     mock_first = MagicMock()
     mock_first.return_value = None
     mock_filter = MagicMock()
-    mock_filter.first = mock_first
+    mock_filter.limit.return_value.all.return_value = []
     query.filter.return_value = mock_filter
 
     mock_ctx = MagicMock()
@@ -241,6 +248,7 @@ def test_search_blank_sub_agent_by_main_agent_id_found(monkeypatch, mock_session
     mock_first.return_value = mock_agent
     mock_filter = MagicMock()
     mock_filter.first = mock_first
+    mock_filter.filter.return_value.first.return_value = None
     query.filter.return_value = mock_filter
 
     mock_ctx = MagicMock()
@@ -259,6 +267,7 @@ def test_search_blank_sub_agent_by_main_agent_id_not_found(monkeypatch, mock_ses
     mock_first.return_value = None
     mock_filter = MagicMock()
     mock_filter.first = mock_first
+    mock_filter.filter.return_value.first.return_value = None
     query.filter.return_value = mock_filter
 
     mock_ctx = MagicMock()
@@ -367,7 +376,7 @@ def test_create_agent_success(monkeypatch, mock_session):
     monkeypatch.setattr("backend.database.agent_db.get_db_session", lambda: mock_ctx)
     monkeypatch.setattr("backend.database.agent_db.filter_property", lambda data, model: data)
     monkeypatch.setattr("backend.database.agent_db.as_dict", lambda obj: obj.__dict__)
-    monkeypatch.setattr("backend.database.agent_db.AgentInfo", lambda **kwargs: mock_agent)
+    monkeypatch.setattr("backend.database.agent_db.AgentInfo", MagicMock(return_value=mock_agent))
 
     agent_info = {"name": "new_agent", "description": "test description"}
     result = create_agent(agent_info, "tenant1", "user1")
@@ -385,6 +394,7 @@ def test_update_agent_success(monkeypatch, mock_session):
     mock_first.return_value = mock_agent
     mock_filter = MagicMock()
     mock_filter.first = mock_first
+    mock_filter.filter.return_value.first.return_value = None
     query.filter.return_value = mock_filter
 
     mock_ctx = MagicMock()
@@ -409,6 +419,7 @@ def test_update_agent_skips_none_and_converts_group_ids(monkeypatch, mock_sessio
     mock_first.return_value = mock_agent
     mock_filter = MagicMock()
     mock_filter.first = mock_first
+    mock_filter.filter.return_value.first.return_value = None
     query.filter.return_value = mock_filter
 
     mock_ctx = MagicMock()
@@ -448,6 +459,7 @@ def test_update_agent_allows_explicit_requested_output_tokens_null(monkeypatch, 
     mock_first.return_value = mock_agent
     mock_filter = MagicMock()
     mock_filter.first = mock_first
+    mock_filter.filter.return_value.first.return_value = None
     query.filter.return_value = mock_filter
 
     mock_ctx = MagicMock()
@@ -475,6 +487,7 @@ def test_update_agent_not_found(monkeypatch, mock_session):
     mock_first.return_value = None
     mock_filter = MagicMock()
     mock_filter.first = mock_first
+    mock_filter.filter.return_value.first.return_value = None
     query.filter.return_value = mock_filter
 
     mock_ctx = MagicMock()
@@ -1283,6 +1296,7 @@ def test_update_agent_pops_requested_output_tokens_when_not_in_fields_set(monkey
     mock_first.return_value = mock_agent
     mock_filter = MagicMock()
     mock_filter.first = mock_first
+    mock_filter.filter.return_value.first.return_value = None
     query.filter.return_value = mock_filter
 
     mock_ctx = MagicMock()

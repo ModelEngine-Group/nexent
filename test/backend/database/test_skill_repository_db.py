@@ -156,6 +156,7 @@ def test_list_repository_summaries_with_filters(monkeypatch, mock_session):
     row = MagicMock(
         skill_repository_id=1,
         skill_id=8,
+        publisher_tenant_id="tenant-1",
         submitted_by="dev@example.com",
         name="Skill A",
         description="description",
@@ -189,6 +190,7 @@ def test_list_repository_summaries_with_filters(monkeypatch, mock_session):
     )
 
     assert result["items"][0]["created_at"] == created_at.isoformat()
+    assert result["items"][0]["publisher_tenant_id"] == "tenant-1"
     assert result["items"][0]["content"] == "please review"
     assert result["pagination"] == {
         "page": 2,

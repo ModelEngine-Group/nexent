@@ -10,7 +10,7 @@ from fastapi import APIRouter, Body, File, Header, HTTPException, Query, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, EmailStr
 
-from consts.exceptions import LimitExceededError, UnauthorizedError, ConversationNotFoundError, AdminCreateUserException
+from consts.exceptions import AgentNameConflictError, LimitExceededError, UnauthorizedError, ConversationNotFoundError, AdminCreateUserException
 from consts.model import ToolParamsRequest
 from consts.const import SERVICE_ROLE_KEY
 from services.northbound_service import (
@@ -308,6 +308,8 @@ async def run_chat(
         logging.error(f"Too Many Requests: rate limit exceeded: {str(e)}", exc_info=e)
         raise HTTPException(status_code=HTTPStatus.TOO_MANY_REQUESTS,
                             detail="Too Many Requests: rate limit exceeded")
+    except AgentNameConflictError as exc:
+        raise HTTPException(status_code=HTTPStatus.CONFLICT, detail=str(exc)) from exc
     except ValueError as e:
         logging.error(f"Invalid northbound chat request: {str(e)}", exc_info=e)
         raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail=str(e))
@@ -395,6 +397,8 @@ async def get_agent_by_name(
     try:
         ctx: NorthboundContext = await _get_northbound_context(request)
         return await get_agent_info_by_name_for_northbound(ctx=ctx, agent_name=agent_name)
+    except AgentNameConflictError as exc:
+        raise HTTPException(status_code=HTTPStatus.CONFLICT, detail=str(exc)) from exc
     except ValueError as e:
         logging.error(f"Invalid agent detail request: {str(e)}", exc_info=e)
         raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail=str(e))

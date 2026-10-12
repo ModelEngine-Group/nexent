@@ -572,7 +572,13 @@ export default function SkillBuildModal({
         ]);
         return;
       }
-      message.error(t("skillManagement.message.submitFailed"));
+      message.error(
+        errorMessage
+          ? t("skillManagement.message.submitFailedWithReason", {
+              reason: errorMessage,
+            })
+          : t("skillManagement.message.submitFailed")
+      );
     } finally {
       setIsSubmitting(false);
     }

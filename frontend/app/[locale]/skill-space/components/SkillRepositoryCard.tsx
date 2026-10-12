@@ -2,7 +2,7 @@
 
 import type { ReactNode } from "react";
 import type { MenuProps } from "antd";
-import { Button, Dropdown, Tag } from "antd";
+import { Button, Dropdown, Tag, Tooltip } from "antd";
 import { Bot, Download, MoreHorizontal, PackageX } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
@@ -45,16 +45,31 @@ export function SkillRepositoryCard({
 }) {
   const { t } = useTranslation("common");
   const showMenu = showAdminMenu && onTakeDown != null;
+  const canTakeDown = listing.can_take_down === true;
   const tags = listing.tags?.filter((tag) => tag.trim()) ?? [];
   const menuItems: MenuProps["items"] = showMenu
     ? [
         {
           key: "takeDown",
-          label: t("skillRepository.action.status.notShared"),
+          label: (
+            <Tooltip
+              title={
+                !canTakeDown
+                  ? t("repository.listingStatus.takeDownTenantOnly")
+                  : undefined
+              }
+            >
+              <span className="block">
+                {t("skillRepository.action.status.notShared")}
+              </span>
+            </Tooltip>
+          ),
           icon: <PackageX className="size-3.5" aria-hidden />,
           danger: true,
-          disabled: isTakingDown,
-          onClick: onTakeDown,
+          disabled: !canTakeDown || isTakingDown,
+          onClick: () => {
+            if (canTakeDown && !isTakingDown) onTakeDown?.();
+          },
         },
       ]
     : [];

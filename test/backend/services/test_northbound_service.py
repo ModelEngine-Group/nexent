@@ -53,6 +53,8 @@ consts_const_mod.NORTHBOUND_RATE_LIMIT_PER_MINUTE = 120
 sys.modules["consts.const"] = consts_const_mod
 
 # Mock consts package
+consts_exceptions_mod.AgentNameConflictError = type("AgentNameConflictError", (ValueError,), {})
+
 consts_package = types.ModuleType("consts")
 consts_package.exceptions = consts_exceptions_mod
 consts_package.const = consts_const_mod
@@ -1799,3 +1801,12 @@ class TestNorthboundFileDescriptorAndUpload:
         assert result["summary"]["total"] == 2
         assert result["summary"]["uploaded"] == 1
         assert result["summary"]["failed"] == 1
+
+
+@pytest.mark.asyncio
+async def test_agent_name_lookup_rejects_ambiguous_published_agents():
+    with patch.object(ns, "_get_visible_published_agents", new_callable=AsyncMock,
+                      return_value=[{"name": "same", "agent_id": 1}, {"name": "same", "agent_id": 2}]):
+        ctx = ns.NorthboundContext(request_id="test", tenant_id="tenant", user_id="user", authorization="token")
+        with pytest.raises(ns.AgentNameConflictError, match="multiple published agents"):
+            await ns.get_agent_info_by_name_for_northbound(ctx, "same")

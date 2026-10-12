@@ -37,7 +37,7 @@ class TestClassAttributes:
 
     def test_inputs_has_max_rows(self):
         assert "max_rows" in MsSqlTool.inputs
-        assert MsSqlTool.inputs["max_rows"]["default"] == 100
+        assert MsSqlTool.inputs["max_rows"]["default"] is None
 
     def test_inputs_has_timeout(self):
         assert "timeout" in MsSqlTool.inputs
@@ -88,35 +88,6 @@ class TestInit:
         tool = MsSqlTool(host="localhost", user="sa", password="pwd", database="db")
         assert tool.running_prompt_zh == "正在执行 SQL 查询..."
         assert tool.running_prompt_en == "Executing SQL query..."
-
-
-class TestPreprocessSql:
-    """Test _preprocess_sql method."""
-
-    def test_converts_limit_to_top(self):
-        tool = MsSqlTool(host="localhost", user="sa", password="pwd", database="db")
-        sql = tool._preprocess_sql("SELECT * FROM users LIMIT 10")
-        assert sql == "SELECT * FROM users TOP 10"
-
-    def test_limit_case_insensitive(self):
-        tool = MsSqlTool(host="localhost", user="sa", password="pwd", database="db")
-        sql = tool._preprocess_sql("select * from users limit 20")
-        assert sql == "select * from users TOP 20"
-
-    def test_no_limit_unchanged(self):
-        tool = MsSqlTool(host="localhost", user="sa", password="pwd", database="db")
-        sql = tool._preprocess_sql("SELECT * FROM users WHERE id = 1")
-        assert sql == "SELECT * FROM users WHERE id = 1"
-
-    def test_limit_in_subquery(self):
-        tool = MsSqlTool(host="localhost", user="sa", password="pwd", database="db")
-        sql = tool._preprocess_sql("SELECT * FROM (SELECT * FROM orders LIMIT 5) AS sub")
-        assert "TOP 5" in sql
-
-    def test_multiple_limits(self):
-        tool = MsSqlTool(host="localhost", user="sa", password="pwd", database="db")
-        sql = tool._preprocess_sql("SELECT * FROM a LIMIT 5; SELECT * FROM b LIMIT 10")
-        assert sql.count("TOP") == 2
 
 
 class TestConvertParamsForMssql:
@@ -305,7 +276,7 @@ class TestForward:
     @patch("sdk.nexent.core.tools.sql_tools.mssql_tool.pymssql")
     def test_forward_success(self, mock_pymssql):
         mock_cursor = MagicMock()
-        mock_cursor.fetchmany.return_value = [{"id": 1, "name": "Alice"}]
+        mock_cursor.fetchall.return_value = [{"id": 1, "name": "Alice"}]
 
         mock_conn = MagicMock()
         mock_conn.cursor.return_value = mock_cursor
@@ -324,7 +295,7 @@ class TestForward:
     @patch("sdk.nexent.core.tools.sql_tools.mssql_tool.pymssql")
     def test_forward_with_observer(self, mock_pymssql):
         mock_cursor = MagicMock()
-        mock_cursor.fetchmany.return_value = []
+        mock_cursor.fetchall.return_value = []
 
         mock_conn = MagicMock()
         mock_conn.cursor.return_value = mock_cursor
@@ -341,7 +312,7 @@ class TestForward:
     @patch("sdk.nexent.core.tools.sql_tools.mssql_tool.pymssql")
     def test_forward_security_error(self, mock_pymssql):
         mock_cursor = MagicMock()
-        mock_cursor.fetchmany.return_value = []
+        mock_cursor.fetchall.return_value = []
 
         mock_conn = MagicMock()
         mock_conn.cursor.return_value = mock_cursor
@@ -360,7 +331,7 @@ class TestForward:
     @patch("sdk.nexent.core.tools.sql_tools.mssql_tool.pymssql")
     def test_forward_update_without_where(self, mock_pymssql):
         mock_cursor = MagicMock()
-        mock_cursor.fetchmany.return_value = []
+        mock_cursor.fetchall.return_value = []
 
         mock_conn = MagicMock()
         mock_conn.cursor.return_value = mock_cursor
@@ -379,7 +350,7 @@ class TestForward:
     @patch("sdk.nexent.core.tools.sql_tools.mssql_tool.pymssql")
     def test_forward_with_parameters(self, mock_pymssql):
         mock_cursor = MagicMock()
-        mock_cursor.fetchmany.return_value = [{"id": 1}]
+        mock_cursor.fetchall.return_value = [{"id": 1}]
 
         mock_conn = MagicMock()
         mock_conn.cursor.return_value = mock_cursor
@@ -397,7 +368,7 @@ class TestForward:
     @patch("sdk.nexent.core.tools.sql_tools.mssql_tool.pymssql")
     def test_forward_with_none_max_rows(self, mock_pymssql):
         mock_cursor = MagicMock()
-        mock_cursor.fetchmany.return_value = []
+        mock_cursor.fetchall.return_value = []
 
         mock_conn = MagicMock()
         mock_conn.cursor.return_value = mock_cursor

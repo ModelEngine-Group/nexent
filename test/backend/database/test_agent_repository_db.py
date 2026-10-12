@@ -22,6 +22,7 @@ agent_repository_consts.STATUS_NOT_SHARED = "not_shared"
 agent_repository_consts.STATUS_PENDING_REVIEW = "pending_review"
 agent_repository_consts.STATUS_REJECTED = "rejected"
 agent_repository_consts.STATUS_SHARED = "shared"
+agent_repository_consts.STATUS_SHARED = "shared"
 agent_repository_consts.OWNERSHIP_ALL = "all"
 agent_repository_consts.OWNERSHIP_CREATED = "created"
 agent_repository_consts.OWNERSHIP_OTHERS = "others"
@@ -163,6 +164,7 @@ class MockSummaryRow:
         defaults = {
             "agent_repository_id": 1,
             "agent_id": 10,
+            "publisher_tenant_id": "tenant-1",
             "author": "author",
             "submitted_by": None,
             "name": "test-agent",
@@ -494,6 +496,22 @@ def test_upsert_agent_repository_record_different_version_updates_snapshot(monke
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.parametrize("tenant_id,status,tenant_scoped", [
+    ("tenant-1", "pending_review", True),
+    ("tenant-1", "rejected", True),
+    ("tenant-1", None, True),
+    ("tenant-1", "shared", False),
+    (None, "pending_review", False),
+])
+def test_repository_review_query_scope(monkeypatch, mock_session, tenant_id, status, tenant_scoped):
+    session, query = mock_session
+    query.filter.return_value = query
+    query.order_by.return_value.all.return_value = []
+    _patch_session(monkeypatch, session)
+    list_agent_repository_summaries(tenant_id, status=status)
+    assert query.filter.call_count == 1 + int(tenant_scoped) + int(status is not None)
+
+
 def test_list_agent_repository_summaries_returns_expected_shape(monkeypatch, mock_session):
     session, query = mock_session
     row = MockSummaryRow(agent_repository_id=2, agent_id=20)
@@ -508,9 +526,11 @@ def test_list_agent_repository_summaries_returns_expected_shape(monkeypatch, moc
     assert len(result) == 1
     assert result[0]["agent_repository_id"] == 2
     assert result[0]["agent_id"] == 20
+    assert result[0]["publisher_tenant_id"] == "tenant-1"
     assert set(result[0].keys()) == {
         "agent_repository_id",
         "agent_id",
+        "publisher_tenant_id",
         "author",
         "submitted_by",
         "name",

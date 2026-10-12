@@ -75,6 +75,7 @@ def test_list_agent_repository_listings_api_success(
     mock_get_user_id.assert_called_once_with(mock_auth_header["Authorization"])
     mock_list.assert_called_once_with(
         "test_tenant_id",
+        user_id="test_user_id",
         status=None,
         agent_id=None,
         page=1,
@@ -106,6 +107,7 @@ def test_list_agent_repository_listings_api_passes_agent_id(
     assert response.status_code == 200
     mock_list.assert_called_once_with(
         "test_tenant_id",
+        user_id="test_user_id",
         status=None,
         agent_id=123,
         page=1,
@@ -137,6 +139,7 @@ def test_list_agent_repository_listings_api_passes_pending_review_status(
     assert response.status_code == 200
     mock_list.assert_called_once_with(
         "test_tenant_id",
+        user_id="test_user_id",
         status="pending_review",
         agent_id=None,
         page=1,
@@ -176,6 +179,7 @@ def test_list_agent_repository_listings_api_passes_pagination_and_search(
     assert response.status_code == 200
     mock_list.assert_called_once_with(
         "test_tenant_id",
+        user_id="test_user_id",
         status=None,
         agent_id=None,
         page=2,
@@ -728,7 +732,20 @@ def test_get_agent_repository_listing_detail_api_passes_tenant_id(
     response = client.get("/repository/agent/42", headers=mock_auth_header)
 
     assert response.status_code == 200
-    mock_get_detail.assert_called_once_with(42, "test_tenant_id")
+    mock_get_detail.assert_called_once_with(42, "test_tenant_id", user_id="test_user_id")
+
+
+@pytest.mark.parametrize("url,service_name", [
+    ("/repository/agent?status=pending_review", "list_agent_repository_listings_impl"),
+    ("/repository/agent/42", "get_agent_repository_listing_detail_impl"),
+])
+def test_agent_review_access_denial_returns_forbidden(mocker, mock_auth_header, url, service_name):
+    from consts.exceptions import ForbiddenError
+
+    mocker.patch("apps.agent_repository_app.get_current_user_id", return_value=("user", "tenant"))
+    mocker.patch("apps.agent_repository_app." + service_name, side_effect=ForbiddenError("Not authorized"))
+    response = client.get(url, headers=mock_auth_header)
+    assert response.status_code == 403
 
 
 def test_import_agent_from_repository_api_passes_tenant_id(

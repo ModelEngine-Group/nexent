@@ -18,6 +18,7 @@ from consts.const import (
     NORTHBOUND_RATE_LIMIT_PER_MINUTE,
 )
 from consts.exceptions import (
+    AgentNameConflictError,
     LimitExceededError,
     UnauthorizedError,
     ConversationNotFoundError,
@@ -417,6 +418,8 @@ async def start_streaming_chat(
         except Exception as e:
             raise Exception(f"Failed to persist user message: {str(e)}")
 
+    except AgentNameConflictError:
+        raise
     except LimitExceededError as exc:
         raise LimitExceededError(str(exc))
     except UnauthorizedError as _:
@@ -557,13 +560,12 @@ async def get_agent_info_by_name_for_northbound(
 
     try:
         agent_info_list = await _get_visible_published_agents(ctx)
-        agent_info = next(
-            (
-                item for item in agent_info_list
-                if item.get("name") == agent_name
-            ),
-            None,
-        )
+        matches = [item for item in agent_info_list if item.get("name") == agent_name]
+        if len(matches) > 1:
+            raise AgentNameConflictError(
+                f"Agent variable name '{agent_name}' matches multiple published agents. Rename the conflicting agents."
+            )
+        agent_info = matches[0] if matches else None
         if agent_info is None:
             raise LookupError(f"Published agent not found: {agent_name}")
 

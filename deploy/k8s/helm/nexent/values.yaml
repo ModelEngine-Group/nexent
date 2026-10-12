@@ -1,5 +1,7 @@
 # Default values for nexent helm chart.
 global:
+  # Timezone for backend application containers only.
+  backendTimezone: "Asia/Shanghai"
   namespace: nexent
   dataDir: "/var/lib/nexent-data"
   sharedStorage:

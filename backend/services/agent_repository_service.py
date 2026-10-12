@@ -87,6 +87,7 @@ def _to_summary_item(
     record: Dict[str, Any],
     *,
     download_total: Optional[int] = None,
+    can_take_down: bool = False,
 ) -> Dict[str, Any]:
     """Map a DB record to a lightweight marketplace summary item."""
     agent_id = record.get("agent_id")
@@ -110,6 +111,7 @@ def _to_summary_item(
         "icon": record.get("icon"),
         "downloads": downloads,
         "content": record.get("content"),
+        "can_take_down": can_take_down,
     }
 
 
@@ -144,6 +146,7 @@ def _matches_repository_listing_search_filter(record: dict, search: str) -> bool
 def list_agent_repository_listings_impl(
     tenant_id: str,
     *,
+    user_id: Optional[str] = None,
     status: Optional[str] = None,
     agent_id: Optional[int] = None,
     page: int = 1,
@@ -156,8 +159,11 @@ def list_agent_repository_listings_impl(
             f"Invalid status '{status}'; must be one of: "
             f"{', '.join(sorted(VALID_REPOSITORY_STATUSES))}"
         )
+    user_role = _get_user_role(user_id) if user_id is not None else None
+    if status == STATUS_PENDING_REVIEW and user_id is not None and user_role not in ("ADMIN", "SU"):
+        raise ForbiddenError("Only administrators can review agent submissions")
     records = list_agent_repository_summaries(
-        publisher_tenant_id=tenant_id,
+        publisher_tenant_id=None if user_role == "SU" else tenant_id,
         status=status,
         agent_id=agent_id,
     )
@@ -180,6 +186,10 @@ def list_agent_repository_listings_impl(
         "items": [
             _to_summary_item(
                 record,
+                can_take_down=(
+                    record.get("status") == STATUS_SHARED
+                    and (user_role == "SU" or record.get("publisher_tenant_id") == tenant_id)
+                ),
                 download_total=download_totals.get(int(record["agent_id"]), 0)
                 if record.get("agent_id") is not None
                 else 0,
@@ -542,6 +552,8 @@ def _serialize_created_at(create_time: Any) -> Optional[str]:
 def get_agent_repository_listing_detail_impl(
     agent_repository_id: int,
     tenant_id: str,
+    *,
+    user_id: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Load a repository listing and return a detail payload for the UI."""
     record = get_agent_repository_by_id(
@@ -550,6 +562,10 @@ def get_agent_repository_listing_detail_impl(
     )
     if not record:
         raise ValueError("Repository listing not found")
+
+    if record.get("status") != STATUS_SHARED and record.get("publisher_tenant_id") != tenant_id:
+        if user_id is None or _get_user_role(user_id) != "SU":
+            raise ForbiddenError("Not authorized to view this repository listing")
 
     root_agent = _extract_root_agent_from_snapshot(record.get("agent_info_json"))
     agent_id = record.get("agent_id")
@@ -683,10 +699,13 @@ def update_agent_repository_status_impl(
         raise ValueError("Repository listing not found")
 
     current_status = record.get("status")
+    user_role = _get_user_role(user_id)
+    publisher_tenant_id = record.get("publisher_tenant_id")
+    if user_role != "SU" and publisher_tenant_id != tenant_id:
+        raise ForbiddenError("Not authorized to update this repository listing")
     publisher_updates: Optional[Dict[str, str]] = None
     submitted_by: Optional[str] = None
     if current_status != status:
-        user_role = _get_user_role(user_id)
         publisher_updates = _validate_repository_status_transition(
             user_role=user_role,
             current_status=current_status,
@@ -702,7 +721,7 @@ def update_agent_repository_status_impl(
         repository_id=agent_repository_id,
         status=status,
         user_id=user_id,
-        filter_publisher_tenant_id=tenant_id,
+        filter_publisher_tenant_id=publisher_tenant_id,
         publisher_tenant_id=(
             publisher_updates["publisher_tenant_id"]
             if publisher_updates
@@ -723,12 +742,12 @@ def update_agent_repository_status_impl(
         agent_repository_id=agent_repository_id,
         agent_id=record["agent_id"],
         status=status,
-        publisher_tenant_id=tenant_id,
+        publisher_tenant_id=publisher_tenant_id,
     )
 
     updated = get_agent_repository_by_id(
         agent_repository_id,
-        tenant_id,
+        publisher_tenant_id,
     )
     if not updated:
         raise ValueError("Failed to load repository listing after update")

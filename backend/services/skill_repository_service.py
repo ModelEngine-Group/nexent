@@ -1087,10 +1087,16 @@ def list_skill_repository_listings_impl(
                 can_take_down=(
                     record.get("status") == STATUS_SHARED
                     and (
-                        user_role in ("ADMIN", "SU")
+                        user_role == "SU"
                         or (
-                            user_role == "DEV"
-                            and str(record.get("publisher_user_id")) == str(user_id)
+                            record.get("publisher_tenant_id") == tenant_id
+                            and (
+                                user_role == "ADMIN"
+                                or (
+                                    user_role == "DEV"
+                                    and str(record.get("publisher_user_id")) == str(user_id)
+                                )
+                            )
                         )
                     )
                 ),

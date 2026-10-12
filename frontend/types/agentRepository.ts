@@ -20,6 +20,7 @@ export interface AgentRepositoryListingItem {
   downloads?: number;
   submitted_by?: string | null;
   content?: string | null;
+  can_take_down?: boolean;
 }
 
 export interface AgentRepositoryListingPagination {

@@ -47,9 +47,10 @@ async def list_agent_repository_listings_api(
 ):
     """List all marketplace repository listings with optional status filter."""
     try:
-        _, tenant_id = get_current_user_id(authorization)
+        user_id, tenant_id = get_current_user_id(authorization)
         result = list_agent_repository_listings_impl(
             tenant_id,
+            user_id=user_id,
             status=status,
             agent_id=agent_id,
             page=page,
@@ -57,6 +58,8 @@ async def list_agent_repository_listings_api(
             search=search,
         )
         return JSONResponse(status_code=HTTPStatus.OK, content=result)
+    except ForbiddenError as e:
+        raise HTTPException(status_code=HTTPStatus.FORBIDDEN, detail=str(e))
     except UnauthorizedError as e:
         logger.warning(
             f"Unauthorized agent repository listings access attempt: {str(e)}"
@@ -125,12 +128,15 @@ async def get_agent_repository_listing_detail_api(
 ):
     """Get detailed marketplace repository listing by primary key."""
     try:
-        _, tenant_id = get_current_user_id(authorization)
+        user_id, tenant_id = get_current_user_id(authorization)
         result = get_agent_repository_listing_detail_impl(
             agent_repository_id,
             tenant_id,
+            user_id=user_id,
         )
         return JSONResponse(status_code=HTTPStatus.OK, content=result)
+    except ForbiddenError as e:
+        raise HTTPException(status_code=HTTPStatus.FORBIDDEN, detail=str(e))
     except UnauthorizedError as e:
         logger.warning(
             f"Unauthorized agent repository listing detail access attempt "

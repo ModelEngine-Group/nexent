@@ -2003,15 +2003,16 @@ class TestRunStreamRealExecution:
             for name, module in original_modules.items():
                 sys.modules[name] = module
 
-    def test_rejects_context_over_hard_budget_before_model_call(self):
+    def test_logs_context_over_hard_budget_without_blocking_model_call(self, caplog):
         module = self._load_core_agent_in_isolation()
         final_context = MagicMock()
         final_context.evidence.over_hard_budget = True
         final_context.evidence.final_token_estimate = 120
         final_context.evidence.hard_budget = 100
 
-        with pytest.raises(ValueError, match="120 > 100"):
-            module.CoreAgent._ensure_context_within_hard_budget(final_context)
+        module.CoreAgent._ensure_context_within_hard_budget(final_context)
+        assert "120 > 100 tokens" in caplog.text
+        assert "continuing the model request" in caplog.text
 
     def test_run_stream_max_steps_path_real_execution(self):
         """Test that actually executes _run_stream and covers max_steps path lines."""

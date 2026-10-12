@@ -123,6 +123,7 @@ export interface RegistryQuickAddOption {
 }
 
 export interface CommunityMcpCard {
+  canTakeDown?: boolean;
   communityId?: number;
   marketId?: number;
   reviewId?: number;

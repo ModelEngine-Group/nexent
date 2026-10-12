@@ -6,6 +6,7 @@ from database.client import get_db_session, as_dict, filter_property
 from database.db_models import AgentInfo, ToolInstance, AgentRelation
 from database.agent_version_db import query_current_version_no
 from consts.const import ASSET_OWNER_TENANT_ID
+from consts.exceptions import AgentNameConflictError
 from utils.str_utils import convert_list_to_string
 
 logger = logging.getLogger("agent_db")
@@ -51,14 +52,36 @@ def search_agent_id_by_agent_name(agent_name: str, tenant_id: str, version_no: i
         version_no: Version number to filter. Default 0 = draft/editing state
     """
     with get_db_session() as session:
-        agent = session.query(AgentInfo).filter(
+        agents = session.query(AgentInfo).filter(
             AgentInfo.name == agent_name,
             AgentInfo.tenant_id == tenant_id,
             AgentInfo.version_no == version_no,
-            AgentInfo.delete_flag != 'Y').first()
-        if not agent:
+            AgentInfo.delete_flag != 'Y').limit(2).all()
+        if not agents:
             raise ValueError("agent not found")
-        return agent.agent_id
+        if len(agents) > 1:
+            raise AgentNameConflictError(
+                f"Agent variable name '{agent_name}' matches multiple agents in this tenant. Rename the conflicting agents."
+            )
+        return agents[0].agent_id
+
+
+def ensure_agent_name_unique(session, name: str, tenant_id: str, exclude_agent_id: Optional[int] = None):
+    """Check active drafts so published snapshots of the same agent do not count as duplicates."""
+    if not name:
+        return
+    query = session.query(AgentInfo).filter(
+        AgentInfo.name == name,
+        AgentInfo.tenant_id == tenant_id,
+        AgentInfo.version_no == 0,
+        AgentInfo.delete_flag != 'Y',
+    )
+    if exclude_agent_id is not None:
+        query = query.filter(AgentInfo.agent_id != exclude_agent_id)
+    if query.first() is not None:
+        raise AgentNameConflictError(
+            f"Agent variable name '{name}' already exists in this tenant. Choose a different variable name."
+        )
 
 
 def search_blank_sub_agent_by_main_agent_id(tenant_id: str, version_no: int = 0):
@@ -209,6 +232,7 @@ def create_agent(agent_info, tenant_id: str, user_id: str):
         "is_new": True,  # Mark new agents as new
     })
     with get_db_session() as session:
+        ensure_agent_name_unique(session, info_with_metadata.get("name"), tenant_id)
         new_agent = AgentInfo(**filter_property(info_with_metadata, AgentInfo))
         new_agent.delete_flag = 'N'
         session.add(new_agent)
@@ -277,6 +301,7 @@ def update_agent(agent_id, agent_info, user_id, version_no: int = 0):
             raise ValueError("ag_tenant_agent_t Agent not found")
 
         agent_data = dict(agent_info.__dict__)
+        ensure_agent_name_unique(session, agent_data.get("name") or agent.name, agent.tenant_id, agent_id)
         fields_set = getattr(agent_info, "model_fields_set", None)
         if fields_set is not None and "requested_output_tokens" not in fields_set:
             agent_data.pop("requested_output_tokens", None)

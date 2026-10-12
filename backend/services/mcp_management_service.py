@@ -6,6 +6,7 @@ from urllib.parse import urlencode
 import aiohttp
 
 from consts.exceptions import (
+    ForbiddenError,
     MCPConnectionError,
     McpNameConflictError,
     McpNotFoundError,
@@ -240,10 +241,23 @@ async def list_community_mcp_services(
         cursor=cursor,
         limit=limit,
     )
+    user_role = _get_user_role(user_id)
     return {
         "count": db_result.get("count", 0),
         "nextCursor": db_result.get("nextCursor"),
-        "items": [_to_community_card(item) for item in db_result.get("items", [])],
+        "items": [
+            {
+                **_to_community_card(item),
+                "canTakeDown": (
+                    item.get("review_status") == STATUS_SHARED
+                    and (
+                        user_role in SUPER_ADMIN_ROLES
+                        or (user_role == "ADMIN" and item.get("tenant_id") == tenant_id)
+                    )
+                ),
+            }
+            for item in db_result.get("items", [])
+        ],
     }
 
 
@@ -453,6 +467,9 @@ async def update_community_mcp_service(
     if not current:
         raise McpNotFoundError("Market MCP record not found")
 
+    if current.get("tenant_id") != tenant_id and _get_user_role(user_id) not in SUPER_ADMIN_ROLES:
+        raise ForbiddenError("Not authorized to update this marketplace listing")
+
     existing_config_json = (
         current.get("config_json") if isinstance(current.get("config_json"), dict) else None
     )
@@ -647,9 +664,18 @@ async def delete_community_mcp_service(
     if not current:
         raise McpNotFoundError("Market MCP record not found")
 
+    user_role = _get_user_role(user_id)
+    if user_role not in SUPER_ADMIN_ROLES:
+        if current.get("tenant_id") != tenant_id:
+            raise ForbiddenError("Not authorized to delete this marketplace listing")
+        if user_role != "ADMIN" and not (
+            user_role == "DEV" and current.get("user_id") == user_id
+        ):
+            raise ForbiddenError("Not authorized to delete this marketplace listing")
+
     delete_mcp_market_record_by_id(market_id=market_id, user_id=user_id)
     clear_mcp_record_market_id(
-        tenant_id=tenant_id,
+        tenant_id=current["tenant_id"],
         user_id=user_id,
         market_id=market_id,
     )

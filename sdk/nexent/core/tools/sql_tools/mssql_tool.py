@@ -65,9 +65,9 @@ class MsSqlTool(SqlDatabaseBaseTool):
         },
         "max_rows": {
             "type": "integer",
-            "description": "Maximum number of rows to return. Default is 100.",
-            "description_zh": "最多返回的行数，默认100。",
-            "default": 100,
+            "description": "Optional maximum number of rows to return. Defaults to unlimited; does not modify SQL.",
+            "description_zh": "可选的返回行数上限，默认不限制，不修改原 SQL。",
+            "default": None,
             "nullable": True,
         },
         "timeout": {
@@ -110,24 +110,6 @@ class MsSqlTool(SqlDatabaseBaseTool):
     @property
     def default_port(self) -> int:
         return 1433
-
-    def _preprocess_sql(self, sql: str) -> str:
-        """Convert standard LIMIT clause to TOP for SQL Server."""
-        limit_pattern = re.compile(
-            r"\bLIMIT\s+(\d+)(?:\s*,\s*(\d+))?",
-            re.IGNORECASE
-        )
-
-        def replace_limit(match):
-            offset = match.group(2)
-            limit = match.group(1)
-
-            if offset:
-                return f"OFFSET {offset} ROWS FETCH NEXT {limit} ROWS ONLY"
-            else:
-                return f"TOP {limit}"
-
-        return limit_pattern.sub(replace_limit, sql)
 
     def _convert_params_for_mssql(
         self, sql: str, parameters: Optional[List[Any]]
@@ -203,7 +185,7 @@ class MsSqlTool(SqlDatabaseBaseTool):
         self,
         sql: str,
         parameters: Optional[List[Any]] = None,
-        max_rows: Optional[int] = 100,
+        max_rows: Optional[int] = None,
         timeout: Optional[int] = 10,
     ) -> str:
         """
@@ -212,7 +194,7 @@ class MsSqlTool(SqlDatabaseBaseTool):
         Args:
             sql: SQL query to execute
             parameters: Optional list of parameter values for parameterized queries
-            max_rows: Maximum number of rows to return (default 100)
+            max_rows: Maximum number of rows to return (default unlimited; does not modify SQL)
             timeout: Query timeout in seconds (default 10)
 
         Returns:
