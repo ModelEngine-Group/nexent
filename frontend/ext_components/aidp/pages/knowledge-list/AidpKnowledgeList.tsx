@@ -377,15 +377,14 @@ const AidpKnowledgeList: React.FC<AidpKnowledgeListProps> = ({
       type: makeColumn("type", {
         title: t("aidpKnowledge.columnType"),
         key: "type",
-        render: (_value, kb) => (
-          <Tooltip title={scopeText(kb)}>
-            {columnWidths.type >= 260 ? (
-              <div>{renderScope(kb)}</div>
-            ) : (
+        render: (_value, kb) =>
+          columnWidths.type >= 260 ? (
+            renderScope(kb)
+          ) : (
+            <Tooltip title={scopeText(kb)}>
               <span className={styles.tableCellText}>{scopeText(kb)}</span>
-            )}
-          </Tooltip>
-        ),
+            </Tooltip>
+          ),
       }),
       description: makeColumn("description", {
         title: t("aidpKnowledge.columnDescription"),
