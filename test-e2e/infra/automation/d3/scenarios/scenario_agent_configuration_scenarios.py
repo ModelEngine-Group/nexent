@@ -191,13 +191,24 @@ async def _agent_crud_negative(identity) -> None:
                 listed = await api.get("/agent/list")
                 assert_status(listed, 200)
                 rows = {int(row["agent_id"]): row for row in listed.json()}
+                # The fixed contract: creating through the update API resolves
+                # duplicate name/display_name to a unique _N suffix instead of
+                # leaving an unavailable duplicate resource behind.
+                duplicate_row = rows[duplicate_id]
+                assert duplicate_row["name"] != payload["name"] or duplicate_row["display_name"] != payload["display_name"], (
+                    'duplicate create kept the conflicting identifiers unchanged'
+                )
+                for field, base in (("name", payload["name"]), ("display_name", payload["display_name"])):
+                    value = duplicate_row[field]
+                    if value != base:
+                        assert value.startswith(f"{base}_"), f'{field}={value!r} is not a unique suffix of {base!r}'
                 original_reasons = set(rows[agent_id].get("unavailable_reasons") or [])
-                duplicate_reasons = set(rows[duplicate_id].get("unavailable_reasons") or [])
+                duplicate_reasons = set(duplicate_row.get("unavailable_reasons") or [])
                 required = {"duplicate_name", "duplicate_display_name"}
                 assert not original_reasons.intersection(required), 'original agent was marked duplicate'
-                assert required.issubset(duplicate_reasons), 'duplicate names were not marked unavailable'
+                assert not duplicate_reasons.intersection(required), 'duplicate create was marked unavailable instead of renamed'
                 # Availability is derived from the reason list in the list API.
-                assert rows[duplicate_id].get("is_available") is False
+                assert duplicate_row.get("is_available") is not False
                 invalid = await api.post("/agent/update", json={"agent_id": agent_id, "max_steps": 0})
                 missing = await api.request("DELETE", "/agent", json={"agent_id": absent_numeric_id(__name__)})
                 original = await api.post('/agent/search_info', json={'agent_id': agent_id, 'version_no': 0})
