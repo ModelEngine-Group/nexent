@@ -964,6 +964,36 @@ export const checkAgentNameConflictBatch = async (payload: {
   }
 };
 
+/**
+ * Generate unique copy names by appending a numeric suffix when the base
+ * name/display_name already exists in the tenant. Mirrors the backend
+ * import-link deduplication (base_1, base_2, ...).
+ */
+export const generateUniqueCopyName = async (
+  baseName: string,
+  baseDisplayName: string
+): Promise<{ name: string; display_name: string }> => {
+  let name = baseName;
+  let displayName = baseDisplayName;
+
+  // Probe at most 100 suffix candidates, matching the backend limit.
+  for (let attempt = 0; attempt < 100; attempt++) {
+    const result = await checkAgentNameConflictBatch({
+      items: [{ name, display_name: displayName }],
+    });
+    if (!result.success || !Array.isArray(result.data)) {
+      throw new Error("Failed to check agent name conflict");
+    }
+    const conflict = result.data[0];
+    if (!conflict?.name_conflict && !conflict?.display_name_conflict) {
+      return { name, display_name: displayName };
+    }
+    name = `${baseName}_${attempt + 1}`;
+    displayName = `${baseDisplayName}_${attempt + 1}`;
+  }
+  throw new Error("Failed to generate unique agent name after max attempts");
+};
+
 export const regenerateAgentNameBatch = async (payload: {
   items: Array<{
     name: string;

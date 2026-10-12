@@ -26,6 +26,7 @@ import { a2aClientService } from "@/services/a2aService";
 import {
   deleteAgent,
   exportAgent,
+  generateUniqueCopyName,
   searchAgentInfo,
   updateAgentInfo,
   updateToolConfig,
@@ -146,12 +147,19 @@ export default function AgentConfigActions({
         return legacySingleId ? [legacySingleId] : undefined;
       })();
 
+      const baseCopyName = `${detail.name || "agent"}_copy`;
+      const baseCopyDisplayName = `${
+        detail.display_name || t("agentConfig.agents.defaultDisplayName")
+      }${t("agent.copySuffix")}`;
+      const copyNames = await generateUniqueCopyName(
+        baseCopyName,
+        baseCopyDisplayName
+      );
+
       const createResult = await updateAgentMutation.mutateAsync({
         agent_id: undefined,
-        name: `${detail.name || "agent"}_copy`,
-        display_name: `${
-          detail.display_name || t("agentConfig.agents.defaultDisplayName")
-        }${t("agent.copySuffix")}`,
+        name: copyNames.name,
+        display_name: copyNames.display_name,
         description: detail.description,
         author: detail.author,
         model_ids: modelIdsForCopy,
