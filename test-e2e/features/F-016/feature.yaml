@@ -1,0 +1,16 @@
+schema_version: '1.0'
+module:
+  id: V5-BASELINE
+  name: Migrated V5 baseline
+feature:
+  feature_id: F-016
+  name: 更新租户与名称校验
+  status: active
+  description: '租户与资源权限 / 租户: 更新租户与名称校验'
+  business_rules:
+  - rule_id: F-016-RULE-01
+    description: 更新租户与名称校验
+  required_test_stages:
+  - D2
+  source:
+    notes: Migrated from V5 01_代码功能清单 without changing the functional description.

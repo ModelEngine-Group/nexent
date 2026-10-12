@@ -1,0 +1,17 @@
+schema_version: '1.0'
+module:
+  id: V5-BASELINE
+  name: Migrated V5 baseline
+feature:
+  feature_id: F-156
+  name: config/tenant_config 读取写入、feature flags、租户隔离；app 名称/描述字段移除，context.compaction_trigger_ratio 键迁移，配置服务启动任务恢复
+  status: active
+  description: '平台运维能力 / 配置: config/tenant_config 读取写入、feature flags、租户隔离；app 名称/描述字段移除，context.compaction_trigger_ratio 键迁移，配置服务启动任务恢复'
+  business_rules:
+  - rule_id: F-156-RULE-01
+    description: config/tenant_config 读取写入、feature flags、租户隔离；app 名称/描述字段移除，context.compaction_trigger_ratio 键迁移，配置服务启动任务恢复
+  required_test_stages:
+  - D1
+  - D2
+  source:
+    notes: Migrated from V5 01_代码功能清单 without changing the functional description.

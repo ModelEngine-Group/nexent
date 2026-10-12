@@ -1,0 +1,56 @@
+schema_version: '1.0'
+stage: D2
+module: V5-BASELINE
+case:
+  case_id: CTR-041
+  feature_id: F-096
+  business_rule_ids:
+  - F-096-RULE-01
+  title: 认证 header/idkey/JWT/custom metadata 实际 wire 传输｜核心流程
+  type: CONTRACT
+  priority: P0
+  status: active
+  automation: automated
+  objective: 认证 header/idkey/JWT/custom metadata 实际 wire 传输｜核心流程
+  preconditions:
+  - Nexent服务与仓库受控A2A Mock就绪，无其他故障注入批次。
+  - config/a2a.yaml符合统一Schema，控制令牌由既有环境或secrets.env提供。
+  - 使用本次动态ID、唯一source URL及受控测试身份，不借用历史资源。
+  test_data:
+    configuration: config/a2a.yaml
+    mock_service: a2a-agent
+  steps:
+  - order: 1
+    action: 分别获取idkey、JWT和both两种认证组合并发现
+    expected: 发现成功；凭据由受控Mock资产提供，不写死在脚本
+  - order: 2
+    action: 保存各组合对应凭据和requirement index
+    expected: 返回200且选择有效组合
+  - order: 3
+    action: 经Nexent调用并携带本次metadata
+    expected: 确定性marker返回；真实POST认证成功，metadata和认证Header指纹一致
+  - order: 4
+    action: 删除本次Agent并回读
+    expected: 回读404，证据脱敏保存
+  expected_results:
+  - 发现成功；凭据由受控Mock资产提供，不写死在脚本
+  - 返回200且选择有效组合
+  - 确定性marker返回；真实POST认证成功，metadata和认证Header指纹一致
+  - 回读404，证据脱敏保存
+  forbidden_side_effects: []
+  source:
+    legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
+    legacy_sheet: 02_测试用例基线
+    legacy_row: 189
+  contract:
+    protocol: Nexent HTTP API and real external A2A wire
+    request_expectations:
+    - 分别获取idkey、JWT和both两种认证组合并发现
+    - 保存各组合对应凭据和requirement index
+    - 经Nexent调用并携带本次metadata
+    - 删除本次Agent并回读
+    response_expectations:
+    - 发现成功；凭据由受控Mock资产提供，不写死在脚本
+    - 返回200且选择有效组合
+    - 确定性marker返回；真实POST认证成功，metadata和认证Header指纹一致
+    - 回读404，证据脱敏保存

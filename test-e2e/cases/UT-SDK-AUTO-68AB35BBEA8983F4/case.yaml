@@ -1,0 +1,77 @@
+schema_version: '1.0'
+stage: D1
+module: V5-BASELINE
+case:
+  case_id: UT-SDK-AUTO-68AB35BBEA8983F4
+  feature_id: F-111
+  business_rule_ids:
+  - F-111-RULE-01
+  title: AidpSearchTool 运行时白名单 set_allowed_kds 语义（空集阻断/非空求交）与 kds_name→id 转换及 scope 解析｜核心流程
+  type: SDK-UT
+  priority: P0
+  status: active
+  automation: automated
+  objective: AidpSearchTool 运行时白名单 set_allowed_kds 语义（空集阻断/非空求交）与 kds_name→id 转换及 scope 解析｜核心流程
+  preconditions:
+  - 本地依赖/组件测试环境可运行；不要求外部模型服务在线，不访问真实 AIDP。
+  - 设置 NEXENT_TEST_HOME，目录不位于 Nexent Git 仓库内。
+  - 当次 run_id 已生成；测试基线固定为 develop 当前批次锁定的产品提交；执行时另记录实际被测 commit。
+  - 可合法实例化 AidpSearchTool：传入非空 server_url / api_key（测试占位）/ tenant_id 与 JSON 字符串 kds_list，kds_name_to_id_map 以内存 dict 注入；测试代码不得读取生产凭据。
+  test_data:
+    legacy_asset_declaration: 无真实外部文件资产：白名单与 kds_name_to_id_map 以内存 dict 注入；_http_client 替换为记录调用的 fake client（不发起真实网络请求）。
+  steps:
+  - order: 1
+    action: 构造 AidpSearchTool：传入合法 server_url（如 https://aidp.example.com）、api_key（占位 ak_test）、tenant_id（如 tenant1）、kds_list='["kb1","kb2"]'，kds_name_to_id_map
+      注入 {"财务知识库":"kb1","人力知识库":"kb2"}；将 _http_client 替换为记录 POST 调用参数的 fake client。
+    expected: set_allowed_kds 三态语义与 _filter_by_whitelist 一致：None 清除且 no-op、空列表安装空集并阻断全部、非空列表安装后按序求交。
+  - order: 2
+    action: 断言初始态：_whitelist_installed 为 False、_allowed_kds_set 为空集；_filter_by_whitelist(["kb1","kb2"]) 原样返回 ["kb1","kb2"]（未安装白名单时不过滤）。
+    expected: 安装白名单后未授权 kds_id 不会进入检索范围；空集白名单彻底阻断（修复空集 no-op 提权），无跨 KB 越权访问。
+  - order: 3
+    action: 执行 set_allowed_kds(None)：断言 _whitelist_installed 仍为 False、_allowed_kds_set 为空集，过滤继续 no-op（兼容 SDK 单测/遗留路径）。
+    expected: kds_name→id 正向转换命中映射转 id、未命中透传；id→name 反向转换命中转显示名、未命中透传。
+  - order: 4
+    action: 执行 set_allowed_kds([])：断言 _whitelist_installed 为 True、_allowed_kds_set 为空集；_filter_by_whitelist(["kb1","kb2"])
+      返回 []（空集合安装后阻断所有 KB，不再 no-op 提权）。
+    expected: 空白名单下 forward 不发出 AIDP HTTP 请求并返回权限拒绝观测，不抛异常、不吞异常返回伪成功。
+  - order: 5
+    action: 执行 set_allowed_kds(["kb1","kb3"])：断言 _whitelist_installed 为 True；_filter_by_whitelist(["kb1","kb2","kb3"]) 按原顺序返回
+      ["kb1","kb3"]（仅保留白名单内 id）。
+    expected: 非空白名单下 forward 实际检索范围等于配置/请求 kds_list 与白名单的交集，请求参数中的 kds_list 只含已授权 id。
+  - order: 6
+    action: 断言 kds_name→id 转换：_convert_to_kds_ids(["财务知识库","kb2","未知库"]) 返回 ["kb1","kb2","未知库"]（命中映射转 id、未命中透传）；_convert_to_kds_names(["kb1","kb2","kb9"])
+      返回 ["财务知识库","人力知识库","kb9"]。
+    expected: 日志、Trace、报告中不出现明文 api_key 或带凭据的图片/服务 URL。
+  - order: 7
+    action: 空白名单 forward：set_allowed_kds([]) 后调用 forward("查询词", kds_list=["kb1","kb2"])，断言 fake client 未收到任何 POST（不发起 AIDP
+      请求），返回字符串为无可用 KB/权限拒绝观测，used_scope 为空。
+    expected: 日志、Trace、报告中不出现明文 api_key 或带凭据的图片/服务 URL。
+  - order: 8
+    action: 非空白名单 forward：set_allowed_kds(["kb1"]) 后调用 forward("查询词", kds_list=["kb1","kb2"])，断言 fake client 收到请求且其 kds_list
+      仅含 "kb1"（越权 id "kb2" 已被过滤）。
+    expected: 日志、Trace、报告中不出现明文 api_key 或带凭据的图片/服务 URL。
+  - order: 9
+    action: 断言日志/Trace 不输出 api_key 或带凭据的服务 URL；测试后清理临时对象，确保用例可重复执行。
+    expected: 日志、Trace、报告中不出现明文 api_key 或带凭据的图片/服务 URL。
+  expected_results:
+  - set_allowed_kds 三态语义与 _filter_by_whitelist 一致：None 清除且 no-op、空列表安装空集并阻断全部、非空列表安装后按序求交。
+  - 安装白名单后未授权 kds_id 不会进入检索范围；空集白名单彻底阻断（修复空集 no-op 提权），无跨 KB 越权访问。
+  - kds_name→id 正向转换命中映射转 id、未命中透传；id→name 反向转换命中转显示名、未命中透传。
+  - 空白名单下 forward 不发出 AIDP HTTP 请求并返回权限拒绝观测，不抛异常、不吞异常返回伪成功。
+  - 非空白名单下 forward 实际检索范围等于配置/请求 kds_list 与白名单的交集，请求参数中的 kds_list 只含已授权 id。
+  - 日志、Trace、报告中不出现明文 api_key 或带凭据的图片/服务 URL。
+  forbidden_side_effects: []
+  source:
+    legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
+    legacy_sheet: 02_测试用例基线
+    legacy_row: 466
+  unit_boundary: AIDP检索工具
+  inputs:
+  - 无真实外部文件资产：白名单与 kds_name_to_id_map 以内存 dict 注入；_http_client 替换为记录调用的 fake client（不发起真实网络请求）。
+  assertions:
+  - set_allowed_kds 三态语义与 _filter_by_whitelist 一致：None 清除且 no-op、空列表安装空集并阻断全部、非空列表安装后按序求交。
+  - 安装白名单后未授权 kds_id 不会进入检索范围；空集白名单彻底阻断（修复空集 no-op 提权），无跨 KB 越权访问。
+  - kds_name→id 正向转换命中映射转 id、未命中透传；id→name 反向转换命中转显示名、未命中透传。
+  - 空白名单下 forward 不发出 AIDP HTTP 请求并返回权限拒绝观测，不抛异常、不吞异常返回伪成功。
+  - 非空白名单下 forward 实际检索范围等于配置/请求 kds_list 与白名单的交集，请求参数中的 kds_list 只含已授权 id。
+  - 日志、Trace、报告中不出现明文 api_key 或带凭据的图片/服务 URL。

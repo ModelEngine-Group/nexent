@@ -1,0 +1,17 @@
+schema_version: '1.0'
+module:
+  id: V5-BASELINE
+  name: Migrated V5 baseline
+feature:
+  feature_id: F-086
+  name: 社区 list/tag stats/mine/detail；tags 迁移至统一标签管理（结构化标签分配/展示/筛选、发布标签继承、删除清理标签分配）
+  status: active
+  description: 'MCP / MCP仓库: 社区 list/tag stats/mine/detail；tags 迁移至统一标签管理（结构化标签分配/展示/筛选、发布标签继承、删除清理标签分配）'
+  business_rules:
+  - rule_id: F-086-RULE-01
+    description: 社区 list/tag stats/mine/detail；tags 迁移至统一标签管理（结构化标签分配/展示/筛选、发布标签继承、删除清理标签分配）
+  required_test_stages:
+  - D1
+  - D2
+  source:
+    notes: Migrated from V5 01_代码功能清单 without changing the functional description.

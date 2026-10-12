@@ -145,7 +145,7 @@ def test_oc_028_three_bare_generations_use_last_answer(monkeypatch):
     agent._handle_max_steps_reached.assert_not_called()
 
 
-def test_oc_028_alternating_malformed_and_bare_use_last_answer(monkeypatch):
+def test_oc_028_alternating_malformed_and_bare_rejects_marked_final(monkeypatch):
     agent, _, _ = _agent_with_responses(
         ["<code>final_answer(", "just thinking", "<code>final_answer("],
         strict=True,
@@ -153,13 +153,12 @@ def test_oc_028_alternating_malformed_and_bare_use_last_answer(monkeypatch):
     )
     agent._handle_max_steps_reached = MagicMock()
 
-    outputs = list(agent._run_stream("task", max_steps=2))
-
-    assert outputs[-1].output == "<code>final_answer("
+    with pytest.raises(core_agent_module.ModelOutputProtocolExhaustedError):
+        list(agent._run_stream("task", max_steps=2))
     assert agent.model.call_count == 3
-    assert len(agent.memory.steps) == 1
-    assert agent.observer.rollback_model_attempt.call_count == 2
-    agent.observer.commit_model_attempt.assert_called_once_with("attempt-2", 1)
+    assert len(agent.memory.steps) == 0
+    assert agent.observer.rollback_model_attempt.call_count == 3
+    agent.observer.commit_model_attempt.assert_not_called()
     agent.python_executor.assert_not_called()
     agent._handle_max_steps_reached.assert_not_called()
 

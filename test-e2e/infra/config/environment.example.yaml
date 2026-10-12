@@ -1,0 +1,13 @@
+# Machine-local service addresses; these defaults are not a deployment command.
+base_url: http://localhost:3000
+locale: zh-CN
+timezone: Asia/Shanghai
+services:
+  config:
+    url: http://localhost:5010
+  runtime:
+    url: http://localhost:5014
+  northbound:
+    url: http://localhost:5013
+  data_process:
+    url: http://localhost:5012

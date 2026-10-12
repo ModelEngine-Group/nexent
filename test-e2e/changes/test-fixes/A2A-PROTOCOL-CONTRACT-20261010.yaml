@@ -1,0 +1,28 @@
+schema_version: '1.0'
+change:
+  change_id: A2A-PROTOCOL-CONTRACT-20261010
+  change_type: test-fix
+  title: Separate advertised protocol wire checks from GRPC configuration persistence
+  description: >-
+    The user approved adapting CTR-039 to the current product compatibility
+    contract without product changes. update_agent_protocol in
+    backend/services/a2a_client_service.py persists protocol configuration without
+    checking advertised Card interfaces. Supersede only CTR-039's unsupported
+    GRPC rejection expectation in A2A-PROTOCOL-TIMEOUT-20261009. Preserve actual
+    JSONRPC and HTTP+JSON calls, business result total=1283, refresh consistency
+    and observed wire endpoint checks. Assert GRPC update returns 200 and both
+    its response and a separate detail read return protocol_type GRPC. Do not
+    invoke an HTTP fallback and label it gRPC success. This Case certifies GRPC
+    configuration persistence only, not gRPC runtime interoperability or UI
+    selection. Resources remain dynamically discovered and cleaned by
+    discovered_agent. Historical outcomes are not relabeled PASS.
+  affected_features:
+    existing: [F-093]
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing: []
+    added: []
+    modified: [CTR-039]
+    retired: []

@@ -1,0 +1,52 @@
+schema_version: '1.0'
+stage: D1
+module: V5-BASELINE
+case:
+  case_id: UT-FE-040
+  feature_id: F-179
+  business_rule_ids:
+  - F-179-RULE-01
+  title: 普通对话的前端消息按用户轮次正确分组
+  type: FE-COMP
+  priority: P0
+  status: active
+  automation: automated
+  objective: 普通对话的前端消息按用户轮次正确分组
+  preconditions:
+  - 本地测试环境健康检查通过，NEXENT_TEST_HOME 位于源码仓库外。
+  - 测试基线固定为 develop 当前批次锁定的产品提交，当次资源使用 run_id 隔离。
+  - 所需资产存在：${NEXENT_TEST_HOME}/config/users.yaml；${NEXENT_TEST_HOME}/config/secrets.env；${NEXENT_TEST_HOME}/config/models.yaml。
+  test_data:
+    legacy_asset_declaration: '- ${NEXENT_TEST_HOME}/config/users.yaml
+
+      - ${NEXENT_TEST_HOME}/config/secrets.env
+
+      - ${NEXENT_TEST_HOME}/config/models.yaml'
+  steps:
+  - order: 1
+    action: 构造两个连续用户轮次及各自的 Agent 工具输出。
+    expected: 每条工具输出只归属发起它的用户轮次。
+  - order: 2
+    action: 调用当前消息转换器。
+    expected: 轮次顺序与输出顺序保持一致，不引入已删除的 HITL 队列状态。
+  - order: 3
+    action: 分别核对两个轮次的分组和输出顺序。
+    expected: 轮次顺序与输出顺序保持一致，不引入已删除的 HITL 队列状态。
+  expected_results:
+  - 每条工具输出只归属发起它的用户轮次。
+  - 轮次顺序与输出顺序保持一致，不引入已删除的 HITL 队列状态。
+  forbidden_side_effects: []
+  source:
+    legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
+    legacy_sheet: 02_测试用例基线
+    legacy_row: 379
+  unit_boundary: 旧 HITL 兼容
+  inputs:
+  - '- ${NEXENT_TEST_HOME}/config/users.yaml
+
+    - ${NEXENT_TEST_HOME}/config/secrets.env
+
+    - ${NEXENT_TEST_HOME}/config/models.yaml'
+  assertions:
+  - 每条工具输出只归属发起它的用户轮次。
+  - 轮次顺序与输出顺序保持一致，不引入已删除的 HITL 队列状态。

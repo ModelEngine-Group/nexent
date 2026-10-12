@@ -1,0 +1,16 @@
+schema_version: '1.0'
+module:
+  id: V5-BASELINE
+  name: Migrated V5 baseline
+feature:
+  feature_id: V5-PW-AGENT-03
+  name: 工具与技能Tab Tools+Skills选择→autosave→Debug真实调用
+  status: active
+  description: 验证工具/技能绑定UI到真实运行。
+  business_rules:
+  - rule_id: V5-PW-AGENT-03-RULE-01
+    description: 工具与技能Tab Tools+Skills选择→autosave→Debug真实调用
+  required_test_stages:
+  - D4
+  source:
+    notes: 'Provisional migration owner: the V5 row has no stable Feature ID. Do not infer an F-ID.'

@@ -1,0 +1,16 @@
+schema_version: '1.0'
+module:
+  id: V5-BASELINE
+  name: Migrated V5 baseline
+feature:
+  feature_id: V5-PW-CHAT-02
+  name: Execution + Tool Call用户可见执行→最终结果
+  status: active
+  description: 替代v4错误的ReAct UI模式：验证Execution中的真实Tool执行。
+  business_rules:
+  - rule_id: V5-PW-CHAT-02-RULE-01
+    description: Execution + Tool Call用户可见执行→最终结果
+  required_test_stages:
+  - D4
+  source:
+    notes: 'Provisional migration owner: the V5 row has no stable Feature ID. Do not infer an F-ID.'

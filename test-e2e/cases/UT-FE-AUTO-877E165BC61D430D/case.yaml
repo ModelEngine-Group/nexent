@@ -1,0 +1,91 @@
+schema_version: '1.0'
+stage: D1
+module: V5-BASELINE
+case:
+  case_id: UT-FE-AUTO-877E165BC61D430D
+  feature_id: F-177
+  business_rule_ids:
+  - F-177-RULE-01
+  title: 标签定义/值编辑、启停与置顶，资源分配单/多选、容量上限及409冲突提示｜核心流程
+  type: FE-COMP
+  priority: P1
+  status: active
+  automation: automated
+  objective: 标签定义/值编辑、启停与置顶，资源分配单/多选、容量上限及409冲突提示｜核心流程
+  preconditions:
+  - 本地前端组件测试环境可运行（React 组件测试框架 + antd 渲染支持），不要求真实模型服务或真实后端在线。
+  - 设置 NEXENT_TEST_HOME，目录不位于 Nexent Git 仓库内。
+  - 当次 run_id 已生成；测试基线固定为 develop 当前批次锁定的产品提交；执行时另记录实际被测 commit。
+  - 组件通过 mock（tagManagementApi / useTagManagement）注入固定的 definitions/values/assignments 数据与受控 service 响应。
+  test_data:
+    legacy_asset_declaration: '- 组件测试 mock fixture（definitions/values/assignments 本地固定数据，覆盖 single_select / multi_select /
+      no_value）。
+
+      - React 组件测试运行环境（antd + Testing Library）。'
+  steps:
+  - order: 1
+    action: 加载 TagDefinitionManagementModal（bucketId=default_resource 桶且 canManage=true），注入 useTagDefinitions 返回的固定 definitions（含
+      single_select / multi_select / no_value 三种 selection_mode 与对应 values）。
+    expected: 定义/值 CRUD、启停、置顶均映射到对应 service 方法及请求参数，成功路径展示 success 提示并触发列表/数据刷新。
+  - order: 2
+    action: 首次渲染后断言：定义列渲染 name/key/mode/status，valueCapacity 进度条显示 active_value_count/value_capacity，no_value 定义行不可展开；将 canManage
+      置 false 再渲染，断言新增/编辑/启停/置顶/删除按钮 disabled。
+    expected: 选择模式正确：single_select 单选、multi_select 多选，no_value 定义在分配区显示 no-value 提示且不可展开值列表。
+  - order: 3
+    action: 点击“新增定义”打开表单，definition_name 留空提交，断言出现前端必填校验文案且 createDefinition 未被调用。
+    expected: 前端必填校验拦截空字段，非法提交不发出网络请求。
+  - order: 4
+    action: 填写 definition_name、选择 multi_select、输入 initial_values 并提交，断言 service.createDefinition 以 (bucketId, {definition_name,
+      selection_mode, initial_values}) 调用，成功后 message.success 出现且定义列表刷新。
+    expected: 分配容量上限 100 生效：超出时前端警告且不提交，进度条与 selected 计数一致。
+  - order: 5
+    action: 展开 single_select 定义行点击“新增值”，输入 display_value 保存，断言 createValue 调用参数正确并在返回后触发 refresh。
+    expected: 失败/冲突路径（409、非 synced 投影、部分批量失败）均通过 message.error/warning 展示明确提示，不误写页面状态。
+  - order: 6
+    action: 对定义依次点击“禁用/启用”“置顶”，断言 updateDefinitionStatus 以相反 status 调用、moveDefinitionToTop 被调用且 definitionPage 重置为 1。
+    expected: 组件不输出明文凭据，测试过程无未处理异常。
+  - order: 7
+    action: 模拟 service 返回 409 冲突（TagConflict message），断言 message.error 展示冲突提示且列表数据不被错误改写。
+    expected: 组件不输出明文凭据，测试过程无未处理异常。
+  - order: 8
+    action: 加载 ResourceTagAssignmentModal（resourceType=agent、resourceId 固定、definitions 含 single_select 与 multi_select），断言左侧定义列表展示带已选数量
+      Badge，进度条按 `${totalSelected}/100` 展示。
+    expected: 组件不输出明文凭据，测试过程无未处理异常。
+  - order: 9
+    action: 对 multi_select 定义选择多个 value、对 single_select 定义选择单个 value，断言 Select 分别以 multiple 与单值模式渲染，selected 按 definition_id
+      正确聚合。
+    expected: 组件不输出明文凭据，测试过程无未处理异常。
+  - order: 10
+    action: 在单资源模式构造 selected 总数 > 100 后保存，断言出现 assignmentCapacity 警告且未触发 replaceAssignments 调用；总数 <= 100 时保存，断言 replaceAssignments
+      以 value_ids 调用、成功后 message.success 且弹窗关闭。
+    expected: 组件不输出明文凭据，测试过程无未处理异常。
+  - order: 11
+    action: 模拟 replaceAssignments 返回 projection_status.status != "synced"，断言出现 projectionPending 警告提示。
+    expected: 组件不输出明文凭据，测试过程无未处理异常。
+  - order: 12
+    action: 加载 ResourceTagChips/TagChips 注入 assignments，断言 chips 展示值（no_value 显示定义名，其余显示 value 显示名），溢出超过 max 时显示 +N，重复加载不产生重复请求。
+    expected: 组件不输出明文凭据，测试过程无未处理异常。
+  expected_results:
+  - 定义/值 CRUD、启停、置顶均映射到对应 service 方法及请求参数，成功路径展示 success 提示并触发列表/数据刷新。
+  - 选择模式正确：single_select 单选、multi_select 多选，no_value 定义在分配区显示 no-value 提示且不可展开值列表。
+  - 前端必填校验拦截空字段，非法提交不发出网络请求。
+  - 分配容量上限 100 生效：超出时前端警告且不提交，进度条与 selected 计数一致。
+  - 失败/冲突路径（409、非 synced 投影、部分批量失败）均通过 message.error/warning 展示明确提示，不误写页面状态。
+  - 组件不输出明文凭据，测试过程无未处理异常。
+  forbidden_side_effects: []
+  source:
+    legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
+    legacy_sheet: 02_测试用例基线
+    legacy_row: 439
+  unit_boundary: 标签组件
+  inputs:
+  - '- 组件测试 mock fixture（definitions/values/assignments 本地固定数据，覆盖 single_select / multi_select / no_value）。
+
+    - React 组件测试运行环境（antd + Testing Library）。'
+  assertions:
+  - 定义/值 CRUD、启停、置顶均映射到对应 service 方法及请求参数，成功路径展示 success 提示并触发列表/数据刷新。
+  - 选择模式正确：single_select 单选、multi_select 多选，no_value 定义在分配区显示 no-value 提示且不可展开值列表。
+  - 前端必填校验拦截空字段，非法提交不发出网络请求。
+  - 分配容量上限 100 生效：超出时前端警告且不提交，进度条与 selected 计数一致。
+  - 失败/冲突路径（409、非 synced 投影、部分批量失败）均通过 message.error/warning 展示明确提示，不误写页面状态。
+  - 组件不输出明文凭据，测试过程无未处理异常。

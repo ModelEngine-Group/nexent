@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
 from sqlalchemy import select, update
@@ -10,6 +10,10 @@ from database.db_models import ConversationShare, ConversationShareAsset
 def create_conversation_share(share_data: Dict[str, Any], user_id: str) -> Dict[str, Any]:
     with get_db_session() as session:
         payload = filter_property(share_data, ConversationShare)
+        expire_time = payload.get("expire_time")
+        if isinstance(expire_time, datetime) and expire_time.tzinfo is not None:
+            # The column is TIMESTAMP WITHOUT TIME ZONE; persist UTC wall time.
+            payload["expire_time"] = expire_time.astimezone(timezone.utc).replace(tzinfo=None)
         payload["created_by"] = user_id
         payload["updated_by"] = user_id
         record = ConversationShare(**payload)
@@ -59,7 +63,10 @@ def get_active_conversation_share(share_token: str) -> Optional[Dict[str, Any]]:
         if expire_time:
             if isinstance(expire_time, str):
                 expire_time = datetime.fromisoformat(expire_time)
-            if expire_time < datetime.now():
+            # Serialized naive timestamps represent UTC in database.client.as_dict.
+            if expire_time.tzinfo is None:
+                expire_time = expire_time.replace(tzinfo=timezone.utc)
+            if expire_time < datetime.now(timezone.utc):
                 return None
         return data
 

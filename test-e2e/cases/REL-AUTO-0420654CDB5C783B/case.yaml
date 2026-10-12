@@ -1,0 +1,76 @@
+schema_version: '1.0'
+stage: D5
+module: V5-BASELINE
+case:
+  case_id: REL-AUTO-0420654CDB5C783B
+  feature_id: V5-REL-AUTO-0420654CDB5C783B
+  business_rule_ids:
+  - V5-REL-AUTO-0420654CDB5C783B-RULE-01
+  title: Northbound服务重启后遗留A2A SUBMITTED/WORKING任务收敛为FAILED（CONTAINER_RESTARTED）
+  type: RELIABILITY
+  priority: P1
+  status: active
+  automation: automated
+  objective: Northbound 服务重启（如单副本重启/容器重建）后，遗留的 TASK_STATE_SUBMITTED 与 TASK_STATE_WORKING A2A 任务若长期滞留非终态，会形成僵尸任务：用户无法获得结果、状态统计失真，且可能被误判为仍在执行。需通过启动回收将这类任务收敛为
+    TASK_STATE_FAILED，并携带明确错误码 code=CONTAINER_RESTARTED，保证状态机终态收敛、可观察可诊断。
+  preconditions:
+  - '- 本地 A2A 任务持久化存储（A2ATask 模型及 DB session，backend/database/a2a_agent_db.py）
+
+    - ${NEXENT_TEST_HOME}/config/environment.yaml（仅本地测试环境参数）'
+  test_data:
+    legacy_asset_declaration: '- 本地 A2A 任务持久化存储（A2ATask 模型及 DB session，backend/database/a2a_agent_db.py）
+
+      - ${NEXENT_TEST_HOME}/config/environment.yaml（仅本地测试环境参数）'
+  steps:
+  - order: 1
+    action: 在本地测试环境通过 _get_db_session()（backend/database/a2a_agent_db.py:23）开启会话，向 A2ATask 表插入两条遗留任务（task_state 分别为 TASK_STATE_SUBMITTED
+      与 TASK_STATE_WORKING），并插入 TASK_STATE_COMPLETED、TASK_STATE_FAILED、TASK_STATE_CANCELED 各一条终态任务作为对照组。
+    expected: 仅 TASK_STATE_SUBMITTED 与 TASK_STATE_WORKING 的任务被置为 TASK_STATE_FAILED，终态任务（COMPLETED/FAILED/CANCELED）不受影响。
+  - order: 2
+    action: 调用 fail_active_tasks_on_startup()（backend/database/a2a_agent_db.py:1486），记录返回的受影响行数。
+    expected: 被迁移任务 result_data 包含 code=CONTAINER_RESTARTED 及对应 message。
+  - order: 3
+    action: 重新查询 A2ATask 表，确认只有 SUBMITTED/WORKING 两条被迁移为 TASK_STATE_FAILED，终态任务行保持不变。
+    expected: state_timestamp、completed_at、update_time 均为非空 UTC 时间戳。
+  - order: 4
+    action: '断言每个被迁移任务 result_data 精确等于 {"error": {"code": "CONTAINER_RESTARTED", "message": "Northbound service restarted
+      before the task completed"}}。'
+    expected: 返回值为被迁移数量，且重复调用返回 0。
+  - order: 5
+    action: 断言被迁移任务的 state_timestamp、completed_at、update_time 均为非空 UTC 时间戳。
+    expected: 返回值为被迁移数量，且重复调用返回 0。
+  - order: 6
+    action: 再次调用 fail_active_tasks_on_startup()，断言返回 0（幂等，无遗留非终态任务可迁移）。
+    expected: 返回值为被迁移数量，且重复调用返回 0。
+  expected_results:
+  - 仅 TASK_STATE_SUBMITTED 与 TASK_STATE_WORKING 的任务被置为 TASK_STATE_FAILED，终态任务（COMPLETED/FAILED/CANCELED）不受影响。
+  - 被迁移任务 result_data 包含 code=CONTAINER_RESTARTED 及对应 message。
+  - state_timestamp、completed_at、update_time 均为非空 UTC 时间戳。
+  - 返回值为被迁移数量，且重复调用返回 0。
+  forbidden_side_effects: []
+  source:
+    legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
+    legacy_sheet: 04_安全性能可靠性
+    legacy_row: 48
+  risk_type: RELIABILITY
+  risk: Northbound 服务重启（如单副本重启/容器重建）后，遗留的 TASK_STATE_SUBMITTED 与 TASK_STATE_WORKING A2A 任务若长期滞留非终态，会形成僵尸任务：用户无法获得结果、状态统计失真，且可能被误判为仍在执行。需通过启动回收将这类任务收敛为
+    TASK_STATE_FAILED，并携带明确错误码 code=CONTAINER_RESTARTED，保证状态机终态收敛、可观察可诊断。
+  condition:
+  - '- 本地 A2A 任务持久化存储（A2ATask 模型及 DB session，backend/database/a2a_agent_db.py）
+
+    - ${NEXENT_TEST_HOME}/config/environment.yaml（仅本地测试环境参数）'
+  metrics:
+  - 仅 TASK_STATE_SUBMITTED 与 TASK_STATE_WORKING 的任务被置为 TASK_STATE_FAILED，终态任务（COMPLETED/FAILED/CANCELED）不受影响。
+  - 被迁移任务 result_data 包含 code=CONTAINER_RESTARTED 及对应 message。
+  - state_timestamp、completed_at、update_time 均为非空 UTC 时间戳。
+  - 返回值为被迁移数量，且重复调用返回 0。
+  thresholds:
+  - 仅 TASK_STATE_SUBMITTED 与 TASK_STATE_WORKING 的任务被置为 TASK_STATE_FAILED，终态任务（COMPLETED/FAILED/CANCELED）不受影响。
+  - 被迁移任务 result_data 包含 code=CONTAINER_RESTARTED 及对应 message。
+  - state_timestamp、completed_at、update_time 均为非空 UTC 时间戳。
+  - 返回值为被迁移数量，且重复调用返回 0。
+  recovery_expectations:
+  - 仅 TASK_STATE_SUBMITTED 与 TASK_STATE_WORKING 的任务被置为 TASK_STATE_FAILED，终态任务（COMPLETED/FAILED/CANCELED）不受影响。
+  - 被迁移任务 result_data 包含 code=CONTAINER_RESTARTED 及对应 message。
+  - state_timestamp、completed_at、update_time 均为非空 UTC 时间戳。
+  - 返回值为被迁移数量，且重复调用返回 0。

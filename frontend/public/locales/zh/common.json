@@ -1339,6 +1339,7 @@
   "modelConfig.slider.expectedChunkSize": "期望切片大小",
   "modelConfig.slider.maximumChunkSize": "最大切片大小",
   "modelConfig.input.chunkingBatchSize": "单次请求切片量",
+  "modelConfig.addDialog.rowSettingsDescEmbedding": "切片与多模态配置（留空使用默认值）",
   "businessLogic.title": "描述智能体应该如何工作",
   "businessLogic.placeholder": "请描述您的业务场景和需求...",
   "businessLogic.config.title": "配置智能体能力",

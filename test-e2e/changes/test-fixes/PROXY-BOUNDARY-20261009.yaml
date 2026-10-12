@@ -1,0 +1,17 @@
+schema_version: '1.0'
+change:
+  change_id: PROXY-BOUNDARY-20261009
+  change_type: test-fix
+  title: Separate proxy transport from business route availability
+  description: Exercise production routing with isolated loopback upstreams and compare deployed forwarding with direct responses.
+  affected_features:
+    existing: []
+    modified: [F-184]
+    added: []
+    retired: []
+  affected_cases:
+    existing: []
+    modified: [API-AUTO-8CFB0598A62F2E58]
+    added: []
+    retired: []
+  notes: No shared container stop or deployment fault injection. Legacy Market page lifecycle remains unresolved; this case does not certify it. The probe evaluates production server.js handlers, not a full Next.js startup.

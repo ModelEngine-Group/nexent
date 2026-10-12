@@ -1,0 +1,16 @@
+schema_version: '1.0'
+module:
+  id: V5-BASELINE
+  name: Migrated V5 baseline
+feature:
+  feature_id: V5-PW-AUTH-01
+  name: 本地登录→受保护路由→刷新/多Tab→退出
+  status: active
+  description: 证明真实浏览器登录态、路由保护、session恢复和退出清理完整。
+  business_rules:
+  - rule_id: V5-PW-AUTH-01-RULE-01
+    description: 本地登录→受保护路由→刷新/多Tab→退出
+  required_test_stages:
+  - D4
+  source:
+    notes: 'Provisional migration owner: the V5 row has no stable Feature ID. Do not infer an F-ID.'

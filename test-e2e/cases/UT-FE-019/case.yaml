@@ -1,0 +1,81 @@
+schema_version: '1.0'
+stage: D1
+module: V5-BASELINE
+case:
+  case_id: UT-FE-019
+  feature_id: V5-UT-FE-019
+  business_rule_ids:
+  - V5-UT-FE-019-RULE-01
+  title: nl2AgentFlow running 阶段/run 启停与 config focus 序列、clarification/proposal/binding card、落地页卡片展示
+  type: FE-COMP
+  priority: P1
+  status: active
+  automation: automated
+  objective: nl2AgentFlow running 阶段/run 启停与 config focus 序列、clarification/proposal/binding card、落地页卡片展示
+  preconditions:
+  - 本地依赖/组件测试环境可运行；不要求外部模型服务在线。
+  - 设置 NEXENT_TEST_HOME，目录不位于 Nexent Git 仓库内。
+  - 当次 run_id 已生成，所有新建资源名称带 run_id；测试基线固定为 develop 当前批次锁定的产品提交；执行时另记录实际被测commit。
+  - 所需本地资产存在且校验通过：${NEXENT_TEST_HOME}/config/models.yaml；${NEXENT_TEST_HOME}/config/secrets.env
+  test_data:
+    legacy_asset_declaration: '- ${NEXENT_TEST_HOME}/config/models.yaml
+
+      - ${NEXENT_TEST_HOME}/config/secrets.env'
+  steps:
+  - order: 1
+    action: 在组件测试环境用 Nl2AgentFlowProvider 包裹被测组件，注入最小 props 与本地固定 fixture，不接入外部模型服务。
+    expected: run 开始将状态机置为 running 且 isFormLocked=true、completionSyncFailed=false；run 结束在可返回条件下回到 idle 且 isFormLocked=false。
+  - order: 2
+    action: 从初始 idle 状态调用 markRunStarted(agentId=1)，检查 phase、agentId、isFormLocked、completionSyncFailed 的迁移结果。
+    expected: run 启停与 config focus 在 agentId 不匹配时保持原状态，不产生副作用。
+  - order: 3
+    action: 在无 activeCard 且 phase 不在 generating/generation_failed/completing 时调用 markRunFinished(agentId=1)，检查 phase 与 isFormLocked
+      是否回到 idle/解锁。
+    expected: configFocusRequestSequence 每次 request 单调递增，requestId 与 target 正确；clear 后 configFocusRequest 为 null 但序列保留。
+  - order: 4
+    action: markRunStarted(agentId=1) 后调用 markRunStarted(agentId=2)，检查跨 agentId 是否被忽略、agentId 保持 1。
+    expected: 落地页 AgentCard 与 LastUsedAgentCard 仅渲染 display_name（缺省回退 name）与 description，不渲染 name 字段与 greeting_message。
+  - order: 5
+    action: registerCard 产生 activeCard 后调用 markRunFinished，检查 phase 不回到 idle 且 isFormLocked 不变。
+    expected: clarification/proposal/binding card 的 register/submit 状态迁移与 submittedCardKeys 更新符合契约。
+  - order: 6
+    action: 调用 requestConfigFocus(agentId=1, target={section:"display_info"})，检查 configFocusRequestSequence 与 configFocusRequest.requestId/target；再次调用检查序列递增。
+    expected: 测试过程无未处理异常，失败路径不产生半写入状态，日志/Trace/报告中不出现明文密钥。
+  - order: 7
+    action: 调用 clearConfigFocusRequest()，检查 configFocusRequest 置空且 configFocusRequestSequence 保留。
+    expected: 测试过程无未处理异常，失败路径不产生半写入状态，日志/Trace/报告中不出现明文密钥。
+  - order: 8
+    action: 向 AgentCard 传入含 display_name、name、greeting_message、description 的 PublishedAgent 并渲染，检查仅展示 display_name 与 description、不出现
+      name 与 greeting_message。
+    expected: 测试过程无未处理异常，失败路径不产生半写入状态，日志/Trace/报告中不出现明文密钥。
+  - order: 9
+    action: 向 LastUsedAgentCard 传入同样数据并渲染，检查仅展示 display_name 与 description、不出现 name 与 greeting_message。
+    expected: 测试过程无未处理异常，失败路径不产生半写入状态，日志/Trace/报告中不出现明文密钥。
+  - order: 10
+    action: 对 clarification/proposal parser/resource binding card 使用真实用户事件（click/fill/select）触发注册与提交，检查 register_card/submit_card
+      状态迁移与 isCardInteractive 判定。
+    expected: 测试过程无未处理异常，失败路径不产生半写入状态，日志/Trace/报告中不出现明文密钥。
+  expected_results:
+  - run 开始将状态机置为 running 且 isFormLocked=true、completionSyncFailed=false；run 结束在可返回条件下回到 idle 且 isFormLocked=false。
+  - run 启停与 config focus 在 agentId 不匹配时保持原状态，不产生副作用。
+  - configFocusRequestSequence 每次 request 单调递增，requestId 与 target 正确；clear 后 configFocusRequest 为 null 但序列保留。
+  - 落地页 AgentCard 与 LastUsedAgentCard 仅渲染 display_name（缺省回退 name）与 description，不渲染 name 字段与 greeting_message。
+  - clarification/proposal/binding card 的 register/submit 状态迁移与 submittedCardKeys 更新符合契约。
+  - 测试过程无未处理异常，失败路径不产生半写入状态，日志/Trace/报告中不出现明文密钥。
+  forbidden_side_effects: []
+  source:
+    legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
+    legacy_sheet: 02_测试用例基线
+    legacy_row: 332
+  unit_boundary: NL2Agent UI
+  inputs:
+  - '- ${NEXENT_TEST_HOME}/config/models.yaml
+
+    - ${NEXENT_TEST_HOME}/config/secrets.env'
+  assertions:
+  - run 开始将状态机置为 running 且 isFormLocked=true、completionSyncFailed=false；run 结束在可返回条件下回到 idle 且 isFormLocked=false。
+  - run 启停与 config focus 在 agentId 不匹配时保持原状态，不产生副作用。
+  - configFocusRequestSequence 每次 request 单调递增，requestId 与 target 正确；clear 后 configFocusRequest 为 null 但序列保留。
+  - 落地页 AgentCard 与 LastUsedAgentCard 仅渲染 display_name（缺省回退 name）与 description，不渲染 name 字段与 greeting_message。
+  - clarification/proposal/binding card 的 register/submit 状态迁移与 submittedCardKeys 更新符合契约。
+  - 测试过程无未处理异常，失败路径不产生半写入状态，日志/Trace/报告中不出现明文密钥。

@@ -1,0 +1,115 @@
+schema_version: '1.0'
+stage: D2
+module: V5-BASELINE
+case:
+  case_id: API-AUTO-ACE1865782DC3890
+  feature_id: F-178
+  business_rule_ids:
+  - F-178-RULE-01
+  title: provider 配置创建/列表/详情/更新/软删除与 EAV 参数校验｜核心流程
+  type: API-IT
+  priority: P1
+  status: active
+  automation: automated
+  objective: provider 配置创建/列表/详情/更新/软删除与 EAV 参数校验｜核心流程
+  preconditions:
+  - Nexent 本地测试全栈已启动，health check 通过。
+  - 设置 NEXENT_TEST_HOME，目录不位于 Nexent Git 仓库内。
+  - 当次 run_id 已生成，所有新建资源名称带 run_id；测试基线固定为 develop 当前批次锁定的产品提交；执行时另记录实际被测commit。
+  - 所需本地资产存在且校验通过：${NEXENT_TEST_HOME}/config/users.yaml；${NEXENT_TEST_HOME}/config/secrets.env
+  - users.yaml 中持有 MEM.PROVIDER 权限的 Admin/SPEED 隔离账号可登录并携带 Authorization，测试租户数据可被清理；内置插件 aidp_mem_plugin 与 mem0 已被 plugin
+    loader 发现（可通过 GET /memory/provider-plugins 确认）。
+  test_data:
+    legacy_asset_declaration: '- ${NEXENT_TEST_HOME}/config/users.yaml
+
+      - ${NEXENT_TEST_HOME}/config/secrets.env'
+  steps:
+  - order: 1
+    action: 从 config/users.yaml 读取持有 MEM.PROVIDER 权限的 Admin 隔离账号与租户关系；密码/Token 仅从 secrets.env 注入，构造 Authorization 头（报告中只记录掩码）。
+    expected: 合法创建返回 200，响应含 provider_config_id、provider_name、connection_type="plugin"、enabled、timeout_seconds 及 params；secret
+      字段 plugin.api_key 按契约掩码（长度>8 显示前3位+***+后4位，即 sk-***cdef）。
+  - order: 2
+    action: 通过 GET /memory/provider-plugins 确认内置插件 mem0 已发现，其 config_schema 中 api_key 为 type=secret 且 required=true。
+    expected: connection_type 非 plugin 被拒绝且不落库（请求模型 Literal 校验；服务层对非 plugin 亦有 ValueError 兜底）。
+  - order: 3
+    action: POST /memory/providers 创建合法配置（provider_name 带 run_id 后缀，connection_type="plugin"，params={"plugin.name":"mem0","plugin.api_key":"sk-1234567890abcdef"}），记录返回的
+      provider_config_id、enabled、timeout_seconds 及掩码后的 params。
+    expected: plugin.name 缺失返回 400 "params must contain 'plugin.name'"；未知插件返回 400 且 detail 含 "is not installed"；缺 config_schema
+      必填字段返回 400 且 detail 含 "Required parameter ... is missing"。
+  - order: 4
+    action: 校验 connection_type 仅 plugin：POST 传 connection_type="http"（其余字段合法），断言请求被拒绝且不产生配置记录。
+    expected: 同租户同名 provider_name 二次创建返回 400，列表 count 不增加，唯一约束（tenant_id+provider_name，delete_flag='N'）生效。
+  - order: 5
+    action: 校验 plugin.name 必填：POST 传 params 不含 plugin.name，断言返回 400 且 detail 为 "params must contain 'plugin.name'"。
+    expected: 列表返回 {"items":[...],"count":N} 结构（本契约无分页参数），详情返回单对象；两者 secret 参数始终掩码；不存在的 id 返回 404 "Provider configuration
+      not found"。
+  - order: 6
+    action: 校验未知插件：POST 传 params={"plugin.name":"not_installed"}，断言返回 400 且 detail 含 "is not installed"。
+    expected: '更新后主表字段与 params 反映最新值，params 为全量替换；软删除返回 200 {"success": true}，删除后 GET 404、列表排除、同名可重建且无 EAV 参数脏残留。'
+  - order: 7
+    action: 校验 config_schema 必填缺参：POST mem0 但不传 plugin.api_key，断言返回 400 且 detail 含 "Required parameter 'api_key' is missing"。
+    expected: 全部错误响应与日志不泄漏明文 api_key/凭据。
+  - order: 8
+    action: 校验 provider_name 唯一：再次以步骤3 相同 provider_name 发起 POST，断言返回 400（detail 含 "may already exist"），且后续列表 count 不增加。
+    expected: 全部错误响应与日志不泄漏明文 api_key/凭据。
+  - order: 9
+    action: GET /memory/providers 列表：断言返回 {"items":[...],"count":N}，包含步骤3 创建的配置，且 items 中 plugin.api_key 为掩码值（不含明文 sk-1234567890abcdef）。
+    expected: 全部错误响应与日志不泄漏明文 api_key/凭据。
+  - order: 10
+    action: GET /memory/providers/{provider_config_id} 详情：断言 200 且主表字段与 params 完整；GET 不存在的 id 断言 404 且 detail 为 "Provider
+      configuration not found"。
+    expected: 全部错误响应与日志不泄漏明文 api_key/凭据。
+  - order: 11
+    action: PUT /memory/providers/{provider_config_id} 更新（如 enabled=true 或替换 params 全量），断言 200 返回更新后配置，被替换的旧参数不再出现。
+    expected: 全部错误响应与日志不泄漏明文 api_key/凭据。
+  - order: 12
+    action: 'DELETE /memory/providers/{provider_config_id} 软删除：断言 200 返回 {"success": true}；随后 GET 同一 id 断言 404、列表不再包含该配置；以相同
+      provider_name 重新创建成功（唯一索引仅约束 delete_flag=''N''），且新配置的 params 无旧配置残留。'
+    expected: 全部错误响应与日志不泄漏明文 api_key/凭据。
+  - order: 13
+    action: 检查日志与错误响应不含明文 api_key；测试结束清理本次创建的配置与临时数据。
+    expected: 全部错误响应与日志不泄漏明文 api_key/凭据。
+  expected_results:
+  - 合法创建返回 200，响应含 provider_config_id、provider_name、connection_type="plugin"、enabled、timeout_seconds 及 params；secret 字段 plugin.api_key
+    按契约掩码（长度>8 显示前3位+***+后4位，即 sk-***cdef）。
+  - connection_type 非 plugin 被拒绝且不落库（请求模型 Literal 校验；服务层对非 plugin 亦有 ValueError 兜底）。
+  - plugin.name 缺失返回 400 "params must contain 'plugin.name'"；未知插件返回 400 且 detail 含 "is not installed"；缺 config_schema 必填字段返回
+    400 且 detail 含 "Required parameter ... is missing"。
+  - 同租户同名 provider_name 二次创建返回 400，列表 count 不增加，唯一约束（tenant_id+provider_name，delete_flag='N'）生效。
+  - 列表返回 {"items":[...],"count":N} 结构（本契约无分页参数），详情返回单对象；两者 secret 参数始终掩码；不存在的 id 返回 404 "Provider configuration not found"。
+  - '更新后主表字段与 params 反映最新值，params 为全量替换；软删除返回 200 {"success": true}，删除后 GET 404、列表排除、同名可重建且无 EAV 参数脏残留。'
+  - 全部错误响应与日志不泄漏明文 api_key/凭据。
+  forbidden_side_effects: []
+  source:
+    legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
+    legacy_sheet: 02_测试用例基线
+    legacy_row: 503
+  contract:
+    protocol: HTTP API
+    request_expectations:
+    - 从 config/users.yaml 读取持有 MEM.PROVIDER 权限的 Admin 隔离账号与租户关系；密码/Token 仅从 secrets.env 注入，构造 Authorization 头（报告中只记录掩码）。
+    - 通过 GET /memory/provider-plugins 确认内置插件 mem0 已发现，其 config_schema 中 api_key 为 type=secret 且 required=true。
+    - POST /memory/providers 创建合法配置（provider_name 带 run_id 后缀，connection_type="plugin"，params={"plugin.name":"mem0","plugin.api_key":"sk-1234567890abcdef"}），记录返回的
+      provider_config_id、enabled、timeout_seconds 及掩码后的 params。
+    - 校验 connection_type 仅 plugin：POST 传 connection_type="http"（其余字段合法），断言请求被拒绝且不产生配置记录。
+    - 校验 plugin.name 必填：POST 传 params 不含 plugin.name，断言返回 400 且 detail 为 "params must contain 'plugin.name'"。
+    - 校验未知插件：POST 传 params={"plugin.name":"not_installed"}，断言返回 400 且 detail 含 "is not installed"。
+    - 校验 config_schema 必填缺参：POST mem0 但不传 plugin.api_key，断言返回 400 且 detail 含 "Required parameter 'api_key' is missing"。
+    - 校验 provider_name 唯一：再次以步骤3 相同 provider_name 发起 POST，断言返回 400（detail 含 "may already exist"），且后续列表 count 不增加。
+    - GET /memory/providers 列表：断言返回 {"items":[...],"count":N}，包含步骤3 创建的配置，且 items 中 plugin.api_key 为掩码值（不含明文 sk-1234567890abcdef）。
+    - GET /memory/providers/{provider_config_id} 详情：断言 200 且主表字段与 params 完整；GET 不存在的 id 断言 404 且 detail 为 "Provider configuration
+      not found"。
+    - PUT /memory/providers/{provider_config_id} 更新（如 enabled=true 或替换 params 全量），断言 200 返回更新后配置，被替换的旧参数不再出现。
+    - 'DELETE /memory/providers/{provider_config_id} 软删除：断言 200 返回 {"success": true}；随后 GET 同一 id 断言 404、列表不再包含该配置；以相同 provider_name
+      重新创建成功（唯一索引仅约束 delete_flag=''N''），且新配置的 params 无旧配置残留。'
+    - 检查日志与错误响应不含明文 api_key；测试结束清理本次创建的配置与临时数据。
+    response_expectations:
+    - 合法创建返回 200，响应含 provider_config_id、provider_name、connection_type="plugin"、enabled、timeout_seconds 及 params；secret 字段
+      plugin.api_key 按契约掩码（长度>8 显示前3位+***+后4位，即 sk-***cdef）。
+    - connection_type 非 plugin 被拒绝且不落库（请求模型 Literal 校验；服务层对非 plugin 亦有 ValueError 兜底）。
+    - plugin.name 缺失返回 400 "params must contain 'plugin.name'"；未知插件返回 400 且 detail 含 "is not installed"；缺 config_schema 必填字段返回
+      400 且 detail 含 "Required parameter ... is missing"。
+    - 同租户同名 provider_name 二次创建返回 400，列表 count 不增加，唯一约束（tenant_id+provider_name，delete_flag='N'）生效。
+    - 列表返回 {"items":[...],"count":N} 结构（本契约无分页参数），详情返回单对象；两者 secret 参数始终掩码；不存在的 id 返回 404 "Provider configuration not found"。
+    - '更新后主表字段与 params 反映最新值，params 为全量替换；软删除返回 200 {"success": true}，删除后 GET 404、列表排除、同名可重建且无 EAV 参数脏残留。'
+    - 全部错误响应与日志不泄漏明文 api_key/凭据。

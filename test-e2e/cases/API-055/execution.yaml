@@ -1,0 +1,15 @@
+schema_version: '1.0'
+case_id: API-055
+implementations:
+- framework: pytest
+  file: test.py
+  selector: API-055
+- framework: pytest
+  file: test-e2e/infra/automation/d3/scenarios/scenario_agent_configuration_scenarios.py
+  selector: API-055
+notes: V5 source binding migrated; runtime parity is not yet certified.
+preparation:
+  families: []
+  anchors: true
+  special_assets: false
+  d4_groups: []

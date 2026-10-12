@@ -1,0 +1,43 @@
+schema_version: '1.0'
+stage: D3
+module: V5-BASELINE
+case:
+  case_id: AGT-007
+  feature_id: F-046
+  business_rule_ids: [F-046-RULE-01]
+  title: Prompt生成拒绝空白任务描述且草稿不变
+  type: AGENT-IT
+  priority: P1
+  status: active
+  automation: automated
+  objective: 空白描述在SSE创建前返回422，避免生成和草稿写入。
+  preconditions:
+  - 本地配置后端健康且已部署空白描述校验；测试账号有权读取和编辑自己的Agent。
+  - 使用已有配置helper、models.yaml及secrets.env，真实LLM和临时草稿由资产工厂创建并清理。
+  test_data:
+    descriptions: ['', " \t\r\n", '　']
+  steps:
+  - order: 1
+    action: 创建带RunID的临时草稿，读取完整草稿作为前置快照。
+    expected: 资源属于本用例且可读取，记录草稿状态。
+  - order: 2
+    action: 分别提交空字符串、仅ASCII空白、全角空格到POST /prompt/generate。
+    expected: 每次返回JSON 422且detail定位task_description，不返回SSE；404、200或无关错误均不能通过。
+  - order: 3
+    action: 每次无效提交后重新读取草稿并与前置快照比较。
+    expected: 草稿未发生任何变化。
+  - order: 4
+    action: 清理本用例创建的临时草稿。
+    expected: 清理完成且不影响其他资产。
+  expected_results:
+  - 三种无效输入均在创建流前被422拒绝。
+  - 错误定位task_description，草稿保持不变。
+  forbidden_side_effects: [无效输入触发生成或修改草稿, 修改共享资产, 泄露凭据]
+  integration_boundary:
+  - 真实配置API、权限和持久化读回；请求模型校验发生在SSE和模型调用之前。
+  observations: [HTTP状态及错误字段, 草稿前后快照, 本用例清理回执]
+  cleanup: [删除临时草稿并保留脱敏结果]
+  source:
+    legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
+    legacy_sheet: 02_测试用例基线
+    legacy_row: 88

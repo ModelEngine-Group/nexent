@@ -1,0 +1,21 @@
+schema_version: '1.0'
+module:
+  id: V5-BASELINE
+  name: Migrated V5 baseline
+feature:
+  feature_id: F-111
+  name: Dify/RAGFlow/AIDP/iData/Haotian/DataMate 适配器协议与错误映射；AIDP 知识库 CRUD/权限/检索集成（aidp_mgmt_app + 访问/KB更新/权限服务 + aidp_search_tool/ind_aidp_search_tool
+    + 前端创建/更新弹窗）
+  status: active
+  description: '知识库与文件 / 外部知识: Dify/RAGFlow/AIDP/iData/Haotian/DataMate 适配器协议与错误映射；AIDP 知识库 CRUD/权限/检索集成（aidp_mgmt_app + 访问/KB更新/权限服务
+    + aidp_search_tool/ind_aidp_search_tool + 前端创建/更新弹窗）'
+  business_rules:
+  - rule_id: F-111-RULE-01
+    description: Dify/RAGFlow/AIDP/iData/Haotian/DataMate 适配器协议与错误映射；AIDP 知识库 CRUD/权限/检索集成（aidp_mgmt_app + 访问/KB更新/权限服务 +
+      aidp_search_tool/ind_aidp_search_tool + 前端创建/更新弹窗）
+  required_test_stages:
+  - D1
+  - D2
+  - D3
+  source:
+    notes: Migrated from V5 01_代码功能清单 without changing the functional description.

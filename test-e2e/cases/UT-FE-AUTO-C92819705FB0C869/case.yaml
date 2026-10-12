@@ -1,0 +1,84 @@
+schema_version: '1.0'
+stage: D1
+module: V5-BASELINE
+case:
+  case_id: UT-FE-AUTO-C92819705FB0C869
+  feature_id: F-178
+  business_rule_ids:
+  - F-178-RULE-01
+  title: Provider 列表/筛选/状态徽标/启停/删除与 ProviderConfigDialog 动态字段、secret 保留、插件为空禁用新增｜核心流程
+  type: FE-COMP
+  priority: P1
+  status: active
+  automation: automated
+  objective: Provider 列表/筛选/状态徽标/启停/删除与 ProviderConfigDialog 动态字段、secret 保留、插件为空禁用新增｜核心流程
+  preconditions:
+  - 本地依赖/组件测试环境可运行；不要求外部模型服务在线。
+  - 设置 NEXENT_TEST_HOME，目录不位于 Nexent Git 仓库内。
+  - 当次 run_id 已生成，所有新建资源名称带 run_id；测试基线固定为 develop 当前批次锁定的产品提交；执行时另记录实际被测commit。
+  - 所需本地资产存在且校验通过：${NEXENT_TEST_HOME}/config/users.yaml；${NEXENT_TEST_HOME}/config/models.yaml
+  test_data:
+    legacy_asset_declaration: '- ${NEXENT_TEST_HOME}/config/users.yaml
+
+      - ${NEXENT_TEST_HOME}/config/models.yaml'
+  steps:
+  - order: 1
+    action: 在组件测试环境加载 MemoryManager 的 ProviderConfigCard 组件，注入最小 props（memoryEnabled/topK/savingTopK/onTopKChange/onTopKSave），并
+      mock frontend/services/providerService.ts 的 listProviders/listPlugins/updateProvider/deleteProvider 以及 usePermission/Can
+      权限上下文。
+    expected: 功能结果与代码契约一致，测试过程无未处理异常。
+  - order: 2
+    action: 首次渲染并等待 listProviders/listPlugins resolve 后，检查默认筛选 filter=all，列表渲染 provider_name、状态徽标（resolveProviderStatus 按
+      last_error_code 映射 normal/unauthorized/forbidden/timeout/error/disabled）、插件名与版本及能力标签。
+    expected: 列表/筛选/状态徽标/启停/删除的状态迁移与 providerService 调用次数、参数及返回值映射一致。
+  - order: 3
+    action: 使用真实用户事件切换 Segmented 筛选 all/enabled/attention，断言 filteredProviders 过滤结果：enabled 仅保留 enabled=true，attention 仅保留状态非
+      normal 且非 disabled。
+    expected: 对话框按 config_schema 动态渲染字段；secret 编辑保留掩码且未修改时不覆盖原值，修改后提交新值。
+  - order: 4
+    action: 对某 provider 切换 Switch 启停，断言调用 updateProvider(provider_config_id, {enabled}) 参数正确；成功后将列表该项替换为返回值，失败时弹出 updateFailed
+      提示且状态回滚。
+    expected: 插件为空时“新增”按钮 disabled，有插件时可用；保存失败返回明确错误提示且不出现半写入或重复提交。
+  - order: 5
+    action: 通过“更多”菜单触发删除，断言 modal.confirm 弹窗出现；确认后调用 deleteProvider(provider_config_id)，成功后从列表移除该项并提示 deleted，失败时提示 deleteFailed
+      且保留该项。
+    expected: 日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。
+  - order: 6
+    action: 模拟 listPlugins 返回空数组，断言“新增”按钮 disabled；模拟返回非空插件，断言按钮 enabled，点击后以 editing=null 打开 ProviderConfigDialog。
+    expected: 日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。
+  - order: 7
+    action: 在 ProviderConfigDialog 中 mock listPlugins 返回带 config_schema 的插件（含 string/secret/number/boolean/select 字段），选择插件后断言按
+      schema 动态渲染对应控件、default 回填、required 字段带 * 标记。
+    expected: 日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。
+  - order: 8
+    action: 编辑已有 provider 时，断言 secret 字段回显为掩码“••••••••”；不修改直接保存时提交的 params 中不含该 plugin.<key>（保留原值），修改 secret 后保存则提交新值。
+    expected: 日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。
+  - order: 9
+    action: 校验 provider_name 必填、timeout_seconds 范围 1-300、required schema 字段缺失时的校验文案与保存阻断；断言插件选择器在编辑态 disabled。
+    expected: 日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。
+  - order: 10
+    action: 触发保存：新增走 createProvider（携带 connection_type=plugin、params 含 plugin.name），编辑走 updateProvider；断言 service 调用参数正确，成功后回调
+      onSaved 并刷新列表；模拟 4xx/5xx 断言提示 createFailed/updateFailed 且弹窗不关闭、不重复提交。
+    expected: 日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。
+  expected_results:
+  - 功能结果与代码契约一致，测试过程无未处理异常。
+  - 列表/筛选/状态徽标/启停/删除的状态迁移与 providerService 调用次数、参数及返回值映射一致。
+  - 对话框按 config_schema 动态渲染字段；secret 编辑保留掩码且未修改时不覆盖原值，修改后提交新值。
+  - 插件为空时“新增”按钮 disabled，有插件时可用；保存失败返回明确错误提示且不出现半写入或重复提交。
+  - 日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。
+  forbidden_side_effects: []
+  source:
+    legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
+    legacy_sheet: 02_测试用例基线
+    legacy_row: 453
+  unit_boundary: 外部Provider配置UI
+  inputs:
+  - '- ${NEXENT_TEST_HOME}/config/users.yaml
+
+    - ${NEXENT_TEST_HOME}/config/models.yaml'
+  assertions:
+  - 功能结果与代码契约一致，测试过程无未处理异常。
+  - 列表/筛选/状态徽标/启停/删除的状态迁移与 providerService 调用次数、参数及返回值映射一致。
+  - 对话框按 config_schema 动态渲染字段；secret 编辑保留掩码且未修改时不覆盖原值，修改后提交新值。
+  - 插件为空时“新增”按钮 disabled，有插件时可用；保存失败返回明确错误提示且不出现半写入或重复提交。
+  - 日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。

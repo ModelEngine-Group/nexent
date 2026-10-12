@@ -1,0 +1,17 @@
+schema_version: '1.0'
+module:
+  id: V5-BASELINE
+  name: Migrated V5 baseline
+feature:
+  feature_id: V5-SEC-AUTO-926FF16475B223A7
+  name: 检索高亮词 retrieval_highlight_terms 外部注入点的 XSS 与正则转义防护
+  status: active
+  description: retrieval_highlight_terms 为外部数据源（检索/ES 结果）注入点，需确保其在来源卡片 <mark> 高亮与 hover 卡片预览渲染时不产生 XSS：含 HTML/事件的载荷仅以纯文本展示，正则特殊字符经
+    escapeRegExp 转义后 matcher 不抛异常，hover 文本经 HTML 白名单过滤，历史重载仍保持一致。
+  business_rules:
+  - rule_id: V5-SEC-AUTO-926FF16475B223A7-RULE-01
+    description: 检索高亮词 retrieval_highlight_terms 外部注入点的 XSS 与正则转义防护
+  required_test_stages:
+  - D5
+  source:
+    notes: 'Provisional migration owner: the V5 row has no stable Feature ID. Do not infer an F-ID.'

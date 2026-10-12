@@ -1,0 +1,76 @@
+schema_version: '1.0'
+stage: D3
+module: V5-BASELINE
+case:
+  case_id: API-054
+  feature_id: F-040
+  business_rule_ids: [F-040-RULE-01]
+  title: STT/TTS configured model connectivity and configuration error mapping
+  type: INTEGRATION
+  priority: P2
+  status: active
+  automation: automated
+  objective: Verify actual STT and TTS provider connectivity through the model-management entry points used by the current product.
+  preconditions:
+  - The config service is healthy and tenant_a_admin can create, inspect, check and delete models.
+  - NEXENT_TEST_HOME provides models.yaml and secrets.env with real STT and TTS credentials; no secret is stored in Git.
+  - The runner provides a run-local asset journal for case-owned model cleanup.
+  test_data:
+    capabilities: [stt, tts]
+    configuration_source: Machine-local models.yaml and secrets.env via the existing model_request helper.
+    negative_credentials: Unique invalid non-secret fixture values; never reuse a valid credential or a persisted probe_model_id.
+  steps:
+  - order: 1
+    action: Read the existing model catalog and default model selection; resolve each configured STT/TTS model through the maintained helper.
+    expected: Provider, model name and service URL come from machine-local configuration, not hardcoded IDs or developer paths.
+  - order: 2
+    action: POST the valid model configuration to /model/temporary_healthcheck for both STT and TTS.
+    expected: HTTP 200 returns data.connectivity=true and the exact configured model_name after a real provider connection.
+  - order: 3
+    action: Probe the same configurations with unique invalid credentials, and submit a request missing model_type.
+    expected: Invalid credentials return HTTP 200 with data.connectivity=false and a nonempty error; the malformed request returns 422. Neither request returns credentials or persists a model.
+  - order: 4
+    action: Re-read the catalog and defaults, then create a uniquely named case-owned model with skip_default_backfill=true; verify its provider, name, type and URL.
+    expected: Temporary probes caused no catalog or default-selection mutation. The owned model is correctly persisted and list responses omit credentials.
+  - order: 5
+    action: POST /model/healthcheck with only the owned display_name and model_type, then independently read the catalog.
+    expected: The product reads the saved credential, returns connectivity=true for the exact model, and persists connect_status=available without changing tenant defaults.
+  - order: 6
+    action: Delete only the case-owned model, verify its absence and unchanged defaults, and retain sanitized receipts and cleanup state locally.
+    expected: All owned resources are removed; failures remain failures and cleanup errors are recorded separately. No credential appears in response evidence.
+  expected_results:
+  - Both configured real STT and TTS models pass temporary and saved-model connectivity through current model-management routes.
+  - Invalid credentials produce explicit failed connectivity with diagnostics, while missing required request fields are rejected with 422.
+  - Temporary probes do not persist models; saved records and their available status match the exact configured model and provider.
+  - Tenant default models and preexisting resources remain unchanged; owned resources are deleted and response evidence is sanitized.
+  forbidden_side_effects:
+  - Do not overwrite existing model credentials, select a new tenant default or mutate another model.
+  - Do not expose API keys or access tokens in responses, test logs or evidence.
+  acceptance:
+  - id: AC-01
+    description: Correct real STT/TTS configurations pass both current connectivity entry points, including persisted health status.
+    steps: [1, 2, 4, 5]
+    expected_results: [1, 3]
+    forbidden_side_effects: [1, 2]
+  - id: AC-02
+    description: Invalid credentials and missing required fields cannot appear as successful connectivity or persist a model.
+    steps: [3, 4]
+    expected_results: [2, 3]
+    forbidden_side_effects: [1, 2]
+  - id: AC-03
+    description: Case-owned resources are cleaned and default selection remains unchanged with sanitized local evidence.
+    steps: [1, 4, 5, 6]
+    expected_results: [4]
+    forbidden_side_effects: [1, 2]
+  source:
+    legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
+    legacy_sheet: 02_测试用例基线
+    legacy_row: 75
+  integration_boundary:
+  - Real config HTTP API and configured external STT/TTS providers. No mocked positive connectivity results.
+  - This Case proves connectivity and configuration error mapping, not speech transcription or generated audio quality; those remain CTR-012 and CTR-014 obligations.
+  - The legacy /voice/connectivity route does not resolve configured model credentials and is not the current model-management UI entry point. Its configuration-wiring defect remains separately recorded, not relabeled PASS.
+  observations:
+  - Exact model names, HTTP status, connectivity booleans, saved available state, unchanged defaults and cleanup receipts.
+  cleanup:
+  - Delete only journaled case-owned models by their unique display names and confirm their absence in the catalog.

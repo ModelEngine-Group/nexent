@@ -1,0 +1,19 @@
+schema_version: '1.0'
+module:
+  id: V5-BASELINE
+  name: Migrated V5 baseline
+feature:
+  feature_id: F-185
+  name: 'Agent/知识库/技能/模型管理逻辑下沉为分层服务（agent: management/naming/read/run/run_context/service；knowledge_base: common/deletion/listing/management/permission/service）'
+  status: active
+  description: '平台运维能力 / 管理服务层: Agent/知识库/技能/模型管理逻辑下沉为分层服务（agent: management/naming/read/run/run_context/service；knowledge_base:
+    common/deletion/listing/management/permission/service）'
+  business_rules:
+  - rule_id: F-185-RULE-01
+    description: 'Agent/知识库/技能/模型管理逻辑下沉为分层服务（agent: management/naming/read/run/run_context/service；knowledge_base: common/deletion/listing/management/permission/service）'
+  required_test_stages:
+  - D1
+  - D2
+  - D3
+  source:
+    notes: Migrated from V5 01_代码功能清单 without changing the functional description.

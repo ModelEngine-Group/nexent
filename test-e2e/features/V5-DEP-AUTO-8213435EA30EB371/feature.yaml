@@ -1,0 +1,17 @@
+schema_version: '1.0'
+module:
+  id: V5-BASELINE
+  name: Migrated V5 baseline
+feature:
+  feature_id: V5-DEP-AUTO-8213435EA30EB371
+  name: 纠正性迁移幂等与数据一致性：role_permission_t 序列重同步 + user_tenant 触发器空租户跳过预置
+  status: active
+  description: '1. 显式种子 ID 不推进 SERIAL 序列，后续插入可能与既有种子 ID 冲突，造成 role_permission_id 主键冲突/数据错位。
+
+    2. 平台超管预留的空 tenant_id 映射若被当作真实租户，触发器会为不存在的租户调用 provision_unified_tag_management 预置统一标签桶，产生脏数据。'
+  business_rules:
+  - rule_id: V5-DEP-AUTO-8213435EA30EB371-RULE-01
+    description: 纠正性迁移幂等与数据一致性：role_permission_t 序列重同步 + user_tenant 触发器空租户跳过预置
+  required_test_stages: []
+  source:
+    notes: 'Provisional migration owner: the V5 row has no stable Feature ID. Do not infer an F-ID.'

@@ -1,0 +1,78 @@
+schema_version: '1.0'
+stage: D4
+module: V5-BASELINE
+case:
+  case_id: PW-AUTH-01
+  feature_id: V5-PW-AUTH-01
+  business_rule_ids:
+  - V5-PW-AUTH-01-RULE-01
+  title: 本地登录→受保护路由→刷新/多Tab→退出
+  type: E2E
+  priority: P0
+  status: active
+  automation: automated
+  objective: 证明真实浏览器登录态、路由保护、session恢复和退出清理完整。
+  preconditions:
+  - 普通用户账号有效
+  - 新BrowserContext无Cookie/localStorage
+  - frontend/backend health通过
+  test_data:
+    legacy_asset_declaration: config/users.yaml；config/secrets.env
+  steps:
+  - order: 1
+    action: 无登录态直接打开 /{locale}/agents，确认进入登录流程而不是看到受保护内容。
+    expected: 未登录不能读取受保护内容；登录用户身份正确。
+  - order: 2
+    action: 按登录表单label填账号/密码并点击【登录】；等待认证请求完成。
+    expected: 刷新和同Context多Tab不丢session。
+  - order: 3
+    action: 进入受保护页面后检查当前用户/租户和导航。
+    expected: 退出后旧session不可复用。
+  - order: 4
+    action: 直接访问 /models、/knowledges 等受保护URL，确认无需二次登录。
+    expected: 无401重定向循环、5xx或明文secret。
+  - order: 5
+    action: page.reload()后等待current-user/session恢复。
+    expected: 无401重定向循环、5xx或明文secret。
+  - order: 6
+    action: 同Context新开第二Tab访问/agents，确认会话一致。
+    expected: 无401重定向循环、5xx或明文secret。
+  - order: 7
+    action: 用户菜单点击【退出登录】并等待logout完成。
+    expected: 无401重定向循环、5xx或明文secret。
+  - order: 8
+    action: 再次直接访问/agents，确认重新进入登录/未授权状态。
+    expected: 无401重定向循环、5xx或明文secret。
+  expected_results:
+  - 未登录不能读取受保护内容；登录用户身份正确。
+  - 刷新和同Context多Tab不丢session。
+  - 退出后旧session不可复用。
+  - 无401重定向循环、5xx或明文secret。
+  forbidden_side_effects: []
+  source:
+    legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
+    legacy_sheet: 03_Playwright_Journey
+    legacy_row: 2
+  actor: Nexent browser user
+  journey:
+  - 无登录态直接打开 /{locale}/agents，确认进入登录流程而不是看到受保护内容。
+  - 按登录表单label填账号/密码并点击【登录】；等待认证请求完成。
+  - 进入受保护页面后检查当前用户/租户和导航。
+  - 直接访问 /models、/knowledges 等受保护URL，确认无需二次登录。
+  - page.reload()后等待current-user/session恢复。
+  - 同Context新开第二Tab访问/agents，确认会话一致。
+  - 用户菜单点击【退出登录】并等待logout完成。
+  - 再次直接访问/agents，确认重新进入登录/未授权状态。
+  final_business_result:
+  - 未登录不能读取受保护内容；登录用户身份正确。
+  - 刷新和同Context多Tab不丢session。
+  - 退出后旧session不可复用。
+  - 无401重定向循环、5xx或明文secret。
+  failure_evidence:
+  - '${NEXENT_TEST_HOME}/runs/{run_id}/playwright/PW-AUTH-01/
+
+    - screenshot.png / trace.zip / video.webm
+
+    - console.log / network.har / failure.json
+
+    - 涉及协议时关联 wire/*.jsonl；涉及下载时保留 downloads/'

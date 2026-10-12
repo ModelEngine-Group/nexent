@@ -1,0 +1,24 @@
+schema_version: '1.0'
+change:
+  change_id: D5-OFFLINE-CASES-REMOVAL-20261010
+  change_type: test-fix
+  title: Remove the two offline packaging cases at user request
+  description: >-
+    Delete DEP-003 and DEP-05 definitions, case-local scripts and execution bindings,
+    and remove their shared dispatcher registrations. Both had been blocked by
+    the missing local nginx:alpine image. Preserve the product feature catalog,
+    but remove its required D5 coverage declaration because these cases are no
+    longer part of the suite. Retain historical reports and migration receipts;
+    deletion is not a PASS and does not establish offline packaging coverage.
+    Do not change product deployment scripts, other D5 cases or local configuration.
+  affected_features:
+    existing: []
+    added: []
+    modified: [F-174, V5-DEP-05]
+    retired: []
+  affected_cases:
+    existing: []
+    added: []
+    modified: []
+    retired: []
+  no_case_change_reason: DEP-003 and DEP-05 are deleted, not retired; no surviving Case is modified or referenced by this removal record.

@@ -1,0 +1,17 @@
+schema_version: '1.0'
+module:
+  id: V5-BASELINE
+  name: Migrated V5 baseline
+feature:
+  feature_id: F-045
+  name: 变量名自动生成与校验、需求澄清对话、意图驱动最小流程（字段修改/资源管理/对话优化）、资源搜索与绑定、Prompt生成
+  status: active
+  description: '智能体配置 / NL2Agent 2.0: 变量名自动生成与校验、需求澄清对话、意图驱动最小流程（字段修改/资源管理/对话优化）、资源搜索与绑定、Prompt生成'
+  business_rules:
+  - rule_id: F-045-RULE-01
+    description: 变量名自动生成与校验、需求澄清对话、意图驱动最小流程（字段修改/资源管理/对话优化）、资源搜索与绑定、Prompt生成
+  required_test_stages:
+  - D1
+  - D3
+  source:
+    notes: Migrated from V5 01_代码功能清单 without changing the functional description.

@@ -1,0 +1,68 @@
+schema_version: '1.0'
+stage: D1
+module: V5-BASELINE
+case:
+  case_id: UT-SDK-AUTO-0704DCE86C3E5C77
+  feature_id: F-183
+  business_rule_ids:
+  - F-183-RULE-01
+  title: ContextManagerConfig.__post_init__ 对 soft/hard input budget 遗留入参归一化｜兼容归一化
+  type: SDK-UT
+  priority: P1
+  status: active
+  automation: automated
+  objective: ContextManagerConfig.__post_init__ 对 soft/hard input budget 遗留入参归一化｜兼容归一化
+  preconditions:
+  - 本地 Python 环境可导入 SDK 包 sdk.nexent.core.agents.context.config，不要求外部模型服务在线。
+  - 使用 pytest 执行 SDK 单元测试，测试代码不读取生产凭据。
+  - 测试基线固定为 develop 当前批次锁定的产品提交；执行时另记录实际被测 commit。
+  - 无需业务侧 NEXENT_TEST_HOME 资产，仅依赖 SDK 纯 Python 模块即可运行。
+  test_data:
+    legacy_asset_declaration: '- 无业务资产；直接导入 sdk/nexent/core/agents/context/config.py 的 ContextManagerConfig。'
+  steps:
+  - order: 1
+    action: 从 sdk/nexent/core/agents/context/config.py 导入 ContextManagerConfig。
+    expected: soft_input_budget_tokens 归一化为 compaction_trigger_threshold_tokens 与 effective_input_limit_tokens（effective=max(soft,
+      int(soft/0.8))），且 agent_context logger 产生归一化 warning。
+  - order: 2
+    action: 构造 soft_input_budget_tokens=1000（其余字段默认），实例化后断言 compaction_trigger_threshold_tokens=1000、effective_input_limit_tokens=max(1000,
+      int(1000/0.8))=1250。
+    expected: hard_input_budget_tokens 仅记录弃用 warning，不写入任何预算字段（保持默认 0）。
+  - order: 3
+    action: 构造 hard_input_budget_tokens=2000（其余字段默认），实例化后断言 effective_input_limit_tokens=0、compaction_trigger_threshold_tokens=0（hard
+      仅弃用告警、不归一化），并捕获 agent_context logger 的 warning 记录。
+    expected: 仅提供 effective_input_limit_tokens 时自动推导 trigger=max(1,int(limit*0.8)) 与 target=max(1,int(limit*0.6))。
+  - order: 4
+    action: 构造 effective_input_limit_tokens=1000（trigger/target 均为默认 0），实例化后断言 compaction_trigger_threshold_tokens=max(1,int(1000*0.8))=800、compaction_target_tokens=max(1,int(1000*0.6))=600。
+    expected: 已有非默认字段不被 soft 覆盖；边界值下限按 max(1,·) 生效；InitVar 在实例化后不残留为实例属性。
+  - order: 5
+    action: 边界值：soft_input_budget_tokens=1 时 effective_input_limit_tokens=max(1,int(1/0.8)=1)=1；effective_input_limit_tokens=1
+      时 target=max(1,int(1*0.6)=0)=1（下限为 1）。
+    expected: 已有非默认字段不被 soft 覆盖；边界值下限按 max(1,·) 生效；InitVar 在实例化后不残留为实例属性。
+  - order: 6
+    action: 组合/优先级：soft_input_budget_tokens 与既有非默认 effective_input_limit_tokens/compaction_trigger_threshold_tokens 同时提供时，已有字段不被
+      soft 覆盖；hard 与 soft 同时提供时 hard 不影响任何字段。
+    expected: 已有非默认字段不被 soft 覆盖；边界值下限按 max(1,·) 生效；InitVar 在实例化后不残留为实例属性。
+  - order: 7
+    action: 断言实例上不存在 soft_input_budget_tokens/hard_input_budget_tokens 运行时属性（InitVar 不保留）。
+    expected: 已有非默认字段不被 soft 覆盖；边界值下限按 max(1,·) 生效；InitVar 在实例化后不残留为实例属性。
+  expected_results:
+  - soft_input_budget_tokens 归一化为 compaction_trigger_threshold_tokens 与 effective_input_limit_tokens（effective=max(soft, int(soft/0.8))），且
+    agent_context logger 产生归一化 warning。
+  - hard_input_budget_tokens 仅记录弃用 warning，不写入任何预算字段（保持默认 0）。
+  - 仅提供 effective_input_limit_tokens 时自动推导 trigger=max(1,int(limit*0.8)) 与 target=max(1,int(limit*0.6))。
+  - 已有非默认字段不被 soft 覆盖；边界值下限按 max(1,·) 生效；InitVar 在实例化后不残留为实例属性。
+  forbidden_side_effects: []
+  source:
+    legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
+    legacy_sheet: 02_测试用例基线
+    legacy_row: 457
+  unit_boundary: 预算配置归一化
+  inputs:
+  - '- 无业务资产；直接导入 sdk/nexent/core/agents/context/config.py 的 ContextManagerConfig。'
+  assertions:
+  - soft_input_budget_tokens 归一化为 compaction_trigger_threshold_tokens 与 effective_input_limit_tokens（effective=max(soft, int(soft/0.8))），且
+    agent_context logger 产生归一化 warning。
+  - hard_input_budget_tokens 仅记录弃用 warning，不写入任何预算字段（保持默认 0）。
+  - 仅提供 effective_input_limit_tokens 时自动推导 trigger=max(1,int(limit*0.8)) 与 target=max(1,int(limit*0.6))。
+  - 已有非默认字段不被 soft 覆盖；边界值下限按 max(1,·) 生效；InitVar 在实例化后不残留为实例属性。

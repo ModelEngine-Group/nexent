@@ -1,0 +1,80 @@
+schema_version: '1.0'
+stage: D4
+module: V5-BASELINE
+case:
+  case_id: PW-MEM-01
+  feature_id: V5-PW-MEM-01
+  business_rule_ids:
+  - V5-PW-MEM-01-RULE-01
+  title: Base配置→User长期记忆版本保存/预览/激活→权限隔离与恢复
+  type: E2E
+  priority: P1
+  status: active
+  automation: automated
+  objective: 验证当前版本化长期Markdown记忆：保存与编辑生成版本、历史预览及激活、刷新持久化和跨租户隔离。
+  preconditions:
+  - Memory feature开启
+  - tenant_a_admin及另一租户管理员账号
+  - run_id记忆内容；finally恢复原活动内容和Base配置
+  test_data:
+    legacy_asset_declaration: config/users.yaml；config/environment.yaml；run_id Markdown记忆；原活动版本/内容和Base状态快照
+  steps:
+  - order: 1
+    action: 打开/memory，确认Base、Tenant、User、带记录数的Agent标签。
+    expected: Base/Tenant/User/Agent标签和版本化长期记忆流程符合当前产品。
+  - order: 2
+    action: 记录Base开关原值，切换并等待自动保存，刷新验证后恢复。
+    expected: 保存、编辑、历史预览和激活均真实持久化；最终活动内容恢复原值。
+  - order: 3
+    action: 打开User长期记忆，读取原活动版本/内容，定位编辑入口。
+    expected: 另一租户账号无法读取本轮用户版本，按版本ID访问返回404。
+  - order: 4
+    action: 编辑并保存含run_id的Markdown内容，记录新版本ID。
+    expected: 另一租户账号无法读取本轮用户版本，按版本ID访问返回404。
+  - order: 5
+    action: 刷新并确认保存内容。
+    expected: 另一租户账号无法读取本轮用户版本，按版本ID访问返回404。
+  - order: 6
+    action: 修改内容并保存，确认第二个活动版本。
+    expected: 另一租户账号无法读取本轮用户版本，按版本ID访问返回404。
+  - order: 7
+    action: 在版本历史选择首个测试版本，检查预览并通过UI激活，重新读取确认。
+    expected: 另一租户账号无法读取本轮用户版本，按版本ID访问返回404。
+  - order: 8
+    action: 恢复原活动版本；原来为空时保存空内容，保留不可删除的版本审计历史。
+    expected: 另一租户账号无法读取本轮用户版本，按版本ID访问返回404。
+  - order: 9
+    action: 恢复Base原值并刷新验证。
+    expected: 另一租户账号无法读取本轮用户版本，按版本ID访问返回404。
+  expected_results:
+  - Base/Tenant/User/Agent标签和版本化长期记忆流程符合当前产品。
+  - 保存、编辑、历史预览和激活均真实持久化；最终活动内容恢复原值。
+  - 另一租户账号无法读取本轮用户版本，按版本ID访问返回404。
+  forbidden_side_effects: []
+  source:
+    legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
+    legacy_sheet: 03_Playwright_Journey
+    legacy_row: 44
+  actor: Nexent browser user
+  journey:
+  - 打开/memory，确认Base、Tenant、User、带记录数的Agent标签。
+  - 记录Base开关原值，切换并等待自动保存，刷新验证后恢复。
+  - 打开User长期记忆，读取原活动版本/内容，定位编辑入口。
+  - 编辑并保存含run_id的Markdown内容，记录新版本ID。
+  - 刷新并确认保存内容。
+  - 修改内容并保存，确认第二个活动版本。
+  - 在版本历史选择首个测试版本，检查预览并通过UI激活，重新读取确认。
+  - 恢复原活动版本；原来为空时保存空内容，保留不可删除的版本审计历史。
+  - 恢复Base原值并刷新验证。
+  final_business_result:
+  - Base/Tenant/User/Agent标签和版本化长期记忆流程符合当前产品。
+  - 保存、编辑、历史预览和激活均真实持久化；最终活动内容恢复原值。
+  - 另一租户账号无法读取本轮用户版本，按版本ID访问返回404。
+  failure_evidence:
+  - '${NEXENT_TEST_HOME}/runs/{run_id}/playwright/PW-MEM-01/
+
+    - screenshot.png / trace.zip / video.webm
+
+    - console.log / network.har / failure.json
+
+    - 涉及协议时关联 wire/*.jsonl；涉及下载时保留 downloads/'

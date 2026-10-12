@@ -1,0 +1,68 @@
+schema_version: '1.0'
+stage: D1
+module: V5-BASELINE
+case:
+  case_id: UT-FE-AUTO-7C7FED1DFB34DA15
+  feature_id: F-112
+  business_rule_ids:
+  - F-112-RULE-01
+  title: 回答中 [[a1]] 引用点击定位与检索词高亮（含开关关闭仅定位）｜核心流程
+  type: FE-COMP
+  priority: P1
+  status: active
+  automation: automated
+  objective: 回答中 [[a1]] 引用点击定位与检索词高亮（含开关关闭仅定位）｜核心流程
+  preconditions:
+  - 本地依赖/组件测试环境可运行；不要求外部模型服务在线。
+  - 设置 NEXENT_TEST_HOME，目录不位于 Nexent Git 仓库内。
+  - 当次 run_id 已生成，所有新建资源名称带 run_id；测试基线固定为 develop 当前批次锁定的产品提交；执行时另记录实际被测commit。
+  - 注入最小 props、store 与本地固定测试数据：构造一条 assistant 消息，finalAnswer/content 含引用标记 [[a1]]，searchResults 含一条 tool_sign='a'、cite_index=1
+    且 score_details.retrieval_highlight_terms=['检索词'] 的来源结果。
+  test_data:
+    legacy_asset_declaration: '- ${NEXENT_TEST_HOME}/config/environment.yaml（仅本地测试环境参数）'
+  steps:
+  - order: 1
+    action: 在组件测试环境加载 chatInterface 与 chatRightPanel，注入最小 props、store 与固定测试数据（含被标记消息及其 searchResults），并注入包含 [[a1]] 引用标记的 assistant
+      回答文本。
+    expected: 功能结果与代码契约一致，测试过程无未处理异常。
+  - order: 2
+    action: 首次渲染后检查：右侧面板默认折叠（isVisible=false），来源列表正常渲染出对应来源卡，且无来源卡处于 selected 选中态。
+    expected: 点击 [[a1]] 后右侧面板打开、对应来源卡进入 selected 选中态并滚动定位、检索词 <mark> 高亮，与源码行为一致。
+  - order: 3
+    action: 使用真实用户事件点击回答文本中的 [[a1]] 引用标记（而非直接修改组件内部状态），从 onCitationClick 入参捕获 messageId 与 citationKey。
+    expected: ENABLE_CITATION_CLICK_HIGHLIGHT=false 时仅定位不高亮：选中与滚动定位不受开关影响，回答上下文句子级高亮被关闭。
+  - order: 4
+    action: 断言点击后状态迁移：handleCitationClick 将 showRightPanel 置为 true、selectedMessageId 指向该消息、selectedCitationKey='a1'，且 getCitationKey(result)==='a1'
+      的来源卡进入 selected 选中态（蓝色边框）。
+    expected: 不发起真实模型/公网请求，日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。
+  - order: 5
+    action: 断言选中态来源卡发生滚动定位：itemRef 触发 scrollIntoView（block:'center'），isExpanded 展开，正文文本容器滚动到首个高亮标记。
+    expected: 不发起真实模型/公网请求，日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。
+  - order: 6
+    action: 断言检索词高亮：selected 来源卡正文对 score_details.retrieval_highlight_terms 中的检索词渲染 <mark> 高亮，且对短于 2 字符或不在段落中的词进行过滤。
+    expected: 不发起真实模型/公网请求，日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。
+  - order: 7
+    action: 以 ENABLE_CITATION_CLICK_HIGHLIGHT=false 再次触发 [[a1]] 点击：断言面板仍打开、对应来源卡仍被选中并滚动定位（定位行为不受开关影响），但 setSelectedCitationContext
+      入参为空字符串、不基于回答上下文提取句子级高亮。
+    expected: 不发起真实模型/公网请求，日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。
+  - order: 8
+    action: 断言无副作用与安全：过程中不发起真实模型/公网请求，卸载后无残留定时器/监听，日志不输出明文密钥。
+    expected: 不发起真实模型/公网请求，日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。
+  expected_results:
+  - 功能结果与代码契约一致，测试过程无未处理异常。
+  - 点击 [[a1]] 后右侧面板打开、对应来源卡进入 selected 选中态并滚动定位、检索词 <mark> 高亮，与源码行为一致。
+  - ENABLE_CITATION_CLICK_HIGHLIGHT=false 时仅定位不高亮：选中与滚动定位不受开关影响，回答上下文句子级高亮被关闭。
+  - 不发起真实模型/公网请求，日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。
+  forbidden_side_effects: []
+  source:
+    legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
+    legacy_sheet: 02_测试用例基线
+    legacy_row: 436
+  unit_boundary: 来源引用
+  inputs:
+  - '- ${NEXENT_TEST_HOME}/config/environment.yaml（仅本地测试环境参数）'
+  assertions:
+  - 功能结果与代码契约一致，测试过程无未处理异常。
+  - 点击 [[a1]] 后右侧面板打开、对应来源卡进入 selected 选中态并滚动定位、检索词 <mark> 高亮，与源码行为一致。
+  - ENABLE_CITATION_CLICK_HIGHLIGHT=false 时仅定位不高亮：选中与滚动定位不受开关影响，回答上下文句子级高亮被关闭。
+  - 不发起真实模型/公网请求，日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。

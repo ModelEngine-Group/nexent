@@ -1371,6 +1371,7 @@
   "modelConfig.slider.expectedChunkSize": "Expected Chunk Size",
   "modelConfig.slider.maximumChunkSize": "Maximum Chunk Size",
   "modelConfig.input.chunkingBatchSize": "Concurrent Request Count",
+  "modelConfig.addDialog.rowSettingsDescEmbedding": "Chunking and multimodal settings (empty fields use defaults)",
   "businessLogic.title": "Describe how should this Agent work",
   "businessLogic.placeholder": "Please describe your business scenario and requirements...",
   "businessLogic.config.title": "Configure Agent Capabilities",

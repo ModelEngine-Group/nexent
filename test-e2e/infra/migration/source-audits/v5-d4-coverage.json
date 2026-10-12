@@ -1,0 +1,31 @@
+{
+  "schema_version": 1,
+  "raw_workbook_rows": 53,
+  "current_scope_excluding_retired": 52,
+  "fixed_playwright_scripts": 45,
+  "status_counts": {
+    "active": 45,
+    "blocked": 5,
+    "retired": 1,
+    "skipped_by_policy": 2
+  },
+  "non_executable_ids": {
+    "blocked": [
+      "PW-A2A-DISCOVERY-01",
+      "PW-A2A-PUBLISH-01",
+      "PW-KB-AIDP-01",
+      "PW-MCP-LOCALIMG-01",
+      "PW-QUOTA-LOCAL-01"
+    ],
+    "retired": [
+      "PW-HITL-01"
+    ],
+    "skipped_by_policy": [
+      "PW-AUTH-03",
+      "PW-AUTH-04"
+    ]
+  },
+  "workbook_title_steps_assertions_exact": true,
+  "script_ids_match_implemented_manifest": true,
+  "semantic_assertion_parity_verified": false
+}

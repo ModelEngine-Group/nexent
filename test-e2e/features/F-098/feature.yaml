@@ -1,0 +1,20 @@
+schema_version: '1.0'
+module:
+  id: V5-BASELINE
+  name: Migrated V5 baseline
+feature:
+  feature_id: F-098
+  name: KB list/name exists/update name/权限/quota/auto-summary frequency/delete；KB列表标签筛选/分配/定义管理；删除阻断错误透传blocking_files与EDS
+    code
+  status: active
+  description: '知识库与文件 / 知识库: KB list/name exists/update name/权限/quota/auto-summary frequency/delete；KB列表标签筛选/分配/定义管理；删除阻断错误透传blocking_files与EDS
+    code'
+  business_rules:
+  - rule_id: F-098-RULE-01
+    description: KB list/name exists/update name/权限/quota/auto-summary frequency/delete；KB列表标签筛选/分配/定义管理；删除阻断错误透传blocking_files与EDS
+      code
+  required_test_stages:
+  - D1
+  - D3
+  source:
+    notes: Migrated from V5 01_代码功能清单 without changing the functional description.

@@ -1,0 +1,88 @@
+schema_version: '1.0'
+stage: D5
+module: V5-BASELINE
+case:
+  case_id: REL-AUTO-BCE0AAF43667C67B
+  feature_id: V5-REL-AUTO-BCE0AAF43667C67B
+  business_rule_ids:
+  - V5-REL-AUTO-BCE0AAF43667C67B-RULE-01
+  title: lifespan 下 northbound_thread_manager 启动、/internal/thread-capacity 容量快照与优雅关停
+  type: RELIABILITY
+  priority: P1
+  status: active
+  automation: automated
+  objective: '1) 线程管理器在 lifespan 中未按 CREATED 状态启动或启动失败，导致 control-io 任务无法执行、恢复中断任务与清理中断上传未调度，遗留数据不一致。
+
+    2) /internal/thread-capacity 快照错误或端点不可用，无法观测线程容量。
+
+    3) 关停未按 NORTHBOUND_THREAD_SHUTDOWN_GRACE_SECONDS 优雅关停，或 finally 中未清理默认线程管理器，造成线程泄漏、任务丢失或进程无法干净退出。'
+  preconditions:
+  - '- 本地测试环境可启动 northbound 应用（backend/northbound_service.py 入口，port 5013）；不要求外部模型服务在线。
+
+    - ${NEXENT_TEST_HOME}/config/environment.yaml（仅本地测试环境参数）'
+  test_data:
+    legacy_asset_declaration: '- 本地测试环境可启动 northbound 应用（backend/northbound_service.py 入口，port 5013）；不要求外部模型服务在线。
+
+      - ${NEXENT_TEST_HOME}/config/environment.yaml（仅本地测试环境参数）'
+  steps:
+  - order: 1
+    action: 设置 NEXENT_TEST_HOME，导入 backend/apps/northbound_base_app 的 northbound_lifespan、recover_northbound_tasks_on_startup
+      与 /internal/thread-capacity 端点，以及 services.thread_lifecycle_service.northbound_thread_manager。
+    expected: lifespan 进入后 northbound_thread_manager 完成启动，状态由 CREATED 迁移至 RUNNING，默认线程管理器指向该实例。
+  - order: 2
+    action: 以 asynccontextmanager 进入 northbound_lifespan（或启动 northbound 应用），断言 manager 处于 ManagerState.CREATED 时调用 start()
+      后状态迁移为 RUNNING，并调用 set_default_thread_manager 与 runtime_state_service.set_thread_manager。
+    expected: 启动阶段 recover_northbound_tasks 与 schedule_interrupted_upload_cleanup(NORTHBOUND_SERVICE_NAME) 均被调度执行且无异常抛出。
+  - order: 3
+    action: 断言启动阶段调用 recover_northbound_tasks_on_startup，即通过 northbound_thread_manager.run('control-io', ManagedTaskSpec(...),
+      recover_northbound_tasks) 恢复中断任务，并调用 schedule_interrupted_upload_cleanup(NORTHBOUND_SERVICE_NAME)。
+    expected: GET /internal/thread-capacity 无需鉴权返回 200，响应为线程容量快照且字段与 snapshot() 返回值一致。
+  - order: 4
+    action: 发起无鉴权请求 GET /internal/thread-capacity，断言返回 HTTP 200 且响应体为 northbound_thread_manager.snapshot() 返回的线程容量快照。
+    expected: 关停时 shutdown 使用 NORTHBOUND_THREAD_SHUTDOWN_GRACE_SECONDS 作为超时，finally 中执行 clear_default_thread_manager(northbound_thread_manager)，测试期间无挂起、无线程或资源泄漏。
+  - order: 5
+    action: 退出 lifespan 上下文触发关停，断言 northbound_thread_manager.shutdown 以 timeout=NORTHBOUND_THREAD_SHUTDOWN_GRACE_SECONDS 被调用，并在
+      finally 中调用 clear_default_thread_manager(northbound_thread_manager)。
+    expected: 全流程无未处理异常，失败路径给出明确错误，测试可重复执行。
+  - order: 6
+    action: 断言整个启停流程无未处理异常、无线程泄漏（关停后活跃工作线程耗尽、状态退出 RUNNING），进程可干净退出。
+    expected: 全流程无未处理异常，失败路径给出明确错误，测试可重复执行。
+  expected_results:
+  - lifespan 进入后 northbound_thread_manager 完成启动，状态由 CREATED 迁移至 RUNNING，默认线程管理器指向该实例。
+  - 启动阶段 recover_northbound_tasks 与 schedule_interrupted_upload_cleanup(NORTHBOUND_SERVICE_NAME) 均被调度执行且无异常抛出。
+  - GET /internal/thread-capacity 无需鉴权返回 200，响应为线程容量快照且字段与 snapshot() 返回值一致。
+  - 关停时 shutdown 使用 NORTHBOUND_THREAD_SHUTDOWN_GRACE_SECONDS 作为超时，finally 中执行 clear_default_thread_manager(northbound_thread_manager)，测试期间无挂起、无线程或资源泄漏。
+  - 全流程无未处理异常，失败路径给出明确错误，测试可重复执行。
+  forbidden_side_effects: []
+  source:
+    legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
+    legacy_sheet: 04_安全性能可靠性
+    legacy_row: 58
+  risk_type: RELIABILITY
+  risk: '1) 线程管理器在 lifespan 中未按 CREATED 状态启动或启动失败，导致 control-io 任务无法执行、恢复中断任务与清理中断上传未调度，遗留数据不一致。
+
+    2) /internal/thread-capacity 快照错误或端点不可用，无法观测线程容量。
+
+    3) 关停未按 NORTHBOUND_THREAD_SHUTDOWN_GRACE_SECONDS 优雅关停，或 finally 中未清理默认线程管理器，造成线程泄漏、任务丢失或进程无法干净退出。'
+  condition:
+  - '- 本地测试环境可启动 northbound 应用（backend/northbound_service.py 入口，port 5013）；不要求外部模型服务在线。
+
+    - ${NEXENT_TEST_HOME}/config/environment.yaml（仅本地测试环境参数）'
+  metrics:
+  - lifespan 进入后 northbound_thread_manager 完成启动，状态由 CREATED 迁移至 RUNNING，默认线程管理器指向该实例。
+  - 启动阶段 recover_northbound_tasks 与 schedule_interrupted_upload_cleanup(NORTHBOUND_SERVICE_NAME) 均被调度执行且无异常抛出。
+  - GET /internal/thread-capacity 无需鉴权返回 200，响应为线程容量快照且字段与 snapshot() 返回值一致。
+  - 关停时 shutdown 使用 NORTHBOUND_THREAD_SHUTDOWN_GRACE_SECONDS 作为超时，finally 中执行 clear_default_thread_manager(northbound_thread_manager)，测试期间无挂起、无线程或资源泄漏。
+  - 全流程无未处理异常，失败路径给出明确错误，测试可重复执行。
+  thresholds:
+  - lifespan 进入后 northbound_thread_manager 完成启动，状态由 CREATED 迁移至 RUNNING，默认线程管理器指向该实例。
+  - 启动阶段 recover_northbound_tasks 与 schedule_interrupted_upload_cleanup(NORTHBOUND_SERVICE_NAME) 均被调度执行且无异常抛出。
+  - GET /internal/thread-capacity 无需鉴权返回 200，响应为线程容量快照且字段与 snapshot() 返回值一致。
+  - 关停时 shutdown 使用 NORTHBOUND_THREAD_SHUTDOWN_GRACE_SECONDS 作为超时，finally 中执行 clear_default_thread_manager(northbound_thread_manager)，测试期间无挂起、无线程或资源泄漏。
+  - 全流程无未处理异常，失败路径给出明确错误，测试可重复执行。
+  recovery_expectations:
+  - lifespan 进入后 northbound_thread_manager 完成启动，状态由 CREATED 迁移至 RUNNING，默认线程管理器指向该实例。
+  - 启动阶段 recover_northbound_tasks 与 schedule_interrupted_upload_cleanup(NORTHBOUND_SERVICE_NAME) 均被调度执行且无异常抛出。
+  - GET /internal/thread-capacity 无需鉴权返回 200，响应为线程容量快照且字段与 snapshot() 返回值一致。
+  - 关停时 shutdown 使用 NORTHBOUND_THREAD_SHUTDOWN_GRACE_SECONDS 作为超时，finally 中执行 clear_default_thread_manager(northbound_thread_manager)，测试期间无挂起、无线程或资源泄漏。
+  - 全流程无未处理异常，失败路径给出明确错误，测试可重复执行。

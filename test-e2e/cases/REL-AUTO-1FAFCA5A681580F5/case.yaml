@@ -1,0 +1,68 @@
+schema_version: '1.0'
+stage: D5
+module: V5-BASELINE
+case:
+  case_id: REL-AUTO-1FAFCA5A681580F5
+  feature_id: V5-REL-AUTO-1FAFCA5A681580F5
+  business_rule_ids:
+  - V5-REL-AUTO-1FAFCA5A681580F5-RULE-01
+  title: runtime_lifespan 优雅关闭顺序与超时清理（调度器→agent流任务→沙箱池→线程管理器）
+  type: RELIABILITY
+  priority: P1
+  status: active
+  automation: automated
+  objective: 关闭顺序错乱或超时清理缺失会导致进程退出时残留后台线程、沙箱资源泄漏、调度器/agent 流任务状态丢失，阻塞进程退出或破坏下次启动恢复的一致性。
+  preconditions:
+  - '- ${NEXENT_TEST_HOME}/config/environment.yaml（仅本地测试环境参数，含 RUNTIME_THREAD_SHUTDOWN_GRACE_SECONDS 取值）'
+  test_data:
+    legacy_asset_declaration: '- ${NEXENT_TEST_HOME}/config/environment.yaml（仅本地测试环境参数，含 RUNTIME_THREAD_SHUTDOWN_GRACE_SECONDS
+      取值）'
+  steps:
+  - order: 1
+    action: 核对 backend/apps/runtime_app.py:56-90 的 runtime_lifespan 关闭契约，确认顺序为：stop_agent_automation_scheduler → shutdown_agent_stream_tasks(剩余
+      grace 超时) → SandboxPoolManager.shutdown → runtime_thread_manager.shutdown(剩余 grace 超时) → finally 中 clear_default_thread_manager(runtime_thread_manager)。
+    expected: 关闭严格按 调度器→agent流任务→沙箱池→线程管理器 顺序执行，顺序颠倒或跳过任一环节判定失败。
+  - order: 2
+    action: 以测试配置启动 Runtime 应用（RUNTIME_THREAD_SHUTDOWN_GRACE_SECONDS 取较小值以缩短等待），注入一个挂起时间超过 grace 的 agent 流任务后触发应用正常关闭。
+    expected: 超时挂起的 agent 流任务被记 warning 并强制清理，进程在 RUNTIME_THREAD_SHUTDOWN_GRACE_SECONDS 期限内完成关闭，不无限阻塞。
+  - order: 3
+    action: 记录关闭过程日志顺序与时间戳，断言调度器 stop 先于 agent 流任务关闭执行。
+    expected: clear_default_thread_manager 在 shutdown 成功或异常路径下均执行，关闭后无残留后台线程/沙箱资源。
+  - order: 4
+    action: 断言 shutdown_agent_stream_tasks 在 timeout 内返回；存在超时 pending 任务时，日志出现包含 pending 数量的 warning。
+    expected: 关闭全程无未处理异常，日志不输出明文 API Key/Token/模型密钥等敏感信息。
+  - order: 5
+    action: 断言存在沙箱池实例时 SandboxPoolManager.shutdown 被调用，随后 runtime_thread_manager.shutdown 以剩余 grace 时间执行。
+    expected: 关闭全程无未处理异常，日志不输出明文 API Key/Token/模型密钥等敏感信息。
+  - order: 6
+    action: 断言 finally 中 clear_default_thread_manager(runtime_thread_manager) 无论 shutdown 成败均执行，进程在 grace 期限内退出且无未处理异常与残留非守护线程。
+    expected: 关闭全程无未处理异常，日志不输出明文 API Key/Token/模型密钥等敏感信息。
+  expected_results:
+  - 关闭严格按 调度器→agent流任务→沙箱池→线程管理器 顺序执行，顺序颠倒或跳过任一环节判定失败。
+  - 超时挂起的 agent 流任务被记 warning 并强制清理，进程在 RUNTIME_THREAD_SHUTDOWN_GRACE_SECONDS 期限内完成关闭，不无限阻塞。
+  - clear_default_thread_manager 在 shutdown 成功或异常路径下均执行，关闭后无残留后台线程/沙箱资源。
+  - 关闭全程无未处理异常，日志不输出明文 API Key/Token/模型密钥等敏感信息。
+  forbidden_side_effects: []
+  source:
+    legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
+    legacy_sheet: 04_安全性能可靠性
+    legacy_row: 50
+  risk_type: RELIABILITY
+  risk: 关闭顺序错乱或超时清理缺失会导致进程退出时残留后台线程、沙箱资源泄漏、调度器/agent 流任务状态丢失，阻塞进程退出或破坏下次启动恢复的一致性。
+  condition:
+  - '- ${NEXENT_TEST_HOME}/config/environment.yaml（仅本地测试环境参数，含 RUNTIME_THREAD_SHUTDOWN_GRACE_SECONDS 取值）'
+  metrics:
+  - 关闭严格按 调度器→agent流任务→沙箱池→线程管理器 顺序执行，顺序颠倒或跳过任一环节判定失败。
+  - 超时挂起的 agent 流任务被记 warning 并强制清理，进程在 RUNTIME_THREAD_SHUTDOWN_GRACE_SECONDS 期限内完成关闭，不无限阻塞。
+  - clear_default_thread_manager 在 shutdown 成功或异常路径下均执行，关闭后无残留后台线程/沙箱资源。
+  - 关闭全程无未处理异常，日志不输出明文 API Key/Token/模型密钥等敏感信息。
+  thresholds:
+  - 关闭严格按 调度器→agent流任务→沙箱池→线程管理器 顺序执行，顺序颠倒或跳过任一环节判定失败。
+  - 超时挂起的 agent 流任务被记 warning 并强制清理，进程在 RUNTIME_THREAD_SHUTDOWN_GRACE_SECONDS 期限内完成关闭，不无限阻塞。
+  - clear_default_thread_manager 在 shutdown 成功或异常路径下均执行，关闭后无残留后台线程/沙箱资源。
+  - 关闭全程无未处理异常，日志不输出明文 API Key/Token/模型密钥等敏感信息。
+  recovery_expectations:
+  - 关闭严格按 调度器→agent流任务→沙箱池→线程管理器 顺序执行，顺序颠倒或跳过任一环节判定失败。
+  - 超时挂起的 agent 流任务被记 warning 并强制清理，进程在 RUNTIME_THREAD_SHUTDOWN_GRACE_SECONDS 期限内完成关闭，不无限阻塞。
+  - clear_default_thread_manager 在 shutdown 成功或异常路径下均执行，关闭后无残留后台线程/沙箱资源。
+  - 关闭全程无未处理异常，日志不输出明文 API Key/Token/模型密钥等敏感信息。

@@ -1,0 +1,60 @@
+schema_version: '1.0'
+stage: D2
+module: V5-BASELINE
+case:
+  case_id: API-086
+  feature_id: F-081
+  business_rule_ids:
+  - F-081-RULE-01
+  title: 配置 CRUD、租户/组可见性、shared_fields｜核心流程
+  type: API-IT
+  priority: P1
+  status: active
+  automation: automated
+  objective: 配置 CRUD、租户/组可见性、shared_fields｜核心流程
+  preconditions:
+  - Nexent 配置 API 可用，隔离测试租户管理员及非成员普通用户可登录。
+  - 运行时创建本次拥有的新组与 PRIVATE MCP 记录，显式 group_ids；NULL 组范围不是私有测试资产。
+  - MCP 禁用且 skip_health_check=true，使用不可连接的 loopback 端口；本用例验证 CRUD/可见性，不调用工具/模型或外部 MCP。
+  test_data:
+    identity_roles:
+    - tenant_a_admin
+    - tenant_a_user
+    scope: owned group, PRIVATE, shared_fields restricted
+    live_endpoint_required: false
+  steps:
+  - order: 1
+    action: 创建并登记本次拥有的新组；在该组下创建禁用 PRIVATE MCP 记录并登记清理。
+    expected: 创建成功，管理员列表返回精确本次记录。
+  - order: 2
+    action: 管理员读取详情、修改描述和标签，保留原 private group_ids 和 restricted shared_fields；再次读取列表。
+    expected: 详情及更新 200，列表可回读。
+  - order: 3
+    action: 检查本次未配置认证令牌的记录响应不凭空出现凭据。
+    expected: authorization_token 为空或掩码；不据此宣称已验证非空凭据脱敏。
+  - order: 4
+    action: 非成员普通用户读取列表及按 ID 读取详情。
+    expected: 列表不含本次 MCP；详情拒绝 403/404，不暴露私有记录。
+  - order: 5
+    action: 清理本次拥有的 MCP，再清理组；保存清理终态。
+    expected: 删除 200/404，无遗留 owned 资源；不扫描历史资源。
+  expected_results: &id001
+  - 创建成功，管理员列表返回精确本次记录。
+  - 详情及更新 200，列表可回读。
+  - authorization_token 为空或掩码；不据此宣称已验证非空凭据脱敏。
+  - 列表不含本次 MCP；详情拒绝 403/404，不暴露私有记录。
+  - 删除 200/404，无遗留 owned 资源；不扫描历史资源。
+  forbidden_side_effects: []
+  source:
+    legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
+    legacy_sheet: 02_测试用例基线
+    legacy_row: 157
+  contract:
+    protocol: HTTP API
+    request_expectations:
+    - 创建并登记本次拥有的新组；在该组下创建禁用 PRIVATE MCP 记录并登记清理。
+    - 管理员读取详情、修改描述和标签，保留原 private group_ids 和 restricted shared_fields；再次读取列表。
+    - 检查本次未配置认证令牌的记录响应不凭空出现凭据。
+    - 非成员普通用户读取列表及按 ID 读取详情。
+    - 清理本次拥有的 MCP，再清理组；保存清理终态。
+    response_expectations: *id001

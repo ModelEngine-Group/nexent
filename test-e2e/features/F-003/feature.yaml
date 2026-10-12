@@ -1,0 +1,16 @@
+schema_version: '1.0'
+module:
+  id: V5-BASELINE
+  name: Migrated V5 baseline
+feature:
+  feature_id: F-003
+  name: refresh token、session、current_user_info/current_user_id
+  status: active
+  description: '身份认证与账号 / 会话: refresh token、session、current_user_info/current_user_id'
+  business_rules:
+  - rule_id: F-003-RULE-01
+    description: refresh token、session、current_user_info/current_user_id
+  required_test_stages:
+  - D2
+  source:
+    notes: Migrated from V5 01_代码功能清单 without changing the functional description.

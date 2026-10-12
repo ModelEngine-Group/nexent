@@ -1,0 +1,68 @@
+schema_version: '1.0'
+stage: D2
+module: V5-BASELINE
+case:
+  case_id: API-AUTO-6A4110F4BD10BA0F
+  feature_id: F-156
+  business_rule_ids:
+  - F-156-RULE-01
+  title: KNOWLEDGE_DELETE_BLOCKED(060109) 错误码与 HTTP 409 映射前后端一致性
+  type: CONTRACT
+  priority: P1
+  status: active
+  automation: automated
+  objective: KNOWLEDGE_DELETE_BLOCKED(060109) 错误码与 HTTP 409 映射前后端一致性
+  preconditions:
+  - Nexent 前后端源码已检出到本地仓库，测试基线固定为 develop 当前批次锁定的产品提交，执行时另记录实际被测 commit。
+  - 设置 NEXENT_TEST_HOME，目录不位于 Nexent Git 仓库内，当次 run_id 已生成。
+  - 后端 consts/error_code.py、consts/error_message.py、consts/exceptions.py 与前端 const/errorCode.ts 可读取。
+  - 本用例为静态契约一致性校验，不要求外部模型/Provider 在线，不启动知识库删除全链路。
+  test_data:
+    legacy_asset_declaration: '- 被测源码（本地仓库相对路径）：backend/consts/error_code.py、backend/consts/error_message.py、backend/consts/exceptions.py、frontend/const/errorCode.ts'
+  steps:
+  - order: 1
+    action: 读取 backend/consts/error_code.py，定位 ErrorCode.KNOWLEDGE_DELETE_BLOCKED 枚举成员，断言其值为保留前导零的 6 位字符串 "060109"。
+    expected: 后端 ErrorCode.KNOWLEDGE_DELETE_BLOCKED 与前端 ErrorCode.KNOWLEDGE_DELETE_BLOCKED 均为 "060109"，前后端错误码字符串完全一致。
+  - order: 2
+    action: 继续读取同文件 ERROR_CODE_HTTP_STATUS 字典，断言 ErrorCode.KNOWLEDGE_DELETE_BLOCKED 键映射的 HTTP 状态码为 409。
+    expected: 该错误码在 ERROR_CODE_HTTP_STATUS 中映射为 409，经 AppException.http_status 返回 409 而非默认 500。
+  - order: 3
+    action: 读取 backend/consts/error_message.py，断言 ErrorCode.KNOWLEDGE_DELETE_BLOCKED 存在默认英文错误消息 "Knowledge base deletion is
+      blocked while files are being processed."。
+    expected: error_message.py 为 060109 提供默认英文错误消息，错误码与消息一一对应。
+  - order: 4
+    action: 读取 backend/consts/exceptions.py 中 AppException.http_status 属性，断言其返回 ERROR_CODE_HTTP_STATUS.get(self.error_code,
+      500)，即该错误码取 409 而非默认 500。
+    expected: 测试过程无未处理异常，日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。
+  - order: 5
+    action: 读取 frontend/const/errorCode.ts，断言 KNOWLEDGE_DELETE_BLOCKED 常量为 "060109"，与后端字符串完全一致。
+    expected: 测试过程无未处理异常，日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。
+  - order: 6
+    action: 校验该错误码在 HTTP 状态映射中无重复冲突、前端 ErrorCode 常量键值唯一，且校验过程与日志不泄露 API Key/Token/Password。
+    expected: 测试过程无未处理异常，日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。
+  expected_results:
+  - 后端 ErrorCode.KNOWLEDGE_DELETE_BLOCKED 与前端 ErrorCode.KNOWLEDGE_DELETE_BLOCKED 均为 "060109"，前后端错误码字符串完全一致。
+  - 该错误码在 ERROR_CODE_HTTP_STATUS 中映射为 409，经 AppException.http_status 返回 409 而非默认 500。
+  - error_message.py 为 060109 提供默认英文错误消息，错误码与消息一一对应。
+  - 测试过程无未处理异常，日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。
+  forbidden_side_effects: []
+  source:
+    legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
+    legacy_sheet: 02_测试用例基线
+    legacy_row: 497
+  contract:
+    protocol: V5 protocol contract
+    request_expectations:
+    - 读取 backend/consts/error_code.py，定位 ErrorCode.KNOWLEDGE_DELETE_BLOCKED 枚举成员，断言其值为保留前导零的 6 位字符串 "060109"。
+    - 继续读取同文件 ERROR_CODE_HTTP_STATUS 字典，断言 ErrorCode.KNOWLEDGE_DELETE_BLOCKED 键映射的 HTTP 状态码为 409。
+    - 读取 backend/consts/error_message.py，断言 ErrorCode.KNOWLEDGE_DELETE_BLOCKED 存在默认英文错误消息 "Knowledge base deletion is blocked
+      while files are being processed."。
+    - 读取 backend/consts/exceptions.py 中 AppException.http_status 属性，断言其返回 ERROR_CODE_HTTP_STATUS.get(self.error_code, 500)，即该错误码取
+      409 而非默认 500。
+    - 读取 frontend/const/errorCode.ts，断言 KNOWLEDGE_DELETE_BLOCKED 常量为 "060109"，与后端字符串完全一致。
+    - 校验该错误码在 HTTP 状态映射中无重复冲突、前端 ErrorCode 常量键值唯一，且校验过程与日志不泄露 API Key/Token/Password。
+    response_expectations:
+    - 后端 ErrorCode.KNOWLEDGE_DELETE_BLOCKED 与前端 ErrorCode.KNOWLEDGE_DELETE_BLOCKED 均为 "060109"，前后端错误码字符串完全一致。
+    - 该错误码在 ERROR_CODE_HTTP_STATUS 中映射为 409，经 AppException.http_status 返回 409 而非默认 500。
+    - error_message.py 为 060109 提供默认英文错误消息，错误码与消息一一对应。
+    - 测试过程无未处理异常，日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。

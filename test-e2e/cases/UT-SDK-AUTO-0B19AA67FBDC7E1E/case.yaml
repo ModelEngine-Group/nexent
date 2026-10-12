@@ -1,0 +1,74 @@
+schema_version: '1.0'
+stage: D1
+module: V5-BASELINE
+case:
+  case_id: UT-SDK-AUTO-0B19AA67FBDC7E1E
+  feature_id: F-079
+  business_rule_ids:
+  - F-079-RULE-01
+  title: validate_path_component/resolve_contained_path/resolve_skill_path 拒绝路径遍历/绝对路径/盘符/符号链接逃逸｜异常/边界/越权
+  type: SDK-UT
+  priority: P1
+  status: active
+  automation: automated
+  objective: validate_path_component/resolve_contained_path/resolve_skill_path 拒绝路径遍历/绝对路径/盘符/符号链接逃逸｜异常/边界/越权
+  preconditions:
+  - 本地依赖/组件测试环境可运行；不要求外部模型服务在线。
+  - 设置 NEXENT_TEST_HOME，目录不位于 Nexent Git 仓库内。
+  - 当次 run_id 已生成，所有新建资源名称带 run_id；测试基线固定为 develop 当前批次锁定的产品提交；执行时另记录实际被测commit。
+  - 所需本地资产存在且校验通过：${NEXENT_TEST_HOME}/assets/skills/。
+  test_data:
+    legacy_asset_declaration: '- ${NEXENT_TEST_HOME}/assets/skills/'
+  steps:
+  - order: 1
+    action: 在本地工作区读取与“validate_path_component/resolve_contained_path/resolve_skill_path 拒绝路径遍历/绝对路径/盘符/符号链接逃逸｜异常/边界/越权”相关的固定
+      fixture/配置；测试代码不得读取生产凭据。
+    expected: 所有非法路径输入（遍历/绝对路径/盘符/NUL/符号链接逃逸）均抛出对应领域异常 InvalidSkillNameError/UnsafeSkillPathError/UnsafeSkillRootError，绝不返回越界路径或吞异常后返回伪成功。
+  - order: 2
+    action: 直接导入 sdk/nexent/skills/paths.py 的 validate_path_component、resolve_contained_path、resolve_skill_path 与 sdk/nexent/skills/skill_manager.py
+      的 SkillManager，构造最小有效输入与必要依赖对象。
+    expected: 合法 skill 名/相对段返回 root 之下的真实路径，测试过程无未处理异常。
+  - order: 3
+    action: 对 validate_path_component 分别执行：合法单词 skill 名返回原值；对空串/空白、"."、".."、含 "/" 或 "\\"、含 NUL、绝对路径、盘符（如 "C:evil"）、os.path.basename(value)
+      != value 的输入断言抛出 InvalidSkillNameError。
+    expected: 通过符号链接逃逸 root 的候选路径被 realpath 归一化后仍被拒绝，不出现跨目录写入或读取。
+  - order: 4
+    action: 对 resolve_contained_path(root, *parts) 分别执行：含 ".." 的相对段、绝对路径段、盘符段、含 NUL 段应抛出 UnsafeSkillPathError；构造指向 root 之外目标的符号链接段，断言解析后被
+      realpath 归一化仍抛出 UnsafeSkillPathError。
+    expected: 失败路径返回明确错误，不出现半写入、重复副作用或跨租户泄露。
+  - order: 5
+    action: 对 resolve_skill_path(root, name, *parts) 分别执行：非法 name 抛 InvalidSkillNameError；当 allowed_root 配置且 root 不在 allowed_root
+      内时抛 UnsafeSkillRootError；name 解析后等于 root 或逃逸 root 时抛 UnsafeSkillPathError。
+    expected: 日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。
+  - order: 6
+    action: 构造 SkillManager 实例并设置 base_skills_dir 指向临时目录，用越界 skill 名（如 "../evil"、"C:evil"、"abs/evil"）调用 resolve_skill_dir，断言抛出对应领域异常而非返回越界路径。
+    expected: 日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。
+  - order: 7
+    action: 对合法 skill 名断言 resolve_skill_path 返回位于 root 之下的真实路径，验证正常输入未破坏。
+    expected: 日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。
+  - order: 8
+    action: 确认日志中不输出 API Key、Token、用户密码或模型密钥。
+    expected: 日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。
+  - order: 9
+    action: 测试结束后释放临时目录/临时对象，确保可重复执行。
+    expected: 日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。
+  expected_results:
+  - 所有非法路径输入（遍历/绝对路径/盘符/NUL/符号链接逃逸）均抛出对应领域异常 InvalidSkillNameError/UnsafeSkillPathError/UnsafeSkillRootError，绝不返回越界路径或吞异常后返回伪成功。
+  - 合法 skill 名/相对段返回 root 之下的真实路径，测试过程无未处理异常。
+  - 通过符号链接逃逸 root 的候选路径被 realpath 归一化后仍被拒绝，不出现跨目录写入或读取。
+  - 失败路径返回明确错误，不出现半写入、重复副作用或跨租户泄露。
+  - 日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。
+  forbidden_side_effects: []
+  source:
+    legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
+    legacy_sheet: 02_测试用例基线
+    legacy_row: 458
+  unit_boundary: 路径校验
+  inputs:
+  - '- ${NEXENT_TEST_HOME}/assets/skills/'
+  assertions:
+  - 所有非法路径输入（遍历/绝对路径/盘符/NUL/符号链接逃逸）均抛出对应领域异常 InvalidSkillNameError/UnsafeSkillPathError/UnsafeSkillRootError，绝不返回越界路径或吞异常后返回伪成功。
+  - 合法 skill 名/相对段返回 root 之下的真实路径，测试过程无未处理异常。
+  - 通过符号链接逃逸 root 的候选路径被 realpath 归一化后仍被拒绝，不出现跨目录写入或读取。
+  - 失败路径返回明确错误，不出现半写入、重复副作用或跨租户泄露。
+  - 日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。

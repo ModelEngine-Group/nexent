@@ -1,0 +1,79 @@
+schema_version: '1.0'
+stage: D1
+module: V5-BASELINE
+case:
+  case_id: UT-FE-AUTO-0440200269363B14
+  feature_id: F-123
+  business_rule_ids:
+  - F-123-RULE-01
+  title: MemoryEmbeddingMonitor 可操作 Modal：memory 开启且 embedding 未配置弹窗、禁用/配置动作、memory-switch/embeddingModelChanged 重查、请求失败不崩溃｜核心流程
+  type: FE-COMP
+  priority: P1
+  status: active
+  automation: automated
+  objective: MemoryEmbeddingMonitor 可操作 Modal：memory 开启且 embedding 未配置弹窗、禁用/配置动作、memory-switch/embeddingModelChanged 重查、请求失败不崩溃｜核心流程
+  preconditions:
+  - 本地依赖/组件测试环境可运行；不要求外部模型服务在线。
+  - 设置 NEXENT_TEST_HOME，目录不位于 Nexent Git 仓库内。
+  - 当次 run_id 已生成；测试基线固定为 develop 当前批次锁定的产品提交；执行时另记录实际被测commit。
+  - 组件测试可渲染 MemoryEmbeddingMonitor，注入 memoryService 桩（loadMemoryConfig/loadMemoryEmbeddingStatus/setMemorySwitch/subscribeMemorySwitch）、AuthorizationProvider（user.role）、deploymentProvider（isSpeedMode）及
+    next/navigation（useParams/usePathname/useRouter）桩。
+  test_data:
+    legacy_asset_declaration: '- 无本地文件资产；使用组件测试内存桩：mock memoryService 各函数、AuthorizationProvider（user.role）、deploymentProvider（isSpeedMode）、next/navigation（useParams/usePathname/useRouter）。'
+  steps:
+  - order: 1
+    action: 在组件测试环境渲染 MemoryEmbeddingMonitor，注入 memoryService 桩（loadMemoryConfig/loadMemoryEmbeddingStatus/setMemorySwitch/subscribeMemorySwitch）、AuthorizationProvider（user.role）、deploymentProvider（isSpeedMode）与
+      next/navigation（useParams/usePathname/useRouter）桩。
+    expected: 功能结果与代码契约一致，测试过程无未处理异常。
+  - order: 2
+    action: 首次渲染后断言弹窗默认关闭；配置 isAuthorized=true 且 pathname 为受监控路径之一（/newchat、/chat、/memory），桩返回 memoryEnabled=true、configured=false，断言弹窗
+      title/content 文本可见。
+    expected: 仅当已授权且路径为 /newchat、/chat、/memory 之一、memory 开启且 embedding 未配置时弹窗出现；其余分支弹窗不出现且不发起多余查询。
+  - order: 3
+    action: 分别覆盖 memoryEnabled=false、configured=true、isAuthorized=false、pathname 非受监控路径，断言弹窗保持关闭且对应分支不触发后续 embedding 状态查询。
+    expected: 禁用记忆调用 setMemorySwitch(false)，成功关闭弹窗，失败触发 setMemorySwitchError 错误提示。
+  - order: 4
+    action: 触发 subscribeMemorySwitch 回调：先 enabled=false 断言弹窗关闭，再 enabled=true 断言重新发起 loadMemoryConfig→loadMemoryEmbeddingStatus
+      检查。
+    expected: 配置按钮按 canManageModels(user.role, isSpeedMode) 显隐，点击后关闭弹窗并跳转 /{locale}/models。
+  - order: 5
+    action: 派发 window "embeddingModelChanged" 事件，断言重新发起配置检查。
+    expected: memory-switch 回调与 embeddingModelChanged 事件触发重新检查，enabled=false 时同步关闭弹窗。
+  - order: 6
+    action: 点击“禁用”按钮：断言 setMemorySwitch 以 false 调用、按钮进入 saving/loading 状态；模拟返回 true 断言弹窗关闭，模拟返回 false 断言弹出 setMemorySwitchError
+      错误提示且弹窗不关闭。
+    expected: 检查请求失败只记录日志、不抛未捕获异常、不误开弹窗；无半写入或重复副作用。
+  - order: 7
+    action: 以 canManageModels(user.role, isSpeedMode) 取真/取假两种桩分别渲染，断言“配置”(configure) 按钮显隐；点击 configure 断言弹窗关闭并调用 router.push
+      跳转 /{locale}/models。
+    expected: 日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。
+  - order: 8
+    action: 模拟 loadMemoryConfig / loadMemoryEmbeddingStatus 抛错，断言仅记录 log.error、不抛未捕获异常、弹窗不误开。
+    expected: 日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。
+  - order: 9
+    action: 卸载组件后断言 subscribeMemorySwitch 取消订阅且 "embeddingModelChanged" 监听被移除，不再产生检查调用。
+    expected: 日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。
+  expected_results:
+  - 功能结果与代码契约一致，测试过程无未处理异常。
+  - 仅当已授权且路径为 /newchat、/chat、/memory 之一、memory 开启且 embedding 未配置时弹窗出现；其余分支弹窗不出现且不发起多余查询。
+  - 禁用记忆调用 setMemorySwitch(false)，成功关闭弹窗，失败触发 setMemorySwitchError 错误提示。
+  - 配置按钮按 canManageModels(user.role, isSpeedMode) 显隐，点击后关闭弹窗并跳转 /{locale}/models。
+  - memory-switch 回调与 embeddingModelChanged 事件触发重新检查，enabled=false 时同步关闭弹窗。
+  - 检查请求失败只记录日志、不抛未捕获异常、不误开弹窗；无半写入或重复副作用。
+  - 日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。
+  forbidden_side_effects: []
+  source:
+    legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
+    legacy_sheet: 02_测试用例基线
+    legacy_row: 423
+  unit_boundary: Embedding配置监控
+  inputs:
+  - '- 无本地文件资产；使用组件测试内存桩：mock memoryService 各函数、AuthorizationProvider（user.role）、deploymentProvider（isSpeedMode）、next/navigation（useParams/usePathname/useRouter）。'
+  assertions:
+  - 功能结果与代码契约一致，测试过程无未处理异常。
+  - 仅当已授权且路径为 /newchat、/chat、/memory 之一、memory 开启且 embedding 未配置时弹窗出现；其余分支弹窗不出现且不发起多余查询。
+  - 禁用记忆调用 setMemorySwitch(false)，成功关闭弹窗，失败触发 setMemorySwitchError 错误提示。
+  - 配置按钮按 canManageModels(user.role, isSpeedMode) 显隐，点击后关闭弹窗并跳转 /{locale}/models。
+  - memory-switch 回调与 embeddingModelChanged 事件触发重新检查，enabled=false 时同步关闭弹窗。
+  - 检查请求失败只记录日志、不抛未捕获异常、不误开弹窗；无半写入或重复副作用。
+  - 日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。

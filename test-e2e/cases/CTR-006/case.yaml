@@ -1,0 +1,99 @@
+schema_version: '1.0'
+stage: D3
+module: V5-BASELINE
+case:
+  case_id: CTR-006
+  feature_id: F-180
+  business_rule_ids:
+  - F-180-RULE-01
+  title: 已保存真实模型连通性与 reasoning 模型响应契约
+  type: INTEGRATION
+  priority: P1
+  status: active
+  automation: automated
+  objective: 已保存真实模型连通性与 reasoning 模型响应契约
+  preconditions:
+  - Nexent 本地测试全栈已启动，health check 通过。
+  - 设置 NEXENT_TEST_HOME，目录不位于 Nexent Git 仓库内。
+  - 当次 run_id 已生成，所有新建资源名称带 run_id；测试基线固定为 develop 473b65268ba8cda3db53be735f97678e214c583b；执行时另记录实际被测commit。
+  - 所需本地资产存在且校验通过：${NEXENT_TEST_HOME}/config/models.yaml；${NEXENT_TEST_HOME}/config/secrets.env；${NEXENT_TEST_HOME}/assets/images/；${NEXENT_TEST_HOME}/assets/expected/vlm_expected.json
+  - models.yaml 中本用例所需真实 Provider 已配置，secrets.env 中凭据有效，预检连通性通过。
+  test_data:
+    legacy_asset_declaration: '- ${NEXENT_TEST_HOME}/config/models.yaml
+
+      - ${NEXENT_TEST_HOME}/config/secrets.env
+
+      - ${NEXENT_TEST_HOME}/assets/images/
+
+      - ${NEXENT_TEST_HOME}/assets/expected/vlm_expected.json'
+  steps:
+  - order: 1
+    action: 从 ${NEXENT_TEST_HOME}/config/models.yaml 读取本用例要求的真实 Provider/模型配置；密钥仅从 secrets.env/系统环境变量注入。
+    expected: 功能结果与代码契约一致，测试过程无未处理异常。
+  - order: 2
+    action: 调用 Nexent 实际模型配置 API 创建或选取测试模型，确认数据库中的 provider、model、model_type、dimension/capacity 等字段与本地配置一致。
+    expected: 关键状态在 API 返回、数据库/存储和后续读取中保持一致。
+  - order: 3
+    action: 执行 Nexent 自带的模型连通性/健康检查，真实请求外部 Provider；保存实际 HTTP 状态、响应耗时和脱敏后的错误信息。
+    expected: 失败路径返回明确错误，不出现半写入、重复副作用或跨租户泄露。
+  - order: 4
+    action: 按“已保存模型 healthcheck 与 temporary_healthcheck｜核心流程”执行目标操作；若涉及 LLM/Embedding/Rerank/VLM/STT/TTS，必须触发一次真实推理/向量化/重排/识别/合成，而不是只检查配置保存成功。
+    expected: 日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。
+  - order: 5
+    action: 对 LLM 检查 stream 正常结束、回答非空、model_id/model_name 正确；对 Rerank 检查目标文档进入期望 Top-N。
+    expected: 真实模型调用成功，stream/Agent run 正常结束；自然语言只做稳定关键词/结构/工具调用断言。
+  - order: 6
+    action: 对 Embedding/Multi-Embedding 使用不含 /embeddings 后缀的 base_url 创建模型，确认系统按候选 URL 顺序探测（先 <base_url>/embeddings 再原始 base_url），任一候选返回非空向量即判定可用。
+    expected: Embedding/Multi-Embedding 连通性检查按候选 URL 顺序探测：先 /embeddings 再原始 base_url，任一候选返回非空向量即判定 AVAILABLE；全部候选均失败才判定 UNAVAILABLE。
+  - order: 7
+    action: 校验创建后持久化的 base_url 为实际响应的候选 URL（优先规范化的 /embeddings URL），并校验向量维度与数据库存储的 dimension/max_tokens 一致；再次执行健康检查确认候选顺序探测下连通结果稳定，覆盖首个候选（/embeddings）不可用而原始
+      URL 可用的回退成功路径。
+    expected: '创建/更新后持久化的 base_url 与实际响应的候选 URL 一致，向量维度与数据库 dimension/max_tokens 一致；首个候选失败时回退到下一候选仍判定可用。
+
+      原凭证继续有效；响应中无 api_key。'
+  - order: 8
+    action: 对 VLM 使用固定图片并检查唯一标记（如 7429）；对 STT 使用固定音频并检查关键词/CER 阈值；对 TTS 检查生成音频可解码、duration>0，必要时再用 STT 做闭环验证。
+    expected: '创建/更新后持久化的 base_url 与实际响应的候选 URL 一致，向量维度与数据库 dimension/max_tokens 一致；首个候选失败时回退到下一候选仍判定可用。
+
+      原凭证继续有效；响应中无 api_key。'
+  - order: 9
+    action: 检查 Telemetry/服务日志中模型名、TTFT/token 或错误信息合理，且 API Key 不得明文出现。
+    expected: '创建/更新后持久化的 base_url 与实际响应的候选 URL 一致，向量维度与数据库 dimension/max_tokens 一致；首个候选失败时回退到下一候选仍判定可用。
+
+      原凭证继续有效；响应中无 api_key。'
+  - order: 10
+    action: '删除本用例创建的临时模型/Provider记录或恢复原主模型，避免污染后续每日用例。
+
+      473b6526：编辑模型不提交 API Key，随后执行真实连通性检查。'
+    expected: '创建/更新后持久化的 base_url 与实际响应的候选 URL 一致，向量维度与数据库 dimension/max_tokens 一致；首个候选失败时回退到下一候选仍判定可用。
+
+      原凭证继续有效；响应中无 api_key。'
+  expected_results:
+  - 功能结果与代码契约一致，测试过程无未处理异常。
+  - 关键状态在 API 返回、数据库/存储和后续读取中保持一致。
+  - 失败路径返回明确错误，不出现半写入、重复副作用或跨租户泄露。
+  - 日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。
+  - 真实模型调用成功，stream/Agent run 正常结束；自然语言只做稳定关键词/结构/工具调用断言。
+  - Embedding/Multi-Embedding 连通性检查按候选 URL 顺序探测：先 /embeddings 再原始 base_url，任一候选返回非空向量即判定 AVAILABLE；全部候选均失败才判定 UNAVAILABLE。
+  - '创建/更新后持久化的 base_url 与实际响应的候选 URL 一致，向量维度与数据库 dimension/max_tokens 一致；首个候选失败时回退到下一候选仍判定可用。
+
+    原凭证继续有效；响应中无 api_key。'
+  forbidden_side_effects: []
+  source:
+    legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
+    legacy_sheet: 02_测试用例基线
+    legacy_row: 64
+  integration_boundary:
+  - REAL_REQUIRED：使用 ${NEXENT_TEST_HOME}/config/models.yaml 中配置的真实模型/向量/Rerank/语音/多模态能力；Mock 仅用于不可稳定制造的 5xx/超时/畸形响应故障注入。
+  observations:
+  - 功能结果与代码契约一致，测试过程无未处理异常。
+  - 关键状态在 API 返回、数据库/存储和后续读取中保持一致。
+  - 失败路径返回明确错误，不出现半写入、重复副作用或跨租户泄露。
+  - 日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。
+  - 真实模型调用成功，stream/Agent run 正常结束；自然语言只做稳定关键词/结构/工具调用断言。
+  - Embedding/Multi-Embedding 连通性检查按候选 URL 顺序探测：先 /embeddings 再原始 base_url，任一候选返回非空向量即判定 AVAILABLE；全部候选均失败才判定 UNAVAILABLE。
+  - '创建/更新后持久化的 base_url 与实际响应的候选 URL 一致，向量维度与数据库 dimension/max_tokens 一致；首个候选失败时回退到下一候选仍判定可用。
+
+    原凭证继续有效；响应中无 api_key。'
+  cleanup:
+  - JUnit/XML、请求/响应摘要（脱敏）、服务日志、必要的DB/对象存储状态快照；协议场景保存wire capture。

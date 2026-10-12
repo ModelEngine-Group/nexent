@@ -1,0 +1,93 @@
+schema_version: '1.0'
+stage: D2
+module: V5-BASELINE
+case:
+  case_id: API-039
+  feature_id: F-025
+  business_rule_ids:
+  - F-025-RULE-01
+  title: usage 缓存/force refresh/per-KB detail｜核心流程
+  type: API-IT
+  priority: P1
+  status: active
+  automation: automated
+  objective: usage 缓存/force refresh/per-KB detail｜核心流程
+  preconditions:
+  - Nexent 本地测试全栈已启动，health check 通过。
+  - 设置 NEXENT_TEST_HOME，目录不位于 Nexent Git 仓库内。
+  - 当次 run_id 已生成，所有新建资源名称带 run_id；测试基线固定为 develop 当前批次锁定的产品提交；执行时另记录实际被测commit。
+  - 所需本地资产存在且校验通过：${NEXENT_TEST_HOME}/config/users.yaml；${NEXENT_TEST_HOME}/config/secrets.env
+  - users.yaml 中 SU/Admin/UserA/UserB 等隔离账号可登录，测试租户数据可被清理。
+  test_data:
+    legacy_asset_declaration: '- ${NEXENT_TEST_HOME}/config/users.yaml
+
+      - ${NEXENT_TEST_HOME}/config/secrets.env'
+  steps:
+  - order: 1
+    action: 从 config/users.yaml 准备 SU、TenantA Admin/User、TenantB Admin/User，所有测试资源使用 RunID 前缀。
+    expected: 功能结果与代码契约一致，测试过程无未处理异常。
+  - order: 2
+    action: 通过实际资源管理 API 创建/修改租户、用户组、邀请码、角色或配额。
+    expected: 关键状态在 API 返回、数据库/存储和后续读取中保持一致。
+  - order: 3
+    action: 每次写操作后重新 GET 列表/详情，并在数据库/配额状态中检查目标租户数据一致。
+    expected: total_bytes 等于源文件账本字节总数，不包含 ES 物理索引容量；es_physical_bytes 独立返回 ES 物理容量且不参与 usage_pct/hard limit 计算。
+  - order: 4
+    action: 使用不同角色重复读取和写入，确认 UI/API 对应 RBAC 与 tenant scope 一致。
+    expected: detail=true 返回 breakdown，其中 actual_bytes 对应源文件字节、es_physical_bytes 对应 ES 物理字节；detail 缺省时响应不含 breakdown。
+  - order: 5
+    action: 对删除/级联操作，在执行前记录关联用户、组、KB、Agent、MCP 等ID，删除后逐项确认不可访问且无孤儿记录。
+    expected: 60s 缓存命中返回一致结果，force_refresh=true 绕过缓存重新计算；ES 统计异常仅告警并降级为观察值 0/缺省，不使配额检查失败。
+  - order: 6
+    action: 调用 GET /tenants/{tenant_id}/quota/usage，分别以默认（命中缓存）、force_refresh=true、detail=true/detail 缺省发起请求，判断 60s 缓存 TTL
+      命中与 force_refresh 绕过缓存重算的行为差异。
+    expected: 失败路径返回明确错误，不出现半写入、重复副作用或跨租户泄露。
+  - order: 7
+    action: 用固定大小文件/知识库真实消耗源文件容量，检查总 usage 与 breakdown 的 warning/hard limit 及释放后的 usage 回落。
+    expected: 日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。
+  - order: 8
+    action: 校验响应字段语义：total_bytes/total_readable 仅反映源文件账本字节；es_physical_bytes/es_physical_readable 独立承载 ES 物理索引容量；breakdown
+      每 KB 的 actual_bytes 为源文件字节、es_physical_bytes 为 ES 物理字节，两者分离且互不影响。
+    expected: 日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。
+  - order: 9
+    action: 越权/非法输入不得改变其他租户数据；错误响应不暴露资源是否真实存在。
+    expected: 日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。
+  - order: 10
+    action: 清理当次创建的租户/用户/邀请码/配额配置。
+    expected: 日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。
+  expected_results:
+  - 功能结果与代码契约一致，测试过程无未处理异常。
+  - 关键状态在 API 返回、数据库/存储和后续读取中保持一致。
+  - total_bytes 等于源文件账本字节总数，不包含 ES 物理索引容量；es_physical_bytes 独立返回 ES 物理容量且不参与 usage_pct/hard limit 计算。
+  - detail=true 返回 breakdown，其中 actual_bytes 对应源文件字节、es_physical_bytes 对应 ES 物理字节；detail 缺省时响应不含 breakdown。
+  - 60s 缓存命中返回一致结果，force_refresh=true 绕过缓存重新计算；ES 统计异常仅告警并降级为观察值 0/缺省，不使配额检查失败。
+  - 失败路径返回明确错误，不出现半写入、重复副作用或跨租户泄露。
+  - 日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。
+  forbidden_side_effects: []
+  source:
+    legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
+    legacy_sheet: 02_测试用例基线
+    legacy_row: 47
+  contract:
+    protocol: HTTP API
+    request_expectations:
+    - 从 config/users.yaml 准备 SU、TenantA Admin/User、TenantB Admin/User，所有测试资源使用 RunID 前缀。
+    - 通过实际资源管理 API 创建/修改租户、用户组、邀请码、角色或配额。
+    - 每次写操作后重新 GET 列表/详情，并在数据库/配额状态中检查目标租户数据一致。
+    - 使用不同角色重复读取和写入，确认 UI/API 对应 RBAC 与 tenant scope 一致。
+    - 对删除/级联操作，在执行前记录关联用户、组、KB、Agent、MCP 等ID，删除后逐项确认不可访问且无孤儿记录。
+    - 调用 GET /tenants/{tenant_id}/quota/usage，分别以默认（命中缓存）、force_refresh=true、detail=true/detail 缺省发起请求，判断 60s 缓存 TTL 命中与 force_refresh
+      绕过缓存重算的行为差异。
+    - 用固定大小文件/知识库真实消耗源文件容量，检查总 usage 与 breakdown 的 warning/hard limit 及释放后的 usage 回落。
+    - 校验响应字段语义：total_bytes/total_readable 仅反映源文件账本字节；es_physical_bytes/es_physical_readable 独立承载 ES 物理索引容量；breakdown 每 KB
+      的 actual_bytes 为源文件字节、es_physical_bytes 为 ES 物理字节，两者分离且互不影响。
+    - 越权/非法输入不得改变其他租户数据；错误响应不暴露资源是否真实存在。
+    - 清理当次创建的租户/用户/邀请码/配额配置。
+    response_expectations:
+    - 功能结果与代码契约一致，测试过程无未处理异常。
+    - 关键状态在 API 返回、数据库/存储和后续读取中保持一致。
+    - total_bytes 等于源文件账本字节总数，不包含 ES 物理索引容量；es_physical_bytes 独立返回 ES 物理容量且不参与 usage_pct/hard limit 计算。
+    - detail=true 返回 breakdown，其中 actual_bytes 对应源文件字节、es_physical_bytes 对应 ES 物理字节；detail 缺省时响应不含 breakdown。
+    - 60s 缓存命中返回一致结果，force_refresh=true 绕过缓存重新计算；ES 统计异常仅告警并降级为观察值 0/缺省，不使配额检查失败。
+    - 失败路径返回明确错误，不出现半写入、重复副作用或跨租户泄露。
+    - 日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。

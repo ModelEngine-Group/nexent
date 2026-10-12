@@ -1,0 +1,16 @@
+schema_version: '1.0'
+module:
+  id: V5-BASELINE
+  name: Migrated V5 baseline
+feature:
+  feature_id: V5-REL-AUTO-DD1A9CB3B544F39F
+  name: recover_interrupted_generations 中断 AI 生成回滚恢复（基线保留/追加清理/置 FAILED/进度归零）
+  status: active
+  description: 线程托管迁移后服务重启时，GENERATING 评测集可能残留追加的 AI 生成 case；恢复逻辑若误删基线 case 或遗漏追加 case 清理，将导致评测集 case_count 与实存 case 数不一致、半生成脏数据残留，影响后续评测执行与展示正确性。
+  business_rules:
+  - rule_id: V5-REL-AUTO-DD1A9CB3B544F39F-RULE-01
+    description: recover_interrupted_generations 中断 AI 生成回滚恢复（基线保留/追加清理/置 FAILED/进度归零）
+  required_test_stages:
+  - D5
+  source:
+    notes: 'Provisional migration owner: the V5 row has no stable Feature ID. Do not infer an F-ID.'

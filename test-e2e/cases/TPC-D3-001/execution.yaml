@@ -1,0 +1,22 @@
+schema_version: '1.0'
+case_id: TPC-D3-001
+implementations:
+- framework: pytest
+  file: test.py
+  selector: test_tpc_d3_001_skill_executes_once_and_history_matches
+  profiles:
+  - mock
+  - real_smoke
+required_mock_services:
+- model-provider
+preparation:
+  families: []
+  anchors: false
+  special_assets: false
+  d4_groups: []
+acceptance_bindings:
+  AC-01:
+  - test_tpc_d3_001_skill_executes_once_and_history_matches
+  AC-02:
+  - test_tpc_d3_001_marked_exhaustion_never_executes_or_finalizes
+timeout_seconds: 600

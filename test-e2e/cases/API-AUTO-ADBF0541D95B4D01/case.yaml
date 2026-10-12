@@ -1,0 +1,125 @@
+schema_version: '1.0'
+stage: D2
+module: V5-BASELINE
+case:
+  case_id: API-AUTO-ADBF0541D95B4D01
+  feature_id: F-177
+  business_rule_ids:
+  - F-177-RULE-01
+  title: 标签库(桶)列表、定义/值 CRUD、启停/排序/置顶/usage 与 400/404/409 契约映射
+  type: API-IT
+  priority: P0
+  status: active
+  automation: automated
+  objective: 标签库(桶)列表、定义/值 CRUD、启停/排序/置顶/usage 与 400/404/409 契约映射
+  preconditions:
+  - 本地集成测试环境可运行，被测后端服务已启动并连接具备统一标签数据结构的测试数据库（tag_bucket/tag_definition/tag_value/resource_tag_assignment 表就绪）。
+  - 设置 NEXENT_TEST_HOME，目录不位于 Nexent Git 仓库内；当次 run_id 已生成，所有新建资源名称带 run_id；测试基线固定为 develop 当前批次锁定的产品提交，执行时另记录实际被测
+    commit。
+  - 测试租户已预置 default_resource 与 knowledge_content 两个标签桶及六类资源类型绑定（user_tenant_t 插入触发预置）。
+  - 所需本地资产存在且校验通过：${NEXENT_TEST_HOME}/config/users.yaml；${NEXENT_TEST_HOME}/config/secrets.env。
+  - users.yaml 中具备 RESOURCE/TAG_LIBRARY/MANAGE 权限的 SU/Admin 账号可登录；另备无该权限的 DEV/USER 账号用于 403 校验；测试租户数据可清理。
+  test_data:
+    legacy_asset_declaration: '- ${NEXENT_TEST_HOME}/config/users.yaml
+
+      - ${NEXENT_TEST_HOME}/config/secrets.env'
+  steps:
+  - order: 1
+    action: 读取 users.yaml 与 secrets.env，登录获取具备 RESOURCE/TAG_LIBRARY/MANAGE 权限的 SU/Admin token 及无该权限的 DEV/USER token，记录被测服务
+      base_url 与测试租户 run_id。
+    expected: 正向 CRUD/治理接口均返回 HTTP 200；响应字段与契约一致：桶列表含 bucket_id/bucket_key/bucket_name/status/resource_types/definition_count/definition_capacity=100；定义含
+      definition_id/selection_mode/status/sort_order/active_value_count/value_capacity=1000/values；值含 value_id/display_value/normalized_value/status。
+  - order: 2
+    action: 以 SU/Admin token 调用 GET /tag-libraries，记录响应状态码与列表结构。
+    expected: 无管理权限账号访问治理写接口返回 403；标签桶/定义 GET 允许已认证 DEV/USER 读取，detail 为 Tag library management permission is required。
+  - order: 3
+    action: 以 DEV/USER 读取标签桶及定义返回 200；以合法 POST /tag-libraries/{bucket_id}/definitions 创建请求验证写入返回 403，detail 为 Tag
+      library management permission is required；回读确认无新增定义。
+    expected: 已认证读取 200、治理写入 403；拒绝写入无副作用。
+  - order: 4
+    action: 以 SU/Admin token 调用 POST /tag-libraries/{default_resource 桶 id}/definitions，body 含 definition_name、selection_mode=multi_select、initial_values（名称带
+      run_id），记录响应。
+    expected: multi_select 转 single_select 且存在多值占用时返回 409，detail.message 为 Cannot convert to single_select while
+      resources have multiple assigned values，details 含 definition_id 与 resources_with_multiple_values。
+  - order: 5
+    action: 以规范化后相同名称（大小写/首尾空白差异）再次 POST 创建同名定义，记录状态码与 detail。
+    expected: 使用中的定义/值删除返回 409（Cannot delete a tag definition with values or active assignments / Cannot delete
+      a tag value that is in use）；清空依赖后删除返回 200 且响应为 success true。
+  - order: 6
+    action: 分别 POST 创建 selection_mode=no_value 且携带 initial_values、selection_mode=multi_select 且不带 initial_values
+      的定义，记录状态码与 detail。
+    expected: 不存在的桶/定义/值返回 404（Tag library not found / Tag definition not found / Tag value not found）；无半写入与跨租户泄露，日志不含明文
+      token。
+  - order: 7
+    action: 调用 PATCH /tag-libraries/{桶 id}/definitions/{定义 id} 更新 definition_name；再以空 body（不含 definition_name/selection_mode）PATCH，记录状态码与响应。
+    expected: 不存在的桶/定义/值返回 404（Tag library not found / Tag definition not found / Tag value not found）；无半写入与跨租户泄露，日志不含明文
+      token。
+  - order: 8
+    action: 依次 PATCH .../definitions/{定义 id}/status（disabled→active）、.../order（sort_order）、.../top，记录状态码与 status/sort_order
+      回显。
+    expected: 不存在的桶/定义/值返回 404（Tag library not found / Tag definition not found / Tag value not found）；无半写入与跨租户泄露，日志不含明文
+      token。
+  - order: 9
+    action: 调用 GET .../definitions/{定义 id}/usage，记录响应字段。
+    expected: 不存在的桶/定义/值返回 404（Tag library not found / Tag definition not found / Tag value not found）；无半写入与跨租户泄露，日志不含明文
+      token。
+  - order: 10
+    action: 调用 POST .../definitions/{定义 id}/values 创建值（display_value、sort_order）；再以规范化重名创建同名值，记录状态码与 detail。
+    expected: 不存在的桶/定义/值返回 404（Tag library not found / Tag definition not found / Tag value not found）；无半写入与跨租户泄露，日志不含明文
+      token。
+  - order: 11
+    action: 依次 PATCH .../values/{值 id}（display_value）、.../values/{值 id}/status、.../values/{值 id}/order，并 GET .../values/{值
+      id}/usage，记录响应。
+    expected: 不存在的桶/定义/值返回 404（Tag library not found / Tag definition not found / Tag value not found）；无半写入与跨租户泄露，日志不含明文
+      token。
+  - order: 12
+    action: 对已存在多值分配的 multi_select 定义（预置某资源持有该定义多个值），PATCH 定义将 selection_mode 改为 single_select，记录状态码与 detail。
+    expected: 不存在的桶/定义/值返回 404（Tag library not found / Tag definition not found / Tag value not found）；无半写入与跨租户泄露，日志不含明文
+      token。
+  - order: 13
+    action: DELETE 仍含 active 值或 active 分配的定义、DELETE 被资源使用的值，记录状态码与 detail；随后清空依赖后 DELETE 未使用的值/定义，记录响应。
+    expected: 不存在的桶/定义/值返回 404（Tag library not found / Tag definition not found / Tag value not found）；无半写入与跨租户泄露，日志不含明文
+      token。
+  - order: 14
+    action: 以不存在的 bucket_id/definition_id/value_id 调用对应接口，记录状态码与 detail；测试结束清理 run_id 相关数据。
+    expected: 不存在的桶/定义/值返回 404（Tag library not found / Tag definition not found / Tag value not found）；无半写入与跨租户泄露，日志不含明文
+      token。
+  expected_results: &id001
+  - 正向 CRUD/治理接口均返回 HTTP 200；响应字段与契约一致：桶列表含 bucket_id/bucket_key/bucket_name/status/resource_types/definition_count/definition_capacity=100；定义含
+    definition_id/selection_mode/status/sort_order/active_value_count/value_capacity=1000/values；值含 value_id/display_value/normalized_value/status。
+  - 无管理权限账号访问治理写接口返回 403；标签桶/定义 GET 允许已认证 DEV/USER 读取，detail 为 Tag library management permission is required。
+  - 重名（规范化后相同）定义/值返回 409；no_value 携带值、非 no_value 缺值、定义空更新返回 400，detail 与源码一致。
+  - multi_select 转 single_select 且存在多值占用时返回 409，detail.message 为 Cannot convert to single_select while resources
+    have multiple assigned values，details 含 definition_id 与 resources_with_multiple_values。
+  - 使用中的定义/值删除返回 409（Cannot delete a tag definition with values or active assignments / Cannot delete a tag value
+    that is in use）；清空依赖后删除返回 200 且响应为 success true。
+  - 不存在的桶/定义/值返回 404（Tag library not found / Tag definition not found / Tag value not found）；无半写入与跨租户泄露，日志不含明文 token。
+  forbidden_side_effects: []
+  source:
+    legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
+    legacy_sheet: 02_测试用例基线
+    legacy_row: 504
+  contract:
+    protocol: HTTP API
+    request_expectations:
+    - 读取 users.yaml 与 secrets.env，登录获取具备 RESOURCE/TAG_LIBRARY/MANAGE 权限的 SU/Admin token 及无该权限的 DEV/USER token，记录被测服务
+      base_url 与测试租户 run_id。
+    - 以 SU/Admin token 调用 GET /tag-libraries，记录响应状态码与列表结构。
+    - 以 DEV/USER 读取标签桶及定义返回 200；以合法 POST /tag-libraries/{bucket_id}/definitions 创建请求验证写入返回 403，detail 为 Tag library
+      management permission is required；回读确认无新增定义。
+    - 以 SU/Admin token 调用 POST /tag-libraries/{default_resource 桶 id}/definitions，body 含 definition_name、selection_mode=multi_select、initial_values（名称带
+      run_id），记录响应。
+    - 以规范化后相同名称（大小写/首尾空白差异）再次 POST 创建同名定义，记录状态码与 detail。
+    - 分别 POST 创建 selection_mode=no_value 且携带 initial_values、selection_mode=multi_select 且不带 initial_values 的定义，记录状态码与
+      detail。
+    - 调用 PATCH /tag-libraries/{桶 id}/definitions/{定义 id} 更新 definition_name；再以空 body（不含 definition_name/selection_mode）PATCH，记录状态码与响应。
+    - 依次 PATCH .../definitions/{定义 id}/status（disabled→active）、.../order（sort_order）、.../top，记录状态码与 status/sort_order
+      回显。
+    - 调用 GET .../definitions/{定义 id}/usage，记录响应字段。
+    - 调用 POST .../definitions/{定义 id}/values 创建值（display_value、sort_order）；再以规范化重名创建同名值，记录状态码与 detail。
+    - 依次 PATCH .../values/{值 id}（display_value）、.../values/{值 id}/status、.../values/{值 id}/order，并 GET .../values/{值
+      id}/usage，记录响应。
+    - 对已存在多值分配的 multi_select 定义（预置某资源持有该定义多个值），PATCH 定义将 selection_mode 改为 single_select，记录状态码与 detail。
+    - DELETE 仍含 active 值或 active 分配的定义、DELETE 被资源使用的值，记录状态码与 detail；随后清空依赖后 DELETE 未使用的值/定义，记录响应。
+    - 以不存在的 bucket_id/definition_id/value_id 调用对应接口，记录状态码与 detail；测试结束清理 run_id 相关数据。
+    response_expectations: *id001

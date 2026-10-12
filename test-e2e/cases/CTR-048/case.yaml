@@ -1,0 +1,59 @@
+schema_version: '1.0'
+stage: D2
+module: V5-BASELINE
+case:
+  case_id: CTR-048
+  feature_id: F-180
+  business_rule_ids:
+  - F-180-RULE-01
+  title: 模型目录/Provider/推理字段/Profile API 契约
+  type: CONTRACT
+  priority: P0
+  status: active
+  automation: automated
+  objective: 模型目录/Provider/推理字段/Profile API 契约
+  preconditions:
+  - 本地测试环境健康检查通过，NEXENT_TEST_HOME 位于源码仓库外。
+  - 测试基线固定为 develop 当前批次锁定的产品提交，当次资源使用 run_id 隔离。
+  - 所需资产存在：${NEXENT_TEST_HOME}/config/users.yaml；${NEXENT_TEST_HOME}/config/secrets.env；${NEXENT_TEST_HOME}/config/models.yaml。
+  test_data:
+    legacy_asset_declaration: '- ${NEXENT_TEST_HOME}/config/users.yaml
+
+      - ${NEXENT_TEST_HOME}/config/secrets.env
+
+      - ${NEXENT_TEST_HOME}/config/models.yaml'
+  steps:
+  - order: 1
+    action: 调用 catalog/all、providers、provider models、field specs 与 profile。
+    expected: 目录 API 与文件事实一致。
+  - order: 2
+    action: 对照本地 model_catalog.json 校验稳定字段。
+    expected: reasoning 字段类型/默认值完整。
+  - order: 3
+    action: 请求未知 Provider/model/profile。
+    expected: 未知项返回明确 4xx/空结果契约。
+  - order: 4
+    action: 校验响应不含密钥。
+    expected: 所有响应不泄露 secret。
+  expected_results:
+  - 目录 API 与文件事实一致。
+  - reasoning 字段类型/默认值完整。
+  - 未知项返回明确 4xx/空结果契约。
+  - 所有响应不泄露 secret。
+  forbidden_side_effects: []
+  source:
+    legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
+    legacy_sheet: 02_测试用例基线
+    legacy_row: 384
+  contract:
+    protocol: V5 protocol contract
+    request_expectations:
+    - 调用 catalog/all、providers、provider models、field specs 与 profile。
+    - 对照本地 model_catalog.json 校验稳定字段。
+    - 请求未知 Provider/model/profile。
+    - 校验响应不含密钥。
+    response_expectations:
+    - 目录 API 与文件事实一致。
+    - reasoning 字段类型/默认值完整。
+    - 未知项返回明确 4xx/空结果契约。
+    - 所有响应不泄露 secret。

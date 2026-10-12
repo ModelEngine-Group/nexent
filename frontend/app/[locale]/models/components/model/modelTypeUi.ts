@@ -58,6 +58,29 @@ export function typeLabel(
   });
 }
 
+/** Embedding-family types: advanced settings are the multimodal flag plus
+ *  the chunk-size range and batch (dedicated controls), never the LLM
+ *  capacity grid. */
+export const isEmbeddingModelType = (type: string | undefined): boolean =>
+  type === MODEL_TYPES.EMBEDDING || type === MODEL_TYPES.MULTI_EMBEDDING;
+
+/** LLM-family types that carry the capacity / temperature / top_p grid
+ *  (same set as the old dialog's supportsCapacityFields). */
+export const supportsCapacityGrid = (type: string | undefined): boolean =>
+  type === MODEL_TYPES.LLM ||
+  type === MODEL_TYPES.VLM ||
+  type === MODEL_TYPES.VLM2 ||
+  type === MODEL_TYPES.VLM3;
+
+/** Voice types: advanced settings are the provider select plus the
+ *  Volcano-engine credentials (App ID / Access Token). */
+export const isVoiceModelType = (type: string | undefined): boolean =>
+  type === MODEL_TYPES.STT || type === MODEL_TYPES.TTS;
+
+/** Types whose spec carries a max-tokens field (rerank / tts). */
+export const supportsMaxTokensField = (type: string | undefined): boolean =>
+  type === MODEL_TYPES.RERANK || type === MODEL_TYPES.TTS;
+
 /** Localized {value, label} options for every model type, in map order. */
 export function useTypeOptions() {
   const { t } = useTranslation();

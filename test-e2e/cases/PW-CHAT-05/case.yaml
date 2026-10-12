@@ -1,0 +1,80 @@
+schema_version: '1.0'
+stage: D4
+module: V5-BASELINE
+case:
+  case_id: PW-CHAT-05
+  feature_id: V5-PW-CHAT-05
+  business_rule_ids:
+  - V5-PW-CHAT-05-RULE-01
+  title: Runtime Metadata→会话Knowledge Scope→发送→新会话作用域
+  type: E2E
+  priority: P0
+  status: active
+  automation: automated
+  objective: 修正v4：只测当前UI存在的metadata和knowledge scope；tool_params移出Playwright。
+  preconditions:
+  - 准备可读取metadata的Test Tool/Agent（可选）
+  - 两个可区分KB
+  - 真实LLM
+  test_data:
+    legacy_asset_declaration: assets/knowledge/*；expected/metadata_expected.json；config/models.yaml
+  steps:
+  - order: 1
+    action: 打开newchat选择Agent。
+    expected: Metadata和Knowledge Scope是真实入口。
+  - order: 2
+    action: 打开Runtime Metadata，新增test_run_id=run_id并保存。
+    expected: 会话作用域行为正确。
+  - order: 3
+    action: 重新打开确认值仍在当前会话。
+    expected: tool_params不出现在Composer。
+  - order: 4
+    action: 打开Knowledge Scope，选择指定KB并确认。
+    expected: tool_params不出现在Composer。
+  - order: 5
+    action: 发送必须使用该KB/metadata的固定问题。
+    expected: tool_params不出现在Composer。
+  - order: 6
+    action: 检查回答/工具结果marker；若用Test MCP则关联wire。
+    expected: tool_params不出现在Composer。
+  - order: 7
+    action: 新建会话，检查Metadata/Knowledge按产品设计重置或继承。
+    expected: tool_params不出现在Composer。
+  - order: 8
+    action: 回原会话确认原作用域仍在。
+    expected: tool_params不出现在Composer。
+  - order: 9
+    action: 修改metadata值再发送，确认本轮使用新值。
+    expected: tool_params不出现在Composer。
+  expected_results:
+  - Metadata和Knowledge Scope是真实入口。
+  - 会话作用域行为正确。
+  - tool_params不出现在Composer。
+  forbidden_side_effects: []
+  source:
+    legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
+    legacy_sheet: 03_Playwright_Journey
+    legacy_row: 42
+  actor: Nexent browser user
+  journey:
+  - 打开newchat选择Agent。
+  - 打开Runtime Metadata，新增test_run_id=run_id并保存。
+  - 重新打开确认值仍在当前会话。
+  - 打开Knowledge Scope，选择指定KB并确认。
+  - 发送必须使用该KB/metadata的固定问题。
+  - 检查回答/工具结果marker；若用Test MCP则关联wire。
+  - 新建会话，检查Metadata/Knowledge按产品设计重置或继承。
+  - 回原会话确认原作用域仍在。
+  - 修改metadata值再发送，确认本轮使用新值。
+  final_business_result:
+  - Metadata和Knowledge Scope是真实入口。
+  - 会话作用域行为正确。
+  - tool_params不出现在Composer。
+  failure_evidence:
+  - '${NEXENT_TEST_HOME}/runs/{run_id}/playwright/PW-CHAT-05/
+
+    - screenshot.png / trace.zip / video.webm
+
+    - console.log / network.har / failure.json
+
+    - 涉及协议时关联 wire/*.jsonl；涉及下载时保留 downloads/'

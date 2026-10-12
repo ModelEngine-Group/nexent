@@ -1,0 +1,65 @@
+schema_version: '1.0'
+stage: D1
+module: V5-BASELINE
+case:
+  case_id: UT-BE-AUTO-696FDBCE6806523B
+  feature_id: F-045
+  business_rule_ids:
+  - F-045-RULE-01
+  title: _is_nl2agent_recommendable_tool 按部署模式过滤可推荐知识库工具｜核心流程
+  type: BE-UT
+  priority: P1
+  status: active
+  automation: automated
+  objective: _is_nl2agent_recommendable_tool 按部署模式过滤可推荐知识库工具｜核心流程
+  preconditions:
+  - 本地依赖/组件测试环境可运行；不要求外部模型服务在线。
+  - 设置 NEXENT_TEST_HOME，目录不位于 Nexent Git 仓库内。
+  - 当次 run_id 已生成，所有新建资源名称带 run_id；测试基线固定为 develop 当前批次锁定的产品提交；执行时另记录实际被测commit。
+  - 所需本地资产存在且校验通过：${NEXENT_TEST_HOME}/config/environment.yaml（仅本地测试环境参数）
+  test_data:
+    legacy_asset_declaration: '- ${NEXENT_TEST_HOME}/config/environment.yaml（仅本地测试环境参数）'
+  steps:
+  - order: 1
+    action: 导入 backend/services/nl2agent_service.py 的 _is_nl2agent_recommendable_tool 函数，并确认模块常量 _LOCAL_KNOWLEDGE_TOOL_NAMES
+      与 _AIDP_KNOWLEDGE_TOOL_NAME 已定义。
+    expected: ENABLE_AIDP_KNOWLEDGE 为 True 时：knowledge_base_search 返回 False（被过滤），ind_aidp_search、aidp_search 与普通工具返回 True（可推荐）。
+  - order: 2
+    action: 使用 pytest monkeypatch 将模块内 ENABLE_AIDP_KNOWLEDGE 置为 True，依次以 knowledge_base_search、ind_aidp_search、aidp_search
+      及一个普通工具名调用函数，记录各返回值。
+    expected: ENABLE_AIDP_KNOWLEDGE 为 False 时：aidp_search 返回 False（被过滤），knowledge_base_search、ind_aidp_search 与普通工具返回 True。
+  - order: 3
+    action: 使用 monkeypatch 将 ENABLE_AIDP_KNOWLEDGE 置为 False，对同一组工具名再次调用函数，记录各返回值。
+    expected: 过滤规则与部署模式契约一致：AIDP 部署排除 knowledge_base_search，本地部署排除 aidp_search；独立 ind_aidp_search 在两种模式均可推荐，推荐目录不含冲突工具。
+  - order: 4
+    action: 以边界/异常输入（空字符串）调用函数，确认仅做布尔判断、不抛未处理异常。
+    expected: 无未处理异常，日志/Trace/报告中不出现 API Key、Token、密码或模型密钥。
+  - order: 5
+    action: 检查调用链中该函数在 _load_installed_resource_catalog 内用于过滤推荐目录，确认被排除的工具不会进入推荐目录。
+    expected: 无未处理异常，日志/Trace/报告中不出现 API Key、Token、密码或模型密钥。
+  - order: 6
+    action: 记录并核对每个分支断言结果，测试结束释放临时状态，确保可重复执行。
+    expected: 无未处理异常，日志/Trace/报告中不出现 API Key、Token、密码或模型密钥。
+  expected_results:
+  - ENABLE_AIDP_KNOWLEDGE 为 True 时：knowledge_base_search 返回 False（被过滤），ind_aidp_search、aidp_search 与普通工具返回 True（可推荐）。
+  - ENABLE_AIDP_KNOWLEDGE 为 False 时：aidp_search 返回 False（被过滤），knowledge_base_search、ind_aidp_search 与普通工具返回 True。
+  - 过滤规则与部署模式契约一致：AIDP 部署排除 knowledge_base_search，本地部署排除 aidp_search；独立 ind_aidp_search 在两种模式均可推荐，推荐目录不含冲突工具。
+  - 无未处理异常，日志/Trace/报告中不出现 API Key、Token、密码或模型密钥。
+  forbidden_side_effects: []
+  source:
+    legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
+    legacy_sheet: 02_测试用例基线
+    legacy_row: 403
+  unit_boundary: NL2Agent 资源推荐
+  inputs:
+  - '- ${NEXENT_TEST_HOME}/config/environment.yaml（仅本地测试环境参数）'
+  assertions:
+  - ENABLE_AIDP_KNOWLEDGE 为 True 时：knowledge_base_search 返回 False（被过滤），ind_aidp_search、aidp_search 与普通工具返回 True（可推荐）。
+  - ENABLE_AIDP_KNOWLEDGE 为 False 时：aidp_search 返回 False（被过滤），knowledge_base_search、ind_aidp_search 与普通工具返回 True。
+  - 过滤规则与部署模式契约一致：AIDP 部署排除 knowledge_base_search，本地部署排除 aidp_search；独立 ind_aidp_search 在两种模式均可推荐，推荐目录不含冲突工具。
+  - 无未处理异常，日志/Trace/报告中不出现 API Key、Token、密码或模型密钥。
+  acceptance:
+  - id: AC-01
+    description: 两种部署模式保持互斥知识库推荐且不隐藏独立 AIDP 搜索，目录过滤与边界输入正确。
+    steps: [1, 2, 3, 4, 5, 6]
+    expected_results: [1, 2, 3, 4]

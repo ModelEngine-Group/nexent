@@ -1,0 +1,63 @@
+schema_version: '1.0'
+stage: D1
+module: V5-BASELINE
+case:
+  case_id: UT-FE-AUTO-ED44D96A53903DD0
+  feature_id: F-112
+  business_rule_ids:
+  - F-112-RULE-01
+  title: 会话模型选择器按 connect_status=available 过滤并回退首个可用模型｜核心流程
+  type: FE-COMP
+  priority: P1
+  status: active
+  automation: automated
+  objective: 会话模型选择器按 connect_status=available 过滤并回退首个可用模型｜核心流程
+  preconditions:
+  - 本地依赖/组件测试环境可运行；不要求外部模型服务在线。
+  - 设置 NEXENT_TEST_HOME，目录不位于 Nexent Git 仓库内。
+  - 当次 run_id 已生成，所有新建资源名称带 run_id；测试基线固定为 develop 当前批次锁定的产品提交；执行时另记录实际被测commit。
+  - mock useModelList 与 usePublishedAgentList 返回固定模型/agent 数据，模型列表包含 connect_status 为 available 与 unavailable 两类。
+  test_data:
+    legacy_asset_declaration: '- ${NEXENT_TEST_HOME}/config/models.yaml
+
+      - ${NEXENT_TEST_HOME}/config/secrets.env'
+  steps:
+  - order: 1
+    action: 在组件测试环境加载 ChatInterface 组件，mock useModelList 返回固定模型列表：模型A connect_status=available、模型B connect_status=available、模型C
+      connect_status=unavailable；mock usePublishedAgentList 返回一个 agent，其 model_ids=[A,B,C]、model_names 与之一一对应。
+    expected: 可选项仅包含 connect_status=available 的模型，模型 C 被过滤。
+  - order: 2
+    action: 选择该 agent（触发 handleAgentSelectWithGreeting），断言可选项 agentModelIds 仅包含 A、B，connect_status 非 available 的模型 C 被过滤。
+    expected: 恢复会话时保留当前仍可用模型 B，不强制回退到第一个。
+  - order: 3
+    action: 恢复会话（restoreConversationAgent 或选中 agent 后触发的 useEffect），当前 selectedModelId=B 且仍可用时，断言保留为 B 而非重置为第一个 A。
+    expected: 当前模型不可用时回退为 selectableModels[0].id（模型A），全部不可用或 agent 不可用时置 null 且列表清空。
+  - order: 4
+    action: 将 B 置为不可用（availableModels 中 B 的 connect_status 改为非 available），重新触发过滤，断言 selectedModelId 回退为第一个可用模型 A。
+    expected: 测试过程无未处理异常，无真实模型调用，无密钥泄漏。
+  - order: 5
+    action: 将全部模型置为不可用，或 agent.is_available=false，断言 selectedModelId=null、agentModelIds 清空，不出现 undefined/NaN。
+    expected: 测试过程无未处理异常，无真实模型调用，无密钥泄漏。
+  - order: 6
+    action: 断言全程无真实模型网络调用，console/日志不含 API Key/Token/密钥。
+    expected: 测试过程无未处理异常，无真实模型调用，无密钥泄漏。
+  expected_results:
+  - 可选项仅包含 connect_status=available 的模型，模型 C 被过滤。
+  - 恢复会话时保留当前仍可用模型 B，不强制回退到第一个。
+  - 当前模型不可用时回退为 selectableModels[0].id（模型A），全部不可用或 agent 不可用时置 null 且列表清空。
+  - 测试过程无未处理异常，无真实模型调用，无密钥泄漏。
+  forbidden_side_effects: []
+  source:
+    legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
+    legacy_sheet: 02_测试用例基线
+    legacy_row: 455
+  unit_boundary: 模型选择器
+  inputs:
+  - '- ${NEXENT_TEST_HOME}/config/models.yaml
+
+    - ${NEXENT_TEST_HOME}/config/secrets.env'
+  assertions:
+  - 可选项仅包含 connect_status=available 的模型，模型 C 被过滤。
+  - 恢复会话时保留当前仍可用模型 B，不强制回退到第一个。
+  - 当前模型不可用时回退为 selectableModels[0].id（模型A），全部不可用或 agent 不可用时置 null 且列表清空。
+  - 测试过程无未处理异常，无真实模型调用，无密钥泄漏。

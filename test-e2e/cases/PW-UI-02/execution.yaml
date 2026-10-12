@@ -1,0 +1,13 @@
+schema_version: '1.0'
+case_id: PW-UI-02
+implementations:
+- framework: playwright
+  file: test.spec.ts
+  selector: PW-UI-02
+notes: V5 source binding migrated; runtime parity is not yet certified.
+preparation:
+  families: []
+  anchors: true
+  special_assets: false
+  d4_groups:
+  - chat

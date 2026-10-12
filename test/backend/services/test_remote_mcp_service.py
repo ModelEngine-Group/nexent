@@ -1391,6 +1391,49 @@ class TestGetMcpRecordByIdCustomHeaders(unittest.IsolatedAsyncioTestCase):
         self.assertIsNotNone(result)
         self.assertIsNone(result["custom_headers"])
 
+    @patch('backend.services.remote_mcp_service.get_remote_mcp_server_list')
+    @patch('backend.services.remote_mcp_service.get_mcp_record_by_id_and_tenant')
+    async def test_get_record_hidden_for_non_creator_private_mcp(
+        self, mock_get_record, mock_list
+    ):
+        """PRIVATE MCP detail must be hidden from users who cannot see it in the list."""
+        mock_get_record.return_value = {
+            "mcp_name": "private-service",
+            "mcp_server": "https://private.com/mcp",
+            "authorization_token": "Bearer token",
+            "custom_headers": None,
+        }
+        # List view applies visibility filtering; an empty result means the
+        # record is invisible to this user (e.g. PRIVATE group MCP).
+        mock_list.return_value = []
+
+        result = await get_mcp_record_by_id(
+            mcp_id=1, tenant_id="tenant123", user_id="user_a"
+        )
+
+        self.assertIsNone(result)
+        mock_list.assert_awaited_once_with(
+            tenant_id="tenant123", user_id="user_a", is_need_auth=False
+        )
+
+    @patch('backend.services.remote_mcp_service.get_remote_mcp_server_list')
+    @patch('backend.services.remote_mcp_service.get_mcp_record_by_id_and_tenant')
+    async def test_get_record_visible_without_user_id(
+        self, mock_get_record, mock_list
+    ):
+        """Legacy callers without user_id keep the old behavior (no visibility check)."""
+        mock_get_record.return_value = {
+            "mcp_name": "test-service",
+            "mcp_server": "https://test.com/mcp",
+            "authorization_token": "Bearer token123",
+            "custom_headers": None,
+        }
+
+        result = await get_mcp_record_by_id(mcp_id=1, tenant_id="tenant123")
+
+        self.assertIsNotNone(result)
+        mock_list.assert_not_awaited()
+
 
 # ============================================================================
 # check_mcp_health_and_update_db - custom_headers tests (lines 901-905, 910-911)

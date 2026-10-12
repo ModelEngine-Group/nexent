@@ -1,0 +1,71 @@
+schema_version: '1.0'
+stage: D3
+module: V5-BASELINE
+case:
+  case_id: AGT-AUTO-7A2120E630C381C7
+  feature_id: F-111
+  business_rule_ids:
+  - F-111-RULE-01
+  title: ENABLE_AIDP_KNOWLEDGE 开启时 nl2agent 装配 aidp_search 工具并注入 kds 白名单，权限变更下次 run 生效(无缓存)｜核心流程
+  type: AGENT-IT
+  priority: P0
+  status: active
+  automation: automated
+  objective: ENABLE_AIDP_KNOWLEDGE 开启时 nl2agent 装配 aidp_search 工具并注入 kds 白名单，权限变更下次 run 生效(无缓存)｜核心流程
+  preconditions:
+  - 本地集成测试环境可运行，ENABLE_AIDP_KNOWLEDGE=true 已开启，后端与 SDK 均已就绪。
+  - 设置 NEXENT_TEST_HOME，目录不位于 Nexent Git 仓库内。
+  - 当次 run_id 已生成，新建资源名称带 run_id；测试基线固定为 develop 当前批次锁定的产品提交；执行时另记录实际被测commit。
+  - 所需本地资产存在且校验通过：${NEXENT_TEST_HOME}/config/users.yaml；${NEXENT_TEST_HOME}/config/secrets.env；${NEXENT_TEST_HOME}/config/environment.yaml。
+  - users.yaml 中 SU/Admin/DevUserA/DevUserB 等隔离账号可登录，测试租户与权限记录可被清理。
+  - AIDP 服务凭据 AIDP_SERVER_URL/AIDP_API_KEY 已配置，AIDP 检索/权限/对象存储真实可达。
+  test_data:
+    legacy_asset_declaration: '- ${NEXENT_TEST_HOME}/config/users.yaml
+
+      - ${NEXENT_TEST_HOME}/config/secrets.env
+
+      - ${NEXENT_TEST_HOME}/config/environment.yaml'
+  steps:
+  - order: 1
+    action: 确认 ENABLE_AIDP_KNOWLEDGE=true 已开启，以 DevUserA 所在租户通过 POST /aidp-mgmt/knowledge-bases 创建知识库 KB-A，设置 ingroup_permission=READ_ONLY、group_ids
+      为 DevUserA 所在组，记录返回的 kds_id 并确认权限记录落库。
+    expected: ENABLE_AIDP_KNOWLEDGE 开启时，Agent 装配了名为 aidp_search 的检索工具。
+  - order: 2
+    action: 触发一次 Agent run（走 nl2agent 装配路径），记录装配给 Agent 的 aidp_search 工具及注入的 kds 白名单。
+    expected: 第一次 run 后，工具白名单包含 KB-A 的 kds_id，与 get_allowed_kds_list 的返回值一致。
+  - order: 3
+    action: 断言 aidp_search 工具已装配，且经 set_allowed_kds 注入的 kds 白名单等于权限服务 get_allowed_kds_list(DevUserA) 的返回值，包含 KB-A 的 kds_id。
+    expected: 权限改为 PRIVATE 后，第二次 run 注入的白名单不再包含 KB-A，证明白名单每次 run 重算、无缓存。
+  - order: 4
+    action: 通过 PATCH /aidp-mgmt/aidp-permissions/{KB-A} 将 KB-A 权限改为 PRIVATE（或将其 group_ids 移出 DevUserA 所在组），确认权限先落库再执行元数据同步。
+    expected: 白名单为空集时，检索被 _filter_by_whitelist 兜底过滤为空，不产生越权请求。
+  - order: 5
+    action: 再次以 DevUserA 触发第二次 Agent run，断言注入的 kds 白名单不再包含 KB-A，证明每次 run 重算白名单、无缓存。
+    expected: 权限变更先落库再同步元数据，API 返回与日志不泄露 AIDP api_key。
+  - order: 6
+    action: 校验兜底：调用 set_allowed_kds([]) 后，_filter_by_whitelist 对任意 kds 列表返回空集，确认不会越权检索 KB-A。
+    expected: 权限变更先落库再同步元数据，API 返回与日志不泄露 AIDP api_key。
+  - order: 7
+    action: 清理：删除新建 KB-A 及其权限记录，确保用例可重复执行。
+    expected: 权限变更先落库再同步元数据，API 返回与日志不泄露 AIDP api_key。
+  expected_results:
+  - ENABLE_AIDP_KNOWLEDGE 开启时，Agent 装配了名为 aidp_search 的检索工具。
+  - 第一次 run 后，工具白名单包含 KB-A 的 kds_id，与 get_allowed_kds_list 的返回值一致。
+  - 权限改为 PRIVATE 后，第二次 run 注入的白名单不再包含 KB-A，证明白名单每次 run 重算、无缓存。
+  - 白名单为空集时，检索被 _filter_by_whitelist 兜底过滤为空，不产生越权请求。
+  - 权限变更先落库再同步元数据，API 返回与日志不泄露 AIDP api_key。
+  forbidden_side_effects: []
+  source:
+    legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
+    legacy_sheet: 02_测试用例基线
+    legacy_row: 520
+  integration_boundary:
+  - AIDP_REQUIRED：依赖真实 AIDP 服务（检索/权限/对象存储），跨服务装配验证 aidp_search 工具与 kds 白名单；不依赖公网 LLM。
+  observations:
+  - ENABLE_AIDP_KNOWLEDGE 开启时，Agent 装配了名为 aidp_search 的检索工具。
+  - 第一次 run 后，工具白名单包含 KB-A 的 kds_id，与 get_allowed_kds_list 的返回值一致。
+  - 权限改为 PRIVATE 后，第二次 run 注入的白名单不再包含 KB-A，证明白名单每次 run 重算、无缓存。
+  - 白名单为空集时，检索被 _filter_by_whitelist 兜底过滤为空，不产生越权请求。
+  - 权限变更先落库再同步元数据，API 返回与日志不泄露 AIDP api_key。
+  cleanup:
+  - pytest 集成测试 JUnit/XML、Agent run 日志、工具装配与 kds 白名单断言输出、stdout/stderr、失败堆栈。

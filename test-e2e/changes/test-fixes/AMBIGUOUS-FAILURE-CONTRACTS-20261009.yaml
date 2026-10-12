@@ -1,0 +1,21 @@
+schema_version: '1.0'
+change:
+  change_id: AMBIGUOUS-FAILURE-CONTRACTS-20261009
+  change_type: test-fix
+  title: Correct provider fault injection, duplicate contracts, task stages and STT transport
+  description: >-
+    Use a case-owned permanent 503 provider with request receipts, without tenant
+    default replacement. Verify duplicate detection and unavailable reasons, not
+    an unsupported create rejection. Resolve only the submitted Celery chain's
+    parents. Decode WAV and resample to the PCM16 transport contract. Preserve
+    product failure assertions and real-provider speech coverage.
+  affected_features:
+    existing: [F-055, F-043, F-038, F-131]
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing: []
+    added: []
+    modified: [AGT-015, API-058, CTR-012, API-AUTO-2B3A078E3CD1B151]
+    retired: []

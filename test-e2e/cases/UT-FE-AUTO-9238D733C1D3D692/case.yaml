@@ -1,0 +1,64 @@
+schema_version: '1.0'
+stage: D1
+module: V5-BASELINE
+case:
+  case_id: UT-FE-AUTO-9238D733C1D3D692
+  feature_id: F-018
+  business_rule_ids:
+  - F-018-RULE-01
+  title: ChatTopNavContent 顶栏 logo alt 与应用名称文本使用 APP_DISPLAY_NAME 常量正确渲染｜核心流程
+  type: FE-COMP
+  priority: P2
+  status: active
+  automation: automated
+  objective: ChatTopNavContent 顶栏 logo alt 与应用名称文本使用 APP_DISPLAY_NAME 常量正确渲染｜核心流程
+  preconditions:
+  - 本地依赖/组件测试环境可运行；不要求外部模型服务在线。
+  - 设置 NEXENT_TEST_HOME，目录不位于 Nexent Git 仓库内。
+  - 当次 run_id 已生成，所有新建资源名称带 run_id；测试基线固定为 develop 当前批次锁定的产品提交；执行时另记录实际被测commit。
+  - 所需本地资产存在且校验通过：${NEXENT_TEST_HOME}/config/environment.yaml（仅本地测试环境参数）
+  test_data:
+    legacy_asset_declaration: '- ${NEXENT_TEST_HOME}/config/environment.yaml（仅本地测试环境参数）'
+  steps:
+  - order: 1
+    action: 在组件测试环境加载 ChatTopNavContent 组件，mock useRouter（返回带 push 的 router）、useConfig（提供 appConfig.avatarUri、getAppAvatarUrl
+      返回固定 URL）、useTranslation（i18n.language）等依赖并注入最小必要数据。
+    expected: 顶栏 logo <img alt> 等于 APP_DISPLAY_NAME 常量值。
+  - order: 2
+    action: 首次渲染后读取顶栏 logo <img> 元素，断言其 alt 属性值等于导入自 @/const/modelConfig 的 APP_DISPLAY_NAME 常量值。
+    expected: 应用名称 span 文本等于 APP_DISPLAY_NAME 常量值。
+  - order: 3
+    action: 读取应用名称 <span> 元素文本，断言等于 APP_DISPLAY_NAME 常量值，且不随 appConfig.appName 变化。
+    expected: 文本与 alt 不依赖 appConfig.appName，修改 appName 不改变渲染结果。
+  - order: 4
+    action: 断言应用名称 span 仍保留渐变样式（bg-clip-text text-transparent）与 16px 字号，不因常量替换而失效。
+    expected: 点击容器触发 router.push(/${i18n.language})。
+  - order: 5
+    action: 使用真实用户事件点击容器，断言 router.push 被调用且目标为 /${i18n.language}。
+    expected: 测试过程无未处理异常，日志、DOM 中不出现明文密钥。
+  - order: 6
+    action: 将 mock 的 appConfig.appName 设置为不同字符串，重新渲染，断言文本与 alt 仍为 APP_DISPLAY_NAME 常量值（验证已脱离 appName 依赖）。
+    expected: 测试过程无未处理异常，日志、DOM 中不出现明文密钥。
+  - order: 7
+    action: 卸载组件并清理 mock，确保用例可重复执行。
+    expected: 测试过程无未处理异常，日志、DOM 中不出现明文密钥。
+  expected_results:
+  - 顶栏 logo <img alt> 等于 APP_DISPLAY_NAME 常量值。
+  - 应用名称 span 文本等于 APP_DISPLAY_NAME 常量值。
+  - 文本与 alt 不依赖 appConfig.appName，修改 appName 不改变渲染结果。
+  - 点击容器触发 router.push(/${i18n.language})。
+  - 测试过程无未处理异常，日志、DOM 中不出现明文密钥。
+  forbidden_side_effects: []
+  source:
+    legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
+    legacy_sheet: 02_测试用例基线
+    legacy_row: 440
+  unit_boundary: 导航/顶栏
+  inputs:
+  - '- ${NEXENT_TEST_HOME}/config/environment.yaml（仅本地测试环境参数）'
+  assertions:
+  - 顶栏 logo <img alt> 等于 APP_DISPLAY_NAME 常量值。
+  - 应用名称 span 文本等于 APP_DISPLAY_NAME 常量值。
+  - 文本与 alt 不依赖 appConfig.appName，修改 appName 不改变渲染结果。
+  - 点击容器触发 router.push(/${i18n.language})。
+  - 测试过程无未处理异常，日志、DOM 中不出现明文密钥。

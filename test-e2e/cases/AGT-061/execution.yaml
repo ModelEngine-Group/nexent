@@ -1,0 +1,16 @@
+schema_version: '1.0'
+case_id: AGT-061
+implementations:
+- framework: pytest
+  file: test.py
+  selector: AGT-061
+- framework: pytest
+  file: test-e2e/infra/automation/d3/scenarios/scenario_evaluation_scenarios.py
+  selector: AGT-061
+notes: V5 source binding migrated; runtime parity is not yet certified.
+preparation:
+  families:
+  - basic_agent
+  anchors: true
+  special_assets: false
+  d4_groups: []

@@ -1,0 +1,15 @@
+schema_version: '1.0'
+module:
+  id: V5-BASELINE
+  name: Migrated V5 baseline
+feature:
+  feature_id: F-163
+  name: file chooser/drag-drop/progress/cancel/download/preview
+  status: active
+  description: '前端与全局UI / 上传与下载: file chooser/drag-drop/progress/cancel/download/preview'
+  business_rules:
+  - rule_id: F-163-RULE-01
+    description: file chooser/drag-drop/progress/cancel/download/preview
+  required_test_stages: []
+  source:
+    notes: Migrated from V5 01_代码功能清单 without changing the functional description.

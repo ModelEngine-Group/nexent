@@ -1,0 +1,16 @@
+schema_version: '1.0'
+module:
+  id: V5-BASELINE
+  name: Migrated V5 baseline
+feature:
+  feature_id: F-148
+  name: 请求覆盖DB、未知参数400、per-agent/tool结构
+  status: active
+  description: 'Northbound API / Tool params: 请求覆盖DB、未知参数400、per-agent/tool结构'
+  business_rules:
+  - rule_id: F-148-RULE-01
+    description: 请求覆盖DB、未知参数400、per-agent/tool结构
+  required_test_stages:
+  - D3
+  source:
+    notes: Migrated from V5 01_代码功能清单 without changing the functional description.

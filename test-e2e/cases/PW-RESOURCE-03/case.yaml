@@ -1,0 +1,73 @@
+schema_version: '1.0'
+stage: D4
+module: V5-BASELINE
+case:
+  case_id: PW-RESOURCE-03
+  feature_id: V5-PW-RESOURCE-03
+  business_rule_ids:
+  - V5-PW-RESOURCE-03-RULE-01
+  title: USER/Admin/SU菜单与直接URL权限矩阵
+  type: E2E
+  priority: P0
+  status: active
+  automation: automated
+  objective: 证明前端显隐和真实路由保护同时存在。
+  preconditions:
+  - 三类storageState
+  - 两个租户各有唯一资源
+  test_data:
+    legacy_asset_declaration: config/users.yaml
+  steps:
+  - order: 1
+    action: USER登录记录管理菜单是否可见。
+    expected: 菜单/按钮显隐正确，direct URL不能绕过。
+  - order: 2
+    action: 直接goto USER无权访问的管理URL，记录最终URL/错误/重定向。
+    expected: 跨租户资源不泄露。
+  - order: 3
+    action: 尝试可达的危险写操作；正确隐藏则记录隐藏。
+    expected: 角色刷新无旧权限缓存。
+  - order: 4
+    action: Tenant Admin重复导航和直接URL检查。
+    expected: 完整IDOR矩阵由SEC。
+  - order: 5
+    action: SU重复并确认平台入口可见。
+    expected: 完整IDOR矩阵由SEC。
+  - order: 6
+    action: Tenant A身份尝试通过URL/query定位Tenant B已知资源。
+    expected: 完整IDOR矩阵由SEC。
+  - order: 7
+    action: 刷新各角色页面，确认无旧权限缓存泄露。
+    expected: 完整IDOR矩阵由SEC。
+  expected_results:
+  - 菜单/按钮显隐正确，direct URL不能绕过。
+  - 跨租户资源不泄露。
+  - 角色刷新无旧权限缓存。
+  - 完整IDOR矩阵由SEC。
+  forbidden_side_effects: []
+  source:
+    legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
+    legacy_sheet: 03_Playwright_Journey
+    legacy_row: 9
+  actor: Nexent browser user
+  journey:
+  - USER登录记录管理菜单是否可见。
+  - 直接goto USER无权访问的管理URL，记录最终URL/错误/重定向。
+  - 尝试可达的危险写操作；正确隐藏则记录隐藏。
+  - Tenant Admin重复导航和直接URL检查。
+  - SU重复并确认平台入口可见。
+  - Tenant A身份尝试通过URL/query定位Tenant B已知资源。
+  - 刷新各角色页面，确认无旧权限缓存泄露。
+  final_business_result:
+  - 菜单/按钮显隐正确，direct URL不能绕过。
+  - 跨租户资源不泄露。
+  - 角色刷新无旧权限缓存。
+  - 完整IDOR矩阵由SEC。
+  failure_evidence:
+  - '${NEXENT_TEST_HOME}/runs/{run_id}/playwright/PW-RESOURCE-03/
+
+    - screenshot.png / trace.zip / video.webm
+
+    - console.log / network.har / failure.json
+
+    - 涉及协议时关联 wire/*.jsonl；涉及下载时保留 downloads/'

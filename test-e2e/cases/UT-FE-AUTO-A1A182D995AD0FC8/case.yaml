@@ -1,0 +1,64 @@
+schema_version: '1.0'
+stage: D1
+module: V5-BASELINE
+case:
+  case_id: UT-FE-AUTO-A1A182D995AD0FC8
+  feature_id: F-115
+  business_rule_ids:
+  - F-115-RULE-01
+  title: ENABLE_CITATION_CLICK_HIGHLIGHT 开关门控引用角标点击定位与片段高亮｜核心流程
+  type: FE-COMP
+  priority: P1
+  status: active
+  automation: automated
+  objective: ENABLE_CITATION_CLICK_HIGHLIGHT 开关门控引用角标点击定位与片段高亮｜核心流程
+  preconditions:
+  - 本地前端组件测试环境可运行（React Testing Library / Vitest 或等价框架），不要求后端、数据库或外部模型服务在线。
+  - 测试基线固定为 develop 当前批次锁定的产品提交；执行时另记录实际被测 commit。
+  - 通过模块 mock 可把 @/const/citation 的 ENABLE_CITATION_CLICK_HIGHLIGHT 在 false（默认）与 true 之间切换。
+  - 已 mock SourcesPanelProvider，可捕获 open({messageId, groupId, sources, images, selectedCitationKey, citationContext}) 的调用参数。
+  - 固定 fixture：含一条助手消息，其 markdown 文本包含引用标记 [[a1]]，消息 source part 解析出 citeIndex=1、toolSign='a'、text（来源片段）与 retrievalHighlightTerms。
+  test_data:
+    legacy_asset_declaration: 无外部本地资产；引用来源数据以组件测试 fixture 注入，SourcesPanel 上下文以 mock 提供。
+  steps:
+  - order: 1
+    action: 以模块 mock 将 ENABLE_CITATION_CLICK_HIGHLIGHT 设为 false（默认值），渲染包含引用标记 [[a1]] 的助手消息 MarkdownText。
+    expected: 开关为 false（默认）：点击引用角标仍选中并定位到对应来源卡（selectedCitationKey='a1'），但 citationContext 为 undefined，不产生引用上下文派生的句子级高亮术语。
+  - order: 2
+    action: 模拟用户点击引用角标按钮（data-citation-marker 且 data-citekey='a1'）。
+    expected: 开关为 true：点击引用角标选中来源卡，且 citationContext 为标记前一整句非空文本，来源卡中与 citationContext 重叠的句子以 <mark> 渲染高亮。
+  - order: 3
+    action: 捕获 SourcesPanelProvider 的 open 调用，断言 payload.selectedCitationKey === 'a1'，且 payload.citationContext 为 undefined。
+    expected: 开关切换仅影响高亮术语，不影响来源卡选中与滚动定位；测试过程无未处理异常、无伪成功。
+  - order: 4
+    action: 以该 payload 渲染 SourcesPanel，断言对应来源卡 selected === true 并滚动定位到该来源卡，highlightTerms 仅由 retrievalHighlightTerms 组成、不含引用上下文派生术语。
+    expected: 开关切换仅影响高亮术语，不影响来源卡选中与滚动定位；测试过程无未处理异常、无伪成功。
+  - order: 5
+    action: 将 ENABLE_CITATION_CLICK_HIGHLIGHT 的模块 mock 改为 true，重新渲染并再次点击同一引用角标。
+    expected: 开关切换仅影响高亮术语，不影响来源卡选中与滚动定位；测试过程无未处理异常、无伪成功。
+  - order: 6
+    action: 断言本次 open 调用的 payload.citationContext 等于引用标记 [[a1]] 前一整句文本（getCitationScopeText 结果）且非空。
+    expected: 开关切换仅影响高亮术语，不影响来源卡选中与滚动定位；测试过程无未处理异常、无伪成功。
+  - order: 7
+    action: 以该 payload 渲染 SourcesPanel，断言 highlightTerms = mergeHighlightTerms(retrievalHighlightTerms, extractHighlightTerms(citationContext,
+      item.text))，且来源卡中与 citationContext 重叠的句子被 HighlightedChunkText 渲染为 <mark> 高亮。
+    expected: 开关切换仅影响高亮术语，不影响来源卡选中与滚动定位；测试过程无未处理异常、无伪成功。
+  - order: 8
+    action: 对比开关 false/true 两次路径，断言 selectedCitationKey 定位行为保持一致，仅引用上下文派生高亮术语随开关变化。
+    expected: 开关切换仅影响高亮术语，不影响来源卡选中与滚动定位；测试过程无未处理异常、无伪成功。
+  expected_results:
+  - 开关为 false（默认）：点击引用角标仍选中并定位到对应来源卡（selectedCitationKey='a1'），但 citationContext 为 undefined，不产生引用上下文派生的句子级高亮术语。
+  - 开关为 true：点击引用角标选中来源卡，且 citationContext 为标记前一整句非空文本，来源卡中与 citationContext 重叠的句子以 <mark> 渲染高亮。
+  - 开关切换仅影响高亮术语，不影响来源卡选中与滚动定位；测试过程无未处理异常、无伪成功。
+  forbidden_side_effects: []
+  source:
+    legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
+    legacy_sheet: 02_测试用例基线
+    legacy_row: 443
+  unit_boundary: 引用高亮
+  inputs:
+  - 无外部本地资产；引用来源数据以组件测试 fixture 注入，SourcesPanel 上下文以 mock 提供。
+  assertions:
+  - 开关为 false（默认）：点击引用角标仍选中并定位到对应来源卡（selectedCitationKey='a1'），但 citationContext 为 undefined，不产生引用上下文派生的句子级高亮术语。
+  - 开关为 true：点击引用角标选中来源卡，且 citationContext 为标记前一整句非空文本，来源卡中与 citationContext 重叠的句子以 <mark> 渲染高亮。
+  - 开关切换仅影响高亮术语，不影响来源卡选中与滚动定位；测试过程无未处理异常、无伪成功。

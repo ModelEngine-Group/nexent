@@ -1,0 +1,52 @@
+schema_version: '1.0'
+stage: D1
+module: CHAT-MESSAGE
+case:
+  case_id: CMSR-D1-003
+  feature_id: CMSR-005
+  requirement_ids:
+  - CMSR-005
+  business_rule_ids:
+  - CMSR-RULE-014
+  - CMSR-RULE-016
+  title: CoreAgent commits streamed valid semantic repair
+  type: SDK-UT
+  priority: P0
+  status: active
+  automation: automated
+  objective: A protocol-invalid first attempt rolls back while its single preceding step label survives and the corrected
+    result streams and commits.
+  preconditions:
+  - Protocol repair retry is enabled for the controlled Agent.
+  - A controlled model yields an invalid response then a pausable valid code action at step one.
+  test_data:
+    profile: mock
+    sequence: invalid code, rollback, corrected code chunks, commit, parse
+  steps:
+  - order: 1
+    action: Begin step one and return protocol-invalid model content.
+    expected: Exactly one step label precedes begin; the attempt rolls back and one repair is scheduled.
+  - order: 2
+    action: Pause the valid repair after its first safe chunk.
+    expected: That chunk is visible before model completion.
+  - order: 3
+    action: Complete the repair and classify it.
+    expected: Its attempt commits and a single parse follows.
+  expected_results:
+  - Corrected content is streamed and committed.
+  - Only the corrected action is executed.
+  - Lifecycle logs identify the repair without content.
+  forbidden_side_effects:
+  - No failed content after rollback.
+  - No repair instruction in user output.
+  - No suppressed successful stream.
+  unit_boundary: CoreAgent semantic repair and deferred model attempt lifecycle
+  inputs:
+  - step one
+  - invalid model content
+  - valid streamed <code> action
+  assertions:
+  - Step label occurs before both model attempts and only once.
+  - Successful repair does not set stream suppression.
+  - Corrected attempt commits once.
+  - Invalid attempt rolls back once.

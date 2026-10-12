@@ -53,6 +53,7 @@ from services.conversation_management_service import (
     save_conversation_user,
     create_new_conversation,
     generate_conversation_title_service,
+    get_conversation_service,
     update_conversation_title as update_conversation_title_service,
 )
 from services.model_management_service import list_models_for_tenant
@@ -418,6 +419,10 @@ async def start_streaming_chat(
 
         internal_conversation_id = conversation_id
 
+        # Authorize before reading history or persisting the incoming message.
+        if get_conversation_service(conversation_id, ctx.user_id, ctx.tenant_id) is None:
+            raise PermissionError("Conversation is not accessible to the current identity")
+
         # Get history according to internal_conversation_id
         history_resp = await get_conversation_history_internal(ctx, internal_conversation_id)
         normalized_attachments = _normalize_northbound_attachments(
@@ -472,6 +477,8 @@ async def start_streaming_chat(
     except UnauthorizedError as _:
         raise UnauthorizedError("Cannot authenticate.")
     except AppException:
+        raise
+    except PermissionError:
         raise
     except Exception as e:
         raise Exception(f"Failed to start streaming chat for conversation_id {conversation_id}: {str(e)}")
@@ -563,7 +570,8 @@ async def list_configured_models(ctx: NorthboundContext) -> Dict[str, Any]:
 
 async def get_conversation_history_internal(ctx: NorthboundContext, conversation_id: int) -> Dict[str, Any]:
     """Internal helper to get conversation history without logging."""
-    history = get_conversation_messages(conversation_id)
+    conversation = get_conversation_service(conversation_id, ctx.user_id, ctx.tenant_id)
+    history = get_conversation_messages(conversation_id) if conversation is not None else []
     result = []
     for message in history:
         # Parse minio_files from database (stored as JSON string)

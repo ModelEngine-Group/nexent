@@ -1,0 +1,69 @@
+schema_version: '1.0'
+stage: D1
+module: V5-BASELINE
+case:
+  case_id: UT-SDK-AUTO-70BDFE501B522B51
+  feature_id: F-186
+  business_rule_ids:
+  - F-186-RULE-01
+  title: wait_until_started 队列超时原子取消并抛 ThreadQueueTimedOut、已启动/终态任务不受影响｜核心流程
+  type: SDK-UT
+  priority: P1
+  status: active
+  automation: automated
+  objective: wait_until_started 队列超时原子取消并抛 ThreadQueueTimedOut、已启动/终态任务不受影响｜核心流程
+  preconditions:
+  - 本地依赖/组件测试环境可运行；不要求外部模型服务在线。
+  - 设置 NEXENT_TEST_HOME，目录不位于 Nexent Git 仓库内。
+  - 当次 run_id 已生成；测试基线固定为 develop 当前批次锁定的产品提交；执行时另记录实际被测commit。
+  - SDK 并发管理框架源码可用：sdk/nexent/core/concurrency/ 下模块可正常导入。
+  test_data:
+    legacy_asset_declaration: 无（纯逻辑单测，仅需本地测试环境，不依赖外部模型或固定文件资产）
+  steps:
+  - order: 1
+    action: 在本地工作区读取与“wait_until_started 队列超时原子取消并抛 ThreadQueueTimedOut”相关的固定 fixture/配置；测试代码不得读取生产凭据。
+    expected: 队列截止时间到期且任务仍未启动时，wait_until_started 抛出 ThreadQueueTimedOut，且异常的 lane 与 timeout_seconds 与 LanePolicy 一致。
+  - order: 2
+    action: 导入 sdk/nexent/core/concurrency 的 ThreadManager、LanePolicy、ManagedTaskSpec、ExecutionState、ThreadQueueTimedOut。
+    expected: 被取消的 execution 状态迁移为 TIMED_OUT，terminal_reason 为“queue deadline exceeded before start”，无残留活动执行。
+  - order: 3
+    action: 构造 ThreadManager(service_name, lane_policies) 并 start()，其中目标 Lane 的 LanePolicy 设置 queue_timeout_seconds 为固定小值（如
+      0.05s），max_workers 设置使后续任务进入 QUEUED 而非立即启动。
+    expected: 已启动（started_event 已设置）或 STARTING/RUNNING/STOP_REQUESTED/SUCCEEDED 状态的 execution，wait_until_started 立即返回原 execution，不抛异常、状态不变。
+  - order: 4
+    action: 通过 submit() 提交一个长期占用唯一 worker 槽位的任务，再提交后续任务使其保持 QUEUED 状态，记录该 execution 及其 queue_deadline_monotonic。
+    expected: queue_timeout_seconds=None 时不会抛出 ThreadQueueTimedOut。
+  - order: 5
+    action: 在 asyncio 事件循环内驱动 await wait_until_started(queued_execution)，等待队列截止时间到期。
+    expected: 日志/Trace/报告中不出现明文 API Key/Token/Password/模型密钥。
+  - order: 6
+    action: 断言到期且未启动时原子取消：捕获 ThreadQueueTimedOut，校验异常的 lane 与 timeout_seconds 与策略一致，并确认 execution.state 迁移为 TIMED_OUT 且 terminal_reason
+      记录队列超时。
+    expected: 日志/Trace/报告中不出现明文 API Key/Token/Password/模型密钥。
+  - order: 7
+    action: 对已设置 started_event 或状态处于 STARTING/RUNNING/STOP_REQUESTED/SUCCEEDED 的 execution 调用 wait_until_started，断言立即返回原 execution
+      且不抛异常、不改变状态。
+    expected: 日志/Trace/报告中不出现明文 API Key/Token/Password/模型密钥。
+  - order: 8
+    action: 对 queue_timeout_seconds=None 的 Lane 任务调用 wait_until_started，断言不会因队列截止时间抛出 ThreadQueueTimedOut；结束后 shutdown 释放线程与临时对象，确保可重复执行。
+    expected: 日志/Trace/报告中不出现明文 API Key/Token/Password/模型密钥。
+  expected_results:
+  - 队列截止时间到期且任务仍未启动时，wait_until_started 抛出 ThreadQueueTimedOut，且异常的 lane 与 timeout_seconds 与 LanePolicy 一致。
+  - 被取消的 execution 状态迁移为 TIMED_OUT，terminal_reason 为“queue deadline exceeded before start”，无残留活动执行。
+  - 已启动（started_event 已设置）或 STARTING/RUNNING/STOP_REQUESTED/SUCCEEDED 状态的 execution，wait_until_started 立即返回原 execution，不抛异常、状态不变。
+  - queue_timeout_seconds=None 时不会抛出 ThreadQueueTimedOut。
+  - 日志/Trace/报告中不出现明文 API Key/Token/Password/模型密钥。
+  forbidden_side_effects: []
+  source:
+    legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
+    legacy_sheet: 02_测试用例基线
+    legacy_row: 468
+  unit_boundary: 并发管理
+  inputs:
+  - 无（纯逻辑单测，仅需本地测试环境，不依赖外部模型或固定文件资产）
+  assertions:
+  - 队列截止时间到期且任务仍未启动时，wait_until_started 抛出 ThreadQueueTimedOut，且异常的 lane 与 timeout_seconds 与 LanePolicy 一致。
+  - 被取消的 execution 状态迁移为 TIMED_OUT，terminal_reason 为“queue deadline exceeded before start”，无残留活动执行。
+  - 已启动（started_event 已设置）或 STARTING/RUNNING/STOP_REQUESTED/SUCCEEDED 状态的 execution，wait_until_started 立即返回原 execution，不抛异常、状态不变。
+  - queue_timeout_seconds=None 时不会抛出 ThreadQueueTimedOut。
+  - 日志/Trace/报告中不出现明文 API Key/Token/Password/模型密钥。

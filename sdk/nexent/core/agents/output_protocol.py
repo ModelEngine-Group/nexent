@@ -99,7 +99,8 @@ _FINAL_ENVELOPE_RE = re.compile(r"\A<final_answer>(?P<body>[\s\S]*)</final_answe
 _TAG_RE = re.compile(r"</?[A-Za-z][^<>]{0,255}>")
 _MODEL_CONTROL_TOKEN_RE = re.compile(r"<\|[^<>]{1,255}\|>")
 _CODE_MARKER_RE = re.compile(r"</?code>")
-_THINK_RE = re.compile(r"\A<think>[\s\S]*</think>\Z")
+_THINK_BLOCK_RE = re.compile(r"<think>[\s\S]*?</think>")
+_THINK_MARKER_RE = re.compile(r"</?think>")
 _CODE_OPEN = "<code>"
 _CODE_CLOSE = "</code>"
 _PYTHON_DATA_TOKEN_TYPES = {
@@ -254,13 +255,28 @@ def _validate_reasoning_prefix(
     if not has_meaningful_visible_content(prefix):
         return
 
-    if "<think>" in prefix or "</think>" in prefix:
-        if not _THINK_RE.fullmatch(prefix) or prefix.count("<think>") != 1 or prefix.count("</think>") != 1:
-            _raise_protocol_error(ProtocolErrorReason.MALFORMED_ACTION, protocol, logger)
-        return
-
+    # Thinking is descriptive prefix data, not an executable envelope. Preserve
+    # accepted complete spans, then tolerate remaining unbalanced/nested markers.
+    # Only inspect the prefix: tags inside Python data must remain untouched.
+    prefix = _THINK_BLOCK_RE.sub("", prefix)
+    prefix = _THINK_MARKER_RE.sub("", prefix)
     if _TAG_RE.search(prefix) or _MODEL_CONTROL_TOKEN_RE.search(prefix):
         _raise_protocol_error(ProtocolErrorReason.MALFORMED_ACTION, protocol, logger)
+
+
+def is_raw_final_answer_candidate(output: Any) -> bool:
+    """Exclude failed protocol-marked output from the exhaustion-only fallback."""
+
+    text = strip_protocol_padding(output)
+    return (
+        has_meaningful_visible_content(text)
+        and not _TAG_RE.search(text)
+        and not _MODEL_CONTROL_TOKEN_RE.search(text)
+        and not any(
+            marker in text.lower()
+            for marker in ("<think", "</think", "<code", "</code", "<final_answer", "</final_answer", "```<run")
+        )
+    )
 
 
 def _parse_code_action(
@@ -325,7 +341,10 @@ def _classify_code_action(
     if code_action is not None:
         return code_action
 
-    run_match = _RUN_RE.fullmatch(text)
+    run_start = text.find("```<run>")
+    if run_start >= 0:
+        _validate_reasoning_prefix(text[:run_start], protocol=protocol, logger=logger)
+    run_match = _RUN_RE.fullmatch(text[run_start:]) if run_start >= 0 else None
     if run_match and text.count("```<run>") == 1:
         return _parse_executable_action(
             run_match.group("body"),
@@ -394,6 +413,10 @@ def classify_model_output(
         or "<final_answer>" in text
         or "</final_answer>" in text
     ):
+        final_start = text.find("<final_answer>")
+        if final_start >= 0:
+            _validate_reasoning_prefix(text[:final_start], protocol=protocol, logger=logger)
+            text = text[final_start:]
         return _classify_final_envelope(text, protocol=protocol, logger=logger)
 
     # The platform prompt explicitly requests Think:/Code: (or 思考：/代码：).

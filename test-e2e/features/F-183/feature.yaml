@@ -1,0 +1,16 @@
+schema_version: '1.0'
+module:
+  id: V5-BASELINE
+  name: Migrated V5 baseline
+feature:
+  feature_id: F-183
+  name: 上下文预算 V2：解析有效输入上限/不确定性预留/压缩触发与目标阈值，V2 指纹与遗留 V1 载荷迁移，DB 列重命名/合并与历史回填
+  status: active
+  description: 'SDK与基础设施 / 上下文预算: 上下文预算 V2：解析有效输入上限/不确定性预留/压缩触发与目标阈值，V2 指纹与遗留 V1 载荷迁移，DB 列重命名/合并与历史回填'
+  business_rules:
+  - rule_id: F-183-RULE-01
+    description: 上下文预算 V2：解析有效输入上限/不确定性预留/压缩触发与目标阈值，V2 指纹与遗留 V1 载荷迁移，DB 列重命名/合并与历史回填
+  required_test_stages:
+  - D1
+  source:
+    notes: Migrated from V5 01_代码功能清单 without changing the functional description.

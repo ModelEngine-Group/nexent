@@ -1,0 +1,76 @@
+schema_version: '1.0'
+stage: D3
+module: V5-BASELINE
+case:
+  case_id: AGT-AUTO-BCDD880DF58AECED
+  feature_id: F-069
+  business_rule_ids:
+  - F-069-RULE-01
+  title: 记忆预检索 run_blocking 并发执行与外部 Provider 搜索失败降级不影响 Agent 启动
+  type: AGENT-IT
+  priority: P1
+  status: active
+  automation: automated
+  objective: 记忆预检索 run_blocking 并发执行与外部 Provider 搜索失败降级不影响 Agent 启动
+  preconditions:
+  - 本地依赖/组件测试环境可运行；不要求外部模型服务在线。
+  - 设置 NEXENT_TEST_HOME，目录不位于 Nexent Git 仓库内。
+  - 当次 run_id 已生成，所有新建资源名称带 run_id；测试基线固定为 develop 473b65268ba8cda3db53be735f97678e214c583b；执行时另记录实际被测commit。
+  - 所需本地资产存在且校验通过：${NEXENT_TEST_HOME}/config/environment.yaml（仅本地测试环境参数）。
+  - 测试租户记忆开关 memory_switch 开启且 embedding 已配置；外部记忆 provider 桩可注入以模拟搜索失败。
+  test_data:
+    legacy_asset_declaration: '- ${NEXENT_TEST_HOME}/config/environment.yaml（仅本地测试环境参数）
+
+      - 外部记忆 provider 桩（可令 search_all_enabled 抛异常）'
+  steps:
+  - order: 1
+    action: 在本地工作区准备记忆预检索集成测试环境，注入固定 tenant_id/user_id/agent_id 与开启 memory_switch 的 memory_context；测试代码不得读取生产凭据。
+    expected: create_agent_config 在记忆预检索阶段通过 run_blocking("memory-presearch", lane="model-tool-io", owner="runtime") 并发执行，功能结果与代码契约一致，测试过程无未处理异常。
+  - order: 2
+    action: 直接调用 backend/agents/create_agent_info.py 的 create_agent_config 构造最小有效 Agent 配置，记录记忆预检索是否经 run_blocking("memory-presearch",
+      lane="model-tool-io", owner="runtime") 并发执行及返回结果。
+    expected: 外部记忆 provider 搜索失败时记录 event=external_provider_search_failed 并降级为 external_results=None，长短期记忆与预检索继续执行，不阻断 Agent
+      配置构建。
+  - order: 3
+    action: 正常路径：令外部记忆 provider search_all_enabled 返回固定结果，断言 external_results 注入 fixed_search_tool 后 pre_run_tool_events 中出现
+      search_memory 事件及固定搜索结果。
+    expected: 正常与降级路径均返回完整 AgentConfig，Agent 启动字段完整，无半写入或重复副作用。
+  - order: 4
+    action: 降级路径：注入 provider 桩令 search_all_enabled 抛异常，重新执行 create_agent_config，断言日志出现 event=external_provider_search_failed
+      且 external_results 为 None，长短期记忆与预检索仍继续执行。
+    expected: 日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。
+  - order: 5
+    action: 断言两次执行均返回非空 AgentConfig，pre_run_tool_events/context_items/context_manager_config 等启动字段完整，不因 provider 失败或并发预检索中断
+      Agent 启动。
+    expected: 日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。
+  - order: 6
+    action: 对固定搜索工具 forward 的边界输入（空 query、top_k=5）分别执行，确认返回结果稳定且无未捕获异常。
+    expected: 日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。
+  - order: 7
+    action: 确认日志、Trace、报告中不输出 API Key、Token、用户密码或模型密钥。
+    expected: 日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。
+  - order: 8
+    action: 测试结束后释放 provider 桩与临时对象，清理测试租户数据，确保可重复执行。
+    expected: 日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。
+  - order: 9
+    action: 所有替身必须保持真实函数的返回类型契约；prepare_prompt_templates 替身返回 dict（可为空），不得返回 list。
+    expected: 日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。
+  expected_results:
+  - create_agent_config 在记忆预检索阶段通过 run_blocking("memory-presearch", lane="model-tool-io", owner="runtime") 并发执行，功能结果与代码契约一致，测试过程无未处理异常。
+  - 外部记忆 provider 搜索失败时记录 event=external_provider_search_failed 并降级为 external_results=None，长短期记忆与预检索继续执行，不阻断 Agent 配置构建。
+  - 正常与降级路径均返回完整 AgentConfig，Agent 启动字段完整，无半写入或重复副作用。
+  - 日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。
+  forbidden_side_effects: []
+  source:
+    legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
+    legacy_sheet: 02_测试用例基线
+    legacy_row: 521
+  integration_boundary:
+  - LOCAL_ASSET_REQUIRED：使用本地固定 fixture 与外部记忆 provider 桩；不访问公网模型。
+  observations:
+  - create_agent_config 在记忆预检索阶段通过 run_blocking("memory-presearch", lane="model-tool-io", owner="runtime") 并发执行，功能结果与代码契约一致，测试过程无未处理异常。
+  - 外部记忆 provider 搜索失败时记录 event=external_provider_search_failed 并降级为 external_results=None，长短期记忆与预检索继续执行，不阻断 Agent 配置构建。
+  - 正常与降级路径均返回完整 AgentConfig，Agent 启动字段完整，无半写入或重复副作用。
+  - 日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。
+  cleanup:
+  - pytest JUnit/XML、stdout/stderr、失败堆栈、覆盖率片段、Agent 启动日志（含 external_provider_search_failed 事件）。

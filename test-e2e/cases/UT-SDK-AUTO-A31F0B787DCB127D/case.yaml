@@ -1,0 +1,79 @@
+schema_version: '1.0'
+stage: D1
+module: V5-BASELINE
+case:
+  case_id: UT-SDK-AUTO-A31F0B787DCB127D
+  feature_id: F-186
+  business_rule_ids:
+  - F-186-RULE-01
+  title: cancel() 对 QUEUED/RUNNING/REGISTERED 执行的中断、STOP_REQUESTED 状态转换、close_hook 调用与 STUCK 标记｜核心流程
+  type: SDK-UT
+  priority: P1
+  status: active
+  automation: automated
+  objective: cancel() 对 QUEUED/RUNNING/REGISTERED 执行的中断、STOP_REQUESTED 状态转换、close_hook 调用与 STUCK 标记｜核心流程
+  preconditions:
+  - 本地 SDK-UT 测试环境可运行，不要求外部模型服务或网络在线。
+  - 本用例为纯内存并发逻辑，无需 NEXENT_TEST_HOME 或固定本地资产，仅依赖 Python 标准库（threading/concurrent.futures/contextvars）与 sdk/nexent/core/concurrency
+    源码。
+  - 可构造含 cancel_grace_seconds 的 LanePolicy 与 ThreadManager 实例并成功 start()；opentelemetry 为可选依赖，缺失不影响逻辑断言。
+  test_data:
+    legacy_asset_declaration: 无（纯内存逻辑，不依赖本地文件或固定配置）
+  steps:
+  - order: 1
+    action: '导入 sdk/nexent/core/concurrency 的 ThreadManager、LanePolicy、ManagedTaskSpec、ManagedThreadSpec、ExecutionState、CancelResult，构造
+      LanePolicy(name="test-lane", max_workers=1, max_queue_size=1, queue_timeout_seconds=None, cancel_grace_seconds=0.5)，实例化
+      ThreadManager(service_name="ut-cancel", lane_policies={"test-lane": policy}) 并 start()。'
+    expected: QUEUED 任务被 cancel 时 future.cancel() 生效，返回 cancelled=True、状态为 CANCELLED，且不进入 STUCK。
+  - order: 2
+    action: QUEUED 中断：先提交一个阻塞到收到释放信号的任务并确认其进入 RUNNING（started_event 置位），再 submit 第二个任务使其处于 QUEUED，调用 cancel(queued.execution_id,
+      reason="test-cancel-queued")，断言返回 cancelled=True 且该执行状态为 ExecutionState.CANCELLED。
+    expected: RUNNING 任务 cancel 时先进入 STOP_REQUESTED（terminal_reason 与入参一致），协作函数观察 cancel_event 后返回，宽限期内结束返回 cancelled=True、最终状态为
+      CANCELLED。
+  - order: 3
+    action: RUNNING 协作中断：提交带 pass_cancel_event=True 的 ManagedTaskSpec，任务函数内部等待 cancel_event.wait() 后返回；确认进入 RUNNING 后调用 cancel(reason="test-cancel-running")，观察状态先变为
+      STOP_REQUESTED 且 terminal_reason 等于入参，任务函数因 cancel_event 被 set 而返回，最终 cancelled=True 且状态为 CANCELLED。
+    expected: close_hook 恰好调用一次；close_hook 抛出的异常被吞掉、不向上传播，仅记录结构化日志。
+  - order: 4
+    action: close_hook 调用：为 RUNNING 任务在 ManagedTaskSpec(close_hook=hook) 传入计数闭包，执行 cancel 后断言 hook 恰好调用一次；再提交一个 close_hook
+      会抛异常的任务，断言异常被吞掉、不向上传播，且结构化日志记录 thread_close_hook_failed。
+    expected: REGISTERED 任务 cancel 时无需 future，cancel_event 被 set、状态为 CANCELLED、返回 cancelled=True，执行从管理器移除。
+  - order: 5
+    action: REGISTERED 中断：用 register_service(ManagedThreadSpec(task_name="svc", owner="ut", lane="test-lane", close_hook=None,
+      daemon=True), fn) 注册专用线程但不 start，调用 cancel 后断言 cancelled=True、状态 CANCELLED、cancel_event.is_set() 为 True，且该执行从管理器移除。
+    expected: 忽略取消事件且宽限期内未结束的任务被标记为 STUCK，返回 cancelled=False 且 stuck=True，指标 stuck_count 递增。
+  - order: 6
+    action: STUCK 标记：提交 pass_cancel_event=True 的任务，其函数进入后忽略 cancel_event 并持续阻塞超过 cancel_grace_seconds，调用 cancel 后断言返回 CancelResult(cancelled=False,
+      stuck=True)、状态为 ExecutionState.STUCK，且 metrics_snapshot() 中该 lane/task_name 的 stuck_count >= 1。
+    expected: 未知 execution_id 返回 already_terminal=True 且 cancelled=False；重复 cancel 不重复触发 close_hook、不产生 STUCK 误报。
+  - order: 7
+    action: 未知/重复取消：对不存在的 execution_id 调用 cancel 断言返回 already_terminal=True 且 cancelled=False；对同一仍在 RUNNING 的任务连续调用两次 cancel，断言
+      close_hook 不重复调用、不产生 STUCK 误报。
+    expected: 全程无未处理异常，无真实模型或网络访问，日志不输出 API Key/Token/Password。
+  - order: 8
+    action: 测试结束调用 manager.shutdown(timeout=2) 释放线程资源，确保用例可重复执行。
+    expected: 全程无未处理异常，无真实模型或网络访问，日志不输出 API Key/Token/Password。
+  expected_results:
+  - QUEUED 任务被 cancel 时 future.cancel() 生效，返回 cancelled=True、状态为 CANCELLED，且不进入 STUCK。
+  - RUNNING 任务 cancel 时先进入 STOP_REQUESTED（terminal_reason 与入参一致），协作函数观察 cancel_event 后返回，宽限期内结束返回 cancelled=True、最终状态为 CANCELLED。
+  - close_hook 恰好调用一次；close_hook 抛出的异常被吞掉、不向上传播，仅记录结构化日志。
+  - REGISTERED 任务 cancel 时无需 future，cancel_event 被 set、状态为 CANCELLED、返回 cancelled=True，执行从管理器移除。
+  - 忽略取消事件且宽限期内未结束的任务被标记为 STUCK，返回 cancelled=False 且 stuck=True，指标 stuck_count 递增。
+  - 未知 execution_id 返回 already_terminal=True 且 cancelled=False；重复 cancel 不重复触发 close_hook、不产生 STUCK 误报。
+  - 全程无未处理异常，无真实模型或网络访问，日志不输出 API Key/Token/Password。
+  forbidden_side_effects: []
+  source:
+    legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
+    legacy_sheet: 02_测试用例基线
+    legacy_row: 476
+  unit_boundary: 受管任务取消
+  inputs:
+  - 无（纯内存逻辑，不依赖本地文件或固定配置）
+  assertions:
+  - QUEUED 任务被 cancel 时 future.cancel() 生效，返回 cancelled=True、状态为 CANCELLED，且不进入 STUCK。
+  - RUNNING 任务 cancel 时先进入 STOP_REQUESTED（terminal_reason 与入参一致），协作函数观察 cancel_event 后返回，宽限期内结束返回 cancelled=True、最终状态为 CANCELLED。
+  - close_hook 恰好调用一次；close_hook 抛出的异常被吞掉、不向上传播，仅记录结构化日志。
+  - REGISTERED 任务 cancel 时无需 future，cancel_event 被 set、状态为 CANCELLED、返回 cancelled=True，执行从管理器移除。
+  - 忽略取消事件且宽限期内未结束的任务被标记为 STUCK，返回 cancelled=False 且 stuck=True，指标 stuck_count 递增。
+  - 未知 execution_id 返回 already_terminal=True 且 cancelled=False；重复 cancel 不重复触发 close_hook、不产生 STUCK 误报。
+  - 全程无未处理异常，无真实模型或网络访问，日志不输出 API Key/Token/Password。

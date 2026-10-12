@@ -1,0 +1,16 @@
+schema_version: '1.0'
+module:
+  id: V5-BASELINE
+  name: Migrated V5 baseline
+feature:
+  feature_id: V5-PW-MEM-02
+  name: 真实对话产生记忆→Agent记录→Dreaming启停/历史确认
+  status: active
+  description: 验证Agent记录和Dreaming真实UI。
+  business_rules:
+  - rule_id: V5-PW-MEM-02-RULE-01
+    description: 真实对话产生记忆→Agent记录→Dreaming启停/历史确认
+  required_test_stages:
+  - D4
+  source:
+    notes: 'Provisional migration owner: the V5 row has no stable Feature ID. Do not infer an F-ID.'

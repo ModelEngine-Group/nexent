@@ -1,0 +1,59 @@
+schema_version: '1.0'
+stage: D1
+module: V5-BASELINE
+case:
+  case_id: UT-SDK-018
+  feature_id: F-171
+  business_rule_ids:
+  - F-171-RULE-01
+  title: 技能脚本可信解析、只读暂存、解释器选择、超时和清理
+  type: SDK-UT
+  priority: P0
+  status: active
+  automation: automated
+  objective: 技能脚本可信解析、只读暂存、解释器选择、超时和清理
+  preconditions:
+  - 本地测试环境健康检查通过，NEXENT_TEST_HOME 位于源码仓库外。
+  - 测试基线固定为 develop 当前批次锁定的产品提交，当次资源使用 run_id 隔离。
+  - 所需资产存在：${NEXENT_TEST_HOME}/config/users.yaml；${NEXENT_TEST_HOME}/config/secrets.env；${NEXENT_TEST_HOME}/config/models.yaml。
+  test_data:
+    legacy_asset_declaration: '- ${NEXENT_TEST_HOME}/config/users.yaml
+
+      - ${NEXENT_TEST_HOME}/config/secrets.env
+
+      - ${NEXENT_TEST_HOME}/config/models.yaml'
+  steps:
+  - order: 1
+    action: 构造仅含固定 SKILL.md 与 scripts 的临时技能。
+    expected: 只执行已授权 scripts。
+  - order: 2
+    action: 通过真实 resolve_skill_script 校验脚本边界。
+    expected: 危险路径在进入容器前拒绝。
+  - order: 3
+    action: 验证只读 tar 暂存、Python/Bash 解释器选择和 300 秒映射超时。
+    expected: 暂存目录只读且重复调用不重复上传。
+  - order: 4
+    action: 覆盖路径穿越、绝对路径、非脚本扩展名、执行错误和重复调用。
+    expected: 超时/错误可诊断并清理。
+  expected_results:
+  - 只执行已授权 scripts。
+  - 危险路径在进入容器前拒绝。
+  - 暂存目录只读且重复调用不重复上传。
+  - 超时/错误可诊断并清理。
+  forbidden_side_effects: []
+  source:
+    legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
+    legacy_sheet: 02_测试用例基线
+    legacy_row: 377
+  unit_boundary: 沙箱技能执行
+  inputs:
+  - '- ${NEXENT_TEST_HOME}/config/users.yaml
+
+    - ${NEXENT_TEST_HOME}/config/secrets.env
+
+    - ${NEXENT_TEST_HOME}/config/models.yaml'
+  assertions:
+  - 只执行已授权 scripts。
+  - 危险路径在进入容器前拒绝。
+  - 暂存目录只读且重复调用不重复上传。
+  - 超时/错误可诊断并清理。

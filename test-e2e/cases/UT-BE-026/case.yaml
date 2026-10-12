@@ -1,0 +1,57 @@
+schema_version: '1.0'
+stage: D1
+module: V5-BASELINE
+case:
+  case_id: UT-BE-026
+  feature_id: F-177
+  business_rule_ids:
+  - F-177-RULE-01
+  title: 标签定义/值排序、批量绑定、幂等与租户边界
+  type: BE-UT
+  priority: P1
+  status: active
+  automation: automated
+  objective: 标签定义/值排序、批量绑定、幂等与租户边界
+  preconditions:
+  - 本地测试环境健康检查通过，NEXENT_TEST_HOME 位于源码仓库外。
+  - 测试基线固定为 develop 当前批次锁定的产品提交，当次资源使用 run_id 隔离。
+  - 所需资产存在：${NEXENT_TEST_HOME}/config/users.yaml；${NEXENT_TEST_HOME}/config/secrets.env；${NEXENT_TEST_HOME}/config/models.yaml。
+  test_data:
+    legacy_asset_declaration: '- ${NEXENT_TEST_HOME}/config/users.yaml
+
+      - ${NEXENT_TEST_HOME}/config/secrets.env
+
+      - ${NEXENT_TEST_HOME}/config/models.yaml'
+  steps:
+  - order: 1
+    action: 用内存仓储 fixture 创建标签库、定义和值。
+    expected: 定义/值顺序稳定。
+  - order: 2
+    action: 验证状态、排序和 usage 聚合。
+    expected: 重复绑定不产生重复行。
+  - order: 3
+    action: 对同一资源重复批量绑定并移除，验证幂等。
+    expected: 跨租户和未知映射被拒绝或按当前产品契约忽略，数据库状态无越权副作用。
+  - order: 4
+    action: 传入跨租户资源、未知定义和值，断言领域错误且无部分写入。
+    expected: 跨租户和未知映射被拒绝或按当前产品契约忽略，数据库状态无越权副作用。
+  expected_results:
+  - 定义/值顺序稳定。
+  - 重复绑定不产生重复行。
+  - 跨租户和未知映射被拒绝或按当前产品契约忽略，数据库状态无越权副作用。
+  forbidden_side_effects: []
+  source:
+    legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
+    legacy_sheet: 02_测试用例基线
+    legacy_row: 373
+  unit_boundary: 统一标签
+  inputs:
+  - '- ${NEXENT_TEST_HOME}/config/users.yaml
+
+    - ${NEXENT_TEST_HOME}/config/secrets.env
+
+    - ${NEXENT_TEST_HOME}/config/models.yaml'
+  assertions:
+  - 定义/值顺序稳定。
+  - 重复绑定不产生重复行。
+  - 跨租户和未知映射被拒绝或按当前产品契约忽略，数据库状态无越权副作用。

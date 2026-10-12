@@ -1,0 +1,15 @@
+schema_version: '1.0'
+module:
+  id: V5-BASELINE
+  name: Migrated V5 baseline
+feature:
+  feature_id: V5-SEC-05
+  name: OAuth state/回调劫持
+  status: active
+  description: CSRF/state replay/provider错误
+  business_rules:
+  - rule_id: V5-SEC-05-RULE-01
+    description: OAuth state/回调劫持
+  required_test_stages: []
+  source:
+    notes: 'Provisional migration owner: the V5 row has no stable Feature ID. Do not infer an F-ID.'

@@ -1,0 +1,12 @@
+# Copy to machine-local config/users.yaml; replace usernames for your test deployment.
+users:
+  - id: tenant_a_admin
+    tenant: tenant_a
+    role: admin
+    username: replace-me
+    password_env_key: NEXENT_TENANT_A_ADMIN_PASSWORD
+  - id: tenant_a_user
+    tenant: tenant_a
+    role: user
+    username: replace-me
+    password_env_key: NEXENT_TENANT_A_USER_PASSWORD

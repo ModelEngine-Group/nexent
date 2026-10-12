@@ -1,0 +1,18 @@
+schema_version: '1.0'
+case_id: TPC-D4-001
+implementations:
+- framework: playwright
+  file: test.spec.ts
+  selector: TPC-D4-001
+  profiles:
+  - mock
+required_mock_services:
+- model-provider
+preparation:
+  families: []
+  anchors: false
+  special_assets: false
+  d4_groups: []
+acceptance_bindings:
+  AC-01:
+  - TPC-D4-001

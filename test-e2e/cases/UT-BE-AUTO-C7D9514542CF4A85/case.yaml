@@ -1,0 +1,65 @@
+schema_version: '1.0'
+stage: D1
+module: V5-BASELINE
+case:
+  case_id: UT-BE-AUTO-C7D9514542CF4A85
+  feature_id: F-069
+  business_rule_ids:
+  - F-069-RULE-01
+  title: 按 agent_id 的 Agent 并发容量准入 reserve/release：超限抛异常、幂等释放与计数回退｜核心流程
+  type: BE-UT
+  priority: P1
+  status: active
+  automation: automated
+  objective: 按 agent_id 的 Agent 并发容量准入 reserve/release：超限抛异常、幂等释放与计数回退｜核心流程
+  preconditions:
+  - 本地 Python 组件测试环境可运行，可直接导入 backend/agents/agent_run_manager.py 的 AgentRunManager 单例及 AgentRunConcurrencyExceededError，不要求外部模型/数据库服务在线。
+  - 每个测试用例启动前隔离/清空 AgentRunManager 内部容量计数 _agent_capacity_counts 与 _agent_capacity_tokens，确保用例间无状态污染、可重复执行。
+  test_data:
+    legacy_asset_declaration: 无外部资产；直接使用 AgentRunManager 内存单例构造 agent_id 与 max_concurrent_runs 输入。
+  steps:
+  - order: 1
+    action: 导入 backend/agents/agent_run_manager.py 的 AgentRunManager 与 AgentRunConcurrencyExceededError，获取管理器实例并清空 _agent_capacity_counts/_agent_capacity_tokens。
+    expected: 首次 reserve 返回非空字符串 token1，get_agent_capacity_count(101) 等于 1。
+  - order: 2
+    action: 对同一 agent_id=101 以 max_concurrent_runs=1 连续两次调用 reserve_agent_capacity，记录第一次返回值 token1 与第二次抛出的异常，并调用 get_agent_capacity_count(101)。
+    expected: 第二次 reserve 抛出 AgentRunConcurrencyExceededError，计数仍为 1（超限不新增计数）。
+  - order: 3
+    action: 对另一 agent_id=202 以 max_concurrent_runs=2 连续三次调用 reserve_agent_capacity，记录第三次抛出的异常类型。
+    expected: agent_id=202 第三次 reserve 抛出 AgentRunConcurrencyExceededError，计数保持 2，不同 agent_id 各自独立计数。
+  - order: 4
+    action: 对 max_concurrent_runs 取 <=0（如 0、-1）调用 reserve_agent_capacity，记录抛出的异常类型与消息。
+    expected: max_concurrent_runs<=0 抛出 ValueError，消息含 "max_concurrent_runs must be greater than zero"，计数为 0。
+  - order: 5
+    action: 使用步骤2的 token1 连续两次调用 release_agent_capacity(token1)，记录两次返回值，并调用 get_agent_capacity_count(101)。
+    expected: 首次 release 返回 True，get_agent_capacity_count(101) 回退为 0；第二次 release 同一 token 返回 False（幂等只释放一次），计数保持 0 不为负。
+  - order: 6
+    action: 使用从未注册的伪造 token 调用 release_agent_capacity，记录返回值。
+    expected: 伪造 token release 返回 False。
+  - order: 7
+    action: 释放全部容量后调用 get_agent_capacity_count 验证计数回退为 0，并确认不同 agent_id 计数互不影响。
+    expected: 释放后容量计数归零、token 映射被清理，失败路径不吞异常，用例可重复执行。
+  expected_results:
+  - 首次 reserve 返回非空字符串 token1，get_agent_capacity_count(101) 等于 1。
+  - 第二次 reserve 抛出 AgentRunConcurrencyExceededError，计数仍为 1（超限不新增计数）。
+  - agent_id=202 第三次 reserve 抛出 AgentRunConcurrencyExceededError，计数保持 2，不同 agent_id 各自独立计数。
+  - max_concurrent_runs<=0 抛出 ValueError，消息含 "max_concurrent_runs must be greater than zero"，计数为 0。
+  - 首次 release 返回 True，get_agent_capacity_count(101) 回退为 0；第二次 release 同一 token 返回 False（幂等只释放一次），计数保持 0 不为负。
+  - 伪造 token release 返回 False。
+  - 释放后容量计数归零、token 映射被清理，失败路径不吞异常，用例可重复执行。
+  forbidden_side_effects: []
+  source:
+    legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
+    legacy_sheet: 02_测试用例基线
+    legacy_row: 416
+  unit_boundary: 并发容量准入
+  inputs:
+  - 无外部资产；直接使用 AgentRunManager 内存单例构造 agent_id 与 max_concurrent_runs 输入。
+  assertions:
+  - 首次 reserve 返回非空字符串 token1，get_agent_capacity_count(101) 等于 1。
+  - 第二次 reserve 抛出 AgentRunConcurrencyExceededError，计数仍为 1（超限不新增计数）。
+  - agent_id=202 第三次 reserve 抛出 AgentRunConcurrencyExceededError，计数保持 2，不同 agent_id 各自独立计数。
+  - max_concurrent_runs<=0 抛出 ValueError，消息含 "max_concurrent_runs must be greater than zero"，计数为 0。
+  - 首次 release 返回 True，get_agent_capacity_count(101) 回退为 0；第二次 release 同一 token 返回 False（幂等只释放一次），计数保持 0 不为负。
+  - 伪造 token release 返回 False。
+  - 释放后容量计数归零、token 映射被清理，失败路径不吞异常，用例可重复执行。

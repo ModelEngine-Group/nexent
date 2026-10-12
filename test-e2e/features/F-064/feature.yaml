@@ -1,0 +1,16 @@
+schema_version: '1.0'
+module:
+  id: V5-BASELINE
+  name: Migrated V5 baseline
+feature:
+  feature_id: F-064
+  name: 附件引用进入模型/工具上下文，多文件和不存在附件
+  status: active
+  description: '智能体运行时与对话 / 附件上下文: 附件引用进入模型/工具上下文，多文件和不存在附件'
+  business_rules:
+  - rule_id: F-064-RULE-01
+    description: 附件引用进入模型/工具上下文，多文件和不存在附件
+  required_test_stages:
+  - D3
+  source:
+    notes: Migrated from V5 01_代码功能清单 without changing the functional description.

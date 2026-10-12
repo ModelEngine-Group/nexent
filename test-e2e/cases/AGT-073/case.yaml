@@ -1,0 +1,59 @@
+schema_version: '1.0'
+stage: D3
+module: V5-BASELINE
+case:
+  case_id: AGT-073
+  feature_id: F-180
+  business_rule_ids:
+  - F-180-RULE-01
+  title: 配置模型名称驱动的 reasoning 连通性与流式响应
+  type: AGENT-IT
+  priority: P0
+  status: active
+  automation: automated
+  objective: 配置模型名称驱动的 reasoning 连通性与流式响应
+  preconditions:
+  - 本地测试环境健康检查通过，NEXENT_TEST_HOME 位于源码仓库外。
+  - 测试基线固定为 develop 当前批次锁定的产品提交，当次资源使用 run_id 隔离。
+  - 所需资产存在：${NEXENT_TEST_HOME}/config/users.yaml；${NEXENT_TEST_HOME}/config/secrets.env；${NEXENT_TEST_HOME}/config/models.yaml。
+  - models.yaml 中所需真实 Provider 通过预检，名称与凭据不得硬编码。
+  test_data:
+    legacy_asset_declaration: '- ${NEXENT_TEST_HOME}/config/users.yaml
+
+      - ${NEXENT_TEST_HOME}/config/secrets.env
+
+      - ${NEXENT_TEST_HOME}/config/models.yaml'
+  steps:
+  - order: 1
+    action: 从 models.yaml 选择标记为 reasoning 的真实模型，不在代码中写死名称。
+    expected: 实际调用的 provider/model/url 与配置快照一致。
+  - order: 2
+    action: 调用连通性检查。
+    expected: 连通性成功。
+  - order: 3
+    action: 发起最小真实流式对话并记录模型快照。
+    expected: stream 正常结束。
+  - order: 4
+    action: 分别验证合法 reasoning 参数和非法组合。
+    expected: 非法字段明确失败。
+  expected_results:
+  - 实际调用的 provider/model/url 与配置快照一致。
+  - 连通性成功。
+  - stream 正常结束。
+  - 非法字段明确失败。
+  - 日志和报告不含 API Key。
+  forbidden_side_effects: []
+  source:
+    legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
+    legacy_sheet: 02_测试用例基线
+    legacy_row: 387
+  integration_boundary:
+  - REAL_REQUIRED：必须使用 config/models.yaml 与 secrets.env 当前真实模型配置。
+  observations:
+  - 实际调用的 provider/model/url 与配置快照一致。
+  - 连通性成功。
+  - stream 正常结束。
+  - 非法字段明确失败。
+  - 日志和报告不含 API Key。
+  cleanup:
+  - JUnit、run_id、stream/tool/retrieval trace、脱敏模型快照。

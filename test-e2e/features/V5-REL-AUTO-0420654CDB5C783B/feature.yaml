@@ -1,0 +1,17 @@
+schema_version: '1.0'
+module:
+  id: V5-BASELINE
+  name: Migrated V5 baseline
+feature:
+  feature_id: V5-REL-AUTO-0420654CDB5C783B
+  name: Northbound服务重启后遗留A2A SUBMITTED/WORKING任务收敛为FAILED（CONTAINER_RESTARTED）
+  status: active
+  description: Northbound 服务重启（如单副本重启/容器重建）后，遗留的 TASK_STATE_SUBMITTED 与 TASK_STATE_WORKING A2A 任务若长期滞留非终态，会形成僵尸任务：用户无法获得结果、状态统计失真，且可能被误判为仍在执行。需通过启动回收将这类任务收敛为
+    TASK_STATE_FAILED，并携带明确错误码 code=CONTAINER_RESTARTED，保证状态机终态收敛、可观察可诊断。
+  business_rules:
+  - rule_id: V5-REL-AUTO-0420654CDB5C783B-RULE-01
+    description: Northbound服务重启后遗留A2A SUBMITTED/WORKING任务收敛为FAILED（CONTAINER_RESTARTED）
+  required_test_stages:
+  - D5
+  source:
+    notes: 'Provisional migration owner: the V5 row has no stable Feature ID. Do not infer an F-ID.'

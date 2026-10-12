@@ -1,0 +1,16 @@
+schema_version: '1.0'
+module:
+  id: V5-BASELINE
+  name: Migrated V5 baseline
+feature:
+  feature_id: V5-DEP-AUTO-3BABDFB6FBFB43A1
+  name: v2.5.4_0910_context_budget_v2.sql 列重命名/合并/回填幂等与一致性校验阻断
+  status: active
+  description: 升级部署到 Context Budget V2 时，防止 model_monitoring_record_t 列重命名/合并造成监控元数据丢失或被错误覆盖；防止 V1 历史回填与代码契约(compaction
+    target 0.6 与 FLOOR 公式)不一致；防止表/列缺失或回填不一致被静默绕过，确保迁移失败可 RAISE 阻断并整体回滚。
+  business_rules:
+  - rule_id: V5-DEP-AUTO-3BABDFB6FBFB43A1-RULE-01
+    description: v2.5.4_0910_context_budget_v2.sql 列重命名/合并/回填幂等与一致性校验阻断
+  required_test_stages: []
+  source:
+    notes: 'Provisional migration owner: the V5 row has no stable Feature ID. Do not infer an F-ID.'

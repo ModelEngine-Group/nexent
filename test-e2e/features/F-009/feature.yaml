@@ -1,0 +1,16 @@
+schema_version: '1.0'
+module:
+  id: V5-BASELINE
+  name: Migrated V5 baseline
+feature:
+  feature_id: F-009
+  name: authorize/callback/state/error/pending-account complete
+  status: active
+  description: '身份认证与账号 / OAuth: authorize/callback/state/error/pending-account complete'
+  business_rules:
+  - rule_id: F-009-RULE-01
+    description: authorize/callback/state/error/pending-account complete
+  required_test_stages:
+  - D2
+  source:
+    notes: Migrated from V5 01_代码功能清单 without changing the functional description.

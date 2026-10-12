@@ -1,0 +1,86 @@
+schema_version: '1.0'
+stage: D4
+module: V5-BASELINE
+case:
+  case_id: PW-FILE-01
+  feature_id: V5-PW-FILE-01
+  business_rule_ids:
+  - V5-PW-FILE-01-RULE-01
+  title: Chat附件上传→删除/重试→预览/下载→刷新追问
+  type: E2E
+  priority: P0
+  status: active
+  automation: automated
+  objective: 验证真实FileChooser/下载/预览附件生命周期。
+  preconditions:
+  - 测试Agent可分析附件
+  - 固定marker=NEXENT_FILE_TEST_92831
+  - 下载目录可写
+  test_data:
+    legacy_asset_declaration: assets/d4/sample.pdf；内存构造 oversized.pdf（10 MiB + 1 byte），验证当前 Composer 10 MiB 文件上限。
+  steps:
+  - order: 1
+    action: 进入/newchat选择Agent。
+    expected: 上传/删除/发送/刷新状态真实。
+  - order: 2
+    action: 点击附件入口并setInputFiles选择sample.pdf，检查待发送附件卡片。
+    expected: 预览/下载为真实浏览器事件。
+  - order: 3
+    action: 发送前先移除附件，确认Composer恢复。
+    expected: 文件marker可被读取。
+  - order: 4
+    action: 再次上传并输入固定问题发送。
+    expected: Range 206/416由CONTRACT。
+  - order: 5
+    action: 等待回答含文件marker。
+    expected: Range 206/416由CONTRACT。
+  - order: 6
+    action: 点击消息附件预览，确认可加载。
+    expected: Range 206/416由CONTRACT。
+  - order: 7
+    action: 点击下载并捕获download event，检查文件非空。
+    expected: Range 206/416由CONTRACT。
+  - order: 8
+    action: 刷新会话确认附件卡片恢复。
+    expected: Range 206/416由CONTRACT。
+  - order: 9
+    action: 继续追问文件问题，确认历史附件上下文可用。
+    expected: Range 206/416由CONTRACT。
+  - order: 10
+    action: 选择内存构造的10 MiB + 1 byte oversized.pdf，确认明确超限错误，Composer和已发送消息中均无该附件；损坏PDF的解析错误不在选文件阶段断言。
+    expected: Range 206/416由CONTRACT。
+  expected_results:
+  - 上传/删除/发送/刷新状态真实。
+  - 预览/下载为真实浏览器事件。
+  - 文件marker可被读取。
+  - Range 206/416由CONTRACT。
+  forbidden_side_effects: []
+  source:
+    legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
+    legacy_sheet: 03_Playwright_Journey
+    legacy_row: 37
+  actor: Nexent browser user
+  journey:
+  - 进入/newchat选择Agent。
+  - 点击附件入口并setInputFiles选择sample.pdf，检查待发送附件卡片。
+  - 发送前先移除附件，确认Composer恢复。
+  - 再次上传并输入固定问题发送。
+  - 等待回答含文件marker。
+  - 点击消息附件预览，确认可加载。
+  - 点击下载并捕获download event，检查文件非空。
+  - 刷新会话确认附件卡片恢复。
+  - 继续追问文件问题，确认历史附件上下文可用。
+  - 选择内存构造的10 MiB + 1 byte oversized.pdf，确认明确超限错误，Composer和已发送消息中均无该附件；损坏PDF的解析错误不在选文件阶段断言。
+  final_business_result:
+  - 上传/删除/发送/刷新状态真实。
+  - 预览/下载为真实浏览器事件。
+  - 文件marker可被读取。
+  - Range 206/416由CONTRACT。
+  failure_evidence:
+  - '${NEXENT_TEST_HOME}/runs/{run_id}/playwright/PW-FILE-01/
+
+    - screenshot.png / trace.zip / video.webm
+
+    - console.log / network.har / failure.json
+
+    - 涉及协议时关联 wire/*.jsonl；涉及下载时保留 downloads/'

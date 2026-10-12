@@ -1,0 +1,16 @@
+schema_version: '1.0'
+module:
+  id: V5-BASELINE
+  name: Migrated V5 baseline
+feature:
+  feature_id: F-108
+  name: auto_summary/change/get、模型/batch/频率
+  status: active
+  description: '知识库与文件 / 知识摘要: auto_summary/change/get、模型/batch/频率'
+  business_rules:
+  - rule_id: F-108-RULE-01
+    description: auto_summary/change/get、模型/batch/频率
+  required_test_stages:
+  - D3
+  source:
+    notes: Migrated from V5 01_代码功能清单 without changing the functional description.

@@ -1,0 +1,16 @@
+schema_version: '1.0'
+module:
+  id: V5-BASELINE
+  name: Migrated V5 baseline
+feature:
+  feature_id: F-113
+  name: 基于问题生成标题并持久化、模型失败 fallback
+  status: active
+  description: '会话与分享 / 标题: 基于问题生成标题并持久化、模型失败 fallback'
+  business_rules:
+  - rule_id: F-113-RULE-01
+    description: 基于问题生成标题并持久化、模型失败 fallback
+  required_test_stages:
+  - D3
+  source:
+    notes: Migrated from V5 01_代码功能清单 without changing the functional description.

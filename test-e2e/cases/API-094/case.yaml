@@ -1,0 +1,53 @@
+schema_version: '1.0'
+stage: D3
+module: V5-BASELINE
+case:
+  case_id: API-094
+  feature_id: F-094
+  business_rule_ids:
+  - F-094-RULE-01
+  title: 本地Agent与外部A2A sub-agent add/remove/list/get｜核心流程
+  type: INTEGRATION
+  priority: P1
+  status: active
+  automation: automated
+  objective: 本地Agent与外部A2A sub-agent add/remove/list/get｜核心流程
+  preconditions:
+  - Nexent服务与仓库受控A2A Mock就绪，无其他故障注入批次。
+  - config/a2a.yaml符合统一Schema，控制令牌由既有环境或secrets.env提供。
+  - 使用本次动态ID、唯一source URL及受控测试身份，不借用历史资源。
+  test_data:
+    configuration: config/a2a.yaml
+    mock_service: a2a-agent
+  steps:
+  - order: 1
+    action: 创建本次本地Agent与外部Agent并建立关系
+    expected: 返回动态关系ID及对应本地和外部ID
+  - order: 2
+    action: 重复建立并读取relations/sub-agents
+    expected: 重复409，两种读取均仅包含本次外部Agent
+  - order: 3
+    action: 删除关系并再次读取及删除
+    expected: 读取空列表，再次删除404
+  - order: 4
+    action: 清理本地和外部Agent
+    expected: 不遗留本次记录，wire证据归档
+  expected_results:
+  - 返回动态关系ID及对应本地和外部ID
+  - 重复409，两种读取均仅包含本次外部Agent
+  - 读取空列表，再次删除404
+  - 不遗留本次记录，wire证据归档
+  forbidden_side_effects: []
+  source:
+    legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
+    legacy_sheet: 02_测试用例基线
+    legacy_row: 186
+  integration_boundary:
+  - Nexent实际HTTP API与受控外部A2A服务及本地持久化，非Mock自测。
+  observations:
+  - 返回动态关系ID及对应本地和外部ID
+  - 重复409，两种读取均仅包含本次外部Agent
+  - 读取空列表，再次删除404
+  - 不遗留本次记录，wire证据归档
+  cleanup:
+  - 清理本次动态资源或恢复故障场景；本地保留脱敏wire、JUnit及清理记录。

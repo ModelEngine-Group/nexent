@@ -1,0 +1,15 @@
+schema_version: '1.0'
+module:
+  id: V5-BASELINE
+  name: Migrated V5 baseline
+feature:
+  feature_id: F-032
+  name: LLM/Embedding/Multi-Embedding/VLM/STT/TTS 模型新增/更新/软删除
+  status: active
+  description: '模型与多模态 / 模型管理: LLM/Embedding/Multi-Embedding/VLM/STT/TTS 模型新增/更新/软删除'
+  business_rules:
+  - rule_id: F-032-RULE-01
+    description: LLM/Embedding/Multi-Embedding/VLM/STT/TTS 模型新增/更新/软删除
+  required_test_stages: []
+  source:
+    notes: Migrated from V5 01_代码功能清单 without changing the functional description.

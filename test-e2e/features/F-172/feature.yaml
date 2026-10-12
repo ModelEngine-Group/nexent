@@ -1,0 +1,16 @@
+schema_version: '1.0'
+module:
+  id: V5-BASELINE
+  name: Migrated V5 baseline
+feature:
+  feature_id: F-172
+  name: Docker Compose fresh install、health、持久化、restart
+  status: active
+  description: 'SDK与基础设施 / 部署 Docker: Docker Compose fresh install、health、持久化、restart'
+  business_rules:
+  - rule_id: F-172-RULE-01
+    description: Docker Compose fresh install、health、持久化、restart
+  required_test_stages:
+  - D5
+  source:
+    notes: Migrated from V5 01_代码功能清单 without changing the functional description.

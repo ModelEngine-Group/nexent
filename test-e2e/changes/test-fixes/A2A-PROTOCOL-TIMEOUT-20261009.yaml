@@ -1,0 +1,22 @@
+schema_version: '1.0'
+change:
+  change_id: A2A-PROTOCOL-TIMEOUT-20261009
+  change_type: test-fix
+  title: Implement supported protocol switching and real product timeout checks
+  description: >-
+    Bind five existing Cases to independent scripts. Test real JSONRPC and
+    HTTP+JSON endpoints and refuse an unadvertised disabled gRPC binding;
+    this is not a claim of implemented gRPC wire interoperability.
+    Timeout checks allow the actual 300 second product deadline and three
+    attempts, record redacted wire, restore the fault and clean owned Agents.
+    Preserve explicit product-error expectations instead of accepting HTTP 500.
+  affected_features:
+    existing: [F-089, F-092, F-093, F-096]
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing: []
+    added: []
+    modified: [CTR-033, CTR-038, CTR-039, CTR-040, CTR-043]
+    retired: []

@@ -1,0 +1,12 @@
+schema_version: '1.0'
+case_id: REL-AUTO-D426EB1254C4E6BE
+implementations:
+- framework: pytest
+  file: test.py
+  selector: REL-AUTO-D426EB1254C4E6BE
+notes: V5 source binding migrated; runtime parity is not yet certified.
+preparation:
+  families: []
+  anchors: false
+  special_assets: false
+  d4_groups: []

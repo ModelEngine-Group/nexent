@@ -1,0 +1,73 @@
+schema_version: '1.0'
+stage: D1
+module: V5-BASELINE
+case:
+  case_id: UT-FE-AUTO-B8AD6F5D0866704A
+  feature_id: F-184
+  business_rule_ids:
+  - F-184-RULE-01
+  title: build-config.js 启动初始化 zh/en custom.json 并注入 FILE_UPLOAD_SIZE_LIMIT(10-100 钳制、非整数回退10)、readLocaleConfig 回退/异常返回空对象、saveLocaleConfig
+    自动建目录｜核心流程
+  type: FE-COMP
+  priority: P2
+  status: active
+  automation: automated
+  objective: build-config.js 启动初始化 zh/en custom.json 并注入 FILE_UPLOAD_SIZE_LIMIT(10-100 钳制、非整数回退10)、readLocaleConfig 回退/异常返回空对象、saveLocaleConfig
+    自动建目录｜核心流程
+  preconditions:
+  - 本地前端单元测试环境可运行（Node/Vitest），不要求外部模型服务在线。
+  - 可导入 frontend/build-config.js 导出的 ensureDir/readLocaleConfig/saveLocaleConfig，并以临时目录隔离 PROJECT_CONFIG_DIR，避免改动 frontend/public/locales
+    源文件。
+  - 当次 run_id 已生成；测试基线固定为 develop 当前批次锁定的产品提交；执行时另记录实际被测 commit。
+  - 所需本地资产存在：frontend/public/locales 内置回退文案目录（测试中只读，不写入）。
+  test_data:
+    legacy_asset_declaration: '- 临时 PROJECT_CONFIG_DIR 目录（Vitest tmpdir，作为可配置持久目录的隔离目标）
+
+      - frontend/public/locales（内置回退目录，测试中只读参照）'
+  steps:
+  - order: 1
+    action: 创建隔离临时目录作为 PROJECT_CONFIG_DIR，准备不存在的 locales 子目录；导入 frontend/build-config.js 的 ensureDir、readLocaleConfig、saveLocaleConfig。
+    expected: FILE_UPLOAD_SIZE_LIMIT 未设置时注入默认 10；合法整数按 10-100 钳制（150→100、5→10）；非整数（abc）回退 10。
+  - order: 2
+    action: 调用 ensureDir(临时目录下不存在的多层嵌套路径)，断言目录被递归创建；再次对已存在路径调用不报错。
+    expected: ensureDir 递归创建缺失目录，对已存在目录调用不失败。
+  - order: 3
+    action: 保持 PROJECT_CONFIG_DIR 下无 zh/custom.json，调用 readLocaleConfig('zh')，断言回退读取 frontend/public/locales/zh/custom.json
+      并返回解析后的对象（若回退文件不存在则返回 {}）。
+    expected: readLocaleConfig 在可配置目录缺失 custom.json 时回退内置 public/locales，二者皆缺失返回 {}；JSON 解析异常返回 {} 且不抛异常、不返回 undefined。
+  - order: 4
+    action: 向 PROJECT_CONFIG_DIR/locales/zh/custom.json 写入非法 JSON 后调用 readLocaleConfig('zh')，断言捕获解析异常后返回 {} 且不向上抛出、不返回 undefined。
+    expected: saveLocaleConfig 自动创建语言子目录并写入 custom.json，返回 "custom.json"，写读一致。
+  - order: 5
+    action: 调用 saveLocaleConfig('{"FILE_UPLOAD_SIZE_LIMIT":10}', 'zh')，断言自动创建 zh 子目录、返回 "custom.json"，随后 readLocaleConfig('zh')
+      能读回相同对象。
+    expected: 全程无未处理异常、不产生半写入或重复副作用，不向 public/locales 写入产物，日志不含敏感信息。
+  - order: 6
+    action: 在子进程中以 FILE_UPLOAD_SIZE_LIMIT 分别为 未设置/150/5/abc 执行 node frontend/build-config.js（始终设置 PROJECT_CONFIG_DIR 指向临时目录），检查生成的
+      zh/en custom.json 中 FILE_UPLOAD_SIZE_LIMIT 分别为 10/100/10/10。
+    expected: 全程无未处理异常、不产生半写入或重复副作用，不向 public/locales 写入产物，日志不含敏感信息。
+  - order: 7
+    action: 校验整个过程未改动 frontend/public/locales 内任何文件，临时目录可清理并可重复执行。
+    expected: 全程无未处理异常、不产生半写入或重复副作用，不向 public/locales 写入产物，日志不含敏感信息。
+  expected_results:
+  - FILE_UPLOAD_SIZE_LIMIT 未设置时注入默认 10；合法整数按 10-100 钳制（150→100、5→10）；非整数（abc）回退 10。
+  - ensureDir 递归创建缺失目录，对已存在目录调用不失败。
+  - readLocaleConfig 在可配置目录缺失 custom.json 时回退内置 public/locales，二者皆缺失返回 {}；JSON 解析异常返回 {} 且不抛异常、不返回 undefined。
+  - saveLocaleConfig 自动创建语言子目录并写入 custom.json，返回 "custom.json"，写读一致。
+  - 全程无未处理异常、不产生半写入或重复副作用，不向 public/locales 写入产物，日志不含敏感信息。
+  forbidden_side_effects: []
+  source:
+    legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
+    legacy_sheet: 02_测试用例基线
+    legacy_row: 447
+  unit_boundary: 构建配置
+  inputs:
+  - '- 临时 PROJECT_CONFIG_DIR 目录（Vitest tmpdir，作为可配置持久目录的隔离目标）
+
+    - frontend/public/locales（内置回退目录，测试中只读参照）'
+  assertions:
+  - FILE_UPLOAD_SIZE_LIMIT 未设置时注入默认 10；合法整数按 10-100 钳制（150→100、5→10）；非整数（abc）回退 10。
+  - ensureDir 递归创建缺失目录，对已存在目录调用不失败。
+  - readLocaleConfig 在可配置目录缺失 custom.json 时回退内置 public/locales，二者皆缺失返回 {}；JSON 解析异常返回 {} 且不抛异常、不返回 undefined。
+  - saveLocaleConfig 自动创建语言子目录并写入 custom.json，返回 "custom.json"，写读一致。
+  - 全程无未处理异常、不产生半写入或重复副作用，不向 public/locales 写入产物，日志不含敏感信息。

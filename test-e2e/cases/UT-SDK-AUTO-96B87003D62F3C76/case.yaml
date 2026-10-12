@@ -1,0 +1,69 @@
+schema_version: '1.0'
+stage: D1
+module: V5-BASELINE
+case:
+  case_id: UT-SDK-AUTO-96B87003D62F3C76
+  feature_id: F-186
+  business_rule_ids:
+  - F-186-RULE-01
+  title: ThreadMetrics 稳定标签计数与队列等待/运行时长聚合准确｜核心流程
+  type: SDK-UT
+  priority: P1
+  status: active
+  automation: automated
+  objective: ThreadMetrics 稳定标签计数与队列等待/运行时长聚合准确｜核心流程
+  preconditions:
+  - 本地依赖/组件测试环境可运行；不要求外部模型服务在线。
+  - 设置 NEXENT_TEST_HOME，目录不位于 Nexent Git 仓库内。
+  - 当次 run_id 已生成；测试基线固定为 develop 当前批次锁定的产品提交；执行时另记录实际被测commit。
+  - Python 环境可直接导入 sdk/nexent/core/concurrency 包，无需任何外部资产或配置。
+  test_data:
+    legacy_asset_declaration: 无（纯内存逻辑，无需外部资产）
+  steps:
+  - order: 1
+    action: 直接导入 sdk/nexent/core/concurrency/metrics.py 的 ThreadMetrics 与 ThreadMetricRecord，以及 sdk/nexent/core/concurrency/models.py
+      的 ManagedExecution、ManagedTaskSpec、ExecutionState。
+    expected: snapshot() 按 (lane, task_name) 稳定键控，每个生命周期事件仅使对应计数精确 +1，无重复写入或跨键串扰。
+  - order: 2
+    action: 新建 ThreadMetrics 实例，断言初始 snapshot() 返回空元组（尚无任何 lane/task_name 标签行）。
+    expected: total_queue_wait_ms 聚合为 started_at - created_at 的毫秒值且非负，total_run_ms 为 finished_at - started_at 的毫秒值且非负。
+  - order: 3
+    action: 对同一 (lane, task_name) 分别调用 queued()、rejected()，断言该行 queued_count、rejected_count 各自 +1，其余计数保持 0。
+    expected: 终态 FAILED 计入 failed_count，CANCELLED 计入 cancelled_count，TIMED_OUT 同时计入 cancelled_count 与 timed_out_count，三者均计入
+      completed_count。
+  - order: 4
+    action: 构造 ManagedExecution 并手工设置 created_at_monotonic 与 started_at_monotonic 为固定差值（如 1.5s），调用 started(execution)，断言 started_count
+      +1 且 total_queue_wait_ms 累加 1500.0；再用 started_at < created_at 的反例断言队列等待时长钳制为 0。
+    expected: 测试全程无未处理异常，日志不输出任何 API Key、Token、用户密码或模型密钥。
+  - order: 5
+    action: 调用 stuck(execution)，断言 stuck_count +1 且不影响其它计数。
+    expected: 测试全程无未处理异常，日志不输出任何 API Key、Token、用户密码或模型密钥。
+  - order: 6
+    action: 分别构造终态为 FAILED、CANCELLED、TIMED_OUT 的 ManagedExecution（设置 started_at_monotonic 与 finished_at_monotonic 为固定差值），调用
+      finished(execution)，断言 completed_count 每次 +1、failed_count/cancelled_count/timed_out_count 按终态精确累加、total_run_ms 累加对应运行时长。
+    expected: 测试全程无未处理异常，日志不输出任何 API Key、Token、用户密码或模型密钥。
+  - order: 7
+    action: 验证同一 (lane, task_name) 多次调用聚合累加、不同 (lane, task_name) 独立成行，且 snapshot() 返回的 ThreadMetricRecord 按 (lane, task_name)
+      稳定排序、字段取值正确。
+    expected: 测试全程无未处理异常，日志不输出任何 API Key、Token、用户密码或模型密钥。
+  - order: 8
+    action: 测试结束后无需释放外部资源，实例可重复新建执行。
+    expected: 测试全程无未处理异常，日志不输出任何 API Key、Token、用户密码或模型密钥。
+  expected_results:
+  - snapshot() 按 (lane, task_name) 稳定键控，每个生命周期事件仅使对应计数精确 +1，无重复写入或跨键串扰。
+  - total_queue_wait_ms 聚合为 started_at - created_at 的毫秒值且非负，total_run_ms 为 finished_at - started_at 的毫秒值且非负。
+  - 终态 FAILED 计入 failed_count，CANCELLED 计入 cancelled_count，TIMED_OUT 同时计入 cancelled_count 与 timed_out_count，三者均计入 completed_count。
+  - 测试全程无未处理异常，日志不输出任何 API Key、Token、用户密码或模型密钥。
+  forbidden_side_effects: []
+  source:
+    legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
+    legacy_sheet: 02_测试用例基线
+    legacy_row: 473
+  unit_boundary: 线程指标统计
+  inputs:
+  - 无（纯内存逻辑，无需外部资产）
+  assertions:
+  - snapshot() 按 (lane, task_name) 稳定键控，每个生命周期事件仅使对应计数精确 +1，无重复写入或跨键串扰。
+  - total_queue_wait_ms 聚合为 started_at - created_at 的毫秒值且非负，total_run_ms 为 finished_at - started_at 的毫秒值且非负。
+  - 终态 FAILED 计入 failed_count，CANCELLED 计入 cancelled_count，TIMED_OUT 同时计入 cancelled_count 与 timed_out_count，三者均计入 completed_count。
+  - 测试全程无未处理异常，日志不输出任何 API Key、Token、用户密码或模型密钥。

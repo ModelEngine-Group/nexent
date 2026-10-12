@@ -1,0 +1,83 @@
+schema_version: '1.0'
+stage: D2
+module: V5-BASELINE
+case:
+  case_id: API-090
+  feature_id: F-087
+  business_rule_ids:
+  - F-087-RULE-01
+  title: 发布申请/撤回/审核通过/驳回/通知/权限｜核心流程
+  type: API-IT
+  priority: P1
+  status: active
+  automation: automated
+  objective: 发布申请/撤回/审核通过/驳回/通知/权限｜核心流程
+  preconditions:
+  - Nexent 本地测试全栈已启动，health check 通过。
+  - 设置 NEXENT_TEST_HOME，目录不位于 Nexent Git 仓库内。
+  - 当次 run_id 已生成，所有新建资源名称带 run_id；测试基线固定为 develop 当前批次锁定的产品提交；执行时另记录实际被测commit。
+  - 所需本地资产存在且校验通过：${NEXENT_TEST_HOME}/config/users.yaml；${NEXENT_TEST_HOME}/config/secrets.env；${NEXENT_TEST_HOME}/config/mcp.yaml；${NEXENT_TEST_HOME}/services/test-mcp/
+  - Test MCP Server 已启动并清空本次 wire log。
+  test_data:
+    legacy_asset_declaration: '- ${NEXENT_TEST_HOME}/config/users.yaml
+
+      - ${NEXENT_TEST_HOME}/config/secrets.env
+
+      - ${NEXENT_TEST_HOME}/config/mcp.yaml
+
+      - ${NEXENT_TEST_HOME}/services/test-mcp/'
+  steps:
+  - order: 1
+    action: 启动/确认 ${NEXENT_TEST_HOME}/services/test-mcp/ 可用，包含 echo、add、get_test_code、require_header、require_metadata、sleep、always_fail
+      等固定工具。
+    expected: 功能结果与代码契约一致，测试过程无未处理异常。
+  - order: 2
+    action: 从 config/mcp.yaml 读取真实本地 MCP endpoint、transport、header/credential；密钥只从 secrets.env 注入。
+    expected: 关键状态在 API 返回、数据库/存储和后续读取中保持一致。
+  - order: 3
+    action: 通过 Nexent MCP 实际 API 创建服务并执行握手/工具列表刷新，断言工具 schema 与 Test MCP Server 暴露内容一致。
+    expected: 失败路径返回明确错误，不出现半写入、重复副作用或跨租户泄露。
+  - order: 4
+    action: 执行“发布申请/撤回/审核通过/驳回/通知/权限｜核心流程”目标操作；需要调用工具时必须经过 Nexent Agent/MCP client 实际网络请求。
+    expected: 日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。
+  - order: 5
+    action: 在 Test MCP Server 的 wire log 中断言请求路径、transport、tool name、arguments、custom header、metadata 等真实收到的值。
+    expected: 本地测试服务 wire log 证明协议请求、Header/metadata/参数真实到达，而不是由 UI 状态推断。
+  - order: 6
+    action: 对 timeout/500/畸形 schema 使用 Test MCP Server 自带故障端点，检查 Nexent 错误映射、重试和连接释放。
+    expected: 本地测试服务 wire log 证明协议请求、Header/metadata/参数真实到达，而不是由 UI 状态推断。
+  - order: 7
+    action: 若涉及 Agent 绑定，保存后执行一次真实 Chat，确认目标 MCP 工具被选择并把 NX-92831 等固定返回值带入回答。
+    expected: 本地测试服务 wire log 证明协议请求、Header/metadata/参数真实到达，而不是由 UI 状态推断。
+  - order: 8
+    action: 删除临时 MCP 配置/容器和关联 Agent 绑定；保存服务端 wire log 到运行结果目录。
+    expected: 本地测试服务 wire log 证明协议请求、Header/metadata/参数真实到达，而不是由 UI 状态推断。
+  expected_results:
+  - 功能结果与代码契约一致，测试过程无未处理异常。
+  - 关键状态在 API 返回、数据库/存储和后续读取中保持一致。
+  - 失败路径返回明确错误，不出现半写入、重复副作用或跨租户泄露。
+  - 日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。
+  - 本地测试服务 wire log 证明协议请求、Header/metadata/参数真实到达，而不是由 UI 状态推断。
+  forbidden_side_effects: []
+  source:
+    legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
+    legacy_sheet: 02_测试用例基线
+    legacy_row: 169
+  contract:
+    protocol: HTTP API
+    request_expectations:
+    - 启动/确认 ${NEXENT_TEST_HOME}/services/test-mcp/ 可用，包含 echo、add、get_test_code、require_header、require_metadata、sleep、always_fail
+      等固定工具。
+    - 从 config/mcp.yaml 读取真实本地 MCP endpoint、transport、header/credential；密钥只从 secrets.env 注入。
+    - 通过 Nexent MCP 实际 API 创建服务并执行握手/工具列表刷新，断言工具 schema 与 Test MCP Server 暴露内容一致。
+    - 执行“发布申请/撤回/审核通过/驳回/通知/权限｜核心流程”目标操作；需要调用工具时必须经过 Nexent Agent/MCP client 实际网络请求。
+    - 在 Test MCP Server 的 wire log 中断言请求路径、transport、tool name、arguments、custom header、metadata 等真实收到的值。
+    - 对 timeout/500/畸形 schema 使用 Test MCP Server 自带故障端点，检查 Nexent 错误映射、重试和连接释放。
+    - 若涉及 Agent 绑定，保存后执行一次真实 Chat，确认目标 MCP 工具被选择并把 NX-92831 等固定返回值带入回答。
+    - 删除临时 MCP 配置/容器和关联 Agent 绑定；保存服务端 wire log 到运行结果目录。
+    response_expectations:
+    - 功能结果与代码契约一致，测试过程无未处理异常。
+    - 关键状态在 API 返回、数据库/存储和后续读取中保持一致。
+    - 失败路径返回明确错误，不出现半写入、重复副作用或跨租户泄露。
+    - 日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。
+    - 本地测试服务 wire log 证明协议请求、Header/metadata/参数真实到达，而不是由 UI 状态推断。

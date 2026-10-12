@@ -58,26 +58,37 @@ export function useMcpServiceToggle() {
       );
       const nextStatus = nextEnabled ? McpServiceStatus.ENABLED : McpServiceStatus.DISABLED;
 
-      // Fire-and-forget tool scan / refresh. UI should update immediately after
-      // enable/disable succeeds, without waiting for scan_tools.
-      setRefreshingTools((prev) => ({ ...prev, [service.mcpId]: true }));
-      void refreshToolListWithToast({
-        message,
-        t,
-        toastKey: `mcp-tools-refresh-${service.mcpId}`,
-        mcpId: service.mcpId,
-      })
-        .then(() => {
-          queryClient.invalidateQueries({ queryKey: ["tools"] });
-          queryClient.invalidateQueries({ queryKey: ["agents"] });
-          queryClient.invalidateQueries({ queryKey: MCP_SERVERS_QUERY_KEY });
-          queryClient.invalidateQueries({ queryKey: MCP_TOOLS_QUERY_KEYS.services });
-          queryClient.invalidateQueries({ queryKey: MCP_TOOLS_QUERY_KEYS.myCommunity });
-          queryClient.invalidateQueries({ queryKey: MCP_TOOLS_QUERY_KEYS.communityList });
+      const invalidateAfterToolRefresh = () => {
+        queryClient.invalidateQueries({ queryKey: ["tools"] });
+        queryClient.invalidateQueries({ queryKey: ["agents"] });
+        queryClient.invalidateQueries({ queryKey: MCP_SERVERS_QUERY_KEY });
+        queryClient.invalidateQueries({ queryKey: MCP_TOOLS_QUERY_KEYS.services });
+        queryClient.invalidateQueries({ queryKey: MCP_TOOLS_QUERY_KEYS.myCommunity });
+        queryClient.invalidateQueries({ queryKey: MCP_TOOLS_QUERY_KEYS.communityList });
+      };
+
+      if (nextEnabled) {
+        // Fire-and-forget tool scan / refresh. UI should update immediately
+        // after enable succeeds, without waiting for scan_tools.
+        setRefreshingTools((prev) => ({ ...prev, [service.mcpId]: true }));
+        void refreshToolListWithToast({
+          message,
+          t,
+          toastKey: `mcp-tools-refresh-${service.mcpId}`,
+          mcpId: service.mcpId,
         })
-        .finally(() => {
-          setRefreshingTools((prev) => ({ ...prev, [service.mcpId]: false }));
-        });
+          .then(() => {
+            invalidateAfterToolRefresh();
+          })
+          .finally(() => {
+            setRefreshingTools((prev) => ({ ...prev, [service.mcpId]: false }));
+          });
+      } else {
+        // Disabling stops the container; requesting a live tool list from it
+        // would only produce a failed request. Refresh dependent caches from
+        // the toggle result instead.
+        invalidateAfterToolRefresh();
+      }
 
       return nextStatus;
     } catch (error) {

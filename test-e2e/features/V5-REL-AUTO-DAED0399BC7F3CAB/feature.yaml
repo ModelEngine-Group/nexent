@@ -1,0 +1,17 @@
+schema_version: '1.0'
+module:
+  id: V5-BASELINE
+  name: Migrated V5 baseline
+feature:
+  feature_id: V5-REL-AUTO-DAED0399BC7F3CAB
+  name: 服务重启后 stale RUNNING 评测与 PENDING/RUNNING case 状态同步收割（reap_stale_runs）
+  status: active
+  description: 服务重启后 in-flight 托管任务丢失，会使 RUNNING 评测及其 PENDING/RUNNING case 成为僵尸记录：状态永久挂起、活跃计数失真、结果无法收敛且无法重新派发。需验证 reap_stale_runs
+    能按 update_time 超时阈值精确收割，同步把 PENDING/RUNNING case 置 FAILED 并写入一致 error_message，同时保证租户隔离、cutoff 内运行与已完成 case 不受影响。
+  business_rules:
+  - rule_id: V5-REL-AUTO-DAED0399BC7F3CAB-RULE-01
+    description: 服务重启后 stale RUNNING 评测与 PENDING/RUNNING case 状态同步收割（reap_stale_runs）
+  required_test_stages:
+  - D5
+  source:
+    notes: 'Provisional migration owner: the V5 row has no stable Feature ID. Do not infer an F-ID.'

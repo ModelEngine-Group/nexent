@@ -1,0 +1,17 @@
+schema_version: '1.0'
+module:
+  id: V5-BASELINE
+  name: Migrated V5 baseline
+feature:
+  feature_id: V5-UT-FE-037
+  name: HttpOnly Cookie 认证、会话过期和 request cancellation
+  status: active
+  description: HttpOnly Cookie 认证、会话过期和 request cancellation
+  business_rules:
+  - rule_id: V5-UT-FE-037-RULE-01
+    description: 浏览器使用 HttpOnly Cookie 会话，代理负责服务端 token；会话过期明确失败，取消不误报认证失败。
+  required_test_stages:
+  - D1
+  source:
+    notes: 'Provisional migration owner: the V5 row has no stable Feature ID. Do not infer an F-ID. Contract updated against
+      e98b84b2b; client-side refresh removed.'

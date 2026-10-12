@@ -1,0 +1,69 @@
+schema_version: '1.0'
+stage: D5
+module: V5-BASELINE
+case:
+  case_id: REL-01
+  feature_id: V5-REL-01
+  business_rule_ids:
+  - V5-REL-01-RULE-01
+  title: Runtime重启恢复与线程生命周期优雅关闭收敛
+  type: RELIABILITY
+  priority: P0
+  status: active
+  automation: automated
+  objective: scheduler lifecycle / thread lifecycle / graceful shutdown
+  preconditions:
+  - '- ${NEXENT_TEST_HOME}/config/environment.yaml'
+  test_data:
+    legacy_asset_declaration: '- ${NEXENT_TEST_HOME}/config/environment.yaml'
+  steps:
+  - order: 1
+    action: 先在无故障情况下执行“Runtime重启与misfire恢复”基线并确认正常通过。
+    expected: 未完成任务经 recover_runtime_tasks 恢复后不重复、不永久丢失。
+  - order: 2
+    action: 构造执行中/待触发的未完成任务，重启Runtime进程，验证启动阶段经 control-io 线程管理器执行 recover_runtime_tasks 恢复未完成任务。
+    expected: 优雅关闭后任务状态收敛、锁释放、未完成任务与用户可见状态可解释。
+  - order: 3
+    action: 故障注入期间持续记录 run/task/connection 状态、/internal/thread-capacity 线程快照与前端/后端日志。
+    expected: /health/ready 在 manager 非 running 或 stuck_count>0 时返回 503，恢复后返回 ready。
+  - order: 4
+    action: 触发Runtime优雅关闭，验证在 RUNTIME_THREAD_SHUTDOWN_GRACE_SECONDS 内依次停止调度器、shutdown_agent_stream_tasks、沙箱池与线程管理器，超时未完成的流任务被取消并记录
+      pending 告警。
+    expected: /health/ready 在 manager 非 running 或 stuck_count>0 时返回 503，恢复后返回 ready。
+  - order: 5
+    action: 恢复依赖后等待系统自恢复，检查锁、重试、状态机、未完成任务与用户可见状态是否收敛。
+    expected: /health/ready 在 manager 非 running 或 stuck_count>0 时返回 503，恢复后返回 ready。
+  - order: 6
+    action: 检查 /health/live 返回 alive，/health/ready 在 manager 非 running 或 stuck_count>0 时返回 503，恢复后返回 ready。
+    expected: /health/ready 在 manager 非 running 或 stuck_count>0 时返回 503，恢复后返回 ready。
+  - order: 7
+    action: 再执行一次正常请求验证系统没有进入永久坏状态。
+    expected: /health/ready 在 manager 非 running 或 stuck_count>0 时返回 503，恢复后返回 ready。
+  - order: 8
+    action: 保存故障开始/结束时间、恢复耗时、关键日志与状态快照。
+    expected: /health/ready 在 manager 非 running 或 stuck_count>0 时返回 503，恢复后返回 ready。
+  expected_results:
+  - 未完成任务经 recover_runtime_tasks 恢复后不重复、不永久丢失。
+  - 优雅关闭后任务状态收敛、锁释放、未完成任务与用户可见状态可解释。
+  - /health/ready 在 manager 非 running 或 stuck_count>0 时返回 503，恢复后返回 ready。
+  forbidden_side_effects: []
+  source:
+    legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
+    legacy_sheet: 04_安全性能可靠性
+    legacy_row: 22
+  risk_type: RELIABILITY
+  risk: scheduler lifecycle / thread lifecycle / graceful shutdown
+  condition:
+  - '- ${NEXENT_TEST_HOME}/config/environment.yaml'
+  metrics:
+  - 未完成任务经 recover_runtime_tasks 恢复后不重复、不永久丢失。
+  - 优雅关闭后任务状态收敛、锁释放、未完成任务与用户可见状态可解释。
+  - /health/ready 在 manager 非 running 或 stuck_count>0 时返回 503，恢复后返回 ready。
+  thresholds:
+  - 未完成任务经 recover_runtime_tasks 恢复后不重复、不永久丢失。
+  - 优雅关闭后任务状态收敛、锁释放、未完成任务与用户可见状态可解释。
+  - /health/ready 在 manager 非 running 或 stuck_count>0 时返回 503，恢复后返回 ready。
+  recovery_expectations:
+  - 未完成任务经 recover_runtime_tasks 恢复后不重复、不永久丢失。
+  - 优雅关闭后任务状态收敛、锁释放、未完成任务与用户可见状态可解释。
+  - /health/ready 在 manager 非 running 或 stuck_count>0 时返回 503，恢复后返回 ready。

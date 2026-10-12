@@ -2,6 +2,7 @@ import os
 import sys
 from unittest.mock import MagicMock, patch
 
+import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
@@ -27,6 +28,45 @@ from apps.prompt_app import router
 app = FastAPI()
 app.include_router(router)
 client = TestClient(app)
+
+
+@pytest.mark.parametrize("description", ["", " ", "\t\r\n", "\u3000", " \t\n\u3000 "])
+def test_generate_prompt_rejects_blank_description(description, mocker):
+    generate = mocker.patch("apps.prompt_app.gen_system_prompt_streamable", return_value=iter(()))
+    authenticate = mocker.patch(
+        "apps.prompt_app.get_current_user_info", return_value=("user-1", "tenant-1", "en")
+    )
+
+    for _ in range(2):
+        response = client.post("/prompt/generate", json={
+            "task_description": description, "agent_id": 1, "model_id": 2,
+        })
+        assert response.status_code == 422
+        assert response.headers["content-type"].startswith("application/json")
+        assert response.json()["detail"][0]["loc"] == ["body", "task_description"]
+    generate.assert_not_called()
+    authenticate.assert_not_called()
+
+
+@pytest.mark.parametrize("description", ["Answer questions", " \tAnswer questions\n\u3000"])
+def test_generate_prompt_preserves_valid_description_and_sse(description, mocker):
+    event = 'data: {"success": true, "data": {"type": "duty", "content": "Answer", "is_complete": true}}\n\n'
+    generate = mocker.patch("apps.prompt_app.gen_system_prompt_streamable", return_value=iter([event]))
+    mocker.patch("apps.prompt_app.get_current_user_info", return_value=("user-1", "tenant-1", "en"))
+    payload = {
+        "task_description": description, "agent_id": 1, "model_id": 2,
+        "tool_ids": [10], "sub_agent_ids": [20], "knowledge_base_display_names": ["kb-a"],
+        "has_selected_resources": True,
+    }
+
+    response = client.post("/prompt/generate", json=payload)
+
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("text/event-stream")
+    assert response.text == event
+    generate.assert_called_once_with(
+        **payload, prompt_template_id=None, user_id="user-1", tenant_id="tenant-1", language="en"
+    )
 
 
 @patch("apps.prompt_app.get_current_user_info")

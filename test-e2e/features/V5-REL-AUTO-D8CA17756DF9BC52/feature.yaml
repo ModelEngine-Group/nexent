@@ -1,0 +1,16 @@
+schema_version: '1.0'
+module:
+  id: V5-BASELINE
+  name: Migrated V5 baseline
+feature:
+  feature_id: V5-REL-AUTO-D8CA17756DF9BC52
+  name: 运行取消/停止时 stop_event、SSE 取消与线程/协程回收
+  status: active
+  description: NL2Agent 草稿配置生成经 agent_run 挂在 runtime_thread_manager 运行时，若取消/停止未置位 stop_event 或线程未被回收，会累积悬挂线程/协程，导致连接泄漏、内存与线程池耗尽，服务逐步退化甚至不可用。
+  business_rules:
+  - rule_id: V5-REL-AUTO-D8CA17756DF9BC52-RULE-01
+    description: 运行取消/停止时 stop_event、SSE 取消与线程/协程回收
+  required_test_stages:
+  - D5
+  source:
+    notes: 'Provisional migration owner: the V5 row has no stable Feature ID. Do not infer an F-ID.'

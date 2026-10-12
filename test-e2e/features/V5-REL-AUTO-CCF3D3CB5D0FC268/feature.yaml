@@ -1,0 +1,19 @@
+schema_version: '1.0'
+module:
+  id: V5-BASELINE
+  name: Migrated V5 baseline
+feature:
+  feature_id: V5-REL-AUTO-CCF3D3CB5D0FC268
+  name: 持久 PENDING 评测运行重派发闭环与运行时幂等 claim
+  status: active
+  description: 威胁/风险：服务重启会丢失内存中运行的评测任务线程（ManagedThreadManager 托管通道不持久），持久 PENDING 运行若不在启动后经后台维护被可靠重派发将永久滞留 PENDING；重派发缺 tenant/creator
+    或运行时服务暂不可用会中断调度，或对同一运行多次派发造成重复执行。测试目标：验证 list_dispatchable_pending_runs 仅取回持久 PENDING（evaluation_set_id>0、delete_flag='N'）并按
+    create_time 升序；_dispatch_pending_runs 对缺失 tenant/created_by 的运行跳过、对字段完整运行以 agent_evaluation_id(int)/user_id(str)/tenant_id(str)
+    调用 dispatch_agent_evaluation_run；派发异常保持 PENDING 供下轮重试；claim_agent_evaluation_run 条件更新(PENDING→RUNNING)幂等，保证重试不重复启动同一运行。
+  business_rules:
+  - rule_id: V5-REL-AUTO-CCF3D3CB5D0FC268-RULE-01
+    description: 持久 PENDING 评测运行重派发闭环与运行时幂等 claim
+  required_test_stages:
+  - D5
+  source:
+    notes: 'Provisional migration owner: the V5 row has no stable Feature ID. Do not infer an F-ID.'

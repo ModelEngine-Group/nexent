@@ -20,7 +20,7 @@ import {
   ModelChunkSizeSlider,
   DEFAULT_EXPECTED_CHUNK_SIZE,
   DEFAULT_MAXIMUM_CHUNK_SIZE,
-} from "./ModelChunkSizeSilder";
+} from "./ModelChunkSizeSlider";
 import {
   isValidMaxTokens,
   ModelMaxTokensInput,

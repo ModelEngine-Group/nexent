@@ -1,0 +1,96 @@
+schema_version: '1.0'
+stage: D5
+module: V5-BASELINE
+case:
+  case_id: REL-AUTO-80AA755E2436D269
+  feature_id: V5-REL-AUTO-80AA755E2436D269
+  business_rule_ids:
+  - V5-REL-AUTO-80AA755E2436D269-RULE-01
+  title: ES向量库统计异常时个人/租户配额检查与用量展示fail-open（源文件账本唯一口径）
+  type: RELIABILITY
+  priority: P1
+  status: active
+  automation: automated
+  objective: ES向量库统计故障不得导致基于源文件持久账本的个人/租户配额检查被错误拒收（TENANT_PERSONAL_KB_QUOTA_UNAVAILABLE）；usage与容量展示应继续以源文件账本为唯一口径，ES物理容量作为独立观测字段返回，ES不可用不得使整体配额检查或用量展示失败。
+  preconditions:
+  - '- ${NEXENT_TEST_HOME}/config/users.yaml
+
+    - ${NEXENT_TEST_HOME}/config/secrets.env
+
+    - 故障注入：monkeypatch management.services.knowledge_base.service.get_vector_db_core，使 vdb_core.get_indices_detail 分别抛 AppException
+    与通用 Exception
+
+    - 源文件账本 fixture：构造 get_committed_bytes_by_kb / get_tenant_committed_source_bytes 的稳定返回'
+  test_data:
+    legacy_asset_declaration: '- ${NEXENT_TEST_HOME}/config/users.yaml
+
+      - ${NEXENT_TEST_HOME}/config/secrets.env
+
+      - 故障注入：monkeypatch management.services.knowledge_base.service.get_vector_db_core，使 vdb_core.get_indices_detail 分别抛 AppException
+      与通用 Exception
+
+      - 源文件账本 fixture：构造 get_committed_bytes_by_kb / get_tenant_committed_source_bytes 的稳定返回'
+  steps:
+  - order: 1
+    action: 准备隔离租户与测试用户：为测试用户设置有限个人配额（set_personal_user_quota），构造包含非零 source bytes 的源文件账本提交记录 fixture，使 get_committed_bytes_by_kb
+      返回稳定用量。
+    expected: ES 统计抛 AppException 或通用 Exception 时，check_personal_user_quota 与 check_personal_kb_quota 均不抛 TENANT_PERSONAL_KB_QUOTA_UNAVAILABLE。
+  - order: 2
+    action: 故障注入A：monkeypatch management.services.knowledge_base.service.get_vector_db_core，使 vdb_core.get_indices_detail
+      抛出 AppException。
+    expected: 源文件账本用量未超限时配额检查放行；超限时仅抛 TENANT_PERSONAL_KB_QUOTA_EXCEEDED，错误信息基于源文件账本 bytes。
+  - order: 3
+    action: 调用 QuotaService.check_personal_user_quota(user_id, upload_bytes) 与 check_personal_kb_quota(user_id, upload_bytes,
+      kb_record)，记录返回或抛出的错误码。
+    expected: get_usage 正常返回，total_bytes 等于源文件账本口径（get_tenant_committed_source_bytes），es_physical_bytes 作为独立字段返回且不影响 total_bytes
+      与配额判定。
+  - order: 4
+    action: 调用 QuotaService.get_usage(force_refresh=True, detail=True)，记录 total_bytes、es_physical_bytes 与 usage_pct。
+    expected: 仅当源文件账本查询失败且 strict=True 时抛出 TENANT_PERSONAL_KB_QUOTA_UNAVAILABLE，证明 fail-closed 仅约束源文件账本。
+  - order: 5
+    action: 故障注入B：改为使 get_indices_detail 抛出通用 Exception，重复步骤3-4。
+    expected: 全流程无未处理异常，ES 故障仅产生 logger.warning 告警日志，不泄露任何凭据。
+  - order: 6
+    action: 对照场景：打桩 get_committed_bytes_by_kb 抛异常（源文件账本故障），在 strict=True 下调用 check_personal_user_quota，记录错误码以确认 fail-closed
+      仅约束源文件账本。
+    expected: 全流程无未处理异常，ES 故障仅产生 logger.warning 告警日志，不泄露任何凭据。
+  expected_results:
+  - ES 统计抛 AppException 或通用 Exception 时，check_personal_user_quota 与 check_personal_kb_quota 均不抛 TENANT_PERSONAL_KB_QUOTA_UNAVAILABLE。
+  - 源文件账本用量未超限时配额检查放行；超限时仅抛 TENANT_PERSONAL_KB_QUOTA_EXCEEDED，错误信息基于源文件账本 bytes。
+  - get_usage 正常返回，total_bytes 等于源文件账本口径（get_tenant_committed_source_bytes），es_physical_bytes 作为独立字段返回且不影响 total_bytes 与配额判定。
+  - 仅当源文件账本查询失败且 strict=True 时抛出 TENANT_PERSONAL_KB_QUOTA_UNAVAILABLE，证明 fail-closed 仅约束源文件账本。
+  - 全流程无未处理异常，ES 故障仅产生 logger.warning 告警日志，不泄露任何凭据。
+  forbidden_side_effects: []
+  source:
+    legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
+    legacy_sheet: 04_安全性能可靠性
+    legacy_row: 56
+  risk_type: RELIABILITY
+  risk: ES向量库统计故障不得导致基于源文件持久账本的个人/租户配额检查被错误拒收（TENANT_PERSONAL_KB_QUOTA_UNAVAILABLE）；usage与容量展示应继续以源文件账本为唯一口径，ES物理容量作为独立观测字段返回，ES不可用不得使整体配额检查或用量展示失败。
+  condition:
+  - '- ${NEXENT_TEST_HOME}/config/users.yaml
+
+    - ${NEXENT_TEST_HOME}/config/secrets.env
+
+    - 故障注入：monkeypatch management.services.knowledge_base.service.get_vector_db_core，使 vdb_core.get_indices_detail 分别抛 AppException
+    与通用 Exception
+
+    - 源文件账本 fixture：构造 get_committed_bytes_by_kb / get_tenant_committed_source_bytes 的稳定返回'
+  metrics:
+  - ES 统计抛 AppException 或通用 Exception 时，check_personal_user_quota 与 check_personal_kb_quota 均不抛 TENANT_PERSONAL_KB_QUOTA_UNAVAILABLE。
+  - 源文件账本用量未超限时配额检查放行；超限时仅抛 TENANT_PERSONAL_KB_QUOTA_EXCEEDED，错误信息基于源文件账本 bytes。
+  - get_usage 正常返回，total_bytes 等于源文件账本口径（get_tenant_committed_source_bytes），es_physical_bytes 作为独立字段返回且不影响 total_bytes 与配额判定。
+  - 仅当源文件账本查询失败且 strict=True 时抛出 TENANT_PERSONAL_KB_QUOTA_UNAVAILABLE，证明 fail-closed 仅约束源文件账本。
+  - 全流程无未处理异常，ES 故障仅产生 logger.warning 告警日志，不泄露任何凭据。
+  thresholds:
+  - ES 统计抛 AppException 或通用 Exception 时，check_personal_user_quota 与 check_personal_kb_quota 均不抛 TENANT_PERSONAL_KB_QUOTA_UNAVAILABLE。
+  - 源文件账本用量未超限时配额检查放行；超限时仅抛 TENANT_PERSONAL_KB_QUOTA_EXCEEDED，错误信息基于源文件账本 bytes。
+  - get_usage 正常返回，total_bytes 等于源文件账本口径（get_tenant_committed_source_bytes），es_physical_bytes 作为独立字段返回且不影响 total_bytes 与配额判定。
+  - 仅当源文件账本查询失败且 strict=True 时抛出 TENANT_PERSONAL_KB_QUOTA_UNAVAILABLE，证明 fail-closed 仅约束源文件账本。
+  - 全流程无未处理异常，ES 故障仅产生 logger.warning 告警日志，不泄露任何凭据。
+  recovery_expectations:
+  - ES 统计抛 AppException 或通用 Exception 时，check_personal_user_quota 与 check_personal_kb_quota 均不抛 TENANT_PERSONAL_KB_QUOTA_UNAVAILABLE。
+  - 源文件账本用量未超限时配额检查放行；超限时仅抛 TENANT_PERSONAL_KB_QUOTA_EXCEEDED，错误信息基于源文件账本 bytes。
+  - get_usage 正常返回，total_bytes 等于源文件账本口径（get_tenant_committed_source_bytes），es_physical_bytes 作为独立字段返回且不影响 total_bytes 与配额判定。
+  - 仅当源文件账本查询失败且 strict=True 时抛出 TENANT_PERSONAL_KB_QUOTA_UNAVAILABLE，证明 fail-closed 仅约束源文件账本。
+  - 全流程无未处理异常，ES 故障仅产生 logger.warning 告警日志，不泄露任何凭据。

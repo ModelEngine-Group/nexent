@@ -1,0 +1,16 @@
+schema_version: '1.0'
+module:
+  id: V5-BASELINE
+  name: Migrated V5 baseline
+feature:
+  feature_id: V5-PW-AUTO-37453582F1CFB11D
+  name: 技能空间仓库 Tab 浏览、搜索与标签过滤、详情弹窗、安装复制改名冲突(409)
+  status: active
+  description: 验证用户从技能空间「仓库」Tab 进入后，能浏览共享技能列表、按关键字搜索、按 tag_predicates 标签过滤、查看详情弹窗，并在复制安装时通过已占用目标名获得 409 重名冲突提示，改名后成功安装，形成浏览→过滤→详情→改名闭环。
+  business_rules:
+  - rule_id: V5-PW-AUTO-37453582F1CFB11D-RULE-01
+    description: 技能空间仓库 Tab 浏览、搜索与标签过滤、详情弹窗、安装复制改名冲突(409)
+  required_test_stages:
+  - D4
+  source:
+    notes: 'Provisional migration owner: the V5 row has no stable Feature ID. Do not infer an F-ID.'

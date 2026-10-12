@@ -1,0 +1,26 @@
+schema_version: '1.0'
+change:
+  change_id: A2A-REFRESH-TIMEOUT-CONTRACT-20261010
+  change_type: test-fix
+  title: Align authenticated refresh timeout with the authorized HTTP 500 contract
+  description: >-
+    The user approved retaining current product behavior and adapting CTR-038.
+    Supersede its HTTP 400 expectation in A2A-PROTOCOL-TIMEOUT-20261009.
+    Assert HTTP 500 and message "Failed to refresh agent", as observed in the
+    completed Ubuntu case and mapped by backend/apps/app_factory.py from the
+    HTTPException in backend/apps/a2a_client_app.py. Preserve three authenticated
+    attempts, the 850-1040 second timeout window, credential redaction and
+    persisted scheme/index, recovered refresh and invocation, and owned cleanup.
+    Correct CTR-043's prior detail-field assertion to the same HTTP envelope's
+    message field, with its distinct chat error text. No product or machine
+    configuration changes; no retroactive PASS or alteration of live batch assets.
+  affected_features:
+    existing: [F-092, F-096]
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing: []
+    added: []
+    modified: [CTR-038, CTR-043]
+    retired: []

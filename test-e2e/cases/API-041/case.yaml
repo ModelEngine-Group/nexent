@@ -1,0 +1,93 @@
+schema_version: '1.0'
+stage: D2
+module: V5-BASELINE
+case:
+  case_id: API-041
+  feature_id: F-026
+  business_rule_ids:
+  - F-026-RULE-01
+  title: 平台 overview/capacity 设置删除与分配冲突｜异常/边界/越权
+  type: API-IT
+  priority: P0
+  status: active
+  automation: automated
+  objective: 平台 overview/capacity 设置删除与分配冲突｜异常/边界/越权
+  preconditions:
+  - Nexent 本地测试全栈已启动，health check 通过。
+  - 设置 NEXENT_TEST_HOME，目录不位于 Nexent Git 仓库内。
+  - 当次 run_id 已生成，所有新建资源名称带 run_id；测试基线固定为 develop 当前批次锁定的产品提交；执行时另记录实际被测commit。
+  - 所需本地资产存在且校验通过：${NEXENT_TEST_HOME}/config/users.yaml；${NEXENT_TEST_HOME}/config/secrets.env
+  - users.yaml 中 SU/Admin/UserA/UserB 等隔离账号可登录，测试租户数据可被清理。
+  test_data:
+    legacy_asset_declaration: '- ${NEXENT_TEST_HOME}/config/users.yaml
+
+      - ${NEXENT_TEST_HOME}/config/secrets.env'
+  steps:
+  - order: 1
+    action: 从 config/users.yaml 准备 SU、TenantA Admin/User、TenantB Admin/User，所有测试资源使用 RunID 前缀。
+    expected: 功能结果与代码契约一致，测试过程无未处理异常。
+  - order: 2
+    action: 按“平台 overview/capacity 设置删除与分配冲突｜异常/边界/越权”通过实际资源管理 API 设置/修改/删除（清空）平台总容量与各租户硬限额。
+    expected: 关键状态在 API 返回、数据库/存储和后续读取中保持一致；平台 overview 的 total_actual_bytes 等于各租户源文件 usage 汇总。
+  - order: 3
+    action: 每次写操作后重新 GET 平台 overview 与租户 quota 详情，核对租户 usage 的 total_bytes、平台 total_actual_bytes 与剩余可分配容量 remaining_allocatable_bytes
+      一致。
+    expected: 配额 usage 以源文件持久账本为唯一口径：total_bytes 等于源文件 committed bytes；es_physical_bytes/total_es_physical_bytes 作为独立观测字段返回，不参与
+      usage、剩余可分配容量或分配冲突判定。
+  - order: 4
+    action: 使用不同角色重复读取和写入，确认 API 对应 RBAC 与 tenant scope 一致。
+    expected: 分配冲突按源文件 usage 判定：TenantQuotaBelowUsage、PlatformCapacityExceeded、PlatformCapacityBelowAllocation 返回对应错误码且不产生半写入；remaining_allocatable_bytes
+      = max(platform_capacity - total_allocated_bytes, 0)。
+  - order: 5
+    action: 对删除/清空配额操作，记录关联用户、组、KB、Agent、MCP 等ID，删除后逐项确认不可访问且无孤儿记录。
+    expected: 日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。
+  - order: 6
+    action: 用固定大小源文件/知识库真实消耗容量，断言 quota usage 的 total_bytes 等于源文件持久账本 committed bytes，es_physical_bytes 作为独立观测字段返回且不计入 usage。
+    expected: 日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。
+  - order: 7
+    action: 分配冲突：租户硬限额低于该租户源文件 usage 触发 TenantQuotaBelowUsage；平台容量低于既有租户分配总额触发 PlatformCapacityBelowAllocation；新增租户限额使 allocated
+      总额超过平台容量触发 PlatformCapacityExceeded。
+    expected: 日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。
+  - order: 8
+    action: 越权/非法输入不得改变其他租户数据；错误响应不暴露资源是否真实存在。
+    expected: 日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。
+  - order: 9
+    action: '清理当次创建的租户/用户/邀请码/配额配置。
+
+      补充异常断言：对本用例涉及的非法/失败条件至少重复一次，确认重试不会产生重复资源、脏状态或权限绕过。'
+    expected: 日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。
+  expected_results:
+  - 功能结果与代码契约一致，测试过程无未处理异常。
+  - 关键状态在 API 返回、数据库/存储和后续读取中保持一致；平台 overview 的 total_actual_bytes 等于各租户源文件 usage 汇总。
+  - 配额 usage 以源文件持久账本为唯一口径：total_bytes 等于源文件 committed bytes；es_physical_bytes/total_es_physical_bytes 作为独立观测字段返回，不参与 usage、剩余可分配容量或分配冲突判定。
+  - 分配冲突按源文件 usage 判定：TenantQuotaBelowUsage、PlatformCapacityExceeded、PlatformCapacityBelowAllocation 返回对应错误码且不产生半写入；remaining_allocatable_bytes
+    = max(platform_capacity - total_allocated_bytes, 0)。
+  - 日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。
+  forbidden_side_effects: []
+  source:
+    legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
+    legacy_sheet: 02_测试用例基线
+    legacy_row: 49
+  contract:
+    protocol: HTTP API
+    request_expectations:
+    - 从 config/users.yaml 准备 SU、TenantA Admin/User、TenantB Admin/User，所有测试资源使用 RunID 前缀。
+    - 按“平台 overview/capacity 设置删除与分配冲突｜异常/边界/越权”通过实际资源管理 API 设置/修改/删除（清空）平台总容量与各租户硬限额。
+    - 每次写操作后重新 GET 平台 overview 与租户 quota 详情，核对租户 usage 的 total_bytes、平台 total_actual_bytes 与剩余可分配容量 remaining_allocatable_bytes
+      一致。
+    - 使用不同角色重复读取和写入，确认 API 对应 RBAC 与 tenant scope 一致。
+    - 对删除/清空配额操作，记录关联用户、组、KB、Agent、MCP 等ID，删除后逐项确认不可访问且无孤儿记录。
+    - 用固定大小源文件/知识库真实消耗容量，断言 quota usage 的 total_bytes 等于源文件持久账本 committed bytes，es_physical_bytes 作为独立观测字段返回且不计入 usage。
+    - 分配冲突：租户硬限额低于该租户源文件 usage 触发 TenantQuotaBelowUsage；平台容量低于既有租户分配总额触发 PlatformCapacityBelowAllocation；新增租户限额使 allocated
+      总额超过平台容量触发 PlatformCapacityExceeded。
+    - 越权/非法输入不得改变其他租户数据；错误响应不暴露资源是否真实存在。
+    - '清理当次创建的租户/用户/邀请码/配额配置。
+
+      补充异常断言：对本用例涉及的非法/失败条件至少重复一次，确认重试不会产生重复资源、脏状态或权限绕过。'
+    response_expectations:
+    - 功能结果与代码契约一致，测试过程无未处理异常。
+    - 关键状态在 API 返回、数据库/存储和后续读取中保持一致；平台 overview 的 total_actual_bytes 等于各租户源文件 usage 汇总。
+    - 配额 usage 以源文件持久账本为唯一口径：total_bytes 等于源文件 committed bytes；es_physical_bytes/total_es_physical_bytes 作为独立观测字段返回，不参与 usage、剩余可分配容量或分配冲突判定。
+    - 分配冲突按源文件 usage 判定：TenantQuotaBelowUsage、PlatformCapacityExceeded、PlatformCapacityBelowAllocation 返回对应错误码且不产生半写入；remaining_allocatable_bytes
+      = max(platform_capacity - total_allocated_bytes, 0)。
+    - 日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。

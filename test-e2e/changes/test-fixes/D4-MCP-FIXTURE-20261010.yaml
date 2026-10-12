@@ -1,0 +1,31 @@
+schema_version: '1.0'
+change:
+  change_id: D4-MCP-FIXTURE-20261010
+  change_type: test-fix
+  title: Pin controlled container MCP proxy to a compatible SDK
+  description: >-
+    The configured fixture image contained mcp-proxy 0.12.0 and mcp 2.2.0;
+    its CLI crashed importing removed request_ctx. Provide a reproducible test
+    fixture Dockerfile pinned to mcp 1.27.1 and mcp-proxy 0.12.0. An untagged
+    candidate image built on Ubuntu passed real MCP initialize, tools/list and
+    get_test_code call in an isolated network-none container, which was removed.
+    Activate the existing fixture latest tag only after the Daily batch closes.
+    The first UI rerun passed creation, health and tool listing but exposed a
+    script race: two Escape events left the parent modal intercepting lifecycle
+    clicks. Close and await each modal explicitly by its title and footer.
+    The latest UI verification passes all eight lifecycle steps, but disabling
+    the container fires a product tool refresh against the stopped service,
+    returning 503. Preserve the unexpected-5xx failure instead of ignoring it.
+    API MCP health
+    still invokes MCP protocol against a plain HTTP API in product code; preserve
+    its health assertion and record that product issue rather than bypass it.
+  affected_features:
+    existing: [V5-PW-MCP-CONTAINER-01, V5-PW-MCP-API-01, V5-PW-MCP-REMOTE-01]
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing: [PW-MCP-API-01, PW-MCP-REMOTE-01]
+    added: []
+    modified: [PW-MCP-CONTAINER-01]
+    retired: []

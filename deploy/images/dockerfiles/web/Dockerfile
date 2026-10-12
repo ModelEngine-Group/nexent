@@ -58,6 +58,7 @@ ARG APK_MIRROR
 ARG TARGETARCH
 ARG CONFIGURED_BASE_PATH=/
 LABEL authors="nexent"
+ENV TZ=Asia/Shanghai
 
 # Configure Alpine mirrors if specified
 RUN if [ "$APK_MIRROR" = "tsinghua" ]; then \
@@ -71,7 +72,7 @@ RUN --mount=type=cache,id=nexent-web-apk-${TARGETARCH},target=/var/cache/apk,sha
     mkdir -p /var/cache/apk && \
     apk update && \
     (apk upgrade busybox || true) && \
-    apk add --no-scripts curl vim
+    apk add --no-scripts curl vim tzdata
 
 WORKDIR /opt/frontend-dist
 

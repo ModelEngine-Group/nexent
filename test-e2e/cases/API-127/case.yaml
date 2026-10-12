@@ -1,0 +1,76 @@
+schema_version: '1.0'
+stage: D2
+module: V5-BASELINE
+case:
+  case_id: API-127
+  feature_id: F-126
+  business_rule_ids:
+  - F-126-RULE-01
+  title: pause/resume/run now/history｜异常/边界/越权
+  type: API-IT
+  priority: P0
+  status: active
+  automation: automated
+  objective: pause/resume/run now/history｜异常/边界/越权
+  preconditions:
+  - Nexent 本地测试全栈已启动，health check 通过。
+  - 设置 NEXENT_TEST_HOME，目录不位于 Nexent Git 仓库内。
+  - 当次 run_id 已生成，所有新建资源名称带 run_id；测试基线固定为 develop 当前批次锁定的产品提交；执行时另记录实际被测commit。
+  - 所需本地资产存在且校验通过：${NEXENT_TEST_HOME}/config/environment.yaml
+  test_data:
+    legacy_asset_declaration: '- ${NEXENT_TEST_HOME}/config/environment.yaml'
+  steps:
+  - order: 1
+    action: 启动完整本地 Scheduler/Worker/DB 环境，并使用 config/environment.yaml 中的测试时区和短周期参数。
+    expected: 功能结果与代码契约一致，测试过程无未处理异常。
+  - order: 2
+    action: 准备真实测试 Agent 与 LLM 配置；创建任务时使用唯一名称和可在数分钟内完成的 Once/Interval/Cron 表达式。
+    expected: 关键状态在 API 返回、数据库/存储和后续读取中保持一致。
+  - order: 3
+    action: 按“pause/resume/run now/history｜异常/边界/越权”通过实际 API 创建/更新/暂停/恢复/立即执行任务，记录 task_id、schedule、next_run_at。
+    expected: 失败路径返回明确错误，不出现半写入、重复副作用或跨租户泄露。
+  - order: 4
+    action: 等待或主动触发真实 scheduler tick，不通过直接改最终状态绕过调度器。
+    expected: 日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。
+  - order: 5
+    action: 查询 task run 历史、fire_count、failure_count、lock/worker 状态和 Agent run_id，确认状态机迁移正确。
+    expected: 日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。
+  - order: 6
+    action: 并发/失败场景使用可控 Test Agent/服务制造慢执行、500 或 timeout，检查重试、SKIPPED、锁释放和自动暂停。
+    expected: 日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。
+  - order: 7
+    action: 时间语义检查统一以配置时区解析，记录实际触发时间与期望时间偏差。
+    expected: 日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。
+  - order: 8
+    action: '删除任务并确认不再触发，清理对应会话/运行记录。
+
+      补充异常断言：对本用例涉及的非法/失败条件至少重复一次，确认重试不会产生重复资源、脏状态或权限绕过。'
+    expected: 日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。
+  expected_results:
+  - 功能结果与代码契约一致，测试过程无未处理异常。
+  - 关键状态在 API 返回、数据库/存储和后续读取中保持一致。
+  - 失败路径返回明确错误，不出现半写入、重复副作用或跨租户泄露。
+  - 日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。
+  forbidden_side_effects: []
+  source:
+    legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
+    legacy_sheet: 02_测试用例基线
+    legacy_row: 245
+  contract:
+    protocol: HTTP API
+    request_expectations:
+    - 启动完整本地 Scheduler/Worker/DB 环境，并使用 config/environment.yaml 中的测试时区和短周期参数。
+    - 准备真实测试 Agent 与 LLM 配置；创建任务时使用唯一名称和可在数分钟内完成的 Once/Interval/Cron 表达式。
+    - 按“pause/resume/run now/history｜异常/边界/越权”通过实际 API 创建/更新/暂停/恢复/立即执行任务，记录 task_id、schedule、next_run_at。
+    - 等待或主动触发真实 scheduler tick，不通过直接改最终状态绕过调度器。
+    - 查询 task run 历史、fire_count、failure_count、lock/worker 状态和 Agent run_id，确认状态机迁移正确。
+    - 并发/失败场景使用可控 Test Agent/服务制造慢执行、500 或 timeout，检查重试、SKIPPED、锁释放和自动暂停。
+    - 时间语义检查统一以配置时区解析，记录实际触发时间与期望时间偏差。
+    - '删除任务并确认不再触发，清理对应会话/运行记录。
+
+      补充异常断言：对本用例涉及的非法/失败条件至少重复一次，确认重试不会产生重复资源、脏状态或权限绕过。'
+    response_expectations:
+    - 功能结果与代码契约一致，测试过程无未处理异常。
+    - 关键状态在 API 返回、数据库/存储和后续读取中保持一致。
+    - 失败路径返回明确错误，不出现半写入、重复副作用或跨租户泄露。
+    - 日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。

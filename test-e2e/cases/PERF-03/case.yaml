@@ -1,0 +1,72 @@
+schema_version: '1.0'
+stage: D5
+module: V5-BASELINE
+case:
+  case_id: PERF-03
+  feature_id: V5-PERF-03
+  business_rule_ids:
+  - V5-PERF-03-RULE-01
+  title: 大文件/多文件上传与处理
+  type: PERFORMANCE
+  priority: P1
+  status: active
+  automation: automated
+  objective: 上传、MinIO、data-process队列
+  preconditions:
+  - '- ${NEXENT_TEST_HOME}/assets/knowledge/
+
+    - ${NEXENT_TEST_HOME}/assets/expected/kb_expected.json
+
+    - ${NEXENT_TEST_HOME}/assets/documents/
+
+    - ${NEXENT_TEST_HOME}/config/performance.yaml'
+  test_data:
+    legacy_asset_declaration: '- ${NEXENT_TEST_HOME}/assets/knowledge/
+
+      - ${NEXENT_TEST_HOME}/assets/expected/kb_expected.json
+
+      - ${NEXENT_TEST_HOME}/assets/documents/
+
+      - ${NEXENT_TEST_HOME}/config/performance.yaml'
+  steps:
+  - order: 1
+    action: 从 performance.yaml 读取本用例并发量/数据规模/阈值，启动本地真实测试栈并记录机器资源信息。
+    expected: 无OOM；错误可定位到单文件；吞吐达标；quota计算准确。
+  - order: 2
+    action: 准备“大文件/多文件上传与处理”所需固定测试数据和真实模型/向量服务（如涉及）。
+    expected: 无OOM；错误可定位到单文件；吞吐达标；quota计算准确。
+  - order: 3
+    action: 覆盖大PDF/XLSX、100文件批次、partial失败；监控CPU/内存/队列。
+    expected: 无OOM；错误可定位到单文件；吞吐达标；quota计算准确。
+  - order: 4
+    action: 预热一次后再正式测量；记录 P50/P95/P99、吞吐、错误率和资源占用。
+    expected: 无OOM；错误可定位到单文件；吞吐达标；quota计算准确。
+  - order: 5
+    action: 性能场景仍要验证业务正确性，不能以返回快作为唯一通过条件。
+    expected: 无OOM；错误可定位到单文件；吞吐达标；quota计算准确。
+  - order: 6
+    action: 保存原始测量 JSON/CSV、服务日志和环境快照；P2 大型场景失败默认记录但不掩盖 P0/P1结果。
+    expected: 无OOM；错误可定位到单文件；吞吐达标；quota计算准确。
+  expected_results:
+  - 无OOM；错误可定位到单文件；吞吐达标；quota计算准确。
+  forbidden_side_effects: []
+  source:
+    legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
+    legacy_sheet: 04_安全性能可靠性
+    legacy_row: 14
+  risk_type: PERFORMANCE
+  risk: 上传、MinIO、data-process队列
+  condition:
+  - '- ${NEXENT_TEST_HOME}/assets/knowledge/
+
+    - ${NEXENT_TEST_HOME}/assets/expected/kb_expected.json
+
+    - ${NEXENT_TEST_HOME}/assets/documents/
+
+    - ${NEXENT_TEST_HOME}/config/performance.yaml'
+  metrics:
+  - 无OOM；错误可定位到单文件；吞吐达标；quota计算准确。
+  thresholds:
+  - 无OOM；错误可定位到单文件；吞吐达标；quota计算准确。
+  recovery_expectations:
+  - 无OOM；错误可定位到单文件；吞吐达标；quota计算准确。

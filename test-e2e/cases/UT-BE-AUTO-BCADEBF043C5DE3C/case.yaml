@@ -1,0 +1,59 @@
+schema_version: '1.0'
+stage: D1
+module: V5-BASELINE
+case:
+  case_id: UT-BE-AUTO-BCADEBF043C5DE3C
+  feature_id: F-079
+  business_rule_ids:
+  - F-079-RULE-01
+  title: skill 描述超过 1000 字符截断为 1000 且 DB 写入无异常｜核心流程
+  type: BE-UT
+  priority: P1
+  status: active
+  automation: automated
+  objective: skill 描述超过 1000 字符截断为 1000 且 DB 写入无异常｜核心流程
+  preconditions:
+  - 本地依赖/组件测试环境可运行；不要求外部模型服务在线。
+  - 设置 NEXENT_TEST_HOME，目录不位于 Nexent Git 仓库内。
+  - 当次 run_id 已生成，所有新建资源名称带 run_id；测试基线固定为 develop 当前批次锁定的产品提交；执行时另记录实际被测commit。
+  - skill_db 单测使用测试专用 DB 或内存 DB，无需真实技能资产或外部服务。
+  test_data:
+    legacy_asset_declaration: '- 无（纯逻辑单元测试；DB 写入使用测试专用/内存 DB session）'
+  steps:
+  - order: 1
+    action: 直接导入 backend/database/skill_db.py 的 SKILL_DESCRIPTION_MAX_LENGTH 与 _normalize_skill_description，构造描述输入。
+    expected: _normalize_skill_description 对 None/空字符串返回空字符串，对 ≤1000 字符输入原样返回。
+  - order: 2
+    action: 依次输入边界值：None、空字符串、长度恰好 1000 的描述、长度 1001 的描述、长度远超 1000（如 5000 字符）的描述，调用 _normalize_skill_description 并记录返回字符串及长度。
+    expected: 对 >1000 字符输入，返回长度恒为 SKILL_DESCRIPTION_MAX_LENGTH(1000)，内容为原始描述前 1000 字符，无截断外多余字符。
+  - order: 3
+    action: 检查返回值：None/空串返回空串，≤1000 字符输入原样返回，>1000 字符输入返回前 1000 字符且长度恒为 1000。
+    expected: 超长描述经 create_skill/upsert_scanned_skills 写入 DB 成功、无异常抛出，落库 skill_description 长度为 1000。
+  - order: 4
+    action: 使用超长描述（>1000 字符）经 create_skill 与 upsert_scanned_skills 走真实 DB 写入路径（测试专用/内存 DB），断言写入成功、无异常，且落库 skill_description
+      长度为 1000、内容等于原始描述前 1000 字符。
+    expected: 截断场景产生 warning 日志；日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。
+  - order: 5
+    action: 确认超长输入时记录截断 warning 日志，且日志中不输出 API Key、Token、用户密码或模型密钥。
+    expected: 截断场景产生 warning 日志；日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。
+  - order: 6
+    action: 测试结束后清理产生的测试技能数据，确保可重复执行。
+    expected: 截断场景产生 warning 日志；日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。
+  expected_results:
+  - _normalize_skill_description 对 None/空字符串返回空字符串，对 ≤1000 字符输入原样返回。
+  - 对 >1000 字符输入，返回长度恒为 SKILL_DESCRIPTION_MAX_LENGTH(1000)，内容为原始描述前 1000 字符，无截断外多余字符。
+  - 超长描述经 create_skill/upsert_scanned_skills 写入 DB 成功、无异常抛出，落库 skill_description 长度为 1000。
+  - 截断场景产生 warning 日志；日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。
+  forbidden_side_effects: []
+  source:
+    legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
+    legacy_sheet: 02_测试用例基线
+    legacy_row: 412
+  unit_boundary: 技能数据库
+  inputs:
+  - '- 无（纯逻辑单元测试；DB 写入使用测试专用/内存 DB session）'
+  assertions:
+  - _normalize_skill_description 对 None/空字符串返回空字符串，对 ≤1000 字符输入原样返回。
+  - 对 >1000 字符输入，返回长度恒为 SKILL_DESCRIPTION_MAX_LENGTH(1000)，内容为原始描述前 1000 字符，无截断外多余字符。
+  - 超长描述经 create_skill/upsert_scanned_skills 写入 DB 成功、无异常抛出，落库 skill_description 长度为 1000。
+  - 截断场景产生 warning 日志；日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。

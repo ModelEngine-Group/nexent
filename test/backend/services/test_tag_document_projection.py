@@ -210,6 +210,61 @@ def test_provider_rejection_is_retryable_and_preserves_canonical_assignments(mon
     assert assignments == _assignments()
 
 
+def test_first_attempt_failure_records_retryable_state(monkeypatch):
+    """First-ever projection has no ledger row: failure must still record a retryable state."""
+    assignments = _assignments()
+    monkeypatch.setattr(
+        projection_module.TagManagementDB,
+        "list_resource_assignments",
+        lambda *args, **kwargs: assignments,
+    )
+    monkeypatch.setattr(
+        projection_module.document_tag_projection_db,
+        "get_projection_state",
+        lambda *args, **kwargs: None,
+    )
+    captured = {}
+
+    def fake_upsert(**kwargs):
+        captured.update(kwargs)
+        return {**kwargs, "payload": kwargs["payload"]}
+
+    monkeypatch.setattr(
+        projection_module.document_tag_projection_db,
+        "upsert_projection_state",
+        fake_upsert,
+    )
+    projected = []
+
+    class FailingProvider:
+        provider_name = "local"
+
+        def capability(self):
+            return "full"
+
+        def project(self, payload):
+            projected.append(payload)
+            raise RuntimeError("es unavailable")
+
+        def clear(self, resource_id):
+            pass
+
+    monkeypatch.setattr(
+        projection_module, "get_projection_provider", lambda *args, **kwargs: FailingProvider()
+    )
+
+    result = project_document_assignments("t1", "local", "kb-1", "doc-a", "user-1")
+
+    assert result["status"] == STATUS_FAILED
+    assert result["retry_count"] == 1
+    assert result["next_attempt_at"] is not None
+    assert captured["retry_count"] == 1
+    assert captured["last_error"] == "es unavailable"
+    assert captured["status"] == STATUS_FAILED
+    assert projected[0]["tags"] == assignments
+    assert assignments == _assignments()
+
+
 def test_aidp_provider_records_unsupported(monkeypatch):
     monkeypatch.setattr(
         projection_module.TagManagementDB,

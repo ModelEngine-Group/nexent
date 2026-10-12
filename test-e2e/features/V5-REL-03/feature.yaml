@@ -1,0 +1,16 @@
+schema_version: '1.0'
+module:
+  id: V5-BASELINE
+  name: Migrated V5 baseline
+feature:
+  feature_id: V5-REL-03
+  name: MinIO/Data-process临时不可用
+  status: active
+  description: 上传与处理的半失败恢复
+  business_rules:
+  - rule_id: V5-REL-03-RULE-01
+    description: MinIO/Data-process临时不可用
+  required_test_stages:
+  - D5
+  source:
+    notes: 'Provisional migration owner: the V5 row has no stable Feature ID. Do not infer an F-ID.'

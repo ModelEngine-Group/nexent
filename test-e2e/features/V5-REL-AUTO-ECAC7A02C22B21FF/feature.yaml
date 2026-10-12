@@ -1,0 +1,17 @@
+schema_version: '1.0'
+module:
+  id: V5-BASELINE
+  name: Migrated V5 baseline
+feature:
+  feature_id: V5-REL-AUTO-ECAC7A02C22B21FF
+  name: northbound 进程启动任务恢复与中断上传清理
+  status: active
+  description: northbound 进程重启或崩溃后，遗留中断 chat 任务与中断上传产生的残留对象若未在启动时恢复/清理，将导致任务状态永久不一致、用户消息丢失或 MinIO 残留对象泄漏；线程管理器未按 NORTHBOUND_THREAD_SHUTDOWN_GRACE_SECONDS
+    优雅关闭则可能丢弃执行中的受管任务。本专项验证 lifespan 启动恢复与优雅关闭契约，降低数据不一致与资源泄漏风险。
+  business_rules:
+  - rule_id: V5-REL-AUTO-ECAC7A02C22B21FF-RULE-01
+    description: northbound 进程启动任务恢复与中断上传清理
+  required_test_stages:
+  - D5
+  source:
+    notes: 'Provisional migration owner: the V5 row has no stable Feature ID. Do not infer an F-ID.'

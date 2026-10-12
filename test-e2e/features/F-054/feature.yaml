@@ -1,0 +1,17 @@
+schema_version: '1.0'
+module:
+  id: V5-BASELINE
+  name: Migrated V5 baseline
+feature:
+  feature_id: F-054
+  name: 基础信息(名称/描述/标签/图标)/模型(多选与优先级排序)/Prompt/工具/技能/高级设置状态与未保存变更；含标签分配、可用性刷新、选择器URL同步守卫、协作代理版本显示
+  status: active
+  description: '智能体配置 / 配置前端: 基础信息(名称/描述/标签/图标)/模型(多选与优先级排序)/Prompt/工具/技能/高级设置状态与未保存变更；含标签分配、可用性刷新、选择器URL同步守卫、协作代理版本显示'
+  business_rules:
+  - rule_id: F-054-RULE-01
+    description: 基础信息(名称/描述/标签/图标)/模型(多选与优先级排序)/Prompt/工具/技能/高级设置状态与未保存变更；含标签分配、可用性刷新、选择器URL同步守卫、协作代理版本显示
+  required_test_stages:
+  - D1
+  - D2
+  source:
+    notes: Migrated from V5 01_代码功能清单 without changing the functional description.

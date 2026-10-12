@@ -1,0 +1,16 @@
+schema_version: '1.0'
+module:
+  id: V5-BASELINE
+  name: Migrated V5 baseline
+feature:
+  feature_id: F-076
+  name: 扫描本地 skill dirs 并同步 DB
+  status: active
+  description: '技能 / 本地同步: 扫描本地 skill dirs 并同步 DB'
+  business_rules:
+  - rule_id: F-076-RULE-01
+    description: 扫描本地 skill dirs 并同步 DB
+  required_test_stages:
+  - D1
+  source:
+    notes: Migrated from V5 01_代码功能清单 without changing the functional description.

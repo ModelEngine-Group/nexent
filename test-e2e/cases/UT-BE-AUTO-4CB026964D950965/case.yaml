@@ -1,0 +1,62 @@
+schema_version: '1.0'
+stage: D1
+module: V5-BASELINE
+case:
+  case_id: UT-BE-AUTO-4CB026964D950965
+  feature_id: F-018
+  business_rule_ids:
+  - F-018-RULE-01
+  title: get_provider_username 解析 linked CAS OAuth 账号 provider_username｜核心与边界/异常
+  type: BE-UT
+  priority: P1
+  status: active
+  automation: automated
+  objective: get_provider_username 解析 linked CAS OAuth 账号 provider_username｜核心与边界/异常
+  preconditions:
+  - 本地依赖/组件测试环境可运行；不要求外部模型或 CAS/OAuth 服务在线。
+  - 设置 NEXENT_TEST_HOME，目录不位于 Nexent Git 仓库内。
+  - 当次 run_id 已生成，所有新建资源名称带 run_id；测试基线固定为 develop 当前批次锁定的产品提交；执行时另记录实际被测commit。
+  - database.oauth_account_db.list_oauth_accounts_by_user_id 可通过测试替身（mock/stub）注入返回，无需真实 OAuth 账号数据。
+  test_data:
+    legacy_asset_declaration: '- 无本地文件资产；使用 pytest mock/fixture 注入 list_oauth_accounts_by_user_id 返回值。'
+  steps:
+  - order: 1
+    action: 直接导入 backend/services/user_management_service.py 的 get_provider_username，并用测试替身替换 database.oauth_account_db.list_oauth_accounts_by_user_id
+      的返回。
+    expected: provider 匹配且 provider_username 非空时，返回 strip 后的非空用户名。
+  - order: 2
+    action: 正常分支：令替身返回含 provider='cas' 且 provider_username='Alice' 的账号列表，调用 get_provider_username(user_id, 'cas')，断言返回 trim
+      后的非空用户名 'Alice'。
+    expected: provider 不匹配时，跳过该账号并最终返回 None。
+  - order: 3
+    action: provider 不匹配分支：令替身返回仅含 provider='google' 的账号列表，调用 get_provider_username(user_id, 'cas')，断言返回 None。
+    expected: provider_username 为 None、空串或纯空白时，返回 None。
+  - order: 4
+    action: provider_username 为空/空白分支：令替身返回 provider='cas' 但 provider_username 分别为 None、''、'   ' 的账号列表，逐一调用并断言返回 None。
+    expected: list_oauth_accounts_by_user_id 抛异常时，返回 None 且不向上抛异常，仅记录 warning 日志。
+  - order: 5
+    action: DB 异常分支：令替身抛出异常，调用 get_provider_username(user_id, 'cas')，断言返回 None 且不向上抛异常，仅记录 warning。
+    expected: 日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。
+  - order: 6
+    action: 确认日志与返回中不输出 API Key、Token、用户密码或模型密钥；测试结束后释放临时对象，确保可重复执行。
+    expected: 日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。
+  expected_results:
+  - provider 匹配且 provider_username 非空时，返回 strip 后的非空用户名。
+  - provider 不匹配时，跳过该账号并最终返回 None。
+  - provider_username 为 None、空串或纯空白时，返回 None。
+  - list_oauth_accounts_by_user_id 抛异常时，返回 None 且不向上抛异常，仅记录 warning 日志。
+  - 日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。
+  forbidden_side_effects: []
+  source:
+    legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
+    legacy_sheet: 02_测试用例基线
+    legacy_row: 398
+  unit_boundary: 用户账号信息
+  inputs:
+  - '- 无本地文件资产；使用 pytest mock/fixture 注入 list_oauth_accounts_by_user_id 返回值。'
+  assertions:
+  - provider 匹配且 provider_username 非空时，返回 strip 后的非空用户名。
+  - provider 不匹配时，跳过该账号并最终返回 None。
+  - provider_username 为 None、空串或纯空白时，返回 None。
+  - list_oauth_accounts_by_user_id 抛异常时，返回 None 且不向上抛异常，仅记录 warning 日志。
+  - 日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。

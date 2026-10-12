@@ -1,0 +1,84 @@
+schema_version: '1.0'
+stage: D4
+module: V5-BASELINE
+case:
+  case_id: PW-KB-LOCAL-01
+  feature_id: V5-PW-KB-LOCAL-01
+  business_rule_ids:
+  - V5-PW-KB-LOCAL-01-RULE-01
+  title: Local KB创建→上传→处理→检索→Agent绑定→Chat
+  type: E2E
+  priority: P0
+  status: active
+  automation: automated
+  objective: 基于/knowledges本地分支的完整RAG Journey。
+  preconditions:
+  - Local模式
+  - 真实Embedding/Rerank健康
+  - 固定文档含NX-92831
+  test_data:
+    legacy_asset_declaration: assets/knowledge/*；config/models.yaml；expected/kb_expected.json
+  steps:
+  - order: 1
+    action: 打开/knowledges并确认渲染Local Knowledge。
+    expected: Local分支正确。
+  - order: 2
+    action: 创建run_id KB。
+    expected: 文件真实处理成功且Top-K先命中。
+  - order: 3
+    action: setInputFiles上传alpha/beta文档。
+    expected: Agent绑定后真实RAG可用。
+  - order: 4
+    action: 等待各文件处理成功。
+    expected: Agent绑定后真实RAG可用。
+  - order: 5
+    action: 检索固定问题，检查Top-K含alpha/NX-92831。
+    expected: Agent绑定后真实RAG可用。
+  - order: 6
+    action: 如有摘要入口，触发并检查成功状态。
+    expected: Agent绑定后真实RAG可用。
+  - order: 7
+    action: 到/agents→Advanced Knowledge绑定KB并等待autosave。
+    expected: Agent绑定后真实RAG可用。
+  - order: 8
+    action: Debug或/newchat提问相同知识问题。
+    expected: Agent绑定后真实RAG可用。
+  - order: 9
+    action: 等待真实回答并检查引用/marker。
+    expected: Agent绑定后真实RAG可用。
+  - order: 10
+    action: 刷新确认KB绑定持续。
+    expected: Agent绑定后真实RAG可用。
+  expected_results:
+  - Local分支正确。
+  - 文件真实处理成功且Top-K先命中。
+  - Agent绑定后真实RAG可用。
+  forbidden_side_effects: []
+  source:
+    legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
+    legacy_sheet: 03_Playwright_Journey
+    legacy_row: 35
+  actor: Nexent browser user
+  journey:
+  - 打开/knowledges并确认渲染Local Knowledge。
+  - 创建run_id KB。
+  - setInputFiles上传alpha/beta文档。
+  - 等待各文件处理成功。
+  - 检索固定问题，检查Top-K含alpha/NX-92831。
+  - 如有摘要入口，触发并检查成功状态。
+  - 到/agents→Advanced Knowledge绑定KB并等待autosave。
+  - Debug或/newchat提问相同知识问题。
+  - 等待真实回答并检查引用/marker。
+  - 刷新确认KB绑定持续。
+  final_business_result:
+  - Local分支正确。
+  - 文件真实处理成功且Top-K先命中。
+  - Agent绑定后真实RAG可用。
+  failure_evidence:
+  - '${NEXENT_TEST_HOME}/runs/{run_id}/playwright/PW-KB-LOCAL-01/
+
+    - screenshot.png / trace.zip / video.webm
+
+    - console.log / network.har / failure.json
+
+    - 涉及协议时关联 wire/*.jsonl；涉及下载时保留 downloads/'

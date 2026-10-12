@@ -1,0 +1,16 @@
+schema_version: '1.0'
+module:
+  id: V5-BASELINE
+  name: Migrated V5 baseline
+feature:
+  feature_id: V5-DEP-06
+  name: Docker/Kubernetes 备份脚本参数、空间预检、资产完整性与回滚前置契约
+  status: active
+  description: 升级前备份遗漏持久化目录、目标目录冲突、空间不足、交互式阻塞或生成不完整恢复资产。
+  business_rules:
+  - rule_id: V5-DEP-06-RULE-01
+    description: Docker/Kubernetes 备份脚本参数、空间预检、资产完整性与回滚前置契约
+  required_test_stages:
+  - D5
+  source:
+    notes: 'Provisional migration owner: the V5 row has no stable Feature ID. Do not infer an F-ID.'

@@ -305,6 +305,18 @@ class NotFoundException(Exception):
     pass
 
 
+class AgentRelationValidationError(ValueError):
+    """Raised when submitted Agent relationships violate the graph contract."""
+
+    pass
+
+
+class AgentNotFoundError(NotFoundException, ValueError):
+    """Raised when an Agent is absent from the caller's visible query scope."""
+
+    pass
+
+
 class MEConnectionException(Exception):
     """Raised when ME connection fails."""
 
@@ -484,7 +496,6 @@ InvalidCredentialsError = UnauthorizedError
 TenantNotFoundError = NotFoundException
 TenantDisabledError = Exception  # Generic fallback
 
-AgentNotFoundError = NotFoundException
 AgentDisabledError = Exception  # Generic fallback
 
 ToolNotFoundError = NotFoundException

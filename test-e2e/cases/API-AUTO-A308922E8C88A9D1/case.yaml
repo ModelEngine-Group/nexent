@@ -1,0 +1,100 @@
+schema_version: '1.0'
+stage: D2
+module: V5-BASELINE
+case:
+  case_id: API-AUTO-A308922E8C88A9D1
+  feature_id: F-168
+  business_rule_ids:
+  - F-168-RULE-01
+  title: delete_documents 按 file_id 持久化 ID 定位删除、无存储对象非 full 返回400｜核心流程
+  type: API-IT
+  priority: P1
+  status: active
+  automation: automated
+  objective: delete_documents 按 file_id 持久化 ID 定位删除、无存储对象非 full 返回400｜核心流程
+  preconditions:
+  - Nexent 本地测试全栈已启动，health check 通过。
+  - 设置 NEXENT_TEST_HOME，目录不位于 Nexent Git 仓库内。
+  - 当次 run_id 已生成，所有新建资源名称带 run_id；测试基线固定为 develop 当前批次锁定的产品提交；执行时另记录实际被测commit。
+  - 所需本地资产存在且校验通过：${NEXENT_TEST_HOME}/config/users.yaml；${NEXENT_TEST_HOME}/config/secrets.env；${NEXENT_TEST_HOME}/assets/knowledge/；${NEXENT_TEST_HOME}/assets/expected/kb_expected.json；${NEXENT_TEST_HOME}/assets/documents/
+  - users.yaml 中 SU/Admin/UserA/UserB 等隔离账号可登录，测试租户数据可被清理。
+  test_data:
+    legacy_asset_declaration: '- ${NEXENT_TEST_HOME}/config/users.yaml
+
+      - ${NEXENT_TEST_HOME}/config/secrets.env
+
+      - ${NEXENT_TEST_HOME}/assets/knowledge/
+
+      - ${NEXENT_TEST_HOME}/assets/expected/kb_expected.json
+
+      - ${NEXENT_TEST_HOME}/assets/documents/'
+  steps:
+  - order: 1
+    action: 从 config/users.yaml 读取隔离测试账号并登录本地 Nexent，通过实际 API 创建带 RunID 后缀的测试知识库，记录 index_name；密码/Token 仅从 secrets.env 注入。
+    expected: 功能结果与代码契约一致，测试过程无未处理异常。
+  - order: 2
+    action: 上传 assets/documents/ 中的固定测试文件到该知识库并等待处理完成，记录该文件的持久化 file_id 与 object_name（object path），并确认 ES 中存在对应 chunk。
+    expected: 传 file_id 时按持久化 ID 定位：目标 file_id 的 lifecycle 记录进入终态删除，对应 ES chunk 与 MinIO 源对象被移除，响应 message 为终态成功（非 deletion_pending
+      重试）。
+  - order: 3
+    action: 调用 DELETE /indices/{index_name}/documents?file_id=<file_id>&scope=full（不传 path_or_url），保存响应状态码、message 与 deletion_pending
+      字段。
+    expected: lifecycle 记录无 object_name 且 scope=source_only 返回 400，detail 精确为 "A file without a storage object can only use
+      full deletion"。
+  - order: 4
+    action: 重新 GET 文件列表/详情并查询该 file_id 对应 lifecycle 记录与 ES，确认删除按持久化 file_id 定位：目标 file_id 记录进入终态删除、对应 chunk 与 MinIO 源对象被移除，未被同
+      object_name 的旧记录干扰。
+    expected: 同一无 object_name 记录 scope=full 走 delete_lifecycle_record_without_object 分支，返回终态成功。
+  - order: 5
+    action: 构造 lifecycle 记录存在但无 object_name（无 storage object）的 file_id，调用 DELETE /indices/{index_name}/documents?file_id=<file_id>&scope=source_only，断言返回
+      400 且 detail 精确为 "A file without a storage object can only use full deletion"。
+    expected: 缺失 file_id 与 path_or_url 返回 400，detail 为 "Either path_or_url or file_id is required"。
+  - order: 6
+    action: 对同一无 object_name 的 file_id 改用 scope=full，断言走无对象删除分支返回终态成功（message 非 deletion_pending 重试态）。
+    expected: 无编辑权限用户返回 401/403，不产生半写入、重复副作用或跨租户泄露。
+  - order: 7
+    action: 不传 file_id 且不传 path_or_url 调用删除接口，断言返回 400 且 detail 为 "Either path_or_url or file_id is required"。
+    expected: 日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。
+  - order: 8
+    action: 使用无知识库编辑权限的另一租户用户重放删除请求，断言 401/403 且目标数据无越权删除副作用。
+    expected: 日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。
+  - order: 9
+    action: 清理本次创建的测试知识库、文件与 lifecycle 记录，确保可重复执行。
+    expected: 日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。
+  expected_results:
+  - 功能结果与代码契约一致，测试过程无未处理异常。
+  - 传 file_id 时按持久化 ID 定位：目标 file_id 的 lifecycle 记录进入终态删除，对应 ES chunk 与 MinIO 源对象被移除，响应 message 为终态成功（非 deletion_pending 重试）。
+  - lifecycle 记录无 object_name 且 scope=source_only 返回 400，detail 精确为 "A file without a storage object can only use full deletion"。
+  - 同一无 object_name 记录 scope=full 走 delete_lifecycle_record_without_object 分支，返回终态成功。
+  - 缺失 file_id 与 path_or_url 返回 400，detail 为 "Either path_or_url or file_id is required"。
+  - 无编辑权限用户返回 401/403，不产生半写入、重复副作用或跨租户泄露。
+  - 日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。
+  forbidden_side_effects: []
+  source:
+    legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
+    legacy_sheet: 02_测试用例基线
+    legacy_row: 501
+  contract:
+    protocol: HTTP API
+    request_expectations:
+    - 从 config/users.yaml 读取隔离测试账号并登录本地 Nexent，通过实际 API 创建带 RunID 后缀的测试知识库，记录 index_name；密码/Token 仅从 secrets.env 注入。
+    - 上传 assets/documents/ 中的固定测试文件到该知识库并等待处理完成，记录该文件的持久化 file_id 与 object_name（object path），并确认 ES 中存在对应 chunk。
+    - 调用 DELETE /indices/{index_name}/documents?file_id=<file_id>&scope=full（不传 path_or_url），保存响应状态码、message 与 deletion_pending
+      字段。
+    - 重新 GET 文件列表/详情并查询该 file_id 对应 lifecycle 记录与 ES，确认删除按持久化 file_id 定位：目标 file_id 记录进入终态删除、对应 chunk 与 MinIO 源对象被移除，未被同 object_name
+      的旧记录干扰。
+    - 构造 lifecycle 记录存在但无 object_name（无 storage object）的 file_id，调用 DELETE /indices/{index_name}/documents?file_id=<file_id>&scope=source_only，断言返回
+      400 且 detail 精确为 "A file without a storage object can only use full deletion"。
+    - 对同一无 object_name 的 file_id 改用 scope=full，断言走无对象删除分支返回终态成功（message 非 deletion_pending 重试态）。
+    - 不传 file_id 且不传 path_or_url 调用删除接口，断言返回 400 且 detail 为 "Either path_or_url or file_id is required"。
+    - 使用无知识库编辑权限的另一租户用户重放删除请求，断言 401/403 且目标数据无越权删除副作用。
+    - 清理本次创建的测试知识库、文件与 lifecycle 记录，确保可重复执行。
+    response_expectations:
+    - 功能结果与代码契约一致，测试过程无未处理异常。
+    - 传 file_id 时按持久化 ID 定位：目标 file_id 的 lifecycle 记录进入终态删除，对应 ES chunk 与 MinIO 源对象被移除，响应 message 为终态成功（非 deletion_pending
+      重试）。
+    - lifecycle 记录无 object_name 且 scope=source_only 返回 400，detail 精确为 "A file without a storage object can only use full deletion"。
+    - 同一无 object_name 记录 scope=full 走 delete_lifecycle_record_without_object 分支，返回终态成功。
+    - 缺失 file_id 与 path_or_url 返回 400，detail 为 "Either path_or_url or file_id is required"。
+    - 无编辑权限用户返回 401/403，不产生半写入、重复副作用或跨租户泄露。
+    - 日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。

@@ -1,0 +1,78 @@
+schema_version: '1.0'
+stage: D2
+module: V5-BASELINE
+case:
+  case_id: API-160
+  feature_id: F-156
+  business_rule_ids:
+  - F-156-RULE-01
+  title: config/tenant_config 读取写入、feature flags、租户隔离｜核心流程
+  type: API-IT
+  priority: P1
+  status: active
+  automation: automated
+  objective: config/tenant_config 读取写入、feature flags、租户隔离｜核心流程
+  preconditions:
+  - Nexent 本地测试全栈已启动，health check 通过。
+  - 设置 NEXENT_TEST_HOME，目录不位于 Nexent Git 仓库内。
+  - 当次 run_id 已生成，所有新建资源名称带 run_id；测试基线固定为 develop 当前批次锁定的产品提交；执行时另记录实际被测commit。
+  - 所需本地资产存在且校验通过：${NEXENT_TEST_HOME}/config/users.yaml；${NEXENT_TEST_HOME}/config/secrets.env
+  test_data:
+    legacy_asset_declaration: '- ${NEXENT_TEST_HOME}/config/users.yaml
+
+      - ${NEXENT_TEST_HOME}/config/secrets.env'
+  steps:
+  - order: 1
+    action: 准备本地真实测试环境和“config/tenant_config 读取写入｜核心流程”要求的最小数据，所有可变资源使用 RunID 前缀。
+    expected: 配置读取返回的 app 负载仅包含 tenantName、defaultGroupId、icon、datamateUrl、modelEngineEnabled 字段，不包含 name、description。
+  - order: 2
+    action: 通过 config 服务对外暴露的配置读取接口（config_app 装配 config_sync_router，落地于 config_sync_service.load_config_impl/build_app_config）读取配置，记录返回的
+      app 负载键集合。
+    expected: 保存含 legacy 键（name/description/appName/appDescription）的负载后，这些键未被持久化到租户配置，重新读取时不返回。
+  - order: 3
+    action: 校验 app 负载仅包含 tenantName、defaultGroupId、icon、datamateUrl、modelEngineEnabled 字段，且不包含 name、description（build_app_config
+      契约）。
+    expected: 其余字段（tenantName/defaultGroupId/icon/datamateUrl/modelEngineEnabled）写入与读取一致，租户隔离语义保持不变，无跨租户泄露。
+  - order: 4
+    action: 向保存接口（config_sync_service.save_config_impl）下发含 appName/appDescription/name/description 的 app 负载，完成后重新读取并确认这些 legacy
+      键未写入租户配置（LEGACY_APP_CONFIG_KEYS 跳过 APP_NAME/APP_DESCRIPTION/NAME/DESCRIPTION）。
+    expected: 失败路径返回明确错误，不出现半写入或重复副作用。
+  - order: 5
+    action: 对 tenantName/defaultGroupId/icon/datamateUrl/modelEngineEnabled 逐项写入后重新读取，验证写入与读取一致且租户间隔离。
+    expected: 日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。
+  - order: 6
+    action: 执行边界/错误输入，确认错误码与失败原子性。
+    expected: 日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。
+  - order: 7
+    action: 检查日志不泄露 secret，并清理临时数据。
+    expected: 日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。
+  expected_results:
+  - 配置读取返回的 app 负载仅包含 tenantName、defaultGroupId、icon、datamateUrl、modelEngineEnabled 字段，不包含 name、description。
+  - 保存含 legacy 键（name/description/appName/appDescription）的负载后，这些键未被持久化到租户配置，重新读取时不返回。
+  - 其余字段（tenantName/defaultGroupId/icon/datamateUrl/modelEngineEnabled）写入与读取一致，租户隔离语义保持不变，无跨租户泄露。
+  - 失败路径返回明确错误，不出现半写入或重复副作用。
+  - 日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。
+  forbidden_side_effects: []
+  source:
+    legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
+    legacy_sheet: 02_测试用例基线
+    legacy_row: 298
+  contract:
+    protocol: HTTP API
+    request_expectations:
+    - 准备本地真实测试环境和“config/tenant_config 读取写入｜核心流程”要求的最小数据，所有可变资源使用 RunID 前缀。
+    - 通过 config 服务对外暴露的配置读取接口（config_app 装配 config_sync_router，落地于 config_sync_service.load_config_impl/build_app_config）读取配置，记录返回的
+      app 负载键集合。
+    - 校验 app 负载仅包含 tenantName、defaultGroupId、icon、datamateUrl、modelEngineEnabled 字段，且不包含 name、description（build_app_config
+      契约）。
+    - 向保存接口（config_sync_service.save_config_impl）下发含 appName/appDescription/name/description 的 app 负载，完成后重新读取并确认这些 legacy
+      键未写入租户配置（LEGACY_APP_CONFIG_KEYS 跳过 APP_NAME/APP_DESCRIPTION/NAME/DESCRIPTION）。
+    - 对 tenantName/defaultGroupId/icon/datamateUrl/modelEngineEnabled 逐项写入后重新读取，验证写入与读取一致且租户间隔离。
+    - 执行边界/错误输入，确认错误码与失败原子性。
+    - 检查日志不泄露 secret，并清理临时数据。
+    response_expectations:
+    - 配置读取返回的 app 负载仅包含 tenantName、defaultGroupId、icon、datamateUrl、modelEngineEnabled 字段，不包含 name、description。
+    - 保存含 legacy 键（name/description/appName/appDescription）的负载后，这些键未被持久化到租户配置，重新读取时不返回。
+    - 其余字段（tenantName/defaultGroupId/icon/datamateUrl/modelEngineEnabled）写入与读取一致，租户隔离语义保持不变，无跨租户泄露。
+    - 失败路径返回明确错误，不出现半写入或重复副作用。
+    - 日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。

@@ -1,0 +1,26 @@
+schema_version: '1.0'
+change:
+  change_id: REMOVE-UNPASSED-CASES-20261009
+  change_type: test-fix
+  title: Remove explicitly excluded cases from the formal execution baseline
+  description: >-
+    At the user request, physically remove UT-BE-AUTO-C0F44F945573C769,
+    CTR-026, CTR-027 and all 21 D5 entries in the 2026-10-09 unresolved report.
+    Remove case-local definitions, scripts and bindings; prune formal change
+    references and stage requirements that no longer have retained coverage.
+    Feature behavior remains documented. Historical results remain immutable.
+    Removal reduces coverage and does not repair or dismiss the observed defects.
+    The exact 24-case inventory and original files are archived outside Git.
+  affected_features:
+    existing: [CMSR-005, F-085, F-137, F-173, F-175, V5-DEP-03, V5-DEP-04, V5-DEP-AUTO-03A2CF91A730FDBE, V5-DEP-AUTO-0E1DE34B7A6EA269, V5-DEP-AUTO-24D2F6A9D904669C, V5-DEP-AUTO-2D0252F1DB402184, V5-DEP-AUTO-3BABDFB6FBFB43A1, V5-DEP-AUTO-4369C70B9B167507, V5-DEP-AUTO-6D109C4E590A97BF, V5-DEP-AUTO-8213435EA30EB371, V5-DEP-AUTO-8F866C5B0175D1CB, V5-DEP-AUTO-E89502155049473D, V5-PERF-06, V5-SEC-01, V5-SEC-05, V5-SEC-08, V5-SEC-AUTO-A4AD5354E1E6A58E, V5-SEC-AUTO-F4D28F8271C36B99]
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing: []
+    added: []
+    modified: []
+    retired: []
+  no_case_change_reason: The selected cases no longer exist in the current baseline; deleted IDs are recorded in the removal inventory, not as dangling execution references.
+  notes: >-
+    Removed IDs: CMSR-D5-001, CTR-026, CTR-027, DEP-002, DEP-004, DEP-03, DEP-04, DEP-AUTO-03A2CF91A730FDBE, DEP-AUTO-0E1DE34B7A6EA269, DEP-AUTO-24D2F6A9D904669C, DEP-AUTO-2D0252F1DB402184, DEP-AUTO-3BABDFB6FBFB43A1, DEP-AUTO-4369C70B9B167507, DEP-AUTO-6D109C4E590A97BF, DEP-AUTO-8213435EA30EB371, DEP-AUTO-8F866C5B0175D1CB, DEP-AUTO-E89502155049473D, PERF-06, SEC-01, SEC-05, SEC-08, SEC-AUTO-A4AD5354E1E6A58E, SEC-AUTO-F4D28F8271C36B99, UT-BE-AUTO-C0F44F945573C769.

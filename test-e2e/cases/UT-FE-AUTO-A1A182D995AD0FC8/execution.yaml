@@ -1,0 +1,7 @@
+schema_version: '1.0'
+case_id: UT-FE-AUTO-A1A182D995AD0FC8
+implementations:
+- framework: vitest
+  file: test.test.tsx
+  selector: UT-FE-AUTO-A1A182D995AD0FC8
+notes: V5 source binding migrated; runtime parity is not yet certified.

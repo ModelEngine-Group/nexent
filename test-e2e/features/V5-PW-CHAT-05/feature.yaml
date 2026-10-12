@@ -1,0 +1,16 @@
+schema_version: '1.0'
+module:
+  id: V5-BASELINE
+  name: Migrated V5 baseline
+feature:
+  feature_id: V5-PW-CHAT-05
+  name: Runtime Metadata→会话Knowledge Scope→发送→新会话作用域
+  status: active
+  description: 修正v4：只测当前UI存在的metadata和knowledge scope；tool_params移出Playwright。
+  business_rules:
+  - rule_id: V5-PW-CHAT-05-RULE-01
+    description: Runtime Metadata→会话Knowledge Scope→发送→新会话作用域
+  required_test_stages:
+  - D4
+  source:
+    notes: 'Provisional migration owner: the V5 row has no stable Feature ID. Do not infer an F-ID.'

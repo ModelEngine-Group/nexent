@@ -1,0 +1,16 @@
+schema_version: '1.0'
+module:
+  id: V5-BASELINE
+  name: Migrated V5 baseline
+feature:
+  feature_id: V5-PW-MARKET-AGENT-01
+  name: Mine申请上架→Admin Review→Repository→同租户其他用户Copy
+  status: active
+  description: 按/agent-space Repository/Mine/Review三Tab验证租户内共享、不同用户复制闭环；复制必须产生独立可编辑副本，同租户重名使用产品自动数字后缀。
+  business_rules:
+  - rule_id: V5-PW-MARKET-AGENT-01-RULE-01
+    description: Mine申请上架→Admin Review→Repository→同租户其他用户Copy
+  required_test_stages:
+  - D4
+  source:
+    notes: 'Provisional migration owner: the V5 row has no stable Feature ID. Do not infer an F-ID.'

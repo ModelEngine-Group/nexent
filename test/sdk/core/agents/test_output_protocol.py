@@ -60,14 +60,6 @@ def test_ac_001_visible_content_is_meaningful(value):
             ProtocolErrorReason.MALFORMED_ACTION,
         ),
         (
-            "<think>reason<code>print(1)</code>",
-            ProtocolErrorReason.MALFORMED_ACTION,
-        ),
-        (
-            "<think>outer<think>inner</think></think><code>print(1)</code>",
-            ProtocolErrorReason.MALFORMED_ACTION,
-        ),
-        (
             "<|channel|>analysis<code>print(1)</code>",
             ProtocolErrorReason.MALFORMED_ACTION,
         ),
@@ -190,6 +182,7 @@ def test_ac_018_ac_019_mainstream_reasoning_and_composite_actions_are_executable
     "code",
     [
         'text = "</code>"\nprint(text)',
+        'value = "<think>data</think><code>example</code>"\n# </think> comment\nprint(value)',
         'text = "<code>nested</code>"\nprint(text)',
         "text = '''<code>\ninside\n</code>'''\nprint(text)",
         'text = f"literal </code> {1 + 1}"\nprint(text)',
@@ -268,7 +261,6 @@ def test_ac_010_invalid_final_envelopes_are_rejected(output):
     "output",
     [
         "<final_answer></final_answer>",
-        "outside<final_answer>inside</final_answer>",
         "<final_answer>one</final_answer><final_answer>two</final_answer>",
         "<final_answer><final_answer>nested</final_answer></final_answer>",
         "<final_answer>unfinished",
@@ -279,3 +271,44 @@ def test_cftp_001_invalid_final_envelopes_in_code_action_mode_are_rejected(outpu
         classify_model_output(output, protocol="code_action")
 
     assert exc_info.value.reason == ProtocolErrorReason.INVALID_FINAL_ENVELOPE
+
+
+@pytest.mark.parametrize("prefix", [
+    "Read the guide first.\n",
+    "<think>Read the guide.</think>\n",
+    "<think>Read the guide.</think>First load the skill.\n",
+    "Read the guide.</think>\n",
+    "<think>Read the guide.\n",
+    "<think>One.</think><think>Two.</think>\n",
+    "<think>One.<think>Two.</think></think>\n",
+])
+@pytest.mark.parametrize("legacy", [False, True])
+def test_thinking_prefix_does_not_require_a_complete_single_block(prefix, legacy):
+    code = "print(1)"
+    envelope = f"```<run>\n{code}\n```" if legacy else f"<code>{code}</code>"
+    assert classify_model_output(prefix + envelope, protocol="code_action") == ExecutableAction(
+        code=code, legacy_format=legacy,
+    )
+
+
+@pytest.mark.parametrize("prefix", [
+    "outside", "</think>", "<think>unfinished", "<think>one</think>narration",
+    "<think>one</think><think>two</think>", "<think>one<think>two</think></think>",
+])
+
+def test_ordinary_final_envelope_accepts_descriptive_prefix(prefix):
+    output = prefix + "<final_answer>inside</final_answer>"
+    assert classify_model_output(output, protocol="code_action") == (
+        ExplicitFinalAnswer(answer="inside")
+    )
+    with pytest.raises(ModelOutputProtocolError) as exc:
+        classify_model_output(output, protocol="final_envelope")
+    assert exc.value.reason == ProtocolErrorReason.INVALID_FINAL_ENVELOPE
+
+
+@pytest.mark.parametrize("protocol,prefix", [("code_action", "</think>"), ("final_envelope", "")])
+def test_thinking_tags_in_final_payload_are_literal_data(protocol, prefix):
+    payload = "Literal <think>data</think> and </think> text."
+    assert classify_model_output(prefix + f"<final_answer>{payload}</final_answer>", protocol=protocol) == (
+        ExplicitFinalAnswer(answer=payload)
+    )

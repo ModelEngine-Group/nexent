@@ -1,0 +1,76 @@
+schema_version: '1.0'
+stage: D4
+module: V5-BASELINE
+case:
+  case_id: PW-MEM-02
+  feature_id: V5-PW-MEM-02
+  business_rule_ids:
+  - V5-PW-MEM-02-RULE-01
+  title: 真实对话产生记忆→Agent记录→Dreaming启停/历史确认
+  type: E2E
+  priority: P1
+  status: active
+  automation: automated
+  objective: 验证Agent记录和Dreaming真实UI。
+  preconditions:
+  - 测试Agent启用Memory
+  - 固定多轮对话含唯一marker
+  - Dreaming可用
+  test_data:
+    legacy_asset_declaration: config/models.yaml；expected/memory_expected.json
+  steps:
+  - order: 1
+    action: newchat用启用Memory的Agent进行固定两轮对话，写入唯一marker。
+    expected: 真实对话产生可观察Agent记忆。
+  - order: 2
+    action: 等待会话完成并满足记忆写入条件。
+    expected: Dreaming启停持久化且关闭有明确历史处理。
+  - order: 3
+    action: 打开/memory→Agent Tab，按Agent/Conversation筛本次run。
+    expected: 召回质量由AGENT-IT。
+  - order: 4
+    action: 确认记录中出现对应marker/摘要。
+    expected: 召回质量由AGENT-IT。
+  - order: 5
+    action: Base找到Dreaming设置并启用，保存后刷新确认。
+    expected: 召回质量由AGENT-IT。
+  - order: 6
+    action: 关闭Dreaming；若出现保留历史/删除历史确认，执行当前每日主分支。
+    expected: 召回质量由AGENT-IT。
+  - order: 7
+    action: 检查选择后的历史状态。
+    expected: 召回质量由AGENT-IT。
+  - order: 8
+    action: 恢复原Dreaming配置。
+    expected: 召回质量由AGENT-IT。
+  expected_results:
+  - 真实对话产生可观察Agent记忆。
+  - Dreaming启停持久化且关闭有明确历史处理。
+  - 召回质量由AGENT-IT。
+  forbidden_side_effects: []
+  source:
+    legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
+    legacy_sheet: 03_Playwright_Journey
+    legacy_row: 45
+  actor: Nexent browser user
+  journey:
+  - newchat用启用Memory的Agent进行固定两轮对话，写入唯一marker。
+  - 等待会话完成并满足记忆写入条件。
+  - 打开/memory→Agent Tab，按Agent/Conversation筛本次run。
+  - 确认记录中出现对应marker/摘要。
+  - Base找到Dreaming设置并启用，保存后刷新确认。
+  - 关闭Dreaming；若出现保留历史/删除历史确认，执行当前每日主分支。
+  - 检查选择后的历史状态。
+  - 恢复原Dreaming配置。
+  final_business_result:
+  - 真实对话产生可观察Agent记忆。
+  - Dreaming启停持久化且关闭有明确历史处理。
+  - 召回质量由AGENT-IT。
+  failure_evidence:
+  - '${NEXENT_TEST_HOME}/runs/{run_id}/playwright/PW-MEM-02/
+
+    - screenshot.png / trace.zip / video.webm
+
+    - console.log / network.har / failure.json
+
+    - 涉及协议时关联 wire/*.jsonl；涉及下载时保留 downloads/'

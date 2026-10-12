@@ -1,0 +1,67 @@
+schema_version: '1.0'
+stage: D1
+module: V5-BASELINE
+case:
+  case_id: UT-BE-028
+  feature_id: F-180
+  business_rule_ids:
+  - F-180-RULE-01
+  title: 模型目录加载、Provider Profile 与 reasoning 字段规范
+  type: BE-UT
+  priority: P0
+  status: active
+  automation: automated
+  objective: 模型目录加载、Provider Profile 与 reasoning 字段规范
+  preconditions:
+  - 本地测试环境健康检查通过，NEXENT_TEST_HOME 位于源码仓库外。
+  - 测试基线固定为 develop 473b65268ba8cda3db53be735f97678e214c583b，当次资源使用 run_id 隔离。
+  - 所需资产存在：${NEXENT_TEST_HOME}/config/users.yaml；${NEXENT_TEST_HOME}/config/secrets.env；${NEXENT_TEST_HOME}/config/models.yaml。
+  test_data:
+    legacy_asset_declaration: '- ${NEXENT_TEST_HOME}/config/users.yaml
+
+      - ${NEXENT_TEST_HOME}/config/secrets.env
+
+      - ${NEXENT_TEST_HOME}/config/models.yaml'
+  steps:
+  - order: 1
+    action: 加载内置 model_catalog.json。
+    expected: 合法目录稳定加载。
+  - order: 2
+    action: 校验 provider/model/profile 唯一性与必填字段。
+    expected: reasoning 字段和 profile 可序列化。
+  - order: 3
+    action: 读取 inference field spec，覆盖 reasoning 选项和默认值。
+    expected: '非法目录在启动/加载阶段给出定位明确的错误，不静默丢字段。
+
+      模型响应任何层级均不泄漏 api_key；嵌套 custom JSON 保真。'
+  - order: 4
+    action: '注入重复、未知 provider、非法类型和缺字段目录。
+
+      473b6526：构造嵌套 __custom__，验证合法 JSON 保留、非有限数/集合被过滤；递归清洗 HTTP 模型响应中的 api_key 且不修改内部源对象。'
+    expected: '非法目录在启动/加载阶段给出定位明确的错误，不静默丢字段。
+
+      模型响应任何层级均不泄漏 api_key；嵌套 custom JSON 保真。'
+  expected_results:
+  - 合法目录稳定加载。
+  - reasoning 字段和 profile 可序列化。
+  - '非法目录在启动/加载阶段给出定位明确的错误，不静默丢字段。
+
+    模型响应任何层级均不泄漏 api_key；嵌套 custom JSON 保真。'
+  forbidden_side_effects: []
+  source:
+    legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
+    legacy_sheet: 02_测试用例基线
+    legacy_row: 375
+  unit_boundary: 模型目录
+  inputs:
+  - '- ${NEXENT_TEST_HOME}/config/users.yaml
+
+    - ${NEXENT_TEST_HOME}/config/secrets.env
+
+    - ${NEXENT_TEST_HOME}/config/models.yaml'
+  assertions:
+  - 合法目录稳定加载。
+  - reasoning 字段和 profile 可序列化。
+  - '非法目录在启动/加载阶段给出定位明确的错误，不静默丢字段。
+
+    模型响应任何层级均不泄漏 api_key；嵌套 custom JSON 保真。'

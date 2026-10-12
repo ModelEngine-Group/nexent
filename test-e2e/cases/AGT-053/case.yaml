@@ -1,0 +1,99 @@
+schema_version: '1.0'
+stage: D3
+module: V5-BASELINE
+case:
+  case_id: AGT-053
+  feature_id: F-123
+  business_rule_ids:
+  - F-123-RULE-01
+  title: 记忆检索/embedding/policy 注入 Agent context 与 token budget｜外部依赖异常与超时
+  type: AGENT-IT
+  priority: P0
+  status: active
+  automation: automated
+  objective: 记忆检索/embedding/policy 注入 Agent context 与 token budget｜外部依赖异常与超时
+  preconditions:
+  - Nexent 本地测试全栈已启动，health check 通过。
+  - 设置 NEXENT_TEST_HOME，目录不位于 Nexent Git 仓库内。
+  - 当次 run_id 已生成，所有新建资源名称带 run_id；测试基线固定为 develop 当前批次锁定的产品提交；执行时另记录实际被测commit。
+  - 所需本地资产存在且校验通过：${NEXENT_TEST_HOME}/config/models.yaml；${NEXENT_TEST_HOME}/config/secrets.env；${NEXENT_TEST_HOME}/assets/knowledge/；${NEXENT_TEST_HOME}/assets/expected/kb_expected.json；${NEXENT_TEST_HOME}/config/users.yaml
+  - models.yaml 中本用例所需真实 Provider 已配置，secrets.env 中凭据有效，预检连通性通过。
+  - 已通过记忆配置启用至少一个外部 memory provider，外部 provider 拓扑可达，且故障注入桩已接入搜索与写入路径。
+  - 测试内故障注入桩能够在该外部 provider 的搜索与写入阶段分别模拟超时、5xx、畸形响应。
+  test_data:
+    legacy_asset_declaration: '- ${NEXENT_TEST_HOME}/config/models.yaml
+
+      - ${NEXENT_TEST_HOME}/config/secrets.env
+
+      - ${NEXENT_TEST_HOME}/assets/knowledge/
+
+      - ${NEXENT_TEST_HOME}/assets/expected/kb_expected.json
+
+      - ${NEXENT_TEST_HOME}/config/users.yaml'
+  steps:
+  - order: 1
+    action: 准备固定测试用户、测试 Agent 与真实 LLM；清空该测试命名空间已有记忆，保证用例初始状态可控。
+    expected: 功能结果与代码契约一致，测试过程无未处理异常。
+  - order: 2
+    action: 通过实际 API 配置用户级/Agent级记忆策略、开关和阈值，并通过 POST /memory/config/set 写入 external_provider_top_k 配置，验证合法边界 1/100 返回 success，越界
+      0/101 返回 400（BAD_REQUEST），非整数返回 406（NOT_ACCEPTABLE）。
+    expected: 关键状态在 API 返回、数据库/存储和后续读取中保持一致。
+  - order: 3
+    action: 启用至少一个外部 memory provider，接入故障注入桩，使其可在搜索与写入阶段分别返回超时、5xx、畸形响应。
+    expected: 失败路径返回明确错误，不出现半写入、重复副作用或跨租户泄露。
+  - order: 4
+    action: 按“记忆检索/embedding/policy 注入 Agent context 与 token budget｜外部依赖异常与超时”执行一到多轮真实对话，输入包含唯一记忆 marker（如 MEM-92831）。
+    expected: 日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。
+  - order: 5
+    action: 等待记忆写入，在外部 provider 写入 fanout 阶段注入 5xx/超时/畸形响应，确认本地 memory record 仍写入成功，外部 ingest 失败仅记录 external_memory_ingest_failed
+      日志。
+    expected: 真实模型调用成功，stream/Agent run 正常结束；自然语言只做稳定关键词/结构/工具调用断言。
+  - order: 6
+    action: 新建会话再次提问，在外部 provider 搜索阶段注入超时/5xx/畸形响应，确认仅记录 external_search_hook failed 警告日志且本地检索照常返回 marker，其他用户/Agent 不可见。
+    expected: 固定测试 marker 对应文档进入期望 Top-K/Top-N，向量维度和模型绑定正确。
+  - order: 7
+    action: 禁用全部外部 provider 后再次对话，确认 external_memory_ingest_skipped 日志出现，本地读写不受影响。
+    expected: 外部 provider 搜索超时/5xx/畸形响应时仅记录 external_search_hook failed 警告日志，本地上下文仍注入该 marker，不因外部失败阻断本地检索结果；外部 provider 写入
+      ingest 超时/5xx/畸形响应时仅记录 external_memory_ingest_failed 日志，本地 memory record 仍写入成功且后续可读。
+  - order: 8
+    action: Dreaming/长期记忆类检查版本、合并/总结结果和禁用后的行为变化。
+    expected: external_provider_top_k 配置边界：合法 1/100 成功持久化，越界 0/101 返回 400，非整数返回 406，且不影响既有记忆开关/共享策略配置。
+  - order: 9
+    action: 对删除/禁用操作再次运行对话，确认旧记忆不再进入上下文。
+    expected: external_provider_top_k 配置边界：合法 1/100 成功持久化，越界 0/101 返回 400，非整数返回 406，且不影响既有记忆开关/共享策略配置。
+  - order: 10
+    action: 保存脱敏 trace 后清理测试记忆。
+    expected: external_provider_top_k 配置边界：合法 1/100 成功持久化，越界 0/101 返回 400，非整数返回 406，且不影响既有记忆开关/共享策略配置。
+  - order: 11
+    action: 补充异常断言：对本用例涉及的非法/失败条件至少重复一次，确认重试不会产生重复资源、脏状态或权限绕过。
+    expected: external_provider_top_k 配置边界：合法 1/100 成功持久化，越界 0/101 返回 400，非整数返回 406，且不影响既有记忆开关/共享策略配置。
+  expected_results:
+  - 功能结果与代码契约一致，测试过程无未处理异常。
+  - 关键状态在 API 返回、数据库/存储和后续读取中保持一致。
+  - 失败路径返回明确错误，不出现半写入、重复副作用或跨租户泄露。
+  - 日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。
+  - 真实模型调用成功，stream/Agent run 正常结束；自然语言只做稳定关键词/结构/工具调用断言。
+  - 固定测试 marker 对应文档进入期望 Top-K/Top-N，向量维度和模型绑定正确。
+  - 外部 provider 搜索超时/5xx/畸形响应时仅记录 external_search_hook failed 警告日志，本地上下文仍注入该 marker，不因外部失败阻断本地检索结果；外部 provider 写入 ingest 超时/5xx/畸形响应时仅记录
+    external_memory_ingest_failed 日志，本地 memory record 仍写入成功且后续可读。
+  - external_provider_top_k 配置边界：合法 1/100 成功持久化，越界 0/101 返回 400，非整数返回 406，且不影响既有记忆开关/共享策略配置。
+  forbidden_side_effects: []
+  source:
+    legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
+    legacy_sheet: 02_测试用例基线
+    legacy_row: 239
+  integration_boundary:
+  - REAL_REQUIRED：使用 ${NEXENT_TEST_HOME}/config/models.yaml 中配置的真实模型/向量/Rerank/语音/多模态能力；Mock 仅用于不可稳定制造的 5xx/超时/畸形响应故障注入。外部
+    memory provider 的搜索/写入超时、5xx、畸形响应用测试内故障注入桩制造，本地记忆读写与上下文注入始终使用真实后端。
+  observations:
+  - 功能结果与代码契约一致，测试过程无未处理异常。
+  - 关键状态在 API 返回、数据库/存储和后续读取中保持一致。
+  - 失败路径返回明确错误，不出现半写入、重复副作用或跨租户泄露。
+  - 日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。
+  - 真实模型调用成功，stream/Agent run 正常结束；自然语言只做稳定关键词/结构/工具调用断言。
+  - 固定测试 marker 对应文档进入期望 Top-K/Top-N，向量维度和模型绑定正确。
+  - 外部 provider 搜索超时/5xx/畸形响应时仅记录 external_search_hook failed 警告日志，本地上下文仍注入该 marker，不因外部失败阻断本地检索结果；外部 provider 写入 ingest 超时/5xx/畸形响应时仅记录
+    external_memory_ingest_failed 日志，本地 memory record 仍写入成功且后续可读。
+  - external_provider_top_k 配置边界：合法 1/100 成功持久化，越界 0/101 返回 400，非整数返回 406，且不影响既有记忆开关/共享策略配置。
+  cleanup:
+  - JUnit/XML、完整Agent run_id、stream事件摘要、tool/retrieval trace、model snapshot、Telemetry span（脱敏）。

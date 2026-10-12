@@ -1,0 +1,81 @@
+schema_version: '1.0'
+stage: D4
+module: V5-BASELINE
+case:
+  case_id: PW-SHARE-01
+  feature_id: V5-PW-SHARE-01
+  business_rule_ids:
+  - V5-PW-SHARE-01-RULE-01
+  title: 创建分享→公共只读页→附件预览/下载→过期
+  type: E2E
+  priority: P1
+  status: active
+  automation: automated
+  objective: 验证公共分享体验；Range协议移到CONTRACT。
+  preconditions:
+  - 测试会话含文本和附件
+  - 分享链接可无登录访问
+  test_data:
+    legacy_asset_declaration: assets/documents/sample.pdf；config/users.yaml
+  steps:
+  - order: 1
+    action: 在测试会话打开分享入口，按当前UI选择消息范围/选项。
+    expected: 公共分享仅暴露快照允许内容。
+  - order: 2
+    action: 创建分享并记录share URL。
+    expected: 附件预览/下载可用。
+  - order: 3
+    action: 新无登录Context打开/share/{shareId}。
+    expected: 过期后不可读取。
+  - order: 4
+    action: 确认只读页显示快照消息，不能继续编辑原会话。
+    expected: Range和token篡改由CONTRACT/SEC。
+  - order: 5
+    action: 预览分享附件并触发下载。
+    expected: Range和token篡改由CONTRACT/SEC。
+  - order: 6
+    action: 登录Context向原会话新增未快照消息。
+    expected: Range和token篡改由CONTRACT/SEC。
+  - order: 7
+    action: 刷新公共页，确认未快照消息不自动泄露。
+    expected: Range和token篡改由CONTRACT/SEC。
+  - order: 8
+    action: 将分享设短过期/按可控方式过期后重开URL。
+    expected: Range和token篡改由CONTRACT/SEC。
+  - order: 9
+    action: 确认显示invalid/expired状态。
+    expected: Range和token篡改由CONTRACT/SEC。
+  expected_results:
+  - 公共分享仅暴露快照允许内容。
+  - 附件预览/下载可用。
+  - 过期后不可读取。
+  - Range和token篡改由CONTRACT/SEC。
+  forbidden_side_effects: []
+  source:
+    legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
+    legacy_sheet: 03_Playwright_Journey
+    legacy_row: 43
+  actor: Nexent browser user
+  journey:
+  - 在测试会话打开分享入口，按当前UI选择消息范围/选项。
+  - 创建分享并记录share URL。
+  - 新无登录Context打开/share/{shareId}。
+  - 确认只读页显示快照消息，不能继续编辑原会话。
+  - 预览分享附件并触发下载。
+  - 登录Context向原会话新增未快照消息。
+  - 刷新公共页，确认未快照消息不自动泄露。
+  - 将分享设短过期/按可控方式过期后重开URL。
+  - 确认显示invalid/expired状态。
+  final_business_result:
+  - 公共分享仅暴露快照允许内容。
+  - 附件预览/下载可用。
+  - 过期后不可读取。
+  - Range和token篡改由CONTRACT/SEC。
+  failure_evidence:
+  - '${NEXENT_TEST_HOME}/runs/{run_id}/playwright/PW-SHARE-01/
+
+    - screenshot.png / trace.zip / video.webm
+
+    - console.log / network.har / failure.json
+
+    - 涉及协议时关联 wire/*.jsonl；涉及下载时保留 downloads/'

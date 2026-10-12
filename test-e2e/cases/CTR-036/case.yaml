@@ -1,0 +1,53 @@
+schema_version: '1.0'
+stage: D3
+module: V5-BASELINE
+case:
+  case_id: CTR-036
+  feature_id: F-092
+  business_rule_ids:
+  - F-092-RULE-01
+  title: security credentials + requirement index 校验 Agent Card｜核心流程
+  type: INTEGRATION
+  priority: P0
+  status: active
+  automation: automated
+  objective: security credentials + requirement index 校验 Agent Card｜核心流程
+  preconditions:
+  - Nexent服务与仓库受控A2A Mock就绪，无其他故障注入批次。
+  - config/a2a.yaml符合统一Schema，控制令牌由既有环境或secrets.env提供。
+  - 使用本次动态ID、唯一source URL及受控测试身份，不借用历史资源。
+  test_data:
+    configuration: config/a2a.yaml
+    mock_service: a2a-agent
+  steps:
+  - order: 1
+    action: 运行时获取受控JWT资产并经Nexent发现
+    expected: 动态ID和卡片securitySchemes/securityRequirements可读取
+  - order: 2
+    action: 保存完整凭据与有效requirement index并回读
+    expected: 已配置scheme ID与index一致，详情不返回凭据值
+  - order: 3
+    action: 刷新卡片并通过Nexent实际调用
+    expected: 刷新认证Header持续有效，调用返回确定性marker且wire认证成功
+  - order: 4
+    action: 删除本次Agent并回读
+    expected: 回读404，脱敏wire和清理结果留存
+  expected_results:
+  - 动态ID和卡片securitySchemes/securityRequirements可读取
+  - 已配置scheme ID与index一致，详情不返回凭据值
+  - 刷新认证Header持续有效，调用返回确定性marker且wire认证成功
+  - 回读404，脱敏wire和清理结果留存
+  forbidden_side_effects: []
+  source:
+    legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
+    legacy_sheet: 02_测试用例基线
+    legacy_row: 181
+  integration_boundary:
+  - Nexent实际HTTP API与受控外部A2A服务及本地持久化，非Mock自测。
+  observations:
+  - 动态ID和卡片securitySchemes/securityRequirements可读取
+  - 已配置scheme ID与index一致，详情不返回凭据值
+  - 刷新认证Header持续有效，调用返回确定性marker且wire认证成功
+  - 回读404，脱敏wire和清理结果留存
+  cleanup:
+  - 清理本次动态资源或恢复故障场景；本地保留脱敏wire、JUnit及清理记录。

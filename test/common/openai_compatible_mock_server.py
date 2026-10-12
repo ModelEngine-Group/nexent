@@ -38,6 +38,9 @@ SUPPORTED_SCENARIOS = {
 class MockState:
     scenario: str = "success"
     response_text: str = "MOCK_SUCCESS"
+    response_protocol: str = "final_envelope"
+    auxiliary_max_tokens: int = 0
+    auxiliary_request_count: int = 0
     retry_after: float = 0.0
     partial_chunk_delay: float = 0.05
     success_chunk_delay: float = 0.0
@@ -53,7 +56,13 @@ class MockState:
         scenario = payload.get("scenario", "success")
         if scenario not in SUPPORTED_SCENARIOS:
             raise ValueError(f"unsupported scenario: {scenario}")
+        response_protocol = payload.get("response_protocol", "final_envelope")
+        if response_protocol not in {"final_envelope", "code_action", "code_then_final"}:
+            raise ValueError("unsupported response protocol")
         with self.lock:
+            self.response_protocol = response_protocol
+            self.auxiliary_max_tokens = int(payload.get("auxiliary_max_tokens", 0))
+            self.auxiliary_request_count = 0
             self.scenario = scenario
             self.response_text = str(payload.get("response_text", "MOCK_SUCCESS"))
             self.retry_after = max(0.0, float(payload.get("retry_after", 0.0)))
@@ -107,6 +116,8 @@ class MockState:
         return {
             "scenario": self.scenario,
             "response_text": self.response_text,
+            "response_protocol": self.response_protocol,
+            "auxiliary_request_count": self.auxiliary_request_count,
             "retry_after": self.retry_after,
             "success_stream_paused": self.success_stream_paused,
             "emit_reasoning": self.emit_reasoning,
@@ -231,6 +242,17 @@ class OpenAICompatibleMockHandler(BaseHTTPRequestHandler):
             )
             return
 
+        # The browser's concurrent title model uses an explicitly configured
+        # reserve, separate from the Agent's fixed test reserve. Default is off.
+        if self.state.auxiliary_max_tokens and payload.get("max_tokens") == self.state.auxiliary_max_tokens:
+            with self.state.lock:
+                self.state.auxiliary_request_count += 1
+            payload["_mock_auxiliary"] = True
+            if payload.get("stream") is True:
+                self._send_complete_stream(payload, self.state.response_text, "stop")
+            else:
+                self._send_non_stream_response(payload, self.state.response_text, "stop")
+            return
         has_bearer_auth = self.headers.get("Authorization", "").startswith("Bearer ")
         request_number, scenario = self.state.record(payload, has_bearer_auth)
         if scenario == "always_429":
@@ -324,12 +346,23 @@ class OpenAICompatibleMockHandler(BaseHTTPRequestHandler):
             payload["usage"] = usage
         return f"data: {json.dumps(payload)}\n\n".encode()
 
+    def _render_response(self, answer: str) -> str:
+        if not answer:
+            return ""
+        if self.state.response_protocol == "code_action":
+            return f"<code>final_answer({json.dumps(answer)})</code>"
+        if self.state.response_protocol == "code_then_final":
+            first_success = 2 if self.state.scenario in {"partial_then_success", "invalid_then_success"} else 1
+            if self.state.request_count <= first_success:
+                return f"<code>print({json.dumps(answer)})</code>"
+        return f"<final_answer>{answer}</final_answer>"
+
     def _send_complete_stream(
         self, payload: dict[str, Any], answer: str, finish_reason: str
     ) -> None:
         request_id = f"chatcmpl-mock-{uuid.uuid4().hex}"
         model = payload["model"]
-        code = f'<final_answer>{answer}</final_answer>' if answer else ""
+        code = f"<final_answer>{answer}</final_answer>" if payload.get("_mock_auxiliary") else self._render_response(answer)
         chunks = [
             self._completion_chunk(
                 request_id=request_id,
@@ -379,7 +412,8 @@ class OpenAICompatibleMockHandler(BaseHTTPRequestHandler):
                 b"data: [DONE]\n\n",
             ]
         )
-        if not self.state.success_chunk_delay and not self.state.pause_after_success_chunks:
+        pause_after = 0 if payload.get("_mock_auxiliary") else self.state.pause_after_success_chunks
+        if not self.state.success_chunk_delay and not pause_after:
             self._send_bytes(HTTPStatus.OK, b"".join(chunks), "text/event-stream")
             return
 
@@ -391,7 +425,7 @@ class OpenAICompatibleMockHandler(BaseHTTPRequestHandler):
         for index, chunk in enumerate(chunks, start=1):
             self.wfile.write(f"{len(chunk):X}\r\n".encode() + chunk + b"\r\n")
             self.wfile.flush()
-            if index == self.state.pause_after_success_chunks:
+            if index == pause_after:
                 with self.state.lock:
                     self.state.success_stream_paused = True
                 self.state.release_success_stream.wait(timeout=60)
@@ -459,7 +493,7 @@ class OpenAICompatibleMockHandler(BaseHTTPRequestHandler):
     def _send_non_stream_response(
         self, payload: dict[str, Any], answer: str, finish_reason: str
     ) -> None:
-        code = f'<final_answer>{answer}</final_answer>' if answer else ""
+        code = f"<final_answer>{answer}</final_answer>" if payload.get("_mock_auxiliary") else self._render_response(answer)
         self._send_json(
             HTTPStatus.OK,
             {

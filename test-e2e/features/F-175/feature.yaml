@@ -1,0 +1,15 @@
+schema_version: '1.0'
+module:
+  id: V5-BASELINE
+  name: Migrated V5 baseline
+feature:
+  feature_id: F-175
+  name: init/migration 幂等、旧版本升级、schema/data compatibility；大数据量统一标签迁移；HITL 表与触发器按能力条件创建/清理
+  status: active
+  description: 'SDK与基础设施 / 数据库迁移: init/migration 幂等、旧版本升级、schema/data compatibility；大数据量统一标签迁移；HITL 表与触发器按能力条件创建/清理'
+  business_rules:
+  - rule_id: F-175-RULE-01
+    description: init/migration 幂等、旧版本升级、schema/data compatibility；大数据量统一标签迁移；HITL 表与触发器按能力条件创建/清理
+  required_test_stages: []
+  source:
+    notes: Migrated from V5 01_代码功能清单 without changing the functional description.

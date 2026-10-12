@@ -1,0 +1,23 @@
+schema_version: '1.0'
+module:
+  id: V5-BASELINE
+  name: Migrated V5 baseline
+feature:
+  feature_id: V5-DEP-AUTO-0E1DE34B7A6EA269
+  name: K8s 基础设施 chart(nexent-infrastructure)安装、ES API Key 初始化、validate.yaml 校验与 uninstall.sh 卸载清理的完整生命周期（含基础设施卸载守卫与本地
+    PV 安全清理）
+  status: active
+  description: '1. 依赖顺序破坏：nexent 应用 release 仍存在时误卸载基础设施，导致应用运行中断或产生孤儿/半卸载状态。
+
+    2. 敏感信息泄露：ES API Key 以明文或宽松权限落盘，泄露后可被用于越权访问 Elasticsearch。
+
+    3. 数据误删：卸载清理越过白名单删除非 nexent 目录，或误删仍在使用中的本地 PV 数据。
+
+    4. 配置失配：持久化 mode、副本数等非法组合绕过校验，造成单副本数据不一致或存储绑定失败。'
+  business_rules:
+  - rule_id: V5-DEP-AUTO-0E1DE34B7A6EA269-RULE-01
+    description: K8s 基础设施 chart(nexent-infrastructure)安装、ES API Key 初始化、validate.yaml 校验与 uninstall.sh 卸载清理的完整生命周期（含基础设施卸载守卫与本地
+      PV 安全清理）
+  required_test_stages: []
+  source:
+    notes: 'Provisional migration owner: the V5 row has no stable Feature ID. Do not infer an F-ID.'

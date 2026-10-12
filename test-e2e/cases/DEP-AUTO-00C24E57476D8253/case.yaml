@@ -1,0 +1,77 @@
+schema_version: '1.0'
+stage: D5
+module: V5-BASELINE
+case:
+  case_id: DEP-AUTO-00C24E57476D8253
+  feature_id: V5-DEP-AUTO-00C24E57476D8253
+  business_rule_ids:
+  - V5-DEP-AUTO-00C24E57476D8253-RULE-01
+  title: 离线 k8s 目标镜像经 ctr 导入 containerd(k8s.io)、ctr 缺失 Docker 回退、sudo/非 root 分支，以及 k8s 目标强制打包官方技能 zip
+  type: DEPLOYMENT
+  priority: P1
+  status: active
+  automation: automated
+  objective: 离线 k8s 部署环境通常仅提供 containerd 而非 Docker。load-images.sh 的 k8s 目标若错用 Docker 加载、ctr 不可用时回退/报错不当、或非 root 用户无法访问 containerd
+    socket，镜像将无法导入 k8s.io 命名空间，导致离线 k8s 部署无法拉起 Pod；build_offline_package.sh 若未在 k8s 目标强制打包官方技能 zip，将导致离线环境缺失技能资产。
+  preconditions:
+  - deploy/offline/load-images.sh、deploy/offline/build_offline_package.sh、deploy/tests/test_load_images.sh；测试用 fake ctr/docker
+    stub 脚本与空 tar 占位镜像（参考 test_load_images.sh 的 IMAGE_LOADER_LOG/FAKE_CTR_FAIL_IMPORT 机制），无需真实 registry。
+  test_data:
+    legacy_asset_declaration: deploy/offline/load-images.sh、deploy/offline/build_offline_package.sh、deploy/tests/test_load_images.sh；测试用
+      fake ctr/docker stub 脚本与空 tar 占位镜像（参考 test_load_images.sh 的 IMAGE_LOADER_LOG/FAKE_CTR_FAIL_IMPORT 机制），无需真实 registry。
+  steps:
+  - order: 1
+    action: 构造与 deploy/tests/test_load_images.sh 相同的 fake docker/ctr stub，将调用参数写入 IMAGE_LOADER_LOG，并在 images 目录放置空 tar 占位镜像。
+    expected: k8s 目标在 ctr 可用时使用 `ctr -n k8s.io images import`，加载日志中不出现 docker 加载调用。
+  - order: 2
+    action: 以 TARGET=k8s 且 ctr 存在运行 load-images.sh，断言 loader 调用为 `ctr -n k8s.io images import`，且不调用 docker。
+    expected: ctr 导入失败时脚本以非零退出，不静默回退到 docker 造成伪成功。
+  - order: 3
+    action: 令 fake ctr 的 import 返回非零（FAKE_CTR_FAIL_IMPORT=true），断言脚本整体以非零退出且不会回退到 docker。
+    expected: ctr 缺失时输出 Docker 回退警告并改用 docker load 加载，警告在 stderr 可见。
+  - order: 4
+    action: 移除 ctr stub 后以 TARGET=k8s 运行，断言 stderr 输出 `falling back to Docker` 警告并改用 `docker load -i`。
+    expected: 非 root 且存在可用 sudo ctr 时走 `sudo -n ctr` 导入分支；无 sudo 或无 socket 可访问时明确报错并退出，不产生伪成功。
+  - order: 5
+    action: 验证 sudo/非 root 分支：模拟非 root（id -u != 0）且存在可用 `sudo -n ctr` 时，断言 loader 为 `sudo -n ctr -n k8s.io images import`；模拟无
+      sudo 且 ctr 无法访问 containerd socket 时，断言输出 `containerd socket is not accessible` 并以非零退出。
+    expected: k8s 离线包强制包含官方技能 zip（deploy/docker/assets/official-skills-zip 共 10 个 zip），缺失时构建报错且返回非零。
+  - order: 6
+    action: 校验 build_offline_package.sh 的 k8s 目标：断言 copy_deployment_bundle 先删除 deploy/docker，再强制将 deploy/docker/assets/official-skills-zip
+      复制回输出目录；当源码目录缺失该目录时输出 `Required K8s official skill assets not found` 并返回非零。
+    expected: k8s 离线包强制包含官方技能 zip（deploy/docker/assets/official-skills-zip 共 10 个 zip），缺失时构建报错且返回非零。
+  expected_results:
+  - k8s 目标在 ctr 可用时使用 `ctr -n k8s.io images import`，加载日志中不出现 docker 加载调用。
+  - ctr 导入失败时脚本以非零退出，不静默回退到 docker 造成伪成功。
+  - ctr 缺失时输出 Docker 回退警告并改用 docker load 加载，警告在 stderr 可见。
+  - 非 root 且存在可用 sudo ctr 时走 `sudo -n ctr` 导入分支；无 sudo 或无 socket 可访问时明确报错并退出，不产生伪成功。
+  - k8s 离线包强制包含官方技能 zip（deploy/docker/assets/official-skills-zip 共 10 个 zip），缺失时构建报错且返回非零。
+  forbidden_side_effects: []
+  source:
+    legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
+    legacy_sheet: 04_安全性能可靠性
+    legacy_row: 36
+  risk_type: DEPLOYMENT
+  risk: 离线 k8s 部署环境通常仅提供 containerd 而非 Docker。load-images.sh 的 k8s 目标若错用 Docker 加载、ctr 不可用时回退/报错不当、或非 root 用户无法访问 containerd
+    socket，镜像将无法导入 k8s.io 命名空间，导致离线 k8s 部署无法拉起 Pod；build_offline_package.sh 若未在 k8s 目标强制打包官方技能 zip，将导致离线环境缺失技能资产。
+  condition:
+  - deploy/offline/load-images.sh、deploy/offline/build_offline_package.sh、deploy/tests/test_load_images.sh；测试用 fake ctr/docker
+    stub 脚本与空 tar 占位镜像（参考 test_load_images.sh 的 IMAGE_LOADER_LOG/FAKE_CTR_FAIL_IMPORT 机制），无需真实 registry。
+  metrics:
+  - k8s 目标在 ctr 可用时使用 `ctr -n k8s.io images import`，加载日志中不出现 docker 加载调用。
+  - ctr 导入失败时脚本以非零退出，不静默回退到 docker 造成伪成功。
+  - ctr 缺失时输出 Docker 回退警告并改用 docker load 加载，警告在 stderr 可见。
+  - 非 root 且存在可用 sudo ctr 时走 `sudo -n ctr` 导入分支；无 sudo 或无 socket 可访问时明确报错并退出，不产生伪成功。
+  - k8s 离线包强制包含官方技能 zip（deploy/docker/assets/official-skills-zip 共 10 个 zip），缺失时构建报错且返回非零。
+  thresholds:
+  - k8s 目标在 ctr 可用时使用 `ctr -n k8s.io images import`，加载日志中不出现 docker 加载调用。
+  - ctr 导入失败时脚本以非零退出，不静默回退到 docker 造成伪成功。
+  - ctr 缺失时输出 Docker 回退警告并改用 docker load 加载，警告在 stderr 可见。
+  - 非 root 且存在可用 sudo ctr 时走 `sudo -n ctr` 导入分支；无 sudo 或无 socket 可访问时明确报错并退出，不产生伪成功。
+  - k8s 离线包强制包含官方技能 zip（deploy/docker/assets/official-skills-zip 共 10 个 zip），缺失时构建报错且返回非零。
+  recovery_expectations:
+  - k8s 目标在 ctr 可用时使用 `ctr -n k8s.io images import`，加载日志中不出现 docker 加载调用。
+  - ctr 导入失败时脚本以非零退出，不静默回退到 docker 造成伪成功。
+  - ctr 缺失时输出 Docker 回退警告并改用 docker load 加载，警告在 stderr 可见。
+  - 非 root 且存在可用 sudo ctr 时走 `sudo -n ctr` 导入分支；无 sudo 或无 socket 可访问时明确报错并退出，不产生伪成功。
+  - k8s 离线包强制包含官方技能 zip（deploy/docker/assets/official-skills-zip 共 10 个 zip），缺失时构建报错且返回非零。

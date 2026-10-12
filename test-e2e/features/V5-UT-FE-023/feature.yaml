@@ -1,0 +1,16 @@
+schema_version: '1.0'
+module:
+  id: V5-BASELINE
+  name: Migrated V5 baseline
+feature:
+  feature_id: V5-UT-FE-023
+  name: SKILL.md/ZIP upload、文件树、编辑、冲突展示
+  status: active
+  description: SKILL.md/ZIP upload、文件树、编辑、冲突展示
+  business_rules:
+  - rule_id: V5-UT-FE-023-RULE-01
+    description: SKILL.md/ZIP upload、文件树、编辑、冲突展示
+  required_test_stages:
+  - D1
+  source:
+    notes: 'Provisional migration owner: the V5 row has no stable Feature ID. Do not infer an F-ID.'

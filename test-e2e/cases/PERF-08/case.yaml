@@ -1,0 +1,72 @@
+schema_version: '1.0'
+stage: D5
+module: V5-BASELINE
+case:
+  case_id: PERF-08
+  feature_id: V5-PERF-08
+  business_rule_ids:
+  - V5-PERF-08-RULE-01
+  title: 大规模工具/仓库列表
+  type: PERFORMANCE
+  priority: P2
+  status: active
+  automation: automated
+  objective: 大量MCP/tool/listing搜索分页
+  preconditions:
+  - '- ${NEXENT_TEST_HOME}/config/mcp.yaml
+
+    - ${NEXENT_TEST_HOME}/services/test-mcp/
+
+    - ${NEXENT_TEST_HOME}/assets/agents/
+
+    - ${NEXENT_TEST_HOME}/config/performance.yaml'
+  test_data:
+    legacy_asset_declaration: '- ${NEXENT_TEST_HOME}/config/mcp.yaml
+
+      - ${NEXENT_TEST_HOME}/services/test-mcp/
+
+      - ${NEXENT_TEST_HOME}/assets/agents/
+
+      - ${NEXENT_TEST_HOME}/config/performance.yaml'
+  steps:
+  - order: 1
+    action: 从 performance.yaml 读取本用例并发量/数据规模/阈值，启动本地真实测试栈并记录机器资源信息。
+    expected: P95符合SLO；分页无重复/遗漏；前端不卡死。
+  - order: 2
+    action: 准备“大规模工具/仓库列表”所需固定测试数据和真实模型/向量服务（如涉及）。
+    expected: P95符合SLO；分页无重复/遗漏；前端不卡死。
+  - order: 3
+    action: 预置大量条目并执行搜索、tag stats、分页、Agent工具选择。
+    expected: P95符合SLO；分页无重复/遗漏；前端不卡死。
+  - order: 4
+    action: 预热一次后再正式测量；记录 P50/P95/P99、吞吐、错误率和资源占用。
+    expected: P95符合SLO；分页无重复/遗漏；前端不卡死。
+  - order: 5
+    action: 性能场景仍要验证业务正确性，不能以返回快作为唯一通过条件。
+    expected: P95符合SLO；分页无重复/遗漏；前端不卡死。
+  - order: 6
+    action: 保存原始测量 JSON/CSV、服务日志和环境快照；P2 大型场景失败默认记录但不掩盖 P0/P1结果。
+    expected: P95符合SLO；分页无重复/遗漏；前端不卡死。
+  expected_results:
+  - P95符合SLO；分页无重复/遗漏；前端不卡死。
+  forbidden_side_effects: []
+  source:
+    legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
+    legacy_sheet: 04_安全性能可靠性
+    legacy_row: 19
+  risk_type: PERFORMANCE
+  risk: 大量MCP/tool/listing搜索分页
+  condition:
+  - '- ${NEXENT_TEST_HOME}/config/mcp.yaml
+
+    - ${NEXENT_TEST_HOME}/services/test-mcp/
+
+    - ${NEXENT_TEST_HOME}/assets/agents/
+
+    - ${NEXENT_TEST_HOME}/config/performance.yaml'
+  metrics:
+  - P95符合SLO；分页无重复/遗漏；前端不卡死。
+  thresholds:
+  - P95符合SLO；分页无重复/遗漏；前端不卡死。
+  recovery_expectations:
+  - P95符合SLO；分页无重复/遗漏；前端不卡死。

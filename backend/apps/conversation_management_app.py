@@ -129,9 +129,10 @@ async def rename_conversation_endpoint(request: RenameRequest, authorization: Op
     """
     try:
         user_id, tenant_id = get_current_user_id(authorization)
-        rename_conversation_service(
-            request.conversation_id, request.name, user_id)
-        return ConversationResponse(code=0, message="success", data=True)
+        kwargs = {"only_if_default_title": True} if request.only_if_default_title else {}
+        renamed = rename_conversation_service(
+            request.conversation_id, request.name, user_id, **kwargs)
+        return ConversationResponse(code=0, message="success", data=renamed)
     except TokenExpiredError as e:
         logging.warning("Session expired")
         raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(e))
@@ -381,6 +382,8 @@ async def update_opinion_endpoint(request: OpinionRequest, authorization: Option
     try:
         update_message_opinion_service(request.message_id, request.opinion)
         return ConversationResponse(code=0, message="success", data=True)
+    except ConversationNotFoundError as exc:
+        raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail=str(exc)) from exc
     except Exception as e:
         logging.error(f"Failed to update message like/dislike: {str(e)}")
         raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=str(e))
@@ -402,6 +405,8 @@ async def get_message_id_endpoint(request: MessageIdRequest):
     try:
         message_id = await get_message_id_by_index_impl(request.conversation_id, request.message_index)
         return ConversationResponse(code=0, message="success", data=message_id)
+    except ConversationNotFoundError as exc:
+        raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail=str(exc)) from exc
     except Exception as e:
         logging.error(f"Failed to get message ID: {str(e)}")
         raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=str(e))

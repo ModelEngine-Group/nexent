@@ -1,0 +1,86 @@
+schema_version: '1.0'
+stage: D5
+module: V5-BASELINE
+case:
+  case_id: DEP-AUTO-7177AC18CCE799DD
+  feature_id: V5-DEP-AUTO-7177AC18CCE799DD
+  business_rule_ids:
+  - V5-DEP-AUTO-7177AC18CCE799DD-RULE-01
+  title: --sandbox-mode 三态解析/校验/持久化、NEXENT_SANDBOX_DEFAULT_LEVEL 与镜像选择、固定沙箱容器重建
+  type: DEPLOYMENT
+  priority: P1
+  status: active
+  automation: automated
+  objective: 沙箱模式在解析、校验、持久化与镜像/执行级别落地的链路中存在不一致或失效风险：非法 --sandbox-mode 未被拒绝；full 模式错误选用 lightweight 镜像(nexent-sandbox)导致技能依赖缺失；disabled
+    模式仍拉取/启动 Docker 沙箱导致隔离级别与实际不符；或模式/镜像变更后未重建固定沙箱容器(nexent-runtime-sandbox)导致旧隔离级别残留。
+  preconditions:
+  - '- deploy/tests/test_common.sh（沙箱模式解析/校验/持久化/镜像切换/容器重建断言）
+
+    - deploy/env/.env.example（NEXENT_SANDBOX_DEFAULT_LEVEL 等沙箱默认配置）'
+  test_data:
+    legacy_asset_declaration: '- deploy/tests/test_common.sh（沙箱模式解析/校验/持久化/镜像切换/容器重建断言）
+
+      - deploy/env/.env.example（NEXENT_SANDBOX_DEFAULT_LEVEL 等沙箱默认配置）'
+  steps:
+  - order: 1
+    action: 在 Bash 测试环境 source deploy/common/common.sh，分别以 --sandbox-mode disabled、lightweight、full 调用 deployment_prepare_config，断言
+      DEPLOYMENT_SANDBOX_MODE 被解析为对应值（deployment_parse_common_args 的 --sandbox-mode 分支）。
+    expected: disabled/lightweight/full 三态均可被解析为合法值，缺省回退为 lightweight。
+  - order: 2
+    action: 不传 --sandbox-mode 时调用 deployment_prepare_config，断言 DEPLOYMENT_SANDBOX_MODE 回退为默认值 lightweight（DEPLOYMENT_SANDBOX_MODE_DEFAULT）。
+    expected: 非法 sandbox mode 被拒绝并输出 "Unsupported sandbox mode" 错误（返回非零）。
+  - order: 3
+    action: '以 --sandbox-mode unsupported 调用 deployment_prepare_config，断言 deployment_validate 返回失败且错误信息包含 "Unsupported sandbox
+      mode: unsupported"。'
+    expected: 执行级别与镜像选择符合契约：disabled→local+nexent-sandbox、lightweight→docker+nexent-sandbox、full→docker+nexent-sandbox-full。
+  - order: 4
+    action: 分别对 disabled/lightweight/full 调用 deployment_apply_image_source，断言 NEXENT_SANDBOX_DEFAULT_LEVEL 依次为 local/docker/docker，且
+      full 选择 nexent-sandbox-full 镜像、disabled 与 lightweight 保留 nexent-sandbox 镜像（含版本 tag）。
+    expected: sandboxMode 正确持久化到 local-config.yaml 并渲染进 Helm values，重载后取值一致。
+  - order: 5
+    action: 调用 deployment_persist_local_config 与 deployment_render_helm_values，断言 local-config.yaml 的 sandboxMode 与 Helm values
+      的 sandboxMode 字段正确写出；以 --defaults --local-config 重新加载后 DEPLOYMENT_SANDBOX_MODE 恢复一致。
+    expected: 沙箱模式或镜像变更时固定沙箱容器被重建（rm -f），disabled 跳过镜像拉取。
+  - order: 6
+    action: 检查 reconcile_sandbox_container：现有 nexent-runtime-sandbox 容器镜像与目标 NEXENT_SANDBOX_IMAGE 一致且模式非 disabled 时保留；否则 docker
+      rm -f 重建并保留工作区卷。
+    expected: 沙箱模式或镜像变更时固定沙箱容器被重建（rm -f），disabled 跳过镜像拉取。
+  - order: 7
+    action: 检查 pull_sandbox_image：disabled 模式下跳过沙箱镜像拉取。
+    expected: 沙箱模式或镜像变更时固定沙箱容器被重建（rm -f），disabled 跳过镜像拉取。
+  expected_results:
+  - disabled/lightweight/full 三态均可被解析为合法值，缺省回退为 lightweight。
+  - 非法 sandbox mode 被拒绝并输出 "Unsupported sandbox mode" 错误（返回非零）。
+  - 执行级别与镜像选择符合契约：disabled→local+nexent-sandbox、lightweight→docker+nexent-sandbox、full→docker+nexent-sandbox-full。
+  - sandboxMode 正确持久化到 local-config.yaml 并渲染进 Helm values，重载后取值一致。
+  - 沙箱模式或镜像变更时固定沙箱容器被重建（rm -f），disabled 跳过镜像拉取。
+  forbidden_side_effects: []
+  source:
+    legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
+    legacy_sheet: 04_安全性能可靠性
+    legacy_row: 44
+  risk_type: DEPLOYMENT
+  risk: 沙箱模式在解析、校验、持久化与镜像/执行级别落地的链路中存在不一致或失效风险：非法 --sandbox-mode 未被拒绝；full 模式错误选用 lightweight 镜像(nexent-sandbox)导致技能依赖缺失；disabled
+    模式仍拉取/启动 Docker 沙箱导致隔离级别与实际不符；或模式/镜像变更后未重建固定沙箱容器(nexent-runtime-sandbox)导致旧隔离级别残留。
+  condition:
+  - '- deploy/tests/test_common.sh（沙箱模式解析/校验/持久化/镜像切换/容器重建断言）
+
+    - deploy/env/.env.example（NEXENT_SANDBOX_DEFAULT_LEVEL 等沙箱默认配置）'
+  metrics:
+  - disabled/lightweight/full 三态均可被解析为合法值，缺省回退为 lightweight。
+  - 非法 sandbox mode 被拒绝并输出 "Unsupported sandbox mode" 错误（返回非零）。
+  - 执行级别与镜像选择符合契约：disabled→local+nexent-sandbox、lightweight→docker+nexent-sandbox、full→docker+nexent-sandbox-full。
+  - sandboxMode 正确持久化到 local-config.yaml 并渲染进 Helm values，重载后取值一致。
+  - 沙箱模式或镜像变更时固定沙箱容器被重建（rm -f），disabled 跳过镜像拉取。
+  thresholds:
+  - disabled/lightweight/full 三态均可被解析为合法值，缺省回退为 lightweight。
+  - 非法 sandbox mode 被拒绝并输出 "Unsupported sandbox mode" 错误（返回非零）。
+  - 执行级别与镜像选择符合契约：disabled→local+nexent-sandbox、lightweight→docker+nexent-sandbox、full→docker+nexent-sandbox-full。
+  - sandboxMode 正确持久化到 local-config.yaml 并渲染进 Helm values，重载后取值一致。
+  - 沙箱模式或镜像变更时固定沙箱容器被重建（rm -f），disabled 跳过镜像拉取。
+  recovery_expectations:
+  - disabled/lightweight/full 三态均可被解析为合法值，缺省回退为 lightweight。
+  - 非法 sandbox mode 被拒绝并输出 "Unsupported sandbox mode" 错误（返回非零）。
+  - 执行级别与镜像选择符合契约：disabled→local+nexent-sandbox、lightweight→docker+nexent-sandbox、full→docker+nexent-sandbox-full。
+  - sandboxMode 正确持久化到 local-config.yaml 并渲染进 Helm values，重载后取值一致。
+  - 沙箱模式或镜像变更时固定沙箱容器被重建（rm -f），disabled 跳过镜像拉取。

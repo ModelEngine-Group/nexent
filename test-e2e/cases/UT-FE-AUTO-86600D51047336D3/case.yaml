@@ -1,0 +1,63 @@
+schema_version: '1.0'
+stage: D1
+module: V5-BASELINE
+case:
+  case_id: UT-FE-AUTO-86600D51047336D3
+  feature_id: F-065
+  business_rule_ids:
+  - F-065-RULE-01
+  title: 流式推理 markdown 渲染回归：反引号代码块与 <code> 标签｜核心流程
+  type: FE-COMP
+  priority: P1
+  status: active
+  automation: automated
+  objective: 流式推理 markdown 渲染回归：反引号代码块与 <code> 标签｜核心流程
+  preconditions:
+  - 本地依赖/组件测试环境可运行；不要求外部模型服务在线。
+  - 设置 NEXENT_TEST_HOME，目录不位于 Nexent Git 仓库内。
+  - 当次 run_id 已生成，所有新建资源名称带 run_id；测试基线固定为 develop 当前批次锁定的产品提交；执行时另记录实际被测 commit。
+  - 所需本地资产存在且校验通过：${NEXENT_TEST_HOME}/config/models.yaml；${NEXENT_TEST_HOME}/config/secrets.env
+  test_data:
+    legacy_asset_declaration: '- ${NEXENT_TEST_HOME}/config/models.yaml
+
+      - ${NEXENT_TEST_HOME}/config/secrets.env'
+  steps:
+  - order: 1
+    action: 在组件测试环境加载 frontend/app/[locale]/newchat/ui/reasoning.tsx 的 StreamingReasoning 组件，注入 reasoning 类型 message part
+      及运行时状态，使用固定推理 markdown 内容作为 part.text。
+    expected: 运行态下反引号代码块与行内 <code> 经 ReactMarkdown + remarkGfm 正确渲染，代码内容逐行完整无丢失。
+  - order: 2
+    action: 构造包含反引号代码块（如 ```python ... ```）与行内 `<code>` 标签、多行连续文本的推理内容，断言渲染流程不再执行旧有 <code> 拆块归一化。
+    expected: 历史态（非 running）与运行态（running）对同一推理文本渲染结果一致，代码块与行内代码均正确显示。
+  - order: 3
+    action: 置 status.type="running" 渲染运行态，断言反引号代码块按语言标记解析为代码块、行内 `<code>` 解析为等宽/背景高亮行内 code，逐行内容完整无丢失。
+    expected: 未闭合 ``` / <code> 片段不产生布局异常或内容错乱，DOM 中不出现裸露未转义标签。
+  - order: 4
+    action: 将同一 part.text 切换为非 running 状态（历史态），断言走 MarkdownTextPrimitive + defaultComponents 分支，渲染结果与运行态一致，无未闭合标签导致的布局异常。
+    expected: 渲染过程无真实模型调用、无未处理异常、无非预期 DOM/console 报错。
+  - order: 5
+    action: 覆盖边界/异常：流式中途截断的未闭合 ``` 与 `<code>` 片段不遗留裸露标签，不破坏后续内容布局。
+    expected: 渲染过程无真实模型调用、无未处理异常、无非预期 DOM/console 报错。
+  - order: 6
+    action: 断言组件渲染过程中不发起真实模型调用，无未处理异常、无非预期 DOM/console 报错。
+    expected: 渲染过程无真实模型调用、无未处理异常、无非预期 DOM/console 报错。
+  expected_results:
+  - 运行态下反引号代码块与行内 <code> 经 ReactMarkdown + remarkGfm 正确渲染，代码内容逐行完整无丢失。
+  - 历史态（非 running）与运行态（running）对同一推理文本渲染结果一致，代码块与行内代码均正确显示。
+  - 未闭合 ``` / <code> 片段不产生布局异常或内容错乱，DOM 中不出现裸露未转义标签。
+  - 渲染过程无真实模型调用、无未处理异常、无非预期 DOM/console 报错。
+  forbidden_side_effects: []
+  source:
+    legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
+    legacy_sheet: 02_测试用例基线
+    legacy_row: 438
+  unit_boundary: 前端流式状态
+  inputs:
+  - '- ${NEXENT_TEST_HOME}/config/models.yaml
+
+    - ${NEXENT_TEST_HOME}/config/secrets.env'
+  assertions:
+  - 运行态下反引号代码块与行内 <code> 经 ReactMarkdown + remarkGfm 正确渲染，代码内容逐行完整无丢失。
+  - 历史态（非 running）与运行态（running）对同一推理文本渲染结果一致，代码块与行内代码均正确显示。
+  - 未闭合 ``` / <code> 片段不产生布局异常或内容错乱，DOM 中不出现裸露未转义标签。
+  - 渲染过程无真实模型调用、无未处理异常、无非预期 DOM/console 报错。

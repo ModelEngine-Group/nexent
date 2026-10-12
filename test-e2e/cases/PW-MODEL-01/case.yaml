@@ -1,0 +1,82 @@
+schema_version: '1.0'
+stage: D4
+module: V5-BASELINE
+case:
+  case_id: PW-MODEL-01
+  feature_id: V5-PW-MODEL-01
+  business_rule_ids:
+  - V5-PW-MODEL-01-RULE-01
+  title: 模型 V2 从 Provider 导入/自定义接入→真实连通性→保存→Agent 使用
+  type: E2E
+  priority: P0
+  status: active
+  automation: automated
+  objective: 验证模型管理 V2 使用本地配置的真实 Provider/模型完成导入或自定义接入、推理参数配置、连通性检查、保存和 Agent 选择。
+  preconditions:
+  - models.yaml定义primary LLM
+  - API Key仅本地
+  - 可创建Draft Agent
+  test_data:
+    legacy_asset_declaration: config/models.yaml；config/secrets.env
+  steps:
+  - order: 1
+    action: 从 config/models.yaml 读取当前真实模型名称、类型、URL 和凭据引用，不在脚本中自造名称。
+    expected: UI 使用的模型名、URL、类型与 config/models.yaml 快照一致。
+  - order: 2
+    action: 进入模型页，打开“添加模型”。
+    expected: 连通性请求到达真实 Provider，reasoning 模型不会因空 content/timeout 误判。
+  - order: 3
+    action: 优先在“从服务商导入”选择配置对应 Provider 和模型；若目录未提供该模型，则使用“自定义接入”。
+    expected: 推理参数和容量持久化且刷新不丢失。
+  - order: 4
+    action: 设置显示名、容量和当前模型支持的推理参数，执行真实连通性检查。
+    expected: 编辑请求不含 api_key/apiKey，已保存凭据未被空值覆盖，保存后原配置模型仍可连通。
+  - order: 5
+    action: 仅在状态为可用后保存；刷新页面并核对持久化。
+    expected: Agent 可选择并真实调用该模型。
+  - order: 6
+    action: 重新进入该模型的编辑弹窗，API Key 保持空白并保存；捕获 /api/model/update 请求后再次执行真实连通性检查。
+    expected: DOM、日志、trace 和报告不出现 API Key。
+  - order: 7
+    action: 创建 run_id Agent，选择该模型并保存，进入调试发起最小真实请求。
+    expected: DOM、日志、trace 和报告不出现 API Key。
+  - order: 8
+    action: 清理 Agent；仅删除本次新建且非共享的模型。
+    expected: DOM、日志、trace 和报告不出现 API Key。
+  expected_results:
+  - UI 使用的模型名、URL、类型与 config/models.yaml 快照一致。
+  - 连通性请求到达真实 Provider，reasoning 模型不会因空 content/timeout 误判。
+  - 推理参数和容量持久化且刷新不丢失。
+  - 编辑请求不含 api_key/apiKey，已保存凭据未被空值覆盖，保存后原配置模型仍可连通。
+  - Agent 可选择并真实调用该模型。
+  - DOM、日志、trace 和报告不出现 API Key。
+  forbidden_side_effects: []
+  source:
+    legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
+    legacy_sheet: 03_Playwright_Journey
+    legacy_row: 13
+  actor: Nexent browser user
+  journey:
+  - 从 config/models.yaml 读取当前真实模型名称、类型、URL 和凭据引用，不在脚本中自造名称。
+  - 进入模型页，打开“添加模型”。
+  - 优先在“从服务商导入”选择配置对应 Provider 和模型；若目录未提供该模型，则使用“自定义接入”。
+  - 设置显示名、容量和当前模型支持的推理参数，执行真实连通性检查。
+  - 仅在状态为可用后保存；刷新页面并核对持久化。
+  - 重新进入该模型的编辑弹窗，API Key 保持空白并保存；捕获 /api/model/update 请求后再次执行真实连通性检查。
+  - 创建 run_id Agent，选择该模型并保存，进入调试发起最小真实请求。
+  - 清理 Agent；仅删除本次新建且非共享的模型。
+  final_business_result:
+  - UI 使用的模型名、URL、类型与 config/models.yaml 快照一致。
+  - 连通性请求到达真实 Provider，reasoning 模型不会因空 content/timeout 误判。
+  - 推理参数和容量持久化且刷新不丢失。
+  - 编辑请求不含 api_key/apiKey，已保存凭据未被空值覆盖，保存后原配置模型仍可连通。
+  - Agent 可选择并真实调用该模型。
+  - DOM、日志、trace 和报告不出现 API Key。
+  failure_evidence:
+  - '${NEXENT_TEST_HOME}/runs/{run_id}/playwright/PW-MODEL-01/
+
+    - screenshot.png / trace.zip / video.webm
+
+    - console.log / network.har / failure.json
+
+    - 涉及协议时关联 wire/*.jsonl；涉及下载时保留 downloads/'

@@ -34,7 +34,9 @@ async def test_http_title_lifecycle(runtime, path):
     assert operation.attributes["session.id"] == "42"
     assert operation.attributes["input.value"] == "hello"
     assert operation.attributes["output.value"] == "Title: hello"
-    runtime.save.assert_called_once_with(42, "Title: hello", "test-user")
+    runtime.save.assert_called_once_with(42, "Title: hello", "test-user", expected_snapshot={
+        "conversation_title": "New Conversation", "update_time": None,
+    })
     assert not trace.get_current_span().get_span_context().is_valid
 
 
@@ -99,7 +101,9 @@ async def test_disabled_monitoring_preserves_behavior(runtime):
     runtime.save.side_effect = None
     title = await runtime.service.generate_conversation_title_service(1, "hello", "user", "tenant")
     assert title == "A title"
-    runtime.save.assert_called_once_with(1, "A title", "user")
+    runtime.save.assert_called_once_with(1, "A title", "user", expected_snapshot={
+        "conversation_title": "New Conversation", "update_time": None,
+    })
     assert runtime.exporter.get_finished_spans() == ()
 
 

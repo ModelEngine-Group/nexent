@@ -1,0 +1,88 @@
+schema_version: '1.0'
+stage: D1
+module: V5-BASELINE
+case:
+  case_id: UT-SDK-AUTO-74430BEE8438F486
+  feature_id: F-171
+  business_rule_ids:
+  - F-171-RULE-01
+  title: W2 预算契约字段改名：context_budget_snapshot 序列化、parse 校验与派发边界｜核心流程
+  type: SDK-UT
+  priority: P1
+  status: active
+  automation: automated
+  objective: W2 预算契约字段改名：context_budget_snapshot 序列化、parse 校验与派发边界｜核心流程
+  preconditions:
+  - 本地依赖/组件测试环境可运行；不要求外部模型服务在线。
+  - 设置 NEXENT_TEST_HOME，目录不位于 Nexent Git 仓库内。
+  - 当次 run_id 已生成，所有新建资源名称带 run_id；测试基线固定为 develop 当前批次锁定的产品提交；执行时另记录实际被测 commit。
+  - SDK 契约模块可导入：nexent.core.models.capacity_budget、nexent.core.agents.agent_model、nexent.core.models.openai_llm、nexent.core.context_runtime.contracts。
+  - 纯内存测试：无需外部文件资产，不读取生产凭据、API Key 或模型密钥。
+  test_data:
+    legacy_asset_declaration: '- 无固定文件资产；使用 pytest 内存构造的一致性 ContextBudgetSnapshot 字典/实例作为 fixture（字段含 fingerprint、w1_fingerprint、provider、model_name、requested_output_tokens、output_reserve_source、effective_input_limit_tokens、compaction_trigger_threshold_tokens、compaction_target_tokens、uncertainty_reserve_tokens、uncertainty_reserve_basis、warnings）。'
+  steps:
+  - order: 1
+    action: 在本地工作区导入被测契约符号：nexent.core.models.capacity_budget 的 ContextBudgetSnapshot、parse_context_budget_snapshot、CallerMaxTokensOverrideForbidden、ContextBudgetCapacityMismatch；nexent.core.agents.agent_model
+      的 AgentConfig、AgentRunInfo；nexent.core.models.openai_llm 的 OpenAIModel。
+    expected: AgentConfig/AgentRunInfo 的序列化键为 context_budget_snapshot，旧键 safe_input_budget_snapshot 不出现；process-local 字段不落入序列化输出。
+  - order: 2
+    action: 构造最小有效 AgentConfig（name/description/tools=[]/model_name 必填，context_budget_snapshot 传一致性字典快照），断言 model_dump() 输出含
+      "context_budget_snapshot" 键、其值为 ContextBudgetSnapshot 序列化结果，且不再出现旧键 "safe_input_budget_snapshot"。
+    expected: parse_context_budget_snapshot 对一致性字典返回 ContextBudgetSnapshot，新字段名 effective_input_limit_tokens/compaction_trigger_threshold_tokens/compaction_target_tokens
+      参与契约，soft_budget/hard_budget 旧字段被移除。
+  - order: 3
+    action: 构造最小有效 AgentRunInfo（query/model_config_list/observer/agent_config/stop_event 必填，context_budget_snapshot 传快照），断言
+      model_dump() 含 "context_budget_snapshot"，且 process-local 字段（cancellation_scope/thread_manager/thread_execution_id/thread_future，exclude=True）不落入序列化输出。
+    expected: 类型既非 ContextBudgetSnapshot 也非 dict 的输入在派发边界抛 TypeError，不吞异常、不返回伪成功。
+  - order: 4
+    action: 调用 parse_context_budget_snapshot(一致性字典)，断言返回 ContextBudgetSnapshot，且契约字段为 effective_input_limit_tokens、compaction_trigger_threshold_tokens、compaction_target_tokens（不再使用
+      soft_budget/hard_budget 旧命名）；对类型既非 ContextBudgetSnapshot 也非 dict 的输入，断言在派发 coerce 边界抛 TypeError。
+    expected: OpenAIModel.context_budget_snapshot 属性每次运行时赋值都经 parse 校验并回读为 ContextBudgetSnapshot。
+  - order: 5
+    action: 实例化 OpenAIModel（最小参数），对 context_budget_snapshot 赋值一致性字典，断言属性回读为 ContextBudgetSnapshot（每次运行时赋值都走 parse 校验）；确认已移除旧关键字
+      safe_input_budget_snapshot。
+    expected: 派发边界：调用方 max_tokens 与 snapshot.requested_output_tokens 冲突时抛 CallerMaxTokensOverrideForbidden；W1-W2 指纹/provider/model
+      不一致时抛 ContextBudgetCapacityMismatch；无 capacity_snapshot 时跳过一致性校验。
+  - order: 6
+    action: 派发边界 max_tokens：构造 snapshot(requested_output_tokens=X)，用 mock 的 self.client.chat.completions.create 调用 _dispatch_chat_completion，分别验证调用方
+      max_tokens 与 X 不一致时抛 CallerMaxTokensOverrideForbidden(snapshot_value=X, caller_value=传入值)、未传 max_tokens 时 completion_kwargs
+      被填充为 X。
+    expected: 未传 max_tokens 时 dispatch 以 snapshot.requested_output_tokens 作为唯一权威填充 completion。
+  - order: 7
+    action: 派发边界 W1-W2 一致性：传入 capacity_snapshot（capacity_fingerprint/provider/model_name）与快照 w1_fingerprint/provider/model_name
+      不一致时，断言抛 ContextBudgetCapacityMismatch 且 field 为 w1_fingerprint/provider/model_name 中的对应项；capacity_snapshot 为空或三字段均缺省时跳过该校验（迁移窗口）。
+    expected: 追踪属性使用新字段名（w2.budget_fingerprint/w2.w1_fingerprint/context.effective_input_limit_tokens 等）；日志/Trace 不出现明文 API
+      Key/Token/Password/模型密钥。
+  - order: 8
+    action: 断言追踪属性 _context_budget_trace_attributes 输出 w2.budget_fingerprint/w2.w1_fingerprint 及 context.effective_input_limit_tokens
+      等新键；全程无未处理异常、无明文 secret 输出；测试结束释放 mock 对象，确保可重复执行。
+    expected: 追踪属性使用新字段名（w2.budget_fingerprint/w2.w1_fingerprint/context.effective_input_limit_tokens 等）；日志/Trace 不出现明文 API
+      Key/Token/Password/模型密钥。
+  expected_results:
+  - AgentConfig/AgentRunInfo 的序列化键为 context_budget_snapshot，旧键 safe_input_budget_snapshot 不出现；process-local 字段不落入序列化输出。
+  - parse_context_budget_snapshot 对一致性字典返回 ContextBudgetSnapshot，新字段名 effective_input_limit_tokens/compaction_trigger_threshold_tokens/compaction_target_tokens
+    参与契约，soft_budget/hard_budget 旧字段被移除。
+  - 类型既非 ContextBudgetSnapshot 也非 dict 的输入在派发边界抛 TypeError，不吞异常、不返回伪成功。
+  - OpenAIModel.context_budget_snapshot 属性每次运行时赋值都经 parse 校验并回读为 ContextBudgetSnapshot。
+  - 派发边界：调用方 max_tokens 与 snapshot.requested_output_tokens 冲突时抛 CallerMaxTokensOverrideForbidden；W1-W2 指纹/provider/model 不一致时抛
+    ContextBudgetCapacityMismatch；无 capacity_snapshot 时跳过一致性校验。
+  - 未传 max_tokens 时 dispatch 以 snapshot.requested_output_tokens 作为唯一权威填充 completion。
+  - 追踪属性使用新字段名（w2.budget_fingerprint/w2.w1_fingerprint/context.effective_input_limit_tokens 等）；日志/Trace 不出现明文 API Key/Token/Password/模型密钥。
+  forbidden_side_effects: []
+  source:
+    legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
+    legacy_sheet: 02_测试用例基线
+    legacy_row: 470
+  unit_boundary: 上下文预算
+  inputs:
+  - '- 无固定文件资产；使用 pytest 内存构造的一致性 ContextBudgetSnapshot 字典/实例作为 fixture（字段含 fingerprint、w1_fingerprint、provider、model_name、requested_output_tokens、output_reserve_source、effective_input_limit_tokens、compaction_trigger_threshold_tokens、compaction_target_tokens、uncertainty_reserve_tokens、uncertainty_reserve_basis、warnings）。'
+  assertions:
+  - AgentConfig/AgentRunInfo 的序列化键为 context_budget_snapshot，旧键 safe_input_budget_snapshot 不出现；process-local 字段不落入序列化输出。
+  - parse_context_budget_snapshot 对一致性字典返回 ContextBudgetSnapshot，新字段名 effective_input_limit_tokens/compaction_trigger_threshold_tokens/compaction_target_tokens
+    参与契约，soft_budget/hard_budget 旧字段被移除。
+  - 类型既非 ContextBudgetSnapshot 也非 dict 的输入在派发边界抛 TypeError，不吞异常、不返回伪成功。
+  - OpenAIModel.context_budget_snapshot 属性每次运行时赋值都经 parse 校验并回读为 ContextBudgetSnapshot。
+  - 派发边界：调用方 max_tokens 与 snapshot.requested_output_tokens 冲突时抛 CallerMaxTokensOverrideForbidden；W1-W2 指纹/provider/model 不一致时抛
+    ContextBudgetCapacityMismatch；无 capacity_snapshot 时跳过一致性校验。
+  - 未传 max_tokens 时 dispatch 以 snapshot.requested_output_tokens 作为唯一权威填充 completion。
+  - 追踪属性使用新字段名（w2.budget_fingerprint/w2.w1_fingerprint/context.effective_input_limit_tokens 等）；日志/Trace 不出现明文 API Key/Token/Password/模型密钥。

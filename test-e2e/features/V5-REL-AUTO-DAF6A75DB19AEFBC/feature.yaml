@@ -1,0 +1,19 @@
+schema_version: '1.0'
+module:
+  id: V5-BASELINE
+  name: Migrated V5 baseline
+feature:
+  feature_id: V5-REL-AUTO-DAF6A75DB19AEFBC
+  name: 启动恢复：fail_interrupted_no_set_runs_on_startup 将 no-set(evaluation_set_id==0) 的 PENDING 运行及 case 置 FAILED，且不误伤持久集(>0)
+    PENDING
+  status: active
+  description: 服务(config/runtime)重启后，无持久评测集(no-set, evaluation_set_id==0)的 PENDING 评测运行在进程内存中生成临时 case、无持久续点，若不处理将永久滞留 PENDING，用户无法感知失败；需在启动时将其与关联
+    case 置 FAILED 并给出明确错误信息，同时不得误伤有持久集(evaluation_set_id>0)的 PENDING 运行（其应保留 PENDING 供 evaluation_maintenance 重派发）。
+  business_rules:
+  - rule_id: V5-REL-AUTO-DAF6A75DB19AEFBC-RULE-01
+    description: 启动恢复：fail_interrupted_no_set_runs_on_startup 将 no-set(evaluation_set_id==0) 的 PENDING 运行及 case 置 FAILED，且不误伤持久集(>0)
+      PENDING
+  required_test_stages:
+  - D5
+  source:
+    notes: 'Provisional migration owner: the V5 row has no stable Feature ID. Do not infer an F-ID.'

@@ -1,0 +1,67 @@
+{
+  "agent_id": 16,
+  "agent_info": {
+    "16": {
+      "agent_id": 16,
+      "tenant_id": "b8752799-c00c-4e3f-a154-bcd70ff65e6a",
+      "name": "summary_assistant",
+      "display_name": "总结助手",
+      "description": "你是一个总结助手，具备强大的信息提炼与归纳能力，能够根据用户提供的文本快速生成简洁明了的核心摘要，帮助用户高效获取关键信息。!",
+      "author": "2@163.com",
+      "max_steps": 15,
+      "requested_output_tokens": null,
+      "is_main_agent": true,
+      "provide_run_summary": false,
+      "allow_chat_metadata": false,
+      "verification_config": {
+        "enabled": false,
+        "pass_score": 0.75,
+        "strictness": "balanced",
+        "fail_policy": "repair_then_controlled_summary",
+        "critical_events": [
+          "tool_precheck",
+          "tool_result",
+          "retrieval",
+          "code_execution",
+          "handoff",
+          "final_answer"
+        ],
+        "guardrail_config": {
+          "rules": [],
+          "enabled": false,
+          "default_action": "pass"
+        },
+        "max_final_rounds": 2,
+        "llm_verification_enabled": true,
+        "step_verification_enabled": true,
+        "final_verification_enabled": true
+      },
+      "context_policy": null,
+      "duty_prompt": "你是一个智能总结助手，负责对各类文本内容进行提炼与归纳。你具备深度理解和精准提取核心信息的能力，能够有效过滤冗余细节。你能将复杂冗长的内容转化为简洁清晰的摘要，帮助用户快速掌握关键要点。!",
+      "constraint_prompt": "",
+      "few_shots_prompt": "",
+      "enabled": true,
+      "tools": [],
+      "managed_agents": [],
+      "model_ids": [
+        7
+      ],
+      "model_names": [
+        "glm-5.1"
+      ],
+      "business_logic_model_id": 7,
+      "business_logic_model_name": "glm-5.1",
+      "skill_names": [],
+      "prompt_template_id": 0,
+      "prompt_template_name": "system_default",
+      "greeting_message": "你好！我是你的总结助手，擅长将冗长复杂的文本提炼成简洁清晰的摘要，帮你快速抓住核心要点。",
+      "example_questions": [
+        "帮我总结一下这篇文章的核心观点",
+        "把这段会议记录提炼成三个关键要点",
+        "帮我概括这封长邮件的主要内容",
+        "用一句话总结这段话的核心意思"
+      ]
+    }
+  },
+  "mcp_info": []
+}

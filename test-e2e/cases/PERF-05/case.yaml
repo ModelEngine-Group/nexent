@@ -1,0 +1,60 @@
+schema_version: '1.0'
+stage: D5
+module: V5-BASELINE
+case:
+  case_id: PERF-05
+  feature_id: V5-PERF-05
+  business_rule_ids:
+  - V5-PERF-05-RULE-01
+  title: Scheduler高并发任务/锁
+  type: PERFORMANCE
+  priority: P0
+  status: active
+  automation: automated
+  objective: 大量到点任务不重复执行
+  preconditions:
+  - '- ${NEXENT_TEST_HOME}/config/environment.yaml
+
+    - ${NEXENT_TEST_HOME}/config/performance.yaml'
+  test_data:
+    legacy_asset_declaration: '- ${NEXENT_TEST_HOME}/config/environment.yaml
+
+      - ${NEXENT_TEST_HOME}/config/performance.yaml'
+  steps:
+  - order: 1
+    action: 从 performance.yaml 读取本用例并发量/数据规模/阈值，启动本地真实测试栈并记录机器资源信息。
+    expected: 每个fire至多一次或符合幂等定义；锁释放；积压可恢复。
+  - order: 2
+    action: 准备“Scheduler高并发任务/锁”所需固定测试数据和真实模型/向量服务（如涉及）。
+    expected: 每个fire至多一次或符合幂等定义；锁释放；积压可恢复。
+  - order: 3
+    action: 创建大量同刻任务，多worker并发；注入worker kill/restart。
+    expected: 每个fire至多一次或符合幂等定义；锁释放；积压可恢复。
+  - order: 4
+    action: 预热一次后再正式测量；记录 P50/P95/P99、吞吐、错误率和资源占用。
+    expected: 每个fire至多一次或符合幂等定义；锁释放；积压可恢复。
+  - order: 5
+    action: 性能场景仍要验证业务正确性，不能以返回快作为唯一通过条件。
+    expected: 每个fire至多一次或符合幂等定义；锁释放；积压可恢复。
+  - order: 6
+    action: 保存原始测量 JSON/CSV、服务日志和环境快照；P2 大型场景失败默认记录但不掩盖 P0/P1结果。
+    expected: 每个fire至多一次或符合幂等定义；锁释放；积压可恢复。
+  expected_results:
+  - 每个fire至多一次或符合幂等定义；锁释放；积压可恢复。
+  forbidden_side_effects: []
+  source:
+    legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
+    legacy_sheet: 04_安全性能可靠性
+    legacy_row: 16
+  risk_type: PERFORMANCE
+  risk: 大量到点任务不重复执行
+  condition:
+  - '- ${NEXENT_TEST_HOME}/config/environment.yaml
+
+    - ${NEXENT_TEST_HOME}/config/performance.yaml'
+  metrics:
+  - 每个fire至多一次或符合幂等定义；锁释放；积压可恢复。
+  thresholds:
+  - 每个fire至多一次或符合幂等定义；锁释放；积压可恢复。
+  recovery_expectations:
+  - 每个fire至多一次或符合幂等定义；锁释放；积压可恢复。

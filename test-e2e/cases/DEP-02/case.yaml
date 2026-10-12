@@ -1,0 +1,81 @@
+schema_version: '1.0'
+stage: D5
+module: V5-BASELINE
+case:
+  case_id: DEP-02
+  feature_id: V5-DEP-02
+  business_rule_ids:
+  - V5-DEP-02-RULE-01
+  title: Docker restart/持久化
+  type: DEPLOYMENT
+  priority: P0
+  status: active
+  automation: automated
+  objective: 重启/重建不丢配置、数据与日志
+  preconditions:
+  - '- ${NEXENT_TEST_HOME}/config/environment.yaml'
+  test_data:
+    legacy_asset_declaration: '- ${NEXENT_TEST_HOME}/config/environment.yaml'
+  steps:
+  - order: 1
+    action: 读取 ${NEXENT_TEST_HOME}/config/environment.yaml 中的本地测试部署参数，记录当前 develop commit、数据库 schema version 与 ROOT_DIR。
+    expected: deploy/env/.env 中 LOG_DIR 为 /mnt/nexent-data/logs，宿主机 ${ROOT_DIR}/logs 与容器 /mnt/nexent-data/logs 在重启前后日志均不丢失。
+  - order: 2
+    action: 在干净的 ROOT_DIR 上执行 bash deploy/docker/deploy.sh 完成首次部署，检查 deploy/env/.env 中 LOG_DIR 被强制覆盖为 /mnt/nexent-data/logs（persist_log_dir，deploy/docker/deploy.sh:498），宿主机创建
+      ${ROOT_DIR}/logs 目录。
+    expected: project-config 迁移完成后目录非空时不重复迁移；配置与数据仍在。
+  - order: 3
+    action: 创建租户/Agent/KB 并向 backend 写入至少一条日志后 restart 全部容器。
+    expected: 沙箱容器重建后工作区卷与配置不丢失；scheduler 恢复。
+  - order: 4
+    action: 部署/重启/迁移后依次检查 frontend、backend、DB、对象存储、向量库、worker/scheduler health。
+    expected: schema version 无重复 migration。
+  - order: 5
+    action: 检查容器内日志写入 /mnt/nexent-data/logs 并映射回宿主机 ${ROOT_DIR}/logs，重启后日志文件仍保留且无写入失败。
+    expected: schema version 无重复 migration。
+  - order: 6
+    action: 切换沙箱模式（如 --sandbox-mode lightweight 与 full 之间）触发 reconcile_sandbox_container（deploy/docker/deploy.sh:917），确认 nexent-runtime-sandbox
+      容器重建后此前 Agent 沙箱工作区卷数据仍保留。
+    expected: schema version 无重复 migration。
+  - order: 7
+    action: 在存在旧 nexent-web 容器的环境执行 deploy，确认 migrate_legacy_project_config（deploy/docker/deploy.sh:1080）将 project-config
+      迁移到 ${ROOT_DIR}/project-config，且目录非空时跳过二次迁移。
+    expected: schema version 无重复 migration。
+  - order: 8
+    action: 执行最小真实 Smoke：登录→真实 LLM Chat；如本用例涉及 KB 再执行一次真实 Embedding 检索。
+    expected: schema version 无重复 migration。
+  - order: 9
+    action: 检查持久化数据和 schema version，确认重启/升级不丢数据且无重复 migration。
+    expected: schema version 无重复 migration。
+  - order: 10
+    action: 保存安装日志、容器/Pod 状态、migration 输出和 Smoke 结果到当次 run 目录。
+    expected: schema version 无重复 migration。
+  expected_results:
+  - deploy/env/.env 中 LOG_DIR 为 /mnt/nexent-data/logs，宿主机 ${ROOT_DIR}/logs 与容器 /mnt/nexent-data/logs 在重启前后日志均不丢失。
+  - project-config 迁移完成后目录非空时不重复迁移；配置与数据仍在。
+  - 沙箱容器重建后工作区卷与配置不丢失；scheduler 恢复。
+  - schema version 无重复 migration。
+  forbidden_side_effects: []
+  source:
+    legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
+    legacy_sheet: 04_安全性能可靠性
+    legacy_row: 28
+  risk_type: DEPLOYMENT
+  risk: 重启/重建不丢配置、数据与日志
+  condition:
+  - '- ${NEXENT_TEST_HOME}/config/environment.yaml'
+  metrics:
+  - deploy/env/.env 中 LOG_DIR 为 /mnt/nexent-data/logs，宿主机 ${ROOT_DIR}/logs 与容器 /mnt/nexent-data/logs 在重启前后日志均不丢失。
+  - project-config 迁移完成后目录非空时不重复迁移；配置与数据仍在。
+  - 沙箱容器重建后工作区卷与配置不丢失；scheduler 恢复。
+  - schema version 无重复 migration。
+  thresholds:
+  - deploy/env/.env 中 LOG_DIR 为 /mnt/nexent-data/logs，宿主机 ${ROOT_DIR}/logs 与容器 /mnt/nexent-data/logs 在重启前后日志均不丢失。
+  - project-config 迁移完成后目录非空时不重复迁移；配置与数据仍在。
+  - 沙箱容器重建后工作区卷与配置不丢失；scheduler 恢复。
+  - schema version 无重复 migration。
+  recovery_expectations:
+  - deploy/env/.env 中 LOG_DIR 为 /mnt/nexent-data/logs，宿主机 ${ROOT_DIR}/logs 与容器 /mnt/nexent-data/logs 在重启前后日志均不丢失。
+  - project-config 迁移完成后目录非空时不重复迁移；配置与数据仍在。
+  - 沙箱容器重建后工作区卷与配置不丢失；scheduler 恢复。
+  - schema version 无重复 migration。

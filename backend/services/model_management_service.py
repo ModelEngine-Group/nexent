@@ -611,6 +611,14 @@ async def create_provider_models_for_tenant(tenant_id: str, provider_request: Di
         logging.debug(
             f"Provider model {provider_request['provider']} created successfully")
         return model_list
+    except HTTPException:
+        # Provider failures are raised above as HTTPException (e.g. 502
+        # connection_failed, or the provider's own 4xx). HTTPException is a
+        # subclass of Exception, so without this pass-through the generic
+        # handler below would swallow it, wrap it in a plain Exception, and the
+        # API layer would flatten every provider error to a 500 with the real
+        # status only surviving as text inside the message. Re-raise as-is.
+        raise
     except Exception as e:
         logging.error(f"Failed to create provider models: {str(e)}")
         raise Exception(f"Failed to create provider models: {str(e)}")

@@ -181,13 +181,18 @@ export const conversationService = {
   },
 
   // Rename conversation
-  async rename(conversationId: number, name: string) {
+  async rename(
+    conversationId: number,
+    name: string,
+    onlyIfDefaultTitle = false
+  ) {
     const response = await fetch(API_ENDPOINTS.conversation.rename, {
       method: "POST",
       headers: getAuthHeaders(),
       body: JSON.stringify({
         conversation_id: conversationId,
         name,
+        ...(onlyIfDefaultTitle ? { only_if_default_title: true } : {}),
       }),
     });
 

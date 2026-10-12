@@ -1,0 +1,98 @@
+schema_version: '1.0'
+stage: D2
+module: V5-BASELINE
+case:
+  case_id: API-047
+  feature_id: F-030
+  business_rule_ids:
+  - F-030-RULE-01
+  title: 用户 quota/default quota 设置与 unlimited 语义｜异常/边界/越权
+  type: API-IT
+  priority: P1
+  status: active
+  automation: automated
+  objective: 用户 quota/default quota 设置与 unlimited 语义｜异常/边界/越权
+  preconditions:
+  - Nexent 本地测试全栈已启动，health check 通过。
+  - 设置 NEXENT_TEST_HOME，目录不位于 Nexent Git 仓库内。
+  - 当次 run_id 已生成，所有新建资源名称带 run_id；测试基线固定为 develop 当前批次锁定的产品提交；执行时另记录实际被测commit。
+  - 所需本地资产存在且校验通过：${NEXENT_TEST_HOME}/config/users.yaml；${NEXENT_TEST_HOME}/config/secrets.env
+  - users.yaml 中 SU/Admin/UserA/UserB 等隔离账号可登录，测试租户数据可被清理。
+  test_data:
+    legacy_asset_declaration: '- ${NEXENT_TEST_HOME}/config/users.yaml
+
+      - ${NEXENT_TEST_HOME}/config/secrets.env'
+  steps:
+  - order: 1
+    action: 从 config/users.yaml 准备 SU、TenantA Admin/User、TenantB Admin/User，所有测试资源使用 RunID 前缀。
+    expected: 功能结果与代码契约一致，测试过程无未处理异常。
+  - order: 2
+    action: 按“用户 quota/default quota 设置与 unlimited 语义｜异常/边界/越权”通过实际资源管理 API 创建/修改租户、用户组、邀请码、角色或配额。
+    expected: 关键状态在 API 返回、数据库/存储和后续读取中保持一致。
+  - order: 3
+    action: 每次写操作后重新 GET 列表/详情，并在数据库/配额状态中检查目标租户数据一致。
+    expected: 失败路径返回明确错误，不出现半写入、重复副作用或跨租户泄露。
+  - order: 4
+    action: 使用不同角色重复读取和写入，确认 UI/API 对应 RBAC 与 tenant scope 一致。
+    expected: 日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。
+  - order: 5
+    action: 对删除/级联操作，在执行前记录关联用户、组、KB、Agent、MCP 等ID，删除后逐项确认不可访问且无孤儿记录。
+    expected: 个人 quota 低于用量/边界校验仅以源文件账本为口径：个人 quota 低于当前源文件用量时返回 TENANT_PERSONAL_KB_QUOTA_BELOW_USAGE 且不写入配置；等于源文件用量时设置成功；ES
+      物理容量(es_physical_bytes/store_size_bytes)不参与该冲突比较。
+  - order: 6
+    action: 配额类用固定大小文件/知识库真实消耗源文件容量，检查 warning/hard limit 与释放后的 usage 回落；确认 quota 相关响应中 total_bytes/source_size 仅取源文件账本，es_physical_bytes/es_physical_readable
+      作为独立观测字段返回且不参与配额比较。
+    expected: ES 索引统计查询异常仅记录告警、不阻断个人 quota 设置；上传前强校验(check_personal_*_quota，strict=True)中源文件账本查询失败返回 TENANT_PERSONAL_KB_QUOTA_UNAVAILABLE，而
+      set_personal_user_quota 容量比较失败按非 strict 降级为告警、不误报冲突。
+  - order: 7
+    action: 个人 quota 边界：记录某用户当前源文件用量(source_size_bytes/total_bytes)，通过 PUT /users/{user_id}/quota 将个人 quota 设置为等于源文件用量，确认设置成功；再设置为低于源文件用量的值，确认返回
+      TENANT_PERSONAL_KB_QUOTA_BELOW_USAGE 且配置未写入；确认即使该用户 ES 物理容量(es_physical_bytes)大于所设 quota 也不触发该冲突，且不改变其他租户/用户配置。
+    expected: ES 索引统计查询异常仅记录告警、不阻断个人 quota 设置；上传前强校验(check_personal_*_quota，strict=True)中源文件账本查询失败返回 TENANT_PERSONAL_KB_QUOTA_UNAVAILABLE，而
+      set_personal_user_quota 容量比较失败按非 strict 降级为告警、不误报冲突。
+  - order: 8
+    action: 越权/非法输入不得改变其他租户数据；错误响应不暴露资源是否真实存在。
+    expected: ES 索引统计查询异常仅记录告警、不阻断个人 quota 设置；上传前强校验(check_personal_*_quota，strict=True)中源文件账本查询失败返回 TENANT_PERSONAL_KB_QUOTA_UNAVAILABLE，而
+      set_personal_user_quota 容量比较失败按非 strict 降级为告警、不误报冲突。
+  - order: 9
+    action: '清理当次创建的租户/用户/邀请码/配额配置。
+
+      补充异常断言：对本用例涉及的非法/失败条件至少重复一次，确认重试不会产生重复资源、脏状态或权限绕过。'
+    expected: ES 索引统计查询异常仅记录告警、不阻断个人 quota 设置；上传前强校验(check_personal_*_quota，strict=True)中源文件账本查询失败返回 TENANT_PERSONAL_KB_QUOTA_UNAVAILABLE，而
+      set_personal_user_quota 容量比较失败按非 strict 降级为告警、不误报冲突。
+  expected_results:
+  - 功能结果与代码契约一致，测试过程无未处理异常。
+  - 关键状态在 API 返回、数据库/存储和后续读取中保持一致。
+  - 失败路径返回明确错误，不出现半写入、重复副作用或跨租户泄露。
+  - 日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。
+  - 个人 quota 低于用量/边界校验仅以源文件账本为口径：个人 quota 低于当前源文件用量时返回 TENANT_PERSONAL_KB_QUOTA_BELOW_USAGE 且不写入配置；等于源文件用量时设置成功；ES 物理容量(es_physical_bytes/store_size_bytes)不参与该冲突比较。
+  - ES 索引统计查询异常仅记录告警、不阻断个人 quota 设置；上传前强校验(check_personal_*_quota，strict=True)中源文件账本查询失败返回 TENANT_PERSONAL_KB_QUOTA_UNAVAILABLE，而
+    set_personal_user_quota 容量比较失败按非 strict 降级为告警、不误报冲突。
+  forbidden_side_effects: []
+  source:
+    legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
+    legacy_sheet: 02_测试用例基线
+    legacy_row: 55
+  contract:
+    protocol: HTTP API
+    request_expectations:
+    - 从 config/users.yaml 准备 SU、TenantA Admin/User、TenantB Admin/User，所有测试资源使用 RunID 前缀。
+    - 按“用户 quota/default quota 设置与 unlimited 语义｜异常/边界/越权”通过实际资源管理 API 创建/修改租户、用户组、邀请码、角色或配额。
+    - 每次写操作后重新 GET 列表/详情，并在数据库/配额状态中检查目标租户数据一致。
+    - 使用不同角色重复读取和写入，确认 UI/API 对应 RBAC 与 tenant scope 一致。
+    - 对删除/级联操作，在执行前记录关联用户、组、KB、Agent、MCP 等ID，删除后逐项确认不可访问且无孤儿记录。
+    - 配额类用固定大小文件/知识库真实消耗源文件容量，检查 warning/hard limit 与释放后的 usage 回落；确认 quota 相关响应中 total_bytes/source_size 仅取源文件账本，es_physical_bytes/es_physical_readable
+      作为独立观测字段返回且不参与配额比较。
+    - 个人 quota 边界：记录某用户当前源文件用量(source_size_bytes/total_bytes)，通过 PUT /users/{user_id}/quota 将个人 quota 设置为等于源文件用量，确认设置成功；再设置为低于源文件用量的值，确认返回
+      TENANT_PERSONAL_KB_QUOTA_BELOW_USAGE 且配置未写入；确认即使该用户 ES 物理容量(es_physical_bytes)大于所设 quota 也不触发该冲突，且不改变其他租户/用户配置。
+    - 越权/非法输入不得改变其他租户数据；错误响应不暴露资源是否真实存在。
+    - '清理当次创建的租户/用户/邀请码/配额配置。
+
+      补充异常断言：对本用例涉及的非法/失败条件至少重复一次，确认重试不会产生重复资源、脏状态或权限绕过。'
+    response_expectations:
+    - 功能结果与代码契约一致，测试过程无未处理异常。
+    - 关键状态在 API 返回、数据库/存储和后续读取中保持一致。
+    - 失败路径返回明确错误，不出现半写入、重复副作用或跨租户泄露。
+    - 日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。
+    - 个人 quota 低于用量/边界校验仅以源文件账本为口径：个人 quota 低于当前源文件用量时返回 TENANT_PERSONAL_KB_QUOTA_BELOW_USAGE 且不写入配置；等于源文件用量时设置成功；ES 物理容量(es_physical_bytes/store_size_bytes)不参与该冲突比较。
+    - ES 索引统计查询异常仅记录告警、不阻断个人 quota 设置；上传前强校验(check_personal_*_quota，strict=True)中源文件账本查询失败返回 TENANT_PERSONAL_KB_QUOTA_UNAVAILABLE，而
+      set_personal_user_quota 容量比较失败按非 strict 降级为告警、不误报冲突。

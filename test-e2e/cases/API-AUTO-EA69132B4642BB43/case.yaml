@@ -1,0 +1,81 @@
+schema_version: '1.0'
+stage: D2
+module: V5-BASELINE
+case:
+  case_id: API-AUTO-EA69132B4642BB43
+  feature_id: F-131
+  business_rule_ids:
+  - F-131-RULE-01
+  title: POST /tasks 链式入队：成功返回真实链式 task_id、入队失败 503 且无半写入｜核心流程
+  type: API-IT
+  priority: P1
+  status: active
+  automation: automated
+  objective: POST /tasks 链式入队：成功返回真实链式 task_id、入队失败 503 且无半写入｜核心流程
+  preconditions:
+  - Nexent 本地测试全栈已启动，health check 通过。
+  - 设置 NEXENT_TEST_HOME，目录不位于 Nexent Git 仓库内。
+  - 当次 run_id 已生成，所有新建资源名称带 run_id；测试基线固定为 develop 当前批次锁定的产品提交；执行时另记录实际被测commit。
+  - 所需本地资产存在且校验通过：${NEXENT_TEST_HOME}/assets/documents/；${NEXENT_TEST_HOME}/assets/expected/kb_expected.json。
+  - Redis/Celery broker 可用，且支持受控断开或对 submit_process_forward_chain 注入故障以制造入队失败。
+  test_data:
+    legacy_asset_declaration: '- ${NEXENT_TEST_HOME}/assets/documents/
+
+      - ${NEXENT_TEST_HOME}/assets/expected/kb_expected.json'
+  steps:
+  - order: 1
+    action: 从 ${NEXENT_TEST_HOME}/assets/documents/ 选择本用例固定文件，并从 expected/kb_expected.json 读取预期 marker/状态，准备一个最小有效的 TaskRequest（source_type、embedding_model_id、chunking_strategy、index_name、original_filename
+      等必填字段），记录请求参数。
+    expected: '成功路径返回 HTTP 201，响应体 {"task_id": 非空字符串}，该 ID 标识真实链式任务（process→forward 链）并与提交参数一致。'
+  - order: 2
+    action: 通过 POST /tasks 真实入口提交该请求，记录返回状态码、响应体和耗时；保存后通过 GET /tasks 或 /tasks/{task_id}/details 重新查询任务详情。
+    expected: 入队失败/空 task_id 返回 HTTP 503，detail 为 "Failed to enqueue data processing task"。
+  - order: 3
+    action: 成功路径断言：当 submit_process_forward_chain 返回非空结果时，接口返回 HTTP 201，响应体 JSON 含非空 task_id，且该 task_id 为 process→forward→cleanup
+      链的真实 Celery 链 ID（非旧 wrapper 任务 ID），后续可查询到对应处理任务。
+    expected: 失败路径无半写入：无 task 记录、无部分处理产物、无重复副作用或跨租户泄露。
+  - order: 4
+    action: 故障注入：通过受控方式使 apply_async 返回 None 或无有效 result.id（如临时断开 Redis/broker 或对 submit_process_forward_chain 注入返回空字符串），再次调用
+      POST /tasks，记录状态码与响应体。
+    expected: 日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。
+  - order: 5
+    action: 失败路径断言：当 task_id 为空时接口返回 HTTP 503，响应 detail 为 "Failed to enqueue data processing task"，且响应体不泄露内部堆栈或凭据。
+    expected: 日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。
+  - order: 6
+    action: 重新查询任务列表/详情及数据库/对象存储状态，确认 503 分支未产生半写入：无新增 task 记录、无部分 chunk/向量数据、process/forward 队列无残留消息，且其他租户数据不受影响。
+    expected: 日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。
+  - order: 7
+    action: 故障注入仅限入队环节，不通过直接修改最终数据库状态绕过业务逻辑；检查服务日志与错误响应不含明文 API Key/Token/Password/模型密钥。
+    expected: 日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。
+  - order: 8
+    action: 恢复 broker 连接与故障注入状态，清理本次 run_id 相关临时任务与数据，确保可重复执行。
+    expected: 日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。
+  expected_results:
+  - '成功路径返回 HTTP 201，响应体 {"task_id": 非空字符串}，该 ID 标识真实链式任务（process→forward 链）并与提交参数一致。'
+  - 入队失败/空 task_id 返回 HTTP 503，detail 为 "Failed to enqueue data processing task"。
+  - 失败路径无半写入：无 task 记录、无部分处理产物、无重复副作用或跨租户泄露。
+  - 日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。
+  forbidden_side_effects: []
+  source:
+    legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
+    legacy_sheet: 02_测试用例基线
+    legacy_row: 512
+  contract:
+    protocol: HTTP API
+    request_expectations:
+    - 从 ${NEXENT_TEST_HOME}/assets/documents/ 选择本用例固定文件，并从 expected/kb_expected.json 读取预期 marker/状态，准备一个最小有效的 TaskRequest（source_type、embedding_model_id、chunking_strategy、index_name、original_filename
+      等必填字段），记录请求参数。
+    - 通过 POST /tasks 真实入口提交该请求，记录返回状态码、响应体和耗时；保存后通过 GET /tasks 或 /tasks/{task_id}/details 重新查询任务详情。
+    - 成功路径断言：当 submit_process_forward_chain 返回非空结果时，接口返回 HTTP 201，响应体 JSON 含非空 task_id，且该 task_id 为 process→forward→cleanup
+      链的真实 Celery 链 ID（非旧 wrapper 任务 ID），后续可查询到对应处理任务。
+    - 故障注入：通过受控方式使 apply_async 返回 None 或无有效 result.id（如临时断开 Redis/broker 或对 submit_process_forward_chain 注入返回空字符串），再次调用 POST
+      /tasks，记录状态码与响应体。
+    - 失败路径断言：当 task_id 为空时接口返回 HTTP 503，响应 detail 为 "Failed to enqueue data processing task"，且响应体不泄露内部堆栈或凭据。
+    - 重新查询任务列表/详情及数据库/对象存储状态，确认 503 分支未产生半写入：无新增 task 记录、无部分 chunk/向量数据、process/forward 队列无残留消息，且其他租户数据不受影响。
+    - 故障注入仅限入队环节，不通过直接修改最终数据库状态绕过业务逻辑；检查服务日志与错误响应不含明文 API Key/Token/Password/模型密钥。
+    - 恢复 broker 连接与故障注入状态，清理本次 run_id 相关临时任务与数据，确保可重复执行。
+    response_expectations:
+    - '成功路径返回 HTTP 201，响应体 {"task_id": 非空字符串}，该 ID 标识真实链式任务（process→forward 链）并与提交参数一致。'
+    - 入队失败/空 task_id 返回 HTTP 503，detail 为 "Failed to enqueue data processing task"。
+    - 失败路径无半写入：无 task 记录、无部分处理产物、无重复副作用或跨租户泄露。
+    - 日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。

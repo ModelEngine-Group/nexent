@@ -1,0 +1,16 @@
+schema_version: '1.0'
+module:
+  id: V5-BASELINE
+  name: Migrated V5 baseline
+feature:
+  feature_id: V5-PW-PROMPT-01
+  name: 智能生成修改职责Prompt→手动微调与autosave
+  status: active
+  description: 验证当前Agent智能生成面板通过真实模型修订职责Prompt，回写配置后可手动微调且持久化；不假设独立Prompt优化弹窗或模板入口。
+  business_rules:
+  - rule_id: V5-PW-PROMPT-01-RULE-01
+    description: 智能生成修改职责Prompt→手动微调与autosave
+  required_test_stages:
+  - D4
+  source:
+    notes: 'Provisional migration owner: the V5 row has no stable Feature ID. Do not infer an F-ID.'

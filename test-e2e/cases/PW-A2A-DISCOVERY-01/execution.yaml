@@ -1,0 +1,12 @@
+schema_version: '1.0'
+case_id: PW-A2A-DISCOVERY-01
+timeout_seconds: 1800
+implementations:
+- framework: playwright
+  file: test.spec.ts
+  selector: PW-A2A-DISCOVERY-01
+preparation:
+  families: []
+  anchors: true
+  special_assets: false
+  d4_groups: []

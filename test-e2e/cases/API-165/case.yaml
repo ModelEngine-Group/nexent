@@ -1,0 +1,59 @@
+schema_version: '1.0'
+stage: D2
+module: V5-BASELINE
+case:
+  case_id: API-165
+  feature_id: F-177
+  business_rule_ids:
+  - F-177-RULE-01
+  title: 标签库/定义/值 CRUD、批量资源绑定与过滤投影
+  type: API-IT
+  priority: P1
+  status: active
+  automation: automated
+  objective: 标签库/定义/值 CRUD、批量资源绑定与过滤投影
+  preconditions:
+  - 本地测试环境健康检查通过，NEXENT_TEST_HOME 位于源码仓库外。
+  - 测试基线固定为 develop 当前批次锁定的产品提交，当次资源使用 run_id 隔离。
+  - 所需资产存在：${NEXENT_TEST_HOME}/config/users.yaml；${NEXENT_TEST_HOME}/config/secrets.env；${NEXENT_TEST_HOME}/config/models.yaml。
+  test_data:
+    legacy_asset_declaration: '- ${NEXENT_TEST_HOME}/config/users.yaml
+
+      - ${NEXENT_TEST_HOME}/config/secrets.env
+
+      - ${NEXENT_TEST_HOME}/config/models.yaml'
+  steps:
+  - order: 1
+    action: 以 TenantA 创建定义和值并调整顺序/状态。
+    expected: CRUD 与排序持久化。
+  - order: 2
+    action: 批量绑定文档和其他资源，查询 assignment/filter/projection/usage。
+    expected: 批量操作幂等。
+  - order: 3
+    action: 重复绑定和删除。
+    expected: 过滤和 usage 与绑定一致。
+  - order: 4
+    action: TenantB 直访全部 ID。
+    expected: 跨租户访问 401/403/404 且无副作用。
+  expected_results:
+  - CRUD 与排序持久化。
+  - 批量操作幂等。
+  - 过滤和 usage 与绑定一致。
+  - 跨租户访问 401/403/404 且无副作用。
+  forbidden_side_effects: []
+  source:
+    legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
+    legacy_sheet: 02_测试用例基线
+    legacy_row: 381
+  contract:
+    protocol: HTTP API
+    request_expectations:
+    - 以 TenantA 创建定义和值并调整顺序/状态。
+    - 批量绑定文档和其他资源，查询 assignment/filter/projection/usage。
+    - 重复绑定和删除。
+    - TenantB 直访全部 ID。
+    response_expectations:
+    - CRUD 与排序持久化。
+    - 批量操作幂等。
+    - 过滤和 usage 与绑定一致。
+    - 跨租户访问 401/403/404 且无副作用。

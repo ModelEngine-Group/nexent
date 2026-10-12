@@ -1,0 +1,85 @@
+schema_version: '1.0'
+stage: D1
+module: V5-BASELINE
+case:
+  case_id: UT-BE-AUTO-2448EA6E8C27143B
+  feature_id: F-069
+  business_rule_ids:
+  - F-069-RULE-01
+  title: SU 角色 Agent 仓库状态迁移(pending_review→rejected/shared、shared→not_shared)的 peer 重置与审核通知｜核心流程与异常边界
+  type: BE-UT
+  priority: P1
+  status: active
+  automation: automated
+  objective: SU 角色 Agent 仓库状态迁移(pending_review→rejected/shared、shared→not_shared)的 peer 重置与审核通知｜核心流程与异常边界
+  preconditions:
+  - 本地依赖/组件测试环境可运行；不要求外部模型服务在线。
+  - 设置 NEXENT_TEST_HOME，目录不位于 Nexent Git 仓库内。
+  - 当次 run_id 已生成，所有新建资源名称带 run_id；测试基线固定为 develop 当前批次锁定的产品提交；执行时另记录实际被测 commit。
+  - 所需本地资产存在且校验通过：${NEXENT_TEST_HOME}/config/users.yaml；${NEXENT_TEST_HOME}/config/secrets.env
+  - users.yaml 中 SU/Admin/UserA/UserB 等隔离账号可登录，测试租户数据可被清理。
+  test_data:
+    legacy_asset_declaration: '- ${NEXENT_TEST_HOME}/config/users.yaml
+
+      - ${NEXENT_TEST_HOME}/config/secrets.env'
+  steps:
+  - order: 1
+    action: 在本地工作区读取与“SU 角色 Agent 仓库状态迁移”相关的固定 fixture/配置；测试代码不得读取生产凭据。
+    expected: SU pending_review→rejected：返回 summary 且 status=rejected；create_repository_review_notification 以 review_status=rejected
+      调用；因 current=pending_review，deactivate_notifications 被调用；reset_agent_repository_status 以 status=rejected 调用。
+  - order: 2
+    action: 导入 backend/services/agent_repository_service.py 的 update_agent_repository_status_impl、_validate_repository_status_transition；对
+      get_agent_repository_by_id、update_agent_repository_status_by_id、reset_agent_repository_status、_get_user_role、create_repository_review_notification、deactivate_notifications
+      使用 mock 替身。
+    expected: SU pending_review→shared：返回 status=shared；审核通知 review_status=shared；待审核通知去活被调用；peer 重置 status=shared。
+  - order: 3
+    action: 构造 user_role=SU 的用户与 status=pending_review 的 listing 记录，调用 update_agent_repository_status_impl 迁移到 rejected，记录返回明细与各
+      mock 调用参数。
+    expected: SU shared→not_shared：返回 status=not_shared；因 not_shared 不在 {shared,rejected} 集合，不触发审核通知；因 current 非 pending_review
+      不去活待审核通知；peer 重置 status=not_shared。
+  - order: 4
+    action: 依次构造 pending_review→shared、shared→not_shared 的合法 SU 迁移，记录返回值与 peer 重置、审核通知、待审核通知去活的调用参数。
+    expected: SU 非法迁移在 _validate_repository_status_transition 中因未命中 _SU_STATUS_TRANSITIONS 而抛出 ValueError，不产生任何 DB 更新或通知副作用。
+  - order: 5
+    action: 对 SU 非法迁移（pending_review→not_shared、rejected→shared、not_shared→pending_review、rejected→not_shared）断言抛出 ValueError，且未触发任何
+      DB 状态更新、peer 重置或通知副作用。
+    expected: 非法 status / 记录不存在 / rows_affected=0 均抛出 ValueError，不出现半写入、重复副作用或跨租户泄露。
+  - order: 6
+    action: 对非法 status（不在 not_shared/pending_review/rejected/shared 集合）与不存在的 agent_repository_id 分别断言抛出 ValueError（非法 status
+      文案 / “Repository listing not found”），且无半写入。
+    expected: 测试过程无未处理异常，日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。
+  - order: 7
+    action: 检查 reset_agent_repository_status 影响范围仅限同 agent_id 的同状态 peer listing；当 update_agent_repository_status_by_id 返回
+      0 时断言抛出 ValueError 且不调用 peer 重置与通知。
+    expected: 测试过程无未处理异常，日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。
+  - order: 8
+    action: 确认日志不输出 API Key/Token/密码等明文；测试结束释放 mock/临时对象，保证可重复执行。
+    expected: 测试过程无未处理异常，日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。
+  expected_results:
+  - SU pending_review→rejected：返回 summary 且 status=rejected；create_repository_review_notification 以 review_status=rejected
+    调用；因 current=pending_review，deactivate_notifications 被调用；reset_agent_repository_status 以 status=rejected 调用。
+  - SU pending_review→shared：返回 status=shared；审核通知 review_status=shared；待审核通知去活被调用；peer 重置 status=shared。
+  - SU shared→not_shared：返回 status=not_shared；因 not_shared 不在 {shared,rejected} 集合，不触发审核通知；因 current 非 pending_review 不去活待审核通知；peer
+    重置 status=not_shared。
+  - SU 非法迁移在 _validate_repository_status_transition 中因未命中 _SU_STATUS_TRANSITIONS 而抛出 ValueError，不产生任何 DB 更新或通知副作用。
+  - 非法 status / 记录不存在 / rows_affected=0 均抛出 ValueError，不出现半写入、重复副作用或跨租户泄露。
+  - 测试过程无未处理异常，日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。
+  forbidden_side_effects: []
+  source:
+    legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
+    legacy_sheet: 02_测试用例基线
+    legacy_row: 390
+  unit_boundary: 发布审核
+  inputs:
+  - '- ${NEXENT_TEST_HOME}/config/users.yaml
+
+    - ${NEXENT_TEST_HOME}/config/secrets.env'
+  assertions:
+  - SU pending_review→rejected：返回 summary 且 status=rejected；create_repository_review_notification 以 review_status=rejected
+    调用；因 current=pending_review，deactivate_notifications 被调用；reset_agent_repository_status 以 status=rejected 调用。
+  - SU pending_review→shared：返回 status=shared；审核通知 review_status=shared；待审核通知去活被调用；peer 重置 status=shared。
+  - SU shared→not_shared：返回 status=not_shared；因 not_shared 不在 {shared,rejected} 集合，不触发审核通知；因 current 非 pending_review 不去活待审核通知；peer
+    重置 status=not_shared。
+  - SU 非法迁移在 _validate_repository_status_transition 中因未命中 _SU_STATUS_TRANSITIONS 而抛出 ValueError，不产生任何 DB 更新或通知副作用。
+  - 非法 status / 记录不存在 / rows_affected=0 均抛出 ValueError，不出现半写入、重复副作用或跨租户泄露。
+  - 测试过程无未处理异常，日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。

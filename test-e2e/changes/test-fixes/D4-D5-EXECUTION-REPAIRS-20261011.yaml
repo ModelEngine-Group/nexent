@@ -1,0 +1,80 @@
+schema_version: '1.0'
+change:
+  change_id: D4-D5-EXECUTION-REPAIRS-20261011
+  change_type: test-fix
+  title: Repair D4 assertions and locators, bridge Memory configuration and retain D5 dependency evidence
+  description: >-
+    PW-CHAT-01 implements the missing fourth assertion without removing manual-title
+    persistence requirements. Both conversations are checked against server state;
+    the second is checked before its planned deletion and the first is checked
+    after automatic-title requests finish and the browser reloads. PW-CHAT-05
+    locates the complete Metadata label with its optional key-count badge and
+    the editor Braces icon, not similarly named sidebar threads.
+    PW-MODEL-01 edits through the model-library UI search so pagination cannot hide
+    the configured row. The central runner exports only the three existing
+    registered Memory provider settings from optional memory-mock.env, rejects
+    conflicts without printing credential values, and preserves other configuration.
+    PW-NL2AGENT-01 recognizes explicit terminal empty-model/error SSE responses
+    during clarification/completion waits and writes a classification-only local
+    receipt. Business failure remains FAIL, not a successful generation or a
+    fabricated provider root-cause attribution. D5 prerequisite failure receipts
+    retain typed asset roles and local logs; timeout and cleanup failures remain
+    independent. PERF-03 uses the configured vector URL/dimension unchanged and
+    bounded dependency-only retries; confirmed owned model creation registers
+    cleanup before list resolution and never backfills tenant defaults. PERF-04
+    no longer treats an empty PERF-03 upload index as a large-scale fixture.
+    It remains blocked until distinct populated scale indices and the full
+    corpus/rerank/relevance/isolation/measurement workload exist; the legacy
+    three-query smoke cannot certify its unchanged requirements. SEC-09 keeps
+    its prerequisite guard and inherits bounded vector dependency retries.
+    AIDP policy and product code remain unchanged. Offline/browser-fixture tests
+    verify the repairs, not formal product acceptance. Historical batch results
+    are immutable; candidate online verification uses a separate source checkout.
+    PW-MODEL-01 retains a pre-existing semantic coverage gap: reusing the configured
+    model bypasses creation, and the capacity/reasoning-parameter assertion is not
+    backed by value comparisons. A passing execution after the pagination repair
+    does not certify those unchanged acceptance obligations. Closing that gap
+    requires a separate owned-model/configuration-restoration implementation,
+    not merely renaming the current shared model or reducing the Case definition.
+    A follow-up inspection corrected the PW-CHAT-01 failure attribution: the
+    captured sidebar already displayed the requested manual title, but its button
+    accessible name also included the completed status badge. History selection,
+    rename assertions and deletion checks now match the exact title span within
+    the history row. Browser fixtures retain negative checks for missing titles,
+    similar titles and unrelated buttons; persistence and late-title assertions
+    are unchanged. This locator repair alone is not an online Case PASS.
+    Automatic-title waiting now records request/response/finished/failed lifecycle
+    events without headers or bodies, treats aborted browser requests as terminal
+    rather than successful title persistence, and bounds waiting at 120 seconds.
+    Both persisted titles and refreshed UI remain required. A pending request
+    produces a timeout with local request-state evidence, never an unbounded wait
+    or a fabricated pass.
+    Title persistence checks now use the current history response contract:
+    code=0 and exactly one data array entry with the requested conversation ID.
+    The former data.conversation_title access was incompatible with the product
+    response and would falsely fail after the unbounded wait was repaired.
+    Online targeted verification on the current Ubuntu deployment passed
+    PW-CHAT-01 (nine steps, four final assertions and cleanup) in batch
+    2026-10-11T055939.559274-0000-e1a6d65a. PW-NL2AGENT-01 passed its complete
+    clarification, binding, generation, Debug and persistence flow with cleanup
+    in batch 2026-10-11T054644.655418-0000-f2adbeb9. That earlier batch remains
+    failed because the old CHAT title wait was interrupted and its browser
+    cleanup could not finish; validated owned conversation leftovers were
+    separately deleted and a local manual-cleanup follow-up receipt was saved.
+    Neither targeted PASS proves the historical empty-model response root cause
+    fixed or changes old reports. No product code, shared provider configuration
+    or credentials were modified by these title repairs.
+  affected_features:
+    existing: []
+    added: []
+    modified: [V5-PW-CHAT-01, V5-PW-CHAT-05, V5-PW-MODEL-01,
+               V5-PW-MEMORY-PROVIDER-01, V5-PW-NL2AGENT-01,
+               V5-PERF-03, V5-PERF-04, V5-SEC-09]
+    retired: []
+  affected_cases:
+    existing: []
+    added: []
+    modified: [PW-CHAT-01, PW-CHAT-05, PW-MODEL-01,
+               PW-MEMORY-PROVIDER-01, PW-NL2AGENT-01,
+               PERF-03, SEC-09]
+    retired: []

@@ -1,0 +1,89 @@
+schema_version: '1.0'
+stage: D3
+module: V5-BASELINE
+case:
+  case_id: API-AUTO-40529BB837906592
+  feature_id: F-178
+  business_rule_ids:
+  - F-178-RULE-01
+  title: test-search/test-ingest 绕过 enabled 开关并回写 last_error_code｜核心流程
+  type: INTEGRATION
+  priority: P1
+  status: active
+  automation: automated
+  objective: test-search/test-ingest 绕过 enabled 开关并回写 last_error_code｜核心流程
+  preconditions:
+  - Nexent 本地测试全栈已启动，health check 通过。
+  - 设置 NEXENT_TEST_HOME，目录不位于 Nexent Git 仓库内。
+  - 当次 run_id 已生成，所有新建资源名称带 run_id；测试基线固定为 develop 当前批次锁定的产品提交；执行时另记录实际被测commit。
+  - 所需本地资产存在且校验通过：${NEXENT_TEST_HOME}/config/users.yaml；${NEXENT_TEST_HOME}/config/secrets.env
+  - users.yaml 中 SU/Admin/UserA/UserB 等隔离账号可登录（MEM.PROVIDER 权限仅授予 ADMIN/SPEED），测试租户数据可被清理。
+  - 本地已启动可配置响应状态的外部记忆 Provider 测试服务（MemoryBank 兼容 stub），用于 test-search/test-ingest 的真实 HTTP 调用与 200/401/403 错误矩阵验证。
+  test_data:
+    legacy_asset_declaration: '- ${NEXENT_TEST_HOME}/config/users.yaml
+
+      - ${NEXENT_TEST_HOME}/config/secrets.env
+
+      - ${NEXENT_TEST_HOME}/services/test-memory-provider/（本地 MemoryBank 兼容 stub，可配置成功/401/403/超时响应）'
+  steps:
+  - order: 1
+    action: 从 config/users.yaml 读取 ADMIN/SPEED 角色隔离账号（MEM.PROVIDER 权限仅授予 ADMIN/SPEED），密码/Token 仅从 secrets.env 注入。
+    expected: 功能结果与代码契约一致，测试过程无未处理异常。
+  - order: 2
+    action: 通过 POST /memory/providers 创建 provider_config，enabled=false，params 含 plugin.name=AIDP_Memorybank、plugin.base_url
+      指向本地测试服务、plugin.api_key、plugin.tenant_id；记录返回的 provider_config_id。
+    expected: enabled=false 时 test-search/test-ingest 仍真实发起调用并返回 200（证明绕过 enabled 开关）。
+  - order: 3
+    action: 先将该 provider 的 last_error_code 预置为非空（将 base_url 指向返回 401 的 stub 调用一次 test-search 触发），作为后续“成功清空”断言的前置状态。
+    expected: '成功路径返回 200：test-search 返回 {"items": [...], "count": N}；test-ingest 返回含 provider/status/accepted_count/rejected_count
+      的结构，前端可解析 count 与 accepted_count/rejected_count。'
+  - order: 4
+    action: 将 base_url 改为返回 200 的 stub，调用 POST /memory/providers/{id}/test-search（query、top_k），记录 HTTP 状态与响应体。
+    expected: 成功后 GET provider 的 last_error_code 为 null（成功清空）。
+  - order: 5
+    action: 调用 POST /memory/providers/{id}/test-ingest（units 含 event_id/event_type/unit_type/unit_content），记录 HTTP 状态与响应体。
+    expected: 失败路径返回 400，detail 含 "Provider test-search failed"；401 时 last_error_code 回写 unauthorized、403 时回写 forbidden（按错误矩阵写码）。
+  - order: 6
+    action: 调用 GET /memory/providers/{id}，读取 last_error_code 字段，验证被清空为 null。
+    expected: 关键状态在 API 返回、数据库/存储和后续读取中保持一致。
+  - order: 7
+    action: 将 base_url 改为返回 401 的 stub（enabled 仍为 false），调用 test-search，记录 HTTP 状态、detail 与 last_error_code。
+    expected: 失败路径返回明确错误，不出现半写入、重复副作用或跨租户泄露。
+  - order: 8
+    action: 将 base_url 改为返回 403 的 stub，调用 test-search，记录 HTTP 状态与 last_error_code。
+    expected: 日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。
+  - order: 9
+    action: 校验响应体字段与前端 ProviderTestPanel 解析约定一致：test-search 返回 items/count，test-ingest 返回 accepted_count/rejected_count。
+    expected: 日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。
+  - order: 10
+    action: 清理本次创建的 provider_config（soft-delete），确认无残留数据。
+    expected: 日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。
+  expected_results:
+  - 功能结果与代码契约一致，测试过程无未处理异常。
+  - enabled=false 时 test-search/test-ingest 仍真实发起调用并返回 200（证明绕过 enabled 开关）。
+  - '成功路径返回 200：test-search 返回 {"items": [...], "count": N}；test-ingest 返回含 provider/status/accepted_count/rejected_count
+    的结构，前端可解析 count 与 accepted_count/rejected_count。'
+  - 成功后 GET provider 的 last_error_code 为 null（成功清空）。
+  - 失败路径返回 400，detail 含 "Provider test-search failed"；401 时 last_error_code 回写 unauthorized、403 时回写 forbidden（按错误矩阵写码）。
+  - 关键状态在 API 返回、数据库/存储和后续读取中保持一致。
+  - 失败路径返回明确错误，不出现半写入、重复副作用或跨租户泄露。
+  - 日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。
+  forbidden_side_effects: []
+  source:
+    legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
+    legacy_sheet: 02_测试用例基线
+    legacy_row: 526
+  integration_boundary:
+  - LOCAL_FULL_STACK：使用本地真实 PostgreSQL 与本地 MemoryBank 兼容 stub 完成真实 test-search/test-ingest 调用；不得以纯 Mock 代替核心链路。
+  observations:
+  - 功能结果与代码契约一致，测试过程无未处理异常。
+  - enabled=false 时 test-search/test-ingest 仍真实发起调用并返回 200（证明绕过 enabled 开关）。
+  - '成功路径返回 200：test-search 返回 {"items": [...], "count": N}；test-ingest 返回含 provider/status/accepted_count/rejected_count
+    的结构，前端可解析 count 与 accepted_count/rejected_count。'
+  - 成功后 GET provider 的 last_error_code 为 null（成功清空）。
+  - 失败路径返回 400，detail 含 "Provider test-search failed"；401 时 last_error_code 回写 unauthorized、403 时回写 forbidden（按错误矩阵写码）。
+  - 关键状态在 API 返回、数据库/存储和后续读取中保持一致。
+  - 失败路径返回明确错误，不出现半写入、重复副作用或跨租户泄露。
+  - 日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。
+  cleanup:
+  - JUnit/XML、请求/响应摘要（脱敏）、服务日志、必要的DB/对象存储状态快照；协议场景保存wire capture。

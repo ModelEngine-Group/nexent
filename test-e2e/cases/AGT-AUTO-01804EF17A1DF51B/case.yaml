@@ -1,0 +1,76 @@
+schema_version: '1.0'
+stage: D3
+module: V5-BASELINE
+case:
+  case_id: AGT-AUTO-01804EF17A1DF51B
+  feature_id: F-045
+  business_rule_ids:
+  - F-045-RULE-01
+  title: NL2Agent run 改用 _resolve_context_budget：ContextManagerConfig 阈值解析与快照缺失回退｜核心流程
+  type: AGENT-IT
+  priority: P1
+  status: active
+  automation: automated
+  objective: NL2Agent run 改用 _resolve_context_budget：ContextManagerConfig 阈值解析与快照缺失回退｜核心流程
+  preconditions:
+  - 每日 CI 集成环境可用，被测后端服务、数据库与 Local MCP 已启动，测试租户/账号可登录且测试 Agent 草稿可访问、可被清理。
+  - 设置 NEXENT_TEST_HOME，目录不位于 Nexent Git 仓库内；当次 run_id 已生成，新建资源名称带 run_id；测试基线固定为 develop 当前批次锁定的产品提交，执行时另记录实际被测 commit。
+  - 所需本地资产存在且校验通过：${NEXENT_TEST_HOME}/config/models.yaml；${NEXENT_TEST_HOME}/config/secrets.env。
+  - 测试租户模型配置覆盖两种路径：模型 A 经 _resolve_context_budget 返回非空 context_budget_snapshot；模型 B 返回 None（无预算快照）以触发回退。
+  test_data:
+    legacy_asset_declaration: '- ${NEXENT_TEST_HOME}/config/models.yaml
+
+      - ${NEXENT_TEST_HOME}/config/secrets.env'
+  steps:
+  - order: 1
+    action: 在本地工作区构造最小有效 NL2AgentRunRequest（含 query、agent_id、history），调用 backend/services/nl2agent_service.py 的 build_nl2agent_run_info，使用返回非空
+      context_budget_snapshot 的模型 A。
+    expected: snapshot 非空时：effective_input_limit_tokens/compaction_trigger_threshold_tokens/compaction_target_tokens 与 context_budget_snapshot
+      对应字段一致，token_threshold == compaction_trigger_threshold_tokens。
+  - order: 2
+    action: 读取返回 AgentRunInfo.agent_config.context_manager_config，记录 token_threshold、context_window_tokens、effective_input_limit_tokens、compaction_trigger_threshold_tokens、compaction_target_tokens。
+    expected: snapshot 为 None 时：effective_input_limit_tokens/compaction_trigger_threshold_tokens/compaction_target_tokens
+      == 0，token_threshold == input_budget（回退阈值）。
+  - order: 3
+    action: 对照 nl2agent_service.py:1357-1368 的分支语义，断言 snapshot 非空时 effective_input_limit_tokens/compaction_trigger_threshold_tokens/compaction_target_tokens
+      分别等于 context_budget_snapshot 对应字段，且 token_threshold == compaction_trigger_threshold_tokens。
+    expected: ContextManagerConfig 的五个字段全部完成赋值，不因快照缺失出现半写入、空字段或未处理异常；不再使用 _resolve_safe_input_budget 旧路径。
+  - order: 4
+    action: 改用返回 None（无预算快照）的模型 B 再次调用 build_nl2agent_run_info，断言 effective_input_limit_tokens/compaction_trigger_threshold_tokens/compaction_target_tokens
+      均为 0，且 token_threshold 回退为 _resolve_input_budget 返回的 input_budget。
+    expected: 关键状态在返回的 run_info.agent_config 与 agent_run 调用间保持一致，无重复副作用或跨租户泄露。
+  - order: 5
+    action: 断言 agent_config.capacity_snapshot 与 agent_config.context_budget_snapshot 按 nl2agent_service.py:1383-1384 正确写入，且流式执行路径
+      agent_run 传入 runtime_thread_manager（nl2agent_service.py:1440）。
+    expected: 日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。
+  - order: 6
+    action: 确认日志/Trace 不输出 API Key、Token、用户密码或模型密钥。
+    expected: 日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。
+  - order: 7
+    action: 测试结束释放临时对象并清理测试租户数据，确保可重复执行。
+    expected: 日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。
+  expected_results:
+  - snapshot 非空时：effective_input_limit_tokens/compaction_trigger_threshold_tokens/compaction_target_tokens 与 context_budget_snapshot
+    对应字段一致，token_threshold == compaction_trigger_threshold_tokens。
+  - snapshot 为 None 时：effective_input_limit_tokens/compaction_trigger_threshold_tokens/compaction_target_tokens == 0，token_threshold
+    == input_budget（回退阈值）。
+  - ContextManagerConfig 的五个字段全部完成赋值，不因快照缺失出现半写入、空字段或未处理异常；不再使用 _resolve_safe_input_budget 旧路径。
+  - 关键状态在返回的 run_info.agent_config 与 agent_run 调用间保持一致，无重复副作用或跨租户泄露。
+  - 日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。
+  forbidden_side_effects: []
+  source:
+    legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
+    legacy_sheet: 02_测试用例基线
+    legacy_row: 518
+  integration_boundary:
+  - NO_EXTERNAL：仅本地代码、组件和固定 fixture；预算解析与回退为确定性逻辑，不触发真实模型推理。
+  observations:
+  - snapshot 非空时：effective_input_limit_tokens/compaction_trigger_threshold_tokens/compaction_target_tokens 与 context_budget_snapshot
+    对应字段一致，token_threshold == compaction_trigger_threshold_tokens。
+  - snapshot 为 None 时：effective_input_limit_tokens/compaction_trigger_threshold_tokens/compaction_target_tokens == 0，token_threshold
+    == input_budget（回退阈值）。
+  - ContextManagerConfig 的五个字段全部完成赋值，不因快照缺失出现半写入、空字段或未处理异常；不再使用 _resolve_safe_input_budget 旧路径。
+  - 关键状态在返回的 run_info.agent_config 与 agent_run 调用间保持一致，无重复副作用或跨租户泄露。
+  - 日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。
+  cleanup:
+  - pytest JUnit/XML、stdout/stderr、失败堆栈、ContextManagerConfig 字段快照对比摘要。

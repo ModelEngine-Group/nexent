@@ -1,0 +1,29 @@
+schema_version: '1.0'
+change:
+  change_id: D1-RUNTIME-CONTRACTS-20261011
+  change_type: test-fix
+  title: Synchronize formal D1 cancellation and northbound lane contracts
+  description: >-
+    Product commit e9460044d8b33e0bf98c9e474fbe0a5f30bc9f67 moved prior-turn
+    cancellation cleanup to reset_stream and added the bounded northbound
+    model-tool-io lane. TESTCASE-FIXUP-20261010 updated traditional UT but omitted
+    F-131 and these formal D1 Cases from its impact record. The full batch at
+    product HEAD f28a9550fa18e1265dda64b49ab9cb6da6c10fd3 exposed stale assertions:
+    register_run was required to delete cancellation and northbound was required
+    to have only two lanes. Update both formal contracts, case-local scripts and
+    acceptance bindings without changing product code. Retain existing routing,
+    fallback, Redis error, exact policy and isolation assertions. Prove old-turn
+    cleanup, preparation-time Stop preservation, foreign-state isolation and
+    bounded northbound model success/error cleanup. Controlled in-memory mutations
+    must be rejected; historical batch failures remain unchanged. No new runtime
+    configuration, live resource IDs or external service dependencies are added.
+  affected_features:
+    existing: [F-131]
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing: []
+    added: []
+    modified: [UT-BE-AUTO-2862BAF58D3E695E, UT-BE-AUTO-A5E5C8329C318684]
+    retired: []

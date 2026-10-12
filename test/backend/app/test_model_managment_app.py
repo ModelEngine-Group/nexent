@@ -493,6 +493,51 @@ async def test_create_provider_model_exception(client, auth_header, user_credent
     mock_get.assert_called_once()
 
 
+@pytest.mark.asyncio
+async def test_create_provider_model_preserves_http_exception(client, auth_header, user_credentials, mocker):
+    """A provider failure classified by the service layer keeps its status.
+
+    Regression for API-049: an upstream connection failure is raised as
+    HTTPException(502) by create_provider_models_for_tenant, but the generic
+    ``except Exception`` handlers used to swallow it and the endpoint answered
+    500 with the real status buried in the message body.
+    """
+    from fastapi import HTTPException as FastAPIHTTPException
+
+    mocker.patch('backend.apps.model_managment_app.get_current_user_id', return_value=user_credentials)
+
+    mock_get = mocker.patch(
+        'backend.apps.model_managment_app.create_provider_models_for_tenant',
+        side_effect=FastAPIHTTPException(
+            status_code=HTTPStatus.BAD_GATEWAY,
+            detail="connection_failed: Failed to connect to OpenAI-compatible",
+        ),
+    )
+
+    request_data = {"provider": "silicon", "model_type": "llm", "api_key": "test_key"}
+    response = client.post(
+        "/model/provider/create", json=request_data, headers=auth_header)
+
+    assert response.status_code == HTTPStatus.BAD_GATEWAY
+    assert "connection_failed" in response.json().get("detail", "")
+    mock_get.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_create_provider_model_rejects_blank_provider(client, auth_header, user_credentials, mocker):
+    """A blank provider is rejected at the boundary with 422, not a 500."""
+    mocker.patch('backend.apps.model_managment_app.get_current_user_id', return_value=user_credentials)
+    mock_get = mocker.patch(
+        'backend.apps.model_managment_app.create_provider_models_for_tenant')
+
+    request_data = {"provider": "", "model_type": "llm", "api_key": "", "base_url": "not-a-url"}
+    response = client.post(
+        "/model/provider/create", json=request_data, headers=auth_header)
+
+    assert response.status_code == HTTPStatus.UNPROCESSABLE_ENTITY
+    mock_get.assert_not_called()
+
+
 # Tests for /model/provider/batch_create endpoint
 @pytest.mark.asyncio
 async def test_provider_batch_create_success(client, auth_header, user_credentials, mocker):
