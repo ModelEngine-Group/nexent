@@ -131,6 +131,7 @@ export function AgentConfigHeader({
         <Button
           type="text"
           aria-pressed={!debugVisible}
+          disabled={false}
           onClick={onConfigure}
           className={
             !debugVisible
