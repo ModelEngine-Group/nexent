@@ -5,6 +5,8 @@ import { Input as AntInput, type InputProps } from "antd";
 import { RotateCw, X } from "lucide-react";
 import type { KeyboardEvent, MouseEvent, ReactNode } from "react";
 
+import { useTranslation } from "react-i18next";
+
 import { cn } from "@/lib/utils";
 
 /** Centered 480px parameter-config dialog (slides in the middle of the page). */
@@ -13,8 +15,8 @@ export function ParamDialog({
   title,
   onClose,
   onConfirm,
-  confirmText = "确定",
-  cancelText = "取消",
+  confirmText,
+  cancelText,
   children,
 }: {
   open: boolean;
@@ -25,6 +27,7 @@ export function ParamDialog({
   cancelText?: string;
   children: ReactNode;
 }) {
+  const { t } = useTranslation("common");
   return (
     <Modal
       open={open}
@@ -50,7 +53,7 @@ export function ParamDialog({
           </span>
           <button
             type="button"
-            aria-label="close"
+            aria-label={t("common.close")}
             onClick={onClose}
             className="flex h-5 w-5 shrink-0 cursor-pointer items-center justify-center border-0 bg-transparent p-0 text-[#666]"
           >
@@ -64,7 +67,7 @@ export function ParamDialog({
             onClick={onClose}
             className="h-8 w-[89px] rounded-[2px] border border-[#C9C9C9] bg-white text-[14px] text-[#191919]"
           >
-            {cancelText}
+            {cancelText ?? t("common.cancel")}
           </button>
           {onConfirm && (
             <button
@@ -72,7 +75,7 @@ export function ParamDialog({
               onClick={onConfirm}
               className="h-8 w-[89px] rounded-[2px] border border-[#2673E5] bg-[#2673E5] text-[14px] text-white"
             >
-              {confirmText}
+              {confirmText ?? t("common.confirm")}
             </button>
           )}
         </div>

@@ -70,7 +70,7 @@ function getToolDisabledTooltipKey(
   return null;
 }
 
-function getToolDescription(tool: any): string {
+function getToolDescription(tool: Tool): string {
   const locale = i18n.language || "en";
   if (locale === "zh" && tool.description_zh) {
     return tool.description_zh;
@@ -165,7 +165,7 @@ export function AddToolDrawer({
   // Collect all unique labels from available tools for the single tag dropdown
   const allLabels = useMemo(() => {
     const labelSet = new Set<string>();
-    selectableTools.forEach((tool: any) => {
+    selectableTools.forEach((tool: Tool) => {
       getToolLabels(tool).forEach((label: string) => labelSet.add(label));
     });
     return Array.from(labelSet).sort((a, b) => a.localeCompare(b));
@@ -181,12 +181,14 @@ export function AddToolDrawer({
     const tab = SOURCE_TABS.find((item) => item.key === activeTab);
     if (!tab) return [];
     const sourceTools = selectableTools.filter(
-      (tool: any) => tool.source === tab.sourceValue
+      (tool: Tool) => tool.source === tab.sourceValue
     );
     if (tab.key === "mcp") {
       return sourceTools.filter(
-        (tool: any) =>
-          !allMcpServerNames.has(tool.usage) || visibleMcpNames.has(tool.usage)
+        (tool: Tool) =>
+          !tool.usage ||
+          !allMcpServerNames.has(tool.usage) ||
+          visibleMcpNames.has(tool.usage)
       );
     }
     return sourceTools;
@@ -196,7 +198,7 @@ export function AddToolDrawer({
   const filteredTools = useMemo(() => {
     const kw = search.trim().toLowerCase();
     return activeTabTools
-      .filter((tool: any) => {
+      .filter((tool: Tool) => {
         if (kw) {
           const desc = getToolDescription(tool);
           const matchSearch =
@@ -210,7 +212,7 @@ export function AddToolDrawer({
         if (activeTag && !getToolLabels(tool).includes(activeTag)) return false;
         return true;
       })
-      .sort((a: any, b: any) => a.name.localeCompare(b.name));
+      .sort((a: Tool, b: Tool) => a.name.localeCompare(b.name));
   }, [activeTabTools, activeTag, search]);
 
   const selectedToolIds = useMemo(
@@ -224,7 +226,7 @@ export function AddToolDrawer({
   const hasMissingRequired = useCallback(
     (params: ToolParam[]): boolean =>
       params.some(
-        (p: any) =>
+        (p: ToolParam) =>
           p.required &&
           (p.value === undefined || p.value === "" || p.value === null)
       ),
@@ -233,7 +235,7 @@ export function AddToolDrawer({
 
   // Selectable tools in the active tab (not disabled, no duplicate name, no missing required).
   const selectableToolsInActiveTab = useMemo(() => {
-    return filteredTools.filter((tool: any) => {
+    return filteredTools.filter((tool: Tool) => {
       const toolId = parseInt(tool.id);
       const hasDuplicateName = selectedTools.some(
         (selectedTool) =>
@@ -266,7 +268,7 @@ export function AddToolDrawer({
   const allVisibleToolsSelected = useMemo(
     () =>
       selectableToolsInActiveTab.length > 0 &&
-      selectableToolsInActiveTab.every((tool: any) =>
+      selectableToolsInActiveTab.every((tool: Tool) =>
         selectedToolIds.has(parseInt(tool.id))
       ),
     [selectableToolsInActiveTab, selectedToolIds]
@@ -290,15 +292,15 @@ export function AddToolDrawer({
   // Auto-switch to first available tab when the active tab has no tools.
   const tabItems = useMemo(
     () =>
-      SOURCE_TABS.filter(
-        (tab) =>
-          selectableTools.some(
-            (tool: any) =>
-              tool.source === tab.sourceValue &&
-              (tab.key !== "mcp" ||
-                !allMcpServerNames.has(tool.usage) ||
-                visibleMcpNames.has(tool.usage))
-          )
+      SOURCE_TABS.filter((tab) =>
+        selectableTools.some(
+          (tool: Tool) =>
+            tool.source === tab.sourceValue &&
+            (tab.key !== "mcp" ||
+              !tool.usage ||
+              !allMcpServerNames.has(tool.usage) ||
+              visibleMcpNames.has(tool.usage))
+        )
       ).map((tab) => ({ key: tab.key, label: t(tab.labelKey) })),
     [allMcpServerNames, selectableTools, t, visibleMcpNames]
   );
@@ -315,7 +317,7 @@ export function AddToolDrawer({
 
   // Open ToolConfigModal (handles add/update internally on save)
   const openConfigModal = useCallback(
-    async (tool: any) => {
+    async (tool: Tool) => {
       const numericId = parseInt(tool.id);
       const kbType = getToolKbType(tool.name);
       if (kbType) prefetchKnowledgeBases(kbType);
@@ -338,7 +340,7 @@ export function AddToolDrawer({
   );
 
   const handleToolToggle = useCallback(
-    async (tool: any) => {
+    async (tool: Tool) => {
       const numericId = parseInt(tool.id);
       const kbType = getToolKbType(tool.name);
       if (kbType) prefetchKnowledgeBases(kbType);
@@ -408,14 +410,14 @@ export function AddToolDrawer({
       currentSelected.map((tool) => parseInt(tool.id))
     );
     const toolsToAdd = selectableToolsInActiveTab.filter(
-      (tool: any) => !currentSelectedIds.has(parseInt(tool.id))
+      (tool: Tool) => !currentSelectedIds.has(parseInt(tool.id))
     );
     if (toolsToAdd.length === 0) return;
 
     setIsSelectingAll(true);
     try {
       const toolsWithParams = await Promise.all(
-        toolsToAdd.map(async (tool: any) => {
+        toolsToAdd.map(async (tool: Tool) => {
           const initParams = await mergeInstanceParams(tool);
           return initParams ? { ...tool, initParams } : null;
         })
@@ -454,7 +456,7 @@ export function AddToolDrawer({
 
   const deselectAllVisibleTools = useCallback(() => {
     const visibleToolIds = new Set(
-      filteredTools.map((tool: any) => parseInt(tool.id))
+      filteredTools.map((tool: Tool) => parseInt(tool.id))
     );
     const currentSelected = useAgentStore.getState().editedAgent?.tools ?? [];
     updateTools(
@@ -530,7 +532,7 @@ export function AddToolDrawer({
       >
         {total > 0 ? (
           <div className="flex flex-col gap-2">
-            {pagedTools.map((tool: any) => {
+            {pagedTools.map((tool: Tool) => {
               const isSelected = selectedToolIds.has(parseInt(tool.id));
               const disabled = isToolDisabled(
                 tool.name,

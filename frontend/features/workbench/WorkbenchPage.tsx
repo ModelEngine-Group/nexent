@@ -715,7 +715,9 @@ const HomeContent: FC = () => {
           });
         } catch (error) {
           message.error(
-            error instanceof Error ? error.message : "资源配置保存失败"
+            error instanceof Error
+              ? error.message
+              : t("workbench.resources.saveFailed")
           );
         }
         return;
@@ -725,6 +727,7 @@ const HomeContent: FC = () => {
     [
       activeConversationId,
       saveWorkbenchConfig,
+      t,
       workbenchState.config,
       dispatchWorkbench,
     ]
@@ -741,7 +744,7 @@ const HomeContent: FC = () => {
         },
       ];
       if (mounts.length > 20) {
-        message.warning("最多选择 20 个 Skills");
+        message.warning(t("workbench.skills.limit", { count: 20 }));
         return;
       }
       const nextConfig = { ...workbenchState.config, skill_mounts: mounts };
@@ -754,7 +757,9 @@ const HomeContent: FC = () => {
           await saveWorkbenchConfig(numericConversationId, nextConfig);
         } catch (error) {
           message.error(
-            error instanceof Error ? error.message : "资源配置保存失败"
+            error instanceof Error
+              ? error.message
+              : t("workbench.resources.saveFailed")
           );
           return;
         }
@@ -769,7 +774,9 @@ const HomeContent: FC = () => {
     [
       activeConversationId,
       saveWorkbenchConfig,
+      t,
       workbenchState.config,
+      workbenchState.skillNames,
       dispatchWorkbench,
     ]
   );

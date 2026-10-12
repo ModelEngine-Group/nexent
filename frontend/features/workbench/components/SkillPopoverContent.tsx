@@ -32,7 +32,7 @@ export function SkillPopoverContent({
   onMount,
   onUnmount,
 }: SkillPopoverContentProps) {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const router = useRouter();
   const [skills, setSkills] = useState<SkillListItem[]>([]);
   const [loading, setLoading] = useState(true);
@@ -48,7 +48,9 @@ export function SkillPopoverContent({
       .catch((error) => {
         if (!cancelled)
           message.error(
-            error instanceof Error ? error.message : "Skill 加载失败"
+            error instanceof Error
+              ? error.message
+              : i18n.t("workbench.skills.loadFailed", { ns: "common" })
           );
       })
       .finally(() => {
@@ -57,7 +59,7 @@ export function SkillPopoverContent({
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [i18n]);
 
   const filtered = useMemo(() => {
     const value = search.trim().toLowerCase();

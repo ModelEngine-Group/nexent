@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Database } from "lucide-react";
 import { Empty, Spin } from "antd";
+import type { TFunction } from "i18next";
 import { useTranslation } from "react-i18next";
 import { useEmbeddingModelDialog } from "@/hooks/knowledge/useEmbeddingModelDialog";
 import { KnowledgeModelMismatchModal } from "@/components/tool-config/KnowledgeModelMismatchModal";
@@ -45,6 +46,7 @@ function iconColorFor(seed: string): string {
 
 function toKnowledgeItem(
   kb: KnowledgeBase,
+  t: TFunction,
   options?: { isAidp?: boolean; groupNames?: string[] }
 ): KnowledgeItem {
   const isAidp = options?.isAidp ?? false;
@@ -53,14 +55,18 @@ function toKnowledgeItem(
   if (isAidp) {
     const created = formatDate(kb.createdAt);
     if (created) meta.push(created);
-    meta.push(`${kb.documentCount}文档`);
-    meta.push(`${kb.chunkCount}块`);
+    meta.push(
+      t("resourcePicker.knowledge.documents", { count: kb.documentCount })
+    );
+    meta.push(t("resourcePicker.knowledge.chunks", { count: kb.chunkCount }));
     options?.groupNames?.forEach((name) => meta.push(name));
     return {
       id: kb.id,
       name: kb.display_name || kb.name,
       category:
-        kb.ingroup_permission === "PRIVATE" ? "私有" : options?.groupNames?.[0],
+        kb.ingroup_permission === "PRIVATE"
+          ? t("resourcePicker.knowledge.private")
+          : options?.groupNames?.[0],
       description: kb.description ?? "",
       iconBg: iconColorFor(kb.id),
       meta,
@@ -68,9 +74,11 @@ function toKnowledgeItem(
   }
 
   const usedAt = formatDate(kb.updatedAt);
-  if (usedAt) meta.push(`${usedAt} 使用过`);
-  meta.push(`${kb.documentCount}文档`);
-  meta.push(`${kb.chunkCount}块`);
+  if (usedAt) meta.push(t("resourcePicker.knowledge.usedAt", { date: usedAt }));
+  meta.push(
+    t("resourcePicker.knowledge.documents", { count: kb.documentCount })
+  );
+  meta.push(t("resourcePicker.knowledge.chunks", { count: kb.chunkCount }));
   return {
     id: kb.id,
     name: kb.display_name || kb.name,
@@ -208,13 +216,13 @@ export function AddKnowledgeDrawer({
   const allItems: KnowledgeItem[] = useMemo(
     () =>
       knowledgeBases.map((kb) =>
-        toKnowledgeItem(kb, {
+        toKnowledgeItem(kb, t, {
           isAidp: isAidpSearch,
           groupNames: groupNamesFor(kb),
         })
       ),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [knowledgeBases, isAidpSearch, groupNameById]
+    [knowledgeBases, isAidpSearch, groupNameById, t]
   );
 
   // ---- Selection state (seeded from props on open) ----
@@ -492,13 +500,13 @@ export function AddKnowledgeDrawer({
   const pagedItems = useMemo(
     () =>
       filteredKbs.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE).map((kb) =>
-        toKnowledgeItem(kb, {
+        toKnowledgeItem(kb, t, {
           isAidp: isAidpSearch,
           groupNames: groupNamesFor(kb),
         })
       ),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [filteredKbs, page, isAidpSearch, groupNameById]
+    [filteredKbs, page, isAidpSearch, groupNameById, t]
   );
 
   const selected: SelectedItem[] = useMemo(

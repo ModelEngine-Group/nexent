@@ -19,10 +19,6 @@ export {
   TestResultArea,
 } from "./ParamDialog";
 export {
-  ModelConfigModal,
-  type ModelConfigModalProps,
-} from "./ModelConfigModal";
-export {
   SkillConfigModal,
   type SkillConfigModalProps,
 } from "./SkillConfigModal";

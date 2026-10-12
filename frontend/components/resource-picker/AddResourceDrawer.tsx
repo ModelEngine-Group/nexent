@@ -54,6 +54,7 @@ export function SearchRow({
   onSearch?: (keyword: string) => void;
   onTagChange?: (value?: string) => void;
 }) {
+  const { t } = useTranslation("common");
   return (
     <div className="flex shrink-0 items-center gap-2">
       <Input
@@ -75,7 +76,7 @@ export function SearchRow({
       {tagOptions && (
         <Select
           allowClear
-          placeholder="标签"
+          placeholder={t("resourcePicker.tags")}
           options={tagOptions}
           onChange={onTagChange}
           suffixIcon={<ChevronDown size={12} className="text-[#666]" />}
@@ -100,6 +101,7 @@ export function SelectedChips({
   onRemove?: (id: string) => void;
   trailing?: ReactNode;
 }) {
+  const { t } = useTranslation("common");
   if (items.length === 0 && !trailing) return null;
   return (
     <div className="flex shrink-0 flex-wrap items-center gap-2">
@@ -111,7 +113,7 @@ export function SelectedChips({
           {item.label}
           <button
             type="button"
-            aria-label="remove"
+            aria-label={t("resourcePicker.remove")}
             onClick={() => onRemove?.(item.id)}
             className="ml-0.5 cursor-pointer border-0 bg-transparent p-0 text-[#666]"
           >
@@ -303,7 +305,7 @@ export function ResourcePagination({
       <div className="flex items-center gap-1">
         <button
           type="button"
-          aria-label="prev"
+          aria-label={t("resourcePicker.previousPage")}
           onClick={() => goTo(safeCurrent - 1)}
           className="flex h-8 w-8 cursor-pointer items-center justify-center rounded-[4px] border-0 bg-transparent text-[#666]"
         >
@@ -335,7 +337,7 @@ export function ResourcePagination({
         )}
         <button
           type="button"
-          aria-label="next"
+          aria-label={t("resourcePicker.nextPage")}
           onClick={() => goTo(safeCurrent + 1)}
           className="flex h-8 w-8 cursor-pointer items-center justify-center rounded-[4px] border-0 bg-transparent text-[#666]"
         >
