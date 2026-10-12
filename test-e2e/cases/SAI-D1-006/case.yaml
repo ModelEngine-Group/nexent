@@ -1,0 +1,51 @@
+schema_version: '1.0'
+stage: D1
+module: RUNTIME-SANDBOX
+case:
+  case_id: SAI-D1-006
+  feature_id: SAI-001
+  business_rule_ids:
+  - SAI-001-R2
+  title: Event-only parent stop propagates to active invocations
+  type: SDK-UT
+  priority: P2
+  status: active
+  automation: automated
+  objective: Parent stop wakes the child; child-only cancellation leaves parent and
+    sibling active.
+  preconditions:
+  - Parent has a stop_event and no cancellation_scope
+  test_data:
+    calls: 2
+  steps:
+  - order: 1
+    action: Stop an active child by setting only the parent event; cancel a child
+      separately.
+    expected: Parent stop wakes the child; child-only cancellation leaves parent and
+      sibling active.
+  expected_results:
+  - Parent stop wakes the child; child-only cancellation leaves parent and sibling
+    active.
+  forbidden_side_effects:
+  - No sibling or parent cancellation from a child scope
+  unit_boundary: Invocation configuration, workspace ownership and cancellation propagation
+  inputs:
+  - Parent has a stop_event and no cancellation_scope
+  assertions:
+  - Parent stop wakes the child; child-only cancellation leaves parent and sibling
+    active.
+  - No sibling or parent cancellation from a child scope
+  execution:
+    profiles:
+    - name: mock
+      required_services: []
+  acceptance:
+  - id: AC-01
+    description: Parent stop wakes the child; child-only cancellation leaves parent
+      and sibling active.
+    steps:
+    - 1
+    expected_results:
+    - 1
+    forbidden_side_effects:
+    - 1

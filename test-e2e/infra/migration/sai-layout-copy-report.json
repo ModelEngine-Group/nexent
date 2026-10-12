@@ -1,0 +1,70 @@
+[
+  {
+    "case_id": "SAI-D1-001",
+    "source": "test/automation/d1/test_subagent_invocation_isolation.py",
+    "source_sha256": "00aff8f09de57b4fca81d5f34fbaaea3f5df333ee8b21c531787e4db0707d966",
+    "target": "test-e2e/cases/SAI-D1-001/test.py",
+    "note": "Case-local extraction, case_id/stage markers and import cleanup. D1-003 adds nested metadata and real owned-workspace bootstrap; D1-005 checks the next sibling call; D1-007 checks thread baseline.",
+    "target_sha256": "ad675cb48b3aca6675773b6b388821453ed3d800e3610b2541c1b9ab12069cb7"
+  },
+  {
+    "case_id": "SAI-D1-002",
+    "source": "test/automation/d1/test_subagent_invocation_isolation.py",
+    "source_sha256": "00aff8f09de57b4fca81d5f34fbaaea3f5df333ee8b21c531787e4db0707d966",
+    "target": "test-e2e/cases/SAI-D1-002/test.py",
+    "note": "Case-local extraction, case_id/stage markers and import cleanup. D1-003 adds nested metadata and real owned-workspace bootstrap; D1-005 checks the next sibling call; D1-007 checks thread baseline.",
+    "target_sha256": "d7afd19228118527d2a38a79515e9602dfd15a8dcc7eeef29451c90e49e77ec9"
+  },
+  {
+    "case_id": "SAI-D1-003",
+    "source": "test/automation/d1/test_subagent_invocation_isolation.py",
+    "source_sha256": "00aff8f09de57b4fca81d5f34fbaaea3f5df333ee8b21c531787e4db0707d966",
+    "target": "test-e2e/cases/SAI-D1-003/test.py",
+    "note": "Case-local extraction, case_id/stage markers and import cleanup. D1-003 adds nested metadata and real owned-workspace bootstrap; D1-005 checks the next sibling call; D1-007 checks thread baseline.",
+    "target_sha256": "5069da067e0070b14343575fa177c17f461da97662d2684df000c48fc1b1fcb3"
+  },
+  {
+    "case_id": "SAI-D1-004",
+    "source": "test/automation/d1/test_subagent_invocation_isolation.py",
+    "source_sha256": "00aff8f09de57b4fca81d5f34fbaaea3f5df333ee8b21c531787e4db0707d966",
+    "target": "test-e2e/cases/SAI-D1-004/test.py",
+    "note": "Case-local extraction, case_id/stage markers and import cleanup. D1-003 adds nested metadata and real owned-workspace bootstrap; D1-005 checks the next sibling call; D1-007 checks thread baseline.",
+    "target_sha256": "fc0bed1bf4b5acac56e4287eff4d571b6e05ad4429156a0ec9879252b78d2ab5"
+  },
+  {
+    "case_id": "SAI-D1-005",
+    "source": "test/automation/d1/test_subagent_invocation_isolation.py",
+    "source_sha256": "00aff8f09de57b4fca81d5f34fbaaea3f5df333ee8b21c531787e4db0707d966",
+    "target": "test-e2e/cases/SAI-D1-005/test.py",
+    "note": "Case-local extraction, case_id/stage markers and import cleanup. D1-003 adds nested metadata and real owned-workspace bootstrap; D1-005 checks the next sibling call; D1-007 checks thread baseline.",
+    "target_sha256": "d3d1447b39eb123c9e1502aee80b6c581a4e50a437fa41c88bcefb91f26deab1"
+  },
+  {
+    "case_id": "SAI-D1-006",
+    "source": "test/automation/d1/test_subagent_invocation_isolation.py",
+    "source_sha256": "00aff8f09de57b4fca81d5f34fbaaea3f5df333ee8b21c531787e4db0707d966",
+    "target": "test-e2e/cases/SAI-D1-006/test.py",
+    "note": "Case-local extraction, case_id/stage markers and import cleanup. D1-003 adds nested metadata and real owned-workspace bootstrap; D1-005 checks the next sibling call; D1-007 checks thread baseline.",
+    "target_sha256": "a7912b2794832506a9b632ae6c0c2dd177ec80145b68c3bc5e324e007a24660d"
+  },
+  {
+    "case_id": "SAI-D1-007",
+    "source": "test/automation/d1/test_cancellation_constructor_compatibility.py",
+    "source_sha256": "57485ae78c8103c4a166cb6d1752328895002cbf75ebde9c1d4ce782aabfce80",
+    "target": "test-e2e/cases/SAI-D1-007/test.py",
+    "target_sha256": "18d4615a0e3982ba83d438342d580fa5fe6291dcb5f42247224ee72623c755a1",
+    "note": "Case-local extraction, case_id/stage markers and import cleanup. D1-003 adds nested metadata and real owned-workspace bootstrap; D1-005 checks the next sibling call; D1-007 checks thread baseline."
+  },
+  {
+    "case_id": "SAI-D3-001",
+    "target": "test-e2e/cases/SAI-D3-001/test.py",
+    "target_sha256": "d7aa0e7f927f09695a2660a76eacf6b43fb955ebe70524772087a54eb044d95d",
+    "note": "Preserved real-kernel probe moved to shared/sai_kernel_probe.py; primary pytest adapter adds formal runner integration and failure/recovery assertions."
+  },
+  {
+    "case_id": "SAI-D5-001",
+    "target": "test-e2e/cases/SAI-D5-001/test.py",
+    "target_sha256": "4a55a8211d2ddd7f01f9d53d1e133d7739d9f9b4ce7f4b97a699c2bd213ffc25",
+    "note": "Preserved real-kernel probe moved to shared/sai_kernel_probe.py; primary pytest adapter adds formal runner integration and failure/recovery assertions."
+  }
+]

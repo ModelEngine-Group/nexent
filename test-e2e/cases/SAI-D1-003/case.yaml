@@ -1,0 +1,62 @@
+schema_version: '1.0'
+stage: D1
+module: RUNTIME-SANDBOX
+case:
+  case_id: SAI-D1-003
+  feature_id: SAI-001
+  business_rule_ids:
+  - SAI-001-R2
+  title: Invocation metadata and workspace initialization remain compatible
+  type: SDK-UT
+  priority: P1
+  status: active
+  automation: automated
+  objective: Preserve nested metadata and workspace rules without sharing mutable
+    context.
+  preconditions:
+  - A parent supplies metadata and a run workspace to its definition.
+  test_data:
+    metadata:
+      region: east
+    output_filename: result.txt
+  steps:
+  - order: 1
+    action: Build two invocation agents and mutate metadata in one.
+    expected: The other call and parent retain original metadata.
+  - order: 2
+    action: Initialize the new child's workspace.
+    expected: Only its owned executors receive workspace initialization.
+  - order: 3
+    action: Invoke an external wrapper without a factory.
+    expected: Its existing dispatch contract is retained.
+  expected_results:
+  - Nested lazy definitions inherit independent metadata snapshots.
+  forbidden_side_effects:
+  - No deletion of the root workspace on child exit
+  - No mutable metadata sharing
+  unit_boundary: Runtime context propagation and wrapper compatibility
+  inputs:
+  - Metadata snapshot
+  - Workspace path
+  - External callable
+  assertions:
+  - Metadata copies differ by identity
+  - Workspace initialization uses owned executor list
+  - Legacy external dispatch remains callable
+  execution:
+    profiles:
+    - name: mock
+      required_services: []
+  acceptance:
+  - id: AC-01
+    description: Preserve nested metadata and workspace rules without sharing mutable
+      context.
+    steps:
+    - 1
+    - 2
+    - 3
+    expected_results:
+    - 1
+    forbidden_side_effects:
+    - 1
+    - 2

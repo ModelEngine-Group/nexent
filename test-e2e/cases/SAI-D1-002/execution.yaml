@@ -1,0 +1,11 @@
+schema_version: '1.0'
+case_id: SAI-D1-002
+implementations:
+- framework: pytest
+  file: test.py
+  selector: test_SAI_D1_002_lifecycle
+  profiles:
+  - mock
+acceptance_bindings:
+  AC-01:
+  - test_SAI_D1_002_lifecycle
