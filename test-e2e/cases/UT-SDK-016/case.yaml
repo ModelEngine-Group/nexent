@@ -1,0 +1,113 @@
+schema_version: '1.0'
+stage: D1
+module: V5-BASELINE
+case:
+  case_id: UT-SDK-016
+  feature_id: F-171
+  business_rule_ids:
+  - F-171-RULE-01
+  title: agent/tool/context gateway 的输入输出 contract｜核心流程
+  type: SDK-UT
+  priority: P0
+  status: active
+  automation: automated
+  objective: agent/tool/context gateway 的输入输出 contract｜核心流程
+  preconditions:
+  - 本地依赖/组件测试环境可运行；不要求外部模型服务在线。
+  - 设置 NEXENT_TEST_HOME，目录不位于 Nexent Git 仓库内。
+  - 当次 run_id 已生成，所有新建资源名称带 run_id；测试基线固定为 develop 473b65268ba8cda3db53be735f97678e214c583b；执行时另记录实际被测commit。
+  - 所需本地资产存在且校验通过：${NEXENT_TEST_HOME}/config/models.yaml；${NEXENT_TEST_HOME}/config/secrets.env
+  test_data:
+    legacy_asset_declaration: '- ${NEXENT_TEST_HOME}/config/models.yaml
+
+      - ${NEXENT_TEST_HOME}/config/secrets.env'
+  steps:
+  - order: 1
+    action: 在本地工作区读取 fixture/配置（${NEXENT_TEST_HOME}/config/models.yaml、secrets.env），测试代码不读取生产凭据，NEXENT_TEST_HOME 目录不位于 Nexent
+      Git 仓库内。
+    expected: context_budget_snapshot/effective_input_limit_tokens/exceeds_effective_input_limit 契约与派发边界同代码一致，测试过程无未处理异常。
+  - order: 2
+    action: 导入 sdk/nexent/core 相关符号：ContextEvidence、AgentConfig、AgentRunInfo、ManagedMCPToolCollection、ModelConcurrencyLimiter、OpenAIModel、run_skill_script、KnowledgeBaseSearchTool、MessageObserver/ProcessType、SandboxConfig、MultimodalGateway。
+    expected: agent_run 经 ThreadManager 提交并返回流，consumer 关闭无死锁且正确取消。
+  - order: 3
+    action: 构造 AgentConfig/AgentRunInfo 最小有效输入，断言存在 context_budget_snapshot（原 safe_input_budget_snapshot 字段已移除）、ContextEvidence
+      含 effective_input_limit_tokens 与 exceeds_effective_input_limit，且 AgentRunInfo 具备 cancellation_scope、mcp_tool_timeout_seconds（默认
+      60.0，gt>0）、mcp_close_timeout_seconds（默认 5.0，gt>0）。
+    expected: OpenAIModel.__call__ 的 context_rebuild 与 CoreAgent._provider_overflow_recovery_safe 恢复闸符合契约。
+  - order: 4
+    action: 使用本地注入 ThreadManager 调用 agent_run（async generator），断言其经 manager.submit 提交 task_name="agent-run" 的 ManagedExecution
+      并 yield observer 消息；提前关闭流消费时触发 stop_event 与 manager.cancel 且不死锁。
+    expected: ManagedMCPToolCollection 超时参数非法抛 ValueError，正常会话默认超时 60.0/5.0 生效。
+  - order: 5
+    action: 验证 OpenAIModel.__call__ 接受 context_rebuild 回调，CoreAgent._provider_overflow_recovery_safe 在当前 agent run 无工具副作用时返回
+      True 并可调用 context_runtime.recover_step/recover_final_answer。
+    expected: ModelConcurrencyLimiter 边界：非法 limit/超时抛 ValueError、取消抛 RuntimeError、等待超时抛 ModelConcurrencyExceeded。
+  - order: 6
+    action: 构造 ManagedMCPToolCollection（注入 session/adapter 工厂与线程管理器），断言 tool_timeout_seconds<=0 或 close_timeout_seconds<=0
+      抛 ValueError；正常会话经 manager.submit 提交 task_name="mcp-session" 并暴露受管工具。
+    expected: knowledge 检索返回结构化 notice+results，权限拒绝/unavailable/fallback_to_all 语义正确。
+  - order: 7
+    action: 用 ModelConcurrencyLimiter.acquire 覆盖边界：limit<=0 或 timeout_seconds<=0 抛 ValueError；同一 key 以不同 limit 再次 acquire
+      抛 ValueError；stop_event 已设置抛 RuntimeError；等待超时抛 ModelConcurrencyExceeded（TimeoutError 子类）。
+    expected: run_skill_script source 默认 "skill"、非法值抛 ValueError、未授权 skill 抛 PermissionError。
+  - order: 8
+    action: 调用 knowledge_base_search 并断言返回结构化 JSON 含 "notice" 与 "results" 两键；对含无权限/未配置 scope 的请求，notice 正确描述 permission_denied/unavailable/fallback_to_all
+      语义。
+    expected: 'observer 消息含 WARNING 与 ERROR 语义区分且 ANSI 已剥离，日志不输出明文 API Key/Token/Password/模型密钥。
+
+      协议字段优先；嵌套自定义字段保留；Qwen thinking 标志仅进入 chat_template_kwargs 且不修改输入。'
+  - order: 9
+    action: 调用 run_skill_script 断言 source 缺省为 "skill"，source 为非法值时抛 ValueError，skill_name 不在 authorized_skill_names 时抛 PermissionError。
+    expected: 'observer 消息含 WARNING 与 ERROR 语义区分且 ANSI 已剥离，日志不输出明文 API Key/Token/Password/模型密钥。
+
+      协议字段优先；嵌套自定义字段保留；Qwen thinking 标志仅进入 chat_template_kwargs 且不修改输入。'
+  - order: 10
+    action: 断言 ProcessType 含 WARNING 成员；向 MessageObserver.add_message 注入含 ANSI 转义序列的文本，断言输出中 ANSI 被剥离且可区分 ERROR/WARNING 语义。
+    expected: 'observer 消息含 WARNING 与 ERROR 语义区分且 ANSI 已剥离，日志不输出明文 API Key/Token/Password/模型密钥。
+
+      协议字段优先；嵌套自定义字段保留；Qwen thinking 标志仅进入 chat_template_kwargs 且不修改输入。'
+  - order: 11
+    action: 断言 SandboxConfig 默认 memory_limit_mb=2048、timeout_seconds=120；MultimodalGateway.get_adapter 每次经 registry.resolve
+      新建实例（无 adapter 缓存）。
+    expected: 'observer 消息含 WARNING 与 ERROR 语义区分且 ANSI 已剥离，日志不输出明文 API Key/Token/Password/模型密钥。
+
+      协议字段优先；嵌套自定义字段保留；Qwen thinking 标志仅进入 chat_template_kwargs 且不修改输入。'
+  - order: 12
+    action: '测试结束释放临时文件/临时对象，断言可重复执行。
+
+      473b6526：验证 ModelContext.extra_body、Embedding/Rerank 自定义字段合并及 Qwen enable_thinking wire translation。'
+    expected: 'observer 消息含 WARNING 与 ERROR 语义区分且 ANSI 已剥离，日志不输出明文 API Key/Token/Password/模型密钥。
+
+      协议字段优先；嵌套自定义字段保留；Qwen thinking 标志仅进入 chat_template_kwargs 且不修改输入。'
+  expected_results:
+  - context_budget_snapshot/effective_input_limit_tokens/exceeds_effective_input_limit 契约与派发边界同代码一致，测试过程无未处理异常。
+  - agent_run 经 ThreadManager 提交并返回流，consumer 关闭无死锁且正确取消。
+  - OpenAIModel.__call__ 的 context_rebuild 与 CoreAgent._provider_overflow_recovery_safe 恢复闸符合契约。
+  - ManagedMCPToolCollection 超时参数非法抛 ValueError，正常会话默认超时 60.0/5.0 生效。
+  - ModelConcurrencyLimiter 边界：非法 limit/超时抛 ValueError、取消抛 RuntimeError、等待超时抛 ModelConcurrencyExceeded。
+  - knowledge 检索返回结构化 notice+results，权限拒绝/unavailable/fallback_to_all 语义正确。
+  - run_skill_script source 默认 "skill"、非法值抛 ValueError、未授权 skill 抛 PermissionError。
+  - 'observer 消息含 WARNING 与 ERROR 语义区分且 ANSI 已剥离，日志不输出明文 API Key/Token/Password/模型密钥。
+
+    协议字段优先；嵌套自定义字段保留；Qwen thinking 标志仅进入 chat_template_kwargs 且不修改输入。'
+  forbidden_side_effects: []
+  source:
+    legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
+    legacy_sheet: 02_测试用例基线
+    legacy_row: 313
+  unit_boundary: Core Agent
+  inputs:
+  - '- ${NEXENT_TEST_HOME}/config/models.yaml
+
+    - ${NEXENT_TEST_HOME}/config/secrets.env'
+  assertions:
+  - context_budget_snapshot/effective_input_limit_tokens/exceeds_effective_input_limit 契约与派发边界同代码一致，测试过程无未处理异常。
+  - agent_run 经 ThreadManager 提交并返回流，consumer 关闭无死锁且正确取消。
+  - OpenAIModel.__call__ 的 context_rebuild 与 CoreAgent._provider_overflow_recovery_safe 恢复闸符合契约。
+  - ManagedMCPToolCollection 超时参数非法抛 ValueError，正常会话默认超时 60.0/5.0 生效。
+  - ModelConcurrencyLimiter 边界：非法 limit/超时抛 ValueError、取消抛 RuntimeError、等待超时抛 ModelConcurrencyExceeded。
+  - knowledge 检索返回结构化 notice+results，权限拒绝/unavailable/fallback_to_all 语义正确。
+  - run_skill_script source 默认 "skill"、非法值抛 ValueError、未授权 skill 抛 PermissionError。
+  - 'observer 消息含 WARNING 与 ERROR 语义区分且 ANSI 已剥离，日志不输出明文 API Key/Token/Password/模型密钥。
+
+    协议字段优先；嵌套自定义字段保留；Qwen thinking 标志仅进入 chat_template_kwargs 且不修改输入。'

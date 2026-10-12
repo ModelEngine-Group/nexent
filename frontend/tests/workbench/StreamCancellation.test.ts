@@ -1,18 +1,102 @@
 import { beforeEach, expect, it, vi } from "vitest";
 import type { ChatModelRunOptions } from "@assistant-ui/react";
-import { remoteChatModelAdapter } from "@/app/newchat/adapter/remote-chat-model-adapter";
+import {
+  planRegistry,
+  remoteChatModelAdapter,
+} from "@/app/newchat/adapter/remote-chat-model-adapter";
 import { ReadableStream } from "node:stream/web";
+import { restoreHistoricalPlan } from "@/app/newchat/adapter/conversation-thread-list-adapter";
 
 const service = vi.hoisted(() => ({ runAgent: vi.fn(), stop: vi.fn() }));
 vi.mock("@/services/conversationService", () => ({
+  CONVERSATION_PAGE_SIZE: 20,
   conversationService: service,
 }));
 vi.mock("@/lib/logger", () => ({
   default: { log: vi.fn(), warn: vi.fn(), error: vi.fn() },
 }));
 beforeEach(() => {
+  planRegistry.set(null);
   service.runAgent.mockReset();
   service.stop.mockReset().mockResolvedValue(undefined);
+});
+
+it("preserves a restored stopped plan through an Execution follow-up", async () => {
+  const plan = {
+    title: "Release checks",
+    steps: [
+      { id: "check", title: "Verify deployment", status: "completed" as const },
+    ],
+  };
+  planRegistry.set(plan);
+  service.runAgent.mockImplementationOnce(async () =>
+    new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(
+          new TextEncoder().encode(
+            'data: {"type":"final_answer","content":"EXEC-follow-up"}\n\n'
+          )
+        );
+        controller.close();
+      },
+    }).getReader()
+  );
+  const result = await consume(
+    options(new AbortController(), {
+      threadId: "12",
+      agentId: 7,
+      enablePlan: false,
+    })
+  );
+  expect(JSON.stringify(result)).toContain("EXEC-follow-up");
+  expect(planRegistry.data).toEqual(plan);
+});
+
+it("clears the prior plan when navigating to a new or unrelated conversation", () => {
+  const plan = {
+    title: "Old plan",
+    steps: [{ id: "old", title: "Old step", status: "completed" }],
+  };
+  planRegistry.set(plan);
+  restoreHistoricalPlan();
+  expect(planRegistry.data).toBeNull();
+  planRegistry.set(plan);
+  restoreHistoricalPlan("unrelated-thread");
+  expect(planRegistry.data).toBeNull();
+});
+
+it("replaces a stopped plan when the next planning turn emits a new plan", async () => {
+  planRegistry.set({
+    title: "Old plan",
+    steps: [{ id: "old", title: "Old step", status: "completed" }],
+  });
+  service.runAgent.mockImplementationOnce(async () =>
+    new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(
+          new TextEncoder().encode(
+            `data: ${JSON.stringify({
+              type: "plan",
+              content: JSON.stringify({
+                title: "New plan",
+                steps: [{ id: "new", title: "New step", status: "pending" }],
+              }),
+            })}\n\n`
+          )
+        );
+        controller.close();
+      },
+    }).getReader()
+  );
+  await consume(
+    options(new AbortController(), {
+      threadId: "12",
+      agentId: 7,
+      enablePlan: true,
+    })
+  );
+  expect(planRegistry.data?.title).toBe("New plan");
+  expect(planRegistry.data?.steps.map((step) => step.id)).toEqual(["new"]);
 });
 
 function options(
@@ -140,7 +224,11 @@ it("passes Start Chat thinking settings to the normal agent run", async () => {
   const runOptions = {
     ...options(new AbortController(), { agentId: 7 }),
     context: {
-      config: { modelName: "12", deepThinking: true, reasoningEffort: "medium" },
+      config: {
+        modelName: "12",
+        deepThinking: true,
+        reasoningEffort: "medium",
+      },
     },
   } as unknown as ChatModelRunOptions;
 

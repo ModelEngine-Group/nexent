@@ -1131,8 +1131,10 @@ def test_get_agent_by_name_api_with_explicit_tenant_id(mocker, mock_auth_header)
 def test_get_agent_by_name_api_exception(mocker, mock_auth_header):
     """Test get_agent_by_name_api exception handling."""
     mock_get_user_id = mocker.patch("apps.agent_app.get_current_user_id")
-    mock_get_agent_info = mocker.patch(
-        "apps.agent_app.get_agent_info_impl", new_callable=AsyncMock)
+    mocker.patch(
+        "apps.agent_app.get_agent_by_name_impl",
+        side_effect=RuntimeError("database unavailable"),
+    )
     mock_get_user_id.return_value = ("user_id", "auth_tenant_id")
 
     response = config_client.get(
@@ -1141,7 +1143,7 @@ def test_get_agent_by_name_api_exception(mocker, mock_auth_header):
     )
 
     assert response.status_code == 500
-    assert "Agent not found" in response.json()["detail"]
+    assert response.json() == {"detail": "Agent by name lookup error."}
 
 
 # Legacy creating-sub-agent endpoint removal

@@ -31,6 +31,8 @@ from consts.model import (
     WorkbenchCapabilityPreviewRequest,
 )
 from consts.exceptions import (
+    AgentNotFoundError,
+    AgentRelationValidationError,
     ForbiddenError,
     SkillDuplicateError,
     AppException,
@@ -462,6 +464,10 @@ async def search_agent_info_api(
         effective_tenant_id = tenant_id or auth_tenant_id
         agent_info = await get_agent_info_impl(agent_id, effective_tenant_id, version_no, user_id)
         return apply_agent_detail_prompt_visibility(auth_tenant_id, agent_info)
+    except AgentNotFoundError as e:
+        raise HTTPException(
+            status_code=HTTPStatus.NOT_FOUND, detail="Agent not found."
+        ) from e
     except ForbiddenError as e:
         raise HTTPException(
             status_code=HTTPStatus.FORBIDDEN,
@@ -488,10 +494,14 @@ async def get_agent_by_name_api(
         effective_tenant_id = tenant_id or auth_tenant_id
         result = get_agent_by_name_impl(agent_name, effective_tenant_id)
         return JSONResponse(status_code=HTTPStatus.OK, content=result)
+    except AgentNotFoundError as e:
+        raise HTTPException(
+            status_code=HTTPStatus.NOT_FOUND, detail="Agent not found."
+        ) from e
     except Exception as e:
         logger.error(f"Agent by name lookup error: {str(e)}")
         raise HTTPException(
-            status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail="Agent not found.")
+            status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail="Agent by name lookup error.")
 
 
 @agent_config_router.post("/update")
@@ -522,6 +532,14 @@ async def update_agent_info_api(
                               user_id=user_id, tenant_id=tenant_id,
                               details=audit_details)
         return result or {}
+    except AgentRelationValidationError as exc:
+        raise HTTPException(
+            status_code=HTTPStatus.BAD_REQUEST, detail=str(exc)
+        ) from exc
+    except AgentNotFoundError as exc:
+        raise HTTPException(
+            status_code=HTTPStatus.NOT_FOUND, detail="Agent not found."
+        ) from exc
     except ForbiddenError as exc:
         raise HTTPException(
             status_code=HTTPStatus.FORBIDDEN,
@@ -533,6 +551,8 @@ async def update_agent_info_api(
             status_code=HTTPStatus.TOO_MANY_REQUESTS,
             content=tenant_resource_limit_error_payload(exc),
         )
+    except AppException:
+        raise
     except Exception as e:
         logger.error(f"Agent update error: {str(e)}")
         raise HTTPException(

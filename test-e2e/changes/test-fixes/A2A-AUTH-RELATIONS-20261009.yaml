@@ -1,0 +1,23 @@
+schema_version: '1.0'
+change:
+  change_id: A2A-AUTH-RELATIONS-20261009
+  change_type: test-fix
+  title: Implement scoped discovery failures, credentials and Agent relationships
+  description: >-
+    Add case-local selectors, matching step contracts and bindings for seven
+    existing Cases. The Mock exposes current test credentials only through a
+    control-token protected no-store endpoint. Scripts do not embed credentials
+    or database IDs; wire evidence contains fingerprints. Faults are restored
+    and owned resources are deleted even when a product assertion fails.
+    Preserve rejection of foreign-owned Agent relation IDs as acceptance;
+    never weaken it to match an incorrect successful product response.
+  affected_features:
+    existing: [F-089, F-092, F-094, F-096]
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing: []
+    added: []
+    modified: [CTR-032, CTR-036, CTR-037, CTR-041, CTR-042, API-094, API-095]
+    retired: []

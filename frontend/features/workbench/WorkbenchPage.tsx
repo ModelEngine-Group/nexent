@@ -33,6 +33,7 @@ import type { Agent } from "@/types/agentConfig";
 import { useModelList } from "@/hooks/model/useModelList";
 import { withDefaultWorkbenchModel } from "./modelOptions";
 import log from "@/lib/logger";
+import { ConversationTitleGuard } from "@/lib/conversationTitle";
 import { conversationService } from "@/services/conversationService";
 import { ApiError } from "@/services/api";
 import {
@@ -194,6 +195,7 @@ const HomeContent: FC = () => {
   //   2. Switching back and forth between threads keeps each thread bound to
   //      its own server-side conversation.
   const serverConversationIdsRef = useRef<Map<string, string>>(new Map());
+  const titleGuard = useRef(new ConversationTitleGuard());
   const [generatedTitles, setGeneratedTitles] = useState<Map<string, string>>(
     new Map()
   );
@@ -217,15 +219,19 @@ const HomeContent: FC = () => {
       }
 
       if (initialQuestion && previous !== numericId) {
+        const revision = titleGuard.current.capture(threadId);
         void generateConversationTitle(numericId, initialQuestion)
           .then((title) => {
             setGeneratedTitles((titles) => {
+              if (!titleGuard.current.isCurrent(threadId, revision))
+                return titles;
               const next = new Map(titles);
               next.set(threadId, title);
               return next;
             });
           })
           .catch((error) => {
+            if (!titleGuard.current.isCurrent(threadId, revision)) return;
             log.error(
               `[HomeContent] Failed to generate title for ${numericId}:`,
               error
@@ -235,9 +241,12 @@ const HomeContent: FC = () => {
             const fallbackTitle = initialQuestion.trim().slice(0, 40);
             if (!fallbackTitle) return;
             void conversationService
-              .rename(Number(numericId), fallbackTitle)
-              .then(() => {
+              .rename(Number(numericId), fallbackTitle, true)
+              .then((renamed) => {
+                if (!renamed) return;
                 setGeneratedTitles((titles) => {
+                  if (!titleGuard.current.isCurrent(threadId, revision))
+                    return titles;
                   const next = new Map(titles);
                   next.set(threadId, fallbackTitle);
                   return next;
@@ -257,6 +266,7 @@ const HomeContent: FC = () => {
 
   const handleConversationRenamed = useCallback(
     (threadId: string, remoteId: string | undefined, title: string) => {
+      titleGuard.current.renamed(threadId);
       setGeneratedTitles((titles) => {
         const next = new Map(titles);
         next.set(threadId, title);

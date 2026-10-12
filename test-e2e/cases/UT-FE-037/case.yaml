@@ -1,0 +1,57 @@
+schema_version: '1.0'
+stage: D1
+module: V5-BASELINE
+case:
+  case_id: UT-FE-037
+  feature_id: V5-UT-FE-037
+  business_rule_ids:
+  - V5-UT-FE-037-RULE-01
+  title: HttpOnly Cookie 认证、会话过期和 request cancellation
+  type: FE-COMP
+  priority: P0
+  status: active
+  automation: automated
+  objective: HttpOnly Cookie 认证、会话过期和 request cancellation
+  preconditions:
+  - 仓库 D1 前端组件运行器及隔离依赖可用。
+  - TEST_HOME 位于仓库外；测试不访问生产资源。
+  test_data:
+    fixtures: &id001
+    - 内存 fixture 和受控服务响应；不依赖真实数据库 ID、模型或凭据。
+  steps:
+  - order: 1
+    action: 有效 Cookie 会话发起请求，传入 header/signal
+    expected: 不读取存储 JWT、不自动注入 Authorization，保留调用方 header/signal。
+  - order: 2
+    action: 模拟本地会话失效
+    expected: 网络请求前失败并标记会话过期。
+  - order: 3
+    action: 模拟 401、499 和 TOKEN_EXPIRED
+    expected: 保留错误并标记过期，不隐式重试或使用已移除的客户端 refresh。
+  - order: 4
+    action: 取消请求触发 AbortError
+    expected: 传递取消异常，不误标记会话过期。
+  - order: 5
+    action: 提交 FormData
+    expected: 不强制 Content-Type，保留浏览器 multipart boundary。
+  expected_results:
+  - 不读取存储 JWT、不自动注入 Authorization，保留调用方 header/signal。
+  - 网络请求前失败并标记会话过期。
+  - 保留错误并标记过期，不隐式重试或使用已移除的客户端 refresh。
+  - 传递取消异常，不误标记会话过期。
+  - 不强制 Content-Type，保留浏览器 multipart boundary。
+  forbidden_side_effects:
+  - 不得访问真实用户、模型 Provider 或数据库，不得输出真实凭据。
+  source:
+    legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
+    legacy_sheet: 02_测试用例基线
+    legacy_row: 350
+    notes: 'Contract updated against e98b84b2b: HttpOnly Cookie/XSS migration removed client-side refresh.'
+  unit_boundary: 真实 fetchWithAuth / fetchWithErrorHandling / ApiError
+  inputs: *id001
+  assertions:
+  - 不读取存储 JWT、不自动注入 Authorization，保留调用方 header/signal。
+  - 网络请求前失败并标记会话过期。
+  - 保留错误并标记过期，不隐式重试或使用已移除的客户端 refresh。
+  - 传递取消异常，不误标记会话过期。
+  - 不强制 Content-Type，保留浏览器 multipart boundary。

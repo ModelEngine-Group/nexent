@@ -1,0 +1,16 @@
+schema_version: '1.0'
+module:
+  id: V5-BASELINE
+  name: Migrated V5 baseline
+feature:
+  feature_id: V5-PW-MODEL-01
+  name: 模型 V2 从 Provider 导入/自定义接入→真实连通性→保存→Agent 使用
+  status: active
+  description: 验证模型管理 V2 使用本地配置的真实 Provider/模型完成导入或自定义接入、推理参数配置、连通性检查、保存和 Agent 选择。
+  business_rules:
+  - rule_id: V5-PW-MODEL-01-RULE-01
+    description: 模型 V2 从 Provider 导入/自定义接入→真实连通性→保存→Agent 使用
+  required_test_stages:
+  - D4
+  source:
+    notes: 'Provisional migration owner: the V5 row has no stable Feature ID. Do not infer an F-ID.'

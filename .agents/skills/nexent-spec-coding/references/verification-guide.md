@@ -2,23 +2,25 @@
 
 ## Required records
 
-Before implementation, record affected feature IDs, business rules, acceptance criteria and required D1-D5 case contracts. During execution, record exact commands, environment profile, version, observed results and evidence paths. Keep results in `task.md` traceability and formal run artifacts; do not write execution state back into the case contract.
+Before implementation, record affected feature IDs, business rules, acceptance criteria and selected Case IDs. During execution, record exact commands, environment profile, version, observed results and evidence paths. Keep results in `task.md` traceability or the lightweight bugfix design's identical table, plus formal run artifacts; do not write execution state back into the case contract.
 
 ## Verification rules
 
 - Run schema and traceability validation before product implementation.
-- After product implementation, add or update fixed scripts and manifest entries for affected automated cases.
+- After product implementation, update scripts/bindings only when their contract, assertions or execution setup needs changes; existing regression Cases may run unchanged.
 - A case passes only when all expected results and forbidden-side-effect assertions pass.
 - Missing, unimplemented, skipped or expected-failure required cases remain incomplete. Required P0/P1 cases cannot be accepted that way.
 - Keep product, environment, provider, asset and test-implementation failures distinguishable.
 - If implementation reveals a requirement change, revise the requirement and structured case contract explicitly; never silently weaken assertions.
-- Legacy UT may supply transition evidence but cannot satisfy formal D1-D5 manifest coverage.
+- Traditional UT is a permanent product-PR obligation: run relevant UT locally and record actual selectors/results; CI reruns its configured UT set. Maintain success/error/boundary and defect-regression assertions for changed unit behavior. Existing adequate tests may be reused; a non-behavior exemption needs a reason. Missing execution is BLOCKED, not an exemption.
+- UT can prove a unit acceptance requirement but cannot count as formal Case execution or substitute for necessary higher-boundary proof. Report UT separately from D1-D5 and frontend coverage separately from Python coverage.
 
 ## Choose the proof surface
 
 | Stage | Required proof surface |
 | --- | --- |
-| D1 | Isolated function, SDK or component execution |
+| Traditional UT | Isolated unit/domain-rule behavior, boundary/error/regression assertions |
+| D1 (new Cases) | Component contract with real internal collaboration and controlled external boundaries |
 | D2 | Running API/protocol boundary and contract assertions |
 | D3 | Integrated runtime/provider path with observable state and cleanup |
 | D4 | Playwright browser journey and final business outcome |
@@ -26,9 +28,13 @@ Before implementation, record affected feature IDs, business rules, acceptance c
 
 Use all applicable stages for mixed changes. Mocks provide deterministic primary coverage. Optional real-smoke profiles prove selected real-provider integrations and remain separately identified.
 
+Keep all existing D1 Cases/scripts and type labels, including unit-oriented overlap. New D1 must add necessary component evidence beyond UT; D3 proves inter-component/service/protocol runtime flow. Do not infer stages from function calls or mocks. Follow acceptance-integrity.md for affected formal obligations: script execution status, obligation mapping and semantic completeness are separate. An unreviewed legacy script PASS is not certified full acceptance.
+
+For bugs, current-fix ACs and evidence-backed regression impact determine applicability. A full functional coverage matrix does not require all listed Cases or all five stages to execute. Global asset validation checks consistency without authorizing generation of historical coverage. Missing/unavailable baseline coverage is a limitation, not an N/A proof surface or an automatic test-generation task.
+
 ## Evidence and status
 
-- Tie each artifact to acceptance criteria and formal case IDs.
+- Tie artifacts to acceptance criteria and either actual UT selectors or formal Case IDs, keeping the two result sets separate.
 - Redact keys, authorization headers, cookies, tokens, private prompts and sensitive user data.
 - Prefer textual results and local artifact paths. D4 retains screenshots/traces only for failures unless a case requires otherwise.
 - Use `PENDING`, `PASS`, `FAIL` and `BLOCKED`. A completed implementation task never implies acceptance.
@@ -42,4 +48,4 @@ A2A can be proved at D2 protocol, D3 integration, D4 full journey and D5 fault/s
 
 ## Closeout
 
-Run affected tests, the unified asset validator and deterministic Excel regeneration/check. Confirm every automated affected case has a valid manifest binding and that only changed/incremental entries were regenerated. Preserve historical cases and evidence unless explicitly retired with rationale.
+Run affected tests, the unified asset validator and deterministic Excel regeneration/check. Confirm every automated affected Case has a valid case-local binding. Regenerate derived views from the complete authoritative Case set; modify only affected source Case directories. Preserve historical Cases and evidence unless explicitly retired with rationale.

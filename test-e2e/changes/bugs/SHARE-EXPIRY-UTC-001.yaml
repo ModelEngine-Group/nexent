@@ -1,0 +1,26 @@
+schema_version: '1.0'
+change:
+  change_id: SHARE-EXPIRY-UTC-001
+  change_type: bugfix
+  bug_id: SHARE-EXPIRY-UTC-001
+  title: Share token expiry with timezone returns 500
+  description: Normalize persisted expiry to UTC and compare timezone-aware values when reading a public share.
+  observed_behavior: A valid share created with an ISO 8601 timezone offset returns HTTP 500 on anonymous GET.
+  expected_behavior: A valid share is readable until expiry; an expired share returns HTTP 404 without leaking the snapshot.
+  escaped_stage: D5
+  coverage_gap:
+    type: missing_assertion
+    description: SEC-002 already specified expiry but did not explicitly exercise timezone-offset or expired tokens.
+  feature_contract_changed: false
+  affected_features:
+    existing:
+    - F-117
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing: []
+    added: []
+    modified:
+    - SEC-002
+    retired: []
