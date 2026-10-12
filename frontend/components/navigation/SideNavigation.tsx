@@ -66,7 +66,7 @@ const ROUTE_CONFIG: RouteConfig[] = [
     path: "/workbench",
     Icon: Zap,
     labelKey: "sidebar.agentWorkbench",
-    order: 1.5,
+    order: 0.5,
     parentKey: null,
   },
   {
