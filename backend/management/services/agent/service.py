@@ -781,6 +781,21 @@ async def update_agent_info_impl(
     try:
         if agent_id is None:
             # Create agent - automatically set group_ids to current user's groups
+            # Guard against duplicate name/display_name regardless of the caller
+            # (dev-page copy, direct API, ...) so new agents stay publishable.
+            agents_cache = query_all_agent_info_by_tenant_id(tenant_id)
+            for field_key in ("name", "display_name"):
+                value = getattr(request, field_key, None)
+                if value and check_agent_value_duplicate(
+                    field_key, value, tenant_id, agents_cache=agents_cache
+                ):
+                    setattr(
+                        request,
+                        field_key,
+                        generate_unique_agent_value(
+                            field_key, value, tenant_id, agents_cache=agents_cache
+                        ),
+                    )
             user_group_ids = _get_user_group_ids(user_id, tenant_id)
             created = create_agent(
                 agent_info={
