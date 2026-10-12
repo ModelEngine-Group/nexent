@@ -42,7 +42,7 @@ journey("PW-TASK-01", async (context) => {
     steps: [
       async () => { await page.goto(appPath("/agent-tasks")); await expect(page.getByRole("button", { name: /通过会话创建|Create in Chat/ })).toBeVisible(); return "opened Agent Tasks"; },
       async () => { await page.getByRole("button", { name: /通过会话创建|Create in Chat/ }).click(); await expect(page).toHaveURL(/newchat.*entry=automation/); await chat.selectAgent(agent); return `Create through conversation selected configured Agent ${agent} at the automation entry`; },
-      async () => { await chat.startMessage(`30分钟后，每60分钟告诉我 TASK-${token}`); return "submitted an ordinary delayed recurring-task user requirement, not undocumented tool/title meta syntax"; },
+      async () => { await chat.startMessage(`每60分钟告诉我 TASK-${token}`); return "submitted an ordinary recurring-task user requirement; first-fire timing belongs to the dedicated API/reliability cases"; },
       async () => {
         const answer = chat.assistantMessages().last();
         const confirm = answer.getByRole("button", { name: /确认创建|创建任务/ });
@@ -69,9 +69,8 @@ journey("PW-TASK-01", async (context) => {
         expect(task.instruction).toContain(`TASK-${token}`);
         expect(task.schedule_rule_type).toBe("INTERVAL");
         expect(task.schedule_config.interval_seconds).toBe(3600);
-        const delay = Date.parse(task.schedule_config.start_at) - Date.now();
-        expect(delay).toBeGreaterThan(20 * 60000);
-        expect(delay).toBeLessThan(31 * 60000);
+        expect(Number.isFinite(Date.parse(task.schedule_config.start_at))).toBe(true);
+        expect(task.schedule_config.timezone).toBeTruthy();
         return "reviewed the rendered proposal title/instruction/interval and confirmed persisted creation";
       },
       async () => { await page.goto(appPath("/agent-tasks")); await expect(taskRow()).toBeVisible(); return `found the run-scoped task through its unique Agent ${agent}`; },

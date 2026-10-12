@@ -5,11 +5,12 @@ import { executeFixedScenario } from "../../infra/automation/d4/runner/scenario"
 import { loginCurrent } from "../../infra/automation/d4/runner/sessions";
 import { resolveReadyAsset } from "../../infra/automation/d4/runner/assets";
 import { ChatPage } from "../../infra/automation/d4/pages/chat.page";
+import { runToken } from "../../infra/automation/d4/runner/runtime-config";
 
 journey("PW-CHART-01", async (context) => {
   const { page, expect, contract } = context;
   const chat = new ChatPage(page);
-  let title = "";
+  const title = `chart-${runToken("PW-CHART-01")}`;
   let agentDisplay = "";
   let alertTriggered = false;
   let validCount = 0;
@@ -92,7 +93,15 @@ journey("PW-CHART-01", async (context) => {
       async () => {
         await chat.sendAndWait("严格原样输出引用正文：第一句内容 [[a1]] 第二句内容 [[1]]");
         citationConversationId = chat.currentConversationId();
-        title = await chat.currentThreadTitle();
+        // Rendering/restore acceptance does not require the asynchronous
+        // title generator. Give only this owned conversation a unique label;
+        // never reopen an arbitrary shared "New Chat" history item.
+        const renamed = await page.request.post("/api/conversation/rename", {
+          data: { conversation_id: citationConversationId, name: title },
+        });
+        expect(renamed.ok()).toBe(true);
+        expect((await renamed.json()).code).toBe(0);
+        expect(await chat.persistedThreadTitle(citationConversationId)).toBe(title);
         const historyResponse = await page.request.get(`/api/conversation/${citationConversationId}`);
         expect(historyResponse.ok()).toBe(true);
         const history = await historyResponse.json();
@@ -113,7 +122,7 @@ journey("PW-CHART-01", async (context) => {
           "--message-id", String(assistant.message_id),
         ], { env: process.env, stdio: "pipe" });
         await page.reload({ waitUntil: "domcontentloaded" });
-        await chat.openThread(title, "first");
+        await chat.openThread(title);
         return `streamed citation fixtures and attached real source metadata to assistant message ${assistant.message_id}`;
       },
       async () => {
@@ -135,7 +144,7 @@ journey("PW-CHART-01", async (context) => {
       },
       async () => {
         const users = await chat.userMessages().count();
-        title = await chat.currentThreadTitle();
+        expect(await chat.persistedThreadTitle(citationConversationId)).toBe(title);
         await page.reload({ waitUntil: "domcontentloaded" });
         await chat.openThread(title);
         await expect(chat.userMessages()).toHaveCount(users, { timeout: 120_000 });

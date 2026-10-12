@@ -17,6 +17,7 @@ case:
   - 本地XSS fixture
   test_data:
     legacy_asset_declaration: assets/expected/mermaid_cases.json；config/models.yaml
+    isolation: 对本用例创建并记录 ID 的会话通过公开 API 设置唯一 run_id 标题，用于刷新后定位同一会话；不依赖异步自动标题、不选择其他同名会话。重命名 UI 验收仍由 PW-CHAT-01 负责。
   steps:
   - order: 1
     action: 发送固定提示输出最小合法Mermaid，等待streaming完成。

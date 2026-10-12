@@ -18,6 +18,7 @@ case:
   - run_id任务名
   test_data:
     legacy_asset_declaration: config/models.yaml；config/users.yaml
+    request: 每60分钟告诉我 TASK-{run_id}；本用例检查真实提案的标题、指令、周期及持久化字段，随后手动 Run；首触发时间的语义精度和准时调度仍由 API/REL 用例验证，不额外添加固定首触发延迟要求。
   steps:
   - order: 1
     action: 打开/agent-tasks。
