@@ -63,6 +63,7 @@ from .output_protocol import (
     RuntimeFinalAnswer,
     classify_model_output,
     has_meaningful_visible_content,
+    is_raw_final_answer_candidate,
     unicode_category_summary,
 )
 from .context.budget import message_role
@@ -1028,7 +1029,7 @@ Additional Args:
             or getattr(self, "_consecutive_protocol_errors", 0) < 2
             or self.stop_event.is_set()
             or getattr(memory_step, "tool_calls", None)
-            or not has_meaningful_visible_content(model_output)
+            or not is_raw_final_answer_candidate(model_output)
         ):
             return False
         diagnostics = getattr(self.model, "last_response_diagnostics", None) or {}

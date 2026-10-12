@@ -32,6 +32,8 @@ For a bug with no usable SPEC, use [bugfix-design-template.md](bugfix-design-tem
 
 <Assess UT for every product change. Do not require all stages or edits to both suites. UT remains outside the formal registry. Preserve existing D1; new D1 proves component collaboration beyond UT, D3 proves actual runtime integration. State real versus substituted dependencies. A unit-only AC can be proved by UT; higher-boundary ACs require their selected formal evidence.>
 
+<Before adding D1, read existing UT/formal assertions and record their actual proof, the remaining gap, real internal collaboration, controlled boundaries and why D2/D3 is not the intended surface. A Feature with no D1 is valid; do not duplicate unit tests to fill this matrix. For code already developed, use the test-backfill route and record current proof gaps, not fictional earlier design/execution.>
+
 ## Test Implementation Strategy
 
 <Describe traditional UT success/error/boundary/regression obligations and applicable formal scripts separately. UT selectors are confirmed after implementation; formal scripts/bindings follow stable interfaces except focused bug reproduction. For each changed formal acceptance obligation, explain actual tests/assertions and collection/execution checks, not just file/ID existence. State relevant local UT commands and affected Case execution. Existing D1 stays; completeness gaps are reported separately from script PASS.>

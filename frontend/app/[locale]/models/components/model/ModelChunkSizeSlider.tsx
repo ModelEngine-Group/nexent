@@ -4,6 +4,7 @@ import { useTranslation } from "react-i18next";
 // Default chunk size values (matching backend defaults)
 export const DEFAULT_EXPECTED_CHUNK_SIZE = 1024;
 export const DEFAULT_MAXIMUM_CHUNK_SIZE = 1536;
+export const DEFAULT_CHUNKING_BATCH_SIZE = 10;
 
 interface ModelChunkSizeSliderProps {
   value: [number, number];
@@ -51,12 +52,13 @@ export const ModelChunkSizeSlider = ({
         formatter: (val?: number) => {
           if (val === undefined) return "";
           const [left, right] = value;
-          if (val === left) return `${t("modelConfig.slider.expectedChunkSize")}: ${val}`;
-          if (val === right) return `${t("modelConfig.slider.maximumChunkSize")}: ${val}`;
+          if (val === left)
+            return `${t("modelConfig.slider.expectedChunkSize")}: ${val}`;
+          if (val === right)
+            return `${t("modelConfig.slider.maximumChunkSize")}: ${val}`;
           return `${val}`;
         },
       }}
     />
   );
 };
-
