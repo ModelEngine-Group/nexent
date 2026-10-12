@@ -173,7 +173,12 @@ async def test_memory_hot_update_isolated_inputs_and_wire_guards(monkeypatch, fa
         async def put(self, path, json):
             state['org'] = json['params']['plugin.org_id']
             return response({})
-        async def get(self, path):
+        async def get(self, path, params=None):
+            if path == '/memory/long-term/user':
+                return response({'empty': False, 'version': {'content': state['local_marker']}})
+            if path == '/memory/context':
+                assert params == {'layers': 'user'}
+                return response({'user_long_term': [{'content': state['local_marker']}]})
             code = ('timeout' if mock.fault.await_args.args[1] else 'provider_error') if mock.fault.await_args else None
             return response({'timeout_seconds': 2, 'last_error_code': code})
     async def run(identity, agent, query, phase, *, expected_external=None):
@@ -340,6 +345,88 @@ function load(file) {
         script = script.replace(name, json.dumps(str(value)))
     result = subprocess.run(['node', '-'], input=script, text=True, encoding='utf-8', capture_output=True, timeout=45)
     assert result.returncode == 0, result.stderr
+
+
+@pytest.mark.parametrize('create_ok', [True, False])
+def test_resource_model_preparation_does_not_occupy_admin_browser(create_ok):
+    script = r'''
+const assert=require('node:assert/strict'),fs=require('node:fs'),ts=require(__TS_PATH__);
+let body,handlers,cleanup,closed=0,health=0,registered=0;
+const main={};
+const owner={request:{post:async(path,options)=>{
+ assert.equal(path,'/api/model/create'); body=options.data;
+ return {ok:()=>CREATE_OK};
+}}};
+const expect=value=>({toBe:wanted=>assert.equal(value,wanted)});
+const modules={
+ 'journey':{journey:(id,fn)=>{assert.equal(id,'PW-RESOURCE-04');body=fn({page:main,expect,contract:{deferCleanup:fn=>cleanup=fn}})}},
+ 'scenario':{executeFixedScenario:async(context,value)=>{handlers=value;}},
+ 'runtime-config':{runToken:()=> 'fixture',configuredModel:()=>({provider:'fixture-provider',model:'fixture-model',baseUrl:'http://fixture.invalid',secret:'synthetic',maxTokens:32768})},
+ 'sessions':{loginCurrent:()=>{throw new Error('setup must not occupy the shared admin browser');},loginIsolated:async(source,id)=>{
+  assert.equal(source,main);assert.equal(id,'tenant_a_admin');return {page:owner,context:{close:async()=>closed++}};
+ }},
+ 'assets':{resolveReadyAsset:()=> 'ready',registerReadyAsset:(section,key,value,id,rule)=>{
+  registered++;assert.equal(rule.identity,'tenant_a_admin');assert.equal(rule.path,'/model/delete');
+ }},
+ 'resource.page':{ResourcePage:class{}},'chat.page':{ChatPage:class{}},
+ 'model.page':{ModelPage:class{constructor(page){assert.equal(page,owner);}
+  async verifyPersistedModel(alias,capability,dependency){health++;assert.equal(capability,'llm');assert.equal(dependency,true);}
+  async deleteModel(alias){assert.equal(alias,'resource-model-fixture');}
+ }},
+};
+const mod={exports:{}};
+const source=ts.transpileModule(fs.readFileSync(__SOURCE_PATH__,'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText;
+new Function('require','module','exports',source)(name=>modules[name.split('/').pop()]||require(name),mod,mod.exports);
+(async()=>{
+ await body;
+ if(CREATE_OK) await handlers.preconditions[0]();
+ else await assert.rejects(handlers.preconditions[0]());
+ assert.equal(body.max_tokens,32768);assert.equal(body.skip_default_backfill,true);
+ assert.equal(body.display_name,'resource-model-fixture');
+ assert.equal(body.api_key,'synthetic');assert.equal(closed,1);
+ assert.equal(health,CREATE_OK?1:0);assert.equal(registered,CREATE_OK?1:0);
+ await cleanup();assert.equal(closed,2);
+})().catch(error=>{console.error(error);process.exitCode=1;});
+'''
+    for name, value in [('__TS_PATH__', ROOT / 'frontend/node_modules/typescript/lib/typescript.js'),
+                        ('__SOURCE_PATH__', ROOT / 'test-e2e/cases/PW-RESOURCE-04/test.spec.ts')]:
+        script = script.replace(name, json.dumps(str(value)))
+    script = script.replace('CREATE_OK', str(create_ok).lower())
+    result = subprocess.run(['node', '-'], input=script, text=True, capture_output=True, timeout=10)
+    assert result.returncode == 0, result.stderr
+
+
+@pytest.mark.parametrize('json_format', [False, True])
+def test_configured_model_preserves_existing_output_budget(tmp_path, monkeypatch, json_format):
+    (tmp_path / 'config').mkdir()
+    configured = {'models': [{
+        'id': 'synthetic', 'capability': 'llm', 'provider': 'fixture-provider',
+        'base_url': 'http://fixture.invalid', 'model': 'old,new',
+        'preferred_model': 'new', 'max_tokens': 32768,
+        'secret_env_key': 'D4_SYNTHETIC_MODEL_SECRET',
+    }]}
+    (tmp_path / 'config/models.yaml').write_text(
+        json.dumps(configured) if json_format else yaml.safe_dump(configured), encoding='utf-8')
+    monkeypatch.setenv('TEST_ROOT', str(tmp_path))
+    monkeypatch.setenv('NEXENT_TEST_HOME', str(tmp_path))
+    monkeypatch.setenv('NEXENT_REPO', str(ROOT))
+    monkeypatch.setenv('FIXED_TEST_PYTHON', sys.executable)
+    monkeypatch.setenv('D4_SYNTHETIC_MODEL_SECRET', 'synthetic')
+    script = r'''
+const assert=require('node:assert/strict'),fs=require('node:fs'),ts=require(__TS_PATH__);
+const mod={exports:{}};
+const source=ts.transpileModule(fs.readFileSync(__CONFIG_PATH__,'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText;
+new Function('require','module','exports',source)(require,mod,mod.exports);
+const asset=mod.exports.configuredModel('llm');
+assert.equal(asset.maxTokens,32768);assert.equal(asset.model,'new');
+assert.equal(asset.provider,'fixture-provider');assert.equal(asset.secret,'synthetic');
+'''
+    for name, value in [('__TS_PATH__', ROOT / 'frontend/node_modules/typescript/lib/typescript.js'),
+                        ('__CONFIG_PATH__', ROOT / 'test-e2e/infra/automation/d4/runner/runtime-config.ts')]:
+        script = script.replace(name, json.dumps(str(value)))
+    result = subprocess.run(['node', '-'], input=script, text=True, capture_output=True, timeout=10)
+    assert result.returncode == 0, result.stderr
+    assert 'synthetic' not in result.stdout
 
 
 def test_skill_journey_actions_cover_every_contract_row():

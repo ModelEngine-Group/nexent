@@ -44,23 +44,25 @@ journey("PW-RESOURCE-04", async (context) => {
         names["Skills"] = resolveReadyAsset("skills", "configurable_name", "PW-RESOURCE-04");
         // Both tenants may legitimately have the same configured LLM name.
         // Use an owned alias so name-based UI isolation is a valid oracle.
-        await loginCurrent(page, "tenant_a_admin");
-        modelPreparationStarted = true;
-        const asset = configuredModel("llm");
-        // Resource isolation is the UI acceptance here; model creation has
-        // its own Journey. Prepare this owned alias through the current API.
-        const added = await page.request.post("/api/model/create", { data: {
-          model_factory: asset.provider || "OpenAI-API-Compatible",
-          model_name: asset.model, model_type: "llm", base_url: asset.baseUrl,
-          api_key: asset.secret, display_name: ownedModel,
-          max_tokens: asset.maxTokens || 4096, skip_default_backfill: true,
-        } });
-        expect(added.ok()).toBe(true);
-        registerReadyAsset("owned_models", ownedModel, ownedModel, "PW-RESOURCE-04", {
-          service: "config", identity: "tenant_a_admin", method: "POST",
-          path: "/model/delete", params: { display_name: ownedModel }, allowed_statuses: [200, 404],
-        });
-        await new ModelPage(page).verifyPersistedModel(ownedModel, "llm", true);
+        const owner = await loginIsolated(page, "tenant_a_admin");
+        try {
+          modelPreparationStarted = true;
+          const asset = configuredModel("llm");
+          // Resource isolation is the UI acceptance here; model creation has
+          // its own Journey. Prepare this owned alias through the current API.
+          const added = await owner.page.request.post("/api/model/create", { data: {
+            model_factory: asset.provider || "OpenAI-API-Compatible",
+            model_name: asset.model, model_type: "llm", base_url: asset.baseUrl,
+            api_key: asset.secret, display_name: ownedModel,
+            max_tokens: asset.maxTokens || 4096, skip_default_backfill: true,
+          } });
+          expect(added.ok()).toBe(true);
+          registerReadyAsset("owned_models", ownedModel, ownedModel, "PW-RESOURCE-04", {
+            service: "config", identity: "tenant_a_admin", method: "POST",
+            path: "/model/delete", params: { display_name: ownedModel }, allowed_statuses: [200, 404],
+          });
+          await new ModelPage(owner.page).verifyPersistedModel(ownedModel, "llm", true);
+        } finally { await owner.context.close(); }
         names["模型"] = ownedModel;
         return "target tenant has an owned configured model and independently prepared agent, MCP and Skill resources";
       },

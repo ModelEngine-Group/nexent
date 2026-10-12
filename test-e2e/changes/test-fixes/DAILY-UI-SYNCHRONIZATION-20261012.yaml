@@ -11,12 +11,22 @@ change:
     Preserve exact history-title matching with normalized text. Traverse resource
     pages for positive and negative assertions, prepare an owned configured-model
     alias to avoid mistaking legitimate same-name tenant models for leakage,
-    and clean up under its owner identity. Await the exact Debug request's bounded
+    using the current API without default backfill and clean up under its owner
+    identity. Exclude still-mounted hidden Compare history when reading the
+    normal Debug answer. Await the exact Debug request's bounded
     transport completion plus a short rendering commit window; reasoning is not
     an answer. Await an enabled create button in the assistant proposal, inspect
-    title/instruction/interval within its card, and require successful confirmation.
+    generated nonempty title/instruction/interval within its card, and require
+    successful confirmation with matching persisted task ID, title and schedule.
+    Use an ordinary natural-language request, not unsupported exact-title tool
+    meta syntax; do not bypass UI confirmation with direct task creation.
     These are candidate test fixes, not proof of live acceptance. No product,
     global configuration, model budget, credentials, deployment or CI changes.
+    D4 model metadata now uses the existing Python YAML loader rather than a
+    regex requiring id as the first field. Preserve configured max_tokens and
+    resolve the existing secret_env_key in-process; do not export secret values
+    through the metadata bridge. Model preparation uses an isolated owner
+    browser so the administrator UI session starts logged out.
   affected_features:
     existing: [V5-PW-CHART-01, V5-PW-PROMPT-02, V5-PW-RESOURCE-04, V5-PW-TASK-01]
     added: []

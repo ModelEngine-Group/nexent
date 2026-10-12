@@ -62,7 +62,7 @@ journey("PW-TASK-01", async (context) => {
         const response = await created;
         expect(response.ok()).toBe(true);
         exists = true;
-        const task = await response.json();
+        const task = (await response.json()).data;
         taskId = Number(task.task_id);
         expect(taskId).toBeGreaterThan(0);
         expect(task.title).toBe(taskTitle);

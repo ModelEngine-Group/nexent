@@ -156,6 +156,10 @@ async def exercise_external_memory(identity, mock, api):
                 'content': f'Local lookup {local_lookup} has unique answer {local_marker}',
                 'expected_active_version_id': None})
             assert_status(local, 201)
+            active = await api.get('/memory/long-term/user')
+            assert_status(active, 200)
+            assert active.json()['empty'] is False
+            assert local_marker in active.json()['version']['content'], 'Local seed was not activated'
             for phase, status, delay in (('unavailable', 503, 0), ('timeout', 200, 3)):
                 await mock.fault(status, delay)
                 failed = await api.post(prefix + '/test-search', json={'query': lookup, 'top_k': 10})
@@ -164,9 +168,18 @@ async def exercise_external_memory(identity, mock, api):
                 assert_status(diagnostic, 200)
                 expected_code = 'timeout' if delay else 'provider_error'
                 assert diagnostic.json()['last_error_code'] == expected_code
+                local_context = await api.get('/memory/context', params={'layers': 'user'})
+                assert_status(local_context, 200)
+                local_items = local_context.json()['user_long_term']
+                seeded_context = any(local_marker in item['content'] for item in local_items)
+                write_case_evidence(CASE_ID + '-local-' + phase + '-preparation', {
+                    'active_seed_present': True, 'context_seed_present': seeded_context,
+                    'local_items': len(local_items), 'lookup': local_lookup,
+                })
+                assert seeded_context, 'Local context API lost the active user memory during external failure'
                 fallback = await run_memory_agent(identity, agent_id,
                         f'Return the unique local memory answer for {local_lookup}.', 'local-' + phase)
-                assert local_marker in fallback, 'External Provider fault blocked local memory context'
+                assert local_marker in fallback, 'Active local memory exists in context API, but real Agent did not return its answer'
                 write_case_evidence(CASE_ID + '-' + phase + '-receipt', {
                     'profile': 'mock', 'error_code': expected_code, 'local_fallback': True})
                 await mock.fault()

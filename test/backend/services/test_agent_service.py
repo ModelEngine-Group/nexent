@@ -11379,10 +11379,12 @@ def test_get_agent_by_name_impl_not_found(mock_search, mock_query_versions):
     """An expected Agent lookup miss retains its domain exception."""
     from consts.exceptions import AgentNotFoundError
 
-    mock_search.side_effect = AgentNotFoundError("agent not found")
+    lookup_error = AgentNotFoundError("agent not found")
+    mock_search.side_effect = lookup_error
 
-    with pytest.raises(AgentNotFoundError, match="agent not found"):
+    with pytest.raises(AgentNotFoundError, match="agent not found") as excinfo:
         get_agent_by_name_impl("nonexistent_agent", "tenant_1")
+    assert excinfo.value is lookup_error
     mock_query_versions.assert_not_called()
 
 
@@ -11394,15 +11396,29 @@ def test_get_agent_by_name_impl_empty_name_service(mock_search, mock_query_versi
         get_agent_by_name_impl("", "tenant_1")
 
 
-# Tests for get_agent_by_name_impl (different path)
+# Unexpected lookup failures must remain distinct from an Agent lookup miss.
+@pytest.mark.parametrize("failure_stage", ["lookup", "versions"])
 @patch("management.services.agent.management.query_version_list")
 @patch("management.services.agent.management.search_agent_id_by_agent_name")
-def test_get_agent_by_impl_agent_not_found(mock_search, mock_query_versions):
-    """Test agent not found error in get_agent_by_name_impl."""
-    mock_search.side_effect = Exception("Not found")
+def test_get_agent_by_name_impl_preserves_internal_errors(
+    mock_search, mock_query_versions, failure_stage
+):
+    """Internal failures must not be reclassified as missing resources."""
+    lookup_error = RuntimeError("database unavailable")
+    mock_search.return_value = 123
+    if failure_stage == "lookup":
+        mock_search.side_effect = lookup_error
+    else:
+        mock_query_versions.side_effect = lookup_error
 
-    with pytest.raises(Exception, match="agent not found"):
+    with pytest.raises(RuntimeError, match="database unavailable") as excinfo:
         get_agent_by_name_impl("missing_agent", "tenant_1")
+    assert excinfo.value is lookup_error
+    mock_search.assert_called_once_with("missing_agent", "tenant_1")
+    if failure_stage == "lookup":
+        mock_query_versions.assert_not_called()
+    else:
+        mock_query_versions.assert_called_once_with(123, "tenant_1")
 
 
 # Tests for delete_related_agent_impl
@@ -12559,40 +12575,30 @@ async def test_update_agent_info_impl_rejects_unavailable_skill_id(
     mock_get_valid_skill_ids.return_value = set()
     mock_query_skills.return_value = []
 
-    request = MagicMock(spec=AgentInfoRequest)
-    request.agent_id = 1
-    request.name = "Test"
-    request.display_name = "Test Display"
-    request.description = "Desc"
-    request.business_description = "Biz Desc"
-    request.author = "Author"
-    request.model_id = None
-    request.model_name = None
-    request.business_logic_model_id = None
-    request.business_logic_model_name = None
-    request.max_steps = 5
-    request.provide_run_summary = True
-    request.duty_prompt = "Duty"
-    request.constraint_prompt = "Constraint"
-    request.few_shots_prompt = "Few shots"
-    request.enabled = True
-    request.enabled_tool_ids = None
-    request.enabled_skill_ids = [9999]
-    request.skill_instances = [
-        AgentSkillInstanceRequest(skill_id=9999, enabled=True)
-    ]
-    request.related_agent_ids = None
-    request.related_external_agent_ids = None
-    request.group_ids = None
-    request.ingroup_permission = None
-    request.prompt_template_id = None
-    request.prompt_template_name = None
-    request.example_questions = None
-    request.greeting_message = None
-    request.version_no = 1
+    request = AgentInfoRequest(
+        agent_id=1,
+        name="Test",
+        display_name="Test Display",
+        description="Desc",
+        business_description="Biz Desc",
+        author="Author",
+        model_ids=[],
+        max_steps=5,
+        provide_run_summary=True,
+        duty_prompt="Duty",
+        constraint_prompt="Constraint",
+        few_shots_prompt="Few shots",
+        enabled=True,
+        enabled_skill_ids=[9999],
+        skill_instances=[AgentSkillInstanceRequest(skill_id=9999, enabled=True)],
+        version_no=1,
+    )
+    assert request.related_agents is None
 
-    with pytest.raises(AppException):
+    with pytest.raises(AppException, match="invalid or unavailable skill IDs: \\[9999\\]"):
         await update_agent_info_impl(request, authorization="Bearer token")
+    mock_get_valid_skill_ids.assert_called_once_with(tenant_id="tenant_1", skill_ids=[9999])
+    mock_query_skills.assert_not_called()
 
 
 # Test for generate_stream unexpected exception (lines 1889-1896)
