@@ -3,9 +3,9 @@ case_id: SAI-D1-003
 implementations:
 - framework: pytest
   file: test.py
-  selector: test_SAI_D1_003_metadata_workspace_and_external
+  selector: test_SAI_D1_003_metadata_isolation
   profiles:
   - mock
 acceptance_bindings:
   AC-01:
-  - test_SAI_D1_003_metadata_workspace_and_external
+  - test_SAI_D1_003_metadata_isolation

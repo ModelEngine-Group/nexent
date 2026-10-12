@@ -59,3 +59,39 @@ def test_ut_sdk_tlm_024_resource_registered_after_cancel_closes_immediately():
     scope.unregister_closer(token)
 
     assert closed == ["closed"]
+
+
+def test_public_constructor_keeps_legacy_event_identity():
+    from nexent.core.concurrency.cancellation import RunCancellationScope as ModuleScope
+
+    assert RunCancellationScope is ModuleScope
+    event = threading.Event()
+    scope = RunCancellationScope(event)
+    assert scope.stop_event is event
+    scope.cancel()
+    assert event.is_set()
+
+
+def test_parent_stop_wakes_blocked_waiter_without_background_watchers():
+    original_threads = {thread.ident for thread in threading.enumerate()}
+    parent = threading.Event()
+    scope = RunCancellationScope(parent_stop_event=parent)
+    ready = threading.Event()
+    observed = []
+
+    def wait_for_stop():
+        ready.set()
+        observed.append(scope.stop_event.wait(2))
+
+    waiter = threading.Thread(target=wait_for_stop)
+    waiter.start()
+    try:
+        assert ready.wait(1)
+        parent.set()
+        waiter.join(1)
+        assert not waiter.is_alive()
+        assert observed == [True]
+    finally:
+        parent.set()
+        waiter.join(2)
+    assert {thread.ident for thread in threading.enumerate()} == original_threads

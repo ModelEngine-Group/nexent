@@ -11,8 +11,8 @@ case:
   priority: P1
   status: active
   automation: automated
-  objective: Clean partial construction and execution failures without releasing sibling
-    resources.
+  objective: Invoke owned cleanup on construction/execution failure and drain active
+    calls before allowing shared teardown.
   preconditions:
   - Invocation factories expose owned cleanup and cancellation hooks.
   test_data:
@@ -31,30 +31,36 @@ case:
   - order: 3
     action: Invoke after parent admission closes.
     expected: No new model or kernel is allocated.
+  - order: 4
+    action: Set only the parent stop_event with an active child and no parent cancellation_scope.
+    expected: The active child observes its linked stop event and exits; its registration
+      is drained.
   expected_results:
-  - No invocation-owned resource remains after terminating callbacks.
+  - Terminated invocations unregister; stuck invocations retain registration and prevent
+    shared teardown.
   forbidden_side_effects:
-  - No shared-container kill from a kernel lease cleanup failure
   - No false successful drain of a stuck invocation
-  unit_boundary: Invocation lifecycle and sandbox lease cleanup
+  - No allocation after parent admission closes
+  unit_boundary: Real invocation factory, wrapper, cancellation and drain collaboration;
+    controlled model/CoreAgent and resource adapters
   inputs:
   - Partial allocation failure
   - Active child
   - Parent cancellation
   assertions:
-  - Cleanup is invocation-owned and idempotent
-  - Cancellation closes active resources
+  - Partial construction and execution failures call owned cleanup
+  - Active children terminate before drain returns
   - Late calls are rejected
   - A stuck child prevents workspace reclamation
-  - Lease fallback never kills shared container
+  - An event-only parent stop reaches the active invocation
   execution:
     profiles:
     - name: mock
       required_services: []
   acceptance:
   - id: AC-01
-    description: Clean partial construction and execution failures without releasing
-      sibling resources.
+    description: Construction and execution failures invoke owned cleanup; parent
+      drain rejects late calls and retains stuck registrations.
     steps:
     - 1
     - 2
@@ -64,3 +70,8 @@ case:
     forbidden_side_effects:
     - 1
     - 2
+  - id: AC-02
+    description: An event-only parent stop reaches the active child through the invocation
+      factory.
+    steps:
+    - 4

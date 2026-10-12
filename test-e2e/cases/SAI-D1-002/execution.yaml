@@ -3,9 +3,11 @@ case_id: SAI-D1-002
 implementations:
 - framework: pytest
   file: test.py
-  selector: test_SAI_D1_002_lifecycle
+  selector: test_SAI_D1_002_
   profiles:
   - mock
 acceptance_bindings:
   AC-01:
   - test_SAI_D1_002_lifecycle
+  AC-02:
+  - test_SAI_D1_002_event_only_stop

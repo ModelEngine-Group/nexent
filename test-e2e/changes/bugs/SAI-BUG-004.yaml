@@ -26,20 +26,23 @@ change:
     existing: []
     added: []
     modified:
-    - SAI-D1-007
     - SAI-D1-001
     - SAI-D1-002
     - SAI-D1-003
-    - SAI-D1-004
     - SAI-D1-005
-    - SAI-D1-006
     - SAI-D3-001
     - SAI-D5-001
     retired: []
   notes: 'Preserve SAI IDs and legacy source assets. Reconcile SAI-001 into case-local
     layout after develop aad4a458c. Existing SPEC: docs/Developing/runtime-sandbox-subagent-invocation-isolation/design.md.
     No API or browser contract changes; D2/D4 remain excluded. Docker scopes use isolated
-    test resources.'
+    test resources. Authorized PR coverage consolidation: remove migrated D1-004/006/007
+    additions, retaining their needed assertions in UT or D1-002. D1-001 proves factory/wrapper/dispatcher
+    collaboration; D1-002 proves failure and drain orchestration including event-only
+    stop; D1-003 proves nested metadata propagation; D1-005 executes real runner filesystem
+    cleanup, beyond mock-runner UT. D3/D5 retain actual kernel isolation and repeated-load
+    proof. Historical source assets are unchanged; Git retains the prior migration
+    audit.'
   traditional_ut:
     decision: add
     behaviors:

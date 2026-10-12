@@ -1,11 +1,8 @@
 """SAI-D1-002: case-local preserved component regression."""
 import threading
-from concurrent.futures import CancelledError
 from types import SimpleNamespace
-from unittest.mock import Mock
 
 import pytest
-from nexent.core.agents import sandbox
 from nexent.core.agents.nexent_agent import NexentAgent
 from nexent.core.concurrency import ManagedTaskSpec
 from nexent.core.concurrency.cancellation import RunCancellationScope, RunTerminated
@@ -70,38 +67,19 @@ def test_SAI_D1_002_lifecycle(setup_factory, monkeypatch, manager):
     factory._subagent_invocations.clear()
     monkeypatch.setattr(NexentAgent, '_close_subagent_invocations', original_close)
 
-    lease = Mock(_nexent_kernel_lease=True)
-    cleanup_manager = Mock()
-    cleanup_manager.run_sync.side_effect = RuntimeError('cleanup failure')
-    monkeypatch.setattr(sandbox, '_get_sandbox_thread_manager', lambda: cleanup_manager)
-    sandbox.cleanup_executor(lease, Mock())
-    lease.container.kill.assert_not_called()
 
-    channel = Mock()
-    cancelled = RunCancellationScope()
-    raw = object.__new__(sandbox._DockerKernelLease)
-    raw._cancellation_scope = cancelled
-    raw._closed = False
-    raw._unhealthy = False
-    raw.ws_url = 'ws://logical-gateway/channels'
-    raw._ssl_context = None
-    raw._receive_timeout_seconds = 1
-    monkeypatch.setattr('websocket.create_connection', lambda *args, **kwargs: channel)
-    channel.getstatus.return_value = 101
-    raw._wait_for_kernel_channel_ready = lambda ws: None
-
-    def interrupted(*args, **kwargs):
-        from websocket import WebSocketConnectionClosedException
-
-        cancelled.cancel()
-        raise WebSocketConnectionClosedException('closed by cancellation')
-
-    channel.recv_data.side_effect = interrupted
-    with pytest.raises(CancelledError):
-        raw.run_code_raise_errors('controlled execution')
-    channel.shutdown.assert_called_once()
-    channel.close.assert_called_once()
-    assert raw._unhealthy is False
+def test_SAI_D1_002_event_only_stop(setup_factory, monkeypatch, manager):
+    factory, child, _, _, _ = setup_factory
+    factory.cancellation_scope = None
+    started = threading.Event()
+    monkeypatch.setattr(NexentAgent, 'create_model', lambda self, name: SimpleNamespace(started=started))
+    execution = manager.submit('model-tool-io', ManagedTaskSpec('event-only-child', 'test'), child, task='WAIT')
+    try:
+        assert started.wait(2)
+        factory.stop_event.set()
+        assert execution.future.result(timeout=0.5)['task'] == 'WAIT'
+    finally:
+        factory._close_subagent_invocations()
 
 
 pytestmark = [pytest.mark.case_id("SAI-D1-002"), pytest.mark.stage("D1")]

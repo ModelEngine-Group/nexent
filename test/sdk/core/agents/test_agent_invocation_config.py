@@ -1,6 +1,9 @@
 """Configuration cloning preserves services but isolates invocation data."""
 
 from dataclasses import dataclass
+from threading import Event
+from types import SimpleNamespace
+from unittest.mock import Mock
 
 import pytest
 from nexent.core.agents.agent_model import (
@@ -8,6 +11,8 @@ from nexent.core.agents.agent_model import (
     ToolConfig,
     copy_invocation_config,
 )
+from nexent.core.agents.nexent_agent import NexentAgent
+from nexent.core.utils.observer import MessageObserver
 
 
 class InjectedClient:
@@ -52,3 +57,38 @@ def test_clone_preserves_cycles_without_sharing_mutable_metadata():
     cloned = copy_invocation_config(source)
     assert cloned.tools[0].metadata is not metadata
     assert cloned.tools[0].metadata["self"] is cloned.tools[0].metadata
+
+
+def test_invocation_factory_passes_isolated_config_and_original_client_to_tools(monkeypatch):
+    from nexent.core.agents import nexent_agent
+
+    class FakeCore:
+        def __init__(self, **kwargs):
+            self.__dict__.update(kwargs)
+            self.state = {}
+
+        def __call__(self, task):
+            return task
+
+    captured = []
+    monkeypatch.setattr(nexent_agent, "CoreAgent", FakeCore)
+    monkeypatch.setattr(NexentAgent, "create_model", lambda *_args: SimpleNamespace())
+
+    def create_tool(_owner, config):
+        captured.append(config)
+        return Mock()
+
+    monkeypatch.setattr(NexentAgent, "create_tool", create_tool)
+    client = InjectedClient()
+    config = AgentConfig(name="worker", description="Worker", model_name="model", tools=[
+        ToolConfig(name="tool", class_name="Tool", params={"options": [1]}, metadata={"client": client}),
+    ])
+    factory = NexentAgent(MessageObserver(), [], Event())
+    child = factory._create_subagent_definition(config, {})
+    assert child(task="left") == "left"
+    assert child(task="right") == "right"
+    assert len(captured) == 2
+    assert all(tool.metadata["client"] is client for tool in captured)
+    captured[0].params["options"].append(2)
+    assert captured[1].params["options"] == config.tools[0].params["options"] == [1]
+    assert not factory._subagent_invocations
