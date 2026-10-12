@@ -15,7 +15,7 @@ cases:
   stage: D4
   status: implemented
   contract_hash: sha256:b90762e85a71ff0d88345201247c01a559a1aff624324338c8b80a9604de96eb
-  implementation_hash: sha256:270648d673d9a74ec8aaa588c8415414cc5e8020ba7b84d7b04567344d43b723
+  implementation_hash: sha256:ee9810a875bd5425b35429e0d58b4fa7d26dbb60c97587de4b51cc95ddfce5e0
   implementation:
   - framework: playwright
     file: test/automation/d4/agent-creation-guide.spec.mjs

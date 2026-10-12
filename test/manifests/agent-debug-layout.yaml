@@ -15,7 +15,7 @@ cases:
   stage: D4
   status: implemented
   contract_hash: sha256:de5e7b33a4bed63c56e6b36a2549125842c1b44e30dbf0ccca5d7945479067d2
-  implementation_hash: sha256:af5ff413a111fd51e3603dc72918f0677aec883a21cb38802a9aba321197dd6e
+  implementation_hash: sha256:0e3a5a00fedc4973e24e00f203bae17377c00fe71edbaa17b10b1b91501d3d70
   implementation:
   - framework: playwright
     file: test/automation/d4/agent-debug-layout.spec.mjs
