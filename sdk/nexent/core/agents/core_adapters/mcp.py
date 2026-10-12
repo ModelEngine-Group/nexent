@@ -138,15 +138,22 @@ class _ConfiguredNativeClient(StreamableHttpClient):
         self._http_client_factory = http_client_factory
 
     async def connect(self, *, timeout):
+        import httpx
         from mcp import ClientSession
         from mcp.client.sse import sse_client
         from mcp.client.streamable_http import streamable_http_client
+        from mcp.shared._httpx_utils import create_mcp_http_client
 
         options = {"headers": self._auth_headers, "timeout": timeout}
         if self._http_client_factory is not None:
             options["httpx_client_factory"] = self._http_client_factory
-        transport = sse_client if self._transport == "sse" else streamable_http_client
-        self._client = transport(self._server_path, **options)
+        if self._transport == "sse":
+            self._client = sse_client(self._server_path, **options)
+        else:
+            factory = self._http_client_factory or create_mcp_http_client
+            http_client = factory(headers=self._auth_headers, timeout=httpx.Timeout(timeout, read=300))
+            await self._exit_stack.enter_async_context(http_client)
+            self._client = streamable_http_client(self._server_path, http_client=http_client)
         streams = await self._exit_stack.enter_async_context(self._client)
         self._read, self._write, *_ = streams
         self._session = await self._exit_stack.enter_async_context(ClientSession(self._read, self._write))
