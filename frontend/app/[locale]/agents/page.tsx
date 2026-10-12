@@ -31,102 +31,11 @@ import { AgentDetail } from "@/components/agent/agent-detail";
 import { mapAgentInfoDetail } from "@/lib/myAgentDetail";
 
 import AgentAvatar from "./components/agent-avatar";
+import AgentConfigurationGuide from "./components/agent-configuration-guide";
 import AgentListCard from "./components/agent-list-card";
 import AgentListTable from "./components/agent-list-table";
 import AgentVersion from "./agent-version";
-
-function AgentConfigurationGuide({
-  expanded,
-  onToggle,
-  showEmptyListDivider,
-}: {
-  expanded: boolean;
-  onToggle: () => void;
-  showEmptyListDivider: boolean;
-}) {
-  const { t } = useTranslation("common");
-  const steps = [
-    {
-      title: t("agentConfig.guide.step.create.title"),
-      description: t("agentConfig.guide.step.create.description"),
-    },
-    {
-      title: t("agentConfig.guide.step.configure.title"),
-      description: t("agentConfig.guide.step.configure.description"),
-    },
-    {
-      title: t("agentConfig.guide.step.personalize.title"),
-      description: t("agentConfig.guide.step.personalize.description"),
-    },
-    {
-      title: t("agentConfig.guide.step.publish.title"),
-      description: t("agentConfig.guide.step.publish.description"),
-    },
-    {
-      title: t("agentConfig.guide.step.use.title"),
-      description: t("agentConfig.guide.step.use.description"),
-    },
-  ];
-
-  return (
-    <div className="shrink-0">
-      <div className="flex h-6 w-full items-center justify-between">
-        <div className="text-sm font-medium text-[#191919]">
-          {t("agentConfig.guide.title")}
-        </div>
-        {expanded ? (
-          <button
-            type="button"
-            className="flex h-6 items-center gap-1 text-xs text-[#0067d1]"
-            aria-expanded={expanded}
-            onClick={onToggle}
-          >
-            <ChevronUp className="size-3" aria-hidden="true" />
-            <span>{t("agentConfig.guide.collapse")}</span>
-          </button>
-        ) : null}
-      </div>
-
-      <div className="mt-2 text-sm leading-5 text-[#191919]">
-        <p>{t("agentConfig.guide.description")}</p>
-        <ol className="mt-2 list-decimal space-y-1 pl-5 text-[#666666]">
-          <li>{t("agentConfig.guide.point.one")}</li>
-          <li>{t("agentConfig.guide.point.two")}</li>
-        </ol>
-        <div className="mt-[13px]">
-          <div className="font-medium text-[#191919]">
-            {t("agentConfig.guide.process.title")}
-          </div>
-          <div className="mt-3 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
-            {steps.map(({ title, description }, index) => (
-              <div
-                key={title}
-                className="relative flex h-[156px] w-full min-w-0 flex-col overflow-hidden rounded-[8px] border border-solid border-white px-[21px] py-6 [background:linear-gradient(180deg,rgba(236,243,255,1)_19.667%,rgba(252,253,253,1)_101.235%)] [box-shadow:inset_0_0_20px_0_rgba(239,239,239,0.3)]"
-              >
-                <div className="relative z-10">
-                  <p className="h-[26px] w-full text-[18px] font-medium leading-[26px] !tracking-[0px] text-[#191919]">
-                    {t("agentConfig.guide.stepLabel", { number: index + 1 })}
-                    {title}
-                  </p>
-                  <p className="mt-4 text-[14px] text-[#777777]">
-                    {description}
-                  </p>
-                </div>
-              </div>
-            ))}
-          </div>
-          {showEmptyListDivider ? (
-            <div
-              data-testid="agent-guide-divider"
-              aria-hidden="true"
-              className="mt-6 h-px w-full bg-[rgba(25,25,25,0.1)]"
-            />
-          ) : null}
-        </div>
-      </div>
-    </div>
-  );
-}
+import "./agent-list.css";
 
 export default function AgentsPage() {
   const { t } = useTranslation("common");
@@ -269,46 +178,57 @@ export default function AgentsPage() {
   };
 
   return (
-    <div className="flex h-full min-h-0 w-full flex-col bg-white p-6">
+    <div className="agent-development-list flex h-full min-h-0 w-full flex-col overflow-y-auto bg-white p-6">
       <header className="flex h-12 shrink-0 items-center justify-between py-[10px]">
         <h1 className="text-[20px] font-medium leading-7 ![letter-spacing:0px] text-[#191919]">
           {t("sidebar.agentDev")}
         </h1>
-        {!isGuideExpanded ? (
-          <button
-            type="button"
-            className="flex h-6 items-center gap-1 text-xs text-[#0067d1]"
-            aria-expanded={false}
-            onClick={() => setGuideExpanded(true)}
-          >
-            <ChevronDown className="size-3" aria-hidden="true" />
-            <span>{t("agentConfig.guide.expand")}</span>
-          </button>
-        ) : null}
+        <button
+          type="button"
+          className="flex h-[22px] min-w-[72px] shrink-0 items-center justify-center gap-[6px] text-[14px] font-normal leading-[22px] tracking-[0px] text-[#191919]"
+          aria-expanded={isGuideExpanded}
+          aria-controls="agent-configuration-guide"
+          onClick={() => setGuideExpanded(!isGuideExpanded)}
+        >
+          <span>
+            {t(
+              isGuideExpanded
+                ? "agentConfig.guide.collapse"
+                : "agentConfig.guide.expand"
+            )}
+          </span>
+          {isGuideExpanded ? (
+            <ChevronUp className="size-2" aria-hidden="true" />
+          ) : (
+            <ChevronDown className="size-2" aria-hidden="true" />
+          )}
+        </button>
       </header>
 
       <section className="mt-3 flex min-h-0 w-full flex-1 flex-col">
         <div
+          id="agent-configuration-guide"
           data-testid="agent-guide-background"
           className={
             isGuideExpanded
-              ? "max-h-[1000px] overflow-hidden rounded-2xl p-6 opacity-100 transition-[max-height,opacity,padding] duration-300 ease-in-out [background:linear-gradient(180deg,rgba(236,243,255,1)_0px,rgba(255,255,255,0)_418px),rgba(255,255,255,1)]"
-              : "max-h-0 overflow-hidden p-0 opacity-0 transition-[max-height,opacity,padding] duration-300 ease-in-out"
+              ? "max-h-[2000px] shrink-0 overflow-hidden rounded-2xl p-6 opacity-100 transition-[max-height,opacity,padding] duration-300 ease-in-out [background:linear-gradient(180deg,rgba(236,243,255,1)_0%,rgba(255,255,255,0)_100%),rgba(255,255,255,1)]"
+              : "max-h-0 shrink-0 overflow-hidden p-0 opacity-0 transition-[max-height,opacity,padding] duration-300 ease-in-out"
           }
           aria-hidden={!isGuideExpanded}
         >
-          {isGuideMounted ? (
-            <AgentConfigurationGuide
-              expanded={isGuideExpanded}
-              onToggle={() => setGuideExpanded(false)}
-              showEmptyListDivider={isEmptyAgentList}
-            />
-          ) : null}
+          {isGuideMounted ? <AgentConfigurationGuide /> : null}
         </div>
 
-        <div className="mt-3 flex min-h-0 flex-1 flex-col pb-5">
+        <div className="mt-3 flex min-h-[300px] flex-1 flex-col pb-5">
           {isEmptyAgentList ? (
-            <div className="flex min-h-0 flex-1 items-center justify-center">
+            <div className="relative flex min-h-0 flex-1 items-center justify-center">
+              {isGuideExpanded ? (
+                <div
+                  data-testid="agent-guide-divider"
+                  aria-hidden="true"
+                  className="absolute inset-x-6 top-0 h-px bg-[rgba(25,25,25,0.1)]"
+                />
+              ) : null}
               <Empty
                 image={Empty.PRESENTED_IMAGE_DEFAULT}
                 description={
@@ -409,10 +329,11 @@ export default function AgentsPage() {
               </div>
 
               <div
-                className={`mt-3 min-h-0 flex-1 ${
+                data-testid="agent-list-content"
+                className={`min-h-0 flex-1 ${
                   view === "list"
-                    ? "overflow-hidden"
-                    : "overflow-y-auto overflow-x-hidden pb-5"
+                    ? "mt-3 overflow-hidden"
+                    : "-mx-px mt-[11px] overflow-y-auto overflow-x-hidden px-px pb-5 pt-px"
                 }`}
               >
                 {isLoading ? (

@@ -345,8 +345,8 @@ export default function AgentConfigActions({
           <Button
             type="text"
             size="small"
-            className="size-8 text-slate-400 hover:text-slate-600"
-            icon={<MoreHorizontal className="size-4" />}
+            className="!size-8 !p-0 !text-[#191919]"
+            icon={<MoreHorizontal className="size-3" />}
             aria-label={t("agentRepository.mine.menu.more")}
           />
         </Dropdown>
