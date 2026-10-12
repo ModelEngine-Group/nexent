@@ -1,6 +1,6 @@
 ---
 name: nexent-spec-coding
-description: Run Nexent requirements and bugfixes through SPEC acceptance, traditional UT and applicable D1-D5 test design, product/test implementation, local verification, and delivery evidence. Use for features, fixes, refactors, APIs, UI, and model or Agent runtime changes.
+description: Run Nexent requirements and bugfixes through SPEC acceptance, traditional UT and applicable D1-D5 test design, product/test implementation, local verification, and delivery evidence. Use for features, fixes, refactors and post-development test backfill across APIs, UI, model and Agent behavior.
 ---
 
 # Nexent SPEC Coding
@@ -25,6 +25,7 @@ Develop Nexent from an evidence-backed SPEC while keeping product behavior, form
 | Create or revise `design.md`; design formal D1-D5 cases | [design-template.md](references/design-template.md) and [test-design-guide.md](references/test-design-guide.md) |
 | Create or revise `task.md` | [task-template.md](references/task-template.md) |
 | Plan, execute, or close verification | [verification-guide.md](references/verification-guide.md) |
+| Add missing tests after product code is already complete | `nexent-test-assets`'s [test-backfill.md](../nexent-test-assets/references/test-backfill.md) and [test-design-guide.md](references/test-design-guide.md) |
 
 Use `nexent-test-assets` for the concrete Feature, Case, execution binding, schema, and Excel formats. `proposal.md` owns the current-change acceptance criteria, `design.md` owns design rationale and test strategy, and `task.md` owns the change-level traceability and evidence record.
 
@@ -36,6 +37,8 @@ Distinguish missing requirement documentation, a test baseline unavailable in th
 
 ## Gated workflow
 
+For test-only backfill, use nexent-test-assets' test-backfill route: recover the intended behavior, read actual UT/formal assertions, identify gaps, then implement and verify only missing proof. Do not restart product implementation or require a new full SPEC set. Reuse existing Feature ownership and correct contracts; add a missing Feature for a distinct uncataloged capability. A pure backfill uses changes/test-fixes/, while completing an existing requirement/bug stays in that record. Report a newly discovered product defect rather than silently expanding into a fix.
+
 ### 1. Analyze
 
 Search existing SPECs and choose the maintenance mode. Inspect the relevant code, callers, interfaces, persistence, services, UI, formal test assets, configuration, and runtime paths. Cite concrete paths, symbols, APIs, schemas, and configuration names. Do not implement production code during analysis.
@@ -45,6 +48,8 @@ Search existing SPECs and choose the maintenance mode. Inspect the relevant code
 For requirements, create or update `proposal.md`, `design.md`, and `task.md`. For bugs, use the Bugfix route above. Preserve correct existing Feature and Case contracts; update them only for affected behavior or a confirmed gap. Define observable acceptance criteria and select the necessary proving stages before product implementation. Each new or modified case must have a stable Case ID, owning Feature ID, priority, precise preconditions, steps, expected results, forbidden side effects, and the stage-specific fields required by the repository schemas.
 
 Use the Traditional UT + D1-D5 responsibility matrix in test-design-guide.md. Every acceptance requirement needs an appropriate proving surface, not necessarily a formal Case: UT may prove a unit contract but cannot satisfy an independently required API/runtime/journey/risk boundary. Record UT behavior intentions at design time; establish real test selectors after implementation. Distinguish reuse, strengthen, add and documented irrelevance. Do not fabricate file edits, selectors or five-stage coverage.
+
+Before proposing new D1, read existing UT/formal inputs and assertions and record the remaining behavior gap. Apply nexent-test-assets' case-design.md admission: component contract, real internal collaboration, controlled boundaries, additional evidence, and why D2/D3 is not the intended surface. A Feature may have no D1. Already-proved unit behavior stays in UT; do not duplicate it merely to populate the formal matrix. Retain necessary higher-boundary proof and all existing D1.
 
 Create a requirement change record under `test-e2e/changes/requirements/` or a lightweight bug record under `test-e2e/changes/bugs/`. Put lasting Feature and Case contracts in `test-e2e/features/` and `test-e2e/cases/`, not only in the change record. Run the design-phase validator and regenerate the Excel view. Do not invent final script paths, selectors, implementation hashes, or passing results during design.
 

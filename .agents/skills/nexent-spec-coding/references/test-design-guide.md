@@ -36,6 +36,12 @@ For example, tool invocation D1 proves internal argument/result/error handling; 
 
 No per-stage or per-bug count is required. Existing Cases may be sufficient with zero additions. Use parameterized variants when they prove the same contract; create distinct Case IDs for independent behavior or necessary independent proof. Every added layer needs a specific boundary/risk reason. Do not treat unrelated historical gaps in the functional inventory as this fix's tasks.
 
+## Existing proof before new D1
+
+Read actual relevant UT and formal inputs/assertions before choosing reuse, strengthen or add. In the responsibility matrix Notes (or the backfill proof-gap table), record existing selectors and proved behavior, remaining gaps, selected boundary and additional evidence. Names, files or coverage percentages are not substitutes for this review. Apply nexent-test-assets/references/case-design.md's four D1 admission questions. No Feature requires a D1; sufficient isolated behavior stays in UT without a duplicate formal Case. A required API/runtime/journey/risk boundary still needs its own proof.
+
+For already-developed code, follow nexent-test-assets/references/test-backfill.md rather than inventing design-before-development history. Use existing SPEC/Change notes for scope and evidence; do not regenerate a whole requirement set for pure test backfill. Match tests by business rule, inputs, assertions and boundary. Same behavior at a necessary different boundary can be justified; repeating the same proof under a new Case ID cannot.
+
 ## Case quality rules
 
 - One case proves one concrete behavior or coherent journey outcome.

@@ -14,6 +14,7 @@ Before implementation, record affected feature IDs, business rules, acceptance c
 - If implementation reveals a requirement change, revise the requirement and structured case contract explicitly; never silently weaken assertions.
 - Traditional UT is a permanent product-PR obligation: run relevant UT locally and record actual selectors/results; CI reruns its configured UT set. Maintain success/error/boundary and defect-regression assertions for changed unit behavior. Existing adequate tests may be reused; a non-behavior exemption needs a reason. Missing execution is BLOCKED, not an exemption.
 - UT can prove a unit acceptance requirement but cannot count as formal Case execution or substitute for necessary higher-boundary proof. Report UT separately from D1-D5 and frontend coverage separately from Python coverage.
+- For each newly added D1, verify its real executed collaboration and assertions supply the recorded evidence missing from UT/formal coverage. Compare actual behavior, inputs, assertions and boundary; a valid YAML or green duplicate does not satisfy the admission rationale. Preserve existing D1 and justified cross-layer checks.
 
 ## Choose the proof surface
 

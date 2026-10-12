@@ -13,6 +13,7 @@ This template applies to full requirement/change sets and existing task document
 - [ ] 1.1 Confirm affected feature contracts and business rules; update only changed or missing contracts. [AC-001]
 - [ ] 1.2 Reuse, strengthen or add structured cases at necessary proving stages, with explicit assertions and impact reasons. Zero additions is valid. [AC-001]
 - [ ] 1.2a Assess traditional UT separately: success/boundary/error/regression intentions and reuse/strengthen/add; justify non-behavior exemptions. Preserve existing D1. [AC-001]
+- [ ] 1.2b Read existing UT/formal assertions; record remaining gaps and the distinct-component-proof rationale for each proposed new D1. No D1 additions is valid; do not duplicate UT or omit necessary higher-boundary proof. [AC-001]
 - [ ] 1.3 Run the design-phase unified validator with --require-ut-change for the current product Change and --require-acceptance-case for added/acceptance-modified automated Cases; regenerate Excel before product implementation. [AC-001]
 
 ## 2. Product Implementation
