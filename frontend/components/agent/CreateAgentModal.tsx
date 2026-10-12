@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { App, Form, Input } from "antd";
+import { App, Empty, Form, Input, Spin } from "antd";
 import { ExternalLink } from "lucide-react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
@@ -18,10 +18,7 @@ import {
 } from "@/hooks/agent/useSaveGuard";
 import { updateAgentInfo } from "@/services/agentConfigService";
 
-import {
-  AGENT_CREATION_TEMPLATES,
-  type AgentCreationTemplate,
-} from "./agentCreationTemplates";
+import { useAgentCreationTemplates } from "@/hooks/agent/useAgentCreationTemplates";
 
 export interface CreatedAgentResult {
   agentId: number;
@@ -54,6 +51,8 @@ export default function CreateAgentModal({
     null
   );
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const templatesQuery = useAgentCreationTemplates(open);
+  const templates = templatesQuery.isError ? [] : (templatesQuery.data ?? []);
 
   useEffect(() => {
     if (open) {
@@ -61,7 +60,9 @@ export default function CreateAgentModal({
     }
   }, [form, open]);
 
-  const selectedTemplate = AGENT_CREATION_TEMPLATES.find(
+  if (!open && selectedTemplateId !== null) setSelectedTemplateId(null);
+
+  const selectedTemplate = templates.find(
     (template) => template.id === selectedTemplateId
   );
 
@@ -74,7 +75,7 @@ export default function CreateAgentModal({
 
       const result = await updateAgentInfo({
         display_name: values.displayName.trim(),
-        description: selectedTemplate ? t(selectedTemplate.descriptionKey) : "",
+        description: selectedTemplate?.description ?? "",
         author: user?.email || "",
         max_steps: 15,
         is_main_agent: true,
@@ -111,9 +112,9 @@ export default function CreateAgentModal({
     onCancel();
   };
 
-  const handleTemplateClick = (template: AgentCreationTemplate) => {
+  const handleTemplateClick = (templateId: string) => {
     setSelectedTemplateId((currentId) =>
-      currentId === template.id ? null : template.id
+      currentId === templateId ? null : templateId
     );
   };
 
@@ -207,47 +208,73 @@ export default function CreateAgentModal({
         data-template-list
         className="mt-4 min-h-0 max-h-[368px] flex-1 overflow-x-hidden overflow-y-auto"
       >
-        <div className="grid grid-cols-2 gap-4">
-          {AGENT_CREATION_TEMPLATES.map((template) => {
-            const isSelected = selectedTemplateId === template.id;
+        {templatesQuery.isLoading ? (
+          <div role="status" className="flex justify-center py-8">
+            <Spin aria-label={t("common.loading")} />
+          </div>
+        ) : templatesQuery.isError ? (
+          <div role="alert" className="flex flex-col items-center gap-3 py-6">
+            <span>{t("agentConfig.createModal.templates.loadFailed")}</span>
+            <StandardButton
+              disabled={templatesQuery.isFetching}
+              onClick={() => void templatesQuery.refetch()}
+            >
+              {t("common.retry")}
+            </StandardButton>
+          </div>
+        ) : templates.length === 0 ? (
+          <Empty
+            image={Empty.PRESENTED_IMAGE_SIMPLE}
+            description={t("agentConfig.createModal.templates.empty")}
+          />
+        ) : (
+          <div className="grid grid-cols-2 gap-4">
+            {templates.map((template) => {
+              const isSelected = selectedTemplateId === template.id;
 
-            return (
-              <button
-                key={template.id}
-                type="button"
-                aria-pressed={isSelected}
-                onClick={() => handleTemplateClick(template)}
-                className={`!m-0 flex h-[112px] w-full flex-col items-start justify-start rounded-[8px] border border-solid bg-white p-3 text-left ![letter-spacing:0px] transition-colors ${
-                  isSelected
-                    ? "!border-[#2673e5]"
-                    : "!border-[#c9c9c9] hover:!border-[#2673e5]"
-                }`}
-              >
-                <div className="flex w-full items-center gap-2">
-                  <span
-                    aria-hidden="true"
-                    data-template-icon
-                    className={`mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[10px] leading-none text-white ${template.iconClassName}`}
-                  >
-                    ✦
-                  </span>
-                  <span className="min-w-0 flex-1 truncate text-[14px] font-medium leading-[22px] text-[#191919]">
-                    {t(template.titleKey)}
-                  </span>
-                  <span className="shrink-0 rounded-[4px] bg-[rgba(25,25,25,0.05)] px-1 text-[12px] leading-[18px] text-[#393939]">
-                    {t(template.tagKey)}
-                  </span>
-                </div>
-                <span
-                  data-template-description
-                  className="mt-2 line-clamp-2 w-full text-[12px] leading-[18px] text-[#777]"
+              return (
+                <button
+                  key={template.id}
+                  type="button"
+                  aria-pressed={isSelected}
+                  onClick={() => handleTemplateClick(template.id)}
+                  className={`!m-0 flex h-[112px] w-full flex-col items-start justify-start rounded-[8px] border border-solid bg-white p-3 text-left ![letter-spacing:0px] transition-colors ${
+                    isSelected
+                      ? "!border-[#2673e5]"
+                      : "!border-[#c9c9c9] hover:!border-[#2673e5]"
+                  }`}
                 >
-                  {t(template.descriptionKey)}
-                </span>
-              </button>
-            );
-          })}
-        </div>
+                  <div className="flex w-full items-center gap-2">
+                    <span
+                      aria-hidden="true"
+                      data-template-icon
+                      className={`mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[10px] leading-none text-white bg-[#2673e5]`}
+                    >
+                      ✦
+                    </span>
+                    <span className="min-w-0 flex-1 truncate text-[14px] font-medium leading-[22px] text-[#191919]">
+                      {template.display_name || template.name}
+                    </span>
+                    {template.tags?.[0] ? (
+                      <span
+                        className="max-w-[35%] shrink-0 truncate rounded-[4px] bg-[rgba(25,25,25,0.05)] px-1 text-[12px] leading-[18px] text-[#393939]"
+                        title={template.tags[0]}
+                      >
+                        {template.tags[0]}
+                      </span>
+                    ) : null}
+                  </div>
+                  <span
+                    data-template-description
+                    className="mt-2 line-clamp-2 w-full text-[12px] leading-[18px] text-[#777]"
+                  >
+                    {template.description}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        )}
       </div>
     </StandardModal>
   );

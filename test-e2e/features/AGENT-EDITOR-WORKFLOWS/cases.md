@@ -7,3 +7,4 @@
 - D4 [AGENT-EDITOR-D4-003](../../cases/AGENT-EDITOR-D4-003/case.yaml) · active
 - D4 [AGENT-EDITOR-D4-004](../../cases/AGENT-EDITOR-D4-004/case.yaml) · active
 - D4 [AGENT-EDITOR-D4-005](../../cases/AGENT-EDITOR-D4-005/case.yaml) · active
+- D4 [AGENT-EDITOR-D4-006](../../cases/AGENT-EDITOR-D4-006/case.yaml) · active

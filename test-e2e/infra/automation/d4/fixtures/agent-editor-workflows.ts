@@ -28,6 +28,9 @@ export async function installEditor(page: Page, permission = "EDIT") {
     conflicts: new Set<string>(),
     rejectNextCreation: false,
     successfulCreations: 0,
+    templateAgents: [] as Record<string, unknown>[],
+    rejectNextTemplateRead: false,
+    templateReads: 0,
   };
   const json = (route: Route, data: unknown, status = 200) =>
     route.fulfill({
@@ -43,6 +46,14 @@ export async function installEditor(page: Page, permission = "EDIT") {
       ["content-type"]?.includes("application/json")
       ? request.postDataJSON()
       : undefined;
+    if (endpoint === "/agent/list") {
+      state.templateReads++;
+      if (state.rejectNextTemplateRead) {
+        state.rejectNextTemplateRead = false;
+        return json(route, { detail: "Controlled catalog failure" }, 400);
+      }
+      return json(route, state.templateAgents);
+    }
     if (await fulfillEditorReadFixture(route, endpoint)) return;
     if (endpoint === "/agent/search_info") return json(route, state.draft);
     if (endpoint === "/agent/check_name")
@@ -76,7 +87,7 @@ export async function installEditor(page: Page, permission = "EDIT") {
         items: [],
         pagination: { page: 1, page_size: 20, total: 0, total_pages: 0 },
       });
-    if (endpoint === "/agent/list") return json(route, []);
+
     if (/^\/agent\/\d+\/versions$/.test(endpoint))
       return json(route, { items: [], total: 0 });
     if (endpoint.startsWith("/tag-assignments/"))

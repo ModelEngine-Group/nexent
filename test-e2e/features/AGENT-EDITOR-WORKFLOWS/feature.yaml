@@ -26,6 +26,10 @@ feature:
   - rule_id: AGENT-EDITOR-RULE-005
     description: Read-only configuration remains protected before and after debug
       navigation and reload, while switching modes never writes or runs an Agent.
+  - rule_id: AGENT-EDITOR-RULE-006
+    description: Creation templates come only from the authorized Agent list API.
+      Empty/error states never substitute static templates; retry recovers and a selected
+      Agent description is sent through the existing creation API.
   required_test_stages:
   - D4
   source:
@@ -35,4 +39,5 @@ feature:
     - AGENT-EDITOR-REQ-003
     - AGENT-EDITOR-REQ-004
     - AGENT-EDITOR-REQ-005
+    - AGENT-EDITOR-REQ-006
     spec_path: ../nexent-doc/docs/Developing/agt-pr4058-test-delivery/design.md
