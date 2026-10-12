@@ -1,0 +1,7 @@
+schema_version: '1.0'
+case_id: UT-FE-039
+implementations:
+- framework: vitest
+  file: test.test.tsx
+  selector: UT-FE-039
+notes: V5 source binding migrated; runtime parity is not yet certified.

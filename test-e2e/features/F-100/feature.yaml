@@ -1,0 +1,16 @@
+schema_version: '1.0'
+module:
+  id: V5-BASELINE
+  name: Migrated V5 baseline
+feature:
+  feature_id: F-100
+  name: process submit、partial submit、状态持久化、chunking strategy
+  status: active
+  description: '知识库与文件 / 文件处理: process submit、partial submit、状态持久化、chunking strategy'
+  business_rules:
+  - rule_id: F-100-RULE-01
+    description: process submit、partial submit、状态持久化、chunking strategy
+  required_test_stages:
+  - D3
+  source:
+    notes: Migrated from V5 01_代码功能清单 without changing the functional description.

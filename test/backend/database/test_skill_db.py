@@ -13,11 +13,13 @@ from datetime import datetime
 
 @pytest.fixture(autouse=True)
 def _default_to_ordinary_agent(monkeypatch):
-    """Keep general SkillInstance tests scoped to an ordinary Agent."""
-    monkeypatch.setattr(
-        "backend.database.agent_db.is_system_agent",
-        lambda *_args, **_kwargs: False,
-    )
+    """Isolate the Agent collaborator without importing its database graph."""
+    import backend.database as database_package
+
+    agent_db_mock = types.ModuleType("backend.database.agent_db")
+    agent_db_mock.is_system_agent = MagicMock(return_value=False)
+    monkeypatch.setitem(sys.modules, "backend.database.agent_db", agent_db_mock)
+    monkeypatch.setattr(database_package, "agent_db", agent_db_mock, raising=False)
 
 boto3_mock = MagicMock()
 sys.modules['boto3'] = boto3_mock

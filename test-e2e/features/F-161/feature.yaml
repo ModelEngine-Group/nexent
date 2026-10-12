@@ -1,0 +1,16 @@
+schema_version: '1.0'
+module:
+  id: V5-BASELINE
+  name: Migrated V5 baseline
+feature:
+  feature_id: F-161
+  name: stores/contexts 在 tab/refresh/login change 下的清理与恢复
+  status: active
+  description: '前端与全局UI / 会话状态: stores/contexts 在 tab/refresh/login change 下的清理与恢复'
+  business_rules:
+  - rule_id: F-161-RULE-01
+    description: stores/contexts 在 tab/refresh/login change 下的清理与恢复
+  required_test_stages:
+  - D1
+  source:
+    notes: Migrated from V5 01_代码功能清单 without changing the functional description.

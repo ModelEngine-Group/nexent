@@ -67,7 +67,7 @@ def runtime(service, monkeypatch, mocker):
         with tracer.start_as_current_span("model.generate"):
             return SimpleNamespace(content="Title: " + messages[-1]["content"])
 
-    def persist(*_args):
+    def persist(*_args, **_kwargs):
         with tracer.start_as_current_span("title.persist"):
             return True
 
@@ -78,6 +78,9 @@ def runtime(service, monkeypatch, mocker):
     adapter = mocker.Mock(side_effect=model)
     mocker.patch.object(service, "get_llm_adapter_from_config", return_value=adapter)
     save = mocker.patch.object(service, "rename_conversation", side_effect=persist)
+    mocker.patch.object(service, "get_conversation", return_value={
+        "conversation_title": "New Conversation", "update_time": None,
+    })
 
     def app():
         application = FastAPI()

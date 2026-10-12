@@ -1,0 +1,86 @@
+schema_version: '1.0'
+stage: D1
+module: V5-BASELINE
+case:
+  case_id: UT-SDK-AUTO-FD74C47E39BAE2FC
+  feature_id: F-183
+  business_rule_ids:
+  - F-183-RULE-01
+  title: adaptive 压缩触发/目标/effective 停止条件与 non_history 超限保留 checkpoint｜核心流程
+  type: SDK-UT
+  priority: P0
+  status: active
+  automation: automated
+  objective: adaptive 压缩触发/目标/effective 停止条件与 non_history 超限保留 checkpoint｜核心流程
+  preconditions:
+  - 本地依赖/组件测试环境可运行；不要求外部模型服务在线。
+  - 设置 NEXENT_TEST_HOME，目录不位于 Nexent Git 仓库内。
+  - 当次 run_id 已生成，测试基线固定为 develop 当前批次锁定的产品提交；执行时另记录实际被测 commit。
+  - Python 环境含 smolagents（AgentMemory/ActionStep/TaskStep）、pydantic、jinja2 依赖，可导入 sdk/nexent/core/agents/context/manager.py、config.py
+    与 sdk/nexent/core/models/capacity_budget.py。
+  test_data:
+    legacy_asset_declaration: 无本地文件资产；测试用 fake model 与内存 fixture（smolagents AgentMemory/ActionStep）构造历史压缩候选，不依赖真实模型或网络资产。
+  steps:
+  - order: 1
+    action: 构造 ContextManagerConfig：将 policy_layers 解析到 ContextProcessingMode.ADAPTIVE_COMPACT；设置 effective_input_limit_tokens
+      为正整数，按场景分别设置或省略 compaction_trigger_threshold_tokens、compaction_target_tokens，记录配置解析后的阈值与回退规则。
+    expected: 压缩仅在 ADAPTIVE_COMPACT 模式且 raw_token_estimate 不小于 compaction_trigger_threshold_tokens（或 force_compaction）时触发，evidence.compaction_trigger_threshold_tokens
+      与配置/回退一致，否则不触发压缩。
+  - order: 2
+    action: 构造 smolagents AgentMemory 与 run_context：准备超过压缩触发阈值的 CONVERSATION_TURN 历史项（或 HISTORY_SUMMARY），以及固定的 CURRENT_ACTION/任务项作为
+      non_history 内容；使用返回合法 HistorySummaryCandidate 的 fake model 替换真实 LLM 调用。
+    expected: 停止条件由 target/effective 决定：compaction_stop_reason 属于 history_target_reached、request_target_reached、insufficient_candidate_reduction、invalid_candidate、compaction_attempts_exhausted
+      之一，且与该场景阈值计算一致。
+  - order: 3
+    action: 调用 assemble_final_context 并读取返回 FinalContext.evidence，记录 raw_token_estimate、final_token_estimate、compaction_stop_reason、non_history_tokens、compressible_history_tokens、exceeds_effective_input_limit
+      与各阈值字段。
+    expected: non_history 超限场景：保留最后一个已接受 checkpoint 且不产生无效退化，history_compression_triggered=false、exceeds_effective_input_limit=true，final_items
+      中历史项未被压缩覆盖。
+  - order: 4
+    action: 场景A（可压缩历史）：配置 non_history_tokens 小于 compaction_target_tokens，断言触发历史压缩且 history_target 以 target 为基准，压缩后以 target
+      或 effective 为停止边界。
+    expected: evidence 关键字段与输入规模一致：non_history_tokens=max(0, raw−历史 tokens)、compressible_history_tokens=历史 tokens，exceeds_effective_input_limit
+      与 final_token_estimate 相对 effective_input_limit_tokens 的关系正确。
+  - order: 5
+    action: 场景B（non_history 已超限）：配置 non_history_tokens 不小于 effective_input_limit_tokens 且存在历史项，断言进入“保留最后 checkpoint 交 Provider”分支：不试图压缩、compaction_stop_reason=history_target_reached、history_compression_triggered=false、final_token_estimate
+      仍超 effective limit 且 exceeds_effective_input_limit=true，历史项未被压缩覆盖。
+    expected: 全过程无未处理异常，日志/Trace/报告中不出现明文 API Key/Token/Password/模型密钥。
+  - order: 6
+    action: 场景C（target/effective 边界）：non_history_tokens 介于 compaction_target 与 effective_input_limit 之间时，断言 history_target=max(0,
+      effective_input_limit_tokens−non_history_tokens)，压缩以 candidate token 不超过 history_target 为停止条件。
+    expected: 全过程无未处理异常，日志/Trace/报告中不出现明文 API Key/Token/Password/模型密钥。
+  - order: 7
+    action: 阈值回退：compaction_trigger_threshold_tokens 为空时回退 token_threshold，compaction_target_tokens 为空时回退 max(1, floor(trigger*0.75))，断言
+      evidence.compaction_trigger_threshold_tokens 与 compaction_target_tokens 同回退值一致。
+    expected: 全过程无未处理异常，日志/Trace/报告中不出现明文 API Key/Token/Password/模型密钥。
+  - order: 8
+    action: 检查日志与临时对象：确认日志不输出 API Key/Token/密码，测试结束释放 fake model 与内存 fixture，确保可重复执行。
+    expected: 全过程无未处理异常，日志/Trace/报告中不出现明文 API Key/Token/Password/模型密钥。
+  expected_results:
+  - 压缩仅在 ADAPTIVE_COMPACT 模式且 raw_token_estimate 不小于 compaction_trigger_threshold_tokens（或 force_compaction）时触发，evidence.compaction_trigger_threshold_tokens
+    与配置/回退一致，否则不触发压缩。
+  - 停止条件由 target/effective 决定：compaction_stop_reason 属于 history_target_reached、request_target_reached、insufficient_candidate_reduction、invalid_candidate、compaction_attempts_exhausted
+    之一，且与该场景阈值计算一致。
+  - non_history 超限场景：保留最后一个已接受 checkpoint 且不产生无效退化，history_compression_triggered=false、exceeds_effective_input_limit=true，final_items
+    中历史项未被压缩覆盖。
+  - evidence 关键字段与输入规模一致：non_history_tokens=max(0, raw−历史 tokens)、compressible_history_tokens=历史 tokens，exceeds_effective_input_limit
+    与 final_token_estimate 相对 effective_input_limit_tokens 的关系正确。
+  - 全过程无未处理异常，日志/Trace/报告中不出现明文 API Key/Token/Password/模型密钥。
+  forbidden_side_effects: []
+  source:
+    legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
+    legacy_sheet: 02_测试用例基线
+    legacy_row: 484
+  unit_boundary: 上下文预算
+  inputs:
+  - 无本地文件资产；测试用 fake model 与内存 fixture（smolagents AgentMemory/ActionStep）构造历史压缩候选，不依赖真实模型或网络资产。
+  assertions:
+  - 压缩仅在 ADAPTIVE_COMPACT 模式且 raw_token_estimate 不小于 compaction_trigger_threshold_tokens（或 force_compaction）时触发，evidence.compaction_trigger_threshold_tokens
+    与配置/回退一致，否则不触发压缩。
+  - 停止条件由 target/effective 决定：compaction_stop_reason 属于 history_target_reached、request_target_reached、insufficient_candidate_reduction、invalid_candidate、compaction_attempts_exhausted
+    之一，且与该场景阈值计算一致。
+  - non_history 超限场景：保留最后一个已接受 checkpoint 且不产生无效退化，history_compression_triggered=false、exceeds_effective_input_limit=true，final_items
+    中历史项未被压缩覆盖。
+  - evidence 关键字段与输入规模一致：non_history_tokens=max(0, raw−历史 tokens)、compressible_history_tokens=历史 tokens，exceeds_effective_input_limit
+    与 final_token_estimate 相对 effective_input_limit_tokens 的关系正确。
+  - 全过程无未处理异常，日志/Trace/报告中不出现明文 API Key/Token/Password/模型密钥。

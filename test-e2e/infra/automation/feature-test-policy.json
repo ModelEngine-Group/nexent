@@ -1,0 +1,13 @@
+{
+  "schema_version": 1,
+  "required_features": {
+    "aidp_knowledge": [
+      "API-AUTO-22F6CB69A36D094D",
+      "API-AUTO-3B8A8FB947806F0E",
+      "API-AUTO-0210A73052FA9CE0",
+      "API-AUTO-FECE331C989B771F",
+      "AGT-AUTO-7A2120E630C381C7",
+      "API-AUTO-7513FEF9904B9F3F"
+    ]
+  }
+}

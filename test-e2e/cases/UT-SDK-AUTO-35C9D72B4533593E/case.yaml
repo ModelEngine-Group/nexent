@@ -1,0 +1,76 @@
+schema_version: '1.0'
+stage: D1
+module: V5-BASELINE
+case:
+  case_id: UT-SDK-AUTO-35C9D72B4533593E
+  feature_id: F-171
+  business_rule_ids:
+  - F-171-RULE-01
+  title: WARNING 进程类型(步骤失败/上传失败/外部停止)、ANSI 剥离与 ParseTransformer 简化输出｜核心流程
+  type: SDK-UT
+  priority: P1
+  status: active
+  automation: automated
+  objective: WARNING 进程类型(步骤失败/上传失败/外部停止)、ANSI 剥离与 ParseTransformer 简化输出｜核心流程
+  preconditions:
+  - 本地依赖/组件测试环境可运行；不要求外部模型服务在线。
+  - 设置 NEXENT_TEST_HOME，目录不位于 Nexent Git 仓库内。
+  - 当次 run_id 已生成，所有新建资源名称带 run_id；测试基线固定为 develop 当前批次锁定的产品提交；执行时另记录实际被测commit。
+  - 可直接导入 sdk/nexent/core/utils/observer.py 的 ProcessType/MessageObserver/Message/ParseTransformer 与 sdk/nexent/core/agents/nexent_agent.py
+    中的调用链，无需外部服务或本地文件资产。
+  test_data:
+    legacy_asset_declaration: '- 无额外本地文件资产；测试在进程内构造 MessageObserver 实例与含 ANSI 转义序列的字符串 fixture（如 "\x1b[31m红字\x1b[0m"、OSC 序列
+      "\x1b]8;;http://x\x1b\\"）。'
+  steps:
+  - order: 1
+    action: 直接导入 sdk/nexent/core/utils/observer.py 的 ProcessType、MessageObserver、Message、ParseTransformer。
+    expected: ProcessType.WARNING.value == "warning"，且 WARNING 已在 MessageObserver.transformers 中注册。
+  - order: 2
+    action: 断言 ProcessType.WARNING 存在且 ProcessType.WARNING.value == "warning"，且 MessageObserver().transformers 中 WARNING 键映射到
+      DefaultTransformer。
+    expected: add_message(WARNING, ...) 产出的消息 JSON 中 type 字段为 "warning"，content 与期望文本一致。
+  - order: 3
+    action: 实例化 MessageObserver，调用 add_message("", ProcessType.WARNING, "step failed")，通过 get_cached_message() 读取返回字符串并用 json.loads
+      解析，断言 type 字段为 "warning" 且 content 为原文。
+    expected: 含 ANSI SGR/OSC 控制序列的内容经 add_message 后被全部剥离，输出中不再包含 ESC("\x1b") 控制字符。
+  - order: 4
+    action: 构造含 ANSI 控制序列的 content（SGR 如 "\x1b[31m红字\x1b[0m" 与 OSC 如 "\x1b]8;;http://x\x1b\\"），经 add_message 后断言 content 中不再含有
+      ESC("\x1b") 控制序列。
+    expected: 步骤失败、外部停止、上传失败三类场景均输出 type=="warning"，不再降格为 type=="error"。
+  - order: 5
+    action: 分别演练三个由 ERROR 升级为 WARNING 的语义调用链：步骤失败（模拟 step_log.error 非空时以 str(error) 调用）、外部停止（stop_event 置位时调用）、上传失败（upload
+      异常时调用），断言三者均 emit type=="warning" 且不再出现 type=="error"。
+    expected: ParseTransformer.transform 原样返回传入 content，无语义损失与额外包装。
+  - order: 6
+    action: 直接调用 ParseTransformer().transform(content="<code>1+1</code>")，断言返回值为原字符串本身，无额外模板包装或前后缀。
+    expected: 真正致命异常（interaction 抛错）仍输出 type=="error"，不会被误降级。
+  - order: 7
+    action: 对真正致命错误路径（如 interaction 抛错）断言仍使用 ProcessType.ERROR 输出 type=="error"，未被降级。
+    expected: 测试全程无未处理异常，message_query 输出中不出现明文 API Key/Token/Password。
+  - order: 8
+    action: 测试结束后释放在内存中构造的临时对象，确保用例可重复执行。
+    expected: 测试全程无未处理异常，message_query 输出中不出现明文 API Key/Token/Password。
+  expected_results:
+  - ProcessType.WARNING.value == "warning"，且 WARNING 已在 MessageObserver.transformers 中注册。
+  - add_message(WARNING, ...) 产出的消息 JSON 中 type 字段为 "warning"，content 与期望文本一致。
+  - 含 ANSI SGR/OSC 控制序列的内容经 add_message 后被全部剥离，输出中不再包含 ESC("\x1b") 控制字符。
+  - 步骤失败、外部停止、上传失败三类场景均输出 type=="warning"，不再降格为 type=="error"。
+  - ParseTransformer.transform 原样返回传入 content，无语义损失与额外包装。
+  - 真正致命异常（interaction 抛错）仍输出 type=="error"，不会被误降级。
+  - 测试全程无未处理异常，message_query 输出中不出现明文 API Key/Token/Password。
+  forbidden_side_effects: []
+  source:
+    legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
+    legacy_sheet: 02_测试用例基线
+    legacy_row: 461
+  unit_boundary: 流式消息 Observer
+  inputs:
+  - '- 无额外本地文件资产；测试在进程内构造 MessageObserver 实例与含 ANSI 转义序列的字符串 fixture（如 "\x1b[31m红字\x1b[0m"、OSC 序列 "\x1b]8;;http://x\x1b\\"）。'
+  assertions:
+  - ProcessType.WARNING.value == "warning"，且 WARNING 已在 MessageObserver.transformers 中注册。
+  - add_message(WARNING, ...) 产出的消息 JSON 中 type 字段为 "warning"，content 与期望文本一致。
+  - 含 ANSI SGR/OSC 控制序列的内容经 add_message 后被全部剥离，输出中不再包含 ESC("\x1b") 控制字符。
+  - 步骤失败、外部停止、上传失败三类场景均输出 type=="warning"，不再降格为 type=="error"。
+  - ParseTransformer.transform 原样返回传入 content，无语义损失与额外包装。
+  - 真正致命异常（interaction 抛错）仍输出 type=="error"，不会被误降级。
+  - 测试全程无未处理异常，message_query 输出中不出现明文 API Key/Token/Password。
