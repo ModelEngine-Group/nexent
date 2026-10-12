@@ -49,6 +49,7 @@ import AidpResizableTitle, {
 import AidpKnowledgeGuide from "@/ext_components/aidp/pages/knowledge-list/AidpKnowledgeGuide";
 import AidpPagination from "@/ext_components/aidp/shared/components/AidpPagination";
 import { aidpKnowledgeVisualTheme } from "@/ext_components/aidp/shared/styles/aidpKnowledgeVisualTheme";
+import typography from "@/ext_components/aidp/shared/styles/aidpKnowledgeTypography.module.css";
 import styles from "./AidpKnowledgeList.module.css";
 import { useAidpColumnWidths } from "./hooks/useAidpColumnWidths";
 import type { AidpKbColumnKey, AidpKbViewMode } from "./types";
@@ -536,7 +537,7 @@ const AidpKnowledgeList: React.FC<AidpKnowledgeListProps> = ({
   return (
     <ConfigProvider theme={aidpKnowledgeVisualTheme}>
       <div
-        className={`${styles.overview} flex h-full min-h-0 w-full flex-col gap-3`}
+        className={`${typography.page} ${styles.overview} flex h-full min-h-0 w-full flex-col gap-3`}
       >
         <AidpKnowledgeGuide />
         <section

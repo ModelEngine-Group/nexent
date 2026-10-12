@@ -10,7 +10,15 @@ import React, {
 import { useTranslation } from "react-i18next";
 import { useParams, useRouter } from "next/navigation";
 
-import { Alert, App, Button, Breadcrumb, Form, Space } from "antd";
+import {
+  Alert,
+  App,
+  Button,
+  Breadcrumb,
+  ConfigProvider,
+  Form,
+  Space,
+} from "antd";
 
 import type { AidpGraphConfig } from "@/ext_components/aidp/shared/types/management";
 import { useDeployment } from "@/components/providers/deploymentProvider";
@@ -31,6 +39,8 @@ import {
 
 import AidpCreateKbSections from "@/ext_components/aidp/pages/knowledge-create/AidpCreateKbSections";
 import styles from "@/ext_components/aidp/pages/knowledge-create/AidpCreateKbSections.module.css";
+import typography from "@/ext_components/aidp/shared/styles/aidpKnowledgeTypography.module.css";
+import { aidpKnowledgeTypographyTheme } from "@/ext_components/aidp/shared/styles/aidpKnowledgeVisualTheme";
 
 /**
  * Default AIDP knowledge base configuration.
@@ -303,8 +313,10 @@ const AidpCreateKbPage: React.FC = () => {
     }
   };
 
-  return (
-    <div className="relative flex h-full min-h-0 w-full flex-col">
+  const pageContent = (
+    <div
+      className={`${typography.page} relative flex h-full min-h-0 w-full flex-col`}
+    >
       <header className="shrink-0 px-6 pt-4">
         <Breadcrumb
           items={[
@@ -314,7 +326,7 @@ const AidpCreateKbPage: React.FC = () => {
                   type="button"
                   disabled={loading}
                   onClick={goBackToList}
-                  className="!text-lg !leading-7 text-gray-500 hover:text-blue-500 disabled:cursor-not-allowed"
+                  className={`${typography.breadcrumbLink} disabled:cursor-not-allowed`}
                 >
                   {t("aidpKnowledge.breadcrumbKnowledgeBase")}
                 </button>
@@ -322,7 +334,7 @@ const AidpCreateKbPage: React.FC = () => {
             },
             {
               title: (
-                <span className="!text-lg !font-semibold !leading-7 text-gray-800">
+                <span className={typography.pageTitle}>
                   {t("aidpKnowledge.createPageTitle")}
                 </span>
               ),
@@ -420,11 +432,19 @@ const AidpCreateKbPage: React.FC = () => {
         </Space>
       </footer>
       {loading && (
-        <div className="absolute bottom-[4.5rem] left-1/2 -translate-x-1/2 rounded bg-white px-3 py-1 text-xs text-gray-500 shadow">
+        <div
+          className={`${typography.muted} absolute bottom-[4.5rem] left-1/2 -translate-x-1/2 rounded bg-white px-3 py-1 text-xs leading-5 shadow`}
+        >
           {t("aidpKnowledge.createSubmitting")}
         </div>
       )}
     </div>
+  );
+
+  return (
+    <ConfigProvider theme={aidpKnowledgeTypographyTheme}>
+      {pageContent}
+    </ConfigProvider>
   );
 };
 

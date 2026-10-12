@@ -9,15 +9,15 @@
 .guideHeader h1 {
   margin: 0;
   color: var(--aidp-text);
-  font-size: 18px;
-  font-weight: 500;
-  line-height: 26px;
+  font-size: var(--aidp-title-size);
+  font-weight: 600;
+  line-height: var(--aidp-title-line-height);
 }
 
 .guideToggle {
   padding-inline: 0;
   color: var(--aidp-secondary);
-  font-size: 14px;
+  font-size: var(--aidp-body-size);
 }
 
 .guideBody {
@@ -40,16 +40,16 @@
 .guideBody h2 {
   margin: 0;
   color: var(--aidp-text);
-  font-size: 16px;
+  font-size: var(--aidp-heading-size);
   font-weight: 500;
-  line-height: 24px;
+  line-height: var(--aidp-heading-line-height);
 }
 
 .guideIntro {
   margin: 12px 0 0;
   color: var(--aidp-text);
-  font-size: 14px;
-  line-height: 22px;
+  font-size: var(--aidp-body-size);
+  line-height: var(--aidp-body-line-height);
 }
 
 .guideBenefits {
@@ -57,9 +57,9 @@
   gap: 4px;
   margin: 8px 0 0;
   padding-inline-start: 22px;
-  color: var(--aidp-muted);
-  font-size: 14px;
-  line-height: 22px;
+  color: var(--aidp-secondary);
+  font-size: var(--aidp-body-size);
+  line-height: var(--aidp-body-line-height);
 }
 
 .guideSteps {
@@ -108,32 +108,22 @@
 
 .guideStep h3 {
   margin: 0;
-  font-size: 18px;
+  font-size: var(--aidp-heading-size);
   font-weight: 500;
-  line-height: 26px;
+  line-height: var(--aidp-heading-line-height);
   color: var(--aidp-text);
 }
 
 .guideStep p {
   margin: 0;
-  font-size: 14px;
-  line-height: 22px;
-  color: var(--aidp-muted);
+  font-size: var(--aidp-body-size);
+  line-height: var(--aidp-body-line-height);
+  color: var(--aidp-secondary);
 }
 
 @container (min-width: 640px) and (max-width: 1000px) {
   .guideStep {
     gap: 12px;
     padding: 16px;
-  }
-
-  .guideStep h3 {
-    font-size: 16px;
-    line-height: 24px;
-  }
-
-  .guideStep p {
-    font-size: 12px;
-    line-height: 20px;
   }
 }

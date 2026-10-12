@@ -19,6 +19,7 @@ import { AIDP_KNOWLEDGE_BASE_NAME_PATTERN } from "@/ext_components/aidp/shared/c
 import { AidpKnowledgeBasePermissionFields } from "@/ext_components/aidp/shared/components/AidpKnowledgeBaseModalParts";
 import AidpSliderNumberField from "@/ext_components/aidp/pages/knowledge-create/AidpSliderNumberField";
 import styles from "@/ext_components/aidp/pages/knowledge-create/AidpCreateKbSections.module.css";
+import typography from "@/ext_components/aidp/shared/styles/aidpKnowledgeTypography.module.css";
 import type { AidpGroupOption } from "@/ext_components/aidp/shared/hooks/useAidpGroupOptions";
 import type { AidpModelOption } from "@/ext_components/aidp/pages/knowledge-create/types";
 import type { AidpGraphTemplate } from "@/ext_components/aidp/shared/types/graph";
@@ -128,7 +129,7 @@ const AidpCreateKbSections: React.FC<AidpCreateKbSectionsProps> = ({
       {hint && (
         <Tooltip title={hint}>
           <QuestionCircleOutlined
-            className="cursor-help text-gray-400"
+            className={`${typography.muted} cursor-help`}
             aria-label={hint}
           />
         </Tooltip>
@@ -150,7 +151,7 @@ const AidpCreateKbSections: React.FC<AidpCreateKbSectionsProps> = ({
         <div className={styles.sectionHeadingTitle}>
           <button
             type="button"
-            className="flex h-9 items-center gap-2 rounded px-1 text-left text-lg font-semibold leading-7 text-gray-800 hover:bg-gray-50"
+            className={`${typography.sectionTitle} flex h-9 items-center gap-2 rounded px-1 text-left hover:bg-gray-50`}
             aria-expanded={isExpanded}
             aria-controls={panelId}
             aria-label={
@@ -168,7 +169,7 @@ const AidpCreateKbSections: React.FC<AidpCreateKbSectionsProps> = ({
           {hint && (
             <Tooltip title={hint}>
               <QuestionCircleOutlined
-                className="cursor-help text-gray-400"
+                className={`${typography.muted} cursor-help`}
                 aria-label={hint}
               />
             </Tooltip>
@@ -199,7 +200,7 @@ const AidpCreateKbSections: React.FC<AidpCreateKbSectionsProps> = ({
       />
 
       <section className={`${styles.formSection} ${styles.basicSection}`}>
-        <h3 className="mb-4 text-lg font-semibold leading-7 text-gray-800">
+        <h3 className={`${typography.sectionTitle} mb-4`}>
           {t("aidpKnowledge.createSectionBasic")}
         </h3>
         <div className={styles.formGrid}>
@@ -245,7 +246,9 @@ const AidpCreateKbSections: React.FC<AidpCreateKbSectionsProps> = ({
           </Form.Item>
           {canConfigureGroupPermissions && (
             <>
-              <div className="mb-2 mt-1 text-xs font-medium text-gray-500 md:col-span-2">
+              <div
+                className={`${typography.muted} mb-2 mt-1 text-xs leading-5 md:col-span-2`}
+              >
                 {t("aidpKnowledge.createSectionPermission")}
               </div>
               <AidpKnowledgeBasePermissionFields
@@ -479,12 +482,8 @@ const AidpCreateKbSections: React.FC<AidpCreateKbSectionsProps> = ({
                       className={`${styles.chunkOption} ${chunkMode === 0 ? styles.chunkOptionSelected : styles.chunkOptionUnselected}`}
                     >
                       <span className={styles.chunkOptionContent}>
-                        <span className="font-medium text-gray-800">
-                          {t("aidpKnowledge.createChunkModeSmart")}
-                        </span>
-                        <span
-                          className={`${styles.chunkOptionHint} text-xs leading-5 text-gray-500`}
-                        >
+                        <span>{t("aidpKnowledge.createChunkModeSmart")}</span>
+                        <span className={styles.chunkOptionHint}>
                           {t("aidpKnowledge.createChunkModeSmartHint")}
                         </span>
                       </span>
@@ -494,12 +493,8 @@ const AidpCreateKbSections: React.FC<AidpCreateKbSectionsProps> = ({
                       className={`${styles.chunkOption} ${chunkMode === 1 ? styles.chunkOptionSelected : styles.chunkOptionUnselected}`}
                     >
                       <span className={styles.chunkOptionContent}>
-                        <span className="font-medium text-gray-800">
-                          {t("aidpKnowledge.createChunkModeLegal")}
-                        </span>
-                        <span
-                          className={`${styles.chunkOptionHint} text-xs leading-5 text-gray-500`}
-                        >
+                        <span>{t("aidpKnowledge.createChunkModeLegal")}</span>
+                        <span className={styles.chunkOptionHint}>
                           {t("aidpKnowledge.createChunkModeLegalHint")}
                         </span>
                       </span>
@@ -620,7 +615,7 @@ const AidpCreateKbSections: React.FC<AidpCreateKbSectionsProps> = ({
                   <span>{t("aidpKnowledge.createVlmModel")}</span>
                   <Tooltip title={t("aidpKnowledge.createCaptionEnableHint")}>
                     <QuestionCircleOutlined
-                      className="cursor-help text-gray-400"
+                      className={`${typography.muted} cursor-help`}
                       aria-label={t("aidpKnowledge.createCaptionEnableHint")}
                     />
                   </Tooltip>

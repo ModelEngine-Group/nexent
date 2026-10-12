@@ -1,6 +1,6 @@
 .createForm {
   width: 100%;
-  color: #191919;
+  color: var(--aidp-text);
 }
 
 .createForm [hidden] {
@@ -14,9 +14,9 @@
   border: 0;
   border-radius: 8px;
   background: #eef3fe;
-  color: #191919;
-  font-size: 14px;
-  line-height: 22px;
+  color: var(--aidp-text);
+  font-size: var(--aidp-body-size);
+  line-height: var(--aidp-body-line-height);
 }
 
 .infoBanner :global(.ant-alert-content) {
@@ -76,19 +76,20 @@
 
 .defaultsHint {
   margin: -8px 0 16px;
-  color: #8c8c8c;
-  font-size: 12px;
-  line-height: 20px;
+  color: var(--aidp-muted);
+  font-size: var(--aidp-caption-size);
+  line-height: var(--aidp-caption-line-height);
 }
 
 .formLabel {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  line-height: 20px;
+  line-height: var(--aidp-body-line-height);
 }
 
 .createForm :global(.anticon-question-circle) {
+  color: var(--aidp-muted);
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -107,9 +108,9 @@
 .createForm :global(.ant-form-item-label > label) {
   min-height: 40px;
   align-items: flex-end;
-  color: #191919;
-  font-size: 14px;
-  line-height: 20px;
+  color: var(--aidp-text);
+  font-size: var(--aidp-body-size);
+  line-height: var(--aidp-body-line-height);
 }
 
 .createForm :global(.ant-form-item-control-input) {
@@ -154,7 +155,7 @@
   padding: 16px !important;
   border: 1px solid #d9d9d9;
   border-radius: 8px;
-  color: #191919;
+  color: var(--aidp-text);
   white-space: normal;
 }
 
@@ -196,16 +197,16 @@
 }
 
 .chunkOptionContent > span:first-child {
-  color: #191919;
-  font-size: 14px;
+  color: var(--aidp-text);
+  font-size: var(--aidp-body-size);
   font-weight: 500;
-  line-height: 20px;
+  line-height: var(--aidp-body-line-height);
 }
 
 .chunkOptionHint {
-  color: #595959;
-  font-size: 12px;
-  line-height: 20px;
+  color: var(--aidp-secondary);
+  font-size: var(--aidp-caption-size);
+  line-height: var(--aidp-caption-line-height);
   text-wrap: balance;
 }
 
@@ -232,9 +233,9 @@
   display: flex;
   justify-content: space-between;
   padding: 0 6px;
-  color: #8c8c8c;
-  font-size: 12px;
-  line-height: 20px;
+  color: var(--aidp-muted);
+  font-size: var(--aidp-caption-size);
+  line-height: var(--aidp-caption-line-height);
 }
 
 .sliderValueInput {
@@ -248,17 +249,17 @@
 .sliderUnit {
   width: 24px;
   flex: none;
-  color: #595959;
-  font-size: 12px;
+  color: var(--aidp-secondary);
+  font-size: var(--aidp-caption-size);
   text-align: right;
 }
 
 .vlmLabelRow {
   display: flex;
-  min-height: 20px;
+  min-height: 22px;
   align-items: center;
   gap: 8px;
-  line-height: 20px;
+  line-height: var(--aidp-body-line-height);
 }
 
 .createFooter {

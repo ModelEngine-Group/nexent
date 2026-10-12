@@ -1,8 +1,5 @@
 .overview {
   --aidp-primary: #0067d1;
-  --aidp-text: #191919;
-  --aidp-secondary: rgba(25, 25, 25, 0.7);
-  --aidp-muted: #777777;
   --aidp-outline: rgba(201, 201, 201, 0.4);
   color: var(--aidp-text);
 }
@@ -136,7 +133,7 @@
   display: flex;
   flex-direction: column;
   justify-content: space-between;
-  gap: 10px;
+  gap: 8px;
   height: 148px;
   min-width: 0;
   padding: 16px 24px;
@@ -187,9 +184,9 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: 16px;
+  font-size: var(--aidp-heading-size);
   font-weight: 500;
-  line-height: 24px;
+  line-height: var(--aidp-heading-line-height);
   color: var(--aidp-text);
 }
 
@@ -208,10 +205,10 @@
   -webkit-line-clamp: 2;
   overflow: hidden;
   margin: 0;
-  height: 42px;
-  font-size: 12px;
+  height: 44px;
+  font-size: var(--aidp-body-size);
   font-weight: 400;
-  line-height: 20px;
+  line-height: var(--aidp-body-line-height);
   color: var(--aidp-secondary);
 }
 
@@ -220,10 +217,10 @@
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  height: 18px;
-  font-size: 12px;
-  line-height: 18px;
-  color: var(--aidp-secondary);
+  height: 20px;
+  font-size: var(--aidp-caption-size);
+  line-height: var(--aidp-caption-line-height);
+  color: var(--aidp-muted);
 }
 
 .cardMetadata > span {
@@ -275,17 +272,17 @@
 .knowledgeTable :global(.ant-table-thead > tr > th) {
   height: 40px;
   padding: 8px !important;
-  font-size: 14px;
+  font-size: var(--aidp-body-size);
   font-weight: 500;
-  line-height: 22px;
+  line-height: var(--aidp-body-line-height);
   border-bottom: 1px solid #f3f3f3;
 }
 
 .knowledgeTable :global(.ant-table-tbody > tr > td) {
   height: 40px;
   padding: 4px 8px !important;
-  font-size: 14px;
-  line-height: 22px;
+  font-size: var(--aidp-body-size);
+  line-height: var(--aidp-body-line-height);
   border-bottom: 1px solid #f3f3f3;
 }
 
@@ -341,6 +338,6 @@
 .tableActions :global(.ant-btn) {
   height: 24px;
   padding: 0;
-  line-height: 22px;
-  font-size: 14px;
+  line-height: var(--aidp-body-line-height);
+  font-size: var(--aidp-body-size);
 }

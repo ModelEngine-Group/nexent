@@ -1,16 +1,23 @@
 import type { ThemeConfig } from "antd";
 
+/** Text tokens shared by the AIDP list and creation pages. */
+export const aidpKnowledgeTypographyTheme: ThemeConfig = {
+  token: {
+    colorText: "#191919",
+    colorTextSecondary: "#595959",
+    colorTextPlaceholder: "#aeaeae",
+    fontSize: 14,
+  },
+};
+
 /** UCD colors scoped to the AIDP overview and its shared pagination. */
 export const aidpKnowledgeVisualTheme: ThemeConfig = {
   token: {
+    ...aidpKnowledgeTypographyTheme.token,
     colorPrimary: "#0067d1",
-    colorText: "#191919",
-    colorTextSecondary: "#777777",
-    colorTextPlaceholder: "#aeaeae",
     colorBorder: "#c9c9c9",
     borderRadius: 4,
     controlHeight: 32,
-    fontSize: 14,
   },
   components: {
     Segmented: {
