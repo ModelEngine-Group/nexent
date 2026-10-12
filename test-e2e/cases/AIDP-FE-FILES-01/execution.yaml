@@ -1,0 +1,21 @@
+schema_version: '1.0'
+case_id: AIDP-FE-FILES-01
+implementations:
+- framework: vitest
+  file: test.test.tsx
+  selector: AIDP-FE-FILES-01
+acceptance_bindings:
+  AC-01:
+  - AIDP-FE-FILES-01 > global counts survive search, empty results and pagination
+  AC-02:
+  - AIDP-FE-FILES-01 > query business-code failure is visible instead of an empty
+    file list
+  - AIDP-FE-FILES-01 > query upstream-message failure is visible instead of an empty
+    file list
+  AC-03:
+  - AIDP-FE-FILES-01 > polling updates counts and import refresh waits for drawer
+    close
+  AC-04:
+  - AIDP-FE-FILES-01 > file deletion success respects cancellation and refreshes the
+    count
+  - AIDP-FE-FILES-01 > file deletion failure keeps the file and rejects confirmation
