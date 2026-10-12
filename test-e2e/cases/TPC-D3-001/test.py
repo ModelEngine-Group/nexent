@@ -14,7 +14,12 @@ import requests
 CODE = '<code>skill_content = read_skill_md(skill_name="tpc-quality-check")\nprint(skill_content)</code>'
 FINAL = 'TPC_SKILL_READ_OK'
 SKILL_MARKER = 'TPC_REAL_SKILL_CONTENT'
-PREFIXES = ['</think>', '<think>unfinished thought', '<think>reasoning</think> Read the guide now.']
+PREFIXES = [
+    'Read the guide first.\n', '<think>Read the guide.</think>\n',
+    '<think>Read the guide.</think>First load the skill.\n', 'Read the guide.</think>\n',
+    '<think>Read the guide.\n', '<think>One.</think><think>Two.</think>\n',
+    '<think>One.<think>Two.</think></think>\n',
+]
 
 
 def config():
@@ -50,10 +55,13 @@ def units(history):
             if isinstance(message.get('message'), list) for unit in message['message']]
 
 
-@pytest.mark.parametrize('prefix,repairs', [(prefix, 0) for prefix in PREFIXES] + [(PREFIXES[0], 2)])
-def test_tpc_d3_001_skill_executes_once_and_history_matches(prefix, repairs, tmp_path):
+@pytest.mark.parametrize('prefix', PREFIXES)
+@pytest.mark.parametrize('repairs', [0, 2])
+@pytest.mark.parametrize('legacy', [False, True])
+def test_tpc_d3_001_skill_executes_once_and_history_matches(prefix, repairs, legacy, tmp_path):
     cfg = config()
-    responses = ['<code>broken(</code>'] * repairs + [prefix + CODE, '</think><final_answer>' + FINAL + '</final_answer>']
+    action = '```<run>\n' + CODE.removeprefix('<code>').removesuffix('</code>') + '\n```' if legacy else CODE
+    responses = ['<code>broken(</code>'] * repairs + [prefix + action, '</think><final_answer>' + FINAL + '</final_answer>']
     request(cfg, 'POST', '/__control', {'responses': responses}, provider=True)
     cid = request(cfg, 'PUT', '/conversation/create', {'title': 'TPC skill execution regression'})['data']['conversation_id']
     try:
@@ -63,8 +71,8 @@ def test_tpc_d3_001_skill_executes_once_and_history_matches(prefix, repairs, tmp
         stats = request(cfg, 'GET', '/__stats', provider=True)
         evidence = Path(os.environ.get('NEXENT_TEST_ARTIFACT_DIR', tmp_path))
         evidence.mkdir(parents=True, exist_ok=True)
-        (evidence / f'tpc-{PREFIXES.index(prefix)}-{repairs}.json').write_text(json.dumps({
-            'case_id': 'TPC-D3-001', 'conversation_id': cid, 'prefix': prefix, 'repairs': repairs,
+        (evidence / f'tpc-{PREFIXES.index(prefix)}-{repairs}-{int(legacy)}.json').write_text(json.dumps({
+            'case_id': 'TPC-D3-001', 'conversation_id': cid, 'prefix': prefix, 'repairs': repairs, 'legacy': legacy,
             'events': events, 'history': history, 'provider': stats,
         }, ensure_ascii=False, indent=2))
         for sequence in (events, persisted):
@@ -79,10 +87,15 @@ def test_tpc_d3_001_skill_executes_once_and_history_matches(prefix, repairs, tmp
         request(cfg, 'POST', '/__control', {'responses': ['<final_answer>TPC ready</final_answer>']}, provider=True)
 
 
-def test_tpc_d3_001_marked_exhaustion_never_executes_or_finalizes(tmp_path):
+@pytest.mark.parametrize('rejected,finish_reason', [
+    ('</think><code>read_skill_md(', 'stop'),
+    ('<think>Only think.', 'stop'),
+    ('<final_answer>one</final_answer><final_answer>two</final_answer>', 'stop'),
+    ('</think>' + CODE, 'length'),
+])
+def test_tpc_d3_001_marked_exhaustion_never_executes_or_finalizes(rejected, finish_reason, tmp_path):
     cfg = config()
-    rejected = '</think><code>read_skill_md('
-    request(cfg, 'POST', '/__control', {'responses': [rejected]}, provider=True)
+    request(cfg, 'POST', '/__control', {'responses': [rejected], 'finish_reason': finish_reason}, provider=True)
     cid = request(cfg, 'PUT', '/conversation/create', {'title': 'TPC malformed exhaustion regression'})['data']['conversation_id']
     try:
         events = run_agent(cfg, cid)
@@ -90,7 +103,7 @@ def test_tpc_d3_001_marked_exhaustion_never_executes_or_finalizes(tmp_path):
         stats = request(cfg, 'GET', '/__stats', provider=True)
         evidence = Path(os.environ.get('NEXENT_TEST_ARTIFACT_DIR', tmp_path))
         evidence.mkdir(parents=True, exist_ok=True)
-        (evidence / 'tpc-rejected.json').write_text(json.dumps({'events': events, 'history': history,
+        (evidence / f'tpc-rejected-{finish_reason}-{rejected[:16].encode().hex()}.json').write_text(json.dumps({'events': events, 'history': history,
              'provider': stats, 'conversation_id': cid}, ensure_ascii=False, indent=2))
         for sequence in (events, units(history)):
             assert not any(e.get('type') == 'parse' for e in sequence)
@@ -98,8 +111,12 @@ def test_tpc_d3_001_marked_exhaustion_never_executes_or_finalizes(tmp_path):
             # nonempty logs would be evidence of an executed action here.
             assert all(str(e.get('content', '')).strip() in {'', '[]'}
                        for e in sequence if e.get('type') == 'execution_logs')
-            assert not any(e.get('type') == 'final_answer' and rejected in str(e.get('content')) for e in sequence)
+            assert all(e.get('content') == '' for e in sequence if e.get('type') == 'final_answer')
+        assert not any(e.get('type') == 'final_answer' for e in events)
         assert stats['request_count'] == 3
+        errors = [e['content'] for e in events if e.get('type') == 'error']
+        assert len(errors) == 1 and errors[0], 'Exhausted protocol must report one bounded failure'
+        assert [e['content'] for e in units(history) if e.get('type') == 'error'] == errors
     finally:
         request(cfg, 'DELETE', f'/conversation/{cid}')
         request(cfg, 'POST', '/__control', {'responses': ['<final_answer>TPC ready</final_answer>']}, provider=True)

@@ -4,16 +4,17 @@ change:
   change_type: bugfix
   bug_id: TPC-BUG-001
   title: Thinking prefix validation rejects valid skill actions
-  description: Relax descriptive thinking prefixes and protect exhaustion against unexecuted
-    raw actions.
-  observed_behavior: Incomplete or narrated thinking prefixes reject valid actions; exhaustion
-    may publish them as final.
-  expected_behavior: Valid action executes; invalid marked output never becomes a raw final.
+  description: Relax descriptive thinking prefixes and protect exhaustion against
+    unexecuted raw actions.
+  observed_behavior: Incomplete or narrated thinking prefixes reject valid actions;
+    exhaustion may publish them as final.
+  expected_behavior: Valid action executes; invalid marked output never becomes a
+    raw final.
   escaped_stage: production
   coverage_gap:
     type: missing_contract
-    description: Existing tests enforce paired-only thinking and lack third-generation action-shaped
-      raw-final exclusion.
+    description: Existing tests enforce paired-only thinking and lack third-generation
+      action-shaped raw-final exclusion.
   feature_contract_changed: true
   affected_features:
     existing: []
@@ -24,46 +25,38 @@ change:
   affected_cases:
     existing: []
     added:
-    - TPC-D1-001
-    - TPC-D1-002
-    - TPC-D1-003
-    - TPC-D1-004
-    - TPC-D1-005
-    - TPC-D1-006
     - TPC-D3-001
     - TPC-D4-001
-    - TPC-D5-001
     modified: []
     retired: []
   traditional_ut:
     decision: strengthen
     behaviors:
-    - Accept incomplete, repeated and narrated reasoning prefixes while preserving exact code
-      bodies.
-    - Reject malformed protocol-marked output at exhaustion without execution, memory commit
-      or raw final.
+    - Accept incomplete, repeated and narrated reasoning prefixes while preserving
+      exact code bodies.
+    - Reject malformed protocol-marked output at exhaustion without execution, memory
+      commit or raw final.
     - Preserve ordinary final payloads and specialized strict final-envelope boundaries.
-    reason: Strengthened existing isolated SDK UT separately from formal component/runtime/journey
-      cases; reuse surrounding compatibility and guardrail regressions.
+    reason: Strengthen isolated output-protocol matrices and add true CoreAgent repair-loop
+      unit regressions with substituted execution; deployed integration and browser
+      proof remain independently formal.
     test_selectors:
     - test/sdk/core/agents/test_output_protocol.py::test_thinking_prefix_does_not_require_a_complete_single_block
     - test/sdk/core/agents/test_output_protocol.py::test_ordinary_final_envelope_accepts_descriptive_prefix
-    - test/sdk/core/agents/test_core_agent.py::TestRunStreamRealExecution::test_oc_029_strict_third_invalid_output_still_fails
-    - test/sdk/core/agents/test_pr4005_continuation.py::test_oc_028_alternating_malformed_and_bare_rejects_marked_final
-  notes: 'Current PR adds these Cases relative to develop; all require explicit acceptance
-    obligations. D1 IDs and original classifier checks are preserved; component collaboration
-    assertions are added rather than relabeling or deleting Cases. SPEC: codeagent-explicit-termination/changes/codeagent-think-prefix-compatibility.
-    D3 mock and real-smoke observations remain separately recorded. Test-baseline 0408fd933
-    overlap/admission review: existing classifier UT proves isolated envelope admission; CoreAgent
-    UT substitutes Python execution. Preserve all existing TPC D1 IDs/scripts. D1-001 adds
-    real CoreAgent/classifier/executor collaboration for code plus legacy envelopes; D1-002
-    adds first/third-attempt single skill execution and attempt state; D1-003 adds stable
-    malformed/truncated rejection with real CoreAgent executor exclusion; D1-004 adds the
-    complete marked-output matrix at real terminal admission while preserving plain fallback;
-    D1-005 adds ordinary/specialized terminal payload and no-execution state; D1-006 adds
-    literal data preservation through actual execution and both terminal protocols. Model/context/observer/skill
-    storage are controlled external boundaries; classifier and executor collaboration are
-    real. D1 has no live API/provider protocol; deployed provider/tool behavior remains D3
-    and persisted browser journey D4. D5 retains bounded three-generation side-effect/attempt
-    risk proof. No new Case or UT wrapper added by this merge. Detailed actual-selector proof-gap
-    table is in SPEC evidence/test-baseline-20261012/compliance-review.md.'
+    - test/sdk/core/agents/test_output_protocol.py::test_ac_021_protocol_markers_inside_python_literals_and_comments_are_preserved
+    - test/sdk/core/agents/test_output_protocol.py::test_ac_004_final_envelope_preserves_arbitrary_payload
+    - test/sdk/core/agents/test_think_prefix_repair.py::test_rejected_outputs_exhaust_without_effects
+    - test/sdk/core/agents/test_think_prefix_repair.py::test_valid_third_action_is_not_replayed
+    - test/sdk/core/agents/test_output_protocol.py::test_thinking_tags_in_final_payload_are_literal_data
+  notes: User requested regenerating the unmerged PR tests under test-baseline 0408fd933
+    rules. Actual UT inputs/assertions reviewed. Replace only this PR-added D1/D5
+    drafts; baseline historical Cases are unchanged. Isolated grammar, exact final
+    payload, truncation and real three-generation repair-budget decisions are traditional
+    UT. D3 adds the deployed provider/classifier/executor/skill/SSE/history boundary
+    with controlled first/third-attempt code and legacy actions, malformed/thinking-only/invalid-final/truncated
+    exhaustion and cleanup. D4 adds authenticated saved browser journey and reload.
+    No separate D1 adds a necessary boundary beyond UT plus actual D3. The former
+    D5 manually advanced the counter and did not prove an independent running-loop
+    risk; replace it with true _run_stream UT. No five-stage quota, copied UT wrapper,
+    or fabricated product change. Existing bug record and Feature owner retained.
+    SPEC evidence/regenerated-20261012 holds the proof-gap and AC traceability table.

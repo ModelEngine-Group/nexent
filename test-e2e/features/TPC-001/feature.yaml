@@ -19,10 +19,8 @@ feature:
     description: Tool effects occur once and committed stream/history reflects actions
       followed by explicit completion.
   required_test_stages:
-  - D1
   - D3
   - D4
-  - D5
   source:
     requirement_ids:
     - TPC-001

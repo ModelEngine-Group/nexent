@@ -19,3 +19,4 @@ acceptance_bindings:
   - test_tpc_d3_001_skill_executes_once_and_history_matches
   AC-02:
   - test_tpc_d3_001_marked_exhaustion_never_executes_or_finalizes
+timeout_seconds: 600
