@@ -4,17 +4,16 @@ change:
   change_type: bugfix
   bug_id: TPC-BUG-001
   title: Thinking prefix validation rejects valid skill actions
-  description: Relax descriptive thinking prefixes and protect exhaustion against
-    unexecuted raw actions.
-  observed_behavior: Incomplete or narrated thinking prefixes reject valid actions;
-    exhaustion may publish them as final.
-  expected_behavior: Valid action executes; invalid marked output never becomes a
-    raw final.
+  description: Relax descriptive thinking prefixes and protect exhaustion against unexecuted
+    raw actions.
+  observed_behavior: Incomplete or narrated thinking prefixes reject valid actions; exhaustion
+    may publish them as final.
+  expected_behavior: Valid action executes; invalid marked output never becomes a raw final.
   escaped_stage: production
   coverage_gap:
     type: missing_contract
-    description: Existing tests enforce paired-only thinking and lack third-generation
-      action-shaped raw-final exclusion.
+    description: Existing tests enforce paired-only thinking and lack third-generation action-shaped
+      raw-final exclusion.
   feature_contract_changed: true
   affected_features:
     existing: []
@@ -39,10 +38,10 @@ change:
   traditional_ut:
     decision: strengthen
     behaviors:
-    - Accept incomplete, repeated and narrated reasoning prefixes while preserving
-      exact code bodies.
-    - Reject malformed protocol-marked output at exhaustion without execution, memory
-      commit or raw final.
+    - Accept incomplete, repeated and narrated reasoning prefixes while preserving exact code
+      bodies.
+    - Reject malformed protocol-marked output at exhaustion without execution, memory commit
+      or raw final.
     - Preserve ordinary final payloads and specialized strict final-envelope boundaries.
     reason: Strengthened existing isolated SDK UT separately from formal component/runtime/journey
       cases; reuse surrounding compatibility and guardrail regressions.
@@ -54,4 +53,17 @@ change:
   notes: 'Current PR adds these Cases relative to develop; all require explicit acceptance
     obligations. D1 IDs and original classifier checks are preserved; component collaboration
     assertions are added rather than relabeling or deleting Cases. SPEC: codeagent-explicit-termination/changes/codeagent-think-prefix-compatibility.
-    D3 mock and real-smoke observations remain separately recorded.'
+    D3 mock and real-smoke observations remain separately recorded. Test-baseline 0408fd933
+    overlap/admission review: existing classifier UT proves isolated envelope admission; CoreAgent
+    UT substitutes Python execution. Preserve all existing TPC D1 IDs/scripts. D1-001 adds
+    real CoreAgent/classifier/executor collaboration for code plus legacy envelopes; D1-002
+    adds first/third-attempt single skill execution and attempt state; D1-003 adds stable
+    malformed/truncated rejection with real CoreAgent executor exclusion; D1-004 adds the
+    complete marked-output matrix at real terminal admission while preserving plain fallback;
+    D1-005 adds ordinary/specialized terminal payload and no-execution state; D1-006 adds
+    literal data preservation through actual execution and both terminal protocols. Model/context/observer/skill
+    storage are controlled external boundaries; classifier and executor collaboration are
+    real. D1 has no live API/provider protocol; deployed provider/tool behavior remains D3
+    and persisted browser journey D4. D5 retains bounded three-generation side-effect/attempt
+    risk proof. No new Case or UT wrapper added by this merge. Detailed actual-selector proof-gap
+    table is in SPEC evidence/test-baseline-20261012/compliance-review.md.'

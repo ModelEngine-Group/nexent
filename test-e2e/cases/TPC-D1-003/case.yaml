@@ -16,20 +16,20 @@ case:
   automation: automated
   objective: Malformed actions retain structural rejection
   preconditions:
-  - Isolated strict ordinary CodeAgent with a controlled model and authorized skill-read
-    tool.
+  - Isolated strict ordinary CodeAgent with a controlled model and authorized skill-read tool.
   test_data:
     profile: mock
   steps:
   - order: 1
-    action: Classify invalid Python, empty/unclosed action, inter-block text, trailing
-      text, unknown tags and truncated output.
+    action: Classify malformed actions, then pass malformed and length-truncated generations
+      through real CoreAgent to assert stable rejection, rollback and no execution.
     expected: Protocol error occurs; no executor is called.
   expected_results:
   - Invalid action bodies and boundaries remain rejected.
   forbidden_side_effects:
   - No execution of invalid code.
-  unit_boundary: classify_model_output
+  unit_boundary: 'CoreAgent rejection: real classifier/error handling and executor exclusion;
+    controlled model/context/observer'
   inputs:
   - invalid action/control matrix
   - length finish reason
@@ -37,8 +37,8 @@ case:
   - Expected stable protocol-error reason.
   acceptance:
   - id: AC-01
-    description: Malformed and truncated actions retain stable error classification
-      and never reach the executor.
+    description: Malformed and truncated actions retain stable error classification and never
+      reach the executor.
     steps:
     - 1
     expected_results:

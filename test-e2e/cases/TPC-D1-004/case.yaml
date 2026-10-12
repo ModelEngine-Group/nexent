@@ -15,14 +15,13 @@ case:
   automation: automated
   objective: Thinking-only and invalid marked output never use exhausted raw final
   preconditions:
-  - Isolated strict ordinary CodeAgent with a controlled model and authorized skill-read
-    tool.
+  - Isolated strict ordinary CodeAgent with a controlled model and authorized skill-read tool.
   test_data:
     profile: mock
   steps:
   - order: 1
-    action: Run thinking-only and malformed action or final outputs with two prior
-      protocol errors.
+    action: Run thinking-only and malformed action or final outputs with two prior protocol
+      errors.
     expected: The attempt rolls back and no raw final is accepted.
   - order: 2
     action: Run eligible complete plain text at exhaustion.
@@ -33,7 +32,8 @@ case:
   forbidden_side_effects:
   - No invalid action final.
   - No reasoning final.
-  unit_boundary: CoreAgent._accept_exhausted_raw_output and _step_stream
+  unit_boundary: 'CoreAgent exhaustion admission: real classifier/raw-final policy and terminal
+    output; controlled model/context/observer, real executor excluded'
   inputs:
   - marked output
   - plain text
@@ -44,8 +44,8 @@ case:
   - Plain raw fallback preserved.
   acceptance:
   - id: AC-01
-    description: Thinking-only and malformed marked output rolls back at exhaustion
-      without execution or final.
+    description: Thinking-only and malformed marked output rolls back at exhaustion without
+      execution or final.
     steps:
     - 1
     expected_results:
@@ -54,8 +54,7 @@ case:
     - 1
     - 2
   - id: AC-02
-    description: Eligible plain text retains the existing final fallback without tool
-      execution.
+    description: Eligible plain text retains the existing final fallback without tool execution.
     steps:
     - 2
     expected_results:

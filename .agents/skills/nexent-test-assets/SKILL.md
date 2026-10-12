@@ -1,6 +1,6 @@
 ---
 name: nexent-test-assets
-description: Create and maintain Nexent's repository-owned feature catalog, D1-D5 case-local contracts and fixed scripts, change records, generated execution registry and Excel view. Use for requirements, bug regressions, test implementation, and formal asset migration. Excludes Legacy UT.
+description: Create and maintain Nexent's repository-owned feature catalog, D1-D5 case-local contracts and fixed scripts, change records, generated execution registry and Excel view. Use for requirements, bug regressions, post-development test backfill, test implementation, and formal asset migration. Traditional UT uses nexent-python-tests.
 ---
 
 # Nexent formal test assets
@@ -18,6 +18,7 @@ Paths are relative to the repository root. Authoritative assets live under `test
 - Preserve all existing D1 definitions/scripts, including unit-oriented and overlapping Cases. Do not bulk delete, retire, migrate or relabel them. New D1 should add component-contract evidence beyond unit assertions; read [case-design.md](references/case-design.md) for the UT/D1/D3 boundary. A feature need not add a D1 if UT and higher-layer tests already supply the necessary proof.
 - A Case's primary script lives beside its `case.yaml`; shared framework helpers live under `test-e2e/infra/automation/`. Do not make a shared helper the primary Case binding.
 - Design cases before product implementation. Implement fixed scripts and case-local `execution.yaml` after product implementation, except an intentional bug reproduction may be written earlier.
+- If product code is already complete and the request is to add missing tests, use `test-backfill` rather than restarting product implementation. Inspect actual UT assertions before creating formal Cases; sufficient unit proof needs no duplicate D1 or formal Case ID.
 - Update only affected Case directories, then validate the complete derived registry.
 - In bugfix mode, reuse existing coverage before adding Cases; zero additions is valid. A missing SPEC or unavailable test baseline does not trigger whole-feature test generation. Follow [bugfix.md](references/bugfix.md) for impact selection.
 - Do not edit the generated Excel workbook directly.
@@ -31,6 +32,7 @@ Paths are relative to the repository root. Authoritative assets live under `test
 | --- | --- | --- |
 | `requirement-design` | Add or change product behavior and design D1-D5 cases | [lifecycle.md](references/lifecycle.md), [case-design.md](references/case-design.md) |
 | `bugfix` | Record a defect, explain the escaped gap, and add/reuse/strengthen regression coverage | [lifecycle.md](references/lifecycle.md), [bugfix.md](references/bugfix.md) |
+| `test-backfill` | Add missing proof for already-developed behavior without duplicating UT or changing the product by default | [test-backfill.md](references/test-backfill.md), [case-design.md](references/case-design.md) |
 | `test-implementation` | Implement fixed scripts and case-local bindings | [test-implementation.md](references/test-implementation.md), [manifest.md](references/manifest.md) |
 | `migration` | Convert V5, fixed scripts, execution bindings, and referenced assets without changing behavior | [migration.md](references/migration.md) |
 | `runtime-migration` | Prepare and verify repository-owned local/Daily execution without switching the operational suite | [runtime-migration.md](references/runtime-migration.md) |
@@ -40,7 +42,7 @@ Read only the references needed for the selected mode.
 
 ## Required workflow
 
-1. Inspect the owning Feature, existing formal Cases, change record, execution bindings, scripts, and repository status.
+1. Inspect the owning Feature, existing formal Cases, relevant traditional UT inputs/assertions, change record, execution bindings, scripts, and repository status. Record existing proof and the remaining behavior gap before choosing a new stage.
 2. Modify the authoritative YAML/JSON before regenerating derived views.
 3. Preserve stable Feature and Case IDs. Retire instead of deleting historical contracts.
 4. During requirement design, run `python test-e2e/infra/tools/validate_test_assets.py --phase design --generate`.

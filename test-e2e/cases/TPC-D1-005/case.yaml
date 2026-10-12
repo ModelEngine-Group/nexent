@@ -16,17 +16,17 @@ case:
   automation: automated
   objective: Ordinary explicit finals tolerate thinking prefix and keep boundaries
   preconditions:
-  - Isolated strict ordinary CodeAgent with a controlled model and authorized skill-read
-    tool.
+  - Isolated strict ordinary CodeAgent with a controlled model and authorized skill-read tool.
   test_data:
     profile: mock
   steps:
   - order: 1
-    action: Classify compatible prefix before valid ordinary final envelope.
+    action: Classify a compatible prefix before a valid ordinary final and pass it through
+      real CoreAgent to assert the exact terminal payload without execution.
     expected: Only the payload is ExplicitFinalAnswer.
   - order: 2
-    action: Classify duplicates, incomplete envelopes, suffix text and specialized
-      prefixed envelopes.
+    action: Pass duplicate, incomplete, suffixed and specialized prefixed finals through the
+      real classifier and CoreAgent terminal admission path to assert rejection.
     expected: Protocol errors remain.
   expected_results:
   - Ordinary terminal prefix accepted.
@@ -34,7 +34,8 @@ case:
   forbidden_side_effects:
   - No prefix in terminal payload.
   - No malformed final accepted.
-  unit_boundary: classify_model_output terminal branch
+  unit_boundary: 'CoreAgent terminal contract: real ordinary/specialized classifier and terminal
+    payload; controlled model/context/observer, real executor excluded'
   inputs:
   - prefix matrix
   - final envelope matrix
@@ -44,8 +45,7 @@ case:
   - Malformed and specialized prefixed forms reject.
   acceptance:
   - id: AC-01
-    description: Ordinary explicit final preserves only its payload with compatible
-      prefixes.
+    description: Ordinary explicit final preserves only its payload with compatible prefixes.
     steps:
     - 1
     expected_results:
@@ -53,8 +53,7 @@ case:
     forbidden_side_effects:
     - 1
   - id: AC-02
-    description: Malformed ordinary and prefixed specialized final envelopes remain
-      rejected.
+    description: Malformed ordinary and prefixed specialized final envelopes remain rejected.
     steps:
     - 2
     expected_results:

@@ -15,27 +15,30 @@ case:
   automation: automated
   objective: Python data containing protocol-like tags is preserved
   preconditions:
-  - Isolated strict ordinary CodeAgent with a controlled model and authorized skill-read
-    tool.
+  - Isolated strict ordinary CodeAgent with a controlled model and authorized skill-read tool.
   test_data:
     profile: mock
   steps:
   - order: 1
-    action: Classify actions whose strings/comments contain think and code markers.
+    action: Classify and execute Python string/comment tags through real CoreAgent and LocalPythonExecutor;
+      pass literal thinking tags through ordinary and specialized final paths.
     expected: Python data remains unchanged and executable.
   expected_results:
   - Only outer reasoning prefix is normalized.
   forbidden_side_effects:
   - No global tag replacement in action or final data.
-  unit_boundary: classify_model_output Python data boundaries
+  unit_boundary: 'CoreAgent payload preservation: real classifier/LocalPythonExecutor or terminal
+    path; controlled external dependencies'
   inputs:
   - Python literal/comment protocol-like text
+  - Literal thinking tags in ordinary and specialized final payloads
   assertions:
   - Exact code body retained.
+  - Executed observation preserves literal data.
+  - Exact terminal payload retained without tool execution.
   acceptance:
   - id: AC-01
-    description: Literal thinking and action tags in Python strings/comments remain
-      unchanged.
+    description: Literal thinking and action tags in Python strings/comments remain unchanged.
     steps:
     - 1
     expected_results:
