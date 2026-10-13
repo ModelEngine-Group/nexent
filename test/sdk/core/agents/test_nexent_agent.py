@@ -441,9 +441,9 @@ def mock_observer():
 
 @pytest.fixture
 def nexent_agent_instance(mock_observer):
-    """Create a NexentAgent instance with minimal initialisation."""
+    """Create an explicitly eager instance for legacy lifecycle checks."""
     agent = NexentAgent(observer=mock_observer,
-                        model_config_list=[], stop_event=Event())
+                        model_config_list=[], stop_event=Event(), tool_fastpath_enabled=False)
     return agent
 
 
@@ -1645,8 +1645,8 @@ def test_agent_run_with_observer_success_with_agent_text(nexent_agent_instance, 
         "test query", stream=True, reset=True)
     mock_core_agent.observer.add_message.assert_any_call(
         "", ProcessType.TOKEN_COUNT, ANY)
-    mock_core_agent.observer.add_message.assert_any_call(
-        "test_agent", ProcessType.FINAL_ANSWER, "Final answer with  content")
+    mock_core_agent.observer.complete_final_answer.assert_called_once_with(
+        "test_agent", "Final answer with  content")
 
 
 def test_runtime_metadata_isolated_across_full_agent_tree(nexent_agent_instance, mock_core_agent):
@@ -1922,8 +1922,8 @@ def test_agent_run_with_observer_success_with_string_final_answer(nexent_agent_i
     # Verify
     mock_core_agent.observer.add_message.assert_any_call(
         "", ProcessType.TOKEN_COUNT, ANY)
-    mock_core_agent.observer.add_message.assert_any_call(
-        "test_agent", ProcessType.FINAL_ANSWER, "String final answer with ")
+    mock_core_agent.observer.complete_final_answer.assert_called_once_with(
+        "test_agent", "String final answer with ")
 
 
 @pytest.mark.parametrize(
@@ -1958,8 +1958,8 @@ def test_agent_run_with_observer_never_emits_empty_final_answer(
 
     nexent_agent_instance.agent_run_with_observer("test query")
 
-    mock_core_agent.observer.add_message.assert_any_call(
-        "test_agent", ProcessType.FINAL_ANSWER, expected
+    mock_core_agent.observer.complete_final_answer.assert_called_once_with(
+        "test_agent", expected
     )
 
 
@@ -2177,8 +2177,8 @@ def test_agent_run_with_observer_removes_think_prefix_chinese_colon(nexent_agent
     expected_final_answer = (
         "一份营养均衡的早餐应包含碳水化合物、蛋白质、健康脂肪、维生素和矿物质。以下是我的推荐："
     )
-    mock_core_agent.observer.add_message.assert_any_call(
-        "test_agent", ProcessType.FINAL_ANSWER, expected_final_answer
+    mock_core_agent.observer.complete_final_answer.assert_called_once_with(
+        "test_agent", expected_final_answer
     )
 
 
@@ -2208,8 +2208,8 @@ def test_agent_run_with_observer_removes_think_prefix_english_colon(nexent_agent
 
     # Verify the "思考:" prefix content was removed
     expected_final_answer = "Here is the actual answer to the question."
-    mock_core_agent.observer.add_message.assert_any_call(
-        "test_agent", ProcessType.FINAL_ANSWER, expected_final_answer
+    mock_core_agent.observer.complete_final_answer.assert_called_once_with(
+        "test_agent", expected_final_answer
     )
 
 
@@ -2242,8 +2242,8 @@ def test_agent_run_with_observer_preserves_think_prefix_without_two_newlines(nex
         "思考：This is thinking content.\n"
         "Here is the actual answer."
     )
-    mock_core_agent.observer.add_message.assert_any_call(
-        "test_agent", ProcessType.FINAL_ANSWER, expected_final_answer
+    mock_core_agent.observer.complete_final_answer.assert_called_once_with(
+        "test_agent", expected_final_answer
     )
 
 
@@ -2274,8 +2274,8 @@ def test_agent_run_with_observer_removes_both_think_tag_and_think_prefix(nexent_
 
     # Verify both patterns were removed
     expected_final_answer = "一份营养均衡的早餐应包含碳水化合物、蛋白质、健康脂肪、维生素和矿物质。"
-    mock_core_agent.observer.add_message.assert_any_call(
-        "test_agent", ProcessType.FINAL_ANSWER, expected_final_answer
+    mock_core_agent.observer.complete_final_answer.assert_called_once_with(
+        "test_agent", expected_final_answer
     )
 
 
@@ -2306,8 +2306,8 @@ def test_agent_run_with_observer_think_prefix_in_middle(nexent_agent_instance, m
 
     # Verify the "思考：" content was removed
     expected_final_answer = "Some initial content. Here is the rest of the answer."
-    mock_core_agent.observer.add_message.assert_any_call(
-        "test_agent", ProcessType.FINAL_ANSWER, expected_final_answer
+    mock_core_agent.observer.complete_final_answer.assert_called_once_with(
+        "test_agent", expected_final_answer
     )
 
 
@@ -2333,8 +2333,8 @@ def test_agent_run_with_observer_no_think_prefix(nexent_agent_instance, mock_cor
     nexent_agent_instance.agent_run_with_observer("test query")
 
     # Verify the content was preserved as-is
-    mock_core_agent.observer.add_message.assert_any_call(
-        "test_agent", ProcessType.FINAL_ANSWER, final_answer_normal
+    mock_core_agent.observer.complete_final_answer.assert_called_once_with(
+        "test_agent", final_answer_normal
     )
 
 
@@ -2366,8 +2366,8 @@ def test_agent_run_with_observer_think_prefix_with_agent_text(nexent_agent_insta
 
     # Verify the "思考：" prefix content was removed
     expected_final_answer = "一份营养均衡的早餐应包含碳水化合物、蛋白质、健康脂肪、维生素和矿物质。"
-    mock_core_agent.observer.add_message.assert_any_call(
-        "test_agent", ProcessType.FINAL_ANSWER, expected_final_answer
+    mock_core_agent.observer.complete_final_answer.assert_called_once_with(
+        "test_agent", expected_final_answer
     )
 
 
@@ -4181,7 +4181,8 @@ class TestAgentRunWithObserverEdgeCases:
         nexent_agent_instance.agent_run_with_observer("test query")
 
         mock_core_agent.observer.add_message.assert_any_call("", ProcessType.TOKEN_COUNT, ANY)
-        mock_core_agent.observer.add_message.assert_any_call("test_agent", ProcessType.FINAL_ANSWER, "Final answer")
+        mock_core_agent.observer.complete_final_answer.assert_called_once_with(
+            "test_agent", "Final answer")
 
     def test_agent_run_with_observer_with_float_duration_conversion(self, nexent_agent_instance, mock_core_agent):
         """Test agent_run_with_observer correctly converts duration to string."""
