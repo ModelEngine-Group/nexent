@@ -62,7 +62,6 @@ import { formatNotificationMessage } from "@/lib/notificationMessage";
 import { buildRepositoryReviewDeepLink, parseReviewDeepLinkParams } from "@/lib/notificationNavigation";
 import { parseSelection, serializeSelection } from "@/app/[locale]/agents/components/knowledge-base-search";
 import { transformMessagesToTaskMessages } from "@/app/[locale]/chat/streaming/messageTransformer";
-import { upsertHistorySummaryInMessages } from "@/app/[locale]/chat/streaming/chatStreamHandler";
 import { isNewAgentPaddingItem } from "@/types/agentRepository";
 import { getToolParamOptions } from "@/const/agentConfig";
 import { Button } from "@/components/ui/button";

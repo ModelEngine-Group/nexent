@@ -1,0 +1,32 @@
+schema_version: '1.0'
+change:
+  change_id: CHAT-REMOVE-LEGACY-20261013
+  change_type: requirement
+  requirement_id: CHAT-REMOVE-LEGACY-20261013
+  title: Remove legacy chat and use newchat for conversation consumers
+  description: Delete the legacy route and migrate its menu grants to workbench, change hidden-home navigation, remove legacy share rendering and migrate version comparison to newchat runtimes.
+  affected_features:
+    existing: [F-117, V5-UT-BE-015, V5-PW-SHARE-01]
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing: [PW-SHARE-01, UT-BE-015]
+    added: []
+    modified: []
+    retired: []
+  traditional_ut:
+    decision: add
+    reason: Frontend runtime orchestration and route access need controlled version/history/cancellation/grant proof. Authorization hook UT verifies independent grants from current user info. The simple permission UPDATE is checked with an isolated SQL fixture during verification; no standalone Python test is maintained. No duplicate formal D1 is needed; direct local PostgreSQL execution is recorded separately.
+    behaviors:
+      - Dispatch the same question to distinct selected versions with isolated follow-up histories.
+      - Cancel, clear and switch versions without leaking active work or histories.
+      - Restore persisted sessions and tolerate unavailable or malformed browser storage.
+      - Migrate exact legacy chat menu grants to workbench while retaining roles and other grants.
+      - Use independent workbench and newchat grants returned by current user info without frontend fallback mappings.
+    test_selectors:
+      - frontend/tests/agents/versions/VersionCompareRuntime.test.tsx
+      - frontend/tests/workbench/ConversationPages.test.tsx
+      - frontend/tests/workbench/AuthorizationRoutes.test.tsx
+  no_case_change_reason: Public newchat sharing and backend version normalization contracts are retained; existing cases remain unchanged. Hook tests provide new orchestration proof, separately from browser/model journeys.
+  notes: SPEC at nexent-doc/docs/Developing/dev-chat-remove-legacy. Legacy share compatibility is explicitly out of scope per user authorization. Removed unused legacy imports from 35 historical scripts. Five preserved D1 scripts still exercise removed implementation APIs and require contract-aware migration (UT-FE-003, UT-FE-029, UT-FE-040, UT-FE-AUTO-55E9952C32F60844, UT-FE-AUTO-7C7FED1DFB34DA15); they are not passing evidence. Verification results and environment limitations are recorded in task.md.

@@ -188,7 +188,6 @@ export function useAuthorization(): AuthorizationContextType {
   const hasAccess =
     isSharePage ||
     accessibleRoutes.includes(cleanPath) ||
-    (cleanPath === "/workbench" && accessibleRoutes.includes("/chat")) ||
     isWithinAccessiblePrefix;
 
   // Route guard
