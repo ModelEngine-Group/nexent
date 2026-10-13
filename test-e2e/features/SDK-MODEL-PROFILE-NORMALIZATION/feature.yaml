@@ -19,10 +19,11 @@ feature:
   - rule_id: SDK-MODEL-PROFILE-NORMALIZATION-RULE-03
     description: Every source field needs a versioned disposition; unknown fields
       and invalid types fail the full load with source diagnostics.
-  required_test_stages: []
+  required_test_stages:
+  - D1
   source:
     requirement_ids:
     - MODEL-PROFILE-NORMALIZATION-20261013
-    notes: Incremental implementation. Budget/inheritance UT does not complete the
-      normalization component; pipeline component proof will be registered before
-      connection. No provider/API/database/Agent acceptance claimed.
+    notes: Isolated UT does not complete component acceptance. MPN-D1-001 was
+      designed before connecting the catalog pipeline to prove complete publication,
+      provenance and revision behavior. No provider/API/database/Agent acceptance claimed.

@@ -16,7 +16,8 @@ change:
     retired: []
   affected_cases:
     existing: []
-    added: []
+    added:
+    - MPN-D1-001
     modified: []
     retired: []
   traditional_ut:
@@ -37,14 +38,16 @@ change:
       sanitized source paths. Raw base-model overrides allow partial objects; effective
       provider-model validation requires the inherited mandatory fields and reasoning
       cross-field constraints.
+    - Versioned mapping rules reject duplicate source identities, unknown transforms
+      and incompatible versions; source capabilities preserve unknown, false and zero
+      separately from request bindings. Each handled leaf retains mapping and source
+      provenance; reference metadata never becomes an API setting.
     reason: Existing profile contract UT owns isolated budget validation; no component
       or runtime normalization is connected in this first step.
     test_selectors:
     - test/sdk/core/model_service/test_profile_contracts.py
     - test/sdk/core/model_service/test_source_inheritance.py
     - test/sdk/core/model_service/test_source_validation.py
-  no_case_change_reason: Current steps cover isolated budget and inheritance rules.
-    Component Cases will be registered before wiring reader, source validator and
-    normalization; existing formal Cases stay unchanged.
+    - test/sdk/core/model_service/test_source_mapping.py
   notes: AC-01/02 subset remains pending as a whole. This change does not infer provider
     API behavior or modify a saved outlet.
