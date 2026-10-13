@@ -19,11 +19,53 @@ import type { TagResourcePredicate } from "@/types/tagManagement";
 /**
  * Normalize tags field into a string array.
  * Ant Design mode="tags" sends a string when only one tag is entered, and
- * malformed/persisted skill data may also carry a non-array tags value.
+ * malformed/persisted data may also carry a non-array tags value, including a
+ * stringified array such as "['tag1', 'tag2']" or '["a", "b"]'. A plain
+ * non-empty scalar is treated as a single tag; anything else becomes an array.
  */
-function normalizeTags(tags: unknown): string[] {
-  if (Array.isArray(tags)) return tags;
-  if (typeof tags === "string" && tags.trim() !== "") return [tags.trim()];
+export function normalizeTags(tags: unknown): string[] {
+  if (Array.isArray(tags)) return cleanTagList(tags);
+  if (typeof tags === "string") {
+    const trimmed = tags.trim();
+    if (trimmed === "") return [];
+    const parsed = parseStringifiedTagArray(trimmed);
+    if (parsed !== null) return parsed;
+    return [trimmed];
+  }
+  return [];
+}
+
+function cleanTagList(values: unknown[]): string[] {
+  return values
+    .filter((value): value is string => typeof value === "string")
+    .map((value) => value.trim())
+    .filter((value) => value !== "");
+}
+
+/**
+ * Recover individual tags from a stringified array, or return null when the
+ * value does not look like an array. Array-like input that cannot be parsed
+ * yields an empty array so an unrecoverable value is ignored, not rendered.
+ */
+function parseStringifiedTagArray(value: string): string[] | null {
+  if (!value.startsWith("[") || !value.endsWith("]")) return null;
+  const candidates = [
+    value,
+    value
+      .replace(/"/g, "`")
+      .replace(/'/g, '"')
+      .replace(/\bTrue\b/g, "true")
+      .replace(/\bFalse\b/g, "false")
+      .replace(/\bNone\b/g, "null"),
+  ];
+  for (const candidate of candidates) {
+    try {
+      const parsed = JSON.parse(candidate);
+      if (Array.isArray(parsed)) return cleanTagList(parsed);
+    } catch {
+      // Try the next candidate representation.
+    }
+  }
   return [];
 }
 

@@ -1764,3 +1764,33 @@ def test_update_existing_relations_returns_early_when_empty():
         user_id="user1",
     )
     assert mock_rel.selected_agent_version_no == 1  # unchanged
+
+
+def test_batch_get_agent_main_flags_returns_flag_map(monkeypatch, mock_session):
+    """Batch main-agent lookup maps each agent id to its is_main_agent flag."""
+    from backend.database.agent_db import batch_get_agent_main_flags
+
+    session, query = mock_session
+    mock_filter = MagicMock()
+    mock_filter.all.return_value = [
+        SimpleNamespace(agent_id=10, is_main_agent=True),
+        SimpleNamespace(agent_id=11, is_main_agent=False),
+    ]
+    query.filter.return_value = mock_filter
+
+    mock_ctx = MagicMock()
+    mock_ctx.__enter__.return_value = session
+    mock_ctx.__exit__.return_value = None
+    monkeypatch.setattr("backend.database.agent_db.get_db_session", lambda: mock_ctx)
+
+    assert batch_get_agent_main_flags([10, 11]) == {10: True, 11: False}
+
+
+def test_batch_get_agent_main_flags_returns_empty_without_ids(mock_session):
+    """No ids (or only None entries) short-circuits without querying the DB."""
+    from backend.database.agent_db import batch_get_agent_main_flags
+
+    session, query = mock_session
+    assert batch_get_agent_main_flags([]) == {}
+    assert batch_get_agent_main_flags([None]) == {}
+    query.filter.assert_not_called()

@@ -171,6 +171,9 @@ async def list_agent_repository_listings_api(
         description="Structured tag predicates encoded as JSON",
     ),
     tag: Optional[str] = Query(None, description="Filter by an exact tag"),
+    sort_by_update_time: bool = Query(
+        False, description="Sort by repository publish time descending"
+    ),
     authorization: str = Header(None),
 ):
     """List all marketplace repository listings with optional status filter."""
@@ -182,6 +185,7 @@ async def list_agent_repository_listings_api(
             "page": page,
             "page_size": page_size,
             "search": search,
+            "sort_by_update_time": sort_by_update_time,
         }
         search_predicates = _parse_tag_predicates(search_tag_predicates)
         if search_predicates:

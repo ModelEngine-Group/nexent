@@ -8,6 +8,7 @@ import type { ColumnsType } from "antd/es/table";
 import { UserIdentity } from "@/components/auth/UserIdentity";
 import { useTranslation } from "react-i18next";
 
+import { normalizeTags } from "@/services/agentConfigService";
 import AgentConfigActions from "./agent-config-actions";
 import AgentTableHeader, {
   type AgentTableHeaderProps,
@@ -130,7 +131,7 @@ export default function AgentListTable({
       key: "type",
       ellipsis: true,
       render: (_, agent) => {
-        const rawCategory = agent.tags?.[0];
+        const rawCategory = normalizeTags(agent.tags)[0];
         const category = rawCategory
           ? getAgentRepositoryTagLabel(rawCategory, t)
           : undefined;

@@ -187,6 +187,7 @@ def list_agent_repository_summaries(
             AgentRepository.icon_url,
             AgentRepository.downloads,
             AgentRepository.content,
+            AgentRepository.create_time,
         ).filter(
             AgentRepository.delete_flag != "Y",
             AgentRepository.publisher_tenant_id == publisher_tenant_id,
@@ -212,6 +213,7 @@ def list_agent_repository_summaries(
                 "icon_url": row.icon_url,
                 "downloads": row.downloads,
                 "content": row.content,
+                "create_time": row.create_time,
             }
             for row in rows
         ]

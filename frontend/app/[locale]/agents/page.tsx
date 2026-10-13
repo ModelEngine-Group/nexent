@@ -2,7 +2,7 @@
 
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { App, Empty, InputNumber, Modal, Select, Spin } from "antd";
 import {
@@ -20,15 +20,19 @@ import CreateAgentModal from "@/components/agent/CreateAgentModal";
 import { StandardButton } from "@/components/common/StandardButton";
 import { StandardInput } from "@/components/common/StandardInput";
 import { StandardPaginator } from "@/components/common/StandardPaginator";
+import TagFilterPopover from "@/components/tag/TagFilterPopover";
 import { useAgentList } from "@/hooks/agent/useAgentList";
+import { useTagDefinitions, useTagLibraries } from "@/hooks/useTagManagement";
 import {
   openImportWizardWithFile,
   type ImportAgentData,
 } from "@/lib/agentImportUtils";
 import log from "@/lib/logger";
+import { getTagSearchPredicates } from "@/lib/systemTagLabels";
 import { searchAgentInfo } from "@/services/agentConfigService";
 import { useAgentStore } from "@/stores/agentStore";
 import type { Agent } from "@/types/agentConfig";
+import type { TagResourcePredicate } from "@/types/tagManagement";
 
 import AgentConfigurationGuide from "./components/agent-configuration-guide";
 import AgentListCard from "./components/agent-list-card";
@@ -53,6 +57,9 @@ export default function AgentsPage() {
   );
   const [view, setView] = useState<"grid" | "list">("grid");
   const [selectedAgent, setSelectedAgent] = useState<Agent | null>(null);
+  const [tagPredicates, setTagPredicates] = useState<TagResourcePredicate[]>(
+    []
+  );
   const [isVersionManageOpen, setIsVersionManageOpen] = useState(false);
   const [isCreateOpen, setIsCreateOpen] = useState(false);
   const [importData, setImportData] = useState<ImportAgentData | null>(null);
@@ -104,16 +111,31 @@ export default function AgentsPage() {
     [initialize, message, t]
   );
 
+  const { data: tagLibraries } = useTagLibraries();
+  const defaultTagLibrary =
+    tagLibraries?.find(
+      (library) => library.bucket_key === "default_resource"
+    ) ?? null;
+  const { data: tagDefinitions } = useTagDefinitions(
+    defaultTagLibrary?.bucket_id ?? null
+  );
+  const searchTagPredicates = useMemo(
+    () => getTagSearchPredicates(tagDefinitions, search, t),
+    [tagDefinitions, search, t]
+  );
   const { agents, pagination, isLoading, isError, refetch } = useAgentList({
     search,
     page,
     pageSize,
     includeRepositoryInfo: true,
+    ...(searchTagPredicates.length > 0 ? { searchTagPredicates } : {}),
+    ...(tagPredicates.length > 0 ? { tagPredicates } : {}),
   });
   const isEmptyAgentList =
     !isLoading &&
     !isError &&
     !search.trim() &&
+    tagPredicates.length === 0 &&
     agents.length === 0 &&
     (pagination?.total ?? 0) === 0;
   const updateUrl = useCallback(
@@ -269,7 +291,7 @@ export default function AgentsPage() {
 
               <div className="mt-3 flex h-auto w-full shrink-0 flex-col items-start justify-between gap-3 lg:h-8 lg:flex-row lg:items-center lg:gap-4">
                 <div
-                  className={`w-full max-w-full shrink-0 ${view === "list" ? "lg:w-[296px]" : "lg:w-[360px]"}`}
+                  className={`flex w-full max-w-full shrink-0 items-center gap-2 ${view === "list" ? "lg:w-[296px]" : "lg:w-[360px]"}`}
                 >
                   <StandardInput
                     allowClear
@@ -281,6 +303,15 @@ export default function AgentsPage() {
                       setPage(1);
                     }}
                     className="!h-8 !w-full"
+                  />
+                  <TagFilterPopover
+                    definitions={tagDefinitions ?? []}
+                    value={tagPredicates}
+                    onChange={(value) => {
+                      setTagPredicates(value);
+                      setPage(1);
+                    }}
+                    buttonClassName="!h-8 shrink-0"
                   />
                 </div>
                 <div className="flex h-auto flex-wrap items-center gap-2 lg:h-8 lg:shrink-0 lg:flex-nowrap">

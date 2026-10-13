@@ -138,4 +138,18 @@ describe("AgentListCard", () => {
       formatAgentListDate({ ...agent, create_time: undefined })
     ).toBeNull();
   });
+
+  it("recovers a tag from a stringified array payload without throwing", () => {
+    render(
+      <AgentListCard
+        agent={{ ...agent, tags: "['医疗', '健康']" as unknown as string[] }}
+        onOpen={vi.fn()}
+        onConfigure={vi.fn()}
+        onPublish={vi.fn()}
+        onManageVersions={vi.fn()}
+      />
+    );
+
+    expect(screen.getByText("医疗")).toBeInTheDocument();
+  });
 });
