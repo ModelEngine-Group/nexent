@@ -240,6 +240,13 @@ export function ChatInput({
 
   // Modify keyboard event handling
   const handleKeyDown = (e: React.KeyboardEvent) => {
+    // Enter that confirms an IME composition must not send the message.
+    // keyCode 229 covers Safari, which reports isComposing=false on the
+    // keydown that fires right after compositionend.
+    if (e.nativeEvent.isComposing || e.keyCode === 229) {
+      return;
+    }
+
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
 
