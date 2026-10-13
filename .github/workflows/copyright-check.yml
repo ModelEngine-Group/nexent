@@ -20,6 +20,9 @@ on:
   push:
     branches: [develop, 'release/**', 'hotfix/**']
 
+permissions:
+  contents: read
+
 jobs:
   copyright-check:
     runs-on: ubuntu-latest
