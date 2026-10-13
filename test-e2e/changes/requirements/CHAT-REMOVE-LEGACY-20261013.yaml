@@ -4,29 +4,63 @@ change:
   change_type: requirement
   requirement_id: CHAT-REMOVE-LEGACY-20261013
   title: Remove legacy chat and use newchat for conversation consumers
-  description: Delete the legacy route and migrate its menu grants to workbench, change hidden-home navigation, remove legacy share rendering and migrate version comparison to newchat runtimes.
+  description: Delete the legacy route and migrate its menu grants to workbench, change
+    hidden-home navigation, remove legacy share rendering and migrate version comparison
+    to newchat runtimes.
   affected_features:
-    existing: [F-117, V5-UT-BE-015, V5-PW-SHARE-01]
+    existing:
+    - F-117
+    - V5-UT-BE-015
+    - V5-PW-SHARE-01
+    - F-065
+    - V5-UT-FE-029
+    - F-179
+    - F-112
     added: []
     modified: []
     retired: []
   affected_cases:
-    existing: [PW-SHARE-01, UT-BE-015]
+    existing:
+    - PW-SHARE-01
+    - UT-BE-015
     added: []
-    modified: []
+    modified:
+    - UT-FE-003
+    - UT-FE-029
+    - UT-FE-040
+    - UT-FE-AUTO-55E9952C32F60844
+    - UT-FE-AUTO-7C7FED1DFB34DA15
     retired: []
   traditional_ut:
-    decision: add
-    reason: Frontend runtime orchestration and route access need controlled version/history/cancellation/grant proof. Authorization hook UT verifies independent grants from current user info. The simple permission UPDATE is checked with an isolated SQL fixture during verification; no standalone Python test is maintained. No duplicate formal D1 is needed; direct local PostgreSQL execution is recorded separately.
+    decision: exempt
+    reason: The user explicitly requested no additional traditional UT in this revision.
+      The three previously proposed files are not implemented and are removed from
+      the declared selectors. This is a user-requested deferral, not evidence that
+      version-runtime, route, independent-grant or SQL migration behavior is covered.
+      Existing formal D1 migrations remain separate from traditional UT.
     behaviors:
-      - Dispatch the same question to distinct selected versions with isolated follow-up histories.
-      - Cancel, clear and switch versions without leaking active work or histories.
-      - Restore persisted sessions and tolerate unavailable or malformed browser storage.
-      - Migrate exact legacy chat menu grants to workbench while retaining roles and other grants.
-      - Use independent workbench and newchat grants returned by current user info without frontend fallback mappings.
-    test_selectors:
-      - frontend/tests/agents/versions/VersionCompareRuntime.test.tsx
-      - frontend/tests/workbench/ConversationPages.test.tsx
-      - frontend/tests/workbench/AuthorizationRoutes.test.tsx
-  no_case_change_reason: Public newchat sharing and backend version normalization contracts are retained; existing cases remain unchanged. Hook tests provide new orchestration proof, separately from browser/model journeys.
-  notes: SPEC at nexent-doc/docs/Developing/dev-chat-remove-legacy. Legacy share compatibility is explicitly out of scope per user authorization. Removed unused legacy imports from 35 historical scripts. Five preserved D1 scripts still exercise removed implementation APIs and require contract-aware migration (UT-FE-003, UT-FE-029, UT-FE-040, UT-FE-AUTO-55E9952C32F60844, UT-FE-AUTO-7C7FED1DFB34DA15); they are not passing evidence. Verification results and environment limitations are recorded in task.md.
+    - Dispatch the same question to distinct selected versions with isolated follow-up
+      histories.
+    - Cancel, clear and switch versions without leaking active work or histories.
+    - Restore persisted sessions and tolerate unavailable or malformed browser storage.
+    - Migrate exact legacy chat menu grants to workbench while retaining roles and
+      other grants.
+    - Use independent workbench and newchat grants returned by current user info without
+      frontend fallback mappings.
+    test_selectors: []
+  notes: 'Legacy share compatibility remains out of scope. Five active automated D1
+    scripts are migrated to surviving newchat stream/history adapters and SourcesPanel
+    without changing Case IDs or adding traditional UT. Newchat uses one replaceable
+    history-summary data part on the current assistant response; idle removes that
+    part, persisted summaries carry their covered message ID and render string or
+    summary.markdown. Legacy summary step IDs, arbitrary-object markdown formatting
+    and trigger labels belonged to the removed legacy view and are no longer asserted
+    as newchat UI contracts. Existing broad acceptance gaps in UT-FE-003, UT-FE-029
+    remain unreviewed; passing migrated scripts must not be presented as full acceptance
+    completeness. Version-runtime, route and independent-grant UT coverage remains
+    deferred at user request. Verification: all five migrated Cases passed the repository
+    run_cases.py runner; 25 collected tests passed in total. The six updated summary
+    obligations have mapped execution evidence. Implementation asset validation with
+    --require-ut-change CHAT-REMOVE-LEGACY-20261013 and --require-acceptance-case
+    UT-FE-AUTO-55E9952C32F60844 passed. Legacy broad acceptance completeness remains
+    unreviewed.'
