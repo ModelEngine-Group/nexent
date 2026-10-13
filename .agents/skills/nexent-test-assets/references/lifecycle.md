@@ -20,6 +20,8 @@ Follow [bugfix.md](bugfix.md). With a usable SPEC, follow and confirm its Featur
 
 ## Change record paths
 
+For already-developed behavior with missing tests, use [test-backfill.md](test-backfill.md). Inspect existing UT/formal assertions and record proof gaps before selecting new Cases. Test-only work uses test-fix; complete an existing requirement/bug delivery in its existing record. New D1 requires case-design.md's distinct-component-proof rationale; no Feature or change has a D1 quota.
+
 | Change type | Required directory |
 | --- | --- |
 | `requirement` | `test-e2e/changes/requirements/` |

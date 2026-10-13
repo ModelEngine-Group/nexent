@@ -48,26 +48,38 @@ def test_tfp_d1_006(monkeypatch, tmp_path, activate_child):
 
     class ScriptRunner:
         def __init__(self, *args, **kwargs):
+            self.cleanup_calls = 0
             script_runners.append(self)
 
         def cleanup(self):
-            pass
+            self.cleanup_calls += 1
+
+    class FixtureCore:
+        def __init__(self, **kwargs):
+            self.__dict__.update(kwargs)
+            self.python_executor = kwargs["executor"]
+            self.state = {}
 
     monkeypatch.setattr(sandbox_module, "build_python_executor", build)
     monkeypatch.setattr(sandbox_module, "SandboxSkillScriptRunner", ScriptRunner)
     monkeypatch.setattr(sandbox_module, "cleanup_executor", lambda ex, *args, **kwargs: releases.append(ex))
-    monkeypatch.setattr(
-        factory_module, "CoreAgent", lambda **kwargs: SimpleNamespace(**kwargs, python_executor=kwargs["executor"]),
-    )
+    monkeypatch.setattr(factory_module, "CoreAgent", FixtureCore)
     runtime = NexentAgent(
         observer=MessageObserver(), model_config_list=[], stop_event=threading.Event(),
         sandbox_config=SandboxConfig(level=SandboxLevel.DOCKER, scope=SandboxScope.SESSION),
         workspace_path=str(tmp_path),
     )
-    monkeypatch.setattr(runtime, "create_model", lambda _: SimpleNamespace())
-    monkeypatch.setattr(runtime, "_pull_file_workspace_from_sandbox", lambda: preparations.append("pull"))
-    monkeypatch.setattr(runtime, "_push_file_workspace_to_sandbox", lambda **kwargs: preparations.append("push"))
-    monkeypatch.setattr(runtime, "_initialize_sandbox_workspaces", lambda **kwargs: preparations.append("initialize"))
+    monkeypatch.setattr(NexentAgent, "create_model", lambda self, _: SimpleNamespace())
+    monkeypatch.setattr(NexentAgent, "_pull_file_workspace_from_sandbox", lambda self: preparations.append("pull"))
+    monkeypatch.setattr(
+        NexentAgent, "_push_file_workspace_to_sandbox", lambda self, **kwargs: preparations.append("push"),
+    )
+
+    def initialize(owner, executors=None):
+        if executors or owner._sandbox_executors:
+            preparations.append("initialize")
+
+    monkeypatch.setattr(NexentAgent, "_initialize_sandbox_workspaces", initialize)
     child_config = AgentConfig(name="child", description="Child fixture", model_name="test", tools=[])
     root_config = AgentConfig(
         name="root", description="Root fixture", model_name="test",
@@ -79,7 +91,9 @@ def test_tfp_d1_006(monkeypatch, tmp_path, activate_child):
     assert script_tool.execution_backend is None
     runtime.agent = root
     wrappers = list(runtime._tool_fastpath_executors)
-    assert len(wrappers) == 2
+    assert len(wrappers) == 1
+    child_definition = root.managed_agents[0]
+    assert child_definition._inner.state == {}
     assert builds == []
     assert script_runners == []
     assert preparations == []
@@ -89,19 +103,33 @@ def test_tfp_d1_006(monkeypatch, tmp_path, activate_child):
     assert builds == []
     root.python_executor("import math")
     assert script_tool.execution_backend is script_runners[0]
-    if activate_child:
-        wrappers[0]("import math")
-    count = 2 if activate_child else 1
+    invocation = child_definition._invocation_factory() if activate_child else nullcontext(None)
+    with invocation as child:
+        if activate_child:
+            child_wrapper = child.python_executor
+            assert isinstance(child_wrapper, DeferredToolExecutor)
+            assert child_wrapper is not root.python_executor
+            child_wrapper.send_tools({"final_answer": FinalAnswerTool()})
+            child_wrapper("print(1)")
+            assert len(builds) == 1
+            assert len(script_runners) == 1
+            child_wrapper("import math")
+        count = 2 if activate_child else 1
+        assert len(builds) == count
+        assert builds[0]["session_container_group"] is None
+        if activate_child:
+            assert builds[1]["session_container_group"] is group
+        assert preparations == ["pull", "push", "initialize"] * count
+        assert [raw.calls for raw in raw_executors] == [["[0, None]", "import math"]] * count
+    assert len(releases) == (1 if activate_child else 0)
+    assert all(runner.cleanup_calls == 0 for runner in script_runners)
+    runtime._close_subagent_invocations()
+    runtime._cleanup_sandbox()
+    runtime._cleanup_sandbox()
     assert len(builds) == count
-    assert builds[0]["session_container_group"] is None
-    if activate_child:
-        assert builds[1]["session_container_group"] is group
-    assert preparations == ["pull", "push", "initialize"] * count
-    assert [raw.calls for raw in raw_executors] == [["[0, None]", "import math"]] * count
-    runtime._cleanup_sandbox()
-    runtime._cleanup_sandbox()
     assert len(releases) == count
     assert len({id(raw) for raw in releases}) == count
+    assert all(runner.cleanup_calls == 1 for runner in script_runners)
     assert runtime._sandbox_executors == []
     assert runtime._tool_fastpath_executors == []
 
@@ -110,6 +138,10 @@ def test_tfp_d1_006(monkeypatch, tmp_path, activate_child):
     assert eager.executor is raw_executors[-1]
     assert len(builds) == count + 1
     assert raw_executors[-1].calls == ["[0, None]"]
+    runtime.agent = eager
+    runtime._cleanup_sandbox()
+    assert releases[-1] is raw_executors[-1]
+    assert len(releases) == count + 1
 
 @pytest.mark.parametrize("level, backend", [
     (SandboxLevel.LOCAL, "local"), (SandboxLevel.WASM, "wasm"), (SandboxLevel.DOCKER, "local"),

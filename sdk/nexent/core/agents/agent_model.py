@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from copy import deepcopy
+from dataclasses import fields, is_dataclass
 from threading import Event
 from typing import TYPE_CHECKING, Any, Dict, List, Literal, Optional, Union
 
@@ -12,6 +14,34 @@ from .context.models import ContextItemInput
 
 if TYPE_CHECKING:
     from .a2a_agent_proxy import A2AAgentInfo
+
+def copy_invocation_config(config: "AgentConfig") -> "AgentConfig":
+    """Copy configuration data while retaining injected runtime objects."""
+    memo = {}
+    visited = set()
+
+    def preserve_services(value):
+        identity = id(value)
+        if identity in visited:
+            return
+        visited.add(identity)
+        if isinstance(value, BaseModel):
+            children = [vars(value), value.__pydantic_extra__, value.__pydantic_private__]
+        elif isinstance(value, dict):
+            children = [*value.keys(), *value.values()]
+        elif isinstance(value, (list, tuple, set, frozenset)):
+            children = value
+        elif is_dataclass(value) and not isinstance(value, type):
+            children = [getattr(value, field.name) for field in fields(value)]
+        else:
+            memo[identity] = value
+            return
+        for child in children:
+            preserve_services(child)
+
+    preserve_services(config)
+    return deepcopy(config, memo)
+
 
 # Protocol type constants (must match backend/database/a2a_agent_db.py definitions)
 PROTOCOL_JSONRPC = "JSONRPC"

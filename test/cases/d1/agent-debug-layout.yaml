@@ -1,0 +1,30 @@
+schema_version: "1.0"
+stage: D1
+module: AGENT-EDITOR
+cases:
+  - case_id: AGENT-DEBUG-D1-001
+    feature_id: AGENT-DEBUG-LAYOUT
+    requirement_ids: [AGENT-DEBUG-REQ-001]
+    business_rule_ids: [AGENT-DEBUG-RULE-002, AGENT-DEBUG-RULE-003]
+    title: Draft welcome and preset selection preserve data and only fill composer
+    type: FE-COMP
+    priority: P1
+    status: active
+    automation: automated
+    objective: Verify real debug welcome/questions with changing draft values, empty values and legacy arrays without request or configuration writes.
+    preconditions: [Render real welcome and suggestions with a controlled composer callback and logical draft data.]
+    test_data: {draft: {asset_ref: debug_agent_draft}, question_count: 6, profile: mock}
+    steps:
+      - order: 1
+        action: Render name and greeting plus six stored questions.
+        expected: Draft name/greeting and all six questions appear without truncation or source mutation.
+      - order: 2
+        action: Select one question, then rerender with changed name/greeting and no questions.
+        expected: Exact text is supplied once to the composer callback only; changed draft values replace prior text and empty questions omit the suggestion section.
+    expected_results: [Dynamic values render exactly; selection calls composer only; empty and legacy values are preserved.]
+    forbidden_side_effects: [No HTTP/provider invocation, no Agent update or automatic question send.]
+    unit_boundary: Real debug welcome and suggestion React components with controlled selection callback
+    inputs: [draft name, greeting, six questions, changed values, empty questions, selection callback]
+    assertions: [All six stored questions render; callback receives selected text once; no source data mutation; empty section omitted; rerender updates draft text.]
+    execution:
+      profiles: [{name: mock, required_services: []}]

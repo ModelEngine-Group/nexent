@@ -197,6 +197,39 @@ def test_closed_session_group_is_removed_after_failed_activation(factory_executi
     assert e.factory._sandbox_skill_runners == []
 
 
+@pytest.mark.parametrize("phase", ["binding", "workspace"])
+def test_failed_child_activation_retains_shared_skills_until_root_cleanup(factory_execution, phase):
+    e = factory_execution
+    root = NexentAgent(observer=Mock(spec=MessageObserver), model_config_list=[], stop_event=Event())
+    root_lease = Mock()
+    root.agent = SimpleNamespace(python_executor=root_lease)
+    root._sandbox_executors.append(root_lease)
+    e.factory._sandbox_skill_cleanup_owner = root
+    e.config.tools = [ToolConfig(name="run_skill_script", class_name="RunSkillScriptTool", source="builtin")]
+    if phase == "binding":
+        e.script_tool.bind_execution_backend.side_effect = RuntimeError("child activation failed")
+    else:
+        e.initialize.side_effect = RuntimeError("child activation failed")
+    e.factory.agent = e.factory.create_single_agent(e.config)
+    with pytest.raises(RuntimeError, match="child activation failed"):
+        e.factory.agent.python_executor('import math')
+    runner = e.runner.return_value
+    runner.cleanup.assert_not_called()
+    assert root._sandbox_skill_runners == [runner]
+    assert e.factory._sandbox_skill_runners == []
+    assert e.factory._sandbox_executors == []
+    e.cleanup.assert_called_once_with(e.remotes[0], agent_module.logger, timeout=5.0)
+    e.factory._cleanup_sandbox()
+    runner.cleanup.assert_not_called()
+    root._close_subagent_invocations()
+    root._cleanup_sandbox()
+    root._cleanup_sandbox()
+    runner.cleanup.assert_called_once()
+    assert root._sandbox_skill_runners == []
+    assert e.cleanup.call_count == 2
+    assert e.cleanup.call_args.args[0] is root_lease
+
+
 @pytest.mark.parametrize("error", [RuntimeError("bind failed"), CancelledError("bind cancelled")])
 def test_skill_binding_failure_releases_executor_even_before_runner_is_registered(factory_execution, error):
     e = factory_execution

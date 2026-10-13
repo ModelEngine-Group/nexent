@@ -1,0 +1,66 @@
+schema_version: '1.0'
+stage: D4
+module: AGENT-EDITOR
+case:
+  case_id: AGENT-EDITOR-D4-003
+  feature_id: AGENT-EDITOR-WORKFLOWS
+  requirement_ids:
+  - AGENT-EDITOR-REQ-003
+  business_rule_ids:
+  - AGENT-EDITOR-RULE-003
+  title: Persist edited guidance and description across reload
+  type: E2E
+  priority: P1
+  status: active
+  automation: automated
+  objective: Description and greeting persist through the real editor/autosave chain
+    and reload, while Agent identity and resource associations are retained.
+  preconditions:
+  - A running frontend is reachable; deterministic existing HTTP fixtures isolate
+    Agent data, authorization and model/resource boundaries.
+  test_data:
+    profile: mock
+    locale: zh
+    viewport:
+      width: 1920
+      height: 1080
+  steps:
+  - order: 1
+    action: Open an editable existing draft and inspect persisted fields.
+    expected: Stored description and greeting render without writes.
+  - order: 2
+    action: Edit description and greeting and wait for autosave.
+    expected: Existing update requests carry the edited fields and preserve Agent
+      identity/model/tools.
+  - order: 3
+    action: Reload and inspect the saved fields.
+    expected: The edited values reappear from persisted HTTP data, without another
+      edit being required.
+  expected_results:
+  - Description and greeting persist through the real editor/autosave chain and reload,
+    while Agent identity and resource associations are retained.
+  forbidden_side_effects:
+  - No unrelated writes, publication or Agent/model execution; only explicitly requested
+    creation/autosave writes are allowed.
+  actor: Authorized Agent development user
+  journey:
+  - Open an editable existing draft and inspect persisted fields.
+  - Edit description and greeting and wait for autosave.
+  - Reload and inspect the saved fields.
+  final_business_result:
+  - Description and greeting persist through the real editor/autosave chain and reload,
+    while Agent identity and resource associations are retained.
+  failure_evidence:
+  - Fixed Playwright journey assertions, sanitized request payloads and terminal audit.
+  acceptance:
+  - id: AC-01
+    description: Description and greeting persist through the real editor/autosave
+      chain and reload, while Agent identity and resource associations are retained.
+    steps:
+    - 1
+    - 2
+    - 3
+    expected_results:
+    - 1
+    forbidden_side_effects:
+    - 1

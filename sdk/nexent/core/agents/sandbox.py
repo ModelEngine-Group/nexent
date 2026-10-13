@@ -1492,6 +1492,11 @@ def cleanup_executor(executor: Any, logger_: logging.Logger, timeout: float = 5.
     except Exception as exc:
         logger_.warning("Sandbox cleanup failed: %s", exc)
 
+    # A kernel lease never owns its shared container, including on cleanup failure.
+    if getattr(executor, "_nexent_kernel_lease", False) is True:
+        logger_.warning("Kernel lease cleanup did not finish; preserving shared container")
+        return
+
     # Layer 2: force-kill Docker container
     try:
         container_attr = getattr(executor, "container", None)

@@ -11,10 +11,11 @@ import shutil
 import tarfile
 import time
 from concurrent.futures import CancelledError
+from contextlib import contextmanager
 from copy import copy, deepcopy
 from dataclasses import replace
 from pathlib import Path
-from threading import Event, RLock
+from threading import Event, Lock, RLock
 from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Sequence
 
 from smolagents import ActionStep, AgentText, TaskStep, Timing
@@ -279,6 +280,7 @@ class NexentAgent:
         self.observer = observer
         self.model_config_list = model_config_list
         self.stop_event = stop_event
+        self._sandbox_skill_cleanup_owner = self
         self.cancellation_scope = cancellation_scope
         self.mcp_tool_collection = mcp_tool_collection
         self.redis_client = redis_client
@@ -304,6 +306,9 @@ class NexentAgent:
         self._sandbox_executors: List[Any] = []
         self._sandbox_skill_runners: List[Any] = []
         self._tool_fastpath_executors: List[Any] = []
+        self._subagent_invocations: Dict[Event, Any] = {}
+        self._subagent_invocations_lock = Lock()
+        self._subagent_invocations_closed = False
 
         self.agent = None
 
@@ -706,6 +711,8 @@ class NexentAgent:
         inner_agent: Any,
         sub_agent_config: Any,
         agent_id: Any = None,
+        *,
+        invocation_factory: Optional[Callable] = None,
     ) -> "SubAgentToolWrapper":
         """Wrap a sub-agent ``Tool`` so the observer sees nesting boundaries.
 
@@ -742,7 +749,101 @@ class NexentAgent:
                 or getattr(inner_agent, "name", None)
                 or str(agent_name)
             ),
+            invocation_factory=invocation_factory,
         )
+
+    def _create_subagent_definition(self, config: AgentConfig, tree_context: Dict[str, Any]):
+        """Register a definition; each call builds and owns a separate runtime."""
+        from .subagent_wrapper import SubAgentDefinition
+
+        definition = SubAgentDefinition(config.invocation_name or config.name, config.description)
+        return self._wrap_subagent(
+            definition,
+            config,
+            invocation_factory=lambda: self._subagent_invocation(config, definition, tree_context),
+        )
+
+    @contextmanager
+    def _subagent_invocation(self, config: AgentConfig, definition: Any, tree_context: Dict[str, Any]):
+        """Keep allocation, state, cancellation and cleanup local to one call."""
+        from ..concurrency.cancellation import RunCancellationScope, RunTerminated
+
+        scope = RunCancellationScope(parent_stop_event=self.stop_event)
+        done = Event()
+        with self._subagent_invocations_lock:
+            if self._subagent_invocations_closed or self.stop_event.is_set():
+                raise RunTerminated("Subagent owner has stopped accepting invocations")
+            self._subagent_invocations[done] = scope
+        parent_token = None
+        runtime = None
+        drained = False
+        try:
+            if self.cancellation_scope is not None:
+                parent_token = self.cancellation_scope.register_closer(scope.cancel)
+            if scope.cancelled or self.stop_event.is_set():
+                raise RunTerminated("Subagent invocation cancelled before allocation")
+            runtime = type(self)(
+                observer=self.observer,
+                model_config_list=self.model_config_list,
+                stop_event=scope.stop_event,
+                mcp_tool_collection=self.mcp_tool_collection,
+                redis_client=self.redis_client,
+                sandbox_config=self.sandbox_config,
+                minio_client=self.minio_client,
+                conversation_id=self.conversation_id,
+                user_id=self.user_id,
+                tenant_id=self.tenant_id,
+                workspace_path=self.workspace_path,
+                workspace_run_id=self.workspace_run_id,
+                cancellation_scope=scope,
+                user_context=self.user_context,
+                tool_fastpath_enabled=self.tool_fastpath_enabled,
+                tool_fastpath_allowed_tools=self.tool_fastpath_allowed_tools,
+            )
+            runtime._sandbox_skill_cleanup_owner = self._sandbox_skill_cleanup_owner
+            from .agent_model import copy_invocation_config
+
+            agent = runtime.create_single_agent(
+                copy_invocation_config(config), _managed_context=True, _sandbox_tree_context=tree_context,
+            )
+            runtime.set_agent(agent)
+            runtime._set_runtime_metadata_for_agent_tree(agent, definition.get_runtime_metadata())
+            runtime._initialize_sandbox_workspaces()
+            if scope.cancelled:
+                raise RunTerminated("Subagent invocation cancelled during allocation")
+            yield agent
+        finally:
+            try:
+                if runtime is not None:
+                    runtime._close_subagent_invocations()
+                    drained = True
+                    try:
+                        if runtime.workspace_path:
+                            runtime._pull_file_workspace_from_sandbox()
+                    finally:
+                        runtime._cleanup_sandbox()
+                else:
+                    drained = True
+            finally:
+                if drained:
+                    if parent_token is not None:
+                        self.cancellation_scope.unregister_closer(parent_token)
+                    with self._subagent_invocations_lock:
+                        self._subagent_invocations.pop(done, None)
+                    done.set()
+
+    def _close_subagent_invocations(self, timeout: float = 5.0) -> None:
+        """Cancel and drain owned calls before shared workspace teardown."""
+        with self._subagent_invocations_lock:
+            self._subagent_invocations_closed = True
+            pending = tuple(self._subagent_invocations.items())
+        for _, scope in pending:
+            scope.cancel()
+        deadline = time.monotonic() + timeout
+        for done, _ in pending:
+            if not done.wait(max(0.0, deadline - time.monotonic())):
+                logger.error("Subagent invocation exceeded close grace; retaining owner resources")
+                raise RuntimeError("Subagent invocation did not terminate before owner cleanup")
 
     def _check_sandbox_cancelled(self) -> None:
         """Stop initialization and retries after the owning run is cancelled."""
@@ -821,19 +922,10 @@ class NexentAgent:
                 raise ValueError(f"Error in creating tool: {e}")
 
             try:
-                # Create worker agents recursively. Session-scoped Docker agents
-                # share one container for the tree but retain independent kernels.
-                raw_worker_agents = []
-                for sub_agent_config in agent_config.worker_agents:
-                    inner_agent = self.create_single_agent(
-                        sub_agent_config,
-                        _managed_context=True,
-                        _sandbox_tree_context=_sandbox_tree_context,
-                    )
-                    raw_worker_agents.append((inner_agent, sub_agent_config))
+                # Definitions are lazy; each invocation owns its runtime and kernel.
                 worker_agents_list = [
-                    self._wrap_subagent(inner_agent, sub_agent_config)
-                    for inner_agent, sub_agent_config in raw_worker_agents
+                    self._create_subagent_definition(sub_agent_config, _sandbox_tree_context)
+                    for sub_agent_config in agent_config.worker_agents
                 ]
             except Exception as e:
                 raise ValueError(f"Error in creating worker agent: {e}")
@@ -1090,7 +1182,13 @@ class NexentAgent:
                             if deferred and python_executor is not None:
                                 try:
                                     if script_runner is not None:
-                                        script_runner.cleanup()
+                                        skill_owner = self._sandbox_skill_cleanup_owner
+                                        if skill_owner is self:
+                                            script_runner.cleanup()
+                                        else:
+                                            # A failed child must not remove skills used by sibling invocations.
+                                            with skill_owner._subagent_invocations_lock:
+                                                skill_owner._sandbox_skill_runners.append(script_runner)
                                         self._sandbox_skill_runners[:] = [
                                             runner for runner in self._sandbox_skill_runners
                                             if runner is not script_runner
@@ -1451,6 +1549,7 @@ class NexentAgent:
                     raise ValueError(f"Error in interaction: {str(e)}")
 
                 finally:
+                    self._close_subagent_invocations()
                     self._restore_runtime_metadata_for_agent_tree(runtime_state_snapshots)
                     self._log_step_metrics()
                     try:
@@ -1945,8 +2044,14 @@ class NexentAgent:
 
         scope = getattr(self, "_sandbox_scope", None)
 
-        for runner in self._sandbox_skill_runners:
-            runner.cleanup()
+        skill_owner = getattr(self, "_sandbox_skill_cleanup_owner", self)
+        if skill_owner is self:
+            for runner in self._sandbox_skill_runners:
+                runner.cleanup()
+        else:
+            # Shared skills remain available until the root drains every child.
+            with skill_owner._subagent_invocations_lock:
+                skill_owner._sandbox_skill_runners.extend(self._sandbox_skill_runners)
         self._sandbox_skill_runners.clear()
 
         # Sync outputs to MinIO before destroying the container.
