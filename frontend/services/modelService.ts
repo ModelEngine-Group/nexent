@@ -281,6 +281,8 @@ export const modelService = {
           // v2.6.0 inference params (model-level defaults)
           ...mapInferenceParamsFromApi(model),
           reasoningCapability: model.reasoning_capability ?? undefined,
+          supportToolCalls:
+            model.support_tool_calls ?? model.supportToolCalls ?? undefined,
           // STT specific fields
           modelAppid: model.model_appid,
           accessToken: model.access_token,

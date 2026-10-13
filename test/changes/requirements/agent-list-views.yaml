@@ -1,0 +1,34 @@
+schema_version: "1.0"
+changes:
+  - change_id: AGENT-LIST-REQ-001
+    change_type: requirement
+    requirement_id: AGENT-LIST-REQ-001
+    title: Add a high-fidelity agent table view
+    description: Add the specified table presentation to the existing agent list while preserving the card presentation, page-level content, and existing workflows.
+    feature_contract_changed: true
+    affected_features:
+      existing: []
+      added: [AGENT-LIST-VIEWS]
+      modified: []
+      retired: []
+    affected_cases:
+      existing: []
+      added: [AGENT-LIST-D1-001, AGENT-LIST-D4-001]
+      modified: []
+      retired: []
+  - change_id: AGENT-LIST-REQ-002
+    change_type: requirement
+    requirement_id: AGENT-LIST-REQ-002
+    title: Standardize agent table with Ant Design Table
+    description: Use a reusable Ant Design Table wrapper for the agent list and document its shared visual contract without changing list data or actions.
+    feature_contract_changed: true
+    affected_features:
+      existing: []
+      added: []
+      modified: [AGENT-LIST-VIEWS]
+      retired: []
+    affected_cases:
+      existing: []
+      added: []
+      modified: [AGENT-LIST-D1-001, AGENT-LIST-D4-001]
+      retired: []

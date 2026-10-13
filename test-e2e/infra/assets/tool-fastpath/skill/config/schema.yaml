@@ -1,0 +1,8 @@
+marker:
+  type: string
+  required: true
+  description_en: Unique configuration marker for fast-path acceptance.
+value:
+  type: number
+  required: true
+  description_en: Numeric value consumed after Docker promotion.

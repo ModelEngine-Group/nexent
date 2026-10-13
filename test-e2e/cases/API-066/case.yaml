@@ -34,7 +34,7 @@ case:
     action: 通过实际 API 创建一个带唯一 RunID 后缀的临时 Agent，记录 agent_id。
     expected: 关键状态在 API 返回、数据库/存储和后续读取中保持一致。
   - order: 3
-    action: 按“无技能 JSON / 带技能 ZIP 导出；导入、冲突/skill resolution｜核心流程”调用对应配置/生成/导入导出接口，提交与 UI 相同的数据结构。
+    action: 按“无技能 JSON / 带技能 ZIP 导出；导入、冲突/skill resolution｜核心流程”调用对应配置/生成/导入导出接口，提交与 UI 相同的数据结构；无技能导出为 JSON，绑定技能导出为 ZIP，文件名使用智能体展示名（display_name）并对 ZIP 的 Content-Disposition 做 RFC 5987 UTF-8 编码。
     expected: 失败路径返回明确错误，不出现半写入、重复副作用或跨租户泄露。
   - order: 4
     action: 读取 Agent 详情再次核对字段：名称、描述、Prompt、模型、max_steps、tools、skills、sub-agents 等与提交值一致。

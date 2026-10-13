@@ -1,9 +1,17 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
-import { Tooltip } from "antd";
-import { ChevronRight, Eye, Pencil, Settings, X } from "lucide-react";
+import { Button, Tooltip } from "antd";
+import {
+  ChevronRight,
+  Eye,
+  Pencil,
+  Settings,
+  Sparkles,
+  Trash2,
+  X,
+} from "lucide-react";
 
 import { useSkillList } from "@/hooks/agent/useSkillList";
 import { useAgentStore } from "@/stores/agentStore";
@@ -48,12 +56,18 @@ interface SelectedSkillManagementProps {
   readonly currentAgentId?: number;
   readonly isReadOnly?: boolean;
   readonly onEditSkill?: (skill: Skill) => void;
+  readonly hideEmpty?: boolean;
+  readonly highFidelity?: boolean;
+  readonly addEntry?: ReactNode;
 }
 
 export default function SelectedSkillManagement({
   currentAgentId,
   isReadOnly = false,
   onEditSkill,
+  hideEmpty = false,
+  highFidelity = false,
+  addEntry,
 }: SelectedSkillManagementProps) {
   const { t } = useTranslation("common");
   const selectedSkills = useAgentStore(
@@ -141,11 +155,122 @@ export default function SelectedSkillManagement({
     setConfigSkill(null);
   };
 
-  if (selectedSkills.length === 0) {
+  if (selectedSkills.length === 0 && !(highFidelity && addEntry)) {
+    if (hideEmpty) return null;
     return (
       <div className="flex h-full items-center justify-center rounded-lg border border-dashed border-gray-200 py-10 text-sm text-gray-400">
         {t("skillPool.noSkillsSelected")}
       </div>
+    );
+  }
+
+  if (highFidelity) {
+    return (
+      <>
+        <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+          {groupedSkills.flatMap((group) =>
+            group.skills.map((skill) => {
+              const canEditSkill =
+                !isReadOnly &&
+                skill.permission === "EDIT" &&
+                Boolean(onEditSkill);
+              const canConfigure = (skill.config_schemas || []).length > 0;
+              const detailActionLabel = t(
+                canEditSkill
+                  ? "skillManagement.edit.title"
+                  : "skillPool.viewDetails"
+              );
+
+              return (
+                <div
+                  key={skill.skill_id}
+                  data-testid={`agent-selected-skill-${skill.skill_id}`}
+                  className="flex h-12 min-w-0 items-center gap-2 rounded-[4px] border border-[#d9d9d9] bg-white px-2"
+                >
+                  <Sparkles
+                    size={18}
+                    className="shrink-0 text-[#78a7f8]"
+                    aria-hidden="true"
+                  />
+                  <div className="flex min-w-0 flex-1 items-center gap-2 overflow-hidden">
+                    <Tooltip title={skill.name}>
+                      <span className="min-w-0 flex-1 truncate text-sm leading-[22px] text-[#191919]">
+                        {skill.name}
+                      </span>
+                    </Tooltip>
+                    {(skill.tags || []).slice(0, 2).map((tag) => (
+                      <span
+                        key={tag}
+                        className="shrink-0 rounded-[2px] bg-[#f5f5f5] px-1 text-[10px] leading-4 text-[#595959]"
+                      >
+                        {tag}
+                      </span>
+                    ))}
+                  </div>
+                  <Tooltip title={detailActionLabel}>
+                    <Button
+                      type="text"
+                      size="small"
+                      icon={
+                        canEditSkill ? <Pencil size={14} /> : <Eye size={14} />
+                      }
+                      aria-label={`${detailActionLabel} ${skill.name}`}
+                      onClick={() => {
+                        if (canEditSkill) {
+                          onEditSkill?.(skill);
+                          return;
+                        }
+                        setDetailSkill(skill);
+                      }}
+                      className="!size-6 !shrink-0 !p-0 !text-[#777777]"
+                    />
+                  </Tooltip>
+                  {canConfigure ? (
+                    <Tooltip title={t("skillPool.configure")}>
+                      <Button
+                        type="text"
+                        size="small"
+                        icon={<Settings size={14} />}
+                        aria-label={`${t("skillPool.configure")} ${skill.name}`}
+                        disabled={isReadOnly}
+                        onClick={() => setConfigSkill(skill)}
+                        className="!size-6 !shrink-0 !p-0 !text-[#777777]"
+                      />
+                    </Tooltip>
+                  ) : null}
+                  <Tooltip title={t("skillPool.remove")}>
+                    <Button
+                      type="text"
+                      size="small"
+                      icon={<Trash2 size={14} />}
+                      aria-label={`${t("skillPool.remove")} ${skill.name}`}
+                      disabled={isReadOnly}
+                      onClick={() => removeSkill(skill.skill_id)}
+                      className="!size-6 !shrink-0 !p-0 !text-[#777777] hover:!text-red-500"
+                    />
+                  </Tooltip>
+                </div>
+              );
+            })
+          )}
+          {addEntry}
+        </div>
+        <SkillDetailModal
+          skill={detailSkill}
+          open={Boolean(detailSkill)}
+          onClose={() => setDetailSkill(null)}
+        />
+        {configSkill ? (
+          <SkillConfigModal
+            isOpen
+            onCancel={() => setConfigSkill(null)}
+            onSave={(params) => saveConfig(configSkill, params)}
+            skill={configSkill}
+            initialParams={configSkill.config_schemas || []}
+            currentAgentId={currentAgentId}
+          />
+        ) : null}
+      </>
     );
   }
 

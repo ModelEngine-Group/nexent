@@ -1,0 +1,86 @@
+schema_version: '1.0'
+stage: D1
+module: NAV-MENU
+case:
+  case_id: NAV-MENU-D1-001
+  feature_id: NAV-MENU-VISIBILITY
+  requirement_ids:
+  - NAV-MENU-REQ-001
+  - NAV-MENU-REQ-002
+  business_rule_ids:
+  - NAV-MENU-RULE-001
+  - NAV-MENU-RULE-002
+  - NAV-MENU-RULE-003
+  title: Preserve functional navigation while hiding inert controls
+  type: FE-COMP
+  priority: P1
+  status: active
+  automation: automated
+  objective: Verify sidebar visibility without changing existing navigation or access
+    behavior.
+  preconditions:
+  - Use deterministic authorized route and deployment fixtures.
+  test_data:
+    profile: mock
+    routes:
+    - /agents
+    - /chat
+    - /agent-space
+    locales:
+    - zh
+    - en
+  steps:
+  - order: 1
+    action: Render/open the sidebar with authorized children in speed mode.
+    expected: Both inert section buttons are absent; authorized children remain and
+      denied routes stay hidden.
+  - order: 2
+    action: Click chat and agent child menus; inspect account and notification controls.
+    expected: Localized pages open and only functional controls are available.
+  - order: 3
+    action: Enable workbench and grant Home and Chat routes; inspect both locales
+      and click Workbench.
+    expected: Workbench appears immediately after Home with the requested localized
+      label and opens the same localized /workbench route.
+  expected_results: &id001
+  - Both inert section buttons are absent; authorized children remain and denied routes
+    stay hidden.
+  - Chat navigates to localized newchat and child pages remain usable.
+  - Speed notification is absent and account control remains.
+  - Workbench feature gate and nested locale selection remain correct.
+  - Anonymous navigation opens login and login success resumes the pending route.
+  - Normal notification read actions retain callback arguments; anonymous bell opens
+    login.
+  - Enabled permitted workbench follows Home and precedes Start Chat; localized label
+    is 工作台 / Workbench.
+  forbidden_side_effects:
+  - No unrequested business writes or agent/provider execution.
+  execution:
+    profiles:
+    - name: mock
+      required_services: []
+  unit_boundary: SideNavigation with mocked router, providers and notification boundaries.
+  inputs:
+  - route permissions
+  - locale
+  - authentication
+  - deployment flags
+  assertions: *id001
+  acceptance:
+  - id: AC-01
+    description: Verify sidebar visibility without changing existing navigation or
+      access behavior.
+    steps:
+    - 1
+    - 2
+    - 3
+    expected_results:
+    - 1
+    - 2
+    - 3
+    - 4
+    - 5
+    - 6
+    - 7
+    forbidden_side_effects:
+    - 1

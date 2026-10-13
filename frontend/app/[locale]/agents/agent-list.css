@@ -1,0 +1,14 @@
+.agent-development-list {
+  font-family: "HarmonyOS Sans SC", "Huawei Sans", system-ui, sans-serif;
+}
+
+.agent-development-list .ant-btn,
+.agent-development-list .ant-input,
+.agent-development-list .ant-input-affix-wrapper,
+.agent-development-list .ant-input-number,
+.agent-development-list .ant-select,
+.agent-development-list .ant-table-wrapper,
+.agent-development-list .ant-table-wrapper .ant-spin,
+.agent-development-list .ant-table {
+  font-family: inherit;
+}

@@ -47,8 +47,11 @@ export const DEFAULT_EFFORT_OPTIONS: readonly ModelSelectorEffortOption[] = [
   { id: "high", name: "High" },
 ];
 
-const getReasoningEffortName = (option: ModelSelectorEffortOption): string =>
-  option.id;
+const getReasoningEffortName = (
+  option: ModelSelectorEffortOption,
+  t: (key: string, options?: Record<string, unknown>) => string
+): string =>
+  t(`chat.modelSelector.effort.${option.id}`, { defaultValue: option.name });
 
 export type ModelOption = {
   id: string;
@@ -294,7 +297,9 @@ function ModelSelectorRoot({
           ? DEFAULT_EFFORT_OPTIONS
           : efforts,
       effort
-    ) ?? resolvedDefaultEffort;
+    ) ??
+    resolvedDefaultEffort ??
+    effortProp;
   const budgetRange = selectedModel?.budgetTokens;
   const activeBudgetTokens =
     budgetRange && budgetTokens !== undefined
@@ -344,7 +349,7 @@ function ModelSelectorRoot({
 }
 
 export const modelSelectorTriggerVariants = cva(
-  "focus-visible:ring-ring/50 flex w-fit cursor-pointer items-center justify-between gap-2 overflow-hidden rounded-md text-sm whitespace-nowrap transition-colors outline-none focus-visible:ring-2 disabled:cursor-not-allowed disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4",
+  "focus-visible:ring-ring/50 flex w-fit min-w-0 cursor-pointer items-center justify-between gap-2 overflow-hidden rounded-md text-sm whitespace-nowrap transition-colors outline-none focus-visible:ring-2 disabled:cursor-not-allowed disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4",
   {
     variants: {
       variant: {
@@ -436,7 +441,12 @@ function ModelSelectorValue({
     effort !== undefined
       ? (() => {
           const option = efforts?.find((e) => e.id === effort);
-          return option ? getReasoningEffortName(option) : undefined;
+          if (option) return getReasoningEffortName(option, t);
+          // Models without catalog effort options still show the current
+          // effort level next to the name (design: "DeepSeek 高").
+          return t(`chat.modelSelector.effort.${effort}`, {
+            defaultValue: effort,
+          });
         })()
       : undefined;
 
@@ -448,7 +458,7 @@ function ModelSelectorValue({
       {selectedModel.icon && <ModelIcon>{selectedModel.icon}</ModelIcon>}
       <span className="truncate font-medium">{selectedModel.name}</span>
       {effortName && (
-        <span className="text-muted-foreground truncate">{effortName}</span>
+        <span className="shrink-0 text-muted-foreground">{effortName}</span>
       )}
     </span>
   );
@@ -747,6 +757,8 @@ export type ModelSelectorProps = Omit<ModelSelectorRootProps, "children"> &
   VariantProps<typeof modelSelectorTriggerVariants> & {
     /** Render a search input above the model list. */
     searchable?: boolean;
+    /** Show the active effort level next to the model name. */
+    showEffort?: boolean;
     className?: string;
     contentClassName?: string;
   };
@@ -802,6 +814,7 @@ function ModelSelectorModelContext() {
 
 const ModelSelectorImpl = ({
   searchable,
+  showEffort,
   variant,
   size,
   className,
@@ -811,11 +824,9 @@ const ModelSelectorImpl = ({
   return (
     <ModelSelectorRoot {...rootProps}>
       <ModelSelectorModelContext />
-      <ModelSelectorTrigger
-        variant={variant}
-        size={size}
-        className={className}
-      />
+      <ModelSelectorTrigger variant={variant} size={size} className={className}>
+        <ModelSelectorValue showEffort={showEffort} />
+      </ModelSelectorTrigger>
       <ModelSelectorContent className={contentClassName}>
         {searchable && <ModelSelectorSearch />}
         <ModelSelectorEffort />

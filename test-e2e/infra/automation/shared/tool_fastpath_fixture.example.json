@@ -1,0 +1,12 @@
+{
+  "runtime_container": "disposable-runtime",
+  "workspace_mount_id": "0000000000000000000000000000000000000000000000000000000000000000",
+  "skill_id": 1,
+  "skill_name": "tfp-verification",
+  "config": {"marker": "TFP_RULES", "value": 7},
+  "langfuse": {
+    "url": "http://trace.example.invalid",
+    "public_key_env": "TFP_TRACE_PUBLIC_KEY",
+    "secret_key_env": "TFP_TRACE_SECRET_KEY"
+  }
+}

@@ -1,12 +1,12 @@
 import { cloneElement, type ReactElement, type ReactNode } from "react";
 import { expect, it, vi } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { Composer } from "@/app/newchat/assistant-ui/composer";
 
 const runtime = vi.hoisted(() => ({
   thread: { isRunning: false, messages: [] },
-  composer: { text: "question", dictation: false },
+  composer: { text: "question", dictation: false, attachments: [] },
   cancel: vi.fn(),
 }));
 vi.mock("@assistant-ui/react", () => {
@@ -120,11 +120,14 @@ it.each(["skill_create", "agent_create"] as const)(
     runtime.composer.text = "question";
   }
 );
-it("UT-FE-WB-014 composer keeps resources between text and ordered toolbar", () => {
+it("UT-FE-WB-014 composer keeps resources between text and ordered toolbar", async () => {
   runtime.thread.isRunning = false;
+  const onChatModeChange = vi.fn();
+  const onSelectAgent = vi.fn();
   render(
     <Composer
       {...base}
+      onChatModeChange={onChatModeChange}
       workbenchPresentation={{
         mode: "generic_chat",
         onExitCreation: vi.fn(),
@@ -132,7 +135,7 @@ it("UT-FE-WB-014 composer keeps resources between text and ordered toolbar", () 
       }}
       workbenchResources={{
         agentName: "Agent A",
-        onSelectAgent: vi.fn(),
+        onSelectAgent,
         onRemoveAgent: vi.fn(),
         skills: [{ id: 2, name: "Skill B" }],
       }}
@@ -147,21 +150,20 @@ it("UT-FE-WB-014 composer keeps resources between text and ordered toolbar", () 
     expect(
       left.compareDocumentPosition(right) & Node.DOCUMENT_POSITION_FOLLOWING
     ).toBeTruthy();
-  const planning = screen.getByRole("button", {
-    name: "chat.composer.planning",
+  const mode = screen.getByRole("button", {
+    name: "chat.composer.executionMode",
   });
-  expect(
-    screen.getByRole("button", { name: "chat.composer.execution" })
-  ).toBeInTheDocument();
-  expect(planning.parentElement?.parentElement).toHaveClass("border-b");
-  const creationAction = screen.getByRole("button", { name: "Skill 创建" });
-  expect(creationAction.closest("fieldset")).toBeNull();
-  before(creationAction, planning);
-  before(planning, screen.getByRole("textbox"));
+  expect(screen.queryByRole("button", { name: "Skill 创建" })).toBeNull();
   const chips = screen.getByLabelText("当前挂载资源");
   before(screen.getByRole("textbox"), chips);
-  before(chips, screen.getByRole("button", { name: "模型" }));
-  const labels = ["模型", "Agent", "Skills", "知识库"];
+  before(chips, mode);
+  const labels = [
+    "chat.composer.executionMode",
+    "chat.composer.skills",
+    "chat.composer.knowledgeBase",
+    "附件",
+    "模型",
+  ];
   for (let index = 1; index < labels.length; index++) {
     before(
       screen.getByRole("button", { name: labels[index - 1] }),
@@ -172,6 +174,20 @@ it("UT-FE-WB-014 composer keeps resources between text and ordered toolbar", () 
   expect(
     screen.getByRole("button", { name: "chat.composer.send" })
   ).toBeEnabled();
+  const agentButton = mode.previousElementSibling;
+  expect(agentButton?.tagName).toBe("BUTTON");
+  await userEvent.click(agentButton as HTMLButtonElement);
+  expect(onSelectAgent).toHaveBeenCalledOnce();
+  await userEvent.click(mode);
+  const choices = within(screen.getByRole("dialog"));
+  expect(
+    choices.getByRole("button", { name: "chat.composer.executionMode" })
+  ).toBeEnabled();
+  await userEvent.click(
+    choices.getByRole("button", { name: "chat.composer.planningMode" })
+  );
+  expect(onChatModeChange).toHaveBeenCalledExactlyOnceWith("planning");
+  expect(screen.queryByRole("dialog")).toBeNull();
 });
 
 it("UT-FE-WB-015 creation composer excludes resources and keeps the draft editable when its adapter is unavailable", () => {

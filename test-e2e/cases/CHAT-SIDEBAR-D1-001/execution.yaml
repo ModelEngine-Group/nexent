@@ -1,0 +1,14 @@
+schema_version: '1.0'
+case_id: CHAT-SIDEBAR-D1-001
+implementations:
+- framework: vitest
+  file: test.test.tsx
+  selector: CHAT-SIDEBAR-D1-001
+timeout_seconds: 180
+acceptance_bindings:
+  AC-01:
+  - '[CHAT-SIDEBAR-D1-001] persisted conversations remain visible and unsent drafts
+    stay hidden'
+  - '[CHAT-SIDEBAR-D1-001] renaming propagates normalized titles to the parent state'
+  - '[CHAT-SIDEBAR-D1-001] batch deletion resolves server IDs and resets the deleted
+    active conversation'

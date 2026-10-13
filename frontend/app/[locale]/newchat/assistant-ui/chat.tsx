@@ -52,10 +52,14 @@ export interface ChatProps {
   interactionContent?: ReactNode;
   readOnlyReason?: string;
   landingContent?: ReactNode;
+  /** Opt into the redesigned NewChat presentation. */
+  newChatDesign?: boolean;
   workbenchPresentation?: import("@/features/workbench/types").WorkbenchComposerPresentation;
   workbenchResources?: import("@/features/workbench/types").WorkbenchResourceControls;
   onRemoveWorkbenchSkill?: (skillId: number) => void;
   onOpenWorkbenchSkillPicker?: () => void;
+  workbenchSkillPopover?: ReactNode;
+  workbenchKnowledgePopover?: ReactNode;
 }
 
 const AgentsLoadingState: FC = () => {
@@ -108,10 +112,13 @@ export const Chat: FC<ChatProps> = ({
   interactionContent,
   readOnlyReason,
   landingContent,
+  newChatDesign = false,
   workbenchPresentation,
   workbenchResources,
   onRemoveWorkbenchSkill,
   onOpenWorkbenchSkillPicker,
+  workbenchSkillPopover,
+  workbenchKnowledgePopover,
 }) => {
   const handleSelectAgent = useCallback(
     (agent: Agent) => {
@@ -143,6 +150,7 @@ export const Chat: FC<ChatProps> = ({
           agent={workbenchPlaceholderAgent}
           generatedTitle={generatedTitle}
           conversationId={conversationId}
+          newChatDesign={newChatDesign}
           welcomeContent={landingContent}
           selectedModelId={selectedModelId}
           onModelChange={onModelChange}
@@ -163,6 +171,8 @@ export const Chat: FC<ChatProps> = ({
           workbenchResources={workbenchResources}
           onOpenWorkbenchSkillPicker={onOpenWorkbenchSkillPicker}
           onRemoveWorkbenchSkill={onRemoveWorkbenchSkill}
+          workbenchSkillPopover={workbenchSkillPopover}
+          workbenchKnowledgePopover={workbenchKnowledgePopover}
           skillFiles={skillFiles}
           knowledgeScope={knowledgeScope}
           knowledgePreview={knowledgePreview}
@@ -185,6 +195,7 @@ export const Chat: FC<ChatProps> = ({
       welcomeTitle={welcomeTitle}
       welcomeSuggestions={welcomeSuggestions}
       conversationId={conversationId}
+      newChatDesign={newChatDesign}
       onBack={onBack}
       chatMode={chatMode}
       onChatModeChange={onChatModeChange}
@@ -214,6 +225,8 @@ export const Chat: FC<ChatProps> = ({
       workbenchResources={workbenchResources}
       onRemoveWorkbenchSkill={onRemoveWorkbenchSkill}
       onOpenWorkbenchSkillPicker={onOpenWorkbenchSkillPicker}
+      workbenchSkillPopover={workbenchSkillPopover}
+      workbenchKnowledgePopover={workbenchKnowledgePopover}
     />
   );
 };

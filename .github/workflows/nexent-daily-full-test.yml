@@ -75,6 +75,7 @@ jobs:
             "$TEST_PYTHON" "$REPO_ROOT/test-e2e/infra/scripts/daily-launch.py" \
               --test-home "$TEST_ROOT" \
               --branch develop \
+              --publish-latest \
               --execute >"$attempt_log" 2>&1
             daily_status=$?
             set -e
@@ -107,4 +108,5 @@ jobs:
           echo "Launch logs: $TEST_ROOT/runs/daily-launch/"
           echo "Daily runs: $TEST_ROOT/runs/repository-daily/"
           echo "Latest report index: $TEST_ROOT/reports/repository-latest.json"
+          echo "Syncthing latest complete batch: $TEST_ROOT/runs-ubuntu/"
           echo "Workflow log: $TEST_ROOT/runs/github-actions/run-${GITHUB_RUN_ID}-attempt-${GITHUB_RUN_ATTEMPT}.log"

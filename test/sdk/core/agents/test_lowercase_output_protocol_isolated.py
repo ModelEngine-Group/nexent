@@ -34,9 +34,10 @@ def test_lowercase_final_answer_is_accepted(protocol):
     assert answer.answer == "ok"
 
 
-def test_uppercase_final_answer_is_rejected(protocol):
-    with pytest.raises(protocol.ModelOutputProtocolError):
-        protocol.classify_model_output("<FINAL_ANSWER>old</FINAL_ANSWER>", protocol="final_envelope")
+def test_uppercase_final_answer_is_accepted(protocol):
+    answer = protocol.classify_model_output("<FINAL_ANSWER>ok</FINAL_ANSWER>", protocol="final_envelope")
+    assert isinstance(answer, protocol.ExplicitFinalAnswer)
+    assert answer.answer == "ok"
 
 
 def test_uppercase_legacy_run_is_rejected_even_after_code_label(protocol):

@@ -1,0 +1,21 @@
+schema_version: '1.0'
+module:
+  id: CHAT-SIDEBAR
+  name: Conversation sidebar
+feature:
+  feature_id: CHAT-SIDEBAR
+  name: Conversation sidebar preserved after merge
+  status: active
+  description: Persisted visibility, normalized rename and server-ID batch deletion
+    preserve sidebar state.
+  business_rules:
+  - rule_id: CHAT-SIDEBAR-RULE-001
+    description: Persisted conversations remain visible; unsent drafts stay hidden;
+      rename propagates normalized title and remote identity; batch deletion resolves
+      server IDs and resets deleted active threads.
+  required_test_stages:
+  - D1
+  source:
+    requirement_ids:
+    - CHAT-SIDEBAR-REQ-001
+    spec_path: ../nexent-doc/docs/Developing/agt-pr4058-test-delivery/design.md

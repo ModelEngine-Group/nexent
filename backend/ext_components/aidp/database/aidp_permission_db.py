@@ -15,11 +15,11 @@ import logging
 from typing import Any, Iterable, List, Optional, Sequence
 
 from sqlalchemy import and_, func, select, update
-from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from database.client import as_dict, get_db_session
+from database.db_models import UserTenant
 from ext_components.aidp.database.db_models import AidpKbPermission
 
 logger = logging.getLogger("aidp_permission_db")
@@ -48,6 +48,18 @@ def _normalize_group_ids(group_ids: Any) -> list[int]:
     if isinstance(group_ids, str):
         return [int(item.strip()) for item in group_ids.split(",") if item.strip()]
     return [int(item) for item in group_ids]
+
+
+def _permission_with_creator():
+    """Join the owner's active tenant record while retaining KBs without a matching user."""
+    return select(AidpKbPermission, UserTenant.user_email.label("creator_name")).outerjoin(
+        UserTenant,
+        and_(
+            UserTenant.user_id == AidpKbPermission.owner_user_id,
+            UserTenant.tenant_id == AidpKbPermission.tenant_id,
+            UserTenant.delete_flag == _ACTIVE_FILTER,
+        ),
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -96,13 +108,13 @@ def list_all_permissions_by_tenant(
         raise ValueError("tenant_id is required")
 
     stmt = (
-        select(AidpKbPermission)
+        _permission_with_creator()
         .where(and_(_active_clause(), AidpKbPermission.tenant_id == tenant_id))
         .order_by(AidpKbPermission.create_time.desc(), AidpKbPermission.id.desc())
     )
     with get_db_session(db_session) as session:
-        rows = session.execute(stmt).scalars().all()
-        return [as_dict(row) for row in rows]
+        rows = session.execute(stmt).all()
+        return [{**as_dict(row), "creator_name": creator_name} for row, creator_name in rows]
 
 
 def list_kds_name_to_id_map(
@@ -154,7 +166,7 @@ def get_permission_by_kb_id(
     """
     if not kb_id or not tenant_id:
         raise ValueError("kb_id and tenant_id are required")
-    stmt = select(AidpKbPermission).where(
+    stmt = _permission_with_creator().where(
         and_(
             _active_clause(),
             AidpKbPermission.kb_id == kb_id,
@@ -162,8 +174,11 @@ def get_permission_by_kb_id(
         )
     )
     with get_db_session(db_session) as session:
-        row = session.execute(stmt).scalar_one_or_none()
-        return as_dict(row) if row is not None else None
+        result = session.execute(stmt).one_or_none()
+        if result is None:
+            return None
+        row, creator_name = result
+        return {**as_dict(row), "creator_name": creator_name}
 
 
 # ---------------------------------------------------------------------------

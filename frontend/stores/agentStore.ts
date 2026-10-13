@@ -71,6 +71,7 @@ interface AgentStoreState {
   isReadOnly: boolean;
   editedAgent: AgentDraft | null;
   savedAgent: AgentDraft | null;
+  lastSavedAt: number | null;
   serverSnapshotRevision: number;
   queue: AgentSaveTask[];
   isGenerating: boolean;
@@ -508,6 +509,7 @@ async function processSaveQueue(): Promise<void> {
         saveQueue = saveQueue.slice(1);
         useAgentStore.setState((state) => ({
           savedAgent: mergeDraft(state.savedAgent, task.patch),
+          lastSavedAt: Date.now(),
           lastSaveFailed:
             drainHadFailure || saveQueue.length > 0
               ? state.lastSaveFailed
@@ -535,9 +537,7 @@ async function processSaveQueue(): Promise<void> {
           ),
           lastSaveFailed: true,
           saveError:
-            error instanceof Error
-              ? error
-              : "Failed to save agent changes",
+            error instanceof Error ? error : "Failed to save agent changes",
         }));
       }
     }
@@ -593,6 +593,7 @@ export const useAgentStore = create<AgentStoreState>((set) => {
     isReadOnly: true,
     editedAgent: null,
     savedAgent: null,
+    lastSavedAt: null,
     serverSnapshotRevision: 0,
     queue: [],
     isGenerating: false,
@@ -611,6 +612,7 @@ export const useAgentStore = create<AgentStoreState>((set) => {
         isReadOnly: agent.permission === "READ_ONLY",
         editedAgent: cloneDraft(draft),
         savedAgent: cloneDraft(draft),
+        lastSavedAt: null,
         serverSnapshotRevision: state.serverSnapshotRevision + 1,
         isGenerating: false,
         saveError: null,
@@ -741,6 +743,7 @@ export const useAgentStore = create<AgentStoreState>((set) => {
         isReadOnly: true,
         editedAgent: null,
         savedAgent: null,
+        lastSavedAt: null,
         serverSnapshotRevision: state.serverSnapshotRevision + 1,
         isGenerating: false,
         saveError: null,

@@ -1,7 +1,9 @@
 ---
-description: Formal Nexent feature catalog, D1-D5 cases, automation, manifest, generated Excel, migration, and Mock profiles
-globs: test/features/**,test/cases/**,test/changes/**,test/automation/**,test/manifests/**,test/schemas/**,test/tools/**,test/mock-services/**
+description: Formal Nexent test-e2e feature catalog, D1-D5 case-local scripts and execution bindings, generated views, runtime, migration, and Mock profiles
+globs: test-e2e/**
 alwaysApply: false
 ---
 
 Read [.agents/skills/nexent-test-assets/SKILL.md](mdc:.agents/skills/nexent-test-assets/SKILL.md) before working in this rule scope.
+
+This is a compatibility entrypoint, not a separate source of generation paths. Follow the canonical skill's case-local layout; historical paths in migration archives are not destinations for new formal tests. Traditional UT under `test/` uses its own rules.

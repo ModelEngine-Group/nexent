@@ -1,0 +1,45 @@
+.page {
+  --aidp-text: #191919;
+  --aidp-secondary: #595959;
+  --aidp-muted: #8c8c8c;
+  --aidp-title-size: 18px;
+  --aidp-title-line-height: 28px;
+  --aidp-heading-size: 16px;
+  --aidp-heading-line-height: 24px;
+  --aidp-body-size: 14px;
+  --aidp-body-line-height: 22px;
+  --aidp-caption-size: 12px;
+  --aidp-caption-line-height: 20px;
+  color: var(--aidp-text);
+  font-size: var(--aidp-body-size);
+  line-height: var(--aidp-body-line-height);
+}
+
+.pageTitle {
+  color: var(--aidp-text);
+  font-size: var(--aidp-title-size);
+  font-weight: 600;
+  line-height: var(--aidp-title-line-height);
+}
+
+.sectionTitle {
+  color: var(--aidp-text);
+  font-size: var(--aidp-heading-size);
+  font-weight: 500;
+  line-height: var(--aidp-heading-line-height);
+}
+
+.breadcrumbLink {
+  color: var(--aidp-secondary);
+  font-size: var(--aidp-title-size);
+  font-weight: 400;
+  line-height: var(--aidp-title-line-height);
+}
+
+.breadcrumbLink:hover {
+  color: #0067d1;
+}
+
+.muted {
+  color: var(--aidp-muted);
+}

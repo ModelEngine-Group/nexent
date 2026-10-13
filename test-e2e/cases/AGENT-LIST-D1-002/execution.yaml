@@ -1,0 +1,17 @@
+schema_version: '1.0'
+case_id: AGENT-LIST-D1-002
+implementations:
+- framework: vitest
+  file: test.test.tsx
+  selector: AGENT-LIST-D1-002
+timeout_seconds: 180
+acceptance_bindings:
+  AC-01:
+  - '[AGENT-LIST-D1-002] measured Agent card metadata and callbacks > renders published
+    metadata without turning the status dot into a control'
+  - '[AGENT-LIST-D1-002] measured Agent card metadata and callbacks > keeps creation
+    dates, offline status and publication protection truthful'
+  - '[AGENT-LIST-D1-002] measured Agent card metadata and callbacks > uses localized
+    missing-value fallbacks without inventing a date or category'
+  - '[AGENT-LIST-D1-002] measured Agent card metadata and callbacks > preserves independent
+    detail, configure, publish and version-menu callbacks'

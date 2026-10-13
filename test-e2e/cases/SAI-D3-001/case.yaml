@@ -1,0 +1,95 @@
+schema_version: '1.0'
+stage: D3
+module: RUNTIME-SANDBOX
+case:
+  case_id: SAI-D3-001
+  feature_id: SAI-001
+  business_rule_ids:
+  - SAI-001-R1
+  - SAI-001-R2
+  title: Real CoreAgent parallel invocation uses distinct Docker kernels
+  type: AGENT-IT
+  priority: P1
+  status: active
+  automation: automated
+  objective: Prove the complete SDK factory and CoreAgent execution boundary against
+    a real Gateway.
+  preconditions:
+  - A built verification Runtime image contains the current worktree SDK and an available
+    Sandbox image supports its Gateway.
+  - Docker socket is authorized for disposable test containers.
+  test_data:
+    scopes:
+    - session
+    - system
+    parallel_calls: 2
+    execution_sleep_seconds: 1
+    markers:
+    - LEFT
+    - RIGHT
+  steps:
+  - order: 1
+    action: Create a parent and one internal child definition using a deterministic
+      model.
+    expected: Only parent resources are allocated before child invocation.
+  - order: 2
+    action: Inject one terminal model timeout after allocating a child kernel, inspect
+      root-only kernel baseline, then invoke the same definition again.
+    expected: The failed child is released without marking the lease unhealthy; subsequent
+      parallel calls succeed.
+  - order: 3
+    action: Dispatch two calls to the same definition through the real parallel tool.
+    expected: Both model calls overlap and receive distinct kernels.
+  - order: 4
+    action: Execute marker state in each kernel and inspect results and events.
+    expected: Markers and state match each own task and observer events pair.
+  - order: 5
+    action: Read the parent cached skill script after every child pair exits.
+    expected: The shared skill path still exists with its original contents.
+  - order: 6
+    action: Close invocation and root resources.
+    expected: No owned kernel or container remains.
+  expected_results:
+  - Both calls succeed with zero unhealthy or kernel replacements.
+  - A failed invocation releases its own kernel and subsequent calls to the same definition
+    recover.
+  forbidden_side_effects:
+  - No deletion of unrelated containers
+  - No task result contamination
+  integration_boundary:
+  - NexentAgent factory
+  - CoreAgent loop
+  - ThreadManager parallel tool
+  - Docker Gateway
+  observations:
+  - Overlapping model calls
+  - Unique kernel IDs
+  - Exact final markers
+  - Paired invocation events
+  - Parent cached skill file survives child cleanup
+  cleanup:
+  - Release all invocation-owned kernels
+  - Remove the owned session sandbox after parent exit and the isolated system sandbox
+    on test pool shutdown
+  execution:
+    profiles:
+    - name: mock
+      required_services: []
+    timeout_seconds: 180
+  acceptance:
+  - id: AC-01
+    description: Prove the complete SDK factory and CoreAgent execution boundary against
+      a real Gateway.
+    steps:
+    - 1
+    - 2
+    - 3
+    - 4
+    - 5
+    - 6
+    expected_results:
+    - 1
+    - 2
+    forbidden_side_effects:
+    - 1
+    - 2

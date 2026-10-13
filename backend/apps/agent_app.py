@@ -1,6 +1,7 @@
 import json
 import logging
 from http import HTTPStatus
+from urllib.parse import quote
 from typing import Optional
 
 from fastapi import APIRouter, Body, Depends, File, Header, HTTPException, Query, Request, UploadFile
@@ -729,11 +730,14 @@ async def export_agent_api(
                               user_id=user_id, tenant_id=tenant_id,
                               details={"agent_id": request.agent_id})
         if isinstance(result, dict) and result.get("_zip"):
+            filename = result.get("filename", "agent_export.zip")
+            encoded_filename = quote(filename)
             return Response(
                 content=result["data"],
                 media_type="application/zip",
                 headers={
-                    "Content-Disposition": f"attachment; filename=\"{result.get('filename', 'agent_export.zip')}\""
+                    # RFC 5987 encoding supports non-ASCII agent display names
+                    "Content-Disposition": f"attachment; filename*=UTF-8''{encoded_filename}",
                 }
             )
         return ConversationResponse(code=0, message="success", data=result)

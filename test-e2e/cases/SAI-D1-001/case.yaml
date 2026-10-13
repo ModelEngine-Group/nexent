@@ -1,0 +1,62 @@
+schema_version: '1.0'
+stage: D1
+module: RUNTIME-SANDBOX
+case:
+  case_id: SAI-D1-001
+  feature_id: SAI-001
+  business_rule_ids:
+  - SAI-001-R1
+  title: Concurrent calls construct isolated invocation agents
+  type: SDK-UT
+  priority: P1
+  status: active
+  automation: automated
+  objective: Preserve overlap while isolating mutable state and tool identity.
+  preconditions:
+  - A parent exposes one lazy internal child definition.
+  test_data:
+    parallel_calls: 2
+    markers:
+    - LEFT
+    - RIGHT
+  steps:
+  - order: 1
+    action: Construct the parent without invoking its child.
+    expected: No child model or executor is allocated.
+  - order: 2
+    action: Invoke that child twice with a barrier in the task body.
+    expected: Both calls overlap using distinct agent and model objects.
+  - order: 3
+    action: Observe results and close events.
+    expected: Both own markers return and each invocation closes its resources.
+  expected_results:
+  - Parent callable identity is stable; instance state is distinct.
+  forbidden_side_effects:
+  - No serialization of complete sibling calls
+  - No cross-call state mutation
+  unit_boundary: Internal subagent definition and invocation factory
+  inputs:
+  - One definition
+  - Two overlapping tasks
+  assertions:
+  - Child allocation count is zero before use
+  - Distinct agent/model/state identities
+  - Peak active calls is two
+  - Results match own markers
+  - Two paired observer events
+  execution:
+    profiles:
+    - name: mock
+      required_services: []
+  acceptance:
+  - id: AC-01
+    description: Preserve overlap while isolating mutable state and tool identity.
+    steps:
+    - 1
+    - 2
+    - 3
+    expected_results:
+    - 1
+    forbidden_side_effects:
+    - 1
+    - 2

@@ -1,0 +1,13 @@
+schema_version: '1.0'
+case_id: FAF-D3-001
+implementations:
+- framework: custom
+  file: test.py
+  selector: main
+  profiles:
+  - real_smoke
+preparation:
+  families: []
+  anchors: false
+  special_assets: false
+  d4_groups: []

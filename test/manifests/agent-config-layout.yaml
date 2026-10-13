@@ -1,0 +1,93 @@
+schema_version: '1.0'
+cases:
+- case_id: AGENT-CONFIG-D1-001
+  stage: D1
+  status: implemented
+  contract_hash: sha256:1b1b2c4ca225df799d587e0fd3d3d8c8104d29fe6a848848a6eda91cf3a9e1b4
+  implementation_hash: sha256:ea731f17afcbdf014ef62b5400aa16c1b3dca7d2002b2304d8c1b1d8c6fbe117
+  implementation:
+  - framework: vitest
+    file: test/automation/d1/agent-config-layout.test.tsx
+    selector: AGENT-CONFIG-D1-001
+    profiles:
+    - mock
+  - framework: vitest
+    file: test/automation/d1/agent-config-prompt.test.tsx
+    selector: AGENT-CONFIG-D1-001
+    profiles:
+    - mock
+- case_id: AGENT-CONFIG-D1-002
+  stage: D1
+  status: implemented
+  contract_hash: sha256:39a5d953b19d09f70343d9924881bd86e99d9753b149df34d69f60674f48b59a
+  implementation_hash: sha256:4eb7abaf1a8199a4b3e5675079e93b771d0dc6ad9987f71f20d46c0444811b04
+  implementation:
+  - framework: vitest
+    file: test/automation/d1/agent-config-guide.test.tsx
+    selector: AGENT-CONFIG-D1-002
+    profiles:
+    - mock
+- case_id: AGENT-CONFIG-D1-003
+  stage: D1
+  status: implemented
+  contract_hash: sha256:402c8dfd7414a39feca412292b5eb1208615c0ff7c20bb1ac19bea4518e02ff9
+  implementation_hash: sha256:3f76518606adc1486ff89c288c6cc27973bef01d7f4cbb2b0e8b6f9d50a7a53a
+  implementation:
+  - framework: vitest
+    file: test/automation/d1/agent-config-resources.test.tsx
+    selector: AGENT-CONFIG-D1-003
+    profiles:
+    - mock
+  - framework: vitest
+    file: test/automation/d1/agent-config-selected-tools.test.tsx
+    selector: AGENT-CONFIG-D1-003
+    profiles:
+    - mock
+  - framework: vitest
+    file: test/automation/d1/agent-config-selected-child-agents.test.tsx
+    selector: AGENT-CONFIG-D1-003
+    profiles:
+    - mock
+- case_id: AGENT-CONFIG-D1-004
+  stage: D1
+  status: implemented
+  contract_hash: sha256:5f33024788d9fdd9d967a2964c21b46f11e124a70f694e2afa90ec680e795aa4
+  implementation_hash: sha256:7e2095b8a8c40bf6eda6b16139471fe337fedecbb0d4cc3824f9eaf86f2cdd13
+  implementation:
+  - framework: vitest
+    file: test/automation/d1/agent-config-info.test.tsx
+    selector: AGENT-CONFIG-D1-004
+    profiles:
+    - mock
+  - framework: vitest
+    file: test/automation/d1/agent-config-guide.test.tsx
+    selector: AGENT-CONFIG-D1-004
+    profiles:
+    - mock
+  - framework: vitest
+    file: test/automation/d1/agent-config-prompt.test.tsx
+    selector: AGENT-CONFIG-D1-004
+    profiles:
+    - mock
+- case_id: AGENT-CONFIG-D1-005
+  stage: D1
+  status: implemented
+  implementation:
+  - framework: vitest
+    file: test/automation/d1/agent-config-drawers.test.tsx
+    selector: AGENT-CONFIG-D1-005
+    profiles:
+    - mock
+  contract_hash: sha256:24f0b216ba67e0b9afc79033ba7c9a5d9ef8e4e816372d7826ec2ce091d460ce
+  implementation_hash: sha256:e21f3380f462f54d1161a964b9ad41a485e43eda860cd66a055c6027889cda87
+- case_id: AGENT-CONFIG-D4-001
+  stage: D4
+  status: implemented
+  contract_hash: sha256:5838edebe9452e43ecb1c573cd00bd5a64fd2f0562891f93f5bc4cefefc2258d
+  implementation_hash: sha256:67c8065cd1d5e5b2799cfb3688fd415858844226268e2704b60abb314c143d2e
+  implementation:
+  - framework: playwright
+    file: test/automation/d4/agent-config-layout.spec.mjs
+    selector: AGENT-CONFIG-D4-001
+    profiles:
+    - mock

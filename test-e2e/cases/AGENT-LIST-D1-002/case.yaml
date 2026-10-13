@@ -1,0 +1,114 @@
+schema_version: '1.0'
+stage: D1
+module: AGENT-LIST
+case:
+  case_id: AGENT-LIST-D1-002
+  feature_id: AGENT-LIST-VIEWS
+  requirement_ids:
+  - AGENT-LIST-REQ-003
+  business_rule_ids:
+  - AGENT-LIST-RULE-007
+  - AGENT-LIST-RULE-008
+  title: Render measured Agent card metadata and preserve existing callbacks
+  type: FE-COMP
+  priority: P1
+  status: active
+  automation: automated
+  objective: Prove isolated card metadata, decorative status semantics and action
+    wiring; the linked D4 case owns actual typography, colors and browser geometry.
+  preconditions:
+  - Render AgentListCard with mocked translation, avatar and more-menu boundaries.
+  - Supply published editable, unpublished read-only and missing-metadata rows using
+    existing Agent fields.
+  test_data:
+    profile: mock
+    published_agent:
+      display_name: 健康小助手
+      description: 一个专业、全面的健康咨询智能体，提供可靠、实用的健康信息。
+      tags:
+      - 医疗
+      create_time: '2026-01-23T12:00:00'
+      update_time: '2026-02-04T09:30:00'
+      current_version_no: 2
+      permission: EDIT
+    unpublished_agent:
+      display_name: 资料助手
+      tags: []
+      create_time: '2026-01-23T12:00:00'
+      update_time: null
+      current_version_no: null
+      permission: READ_ONLY
+    missing_metadata_agent:
+      display_name: null
+      name: fallback_agent
+      description: null
+      create_time: null
+      update_time: null
+      tags: []
+  steps:
+  - order: 1
+    action: Render the published editable card and inspect its title, description,
+      category, timestamp and status content.
+    expected: Real fields render without fabricated metadata; the update date is labeled
+      as updated, published status includes a decorative status dot, and the more
+      menu remains accessible.
+  - order: 2
+    action: Render the unpublished read-only row and a row with missing metadata.
+    expected: Creation time is labeled as creation rather than update, unpublished
+      status remains truthful, missing values use existing localized fallbacks, and
+      publication is disabled for read-only data.
+  - order: 3
+    action: Activate card details, configure and publication controls on an editable
+      row and open its more menu.
+    expected: Each existing callback receives the correct Agent or numeric ID; a decorative
+      status dot creates no extra control and no new business request.
+  expected_results:
+  - Actual title, description, category, timestamp and publication status content
+    render with accessible controls; typography, colors and numeric geometry are separately
+    proved by AGENT-LIST-D4-002.
+  - Status and dates derive from actual metadata, with creation versus update labels
+    preserved and missing data never fabricated.
+  - Details, configure, publication and more-menu callbacks retain their existing
+    data/permission contracts.
+  - The status dot is purely decorative and introduces no extra interactive element
+    or callback.
+  forbidden_side_effects:
+  - Rendering, hover/focus presentation or status decoration must not invoke a business
+    mutation or model/provider call.
+  - Do not replace real list data with screenshot fixtures or infer imported provenance.
+  - Do not mark a creation date as an update date or enable publication for read-only
+    rows.
+  unit_boundary: AgentListCard React component with mocked callbacks, translations
+    and avatar/menu boundaries.
+  inputs:
+  - published editable Agent
+  - unpublished read-only Agent
+  - missing metadata Agent
+  - existing callbacks
+  assertions:
+  - Titles use display_name then name and descriptions use the existing localized
+    fallback when absent.
+  - Category uses actual tags and status uses actual current_version_no.
+  - Timestamp source and labels preserve creation-versus-update semantics and missing
+    timestamp placeholders.
+  - Status dot is aria-hidden, has no focus/interactive role and leaves existing status
+    text available.
+  - Existing details/configure/publication callbacks and read-only publication protection
+    are unchanged.
+  acceptance:
+  - id: AC-01
+    description: Prove isolated card metadata, decorative status semantics and action
+      wiring; the linked D4 case owns actual typography, colors and browser geometry.
+    steps:
+    - 1
+    - 2
+    - 3
+    expected_results:
+    - 1
+    - 2
+    - 3
+    - 4
+    forbidden_side_effects:
+    - 1
+    - 2
+    - 3

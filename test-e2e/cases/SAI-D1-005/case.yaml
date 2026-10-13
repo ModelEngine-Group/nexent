@@ -1,0 +1,50 @@
+schema_version: '1.0'
+stage: D1
+module: RUNTIME-SANDBOX
+case:
+  case_id: SAI-D1-005
+  feature_id: SAI-001
+  business_rule_ids:
+  - SAI-001-R2
+  title: Shared skill directories survive child cleanup
+  type: SDK-UT
+  priority: P1
+  status: active
+  automation: automated
+  objective: Child releases its executor without deleting skills; root cleanup removes
+    shared skills.
+  preconditions:
+  - Parent and child runners refer to one container workspace
+  test_data:
+    calls: 2
+  steps:
+  - order: 1
+    action: Exit a child then use the parent cached skill path before root cleanup.
+    expected: Child releases its executor without deleting skills; root cleanup removes
+      shared skills.
+  expected_results:
+  - Child releases its executor without deleting skills; root cleanup removes shared
+    skills.
+  forbidden_side_effects:
+  - No sibling or parent script deletion
+  unit_boundary: Invocation configuration, workspace ownership and cancellation propagation
+  inputs:
+  - Parent and child runners refer to one container workspace
+  assertions:
+  - Child releases its executor without deleting skills; root cleanup removes shared
+    skills.
+  - No sibling or parent script deletion
+  execution:
+    profiles:
+    - name: mock
+      required_services: []
+  acceptance:
+  - id: AC-01
+    description: Child releases its executor without deleting skills; root cleanup
+      removes shared skills.
+    steps:
+    - 1
+    expected_results:
+    - 1
+    forbidden_side_effects:
+    - 1

@@ -229,9 +229,10 @@ def test_cftp_001_final_only_protocol_accepts_the_same_envelope():
 
 
 @pytest.mark.parametrize("protocol", ["final_envelope", "code_action"])
-def test_uppercase_final_envelope_is_not_accepted(protocol):
-    with pytest.raises(ModelOutputProtocolError):
-        classify_model_output("<FINAL_ANSWER>old</FINAL_ANSWER>", protocol=protocol)
+def test_uppercase_final_envelope_is_accepted(protocol):
+    answer = classify_model_output("<FINAL_ANSWER>ok</FINAL_ANSWER>", protocol=protocol)
+    assert isinstance(answer, ExplicitFinalAnswer)
+    assert answer.answer == "ok"
 
 
 @pytest.mark.parametrize("protocol", ["final_envelope", "code_action"])

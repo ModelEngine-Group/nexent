@@ -41,10 +41,9 @@ export function createReasoningAccumulator(parts: unknown[]) {
         return;
       }
       if (current) this.close();
-      replace({ type: "reasoning", text: label, status: { type: "running" } });
-      currentHasStepLabel = true;
+      pendingStepLabel = label;
+      currentHasStepLabel = false;
       currentHasModelContent = false;
-      pendingStepLabel = "";
       pendingWhitespace = "";
     },
     append(text: string) {
@@ -53,6 +52,7 @@ export function createReasoningAccumulator(parts: unknown[]) {
         pendingWhitespace += text;
         return;
       }
+      const hasStepLabel = currentHasStepLabel || Boolean(pendingStepLabel);
       replace({
         type: "reasoning",
         text: (current?.text ?? pendingStepLabel + pendingWhitespace) + text,
@@ -60,7 +60,15 @@ export function createReasoningAccumulator(parts: unknown[]) {
       });
       pendingStepLabel = "";
       pendingWhitespace = "";
+      currentHasStepLabel = hasStepLabel;
       currentHasModelContent = true;
+    },
+    detach() {
+      current = null;
+      pendingStepLabel = "";
+      pendingWhitespace = "";
+      currentHasStepLabel = false;
+      currentHasModelContent = false;
     },
     close() {
       if (current) {

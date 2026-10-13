@@ -1,4 +1,5 @@
 import importlib.util
+import json
 import logging
 import os
 import sys
@@ -606,78 +607,6 @@ class TestFetchAllAidpKnowledgeBasesImpl:
         assert exc_info.value.error_code == ErrorCode.AIDP_SERVICE_ERROR
 
 
-# ---------------------------------------------------------------------------
-# _apply_create_defaults tests
-# Pure helper, no mocking required -- tests default injection behavior.
-# ---------------------------------------------------------------------------
-class TestApplyCreateDefaults:
-    """Tests for _apply_create_defaults (AIDP create KB payload defaults)."""
-
-    @pytest.fixture
-    def aidp_mod(self, aidp_service_module):
-        return aidp_service_module
-
-    def test_fills_all_defaults_when_payload_is_minimal(self, aidp_mod):
-        result = aidp_mod._apply_create_defaults({"name": "kb-1"})
-        assert result["name"] == "kb-1"
-        assert result["chunk_token_num"] == 1024
-        assert result["chunk_overlap_num"] == 128
-        assert result["embedding_model"] == "default"
-        assert result["vlm_model"] == ""
-        assert result["is_personal"] == 0
-        assert result["topk"] == 10
-        assert result["similarity"] == 0.0
-        assert result["smartsplit"] == 1
-        assert result["caption_enable"] == 0
-
-    def test_preserves_client_supplied_values(self, aidp_mod):
-        payload = {
-            "name": "kb-custom",
-            "description": "my desc",
-            "chunk_token_num": 512,
-            "embedding_model": "bge-m3",
-            "is_personal": 1,
-        }
-        result = aidp_mod._apply_create_defaults(payload)
-        assert result["name"] == "kb-custom"
-        assert result["description"] == "my desc"
-        assert result["chunk_token_num"] == 512
-        assert result["embedding_model"] == "bge-m3"
-        assert result["is_personal"] == 1
-        assert result["chunk_overlap_num"] == 128
-        assert result["vlm_model"] == ""
-        assert result["topk"] == 10
-
-    def test_is_multimodal_enables_caption_when_not_set(self, aidp_mod):
-        result = aidp_mod._apply_create_defaults(
-            {"name": "kb-mm", "is_multimodal": True}
-        )
-        assert result["is_multimodal"] is True
-        assert result["caption_enable"] == 1
-
-    def test_is_multimodal_respects_explicit_caption(self, aidp_mod):
-        result = aidp_mod._apply_create_defaults(
-            {"name": "kb-mm", "is_multimodal": True, "caption_enable": 0}
-        )
-        assert result["caption_enable"] == 0
-
-    def test_does_not_mutate_input_payload(self, aidp_mod):
-        original = {"name": "kb-x"}
-        snapshot = dict(original)
-        aidp_mod._apply_create_defaults(original)
-        assert original == snapshot
-
-    def test_false_value_preserved_not_replaced_by_default(self, aidp_mod):
-        result = aidp_mod._apply_create_defaults(
-            {
-                "name": "kb",
-                "chunk_token_num": 0,
-                "caption_enable": 1,
-                "vlm_model": "my-vlm",
-            }
-        )
-        assert result["chunk_token_num"] == 0
-        assert result["vlm_model"] == "my-vlm"
 
 
 # ---------------------------------------------------------------------------
@@ -1094,24 +1023,122 @@ class TestFetchAllAidpKnowledgeBasesImplGaps:
         assert result["value"] == [{"kds_id": "kb-1"}]
 
 
-# ---------------------------------------------------------------------------
-# _apply_create_defaults remaining gap
-# ---------------------------------------------------------------------------
-class TestApplyCreateDefaultsGaps:
-    """Cover the fallback description branch (line 506)."""
 
-    def test_empty_description_no_name_uses_fallback(self, aidp_service_module):
-        """No description and no name -> 'Nexent knowledge base'."""
-        result = aidp_service_module._apply_create_defaults({})
-        assert result["description"] == "Nexent knowledge base"
 
-    def test_whitespace_only_description_no_name_uses_fallback(self, aidp_service_module):
-        result = aidp_service_module._apply_create_defaults({"description": "   "})
-        assert result["description"] == "Nexent knowledge base"
+class TestGraphConfigValidation:
+    """Graph settings are validated against the values accepted by AIDP."""
 
-    def test_empty_description_with_name_uses_name(self, aidp_service_module):
-        result = aidp_service_module._apply_create_defaults({"name": "my-kb", "description": ""})
-        assert result["description"] == "my-kb"
+
+
+    @pytest.mark.parametrize(
+        "override",
+        [
+            {"domain": 7},
+            {"prompt_language": 7},
+            {"prompt_text": 7},
+            {"retrieve_subgraph_hop": 2},
+            {"llm_model_name": 7},
+        ],
+    )
+    def test_rejects_wrong_graph_value_types(self, aidp_service_module, override):
+        config = {
+            "domain": "常规",
+            "retrieve_subgraph_hop": "2",
+            "no_think_mode": "是",
+            "prompt_language": "中文",
+            "prompt_text": "提取实体关系。",
+            "synonym_merge_enable": "否",
+            "disambiguation_enable": "否",
+            "llm_model_name": "qwen3_8b",
+            **override,
+        }
+        with pytest.raises(AppException) as exc_info:
+            aidp_service_module._serialize_graph_config(config)
+        assert exc_info.value.error_code == ErrorCode.COMMON_PARAMETER_INVALID
+
+    def test_requires_llm_model_when_graph_is_enabled(self, aidp_service_module):
+        config = {
+            "domain": "常规",
+            "retrieve_subgraph_hop": "2",
+            "no_think_mode": "是",
+            "prompt_language": "中文",
+            "prompt_text": "提取实体关系。",
+            "synonym_merge_enable": "否",
+            "disambiguation_enable": "否",
+        }
+        with pytest.raises(AppException) as exc_info:
+            aidp_service_module._serialize_graph_config(config)
+        assert exc_info.value.error_code == ErrorCode.COMMON_PARAMETER_INVALID
+
+
+class TestGetAidpGraphTemplateImpl:
+    """The graph-template client validates language and maps upstream failures."""
+
+    @staticmethod
+    def _configure_client(module, response):
+        client = MagicMock()
+        client.get.return_value = response
+        module.http_client_manager.get_sync_client.return_value = client
+        module._request_with_retry = lambda request_fn, context: request_fn()
+        return client
+
+
+    def test_rejects_unexpected_response_shape(self, aidp_service_module):
+        response = MagicMock(status_code=200)
+        response.json.return_value = {"value": None}
+        self._configure_client(aidp_service_module, response)
+
+        with pytest.raises(AppException) as exc_info:
+            aidp_service_module.get_aidp_graph_template_impl(
+                "http://aidp.example.test", "api-key"
+            )
+
+        assert exc_info.value.error_code == ErrorCode.AIDP_RESPONSE_ERROR
+
+    def test_maps_connection_error(self, aidp_service_module):
+        request = httpx.Request("GET", "http://aidp.example.test")
+        client = MagicMock()
+        client.get.side_effect = httpx.ConnectError("offline", request=request)
+        aidp_service_module.http_client_manager.get_sync_client.return_value = client
+        aidp_service_module._request_with_retry = lambda request_fn, context: request_fn()
+
+        with pytest.raises(AppException) as exc_info:
+            aidp_service_module.get_aidp_graph_template_impl(
+                "http://aidp.example.test", "api-key"
+            )
+
+        assert exc_info.value.error_code == ErrorCode.AIDP_CONNECTION_ERROR
+
+    def test_maps_http_status_error(self, aidp_service_module, monkeypatch):
+        request = httpx.Request("GET", "http://aidp.example.test")
+        response = httpx.Response(500, request=request)
+        client = MagicMock()
+        client.get.return_value = response
+        aidp_service_module.http_client_manager.get_sync_client.return_value = client
+        aidp_service_module._request_with_retry = lambda request_fn, context: request_fn()
+        mapped_error = AppException(ErrorCode.AIDP_RESPONSE_ERROR, "upstream status")
+        mapper = MagicMock(side_effect=mapped_error)
+        monkeypatch.setattr(aidp_service_module, "_raise_aidp_http_error", mapper)
+
+        with pytest.raises(AppException) as exc_info:
+            aidp_service_module.get_aidp_graph_template_impl(
+                "http://aidp.example.test", "api-key"
+            )
+
+        assert exc_info.value is mapped_error
+        mapper.assert_called_once()
+
+    def test_maps_invalid_json(self, aidp_service_module):
+        response = MagicMock(status_code=200)
+        response.json.side_effect = ValueError("invalid JSON")
+        self._configure_client(aidp_service_module, response)
+
+        with pytest.raises(AppException) as exc_info:
+            aidp_service_module.get_aidp_graph_template_impl(
+                "http://aidp.example.test", "api-key"
+            )
+
+        assert exc_info.value.error_code == ErrorCode.AIDP_RESPONSE_ERROR
 
 
 # ---------------------------------------------------------------------------
@@ -1387,7 +1414,7 @@ class TestCreateAidpKbImpl:
     def test_invalid_config(self, aidp_service_module, server_url, api_key):
         with pytest.raises(AppException) as exc_info:
             aidp_service_module.create_aidp_kb_impl(
-                server_url=server_url, api_key=api_key, payload={"name": "kb"}
+                server_url=server_url, api_key=api_key, payload={"caption_enable": 0, "is_exist_graph": False, "vlm_model": "", "name": "kb"}
             )
         assert exc_info.value.error_code == ErrorCode.AIDP_CONFIG_INVALID
 
@@ -1398,7 +1425,7 @@ class TestCreateAidpKbImpl:
         result = aidp_service_module.create_aidp_kb_impl(
             server_url="http://127.0.0.1:30081",
             api_key="jwt-token",
-            payload={"name": "test-kb"},
+            payload={"caption_enable": 0, "is_exist_graph": False, "vlm_model": "", "name": "test-kb", "description": "A test knowledge base"},
         )
         assert result["kds_id"] == "new-kb"
 
@@ -1410,7 +1437,7 @@ class TestCreateAidpKbImpl:
             aidp_service_module.create_aidp_kb_impl(
                 server_url="http://127.0.0.1:30081",
                 api_key="jwt-token",
-                payload={"name": "kb"},
+                payload={"caption_enable": 0, "is_exist_graph": False, "vlm_model": "", "name": "kb", "description": "A test knowledge base"},
             )
         assert exc_info.value.error_code == ErrorCode.AIDP_RESPONSE_ERROR
 
@@ -1421,7 +1448,7 @@ class TestCreateAidpKbImpl:
             aidp_service_module.create_aidp_kb_impl(
                 server_url="http://127.0.0.1:30081",
                 api_key="jwt-token",
-                payload={"name": "kb"},
+                payload={"caption_enable": 0, "is_exist_graph": False, "vlm_model": "", "name": "kb", "description": "A test knowledge base"},
             )
         assert exc_info.value.error_code == ErrorCode.AIDP_AUTH_ERROR
 
@@ -1431,7 +1458,7 @@ class TestCreateAidpKbImpl:
             aidp_service_module.create_aidp_kb_impl(
                 server_url="http://127.0.0.1:30081",
                 api_key="jwt-token",
-                payload={"name": "kb"},
+                payload={"caption_enable": 0, "is_exist_graph": False, "vlm_model": "", "name": "kb", "description": "A test knowledge base"},
             )
         assert exc_info.value.error_code == ErrorCode.AIDP_RATE_LIMIT
 
@@ -1441,7 +1468,7 @@ class TestCreateAidpKbImpl:
             aidp_service_module.create_aidp_kb_impl(
                 server_url="http://127.0.0.1:30081",
                 api_key="jwt-token",
-                payload={"name": "kb"},
+                payload={"caption_enable": 0, "is_exist_graph": False, "vlm_model": "", "name": "kb", "description": "A test knowledge base"},
             )
         assert exc_info.value.error_code == ErrorCode.AIDP_SERVICE_ERROR
 
@@ -1455,7 +1482,7 @@ class TestCreateAidpKbImpl:
             aidp_service_module.create_aidp_kb_impl(
                 server_url="http://127.0.0.1:30081",
                 api_key="jwt-token",
-                payload={"name": "kb"},
+                payload={"caption_enable": 0, "is_exist_graph": False, "vlm_model": "", "name": "kb", "description": "A test knowledge base"},
             )
         assert exc_info.value.error_code == ErrorCode.AIDP_CONNECTION_ERROR
 
@@ -1467,7 +1494,7 @@ class TestCreateAidpKbImpl:
             aidp_service_module.create_aidp_kb_impl(
                 server_url="http://127.0.0.1:30081",
                 api_key="jwt-token",
-                payload={"name": "kb"},
+                payload={"caption_enable": 0, "is_exist_graph": False, "vlm_model": "", "name": "kb", "description": "A test knowledge base"},
             )
         assert exc_info.value.error_code == ErrorCode.AIDP_RESPONSE_ERROR
 
@@ -1485,7 +1512,7 @@ class TestCreateAidpKbImpl:
             aidp_service_module.create_aidp_kb_impl(
                 server_url="http://127.0.0.1:30081",
                 api_key="jwt-token",
-                payload={"name": "kb"},
+                payload={"caption_enable": 0, "is_exist_graph": False, "vlm_model": "", "name": "kb", "description": "A test knowledge base"},
             )
         assert exc_info.value.error_code == ErrorCode.AIDP_SERVICE_ERROR
 
@@ -2073,14 +2100,15 @@ class TestCountAidpDocsImpl:
         )
         assert result == 15
 
-    def test_missing_count_returns_zero(self, aidp_service_module):
+    def test_missing_count_is_not_treated_as_zero(self, aidp_service_module):
         mock_resp = _make_success_response({})
         _setup_mock_client(aidp_service_module, method="post", response=mock_resp)
 
-        result = aidp_service_module.count_aidp_docs_impl(
-            server_url="http://127.0.0.1:30081", api_key="jwt-token", kds_id="kb-1"
-        )
-        assert result == 0
+        with pytest.raises(AppException) as exc_info:
+            aidp_service_module.count_aidp_docs_impl(
+                server_url="http://127.0.0.1:30081", api_key="jwt-token", kds_id="kb-1"
+            )
+        assert exc_info.value.error_code == ErrorCode.AIDP_RESPONSE_ERROR
 
     def test_non_dict_response_raises(self, aidp_service_module):
         mock_resp = _make_success_response(999)
@@ -2101,12 +2129,13 @@ class TestCountAidpDocsImpl:
             )
         assert exc_info.value.error_code == ErrorCode.AIDP_AUTH_ERROR
 
-    def test_404_returns_zero(self, aidp_service_module):
+    def test_404_does_not_claim_zero_documents(self, aidp_service_module):
         _setup_mock_client(aidp_service_module, method="post", side_effect=_make_http_error(404))
-        result = aidp_service_module.count_aidp_docs_impl(
-            server_url="http://127.0.0.1:30081", api_key="jwt-token", kds_id="kb-1"
-        )
-        assert result == 0
+        with pytest.raises(AppException) as exc_info:
+            aidp_service_module.count_aidp_docs_impl(
+                server_url="http://127.0.0.1:30081", api_key="jwt-token", kds_id="kb-1"
+            )
+        assert exc_info.value.error_code == ErrorCode.AIDP_SERVICE_ERROR
 
     def test_rate_limit_error(self, aidp_service_module):
         _setup_mock_client(aidp_service_module, method="post", side_effect=_make_http_error(429))
@@ -2186,6 +2215,25 @@ class TestListAidpDocsImpl:
         assert result["value"][0]["created_at"] is not None
         assert result["value"][0]["file_uuid"] == "uuid-1"
         assert result["value"][1]["updated_at"] is not None
+
+    def test_keyword_is_forwarded_to_aidp_file_listing(self, aidp_service_module):
+        mock_resp = _make_success_response({"value": [], "next_link": None})
+        mock_client = _setup_mock_client(
+            aidp_service_module, method="get", response=mock_resp
+        )
+
+        aidp_service_module.list_aidp_docs_impl(
+            server_url="http://127.0.0.1:30081",
+            api_key="jwt-token",
+            kds_id="kb-1",
+            page=2,
+            page_size=5,
+            keyword="制度手册",
+        )
+
+        request_url = mock_client.get.call_args.args[0]
+        assert "page=2&page_size=5" in request_url
+        assert "keyword=%E5%88%B6%E5%BA%A6%E6%89%8B%E5%86%8C" in request_url
 
     def test_success_non_list_value_not_normalized(self, aidp_service_module):
         mock_resp = _make_success_response({"value": "not-a-list", "total_count": 0})
@@ -2445,13 +2493,14 @@ class TestListAidpModelsImpl:
         mock_resp = _make_success_response({})
         _setup_mock_client(aidp_service_module, method="get", response=mock_resp)
 
-        result = aidp_service_module.list_aidp_models_impl(
-            server_url="http://127.0.0.1:30081", api_key="jwt-token"
-        )
-        assert result["total_count"] == 0
+        with pytest.raises(AppException) as exc_info:
+            aidp_service_module.list_aidp_models_impl(
+                server_url="http://127.0.0.1:30081", api_key="jwt-token"
+            )
+        assert exc_info.value.error_code == ErrorCode.AIDP_RESPONSE_ERROR
 
     def test_non_dict_response_raises(self, aidp_service_module):
-        mock_resp = _make_success_response(["not-dict"])
+        mock_resp = _make_success_response("not-an-object-or-array")
         _setup_mock_client(aidp_service_module, method="get", response=mock_resp)
 
         with pytest.raises(AppException) as exc_info:
@@ -2996,6 +3045,8 @@ class TestListAidpDocHistoryImpl:
 
         assert "status" not in result["value"][0]
 
+
+
     def test_unreadable_status_payload_is_reported(
         self, aidp_service_module, caplog
     ):
@@ -3050,6 +3101,9 @@ class TestListAidpDocHistoryImpl:
                 kds_id=self._KB,
             )
         assert exc_info.value.error_code == ErrorCode.AIDP_RESPONSE_ERROR
+
+
+
 
     def test_response_without_list_carries_empty_value(self, aidp_service_module):
         """An empty directory is a valid answer, not a payload error."""

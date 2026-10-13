@@ -23,7 +23,6 @@ import { useDeployment } from "@/components/providers/deploymentProvider";
 import knowledgeBaseService from "@/services/knowledgeBaseService";
 import { useGroupList } from "@/hooks/group/useGroupList";
 import type { KnowledgeBase } from "@/types/knowledgeBase";
-import type { ToolParam } from "@/types/agentConfig";
 import type {
   ConversationKnowledgeScope,
   KnowledgeCapabilities,
@@ -31,12 +30,6 @@ import type {
 } from "@/types/knowledgeScope";
 import { DEFAULT_CONVERSATION_KNOWLEDGE_SCOPE } from "@/types/knowledgeScope";
 import { ResourceCard } from "@/features/workbench";
-import { KnowledgeRetrievalParamsForm } from "@/components/tool-config/KnowledgeRetrievalParamsForm";
-import { useToolList } from "@/hooks/agent/useToolList";
-import {
-  AIDP_NON_PERSISTED_PARAM_NAMES,
-  getSemanticToolName,
-} from "@/lib/managedKnowledgeTools";
 import { RestoreDefaultsButton } from "@/features/workbench/components/RestoreDefaultsButton";
 
 interface ConversationKnowledgeScopeModalProps {
@@ -105,26 +98,6 @@ export const ConversationKnowledgeScopeModal: FC<
   const { t } = useTranslation();
   const router = useRouter();
   const { enableAidpKnowledge, isDeploymentReady } = useDeployment();
-  const { availableTools, isLoading: toolsLoading } = useToolList({
-    enabled: open && isDeploymentReady,
-  });
-  const [paramsOpen, setParamsOpen] = useState(false);
-  const [retrievalConfig, setRetrievalConfig] = useState<
-    Record<string, unknown>
-  >({});
-  const [paramDraft, setParamDraft] = useState<Record<string, unknown>>({});
-  const knowledgeTool = availableTools.find(
-    (tool) =>
-      getSemanticToolName(tool) ===
-      (enableAidpKnowledge ? "aidp_search" : "knowledge_base_search")
-  );
-  const configurableParams: ToolParam[] = (
-    knowledgeTool?.initParams || []
-  ).filter(
-    (param: ToolParam) =>
-      !["index_names", "kds_list"].includes(param.name) &&
-      !AIDP_NON_PERSISTED_PARAM_NAMES.has(param.name)
-  );
   const { user } = useAuthorizationContext();
   const { data: groupListData } = useGroupList(user?.tenantId ?? null);
   const groupNameById = useMemo(
@@ -168,14 +141,6 @@ export const ConversationKnowledgeScopeModal: FC<
 
   useEffect(() => {
     if (!open || !configuredSource) return;
-    setParamsOpen(false);
-    const incompatible =
-      configuredSource === "aidp"
-        ? value?.local.mode === "override"
-        : value?.aidp.mode === "override";
-    setRetrievalConfig(
-      incompatible ? {} : structuredClone(value?.retrieval_config || {})
-    );
     const normalized = normalizeScopeForSource(value, configuredSource);
     setDraft(normalized);
     setInitialSelectionWasFiltered(false);
@@ -451,7 +416,16 @@ export const ConversationKnowledgeScopeModal: FC<
       nextScope = buildInheritScope(configuredSource);
     }
     if (!validateLocalEmbeddingModels()) return;
-    if (Object.keys(retrievalConfig).length)
+    const incompatibleScope =
+      configuredSource === "aidp"
+        ? value?.local.mode === "override"
+        : value?.aidp.mode === "override";
+    const retrievalConfig = value?.retrieval_config || {};
+    if (
+      !restoreDefaultClicked &&
+      !incompatibleScope &&
+      Object.keys(retrievalConfig).length
+    )
       nextScope.retrieval_config = structuredClone(retrievalConfig);
     else delete nextScope.retrieval_config;
     const localNamesById = new Map(
@@ -721,26 +695,10 @@ export const ConversationKnowledgeScopeModal: FC<
                 );
                 setSelectionTouched(true);
                 setRestoreDefaultClicked(true);
-                setRetrievalConfig({});
               }}
             >
               {t("chat.knowledgeScope.restoreDefault")}
             </RestoreDefaultsButton>
-            <Button
-              disabled={
-                loading ||
-                saving ||
-                toolsLoading ||
-                !knowledgeTool ||
-                !configuredSource
-              }
-              onClick={() => {
-                setParamDraft(structuredClone(retrievalConfig));
-                setParamsOpen(true);
-              }}
-            >
-              配置
-            </Button>
           </div>
           <div className="flex gap-2">
             <CancelBtn />
@@ -793,42 +751,6 @@ export const ConversationKnowledgeScopeModal: FC<
               placeholder="搜索名称或描述"
               allowClear
             />
-            <Modal
-              open={paramsOpen}
-              title={t("agent.knowledge.configModal.title")}
-              onCancel={() => setParamsOpen(false)}
-              okText="确定"
-              cancelText="取消"
-              onOk={() => {
-                setRetrievalConfig(structuredClone(paramDraft));
-                setParamsOpen(false);
-              }}
-            >
-              <KnowledgeRetrievalParamsForm
-                params={configurableParams}
-                values={Object.fromEntries(
-                  configurableParams.map((param) => [
-                    param.name,
-                    paramDraft[param.name] ??
-                      (configuredSource
-                        ? capabilities?.sources[configuredSource]
-                            .default_retrieval_config?.[param.name]
-                        : undefined) ??
-                      param.value ??
-                      param.default,
-                  ])
-                )}
-                onChange={(name, nextValue) =>
-                  setParamDraft((current) => {
-                    const next = { ...current };
-                    if (nextValue === null || nextValue === undefined)
-                      delete next[name];
-                    else next[name] = nextValue;
-                    return next;
-                  })
-                }
-              />
-            </Modal>
             {renderSource(configuredSource)}
           </div>
         ) : (

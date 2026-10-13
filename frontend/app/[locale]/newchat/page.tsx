@@ -27,6 +27,11 @@ import {
   setHistoricalChatModeListener,
   setServerConversationIdState,
 } from "./adapter/conversation-thread-list-adapter";
+import {
+  recordThreadActivity,
+  resumeLatestAgentConversation,
+  startAgentConversation,
+} from "./adapter/thread-agent-registry";
 import { remoteChatModelAdapter } from "./adapter/remote-chat-model-adapter";
 import { createNewChatAttachmentAdapter } from "./adapter/attachment-adapter";
 import { SidebarProvider } from "@/components/ui/sidebar";
@@ -115,19 +120,17 @@ const PersistentChatHome: FC = () => {
 
   const { isLoading: isLoadingAgents, agents } = usePublishedAgentList();
 
-  const switchToNewAgentThread = useCallback(async () => {
-    await runtime.threads.switchToNewThread();
-  }, [runtime]);
-
   const handleAgentSelected = useCallback(
-    (agent: Agent) => {
-      setSelectedAgent(agent);
-      log.log(`[Home] Agent selected: ${agent.display_name || agent.name}`);
-      void switchToNewAgentThread().catch((error) => {
+    async (agent: Agent) => {
+      try {
+        await startAgentConversation(runtime, Number(agent.id));
+        setSelectedAgent(agent);
+        log.log(`[Home] Agent selected: ${agent.display_name || agent.name}`);
+      } catch (error) {
         log.error("[Home] Failed to switch to a new agent thread:", error);
-      });
+      }
     },
-    [switchToNewAgentThread]
+    [runtime]
   );
 
   useEffect(() => {
@@ -161,6 +164,7 @@ const PersistentChatHome: FC = () => {
           setSelectedAgent={setSelectedAgent}
           isLoadingAgents={isLoadingAgents}
           agents={agents}
+          onAgentSelected={handleAgentSelected}
           onBack={handleBack}
           isDictationConfigured={isDictationConfigured(modelConfig?.stt)}
         />
@@ -179,6 +183,7 @@ const HomeContent: FC<{
   setSelectedAgent: (agent: Agent | null) => void;
   isLoadingAgents: boolean;
   agents: Agent[];
+  onAgentSelected: (agent: Agent) => Promise<void>;
   onBack: () => void;
   isDictationConfigured: boolean;
 }> = ({
@@ -187,6 +192,7 @@ const HomeContent: FC<{
   setSelectedAgent,
   isLoadingAgents,
   agents,
+  onAgentSelected,
   onBack,
   isDictationConfigured,
 }) => {
@@ -216,6 +222,11 @@ const HomeContent: FC<{
   const isLoading = useAuiState((s) => s.threads.isLoading);
   const isThreadLoading = useAuiState((s) => s.thread.isLoading);
   const isThreadRunning = useAuiState((s) => s.thread.isRunning);
+  useEffect(() => {
+    if (isThreadRunning && runtimeMainThreadId) {
+      recordThreadActivity(runtimeMainThreadId);
+    }
+  }, [isThreadRunning, runtimeMainThreadId]);
   const threadItems = useAuiState((s) => s.threads.threadItems);
   const ready =
     runtimeMainThreadId !== undefined && !isLoading && !isThreadLoading;
@@ -773,64 +784,79 @@ const HomeContent: FC<{
   const handleAgentSelectedFromLanding = useCallback(
     async (agent: Agent) => {
       shouldRestoreAgentRef.current = true;
-      const thread = runtime.threads.getItemById(
-        runtime.threads.getState().mainThreadId
-      );
-      await thread.initialize();
-      await thread.updateCustom({ agentId: agent.id });
-      setSelectedAgent(agent);
+      await onAgentSelected(agent);
     },
-    [runtime, setSelectedAgent]
+    [onAgentSelected]
   );
 
-  // Conditional rendering must happen after all hooks
-  if (!ready) {
-    return (
-      <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
-        Loading conversation…
-      </div>
-    );
-  }
+  const handleAgentSwitched = useCallback(
+    async (agent: Agent) => {
+      try {
+        shouldRestoreAgentRef.current = true;
+        await resumeLatestAgentConversation(
+          runtime,
+          Number(agent.id),
+          generatedTitles
+        );
+        setSelectedAgent(agent);
+      } catch (error) {
+        log.error("[HomeContent] Failed to switch agent conversation:", error);
+        message.error(t("chatInterface.errorFetchingConversationDetailsError"));
+      }
+    },
+    [runtime, generatedTitles, setSelectedAgent, t]
+  );
 
   return (
     <div className="flex w-full h-full">
       <div className="shrink-0 h-full">
         <SidebarProvider className="w-auto h-full">
           <ThreadListSidebar
+            newChatDesign
+            activeThreadId={selectedAgent ? runtimeMainThreadId : undefined}
             generatedTitles={generatedTitles}
             serverConversationIds={serverConversationIds}
             onRenameSuccess={handleConversationRenamed}
             onPrepareNewConversation={handlePrepareNewConversation}
             onNewConversation={handleNewConversation}
+            selectedAgent={selectedAgent}
+            onAgentSelected={handleAgentSwitched}
           />
         </SidebarProvider>
       </div>
 
       <div className="flex min-h-0 flex-1 min-w-0 flex-col">
         <div className="min-h-0 flex-1">
-          <Chat
-            generatedTitle={
-              activeThreadId ? generatedTitles.get(activeThreadId) : undefined
-            }
-            conversationId={
-              activeConversationId && Number(activeConversationId) > 0
-                ? Number(activeConversationId)
-                : undefined
-            }
-            isLoadingAgents={isLoadingAgents}
-            selectedAgent={selectedAgent}
-            onAgentSelected={handleAgentSelectedFromLanding}
-            onBack={handleThreadBack}
-            chatMode={chatMode}
-            onChatModeChange={handleChatModeChange}
-            isDictationConfigured={isDictationConfigured}
-            knowledgeScope={knowledgeScope}
-            knowledgePreview={knowledgePreview}
-            knowledgeCapabilities={knowledgeCapabilities}
-            onKnowledgeScopeChange={handleKnowledgeScopeChange}
-            runtimeMetadata={runtimeMetadata}
-            onRuntimeMetadataChange={handleRuntimeMetadataChange}
-          />
+          {ready ? (
+            <Chat
+              newChatDesign
+              generatedTitle={
+                activeThreadId ? generatedTitles.get(activeThreadId) : undefined
+              }
+              conversationId={
+                activeConversationId && Number(activeConversationId) > 0
+                  ? Number(activeConversationId)
+                  : undefined
+              }
+              isLoadingAgents={isLoadingAgents}
+              selectedAgent={selectedAgent}
+              onAgentSelected={handleAgentSelectedFromLanding}
+              onBack={handleThreadBack}
+              chatMode={chatMode}
+              onChatModeChange={handleChatModeChange}
+              isDictationConfigured={isDictationConfigured}
+              knowledgeScope={knowledgeScope}
+              knowledgePreview={knowledgePreview}
+              knowledgeCapabilities={knowledgeCapabilities}
+              onKnowledgeScopeChange={handleKnowledgeScopeChange}
+              runtimeMetadata={runtimeMetadata}
+              onRuntimeMetadataChange={handleRuntimeMetadataChange}
+            />
+          ) : (
+            <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
+              {t("chat.threadList.loading")}
+            </div>
+          )}
         </div>
       </div>
     </div>

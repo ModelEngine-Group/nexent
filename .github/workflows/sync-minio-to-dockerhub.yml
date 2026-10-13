@@ -1,0 +1,83 @@
+name: Sync archived MinIO image to Docker Hub
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: sync-minio-to-dockerhub
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      SOURCE_IMAGE: ccr.ccs.tencentyun.com/nexent-hub/minio
+      SOURCE_DIGEST: sha256:825575ae13cb7e857755bed5b0425e645107c27714feaa6196f616f4d6d43c38
+      TARGET_IMAGE: docker.io/nexent/minio
+      IMAGE_TAG: RELEASE.2023-12-20T01-00-02Z
+    steps:
+      - name: Install registry copy tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y skopeo jq
+
+      - name: Authenticate to source and destination registries
+        env:
+          TCR_USERNAME: ${{ secrets.TCR_USERNAME }}
+          TCR_PASSWORD: ${{ secrets.TCR_PASSWORD }}
+          DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          : "${TCR_USERNAME:?Missing TCR_USERNAME secret}"
+          : "${TCR_PASSWORD:?Missing TCR_PASSWORD secret}"
+          : "${DOCKERHUB_TOKEN:?Missing DOCKERHUB_TOKEN secret}"
+          umask 077
+          AUTH_FILE="$RUNNER_TEMP/minio-registry-auth.json"
+          printf '%s' "$TCR_PASSWORD" | skopeo login --authfile "$AUTH_FILE" \
+            --username "$TCR_USERNAME" --password-stdin ccr.ccs.tencentyun.com
+          printf '%s' "$DOCKERHUB_TOKEN" | skopeo login --authfile "$AUTH_FILE" \
+            --username nexent --password-stdin docker.io
+
+      - name: Validate source platforms and copy all architectures
+        run: |
+          set -euo pipefail
+          AUTH_FILE="$RUNNER_TEMP/minio-registry-auth.json"
+          skopeo inspect --authfile "$AUTH_FILE" --raw \
+            "docker://$SOURCE_IMAGE@$SOURCE_DIGEST" > "$RUNNER_TEMP/minio-source.json"
+          jq -e '
+            [.manifests[].platform | .os + "/" + .architecture] | sort
+            == ["linux/amd64", "linux/arm64"]
+          ' "$RUNNER_TEMP/minio-source.json"
+          skopeo copy --all --preserve-digests --retry-times 3 --authfile "$AUTH_FILE" \
+            "docker://$SOURCE_IMAGE@$SOURCE_DIGEST" "docker://$TARGET_IMAGE:$IMAGE_TAG"
+
+      - name: Verify public access and both architectures
+        run: |
+          set -euo pipefail
+          # Use an empty auth file so successful verification proves anonymous access.
+          printf '{"auths":{}}\n' > "$RUNNER_TEMP/minio-anonymous-auth.json"
+          if ! skopeo inspect --authfile "$RUNNER_TEMP/minio-anonymous-auth.json" --raw \
+            "docker://$TARGET_IMAGE:$IMAGE_TAG" > "$RUNNER_TEMP/minio-target.json"; then
+            echo "::error::Anonymous access failed. Check Docker Hub repository visibility (Public), rate limits and connectivity."
+            exit 1
+          fi
+          jq -e '
+            [.manifests[].platform | .os + "/" + .architecture] | sort
+            == ["linux/amd64", "linux/arm64"]
+          ' "$RUNNER_TEMP/minio-target.json"
+          cmp "$RUNNER_TEMP/minio-source.json" "$RUNNER_TEMP/minio-target.json"
+          {
+            echo '### MinIO image published'
+            echo "- Image: \`$TARGET_IMAGE:$IMAGE_TAG\`"
+            echo "- Digest: \`$SOURCE_DIGEST\`"
+            echo '- Platforms: linux/amd64, linux/arm64'
+            echo '- Anonymous manifest access: verified'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Remove registry credentials
+        if: always()
+        run: rm -f "$RUNNER_TEMP/minio-registry-auth.json" "$RUNNER_TEMP/minio-anonymous-auth.json"

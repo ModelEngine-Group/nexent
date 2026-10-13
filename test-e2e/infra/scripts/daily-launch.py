@@ -39,13 +39,15 @@ def main(argv=None):
     parser.add_argument("--test-home", type=Path, required=True)
     parser.add_argument("--branch", required=True, choices=("djb/test-baseline", "develop"))
     parser.add_argument("--execute", action="store_true")
+    parser.add_argument("--publish-latest", action="store_true",
+                        help="Publish complete Daily logs to test-home/runs-ubuntu; default disabled")
     args = parser.parse_args(argv)
     repo = Path(__file__).resolve().parents[3]
     home = args.test_home.resolve()
     if home.is_relative_to(repo) or repo.is_relative_to(home):
         parser.error("Test home must be outside the checkout")
     if not args.execute:
-        print(json.dumps({"branch": args.branch, "execute": False,
+        print(json.dumps({"branch": args.branch, "execute": False, "publish_latest": args.publish_latest,
                           "steps": ["lock", "fast-forward", "derived-view-validation", "static-assets",
                                     "doctor", "build", "deploy", "D1-D5", "D6"]}))
         return 0
@@ -83,7 +85,7 @@ def main(argv=None):
                 state["status"] = "EXECUTING"
                 save(directory / "status.json", state)
                 # execute() does not acquire another lock; all normal entrypoints use the same lock.
-                code = suite.execute(repo, home, records, settings, daily=True)
+                code = suite.execute(repo, home, records, settings, daily=True, publish_latest=args.publish_latest)
                 state["status"] = "PASSED" if code == 0 else "FAILED"
                 return code
             except (Exception, KeyboardInterrupt) as exc:

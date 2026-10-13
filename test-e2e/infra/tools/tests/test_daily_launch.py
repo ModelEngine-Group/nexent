@@ -1,7 +1,11 @@
 """Exercise clean synchronization without network or deployment."""
+from contextlib import redirect_stdout
 import importlib.util
+import io
+import json
 from pathlib import Path
 import sys
+import tempfile
 import unittest
 from unittest.mock import patch
 
@@ -13,6 +17,15 @@ spec.loader.exec_module(launcher)
 
 
 class DailyLaunchTests(unittest.TestCase):
+    def test_publication_is_explicit_and_dry_run_has_no_outputs(self):
+        with tempfile.TemporaryDirectory() as root:
+            for extra, expected in (([], False), (["--publish-latest"], True)):
+                output = io.StringIO()
+                with redirect_stdout(output):
+                    self.assertEqual(launcher.main(["--test-home", root, "--branch", "develop", *extra]), 0)
+                self.assertEqual(json.loads(output.getvalue())["publish_latest"], expected)
+                self.assertFalse((Path(root) / "runs-ubuntu").exists())
+
     def test_dirty_checkout_never_fetches(self):
         with patch.object(launcher, "git", return_value=" M file") as git:
             with self.assertRaisesRegex(RuntimeError, "clean checkout"):

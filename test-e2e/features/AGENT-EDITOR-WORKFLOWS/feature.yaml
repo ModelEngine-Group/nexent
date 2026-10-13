@@ -1,0 +1,43 @@
+schema_version: '1.0'
+module:
+  id: AGENT-EDITOR
+  name: Agent editor workflows
+feature:
+  feature_id: AGENT-EDITOR-WORKFLOWS
+  name: Agent editor failure recovery and persistence
+  status: active
+  description: Browser regression coverage for creation validation/retry, autosave,
+    cancelled resource selection and readonly debug navigation.
+  business_rules:
+  - rule_id: AGENT-EDITOR-RULE-001
+    description: Empty/duplicate names perform no write; exactly one successful creation
+      preserves trimmed display name and reload restores the editor without repeating
+      onboarding.
+  - rule_id: AGENT-EDITOR-RULE-002
+    description: A controlled creation failure preserves user input; retry creates
+      one persisted Agent, with exactly two requested attempts and no automatic extra
+      creation.
+  - rule_id: AGENT-EDITOR-RULE-003
+    description: Description and greeting persist through the real editor/autosave
+      chain and reload, while Agent identity and resource associations are retained.
+  - rule_id: AGENT-EDITOR-RULE-004
+    description: Cancelling all five resource drawers preserves original associations
+      and leaves no blocking overlay or business mutation.
+  - rule_id: AGENT-EDITOR-RULE-005
+    description: Read-only configuration remains protected before and after debug
+      navigation and reload, while switching modes never writes or runs an Agent.
+  - rule_id: AGENT-EDITOR-RULE-006
+    description: Creation templates come only from the authorized Agent list API.
+      Empty/error states never substitute static templates; retry recovers and a selected
+      Agent description is sent through the existing creation API.
+  required_test_stages:
+  - D4
+  source:
+    requirement_ids:
+    - AGENT-EDITOR-REQ-001
+    - AGENT-EDITOR-REQ-002
+    - AGENT-EDITOR-REQ-003
+    - AGENT-EDITOR-REQ-004
+    - AGENT-EDITOR-REQ-005
+    - AGENT-EDITOR-REQ-006
+    spec_path: ../nexent-doc/docs/Developing/agt-pr4058-test-delivery/design.md

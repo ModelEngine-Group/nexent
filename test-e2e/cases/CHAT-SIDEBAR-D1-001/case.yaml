@@ -1,0 +1,61 @@
+schema_version: '1.0'
+stage: D1
+module: CHAT-SIDEBAR
+case:
+  case_id: CHAT-SIDEBAR-D1-001
+  feature_id: CHAT-SIDEBAR
+  requirement_ids:
+  - CHAT-SIDEBAR-REQ-001
+  business_rule_ids:
+  - CHAT-SIDEBAR-RULE-001
+  title: Preserve merged conversation sidebar interactions
+  type: FE-COMP
+  priority: P1
+  status: active
+  automation: automated
+  objective: Verify ThreadList and batch footer collaborate with persisted metadata,
+    rename and deletion boundaries.
+  preconditions:
+  - Render actual ThreadList and BatchSidebarFooter with a controlled assistant runtime
+    and conversation service.
+  test_data:
+    profile: mock
+  steps:
+  - order: 1
+    action: Render saved and unsent threads with generated titles.
+    expected: Only persisted conversation and its server title are visible.
+  - order: 2
+    action: Rename saved conversation with surrounding whitespace.
+    expected: Runtime receives normalized title; parent callback receives local ID,
+      remote ID and normalized title.
+  - order: 3
+    action: Select and confirm batch deletion with server-ID mapping.
+    expected: Deletion receives server ID and deleting the active thread invokes the
+      reset callback.
+  expected_results: &id001
+  - Only persisted conversation and its server title are visible.
+  - Runtime receives normalized title; parent callback receives local ID, remote ID
+    and normalized title.
+  - Deletion receives server ID and deleting the active thread invokes the reset callback.
+  forbidden_side_effects:
+  - No unsent draft displayed and no deletion of an unrelated conversation.
+  unit_boundary: Actual sidebar components with mocked external assistant runtime
+    and conversation service.
+  inputs:
+  - persisted metadata
+  - remote-ID map
+  - callback spies
+  assertions: *id001
+  acceptance:
+  - id: AC-01
+    description: Visibility, rename and batch deletion preserve the existing contracts.
+    steps:
+    - 1
+    - 2
+    - 3
+    expected_results:
+    - 1
+    - 2
+    - 3
+    forbidden_side_effects:
+    - 1

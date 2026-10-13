@@ -23,10 +23,11 @@ from jsonschema import Draft202012Validator
 from packaging.requirements import Requirement
 
 from run_cases import machine_environment, run_one, result_reason
+from report_ownership import enrich as enrich_ownership
 from launch_runtime import test_python
 from local_preflight import live_service_problems, static_config_problems
 from static_assets import entries as static_entries, inventory as static_inventory
-from suite_runtime import BatchLock, config_fingerprint, finalize, fingerprint, logged, now, save
+from suite_runtime import BatchLock, config_fingerprint, finalize, fingerprint, logged, now, render_report, save
 from suite_resume import prepare_resume
 from suite_services import controlled_services
 from test_asset_lib import repository_root
@@ -267,7 +268,7 @@ def worker(repo, home, record, directory, settings):
     return 0 if outcome == "PASS" and not cleanup_code else 1
 
 
-def execute(repo, home, records, settings, *, daily=False, resume=None):
+def execute(repo, home, records, settings, *, daily=False, resume=None, publish_latest=False):
     directory = home / "runs/repository-daily" / (now().replace(":", "").replace("+", "-") + "-" + uuid.uuid4().hex[:8])
     directory.mkdir(parents=True, exist_ok=False)
     if os.name != "nt":
@@ -277,6 +278,12 @@ def execute(repo, home, records, settings, *, daily=False, resume=None):
                   "batch_mode": "daily" if daily else "run", "full_static_assets": daily,
                   "required_static_assets": sorted(required_static or []),
                   "resumed_from": str(resume["source"]) if resume else None}
+    report_records, ownership_warnings = enrich_ownership(repo, records, provenance["head"])
+    ownership_by_case = {record["case_id"]: record for record in report_records}
+    save(directory / "report-ownership.json", {
+        "head": provenance["head"], "warnings": ownership_warnings,
+        "cases": [{"case_id": record["case_id"], "git_last_modifier": record["git_last_modifier"],
+                   "responsibility": record["responsibility"]} for record in report_records]})
     if resume:
         marker = resume["source"] / "resume-child.json"
         with os.fdopen(os.open(marker, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600), "w", encoding="utf-8") as output:
@@ -351,6 +358,8 @@ def execute(repo, home, records, settings, *, daily=False, resume=None):
                         row["result"] = "AUTOMATION_ERROR"
                     row["evidence"] = [f"cases/{case_id}", f"logs/{case_id}.log"]
                 rows.append(row)
+                attribution = ownership_by_case[case_id]
+                row.update(git_last_modifier=attribution["git_last_modifier"], responsibility=attribution["responsibility"])
                 row.setdefault("executed_at", case_started_at)
                 row.setdefault("duration_seconds", round(time.monotonic() - case_started_clock, 3))
                 definition_path = repo / "test-e2e/cases" / case_id / "case.yaml"
@@ -379,7 +388,7 @@ def execute(repo, home, records, settings, *, daily=False, resume=None):
     except Exception as exc:
         error = str(exc) if isinstance(exc, RuntimeError) else type(exc).__name__
     finally:
-        summary = finalize(directory, records, rows, error)
+        summary = finalize(directory, report_records, rows, error)
         for stage, status in state["stages"].items():
             if status in {"PENDING", "RUNNING"}:
                 state["stages"][stage] = "NOT_EXECUTED" if status == "PENDING" else "INTERRUPTED"
@@ -388,6 +397,21 @@ def execute(repo, home, records, settings, *, daily=False, resume=None):
         save(directory / "status.json", state)
         save(home / "reports/repository-latest.json", {"batch": str(directory), "status": summary["status"]})
         signal.signal(signal.SIGTERM, previous_handler)
+    if daily and publish_latest and summary["execution_complete"] and summary["d6_complete"]:
+        try:
+            from suite_publish import publish_latest as publish_complete_batch
+            sharing = publish_complete_batch(directory, home, env)
+        except Exception as exc:
+            sharing = {"status": "FAILED", "batch_id": directory.name, "error_type": type(exc).__name__}
+            try:
+                save(home / "state/report-publications" / directory.name / "receipt.json", sharing)
+            except OSError:
+                print("Publication failed; could not save local publication receipt", flush=True)
+        try:
+            render_report(directory, report_records, rows, summary, sharing=sharing)
+        except OSError:
+            # Keep the previously finalized report and continue the existing notification path.
+            print("Could not refresh publication status in the finalized report", flush=True)
     if daily and settings.get("notify") and summary["execution_complete"]:
         from suite_notify import send_report
         send_report(directory, env)

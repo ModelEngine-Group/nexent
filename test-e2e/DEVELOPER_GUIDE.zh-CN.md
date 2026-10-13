@@ -173,6 +173,8 @@ $ChangeId = "TEST-FIX-001"
 
 ## 6. 提交前检查和 Daily 衔接
 
+Ubuntu Daily 可通过显式 `--publish-latest` 发布最新完整批次到 `<test-home>/runs-ubuntu/`，Windows 和普通本地入口默认不发布。同步后阅读 `latest-report.md`，解压 `latest-batch.zip` 查看所有用例的脱敏文本日志；核对批次 ID，包内路径相对于解压目录。未经隐私确认的截图和原始 Trace 仍在 Ubuntu，报告与包内排除清单会注明。参见[共享结果发布说明](infra/environment/shared-daily-results.md)。
+
 1. 受影响 Case 已实际执行，核对计划数量、所有终态和清理结果。没有运行的范围明确标记未验证。
 2. 实现阶段只读校验通过，检查 `git diff` 中正式资产及生成视图的变化。
 3. 提交必要的产品修复、Case、脚本、绑定、Feature 和 Change 记录；本机配置、密码、运行结果和截图留在本地。

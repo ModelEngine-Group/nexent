@@ -71,10 +71,7 @@ export function SelectedResourceChips({
   ];
   if (chips.length === 0) return null;
   return (
-    <div
-      className="mx-4 mb-2 flex min-w-0 flex-wrap gap-1.5 pt-2"
-      aria-label="当前挂载资源"
-    >
+    <div className="flex min-w-0 flex-wrap gap-1.5" aria-label="当前挂载资源">
       {chips.map((chip) => (
         <span
           key={chip.key}

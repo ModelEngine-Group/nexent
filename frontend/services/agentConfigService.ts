@@ -163,6 +163,7 @@ type AgentListApiItem = {
   author?: string;
   created_by?: string | null;
   create_time?: string;
+  update_time?: string;
   tags?: unknown;
   model_ids?: number[];
   model_id?: number;
@@ -194,6 +195,7 @@ const formatAgentListItem = (agent: AgentListApiItem): Agent =>
     author: agent.author,
     created_by: agent.created_by,
     create_time: agent.create_time,
+    update_time: agent.update_time,
     tags: normalizeTags(agent.tags),
     model_ids: agent.model_ids || (agent.model_id ? [agent.model_id] : []),
     model_names:
@@ -382,6 +384,11 @@ export const fetchPublishedAgentList = async () => {
       model_params_override: agent.model_params_override ?? null,
       enable_protocol_repair_retry: agent.enable_protocol_repair_retry ?? false,
       icon_url: agent.icon_url,
+      tags: Array.isArray(agent.tags)
+        ? agent.tags.filter(
+            (tag: unknown): tag is string => typeof tag === "string"
+          )
+        : [],
     }));
 
     return {
@@ -724,15 +731,26 @@ export const exportAgent = async (agentId: number) => {
 
 /**
  * Extract filename from Content-Disposition header
- * Handles both quoted and unquoted filename values
+ * Handles RFC 5987 filename* (UTF-8 percent-encoded), quoted and unquoted filename values
  * @param contentDisposition The Content-Disposition header value
  * @returns Extracted filename or null if not found
  */
-const extractFilenameFromContentDisposition = (
+export const extractFilenameFromContentDisposition = (
   contentDisposition: string | null
 ): string | null => {
   if (!contentDisposition) {
     return null;
+  }
+
+  // RFC 5987 encoding, e.g. filename*=UTF-8''%E6%99%BA%E8%83%BD%E4%BD%93.zip
+  const utf8Regex = /filename\*=UTF-8''([^;]+)/i;
+  const utf8Match = utf8Regex.exec(contentDisposition);
+  if (utf8Match?.[1]) {
+    try {
+      return decodeURIComponent(utf8Match[1].trim());
+    } catch {
+      // fall back to plain filename parsing on invalid encoding
+    }
   }
 
   const regex = /filename[^;=\n]*=((['"]).*?\2|[^;\n]*)/;
@@ -944,6 +962,36 @@ export const checkAgentNameConflictBatch = async (payload: {
       message: "agentConfig.agents.checkNameFailed",
     };
   }
+};
+
+/**
+ * Generate unique copy names by appending a numeric suffix when the base
+ * name/display_name already exists in the tenant. Mirrors the backend
+ * import-link deduplication (base_1, base_2, ...).
+ */
+export const generateUniqueCopyName = async (
+  baseName: string,
+  baseDisplayName: string
+): Promise<{ name: string; display_name: string }> => {
+  let name = baseName;
+  let displayName = baseDisplayName;
+
+  // Probe at most 100 suffix candidates, matching the backend limit.
+  for (let attempt = 0; attempt < 100; attempt++) {
+    const result = await checkAgentNameConflictBatch({
+      items: [{ name, display_name: displayName }],
+    });
+    if (!result.success || !Array.isArray(result.data)) {
+      throw new Error("Failed to check agent name conflict");
+    }
+    const conflict = result.data[0];
+    if (!conflict?.name_conflict && !conflict?.display_name_conflict) {
+      return { name, display_name: displayName };
+    }
+    name = `${baseName}_${attempt + 1}`;
+    displayName = `${baseDisplayName}_${attempt + 1}`;
+  }
+  throw new Error("Failed to generate unique agent name after max attempts");
 };
 
 export const regenerateAgentNameBatch = async (payload: {

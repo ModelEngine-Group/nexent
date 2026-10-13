@@ -1,0 +1,63 @@
+schema_version: "1.0"
+stage: D4
+module: AGENT-LIST
+cases:
+  - case_id: AGENT-LIST-D4-001
+    feature_id: AGENT-LIST-VIEWS
+    requirement_ids: [AGENT-LIST-REQ-001, AGENT-LIST-REQ-002]
+    business_rule_ids:
+      [
+        AGENT-LIST-RULE-001,
+        AGENT-LIST-RULE-002,
+        AGENT-LIST-RULE-003,
+        AGENT-LIST-RULE-004,
+        AGENT-LIST-RULE-005,
+      ]
+    title: Switch between the agent card and table presentations
+    type: E2E
+    priority: P1
+    status: active
+    automation: automated
+    objective: Verify Ant Design table separators and content-responsive sizing at desktop and constrained viewport widths, and confirm that table view retains existing list workflows.
+    preconditions:
+      - Open the agent list with at least two mocked agents, including one with update_time and one without it.
+    test_data:
+      profile: mock
+      viewport: { width: 1920, height: 1080 }
+      agent_count: 8
+    steps:
+      - order: 1
+        action: Switch from card mode to table mode.
+        expected: The page heading, guide, and tabs remain unchanged while the table and its pagination appear.
+      - order: 2
+        action: Verify columns and representative row values.
+        expected: The column order is 名称、类型、描述、状态、创建人、更新时间、操作; timestamps reflect update_time only.
+      - order: 3
+        action: Inspect the header separators and table height with eight rendered rows, then search to a single matching row.
+        expected: Internal header columns have 1px #c9c9c9 separators that are 14px high and vertically centered, with no final or outer separator; the table height follows the rendered header and rows instead of filling unused space, then shrinks with the filtered content.
+      - order: 4
+        action: Search for an agent, activate its configure action, then return and switch back to card mode.
+        expected: Search and navigation still work, and the card presentation returns with its prior layout and metadata.
+    expected_results:
+      - At 1920×1080 the table occupies the measured 1807px content width; its height follows its rendered rows, grows no higher than 500px, and does not fill unused space.
+      - The table uses StandardTable with 14px/#191919/0px typography, white rows, a #f3f3f3 header, 40px rows, #f0f0f0 horizontal body dividers, and 14px centered #c9c9c9 internal header separators only.
+      - Narrow filter headers show both the label and icon with 8px horizontal padding.
+      - When rows exceed the 500px cap or the available list area, scrolling stays inside the table body and pagination remains below it.
+      - Search, configure, publish, import, and view switching remain usable.
+      - Page-level content above the list and existing card mode are unchanged.
+    forbidden_side_effects:
+      - No backend API or data mutation is introduced by switching views.
+      - Do not use create_time as update_time.
+      - Do not add body vertical separators or an outer table border; header separators remain centered and shorter than the 40px header cell.
+    actor: Agent list user
+    journey:
+      - Open the agent list.
+      - Switch between card and table modes.
+      - Search and open an agent configuration.
+    final_business_result:
+      - The same agent collection remains available in either presentation.
+      - Existing list operations remain reachable.
+    failure_evidence:
+      - Missing/incorrect table headings or row values.
+      - Search, navigation, pagination, or view switching fails.
+      - The table changes content above the list or mutates agent data.

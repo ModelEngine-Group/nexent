@@ -1,0 +1,13 @@
+schema_version: '1.0'
+case_id: FAF-D1-001
+implementations:
+- framework: pytest
+  file: test.py
+  selector: test_faf_d1_001
+  profiles:
+  - mock
+preparation:
+  families: []
+  anchors: false
+  special_assets: false
+  d4_groups: []

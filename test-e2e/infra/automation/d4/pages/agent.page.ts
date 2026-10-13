@@ -391,6 +391,53 @@ export class AgentPage {
     return download;
   }
 
+  async copyAgent(displayName: string): Promise<number> {
+    await this.open();
+    await this.page.getByPlaceholder("按名称或描述搜索", { exact: true }).fill(displayName);
+    const card = this.page.getByRole("button", { name: displayName, exact: true }).locator("xpath=..");
+    await expect(card).toHaveCount(1);
+    await card.getByRole("button", { name: "更多操作", exact: true }).click();
+    const created = this.page.waitForResponse(
+      (response) => response.request().method() === "POST" && response.url().includes("/api/agent/update"),
+      { timeout: 120_000 },
+    );
+    await this.page.getByRole("menuitem", { name: "复制", exact: true }).click();
+    await this.page.getByRole("dialog").getByRole("button", { name: /确\s*定/ }).click();
+    const response = await created;
+    if (!response.ok()) throw new Error(`agent copy returned ${response.status()}`);
+    const body = await response.json();
+    const id = Number(body?.agent_id || body?.data?.agent_id);
+    if (!Number.isInteger(id) || id <= 0) throw new Error("agent copy response omitted agent_id");
+    await expect(this.page.getByText("智能体复制成功", { exact: true }).first()).toBeVisible({ timeout: 30_000 });
+    return id;
+  }
+
+  async expectAgentAvailable(displayName: string): Promise<void> {
+    let observed: { name?: string; display_name?: string; is_available?: boolean; unavailable_reasons?: string[] } | null = null;
+    for (let attempt = 0; attempt < 20; attempt += 1) {
+      const response = await this.page.request.get("/api/agent/list");
+      if (response.ok()) {
+        const payload = await response.json();
+        // /api/agent/list returns a bare JSON array, not a wrapped object.
+        const rows = Array.isArray(payload) ? payload : (Array.isArray(payload?.data) ? payload.data : []);
+        const match = rows.find((row: { display_name?: string }) => row.display_name === displayName);
+        if (match) {
+          if (match.is_available === false) {
+            throw new Error(`copied agent ${displayName} was marked unavailable: ${JSON.stringify(match.unavailable_reasons || [])}`);
+          }
+          observed = match;
+          break;
+        }
+      }
+      await this.page.waitForTimeout(1000);
+    }
+    if (!observed) throw new Error(`copied agent ${displayName} was not returned by /api/agent/list`);
+    const reasons = observed.unavailable_reasons || [];
+    if (reasons.includes("duplicate_name") || reasons.includes("duplicate_display_name")) {
+      throw new Error(`copied agent ${displayName} kept duplicate unavailable reasons: ${JSON.stringify(reasons)}`);
+    }
+  }
+
   async openImport(filePath: string): Promise<void> {
     await this.open();
     const chooser = this.page.waitForEvent("filechooser");
