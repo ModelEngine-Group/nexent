@@ -187,3 +187,31 @@ def apply_parameter_values(
         elif rule["required"] and key not in values:
             raise ParameterValidationError("PARAMETER_VALUE_REQUIRED", _pointer(key))
     return values
+
+
+def validate_saved_parameter_values(
+    compiled: CompiledParameterRules,
+    saved_values: Mapping[str, object],
+) -> dict:
+    """Validate a persisted snapshot without applying defaults or changing presence."""
+    validate_parameter_value(compile_parameter_schema({"type": "object"}), saved_values)
+    values = json.loads(json.dumps(dict(saved_values)))
+    rules = {rule["key"]: rule for rule in compiled.declarations}
+    schemas = dict(compiled._schemas)
+    for key in values:
+        if key not in rules:
+            raise ParameterValidationError("PARAMETER_UNKNOWN", _pointer(key))
+        validate_parameter_value(schemas[key], values[key], _pointer(key))
+    for key in compiled._order:
+        rule = rules[key]
+        active = _condition_matches(rule.get("condition"), values)
+        if not active:
+            if key in values:
+                raise ParameterValidationError("PARAMETER_DEPENDENCY", _pointer(key))
+            continue
+        if "fixed_value" in rule:
+            if key not in values or not json_values_equal(values[key], rule["fixed_value"]):
+                raise ParameterValidationError("FIXED_PARAMETER", _pointer(key))
+        elif rule["required"] and key not in values:
+            raise ParameterValidationError("PARAMETER_VALUE_REQUIRED", _pointer(key))
+    return values

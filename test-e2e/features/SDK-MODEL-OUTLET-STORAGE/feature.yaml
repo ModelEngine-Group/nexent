@@ -1,0 +1,20 @@
+schema_version: '1.0'
+module:
+  id: SDK-MODEL-SERVICE
+  name: SDK model service
+feature:
+  feature_id: SDK-MODEL-OUTLET-STORAGE
+  name: Resolved outlet parameter storage
+  status: planned
+  description: Preserve saved parameter presence across dedicated columns and the remaining parameter bag.
+  business_rules:
+  - rule_id: SDK-MODEL-OUTLET-STORAGE-RULE-01
+    description: Loading never applies defaults or fixed values and never removes conflicting saved values; invalid snapshots fail.
+  - rule_id: SDK-MODEL-OUTLET-STORAGE-RULE-02
+    description: Common parameters have one dedicated column; only other values enter the parameter bag. False, zero and explicit null remain distinct from omission.
+  - rule_id: SDK-MODEL-OUTLET-STORAGE-RULE-03
+    description: Dedicated SQL null means omission unless its allowed key is explicitly marked. Duplicate, unknown or conflicting markers and duplicate storage fail.
+  required_test_stages: []
+  source:
+    requirement_ids: [MODEL-OUTLET-PARAMETER-STORAGE-20261013]
+    notes: Isolated codec slice of SPEC AC-01/03. No database writer, SQL migration or runtime loading is connected yet. Those boundaries require additional integration and deployment evidence.
