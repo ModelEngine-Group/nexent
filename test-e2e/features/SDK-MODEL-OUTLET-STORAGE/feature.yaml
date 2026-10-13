@@ -16,7 +16,9 @@ feature:
     description: Dedicated SQL null means omission unless its allowed key is explicitly marked. Duplicate, unknown or conflicting markers and duplicate storage fail.
   - rule_id: SDK-MODEL-OUTLET-STORAGE-RULE-04
     description: Capability status, context, controls and modalities live only in their dedicated columns; remaining details are strict and complete, with no inference or duplicate storage.
+  - rule_id: SDK-MODEL-OUTLET-STORAGE-RULE-05
+    description: Exact duplicated control domains and active fixed values use strict same-row references; restoration preserves additional restrictions and never applies defaults or repairs missing values.
   required_test_stages: []
   source:
-    requirement_ids: [MODEL-OUTLET-PARAMETER-STORAGE-20261013, MODEL-OUTLET-CAPABILITY-STORAGE-20261013]
+    requirement_ids: [MODEL-OUTLET-PARAMETER-STORAGE-20261013, MODEL-OUTLET-CAPABILITY-STORAGE-20261013, MODEL-OUTLET-RULE-STORAGE-20261013]
     notes: Isolated codec slice of SPEC AC-01/03. No database writer, SQL migration or runtime loading is connected yet. Those boundaries require additional integration and deployment evidence.
