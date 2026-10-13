@@ -441,9 +441,9 @@ def mock_observer():
 
 @pytest.fixture
 def nexent_agent_instance(mock_observer):
-    """Create a NexentAgent instance with minimal initialisation."""
+    """Create an explicitly eager instance for legacy lifecycle checks."""
     agent = NexentAgent(observer=mock_observer,
-                        model_config_list=[], stop_event=Event())
+                        model_config_list=[], stop_event=Event(), tool_fastpath_enabled=False)
     return agent
 
 
