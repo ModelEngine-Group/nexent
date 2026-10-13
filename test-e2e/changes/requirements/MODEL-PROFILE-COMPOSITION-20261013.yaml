@@ -39,5 +39,6 @@ change:
     - test/sdk/core/model_service/test_request_parameters.py
     - test/sdk/core/model_service/test_supplements.py
     - test/sdk/core/model_service/test_profile_capabilities.py
+    - test/sdk/core/model_service/test_composition.py
   notes: Design before component wiring. D2/D3/D4 and deployed outlet acceptance remain
     later service/runtime slices.
