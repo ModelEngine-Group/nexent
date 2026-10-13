@@ -1,0 +1,44 @@
+schema_version: '1.0'
+change:
+  change_id: MODEL-PROFILE-NORMALIZATION-20261013
+  change_type: requirement
+  requirement_id: MODEL-PROFILE-NORMALIZATION-20261013
+  title: Normalize pinned model profile sources without invented capability defaults
+  description: Incremental source inheritance and normalization layer; first contract
+    step preserves absent budget bounds.
+  affected_features:
+    existing:
+    - SDK-MODEL-PROFILE-CONTRACTS
+    added:
+    - SDK-MODEL-PROFILE-NORMALIZATION
+    modified:
+    - SDK-MODEL-PROFILE-CONTRACTS
+    retired: []
+  affected_cases:
+    existing: []
+    added: []
+    modified: []
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    behaviors:
+    - Absent reasoning budget minimum or maximum remains unknown; explicit zero and
+      declared special values remain distinct.
+    - Only known bounds participate in range validation; strict type errors and JSON
+      round trips preserve the declared domain.
+    - Inheritance keeps scalar/array replacements and recursive object merging distinct,
+      applies omit semantics, excludes identity/license/weights/links/benchmarks from
+      provider inheritance, and does not mutate source documents.
+    - Unknown/missing base references, duplicate source identities and invalid omission
+      declarations fail explicitly; surviving fields retain exact source file and
+      path.
+    reason: Existing profile contract UT owns isolated budget validation; no component
+      or runtime normalization is connected in this first step.
+    test_selectors:
+    - test/sdk/core/model_service/test_profile_contracts.py
+    - test/sdk/core/model_service/test_source_inheritance.py
+  no_case_change_reason: Current steps cover isolated budget and inheritance rules.
+    Component Cases will be registered before wiring reader, source validator and
+    normalization; existing formal Cases stay unchanged.
+  notes: AC-01/02 subset remains pending as a whole. This change does not infer provider
+    API behavior or modify a saved outlet.

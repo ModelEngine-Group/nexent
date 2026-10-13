@@ -62,17 +62,17 @@ class EffortControl(ProfileContract):
 
 
 class BudgetTokensControl(ProfileContract):
-    """Token bounds and explicitly declared sentinel values."""
+    """Known or unknown token bounds and explicitly declared sentinel values."""
 
     mode: Literal["budget_tokens"] = "budget_tokens"
     parameter_key: Literal["reasoning_budget_tokens"] = "reasoning_budget_tokens"
-    min: Annotated[int, Field(ge=0)]
-    max: Annotated[int, Field(ge=0)]
+    min: Annotated[int, Field(ge=0)] | None = None
+    max: Annotated[int, Field(ge=0)] | None = None
     special_values: list[int] = Field(default_factory=list)
 
     @model_validator(mode="after")
     def validate_range(self) -> Self:
-        if self.min > self.max:
+        if self.min is not None and self.max is not None and self.min > self.max:
             raise ValueError("Budget minimum cannot exceed maximum")
         if len(set(self.special_values)) != len(self.special_values):
             raise ValueError("Special budget values must be unique")

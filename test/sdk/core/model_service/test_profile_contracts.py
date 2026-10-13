@@ -182,3 +182,31 @@ def test_contract_fields_cannot_be_reassigned_without_validation():
     with pytest.raises(ValidationError):
         profile.combined_window = 0
     assert profile.combined_window == 100
+
+
+@pytest.mark.parametrize(
+    "bounds", [{}, {"max": 81920}, {"min": 1}, {"min": 0}, {"max": 0}]
+)
+def test_reasoning_budget_preserves_missing_bounds_without_defaults(bounds):
+    control = BudgetTokensControl(**bounds)
+    assert control.min == bounds.get("min")
+    assert control.max == bounds.get("max")
+    assert BudgetTokensControl.model_validate_json(control.model_dump_json()) == control
+    profile = ReasoningCapabilities(status="supported", controls=[control])
+    restored = ReasoningCapabilities.model_validate_json(profile.model_dump_json())
+    assert restored.controls[0].min == bounds.get("min")
+    assert restored.controls[0].max == bounds.get("max")
+
+
+@pytest.mark.parametrize("field", ["min", "max"])
+@pytest.mark.parametrize("invalid", [True, "100", 1.5, -1])
+def test_reasoning_budget_rejects_invalid_partial_bounds(field, invalid):
+    with pytest.raises(ValidationError):
+        BudgetTokensControl(**{field: invalid})
+
+
+def test_reasoning_budget_keeps_declared_sentinel_and_known_zero_separate():
+    control = BudgetTokensControl(max=0, special_values=[-1])
+    assert control.min is None
+    assert control.max == 0
+    assert control.special_values == [-1]

@@ -1,0 +1,28 @@
+schema_version: '1.0'
+module:
+  id: SDK-MODEL-SERVICE
+  name: SDK model service
+feature:
+  feature_id: SDK-MODEL-PROFILE-NORMALIZATION
+  name: Model profile source inheritance and normalization
+  status: planned
+  description: Versioned conversion from pinned source definitions to provider-neutral
+    capabilities with explicit field origins.
+  business_rules:
+  - rule_id: SDK-MODEL-PROFILE-NORMALIZATION-RULE-01
+    description: Pinned authored inheritance overlays objects recursively, replaces
+      arrays/scalars, honors omissions, excludes reference-only metadata, and leaves
+      original documents unchanged.
+  - rule_id: SDK-MODEL-PROFILE-NORMALIZATION-RULE-02
+    description: Missing capabilities and bounds stay unknown; boolean abilities and
+      configurable values remain separate.
+  - rule_id: SDK-MODEL-PROFILE-NORMALIZATION-RULE-03
+    description: Every source field needs a versioned disposition; unknown fields
+      and invalid types fail the full load with source diagnostics.
+  required_test_stages: []
+  source:
+    requirement_ids:
+    - MODEL-PROFILE-NORMALIZATION-20261013
+    notes: Incremental implementation. Budget/inheritance UT does not complete the
+      normalization component; pipeline component proof will be registered before
+      connection. No provider/API/database/Agent acceptance claimed.
