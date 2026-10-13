@@ -2717,6 +2717,13 @@ async def create_agent_run_info(
         create_config_kwargs["runtime_sub_agent_mounts"] = runtime_sub_agent_mounts
     agent_config = await create_agent_config(**create_config_kwargs, tool_params=tool_params)
 
+    if getattr(agent_config, "agent_core", "smolagents") == "jiuwen":
+        # Historical attachments remain in authorized history and the workspace;
+        # only this turn's uploads may frame the current request as a file task.
+        final_query = await join_minio_file_description_to_query(
+            minio_files=minio_files, query=query, history=None, language=language,
+        )
+
     # v2.6.0: Apply per-agent model params override to model_config_list.
     # model_params_override is a {model_id_str: {temperature, top_p, extra_params}} dict
     # stored on ag_tenant_agent_t. We match each override entry to a ModelConfig

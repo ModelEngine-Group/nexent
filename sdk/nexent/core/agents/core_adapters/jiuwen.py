@@ -145,6 +145,7 @@ class JiuwenAdapter(AgentCoreAdapter):
         from openjiuwen.core.foundation.tool import LocalFunction, ToolCard
         from openjiuwen.core.single_agent import AgentCard
         from openjiuwen.harness.factory import create_deep_agent
+        from openjiuwen.harness.rails.model_anomaly_detection_rail import ModelAnomalyDetectionRail
 
         from ..run_agent import _get_default_agent_thread_manager
 
@@ -178,6 +179,11 @@ class JiuwenAdapter(AgentCoreAdapter):
         self.query = self.resources._prepare_file_workspace(info.query)
         prompt = self._compile_context()
         rails = self._skill_rails()
+        # Retry only the native model call, never a completed business tool or run.
+        rails.append(ModelAnomalyDetectionRail(
+            max_retries=0, transient_max_retries=1, transient_base_delay_seconds=0.5,
+            tool_loop_compact={"enabled": False},
+        ))
         model = self._create_model()
         self.native_agent = create_deep_agent(
             model, card=AgentCard(id=self.owner_id, name=info.agent_config.name,
@@ -241,7 +247,14 @@ class JiuwenAdapter(AgentCoreAdapter):
             {"role": history.role, "content": history.content}
             for history in _get_authorized_history(self.run_info) or ()
         )
-        return "\n\n".join(text for text in instructions if text) or config.description
+        prompt = "\n\n".join(text for text in instructions if text) or config.description
+        current_task_guidance = (
+            "Process only the latest user request in this run. Earlier conversation messages, attachments and "
+            "results are historical reference, not pending tasks. Do not repeat earlier requests or tool calls "
+            "unless the latest user request explicitly asks you to. Reuse prior results when answering follow-up "
+            "questions; the presence of an earlier attachment does not require analyzing it again."
+        )
+        return prompt + "\n\n" + current_task_guidance
 
     def _create_model(self):
         from openjiuwen.core.foundation.llm import Model
