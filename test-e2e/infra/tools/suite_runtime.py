@@ -10,6 +10,8 @@ from pathlib import Path
 import signal
 import subprocess
 
+from report_ownership import git_label, responsibility_label
+
 
 def now():
     return datetime.now(timezone.utc).isoformat()
@@ -157,7 +159,7 @@ def finalize(directory, plan, rows, error=None):
     by_id = {record["case_id"]: record for record in plan}
     for row in rows:
         record = by_id.get(row["case_id"], {})
-        for key in ("feature_id", "title", "module", "owner"):
+        for key in ("feature_id", "title", "module", "owner", "git_last_modifier", "responsibility"):
             if key in record:
                 row.setdefault(key, record[key])
     incomplete = any(row["result"] in {"NOT_EXECUTED", "INTERRUPTED"} for row in rows)
@@ -234,18 +236,24 @@ def render_report(directory, plan, rows, summary):
     unsuccessful = [row for row in rows if row["result"] not in {"PASS", "RETIRED", "SKIPPED_BY_POLICY"}]
     lines += ["", "## Case results — not passed only", "",
               "PASS, RETIRED and SKIPPED_BY_POLICY rows are omitted from this detail table. "
-              "All results remain in checkpoints/results.jsonl and per-case evidence."]
+              "All results remain in checkpoints/results.jsonl and per-case evidence.",
+              "Git last modifier identifies the latest commit affecting the Case definition, execution binding "
+              "or primary script at the batch revision; it is not the original creator or defect owner. "
+              "Responsibility fields route investigation by functional area, not proven fault. "
+              "Detailed attribution and routing basis are retained in report-ownership.json; "
+              "unmatched work remains Unassigned."]
     for stage in sorted(set(metrics["stages"]) | {row["stage"] for row in unsuccessful}):
         stage_rows = [row for row in unsuccessful if row["stage"] == stage]
         lines += ["", f"### {stage} — {len(stage_rows)} not passed", ""]
         if not stage_rows:
             lines += ["No non-passing cases in this stage."]
             continue
-        lines += ["| Case | Stage | Title | Feature | Module | Owner | Result | Reason | Duration (s) | Executed at (UTC) | Cleanup | Local evidence |",
-                  "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |"]
+        lines += ["| Case | Stage | Title | Feature | Module | Git最近修改者 | 责任田负责人 | Result | Reason | Duration (s) | Executed at (UTC) | Cleanup | Local evidence |",
+                  "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |"]
         lines += ["| " + " | ".join(cell(value) for value in (
             row['case_id'], row['stage'], row.get('title'), row.get('feature_id'), row.get('module'),
-            row.get('owner', 'Unassigned'), row['result'], row.get('reason'), row.get('duration_seconds'), row.get('executed_at'),
+            git_label(row.get('git_last_modifier')), responsibility_label(row.get('responsibility')),
+            row['result'], row.get('reason'), row.get('duration_seconds'), row.get('executed_at'),
             row.get('cleanup_reason') or row.get('cleanup_exit_code'),
             ', '.join(row.get('evidence', [])))) + " |" for row in stage_rows]
     if not unsuccessful:

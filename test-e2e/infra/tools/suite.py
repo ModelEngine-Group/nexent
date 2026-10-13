@@ -23,6 +23,7 @@ from jsonschema import Draft202012Validator
 from packaging.requirements import Requirement
 
 from run_cases import machine_environment, run_one, result_reason
+from report_ownership import enrich as enrich_ownership
 from launch_runtime import test_python
 from local_preflight import live_service_problems, static_config_problems
 from static_assets import entries as static_entries, inventory as static_inventory
@@ -277,6 +278,12 @@ def execute(repo, home, records, settings, *, daily=False, resume=None):
                   "batch_mode": "daily" if daily else "run", "full_static_assets": daily,
                   "required_static_assets": sorted(required_static or []),
                   "resumed_from": str(resume["source"]) if resume else None}
+    report_records, ownership_warnings = enrich_ownership(repo, records, provenance["head"])
+    ownership_by_case = {record["case_id"]: record for record in report_records}
+    save(directory / "report-ownership.json", {
+        "head": provenance["head"], "warnings": ownership_warnings,
+        "cases": [{"case_id": record["case_id"], "git_last_modifier": record["git_last_modifier"],
+                   "responsibility": record["responsibility"]} for record in report_records]})
     if resume:
         marker = resume["source"] / "resume-child.json"
         with os.fdopen(os.open(marker, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600), "w", encoding="utf-8") as output:
@@ -351,6 +358,8 @@ def execute(repo, home, records, settings, *, daily=False, resume=None):
                         row["result"] = "AUTOMATION_ERROR"
                     row["evidence"] = [f"cases/{case_id}", f"logs/{case_id}.log"]
                 rows.append(row)
+                attribution = ownership_by_case[case_id]
+                row.update(git_last_modifier=attribution["git_last_modifier"], responsibility=attribution["responsibility"])
                 row.setdefault("executed_at", case_started_at)
                 row.setdefault("duration_seconds", round(time.monotonic() - case_started_clock, 3))
                 definition_path = repo / "test-e2e/cases" / case_id / "case.yaml"
@@ -379,7 +388,7 @@ def execute(repo, home, records, settings, *, daily=False, resume=None):
     except Exception as exc:
         error = str(exc) if isinstance(exc, RuntimeError) else type(exc).__name__
     finally:
-        summary = finalize(directory, records, rows, error)
+        summary = finalize(directory, report_records, rows, error)
         for stage, status in state["stages"].items():
             if status in {"PENDING", "RUNNING"}:
                 state["stages"][stage] = "NOT_EXECUTED" if status == "PENDING" else "INTERRUPTED"
