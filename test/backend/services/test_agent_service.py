@@ -1855,6 +1855,55 @@ async def test_update_agent_info_impl_create_agent_auto_group_ids(
     assert call_args["group_ids"] == "1,2,3"
 
 
+@patch("management.services.agent.service.query_all_agent_info_by_tenant_id")
+@patch("management.services.agent.management.query_group_ids_by_user")
+@patch("management.services.agent.service.create_agent")
+@patch("management.services.agent.service.get_current_user_info")
+@pytest.mark.asyncio
+async def test_update_agent_info_impl_create_agent_resolves_duplicate_names(
+    mock_get_current_user_info,
+    mock_create_agent,
+    mock_get_group_ids,
+    mock_query_all_agents,
+):
+    """
+    Creating an agent through update_agent_info_impl with a duplicate
+    name/display_name must fall back to a unique numeric suffix so the new
+    agent stays publishable (same rule as the repository import link).
+    """
+    mock_get_current_user_info.return_value = ("test_user", "test_tenant", "en")
+    mock_get_group_ids.return_value = []
+    mock_create_agent.return_value = {"agent_id": 457}
+    # Existing tenant agents already own the requested names
+    mock_query_all_agents.return_value = [
+        {"agent_id": 1, "name": "javis_copy", "display_name": "Javis副本"},
+    ]
+
+    request = MagicMock()
+    request.agent_id = None  # create mode
+    request.name = "javis_copy"
+    request.display_name = "Javis副本"
+    request.business_description = "copy"
+    request.author = "test_author"
+    request.model_id = 1
+    request.model_name = "test-model"
+    request.business_logic_model_id = None
+    request.business_logic_model_name = None
+    request.max_steps = 10
+    request.provide_run_summary = True
+    request.enabled = True
+    request.enabled_tool_ids = None
+    request.related_agent_ids = None
+    request.group_ids = None
+    apply_default_prompt_template_request_fields(request)
+
+    result = await update_agent_info_impl(request, authorization="Bearer token")
+
+    assert result["agent_id"] == 457
+    call_args = mock_create_agent.call_args[1]["agent_info"]
+    assert call_args["name"] == "javis_copy_1"
+    assert call_args["display_name"] == "Javis副本_1"
+
 @patch("management.services.agent.management.get_mcp_server_by_name_and_tenant")
 @patch("management.services.agent.management.ExportAndImportDataFormat")
 @patch("management.services.agent.management.export_agent_by_agent_id")
@@ -11781,7 +11830,7 @@ async def test_export_agent_with_skills_impl_with_zip(
     import zipfile
 
     mock_get_user_info.return_value = ("user_123", "tenant_abc", "en")
-    mock_search_info.return_value = {"name": "my_agent"}
+    mock_search_info.return_value = {"name": "my_agent", "display_name": "My Agent"}
     mock_collect_skills.return_value = [
         SkillZipEntry(skill_name="TestSkill", skill_zip_base64="SGVsbG8gV29ybGQ=")
     ]
@@ -11793,7 +11842,7 @@ async def test_export_agent_with_skills_impl_with_zip(
 
     assert result["_zip"] is True
     assert "data" in result
-    assert result["filename"] == "my_agent.zip"
+    assert result["filename"] == "My Agent.zip"
     zip_data = io.BytesIO(result["data"])
     with zipfile.ZipFile(zip_data, "r") as zf:
         assert "agent.json" in zf.namelist()
