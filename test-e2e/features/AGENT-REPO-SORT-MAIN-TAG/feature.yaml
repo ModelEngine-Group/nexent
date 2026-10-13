@@ -1,0 +1,35 @@
+schema_version: '1.0'
+module:
+  id: AGENT-REPO
+  name: Agent repository listings
+  description: Agent repository catalog listings plus the agent management page that browses the same agents.
+feature:
+  feature_id: AGENT-REPO-SORT-MAIN-TAG
+  name: Agent repository publish-time sort, main-agent indicator and tag search
+  status: active
+  description: >-
+    The agent repository lists tenant listings with an optional latest-published-first order, marks each listing
+    card as a main or an ordinary agent, and the agent management page matches agents by tag on top of its
+    name and description search, recovering tags that arrive as a stringified array instead of crashing.
+  business_rules:
+  - rule_id: AGENT-REPO-SORT-MAIN-TAG-RULE-001
+    description: >-
+      The repository sort control offers a default order and a latest-published order; choosing the latest-published
+      order requests publish-time descending sorting and renders the returned listings newest first with undated
+      listings last, while the default order leaves the request unchanged.
+  - rule_id: AGENT-REPO-SORT-MAIN-TAG-RULE-002
+    description: >-
+      Every repository listing card shows an amber main-agent badge when the listing is a main agent, and an ordinary
+      listing with no version label renders no such badge, so main and ordinary agents are visually distinguished.
+  - rule_id: AGENT-REPO-SORT-MAIN-TAG-RULE-003
+    description: >-
+      The agent management page matches agents by tag from its search box, including a tag persisted as a stringified
+      array, renders the recovered tag instead of the raw stringified value, and keeps the list usable.
+  required_test_stages:
+  - D4
+  source:
+    requirement_ids:
+    - AGENT-REPO-SORT-MAIN-TAG-20261013
+    notes: >-
+      Traditional backend UT and frontend component UT prove the ordering helper, route forwarding and tag
+      normalization; this Feature owns the browser-level acceptance of the three user-visible behaviors.

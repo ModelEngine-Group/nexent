@@ -1,0 +1,101 @@
+schema_version: '1.0'
+stage: D4
+module: AGENT-REPO
+case:
+  case_id: AGENT-REPO-SORT-MAIN-TAG-D4-001
+  feature_id: AGENT-REPO-SORT-MAIN-TAG
+  requirement_ids:
+  - AGENT-REPO-SORT-MAIN-TAG-20261013
+  business_rule_ids:
+  - AGENT-REPO-SORT-MAIN-TAG-RULE-001
+  - AGENT-REPO-SORT-MAIN-TAG-RULE-002
+  - AGENT-REPO-SORT-MAIN-TAG-RULE-003
+  title: Sort repository listings by publish time, badge main agents and search agents by tag
+  type: E2E
+  priority: P1
+  status: active
+  automation: automated
+  objective: >-
+    Choosing the latest-published order forwards the publish-time sort flag and renders dated listings newest
+    first with the undated listing last; every repository card separates a main agent from an ordinary agent;
+    and the agent management page searches by tag and renders a tag that arrived as a stringified array
+    without crashing.
+  preconditions:
+  - >-
+    A running frontend is reachable, and deterministic HTTP fixtures isolate the repository listings, the
+    default tag library and the agent list so no live tenant or provider data is required.
+  test_data:
+    profile: mock
+    locale: zh
+    viewport:
+      width: 1920
+      height: 1080
+    repository_titles:
+    - 仓库智能体一
+    - 仓库智能体二
+    - 仓库智能体三
+    tag_search_keyword: d4_key
+    tag_search_value: d4_value
+    stringified_tag_payload: "['d4_value', 'd4_extra']"
+  steps:
+  - order: 1
+    action: Open the agent repository and choose the latest-published option in the sort control.
+    expected: >-
+      The listings request carries the publish-time sort flag and the dated listings render newest first with
+      the undated listing last, while the untouched default request carries no such flag.
+  - order: 2
+    action: Inspect the badge on the rendered repository listing cards.
+    expected: >-
+      The main-agent listing shows the amber main-agent badge while the ordinary listing with no version
+      label shows no such badge.
+  - order: 3
+    action: Search the agent management page by a tag keyword.
+    expected: >-
+      The list request carries the tag search predicates, the tag-matched agent renders the recovered tag
+      value and never the raw stringified array, and the list stays usable.
+  expected_results:
+  - >-
+    The latest-published order is forwarded to the listings endpoint and dated listings render newest first
+    with the undated listing last.
+  - >-
+    A main-agent listing and an ordinary listing are visually distinguished by the amber main-agent badge.
+  - >-
+    Searching by tag on the agent management page returns the tag-matched agent and renders a tag that
+    arrived as a stringified array as an individual tag.
+  forbidden_side_effects:
+  - >-
+    No unrelated writes, publication, installation or Agent/model execution; browsing, sorting and searching
+    only read data.
+  actor: Authorized tenant user browsing the agent repository and the agent management page
+  journey:
+  - Open the agent repository and choose the latest-published option in the sort control.
+  - Inspect the badge on the rendered repository listing cards.
+  - Search the agent management page by a tag keyword.
+  final_business_result:
+  - >-
+    The latest-published order is forwarded to the listings endpoint and dated listings render newest first
+    with the undated listing last.
+  - >-
+    A main-agent listing and an ordinary listing are visually distinguished by the amber main-agent badge.
+  - >-
+    Searching by tag on the agent management page returns the tag-matched agent and renders a tag that
+    arrived as a stringified array as an individual tag.
+  failure_evidence:
+  - Fixed Playwright journey assertions, sanitized request payloads and terminal audit.
+  acceptance:
+  - id: AC-01
+    description: >-
+      The repository sort control forwards the latest-published order and renders dated listings newest first
+      with the undated listing last; listing cards distinguish a main agent from an ordinary agent; and the
+      agent management page searches by tag and renders a tag that arrived as a stringified array without
+      crashing.
+    steps:
+    - 1
+    - 2
+    - 3
+    expected_results:
+    - 1
+    - 2
+    - 3
+    forbidden_side_effects:
+    - 1

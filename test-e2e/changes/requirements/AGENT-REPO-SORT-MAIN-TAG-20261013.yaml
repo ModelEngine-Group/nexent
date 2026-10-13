@@ -1,0 +1,50 @@
+schema_version: '1.0'
+change:
+  change_id: AGENT-REPO-SORT-MAIN-TAG-20261013
+  change_type: requirement
+  requirement_id: AGENT-REPO-SORT-MAIN-TAG-20261013
+  title: Sort agent repository listings by publish time, flag main agents, and search agents by tag
+  description: >-
+    Add a latest-first sort selector for agent repository listings ordered by publish time, expose an is_main_agent
+    indicator on listing summaries and details, and let the agent management page filter agents by tag on top of the
+    existing name and description search. Tag reads recover tags from stringified array payloads so the page no longer
+    crashes and the tag-search feature is not silently lost.
+  affected_features:
+    existing: []
+    added: [AGENT-REPO-SORT-MAIN-TAG]
+    modified: []
+    retired: []
+  affected_cases:
+    existing: []
+    added: [AGENT-REPO-SORT-MAIN-TAG-D4-001]
+    modified: []
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    behaviors:
+      - Repository listing summaries carry the publish time, and latest-first ordering sorts dated records by time descending with a repository-id tie-break while undated records stay last; the default order is unchanged.
+      - The listing route forwards the sort flag to the implementation, and each listing summary and detail exposes is_main_agent, defaulting to true when the agent is unknown or absent.
+      - The agent management page produces tag search predicates, filters by one or more tags including the stringified-array case, and resolves combined query and tag matching, while tag normalization recovers tags from JSON and Python-repr stringified arrays and returns an empty list for unrecoverable input.
+    reason: >-
+      The sort ordering, the main-agent annotation and the tag matching each have isolated unit and component contracts proved
+      with controlled inputs: the backend queries, ordering helper and route forwarding are exercised by traditional backend UT,
+      and the tag-normalization and card-rendering regressions are exercised by frontend component UT.
+    test_selectors:
+      - test/backend/database/test_agent_repository_db.py
+      - test/backend/database/test_agent_db.py
+      - test/backend/services/test_agent_repository_service.py
+      - test/backend/app/test_agent_repository_app.py
+      - frontend/tests/component/agentTagsNormalization.test.tsx
+      - frontend/tests/component/agentListCard.test.tsx
+  notes: >-
+    Acceptance: selecting latest-first reorders listings by publish time with undated records last; main-agent and ordinary
+    listings are visually distinguished by the amber main-agent badge; the agent management page searches and filters by tag,
+    including tags that arrive as a stringified array, without crashing. Scope: backend/database agent_repository and agent
+    modules, backend/services/agent_repository_service.py, backend/apps/agent_repository_app.py, the frontend agent-space
+    repository tab and the frontend agents management page.
+
+    Proof boundary: the three user-visible behaviours cross page, toolbar, card and list-rendering boundaries, so they are
+    owned by a single browser-level D4 case, AGENT-REPO-SORT-MAIN-TAG-D4-001, instead of duplicating the isolated contracts
+    already proved by traditional UT. No live-deployment, tenant-data or Agent-execution acceptance is claimed: the journey
+    fulfils every HTTP response with deterministic fixtures inside the browser boundary and needs no seeded server data.
+
