@@ -6,10 +6,61 @@ import tempfile
 import unittest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from suite_runtime import finalize, render_report, report_metrics
+from suite_runtime import finalize, render_report, report_metrics, save
 
 
 class SuiteReportTests(unittest.TestCase):
+    def test_batch_header_uses_pinned_metadata_and_beijing_time(self):
+        row = {"case_id": "A", "stage": "D4", "result": "FAIL"}
+        with tempfile.TemporaryDirectory() as root:
+            directory = Path(root) / "daily-batch-001"
+            save(directory / "status.json", {"started_at": "2026-10-12T22:52:22Z"})
+            save(directory / "provenance.json", {"head": "a" * 40})
+            summary = finalize(directory, [row], [row])
+            summary["finished_at"] = "2026-10-13T02:06:10+00:00"
+            before = {name: (directory / name).read_bytes() for name in
+                      ("summary.json", "status.json", "provenance.json", "checkpoints/results.jsonl")}
+            render_report(directory, [row], [row], summary)
+            report = (directory / "report.md").read_text(encoding="utf-8")
+            self.assertIn("当前批次：`daily-batch-001`", report)
+            self.assertIn("测试代码 HEAD：`" + "a" * 40 + "`", report)
+            self.assertIn("2026-10-13 06:52:22 +08:00", report)
+            self.assertIn("2026-10-13 10:06:10 +08:00", report)
+            for suffix in ("/report.md", "/checkpoints/results.jsonl", "/logs/<Case-ID>.log", "/cases/<Case-ID>/"):
+                self.assertIn(directory.resolve().as_posix() + suffix, report)
+            for name, content in before.items():
+                self.assertEqual((directory / name).read_bytes(), content)
+
+    def test_historical_copy_preserves_original_remote_evidence_root(self):
+        row = {"case_id": "A", "stage": "D1", "result": "PASS"}
+        with tempfile.TemporaryDirectory() as root:
+            directory = Path(root)
+            summary = finalize(directory, [row], [row])
+            save(directory / "original/status.json", {"started_at": "2026-10-12T16:02:00+00:00"})
+            save(directory / "original/provenance.json", {"head": "b" * 40})
+            source = "/operator/test-home/runs/historical-batch"
+            render_report(directory, [row], [row], summary,
+                          metadata_directory=directory / "original", evidence_root=source)
+            report = (directory / "report.md").read_text(encoding="utf-8")
+            self.assertIn("当前批次：`historical-batch`", report)
+            self.assertIn(source + "/checkpoints/results.jsonl", report)
+            self.assertIn("2026-10-13 00:02:00 +08:00", report)
+            self.assertNotIn(directory.resolve().as_posix(), report)
+
+    def test_missing_or_invalid_metadata_does_not_invent_batch_version_or_time(self):
+        row = {"case_id": "A", "stage": "D1", "result": "PASS"}
+        with tempfile.TemporaryDirectory() as root:
+            directory = Path(root)
+            summary = finalize(directory, [row], [row])
+            save(directory / "provenance.json", ["not a snapshot mapping"])
+            save(directory / "status.json", {"started_at": "2026-10-13T06:52:22"})
+            summary["finished_at"] = None
+            render_report(directory, [row], [row], summary)
+            report = (directory / "report.md").read_text(encoding="utf-8")
+            self.assertIn("测试代码 HEAD：`未记录`", report)
+            self.assertIn("开始时间（北京时间）：未记录（原时间缺少时区）", report)
+            self.assertIn("结束时间（北京时间）：未记录", report)
+
     def test_exception_only_details_and_full_checkpoints(self):
         statuses = ["PASS", "FAIL", "BLOCKED", "AUTOMATION_ERROR", "RETIRED", "SKIPPED_BY_POLICY",
                     "CLEANUP_FAILED", "BLOCKED_BY_DEPENDENCY", "EXECUTION_FAILED", "TIMEOUT"]

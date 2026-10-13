@@ -2,13 +2,15 @@
 from __future__ import annotations
 
 from collections import Counter
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 import hashlib
 import json
 import os
 from pathlib import Path
 import signal
 import subprocess
+
+from report_ownership import git_label, responsibility_label
 
 
 def now():
@@ -157,7 +159,7 @@ def finalize(directory, plan, rows, error=None):
     by_id = {record["case_id"]: record for record in plan}
     for row in rows:
         record = by_id.get(row["case_id"], {})
-        for key in ("feature_id", "title", "module", "owner"):
+        for key in ("feature_id", "title", "module", "owner", "git_last_modifier", "responsibility"):
             if key in record:
                 row.setdefault(key, record[key])
     incomplete = any(row["result"] in {"NOT_EXECUTED", "INTERRUPTED"} for row in rows)
@@ -197,13 +199,64 @@ def report_metrics(plan, rows):
             "stages": stages}
 
 
-def render_report(directory, plan, rows, summary):
+def report_context(directory, summary, *, metadata_directory=None, evidence_root=None, sharing=None):
+    """Use batch snapshots, never the current checkout or rendering timestamp."""
+    metadata_directory = Path(metadata_directory) if metadata_directory is not None else directory
+
+    def snapshot(name):
+        try:
+            value = json.loads((metadata_directory / name).read_text(encoding="utf-8"))
+            return value if isinstance(value, dict) else {}
+        except (OSError, ValueError):
+            return {}
+
+    def beijing(value):
+        try:
+            parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+            if parsed.tzinfo is None:
+                return "未记录（原时间缺少时区）"
+            return parsed.astimezone(timezone(timedelta(hours=8))).strftime("%Y-%m-%d %H:%M:%S +08:00")
+        except (AttributeError, TypeError, ValueError):
+            return "未记录"
+
+    state = snapshot("status.json")
+    provenance = snapshot("provenance.json")
+    root = str(evidence_root).replace("\\", "/").rstrip("/") if evidence_root is not None else directory.resolve().as_posix()
+    batch_id = root.rsplit("/", 1)[-1]
+    lines = ["## 批次与本地证据", "",
+            f"- 当前批次：`{batch_id}`",
+            f"- 测试代码 HEAD：`{provenance.get('head') or '未记录'}`",
+            f"- 开始时间（北京时间）：{beijing(state.get('started_at'))}",
+            f"- 结束时间（北京时间）：{beijing(summary.get('finished_at') or state.get('finished_at'))}",
+            f"- 证据根目录（执行机器本地）：`{root}`",
+            f"- 完整报告：`{root}/report.md`",
+            f"- 完整结果：`{root}/checkpoints/results.jsonl`",
+            f"- 用例日志：`{root}/logs/<Case-ID>.log`",
+            f"- 用例证据目录：`{root}/cases/<Case-ID>/`（截图、Trace 等仅在实际生成时存在）",
+            "- 下表 Local evidence 中的相对路径均以此证据根目录为基准；文件保留在执行机器，不上传 GitHub。", ""]
+    if sharing is not None:
+        published = sharing.get("status") == "PUBLISHED"
+        lines += ["## Syncthing 共享副本", "",
+                  "- 共享发布：" + ("成功（不代表各接收端已完成同步）" if published else "失败；共享目录可能仍是上一批次，请勿当成本次结果"),
+                  f"- 共享内容所属批次：`{sharing.get('batch_id', batch_id)}`",
+                  "- 共享报告：`runs-ubuntu/latest-report.md`",
+                  "- 完整文本日志包：`runs-ubuntu/latest-batch.zip`",
+                  "- 文件位于各自的 Syncthing 共享目录，不是飞书附件；外部报告和日志包可能先后到达，请核对批次 ID。",
+                  "- 使用同步包时，明细中的 `cases/…`、`logs/…` 和 `checkpoints/…` 相对于解压目录；包内报告与日志属于同一批次。",
+                  "- 共享包只包含脱敏后的白名单文件，Ubuntu 原始证据保持不变。",
+                  f"- 未共享的截图／Trace 等二进制证据：{sharing.get('excluded_binary_count', '未统计')} 个；未经隐私确认，保留在 Ubuntu，详见包内 `excluded-evidence.json`。", ""]
+    return lines
+
+
+def render_report(directory, plan, rows, summary, *, metadata_directory=None, evidence_root=None, sharing=None):
     """Refresh the reading view only, preserving final receipts and batch timestamps."""
     metrics = report_metrics(plan, rows)
     def percent(value):
         return f"{value:.2f}%" if value is not None else "N/A"
 
-    lines = ["# Nexent repository test report", "", f"Status: {summary['status']}",
+    lines = ["# Nexent repository test report", ""]
+    lines += report_context(directory, summary, metadata_directory=metadata_directory, evidence_root=evidence_root, sharing=sharing)
+    lines += [f"Status: {summary['status']}",
              f"Cases: {summary['recorded']} / {summary['planned']}",
              f"Overall pass rate (PASS / planned): **{percent(metrics['overall_pass_rate'])}** "
              f"({metrics['passed']} / {metrics['planned']})",
@@ -234,18 +287,24 @@ def render_report(directory, plan, rows, summary):
     unsuccessful = [row for row in rows if row["result"] not in {"PASS", "RETIRED", "SKIPPED_BY_POLICY"}]
     lines += ["", "## Case results — not passed only", "",
               "PASS, RETIRED and SKIPPED_BY_POLICY rows are omitted from this detail table. "
-              "All results remain in checkpoints/results.jsonl and per-case evidence."]
+              "All results remain in checkpoints/results.jsonl and per-case evidence.",
+              "Git last modifier identifies the latest commit affecting the Case definition, execution binding "
+              "or primary script at the batch revision; it is not the original creator or defect owner. "
+              "Responsibility fields route investigation by functional area, not proven fault. "
+              "Detailed attribution and routing basis are retained in report-ownership.json; "
+              "unmatched work remains Unassigned."]
     for stage in sorted(set(metrics["stages"]) | {row["stage"] for row in unsuccessful}):
         stage_rows = [row for row in unsuccessful if row["stage"] == stage]
         lines += ["", f"### {stage} — {len(stage_rows)} not passed", ""]
         if not stage_rows:
             lines += ["No non-passing cases in this stage."]
             continue
-        lines += ["| Case | Stage | Title | Feature | Module | Owner | Result | Reason | Duration (s) | Executed at (UTC) | Cleanup | Local evidence |",
-                  "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |"]
+        lines += ["| Case | Stage | Title | Feature | Module | Git最近修改者 | 责任田负责人 | Result | Reason | Duration (s) | Executed at (UTC) | Cleanup | Local evidence |",
+                  "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |"]
         lines += ["| " + " | ".join(cell(value) for value in (
             row['case_id'], row['stage'], row.get('title'), row.get('feature_id'), row.get('module'),
-            row.get('owner', 'Unassigned'), row['result'], row.get('reason'), row.get('duration_seconds'), row.get('executed_at'),
+            git_label(row.get('git_last_modifier')), responsibility_label(row.get('responsibility')),
+            row['result'], row.get('reason'), row.get('duration_seconds'), row.get('executed_at'),
             row.get('cleanup_reason') or row.get('cleanup_exit_code'),
             ', '.join(row.get('evidence', [])))) + " |" for row in stage_rows]
     if not unsuccessful:
