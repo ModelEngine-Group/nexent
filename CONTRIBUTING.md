@@ -95,6 +95,8 @@ The header uses the comment style of the file type (`#` for Python/Shell, `--` f
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 ```
 
+The end year of the range always tracks the current year (e.g. `2025-2027` in 2027); the checker accepts any existing year variant, and `--fix` generates the current range automatically.
+
 To verify locally before pushing:
 
 ```bash

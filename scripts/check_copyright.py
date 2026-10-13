@@ -17,12 +17,14 @@ import argparse
 import os
 import re
 import sys
+from datetime import datetime
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 
-# Standard header text inserted by --fix (aligned with NOTICE).
-COPYRIGHT_TEXT = "Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved."
+# First year of the project's copyright convention; the header inserted by
+# --fix carries a year range ending at the current year (see copyright_text()).
+COPYRIGHT_START_YEAR = 2025
 
 # Loose matching pattern so existing year variants keep passing, e.g.
 #   Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
@@ -79,6 +81,16 @@ EXCLUDED_DIRS = {
 EXCLUDED_FILES = {
     "next-env.d.ts",
 }
+
+
+def copyright_text() -> str:
+    """Standard header text; the year range ends at the current year."""
+    current_year = datetime.now().year
+    if current_year > COPYRIGHT_START_YEAR:
+        years = f"{COPYRIGHT_START_YEAR}-{current_year}"
+    else:
+        years = str(COPYRIGHT_START_YEAR)
+    return f"Copyright (c) {years} Huawei Technologies Co., Ltd. All rights reserved."
 
 
 def rel(path: Path) -> str:
@@ -154,7 +166,7 @@ def fix_file(path: Path) -> bool:
             break
 
     style = COMMENT_STYLES[path.suffix.lower()]
-    lines.insert(insert_at, f"{style} {COPYRIGHT_TEXT}{newline}")
+    lines.insert(insert_at, f"{style} {copyright_text()}{newline}")
     # Keep a blank separator line between the header and the body when needed.
     if insert_at + 1 < len(lines) and lines[insert_at + 1].strip():
         lines.insert(insert_at + 1, newline)
@@ -247,7 +259,7 @@ def main() -> int:
     print(
         f"\n{len(missing)} file(s) missing the required header. "
         "Expected comment line within the file header:\n"
-        f"    {COPYRIGHT_TEXT}\n"
+        f"    {copyright_text()}\n"
         "Comment style: '#' for .py/.sh, '--' for .sql, '//' for .ts/.tsx/.js/.jsx/.mjs.\n"
         "Fix automatically with:\n"
         "    python scripts/check_copyright.py --fix <files...>"
