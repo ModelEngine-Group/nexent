@@ -26,10 +26,16 @@ change:
       requiring upstream TypeScript.
     - SDK wheels retain the manifest, source files, README and complete upstream MIT
       license.
+    - Controlled TOML reader rejects path escapes, invalid manifest versions, duplicates,
+      missing sources, digest mismatch and malformed TOML without returning a partial
+      inventory.
+    - Read source documents preserve exact source identity and deeply immutable nested
+      data; loading is not semantic normalization.
     reason: Isolated source/package integrity checks; later reader, normalization
       and composition steps need their own component verification.
     test_selectors:
     - test/sdk/core/model_service/test_catalog_inventory.py
+    - test/sdk/core/model_service/test_source_reader.py
   no_case_change_reason: No API or runtime behavior is connected. Existing Cases remain
     unchanged; installed-package inspection supplies artifact evidence, not Agent
     acceptance.
