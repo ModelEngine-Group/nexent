@@ -27,7 +27,7 @@ from report_ownership import enrich as enrich_ownership
 from launch_runtime import test_python
 from local_preflight import live_service_problems, static_config_problems
 from static_assets import entries as static_entries, inventory as static_inventory
-from suite_runtime import BatchLock, config_fingerprint, finalize, fingerprint, logged, now, save
+from suite_runtime import BatchLock, config_fingerprint, finalize, fingerprint, logged, now, render_report, save
 from suite_resume import prepare_resume
 from suite_services import controlled_services
 from test_asset_lib import repository_root
@@ -268,7 +268,7 @@ def worker(repo, home, record, directory, settings):
     return 0 if outcome == "PASS" and not cleanup_code else 1
 
 
-def execute(repo, home, records, settings, *, daily=False, resume=None):
+def execute(repo, home, records, settings, *, daily=False, resume=None, publish_latest=False):
     directory = home / "runs/repository-daily" / (now().replace(":", "").replace("+", "-") + "-" + uuid.uuid4().hex[:8])
     directory.mkdir(parents=True, exist_ok=False)
     if os.name != "nt":
@@ -397,6 +397,21 @@ def execute(repo, home, records, settings, *, daily=False, resume=None):
         save(directory / "status.json", state)
         save(home / "reports/repository-latest.json", {"batch": str(directory), "status": summary["status"]})
         signal.signal(signal.SIGTERM, previous_handler)
+    if daily and publish_latest and summary["execution_complete"] and summary["d6_complete"]:
+        try:
+            from suite_publish import publish_latest as publish_complete_batch
+            sharing = publish_complete_batch(directory, home, env)
+        except Exception as exc:
+            sharing = {"status": "FAILED", "batch_id": directory.name, "error_type": type(exc).__name__}
+            try:
+                save(home / "state/report-publications" / directory.name / "receipt.json", sharing)
+            except OSError:
+                print("Publication failed; could not save local publication receipt", flush=True)
+        try:
+            render_report(directory, report_records, rows, summary, sharing=sharing)
+        except OSError:
+            # Keep the previously finalized report and continue the existing notification path.
+            print("Could not refresh publication status in the finalized report", flush=True)
     if daily and settings.get("notify") and summary["execution_complete"]:
         from suite_notify import send_report
         send_report(directory, env)
