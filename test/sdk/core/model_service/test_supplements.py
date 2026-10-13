@@ -62,6 +62,7 @@ def test_valid_rule_is_frozen_and_revisions_include_source_and_rule_bytes(
 ):
     file, digest = write_rule(tmp_path)
     catalog = load_supplements(tmp_path, sources)
+    assert catalog.source_revision == sources.revision
     entry = catalog.entries["test_model_v1"]
     assert entry.content_sha256 == digest
     assert entry.rule["aliases"] == ("qwen3.5-plus",)
@@ -259,7 +260,12 @@ def test_manifest_schema_version_and_unknown_fields_fail(tmp_path, sources, mani
 
 
 def test_diagnostics_identify_fields_without_echoing_values(tmp_path, sources):
-    write_rule(tmp_path, MODEL_RULE.replace('version = 1\ntarget_kind', 'version = "secret"\ntarget_kind'))
+    write_rule(
+        tmp_path,
+        MODEL_RULE.replace(
+            "version = 1\ntarget_kind", 'version = "secret"\ntarget_kind'
+        ),
+    )
     with pytest.raises(SupplementReadError) as captured:
         load_supplements(tmp_path, sources)
     assert captured.value.field_path == "version"
@@ -273,13 +279,90 @@ def test_diagnostics_identify_fields_without_echoing_values(tmp_path, sources):
 
 @pytest.mark.parametrize("value", ["nan", "inf", "-inf"])
 def test_capability_override_values_must_be_finite_json(tmp_path, sources, value):
-    override = f'''\n[[capability_overrides]]
+    override = f"""\n[[capability_overrides]]
 path = "/context/combined_window"
 value = {value}
 reason = "test"
 evidence = "test"
-'''
+"""
     write_rule(tmp_path, MODEL_RULE + override)
-    with pytest.raises(SupplementReadError, match="SUPPLEMENT_RULE_INVALID") as captured:
+    with pytest.raises(
+        SupplementReadError, match="SUPPLEMENT_RULE_INVALID"
+    ) as captured:
         load_supplements(tmp_path, sources)
     assert captured.value.field_path == "/capability_overrides/0/value"
+
+
+JSON_PARAMETER = """
+[[parameters]]
+key = "reasoning_effort"
+visible = true
+editable = true
+required = false
+allowed_scopes = ["outlet"]
+ui_group = "reasoning"
+owner = "model"
+[parameters.source]
+rule_id = "test"
+[json_fields]
+"/parameters/0/schema" = '{"enum": [null, "low"]}'
+"/parameters/0/default_value" = 'null'
+"""
+
+
+def test_explicit_json_fields_preserve_null_without_string_aliases(tmp_path, sources):
+    write_rule(tmp_path, MODEL_RULE + JSON_PARAMETER)
+    parameters = (
+        load_supplements(tmp_path, sources).entries["test_model_v1"].rule["parameters"]
+    )
+    assert parameters[0]["default_value"] is None
+    assert parameters[0]["schema"]["enum"] == (None, "low")
+    content = JSON_PARAMETER.replace(
+        '\'{"enum": [null, "low"]}\'', '\'{"type": "string"}\''
+    )
+    content = content.replace("= 'null'", "= '\"null\"'")
+    write_rule(tmp_path, MODEL_RULE + content)
+    assert (
+        load_supplements(tmp_path, sources)
+        .entries["test_model_v1"]
+        .rule["parameters"][0]["default_value"]
+        == "null"
+    )
+
+
+@pytest.mark.parametrize(
+    "encoded", ["NaN", "Infinity", "1e9999", '{"key": 0, "key": 1}', "invalid"]
+)
+def test_embedded_json_is_strict_and_sanitized(tmp_path, sources, encoded):
+    write_rule(
+        tmp_path, MODEL_RULE + JSON_PARAMETER.replace("= 'null'", f"= '{encoded}'")
+    )
+    with pytest.raises(SupplementReadError, match="SUPPLEMENT_JSON_FIELD_INVALID"):
+        load_supplements(tmp_path, sources)
+
+
+@pytest.mark.parametrize(
+    "pointer",
+    [
+        "/parameters/00/default_value",
+        "/parameters/1/default_value",
+        "/parameters/0/key",
+        "/capability_overrides/0/schema",
+    ],
+)
+def test_json_fields_cannot_patch_arbitrary_paths(tmp_path, sources, pointer):
+    write_rule(
+        tmp_path,
+        MODEL_RULE + JSON_PARAMETER.replace("/parameters/0/default_value", pointer),
+    )
+    with pytest.raises(SupplementReadError, match="SUPPLEMENT_JSON_FIELD_INVALID"):
+        load_supplements(tmp_path, sources)
+
+
+def test_json_and_toml_cannot_both_define_the_same_field(tmp_path, sources):
+    content = JSON_PARAMETER.replace(
+        'key = "reasoning_effort"', 'key = "reasoning_effort"\ndefault_value = "low"'
+    )
+    write_rule(tmp_path, MODEL_RULE + content)
+    with pytest.raises(SupplementReadError, match="SUPPLEMENT_JSON_FIELD_CONFLICT"):
+        load_supplements(tmp_path, sources)

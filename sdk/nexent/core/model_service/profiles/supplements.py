@@ -1,6 +1,8 @@
 """Read explicit Nexent supplement declarations separately from upstream TOML."""
 
 import hashlib
+import json
+import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal, Mapping
@@ -108,6 +110,7 @@ class SupplementCatalog:
     revision: str
     schema_ref: str
     entries: Mapping[str, SupplementEntry]
+    source_revision: str
 
 
 def _document(root: Path, path: str) -> tuple[dict, bytes]:
@@ -116,6 +119,60 @@ def _document(root: Path, path: str) -> tuple[dict, bytes]:
         return _parse(data, path, "supplement"), data
     except SourceReadError:
         raise SupplementReadError("SUPPLEMENT_FILE_INVALID", path) from None
+
+
+def _decode_json_fields(authored: dict, file_path: str) -> dict:
+    """Explicitly encode JSON-only values; ordinary TOML strings keep their meaning."""
+    copied = dict(authored)
+    directives = copied.pop("json_fields", {})
+    if not isinstance(directives, dict):
+        raise SupplementReadError("SUPPLEMENT_JSON_FIELD_INVALID", file_path, "json_fields")
+
+    def unique_object(pairs):
+        result = {}
+        for key, value in pairs:
+            if key in result:
+                raise ValueError("Duplicate JSON field")
+            result[key] = value
+        return result
+
+    def invalid_constant(value):
+        raise ValueError("Nonfinite JSON value")
+
+    for pointer, encoded in directives.items():
+        match = re.fullmatch(
+            r"/(parameters|capability_overrides)/(0|[1-9][0-9]*)/(schema|default_value|fixed_value|condition|value)",
+            pointer,
+        )
+        if match is None or not isinstance(encoded, str):
+            raise SupplementReadError("SUPPLEMENT_JSON_FIELD_INVALID", file_path, "json_fields")
+        group, index_text, field = match.groups()
+        allowed = {
+            "parameters": {"schema", "default_value", "fixed_value", "condition"},
+            "capability_overrides": {"value"},
+        }
+        items = copied.get(group)
+        if (
+            field not in allowed[group]
+            or not isinstance(items, list)
+            or len(index_text) > len(str(len(items)))
+            or int(index_text) >= len(items)
+            or not isinstance(items[int(index_text)], dict)
+        ):
+            raise SupplementReadError("SUPPLEMENT_JSON_FIELD_INVALID", file_path, pointer)
+        item = items[int(index_text)]
+        if field in item:
+            raise SupplementReadError("SUPPLEMENT_JSON_FIELD_CONFLICT", file_path, pointer)
+        try:
+            value = json.loads(encoded, object_pairs_hook=unique_object, parse_constant=invalid_constant)
+            validate_parameter_value(compile_parameter_schema({}), value)
+        except (ValueError, RecursionError):
+            raise SupplementReadError("SUPPLEMENT_JSON_FIELD_INVALID", file_path, pointer) from None
+        # Copy the touched container rather than mutating the authored declaration.
+        items = [dict(entry) if isinstance(entry, dict) else entry for entry in items]
+        items[int(index_text)][field] = value
+        copied[group] = items
+    return copied
 
 
 def load_supplements(root: Path, sources: SourceCatalog) -> SupplementCatalog:
@@ -156,6 +213,7 @@ def load_supplements(root: Path, sources: SourceCatalog) -> SupplementCatalog:
             validate_parameter_value(compile_parameter_schema({}), authored)
         except ParameterValidationError as error:
             raise SupplementReadError("SUPPLEMENT_RULE_INVALID", path, error.path) from None
+        authored = _decode_json_fields(authored, path)
         try:
             rule = SupplementRule.model_validate(authored)
             # Conditions can refer to parameters in another participating atom.
@@ -185,4 +243,4 @@ def load_supplements(root: Path, sources: SourceCatalog) -> SupplementCatalog:
         normalized = rule.model_dump(mode="json", by_alias=True, exclude_unset=True)
         entries[rule.rule_id] = SupplementEntry(path, digest, _freeze(normalized))
         parts[path] = digest
-    return SupplementCatalog(_revision(parts), SUPPLEMENT_SCHEMA_REF, _freeze(entries))
+    return SupplementCatalog(_revision(parts), SUPPLEMENT_SCHEMA_REF, _freeze(entries), sources.revision)
