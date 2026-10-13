@@ -1,0 +1,131 @@
+"""Strict profile primitives, independent of provider clients and persistence."""
+
+import json
+from typing import Annotated, Literal, Self
+
+from pydantic import BaseModel, ConfigDict, Field, StringConstraints, model_validator
+
+
+SupportStatus = Literal["supported", "unsupported", "unknown"]
+NonBlankString = Annotated[str, StringConstraints(pattern=r"\S")]
+PositiveTokens = Annotated[int, Field(gt=0)]
+
+
+class ProfileContract(BaseModel):
+    """Reject undeclared fields and coercion at the profile boundary."""
+
+    model_config = ConfigDict(strict=True, extra="forbid", frozen=True)
+
+
+class ContextCapabilities(ProfileContract):
+    """Effective service limits; missing limits remain unknown."""
+
+    combined_window: PositiveTokens | None = None
+    input_limit: PositiveTokens | None = None
+    output_limit: PositiveTokens | None = None
+
+    @model_validator(mode="after")
+    def validate_limits(self) -> Self:
+        if self.combined_window is not None:
+            for limit in (self.input_limit, self.output_limit):
+                if limit is not None and limit > self.combined_window:
+                    raise ValueError("Service limits cannot exceed the combined context window")
+        return self
+
+
+class ToggleControl(ProfileContract):
+    """Explicitly supported thinking switch values, not the current setting."""
+
+    mode: Literal["toggle"] = "toggle"
+    parameter_key: Literal["enable_thinking"] = "enable_thinking"
+    values: list[bool] = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def validate_values(self) -> Self:
+        if len(set(self.values)) != len(self.values):
+            raise ValueError("Toggle values must be unique")
+        return self
+
+
+class EffortControl(ProfileContract):
+    """Provider-declared effort values; no universal effort enum is inferred."""
+
+    mode: Literal["effort"] = "effort"
+    parameter_key: Literal["reasoning_effort"] = "reasoning_effort"
+    values: list[NonBlankString] = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def validate_values(self) -> Self:
+        if len(set(self.values)) != len(self.values):
+            raise ValueError("Effort values must be unique")
+        return self
+
+
+class BudgetTokensControl(ProfileContract):
+    """Token bounds and explicitly declared sentinel values."""
+
+    mode: Literal["budget_tokens"] = "budget_tokens"
+    parameter_key: Literal["reasoning_budget_tokens"] = "reasoning_budget_tokens"
+    min: Annotated[int, Field(ge=0)]
+    max: Annotated[int, Field(ge=0)]
+    special_values: list[int] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def validate_range(self) -> Self:
+        if self.min > self.max:
+            raise ValueError("Budget minimum cannot exceed maximum")
+        if len(set(self.special_values)) != len(self.special_values):
+            raise ValueError("Special budget values must be unique")
+        return self
+
+
+ReasoningControl = Annotated[ToggleControl | EffortControl | BudgetTokensControl, Field(discriminator="mode")]
+
+
+class ReasoningCapabilities(ProfileContract):
+    """Capability declarations with unknown distinct from unsupported."""
+
+    status: SupportStatus = "unknown"
+    controls: list[ReasoningControl] | None = None
+    response_paths: list[NonBlankString] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def validate_controls(self) -> Self:
+        if self.status == "unsupported" and (self.controls or self.response_paths):
+            raise ValueError("Unsupported reasoning cannot declare controls or response paths")
+        if len(set(self.response_paths)) != len(self.response_paths):
+            raise ValueError("Reasoning response paths must be unique")
+        if self.controls is not None:
+            modes = [control.mode for control in self.controls]
+            keys = [control.parameter_key for control in self.controls]
+            if len(set(modes)) != len(modes) or len(set(keys)) != len(keys):
+                raise ValueError("Reasoning control modes and parameter keys must be unique")
+            encoded = json.dumps(
+                [control.model_dump(mode="json") for control in self.controls],
+                ensure_ascii=False,
+                separators=(",", ":"),
+            ).encode("utf-8")
+            if len(encoded) > 64 * 1024:
+                raise ValueError("Reasoning controls exceed the 64 KiB UTF-8 limit")
+        return self
+
+
+class AtomicProfileReference(ProfileContract):
+    """Provenance only; runtime loading never recomposes from this reference."""
+
+    key: NonBlankString
+    catalog_revision: NonBlankString
+    file_path: NonBlankString
+    content_sha256: Annotated[str, StringConstraints(pattern=r"^[a-f0-9]{64}$")]
+
+    @model_validator(mode="after")
+    def validate_source_path(self) -> Self:
+        parts = self.file_path.split("/")
+        if (
+            "\\" in self.file_path
+            or ":" in self.file_path
+            or any(ord(character) < 32 for character in self.file_path)
+            or any(part in ("", ".", "..") for part in parts)
+        ):
+            raise ValueError("Source paths must be canonical relative POSIX paths")
+        return self
