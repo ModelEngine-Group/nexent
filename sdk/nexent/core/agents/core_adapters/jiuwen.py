@@ -22,6 +22,24 @@ from .events import JiuwenEventAdapter
 logger = logging.getLogger(__name__)
 
 
+def _prepend_context_messages(messages, prefix):
+    """Replay authorized context without mixing dictionaries and native messages."""
+    from openjiuwen.core.foundation.llm.schema.message import AssistantMessage, BaseMessage, ToolMessage, UserMessage
+
+    def native(message):
+        if not isinstance(message, dict):
+            return message
+        message_type = {"assistant": AssistantMessage, "tool": ToolMessage}.get(message["role"], BaseMessage)
+        return message_type.model_validate(dict(message))
+
+    current = [UserMessage(content=messages)] if isinstance(messages, str) else [native(item) for item in messages]
+    # Keep the harness system prompt first, then previous turns, then this run.
+    boundary = 0
+    while boundary < len(current) and current[boundary].role in {"system", "developer"}:
+        boundary += 1
+    return [*current[:boundary], *(native(item) for item in prefix), *current[boundary:]]
+
+
 def _tool_schema(inputs):
     """Convert existing tool parameter declarations into JSON Schema."""
     if isinstance(inputs, str):
@@ -260,7 +278,7 @@ class JiuwenAdapter(AgentCoreAdapter):
         class RunModel(Model):
             async def invoke(model_self, messages, **kwargs):
                 start_model_call()
-                messages = [*prefix, *messages]
+                messages = _prepend_context_messages(messages, prefix)
                 permit = acquire(messages, kwargs.get("tools"))
                 try:
                     return await super().invoke(messages, **kwargs)
@@ -270,7 +288,7 @@ class JiuwenAdapter(AgentCoreAdapter):
 
             async def stream(model_self, messages, **kwargs):
                 start_model_call()
-                messages = [*prefix, *messages]
+                messages = _prepend_context_messages(messages, prefix)
                 permit = acquire(messages, kwargs.get("tools"))
                 try:
                     async for chunk in super().stream(messages, **kwargs):
