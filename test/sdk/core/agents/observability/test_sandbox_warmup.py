@@ -27,13 +27,22 @@ def config(name="root", display_name="主智能体", children=()):
 
 @pytest.fixture
 def factory(mocker):
+    class WarmupAgent(SimpleNamespace):
+        def __init__(self, **kwargs):
+            super().__init__(**kwargs)
+            self.state = {}
+
+        def __call__(self, task):
+            return task
+
     runtime = NexentAgent(
         observer=MessageObserver(), model_config_list=[], stop_event=threading.Event(),
         sandbox_config=SandboxConfig(level=SandboxLevel.DOCKER, scope=SandboxScope.SYSTEM),
     )
-    mocker.patch.object(runtime, "create_model", return_value=mocker.Mock())
-    mocker.patch("nexent.core.agents.nexent_agent.CoreAgent", side_effect=lambda **kwargs: SimpleNamespace(**kwargs))
+    mocker.patch.object(NexentAgent, "create_model", side_effect=lambda *_args: mocker.Mock())
+    mocker.patch("nexent.core.agents.nexent_agent.CoreAgent", new=WarmupAgent)
     mocker.patch("nexent.core.agents.sandbox.SandboxSkillScriptRunner")
+    mocker.patch("nexent.core.agents.sandbox.release_python_executor")
     return runtime
 
 
@@ -41,7 +50,7 @@ def warmups(spans):
     return [s for s in spans.exporter.get_finished_spans() if s.name == "agent.sandbox.warmup"]
 
 
-def test_sdk_ut_013_01_agent_tree_warmups_are_timed_children_of_run(spans, mocker, factory):
+def test_sdk_ut_013_01_lazy_agent_warmups_are_timed_children_of_invocation(spans, mocker, factory):
     intervals = []
 
     def execute(code):
@@ -52,7 +61,7 @@ def test_sdk_ut_013_01_agent_tree_warmups_are_timed_children_of_run(spans, mocke
         intervals.append((start, time.time_ns()))
 
     executors = [mocker.Mock(_nexent_backend="docker", side_effect=execute) for _ in range(2)]
-    mocker.patch("nexent.core.agents.sandbox.build_python_executor", side_effect=executors)
+    build = mocker.patch("nexent.core.agents.sandbox.build_python_executor", side_effect=executors)
     child = config("child", "子智能体")
     child._sub_agent_id = 23
     metadata = AgentRunMetadata(
@@ -61,7 +70,13 @@ def test_sdk_ut_013_01_agent_tree_warmups_are_timed_children_of_run(spans, mocke
     )
     with spans.tracer.start_as_current_span("request"), spans.manager.start_agent_run(metadata):
         parent = trace.get_current_span()
-        factory.create_single_agent(config(children=[child]))
+        agent = factory.create_single_agent(config(children=[child]))
+        assert build.call_count == 1
+        assert len(warmups(spans)) == 1
+        assert trace.get_current_span() is parent
+        assert get_agent_monitoring_context() is metadata
+        assert agent.managed_agents[0](task="warm up child") == "warm up child"
+        assert build.call_count == 2
         assert trace.get_current_span() is parent
         assert get_agent_monitoring_context() is metadata
 
@@ -71,11 +86,14 @@ def test_sdk_ut_013_01_agent_tree_warmups_are_timed_children_of_run(spans, mocke
     assert_child(tree["agent.run"], tree["request"])
     assert tree["agent.run"].attributes["langfuse.trace.name"] == "主智能体"
     assert sum(s.name == "agent.run" for s in spans.exporter.get_finished_spans()) == 1
-    assert not any(s.name.startswith("agent.subagent.") for s in spans.exporter.get_finished_spans())
-    for span, interval, executor, name, display, agent_id in zip(
-        observations, intervals, executors, ("child", "root"), ("子智能体", "主智能体"), (23, 7), strict=True,
+    child_call = tree["agent.subagent.子智能体"]
+    assert_child(child_call, tree["agent.run"])
+    assert sum(s.name.startswith("agent.subagent.") for s in spans.exporter.get_finished_spans()) == 1
+    for span, interval, executor, name, display, agent_id, parent_span in zip(
+        observations, intervals, executors, ("root", "child"), ("主智能体", "子智能体"), (7, 23),
+        (tree["agent.run"], child_call), strict=True,
     ):
-        assert_child(span, tree["agent.run"])
+        assert_child(span, parent_span)
         assert span.start_time <= interval[0] <= interval[1] <= span.end_time
         assert span.attributes["openinference.span.kind"] == "CHAIN"
         assert span.attributes["agent.step.type"] == "sandbox_warmup"
