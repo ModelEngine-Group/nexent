@@ -15,7 +15,6 @@ import {
   FileTextIcon,
   ImageIcon,
   LoaderCircleIcon,
-  ServerIcon,
   XIcon,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -37,13 +36,18 @@ import {
   storageService,
 } from "@/services/storageService";
 import { AuthenticatedImage } from "./authenticated-image";
+import type { SourceAttributes } from "@/types/source";
+import { getAidpDownloadLocator, getSourceLabel, getSourceProvider, isAidpSource } from "@/lib/source";
+import { SourceMetadata } from "@/components/common/sourceMetadata";
+import { downloadAidpCitation } from "@/ext_components/aidp/shared/services/aidpCitationService";
+import log from "@/lib/logger";
 
 /**
  * Loose typing for the source items handled by the side panel. Matches the
  * shape of `SourcePartLike` used in `thread.tsx` so we can render each entry
  * consistently with the inline preview.
  */
-export interface PanelSourceItem {
+export interface PanelSourceItem extends SourceAttributes {
   sourceType?: "url" | "document";
   url?: string;
   title?: string;
@@ -143,7 +147,7 @@ export const SourcesPanel: FC<SourcesPanelProps> = ({
       aria-label={t("chat.sources.panel")}
     >
       <header className="flex items-center justify-between gap-2 border-b border-slate-200 px-4 py-2">
-        <h2 className="text-sm font-semibold text-slate-800">{t("chatRightPanel.searchTitle")}</h2>
+        <h2 className="text-base font-medium text-foreground">{t("chat.sources.referenceTitle", { count: sources.length })}</h2>
         <Button
           variant="ghost"
           size="icon"
@@ -154,7 +158,7 @@ export const SourcesPanel: FC<SourcesPanelProps> = ({
         </Button>
       </header>
 
-      <div
+      {images.length > 0 && <div
         role="tablist"
         aria-label={t("chat.sources.tabs")}
         className="grid grid-cols-2 gap-0 border-b border-slate-200 px-3 py-2"
@@ -173,7 +177,7 @@ export const SourcesPanel: FC<SourcesPanelProps> = ({
           active={!showSources}
           onClick={() => setActiveTab("images")}
         />
-      </div>
+      </div>}
 
       <div className="flex-1 overflow-y-auto bg-slate-50/40 px-3 py-3">
         {currentItems.length === 0 ? (
@@ -188,7 +192,7 @@ export const SourcesPanel: FC<SourcesPanelProps> = ({
               <SourceListItem
                 key={`${item.url ?? item.title ?? "source"}-${index}`}
                 item={item}
-                selected={getCitationKey(item) === selectedCitationKey}
+                selected={selectedCitationKey !== undefined && getCitationKey(item) === selectedCitationKey}
                 citationContext={citationContext}
               />
             ))}
@@ -277,7 +281,7 @@ const SourceSummary: FC<{
 
   if (!text?.trim()) return null;
 
-  if (highlighted) {
+  if (highlighted && highlightTerms.length > 0) {
     return (
       <div className="mt-2">
         <p ref={textRef} className="max-h-52 overflow-y-auto whitespace-pre-wrap wrap-break-word pr-1 text-sm leading-6 text-gray-700">
@@ -291,7 +295,7 @@ const SourceSummary: FC<{
   }
 
   return (
-    <p className="mt-1 line-clamp-3 wrap-break-word text-sm leading-6 text-gray-700">
+    <p className="mt-1 line-clamp-2 wrap-break-word text-sm leading-[19px] text-[#777]">
       {text}
     </p>
   );
@@ -301,21 +305,14 @@ const SourceFooter: FC<{ item: PanelSourceItem; sourceLabel: string }> = ({
   item,
   sourceLabel,
 }) => {
-  const fileLabel = item.filename || item.title || item.url || "";
-  if (!fileLabel) return null;
-
   return (
-    <div className="mt-2 flex min-w-0 flex-col gap-0.5 text-xs text-gray-500">
+    <div className="mt-2 flex min-w-0 text-xs text-gray-500">
       <div className="flex min-w-0 items-center gap-1">
-        {item.sourceType === "document" ? (
+        {getSourceProvider(item.searchType, item.toolSign) || item.sourceType === "document" ? (
           <DatabaseIcon className="size-3 shrink-0" />
         ) : (
           <ExternalLinkIcon className="size-3 shrink-0" />
         )}
-        <span className="truncate text-[#1677ff]">{fileLabel}</span>
-      </div>
-      <div className="flex min-w-0 items-center gap-1">
-        <ServerIcon className="size-3 shrink-0" />
         <span className="truncate">{sourceLabel}</span>
       </div>
     </div>
@@ -332,8 +329,7 @@ const SourceCardBody: FC<{
   item: PanelSourceItem;
   selected: boolean;
   highlightTerms: string[];
-  sourceLabel: string;
-}> = ({ title, dateFallback, item, selected, highlightTerms, sourceLabel }) => (
+}> = ({ title, dateFallback, item, selected, highlightTerms }) => (
   <>
     <div className="flex items-start gap-1.5">
       {title}
@@ -354,7 +350,6 @@ const SourceCardBody: FC<{
       highlighted={selected}
       highlightTerms={highlightTerms}
     />
-    <SourceFooter item={item} sourceLabel={sourceLabel} />
   </>
 );
 
@@ -371,6 +366,14 @@ const SourceListItem: FC<{
   const itemRef = useRef<HTMLLIElement>(null);
   const [isDownloading, setIsDownloading] = useState(false);
   const [downloadError, setDownloadError] = useState<string | null>(null);
+  const aidpLocator = getAidpDownloadLocator(item);
+  const isAidp = isAidpSource(item);
+  const sourceLabel = getSourceLabel(item, {
+    knowledgeBase: t("chat.sources.knowledgeBase"),
+    web: t("chat.sources.web"),
+    document: t("chat.sources.document"),
+    source: t("chat.sources.source"),
+  });
 
   useEffect(() => {
     if (selected) {
@@ -379,12 +382,16 @@ const SourceListItem: FC<{
   }, [selected]);
 
   const handleDocumentDownload = async () => {
-    if (isDownloading) return;
+    if (isDownloading || (isAidp && !aidpLocator)) return;
 
     setIsDownloading(true);
     setDownloadError(null);
     try {
       const filename = item.filename || item.title || "download";
+      if (isAidp && aidpLocator) {
+        await downloadAidpCitation(aidpLocator, filename);
+        return;
+      }
       if (item.downloadUrl) {
         const link = document.createElement("a");
         link.href = item.downloadUrl;
@@ -408,7 +415,8 @@ const SourceListItem: FC<{
         throw new Error("Cannot determine the file location.");
       }
       await storageService.downloadFileWithAuth(objectName, filename);
-    } catch {
+    } catch (error) {
+      log.error("Failed to download citation file", { searchType: item.searchType, error });
       setDownloadError(t("chat.sources.downloadError"));
     } finally {
       setIsDownloading(false);
@@ -441,7 +449,7 @@ const SourceListItem: FC<{
         : [],
     [citationContext, retrievalHighlightTerms, item.text, selected],
   );
-  const previewUrl = getLocalFilePreviewUrl(
+  const previewUrl = isAidp ? undefined : getLocalFilePreviewUrl(
     item.url,
     item.filename || item.title,
     item.objectName
@@ -467,18 +475,17 @@ const SourceListItem: FC<{
             <div className="min-w-0 flex-1">
               <SourceCardBody
                 title={
-                  <span className="block min-w-0 flex-1 wrap-break-word text-base font-medium text-[#1677ff] group-hover:underline">
+                  <span className="block min-w-0 flex-1 wrap-break-word text-sm font-medium text-foreground group-hover:underline">
                     {item.title || item.filename || t("chat.sources.document")}
                   </span>
                 }
                 item={item}
                 selected={selected}
                 highlightTerms={highlightTerms}
-                sourceLabel="来源: Nexent"
               />
             </div>
           </button>
-          <button
+          {(!isAidp || aidpLocator) && <button
             type="button"
             onClick={() => void handleDocumentDownload()}
             disabled={isDownloading}
@@ -492,8 +499,10 @@ const SourceListItem: FC<{
             ) : (
               <DownloadIcon className="size-4" />
             )}
-          </button>
+          </button>}
         </div>
+        <SourceMetadata metadata={item.sourceMetadata} />
+        <SourceFooter item={item} sourceLabel={sourceLabel} />
         {downloadError && (
           <p className="pt-2 text-xs text-destructive">{downloadError}</p>
         )}
@@ -516,7 +525,7 @@ const SourceListItem: FC<{
           <div className="min-w-0 flex-1">
             <SourceCardBody
               title={
-                <span className="block min-w-0 flex-1 truncate text-base font-medium text-[#1677ff] hover:underline">
+                <span className="block min-w-0 flex-1 truncate text-sm font-medium text-foreground hover:underline">
                   {displayTitle}
                 </span>
               }
@@ -528,10 +537,11 @@ const SourceListItem: FC<{
               item={item}
               selected={selected}
               highlightTerms={highlightTerms}
-              sourceLabel={`来源: ${domain}`}
             />
           </div>
         </a>
+        <SourceMetadata metadata={item.sourceMetadata} />
+        <SourceFooter item={item} sourceLabel={sourceLabel} />
       </li>
     );
   }
@@ -543,20 +553,22 @@ const SourceListItem: FC<{
     >
       <SourceCardBody
         title={
-          <span className="min-w-0 flex-1 text-base font-medium text-[#1677ff]">
+          <span className="min-w-0 flex-1 text-sm font-medium text-foreground">
             {item.title || t("chat.sources.untitled")}
           </span>
         }
         item={item}
         selected={selected}
         highlightTerms={highlightTerms}
-        sourceLabel="来源: Nexent"
       />
+      <SourceMetadata metadata={item.sourceMetadata} />
+      <SourceFooter item={item} sourceLabel={sourceLabel} />
     </li>
   );
 };
 
 const ImageListItem: FC<{ item: PanelSourceItem }> = ({ item }) => {
+  const { t } = useTranslation();
   const imageUrl = item.url || "";
   const [resolvedUrl, setResolvedUrl] = useState<string | null>(null);
   const [loadError, setLoadError] = useState(false);
@@ -614,8 +626,18 @@ const ImageListItem: FC<{ item: PanelSourceItem }> = ({ item }) => {
         loading="lazy"
         preview
         proxy={!resolvedUrl}
-        className="aspect-square w-full object-cover"
+        className="aspect-square w-full object-contain"
       />
+      <div className="px-2 pb-2">
+        {(item.filename || (item.title && item.title !== item.url)) && <p className="mt-1 truncate text-xs text-muted-foreground">{item.filename || item.title}</p>}
+        <SourceMetadata metadata={item.sourceMetadata} />
+        <SourceFooter item={item} sourceLabel={getSourceLabel(item, {
+          knowledgeBase: t("chat.sources.knowledgeBase"),
+          web: t("chat.sources.web"),
+          document: t("chat.sources.document"),
+          source: t("chat.sources.source"),
+        })} />
+      </div>
     </div>
   );
 };

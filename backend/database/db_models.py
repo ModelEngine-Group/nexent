@@ -352,6 +352,14 @@ class ConversationSourceSearch(TableBase):
         JSONB,
         doc="Exact lexical terms returned by the retrieval engine for source highlighting",
     )
+    source_metadata = Column(
+        JSONB, nullable=True,
+        comment="Opaque business metadata snapshot returned for this retrieval hit",
+    )
+    source_reference = Column(
+        JSONB, nullable=True,
+        comment="Technical retrieval attributes for this hit, excluding business metadata",
+    )
     published_date = Column(TIMESTAMP(
         timezone=False), doc="Upload date of local files or network search date")
     cite_index = Column(

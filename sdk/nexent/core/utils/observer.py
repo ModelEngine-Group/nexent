@@ -138,6 +138,7 @@ class MessageObserver:
         # Unified output queue consumed by the agent streaming bridge.
         self.message_query = []
         self._message_query_lock = threading.Lock()
+        self._citation_indexes: dict[str, int] = {}
 
         # Control output language
         self.lang = lang
@@ -184,6 +185,13 @@ class MessageObserver:
             "model_attempt_id", default=None
         )
         self._step_outputs: dict[str | None, dict[str, Any]] = {}
+
+    def reserve_citations(self, tool_sign: str, count: int) -> int:
+        """Reserve unique citation indexes across tools sharing this run observer."""
+        with self._message_query_lock:
+            start = self._citation_indexes.get(tool_sign, 1)
+            self._citation_indexes[tool_sign] = start + count
+            return start
 
     def _step_output(self) -> dict[str, Any]:
         active = self._active_subagent()

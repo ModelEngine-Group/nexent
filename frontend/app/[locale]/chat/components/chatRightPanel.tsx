@@ -25,6 +25,9 @@ import {
 } from "@/services/storageService";
 import { message, Button } from "antd";
 import log from "@/lib/logger";
+import { getAidpDownloadLocator, getSourceAttributes, getSourceLabel, isAidpSource } from "@/lib/source";
+import { SourceMetadata } from "@/components/common/sourceMetadata";
+import { downloadAidpCitation } from "@/ext_components/aidp/shared/services/aidpCitationService";
 import { useConfig } from "@/hooks/useConfig";
 import type { AppConfig } from "@/types/modelConfig";
 
@@ -80,6 +83,9 @@ function SearchResultItem({
   const source_type = result.source_type || "url";
   const filename = result.filename || result.title || "";
   const searchType = result.search_type || "";
+  const sourceAttributes = { ...getSourceAttributes(searchType, result.score_details), toolSign: result.tool_sign };
+  const aidpLocator = getAidpDownloadLocator(sourceAttributes);
+  const isAidp = isAidpSource(sourceAttributes) || source_type === "aidp";
   const isKnowledgeResult =
     source_type === "file" ||
     source_type === "datamate" ||
@@ -141,13 +147,15 @@ function SearchResultItem({
     if (source_type === "datamate") {
       return t("chatRightPanel.source.datamate", "Source: Datamate");
     }
-    if (source_type === "aidp" || searchType === "aidp_search") {
+    if (isAidp) {
       return t("chatRightPanel.source.aidp", "Source: AIDP");
     }
-    if (source_type === "file") {
-      return t("chatRightPanel.source.nexent", "Source: Nexent");
-    }
-    return "";
+    return getSourceLabel({ ...sourceAttributes, sourceType: source_type, url }, {
+      knowledgeBase: t("chat.sources.knowledgeBase"),
+      web: t("chat.sources.web"),
+      document: t("chat.sources.document"),
+      source: t("chat.sources.source"),
+    });
   };
 
   const downloadDatamateFile = async () => {
@@ -218,6 +226,8 @@ function SearchResultItem({
     e.preventDefault();
     e.stopPropagation();
 
+    if (isAidp && !aidpLocator) return;
+
     if (!filename && !url) {
       message.error(
         t("chatRightPanel.fileDownloadError", "File name or URL is missing")
@@ -227,6 +237,10 @@ function SearchResultItem({
 
     setIsDownloading(true);
     try {
+      if (isAidp && aidpLocator) {
+        await downloadAidpCitation(aidpLocator, filename || "download");
+        return;
+      }
       if (source_type === "datamate") {
         await downloadDatamateFile();
         return;
@@ -276,7 +290,7 @@ function SearchResultItem({
         {title}
       </a>
     );
-  } else if (isKnowledgeResult) {
+  } else if (isKnowledgeResult && (!isAidp || aidpLocator)) {
     titleNode = (
       <a
         href="#"
@@ -341,6 +355,8 @@ function SearchResultItem({
           </p>
         </div>
 
+        <SourceMetadata metadata={sourceAttributes.sourceMetadata} />
+
         <div className="mt-2 text-sm flex justify-between items-center">
           <div
             className="flex flex-col overflow-hidden"
@@ -352,7 +368,7 @@ function SearchResultItem({
                   <div className="w-3 h-3 flex-shrink-0 mr-1">
                     <Database className="w-full h-full" />
                   </div>
-                  <a
+                  {isAidp && !aidpLocator ? <span className="truncate">{filename || formatUrl(result)}</span> : <a
                     href="#"
                     onClick={handleFileDownload}
                     className="text-blue-600 hover:underline truncate cursor-pointer"
@@ -363,7 +379,7 @@ function SearchResultItem({
                     title={formatUrl(result)}
                   >
                     {filename || formatUrl(result)}
-                  </a>
+                  </a>}
                 </div>
                 <div className="flex items-center mt-0.5 min-w-0">
                   <div className="w-3 h-3 flex-shrink-0 mr-1">

@@ -63,6 +63,8 @@ class SearchRecord(TypedDict):
     score_accuracy: Optional[float]
     score_semantic: Optional[float]
     retrieval_highlight_terms: Optional[List[str]]
+    source_metadata: Optional[Dict[str, Any]]
+    source_reference: Optional[Dict[str, Any]]
     published_date: Optional[datetime]
     cite_index: Optional[int]
     search_type: Optional[str]
@@ -476,6 +478,9 @@ def persist_assistant_run_batch(
                 "score_overall": record.get("score_overall"),
                 "score_accuracy": record.get("score_accuracy"),
                 "score_semantic": record.get("score_semantic"),
+                "retrieval_highlight_terms": record.get("retrieval_highlight_terms"),
+                "source_metadata": record.get("source_metadata"),
+                "source_reference": record.get("source_reference"),
                 "published_date": record.get("published_date"),
                 "cite_index": record.get("cite_index"),
                 "search_type": record.get("search_type"),
@@ -1949,6 +1954,10 @@ def create_source_search(search_data: Dict[str, Any], user_id: Optional[str] = N
             ]
         if 'published_date' in search_data:
             data["published_date"] = search_data['published_date']
+        if 'source_metadata' in search_data:
+            data["source_metadata"] = search_data['source_metadata']
+        if 'source_reference' in search_data:
+            data["source_reference"] = search_data['source_reference']
         if user_id:
             data = add_creation_tracking(data, user_id)
 

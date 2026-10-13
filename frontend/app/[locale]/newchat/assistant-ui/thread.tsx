@@ -1,5 +1,7 @@
 "use client";
 
+import type { SourceAttributes } from "@/types/source";
+
 import {
   useCallback,
   useEffect,
@@ -2064,7 +2066,7 @@ const UserActionBar: FC = () => {
  * detect the synthetic `isImage` flag on picture_web entries. The base shape
  * stays compatible with `@assistant-ui/react`'s `SourceMessagePartComponent`.
  */
-interface SourcePartLike {
+interface SourcePartLike extends SourceAttributes {
   type: "source";
   sourceType?: "url" | "document";
   url?: string;
@@ -2323,6 +2325,10 @@ const SourceGroupButton: FC<SourceGroupButtonProps> = ({ indices }) => {
           isImage: source.isImage,
           citeIndex: source.citeIndex,
           toolSign: source.toolSign,
+          searchType: source.searchType,
+          sourceMetadata: source.sourceMetadata,
+          sourceReference: source.sourceReference,
+          retrievalHighlightTerms: source.retrievalHighlightTerms,
         }))
       : groupedSources;
     for (const item of displaySources) {

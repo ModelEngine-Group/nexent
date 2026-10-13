@@ -1,0 +1,32 @@
+schema_version: '1.0'
+change:
+  change_id: CHAT-AIDP-SOURCES-20261014
+  change_type: requirement
+  requirement_id: CHAT-AIDP-SOURCES-20261014
+  title: Persist per-hit citation metadata and prevent AIDP local download fallback
+  description: Show two-row raw-key source attributes with hover details, restore metadata and provider/reference snapshots in history, and require explicit original-file identity for AIDP downloads.
+  affected_features:
+    existing: [F-065]
+    added: []
+    modified: [F-065]
+    retired: []
+  affected_cases:
+    existing: [UT-FE-AUTO-82166F602745F6D7]
+    added: []
+    modified: [UT-FE-AUTO-82166F602745F6D7]
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    behaviors:
+      - Preserve distinct per-hit business JSON and technical references in stream buffering, batch and legacy source writes, and history/sources restoration, including zero, false and nested values.
+      - Keep old records without snapshots readable and preserve existing transactional, authorization and error behavior.
+      - Preserve image hit identity when picture events arrive out of order or multiple hits share one URL. Retain SDK retrieval identity without treating chunk IDs, filenames, metadata or image URLs as original-file locators.
+    reason: Existing source SDK/database/history UT own these isolated serialization and write/error contracts. Strengthen their payload assertions; the existing frontend D1 adds actual citation-to-panel collaboration and forbidden download side effects, while browser/runtime evidence is recorded separately.
+    test_selectors:
+      - test/ext_components/aidp/test_aidp_search_tool.py
+      - test/ext_components/aidp/test_aidp_citation_identity.py
+      - test/backend/database/test_conversation_db.py
+      - test/backend/services/test_conversation_management_service.py
+      - test/backend/services/test_agent_run_final_answers.py
+      - frontend/tests/workbench/StreamCancellation.test.ts
+  notes: Real AIDP original UUID and byte verification remain unverified; the documented FusionSearch contract supplies no original download locator. Preserve existing blocked higher-layer Cases, pipeline/history logic, and local attachment behavior. Syncthing documents are read-only; the approved SPEC and local verification record are maintained outside Git.
