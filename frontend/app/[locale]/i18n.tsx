@@ -109,6 +109,8 @@ if (!i18n.isInitialized) {
     fallbackLng: "en",
     ns: ["common"],
     defaultNS: "common",
+    keySeparator: false,
+    nsSeparator: false,
     interpolation: {
       escapeValue: false,
     },
