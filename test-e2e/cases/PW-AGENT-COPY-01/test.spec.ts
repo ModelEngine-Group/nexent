@@ -45,7 +45,8 @@ journey("PW-AGENT-COPY-01", async (context) => {
         const listed = await page.request.get("/api/agent/list");
         expect(listed.ok()).toBe(true);
         const payload = await listed.json();
-        const rows = Array.isArray(payload?.data) ? payload.data : [];
+        // /api/agent/list returns a bare JSON array, not a wrapped object.
+        const rows = Array.isArray(payload) ? payload : (Array.isArray(payload?.data) ? payload.data : []);
         const first = rows.find((row: { display_name?: string }) => row.display_name === firstCopyDisplay);
         expect(first).toBeTruthy();
         expect(first?.name).toBe(`${sourceVariable}_copy`);
@@ -60,7 +61,8 @@ journey("PW-AGENT-COPY-01", async (context) => {
         const listed = await page.request.get("/api/agent/list");
         expect(listed.ok()).toBe(true);
         const payload = await listed.json();
-        const rows = Array.isArray(payload?.data) ? payload.data : [];
+        // /api/agent/list returns a bare JSON array, not a wrapped object.
+        const rows = Array.isArray(payload) ? payload : (Array.isArray(payload?.data) ? payload.data : []);
         const names = rows.filter(
           (row: { display_name?: string }) =>
             row.display_name === sourceDisplay ||
@@ -97,7 +99,8 @@ journey("PW-AGENT-COPY-01", async (context) => {
         const listed = await page.request.get("/api/agent/list");
         expect(listed.ok()).toBe(true);
         const payload = await listed.json();
-        const rows = Array.isArray(payload?.data) ? payload.data : [];
+        // /api/agent/list returns a bare JSON array, not a wrapped object.
+        const rows = Array.isArray(payload) ? payload : (Array.isArray(payload?.data) ? payload.data : []);
         const copies = rows.filter(
           (row: { display_name?: string }) =>
             row.display_name === firstCopyDisplay || row.display_name === secondCopyDisplay,

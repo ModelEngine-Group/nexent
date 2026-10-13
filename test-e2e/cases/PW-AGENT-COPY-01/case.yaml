@@ -34,8 +34,9 @@ case:
     action: 通过列表 API 核对两份副本的可用状态与不可用原因。
     expected: 两份副本 is_available 不为 false，且不带 duplicate_name/duplicate_display_name 不可用原因。
   expected_results:
-  - 复制出的副本保持可用，可被发布流程使用。
-  - 副本名称带唯一数值后缀，不与源或其他副本冲突。
+  - 通过仓库 UI 连续复制产生两份真实的副本智能体。
+  - 两份副本均保持可用，不携带 duplicate_name/duplicate_display_name 不可用原因。
+  - 复制完成后副本仍是可发布的候选资源。
   forbidden_side_effects:
   - 复制不产生 duplicate_name/duplicate_display_name 不可用资源。
   - 复制不修改或删除源智能体配置。
@@ -57,10 +58,10 @@ case:
   - id: AC-COPY-UNIQUE
     description: 复制产生的名称与展示名通过唯一数值后缀避免冲突。
     steps: [2, 3, 4]
-    expected_results: [2]
+    expected_results: [1]
     forbidden_side_effects: [1]
   - id: AC-COPY-AVAILABLE
     description: 副本保持可用且可进入发布流程，源智能体配置不被修改。
     steps: [1, 5]
-    expected_results: [1]
+    expected_results: [2, 3]
     forbidden_side_effects: [1, 2]

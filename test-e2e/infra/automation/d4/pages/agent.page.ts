@@ -418,7 +418,8 @@ export class AgentPage {
       const response = await this.page.request.get("/api/agent/list");
       if (response.ok()) {
         const payload = await response.json();
-        const rows = Array.isArray(payload?.data) ? payload.data : [];
+        // /api/agent/list returns a bare JSON array, not a wrapped object.
+        const rows = Array.isArray(payload) ? payload : (Array.isArray(payload?.data) ? payload.data : []);
         const match = rows.find((row: { display_name?: string }) => row.display_name === displayName);
         if (match) {
           if (match.is_available === false) {
