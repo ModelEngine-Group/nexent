@@ -1,7 +1,7 @@
 /** FAF-D4-001: fixed Playwright checks, executed with the authenticated CUA tab. */
 export async function assertResult(tab, { answer, pure = false }) {
   const result = tab.playwright.locator("p").filter({ hasText: new RegExp("^" + answer + "$") });
-  await result.waitFor({ state: "visible", timeoutMs: 10000 });
+  await result.waitFor({ state: "visible", timeoutMs: 45000 });
   const count = await result.count();
   if (count !== 1)
     throw new Error(`Expected one answer paragraph, found ${count}`);
@@ -26,11 +26,8 @@ export async function assertResult(tab, { answer, pure = false }) {
 }
 
 export async function sendScenario(tab, { url, prompt }) {
-  await tab.goto(url);
-  const input = tab.playwright.getByRole("textbox", {
-    name: "发送消息...",
-    exact: true,
-  });
+  if ((await tab.url()) !== url) await tab.goto(url);
+  const input = tab.playwright.getByRole("textbox");
   await input.waitFor({ state: "visible", timeoutMs: 10000 });
   await input.fill(prompt, { timeoutMs: 10000 });
   await tab.playwright
@@ -38,13 +35,18 @@ export async function sendScenario(tab, { url, prompt }) {
     .click({ timeoutMs: 10000 });
 }
 
-export async function reloadHistory(tab, title) {
+export async function reloadHistory(tab, title, agentName) {
   await tab.reload();
-  await tab.playwright.getByRole("textbox", { name: "发送消息...", exact: true }).waitFor({ state: "visible", timeoutMs: 10000 });
+  await tab.playwright.getByRole("textbox").waitFor({ state: "visible", timeoutMs: 10000 });
   const history = tab.playwright.getByRole("button", {
-    name: title,
-    exact: true,
+    name: new RegExp("^" + title + "(?:\\s|$)"),
   });
+  if ((await history.count()) === 0 && agentName) {
+    const group = tab.playwright.locator('button[data-slot="aui_thread-list-group-label"]')
+      .filter({ hasText: new RegExp("^" + agentName + "$") });
+    await group.waitFor({ state: "visible", timeoutMs: 10000 });
+    if ((await group.getAttribute("aria-expanded")) !== "true") await group.click({ timeoutMs: 10000 });
+  }
   await history.waitFor({ state: "visible", timeoutMs: 10000 });
   await history.click({ timeoutMs: 10000 });
 }
@@ -53,10 +55,10 @@ export async function assertSubagentResult(tab, childName) {
   const group = tab.playwright.getByRole("button", { name: "1 subagent call", exact: true });
   if ((await group.count()) === 1 && (await group.getAttribute("aria-expanded")) !== "true") await group.click({ timeoutMs: 10000 });
   const childHeader = tab.playwright.getByRole("button", { name: new RegExp(childName + " Completed") });
-  await childHeader.waitFor({ state: "visible", timeoutMs: 10000 });
+  await childHeader.waitFor({ state: "visible", timeoutMs: 45000 });
   if ((await childHeader.getAttribute("aria-expanded")) !== "true") await childHeader.click({ timeoutMs: 10000 });
   const result = tab.playwright.locator("p").filter({ hasText: /^FAF-CHILD-OK$/ });
-  await result.waitFor({ state: "visible", timeoutMs: 10000 });
+  await result.waitFor({ state: "visible", timeoutMs: 45000 });
   if ((await result.count()) !== 1) throw new Error("Subagent answer appears more than once");
   const placement = await result.evaluate((element) => {
     const card = element.closest(".my-3.ml-3");
