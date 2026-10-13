@@ -1,0 +1,13 @@
+schema_version = 1
+
+[[rules]]
+path = "rules/models/alibaba/qwen3.5-plus.toml"
+content_sha256 = "4d224c51db0164b25333be6292764747060d53e1d69ff6feb2f12e32495876cd"
+
+[[rules]]
+path = "rules/providers/alibaba-cn/provider.toml"
+content_sha256 = "1defa8dbcc173c84db79c9fad31c17bc570033951bcbbe7f40dfcfa8080343ab"
+
+[[rules]]
+path = "rules/providers/alibaba-cn/qwen3.5-plus.toml"
+content_sha256 = "8a7cb14a7d11904dddebd2a7123529534b2c5feecde34c080b0decf36d833aad"

@@ -328,3 +328,15 @@ def test_resolved_policy_size_includes_submitted_parameter_values(sources):
         compose(definitions, submitted_values={"custom": "中" * 350000})
     value = compose(definitions, submitted_values={"custom": "中" * 1000})
     assert len(value.parameter_values["custom"]) == 1000
+
+
+def test_frozen_supplement_instruction_reference_is_materialized(sources):
+    from types import MappingProxyType
+
+    value = compose(
+        catalog(
+            sources,
+            model={"instruction_mapping": MappingProxyType(INSTRUCTION.model_dump())},
+        )
+    )
+    assert value.instruction_mapping["strategy_id"] == "system_only"

@@ -177,7 +177,7 @@ def build_profile_catalog(sources: SourceCatalog, supplements: SupplementCatalog
                 overrides.append(_apply_override(capabilities, override, supplement.file_path))
             capabilities = _capabilities(capabilities)
             reference = rule.get("instruction_mapping")
-            reference = VersionedReference.model_validate(reference) if reference else None
+            reference = VersionedReference.model_validate(_json_copy(reference)) if reference else None
             parts = {
                 "composer": COMPOSER_REF,
                 "source": source.profile_revision,

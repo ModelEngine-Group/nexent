@@ -37,3 +37,24 @@ not implement cost estimation.
 No upstream TypeScript project, online synchronization or npm dependency is
 required at runtime. Model weight licenses and service terms remain separate
 from the license of these descriptive files.
+
+
+## Nexent supplements and complete catalog loading
+
+`resolver.load_source_catalog()` reads source facts only.
+`resolver.load_profile_catalog()` additionally validates `rules/manifest.toml`,
+reads exact Nexent supplement declarations and publishes immutable atomic views.
+The manifest pins each supplement file's digest separately from upstream data.
+
+The first supplement selection covers Alibaba China `qwen3.5-plus`: explicit
+model linkage, traditional instruction mapping, thinking toggle and the
+`reasoning_budget_tokens` to `/thinking_budget` binding. The copied maximum is
+81,920 tokens; the lower bound remains unknown, and no numeric default is
+invented. API binding declarations require a trusted implementation registry
+when composing a usable policy. Catalog inclusion does not certify a live
+provider endpoint or register an unimplemented transport.
+
+Keep upstream TOML unchanged. Put model rules under `rules/models/` and provider
+or exact provider-model rules under `rules/providers/`; update their manifest
+hashes when editing. Use the optional `json_fields` table only for JSON-only
+values such as explicit null, never as a string alias or arbitrary path patch.

@@ -275,3 +275,14 @@ def load_source_catalog(root: Path | None = None) -> SourceCatalog:
         _freeze(entries["provider"]),
         _freeze(entries["provider_model"]),
     )
+
+
+def load_profile_catalog(root: Path | None = None):
+    """Load source facts and explicit Nexent policy through one atomic entry point."""
+    from nexent.core.model_service.profiles.composition import build_profile_catalog
+    from nexent.core.model_service.profiles.supplements import load_supplements
+
+    root = (root if root is not None else Path(__file__).parent).resolve()
+    sources = load_source_catalog(root)
+    supplements = load_supplements(root, sources)
+    return build_profile_catalog(sources, supplements)
