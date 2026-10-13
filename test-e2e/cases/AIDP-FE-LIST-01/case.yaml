@@ -1,0 +1,96 @@
+schema_version: '1.0'
+stage: D1
+module: V5-BASELINE
+case:
+  case_id: AIDP-FE-LIST-01
+  feature_id: F-111
+  business_rule_ids:
+  - F-111-RULE-01
+  title: AIDP 知识库列表操作、偏好保持与查询隔离
+  type: FE-COMP
+  priority: P0
+  status: active
+  automation: automated
+  objective: AIDP 知识库列表操作、偏好保持与查询隔离
+  preconditions:
+  - 组件测试环境及产品前端依赖可用；不需要 AIDP 服务、数据库或真实模型。
+  - 使用独立 QueryClient、浏览器存储和受控 HTTP/XHR；模拟时钟代替真实上传与轮询等待。
+  test_data:
+    source_role:
+    - direct_input
+    trace: 用户确认的 AIDP 创建、列表、导入及文件列表验收；2026-10-12 D1 补充审核
+    data: 模型混合目录、两种语言及领域模板、不同权限知识库、有限文件数据和错误响应
+  steps:
+  - order: 1
+    action: 首次加载卡片，收起/展开教程，切换表格并配置列；卸载再挂载；点击描述或名称。
+    expected: 默认卡片和展开教程；视图、教程、列配置保持；名称和操作列固定；表格仅名称进入文件页；缺少创建人显示 --。
+  - order: 2
+    action: 翻到第二页，再输入带空格的关键词；切换每页数量；返回无匹配结果。
+    expected: 查询参数与分页一致；防抖后的搜索和每页数量变化重置到第一页；关键词去除首尾空格；无匹配显示空态。
+  - order: 3
+    action: 从列表打开导入，完成上传后分别以确定、X 关闭；取消或确认删除。
+    expected: 上传完成不刷新列表，关闭抽屉触发一次立即刷新；取消删除不请求，确认删除一次并刷新结果。
+  - order: 4
+    action: 推进模拟时钟到 30 秒，打开抽屉后再推进时钟，关闭后继续推进。
+    expected: 正常浏览时定时刷新；抽屉打开期间暂停，关闭后恢复，不等待真实 30 秒。
+  - order: 5
+    action: 使旧账号请求暂不返回，切换用户或租户，返回新账号数据后再完成旧请求；禁用 AIDP 或移除用户。
+    expected: 旧数据及延迟响应不污染新账号查询；未登录和禁用 AIDP 时不查询。
+  expected_results:
+  - 默认卡片和展开教程；视图、教程、列配置保持；名称和操作列固定；表格仅名称进入文件页；缺少创建人显示 --。
+  - 查询参数与分页一致；防抖后的搜索和每页数量变化重置到第一页；关键词去除首尾空格；无匹配显示空态。
+  - 上传完成不刷新列表，关闭抽屉触发一次立即刷新；取消删除不请求，确认删除一次并刷新结果。
+  - 正常浏览时定时刷新；抽屉打开期间暂停，关闭后恢复，不等待真实 30 秒。
+  - 旧数据及延迟响应不污染新账号查询；未登录和禁用 AIDP 时不查询。
+  forbidden_side_effects:
+  - 不得请求实际 AIDP、数据库、模型或修改用户的部署数据。
+  unit_boundary: 真实页面/表单、查询 hooks、React Query 缓存和前端服务层协作；仅替换外部身份、路由与 HTTP/XHR 边界。
+  inputs:
+  - case-local 受控响应与内存文件
+  assertions:
+  - 默认卡片和展开教程；视图、教程、列配置保持；名称和操作列固定；表格仅名称进入文件页；缺少创建人显示 --。
+  - 查询参数与分页一致；防抖后的搜索和每页数量变化重置到第一页；关键词去除首尾空格；无匹配显示空态。
+  - 上传完成不刷新列表，关闭抽屉触发一次立即刷新；取消删除不请求，确认删除一次并刷新结果。
+  - 正常浏览时定时刷新；抽屉打开期间暂停，关闭后恢复，不等待真实 30 秒。
+  - 旧数据及延迟响应不污染新账号查询；未登录和禁用 AIDP 时不查询。
+  acceptance:
+  - id: AC-01
+    description: 列表偏好与入口
+    steps:
+    - 1
+    expected_results:
+    - 1
+    forbidden_side_effects:
+    - 1
+  - id: AC-02
+    description: 搜索与分页
+    steps:
+    - 2
+    expected_results:
+    - 2
+    forbidden_side_effects:
+    - 1
+  - id: AC-03
+    description: 导入与删除刷新
+    steps:
+    - 3
+    expected_results:
+    - 3
+    forbidden_side_effects:
+    - 1
+  - id: AC-04
+    description: 定时刷新与暂停
+    steps:
+    - 4
+    expected_results:
+    - 4
+    forbidden_side_effects:
+    - 1
+  - id: AC-05
+    description: 账号与租户隔离
+    steps:
+    - 5
+    expected_results:
+    - 5
+    forbidden_side_effects:
+    - 1

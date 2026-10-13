@@ -1,9 +1,10 @@
 import React from "react";
-import { Button, Form, Input, Select } from "antd";
+import { QuestionCircleOutlined } from "@ant-design/icons";
+import { Button, Form, Input, Select, Tooltip } from "antd";
 import type { TFunction } from "i18next";
 
-import { AIDP_KNOWLEDGE_BASE_NAME_PATTERN } from "@/const/knowledgeBase";
-import type { AidpGroupOption } from "../hooks/useAidpGroupOptions";
+import { AIDP_KNOWLEDGE_BASE_NAME_PATTERN } from "@/ext_components/aidp/shared/const/knowledge";
+import type { AidpGroupOption } from "@/ext_components/aidp/shared/hooks/useAidpGroupOptions";
 
 export const AIDP_MODAL_STYLES = {
   container: { overflow: "hidden", borderRadius: 16, padding: 0 },
@@ -17,7 +18,7 @@ export const AIDP_MODAL_STYLES = {
 
 interface AidpModalHeaderProps {
   title: string;
-  subtitle: string;
+  subtitle?: string;
 }
 
 export const AidpKnowledgeBaseModalHeader: React.FC<AidpModalHeaderProps> = ({
@@ -31,7 +32,7 @@ export const AidpKnowledgeBaseModalHeader: React.FC<AidpModalHeaderProps> = ({
     <h2 className="text-xl font-semibold tracking-tight text-gray-900">
       {title}
     </h2>
-    <p className="mt-1 text-sm text-gray-500">{subtitle}</p>
+    {subtitle && <p className="mt-1 text-sm text-gray-500">{subtitle}</p>}
   </div>
 );
 
@@ -39,6 +40,7 @@ interface AidpModalFooterProps {
   onCancel: () => void;
   onSubmit: () => void;
   loading: boolean;
+  submitDisabled?: boolean;
   cancelText: string;
   submitText: string;
 }
@@ -47,6 +49,7 @@ export const AidpKnowledgeBaseModalFooter: React.FC<AidpModalFooterProps> = ({
   onCancel,
   onSubmit,
   loading,
+  submitDisabled = false,
   cancelText,
   submitText,
 }) => (
@@ -54,7 +57,12 @@ export const AidpKnowledgeBaseModalFooter: React.FC<AidpModalFooterProps> = ({
     <Button onClick={onCancel} disabled={loading}>
       {cancelText}
     </Button>
-    <Button type="primary" loading={loading} onClick={onSubmit}>
+    <Button
+      type="primary"
+      loading={loading}
+      disabled={submitDisabled}
+      onClick={onSubmit}
+    >
       {submitText}
     </Button>
   </div>
@@ -95,6 +103,8 @@ interface AidpPermissionFieldsProps {
   groupOptions: AidpGroupOption[];
   ingroupPermission?: string;
   showSearch?: boolean;
+  groupsLoading?: boolean;
+  groupsUnavailable?: boolean;
 }
 
 const hasRequiredGroupIds = (permission: string, value: unknown) =>
@@ -102,11 +112,28 @@ const hasRequiredGroupIds = (permission: string, value: unknown) =>
 
 export const AidpKnowledgeBasePermissionFields: React.FC<
   AidpPermissionFieldsProps
-> = ({ t, groupOptions, ingroupPermission, showSearch = false }) => (
+> = ({
+  t,
+  groupOptions,
+  ingroupPermission,
+  showSearch = false,
+  groupsLoading = false,
+  groupsUnavailable = false,
+}) => (
   <>
     <Form.Item
       name="ingroup_permission"
-      label={t("aidpKnowledge.createIngroupPermission")}
+      label={
+        <span className="inline-flex items-center">
+          {t("aidpKnowledge.createIngroupPermission")}
+          <Tooltip title={t("aidpKnowledge.createIngroupPermissionHint")}>
+            <QuestionCircleOutlined
+              className="ml-1 cursor-help text-gray-400"
+              aria-label={t("aidpKnowledge.createIngroupPermissionHint")}
+            />
+          </Tooltip>
+        </span>
+      }
       rules={[
         {
           required: true,
@@ -154,7 +181,10 @@ export const AidpKnowledgeBasePermissionFields: React.FC<
         mode="multiple"
         showSearch={showSearch ? { optionFilterProp: "label" } : undefined}
         placeholder={t("aidpKnowledge.createAccessGroupsPlaceholder")}
-        disabled={ingroupPermission === "PRIVATE"}
+        loading={groupsLoading}
+        disabled={
+          ingroupPermission === "PRIVATE" || groupsLoading || groupsUnavailable
+        }
         options={groupOptions}
       />
     </Form.Item>

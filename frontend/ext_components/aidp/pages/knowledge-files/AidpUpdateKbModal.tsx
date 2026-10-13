@@ -1,24 +1,27 @@
 "use client";
 
-import React, { useEffect } from "react";
+import React, { useEffect, useRef } from "react";
 import { useTranslation } from "react-i18next";
 
-import { Collapse, Modal, Form, Input, message } from "antd";
-import { SettingOutlined } from "@ant-design/icons";
+import { Alert, Modal, Form, Input, message } from "antd";
 
-import type { AidpKnowledgeBaseItem } from "@/types/agentConfig";
-import aidpKnowledgeService from "@/ext_components/aidp/services/aidpKnowledgeService";
-import { useAidpGroupOptions } from "../hooks/useAidpGroupOptions";
+import log from "@/lib/logger";
+
+import type { AidpKnowledgeBaseItem } from "@/ext_components/aidp/shared/types/knowledge";
+import { useSaveAidpKnowledgeSettings } from "./hooks/useAidpKnowledgeDetail";
+import { getAidpErrorMessage } from "@/ext_components/aidp/shared/utils/aidpErrorUtils";
+import { useAidpGroupOptions } from "@/ext_components/aidp/shared/hooks/useAidpGroupOptions";
 import {
   AIDP_MODAL_STYLES,
   AidpKnowledgeBaseBasicFields,
   AidpKnowledgeBaseModalFooter,
   AidpKnowledgeBaseModalHeader,
   AidpKnowledgeBasePermissionFields,
-} from "./AidpKnowledgeBaseModalParts";
+} from "@/ext_components/aidp/shared/components/AidpKnowledgeBaseModalParts";
 
 interface AidpUpdateKbModalProps {
   open: boolean;
+  mode: "metadata" | "permissions";
   knowledgeBase: AidpKnowledgeBaseItem | null;
   onCancel: () => void;
   onSuccess: (knowledgeBase: AidpKnowledgeBaseItem) => void;
@@ -26,18 +29,26 @@ interface AidpUpdateKbModalProps {
 
 const AidpUpdateKbModal: React.FC<AidpUpdateKbModalProps> = ({
   open,
+  mode,
   knowledgeBase,
   onCancel,
   onSuccess,
 }) => {
   const { t } = useTranslation();
   const [form] = Form.useForm();
-  const [loading, setLoading] = React.useState(false);
+  const [validating, setValidating] = React.useState(false);
+  const saveMutation = useSaveAidpKnowledgeSettings();
+  const loading = validating || saveMutation.isPending;
+  const submittingRef = useRef(false);
 
-  const { isUser, canConfigureGroupPermissions, groupOptions } =
-    useAidpGroupOptions();
-  const [advancedOpen, setAdvancedOpen] = React.useState(false);
-
+  const {
+    isUser,
+    canConfigureGroupPermissions,
+    canReadGroups,
+    groupOptions,
+    groupsLoading,
+    groupsError,
+  } = useAidpGroupOptions();
   const ingroupPermission = Form.useWatch("ingroup_permission", form);
 
   // Pre-fill form when opening. ``group_ids`` may be null/undefined on rows
@@ -45,7 +56,6 @@ const AidpUpdateKbModal: React.FC<AidpUpdateKbModalProps> = ({
   // (mode="multiple") receives a value shape it accepts.
   useEffect(() => {
     if (!open) return;
-    setAdvancedOpen(false);
     if (!knowledgeBase) return;
     form.setFieldsValue({
       name: knowledgeBase.kds_name,
@@ -62,21 +72,28 @@ const AidpUpdateKbModal: React.FC<AidpUpdateKbModalProps> = ({
   }, [open, knowledgeBase, form, isUser]);
 
   const handleOk = async () => {
-    if (!knowledgeBase) return;
-
+    if (!knowledgeBase || submittingRef.current) return;
+    submittingRef.current = true;
+    setValidating(true);
     try {
       const values = await form.validateFields();
-      setLoading(true);
 
-      const name = values.name.trim();
-      const description = values.description?.trim() || "";
-      const nameChanged = name !== knowledgeBase.kds_name.trim();
+      const name =
+        mode === "metadata"
+          ? values.name.trim()
+          : knowledgeBase.kds_name.trim();
+      const description =
+        mode === "metadata"
+          ? values.description?.trim() || ""
+          : (knowledgeBase.description || "").trim();
+      const nameChanged =
+        mode === "metadata" && name !== knowledgeBase.kds_name.trim();
       const descriptionChanged =
+        mode === "metadata" &&
         description !== (knowledgeBase.description || "").trim();
 
-      // The advanced permission fields are intentionally hidden for USER
-      // accounts. Keep a form-level fallback so metadata-only edits still
-      // submit a valid permission when those fields are not mounted.
+      // Permission fields are hidden for USER accounts. Keep a form-level
+      // fallback so metadata-only edits still submit a valid permission.
       const newPermission = isUser
         ? "PRIVATE"
         : values.ingroup_permission ||
@@ -112,15 +129,16 @@ const AidpUpdateKbModal: React.FC<AidpUpdateKbModalProps> = ({
       }
 
       // Omitted metadata fields must never trigger an upstream AIDP request.
-      const result = await aidpKnowledgeService.setPermission(
-        knowledgeBase.kds_id,
-        {
+      setValidating(false);
+      const result = await saveMutation.mutateAsync({
+        id: knowledgeBase.kds_id,
+        payload: {
           ingroup_permission: newPermission,
           group_ids: normalizedNewGroupIds,
           ...(nameChanged ? { name } : {}),
           ...(descriptionChanged ? { description } : {}),
-        }
-      );
+        },
+      });
       const metadataFailed = result.metadata_status === "failed";
       if (metadataFailed) {
         message.warning(t("aidpKnowledge.updateKbMetadataFailed"));
@@ -150,13 +168,21 @@ const AidpUpdateKbModal: React.FC<AidpUpdateKbModalProps> = ({
       if (error && typeof error === "object" && "errorFields" in error) {
         return;
       }
-      message.error(t("aidpKnowledge.updateKbFailed"));
+      log.error("Failed to update AIDP knowledge base:", {
+        id: knowledgeBase.kds_id,
+        error,
+      });
+      message.error(
+        getAidpErrorMessage(error, t, t("aidpKnowledge.updateKbFailed"))
+      );
     } finally {
-      setLoading(false);
+      submittingRef.current = false;
+      setValidating(false);
     }
   };
 
   const handleCancel = () => {
+    if (submittingRef.current) return;
     form.resetFields();
     onCancel();
   };
@@ -170,9 +196,11 @@ const AidpUpdateKbModal: React.FC<AidpUpdateKbModalProps> = ({
       okText={t("common.confirm")}
       cancelText={t("common.cancel")}
       confirmLoading={loading}
+      closable={!loading}
+      keyboard={!loading}
       centered
       width={640}
-      maskClosable={false}
+      mask={{ closable: false }}
       destroyOnHidden
       styles={AIDP_MODAL_STYLES}
       footer={
@@ -180,6 +208,11 @@ const AidpUpdateKbModal: React.FC<AidpUpdateKbModalProps> = ({
           onCancel={handleCancel}
           onSubmit={handleOk}
           loading={loading}
+          submitDisabled={
+            canConfigureGroupPermissions &&
+            ingroupPermission !== "PRIVATE" &&
+            (groupsLoading || !!groupsError || !canReadGroups)
+          }
           cancelText={t("common.cancel")}
           submitText={t("common.confirm")}
         />
@@ -187,52 +220,49 @@ const AidpUpdateKbModal: React.FC<AidpUpdateKbModalProps> = ({
     >
       <div>
         <AidpKnowledgeBaseModalHeader
-          title={t("aidpKnowledge.updateKb")}
-          subtitle={t("knowledgeBase.create.subtitle")}
+          title={
+            mode === "metadata"
+              ? t("aidpKnowledge.updateKb")
+              : t("aidpKnowledge.detailPermissions")
+          }
+          subtitle={
+            mode === "metadata" ? t("knowledgeBase.create.subtitle") : undefined
+          }
         />
         <Form
           form={form}
           layout="vertical"
           style={{ padding: "20px 24px 8px" }}
         >
-          <AidpKnowledgeBaseBasicFields t={t} />
+          {mode === "metadata" && <AidpKnowledgeBaseBasicFields t={t} />}
+          {canConfigureGroupPermissions &&
+            (groupsError || (!canReadGroups && !groupsLoading)) && (
+              <Alert
+                className="mb-4"
+                type="error"
+                showIcon
+                title={
+                  groupsError
+                    ? getAidpErrorMessage(
+                        groupsError,
+                        t,
+                        t("aidpKnowledge.groupsLoadFailed")
+                      )
+                    : t("aidpKnowledge.groupsPermissionRequired")
+                }
+              />
+            )}
           {canConfigureGroupPermissions ? (
-            <Collapse
-              className="!rounded-xl !border-gray-200"
-              activeKey={advancedOpen ? ["advanced"] : []}
-              onChange={(keys) =>
-                setAdvancedOpen(
-                  Array.isArray(keys)
-                    ? keys.includes("advanced")
-                    : keys === "advanced"
-                )
-              }
-              items={[
-                {
-                  key: "advanced",
-                  // Keep permission fields registered with the Form while
-                  // the Collapse is closed so metadata-only edits still
-                  // submit the existing group_ids value.
-                  forceRender: true,
-                  label: (
-                    <span className="flex items-center gap-2 text-sm font-medium text-gray-800">
-                      <SettingOutlined />
-                      {t("aidpKnowledge.createAdvancedOptions")}
-                    </span>
-                  ),
-                  children: (
-                    <div className="pt-1">
-                      <AidpKnowledgeBasePermissionFields
-                        t={t}
-                        groupOptions={groupOptions}
-                        ingroupPermission={ingroupPermission}
-                        showSearch
-                      />
-                    </div>
-                  ),
-                },
-              ]}
-            />
+            <div className="grid grid-cols-1 gap-x-6 md:grid-cols-2">
+              <AidpKnowledgeBasePermissionFields
+                t={t}
+                groupOptions={groupOptions}
+                ingroupPermission={ingroupPermission}
+                showSearch
+                groupsLoading={groupsLoading}
+                groupsUnavailable={!!groupsError || !canReadGroups}
+              />
+            </div>
           ) : (
             <Form.Item name="ingroup_permission" hidden>
               <Input type="hidden" />
