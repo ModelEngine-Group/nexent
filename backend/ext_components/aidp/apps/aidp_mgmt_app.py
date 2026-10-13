@@ -1159,6 +1159,26 @@ async def get_knowledge_base(
     detail["ingroup_permission"] = permission_record.get("ingroup_permission")
     detail["group_ids"] = permission_record.get("group_ids") or []
     detail["created_by"] = permission_record.get("owner_user_id")
+
+    # Enrich document_count via the AIDP Count API - the upstream detail
+    # response omits this summary field that the list endpoint already
+    # computes. Without this the detail header renders an empty count even
+    # though files exist.
+    if resource_status == "ACTIVE":
+        try:
+            doc_count = await run_blocking(
+                "aidp-doc-count",
+                _load_cached_doc_count,
+                server_url,
+                api_key,
+                kds_id, lane="control-io",
+                owner="config",
+            )
+            detail["document_count"] = doc_count
+            detail["document_count_reliable"] = doc_count is not None
+        except AppException:
+            logger.warning("AIDP doc count fetch failed for %s", kds_id)
+            detail["document_count_reliable"] = False
     return JSONResponse(status_code=HTTPStatus.OK, content=detail)
 
 
@@ -1453,6 +1473,11 @@ async def list_ingested_files(
         else bool(reported_more) if reported_more is not None
         else len(rows) >= page_size
     )
+    # Upstream pagers can return next_link even when the current page is
+    # incomplete (fewer rows than page_size), which would create phantom
+    # pagination pages. Suppress has_more when the returned page is not full.
+    if len(rows) < page_size:
+        has_more = False
     result.update({
         "total_count": total,
         "has_more": has_more,

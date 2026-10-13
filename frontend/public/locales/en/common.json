@@ -5502,5 +5502,6 @@
   "aidpKnowledge.detailSettingSaveFailed": "Failed to update configuration",
   "aidpKnowledge.deleteDocTitle": "Delete this file?",
   "aidpKnowledge.deleteDocsTitle": "Delete {{count}} selected files?",
-  "aidpKnowledge.deleteDocsPartial": "{{count}} file(s) failed to delete"
+  "aidpKnowledge.deleteDocsLimit": "You can delete up to {{max}} files at a time. Please reduce your selection.",
+  "aidpKnowledge.deleteDocsPartial": "Deleted {{success}} file(s) successfully, {{failed}} failed"
 }

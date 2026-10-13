@@ -65,6 +65,8 @@ interface AidpKnowledgeDetailProps {
 }
 
 const PAGE_SIZE = 10;
+// AIDP caps a single batch document removal request at 10 files.
+const AIDP_BATCH_DELETE_MAX = 10;
 const UNKNOWN = AIDP_UNKNOWN_VALUE;
 
 const formatDetailDateTime = (value: unknown): string => {
@@ -335,6 +337,19 @@ const AidpKnowledgeDetail: React.FC<AidpKnowledgeDetailProps> = ({
         setFileHasMore(result.has_more ?? false);
         setFileTotalReliable(result.total_reliable !== false);
         setFilePage(page);
+        // Keep the header document count in sync with the live file list
+        // total so it updates whenever the list is refreshed, deleted, or
+        // reloaded - instead of only showing the stale detail-API value.
+        // Only update from unfiltered fetches so the header always shows the
+        // true total, not a keyword-filtered subset.
+        if (!keyword) {
+          const liveTotal = result.total_count ?? result.value.length;
+          setDetail((current) => ({
+            ...current,
+            document_count: liveTotal,
+            document_count_reliable: result.total_reliable !== false,
+          }));
+        }
       } catch {
         message.error(t("aidpKnowledge.detailFilesLoadFailed"));
         setFiles([]);
@@ -515,6 +530,13 @@ const AidpKnowledgeDetail: React.FC<AidpKnowledgeDetailProps> = ({
       .map((file) => file.file_uuid)
       .filter(Boolean);
     if (fileUuids.length === 0) return;
+    // AIDP rejects oversized batch removals; guard before confirming.
+    if (fileUuids.length > AIDP_BATCH_DELETE_MAX) {
+      message.warning(
+        t("aidpKnowledge.deleteDocsLimit", { max: AIDP_BATCH_DELETE_MAX })
+      );
+      return;
+    }
     Modal.confirm({
       title: t("aidpKnowledge.deleteDocsTitle", { count: fileUuids.length }),
       centered: true,
@@ -525,14 +547,15 @@ const AidpKnowledgeDetail: React.FC<AidpKnowledgeDetailProps> = ({
             knowledgeBase.kds_id,
             fileUuids
           );
-          if (result.summary.failed > 0) {
-            message.error(
-              t("aidpKnowledge.deleteDocsPartial", {
-                count: result.summary.failed,
-              })
-            );
-          } else {
+          const { success, failed } = result.summary;
+          if (failed === 0) {
             message.success(t("aidpKnowledge.deleteDocSuccess"));
+          } else if (success === 0) {
+            message.error(t("aidpKnowledge.deleteDocFailed"));
+          } else {
+            message.warning(
+              t("aidpKnowledge.deleteDocsPartial", { success, failed })
+            );
           }
           void fetchFiles(filePage, fileKeyword, filePageSize);
           void refreshDetail();

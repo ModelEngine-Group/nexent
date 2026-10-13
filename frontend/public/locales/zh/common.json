@@ -5516,5 +5516,6 @@
   "aidpKnowledge.detailSettingSaveFailed": "配置更新失败",
   "aidpKnowledge.deleteDocTitle": "确定删除此文件吗？",
   "aidpKnowledge.deleteDocsTitle": "确定删除选中的 {{count}} 个文件吗？",
-  "aidpKnowledge.deleteDocsPartial": "{{count}} 个文件删除失败"
+  "aidpKnowledge.deleteDocsLimit": "单次最多删除 {{max}} 个文件，请减少选择数量",
+  "aidpKnowledge.deleteDocsPartial": "文档删除成功 {{success}} 个，失败 {{failed}} 个"
 }
