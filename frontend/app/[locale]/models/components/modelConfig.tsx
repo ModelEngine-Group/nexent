@@ -321,11 +321,14 @@ export const ModelConfigSection = forwardRef<
       for (const m of group.models) {
         try {
           // Partial update: only api_key + base_url are sent; the backend
-          // leaves every other field untouched.
+          // leaves every other field untouched. An empty key means "keep the
+          // existing credential" (list responses never carry stored keys), so
+          // it must be omitted rather than sent as an empty string -- sending
+          // "" would overwrite the stored key.
           await modelService.updateSingleModel({
             currentDisplayName: m.displayName,
             url: patch.url,
-            apiKey: patch.apiKey,
+            ...(patch.apiKey.trim() ? { apiKey: patch.apiKey.trim() } : {}),
             source: m.source,
           });
         } catch (e: any) {

@@ -188,6 +188,15 @@ def build_models_config(tenant_id: str) -> dict:
 
 
 def build_model_config(model_config: dict) -> dict:
+    """Build the /config/load_config model entry for one default-model slot.
+
+    Credential values (api_key, and the STT/TTS model_appid / access_token
+    pair) are intentionally NOT included: load_config responses go to every
+    logged-in user, so leaking them would expose tenant-level provider
+    credentials. The frontend model page never displays or resubmits these
+    fields from this payload (model management submits credential updates
+    only through the /model/* endpoints), so nothing breaks by omitting them.
+    """
     if not model_config:
         return {
             "id": None,
@@ -204,7 +213,7 @@ def build_model_config(model_config: dict) -> dict:
         "name": get_model_name_from_config(model_config) if model_config else "",
         "displayName": model_config.get("display_name", ""),
         "apiConfig": {
-            "apiKey": model_config.get("api_key", ""),
+            "apiKey": "",
             "modelUrl": model_config.get("base_url", "")
         }
     }
@@ -212,11 +221,13 @@ def build_model_config(model_config: dict) -> dict:
     if "embedding" in model_config.get("model_type", ""):
         config["dimension"] = model_config.get("max_tokens", 0)
 
-    # Add voice model specific fields (STT and TTS)
+    # Add voice model specific fields (STT and TTS). model_appid and
+    # access_token are credentials (the Volcano auth pair) and are omitted;
+    # the operator edits them from the model-management dialog instead.
     model_type = model_config.get("model_type", "")
     if model_type == "stt" or model_type == "tts":
         config["modelFactory"] = model_config.get("model_factory", "")
-        config["modelAppid"] = model_config.get("model_appid", "")
-        config["accessToken"] = model_config.get("access_token", "")
+        config["modelAppid"] = ""
+        config["accessToken"] = ""
 
     return config

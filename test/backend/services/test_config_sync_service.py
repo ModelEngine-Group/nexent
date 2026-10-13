@@ -1246,7 +1246,7 @@ class TestLoadConfigImpl:
 
         # Verify successful config
         assert result["llm"]["displayName"] == "Test LLM"
-        assert result["llm"]["apiConfig"]["apiKey"] == "test-api-key"
+        assert result["llm"]["apiConfig"]["apiKey"] == ""  # sanitized
 
         # Verify failed config was handled gracefully
         assert result["embedding"]["name"] == ""
@@ -1300,7 +1300,7 @@ class TestLoadConfigImpl:
 
         # Verify successful configs
         assert result["llm"]["displayName"] == "GPT-4"
-        assert result["llm"]["apiConfig"]["apiKey"] == "test-key"
+        assert result["llm"]["apiConfig"]["apiKey"] == ""  # sanitized
 
         # Verify no warnings were logged (all successful)
         service_mocks['logger'].warning.assert_not_called()
@@ -1642,7 +1642,7 @@ class TestBuildModelConfig:
         # Assert
         assert result["name"] == "gpt-4"
         assert result["displayName"] == "GPT-4"
-        assert result["apiConfig"]["apiKey"] == "test-api-key"
+        assert result["apiConfig"]["apiKey"] == ""  # sanitized
         assert result["apiConfig"]["modelUrl"] == "https://api.openai.com"
         # Should not have dimension field for non-embedding models
         assert "dimension" not in result
@@ -1667,7 +1667,7 @@ class TestBuildModelConfig:
         # Assert
         assert result["name"] == "text-embedding-ada-002"
         assert result["displayName"] == "Ada Embeddings"
-        assert result["apiConfig"]["apiKey"] == "test-api-key"
+        assert result["apiConfig"]["apiKey"] == ""  # sanitized
         assert result["apiConfig"]["modelUrl"] == "https://api.openai.com"
         # Should have dimension field for embedding models
         assert result["dimension"] == 1536
@@ -1692,7 +1692,7 @@ class TestBuildModelConfig:
         # Assert
         assert result["name"] == "text-embedding-3-small"
         assert result["displayName"] == "Multi Ada Embeddings"
-        assert result["apiConfig"]["apiKey"] == "test-api-key"
+        assert result["apiConfig"]["apiKey"] == ""  # sanitized
         assert result["apiConfig"]["modelUrl"] == "https://api.openai.com"
         # Should have dimension field for multi_embedding models
         assert result["dimension"] == 768
@@ -1739,7 +1739,7 @@ class TestBuildModelConfig:
         # Assert
         assert result["name"] == "test-embedding"
         assert result["displayName"] == "Test Embedding"
-        assert result["apiConfig"]["apiKey"] == "test-key"
+        assert result["apiConfig"]["apiKey"] == ""  # sanitized
         assert result["apiConfig"]["modelUrl"] == "https://test.com"
         # Should have dimension field with default value 0
         assert result["dimension"] == 0
@@ -1763,7 +1763,7 @@ class TestBuildModelConfig:
         # Assert
         assert result["name"] == "test-model"
         assert result["displayName"] == "Test Model"
-        assert result["apiConfig"]["apiKey"] == "test-key"
+        assert result["apiConfig"]["apiKey"] == ""  # sanitized
         # Should have dimension since model_type contains 'embedding'
         assert result["dimension"] == 512
 
