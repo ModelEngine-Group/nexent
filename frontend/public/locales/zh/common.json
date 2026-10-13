@@ -5793,5 +5793,5 @@
   "modelParams.token.outputReserveInfo": "从上下文窗口中预留的输出空间",
   "agent.core.label": "Agent Core",
   "agent.core.contextManager": "上下文自动压缩",
-  "agent.core.jiuwenHint": "Jiuwen 暂不支持上下文自动压缩、运行总结、协议修复、自校验、护栏及协作智能体。切换时会关闭这些选项并清空协作绑定，保留模型、提示词、工具和 Skills；切回 smolagents 后需手动重新配置。"
+  "agent.core.jiuwenHint": "Jiuwen 暂不支持规划、上下文自动压缩、运行总结、协议修复、自校验、护栏及协作智能体。切换时会关闭这些选项并清空协作绑定，保留模型、提示词、工具和 Skills；切回 smolagents 后需手动重新配置。"
 }

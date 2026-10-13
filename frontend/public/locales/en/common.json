@@ -5779,5 +5779,5 @@
   "modelParams.token.outputReserveInfo": "Output space reserved within the context window",
   "agent.core.label": "Agent Core",
   "agent.core.contextManager": "Automatic context compaction",
-  "agent.core.jiuwenHint": "Jiuwen does not yet support automatic context compaction, run summaries, protocol repair, verification, guardrails or collaborative agents. Switching disables these options and clears collaboration bindings while keeping models, prompts, tools and skills. Configure them again manually after switching back to smolagents."
+  "agent.core.jiuwenHint": "Jiuwen does not yet support planning, automatic context compaction, run summaries, protocol repair, verification, guardrails or collaborative agents. Switching disables these options and clears collaboration bindings while keeping models, prompts, tools and skills. Configure them again manually after switching back to smolagents."
 }

@@ -176,6 +176,8 @@ const AgentDebugPanel: FC<AgentDebugPanelProps> = ({
   const agentId = useAgentStore((state) => state.agentId);
   const editedAgent = useAgentStore((state) => state.editedAgent);
   const [chatMode, setChatMode] = useState<ChatMode>("execution");
+  const effectiveChatMode =
+    editedAgent?.agent_core === "jiuwen" ? "execution" : chatMode;
   const [clearEpoch, setClearEpoch] = useState(0);
   const [compareClearEpoch, setCompareClearEpoch] = useState(0);
   const debugAgent = useMemo(
@@ -204,10 +206,17 @@ const AgentDebugPanel: FC<AgentDebugPanelProps> = ({
         <Dropdown
           trigger={["click"]}
           menu={{
-            selectedKeys: [chatMode, isCompareMode ? "compare" : "single"],
+            selectedKeys: [
+              effectiveChatMode,
+              isCompareMode ? "compare" : "single",
+            ],
             items: [
               { key: "execution", label: t("chat.composer.execution") },
-              { key: "planning", label: t("chat.composer.planning") },
+              {
+                key: "planning",
+                label: t("chat.composer.planning"),
+                disabled: editedAgent?.agent_core === "jiuwen",
+              },
               { type: "divider" },
               { key: "single", label: t("agent.debug.defaultMode") },
               { key: "compare", label: t("agent.debug.compareMode") },
@@ -271,7 +280,7 @@ const AgentDebugPanel: FC<AgentDebugPanelProps> = ({
           <AgentDebugChat
             agent={debugAgent}
             agentId={agentId}
-            chatMode={chatMode}
+            chatMode={effectiveChatMode}
             clearEpoch={clearEpoch}
           />
         </div>
@@ -281,7 +290,7 @@ const AgentDebugPanel: FC<AgentDebugPanelProps> = ({
           <AgentDebugComparePanel
             clearEpoch={compareClearEpoch}
             agentId={agentId}
-            chatMode={chatMode}
+            chatMode={effectiveChatMode}
             onChatModeChange={setChatMode}
           />
         </div>
