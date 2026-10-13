@@ -1,6 +1,7 @@
 import { create } from "zustand";
 
 import { safeStringify } from "@/lib/utils";
+import { compatibleCorePatch } from "@/lib/agentCore";
 import {
   searchToolConfig,
   updateAgentInfo,
@@ -16,6 +17,7 @@ import {
 export type AgentDraft = Pick<
   Agent,
   | "name"
+  | "agent_core"
   | "display_name"
   | "description"
   | "author"
@@ -110,6 +112,7 @@ interface AgentStoreState {
 }
 
 const toDraft = (agent: Agent): AgentDraft => ({
+  agent_core: agent.agent_core ?? "smolagents",
   name: agent.name,
   display_name: agent.display_name || "",
   description: agent.description || "",
@@ -274,6 +277,7 @@ const applyQueuedPatches = (
 
 const toAgentPayload = (agentId: number, patch: AgentDraftPatch) => ({
   agent_id: agentId,
+  ...(patch.agent_core !== undefined ? { agent_core: patch.agent_core } : {}),
   ...(patch.name !== undefined ? { name: patch.name } : {}),
   ...(patch.display_name !== undefined
     ? { display_name: patch.display_name }
@@ -576,7 +580,9 @@ export const useAgentStore = create<AgentStoreState>((set) => {
 
     const task: AgentSaveTask = {
       agentId,
-      patch: cloneDraft(patch),
+      patch: cloneDraft(
+        compatibleCorePatch(useAgentStore.getState().editedAgent, patch)
+      ),
       ...options,
     };
     saveQueue = [...saveQueue, task];

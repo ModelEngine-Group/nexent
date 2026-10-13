@@ -172,6 +172,9 @@ function useGuardrailConfigState() {
 export function GuardrailConfigActions() {
   const { t } = useTranslation("common");
   const { config, updateConfig } = useGuardrailConfigState();
+  const disabled = useAgentStore(
+    (state) => state.isReadOnly || state.editedAgent?.agent_core === "jiuwen"
+  );
 
   return (
     <Tooltip
@@ -183,6 +186,7 @@ export function GuardrailConfigActions() {
     >
       <Switch
         checked={config.enabled}
+        disabled={disabled}
         onChange={(enabled) => updateConfig({ ...config, enabled })}
         size="small"
       />

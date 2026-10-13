@@ -556,6 +556,7 @@ export const loadLastToolConfig = async (toolId: number) => {
  * @returns update result
  */
 export interface UpdateAgentInfoPayload {
+  agent_core?: Agent["agent_core"];
   agent_id?: number;
   name?: string;
   display_name?: string;
@@ -1064,6 +1065,8 @@ export const searchAgentInfo = async (
     // convert backend data to frontend format
     const formattedAgent = {
       id: data.agent_id,
+      agent_core: data.agent_core ?? "smolagents",
+      enable_context_manager: data.enable_context_manager ?? true,
       name: data.name,
       display_name: data.display_name,
       description: data.description,

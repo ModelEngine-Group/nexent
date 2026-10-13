@@ -72,7 +72,7 @@ export function CollaborativeAgentList({
       <span
         className={`shrink-0 rounded px-2 py-0.5 text-xs font-medium ${toneClasses.badge}`}
       >
-        {label} · {agents.length}
+        {label} 路 {agents.length}
       </span>
       {agents.map((agent) => (
         <span
@@ -116,7 +116,7 @@ export function CollaborativeAgentActions({
   const updateExternalSubAgentIds = useAgentStore(
     (state) => state.updateExternalSubAgentIds
   );
-  const isReadOnly = useAgentReadOnly();
+  const isReadOnly = useAgentReadOnly() || editedAgent?.agent_core === "jiuwen";
   const { invalidate: invalidateExternalAgents } = useExternalAgents();
   const externalSubAgentIdList = editedAgent?.external_sub_agent_id_list || [];
 
@@ -218,7 +218,7 @@ export default function CollaborativeAgent({
   const updateExternalSubAgentIds = useAgentStore(
     (state) => state.updateExternalSubAgentIds
   );
-  const isReadOnly = useAgentReadOnly();
+  const isReadOnly = useAgentReadOnly() || editedAgent?.agent_core === "jiuwen";
 
   const { availableAgents: internalAgents } = usePublishedAgentList();
   const { availableAgents: externalAgents } = useExternalAgents();
