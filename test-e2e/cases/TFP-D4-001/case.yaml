@@ -19,14 +19,15 @@ case:
   preconditions:
   - A disposable Nexent deployment with this implementation and an approved controlled provider profile is available.
   - A disposable authenticated browser session and a working current sandbox image are available.
+  - The maintained private TFP fixture and runner-owned controlled provider are available for the published test Agent.
   test_data:
     profile: mock
   steps:
   - order: 1
-    action: Open a disposable Agent chat and request a knowledge answer.
+    action: Open a disposable Agent chat and request an approved skill configuration lookup with JSON processing.
     expected: A single tool event and correct final answer appear.
   - order: 2
-    action: Request a task requiring Python and reload the conversation.
+    action: Request Python promotion in a separate owned chat, then reload that conversation and download the report.
     expected: The task completes and history preserves the result without duplicates.
   expected_results:
   - The final answer and artifact are accessible.
@@ -48,3 +49,14 @@ case:
     - name: mock
       required_services:
       - model-provider
+  acceptance:
+  - id: AC-LIVE
+    description: Both real browser runs show their exact final output and one card per actual official tool invocation.
+    steps: [1, 2]
+    expected_results: [1]
+    forbidden_side_effects: [1]
+  - id: AC-HISTORY
+    description: Reload preserves final output, tool cards and downloadable artifact bytes without duplicated or stale results.
+    steps: [2]
+    expected_results: [1, 2]
+    forbidden_side_effects: [1]

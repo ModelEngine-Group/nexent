@@ -19,11 +19,13 @@ case:
   preconditions:
   - A disposable Nexent deployment with this implementation and an approved controlled provider profile is available.
   - The current sandbox image has its sandbox user and a reachable kernel service.
+  - The maintained private TFP fixture declares the disposable runtime, enabled test skill, workspace mount and read-only Langfuse credentials.
+  - The deployment uses session-scoped Docker and has no concurrent sandbox runs during the scoped Docker event observation.
   test_data:
     profile: mock
   steps:
   - order: 1
-    action: Run an approved knowledge query with a controlled model.
+    action: Read the approved official skill configuration and process its JSON with a controlled model.
     expected: No kernel or warm-up appears.
   - order: 2
     action: Run retrieval followed by ordinary Python and a script-produced artifact.
@@ -48,3 +50,18 @@ case:
     - name: real_smoke
       required_services:
       - model-provider
+  acceptance:
+  - id: AC-COLD
+    description: A real official skill lookup and JSON processing complete without Docker creation or warm-up.
+    steps: [1]
+    expected_results: [1]
+    forbidden_side_effects: [1]
+  - id: AC-PROMOTION
+    description: Saved values and JSON aliases survive one Docker activation; subsequent host tools and the generated artifact remain correct.
+    steps: [2]
+    expected_results: [1, 2]
+    forbidden_side_effects: [1]
+  - id: AC-CLEANUP
+    description: Owned conversations, artifact objects and session sandboxes are reclaimed after successful or failed assertions.
+    steps: [1, 2]
+    expected_results: [3]
