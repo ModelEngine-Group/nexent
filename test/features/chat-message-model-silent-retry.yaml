@@ -13,7 +13,7 @@ features:
       - rule_id: CMSR-RULE-014
         description: Rollback removes only the failed attempt and successful code remains visible as raw reasoning until parsing.
       - rule_id: CMSR-RULE-015
-        description: A running step label appears before model output and survives retry rollback, but a terminal label-only card is removed.
+        description: A logical step label precedes model output in the protocol and survives retry rollback; a reasoning card becomes visible only with meaningful reasoning or action content. Pure answer steps never create a label-only card.
       - rule_id: CMSR-RULE-016
         description: Valid semantic protocol-repair attempts stream and persist like other successful attempts, with sanitized lifecycle logs.
       - rule_id: CMSR-RULE-017

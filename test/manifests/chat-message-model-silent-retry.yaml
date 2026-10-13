@@ -13,8 +13,8 @@ cases:
   - case_id: CMSR-D1-002
     stage: D1
     status: implemented
-    contract_hash: sha256:b614502639e969ab0f3840d1381f1b12b01cb5b693a0b02d17387192b230b354
-    implementation_hash: sha256:03f5fae5200c76ca296c75ab0ebf225f190fb3fe6a7f52c7c8c7e0da2a97d07c
+    contract_hash: sha256:7c09f1fc6347723f645417a2e902599af96b8d379fe49a34ec37046cfe72a7de
+    implementation_hash: sha256:c9b6a6369c365c5089ac8c10e1856cc9507b4d068a3c7ea98b12f18e61515978
     implementation:
       - framework: custom
         file: test/automation/d1/test_reasoning_card.ts
@@ -24,7 +24,7 @@ cases:
     stage: D2
     status: implemented
     contract_hash: sha256:9e5d436508638774329620f8bea1420eab531ad470095c935fac5fccc69e894c
-    implementation_hash: sha256:570d7db5b7480c6b3a3a3adcc953158f7c496e44a79e90ad1ca3a4df676d573f
+    implementation_hash: sha256:f8f1bc3e7a01d6ffd739d9fbe695e28533e4c410847a09b6405a7dbd4c2e948a
     implementation:
       - framework: pytest
         file: test/automation/d2/test_model_attempt_sse.py
@@ -41,7 +41,7 @@ cases:
   - case_id: CMSR-D4-001
     stage: D4
     status: blocked
-    contract_hash: sha256:f110f582fe091286fdaa5301f8bdc22703bf583fc7c6c95214ae8c8187a612a1
+    contract_hash: sha256:4dd76b743c92c70095e300d96ea8ffaf7276fad1488c9f16b81c859b35eea7a1
     implementation_hash: sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945
     implementation: []
     required_mock_services: [model-provider]

@@ -30,6 +30,7 @@ import {
   isClarificationFallback,
 } from "@/lib/clarification";
 import { stripAnsiControlSequences } from "@/lib/ansi";
+import { createFinalAnswerProjection } from "@/lib/finalAnswerProjection";
 import { createReasoningAccumulator } from "@/lib/reasoningAccumulator";
 
 import { storageService } from "@/services/storageService";
@@ -488,6 +489,7 @@ export class RemoteConversationHistoryAdapter implements ThreadHistoryAdapter {
         if (text) content.push({ type: "text", text });
       } else {
         const parentReasoning = createReasoningAccumulator(content);
+        const finalAnswers = createFinalAnswerProjection(content);
         // Per-invocation map of currently-open sub-agent runs reconstructed
         // from persisted ``subagent_start`` / ``subagent_end`` units. We do
         // not route inner parts into a separate ``subagent-group`` array;
@@ -976,7 +978,8 @@ export class RemoteConversationHistoryAdapter implements ThreadHistoryAdapter {
                   top.reasoningText = part.content + top.reasoningText;
                 } else {
                   flushReasoning(part.invocation_id);
-                  top.reasoningText = part.content;
+                  top.reasoningText = "";
+                  top.pendingStepLabel = part.content;
                 }
                 top.stepLabel = part.content;
               } else parentReasoning.queueStepLabel(part.content);
@@ -1124,10 +1127,8 @@ export class RemoteConversationHistoryAdapter implements ThreadHistoryAdapter {
           ) {
             flushReasoning(part.invocation_id);
             if (part.content) {
-              const textPart: any = { type: "text", text: part.content };
               const meta = buildMetadata(part.invocation_id);
-              if (meta) textPart.metadata = meta;
-              content.push(textPart);
+              finalAnswers.apply({ ...part, answer_phase: "delta" }, meta);
             }
           }
         }

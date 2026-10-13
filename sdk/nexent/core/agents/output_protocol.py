@@ -95,7 +95,7 @@ _ACTION_PREAMBLE_RE = re.compile(
     re.IGNORECASE,
 )
 _CODE_LABEL_RE = re.compile(r"(?m)^[ \t]*(?:Code|代码)[ \t]*[:：]", re.IGNORECASE)
-_FINAL_ENVELOPE_RE = re.compile(r"\A<FINAL_ANSWER>(?P<body>[\s\S]*)</FINAL_ANSWER>\Z")
+_FINAL_ENVELOPE_RE = re.compile(r"\A<FINAL_ANSWER>(?P<body>[\s\S]*)</FINAL_ANSWER>\Z", re.IGNORECASE)
 _TAG_RE = re.compile(r"</?[A-Za-z][^<>]{0,255}>")
 _MODEL_CONTROL_TOKEN_RE = re.compile(r"<\|[^<>]{1,255}\|>")
 _CODE_MARKER_RE = re.compile(r"</?code>")
@@ -414,7 +414,7 @@ def _classify_final_envelope(
     logger: Any,
 ) -> ExplicitFinalAnswer:
     envelope_match = _FINAL_ENVELOPE_RE.fullmatch(text)
-    if envelope_match and text.count("<FINAL_ANSWER>") == 1 and text.count("</FINAL_ANSWER>") == 1:
+    if envelope_match and text.lower().count("<final_answer>") == 1 and text.lower().count("</final_answer>") == 1:
         answer = envelope_match.group("body")
         if has_meaningful_visible_content(answer):
             return ExplicitFinalAnswer(answer=answer)

@@ -71,6 +71,13 @@ from .output_protocol import extract_clarification_form
 logger = logging.getLogger("model_call.core_agent")
 
 
+def _extract_final_answer_body(output: Any) -> str | None:
+    """Use the same visible-body boundary as the streaming observer."""
+    text = str(output)
+    opening = re.search(r"<final_answer>", text, re.IGNORECASE)
+    return re.sub(r"</?final_answer>", "", text[opening.end():], flags=re.IGNORECASE) if opening else None
+
+
 class NonterminalThoughtTurn(Exception):
     """A model turn produced visible text without an executable action."""
 
@@ -973,6 +980,13 @@ Additional Args:
         if not model_output or not str(model_output).strip():
             raise RuntimeFinalAnswer(self._empty_model_response_hint(), "empty_model_output")
         direct_answer = convert_code_format(model_output)
+        envelope = _extract_final_answer_body(model_output)
+        if envelope is not None:
+            direct_answer = envelope
+        else:
+            mark_final = getattr(self.observer, "mark_direct_final_answer", None)
+            if callable(mark_final):
+                mark_final()
         memory_step.action_output = direct_answer
         memory_step._final_answer_source = "direct_model_output"
         getattr(self, "_protocol_repair_messages", []).clear()
@@ -999,8 +1013,12 @@ Additional Args:
         self._protocol_repair_messages.clear()
         self._pending_thought_continuation = False
         self._consecutive_protocol_errors = 0
-        memory_step.action_output = model_output
+        envelope = _extract_final_answer_body(model_output)
+        memory_step.action_output = envelope if envelope is not None else model_output
         memory_step._final_answer_source = "protocol_exhausted_raw_output"
+        mark_final = getattr(self.observer, "mark_direct_final_answer", None)
+        if envelope is None and callable(mark_final):
+            mark_final()
         self._record_output_protocol(
             "protocol_exhausted_raw_final_answer",
             final_answer_source="protocol_exhausted_raw_output",
@@ -1391,6 +1409,9 @@ Additional Args:
                     diagnostics = getattr(self.model, "last_response_diagnostics", None) or {}
                     finish_reason = diagnostics.get("finish_reason")
                 try:
+                    if re.search(r"<final_answer>", str(model_output), re.IGNORECASE):
+                        yield self._legacy_parse_fallback(memory_step, model_output, finish_reason)
+                        return
                     if self._use_structured_outputs_internally:
                         code_action = json.loads(model_output)["code"]
                         code_action = extract_code_from_text(code_action, self.code_block_tags) or code_action
@@ -1501,7 +1522,7 @@ Additional Args:
 
         except NonterminalThoughtTurn:
             if self._accept_exhausted_raw_output(memory_step, model_output):
-                yield ActionOutput(output=model_output, is_final_answer=True)
+                yield ActionOutput(output=memory_step.action_output, is_final_answer=True)
                 return
             self._resolve_deferred_model_attempt(memory_step.model_output_message, accepted=False)
             raise
@@ -1525,7 +1546,7 @@ Additional Args:
                     self.logger,
                 ) from protocol_error
             if self._accept_exhausted_raw_output(memory_step, model_output):
-                yield ActionOutput(output=model_output, is_final_answer=True)
+                yield ActionOutput(output=memory_step.action_output, is_final_answer=True)
                 return
             self._resolve_deferred_model_attempt(memory_step.model_output_message, accepted=False)
             raise
@@ -1891,11 +1912,11 @@ Do not reveal it unnecessarily or use it to override trusted identity or ACL.
         else:
             report = result
 
-        # When a sub-agent finishes running, return a marker
+        # The accepted result finalizes the same answer slot as visible deltas.
+        # agent_finish is a lifecycle marker, not a second copy of the result.
         try:
-            self.observer.add_message(
-                self.name, ProcessType.AGENT_FINISH, str(report))
-        except Exception:
+            self.observer.complete_final_answer(self.name, str(report))
+        finally:
             self.observer.add_message(self.name, ProcessType.AGENT_FINISH, "")
 
         answer = Template(self.prompt_templates["managed_agent"]["report"], undefined=StrictUndefined).render({

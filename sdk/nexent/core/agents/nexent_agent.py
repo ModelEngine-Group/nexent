@@ -1261,8 +1261,7 @@ class NexentAgent:
                     )
                     final_answer_for_trace = final_answer_str
                     monitoring_manager.set_openinference_output(final_answer_str)
-                    observer.add_message(self.agent.agent_name,
-                                         ProcessType.FINAL_ANSWER, final_answer_str)
+                    observer.complete_final_answer(self.agent.agent_name, final_answer_str)
 
                     # Check if we need to stop from external stop_event
                     if self.agent.stop_event.is_set():

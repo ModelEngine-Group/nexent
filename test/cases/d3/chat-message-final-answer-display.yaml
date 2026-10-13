@@ -1,0 +1,59 @@
+schema_version: '1.0'
+stage: D3
+module: CHAT-MESSAGE
+cases:
+- case_id: FAF-D3-001
+  feature_id: FAF-001
+  requirement_ids:
+  - FAF-001
+  business_rule_ids:
+  - FAF-RULE-001
+  title: Final answer classification and display
+  type: AGENT-IT
+  priority: P1
+  status: active
+  automation: automated
+  objective: Verify the approved final answer display contract at the declared stage.
+  preconditions:
+  - Local deployment running this branch, authenticated test tenant and configured
+    real model.
+  test_data:
+    profile: real_smoke
+    sequences:
+    - mixed step
+    - pure final-answer step
+    - subagent
+  steps:
+  - order: 1
+    action: Run mixed reasoning and final-answer envelope output.
+    expected: Thinking prefix remains; final answer occurs once outside reasoning.
+  - order: 2
+    action: Run a step beginning with the final-answer opening tag.
+    expected: No reasoning card and no persisted step marker.
+  - order: 3
+    action: Run a subagent final answer and reload persisted history.
+    expected: Answer remains once in its owning result area; sibling reasoning remains
+      intact.
+  expected_results:
+  - Tag-free unique answer outside reasoning.
+  - Pure answer step has no empty reasoning card.
+  - Sibling and attempt attribution preserved.
+  forbidden_side_effects:
+  - No duplicate answer.
+  - No sibling deletion.
+  - No failed answer persisted.
+  integration_boundary:
+  - Agent observer
+  - SSE stream
+  - PostgreSQL
+  observations:
+  - Answer appears once in the owning invocation.
+  - Persisted pure answer step has no marker.
+  cleanup:
+  - Retain named run-owned fixtures and evidence for review; later cleanup affects
+    only those fixtures.
+  execution:
+    profiles:
+    - name: real_smoke
+      required_services:
+      - model-provider

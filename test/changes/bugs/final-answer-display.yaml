@@ -1,0 +1,41 @@
+schema_version: '1.0'
+changes:
+- change_id: FAF-BUG-001
+  change_type: bugfix
+  bug_id: FAF-BUG-001
+  title: Final answer envelope leaks into reasoning and repeats
+  description: Classify final-answer roles in the SDK, resolve completion once and
+    project lazy reasoning with scoped answers.
+  observed_behavior: Answer envelope remains in reasoning; terminal answer repeats;
+    pure answer creates empty step.
+  expected_behavior: Unique tag-free answer outside reasoning; pure answer marker
+    removed.
+  escaped_stage: production
+  coverage_gap:
+    type: missing_boundary
+    description: Missing envelope-to-message-unit and frontend invocation projection
+      assertions.
+  feature_contract_changed: true
+  affected_features:
+    existing:
+    - CMSR-005
+    added:
+    - FAF-001
+    modified:
+    - CMSR-005
+    retired: []
+  affected_cases:
+    existing:
+    - CMSR-D1-002
+    - CMSR-D4-001
+    added:
+    - FAF-D1-001
+    - FAF-D1-002
+    - FAF-D2-001
+    - FAF-D3-001
+    - FAF-D4-001
+    - FAF-D5-001
+    modified:
+    - CMSR-D1-002
+    - CMSR-D4-001
+    retired: []
