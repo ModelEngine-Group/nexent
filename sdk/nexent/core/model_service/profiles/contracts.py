@@ -170,3 +170,66 @@ class InstructionMappingDefinition(ProfileContract):
         if not set(self.mappings.model_dump().values()) <= set(self.supported_roles):
             raise ValueError("All semantic roles require supported targets")
         return self
+
+
+class CapabilityFlag(ProfileContract):
+    """Missing capability evidence stays unknown."""
+
+    status: SupportStatus = "unknown"
+
+
+class ToolCapabilities(ProfileContract):
+    """Native tool support and explicit registered format/constraint contracts."""
+
+    status: SupportStatus = "unknown"
+    schema_constraints: VersionedReference | None = None
+    result_format: NonBlankString | None = None
+
+
+class SamplingCapabilities(ProfileContract):
+    """Source temperature support is not a configured numeric temperature."""
+
+    temperature: CapabilityFlag = Field(default_factory=CapabilityFlag)
+
+
+class ModalityCapabilities(ProfileContract):
+    input: list[NonBlankString] | None = None
+    output: list[NonBlankString] | None = None
+
+    @model_validator(mode="after")
+    def validate_unique_modalities(self) -> Self:
+        for values in (self.input, self.output):
+            if values is not None and len(set(values)) != len(values):
+                raise ValueError("Modalities must be unique")
+        return self
+
+
+class ResponseCapabilities(ProfileContract):
+    supported_finish_reasons: list[NonBlankString] | None = None
+    stream_format: NonBlankString | None = None
+
+    @model_validator(mode="after")
+    def validate_finish_reasons(self) -> Self:
+        if self.supported_finish_reasons is not None:
+            if len(set(self.supported_finish_reasons)) != len(self.supported_finish_reasons):
+                raise ValueError("Finish reasons must be unique")
+        return self
+
+
+class UsageCapabilities(ProfileContract):
+    semantics_id: NonBlankString | None = None
+    input_includes_cached: SupportStatus = "unknown"
+    output_includes_reasoning: SupportStatus = "unknown"
+
+
+class ProfileCapabilities(ProfileContract):
+    """Strict complete groups; unknown controls never become invented defaults."""
+
+    context: ContextCapabilities = Field(default_factory=ContextCapabilities)
+    reasoning: ReasoningCapabilities = Field(default_factory=ReasoningCapabilities)
+    tools: ToolCapabilities = Field(default_factory=ToolCapabilities)
+    sampling: SamplingCapabilities = Field(default_factory=SamplingCapabilities)
+    structured_output: CapabilityFlag = Field(default_factory=CapabilityFlag)
+    modalities: ModalityCapabilities = Field(default_factory=ModalityCapabilities)
+    response: ResponseCapabilities = Field(default_factory=ResponseCapabilities)
+    usage: UsageCapabilities = Field(default_factory=UsageCapabilities)
