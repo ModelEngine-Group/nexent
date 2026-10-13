@@ -52,7 +52,7 @@ class EffortControl(ProfileContract):
 
     mode: Literal["effort"] = "effort"
     parameter_key: Literal["reasoning_effort"] = "reasoning_effort"
-    values: list[NonBlankString] = Field(min_length=1)
+    values: list[NonBlankString | None] = Field(min_length=1)
 
     @model_validator(mode="after")
     def validate_values(self) -> Self:

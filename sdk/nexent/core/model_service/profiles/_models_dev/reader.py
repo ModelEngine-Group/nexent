@@ -92,10 +92,21 @@ def _key(entry: SourceEntry) -> str:
     raise SourceReadError("SOURCE_KIND_PATH_MISMATCH", entry.path, entry.kind)
 
 
-def read_sources(root: Path) -> tuple[SourceDocument, ...]:
+@dataclass(frozen=True)
+class SourceInventory:
+    """Metadata from the same manifest bytes used to validate source documents."""
+
+    upstream_revision: str
+    source_schema_ref: str
+    manifest_sha256: str
+    documents: tuple[SourceDocument, ...]
+
+
+def read_inventory(root: Path) -> SourceInventory:
     """Fail the whole inventory on errors; do not expose a partial catalog."""
     root = root.resolve()
-    raw_manifest = _parse(_read(root, "manifest.toml", "manifest"), "manifest.toml", "manifest")
+    manifest_bytes = _read(root, "manifest.toml", "manifest")
+    raw_manifest = _parse(manifest_bytes, "manifest.toml", "manifest")
     try:
         manifest = SourceManifest.model_validate(raw_manifest)
         if len(manifest.upstream_revision) != 40 or any(
@@ -131,4 +142,14 @@ def read_sources(root: Path) -> tuple[SourceDocument, ...]:
             raise SourceReadError("SOURCE_DIGEST_MISMATCH", entry.path, entry.kind)
         parsed = _parse(data, entry.path, entry.kind)
         documents.append(SourceDocument(entry.kind, key, entry.path, entry.content_sha256, _freeze(parsed)))
-    return tuple(documents)
+    return SourceInventory(
+        manifest.upstream_revision,
+        manifest.source_schema_ref,
+        hashlib.sha256(manifest_bytes).hexdigest(),
+        tuple(documents),
+    )
+
+
+def read_sources(root: Path) -> tuple[SourceDocument, ...]:
+    """Return complete authored documents without changing the existing interface."""
+    return read_inventory(root).documents

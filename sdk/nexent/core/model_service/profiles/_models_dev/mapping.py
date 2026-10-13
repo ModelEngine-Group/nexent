@@ -65,44 +65,68 @@ def _error(category: str, file_path: str, kind: str, path: str = "") -> SourceRe
 def load_mapping_rules(path: Path) -> SourceMappingRegistry:
     """Load the explicitly selected local registry; unknown rules fail closed."""
     try:
-        raw = tomllib.loads(path.read_text(encoding="utf-8"))
+        data = path.read_bytes()
+    except OSError:
+        raise _error("SOURCE_MAPPING_INVALID", path.name, "mapping") from None
+    return parse_mapping_rules(data, path.name)
+
+
+def parse_mapping_rules(data: bytes, file_path: str) -> SourceMappingRegistry:
+    """Parse a captured rule snapshot; revision hashing uses these same bytes."""
+    try:
+        raw = tomllib.loads(data.decode("utf-8"))
         if isinstance(raw.get("rules"), list):
             raw["rules"] = tuple(raw["rules"])
         registry = SourceMappingRegistry.model_validate(raw)
-    except (OSError, UnicodeDecodeError, tomllib.TOMLDecodeError, ValidationError):
-        raise _error("SOURCE_MAPPING_INVALID", path.name, "mapping") from None
+    except (UnicodeDecodeError, tomllib.TOMLDecodeError, ValidationError):
+        raise _error("SOURCE_MAPPING_INVALID", file_path, "mapping") from None
     identities = set()
     rule_ids = set()
     targets = set()
     for rule in registry.rules:
         identity = (rule.source_kind, rule.source_path)
         if identity in identities or rule.rule_id in rule_ids:
-            raise _error("SOURCE_MAPPING_DUPLICATE", path.name, "mapping", rule.source_path)
+            raise _error("SOURCE_MAPPING_DUPLICATE", file_path, "mapping", rule.source_path)
         identities.add(identity)
         rule_ids.add(rule.rule_id)
         target_identity = (rule.source_kind, rule.target_path)
         if target_identity in targets:
-            raise _error("SOURCE_TARGET_CONFLICT", path.name, "mapping", rule.source_path)
+            raise _error("SOURCE_TARGET_CONFLICT", file_path, "mapping", rule.source_path)
         targets.add(target_identity)
         if (
-            not rule.target_path.startswith("/")
+            not re.fullmatch(
+                r"/[a-zA-Z_][a-zA-Z0-9_]*(?:\[\])?(?:/[a-zA-Z_][a-zA-Z0-9_]*(?:\[\])?)*", rule.target_path
+            )
             or not re.fullmatch(
                 r"[a-zA-Z_][a-zA-Z0-9_]*(?:\[\])?(?:\.[a-zA-Z_][a-zA-Z0-9_]*(?:\[\])?)*", rule.source_path
             )
             or rule.source_path.count("[]") != rule.target_path.count("[]")
         ):
-            raise _error("SOURCE_MAPPING_INVALID", path.name, "mapping", rule.source_path)
+            raise _error("SOURCE_MAPPING_INVALID", file_path, "mapping", rule.source_path)
         if (rule.transform_ref == "boolean_capability_v1" and rule.source_type != "boolean") or (
             rule.transform_ref == "zero_unknown_tokens_v1" and rule.source_type != "integer"
         ):
-            raise _error("SOURCE_MAPPING_INVALID", path.name, "mapping", rule.source_path)
+            raise _error("SOURCE_MAPPING_INVALID", file_path, "mapping", rule.source_path)
         expected_policy = {
             "identity_v1": "preserve",
             "boolean_capability_v1": "strict_boolean",
             "zero_unknown_tokens_v1": "zero_is_unknown",
         }[rule.transform_ref]
         if rule.special_value_policy != expected_policy:
-            raise _error("SOURCE_MAPPING_INVALID", path.name, "mapping", rule.source_path)
+            raise _error("SOURCE_MAPPING_INVALID", file_path, "mapping", rule.source_path)
+    for parent in registry.rules:
+        if parent.source_type in ("object", "array"):
+            continue
+        for child in registry.rules:
+            if (
+                parent.source_kind == "provider_model"
+                and parent.source_path == "interleaved"
+                and child.source_kind == parent.source_kind
+                and child.source_path == "interleaved.field"
+            ):
+                continue
+            if child.source_kind == parent.source_kind and child.target_path.startswith(parent.target_path + "/"):
+                raise _error("SOURCE_TARGET_CONFLICT", file_path, "mapping", child.source_path)
     return registry
 
 

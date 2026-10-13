@@ -30,7 +30,7 @@ case:
     action: Change a declared source value in a temporary catalog and update only its manifest digest; then change a mapping rule in a separate temporary catalog.
     expected: Each valid source or rule change changes the catalog revision and the affected normalized value or mapping provenance; the original catalog remains unchanged.
   - order: 3
-    action: Introduce an unhandled field, invalid inherited model reference or incompatible rule version in controlled copies and load each through the same component.
+    action: Introduce an unhandled field, invalid inherited model reference incompatible rule version or unregistered upstream version in controlled copies and load each through the same component.
     expected: Each full load fails with an explicit sanitized source diagnostic; no partial catalog is returned and a previously loaded catalog remains usable.
   expected_results:
   - The complete pinned inventory is normalized through real reader, schema validation, inheritance and mapping collaboration.

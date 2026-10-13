@@ -210,3 +210,11 @@ def test_reasoning_budget_keeps_declared_sentinel_and_known_zero_separate():
     assert control.min is None
     assert control.max == 0
     assert control.special_values == [-1]
+
+
+def test_effort_null_sentinel_is_an_explicit_value_not_absent_control():
+    control = EffortControl(values=["none", None, "default"])
+    restored = EffortControl.model_validate_json(control.model_dump_json())
+    assert restored.values == ["none", None, "default"]
+    with pytest.raises(ValueError):
+        EffortControl(values=[None, None])

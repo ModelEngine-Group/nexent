@@ -38,6 +38,8 @@ change:
       sanitized source paths. Raw base-model overrides allow partial objects; effective
       provider-model validation requires the inherited mandatory fields and reasoning
       cross-field constraints.
+    - Explicit effort null sentinels remain declared values; catalog tree materialization
+      preserves array/object/null distinctions and immutable normalized snapshots.
     - Versioned mapping rules reject duplicate source identities, unknown transforms
       and incompatible versions; source capabilities preserve unknown, false and zero
       separately from request bindings. Each handled leaf retains mapping and source
@@ -49,5 +51,6 @@ change:
     - test/sdk/core/model_service/test_source_inheritance.py
     - test/sdk/core/model_service/test_source_validation.py
     - test/sdk/core/model_service/test_source_mapping.py
+    - test/sdk/core/model_service/test_catalog_normalization.py
   notes: AC-01/02 subset remains pending as a whole. This change does not infer provider
     API behavior or modify a saved outlet.

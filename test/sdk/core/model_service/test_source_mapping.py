@@ -198,3 +198,19 @@ def test_empty_reference_arrays_and_text_benchmark_scores_remain_reference_data(
     assert result.values["/reference_metadata/links"] == ()
     assert result.values["/reference_metadata/benchmarks/0/score"] == "pass"
     assert result.values["/reasoning/status"] == "unknown"
+
+
+def test_scalar_target_cannot_own_a_descendant_field(tmp_path):
+    path = tmp_path / "mapping.toml"
+    path.write_text(
+        RULE_PATH.read_text().replace(
+            'target_path = "/identity/name"', 'target_path = "/identity"', 1
+        )
+    )
+    with pytest.raises(SourceReadError, match="SOURCE_TARGET_CONFLICT"):
+        load_mapping_rules(path)
+
+
+def test_missing_rule_file_is_an_explicit_mapping_error(tmp_path):
+    with pytest.raises(SourceReadError, match="SOURCE_MAPPING_INVALID"):
+        load_mapping_rules(tmp_path / "missing.toml")
