@@ -16,7 +16,11 @@ from nexent.core.model_service.profiles.contracts import (
 )
 from nexent.core.model_service.profiles.instruction_mapping import InstructionMappingError, resolve_instruction_mapping
 from nexent.core.model_service.profiles.parameter_rules import ParameterRule, compile_parameter_rules
-from nexent.core.model_service.profiles.parameter_schema import ParameterValidationError
+from nexent.core.model_service.profiles.parameter_schema import (
+    ParameterValidationError,
+    compile_parameter_schema,
+    validate_parameter_value,
+)
 from nexent.core.model_service.profiles.resolver import SourceCatalog, _revision
 
 
@@ -148,6 +152,10 @@ def load_supplements(root: Path, sources: SourceCatalog) -> SupplementCatalog:
         digest = hashlib.sha256(data).hexdigest()
         if digest != declared.content_sha256:
             raise SupplementReadError("SUPPLEMENT_HASH_MISMATCH", path)
+        try:
+            validate_parameter_value(compile_parameter_schema({}), authored)
+        except ParameterValidationError as error:
+            raise SupplementReadError("SUPPLEMENT_RULE_INVALID", path, error.path) from None
         try:
             rule = SupplementRule.model_validate(authored)
             # Conditions can refer to parameters in another participating atom.

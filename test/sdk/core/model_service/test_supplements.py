@@ -269,3 +269,17 @@ def test_diagnostics_identify_fields_without_echoing_values(tmp_path, sources):
         load_supplements(tmp_path, sources)
     assert captured.value.field_path == "instruction_mapping"
     assert "secret" not in str(captured.value)
+
+
+@pytest.mark.parametrize("value", ["nan", "inf", "-inf"])
+def test_capability_override_values_must_be_finite_json(tmp_path, sources, value):
+    override = f'''\n[[capability_overrides]]
+path = "/context/combined_window"
+value = {value}
+reason = "test"
+evidence = "test"
+'''
+    write_rule(tmp_path, MODEL_RULE + override)
+    with pytest.raises(SupplementReadError, match="SUPPLEMENT_RULE_INVALID") as captured:
+        load_supplements(tmp_path, sources)
+    assert captured.value.field_path == "/capability_overrides/0/value"
