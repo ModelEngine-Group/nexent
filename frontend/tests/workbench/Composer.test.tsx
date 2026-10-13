@@ -1,14 +1,61 @@
 import { cloneElement, type ReactElement, type ReactNode } from "react";
-import { expect, it, vi } from "vitest";
-import { render, screen, within } from "@testing-library/react";
+import { beforeEach, expect, it, vi } from "vitest";
+import {
+  render as renderComponent,
+  screen,
+  within,
+} from "@testing-library/react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import userEvent from "@testing-library/user-event";
 import { Composer } from "@/app/newchat/assistant-ui/composer";
+
+vi.mock("next/navigation", () => ({
+  useRouter: () => ({ push: vi.fn() }),
+  useParams: () => ({ locale: "zh" }),
+}));
+vi.mock("@/components/providers/deploymentProvider", () => ({
+  useDeployment: () => ({
+    enableAidpKnowledge: false,
+    isDeploymentReady: true,
+  }),
+}));
+vi.mock("@/hooks/chat/useComposerResources", () => ({
+  useComposerKnowledgeBases: () => ({ data: [], isLoading: false }),
+  useComposerSkills: () => ({ data: [], isLoading: false }),
+}));
+vi.mock("@/hooks/agent/useToolList", () => ({
+  useToolList: () => ({
+    isLoading: false,
+    availableTools: [
+      {
+        name: "knowledge_base_search",
+        initParams: [{ name: "top_k", type: "number", value: 5 }],
+      },
+    ],
+  }),
+}));
+
+function render(ui: ReactElement) {
+  const queryClient = new QueryClient({
+    defaultOptions: { queries: { retry: false } },
+  });
+  return renderComponent(ui, {
+    wrapper: ({ children }) => (
+      <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
+    ),
+  });
+}
 
 const runtime = vi.hoisted(() => ({
   thread: { isRunning: false, messages: [] },
   composer: { text: "question", dictation: false, attachments: [] },
   cancel: vi.fn(),
 }));
+beforeEach(() => {
+  runtime.thread.isRunning = false;
+  runtime.composer.text = "question";
+  runtime.cancel.mockReset();
+});
 vi.mock("@assistant-ui/react", () => {
   const Wrapper = ({ children }: { children: ReactNode }) => <>{children}</>;
   return {
@@ -28,6 +75,7 @@ vi.mock("@assistant-ui/react", () => {
     ComposerPrimitive: {
       Root: Wrapper,
       Unstable_TriggerPopoverRoot: Wrapper,
+      AddAttachment: Wrapper,
       Input: () => (
         <textarea aria-label="正文" defaultValue={runtime.composer.text} />
       ),
@@ -174,9 +222,9 @@ it("UT-FE-WB-014 composer keeps resources between text and ordered toolbar", asy
   expect(
     screen.getByRole("button", { name: "chat.composer.send" })
   ).toBeEnabled();
-  const agentButton = mode.previousElementSibling;
-  expect(agentButton?.tagName).toBe("BUTTON");
-  await userEvent.click(agentButton as HTMLButtonElement);
+  await userEvent.click(
+    screen.getByRole("button", { name: "Agent · Agent A" })
+  );
   expect(onSelectAgent).toHaveBeenCalledOnce();
   await userEvent.click(mode);
   const choices = within(screen.getByRole("dialog"));
@@ -239,4 +287,87 @@ it("UT-FE-WB-004 stop remains reachable while running and input recovers when id
   expect(
     screen.getByRole("button", { name: "chat.composer.send" })
   ).toBeEnabled();
+});
+
+it("retrieval configuration stays a draft until the composer confirms it", async () => {
+  const scope = {
+    schema_version: 1 as const,
+    local: { mode: "override" as const, knowledge_ids: ["1", "2"] },
+    aidp: { mode: "disabled" as const, kds_ids: [] },
+    retrieval_config: { top_k: 6 },
+  };
+  const save = vi.fn().mockResolvedValue(undefined);
+  render(
+    <Composer
+      {...base}
+      newChatDesign
+      knowledgeScope={scope}
+      onKnowledgeScopeChange={save}
+    />
+  );
+  await userEvent.click(
+    screen.getByRole("button", { name: "chat.composer.plus" })
+  );
+  await userEvent.click(
+    screen.getByRole("button", { name: "chat.composer.knowledge" })
+  );
+  await userEvent.click(
+    screen.getByRole("button", { name: "agent.knowledge.button.configure" })
+  );
+  const dialog = within(
+    screen.getByRole("dialog", { name: "agent.knowledge.configModal.title" })
+  );
+  const input = dialog.getByRole("spinbutton");
+  expect(input).toHaveValue("6");
+  await userEvent.tripleClick(input);
+  await userEvent.keyboard("8");
+  expect(save).not.toHaveBeenCalled();
+  expect(scope.retrieval_config).toEqual({ top_k: 6 });
+  await userEvent.click(dialog.getByRole("button", { name: "common.confirm" }));
+  expect(save).toHaveBeenCalledExactlyOnceWith({
+    ...scope,
+    retrieval_config: { top_k: 8 },
+  });
+  expect(scope.retrieval_config).toEqual({ top_k: 6 });
+});
+
+it("canceling retrieval configuration discards edits before reopening", async () => {
+  const scope = {
+    schema_version: 1 as const,
+    local: { mode: "override" as const, knowledge_ids: ["1"] },
+    aidp: { mode: "disabled" as const, kds_ids: [] },
+    retrieval_config: { top_k: 6 },
+  };
+  const save = vi.fn();
+  render(
+    <Composer
+      {...base}
+      newChatDesign
+      knowledgeScope={scope}
+      onKnowledgeScopeChange={save}
+    />
+  );
+  const openConfig = async () => {
+    await userEvent.click(
+      screen.getByRole("button", { name: "chat.composer.plus" })
+    );
+    await userEvent.click(
+      screen.getByRole("button", { name: "chat.composer.knowledge" })
+    );
+    await userEvent.click(
+      screen.getByRole("button", { name: "agent.knowledge.button.configure" })
+    );
+    return within(
+      screen.getByRole("dialog", { name: "agent.knowledge.configModal.title" })
+    );
+  };
+  const dialog = await openConfig();
+  await userEvent.tripleClick(dialog.getByRole("spinbutton"));
+  await userEvent.keyboard("8");
+  await userEvent.click(dialog.getByRole("button", { name: "common.cancel" }));
+  expect(save).not.toHaveBeenCalled();
+  expect(scope.retrieval_config).toEqual({ top_k: 6 });
+  const reopened = await openConfig();
+  expect(reopened.getByRole("spinbutton")).toHaveValue("6");
+  expect(save).not.toHaveBeenCalled();
 });
