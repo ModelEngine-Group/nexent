@@ -41,7 +41,6 @@ import {
 import { useAidpGroupOptions } from "@/ext_components/aidp/shared/hooks/useAidpGroupOptions";
 import { usePermission } from "@/hooks/permission/usePermission";
 import { getAidpErrorMessage } from "@/ext_components/aidp/shared/utils/aidpErrorUtils";
-import { Can } from "@/components/permission/Can";
 import { AIDP_MIN_COLUMN_WIDTH } from "@/ext_components/aidp/pages/knowledge-list/utils/aidpKnowledgeColumnWidths";
 import AidpResizableTitle, {
   type AidpResizableTitleProps,
@@ -136,6 +135,10 @@ const AidpKnowledgeList: React.FC<AidpKnowledgeListProps> = ({
     kb.resource_status === "UNAVAILABLE" || kb.resource_status === "ORPHANED";
   const canModify = (kb: AidpKnowledgeBaseItem) =>
     kb.permission === "EDIT" && !isRowUnavailable(kb);
+  // Deletion stays available for unavailable rows: it is the only way to
+  // clean up KBs whose AIDP side is already gone or unreachable.
+  const canDeleteRow = (kb: AidpKnowledgeBaseItem) =>
+    kb.permission === "EDIT" && can("kb:delete");
 
   const getGroupNames = (ids: number[] | undefined) =>
     Array.isArray(ids)
@@ -219,33 +222,41 @@ const AidpKnowledgeList: React.FC<AidpKnowledgeListProps> = ({
     );
   };
 
-  const menuFor = (kb: AidpKnowledgeBaseItem): MenuProps => ({
-    items: [
-      {
-        key: "import",
-        icon: <FileAddOutlined />,
-        label: t("aidpKnowledge.importFile"),
+  const menuFor = (kb: AidpKnowledgeBaseItem): MenuProps => {
+    const showImport = canModify(kb);
+    const showDelete = canDeleteRow(kb);
+    return {
+      items: [
+        ...(showImport
+          ? [
+              {
+                key: "import",
+                icon: <FileAddOutlined />,
+                label: t("aidpKnowledge.importFile"),
+              },
+            ]
+          : []),
+        ...(showDelete
+          ? [
+              ...(showImport ? [{ type: "divider" as const }] : []),
+              {
+                key: "delete",
+                icon: <Trash2 className="h-3.5 w-3.5" />,
+                label: t("common.delete"),
+              },
+            ]
+          : []),
+      ],
+      onClick: ({ key, domEvent }) => {
+        domEvent.stopPropagation();
+        if (key === "import") onImport(kb);
+        if (key === "delete") onDelete(kb);
       },
-      ...(can("kb:delete")
-        ? [
-            { type: "divider" as const },
-            {
-              key: "delete",
-              icon: <Trash2 className="h-3.5 w-3.5" />,
-              label: t("common.delete"),
-            },
-          ]
-        : []),
-    ],
-    onClick: ({ key, domEvent }) => {
-      domEvent.stopPropagation();
-      if (key === "import") onImport(kb);
-      if (key === "delete") onDelete(kb);
-    },
-  });
+    };
+  };
 
   const renderMoreMenu = (kb: AidpKnowledgeBaseItem) =>
-    canModify(kb) ? (
+    canModify(kb) || canDeleteRow(kb) ? (
       <Dropdown menu={menuFor(kb)} trigger={["click"]}>
         <Button
           type="text"
@@ -411,23 +422,25 @@ const AidpKnowledgeList: React.FC<AidpKnowledgeListProps> = ({
         fixed: "right",
         align: "left",
         render: (_value, kb) =>
-          canModify(kb) ? (
+          canModify(kb) || canDeleteRow(kb) ? (
             columnWidths.actions < 144 ? (
               renderMoreMenu(kb)
             ) : (
               <div className={styles.tableActions}>
-                <Button
-                  type="link"
-                  size="small"
-                  className="px-1"
-                  onClick={(event) => {
-                    event.stopPropagation();
-                    onImport(kb);
-                  }}
-                >
-                  {t("aidpKnowledge.importFile")}
-                </Button>
-                <Can permission="kb:delete">
+                {canModify(kb) && (
+                  <Button
+                    type="link"
+                    size="small"
+                    className="px-1"
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      onImport(kb);
+                    }}
+                  >
+                    {t("aidpKnowledge.importFile")}
+                  </Button>
+                )}
+                {canDeleteRow(kb) && (
                   <Button
                     type="link"
                     size="small"
@@ -439,7 +452,7 @@ const AidpKnowledgeList: React.FC<AidpKnowledgeListProps> = ({
                   >
                     {t("common.delete")}
                   </Button>
-                </Can>
+                )}
               </div>
             )
           ) : null,

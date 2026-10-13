@@ -850,7 +850,6 @@ def count_aidp_kbs_impl(server_url: str, api_key: str) -> int:
         )
 
 
-_GRAPH_DOMAINS = {"医疗", "金融", "常规", "法律法规"}
 _GRAPH_PROMPT_LANGUAGES = {"中文", "英文"}
 _GRAPH_CONFIG_FIELDS = frozenset(
     {
@@ -873,10 +872,13 @@ _GRAPH_PROMPT_MAX_CHARS = 4096
 def _serialize_graph_config(config: Dict[str, Any]) -> str:
     """Validate a structured graph configuration and serialize it for AIDP.
 
-    Only documented keys and canonical UI values are accepted. Unknown or
-    legacy values are rejected, and out-of-range values are not clamped. The
-    result is the JSON string AIDP expects in
-    ``graph_config``; the frontend never builds that string itself.
+    Only documented keys are accepted, and out-of-range values are not
+    clamped. Domain validity is deliberately NOT enforced here: the frontend
+    sources domain choices from the live AIDP graph template, so a fixed
+    backend whitelist would reject newly added AIDP domains. AIDP remains
+    the authority on whether a domain is supported. The result is the JSON
+    string AIDP expects in ``graph_config``; the frontend never builds that
+    string itself.
     """
     unsupported_fields = set(config).difference(_GRAPH_CONFIG_FIELDS)
     if unsupported_fields:
@@ -887,12 +889,10 @@ def _serialize_graph_config(config: Dict[str, Any]) -> str:
         )
 
     domain = config.get("domain")
-    if not isinstance(domain, str):
-        raise AppException(ErrorCode.COMMON_PARAMETER_INVALID, "Graph domain must be a string")
-    if domain not in _GRAPH_DOMAINS:
+    if not isinstance(domain, str) or not domain.strip():
         raise AppException(
             ErrorCode.COMMON_PARAMETER_INVALID,
-            f"Unsupported graph domain: {domain}",
+            "Graph domain must be a non-empty string",
         )
 
     prompt_language = config.get("prompt_language")
@@ -1193,7 +1193,12 @@ def delete_aidp_kb_impl(
     api_key: str,
     kds_id: str,
 ) -> bool:
-    """Delete a knowledge base via AIDP API."""
+    """Delete a knowledge base via AIDP API.
+
+    A 404 response means the KB is already gone upstream (orphan cleanup),
+    which satisfies the delete intent: report success so the caller proceeds
+    with local permission cleanup instead of failing the whole operation.
+    """
     normalized_url = _validate_params(server_url, api_key)
 
     headers = {
@@ -1236,6 +1241,13 @@ def delete_aidp_kb_impl(
                 ErrorCode.AIDP_RATE_LIMIT,
                 f"AIDP rate limit exceeded: {str(e)}",
             )
+        if e.response.status_code == 404:
+            logger.warning(
+                "AIDP knowledge base %s already absent upstream (404); "
+                "treating delete as success",
+                kds_id,
+            )
+            return True
         raise AppException(
             ErrorCode.AIDP_SERVICE_ERROR,
             f"AIDP API HTTP error {e.response.status_code}: {str(e)}",

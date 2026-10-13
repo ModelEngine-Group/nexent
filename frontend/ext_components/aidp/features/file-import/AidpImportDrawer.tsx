@@ -276,18 +276,26 @@ const AidpImportDrawer: React.FC<AidpImportDrawerProps> = ({
     }
 
     const nextRows = [...rowsRef.current];
-    const knownFiles = new Set(
-      nextRows.map(
-        ({ file }) => `${file.name}\u0000${file.size}\u0000${file.lastModified}`
-      )
+    // Only rows still awaiting upload claim a file name. Finished rows must
+    // not block uploading a new same-name version in a later batch.
+    const claimedNames = new Set(
+      nextRows
+        .filter((row) => row.status === "pending" || row.status === "uploading")
+        .map(({ file }) => file.name)
     );
-    let duplicateCount = 0;
     let overLimitCount = 0;
 
     for (const file of selectedFiles) {
-      const key = `${file.name}\u0000${file.size}\u0000${file.lastModified}`;
-      if (knownFiles.has(key)) {
-        duplicateCount += 1;
+      if (claimedNames.has(file.name)) {
+        // Upload responses match rows by file name only, so a batch cannot
+        // contain two same-name files: keep the first, fail the rest.
+        nextRows.push({
+          id: nextIdRef.current++,
+          file,
+          status: "failed",
+          progress: 0,
+          error: t("aidpKnowledge.uploadFileDuplicate"),
+        });
         continue;
       }
       if (nextRows.length >= AIDP_MAX_UPLOAD_FILE_COUNT) {
@@ -295,7 +303,6 @@ const AidpImportDrawer: React.FC<AidpImportDrawerProps> = ({
         continue;
       }
 
-      knownFiles.add(key);
       const validation = validateAidpFiles([file]);
       let error: string | undefined;
       if (validation.invalidType.length > 0) {
@@ -307,6 +314,7 @@ const AidpImportDrawer: React.FC<AidpImportDrawerProps> = ({
         });
       }
 
+      if (!error) claimedNames.add(file.name);
       nextRows.push({
         id: nextIdRef.current++,
         file,
@@ -318,9 +326,6 @@ const AidpImportDrawer: React.FC<AidpImportDrawerProps> = ({
 
     replaceRows(nextRows);
     void uploadPendingFiles();
-    if (duplicateCount > 0) {
-      message.info(t("aidpKnowledge.importDuplicateSelection"));
-    }
     if (overLimitCount > 0) {
       message.error(
         t("aidpKnowledge.tooManyFiles", {

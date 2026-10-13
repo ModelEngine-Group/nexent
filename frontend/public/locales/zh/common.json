@@ -4007,6 +4007,7 @@
   "aidpKnowledge.uploadPartial": "{{success}} 个上传成功，{{failed}} 个失败",
   "aidpKnowledge.uploadFailed": "上传失败",
   "aidpKnowledge.uploadDuplicateFile": "\"{{fileName}}\"：文件已存在，请勿重复上传。",
+  "aidpKnowledge.uploadFileDuplicate": "文件重复：同批次同名文件仅上传第一个",
   "aidpKnowledge.uploading": "正在上传...",
   "aidpKnowledge.uploadHint": "点击或拖拽文件到此处上传",
   "aidpKnowledge.uploadHintDetail": "支持文本（txt/json/markdown）、网页（html）、文档（pdf/docx/doc/ppt/pptx）、表格（xlsx/xls/csv）、图片（png/jpeg/jpg/bmp）",

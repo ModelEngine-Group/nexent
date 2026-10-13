@@ -151,7 +151,9 @@ def test_registered_model_identifier_has_no_invented_byte_limit(aidp_service_mod
 @pytest.mark.parametrize(
     "key,value",
     [
-        ("domain", "general"),
+        # "domain" is intentionally absent: the live AIDP graph template owns
+        # the domain list, so the serializer accepts any non-empty string and
+        # lets AIDP reject unsupported domains.
         ("prompt_language", "chinese"),
         ("no_think_mode", False),
         ("synonym_merge_enable", False),
