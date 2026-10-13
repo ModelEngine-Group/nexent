@@ -1114,7 +1114,7 @@ class NexentAgent:
                     python_executor = DeferredToolExecutor(
                         create_executor=create_executor,
                         release_executor=release_executor,
-                        allowed_tools=official_fastpath_tools(agent_config.tools, tool_list, allowed_classes),
+                        allowed_tools=official_fastpath_tools(tool_configs, tool_list, allowed_classes),
                         stop_event=self.stop_event,
                     )
                     self._tool_fastpath_executors.append(python_executor)
