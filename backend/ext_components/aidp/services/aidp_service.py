@@ -850,10 +850,6 @@ def count_aidp_kbs_impl(server_url: str, api_key: str) -> int:
         )
 
 
-# Default values for AIDP create KB payload, aligned with
-# sdk/nexent/core/knowledge_base/config.py (build_create_payload).
-# Used as defense-in-depth: any client calling create_aidp_kb_impl
-# without these fields will get them filled in automatically.
 _GRAPH_DOMAINS = {"医疗", "金融", "常规", "法律法规"}
 _GRAPH_PROMPT_LANGUAGES = {"中文", "英文"}
 _GRAPH_CONFIG_FIELDS = frozenset(
