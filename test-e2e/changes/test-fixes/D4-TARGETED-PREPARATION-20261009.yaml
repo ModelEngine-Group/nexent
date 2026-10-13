@@ -1,0 +1,38 @@
+schema_version: '1.0'
+change:
+  change_id: D4-TARGETED-PREPARATION-20261009
+  change_type: test-fix
+  title: Reuse owned suite preparation for targeted D4 CLI execution
+  description: >-
+    PW-FILE-01 invoked directly through run_cases lacked the declared
+    agents.d4_file_display_name READY asset and was blocked before UI steps.
+    Route D4 CLI selections through the existing non-Daily repository suite,
+    which prepares only declared assets, runs the fixed script, cleans owned
+    resources and closes the report. Keep run_one as the worker primitive to
+    avoid recursion and duplicate preparation. Propagate nonzero suite exits.
+    This shared entry applies to all active D4 Cases. Product code, business
+    assertions, operator configuration, policy exclusions and D1-D3/D5 CLI
+    dispatch remain unchanged. A successful replay is not a product root-cause
+    fix or a full D4 regression result.
+    PW-AGENT-03 historically bound a stale d3-mcp service instead of its registered
+    d4-prep-mcp service because it selected the first same-name tool. Select the
+    current-case service and read back its exact tool ID after binding and refresh.
+    PW-CHAT-04 supplied no concrete subtask content, so the product correctly
+    requested clarification and the script waited for collaborator cards.
+    Define both independent tasks before submitting; preserve collaborator,
+    partial-failure, final-marker and refresh assertions.
+    The PW-CHAT-04 refresh step also required an unrelated conversation rename.
+    Reopen the existing sidebar title after refresh instead; retain the exact
+    persisted collaborator-card count and partial-failure checks. Record the
+    independently observed product rename-cache defect without making it a
+    prerequisite for the collaboration Case.
+  affected_features:
+    existing: [V5-PW-FILE-01, V5-PW-AGENT-03, V5-PW-CHAT-04]
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing: [PW-FILE-01]
+    added: []
+    modified: [PW-AGENT-03, PW-CHAT-04]
+    retired: []

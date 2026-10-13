@@ -4,18 +4,23 @@ from dataclasses import dataclass
 from types import SimpleNamespace
 
 import pytest
-
-from backend.utils.context_utils import (
-    _build_execution_flow_text,
-    build_authorized_context_input,
-    build_context_inputs,
-)
 from nexent.core.agents.context import (
     ContextItemInput,
     ContextItemRenderer,
     ContextItemType,
 )
 from nexent.core.agents.context.models import normalize_context_inputs
+from nexent.core.agents.prompt import AgentPromptComposer
+
+from backend.management.services.agent.prompt_template_loader import (
+    load_agent_prompt_bundle,
+)
+from backend.utils.context_utils import (
+    build_authorized_context_input,
+)
+from backend.utils.context_utils import (
+    build_context_inputs as _runtime_build_context_inputs,
+)
 
 
 @dataclass
@@ -28,6 +33,17 @@ class Value:
     tools: tuple = ()
     agent_id: str = "external-id"
     url: str = "https://example.invalid"
+
+
+def build_context_inputs(**kwargs):
+    """Call the Backend adapter with an explicit run-scoped prompt bundle."""
+    language = kwargs.get("language", "zh")
+    is_manager = kwargs.get("is_manager", True)
+    kwargs.setdefault(
+        "prompt_bundle",
+        load_agent_prompt_bundle(is_manager=is_manager, language=language),
+    )
+    return _runtime_build_context_inputs(**kwargs)
 
 
 def _messages(**kwargs):
@@ -108,18 +124,40 @@ def test_authorized_context_snapshot_ignores_unpaired_assistant_history():
     assert "Orphaned private output" not in str(context_input.items)
 
 
-def test_empty_inputs_emit_only_required_skeleton_and_fallback_items():
+def test_empty_inputs_do_not_emit_empty_resource_sections():
     items = build_context_inputs()
 
     assert [item.id for item in items] == [
         "system:header",
         "system:execution_flow",
-        "system:available_resources_header",
-        "system:agent_fallback",
-        "system:skills_usage",
+        "system:manager_orchestration",
+        "system:final_answer_guidance",
         "system:code_norms",
     ]
     assert all(item.type == ContextItemType.SYSTEM for item in items)
+
+
+def test_ut_be_fps_012_backend_adapter_preserves_outline_and_priorities():
+    """UT-BE-FPS-012: Backend data enters the SDK outline without reordering by priority."""
+    items = build_context_inputs(
+        language="en", duty="Investigate", constraint="Use approved sources",
+        few_shots="Example response", tools={"search": Value()},
+    )
+    ordered = normalize_context_inputs(items)
+    rendered = ContextItemRenderer().render(ordered)
+    text = "\n".join(
+        message["content"][0]["text"]
+        for message in rendered if message["role"] == "system"
+    )
+
+    assert [line for line in text.splitlines() if line.startswith("## ")] == [
+        "## Identity and Goals", "## Execution Protocol",
+        "## Constraints and Environment", "## Examples", "## Available Resources",
+    ]
+    assert "### Tools" in text
+    assert next(item.priority for item in items if item.id == "system:header") == 100
+    assert next(item.priority for item in items if item.id == "system:code_norms") == 20
+    assert next(item.priority for item in items if item.id == "system:available_resources_header") == 55
 
 
 @pytest.mark.parametrize(
@@ -146,7 +184,7 @@ def test_app_identity_is_static(language, identity):
 
 
 @pytest.mark.parametrize("language", ["en", "zh"])
-def test_restricted_python_policy_is_injected_before_code_norms(language):
+def test_restricted_python_policy_follows_code_norms_in_display(language):
     items = build_context_inputs(
         restricted_python_authorized_imports=["json", "csv", "math", "json"],
         language=language,
@@ -156,14 +194,14 @@ def test_restricted_python_policy_is_injected_before_code_norms(language):
         item for item in items if item.id == "system:restricted_python_execution"
     )
     policy_text = policy_item.content["text"]
-    item_ids = [item.id for item in items]
+    item_ids = [item.id for item in normalize_context_inputs(items)]
 
     assert policy_item.type == ContextItemType.SYSTEM
     assert policy_item.metadata["authority"] == "platform"
     assert policy_item.priority == 25
     assert "`csv`, `json`, `math`" in policy_text
     assert "`requests`" in policy_text
-    assert item_ids.index(policy_item.id) < item_ids.index("system:code_norms")
+    assert item_ids.index("system:code_norms") < item_ids.index(policy_item.id)
     if language == "en":
         assert "### Python Code Execution Boundary" in policy_text
 
@@ -171,17 +209,18 @@ def test_restricted_python_policy_is_injected_before_code_norms(language):
 @pytest.mark.parametrize(
     ("language", "expected_text"),
     [
-        ("zh", "一个引用标记只对应它紧前的一句话"),
-        ("en", "applies only to the sentence immediately before it"),
+        ("zh", "一个引用标记只对应它前方最近的一句话"),
+        ("en", "applies only to the nearest preceding sentence"),
     ],
 )
 def test_retrieval_citation_prompt_requires_sentence_level_marks(
     language, expected_text
 ):
-    prompt = _build_execution_flow_text(language=language, is_manager=False)
+    bundle = load_agent_prompt_bundle(is_manager=False, language=language)
+    prompt = AgentPromptComposer(bundle).render_system_section("final_answer_guidance")
 
     assert expected_text in prompt
-    assert "同一句可标记多个来源" in prompt or "multiple sources may be marked" in prompt
+    assert "一个或多个引用标记" in prompt or "matching mark or marks" in prompt
 
 
 def test_all_sources_are_naturally_granular_and_keep_stable_order():
@@ -191,14 +230,13 @@ def test_all_sources_are_naturally_granular_and_keep_stable_order():
         few_shots="example",
         tools={"one": Value(), "two": Value()},
         skills=[{"name": "skill-one", "description": "one"}, {"name": "skill-two", "description": "two"}],
-        managed_agents={"worker": Value()},
+        worker_agents={"worker": Value()},
         external_a2a_agents={"external-id": Value()},
         memory_list=[
             {"memory": "tenant fact", "memory_level": "tenant", "score": 1.0},
             {"memory": "user fact", "memory_level": "user", "score": 0.9},
         ],
-        knowledge_base_summary="index summary",
-        kb_ids=["kb-one"],
+        knowledge_base_summaries=[{"index_name": "kb-one", "display_name": "KB", "summary": "index summary"}],
         language="en",
     )
 
@@ -206,7 +244,7 @@ def test_all_sources_are_naturally_granular_and_keep_stable_order():
     assert ids.index("tool:one") < ids.index("tool:two")
     assert ids.index("skill:skill-one") < ids.index("skill:skill-two")
     assert {item.id for item in items if item.type == ContextItemType.MEMORY} == {"memory:0", "memory:1"}
-    assert "managed_agent:worker" in ids
+    assert "worker_agent:worker" in ids
     assert "external_agent:external-id" in ids
     assert all("_source_component" not in item.metadata for item in items)
 
@@ -222,10 +260,9 @@ def test_scoped_knowledge_summary_is_bounded_and_untrusted(
     language, scope_marker, resource_marker, instruction_marker
 ):
     items = build_context_inputs(
-        knowledge_base_summary="**Selected KB**: untrusted summary",
-        kb_ids=["selected-index"],
-        knowledge_scope_policy="trusted scope policy",
-        knowledge_scope_resources="allowed resources",
+        knowledge_base_summaries=[{"index_name": "selected-index", "display_name": "Selected KB", "summary": "untrusted summary"}],
+        knowledge_scope={"local_capable": True, "aidp_capable": False, "local_disabled": False,
+                         "aidp_disabled": False, "local_display_names": ["Selected KB"], "aidp_display_names": []},
         language=language,
     )
 
@@ -243,8 +280,7 @@ def test_scoped_knowledge_summary_is_bounded_and_untrusted(
 
 def test_unscoped_knowledge_summary_keeps_legacy_routing_guidance():
     items = build_context_inputs(
-        knowledge_base_summary="**Default KB**: summary",
-        kb_ids=["default-index"],
+        knowledge_base_summaries=[{"index_name": "default-index", "display_name": "Default KB", "summary": "summary"}],
         language="en",
     )
 
@@ -263,8 +299,8 @@ def test_unscoped_knowledge_summary_keeps_legacy_routing_guidance():
         ("include_tools", {"tools": {"tool": Value()}}, ContextItemType.TOOL),
         ("include_skills", {"skills": [{"name": "skill", "description": "d"}]}, ContextItemType.SKILL),
         ("include_memory", {"memory_list": ["memory"]}, ContextItemType.MEMORY),
-        ("include_knowledge_base", {"knowledge_base_summary": "kb"}, ContextItemType.KNOWLEDGE_BASE),
-        ("include_managed_agents", {"managed_agents": {"worker": Value()}}, ContextItemType.MANAGED_AGENT),
+        ("include_knowledge_base", {"knowledge_base_summaries": [{"index_name": "kb", "display_name": "KB", "summary": "kb"}]}, ContextItemType.KNOWLEDGE_BASE),
+        ("include_worker_agents", {"worker_agents": {"worker": Value()}}, ContextItemType.WORKER_AGENT),
         ("include_external_agents", {"external_a2a_agents": {"id": Value()}}, ContextItemType.EXTERNAL_AGENT),
     ],
 )
@@ -277,11 +313,11 @@ def test_inclusion_flags_remove_the_corresponding_item_type(flag, kwargs, item_t
 def test_managed_agent_does_not_receive_sub_agent_definitions_or_manager_fallback():
     items = build_context_inputs(
         is_manager=False,
-        managed_agents={"worker": Value()},
+        worker_agents={"worker": Value()},
         external_a2a_agents={"id": Value()},
     )
 
-    assert all(item.type not in {ContextItemType.MANAGED_AGENT, ContextItemType.EXTERNAL_AGENT} for item in items)
+    assert all(item.type not in {ContextItemType.WORKER_AGENT, ContextItemType.EXTERNAL_AGENT} for item in items)
     assert all(item.id != "system:agent_fallback" for item in items)
 
 
@@ -291,12 +327,10 @@ def test_invalid_memory_payload_fails_at_backend_boundary():
 
 
 def test_memory_tool_policy_is_a_required_system_item_rendered_verbatim():
-    policy = (
-        "### Memory Tool Policy\n"
-        "Evaluate this turn and call `store_memory` when durable memory exists."
-    )
+    from nexent.core.prompts import load_prompt
 
-    items = build_context_inputs(memory_tool_policy=policy, language="en")
+    policy = load_prompt("en", "agent/memory_tool_policy")["policy"]
+    items = build_context_inputs(enable_memory_tool_policy=True, language="en")
     policy_items = [item for item in items if item.id == "system:memory_tool_policy"]
 
     assert len(policy_items) == 1
@@ -320,15 +354,16 @@ def test_memory_tool_policy_is_a_required_system_item_rendered_verbatim():
 
 
 def test_memory_tool_policy_is_omitted_when_empty():
-    items = build_context_inputs(memory_tool_policy="")
+    items = build_context_inputs(enable_memory_tool_policy=False)
 
     assert all(item.id != "system:memory_tool_policy" for item in items)
 
 
 def test_automation_tool_policy_is_required_platform_context():
-    policy = "Use create_scheduled_task_proposal without executing the business task."
+    from nexent.core.prompts import load_prompt
 
-    items = build_context_inputs(automation_tool_policy=policy, language="en")
+    policy = load_prompt("en", "agent/automation_tool_policy")["policy"]
+    items = build_context_inputs(enable_automation_tool_policy=True, language="en")
     policy_item = next(item for item in items if item.id == "system:automation_tool_policy")
 
     assert policy_item.type == ContextItemType.SYSTEM
@@ -391,7 +426,7 @@ def test_rendered_roles_and_sections_match_context_semantics():
     messages = _messages(
         duty="duty",
         memory_list=[{"memory": "fact", "memory_level": "user", "score": 1.0}],
-        knowledge_base_summary="kb",
+        knowledge_base_summaries=[{"index_name": "kb", "display_name": "KB", "summary": "kb"}],
         language="en",
     )
 
@@ -399,7 +434,7 @@ def test_rendered_roles_and_sections_match_context_semantics():
     first_user = next(index for index, message in enumerate(messages) if message["role"] == "user")
     assert all(message["role"] == "system" for message in messages[:first_user])
     assert any(message["role"] == "system" and "Core Responsibilities" in str(message) for message in messages)
-    assert any(message["role"] == "user" and "knowledge_base_search" in str(message) for message in messages)
+    assert any(message["role"] == "system" and "knowledge_base_search" in str(message) for message in messages)
 
 
 def test_agent_presearch_result_is_rendered_into_model_context():
@@ -416,5 +451,6 @@ def test_agent_presearch_result_is_rendered_into_model_context():
         if block.get("type") == "text"
     )
 
-    assert "**Agent Level Memory:**" in rendered_text
+    assert "**Agent Level Memory:**" not in rendered_text
+    assert "Memory Usage Guidelines" not in rendered_text
     assert result_text in rendered_text

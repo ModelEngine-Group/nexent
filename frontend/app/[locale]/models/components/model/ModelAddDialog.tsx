@@ -42,9 +42,20 @@ import log from "@/lib/logger";
 import {
   ModelAdvancedSettingsValue,
   buildInferenceParamsPayload,
+  buildVoiceCredentialParams,
 } from "./ModelAdvancedSettings";
 import { ModelAdvancedConfig } from "./ModelAdvancedConfig";
-import { TYPE_BADGE_CLASS, useTypeOptions } from "./modelTypeUi";
+import {
+  DEFAULT_CHUNKING_BATCH_SIZE,
+  DEFAULT_EXPECTED_CHUNK_SIZE,
+  DEFAULT_MAXIMUM_CHUNK_SIZE,
+} from "./ModelChunkSizeSlider";
+import {
+  isEmbeddingModelType,
+  supportsMaxTokensField,
+  TYPE_BADGE_CLASS,
+  useTypeOptions,
+} from "./modelTypeUi";
 
 /**
  * v2.6.1 redesign (v0 design): the add-model dialog.
@@ -271,6 +282,33 @@ async function createModel(
 }
 
 /**
+ * Always send chunk params for embedding-family rows (old-dialog parity):
+ * saved gear values win, otherwise the same defaults the backend would
+ * apply become explicit.
+ */
+function applyEmbeddingChunkParams(
+  params: Record<string, unknown>,
+  settings?: ModelAdvancedSettingsValue
+) {
+  if (!isEmbeddingModelType(params.type as string | undefined)) return;
+  const expected =
+    typeof settings?.expected_chunk_size === "number"
+      ? settings.expected_chunk_size
+      : DEFAULT_EXPECTED_CHUNK_SIZE;
+  const maximum =
+    typeof settings?.maximum_chunk_size === "number"
+      ? settings.maximum_chunk_size
+      : DEFAULT_MAXIMUM_CHUNK_SIZE;
+  const batch =
+    typeof settings?.chunk_batch === "number" && settings.chunk_batch > 0
+      ? settings.chunk_batch
+      : DEFAULT_CHUNKING_BATCH_SIZE;
+  params.expectedChunkSize = expected;
+  params.maximumChunkSize = maximum;
+  params.chunkingBatchSize = batch;
+}
+
+/**
  * Merge an advanced-settings value (snake_case spec keys) into the create
  * params. buildInferenceParamsPayload emits snake_case top-level keys, but
  * buildCapacityRequestBody in modelService only reads camelCase — without
@@ -304,6 +342,19 @@ function applyAdvancedSettingsToParams(
   if (payload.tokenizer_family != null)
     params.tokenizerFamily = payload.tokenizer_family;
   if (hasCapacity) params.capacitySource = "operator";
+  // Type-specific spec fields, gated by the row's current type (stale gear
+  // values must survive a type change silently, not pollute the new type).
+  // max_tokens only exists for rerank/tts; voice credentials only for stt/tts.
+  if (
+    supportsMaxTokensField(params.type as string | undefined) &&
+    payload.max_tokens != null
+  ) {
+    params.maxTokens = payload.max_tokens;
+  }
+  Object.assign(
+    params,
+    buildVoiceCredentialParams(params.type as string | undefined, payload)
+  );
 }
 
 /* ------------------------------ 单个添加 ------------------------------ */
@@ -443,6 +494,8 @@ function SingleAddForm({
         ...(effective?.settings
           ? buildInferenceParamsPayload(effective.settings)
           : {}),
+        // voice 凭证随探测透传，按当前类型门控防止类型切换后过期值泄漏
+        ...buildVoiceCredentialParams(type, effective?.settings),
       });
       setProbe(result.connectivity ? "available" : "unavailable");
     } catch {
@@ -469,7 +522,9 @@ function SingleAddForm({
         url: baseUrl.trim(),
         apiKey: apiKey.trim(),
         displayName: displayName.trim() || name.trim(),
-        maxTokens: type === MODEL_TYPES.EMBEDDING ? 1024 : 4096,
+        // Embedding-family rows use max_tokens as the vector-dimension
+        // placeholder (V2 parity); other types keep the generic default.
+        maxTokens: isEmbeddingModelType(type) ? 1024 : 4096,
         modelFactory: isCustom ? "OpenAI-API-Compatible" : provider,
         // The gate above guarantees a passing probe with these exact values.
         connectStatus: "available",
@@ -477,6 +532,8 @@ function SingleAddForm({
       if (effective?.settings) {
         applyAdvancedSettingsToParams(params, effective.settings, capability);
       }
+      // Embedding rows always carry chunk params (gear values or defaults).
+      applyEmbeddingChunkParams(params, effective?.settings);
       await createModel(tenantId, params);
       onSuccess({ name: name.trim(), type });
       onDone();
@@ -718,7 +775,8 @@ function SingleAddForm({
         </div>
       </div>
 
-      {/* Advanced settings (capacity + inference params) */}
+      {/* Advanced settings (capacity + inference params; embedding rows get
+          the chunk/multimodal panel instead) */}
       {showSettings && (
         <RowSettingsDialog
           key="single"
@@ -729,6 +787,10 @@ function SingleAddForm({
           }}
           override={effective}
           reasoningCapability={capability}
+          onModelTypeChange={(next) => {
+            setType(next);
+            setProbe("idle");
+          }}
           onSave={(next) => {
             setOverride(next);
             setProbe("idle");
@@ -940,11 +1002,17 @@ function BatchAddForm({
   async function checkRow(row: FetchedRow) {
     setRowCheck((s) => ({ ...s, [row.id]: "checking" }));
     try {
+      // voice 凭证随探测透传，按当前类型门控防止类型切换后过期值泄漏
+      // （只取手动 override——目录建议不携带语音凭证）
       const result = await modelService.verifyModelConfigConnectivity({
         modelName: row.model_name,
         modelType: row.model_type,
         baseUrl: baseUrl.trim(),
         apiKey: apiKey.trim(),
+        ...buildVoiceCredentialParams(
+          row.model_type,
+          rowOverrides[row.id]?.settings
+        ),
       });
       setRowCheck((s) => ({
         ...s,
@@ -981,6 +1049,7 @@ function BatchAddForm({
     setSubmitting(true);
     let created = 0;
     const failed: string[] = [];
+    const createdDisplayNames: string[] = [];
     for (const row of rows) {
       // User-modified overrides win; otherwise use catalog suggestions.
       const override = rowOverrides[row.id] ?? rowSuggestions[row.id];
@@ -994,7 +1063,7 @@ function BatchAddForm({
           // the default display name; a collision with an existing row is
           // reported as a per-row failure instead of silently suffixed.
           displayName: override?.displayName?.trim() || row.model_name,
-          maxTokens: row.model_type === MODEL_TYPES.EMBEDDING ? 1024 : 4096,
+          maxTokens: isEmbeddingModelType(row.model_type) ? 1024 : 4096,
           modelFactory:
             provider === CUSTOM_PROVIDER_KEY
               ? "OpenAI-API-Compatible"
@@ -1004,6 +1073,11 @@ function BatchAddForm({
           // carry the verified result into the created record instead of
           // resetting to not_detected.
           connectStatus: "available",
+          // Batch rows leave default-slot auto-configuration to the single
+          // finalize call after the loop, so the whole batch competes for
+          // empty slots at once (and occupied slots stay untouched) instead
+          // of the first row permanently claiming them.
+          skipDefaultBackfill: true,
         };
         if (override?.settings) {
           applyAdvancedSettingsToParams(
@@ -1012,11 +1086,30 @@ function BatchAddForm({
             rowCapabilities[row.id]
           );
         }
+        // Embedding rows always carry chunk params (gear values or defaults).
+        applyEmbeddingChunkParams(params, override?.settings);
         await createModel(tenantId, params);
+        createdDisplayNames.push(
+          override?.displayName?.trim() || row.model_name
+        );
         created++;
       } catch (error: any) {
         failed.push(row.model_name);
         log.error("batch add model failed", row.model_name, error);
+      }
+    }
+    if (created > 0) {
+      // Single finalize for the whole batch: empty slots get the best model
+      // among the freshly created ones; occupied slots are never touched.
+      // Only the user-facing flow (no tenantId override) — the manage-tenant
+      // path targets another tenant and keeps its own behavior.
+      // Best-effort — a failure here does not fail the import.
+      if (!tenantId) {
+        try {
+          await modelService.backfillDefaults(createdDisplayNames);
+        } catch (error) {
+          log.warn("Failed to finalize default-model backfill:", error);
+        }
       }
     }
     setSubmitting(false);
@@ -1361,6 +1454,7 @@ function BatchAddForm({
             rowOverrides[settingsRowId] ?? rowSuggestions[settingsRowId]
           }
           reasoningCapability={rowCapabilities[settingsRowId]}
+          onModelTypeChange={(next) => updateRowType(settingsRowId, next)}
           onSave={(next) => {
             setRowOverrides((prev) => ({
               ...prev,
@@ -1381,24 +1475,32 @@ function RowSettingsDialog({
   row,
   override,
   reasoningCapability,
+  onModelTypeChange,
   onSave,
   onClose,
 }: {
   row: FetchedRow | null;
   override?: RowOverride;
   reasoningCapability?: ReasoningCapability;
+  /** Live type updates for the multimodal switch (embedding ↔
+   *  multi_embedding). The switch mirrors the old dialog: it edits the
+   *  row's type immediately, like the row type Select itself. */
+  onModelTypeChange?: (next: ModelType) => void;
   onSave: (next: RowOverride) => void;
   onClose: () => void;
 }) {
   const { t } = useTranslation();
   // One flat value drives the whole form — ModelAdvancedConfig renders the
-  // fixed v0 field set (capacity + inference + custom params).
+  // type-aware v0 field set (capacity + inference for LLM family; chunk /
+  // multimodal for embedding; voice credentials for stt/tts).
   const [settings, setSettings] = useState<ModelAdvancedSettingsValue>(
     override?.settings ?? {}
   );
   const [displayName, setDisplayName] = useState(override?.displayName ?? "");
 
   if (!row) return null;
+
+  const isEmbedding = isEmbeddingModelType(row.model_type);
 
   function handleSave() {
     onSave({
@@ -1415,9 +1517,13 @@ function RowSettingsDialog({
             {row.model_name}
           </DialogTitle>
           <DialogDescription>
-            {t("modelConfig.addDialog.rowSettingsDesc", {
-              defaultValue: "容量与推理参数（留空使用默认值）",
-            })}
+            {isEmbedding
+              ? t("modelConfig.addDialog.rowSettingsDescEmbedding", {
+                  defaultValue: "切片与多模态配置（留空使用默认值）",
+                })
+              : t("modelConfig.addDialog.rowSettingsDesc", {
+                  defaultValue: "容量与推理参数（留空使用默认值）",
+                })}
           </DialogDescription>
         </DialogHeader>
         <div className="min-h-0 flex-1 overflow-y-auto px-6 py-5">
@@ -1440,11 +1546,15 @@ function RowSettingsDialog({
               })}
             />
           </div>
+
+          {/* Type-aware fields: embedding rows get the chunk/multimodal
+              panel, rerank gets max tokens, stt/tts get voice credentials */}
           <ModelAdvancedConfig
             value={settings}
             onChange={setSettings}
             modelType={row.model_type}
             reasoningCapability={reasoningCapability}
+            onModelTypeChange={onModelTypeChange}
           />
         </div>
         <div className="flex justify-end gap-2 border-t px-6 py-4">

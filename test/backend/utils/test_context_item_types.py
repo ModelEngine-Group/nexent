@@ -3,11 +3,27 @@
 import hashlib
 
 import pytest
-
-from backend.utils.context_utils import build_context_inputs
-from nexent.core.agents.context import ContextManager as RealContextManager
 from nexent.core.agents.context import ContextItemRenderer, ContextItemType
+from nexent.core.agents.context import ContextManager as RealContextManager
 from nexent.core.agents.context.models import normalize_context_inputs
+
+from backend.management.services.agent.prompt_template_loader import (
+    load_agent_prompt_bundle,
+)
+from backend.utils.context_utils import (
+    build_context_inputs as _runtime_build_context_inputs,
+)
+
+
+def build_context_inputs(**kwargs):
+    """Call the Backend adapter with an explicit run-scoped prompt bundle."""
+    language = kwargs.get("language", "zh")
+    is_manager = kwargs.get("is_manager", True)
+    kwargs.setdefault(
+        "prompt_bundle",
+        load_agent_prompt_bundle(is_manager=is_manager, language=language),
+    )
+    return _runtime_build_context_inputs(**kwargs)
 
 
 def _items(**kwargs):
@@ -60,9 +76,8 @@ def test_every_backend_item_payload_serializes_and_renders(language):
         tools={"tool": {"description": "desc", "inputs": {"q": "str"}, "output_type": "str"}},
         skills=[{"name": "skill", "description": "desc"}],
         memory_list=[{"memory": "fact", "memory_level": "user", "score": 0.9}],
-        knowledge_base_summary="kb summary",
-        kb_ids=["kb"],
-        managed_agents={"worker": {"description": "worker", "tools": []}},
+        knowledge_base_summaries=[{"index_name": "kb", "display_name": "KB", "summary": "kb summary"}],
+        worker_agents={"worker": {"description": "worker", "tools": []}},
         external_a2a_agents={"external": {"agent_id": "external", "name": "external", "description": "desc"}},
     )
 
@@ -72,14 +87,14 @@ def test_every_backend_item_payload_serializes_and_renders(language):
     assert {item.type for item in items} == {
         ContextItemType.SYSTEM, ContextItemType.TOOL, ContextItemType.SKILL,
         ContextItemType.MEMORY, ContextItemType.KNOWLEDGE_BASE,
-        ContextItemType.MANAGED_AGENT, ContextItemType.EXTERNAL_AGENT,
+        ContextItemType.WORKER_AGENT, ContextItemType.EXTERNAL_AGENT,
     }
     assert all(item.model_dump(mode="json") for item in items)
     system_composition_types = {
         ContextItemType.SYSTEM,
         ContextItemType.TOOL,
         ContextItemType.SKILL,
-        ContextItemType.MANAGED_AGENT,
+        ContextItemType.WORKER_AGENT,
         ContextItemType.EXTERNAL_AGENT,
     }
     assert all(item.required for item in items if item.type in system_composition_types)
@@ -97,8 +112,8 @@ def test_every_backend_item_payload_serializes_and_renders(language):
         (ContextItemType.TOOL, "system"),
         (ContextItemType.SKILL, "system"),
         (ContextItemType.MEMORY, "user"),
-        (ContextItemType.KNOWLEDGE_BASE, "user"),
-        (ContextItemType.MANAGED_AGENT, "system"),
+        (ContextItemType.KNOWLEDGE_BASE, "system"),
+        (ContextItemType.WORKER_AGENT, "system"),
         (ContextItemType.EXTERNAL_AGENT, "system"),
     ],
 )
@@ -108,8 +123,8 @@ def test_each_item_type_has_explicit_role(item_type, expected_role):
         tools={"tool": {"description": "desc"}},
         skills=[{"name": "skill", "description": "desc"}],
         memory_list=[{"memory": "fact", "memory_level": "user", "score": 1.0}],
-        knowledge_base_summary="kb",
-        managed_agents={"worker": {"description": "worker"}},
+        knowledge_base_summaries=[{"index_name": "kb", "display_name": "KB", "summary": "kb"}],
+        worker_agents={"worker": {"description": "worker"}},
         external_a2a_agents={"external": {"name": "external", "description": "desc"}},
     )
     selected = [item for item in items if item.type == item_type]
@@ -141,12 +156,11 @@ def test_default_rendering_has_deterministic_class_defined_order(language):
             "run_skill_script": {"description": "Run skill script", "inputs": '{"path":"string"}', "output_type": "string", "source": "local"},
         },
         skills=[{"name": "analysis-skill", "description": "Analyze <input> & report"}],
-        managed_agents={"analyst": {"description": "Internal analyst ✓"}},
+        worker_agents={"analyst": {"description": "Internal analyst ✓"}},
         external_a2a_agents={"ext-1": {"agent_id": "ext-1", "name": "remote_helper", "description": "External & safe"}},
         memory_list=[{"memory": "Prefers concise answers <3", "memory_level": "user", "score": 0.91}],
         memory_search_query="special <query>",
-        knowledge_base_summary="**KB**: facts & <evidence>",
-        kb_ids=["kb-1"],
+        knowledge_base_summaries=[{"index_name": "kb-1", "display_name": "KB", "summary": "facts & <evidence>"}],
     )
     manager = RealContextManager()
     manager.replace_items(items)

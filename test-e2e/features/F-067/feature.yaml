@@ -1,0 +1,16 @@
+schema_version: '1.0'
+module:
+  id: V5-BASELINE
+  name: Migrated V5 baseline
+feature:
+  feature_id: F-067
+  name: 版本 compare/rollback、metadata、DISABLED/ARCHIVED、delete
+  status: active
+  description: '版本与市场 / Agent版本: 版本 compare/rollback、metadata、DISABLED/ARCHIVED、delete'
+  business_rules:
+  - rule_id: F-067-RULE-01
+    description: 版本 compare/rollback、metadata、DISABLED/ARCHIVED、delete
+  required_test_stages:
+  - D2
+  source:
+    notes: Migrated from V5 01_代码功能清单 without changing the functional description.

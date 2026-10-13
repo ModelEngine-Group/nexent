@@ -6,7 +6,7 @@ import {
 } from "./api";
 
 import { NAME_CHECK_STATUS } from "@/const/agentConfig";
-import { getAuthHeaders } from "@/lib/auth";
+import { fetchWithAuth, getAuthHeaders } from "@/lib/auth";
 import { convertParamType } from "@/lib/utils";
 import log from "@/lib/logger";
 import type { Agent } from "@/types/agentConfig";
@@ -163,6 +163,7 @@ type AgentListApiItem = {
   author?: string;
   created_by?: string | null;
   create_time?: string;
+  update_time?: string;
   tags?: unknown;
   model_ids?: number[];
   model_id?: number;
@@ -182,6 +183,7 @@ type AgentListApiItem = {
   enable_protocol_repair_retry?: boolean;
   model_params_override?: Agent["model_params_override"];
   icon_url?: string;
+  repository_info?: Agent["repository_info"];
 };
 
 const formatAgentListItem = (agent: AgentListApiItem): Agent =>
@@ -193,6 +195,7 @@ const formatAgentListItem = (agent: AgentListApiItem): Agent =>
     author: agent.author,
     created_by: agent.created_by,
     create_time: agent.create_time,
+    update_time: agent.update_time,
     tags: normalizeTags(agent.tags),
     model_ids: agent.model_ids || (agent.model_id ? [agent.model_id] : []),
     model_names:
@@ -211,11 +214,13 @@ const formatAgentListItem = (agent: AgentListApiItem): Agent =>
     enable_protocol_repair_retry: agent.enable_protocol_repair_retry ?? false,
     model_params_override: agent.model_params_override ?? null,
     icon_url: agent.icon_url,
+    repository_info: agent.repository_info,
   }) as unknown as Agent;
 
 export type AgentListFilters = {
   tenantId?: string | null;
   enabled?: boolean;
+  includeRepositoryInfo?: boolean;
   permission?: "EDIT" | "READ_ONLY";
   tag?: string;
   tagPredicates?: TagResourcePredicate[];
@@ -293,6 +298,8 @@ export const fetchPagedAgentList = async (
     if (filters.tag?.trim()) queryParams.set("tag", filters.tag.trim());
     if (filters.search?.trim())
       queryParams.set("search", filters.search.trim());
+    if (filters.includeRepositoryInfo)
+      queryParams.set("include_repository_info", "true");
     queryParams.set("page", String(filters.page ?? 1));
     queryParams.set("page_size", String(filters.pageSize ?? 20));
 
@@ -377,6 +384,11 @@ export const fetchPublishedAgentList = async () => {
       model_params_override: agent.model_params_override ?? null,
       enable_protocol_repair_retry: agent.enable_protocol_repair_retry ?? false,
       icon_url: agent.icon_url,
+      tags: Array.isArray(agent.tags)
+        ? agent.tags.filter(
+            (tag: unknown): tag is string => typeof tag === "string"
+          )
+        : [],
     }));
 
     return {
@@ -719,15 +731,26 @@ export const exportAgent = async (agentId: number) => {
 
 /**
  * Extract filename from Content-Disposition header
- * Handles both quoted and unquoted filename values
+ * Handles RFC 5987 filename* (UTF-8 percent-encoded), quoted and unquoted filename values
  * @param contentDisposition The Content-Disposition header value
  * @returns Extracted filename or null if not found
  */
-const extractFilenameFromContentDisposition = (
+export const extractFilenameFromContentDisposition = (
   contentDisposition: string | null
 ): string | null => {
   if (!contentDisposition) {
     return null;
+  }
+
+  // RFC 5987 encoding, e.g. filename*=UTF-8''%E6%99%BA%E8%83%BD%E4%BD%93.zip
+  const utf8Regex = /filename\*=UTF-8''([^;]+)/i;
+  const utf8Match = utf8Regex.exec(contentDisposition);
+  if (utf8Match?.[1]) {
+    try {
+      return decodeURIComponent(utf8Match[1].trim());
+    } catch {
+      // fall back to plain filename parsing on invalid encoding
+    }
   }
 
   const regex = /filename[^;=\n]*=((['"]).*?\2|[^;\n]*)/;
@@ -939,6 +962,36 @@ export const checkAgentNameConflictBatch = async (payload: {
       message: "agentConfig.agents.checkNameFailed",
     };
   }
+};
+
+/**
+ * Generate unique copy names by appending a numeric suffix when the base
+ * name/display_name already exists in the tenant. Mirrors the backend
+ * import-link deduplication (base_1, base_2, ...).
+ */
+export const generateUniqueCopyName = async (
+  baseName: string,
+  baseDisplayName: string
+): Promise<{ name: string; display_name: string }> => {
+  let name = baseName;
+  let displayName = baseDisplayName;
+
+  // Probe at most 100 suffix candidates, matching the backend limit.
+  for (let attempt = 0; attempt < 100; attempt++) {
+    const result = await checkAgentNameConflictBatch({
+      items: [{ name, display_name: displayName }],
+    });
+    if (!result.success || !Array.isArray(result.data)) {
+      throw new Error("Failed to check agent name conflict");
+    }
+    const conflict = result.data[0];
+    if (!conflict?.name_conflict && !conflict?.display_name_conflict) {
+      return { name, display_name: displayName };
+    }
+    name = `${baseName}_${attempt + 1}`;
+    displayName = `${baseDisplayName}_${attempt + 1}`;
+  }
+  throw new Error("Failed to generate unique agent name after max attempts");
 };
 
 export const regenerateAgentNameBatch = async (payload: {
@@ -1533,7 +1586,7 @@ export const createSkill = async (skillData: {
       requestBody.ingroup_permission = skillData.ingroup_permission;
     }
 
-    const response = await fetch(API_ENDPOINTS.skills.create, {
+    const response = await fetchWithErrorHandling(API_ENDPOINTS.skills.create, {
       method: "POST",
       headers: {
         ...getAuthHeaders(),
@@ -1542,17 +1595,13 @@ export const createSkill = async (skillData: {
       body: JSON.stringify(requestBody),
     });
 
-    if (!response.ok) {
-      const errorData = await response.json().catch(() => ({}));
-      throw new Error(errorData.detail || `Request failed: ${response.status}`);
-    }
-
     const data = await response.json();
 
     return {
       success: true,
       data: data,
       message: "",
+      error: null,
     };
   } catch (error) {
     log.error("Error creating skill:", error);
@@ -1561,6 +1610,7 @@ export const createSkill = async (skillData: {
       data: null,
       message:
         error instanceof Error ? error.message : "Failed to create skill",
+      error,
     };
   }
 };
@@ -1770,30 +1820,11 @@ export const createSkillFromFile = async (
       "User-Agent": "AgentFrontEnd/1.0",
     };
 
-    const response = await fetch(endpoint, {
+    const response = await fetchWithAuth(endpoint, {
       method: method,
       headers: headers,
       body: formData,
     });
-
-    if (!response.ok) {
-      let errorData: any = {};
-      try {
-        errorData = await response.json();
-      } catch {
-        // JSON parse failed
-      }
-
-      const errorMessage =
-        typeof errorData.detail === "string"
-          ? errorData.detail
-          : Array.isArray(errorData.detail)
-            ? errorData.detail
-                .map((e: any) => e.msg || JSON.stringify(e))
-                .join("; ")
-            : JSON.stringify(errorData.detail);
-      throw new Error(errorMessage || `Request failed: ${response.status}`);
-    }
 
     const data = await response.json();
 
@@ -1801,6 +1832,7 @@ export const createSkillFromFile = async (
       success: true,
       data: data,
       message: "",
+      error: null,
     };
   } catch (error) {
     log.error("Error creating skill from file:", error);
@@ -1811,6 +1843,7 @@ export const createSkillFromFile = async (
         error instanceof Error
           ? error.message
           : "Failed to create skill from file",
+      error,
     };
   }
 };

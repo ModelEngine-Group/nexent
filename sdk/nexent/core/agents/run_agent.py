@@ -1,7 +1,9 @@
 import asyncio
 import json
 import logging
+import math
 import threading
+from concurrent.futures import CancelledError
 from contextvars import Context, copy_context
 from copy import deepcopy
 from dataclasses import replace
@@ -9,6 +11,10 @@ from typing import Any, Dict, Union
 
 import httpx
 
+from ...consts.mcp_errors import (
+    is_mcp_connection_timeout_error,
+    is_mcp_timeout_error,
+)
 from ...monitor import (
     AgentRunMetadata,
     get_agent_monitoring_context,
@@ -23,12 +29,12 @@ from ..concurrency import (
     ThreadManager,
     get_current_thread_manager,
 )
+from ..concurrency.cancellation import RunTerminated
 from ..concurrency.context import _reset_current_thread_manager, _set_current_thread_manager
 from ..concurrency.helpers import (
     get_fallback_thread_manager,
     shutdown_fallback_thread_manager,
 )
-from ..concurrency.cancellation import RunTerminated
 from ..model_errors import ModelInvocationTerminalError
 from .agent_model import AgentRunInfo
 from .managed_mcp import ManagedMCPToolCollection
@@ -37,6 +43,64 @@ from .output_protocol import ModelOutputProtocolExhaustedError
 
 
 logger = logging.getLogger("run_agent")
+
+
+def _resolve_mcp_request_timeout_seconds(agent_run_info: AgentRunInfo) -> float:
+    """Return a positive finite timeout for one MCP tool request."""
+    timeout = getattr(agent_run_info, "mcp_request_timeout_seconds", None)
+    try:
+        timeout = float(timeout)
+    except (TypeError, ValueError):
+        timeout = 10.0
+    if not math.isfinite(timeout) or timeout <= 0:
+        return 10.0
+    return timeout
+
+
+def _mcp_timeout_message(agent_run_info: AgentRunInfo) -> str:
+    """Return a localized MCP tool-execution timeout message."""
+    timeout_label = f"{agent_run_info.mcp_tool_timeout_seconds:g}"
+    if getattr(agent_run_info.observer, "lang", "en") == "zh":
+        return f"MCP 工具调用超时（{timeout_label} 秒）。请确认服务响应状态后重试。"
+    return (
+        f"MCP tool execution timed out after {timeout_label} seconds. "
+        "Please check the service response and try again."
+    )
+
+
+def _mcp_connection_timeout_message(agent_run_info: AgentRunInfo) -> str:
+    """Return a localized MCP connection-timeout message for the current run."""
+    timeout_label = f"{_resolve_mcp_request_timeout_seconds(agent_run_info):g}"
+    if getattr(agent_run_info.observer, "lang", "en") == "zh":
+        return f"MCP 服务连接超时（{timeout_label} 秒）。请确认服务地址和网络连通性后重试。"
+    return (
+        f"MCP connection timed out after {timeout_label} seconds. "
+        "Please check the service address and network connectivity, then try again."
+    )
+
+
+def _is_mcp_timeout_error(error: BaseException) -> bool:
+    """Identify an MCP timeout, including errors wrapped by the Agent runtime."""
+    return is_mcp_timeout_error(error)
+
+
+def _agent_run_error_message(
+    agent_run_info: AgentRunInfo,
+    mcp_host: list | None,
+    error: BaseException,
+) -> str:
+    """Build the user-facing message for a failed Agent run."""
+    if mcp_host and is_mcp_connection_timeout_error(error):
+        return _mcp_connection_timeout_message(agent_run_info)
+    if mcp_host and is_mcp_timeout_error(error):
+        return _mcp_timeout_message(agent_run_info)
+    if "Couldn't connect to the MCP server" in str(error):
+        return (
+            "MCP服务器连接超时。"
+            if agent_run_info.observer.lang == "zh"
+            else "Couldn't connect to the MCP server."
+        )
+    return f"Run Agent Error: {error}"
 
 
 class DeferredAgentRun:
@@ -323,6 +387,8 @@ def _agent_run_thread(agent_run_info: AgentRunInfo):
                 redis_client=agent_run_info.redis_client,
                 user_context=user_context,
                 sandbox_config=getattr(agent_run_info, "sandbox_config", None),
+                tool_fastpath_enabled=getattr(agent_run_info, "tool_fastpath_enabled", True),
+                tool_fastpath_allowed_tools=getattr(agent_run_info, "tool_fastpath_allowed_tools", None),
                 minio_client=getattr(agent_run_info, "minio_client", None),
                 conversation_id=agent_run_info.conversation_id,
                 user_id=agent_run_info.user_id,
@@ -360,6 +426,7 @@ def _agent_run_thread(agent_run_info: AgentRunInfo):
                 cancellation_scope=mcp_cancellation_scope,
                 tool_timeout_seconds=agent_run_info.mcp_tool_timeout_seconds,
                 close_timeout_seconds=agent_run_info.mcp_close_timeout_seconds,
+                connect_timeout_seconds=_resolve_mcp_request_timeout_seconds(agent_run_info),
             ) as tool_collection:
                 nexent = NexentAgent(
                     observer=agent_run_info.observer,
@@ -369,6 +436,8 @@ def _agent_run_thread(agent_run_info: AgentRunInfo):
                     redis_client=agent_run_info.redis_client,
                     user_context=user_context,
                     sandbox_config=getattr(agent_run_info, "sandbox_config", None),
+                    tool_fastpath_enabled=getattr(agent_run_info, "tool_fastpath_enabled", True),
+                    tool_fastpath_allowed_tools=getattr(agent_run_info, "tool_fastpath_allowed_tools", None),
                     minio_client=getattr(agent_run_info, "minio_client", None),
                     conversation_id=agent_run_info.conversation_id,
                     user_id=agent_run_info.user_id,
@@ -395,22 +464,18 @@ def _agent_run_thread(agent_run_info: AgentRunInfo):
                     _log_memory_value_assessment(agent)
 
         agent_run_info.attempt_outcome = "stopped" if agent_run_info.stop_event.is_set() else "completed"
-    except RunTerminated:
+    except (RunTerminated, CancelledError):
         agent_run_info.attempt_outcome = "stopped"
     except (ModelInvocationTerminalError, ModelOutputProtocolExhaustedError):
         agent_run_info.attempt_outcome = "failed"
         raise
     except Exception as e:
         agent_run_info.attempt_outcome = "failed"
-        if "Couldn't connect to the MCP server" in str(e):
-            mcp_connect_error_str = (
-                "MCP服务器连接超时。"
-                if agent_run_info.observer.lang == "zh"
-                else "Couldn't connect to the MCP server."
-            )
-            agent_run_info.observer.add_message("", ProcessType.FINAL_ANSWER, mcp_connect_error_str)
-        else:
-            agent_run_info.observer.add_message("", ProcessType.FINAL_ANSWER, f"Run Agent Error: {e}")
+        agent_run_info.observer.add_message(
+            "",
+            ProcessType.FINAL_ANSWER,
+            _agent_run_error_message(agent_run_info, mcp_host, e),
+        )
         raise ValueError(f"Error in agent_run_thread: {e}")
     finally:
         # Agent construction, MCP setup, and executor initialization can fail

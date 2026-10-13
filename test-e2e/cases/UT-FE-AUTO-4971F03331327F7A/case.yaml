@@ -1,0 +1,74 @@
+schema_version: '1.0'
+stage: D1
+module: V5-BASELINE
+case:
+  case_id: UT-FE-AUTO-4971F03331327F7A
+  feature_id: F-036
+  business_rule_ids:
+  - F-036-RULE-01
+  title: reorderModelIds/resolveModelSelection 模型优先级重排与名称解析及 form.setFieldValue('model_ids') 同步｜核心流程
+  type: FE-COMP
+  priority: P1
+  status: active
+  automation: automated
+  objective: reorderModelIds/resolveModelSelection 模型优先级重排与名称解析及 form.setFieldValue('model_ids') 同步｜核心流程
+  preconditions:
+  - 本地依赖/组件测试环境可运行；不要求外部模型服务在线。
+  - 设置 NEXENT_TEST_HOME，目录不位于 Nexent Git 仓库内。
+  - 当次 run_id 已生成，所有新建资源名称带 run_id；测试基线固定为 develop 当前批次锁定的产品提交；执行时另记录实际被测commit。
+  - frontend/lib/agent/modelPriority.ts 及其依赖 @dnd-kit/sortable 可由测试运行器（node:test）导入；frontend/app/[locale]/agents/components/agent-prompt.tsx
+    源码可读取。
+  test_data:
+    legacy_asset_declaration: '- 无固定外部 fixture；仅依赖被测源码 frontend/lib/agent/modelPriority.ts 与 frontend/app/[locale]/agents/components/agent-prompt.tsx
+      可访问。'
+  steps:
+  - order: 1
+    action: 在本地工作区加载 frontend/lib/agent/modelPriority.ts，导出 reorderModelIds 与 resolveModelSelection 纯函数。
+    expected: reorderModelIds([1,2,3],3,1) 返回 [3,1,2]；原输入数组不被就地修改（返回新数组）。
+  - order: 2
+    action: 构造固定模型选项 [{value:1,displayName:"Primary"},{value:2,displayName:"Fallback A"},{value:3,displayName:"Fallback B"}]
+      与初始顺序 modelIds=[1,2,3]。
+    expected: activeId 或 overId 缺失、或二者索引相同时，返回原 modelIds 引用，顺序不变且不抛异常。
+  - order: 3
+    action: 调用 reorderModelIds([1,2,3], 3, 1)，记录返回数组及原输入数组引用。
+    expected: resolveModelSelection 返回 {model_ids, model, model_names}；model 为重排后首位模型 displayName（如 "Fallback B"），model_names
+      与 modelIds 顺序一一对应；未知 id 对应 model_names 项为 ""，首位未知时 model 为 ""。
+  - order: 4
+    action: 以重排结果调用 resolveModelSelection(modelIds, modelOptions)，记录返回对象的 model、model_ids、model_names 三字段。
+    expected: agent-prompt.tsx 通过 Popover（ListOrdered icon）展示模型优先级排序，并调用 form.setFieldValue("model_ids", modelIds) 将重排顺序同步回表单受控字段。
+  - order: 5
+    action: 边界：activeId 或 overId 不在 modelIds 中（indexOf 为 -1），调用并记录返回值与顺序。
+    expected: 测试过程无未处理异常；日志/Trace/报告中不出现明文 API Key/Token/Password/模型密钥。
+  - order: 6
+    action: 边界：activeId 与 overId 相同（activeIndex===overIndex），调用并记录返回值。
+    expected: 测试过程无未处理异常；日志/Trace/报告中不出现明文 API Key/Token/Password/模型密钥。
+  - order: 7
+    action: 边界：modelIds 含 modelOptions 中不存在的 id，调用 resolveModelSelection，记录 model 与 model_names。
+    expected: 测试过程无未处理异常；日志/Trace/报告中不出现明文 API Key/Token/Password/模型密钥。
+  - order: 8
+    action: 读取 frontend/app/[locale]/agents/components/agent-prompt.tsx 源码，核对优先级弹窗由 Popover（ListOrdered）触发，并核对重排后通过 Form.useFormInstance()
+      与 form.setFieldValue("model_ids", modelIds) 回写受控 Select。
+    expected: 测试过程无未处理异常；日志/Trace/报告中不出现明文 API Key/Token/Password/模型密钥。
+  expected_results:
+  - reorderModelIds([1,2,3],3,1) 返回 [3,1,2]；原输入数组不被就地修改（返回新数组）。
+  - activeId 或 overId 缺失、或二者索引相同时，返回原 modelIds 引用，顺序不变且不抛异常。
+  - resolveModelSelection 返回 {model_ids, model, model_names}；model 为重排后首位模型 displayName（如 "Fallback B"），model_names 与 modelIds
+    顺序一一对应；未知 id 对应 model_names 项为 ""，首位未知时 model 为 ""。
+  - agent-prompt.tsx 通过 Popover（ListOrdered icon）展示模型优先级排序，并调用 form.setFieldValue("model_ids", modelIds) 将重排顺序同步回表单受控字段。
+  - 测试过程无未处理异常；日志/Trace/报告中不出现明文 API Key/Token/Password/模型密钥。
+  forbidden_side_effects: []
+  source:
+    legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
+    legacy_sheet: 02_测试用例基线
+    legacy_row: 429
+  unit_boundary: 模型优先级
+  inputs:
+  - '- 无固定外部 fixture；仅依赖被测源码 frontend/lib/agent/modelPriority.ts 与 frontend/app/[locale]/agents/components/agent-prompt.tsx
+    可访问。'
+  assertions:
+  - reorderModelIds([1,2,3],3,1) 返回 [3,1,2]；原输入数组不被就地修改（返回新数组）。
+  - activeId 或 overId 缺失、或二者索引相同时，返回原 modelIds 引用，顺序不变且不抛异常。
+  - resolveModelSelection 返回 {model_ids, model, model_names}；model 为重排后首位模型 displayName（如 "Fallback B"），model_names 与 modelIds
+    顺序一一对应；未知 id 对应 model_names 项为 ""，首位未知时 model 为 ""。
+  - agent-prompt.tsx 通过 Popover（ListOrdered icon）展示模型优先级排序，并调用 form.setFieldValue("model_ids", modelIds) 将重排顺序同步回表单受控字段。
+  - 测试过程无未处理异常；日志/Trace/报告中不出现明文 API Key/Token/Password/模型密钥。

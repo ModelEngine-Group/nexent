@@ -23,8 +23,9 @@ import {
 } from "@/lib/clarification";
 import { stripAnsiControlSequences } from "@/lib/ansi";
 import { createReasoningAccumulator } from "@/lib/reasoningAccumulator";
-import { stripStreamedFinalAnswerEcho } from "@/lib/streamFinalAnswer";
+import { createFinalAnswerProjection } from "@/lib/finalAnswerProjection";
 import { parseAutomationProposal } from "@/features/agentAutomation/parseProposal";
+import { unwrapFinalAnswer } from "@/lib/finalAnswerEnvelope";
 import type { SkillParam, ToolParam } from "@/types/agentConfig";
 import type { HumanInteractionEvent } from "@/types/clarification";
 import { extractMinioFiles } from "../utils/history-attachments";
@@ -77,6 +78,9 @@ interface SseChunk {
   // sibling sub-agents execute in parallel.
   invocation_id?: string;
   attempt_id?: string;
+  step_id?: string;
+  answer_phase?: "delta" | "complete";
+  reclassify_step?: boolean;
   phase?: "begin" | "rollback" | "commit";
   attempt?: number;
   path?: string;
@@ -290,7 +294,6 @@ interface NexentRunConfig {
     resolution: import("@/types/knowledgeScope").KnowledgeScopeResolution
   ) => void;
   draftSnapshot?: Record<string, unknown>;
-  complexity?: "simple" | "complicated";
   language?: "zh" | "en";
   onNl2SkillEvent?: (event: Nl2SkillStreamEvent) => void;
   onNl2AgentState?: (event: Nl2AgentStateEvent) => void;
@@ -1283,14 +1286,13 @@ export function pushStepTokenCount(step: StepTokenCount): void {
 }
 
 /**
- * Clears the global step token counts registry and resets the shared plan
- * state. Called from `remoteChatModelAdapter.run()` so a fresh assistant
- * turn never inherits the previous run's plan panel.
+ * Clear per-turn timing while retaining the conversation's latest plan.
+ * Conversation switches restore or clear the plan in the history adapter;
+ * a later plan event replaces it when a new planning turn creates a plan.
  */
 export function clearStepTokenCounts(): void {
   stepTokenCounts.length = 0;
   accumulatedDuration = 0;
-  planRegistry.set(null);
 }
 
 /**
@@ -1502,21 +1504,23 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
       context.config as { reasoningBudgetTokens?: number } | undefined
     )?.reasoningBudgetTokens;
     const reasoningCapability = (
-      context.config as {
-        reasoningCapability?: {
-          status?: string;
-          controls?: Array<{ type?: string }>;
-          levels?: string[];
-          control?: string;
-        };
-      } | undefined
+      context.config as
+        | {
+            reasoningCapability?: {
+              status?: string;
+              controls?: Array<{ type?: string }>;
+              levels?: string[];
+              control?: string;
+            };
+          }
+        | undefined
     )?.reasoningCapability;
     const reasoningSupported =
       reasoningCapability?.status === "supported" &&
       Boolean(
         reasoningCapability.controls?.length ||
-          reasoningCapability.levels?.length ||
-          reasoningCapability.control === "toggle"
+        reasoningCapability.levels?.length ||
+        reasoningCapability.control === "toggle"
       );
     const hasBudgetSelection =
       typeof reasoningBudgetTokens === "number" &&
@@ -1568,15 +1572,12 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
     }
     if (!workbenchConfig && !isEphemeralRuntime) {
       const modelContext = context.config as
-        | { deepThinking?: boolean; reasoningEffort?: string }
-        | undefined;
+        { deepThinking?: boolean; reasoningEffort?: string } | undefined;
       if (modelContext?.deepThinking !== undefined) {
         requestBody.generation_config = {
           deep_thinking: modelContext.deepThinking,
           ...(modelContext.deepThinking &&
-          ["low", "medium", "high"].includes(
-            modelContext.reasoningEffort ?? ""
-          )
+          ["low", "medium", "high"].includes(modelContext.reasoningEffort ?? "")
             ? { thinking_effort: modelContext.reasoningEffort }
             : {}),
         };
@@ -1676,7 +1677,6 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
             ? custom?.creationWorkbenchConfig
             : undefined,
           draft_snapshot: isNl2Skill ? custom?.draftSnapshot : undefined,
-          complexity: isNl2Skill ? custom?.complexity : undefined,
           language: isNl2Skill ? custom?.language : undefined,
           model_id: isNl2Skill
             ? (custom?.modelId ?? (requestBody.model_id as number | undefined))
@@ -2054,6 +2054,7 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
       ) {
         return false;
       }
+      finalAnswers.control(chunk);
       const top = resolveSubAgent(chunk.invocation_id);
       if (!top) {
         if (chunk.phase === "begin") {
@@ -2128,18 +2129,10 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
       }
       parentReasoning.close();
     };
-    const removeFinalAnswerEcho = (answer: string) => {
-      for (let index = contentParts.length - 1; index >= 0; index -= 1) {
-        const part = contentParts[index];
-        if (part?.type !== "reasoning") continue;
-        const remaining = stripStreamedFinalAnswerEcho(part.text, answer);
-        if (remaining !== null) {
-          if (remaining.trim()) contentParts[index] = { ...part, text: remaining };
-          else removeContentPart(index);
-        }
-        break;
-      }
-    };
+    const finalAnswers = createFinalAnswerProjection(
+      contentParts,
+      removeContentPart
+    );
 
     // Helper: build a fresh sub-agent metadata object for a given invocation.
     function subAgentMetadataFor(entry: ActiveSubAgent): SubAgentPartMetadata {
@@ -2319,6 +2312,9 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
         for (const line of lines) {
           const chunk = parseSseChunk(line);
           if (!chunk) continue;
+          if (chunk.type === "final_answer") {
+            chunk.content = unwrapFinalAnswer(chunk.content);
+          }
 
           if (isHumanInteractionEvent(chunk)) {
             flushOpenReasoning();
@@ -2418,6 +2414,7 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
           }
 
           if (chunk.type === "step_count") {
+            finalAnswers.recordStep(chunk);
             // NL2Skill can emit a step marker with no thinking text. It is
             // metadata, not a standalone reasoning card in creation mode.
             if (isNl2Skill) continue;
@@ -2427,15 +2424,9 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
             flushOpenReasoning(chunk.invocation_id);
             const top = resolveSubAgent(chunk.invocation_id);
             if (top) {
-              const part = makeReasoningPart(
-                chunk.content,
-                true,
-                subAgentMetadataFor(top)
-              );
-              contentParts.push(part);
-              top.slot.reasoningIdx = contentParts.length - 1;
+              top.slot.reasoningIdx = null;
               top.slot.stepLabel = chunk.content;
-              top.slot.pendingStepLabel = "";
+              top.slot.pendingStepLabel = chunk.content;
               top.slot.pendingWhitespace = "";
             } else {
               parentReasoning.queueStepLabel(chunk.content);
@@ -2535,33 +2526,43 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
             continue;
           }
 
-          // The final answer (or other terminal events) terminates the self-check lifecycle.
-          // Mark the existing panel complete before exposing terminal output.
+          if (chunk.type === "final_answer") {
+            const top = resolveSubAgent(chunk.invocation_id);
+            if (chunk.reclassify_step) {
+              if (top) top.slot.reasoningIdx = null;
+              else parentReasoning.detach();
+            }
+            finalAnswers.apply(
+              chunk,
+              top ? subAgentMetadataFor(top) : undefined
+            );
+            if (chunk.answer_phase !== "delta") {
+              for (const part of contentParts) {
+                const sameScope = top
+                  ? part.metadata?.runId === top.runId
+                  : !part.metadata?.subagentId;
+                if (sameScope && part.type === "text" && part.isError) {
+                  delete part.isError;
+                  part.isWarning = true;
+                }
+              }
+            }
+            flushOpenReasoning(chunk.invocation_id);
+            if (!chunk.invocation_id && chunk.answer_phase !== "delta")
+              completeVerificationPanel();
+            upsertCreatedAgentPart(false);
+            yield buildStreamResult(contentParts);
+            continue;
+          }
+
+          // Complete only the lifecycle belonging to this terminal event.
           if (
-            chunk.type === "final_answer" ||
             chunk.type === "error" ||
             chunk.type === "agent_finish" ||
             chunk.type === "max_steps_reached"
           ) {
-            // Commit any pending parent reasoning BEFORE writing the final
-            // answer text so the answer does not appear before its preceding
-            // step thought in the merged view.
-            flushOpenReasoning();
-            completeVerificationPanel();
-          }
-
-          if (chunk.type === "final_answer") {
-            removeFinalAnswerEcho(chunk.content);
-            upsertCreatedAgentPart(false);
-            // Backward compatibility for streams produced before the warning
-            // event existed. A later final answer proves those earlier step
-            // errors were recovered, so update their presentation in place.
-            for (const part of contentParts) {
-              if (part?.type === "text" && part.isError) {
-                delete part.isError;
-                part.isWarning = true;
-              }
-            }
+            flushOpenReasoning(chunk.invocation_id);
+            if (!chunk.invocation_id) completeVerificationPanel();
           }
 
           if (chunk.type === "warning") {
@@ -2696,9 +2697,22 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
               } else {
                 contentParts[top.slot.reasoningIdx].text += chunk.content;
               }
+              finalAnswers.recordReasoning(
+                chunk,
+                contentParts[top.slot.reasoningIdx!]
+              );
               yield buildStreamResult(contentParts);
             } else {
               parentReasoning.append(chunk.content);
+              finalAnswers.recordReasoning(
+                chunk,
+                [...contentParts]
+                  .reverse()
+                  .find(
+                    (part) =>
+                      part.type === "reasoning" && !part.metadata?.subagentId
+                  )
+              );
               yield buildStreamResult(contentParts);
             }
           } else if (partType === "tool-call") {
@@ -2826,20 +2840,18 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
         const chunk = parseSseChunk(buffer);
         if (chunk && chunk.type !== "status") {
           if (!isHumanInteractionEvent(chunk)) {
+            if (chunk.type === "final_answer") {
+              chunk.content = unwrapFinalAnswer(chunk.content);
+            }
             if (isNl2Skill) custom?.onNl2SkillEvent?.(chunk);
             if (chunk.type === "step_count") {
+              finalAnswers.recordStep(chunk);
               flushOpenReasoning(chunk.invocation_id);
               const top = resolveSubAgent(chunk.invocation_id);
               if (top) {
-                const part = makeReasoningPart(
-                  chunk.content,
-                  true,
-                  subAgentMetadataFor(top)
-                );
-                contentParts.push(part);
-                top.slot.reasoningIdx = contentParts.length - 1;
+                top.slot.reasoningIdx = null;
                 top.slot.stepLabel = chunk.content;
-                top.slot.pendingStepLabel = "";
+                top.slot.pendingStepLabel = chunk.content;
                 top.slot.pendingWhitespace = "";
               } else {
                 parentReasoning.queueStepLabel(chunk.content);
@@ -2959,23 +2971,25 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
             // The buffered SSE tail follows the live NL2Skill rule too.
           } else {
             if (chunk.type === "final_answer") {
-              upsertCreatedAgentPart(false);
-              // Commit any pending parent reasoning so the answer is emitted
-              // after the most recent step thought instead of being reordered
-              // in front of it.
-              flushOpenReasoning();
-              removeFinalAnswerEcho(chunk.content);
-              completeVerificationPanel();
-              for (const part of contentParts) {
-                if (part?.type === "text" && part.isError) {
-                  delete part.isError;
-                  part.isWarning = true;
-                }
+              const top = resolveSubAgent(chunk.invocation_id);
+              if (chunk.reclassify_step) {
+                if (top) top.slot.reasoningIdx = null;
+                else parentReasoning.detach();
               }
+              finalAnswers.apply(
+                chunk,
+                top ? subAgentMetadataFor(top) : undefined
+              );
+              flushOpenReasoning(chunk.invocation_id);
+              if (!chunk.invocation_id && chunk.answer_phase !== "delta")
+                completeVerificationPanel();
+              upsertCreatedAgentPart(false);
+              yield buildStreamResult(contentParts);
             } else if (chunk.type === "warning") {
               flushOpenReasoning();
             }
-            const partType = mapChunkType(chunk.type);
+            const partType =
+              chunk.type === "final_answer" ? null : mapChunkType(chunk.type);
             if (chunk.type === "parse") {
               flushOpenReasoning(chunk.invocation_id);
               if (chunk.content.trim()) {
@@ -3011,10 +3025,23 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
                   contentParts[top.slot.reasoningIdx].text += chunk.content;
                 }
                 if (top.slot.reasoningIdx !== null) {
+                  finalAnswers.recordReasoning(
+                    chunk,
+                    contentParts[top.slot.reasoningIdx]
+                  );
                   yield buildStreamResult(contentParts);
                 }
               } else {
                 parentReasoning.append(chunk.content);
+                finalAnswers.recordReasoning(
+                  chunk,
+                  [...contentParts]
+                    .reverse()
+                    .find(
+                      (part) =>
+                        part.type === "reasoning" && !part.metadata?.subagentId
+                    )
+                );
                 yield buildStreamResult(contentParts);
               }
             } else if (partType === "tool-call") {

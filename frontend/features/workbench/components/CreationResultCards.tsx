@@ -28,7 +28,10 @@ export function AgentCreationResultCard({
   description?: string;
   completed?: boolean;
 }) {
-  const { t } = useTranslation("common");
+  const { t, i18n } = useTranslation("common");
+  const locale = (i18n.resolvedLanguage || i18n.language).startsWith("en")
+    ? "en"
+    : "zh";
   const [agentDetails, setAgentDetails] = useState<{
     name: string;
     description?: string;
@@ -60,7 +63,7 @@ export function AgentCreationResultCard({
   const displayDescription = description || agentDetails?.description;
   return (
     <Link
-      href={`/agents?agent_id=${agentId}`}
+      href={`/${locale}/agents/${agentId}`}
       className="group my-4 block w-full min-w-0 overflow-hidden rounded-2xl border border-border bg-card shadow-sm transition-all hover:border-primary/45 hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
     >
       <div className="flex items-start gap-3 p-4">
@@ -109,7 +112,10 @@ export function SkillCreationResultCard({
   saved: boolean;
   onSave: (payload: SkillPayload) => Promise<void>;
 }) {
-  const { t } = useTranslation("common");
+  const { t, i18n } = useTranslation("common");
+  const locale = (i18n.resolvedLanguage || i18n.language).startsWith("en")
+    ? "en"
+    : "zh";
   const [saving, setSaving] = useState(false);
   const [lookup, setLookup] = useState<{
     name: string;
@@ -179,7 +185,7 @@ export function SkillCreationResultCard({
       </p>
       {isSaved ? (
         <Button asChild size="sm" variant="outline">
-          <Link href="/skill-space?tab=mine">
+          <Link href={`/${locale}/skill-space?tab=mine`}>
             {t("workbench.creation.openSkills", "查看我的 Skills")}
           </Link>
         </Button>

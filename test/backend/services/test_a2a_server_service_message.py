@@ -439,7 +439,7 @@ class TestHandleMessageSend:
         from backend.services.a2a_server_service import A2AServerService
 
         service = A2AServerService()
-        server_agent = {"agent_id": 7, "tenant_id": "agent-tenant", "is_enabled": True}
+        server_agent = {"agent_id": 7, "tenant_id": "agent-tenant", "version": "1", "is_enabled": True}
         parsed_message = {"message": {"parts": [{"type": "text", "text": "hello"}]}}
         events = [
             {"type": "model_output_thinking", "content": "working"},
@@ -493,7 +493,7 @@ class TestHandleMessageSend:
         from backend.services.a2a_server_service import A2AServerService
 
         service = A2AServerService()
-        server_agent = {"agent_id": 7, "is_enabled": True}
+        server_agent = {"agent_id": 7, "version": "1", "is_enabled": True}
         parsed_message = {"message": {"parts": []}, "history": [{"role": "user"}]}
         stream_response = MagicMock(
             status_code=200,
@@ -547,7 +547,7 @@ class TestHandleMessageSend:
         with patch.object(
             service,
             "_validate_endpoint",
-            return_value={"agent_id": 7, "tenant_id": "agent-tenant", "is_enabled": True},
+            return_value={"agent_id": 7, "tenant_id": "agent-tenant", "version": "1", "is_enabled": True},
         ), patch.object(
             service.adapter,
             "parse_a2a_message",
@@ -597,7 +597,7 @@ class TestHandleMessageSend:
         with patch.object(
             service,
             "_validate_endpoint",
-            return_value={"agent_id": 7, "tenant_id": "agent-tenant", "is_enabled": True},
+            return_value={"agent_id": 7, "tenant_id": "agent-tenant", "version": "1", "is_enabled": True},
         ), patch.object(
             service.adapter,
             "parse_a2a_message",
@@ -646,7 +646,7 @@ class TestHandleMessageStream:
         from backend.services.a2a_server_service import A2AServerService
 
         service = A2AServerService()
-        server_agent = {"agent_id": 7, "tenant_id": "agent-tenant", "is_enabled": True}
+        server_agent = {"agent_id": 7, "tenant_id": "agent-tenant", "version": "1", "is_enabled": True}
         parsed_message = {"message": {"parts": []}}
         valid_event = {"type": "final_answer", "content": "done"}
         stream_response = MagicMock(
@@ -709,7 +709,7 @@ class TestHandleMessageStream:
         with patch.object(
             service,
             "_validate_endpoint",
-            return_value={"agent_id": 7, "tenant_id": "agent-tenant", "is_enabled": True},
+            return_value={"agent_id": 7, "tenant_id": "agent-tenant", "version": "1", "is_enabled": True},
         ), patch.object(
             service.adapter,
             "parse_a2a_message",
@@ -773,7 +773,7 @@ class TestHandleMessageStream:
         with patch.object(
             service,
             "_validate_endpoint",
-            return_value={"agent_id": 7, "tenant_id": "agent-tenant", "is_enabled": True},
+            return_value={"agent_id": 7, "tenant_id": "agent-tenant", "version": "1", "is_enabled": True},
         ), patch.object(
             service.adapter,
             "parse_a2a_message",

@@ -23,7 +23,7 @@ def _configure_early_workbench_run(monkeypatch, canonical, conversation):
         "_resolve_user_tenant_language",
         lambda **_kwargs: ("user-a", "tenant-a", "en"),
     )
-    monkeypatch.setattr(agent_run, "prepend_current_time", lambda query, _timezone: query)
+    monkeypatch.setattr(agent_run, "prepend_current_time", lambda query, _timezone, *, language: query)
     monkeypatch.setattr(agent_run, "get_conversation_service", lambda **_kwargs: conversation)
     monkeypatch.setattr(
         agent_run,

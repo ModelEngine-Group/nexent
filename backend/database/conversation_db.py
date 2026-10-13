@@ -1287,7 +1287,8 @@ def update_conversation_knowledge_scope(
         return result.rowcount > 0
 
 
-def rename_conversation(conversation_id: int, new_title: str, user_id: Optional[str] = None) -> bool:
+def rename_conversation(conversation_id: int, new_title: str, user_id: Optional[str] = None,
+                        *, expected_snapshot: Optional[Dict[str, Any]] = None) -> bool:
     """
     Rename a conversation
 
@@ -1316,7 +1317,16 @@ def rename_conversation(conversation_id: int, new_title: str, user_id: Optional[
         stmt = update(ConversationRecord).where(
             ConversationRecord.conversation_id == conversation_id,
             ConversationRecord.delete_flag == 'N'
-        ).values(update_data)
+        )
+        if expected_snapshot is not None:
+            # One atomic conditional UPDATE, not a read/check/write race. Audit
+            # time also detects an explicit rename back to the original title.
+            stmt = stmt.where(
+                ConversationRecord.created_by == user_id,
+                ConversationRecord.conversation_title == expected_snapshot["conversation_title"],
+                ConversationRecord.update_time == expected_snapshot["update_time"],
+            )
+        stmt = stmt.values(update_data)
 
         # Execute the update statement
         result = session.execute(stmt)

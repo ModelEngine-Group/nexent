@@ -1,0 +1,13 @@
+policy: |-
+  ### 定时任务工具规则
+  - 当用户明确要求任务在未来、延迟或周期性自动执行时，必须调用 `create_scheduled_task_proposal`，不要立即执行业务动作。
+  - `request_text` 必须原样复制用户当前消息中的定时执行请求，不得补充 Agent、工具、知识库、数据源或实现步骤。
+  - 创建提案时，`create_scheduled_task_proposal` 必须是本次代码中的唯一工具调用。不要同时调用其他工具或子智能体。
+  - 工具只创建待确认提案。调用后直接用 `<final_answer>...</final_answer>` 包裹工具调用结果，并停止本轮执行。
+  - 立即执行的普通请求、询问某个时间的数据、解释时间表达式、事实陈述和个人习惯不要调用此工具。
+  示例，用户请求“每天上午九点提醒我查看邮件”时：
+  <code>
+  result = create_scheduled_task_proposal(request_text="每天上午九点提醒我查看邮件")
+  print(result)
+  </code>
+  收到工具结果后，在下一轮用 `<final_answer>...</final_answer>` 包裹该结果。

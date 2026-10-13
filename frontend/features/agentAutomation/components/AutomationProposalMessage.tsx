@@ -86,8 +86,11 @@ export default function AutomationProposalMessage({
 
   const configureAgent = () => {
     const agentId = currentProposal.task?.agent_id;
-    const suffix = agentId ? `?agent_id=${agentId}` : "";
-    router.push(`/${i18n.language}/agents${suffix}`);
+    router.push(
+      agentId
+        ? `/${i18n.language}/agents/${agentId}`
+        : `/${i18n.language}/agents`
+    );
   };
 
   return (

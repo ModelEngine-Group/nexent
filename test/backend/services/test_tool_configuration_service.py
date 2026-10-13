@@ -112,10 +112,6 @@ for name in ["CodeAgent", "handle_agent_output_types", "ActionOutput", "RunResul
     setattr(mock_smolagents.agents, name, MagicMock(
         name=f"smolagents.agents.{name}"))
 
-# Populate smolagents.local_python_executor with required attributes
-setattr(mock_smolagents.local_python_executor, "fix_final_answer_code",
-        MagicMock(name="fix_final_answer_code"))
-
 # Populate smolagents.memory with required attributes
 for name in ["ActionStep", "PlanningStep", "FinalAnswerStep", "ToolCall", "TaskStep", "SystemPromptStep"]:
     setattr(mock_smolagents.memory, name, MagicMock(
@@ -1436,7 +1432,7 @@ class TestGetToolFromRemoteMcpServer:
 
         # Verify calls
         mock_create_transport.assert_called_once_with("http://test-server.com", None, None)
-        mock_client_cls.assert_called_once_with(transport=mock_transport, timeout=10)
+        mock_client_cls.assert_called_once_with(transport=mock_transport, timeout=60)
         assert mock_client.list_tools.call_count == 1
 
     @patch('backend.services.tool_configuration_service.Client')
@@ -2304,7 +2300,7 @@ class TestLoadLastToolConfigImpl:
 
         assert result == "test result"
         mock_create_transport.assert_called_once_with("http://test-server.com", None, None)
-        mock_client_cls.assert_called_once_with(transport=mock_transport)
+        mock_client_cls.assert_called_once_with(transport=mock_transport, timeout=60)
         mock_client.call_tool.assert_called_once_with(
             name="test_tool", arguments={"param": "value"})
 
@@ -2339,7 +2335,7 @@ class TestLoadLastToolConfigImpl:
 
         assert result == "test result with token"
         mock_create_transport.assert_called_once_with("http://test-server.com", "Bearer token123", None)
-        mock_client_cls.assert_called_once_with(transport=mock_transport)
+        mock_client_cls.assert_called_once_with(transport=mock_transport, timeout=60)
         mock_client.call_tool.assert_called_once_with(
             name="test_tool", arguments={"param": "value"})
 
@@ -2366,7 +2362,7 @@ class TestLoadLastToolConfigImpl:
 
         # Verify client was created and connection was checked
         mock_create_transport.assert_called_once_with("http://test-server.com", None, None)
-        mock_client_cls.assert_called_once_with(transport=mock_transport)
+        mock_client_cls.assert_called_once_with(transport=mock_transport, timeout=60)
         mock_client.is_connected.assert_called_once()
 
     @patch('backend.services.tool_configuration_service.urljoin')
@@ -4340,34 +4336,10 @@ class TestGetLocalToolsDescriptionZhCoverage:
         inputs = json.loads(result[0].inputs)
         assert inputs == {"query": "string"}
 
-    @pytest.mark.parametrize(
-        ("enable_aidp_knowledge", "expected_selectability"),
-        [
-            (
-                True,
-                {
-                    "knowledge_base_search": False,
-                    "aidp_search": False,
-                    "ind_aidp_search": False,
-                },
-            ),
-            (
-                False,
-                {
-                    "knowledge_base_search": False,
-                    "aidp_search": False,
-                    "ind_aidp_search": True,
-                },
-            ),
-        ],
-    )
     @patch('backend.services.tool_configuration_service.get_local_tools_classes')
-    def test_get_local_tools_applies_knowledge_tool_selectability_by_deployment(
+    def test_get_local_tools_keeps_independent_aidp_search_selectable(
         self,
         mock_get_classes,
-        monkeypatch,
-        enable_aidp_knowledge,
-        expected_selectability,
     ):
         class KnowledgeTool:
             name = "knowledge_base_search"
@@ -4391,36 +4363,24 @@ class TestGetLocalToolsDescriptionZhCoverage:
             AidpTool,
             IndependentAidpTool,
         ]
-        monkeypatch.setattr(
-            _tool_cfg_service,
-            "ENABLE_AIDP_KNOWLEDGE",
-            enable_aidp_knowledge,
-        )
-
         result = _tool_cfg_service.get_local_tools()
 
         assert {
             tool.name: tool.is_user_selectable
             for tool in result
-        } == expected_selectability
+        } == {
+            "knowledge_base_search": False,
+            "aidp_search": False,
+            "ind_aidp_search": True,
+        }
 
-    @pytest.mark.parametrize(
-        ("enable_aidp_knowledge", "expected_selectability"),
-        [
-            (True, [False, False, False]),
-            (False, [False, False, True]),
-        ],
-    )
     @patch('backend.services.tool_configuration_service.get_local_tools_description_zh')
     @patch('backend.services.tool_configuration_service.query_all_tools')
     @pytest.mark.asyncio
-    async def test_list_all_tools_applies_deployment_selectability_to_stale_records(
+    async def test_list_all_tools_preserves_independent_aidp_search_selectability(
         self,
         mock_query,
         mock_get_descriptions,
-        monkeypatch,
-        enable_aidp_knowledge,
-        expected_selectability,
     ):
         mock_query.return_value = [
             {
@@ -4441,15 +4401,9 @@ class TestGetLocalToolsDescriptionZhCoverage:
             )
         ]
         mock_get_descriptions.return_value = {}
-        monkeypatch.setattr(
-            _tool_cfg_service,
-            "ENABLE_AIDP_KNOWLEDGE",
-            enable_aidp_knowledge,
-        )
-
         result = await _tool_cfg_service.list_all_tools("tenant-a")
 
-        assert [tool["is_user_selectable"] for tool in result] == expected_selectability
+        assert [tool["is_user_selectable"] for tool in result] == [False, False, True]
 
     @patch('backend.services.tool_configuration_service.get_local_tools_description_zh')
     @patch('backend.services.tool_configuration_service.query_all_tools')
@@ -6032,3 +5986,26 @@ class TestValidateToolParamRanges:
             _tool_cfg_service._validate_tool_param_ranges(
                 1, {"top_k": 50, "threshold": 0.5}
             )
+
+
+@pytest.mark.asyncio
+async def test_call_mcp_tool_enforces_runtime_timeout(monkeypatch):
+    """A stalled remote tool call uses the independent runtime tool timeout."""
+    client = AsyncMock()
+    client.__aenter__.return_value = client
+    client.is_connected.return_value = True
+
+    async def stalled_call(*_args, **_kwargs):
+        await asyncio.sleep(1)
+
+    client.call_tool.side_effect = stalled_call
+    monkeypatch.setattr(_tool_cfg_service, "Client", MagicMock(return_value=client))
+    monkeypatch.setattr(_tool_cfg_service, "_create_mcp_transport", MagicMock())
+    monkeypatch.setattr(_tool_cfg_service, "RUNTIME_MCP_TOOL_TIMEOUT_SECONDS", 0.01)
+
+    with pytest.raises(MCPConnectionError, match="tool execution timed out after 0.01 seconds"):
+        await _tool_cfg_service._call_mcp_tool(
+            "https://mcp.example/mcp",
+            "slow_tool",
+            {},
+        )

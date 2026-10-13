@@ -1,0 +1,16 @@
+schema_version: '1.0'
+module:
+  id: V5-BASELINE
+  name: Migrated V5 baseline
+feature:
+  feature_id: F-008
+  name: 配置/Provider 列表与 feature flag
+  status: active
+  description: '身份认证与账号 / OAuth: 配置/Provider 列表与 feature flag'
+  business_rules:
+  - rule_id: F-008-RULE-01
+    description: 配置/Provider 列表与 feature flag
+  required_test_stages:
+  - D2
+  source:
+    notes: Migrated from V5 01_代码功能清单 without changing the functional description.

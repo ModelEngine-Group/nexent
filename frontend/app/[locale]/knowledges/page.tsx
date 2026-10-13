@@ -8,7 +8,7 @@ import { useSetupFlow } from "@/hooks/useSetupFlow";
 import { useDeployment } from "@/components/providers/deploymentProvider";
 
 import DataConfig from "./KnowledgeBaseConfiguration";
-import AidpKnowledgeConfiguration from "@/ext_components/aidp/components/AidpKnowledgeConfiguration";
+import AidpKnowledgeConfiguration from "@/ext_components/aidp/AidpKnowledgeConfiguration";
 
 /**
  * KnowledgesContent - Unified knowledge base entry page

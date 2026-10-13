@@ -1,0 +1,17 @@
+schema_version: '1.0'
+module:
+  id: V5-BASELINE
+  name: Migrated V5 baseline
+feature:
+  feature_id: V5-REL-AUTO-D7FD61217390A8EE
+  name: 模型连通性检查启动恢复：fail_detecting_models_on_startup 将 detecting 状态模型批量置 unavailable 且不误伤其他状态
+  status: active
+  description: config-service 重启会打断进行中的模型连通性检查，导致模型记录停留在 connect_status=detecting；若不恢复，前端长期显示检测中，依赖 available 状态的调度与展示被误导。风险为本恢复逻辑误伤
+    available/unavailable/not_detected 或已删除(delete_flag=Y)的记录。
+  business_rules:
+  - rule_id: V5-REL-AUTO-D7FD61217390A8EE-RULE-01
+    description: 模型连通性检查启动恢复：fail_detecting_models_on_startup 将 detecting 状态模型批量置 unavailable 且不误伤其他状态
+  required_test_stages:
+  - D5
+  source:
+    notes: 'Provisional migration owner: the V5 row has no stable Feature ID. Do not infer an F-ID.'

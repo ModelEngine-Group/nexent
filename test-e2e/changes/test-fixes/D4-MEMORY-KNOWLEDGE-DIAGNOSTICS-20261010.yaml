@@ -1,0 +1,35 @@
+schema_version: '1.0'
+change:
+  change_id: D4-MEMORY-KNOWLEDGE-DIAGNOSTICS-20261010
+  change_type: test-fix
+  title: Confirm owned memory deletion and diagnose upstream knowledge failures
+  description: >-
+    A controlled Mem0 Mock run passed UI creation, ingest/search, genuine chat
+    retrieval and masked-credential edit, but the confirmation locator did not
+    match Ant Design's spaced Chinese delete label. Scope the confirmation modal,
+    await the owned-ID DELETE response and verify absence before and after reload.
+    Run the existing dedicated Mock configuration explicitly for this receipt;
+    do not replace real Provider credentials or certify a real Provider result.
+    The complete fixed Mock journey passed in repository-daily batch
+    2026-10-10T061750.421882-0000-b0d40c38, including confirmed UI deletion
+    and resource absence. The optional Mock environment was process-scoped;
+    shared secrets.env and the official Daily environment were not overwritten.
+    Record only fixed HTTP status and TLS/connection/timeout booleans for failed
+    knowledge retrieval. A failed product HTTP response is execution FAIL rather
+    than AUTOMATION_ERROR; attribution still requires provider/network evidence.
+    Report a missing CMSR successful SSE fragment as an explicit bounded
+    acceptance failure with sanitized fixture state, not a generic infrastructure
+    timeout. Keep the same pre-completion visibility window and both retry modes.
+    Batch 2026-10-10T062014.424760-0000-904f6252 verified explicit CMSR FAIL
+    diagnostics: calls=2, paused=success, completed=false, expired=false.
+    No product changes, weakened markers or bypassed deletion confirmation.
+  affected_features:
+    existing: [CMSR-005, V5-PW-MEMORY-PROVIDER-01, V5-PW-MODEL-02, V5-PW-KB-LOCAL-01]
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing: [PW-KB-LOCAL-01]
+    added: []
+    modified: [CMSR-D3-001, PW-MEMORY-PROVIDER-01, PW-MODEL-02]
+    retired: []

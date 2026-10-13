@@ -98,7 +98,12 @@ def get_single_config_info(tenant_id: str, select_key: str):
         if result:
             record_info = {
                 "config_value": result.config_value,
-                "tenant_config_id": result.tenant_config_id
+                "tenant_config_id": result.tenant_config_id,
+                # The UI config-save path (set_single_config) stamps the
+                # acting user here; auto-backfilled rows leave it empty.
+                # Consumers use it to tell "user chose this" from "system
+                # picked a placeholder".
+                "user_id": result.user_id,
             }
 
             return record_info

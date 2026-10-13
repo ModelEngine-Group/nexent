@@ -234,7 +234,7 @@ class SkillManager:
 
         # Write additional files
         for file_path, file_content, file_encoding in files_to_write:
-            self._write_skill_file(
+            self._save_extra_file(
                 name,
                 file_path,
                 file_content,
@@ -245,7 +245,7 @@ class SkillManager:
         logger.info(f"Saved skill '{name}' to local storage with {len(extra_files)} extra file(s)")
         return self.load_skill(name, tenant_id=tenant_id)
 
-    def write_skill_file(
+    def _save_extra_file(
         self,
         skill_name: str,
         file_path: str,
@@ -254,7 +254,7 @@ class SkillManager:
         encoding: str = "utf-8",
         tenant_id: Optional[str],
     ) -> None:
-        """Write a file inside a tenant-scoped skill directory."""
+        """Save an additional file inside a tenant-scoped skill directory."""
         if not self.base_skills_dir:
             raise ValueError("base_skills_dir is not configured")
         if not isinstance(skill_name, str) or not skill_name.strip():
@@ -274,27 +274,7 @@ class SkillManager:
             raise ValueError("file_path resolves outside the skill directory")
         with open(safe_path, "w", encoding=encoding) as f:
             f.write(content)
-        logger.debug(f"Wrote skill file '{skill_name}/{file_path}'")
-
-    def _write_skill_file(
-        self,
-        skill_name: str,
-        file_path: str,
-        content: str,
-        *,
-        encoding: str = "utf-8",
-        tenant_id: Optional[str],
-    ) -> None:
-        """Write a skill file through the validated public API."""
-        if not self.base_skills_dir:
-            return
-        self.write_skill_file(
-            skill_name,
-            file_path,
-            content,
-            encoding=encoding,
-            tenant_id=tenant_id,
-        )
+        logger.debug(f"Saved extra skill file '{skill_name}/{file_path}'")
 
     def upload_skill_from_file(
         self,

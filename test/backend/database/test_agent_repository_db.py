@@ -751,6 +751,23 @@ def test_list_agent_repository_by_agent_ids_success(monkeypatch, mock_session):
     assert result[0]["content"] is None
 
 
+def test_list_agent_repository_by_agent_ids_filters_publisher_user(monkeypatch, mock_session):
+    session, query = mock_session
+    inner_query = MagicMock()
+    inner_query.filter.return_value = inner_query
+    inner_query.order_by.return_value.all.return_value = []
+    query.filter.return_value = inner_query
+    _patch_session(monkeypatch, session)
+
+    list_agent_repository_by_agent_ids(
+        [10], statuses=["pending_review"],
+        publisher_tenant_id="tenant-1", publisher_user_id="alice",
+    )
+
+    assert inner_query.filter.call_count == 1
+    _AgentRepositoryModel.publisher_user_id.__eq__.assert_called_with("alice")
+
+
 def test_update_agent_repository_status_by_id_persists_content(monkeypatch, mock_session):
     session, _ = mock_session
     execute_result = MagicMock()

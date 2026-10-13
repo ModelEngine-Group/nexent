@@ -239,7 +239,9 @@ def _install_sys_modules_stubs() -> None:
     # ---- nexent namespace --------------------------------------------------
     _nexent_pkg = _register_package("nexent")
     _nexent_core = _register_package("nexent.core")
+    _nexent_core.__path__ = [str(Path(__file__).resolve().parents[3] / "sdk/nexent/core")]
     _nexent_core_agents = _register_package("nexent.core.agents")
+    sys.modules["nexent.core.agents"].__path__ = [str(Path(__file__).resolve().parents[3] / "sdk/nexent/core/agents")]
     _nexent_core_utils = _register_package("nexent.core.utils")
     _nexent_pkg.core = _nexent_core
     _nexent_core.agents = _nexent_core_agents

@@ -1,0 +1,16 @@
+schema_version: '1.0'
+module:
+  id: V5-BASELINE
+  name: Migrated V5 baseline
+feature:
+  feature_id: F-126
+  name: pause/resume/run now/history
+  status: active
+  description: '自动任务 / 状态: pause/resume/run now/history'
+  business_rules:
+  - rule_id: F-126-RULE-01
+    description: pause/resume/run now/history
+  required_test_stages:
+  - D2
+  source:
+    notes: Migrated from V5 01_代码功能清单 without changing the functional description.
