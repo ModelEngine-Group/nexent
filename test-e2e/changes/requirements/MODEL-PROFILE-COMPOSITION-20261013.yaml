@@ -26,10 +26,13 @@ change:
       unknown fields/versions/unsupported roles.
     - Supplement parsing, explicit conflict handling and revision inputs are deterministic
       and preserve caller-owned data.
+    - Body extras use exact JSON Pointer semantics, reject owned/overlapping paths
+      and invalid arrays, preserve inputs, and enforce UTF-8 size/depth/leaf limits.
     reason: Existing contracts and parameter tests do not validate complete profile
       definitions, supplements or selection composition. Keep isolated assertions
       in UT and verify actual connected component behavior separately.
     test_selectors:
     - test/sdk/core/model_service/test_instruction_mapping.py
+    - test/sdk/core/model_service/test_request_parameters.py
   notes: Design before component wiring. D2/D3/D4 and deployed outlet acceptance remain
     later service/runtime slices.
