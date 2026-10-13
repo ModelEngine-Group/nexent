@@ -74,6 +74,38 @@ def catalog(sources, *, model=None, provider=None, combo=None):
     )
 
 
+def test_top_p_override_has_explicit_support_and_versioned_revision(
+    sources, monkeypatch
+):
+    from nexent.core.model_service.profiles import composition
+
+    override = {
+        "path": "/sampling/top_p",
+        "value": {"status": "unsupported"},
+        "reason": "Service-specific support",
+        "evidence": ["fixture"],
+    }
+    current = catalog(sources, combo={"capability_overrides": [override]})
+    assert (
+        current.provider_models["provider/exact"].capabilities["sampling"]["top_p"][
+            "status"
+        ]
+        == "unsupported"
+    )
+    assert (
+        current.models["family/model"].capabilities["sampling"]["top_p"]["status"]
+        == "unknown"
+    )
+    assert composition.COMPOSER_REF == "profile_policy_composer_v2"
+    monkeypatch.setattr(composition, "COMPOSER_REF", "profile_policy_composer_v1")
+    previous = catalog(sources, combo={"capability_overrides": [override]})
+    assert current.revision != previous.revision
+    assert (
+        current.models["family/model"].revision
+        != previous.models["family/model"].revision
+    )
+
+
 def compose(catalog, **changes):
     options = {
         "provider_key": "provider",

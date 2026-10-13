@@ -1,0 +1,20 @@
+schema_version: '1.0'
+module:
+  id: MODEL-SERVICE
+  name: Model service
+feature:
+  feature_id: BE-MODEL-OUTLET-SCHEMA
+  name: Model outlet schema extension
+  status: planned
+  description: Add single-row capability and parameter storage without changing existing model configuration values.
+  business_rules:
+  - rule_id: BE-MODEL-OUTLET-SCHEMA-RULE-01
+    description: Capability columns preserve unknown as NULL; schema upgrade does not infer support or copy existing values.
+  - rule_id: BE-MODEL-OUTLET-SCHEMA-RULE-02
+    description: Types, comments and revision default match the reviewed storage contract; no atomic profile tables or redundant indexes are added.
+  - rule_id: BE-MODEL-OUTLET-SCHEMA-RULE-03
+    description: Repeated schema execution preserves existing data and metadata; failed transactional execution rolls back and permits a normal retry.
+  required_test_stages: [D5]
+  source:
+    requirement_ids: [MODEL-OUTLET-SCHEMA-20261013]
+    notes: Schema only; saved-profile codec, runtime consumption and legacy data migration remain separate requirements.

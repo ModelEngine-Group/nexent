@@ -1,0 +1,57 @@
+schema_version: '1.0'
+stage: D5
+module: MODEL-SERVICE
+case:
+  case_id: MOS-D5-001
+  feature_id: BE-MODEL-OUTLET-SCHEMA
+  business_rule_ids: [BE-MODEL-OUTLET-SCHEMA-RULE-01, BE-MODEL-OUTLET-SCHEMA-RULE-02, BE-MODEL-OUTLET-SCHEMA-RULE-03]
+  title: Upgrade and repeat model outlet schema without data loss
+  type: DEPLOYMENT
+  priority: P1
+  status: active
+  automation: automated
+  objective: Exercise incremental SQL and PostgreSQL metadata/data behavior against a pre-upgrade model table.
+  preconditions:
+  - Isolated PostgreSQL database created for the current run; no production database is permitted.
+  - Repository migration runner and SQL are available at the locked product revision.
+  test_data:
+    configuration: Synthetic model rows with non-secret connection values; transaction-scoped failure injection.
+  steps:
+  - order: 1
+    action: Prepare the prior model table with representative existing endpoint, model, capacity, false/zero inference values and an extra parameter bag; execute the new schema SQL transactionally.
+    expected: Existing values are unchanged and new capabilities remain unknown; config_revision becomes 1.
+  - order: 2
+    action: Query PostgreSQL column types, nullability, defaults and comments; repeat the SQL and compare existing rows and metadata.
+    expected: All new columns match the design and repeat execution preserves metadata and values.
+  - order: 3
+    action: Inject a deliberate SQL failure after migration inside a transaction, confirm rollback, then run the unchanged migration successfully.
+    expected: Failed transaction leaves no partial new schema; the successful retry restores the complete extension.
+  expected_results:
+  - Prior model configuration values are unchanged; new capability/profile fields remain NULL and config_revision is 1.
+  - Actual PostgreSQL types, nullability, default and English comments match ORM/design; repeated execution is idempotent.
+  - Injected failure rolls back all migration changes and normal retry succeeds.
+  forbidden_side_effects:
+  - No production connection, real provider call or credential value in logs/artifacts.
+  - No new atomic profile tables, capability inference or modification of previously merged SQL.
+  risk_type: DEPLOYMENT
+  risk: Schema changes may rewrite model settings, lose unknown states or partially apply.
+  condition: [Isolated actual PostgreSQL with a pre-upgrade schema and existing model rows]
+  metrics: [Existing value mismatch count, New column metadata mismatch count, Partial schema count after rollback]
+  thresholds: [All mismatch counts are zero, Partial schema count is zero]
+  recovery_expectations: [The unchanged SQL succeeds after the intentionally failed transaction]
+  acceptance:
+  - id: AC-01
+    description: Preserve legacy values and unknown capabilities during upgrade.
+    steps: [1]
+    expected_results: [1]
+    forbidden_side_effects: [1, 2]
+  - id: AC-02
+    description: Validate actual metadata and idempotent repetition.
+    steps: [2]
+    expected_results: [2]
+    forbidden_side_effects: [1, 2]
+  - id: AC-03
+    description: Roll back failed execution and recover by retry.
+    steps: [3]
+    expected_results: [3]
+    forbidden_side_effects: [1, 2]

@@ -15,6 +15,31 @@ def test_missing_capabilities_are_unknown_not_supported_or_false():
     assert capabilities.response.supported_finish_reasons is None
     assert capabilities.usage.input_includes_cached == "unknown"
     assert capabilities.usage.output_includes_reasoning == "unknown"
+    assert capabilities.sampling.top_p.status == "unknown"
+
+
+@pytest.mark.parametrize("status", ["supported", "unsupported", "unknown"])
+def test_top_p_support_is_independent_of_temperature(status):
+    capabilities = ProfileCapabilities.model_validate(
+        {"sampling": {"top_p": {"status": status}}}
+    )
+    assert capabilities.sampling.top_p.status == status
+    assert capabilities.sampling.temperature.status == "unknown"
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        True,
+        0.5,
+        {"status": False},
+        {"status": "maybe"},
+        {"status": "supported", "value": 0.5},
+    ],
+)
+def test_top_p_rejects_parameter_values_and_undeclared_support(value):
+    with pytest.raises(ValidationError):
+        ProfileCapabilities.model_validate({"sampling": {"top_p": value}})
 
 
 @pytest.mark.parametrize(

@@ -187,9 +187,10 @@ class ToolCapabilities(ProfileContract):
 
 
 class SamplingCapabilities(ProfileContract):
-    """Source temperature support is not a configured numeric temperature."""
+    """Sampling support is independent of configured numeric parameter values."""
 
     temperature: CapabilityFlag = Field(default_factory=CapabilityFlag)
+    top_p: CapabilityFlag = Field(default_factory=CapabilityFlag)
 
 
 class ModalityCapabilities(ProfileContract):
