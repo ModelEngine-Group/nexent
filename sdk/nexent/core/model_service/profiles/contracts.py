@@ -129,3 +129,44 @@ class AtomicProfileReference(ProfileContract):
         ):
             raise ValueError("Source paths must be canonical relative POSIX paths")
         return self
+
+
+class VersionedReference(ProfileContract):
+    """An explicit registry identity; never a dynamic import path."""
+
+    ref: NonBlankString
+    version: Annotated[int, Field(gt=0)]
+
+
+class InstructionRoleMappings(ProfileContract):
+    """All Nexent semantic instruction/resource categories need explicit targets."""
+
+    platform_instruction: NonBlankString
+    application_instruction: NonBlankString
+    user_input: NonBlankString
+    assistant_history: NonBlankString
+    tool_result: NonBlankString
+    reference_data: NonBlankString
+
+
+class InstructionMappingDefinition(ProfileContract):
+    """Extensible declaration; execution requires a matching registered strategy."""
+
+    strategy_id: NonBlankString
+    strategy_version: Annotated[int, Field(gt=0)]
+    instruction_hierarchy: list[NonBlankString]
+    supported_roles: list[NonBlankString]
+    mappings: InstructionRoleMappings
+    ordering: list[NonBlankString]
+    reference_placement: NonBlankString
+
+    @model_validator(mode="after")
+    def validate_declared_roles(self) -> Self:
+        for values in (self.instruction_hierarchy, self.supported_roles, self.ordering):
+            if not values or len(set(values)) != len(values):
+                raise ValueError("Instruction lists must be nonempty and unique")
+        if not set(self.instruction_hierarchy) <= set(self.supported_roles):
+            raise ValueError("Instruction hierarchy must use supported roles")
+        if not set(self.mappings.model_dump().values()) <= set(self.supported_roles):
+            raise ValueError("All semantic roles require supported targets")
+        return self
