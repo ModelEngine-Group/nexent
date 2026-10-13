@@ -12,6 +12,24 @@ from .utils import add_creation_tracking, add_update_tracking
 logger = logging.getLogger("database.model_management_db")
 
 
+def create_resolved_model_record(*args, **kwargs):
+    """Create a resolved outlet through the transactional storage implementation."""
+    from .model_outlet_db import create_resolved_model_record as create_resolved
+    return create_resolved(*args, **kwargs)
+
+
+def get_resolved_model_record(*args, **kwargs):
+    """Load a tenant-owned resolved outlet without applying legacy parameter filters."""
+    from .model_outlet_db import get_resolved_model_record as get_resolved
+    return get_resolved(*args, **kwargs)
+
+
+def update_resolved_model_record(*args, **kwargs):
+    """Update a resolved outlet with an expected configuration revision."""
+    from .model_outlet_db import update_resolved_model_record as update_resolved
+    return update_resolved(*args, **kwargs)
+
+
 def create_model_record(model_data: Dict[str, Any], user_id: str, tenant_id: str) -> bool:
     """
     Create a model record

@@ -54,6 +54,14 @@ def test_creation_defaults_are_not_reapplied_on_saved_snapshot_load():
     assert restore(rules, stored) == {}
 
 
+@pytest.mark.parametrize("key", ["temperature", "top_p"])
+def test_float_columns_reject_integer_rounding(key):
+    rules = compile_parameter_rules([declaration(key)])
+    with pytest.raises(ParameterValidationError, match="PARAMETER_COLUMN_INVALID"):
+        split_outlet_parameters(rules, {key: 2**53 + 1})
+    assert restore(rules, split_outlet_parameters(rules, {key: 2**53})) == {key: 2**53}
+
+
 @pytest.mark.parametrize(
     "key,value",
     [

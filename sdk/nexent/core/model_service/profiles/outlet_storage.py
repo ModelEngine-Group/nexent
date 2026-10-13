@@ -154,6 +154,19 @@ def decode_resolved_model_profile(
                 raise ProfileStorageError()
             if value is not None or key in nulls:
                 saved[key] = value
+        for declaration in remainder["parameter_rules"]:
+            key = declaration.get("key")
+            if key not in {"temperature", "top_p"}:
+                continue
+            declared_type = declaration.get("schema", {}).get("type")
+            integer_only = declared_type == "integer" or (
+                isinstance(declared_type, list)
+                and "integer" in declared_type
+                and set(declared_type) <= {"integer", "null"}
+            )
+            value = saved.get(key)
+            if integer_only and type(value) is float and value.is_integer():
+                saved[key] = int(value)
         compiled = restore_parameter_rules(
             remainder["parameter_rules"],
             reasoning_controls=capability_columns["reasoning_controls"],

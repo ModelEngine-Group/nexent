@@ -420,3 +420,14 @@ def test_atomic_key_cannot_contradict_provenance(document):
     document["identity"]["model_profile_key"] = "unrelated-model"
     with pytest.raises(ValueError):
         ResolvedModelProfile.model_validate(document)
+
+
+def test_integer_sampling_schema_survives_postgresql_float_column(document):
+    document["parameter_rules"][0]["schema"] = {"type": "integer"}
+    row = encode(document)
+    row["temperature"] = (
+        0.0  # PostgreSQL FLOAT returns a Python float for an integer insert.
+    )
+    profile = decode(row)
+    assert type(profile.parameter_values["temperature"]) is int
+    assert profile.parameter_values["temperature"] == 0

@@ -32,6 +32,8 @@ def _validate_column(key: str, value: object) -> None:
     if key in {"temperature", "top_p"}:
         try:
             valid = type(value) in {int, float} and math.isfinite(value)
+            if valid and type(value) is int:
+                valid = float(value) == value
         except OverflowError:
             valid = False
     elif key == "enable_thinking":
