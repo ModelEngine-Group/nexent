@@ -9,12 +9,19 @@ from pydantic import ValidationError
 from nexent.core.model_service.profiles._models_dev.reader import _freeze
 from nexent.core.model_service.profiles.contracts import ProfileCapabilities, VersionedReference
 from nexent.core.model_service.profiles.instruction_mapping import resolve_instruction_mapping
+from nexent.core.model_service.profiles.parameter_bindings import validate_parameter_bindings
 from nexent.core.model_service.profiles.parameter_rules import (
     CompiledParameterRules,
     apply_parameter_values,
     compile_parameter_rules,
 )
-from nexent.core.model_service.profiles.parameter_schema import _json_copy, json_values_equal
+from nexent.core.model_service.profiles.parameter_schema import (
+    ParameterValidationError,
+    _json_copy,
+    compile_parameter_schema,
+    json_values_equal,
+    validate_parameter_value,
+)
 from nexent.core.model_service.profiles.resolver import SourceCatalog, SourceCatalogEntry, _revision
 from nexent.core.model_service.profiles.supplements import SupplementCatalog
 
@@ -79,10 +86,22 @@ class ProviderModelPolicy:
     instruction_mapping: Mapping[str, object]
     bindings: Mapping[str, object]
     parameter_rules: CompiledParameterRules
+    parameter_bindings: Mapping[str, Mapping[str, object]]
     parameter_values: Mapping[str, object]
     overrides: tuple[Mapping[str, object], ...]
     catalog_revision: str
     revision: str
+
+
+def _check_profile_size(document: Mapping) -> None:
+    try:
+        encoded = json.dumps(_json_copy(document), ensure_ascii=False, allow_nan=False, separators=(",", ":")).encode(
+            "utf-8"
+        )
+    except (ValueError, TypeError, RecursionError, UnicodeError):
+        raise ProfileCompositionError("PROFILE_JSON_INVALID") from None
+    if len(encoded) > 1024 * 1024:
+        raise ProfileCompositionError("PROFILE_SIZE_LIMIT")
 
 
 def _capabilities(value: Mapping) -> dict:
@@ -166,6 +185,15 @@ def build_profile_catalog(sources: SourceCatalog, supplements: SupplementCatalog
             }
             if supplement:
                 parts[supplement.file_path] = supplement.content_sha256
+            _check_profile_size(
+                {
+                    "identity": source.identity,
+                    "capabilities": capabilities,
+                    "reference_metadata": source.reference_metadata,
+                    "connection_suggestions": source.connection_suggestions,
+                    "supplement": rule,
+                }
+            )
             collections[kind][key] = AtomicProfileDefinition(
                 kind,
                 key,
@@ -198,6 +226,7 @@ def compose_provider_model_policy(
     base_instruction: VersionedReference,
     registered_references: Mapping[str, Sequence[VersionedReference]],
     submitted_values: Mapping[str, object],
+    protected_api_paths: Sequence[str] = (),
 ) -> ProviderModelPolicy:
     """Compose exact selections against a trusted implementation-availability snapshot."""
     if not isinstance(request_model_id, str) or not request_model_id.strip() or len(request_model_id) > 100:
@@ -272,7 +301,38 @@ def compose_provider_model_policy(
             raise ProfileCompositionError("PROFILE_BINDING_INVALID", "/bindings/" + name) from None
         if reference not in registered_references.get(name, ()):
             raise ProfileCompositionError("PROFILE_BINDING_UNREGISTERED", "/bindings/" + name)
+    parameter_bindings = validate_parameter_bindings(
+        compiled,
+        registered_references.get("parameter_transform", ()),
+        protected_paths=protected_api_paths,
+    )
+    parameter_schemas = {rule["key"]: compile_parameter_schema(rule["schema"]) for rule in compiled.declarations}
+    for control in capabilities["reasoning"]["controls"] or ():
+        if control["parameter_key"] not in parameter_bindings:
+            raise ProfileCompositionError("REASONING_PARAMETER_BINDING_MISSING", "/capabilities/reasoning/controls")
+        candidates = list(control.get("values", ())) + list(control.get("special_values", ()))
+        for bound in ("min", "max"):
+            if control.get(bound) is not None:
+                candidates.append(control[bound])
+        try:
+            for candidate in candidates:
+                validate_parameter_value(parameter_schemas[control["parameter_key"]], candidate)
+        except ParameterValidationError:
+            raise ProfileCompositionError(
+                "REASONING_PARAMETER_SCHEMA_CONFLICT", "/capabilities/reasoning/controls"
+            ) from None
     mapping = resolve_instruction_mapping(instruction).model_dump(mode="json")
+    _check_profile_size(
+        {
+            "request_model_id": request_model_id,
+            "capabilities": capabilities,
+            "instruction_mapping": mapping,
+            "bindings": bindings,
+            "parameter_rules": compiled.declarations,
+            "parameter_values": values,
+            "overrides": overrides,
+        }
+    )
     parts = {
         "composer": COMPOSER_REF,
         "request_model_id": request_model_id,
@@ -290,6 +350,7 @@ def compose_provider_model_policy(
         _freeze(mapping),
         _freeze(bindings),
         compiled,
+        parameter_bindings,
         _freeze(values),
         _freeze(overrides),
         catalog.revision,

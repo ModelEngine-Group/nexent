@@ -81,7 +81,9 @@ def compose(catalog, **changes):
         "model_profile_key": None,
         "base_bindings": BINDINGS,
         "base_instruction": INSTRUCTION,
-        "registered_references": {key: [REFERENCE] for key in BINDINGS},
+        "registered_references": {
+            key: [REFERENCE] for key in (*BINDINGS, "parameter_transform")
+        },
         "submitted_values": {},
     }
     options.update(changes)
@@ -193,6 +195,11 @@ def test_nullable_default_is_materialized_once_and_detached(sources):
         "owner": "model",
         "source": {"ref": "fixture"},
         "default_value": None,
+        "api_binding": {
+            "path": "/effort",
+            "transform_ref": "test_v1",
+            "transform_version": 1,
+        },
     }
     definitions = catalog(sources, model={"parameters": [rule]})
     value = compose(definitions)
@@ -203,3 +210,121 @@ def test_nullable_default_is_materialized_once_and_detached(sources):
     declarations = value.parameter_rules.declarations
     declarations[0]["schema"]["enum"].append("high")
     assert value.parameter_rules.declarations[0]["schema"]["enum"] == [None, "low"]
+
+
+def test_oversized_atomic_definition_is_rejected_in_utf8_bytes(sources):
+    with pytest.raises(ProfileCompositionError, match="PROFILE_SIZE_LIMIT"):
+        catalog(sources, model={"aliases": ["中" * 350000]})
+
+
+def test_declared_thinking_control_requires_parameter_binding(sources):
+    model = replace(
+        sources.models["family/model"],
+        capabilities={
+            "reasoning": {
+                "status": "supported",
+                "controls": [{"mode": "toggle", "values": [False, True]}],
+            },
+        },
+    )
+    changed = replace(sources, models={"family/model": model})
+    with pytest.raises(
+        ProfileCompositionError, match="REASONING_PARAMETER_BINDING_MISSING"
+    ):
+        compose(catalog(changed))
+
+
+def test_thinking_control_values_must_fit_declared_parameter_schema(sources):
+    model = replace(
+        sources.models["family/model"],
+        capabilities={
+            "reasoning": {
+                "status": "supported",
+                "controls": [{"mode": "toggle", "values": [False, True]}],
+            },
+        },
+    )
+    changed = replace(sources, models={"family/model": model})
+    parameter = {
+        "key": "enable_thinking",
+        "schema": {"enum": [False]},
+        "visible": True,
+        "editable": True,
+        "required": False,
+        "allowed_scopes": ["outlet"],
+        "ui_group": "reasoning",
+        "owner": "combination",
+        "source": {"ref": "fixture"},
+        "api_binding": {
+            "path": "/enable_thinking",
+            "transform_ref": "test_v1",
+            "transform_version": 1,
+        },
+    }
+    with pytest.raises(
+        ProfileCompositionError, match="REASONING_PARAMETER_SCHEMA_CONFLICT"
+    ):
+        compose(catalog(changed, combo={"parameters": [parameter]}))
+    parameter["schema"] = {"type": "boolean"}
+    value = compose(catalog(changed, combo={"parameters": [parameter]}))
+    assert value.parameter_bindings["enable_thinking"]["path"] == "/enable_thinking"
+
+
+def test_composition_propagates_adapter_owned_path_protection(sources):
+    parameter = {
+        "key": "effort",
+        "schema": {"type": "string"},
+        "visible": True,
+        "editable": True,
+        "required": False,
+        "allowed_scopes": ["outlet"],
+        "ui_group": "reasoning",
+        "owner": "provider",
+        "source": {"ref": "fixture"},
+        "api_binding": {
+            "path": "/options/effort",
+            "transform_ref": "test_v1",
+            "transform_version": 1,
+        },
+    }
+    from nexent.core.model_service.profiles.parameter_schema import (
+        ParameterValidationError,
+    )
+
+    with pytest.raises(ParameterValidationError, match="RESERVED_API_PATH"):
+        compose(
+            catalog(sources, provider={"parameters": [parameter]}),
+            protected_api_paths=["/options"],
+        )
+
+
+def test_invalid_unicode_model_id_is_rejected_without_raw_values(sources):
+    with pytest.raises(
+        ProfileCompositionError, match="PROFILE_JSON_INVALID"
+    ) as captured:
+        compose(catalog(sources), request_model_id="private-\ud800")
+    assert "private" not in str(captured.value)
+
+
+def test_resolved_policy_size_includes_submitted_parameter_values(sources):
+    parameter = {
+        "key": "custom",
+        "schema": {"type": "string"},
+        "visible": True,
+        "editable": True,
+        "required": False,
+        "allowed_scopes": ["outlet"],
+        "ui_group": "advanced",
+        "owner": "provider",
+        "source": {"ref": "fixture"},
+        "api_binding": {
+            "path": "/custom",
+            "transform_ref": "test_v1",
+            "transform_version": 1,
+        },
+    }
+    definitions = catalog(sources, provider={"parameters": [parameter]})
+    with pytest.raises(ProfileCompositionError, match="PROFILE_SIZE_LIMIT"):
+        compose(definitions, submitted_values={"custom": "中" * 350000})
+    value = compose(definitions, submitted_values={"custom": "中" * 1000})
+    assert len(value.parameter_values["custom"]) == 1000
