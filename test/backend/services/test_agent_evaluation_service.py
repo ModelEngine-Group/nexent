@@ -428,7 +428,7 @@ _utils_pkg.evaluation_run = _utils_eval_run_module
 
 _utils_llm_module = MagicMock()
 _utils_llm_module.call_llm_for_system_prompt = MagicMock()
-sys.modules["utils.llm_utils"] = _utils_llm_module
+sys.modules["management.services.model.invocation"] = _utils_llm_module
 _utils_pkg.llm_utils = _utils_llm_module
 
 # utils.agent_profile_utils is imported lazily inside _generate_test_queries.

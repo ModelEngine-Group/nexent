@@ -2,9 +2,8 @@ import logging
 from typing import Dict, List
 
 import aiohttp
-
 from consts.const import DEFAULT_LLM_MAX_TOKENS
-from services.providers.base import (
+from management.services.model.providers.base import (
     AbstractModelProvider,
     _classify_provider_error,
     _extract_capacity_hints_from_raw,
@@ -32,10 +31,13 @@ def get_model_engine_raw_url(model_engine_url: str) -> str:
     if not model_engine_url:
         return ""
     # Remove any trailing /open/router/v1 or similar paths to get base host
-    raw_url = model_engine_url.split(
-        "/open/")[0] if "/open/" in model_engine_url else model_engine_url
+    raw_url = (
+        model_engine_url.split("/open/")[0]
+        if "/open/" in model_engine_url
+        else model_engine_url
+    )
     # Remove trailing slash if present
-    return raw_url.rstrip('/')
+    return raw_url.rstrip("/")
 
 
 class ModelEngineProvider(AbstractModelProvider):
@@ -64,11 +66,11 @@ class ModelEngineProvider(AbstractModelProvider):
 
             async with aiohttp.ClientSession(
                 timeout=aiohttp.ClientTimeout(total=30),
-                connector=aiohttp.TCPConnector(ssl=False)
+                connector=aiohttp.TCPConnector(ssl=False),
             ) as session:
                 async with session.get(
                     f"{model_engine_url.rstrip('/')}/{MODEL_ENGINE_NORTH_PREFIX}/models",
-                    headers=headers
+                    headers=headers,
                 ) as response:
                     # Use centralized error classification
                     if response.status >= 400:
@@ -76,13 +78,12 @@ class ModelEngineProvider(AbstractModelProvider):
                         return _classify_provider_error(
                             "ModelEngine",
                             status_code=response.status,
-                            error_message=error_text
+                            error_message=error_text,
                         )
 
                     data = await response.json()
                     all_models = data.get("data", [])
-                    logger.info(
-                        f"ModelEngine API returned {len(all_models)} models")
+                    logger.info(f"ModelEngine API returned {len(all_models)} models")
 
             # Type mapping from ModelEngine to internal types
             type_map = {
@@ -108,7 +109,9 @@ class ModelEngineProvider(AbstractModelProvider):
                         "id": model.get("id", ""),
                         "model_type": internal_type,
                         "model_tag": me_type,
-                        "max_tokens": DEFAULT_LLM_MAX_TOKENS if internal_type in ("llm", "vlm") else 0,
+                        "max_tokens": DEFAULT_LLM_MAX_TOKENS
+                        if internal_type in ("llm", "vlm")
+                        else 0,
                         "base_url": host,
                         "api_key": api_key,
                     }

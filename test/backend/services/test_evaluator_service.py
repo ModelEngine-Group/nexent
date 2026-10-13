@@ -87,8 +87,8 @@ def _install_stubs():
         fetch_agent_profile=MagicMock(name="fetch_agent_profile"),
         format_agent_profile_context=MagicMock(name="format_agent_profile_context"),
     )
-    _utils.llm_utils = _mk_mod(
-        "utils.llm_utils", call_llm_for_system_prompt=MagicMock(name="call_llm_for_system_prompt")
+    _mk_mod(
+        "management.services.model.invocation", call_llm_for_system_prompt=MagicMock(name="call_llm_for_system_prompt")
     )
     _utils.prompt_template_utils = _mk_mod(
         "utils.prompt_template_utils", get_prompt_template=MagicMock(name="get_prompt_template")
@@ -116,7 +116,7 @@ def bundle():
     sys.modules["services.agent_evaluation_service"].validate_code_evaluator = code_val
     sys.modules["utils.agent_profile_utils"].fetch_agent_profile = profile
     sys.modules["utils.agent_profile_utils"].format_agent_profile_context = fmt_profile
-    sys.modules["utils.llm_utils"].call_llm_for_system_prompt = llm
+    sys.modules["management.services.model.invocation"].call_llm_for_system_prompt = llm
     sys.modules["utils.prompt_template_utils"].get_prompt_template = tmpl
 
     if MODULE_UNDER_TEST in sys.modules:

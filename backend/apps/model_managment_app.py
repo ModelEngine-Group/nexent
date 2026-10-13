@@ -44,12 +44,9 @@ from fastapi.responses import JSONResponse
 from fastapi.encoders import jsonable_encoder
 from http import HTTPStatus
 from typing import Annotated, Any, List, Optional
-from services.model_health_service import (
-    check_model_connectivity,
-    verify_model_config_connectivity,
-)
-from services.model_capacity_suggestion_service import suggest_capacity
-from services.model_management_service import (
+from management.services.model.health import check_model_connectivity, verify_model_config_connectivity
+from management.services.model.capacity import suggest_capacity
+from management.services.model.management import (
     create_model_for_tenant,
     create_provider_models_for_tenant,
     batch_create_models_for_tenant,
@@ -60,11 +57,13 @@ from services.model_management_service import (
     list_models_for_tenant,
     list_llm_models_for_tenant,
     list_models_for_admin,
+)
+from management.services.model.capacity import (
     get_capacity_coverage,
     pop_capacity_accept_signal,
     _record_capacity_suggestion_accept,
-    get_model_reasoning_capability,
 )
+from management.services.model.reasoning import get_model_reasoning_capability
 from permissions.depends import authenticate, require
 from permissions.models import CurrentUser
 from utils.auth_utils import get_current_user_id

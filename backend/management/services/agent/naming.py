@@ -7,7 +7,7 @@ from jinja2 import Template
 
 from consts.const import LANGUAGE
 from database.agent_db import query_all_agent_info_by_tenant_id
-from utils.llm_utils import call_llm_for_system_prompt
+from management.services.model.invocation import call_llm_for_system_prompt
 from utils.prompt_template_utils import (
     get_prompt_generate_prompt_template,
     normalize_prompt_generate_template_content,

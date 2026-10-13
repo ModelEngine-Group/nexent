@@ -68,7 +68,7 @@ from services.thread_lifecycle_service import (
     config_thread_manager,
     runtime_thread_manager,
 )
-from utils.llm_utils import call_llm_for_system_prompt
+from management.services.model.invocation import call_llm_for_system_prompt
 from utils.prompt_template_utils import get_prompt_template
 
 

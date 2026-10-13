@@ -55,7 +55,7 @@ from services.conversation_management_service import (
     generate_conversation_title_service,
     update_conversation_title as update_conversation_title_service,
 )
-from services.model_management_service import list_models_for_tenant
+from management.services.model.management import list_models_for_tenant
 from utils.runtime_metadata_utils import (
     runtime_metadata_hash,
     validate_runtime_metadata,

@@ -8,6 +8,9 @@ from __future__ import annotations
 import logging
 from typing import Any, Dict, Optional
 
+from consts.const import MODEL_CONFIG_MAPPING
+from database.model_management_db import get_model_by_model_id
+from management.services.model.names import get_model_name_from_config
 from nexent import MessageObserver
 from nexent.core.gateway import (
     EmbeddingContext,
@@ -18,9 +21,7 @@ from nexent.core.gateway import (
     get_gateway,
 )
 from nexent.core.gateway.registry import get_registry
-from consts.const import MODEL_CONFIG_MAPPING
-from database.model_management_db import get_model_by_model_id
-from utils.config_utils import get_model_name_from_config, tenant_config_manager
+from utils.config_utils import tenant_config_manager
 
 logger = logging.getLogger("model_gateway_service")
 
@@ -63,7 +64,10 @@ def _normalize_factory(raw: Optional[str], modality: str) -> str:
     default = _MODALITY_DEFAULT_FACTORY.get(modality, "openai")
     if factory:
         logger.debug(
-            "factory %r has no %s adapter; falling back to %r", factory, modality, default
+            "factory %r has no %s adapter; falling back to %r",
+            factory,
+            modality,
+            default,
         )
     return default
 
@@ -96,13 +100,20 @@ def _custom_extra_body(extra_params: Optional[dict]) -> Optional[dict]:
     return custom if isinstance(custom, dict) and custom else None
 
 
-def _llm_construct_kwargs(construct_extras: Dict[str, Any], cfg: dict) -> Dict[str, Any]:
+def _llm_construct_kwargs(
+    construct_extras: Dict[str, Any], cfg: dict
+) -> Dict[str, Any]:
     """Per-call kwargs shared by every LLM-family context subclass."""
     return {
-        "temperature": _coalesce(construct_extras.pop("temperature", None), cfg.get("temperature")),
+        "temperature": _coalesce(
+            construct_extras.pop("temperature", None), cfg.get("temperature")
+        ),
         "top_p": _coalesce(construct_extras.pop("top_p", None), cfg.get("top_p")),
         "stream": construct_extras.pop("stream", None),
-        "max_output_tokens": _coalesce(construct_extras.pop("max_output_tokens", None), cfg.get("max_output_tokens")),
+        "max_output_tokens": _coalesce(
+            construct_extras.pop("max_output_tokens", None),
+            cfg.get("max_output_tokens"),
+        ),
         "frequency_penalty": cfg.get("frequency_penalty"),
     }
 
@@ -130,7 +141,9 @@ def _config_to_context(
 
     # ---- common kwargs (base class fields) ----
     common: Dict[str, Any] = {
-        "model_name": construct_extras.pop("model_name", None) or get_model_name_from_config(cfg) or "",
+        "model_name": construct_extras.pop("model_name", None)
+        or get_model_name_from_config(cfg)
+        or "",
         "base_url": cfg.get("base_url", ""),
         "api_key": cfg.get("api_key", ""),
         "modality": modality,
@@ -139,9 +152,14 @@ def _config_to_context(
         "slot": slot,
         "ssl_verify": cfg.get("ssl_verify", True),
         "observer": observer,
-        "display_name": _coalesce(construct_extras.pop("display_name", None), cfg.get("display_name")),
-        "timeout_seconds": _coalesce(construct_extras.pop("timeout_seconds", None), cfg.get("timeout_seconds")),
-        "extra_body": cfg.get("extra_body") or _custom_extra_body(cfg.get("extra_params")),
+        "display_name": _coalesce(
+            construct_extras.pop("display_name", None), cfg.get("display_name")
+        ),
+        "timeout_seconds": _coalesce(
+            construct_extras.pop("timeout_seconds", None), cfg.get("timeout_seconds")
+        ),
+        "extra_body": cfg.get("extra_body")
+        or _custom_extra_body(cfg.get("extra_params")),
     }
 
     # ---- modality-specific subclass construction ----
@@ -207,6 +225,7 @@ def build_adapter_fresh(
 
 # ---- Convenience wrappers (modality-specific defaults) -------------------
 
+
 def get_llm_adapter_from_config(
     cfg: Optional[dict],
     tenant_id: Optional[str] = None,
@@ -255,7 +274,9 @@ def get_vlm_adapter(tenant_id: str, model_id: Optional[int] = None, slot: str = 
     return get_gateway().get_adapter(_config_to_context(cfg, "vlm", slot, tenant_id))
 
 
-def get_llm_adapter(tenant_id: str, model_id: Optional[int] = None, modality: str = "llm"):
+def get_llm_adapter(
+    tenant_id: str, model_id: Optional[int] = None, modality: str = "llm"
+):
     """Resolve the LLM (or long-context) adapter directly (bridge owns config-fetch).
 
     Replaces ``file_management_service.get_llm_model``. ``modality`` = ``"llm"``
@@ -299,4 +320,6 @@ def get_rerank_adapter_from_config(
     tenant_id: Optional[str] = None,
     **construct_extras: Any,
 ):
-    return get_adapter_from_config(cfg, "rerank", "rerank", tenant_id, **construct_extras)
+    return get_adapter_from_config(
+        cfg, "rerank", "rerank", tenant_id, **construct_extras
+    )

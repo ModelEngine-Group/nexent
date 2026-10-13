@@ -900,3 +900,7 @@ MODELS_DEV_CATALOG_JSON_PATH = os.getenv(
 
 # External Memory Provider Configuration
 MEMORY_PROVIDER_PLUGINS_DIR = os.getenv("MEMORY_PROVIDER_PLUGINS_DIR", "")
+
+
+# Bundled LiteLLM catalog used for model capacity suggestions.
+NEXENT_LITELLM_JSON = os.environ.get("NEXENT_LITELLM_JSON", "/opt/nexent/litellm_models.json")

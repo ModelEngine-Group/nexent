@@ -143,7 +143,7 @@ def test_suggest_capacity_includes_reasoning_capability(mocker):
     """The shared model/base-URL lookup is returned to custom-access callers."""
     from backend.apps.model_managment_app import _suggest_capacity_for_request
     from backend.consts.model import ModelCapacitySuggestionRequest
-    from backend.services.model_capacity_suggestion_service import (
+    from management.services.model.capacity import (
         CapacitySuggestionMatchKind,
         CapacitySuggestionResult,
     )

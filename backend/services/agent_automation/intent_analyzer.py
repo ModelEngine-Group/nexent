@@ -280,7 +280,7 @@ class LLMAutomationIntentStrategy(AutomationIntentAnalysisStrategy):
     def _generate_sync(self, context: AutomationIntentContext) -> str:
         from nexent.core.models import OpenAIModel
         from nexent.core.utils.observer import MessageObserver
-        from utils.config_utils import get_model_name_from_config
+        from management.services.model.names import get_model_name_from_config
 
         language = detect_instruction_language(context.message)
         prompt_template = get_prompt_template("agent_automation", language)

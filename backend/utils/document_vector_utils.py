@@ -22,7 +22,7 @@ from consts.const import LANGUAGE
 from database.model_management_db import get_model_by_model_id
 from nexent.core.utils.observer import MessageObserver
 from nexent.vector_database.base import VectorDatabaseCore
-from utils.llm_utils import call_llm_for_system_prompt
+from management.services.model.invocation import call_llm_for_system_prompt
 from utils.prompt_template_utils import (
     get_document_summary_prompt_template,
     get_cluster_summary_reduce_prompt_template

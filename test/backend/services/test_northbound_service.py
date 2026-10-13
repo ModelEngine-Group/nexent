@@ -211,9 +211,9 @@ conv_mgmt_mod.update_conversation_title = MagicMock()
 sys.modules["services.conversation_management_service"] = conv_mgmt_mod
 
 # Mock model_management_service
-model_mgmt_mod = types.ModuleType("services.model_management_service")
+model_mgmt_mod = types.ModuleType("management.services.model.management")
 model_mgmt_mod.list_models_for_tenant = AsyncMock(return_value=[])
-sys.modules["services.model_management_service"] = model_mgmt_mod
+sys.modules["management.services.model.management"] = model_mgmt_mod
 
 # Mock agent_version_service
 agent_version_mod = types.ModuleType("services.agent_version_service")

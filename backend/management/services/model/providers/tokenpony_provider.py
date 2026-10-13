@@ -1,17 +1,14 @@
-import httpx
 import ssl
-
 from typing import Dict, List
 
-
+import httpx
 from consts.const import DEFAULT_LLM_MAX_TOKENS
 from consts.provider import TOKENPONY_GET_URL
-from services.providers.base import (
+from management.services.model.providers.base import (
     AbstractModelProvider,
     _classify_provider_error,
     _extract_capacity_hints_from_raw,
 )
-
 
 TOKENPONY_IMAGE_UNDERSTANDING_KEYWORDS = (
     "qwen-vl",
@@ -96,7 +93,6 @@ class TokenPonyModelProvider(AbstractModelProvider):
             headers = {"Authorization": f"Bearer {model_api_key}"}
             url = TOKENPONY_GET_URL
 
-
             ssl_context = ssl.create_default_context()
             ssl_context.check_hostname = False
             ssl_context.verify_mode = ssl.CERT_NONE
@@ -110,19 +106,19 @@ class TokenPonyModelProvider(AbstractModelProvider):
 
             # Initialize containers for the 6 main categories
             categorized_models = {
-                "chat": [],       # Maps to "llm"
-                "vlm": [],        # Maps to "vlm"
-                "vlm2": [],       # Maps to image generation models
-                "vlm3": [],       # Maps to video understanding models
+                "chat": [],  # Maps to "llm"
+                "vlm": [],  # Maps to "vlm"
+                "vlm2": [],  # Maps to image generation models
+                "vlm3": [],  # Maps to video understanding models
                 "embedding": [],  # Maps to "embedding" / "multi_embedding"
-                "rerank": [],   # Maps to "rerank"
-                "tts": [],        # Maps to "tts"
-                "stt": []         # Maps to "stt"
+                "rerank": [],  # Maps to "rerank"
+                "tts": [],  # Maps to "tts"
+                "stt": [],  # Maps to "stt"
             }
 
             # Classify models and inject canonical fields expected downstream
             for model_obj in all_models:
-                m_id = model_obj['id'].lower()
+                m_id = model_obj["id"].lower()
                 model_obj.setdefault("object", model_obj.get("object", "model"))
                 model_obj.setdefault("owned_by", model_obj.get("owned_by", "tokenpony"))
                 cleaned_model = {
@@ -132,45 +128,48 @@ class TokenPonyModelProvider(AbstractModelProvider):
                     "owned_by": model_obj.get("owned_by"),
                     "model_tag": "",
                     "model_type": "",
-                    "max_tokens": DEFAULT_LLM_MAX_TOKENS
+                    "max_tokens": DEFAULT_LLM_MAX_TOKENS,
                 }
                 cleaned_model.update(_extract_capacity_hints(model_obj))
                 # 1. rerank
-                if 'rerank' in m_id:
-                    cleaned_model.update({"model_tag": "rerank", "model_type": "rerank"})
-                    categorized_models['rerank'].append(cleaned_model)
-                #2. embedding
-                elif 'embedding' in m_id or m_id.startswith('bge-'):
-                    cleaned_model.update({"model_tag": "embedding", "model_type": "embedding"})
-                    categorized_models['embedding'].append(cleaned_model)
+                if "rerank" in m_id:
+                    cleaned_model.update(
+                        {"model_tag": "rerank", "model_type": "rerank"}
+                    )
+                    categorized_models["rerank"].append(cleaned_model)
+                # 2. embedding
+                elif "embedding" in m_id or m_id.startswith("bge-"):
+                    cleaned_model.update(
+                        {"model_tag": "embedding", "model_type": "embedding"}
+                    )
+                    categorized_models["embedding"].append(cleaned_model)
 
                 # 3. STT (Speech-to-Text / Audio understanding)
-                elif 'stt' in m_id:
+                elif "stt" in m_id:
                     cleaned_model.update({"model_tag": "stt", "model_type": "stt"})
-                    categorized_models['stt'].append(cleaned_model)
-
+                    categorized_models["stt"].append(cleaned_model)
 
                 # 4. TTS (Text-to-Speech)
-                elif 'tts' in m_id:
+                elif "tts" in m_id:
                     cleaned_model.update({"model_tag": "tts", "model_type": "tts"})
-                    categorized_models['tts'].append(cleaned_model)
+                    categorized_models["tts"].append(cleaned_model)
 
                 # 5. Multimodal models
                 elif _is_tokenpony_video_understanding_model(m_id):
                     cleaned_model.update({"model_tag": "chat", "model_type": "vlm3"})
-                    categorized_models['vlm3'].append(cleaned_model)
+                    categorized_models["vlm3"].append(cleaned_model)
                 elif _is_tokenpony_image_generation_model(m_id):
                     cleaned_model.update({"model_tag": "chat", "model_type": "vlm2"})
-                    categorized_models['vlm2'].append(cleaned_model)
+                    categorized_models["vlm2"].append(cleaned_model)
                 elif _is_tokenpony_image_understanding_model(m_id):
                     cleaned_model.update({"model_tag": "chat", "model_type": "vlm"})
-                    categorized_models['vlm'].append(cleaned_model)
+                    categorized_models["vlm"].append(cleaned_model)
 
                 # 6. Chat (Pure Text Conversation / Reasoning)
                 # Fallback check added: 'not metadata' catches standard OpenAI models that lack modality data
-                else :
+                else:
                     cleaned_model.update({"model_tag": "chat", "model_type": "llm"})
-                    categorized_models['chat'].append(cleaned_model)
+                    categorized_models["chat"].append(cleaned_model)
 
             # Return the specific list based on the requested target_model_type
             if target_model_type == "llm":
@@ -185,8 +184,17 @@ class TokenPonyModelProvider(AbstractModelProvider):
             else:
                 return []
 
-        except (httpx.HTTPStatusError, httpx.ConnectTimeout, httpx.ConnectError, Exception) as e:
-            status_code = e.response.status_code if isinstance(e, httpx.HTTPStatusError) and getattr(e, "response", None) else None
+        except (
+            httpx.HTTPStatusError,
+            httpx.ConnectTimeout,
+            httpx.ConnectError,
+            Exception,
+        ) as e:
+            status_code = (
+                e.response.status_code
+                if isinstance(e, httpx.HTTPStatusError) and getattr(e, "response", None)
+                else None
+            )
             return _classify_provider_error(
                 "TokenPony",
                 status_code=status_code,

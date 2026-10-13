@@ -6,16 +6,21 @@ from consts.const import (
     DEFAULT_MAXIMUM_CHUNK_SIZE,
 )
 from consts.model import ModelConnectStatusEnum, ModelRequest
-from consts.provider import ProviderEnum, DASHSCOPE_REALTIME_BASE_URL
+from consts.provider import DASHSCOPE_REALTIME_BASE_URL, ProviderEnum
 from database.model_management_db import get_models_by_tenant_factory_type
-from services.model_health_service import embedding_dimension_check, _infer_model_factory
-from services.providers.base import AbstractModelProvider
-from services.providers.silicon_provider import SiliconModelProvider
-from services.providers.tokenpony_provider import TokenPonyModelProvider
-from services.providers.dashscope_provider import DashScopeModelProvider
-from services.providers.modelengine_provider import ModelEngineProvider, get_model_engine_raw_url, MODEL_ENGINE_NORTH_PREFIX
-from services.providers.openai_provider import OpenAICompatibleProvider
-from utils.model_name_utils import split_repo_name, add_repo_to_name
+from management.services.model.names import add_repo_to_name, split_repo_name
+from management.services.model.probe import (
+    _infer_model_factory,
+    embedding_dimension_check,
+)
+from management.services.model.providers.base import AbstractModelProvider
+from management.services.model.providers.modelengine_provider import (
+    MODEL_ENGINE_NORTH_PREFIX,
+    ModelEngineProvider,
+    get_model_engine_raw_url,
+)
+from management.services.model.providers.openai_provider import OpenAICompatibleProvider
+from management.services.model.providers.silicon_provider import SiliconModelProvider
 
 logger = logging.getLogger("model_provider")
 
@@ -57,7 +62,9 @@ async def get_provider_models(model_data: dict) -> List[dict]:
 # =============================================================================
 
 
-async def prepare_model_dict(provider: str, model: dict, model_url: str, model_api_key: str) -> dict:
+async def prepare_model_dict(
+    provider: str, model: dict, model_url: str, model_api_key: str
+) -> dict:
     """
     Construct a model configuration dictionary that is ready to be stored in the
     database. This utility centralises the logic that was previously embedded in
@@ -87,9 +94,9 @@ async def prepare_model_dict(provider: str, model: dict, model_url: str, model_a
     # For embedding models, apply default values when chunk sizes are null
     if model["model_type"] in ["embedding", "multi_embedding"]:
         expected_chunk_size = model.get(
-            "expected_chunk_size", DEFAULT_EXPECTED_CHUNK_SIZE)
-        maximum_chunk_size = model.get(
-            "maximum_chunk_size", DEFAULT_MAXIMUM_CHUNK_SIZE)
+            "expected_chunk_size", DEFAULT_EXPECTED_CHUNK_SIZE
+        )
+        maximum_chunk_size = model.get("maximum_chunk_size", DEFAULT_MAXIMUM_CHUNK_SIZE)
         chunk_batch = model.get("chunk_batch", 10)
 
     # For ModelEngine provider, extract the host from model's base_url
@@ -106,8 +113,7 @@ async def prepare_model_dict(provider: str, model: dict, model_url: str, model_a
     # Set default timeout_seconds to 120 for LLM models (embedding models don't need it).
     model_type = model["model_type"]
     is_embedding_type = model_type in ["embedding", "multi_embedding"]
-    max_tokens_value = model.get(
-        "max_tokens", 0) if not is_embedding_type else 0
+    max_tokens_value = model.get("max_tokens", 0) if not is_embedding_type else 0
     timeout_seconds_value = 120 if not is_embedding_type else None
 
     # W1/W2 capacity fields. The frontend batch-add resolves these in
@@ -168,28 +174,40 @@ async def prepare_model_dict(provider: str, model: dict, model_url: str, model_a
     # Determine the correct base_url and, for embeddings, update the actual
     # dimension by performing a real connectivity check.
     if model["model_type"] in ["embedding", "multi_embedding"]:
-        if provider == ProviderEnum.DASHSCOPE.value and model["model_type"] == "embedding":
+        if (
+            provider == ProviderEnum.DASHSCOPE.value
+            and model["model_type"] == "embedding"
+        ):
             model_dict["base_url"] = f"{model_url.rstrip('/')}/embeddings"
         elif provider == ProviderEnum.MODELENGINE.value:
-            model_dict["base_url"] = f"{model_url.rstrip('/')}/{MODEL_ENGINE_NORTH_PREFIX}/embeddings"
+            model_dict["base_url"] = (
+                f"{model_url.rstrip('/')}/{MODEL_ENGINE_NORTH_PREFIX}/embeddings"
+            )
         elif "/embeddings" in model_url:
             # URL already contains /embeddings endpoint, use as-is
-            model_dict["base_url"] = model_url.rstrip('/')
+            model_dict["base_url"] = model_url.rstrip("/")
         else:
             model_dict["base_url"] = f"{model_url.rstrip('/')}/embeddings"
         model_dict["max_tokens"] = await embedding_dimension_check(model_dict)
-    elif model["model_type"] in ("stt", "tts") and provider == ProviderEnum.DASHSCOPE.value:
+    elif (
+        model["model_type"] in ("stt", "tts")
+        and provider == ProviderEnum.DASHSCOPE.value
+    ):
         model_dict["base_url"] = DASHSCOPE_REALTIME_BASE_URL
     elif model["model_type"] == "rerank":
         if provider == ProviderEnum.DASHSCOPE.value:
-            model_dict["base_url"] = f"{model_url.replace('compatible-mode/v1','api/v1').rstrip('/')}/services/rerank/text-rerank/text-rerank"
+            model_dict["base_url"] = (
+                f"{model_url.replace('compatible-mode/v1', 'api/v1').rstrip('/')}/services/rerank/text-rerank/text-rerank"
+            )
         else:
             model_dict["base_url"] = f"{model_url.rstrip('/')}/rerank"
     else:
         # For non-embedding models
         if provider == ProviderEnum.MODELENGINE.value:
             # Ensure ModelEngine models have the full API path
-            model_dict["base_url"] = f"{model_url.rstrip('/')}/{MODEL_ENGINE_NORTH_PREFIX}"
+            model_dict["base_url"] = (
+                f"{model_url.rstrip('/')}/{MODEL_ENGINE_NORTH_PREFIX}"
+            )
         else:
             model_dict["base_url"] = model_url
 
@@ -215,7 +233,7 @@ def merge_existing_model_attributes(
     tenant_id: str,
     provider: str,
     model_type: str,
-    fields: List[str] = None
+    fields: List[str] = None,
 ) -> List[dict]:
     """
     Merge existing model's attributes into the model list.
@@ -242,7 +260,8 @@ def merge_existing_model_attributes(
         return model_list
 
     existing_model_list = get_models_by_tenant_factory_type(
-        tenant_id, provider, model_type)
+        tenant_id, provider, model_type
+    )
 
     if not model_list or not existing_model_list:
         return model_list
@@ -274,7 +293,9 @@ def merge_existing_model_attributes(
     return model_list
 
 
-def merge_existing_model_tokens(model_list: List[dict], tenant_id: str, provider: str, model_type: str) -> List[dict]:
+def merge_existing_model_tokens(
+    model_list: List[dict], tenant_id: str, provider: str, model_type: str
+) -> List[dict]:
     """
     Merge existing model's max_tokens attribute into the model list.
 
@@ -289,7 +310,9 @@ def merge_existing_model_tokens(model_list: List[dict], tenant_id: str, provider
     Returns:
         List[dict]: Merged model list
     """
-    return merge_existing_model_attributes(model_list, tenant_id, provider, model_type, ["max_tokens"])
+    return merge_existing_model_attributes(
+        model_list, tenant_id, provider, model_type, ["max_tokens"]
+    )
 
 
 # Re-export provider classes for backward compatibility

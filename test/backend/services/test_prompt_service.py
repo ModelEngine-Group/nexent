@@ -25,7 +25,7 @@ _MODULE_PATCH_NAMES = [
     'database.knowledge_db',
     'database.client',
     'database.db_models',
-    'utils.llm_utils',
+    'management.services.model.invocation',
     'utils.prompt_template_utils',
     'management.services.agent.service',
     'services.prompt_template_service',
@@ -176,7 +176,7 @@ sys.modules['database.db_models'] = MagicMock()
 from jinja2 import StrictUndefined
 
 # Mock utils
-sys.modules['utils.llm_utils'] = MagicMock()
+sys.modules['management.services.model.invocation'] = MagicMock()
 sys.modules['utils.prompt_template_utils'] = MagicMock()
 
 # Mock services

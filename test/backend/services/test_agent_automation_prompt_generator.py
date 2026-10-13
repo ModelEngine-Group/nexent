@@ -275,7 +275,7 @@ def test_llm_strategy_builds_model_request_from_tenant_configuration(monkeypatch
             return SimpleNamespace(content='{"title":"A","instruction":"B"}')
 
     monkeypatch.setattr("nexent.core.models.OpenAIModel", FakeModel)
-    monkeypatch.setattr("utils.config_utils.get_model_name_from_config", lambda config: "resolved-model")
+    monkeypatch.setattr("management.services.model.names.get_model_name_from_config", lambda config: "resolved-model")
     monkeypatch.setattr(
         prompt_generator,
         "get_prompt_template",

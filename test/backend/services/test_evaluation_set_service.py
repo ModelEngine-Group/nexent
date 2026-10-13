@@ -199,7 +199,7 @@ _db_pkg.knowledge_db = _knowledge_db_mock
 _utils_pkg = _register_package("utils")
 
 _utils_llm_mock = MagicMock()
-sys.modules["utils.llm_utils"] = _utils_llm_mock
+sys.modules["management.services.model.invocation"] = _utils_llm_mock
 _utils_pkg.llm_utils = _utils_llm_mock
 
 _utils_prompt_mock = MagicMock()

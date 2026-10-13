@@ -1,13 +1,25 @@
 import json
 import logging
-import os
 import re
+import threading
 import time
-from dataclasses import dataclass
-from enum import Enum
-from typing import Any, Mapping, Optional
+from typing import Any, Dict, Mapping, Optional
 
-from consts.const import CAPACITY_SUGGESTION_ENABLED
+from consts.const import (
+    CAPACITY_SUGGESTION_ENABLED,
+    CAPACITY_VISIBILITY_ENABLED,
+    NEXENT_LITELLM_JSON,
+)
+from contracts.model import (
+    CapabilityProfileLike,
+    CapacitySuggestionConfidence,
+    CapacitySuggestionFields,
+    CapacitySuggestionMatchKind,
+    CapacitySuggestionResult,
+    ProfileKey,
+)
+from database.model_management_db import get_model_records
+from management.services.model.names import add_repo_to_name
 
 logger = logging.getLogger(__name__)
 
@@ -18,7 +30,7 @@ logger = logging.getLogger(__name__)
 try:
     from opentelemetry import metrics as _otel_metrics
 
-    _suggestion_meter = _otel_metrics.get_meter(__name__)
+    _suggestion_meter = _otel_metrics.get_meter("management.services.model.capacity")
     _capacity_suggestion_requests_total = _suggestion_meter.create_counter(
         name="model_capacity_suggestion_requests_total",
         description=(
@@ -75,45 +87,6 @@ def _record_suggestion_request(
             )
         except Exception:  # pragma: no cover
             pass
-
-
-ProfileKey = tuple[str, str]
-CapabilityProfileLike = Any
-
-
-class CapacitySuggestionMatchKind(str, Enum):
-    CATALOG_EXACT = "catalog_exact"
-    CATALOG_FUZZY = "catalog_fuzzy"
-    PROVIDER_DISCOVERY = "provider_discovery"
-    LITELLM_LOOKUP = "litellm_lookup"
-    NONE = "none"
-
-
-class CapacitySuggestionConfidence(str, Enum):
-    HIGH = "high"
-    MEDIUM = "medium"
-    LOW = "low"
-
-
-@dataclass(frozen=True)
-class CapacitySuggestionFields:
-    context_window_tokens: Optional[int] = None
-    max_input_tokens: Optional[int] = None
-    max_output_tokens: Optional[int] = None
-    default_output_reserve_tokens: Optional[int] = None
-    tokenizer_family: Optional[str] = None
-
-
-@dataclass(frozen=True)
-class CapacitySuggestionResult:
-    suggestions: Optional[CapacitySuggestionFields]
-    match_kind: CapacitySuggestionMatchKind
-    match_confidence: Optional[CapacitySuggestionConfidence]
-    match_explanation: str
-    suggested_provider: Optional[str] = None
-    canonical_model_name: Optional[str] = None
-    capability_profile_version: Optional[str] = None
-    capacity_source_on_accept: Optional[str] = None
 
 
 # Substring patterns matched against the lower-cased base_url. Order matters:
@@ -395,7 +368,9 @@ def _suggest_capacity_inner(
         raise ValueError("model_name is too long")
 
     if model_type and model_type.lower() not in SUPPORTED_SUGGESTION_MODEL_TYPES:
-        return _none_result(f"Capacity suggestion is not supported for model_type={model_type}")
+        return _none_result(
+            f"Capacity suggestion is not supported for model_type={model_type}"
+        )
 
     active_catalog = catalog if catalog is not None else _get_default_catalog()
 
@@ -418,7 +393,9 @@ def _suggest_capacity_inner(
     if litellm_result is not None:
         return litellm_result
 
-    return _none_result(f"No approved catalog profile matched provider={provider}, model={clean_model_name}")
+    return _none_result(
+        f"No approved catalog profile matched provider={provider}, model={clean_model_name}"
+    )
 
 
 # =============================================================================
@@ -430,10 +407,7 @@ def _suggest_capacity_inner(
 # max_input_tokens -> context_window and max_output_tokens -> max_output;
 # max_input / reserve stay None (SDK derives them from the combined window).
 
-_LITELLM_JSON_PATH = os.environ.get(
-    "NEXENT_LITELLM_JSON",
-    "/opt/nexent/litellm_models.json",
-)
+_LITELLM_JSON_PATH = NEXENT_LITELLM_JSON
 _LITELLM_CACHE: Optional[dict] = None
 
 
@@ -451,7 +425,9 @@ def _litellm_cache() -> Optional[dict]:
     return _LITELLM_CACHE
 
 
-def _litellm_exact_entry(cache: dict, target: str, provider: Optional[str]) -> Optional[dict]:
+def _litellm_exact_entry(
+    cache: dict, target: str, provider: Optional[str]
+) -> Optional[dict]:
     """Find the first cache entry whose key is one of the exact candidates."""
     candidates = []
     if provider:
@@ -477,7 +453,11 @@ def _litellm_cross_provider_entry(cache: dict, final_segment: str) -> Optional[d
     lowered = final_segment.lower()
     matches = [v for k, v in cache.items() if k.split("/")[-1].lower() == lowered]
     return next(
-        (m for m in matches if m.get("max_input_tokens") and m.get("max_output_tokens")),
+        (
+            m
+            for m in matches
+            if m.get("max_input_tokens") and m.get("max_output_tokens")
+        ),
         matches[0] if matches else None,
     )
 
@@ -541,3 +521,205 @@ def _litellm_lookup(
         canonical_model_name=target,
         capacity_source_on_accept="operator",
     )
+
+
+CAPACITY_COVERAGE_MODEL_TYPES = {"llm", "vlm", "vlm2", "vlm3", "vlm4"}
+
+# OpenTelemetry counter for silent catalog-matcher failures during the
+# capacity-coverage scan. The matcher is called per row so we cannot raise --
+# but the silent fallback to suggestion_available=False would hide a corrupt
+# catalog entry that turns every "available" hint into "false" across a whole
+# tenant. The counter gives staging/CI a single number to watch.
+#
+# Guarded the same way as the SDK monitor module: if OpenTelemetry is not
+# installed (some deployments run without it), the counter is None and the
+# increment becomes a no-op.
+try:
+    from opentelemetry import metrics as _otel_metrics
+
+    _capacity_suggestion_meter = _otel_metrics.get_meter(
+        "management.services.model.management"
+    )
+    _capacity_suggestion_coverage_errors_total = (
+        _capacity_suggestion_meter.create_counter(
+            name="model_capacity_suggestion_coverage_errors_total",
+            description=(
+                "Count of catalog-matcher exceptions raised while computing the "
+                "per-row `suggestion_available` flag in /model/capacity-coverage. "
+                "Non-zero means catalog data or matcher logic is broken; "
+                "operators see every row as suggestion_available=False."
+            ),
+            unit="errors",
+        )
+    )
+    # W11 spec line 709: emitted when the operator clicks "Use suggestion" and
+    # saves. Combined with model_capacity_suggestion_dispatch_profile_hit_total
+    # at /agent/run, gives the "95% of accepted catalog suggestions produce
+    # the expected runtime capability_profile_version" SLO ratio.
+    _capacity_suggestion_accept_total = _capacity_suggestion_meter.create_counter(
+        name="model_capacity_suggestion_accept_total",
+        description=(
+            "Count of model save events that carried an accepted W11 "
+            "capacity suggestion, labelled by match_kind and provider. "
+            "Audit signal only -- not persisted to model_record_t."
+        ),
+        unit="accepts",
+    )
+except Exception:  # pragma: no cover - OTel is optional at runtime
+    _capacity_suggestion_coverage_errors_total = None
+    _capacity_suggestion_accept_total = None
+
+
+# Per-process dedup for the warning log emitted when the catalog-matcher
+# raises during /capacity-coverage. The OTel counter still increments per
+# failure (no monitoring impact); only the log line is deduped, so a global
+# catalog bug surfaces once per (model_id, error_type) instead of flooding
+# logs on every endpoint call. Same pattern as
+# `_warn_missing_capacity_once` in `backend/agents/create_agent_info.py`.
+_CAPACITY_SUGGESTION_ERROR_EMITTED: set = set()
+_CAPACITY_SUGGESTION_ERROR_LOCK = threading.Lock()
+
+
+def _record_capacity_coverage_error(model_id: Optional[Any], exc: Exception) -> None:
+    if _capacity_suggestion_coverage_errors_total is None:
+        return
+    try:
+        _capacity_suggestion_coverage_errors_total.add(
+            1,
+            {
+                "model_id": str(model_id) if model_id is not None else "unknown",
+                "error_type": type(exc).__name__,
+            },
+        )
+    except Exception:  # pragma: no cover - never break coverage for telemetry
+        pass
+
+
+# Wire-only fields the frontend ships when the operator clicks "Use suggestion"
+# and saves. They are audit/metrics input; runtime never reads them. The app
+# layer pops them off the request payload via `pop_capacity_accept_signal` so
+# the service/DB layer never sees them.
+_ACCEPT_SIGNAL_KEYS = (
+    "accepted_suggestion_match_kind",
+    "accepted_capability_profile_version",
+)
+
+
+def pop_capacity_accept_signal(payload: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """Strip audit-only accept-signal fields from a save payload and return them.
+
+    Returns the popped values as {'match_kind': ..., 'capability_profile_version': ...}
+    when match_kind is present, else None. Callers forward the dict to
+    `_record_capacity_suggestion_accept` once the model_factory is known.
+    """
+    if not isinstance(payload, dict):
+        return None
+    popped = {key: payload.pop(key, None) for key in _ACCEPT_SIGNAL_KEYS}
+    match_kind = popped.get("accepted_suggestion_match_kind")
+    if not match_kind:
+        return None
+    return {
+        "match_kind": match_kind,
+        "capability_profile_version": popped.get("accepted_capability_profile_version"),
+    }
+
+
+def _record_capacity_suggestion_accept(
+    match_kind: str, provider: Optional[str]
+) -> None:
+    """Emit the accept_total counter for one operator-accepted suggestion save."""
+    if _capacity_suggestion_accept_total is None:
+        return
+    try:
+        _capacity_suggestion_accept_total.add(
+            1,
+            {
+                "match_kind": match_kind,
+                "provider": (provider or "unknown").lower(),
+            },
+        )
+    except Exception:  # pragma: no cover - never break save for telemetry
+        pass
+
+
+def _is_bare_capacity_model(model: Dict[str, Any]) -> bool:
+    return (
+        model.get("context_window_tokens") is None
+        or model.get("max_output_tokens") is None
+    )
+
+
+def _capacity_suggestion_available(model: Dict[str, Any]) -> bool:
+    if not CAPACITY_SUGGESTION_ENABLED:
+        return False
+
+    try:
+        model_name = add_repo_to_name(
+            model.get("model_repo", ""), model.get("model_name", "")
+        )
+        result = suggest_capacity(
+            model_name=model_name,
+            base_url=model.get("base_url"),
+            provider_hint=model.get("model_factory"),
+            model_type=model.get("model_type"),
+            enabled=CAPACITY_SUGGESTION_ENABLED,
+        )
+        return result.match_kind != CapacitySuggestionMatchKind.NONE
+    except Exception as exc:
+        # A catalog-matcher exception must not break /capacity-coverage --
+        # the endpoint scans every LLM/VLM row, and one bad row would make
+        # the whole tenant view explode. We fall back to False and emit a
+        # counter so a corrupt catalog is visible in metrics instead of
+        # silently turning every row into "no suggestion available".
+        dedup_key = (model.get("model_id"), type(exc).__name__)
+        should_log = False
+        with _CAPACITY_SUGGESTION_ERROR_LOCK:
+            if dedup_key not in _CAPACITY_SUGGESTION_ERROR_EMITTED:
+                _CAPACITY_SUGGESTION_ERROR_EMITTED.add(dedup_key)
+                should_log = True
+        if should_log:
+            logger.warning(
+                "Capacity coverage suggestion check failed for model_id=%s: %s "
+                "(per-process dedup; OTel counter still increments per failure)",
+                model.get("model_id"),
+                exc,
+            )
+        _record_capacity_coverage_error(model.get("model_id"), exc)
+        return False
+
+
+def get_capacity_coverage(tenant_id: str) -> Dict[str, Any]:
+    """Return bare-capacity LLM/VLM coverage for one tenant."""
+    if not CAPACITY_VISIBILITY_ENABLED:
+        return {
+            "total_llm_vlm": 0,
+            "bare_count": 0,
+            "bare_models": [],
+        }
+
+    records = get_model_records(None, tenant_id)
+    scoped_records = [
+        model
+        for model in records
+        if model.get("model_type") in CAPACITY_COVERAGE_MODEL_TYPES
+    ]
+    bare_models = [
+        {
+            "model_id": model["model_id"],
+            "model_name": add_repo_to_name(
+                model.get("model_repo", ""), model.get("model_name", "")
+            ),
+            "model_factory": model.get("model_factory"),
+            "model_type": model.get("model_type"),
+            "max_tokens": model.get("max_tokens"),
+            "suggestion_available": _capacity_suggestion_available(model),
+        }
+        for model in scoped_records
+        if _is_bare_capacity_model(model)
+    ]
+
+    return {
+        "total_llm_vlm": len(scoped_records),
+        "bare_count": len(bare_models),
+        "bare_models": bare_models,
+    }

@@ -231,7 +231,7 @@ class LLMAutomationPromptStrategy(AutomationPromptStrategy):
     ) -> str:
         from nexent.core.models import OpenAIModel
         from nexent.core.utils.observer import MessageObserver
-        from utils.config_utils import get_model_name_from_config
+        from management.services.model.names import get_model_name_from_config
 
         prompt_template = get_prompt_template("agent_automation", context.language)
         values = {"instruction": context.instruction.strip()}

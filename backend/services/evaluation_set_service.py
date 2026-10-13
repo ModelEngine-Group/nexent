@@ -40,7 +40,7 @@ from database.evaluation_set_db import (
     update_evaluation_set_case_count,
 )
 from database.knowledge_db import get_index_name_by_knowledge_name
-from utils.llm_utils import call_llm_for_system_prompt
+from management.services.model.invocation import call_llm_for_system_prompt
 from utils.prompt_template_utils import get_prompt_template
 
 

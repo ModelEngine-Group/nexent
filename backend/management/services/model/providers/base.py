@@ -67,7 +67,9 @@ def _first_non_empty_str(candidates: List[Dict], keys: tuple[str, ...]) -> str |
     return None
 
 
-def _extract_capacity_hints_from_raw(raw: Dict, nested_keys: Iterable[str] = ()) -> Dict:
+def _extract_capacity_hints_from_raw(
+    raw: Dict, nested_keys: Iterable[str] = ()
+) -> Dict:
     """Extract advisory provider-discovery capacity hints from one raw model row."""
     candidates = _candidate_dicts(raw, nested_keys)
     hints = {}
@@ -95,7 +97,9 @@ def _extract_capacity_hints_from_raw(raw: Dict, nested_keys: Iterable[str] = ())
 # =============================================================================
 
 
-def _create_error_response(error_code: str, message: str, http_code: int = None) -> List[Dict]:
+def _create_error_response(
+    error_code: str, message: str, http_code: int = None
+) -> List[Dict]:
     """
     Create a standardized error response for provider API failures.
 
@@ -114,10 +118,10 @@ def _create_error_response(error_code: str, message: str, http_code: int = None)
 
 
 def _classify_provider_error(
-        provider_name: str,
-        status_code: int = None,
-        error_message: str = None,
-        exception: Exception = None
+    provider_name: str,
+    status_code: int = None,
+    error_message: str = None,
+    exception: Exception = None,
 ) -> List[Dict]:
     """
     Classify provider errors and return standardized error response.
@@ -137,43 +141,41 @@ def _classify_provider_error(
     # Classify by HTTP status code
     if status_code:
         if status_code == 401:
-            logger.error(
-                f"{provider_name} API authentication failed: Invalid API key")
+            logger.error(f"{provider_name} API authentication failed: Invalid API key")
             return _create_error_response(
                 "authentication_failed",
                 "Invalid API key or authentication failed",
-                status_code
+                status_code,
             )
         elif status_code == 403:
             logger.error(
-                f"{provider_name} API access forbidden: Insufficient permissions")
+                f"{provider_name} API access forbidden: Insufficient permissions"
+            )
             return _create_error_response(
                 "access_forbidden",
                 "Access forbidden. Please check your permissions",
-                status_code
+                status_code,
             )
         elif status_code == 404:
             logger.error(
-                f"{provider_name} API endpoint not found: URL may be incorrect")
+                f"{provider_name} API endpoint not found: URL may be incorrect"
+            )
             return _create_error_response(
                 "endpoint_not_found",
                 "API endpoint not found. Please verify the URL",
-                status_code
+                status_code,
             )
         elif status_code >= 500:
             logger.error(f"{provider_name} server error: HTTP {status_code}")
             return _create_error_response(
-                "server_error",
-                f"Server error (HTTP {status_code})",
-                status_code
+                "server_error", f"Server error (HTTP {status_code})", status_code
             )
         elif status_code >= 400:
             logger.error(
-                f"{provider_name} API error (HTTP {status_code}): {error_message}")
+                f"{provider_name} API error (HTTP {status_code}): {error_message}"
+            )
             return _create_error_response(
-                "api_error",
-                f"API error (HTTP {status_code})",
-                status_code
+                "api_error", f"API error (HTTP {status_code})", status_code
             )
 
     # Classify by exception type
@@ -182,45 +184,41 @@ def _classify_provider_error(
         if isinstance(exception, aiohttp.ClientConnectorError):
             error_str = str(exception).lower()
             if "certificate" in error_str or "ssl" in error_str:
-                logger.error(
-                    f"{provider_name} SSL certificate error: {exception}")
+                logger.error(f"{provider_name} SSL certificate error: {exception}")
                 return _create_error_response(
                     "ssl_error",
-                    "SSL certificate error. Please check the URL and SSL configuration"
+                    "SSL certificate error. Please check the URL and SSL configuration",
                 )
             else:
                 logger.error(f"{provider_name} connection failed: {exception}")
                 return _create_error_response(
                     "connection_failed",
-                    f"Failed to connect to {provider_name}. Please check the URL and network connection"
+                    f"Failed to connect to {provider_name}. Please check the URL and network connection",
                 )
         elif isinstance(exception, aiohttp.ServerTimeoutError):
             logger.error(f"{provider_name} server timeout: {exception}")
             return _create_error_response(
                 "timeout",
-                "Connection timed out. Please check the URL and network connection"
+                "Connection timed out. Please check the URL and network connection",
             )
         elif isinstance(exception, aiohttp.ServerDisconnectedError):
             logger.error(f"{provider_name} server disconnected: {exception}")
             return _create_error_response(
                 "connection_failed",
-                f"Connection to {provider_name} was interrupted. Please try again"
+                f"Connection to {provider_name} was interrupted. Please try again",
             )
         elif isinstance(exception, aiohttp.ContentTypeError):
-            logger.error(
-                f"{provider_name} invalid response format: {exception}")
+            logger.error(f"{provider_name} invalid response format: {exception}")
             return _create_error_response(
-                "invalid_response",
-                "Invalid response from provider API"
+                "invalid_response", "Invalid response from provider API"
             )
 
     # Generic connection error fallback
-    error_msg = error_message or str(
-        exception) if exception else "Unknown error"
+    error_msg = error_message or str(exception) if exception else "Unknown error"
     logger.error(f"{provider_name} error: {error_msg}")
     return _create_error_response(
         "connection_failed",
-        f"Failed to connect to {provider_name}. Please check the URL and network connection"
+        f"Failed to connect to {provider_name}. Please check the URL and network connection",
     )
 
 
