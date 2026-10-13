@@ -49,6 +49,8 @@ export interface ModelItem {
   id: string;
   name: string;
   tags: string[];
+  /** Lowercased modelFactory/source used to resolve a provider logo. */
+  provider?: string;
 }
 
 /** Row entry shared by the "add skill" and "add tool" drawers. */

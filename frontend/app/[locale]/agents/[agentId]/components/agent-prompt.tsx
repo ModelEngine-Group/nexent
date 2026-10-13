@@ -45,6 +45,7 @@ import { ModelParamsModal } from "@/components/resource-picker/ModelParamsModal"
 import { useModelList } from "@/hooks/model/useModelList";
 import { useInferenceFieldSpecs } from "@/hooks/model/useInferenceFieldSpecs";
 import type { ModelOption } from "@/types/modelConfig";
+import { MODEL_PROVIDER_LOGOS } from "@/const/modelConfig";
 import { ResourceAddButton } from "@/components/common/ResourceAddButton";
 import {
   ModelAdvancedSettingsValue,
@@ -129,15 +130,6 @@ function SortableModelItem({
     </li>
   );
 }
-
-const MODEL_PROVIDER_LOGOS: Record<string, string> = {
-  deepseek: "/deepseek.png",
-  openai: "/openai.png",
-  qwen: "/qwen.png",
-  silicon: "/siliconflow.png",
-  siliconflow: "/siliconflow.png",
-  modelengine: "/modelengine.png",
-};
 
 interface SelectedModelCardProps {
   model: ModelOption;
@@ -1063,7 +1055,6 @@ export default function AgentPrompt({
             onClose={() => setIsModelSelectionOpen(false)}
             models={availableLlmModels ?? []}
             selectedModelIds={selectedModelIds}
-            selectedTrailing={modelSelectionActions}
             disabled={isModelSelectionDisabled}
             onSelectionChange={(ids) => {
               if (isModelSelectionDisabled) return;

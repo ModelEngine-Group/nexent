@@ -3,9 +3,7 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { useTranslation } from "react-i18next";
 import {
-  Modal,
   Input,
-  Switch,
   InputNumber,
   Tag,
   Form,
@@ -30,6 +28,12 @@ import { CloseOutlined } from "@ant-design/icons";
 import { TOOL_PARAM_TYPES, getToolParamOptions } from "@/const/agentConfig";
 import { ToolParam, Tool } from "@/types/agentConfig";
 import { KnowledgeBase } from "@/types/knowledgeBase";
+import {
+  ParamDialog,
+  ParamLabel,
+  ParamSwitch,
+  SectionHeader,
+} from "@/components/resource-picker/ParamDialog";
 import ToolTestPanel from "./ToolTestPanel";
 import { updateToolConfig } from "@/services/agentConfigService";
 import KnowledgeBaseSelectorModal from "@/components/tool-config/KnowledgeBaseSelectorModal";
@@ -63,6 +67,7 @@ export interface ToolConfigModalProps {
   isOpen: boolean;
   onCancel: () => void;
   onSave?: (params: ToolParam[]) => void;
+  onSaveTool?: (tool: Tool) => void;
   tool: Tool;
   initialParams: ToolParam[];
   selectedTool?: Tool | null;
@@ -180,10 +185,22 @@ function withExtraToolParams(
   );
 }
 
+/** Adapts ParamSwitch to the value/onChange contract injected by Form.Item. */
+function BooleanSwitchInput({
+  value,
+  onChange,
+}: {
+  value?: boolean;
+  onChange?: (value: boolean) => void;
+}) {
+  return <ParamSwitch checked={!!value} onChange={(next) => onChange?.(next)} />;
+}
+
 export default function ToolConfigModal({
   isOpen,
   onCancel,
   onSave,
+  onSaveTool,
   tool,
   initialParams,
   selectedTool,
@@ -1530,6 +1547,12 @@ export default function ToolConfigModal({
       if (onSave) {
         onSave(syncedParams);
       }
+
+      // Call onSaveTool with the full tool (including display_names) when
+      // the parent handles the draft commit itself (localOnly mode).
+      if (onSaveTool) {
+        onSaveTool(updatedTool);
+      }
     } catch {
       // Form validation failed, error will be shown by antd Form
     }
@@ -2084,7 +2107,7 @@ export default function ToolConfigModal({
           );
 
         case TOOL_PARAM_TYPES.BOOLEAN:
-          return <Switch />;
+          return <BooleanSwitchInput />;
 
         case TOOL_PARAM_TYPES.STRING:
         case TOOL_PARAM_TYPES.ARRAY:
@@ -2171,87 +2194,49 @@ export default function ToolConfigModal({
 
   return (
     <>
-      <Modal
-        mask={true}
-        title={
-          <div className="flex justify-between items-center w-full pr-8">
-            <span>{`${tool?.name}`}</span>
-            <div className="flex items-center gap-2">
-              <Tag
-                color={
-                  tool?.source === "mcp"
-                    ? "blue"
-                    : tool?.source === "langchain"
-                      ? "orange"
-                      : "green"
-                }
-              >
-                {tool?.source === "mcp"
-                  ? t("toolPool.tag.mcp")
-                  : tool?.source === "langchain"
-                    ? t("toolPool.tag.langchain")
-                    : t("toolPool.tag.local")}
-              </Tag>
-            </div>
-          </div>
-        }
+      <ParamDialog
         open={isOpen}
-        onCancel={onCancel}
-        onOk={handleSave}
-        okText={t("common.button.save")}
-        cancelText={t("common.button.cancel")}
-        width={600}
-        confirmLoading={isLoading}
-        className="tool-config-modal-content"
-        wrapProps={{ style: { pointerEvents: "auto" } }}
-        footer={
-          <div className="flex items-center w-full">
-            <div className="flex-1 flex justify-start">
-              <button
-                onClick={handleTestTool}
-                disabled={!tool}
-                className="flex items-center justify-center px-4 py-2 text-sm border border-gray-300 text-gray-700 rounded hover:bg-gray-50 transition-colors duration-200 h-8"
-              >
-                {testPanelVisible
-                  ? t("toolConfig.button.closeTest")
-                  : t("toolConfig.button.testTool")}
-              </button>
-            </div>
-            <div className="flex gap-2">
-              <button
-                onClick={handleClose}
-                className="flex items-center justify-center px-4 py-2 text-sm border border-gray-300 text-gray-700 rounded hover:bg-gray-50 transition-colors duration-200 h-8"
-              >
-                {t("common.button.cancel")}
-              </button>
-              <button
-                onClick={handleSave}
-                disabled={isLoading || hasFormErrors || hasEmptyRequired}
-                className="flex items-center justify-center px-4 py-2 text-sm bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors duration-200 h-8"
-              >
-                {isLoading
-                  ? t("common.button.saving")
-                  : t("common.button.save")}
-              </button>
-            </div>
-          </div>
+        title={
+          <span className="flex items-center gap-2">
+            <span>{tool?.name}</span>
+            <Tag
+              color={
+                tool?.source === "mcp"
+                  ? "blue"
+                  : tool?.source === "langchain"
+                    ? "orange"
+                    : "green"
+              }
+            >
+              {tool?.source === "mcp"
+                ? t("toolPool.tag.mcp")
+                : tool?.source === "langchain"
+                  ? t("toolPool.tag.langchain")
+                  : t("toolPool.tag.local")}
+            </Tag>
+          </span>
         }
+        onClose={handleClose}
+        onConfirm={handleSave}
+        confirmText={
+          isLoading ? t("common.button.saving") : t("common.confirm")
+        }
+        cancelText={t("common.cancel")}
+        confirmDisabled={isLoading || hasFormErrors || hasEmptyRequired}
       >
-        <div className="mb-4">
-          <p className="text-sm text-gray-500 mb-4">
-            {getLocalizedDescription(tool?.description, tool?.description_zh)}
-          </p>
-          <div className="text-sm font-medium mb-2">
-            {t("toolConfig.title.paramConfig")}
-          </div>
-          <div style={{ maxHeight: "500px", overflow: "auto" }}>
-            <Form
-              form={form}
-              layout="horizontal"
-              labelAlign="left"
-              labelCol={{ span: 6 }}
-              wrapperCol={{ span: 18 }}
-              onValuesChange={(changedValues, allValues) => {
+        <p className="text-[12px] leading-[18px] text-[#191919]/40">
+          {getLocalizedDescription(tool?.description, tool?.description_zh)}
+        </p>
+
+        <div className="text-[14px] font-bold leading-6 text-[#191919]">
+          {t("toolConfig.title.paramConfig")}
+        </div>
+
+        <div style={{ maxHeight: "500px", overflow: "auto" }}>
+          <Form
+            form={form}
+            layout="vertical"
+            onValuesChange={(changedValues, allValues) => {
                 // Track if user has modified the datamate server_url field
                 if (
                   tool?.name === "datamate_search" &&
@@ -2470,14 +2455,24 @@ export default function ToolConfigModal({
                   return (
                     <Form.Item
                       key={param.name}
-                      required={param.required}
+                      required={false}
+                      colon={false}
                       label={
-                        <span
-                          className="inline-block w-full truncate"
-                          title={param.name}
-                        >
-                          {param.name}
-                        </span>
+                        <ParamLabel
+                          label={param.name}
+                          required={param.required}
+                          info={Boolean(
+                            getLocalizedDescription(
+                              param.description,
+                              param.description_zh
+                            )
+                          )}
+                          infoText={getLocalizedDescription(
+                            param.description,
+                            param.description_zh
+                          )}
+                          size="md"
+                        />
                       }
                       name={
                         toolRequiresKbSelection &&
@@ -2488,14 +2483,7 @@ export default function ToolConfigModal({
                           : fieldName
                       }
                       rules={rules}
-                      tooltip={{
-                        title: getLocalizedDescription(
-                          param.description,
-                          param.description_zh
-                        ),
-                        placement: "topLeft",
-                        styles: { root: { maxWidth: 400 } },
-                      }}
+                      style={{ marginBottom: 16 }}
                     >
                       {/* For KB selector, use custom display (Form.Item doesn't control value) */}
                       {toolRequiresKbSelection &&
@@ -2510,9 +2498,13 @@ export default function ToolConfigModal({
               </div>
             </Form>
           </div>
-          <div>
-            {testPanelVisible && (
-              <ToolTestPanel
+          <SectionHeader
+            title={t("toolConfig.button.testTool")}
+            expanded={testPanelVisible}
+            onToggle={handleTestTool}
+          />
+          {testPanelVisible && (
+            <ToolTestPanel
                 visible={testPanelVisible}
                 tool={tool}
                 onClose={handleCloseTestPanel}
@@ -2591,9 +2583,7 @@ export default function ToolConfigModal({
                 haotianKnowledgeSets={haotianKnowledgeSets}
               />
             )}
-          </div>
-        </div>
-      </Modal>
+      </ParamDialog>
 
       {/* Knowledge Base Selector Modal */}
       {toolKbType === "haotian_search" ? (

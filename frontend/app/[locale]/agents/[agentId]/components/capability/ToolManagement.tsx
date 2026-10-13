@@ -217,6 +217,7 @@ export default function ToolManagement({
                 key={tool.id}
                 data-testid={`agent-selected-tool-${tool.id}`}
                 name={tool.name}
+                className="shadow-none"
                 icon={
                   <span
                     aria-hidden="true"

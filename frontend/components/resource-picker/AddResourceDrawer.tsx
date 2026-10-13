@@ -132,11 +132,13 @@ export function ListHeader({
   onSelectAll,
   allSelected,
   onRefresh,
+  extra,
 }: {
   title: string;
   onSelectAll?: (checked: boolean) => void;
   allSelected?: boolean;
   onRefresh?: () => void;
+  extra?: ReactNode;
 }) {
   const { t } = useTranslation("common");
   return (
@@ -145,6 +147,7 @@ export function ListHeader({
         {title}
       </span>
       <div className="flex items-center gap-4 text-[14px] leading-[22px]">
+        {extra}
         {onRefresh && (
           <button
             type="button"
@@ -396,6 +399,8 @@ export interface AddResourceDrawerProps {
   searchContent?: ReactNode;
   showSelection?: boolean;
   showListHeader?: boolean;
+  /** Extra action rendered to the left of the refresh button in the list header. */
+  listHeaderExtra?: ReactNode;
   showPagination?: boolean;
 }
 
@@ -431,6 +436,7 @@ export function AddResourceDrawer({
   searchContent,
   showSelection = true,
   showListHeader = true,
+  listHeaderExtra,
   showPagination = true,
 }: AddResourceDrawerProps) {
   const { t } = useTranslation("common");
@@ -499,6 +505,7 @@ export function AddResourceDrawer({
           onSelectAll={onSelectAll}
           allSelected={allSelected}
           onRefresh={onRefresh}
+          extra={listHeaderExtra}
         />
       )}
 

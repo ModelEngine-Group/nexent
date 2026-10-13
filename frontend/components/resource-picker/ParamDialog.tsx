@@ -1,9 +1,15 @@
 "use client";
 
-import { Modal } from "antd";
+import { Modal, Tooltip } from "antd";
 import { Input as AntInput, type InputProps } from "antd";
 import { RotateCw, X } from "lucide-react";
-import type { KeyboardEvent, MouseEvent, ReactNode } from "react";
+import {
+  forwardRef,
+  type HTMLAttributes,
+  type KeyboardEvent,
+  type MouseEvent,
+  type ReactNode,
+} from "react";
 
 import { useTranslation } from "react-i18next";
 
@@ -15,16 +21,22 @@ export function ParamDialog({
   title,
   onClose,
   onConfirm,
-  confirmText,
-  cancelText,
+  confirmText = "确定",
+  cancelText = "取消",
+  zIndex,
+  maskClosable = false,
+  confirmDisabled = false,
   children,
 }: {
   open: boolean;
-  title: string;
+  title: ReactNode;
   onClose: () => void;
   onConfirm?: () => void;
   confirmText?: string;
   cancelText?: string;
+  zIndex?: number;
+  maskClosable?: boolean;
+  confirmDisabled?: boolean;
   children: ReactNode;
 }) {
   const { t } = useTranslation("common");
@@ -36,7 +48,8 @@ export function ParamDialog({
       width={480}
       footer={null}
       closable={false}
-      maskClosable={false}
+      zIndex={zIndex}
+      maskClosable={maskClosable}
       styles={{
         container: {
           padding: 0,
@@ -73,7 +86,8 @@ export function ParamDialog({
             <button
               type="button"
               onClick={onConfirm}
-              className="h-8 w-[89px] rounded-[2px] border border-[#2673E5] bg-[#2673E5] text-[14px] text-white"
+              disabled={confirmDisabled}
+              className="h-8 w-[89px] rounded-[2px] border border-[#2673E5] bg-[#2673E5] text-[14px] text-white disabled:cursor-not-allowed disabled:opacity-50"
             >
               {confirmText ?? t("common.confirm")}
             </button>
@@ -188,17 +202,22 @@ export function ParamSlider({
   );
 }
 
-/** Rounded "i" info icon used beside field labels. */
-export function InfoIcon({ size = 12 }: { size?: number }) {
+/** Rounded "?" help icon used beside field labels. */
+export const InfoIcon = forwardRef<
+  HTMLSpanElement,
+  { size?: number } & HTMLAttributes<HTMLSpanElement>
+>(function InfoIcon({ size = 12, ...rest }, ref) {
   return (
     <span
+      ref={ref}
+      {...rest}
       className="inline-flex shrink-0 items-center justify-center rounded-full border border-[#CCC] font-normal not-italic text-[#BBB]"
       style={{ width: size, height: size, fontSize: size - 2 }}
     >
-      i
+      ?
     </span>
   );
-}
+});
 
 /** antd Input restyled to the design's 26px ("sm") / 28px ("md") variants. */
 export function ParamInput({
@@ -225,15 +244,19 @@ export function ParamLabel({
   label,
   required,
   info,
+  infoText,
   icon,
   size = "sm",
 }: {
   label: string;
   required?: boolean;
   info?: boolean;
+  infoText?: string;
   icon?: ReactNode;
   size?: "sm" | "md";
 }) {
+  const showInfo = info && !icon;
+  const infoNode = icon ?? (showInfo && <InfoIcon size={size === "md" ? 14 : 12} />);
   return (
     <span
       className={cn(
@@ -249,7 +272,12 @@ export function ParamLabel({
         </span>
       )}
       {label}
-      {icon ?? (info && <InfoIcon size={size === "md" ? 14 : 12} />)}
+      {infoNode &&
+        (showInfo && infoText ? (
+          <Tooltip title={infoText}>{infoNode}</Tooltip>
+        ) : (
+          infoNode
+        ))}
     </span>
   );
 }
@@ -259,6 +287,7 @@ export function ParamField({
   label,
   required,
   info,
+  infoText,
   icon,
   size = "sm",
   children,
@@ -266,6 +295,7 @@ export function ParamField({
   label: string;
   required?: boolean;
   info?: boolean;
+  infoText?: string;
   icon?: ReactNode;
   size?: "sm" | "md";
   children: ReactNode;
@@ -276,6 +306,7 @@ export function ParamField({
         label={label}
         required={required}
         info={info}
+        infoText={infoText}
         icon={icon}
         size={size}
       />
@@ -312,15 +343,18 @@ export function SectionHeader({
 export function TestRunLink({
   label = "点击测试",
   onClick,
+  disabled = false,
 }: {
   label?: string;
   onClick?: () => void;
+  disabled?: boolean;
 }) {
   return (
     <button
       type="button"
       onClick={onClick}
-      className="flex h-6 cursor-pointer items-center gap-1.5 border-0 bg-transparent p-0 text-[14px] text-[#2673E5]"
+      disabled={disabled}
+      className="flex h-6 cursor-pointer items-center gap-1.5 border-0 bg-transparent p-0 text-[14px] text-[#2673E5] disabled:cursor-not-allowed disabled:opacity-50"
     >
       <RotateCw size={14} />
       {label}

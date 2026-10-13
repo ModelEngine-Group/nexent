@@ -407,7 +407,6 @@ export function AgentSkillCapability({
         open={isSkillSelectOpen}
         onClose={() => setIsSkillSelectOpen(false)}
         onOpenManageTags={() => setTagModalOpen(true)}
-        onEditSkill={handleOpenSkillEditor}
         currentAgentId={currentAgentId ?? undefined}
         isReadOnly={isReadOnly}
       />

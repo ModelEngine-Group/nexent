@@ -351,7 +351,6 @@ export function KnowledgeBaseConfigActions() {
         isAidpSearch={state.profile.selectorType === "aidp_search"}
         knowledgeBases={state.knowledgeBases}
         isLoading={state.isLoading}
-        title={t("agent.knowledge.selectModal.title")}
         onRefresh={() => {
           void state.refetch();
         }}
@@ -563,7 +562,6 @@ export default function KnowledgeBaseConfig({
               isAidpSearch={state.profile.selectorType === "aidp_search"}
               knowledgeBases={state.knowledgeBases}
               isLoading={state.isLoading}
-              title={t("agent.knowledge.selectModal.title")}
               onRefresh={() => {
                 void state.refetch();
               }}

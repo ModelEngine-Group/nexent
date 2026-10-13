@@ -2,19 +2,7 @@
 
 import { useState, useEffect, useMemo, useCallback } from "react";
 import { useTranslation } from "react-i18next";
-import {
-  Modal,
-  Form,
-  Input,
-  Switch,
-  InputNumber,
-  Button,
-  message,
-  Tag,
-  Skeleton,
-  Tooltip,
-} from "antd";
-import { Settings } from "lucide-react";
+import { Input, InputNumber, message, Tag, Skeleton } from "antd";
 import { CloseOutlined } from "@ant-design/icons";
 
 import { Skill, SkillParam } from "@/types/agentConfig";
@@ -30,6 +18,12 @@ import {
   useKnowledgeBasesForToolConfig,
   useSyncKnowledgeBases,
 } from "@/hooks/useKnowledgeBaseSelector";
+import {
+  ParamDialog,
+  ParamField,
+  ParamInput,
+  ParamSwitch,
+} from "@/components/resource-picker/ParamDialog";
 import log from "@/lib/logger";
 import {
   isZhLocale,
@@ -75,11 +69,9 @@ export default function SkillConfigModal({
   skill,
   initialParams,
   currentAgentId,
-  zIndex = 1000,
+  zIndex,
   maskClosable = true,
 }: SkillConfigModalProps) {
-  const [form] = Form.useForm();
-  const [isLoading, setIsLoading] = useState(false);
   const [currentParams, setCurrentParams] = useState<SkillParam[]>([]);
   const { t } = useTranslation("common");
   const isZh = isZhLocale();
@@ -90,7 +82,7 @@ export default function SkillConfigModal({
   }, [initialParams]);
 
   // Derive the correct toolType based on skill name
-  const skillToolType = useMemo((): ToolKbType => {
+  const skillToolType = useMemo<ToolKbType>(() => {
     return getToolTypeForSkill(skill?.name || "");
   }, [skill?.name]);
 
@@ -136,7 +128,6 @@ export default function SkillConfigModal({
   const {
     data: knowledgeBases = [],
     isLoading: kbLoading,
-    refetch: refetchKnowledgeBases,
   } = useKnowledgeBasesForToolConfig(skillToolType);
 
   // Sync knowledge bases based on skill tool type
@@ -161,6 +152,7 @@ export default function SkillConfigModal({
       setCurrentKbParamIndex(null);
     }
   }, [isOpen]);
+
   useEffect(() => {
     if (selectedKbIds.length > 0 && knowledgeBases.length > 0) {
       const validKbIds = selectedKbIds.filter((id) =>
@@ -198,13 +190,6 @@ export default function SkillConfigModal({
 
     setCurrentParams(merged);
 
-    // Initialize form with indexed field names
-    const formValues: Record<string, any> = {};
-    merged.forEach((param, index) => {
-      formValues[`param_${index}`] = param.value;
-    });
-    form.setFieldsValue(formValues);
-
     // Parse initial knowledge base IDs from the relevant param (index_names or dataset_ids)
     if (skillRequiresKbSelection && kbParamName) {
       const kbParam = merged.find((p) => p.name === kbParamName);
@@ -215,85 +200,15 @@ export default function SkillConfigModal({
         }
       }
     }
-  }, [
-    isOpen,
-    initialParams,
-    skill.config_values,
-    form,
-    skillRequiresKbSelection,
-    kbParamName,
-  ]);
+  }, [isOpen, initialParams, skill.config_values, skillRequiresKbSelection, kbParamName]);
 
-  // Watch all form values and sync to currentParams
-  const formValues = Form.useWatch([], form);
-  useEffect(() => {
-    if (!formValues) return;
-    const newParams = [...currentParams];
-    Object.entries(formValues).forEach(([fieldName, value]) => {
-      const index = parseInt(fieldName.replace("param_", ""));
-      if (!isNaN(index) && newParams[index]) {
-        // Skip knowledge base selector field (controlled by selectedKbIds)
-        if (newParams[index].name === kbParamName) {
-          return;
-        }
-        newParams[index] = { ...newParams[index], value };
-      }
+  const updateParamValue = useCallback((index: number, value: unknown) => {
+    setCurrentParams((prev) => {
+      const next = [...prev];
+      if (next[index]) next[index] = { ...next[index], value };
+      return next;
     });
-    setCurrentParams(newParams);
-  }, [formValues]);
-
-  const handleSave = async () => {
-    if (!currentAgentId) {
-      message.error(t("agentConfig.skill.noAgentSelected"));
-      return;
-    }
-
-    setIsLoading(true);
-    setHasSubmitted(true);
-    try {
-      // Force sync form values before validation
-      const latestFormValues = form.getFieldsValue();
-      if (latestFormValues) {
-        const newParams = [...currentParams];
-        Object.entries(latestFormValues).forEach(([fieldName, value]) => {
-          const index = parseInt(fieldName.replace("param_", ""));
-          if (!isNaN(index) && newParams[index]) {
-            newParams[index] = { ...newParams[index], value };
-          }
-        });
-        setCurrentParams(newParams);
-      }
-
-      // Check if knowledge base selector has valid selection
-      if (skillRequiresKbSelection && selectedKbIds.length === 0) {
-        const kbParam = currentParams.find(
-          (p) => p.required && p.name === kbParamName
-        );
-        if (kbParam) {
-          message.error(t("toolConfig.validation.selectKb"));
-          setIsLoading(false);
-          return;
-        }
-      }
-
-      await form.validateFields();
-
-      const paramsToSave = currentParams.map((param) => ({
-        ...param,
-        value: param.value,
-      }));
-
-      if (onSave) {
-        onSave(paramsToSave);
-      }
-      message.success(t("toolConfig.message.saveSuccess"));
-      onCancel();
-    } catch {
-      // Validation failed - error shown by antd Form
-    } finally {
-      setIsLoading(false);
-    }
-  };
+  }, []);
 
   const getLocalizedDescription = useCallback(
     (param: SkillParam) => {
@@ -321,22 +236,8 @@ export default function SkillConfigModal({
     setSelectedKbDisplayNames(displayNames);
     setHasSubmitted(false);
 
-    // Update form value
     if (currentKbParamIndex !== null) {
-      const param = currentParams[currentKbParamIndex];
-      if (param) {
-        const formFieldName = `param_${currentKbParamIndex}`;
-        form.setFieldValue(formFieldName, ids);
-
-        // Also update currentParams directly since Form.Item has no name for KB param
-        const updatedParams = [...currentParams];
-        updatedParams[currentKbParamIndex] = {
-          ...updatedParams[currentKbParamIndex],
-          name: param.name,
-          value: ids,
-        };
-        setCurrentParams(updatedParams);
-      }
+      updateParamValue(currentKbParamIndex, ids);
     }
 
     setKbSelectorVisible(false);
@@ -354,42 +255,16 @@ export default function SkillConfigModal({
     setSelectedKbDisplayNames(newDisplayNames);
     setHasSubmitted(false);
 
-    // Update form value
-    const formFieldName = `param_${paramIndex}`;
-    form.setFieldValue(formFieldName, newIds);
-
-    // Also update currentParams directly
-    const updatedParams = [...currentParams];
-    if (updatedParams[paramIndex]) {
-      updatedParams[paramIndex] = {
-        ...updatedParams[paramIndex],
-        value: newIds,
-      };
-      setCurrentParams(updatedParams);
-    }
+    updateParamValue(paramIndex, newIds);
   };
 
   // Render knowledge base selector input (clickable input that opens selector modal)
   const renderKbSelectorInput = useCallback(
     (param: SkillParam, index: number) => {
-      const fieldName = `param_${index}`;
-      const formValue = form.getFieldValue(fieldName);
-
-      // Get display names based on current form value and knowledgeBases
-      let displayNames: string[] = [];
-      let ids: string[] = [];
-      if (formValue) {
-        ids = parseKbIds(formValue);
-
-        if (ids.length > 0 && knowledgeBases.length > 0) {
-          displayNames = mapKbIdsToDisplayNames(ids, knowledgeBases);
-        }
-      }
-
-      // Fallback to selectedKbDisplayNames if displayNames is empty
-      if (displayNames.length === 0 && selectedKbDisplayNames.length > 0) {
-        displayNames = selectedKbDisplayNames;
-        ids = selectedKbIds;
+      let displayNames = selectedKbDisplayNames;
+      let ids = selectedKbIds;
+      if (displayNames.length === 0 && ids.length > 0 && knowledgeBases.length > 0) {
+        displayNames = mapKbIdsToDisplayNames(ids, knowledgeBases);
       }
 
       const placeholder = t(
@@ -399,31 +274,22 @@ export default function SkillConfigModal({
         }
       );
 
-      // Check if this field has validation error
       const hasError =
         hasSubmitted && param.required && selectedKbIds.length === 0;
 
       return (
         <div>
           <div
-            className={`cursor-pointer bg-white border rounded px-3 py-2 transition-colors ${
+            className={`flex min-h-7 w-full cursor-pointer flex-wrap items-center gap-1 rounded-[2px] border bg-white px-3 transition-colors ${
               hasError
                 ? "border-red-500 hover:border-red-500"
-                : "border-gray-300 hover:border-blue-400"
+                : "border-[#D9D9D9] hover:border-[#2673E5]"
             }`}
             onClick={() => openKbSelector(index)}
-            style={{
-              width: "100%",
-              minHeight: "32px",
-              display: "flex",
-              flexWrap: "wrap",
-              alignItems: "center",
-              gap: "4px",
-            }}
             title={displayNames.join(", ")}
           >
             {kbLoading && knowledgeBases.length === 0 ? (
-              <div className="flex items-center gap-2 w-full">
+              <div className="flex w-full items-center gap-2">
                 <Skeleton.Input active size="small" style={{ width: "60%" }} />
               </div>
             ) : displayNames.length > 0 ? (
@@ -472,51 +338,35 @@ export default function SkillConfigModal({
       );
     },
     [
-      form,
-      knowledgeBases,
       selectedKbIds,
       selectedKbDisplayNames,
       hasSubmitted,
       kbLoading,
+      knowledgeBases,
       openKbSelector,
       removeKbFromSelection,
       getLocalizedDescription,
       t,
-      kbParamName,
     ]
   );
 
   const renderParamInput = (param: SkillParam, index: number) => {
-    const inputStyle = { width: "100%" };
-
     // For knowledge base selector, use custom input
     if (skillRequiresKbSelection && param.name === kbParamName) {
       return renderKbSelectorInput(param, index);
     }
 
+    const placeholder = getLocalizedDescription(param) || param.name;
+
     switch (param.type) {
       case "number":
         return (
           <InputNumber
-            style={inputStyle}
+            className="!w-full !rounded-[2px] !border-[#D9D9D9]"
+            controls={false}
             value={param.value}
-            placeholder={getLocalizedDescription(param) || param.name}
-          />
-        );
-
-      case "boolean":
-        return (
-          <Switch
-            value={param.value}
-            onChange={(checked) => {
-              const updatedParams = [...currentParams];
-              updatedParams[index] = {
-                ...updatedParams[index],
-                value: checked,
-              };
-              setCurrentParams(updatedParams);
-              form.setFieldValue(`param_${index}`, checked);
-            }}
+            onChange={(value) => updateParamValue(index, value)}
+            placeholder={placeholder}
           />
         );
 
@@ -524,9 +374,10 @@ export default function SkillConfigModal({
       case "object":
         return (
           <Input.TextArea
-            style={inputStyle}
+            className="!rounded-[2px] !border-[#D9D9D9] !text-[14px]"
             value={param.value != null ? String(param.value) : ""}
-            placeholder={getLocalizedDescription(param) || param.name}
+            onChange={(e) => updateParamValue(index, e.target.value)}
+            placeholder={placeholder}
             autoSize={{ minRows: 1, maxRows: 6 }}
           />
         );
@@ -535,105 +386,107 @@ export default function SkillConfigModal({
       case "Optional":
       default:
         return (
-          <Input
-            style={inputStyle}
+          <ParamInput
             value={param.value != null ? String(param.value) : ""}
-            placeholder={getLocalizedDescription(param) || param.name}
+            onChange={(e) => updateParamValue(index, e.target.value)}
+            placeholder={placeholder}
           />
         );
     }
   };
 
+  const handleSave = () => {
+    if (!currentAgentId) {
+      message.error(t("agentConfig.skill.noAgentSelected"));
+      return;
+    }
+
+    setHasSubmitted(true);
+
+    // Validate required params manually (replacing antd Form.validateFields)
+    for (const param of currentParams) {
+      if (skillRequiresKbSelection && param.name === kbParamName) {
+        if (param.required && selectedKbIds.length === 0) {
+          message.error(t("toolConfig.validation.selectKb"));
+          return;
+        }
+        continue;
+      }
+      if (param.required) {
+        const value = param.value;
+        const empty =
+          value === undefined ||
+          value === null ||
+          value === "" ||
+          (Array.isArray(value) && value.length === 0);
+        if (empty) {
+          message.error(t("toolConfig.validation.required"));
+          return;
+        }
+      }
+    }
+
+    const paramsToSave = currentParams.map((param) => {
+      if (skillRequiresKbSelection && param.name === kbParamName) {
+        return { ...param, value: selectedKbIds };
+      }
+      return { ...param };
+    });
+
+    if (onSave) {
+      onSave(paramsToSave);
+    }
+    message.success(t("toolConfig.message.saveSuccess"));
+    onCancel();
+  };
+
   return (
-    <Modal
-      title={
-        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-          <Settings size={18} />
-          <span>{skill.name}</span>
-        </div>
-      }
+    <ParamDialog
       open={isOpen}
-      onCancel={onCancel}
-      width={600}
+      title={skill.name}
+      onClose={onCancel}
+      onConfirm={handleSave}
+      confirmText={t("common.save")}
+      cancelText={t("common.cancel")}
       zIndex={zIndex}
-      mask={{ closable: maskClosable }}
-      destroyOnHidden
-      footer={
-        <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
-          <Button onClick={onCancel}>{t("common.cancel")}</Button>
-          <Button type="primary" onClick={handleSave} loading={isLoading}>
-            {t("common.save")}
-          </Button>
-        </div>
-      }
+      maskClosable={maskClosable}
     >
       {currentParams.length > 0 ? (
-        <>
-          <div style={{ fontSize: 14, color: "#666", marginBottom: 4 }}>
-            {t("agentConfig.skill.config.parameters") || "Parameters"}
-          </div>
-          <div style={{ maxHeight: 500, overflow: "auto" }}>
-            <Form
-              form={form}
-              layout="horizontal"
-              labelAlign="left"
-              labelCol={{ span: 6 }}
-              wrapperCol={{ span: 18 }}
+        currentParams.map((param, index) => {
+          if (!visibleIndices.has(index)) return null;
+          const description = getLocalizedDescription(param);
+          const isKbParam =
+            skillRequiresKbSelection && param.name === kbParamName;
+
+          if (param.type === "boolean" && !isKbParam) {
+            return (
+              <ParamField
+                key={param.name}
+                label={param.name}
+                required={param.required}
+                info={!!description}
+                infoText={description}
+              >
+                <ParamSwitch
+                  checked={!!param.value}
+                  onChange={(value) => updateParamValue(index, value)}
+                />
+              </ParamField>
+            );
+          }
+
+          return (
+            <ParamField
+              key={param.name}
+              label={param.name}
+              required={param.required}
+              info={!!description}
+              infoText={description}
             >
-              {currentParams.map((param, index) => {
-                const fieldName = `param_${index}`;
-                const rules: any[] = [];
-
-                if (param.required) {
-                  rules.push({
-                    required: true,
-                    message: t("toolConfig.validation.required"),
-                  });
-                }
-
-                // Add custom validator for knowledge base selector field (index_names/dataset_ids)
-                // Since this field uses custom display without form control, we need custom validation
-                if (skillRequiresKbSelection && param.name === kbParamName) {
-                  rules.push({
-                    validator: async () => {
-                      if (selectedKbIds.length === 0) {
-                        throw new Error(t("toolConfig.validation.selectKb"));
-                      }
-                    },
-                  });
-                }
-
-                const isVisible = visibleIndices.has(index);
-
-                return (
-                  <Form.Item
-                    key={param.name}
-                    required={param.required}
-                    label={
-                      <Tooltip title={param.name} placement="topLeft">
-                        <span className="truncate">{param.name}</span>
-                      </Tooltip>
-                    }
-                    name={
-                      skillRequiresKbSelection && param.name === kbParamName
-                        ? undefined
-                        : fieldName
-                    }
-                    rules={rules}
-                    tooltip={{
-                      title: getLocalizedDescription(param),
-                      placement: "topLeft",
-                      styles: { root: { maxWidth: 400 } },
-                    }}
-                    style={{ display: isVisible ? undefined : "none" }}
-                  >
-                    {renderParamInput(param, index)}
-                  </Form.Item>
-                );
-              })}
-            </Form>
-          </div>
-        </>
+              {renderParamInput(param, index)}
+            </ParamField>
+          );
+        })
       ) : (
         <div style={{ textAlign: "center", padding: "24px 0", color: "#999" }}>
           {t("agentConfig.skill.noParams")}
@@ -661,6 +514,6 @@ export default function SkillConfigModal({
         }}
         syncLoading={!!kbLoading || !!isSyncing}
       />
-    </Modal>
+    </ParamDialog>
   );
 }

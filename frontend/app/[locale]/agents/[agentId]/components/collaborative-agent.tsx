@@ -427,6 +427,7 @@ export default function CollaborativeAgent({
           <SelectedResourceRow
             key={`internal-${agent.id}`}
             data-testid={`agent-selected-child-internal-${agent.id}`}
+            className="shadow-none"
             icon={
               <AgentAvatar
                 agent={agent}
@@ -482,6 +483,7 @@ export default function CollaborativeAgent({
         <SelectedResourceRow
           key={`external-${agent.id}`}
           data-testid={`agent-selected-child-external-${agent.id}`}
+          className="shadow-none"
           icon={
             <Avatar
               shape="square"

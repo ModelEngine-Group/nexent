@@ -125,6 +125,18 @@ export const PROVIDER_ICON_MAP: Record<ModelProviderKey, string> = {
 export const OFFICIAL_PROVIDER_ICON = publicAsset("/modelengine-logo.png");
 export const DEFAULT_PROVIDER_ICON = publicAsset("/default-icon.png");
 
+// Provider logo filenames for the agent model selection UI. Keys match the
+// lowercased modelFactory/source of a model; entries without a logo fall back
+// to an icon in the component.
+export const MODEL_PROVIDER_LOGOS: Record<string, string> = {
+  deepseek: "/deepseek.png",
+  openai: "/openai.png",
+  qwen: "/qwen.png",
+  silicon: "/siliconflow.png",
+  siliconflow: "/siliconflow.png",
+  modelengine: "/modelengine.png",
+};
+
 // Provider official website links
 export const PROVIDER_LINKS: Record<string, string> = {
   modelengine: "https://modelengine-ai.net/",
