@@ -2,6 +2,7 @@
 
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { useQuery } from "@tanstack/react-query";
 
 import {
   App,
@@ -14,6 +15,7 @@ import {
   Modal,
   Select,
   Skeleton,
+  Switch,
   Table,
   Tabs,
   Tooltip,
@@ -27,6 +29,7 @@ import {
   EditOutlined,
   FileTextOutlined,
   InfoCircleOutlined,
+  QuestionCircleOutlined,
   ReloadOutlined,
   SearchOutlined,
   TeamOutlined,
@@ -38,6 +41,7 @@ import type { AidpKnowledgeBaseItem } from "@/types/agentConfig";
 import aidpKnowledgeService, {
   type AidpDocumentItem,
   type AidpKbDetail,
+  type AidpModelItem,
 } from "@/ext_components/aidp/services/aidpKnowledgeService";
 import {
   AIDP_UNKNOWN_VALUE,
@@ -247,9 +251,13 @@ const AidpKnowledgeDetail: React.FC<AidpKnowledgeDetailProps> = ({
   const [importOpen, setImportOpen] = useState(false);
   const [savingSetting, setSavingSetting] = useState(false);
   const [settingModal, setSettingModal] = useState<
-    "chunk_mode" | "topk" | null
+    "chunk_mode" | "topk" | "vlm" | null
   >(null);
   const [settingForm] = Form.useForm<{ value: number }>();
+  const [vlmForm] = Form.useForm<{
+    caption_enable: boolean;
+    vlm_model?: string;
+  }>();
 
   const [fileKeyword, setFileKeyword] = useState("");
   const [files, setFiles] = useState<AidpDocumentItem[]>([]);
@@ -298,15 +306,49 @@ const AidpKnowledgeDetail: React.FC<AidpKnowledgeDetailProps> = ({
     detail.resource_status !== "UNAVAILABLE" &&
     detail.resource_status !== "ORPHANED";
 
+  // ---- VLM model options for the caption (VLM) edit dialog ----
+  const { data: vlmModelsData, isLoading: vlmModelsLoading } = useQuery({
+    queryKey: ["aidp-models", "vlm", "KnowledgeBase"],
+    queryFn: () => aidpKnowledgeService.listModels("vlm", "KnowledgeBase"),
+    staleTime: 5 * 60 * 1000,
+    enabled: canEdit,
+  });
+  const vlmModelOptions = useMemo(() => {
+    const models: AidpModelItem[] = vlmModelsData?.models ?? [];
+    return models
+      .map((m) => m.model_name)
+      .filter(
+        (name): name is string => typeof name === "string" && name.length > 0
+      );
+  }, [vlmModelsData]);
+  const captionEditEnabled = Form.useWatch("caption_enable", vlmForm);
+
   useEffect(() => {
     if (!settingModal) return;
+    if (settingModal === "vlm") {
+      vlmForm.setFieldsValue({
+        caption_enable:
+          detail.is_multimodal === true || detail.caption_enable === 1,
+        vlm_model: detail.vlm_model || undefined,
+      });
+      return;
+    }
     settingForm.setFieldsValue({
       value:
         settingModal === "chunk_mode"
           ? (detail.chunk_mode ?? 0)
           : (detail.topk ?? 10),
     });
-  }, [detail.chunk_mode, detail.topk, settingForm, settingModal]);
+  }, [
+    detail.caption_enable,
+    detail.chunk_mode,
+    detail.is_multimodal,
+    detail.topk,
+    detail.vlm_model,
+    settingForm,
+    settingModal,
+    vlmForm,
+  ]);
 
   const refreshDetail = useCallback(async () => {
     setLoadingDetail(true);
@@ -492,6 +534,8 @@ const AidpKnowledgeDetail: React.FC<AidpKnowledgeDetailProps> = ({
         title: t("aidpKnowledge.deleteDocTitle"),
         content: file.file_name,
         centered: true,
+        okText: t("common.confirm"),
+        cancelText: t("common.cancel"),
         okButtonProps: { danger: true },
         onOk: async () => {
           try {
@@ -540,6 +584,8 @@ const AidpKnowledgeDetail: React.FC<AidpKnowledgeDetailProps> = ({
     Modal.confirm({
       title: t("aidpKnowledge.deleteDocsTitle", { count: fileUuids.length }),
       centered: true,
+      okText: t("common.confirm"),
+      cancelText: t("common.cancel"),
       okButtonProps: { danger: true },
       onOk: async () => {
         try {
@@ -613,6 +659,28 @@ const AidpKnowledgeDetail: React.FC<AidpKnowledgeDetailProps> = ({
 
   const saveSetting = async () => {
     if (!settingModal) return;
+    if (settingModal === "vlm") {
+      // Mirrors the create-KB behavior: enabled requires a VLM model;
+      // disabled omits the model field entirely so AIDP keeps its value.
+      const values = await vlmForm.validateFields();
+      setSavingSetting(true);
+      try {
+        await aidpKnowledgeService.updateKb(
+          knowledgeBase.kds_id,
+          values.caption_enable
+            ? { caption_enable: 1, vlm_model: values.vlm_model || "" }
+            : { caption_enable: 0 }
+        );
+        setSettingModal(null);
+        await refreshDetail();
+        message.success(t("aidpKnowledge.detailSettingSaved"));
+      } catch {
+        message.error(t("aidpKnowledge.detailSettingSaveFailed"));
+      } finally {
+        setSavingSetting(false);
+      }
+      return;
+    }
     const values = await settingForm.validateFields();
     setSavingSetting(true);
     try {
@@ -1191,15 +1259,74 @@ const AidpKnowledgeDetail: React.FC<AidpKnowledgeDetailProps> = ({
         title={t(
           settingModal === "chunk_mode"
             ? "aidpKnowledge.detailEditChunkMode"
-            : "aidpKnowledge.detailEditTopK"
+            : settingModal === "topk"
+              ? "aidpKnowledge.detailEditTopK"
+              : "aidpKnowledge.detailEditVlm"
         )}
         open={Boolean(settingModal)}
+        centered
+        okText={t("common.confirm")}
+        cancelText={t("common.cancel")}
         onCancel={() => setSettingModal(null)}
         onOk={() => void saveSetting()}
         confirmLoading={savingSetting}
         destroyOnHidden
       >
-        {settingModal && (
+        {settingModal === "vlm" ? (
+          <Form form={vlmForm} layout="vertical">
+            <Form.Item
+              label={
+                <span className="flex min-h-5 items-center gap-2 leading-5">
+                  <span>{t("aidpKnowledge.createVlmModel")}</span>
+                  <Tooltip title={t("aidpKnowledge.createCaptionEnableHint")}>
+                    <QuestionCircleOutlined
+                      className="cursor-help text-gray-400"
+                      aria-label={t("aidpKnowledge.createCaptionEnableHint")}
+                    />
+                  </Tooltip>
+                  <Form.Item
+                    name="caption_enable"
+                    valuePropName="checked"
+                    noStyle
+                  >
+                    <Switch
+                      aria-label={t("aidpKnowledge.createCaptionEnable")}
+                    />
+                  </Form.Item>
+                </span>
+              }
+            >
+              {captionEditEnabled && (
+                <Form.Item
+                  name="vlm_model"
+                  rules={[
+                    {
+                      required: true,
+                      message: t("aidpKnowledge.createVlmModelRequired"),
+                    },
+                  ]}
+                  noStyle
+                >
+                  <Select
+                    showSearch
+                    allowClear
+                    loading={vlmModelsLoading}
+                    notFoundContent={
+                      vlmModelsLoading
+                        ? t("aidpKnowledge.createModelLoading")
+                        : t("aidpKnowledge.createModelNone")
+                    }
+                    placeholder={t("aidpKnowledge.createModelSearch")}
+                    options={vlmModelOptions.map((name) => ({
+                      label: name,
+                      value: name,
+                    }))}
+                  />
+                </Form.Item>
+              )}
+            </Form.Item>
+          </Form>
+        ) : settingModal ? (
           <Form
             form={settingForm}
             layout="vertical"
@@ -1232,7 +1359,7 @@ const AidpKnowledgeDetail: React.FC<AidpKnowledgeDetailProps> = ({
               )}
             </Form.Item>
           </Form>
-        )}
+        ) : null}
       </Modal>
 
       <Drawer

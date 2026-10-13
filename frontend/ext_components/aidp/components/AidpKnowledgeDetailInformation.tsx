@@ -32,7 +32,7 @@ interface AidpKnowledgeDetailInformationProps {
   groupNames: string[];
   canConfigureGroupPermissions: boolean;
   formatDateTime: (value: unknown) => string;
-  onEditSetting: (setting: "chunk_mode" | "topk") => void;
+  onEditSetting: (setting: "chunk_mode" | "topk" | "vlm") => void;
   onEditPermissions: () => void;
 }
 
@@ -60,10 +60,11 @@ const AidpKnowledgeDetailInformation = ({
       return value ? t("common.yes") : t("common.no");
     return String(value);
   };
-  const editButton = (setting: "chunk_mode" | "topk", label: string) =>
+  const editButton = (setting: "chunk_mode" | "topk" | "vlm", label: string) =>
     canEdit && (
       <Tooltip title={label}>
         <Button
+          className="ml-2"
           type="text"
           size="small"
           aria-label={label}
@@ -113,13 +114,16 @@ const AidpKnowledgeDetailInformation = ({
           <AidpDetailField label={t("aidpKnowledge.detailEmbeddingModel")}>
             {detail.embedding_model || AIDP_UNKNOWN_VALUE}
           </AidpDetailField>
-          <AidpDetailField label={t("aidpKnowledge.detailVlmState")}>
-            <Tag color={multimodalEnabled ? "green" : "default"}>
-              {multimodalEnabled ? t("common.enabled") : t("common.disabled")}
-            </Tag>
-          </AidpDetailField>
           <AidpDetailField label={t("aidpKnowledge.detailVlmModel")}>
-            {detail.vlm_model || AIDP_UNKNOWN_VALUE}
+            {multimodalEnabled ? (
+              <>
+                <Tag color="green">{t("common.enabled")}</Tag>
+                <span className="ml-2">{detail.vlm_model || AIDP_UNKNOWN_VALUE}</span>
+              </>
+            ) : (
+              <Tag color="default">{t("common.disabled")}</Tag>
+            )}
+            {editButton("vlm", t("aidpKnowledge.detailEditVlm"))}
           </AidpDetailField>
           <AidpDetailField label={t("aidpKnowledge.detailRerankModel")}>
             {detail.rerank_model || AIDP_UNKNOWN_VALUE}

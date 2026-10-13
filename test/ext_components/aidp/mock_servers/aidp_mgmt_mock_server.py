@@ -732,6 +732,8 @@ class UpdateKbBody(BaseModel):
     description: Optional[str] = None
     chunk_mode: Optional[int] = None
     topk: Optional[int] = None
+    caption_enable: Optional[int] = None
+    vlm_model: Optional[str] = None
 
 
 class DocHistoryBody(BaseModel):
@@ -1095,6 +1097,10 @@ def update_knowledge_base(
         kb["chunk_mode"] = body.chunk_mode
     if body.topk is not None:
         kb["topk"] = body.topk
+    if body.caption_enable is not None:
+        kb["caption_enable"] = body.caption_enable
+    if body.vlm_model is not None:
+        kb["vlm_model"] = body.vlm_model
     kb["update_time"] = int(time.time())
 
     logger.info("UPDATE  kds_id=%s name=%r description=%r", kds_id, body.name, body.description)

@@ -208,6 +208,10 @@ class UpdateKbRequest(BaseModel):
     description: Optional[str] = Field(None, description="Knowledge base description")
     chunk_mode: Optional[int] = Field(None, ge=0, le=1, description="Chunk mode: 0 smart, 1 legal")
     topk: Optional[int] = Field(None, ge=1, le=100, description="Vector retrieval Top K")
+    caption_enable: Optional[int] = Field(
+        None, ge=0, le=1, description="Caption (VLM) generation toggle, int 0 or 1"
+    )
+    vlm_model: Optional[str] = Field(None, description="VLM model identifier for caption generation")
 
 
 class SetPermissionRequest(BaseModel):

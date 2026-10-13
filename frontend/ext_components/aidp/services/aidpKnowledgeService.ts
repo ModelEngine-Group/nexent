@@ -284,6 +284,10 @@ export interface AidpUpdateKbPayload {
   description?: string;
   chunk_mode?: number;
   topk?: number;
+  /** Caption (VLM) generation toggle; 1 enabled, 0 disabled. */
+  caption_enable?: number;
+  /** VLM model identifier; required when caption_enable is 1. */
+  vlm_model?: string;
 }
 
 export interface AidpUploadTaskStats {
