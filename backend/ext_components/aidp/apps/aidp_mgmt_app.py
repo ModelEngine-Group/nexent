@@ -14,6 +14,7 @@ FastAPI endpoints for AIDP knowledge base CRUD with permission enforcement.
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import time
 from http import HTTPStatus
@@ -288,6 +289,46 @@ def _infer_is_multimodal(detail: dict) -> bool:
         return False
     caption = detail.get("caption_enable")
     return caption in (1, "1", True)
+
+
+def _normalize_kb_config_fields(detail: dict) -> dict:
+    """Extract configuration fields the frontend expects from the AIDP detail response.
+    
+    AIDP stores chunking and embedding configuration inside ``kms_config_str``
+    (a JSON string) and uses ``top_k`` instead of ``topk``. The frontend reads
+    ``chunk_mode``, ``embedding_model``, ``topk``, ``similarity``, ``vlm_model``,
+    ``caption_enable``, ``chunk_token_num`` and ``chunk_overlap_num`` as
+    top-level fields. Without this normalization every configuration field
+    on the detail "Information" tab renders as unknown ("-").
+    """
+    if not isinstance(detail, dict):
+        return detail
+    
+    # Parse kms_config_str and merge its keys as  top-level fields, but never
+    # overwrite a value already present at the top level (the top-level value
+    # is more authoritative if AIDP ever starts returning it natively).
+    raw_kms = detail.get("kms_config_str")
+    if isinstance(raw_kms, str) and raw_kms.strip():
+        try:
+            kms = json.loads(raw_kms)
+            if isinstance(kms, dict):
+                for key, value in kms.items():
+                    if key not in detail or detail[key] is None:
+                        detail[key] = value
+        except (json.JSONDecodeError, ValueError):
+            logger.warning("Failed to parse kms_config_str for KB %s", detail.get("kds_id"))
+
+    # Map AIDP's top_k -> topk (the frontend / create payload field name).
+    if "topk" not in detail or detail["topk"] is None:
+        top_k = detail.get("top_k")
+        if top_k is not None:
+            detail["topk"] = top_k
+
+    # Derive is_multimodal from caption_enable when not already present.
+    if "is_multimodal" not in detail or detail["is_multimodal"] is None:
+        detail["is_multimodal"] = _infer_is_multimodal(detail)
+
+    return detail
 
 
 def _raise_aidp_conflict(exc: IntegrityError) -> None:
@@ -1156,6 +1197,7 @@ async def get_knowledge_base(
         resource_status = "UNAVAILABLE"
 
     detail = dict(detail)
+    detail = _normalize_kb_config_fields(detail)
     detail["kds_id"] = kds_id
     detail["permission"] = decision.permission
     detail["resource_status"] = resource_status
@@ -1183,6 +1225,7 @@ async def get_knowledge_base(
         except AppException:
             logger.warning("AIDP doc count fetch failed for %s", kds_id)
             detail["document_count_reliable"] = False
+
     return JSONResponse(status_code=HTTPStatus.OK, content=detail)
 
 
