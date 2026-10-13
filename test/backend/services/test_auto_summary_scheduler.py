@@ -246,6 +246,9 @@ setattr(sys.modules['services'], 'vectordatabase_service', vectordatabase_servic
 # Mock utils modules
 sys.modules['utils'] = types.ModuleType('utils')
 sys.modules['backend.utils'] = sys.modules['utils']
+# Keep the lightweight stub package-capable so const.py can load the shared
+# configuration validation helpers without importing unrelated utility modules.
+sys.modules['utils'].__path__ = [os.path.abspath(os.path.join(os.path.dirname(__file__), '../../../backend/utils'))]
 
 # Create document_vector_utils mock
 document_vector_utils_mock = types.ModuleType('backend.utils.document_vector_utils')

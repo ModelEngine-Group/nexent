@@ -11,7 +11,7 @@ import { DEFAULT_ERROR_MESSAGES } from "./errorMessage";
 import { handleSessionExpired } from "@/lib/session";
 import { isSessionExpired } from "./errorCode";
 import log from "@/lib/logger";
-import type { TFunction } from "i18next";
+type Translate = (key: string, options?: Record<string, unknown>) => string;
 
 const TENANT_RESOURCE_LIMIT_CODE = "120104";
 
@@ -23,11 +23,12 @@ const TENANT_RESOURCE_LIMIT_KEYS: Record<string, string> = {
   administrators: "tenantResources.limit.administrators",
   super_admins: "tenantResources.limit.superAdmins",
   external_a2a_agents: "tenantResources.limit.externalA2aAgents",
+  skills: "tenantResources.limit.skills",
 };
 
 export const getTenantResourceLimitMessage = (
   error: unknown,
-  t: TFunction
+  t: Translate
 ): string | null => {
   if (!error || typeof error !== "object") {
     return null;
@@ -57,7 +58,7 @@ export const getTenantResourceLimitMessage = (
 
 export const getKnowledgeResourceLimitMessage = (
   error: unknown,
-  t: TFunction
+  t: Translate
 ): string | undefined => {
   if (!error || typeof error !== "object") {
     return undefined;
@@ -120,7 +121,7 @@ const CONVERSATION_RESOURCE_LIMIT_PATTERNS: Array<{
 
 export const getConversationResourceLimitMessage = (
   error: unknown,
-  t: TFunction
+  t: Translate
 ): string | null => {
   const candidate =
     error && typeof error === "object"

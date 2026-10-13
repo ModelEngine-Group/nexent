@@ -260,7 +260,6 @@ class TenantResourceLimitError(ValidationError, ValueError):
     """Raised when a platform or tenant hard resource limit is reached."""
 
     code = ErrorCode.TENANT_RESOURCE_EXCEEDED.value
-
     def __init__(
         self,
         message: str,
@@ -274,6 +273,7 @@ class TenantResourceLimitError(ValidationError, ValueError):
         self.scope = scope
         self.limit = limit
         self.current_count = current_count
+        self.details = self.to_detail()
         super().__init__(message)
 
     def to_detail(self) -> dict:
@@ -301,6 +301,18 @@ def tenant_resource_limit_error_payload(error: TenantResourceLimitError) -> dict
 
 class NotFoundException(Exception):
     """Raised when not found exception occurs."""
+
+    pass
+
+
+class AgentRelationValidationError(ValueError):
+    """Raised when submitted Agent relationships violate the graph contract."""
+
+    pass
+
+
+class AgentNotFoundError(NotFoundException, ValueError):
+    """Raised when an Agent is absent from the caller's visible query scope."""
 
     pass
 
@@ -484,7 +496,6 @@ InvalidCredentialsError = UnauthorizedError
 TenantNotFoundError = NotFoundException
 TenantDisabledError = Exception  # Generic fallback
 
-AgentNotFoundError = NotFoundException
 AgentDisabledError = Exception  # Generic fallback
 
 ToolNotFoundError = NotFoundException

@@ -135,6 +135,9 @@ sys.modules["permissions.models"] = permissions_models_mock
 
 class SkillException(Exception):
     pass
+class AppException(Exception):
+    pass
+consts_exceptions_mock.AppException = AppException
 consts_exceptions_mock.SkillException = SkillException
 consts_exceptions_mock.ForbiddenError = type('ForbiddenError', (Exception,), {})
 consts_exceptions_mock.UnauthorizedError = type('UnauthorizedError', (Exception,), {})
@@ -195,7 +198,6 @@ class MockNL2SkillRunRequest(BaseModel):
     retry_user_message_id: Optional[int] = None
     retry_message_index: Optional[int] = None
     draft_snapshot: Optional[Dict[str, Any]] = None
-    complexity: str = "complicated"
     language: Optional[str] = None
 
 consts_model_mock.SkillCreateRequest = MockSkillCreateRequest
@@ -284,7 +286,7 @@ setattr(utils_mock, 'config_utils', utils_config_utils_mock)
 # Mock utils.prompt_template_utils
 utils_prompt_template_utils_mock = types.ModuleType('utils.prompt_template_utils')
 sys.modules['utils.prompt_template_utils'] = utils_prompt_template_utils_mock
-utils_prompt_template_utils_mock.get_skill_creation_simple_prompt_template = MagicMock(return_value={
+utils_prompt_template_utils_mock.get_nl2skill_prompt_template = MagicMock(return_value={
     "system_prompt": "You are a skill creator",
     "user_prompt": "Create a skill"
 })
@@ -420,6 +422,24 @@ class TestListSkillsEndpoint:
 # ===== Create Skill Endpoint Tests =====
 class TestCreateSkillEndpoint:
     """Test POST /skills endpoint."""
+
+    @pytest.mark.asyncio
+    async def test_create_skill_preserves_app_exception(self, mocker):
+        """Quota exceptions must reach the global AppException handler."""
+        mocker.patch(
+            "backend.apps.skill_app.get_current_user_id",
+            return_value=("user123", "tenant123"),
+        )
+        mock_service = mocker.patch("backend.apps.skill_app.SkillService").return_value
+        mock_service.create_skill.side_effect = AppException("quota", "limit reached")
+
+        request = skill_app.SkillCreateRequest(
+            name="skill",
+            description="description",
+            content="# Skill",
+        )
+        with pytest.raises(AppException):
+            await skill_app.create_skill(request=request, http_request=None, authorization="token")
 
     def test_create_skill_success(self, mocker):
         """Test successful skill creation."""
@@ -557,6 +577,22 @@ class TestCreateSkillEndpoint:
 # ===== Create Skill From File Endpoint Tests =====
 class TestCreateSkillFromFileEndpoint:
     """Test POST /skills/upload endpoint."""
+
+    @pytest.mark.asyncio
+    async def test_upload_preserves_app_exception(self, mocker):
+        """Upload quota and file-size errors must not be converted to HTTP 500."""
+        mocker.patch(
+            "backend.apps.skill_app.get_current_user_id",
+            return_value=("user123", "tenant123"),
+        )
+        mock_service = mocker.patch("backend.apps.skill_app.SkillService").return_value
+        mock_service.create_skill_from_file.side_effect = AppException("quota", "limit reached")
+
+        from fastapi import UploadFile
+
+        upload = UploadFile(filename="skill.md", file=io.BytesIO(b"content"))
+        with pytest.raises(AppException):
+            await skill_app.create_skill_from_file(file=upload, http_request=None, authorization="token")
 
     def test_upload_md_file_success(self, mocker):
         """Test successful skill upload from MD file."""
@@ -921,6 +957,26 @@ class TestGetSkillFileContentEndpoint:
 class TestUpdateSkillFromFileEndpoint:
     """Test PUT /skills/{skill_name}/upload endpoint."""
 
+    @pytest.mark.asyncio
+    async def test_update_upload_preserves_app_exception(self, mocker):
+        """Update uploads must preserve structured file-size errors."""
+        mocker.patch(
+            "backend.apps.skill_app.get_current_user_id",
+            return_value=("user123", "tenant123"),
+        )
+        mock_service = mocker.patch("backend.apps.skill_app.SkillService").return_value
+        mock_service.update_skill_from_file.side_effect = AppException("file", "too large")
+
+        from fastapi import UploadFile
+
+        upload = UploadFile(filename="skill.md", file=io.BytesIO(b"content"))
+        with pytest.raises(AppException):
+            await skill_app.update_skill_from_file(
+                skill_name="skill",
+                file=upload,
+                authorization="token", http_request=None,
+            )
+
     def test_update_skill_from_md_success(self, mocker):
         """Test successful skill update from MD file."""
         with patch('backend.apps.skill_app.SkillService') as mock_service_class:
@@ -1025,7 +1081,7 @@ class TestUpdateSkillInstanceEndpoint:
                         agent_id=1,
                         enabled=True,
                     ),
-                    authorization="Bearer token123",
+                    authorization="Bearer token123", http_request=None,
                 )
 
                 assert response.status_code == 200
@@ -1050,7 +1106,7 @@ class TestUpdateSkillInstanceEndpoint:
                             agent_id=1,
                             enabled=True,
                         ),
-                        authorization="Bearer token123",
+                        authorization="Bearer token123", http_request=None,
                     )
 
                 assert exc_info.value.status_code == 404
@@ -1276,7 +1332,7 @@ class TestUpdateSkillInstanceEndpointExtended:
                             agent_id=1,
                             enabled=True,
                         ),
-                        authorization="Bearer token123",
+                        authorization="Bearer token123", http_request=None,
                     )
 
                 assert exc_info.value.status_code == 400
@@ -2106,7 +2162,7 @@ class TestUpdateSkillInstanceEndpointErrorHandling:
                         agent_id=1,
                         enabled=True,
                     ),
-                    authorization="Bearer token123",
+                    authorization="Bearer token123", http_request=None,
                 )
 
         assert exc_info.value is expected_exception
@@ -2131,7 +2187,7 @@ class TestUpdateSkillInstanceEndpointErrorHandling:
                             agent_id=1,
                             enabled=True,
                         ),
-                        authorization="Bearer token123",
+                        authorization="Bearer token123", http_request=None,
                     )
 
                 assert exc_info.value.status_code == 500
@@ -2369,6 +2425,22 @@ class TestListOfficialSkillsEndpoint:
 class TestInstallSkillsEndpoint:
     """Test POST /skills/install endpoint."""
 
+    @pytest.mark.asyncio
+    async def test_install_skills_preserves_app_exception(self, mocker):
+        """Official Skill installation must preserve tenant quota errors."""
+        mocker.patch(
+            "backend.apps.skill_app.get_current_user_id",
+            return_value=("user123", "tenant123"),
+        )
+        mocker.patch(
+            "backend.apps.skill_app.install_skills_from_zip_for_tenant",
+            side_effect=AppException("quota", "limit reached"),
+        )
+
+        request = skill_app.InstallSkillsRequest(skill_names=["skill"])
+        with pytest.raises(AppException):
+            await skill_app.install_skills(request=request, http_request=None, authorization="token")
+
     def test_install_skills_success(self, mocker):
         """Test successful skill installation."""
         with patch('backend.apps.skill_app.get_current_user_id') as mock_auth:
@@ -2563,7 +2635,7 @@ class TestCreateSkillInteractiveEndpoint:
 
                 response = client.post(
                     "/skills/nl2skill/run",
-                    json={"query": "Create a skill", "language": "zh", "complexity": "simple"},
+                    json={"query": "Create a skill", "language": "zh"},
                     headers={"Authorization": "Bearer token123"}
                 )
 
@@ -2692,7 +2764,7 @@ class TestUpdateSkillInstanceWithConfigMerge:
                         agent_id=1,
                         enabled=True,
                     ),
-                    authorization="Bearer token123",
+                    authorization="Bearer token123", http_request=None,
                 )
 
                 assert response.status_code == 200
@@ -3250,7 +3322,7 @@ class TestSkillAppRemainingExceptionMappings:
         upload = MagicMock()
 
         with pytest.raises(skill_app.HTTPException) as exc_info:
-            await skill_app.create_skill_from_file(file=upload, authorization="token")
+            await skill_app.create_skill_from_file(file=upload, http_request=None, authorization="token")
 
         assert exc_info.value.status_code == 403
         assert exc_info.value.detail == "denied"
@@ -3318,7 +3390,7 @@ class TestSkillAppRemainingExceptionMappings:
             await skill_app.update_skill(
                 skill_name="demo",
                 request=skill_app.SkillUpdateRequest(description="updated"),
-                authorization="token",
+                authorization="token", http_request=None,
             )
 
         assert exc_info.value.status_code == 403
@@ -3342,6 +3414,101 @@ class TestSkillAppRemainingExceptionMappings:
             await skill_app.nl2skill_run_api(request=request, authorization="token")
 
         assert exc_info.value is expected
+
+
+# ===== Security Audit Entries =====
+class TestSkillAuditEntries:
+    """Security audit entries emitted by skill management endpoints."""
+
+    def test_create_emits_audit_entry_without_content(self, mocker, caplog):
+        """Successful create records name/source, never the skill body."""
+        import logging
+        with patch('backend.apps.skill_app.get_current_user_id') as mock_auth:
+            mock_auth.return_value = ("user123", "tenant123")
+            with patch('backend.apps.skill_app.SkillService') as mock_service_class:
+                mock_service = MagicMock()
+                mock_service_class.return_value = mock_service
+                mock_service.create_skill.return_value = {"skill_id": 5, "name": "my-skill"}
+
+                app = FastAPI()
+                app.include_router(skill_app.router)
+                client = TestClient(app)
+
+                with caplog.at_level(logging.INFO, logger="audit.security"):
+                    response = client.post(
+                        "/skills",
+                        headers={"Authorization": "Bearer token123"},
+                        json={"name": "my-skill", "description": "desc",
+                              "content": "secret skill body"},
+                    )
+
+        assert response.status_code == 201
+        messages = [record.getMessage() for record in caplog.records
+                    if record.name == "audit.security"]
+        assert len(messages) == 1
+        assert "event=skill_create" in messages[0]
+        assert "result=success" in messages[0]
+        assert "user_id=user123" in messages[0]
+        assert '"skill_name":"my-skill"' in messages[0]
+        assert '"source":"custom"' in messages[0]
+        assert "secret skill body" not in messages[0]
+
+    def test_upload_emits_audit_entry_without_file_content(self, mocker, caplog):
+        """Successful upload records filename/source, never the file bytes."""
+        import logging
+        with patch('backend.apps.skill_app.get_current_user_id') as mock_auth:
+            mock_auth.return_value = ("user123", "tenant123")
+            with patch('backend.apps.skill_app.SkillService') as mock_service_class:
+                mock_service = MagicMock()
+                mock_service_class.return_value = mock_service
+                mock_service.create_skill_from_file.return_value = {"skill_id": 6}
+
+                app = FastAPI()
+                app.include_router(skill_app.router)
+                client = TestClient(app)
+
+                with caplog.at_level(logging.INFO, logger="audit.security"):
+                    response = client.post(
+                        "/skills/upload",
+                        headers={"Authorization": "Bearer token123"},
+                        files={"file": ("SKILL.md", b"secret file body", "text/markdown")},
+                        data={"skill_name": "file-skill"},
+                    )
+
+        assert response.status_code == 201
+        messages = [record.getMessage() for record in caplog.records
+                    if record.name == "audit.security"]
+        assert len(messages) == 1
+        assert "event=skill_upload" in messages[0]
+        assert '"filename":"SKILL.md"' in messages[0]
+        assert '"skill_name":"file-skill"' in messages[0]
+        assert "secret file body" not in messages[0]
+
+    def test_delete_emits_audit_entry(self, mocker, caplog):
+        """Successful delete records the removed skill name."""
+        import logging
+        with patch('backend.apps.skill_app.get_current_user_id') as mock_auth:
+            mock_auth.return_value = ("user123", "tenant123")
+            with patch('backend.apps.skill_app.SkillService') as mock_service_class:
+                mock_service = MagicMock()
+                mock_service_class.return_value = mock_service
+
+                app = FastAPI()
+                app.include_router(skill_app.router)
+                client = TestClient(app)
+
+                with caplog.at_level(logging.INFO, logger="audit.security"):
+                    response = client.delete(
+                        "/skills/old-skill",
+                        headers={"Authorization": "Bearer token123"},
+                    )
+
+        assert response.status_code == 200
+        messages = [record.getMessage() for record in caplog.records
+                    if record.name == "audit.security"]
+        assert len(messages) == 1
+        assert "event=skill_delete" in messages[0]
+        assert '"skill_name":"old-skill"' in messages[0]
 
 
 if __name__ == "__main__":

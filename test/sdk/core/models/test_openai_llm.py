@@ -2257,7 +2257,7 @@ def test_call_can_defer_successful_attempt_commit_for_core_agent(openai_model_in
     """CoreAgent may validate a successful stream before committing it to clients."""
     mock_chunk = MagicMock()
     mock_chunk.choices = [MagicMock()]
-    mock_chunk.choices[0].delta.content = '<code>final_answer("ok")</code>'
+    mock_chunk.choices[0].delta.content = '<final_answer>ok</final_answer>'
     mock_chunk.choices[0].delta.role = "assistant"
     mock_chunk.choices[0].delta.reasoning = None
     mock_chunk.choices[0].delta.reasoning_content = None
@@ -2285,7 +2285,7 @@ def test_call_can_suppress_semantic_repair_stream(openai_model_instance):
     """A semantic repair is observed internally without publishing raw tokens."""
     mock_chunk = MagicMock()
     mock_chunk.choices = [MagicMock()]
-    mock_chunk.choices[0].delta.content = '<code>final_answer("ok")</code>'
+    mock_chunk.choices[0].delta.content = '<final_answer>ok</final_answer>'
     mock_chunk.choices[0].delta.role = "assistant"
     mock_chunk.choices[0].delta.reasoning = "internal repair reasoning"
     mock_chunk.choices[0].delta.reasoning_content = None

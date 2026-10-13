@@ -1,0 +1,65 @@
+schema_version: '1.0'
+stage: D1
+module: V5-BASELINE
+case:
+  case_id: UT-BE-AUTO-97496DA0E32E2AD0
+  feature_id: F-185
+  business_rule_ids:
+  - F-185-RULE-01
+  title: apply_duplicate_name_availability_rules 重名可用性判定：同名/同 display_name 按 create_time 保留最早者可用｜核心流程
+  type: BE-UT
+  priority: P1
+  status: active
+  automation: automated
+  objective: apply_duplicate_name_availability_rules 重名可用性判定：同名/同 display_name 按 create_time 保留最早者可用｜核心流程
+  preconditions:
+  - 本地依赖/组件测试环境可运行；不要求外部模型服务在线。
+  - 测试代码不得读取生产凭据；被测函数为纯函数，仅依赖内存输入的 enriched_agents 列表。
+  - 每个输入 entry 需包含 raw_agent 字典（含 name、display_name、create_time）与 unavailable_reasons 列表两个字段。
+  test_data:
+    legacy_asset_declaration: '- 无外部资产；测试输入为内存构造的 enriched_agents 列表，每个 entry 含 raw_agent（name/display_name/create_time）与
+      unavailable_reasons 列表。'
+  steps:
+  - order: 1
+    action: 直接导入 backend/management/services/agent/read.py 中的 apply_duplicate_name_availability_rules 函数，构造最小有效输入列表与必要依赖对象。
+    expected: 同名组中 create_time 最早的 entry 的 unavailable_reasons 不新增 DUPLICATE_NAME；其余后创建 entry 各追加一个 DUPLICATE_NAME。
+  - order: 2
+    action: 构造同名组：多个 entry 的 raw_agent.name 相同而 create_time 不同，调用函数后记录各 entry 的 unavailable_reasons。
+    expected: 同 display_name 组中 create_time 最早的 entry 不新增 DUPLICATE_DISPLAY_NAME；其余后创建 entry 各追加一个 DUPLICATE_DISPLAY_NAME。
+  - order: 3
+    action: 构造同 display_name 组：多个 entry 的 raw_agent.display_name 相同而 create_time 不同，调用函数后记录各 entry 的 unavailable_reasons。
+    expected: 同时属于同名组与同 display_name 组的后创建 entry，unavailable_reasons 同时包含 DUPLICATE_NAME 与 DUPLICATE_DISPLAY_NAME。
+  - order: 4
+    action: 构造交叉场景：某 entry 同时与其他 entry 同名且与另外 entry 同 display_name，验证两种重复原因是否叠加。
+    expected: 已有模型/工具原因的 entry 在追加重复原因后，原有原因保留、新原因追加且不重复；同名组内不因同一成员重复追加同一原因。
+  - order: 5
+    action: 构造已有模型/工具原因的 entry（unavailable_reasons 预置 MODEL_DELETED/MODEL_NOT_CONFIGURED 等），再叠加重名场景，验证原因合并与去重。
+    expected: 单成员组与空列表不产生任何追加，函数不抛异常。
+  - order: 6
+    action: 构造仅一个成员的组与空列表边界，确认不产生追加且不报错。
+    expected: 函数返回 None，输入列表被原地修改，测试过程无未处理异常、无跨租户数据副作用。
+  - order: 7
+    action: 确认函数返回值为 None，且仅原地修改输入列表；断言结束后释放临时对象确保可重复执行。
+    expected: 函数返回 None，输入列表被原地修改，测试过程无未处理异常、无跨租户数据副作用。
+  expected_results:
+  - 同名组中 create_time 最早的 entry 的 unavailable_reasons 不新增 DUPLICATE_NAME；其余后创建 entry 各追加一个 DUPLICATE_NAME。
+  - 同 display_name 组中 create_time 最早的 entry 不新增 DUPLICATE_DISPLAY_NAME；其余后创建 entry 各追加一个 DUPLICATE_DISPLAY_NAME。
+  - 同时属于同名组与同 display_name 组的后创建 entry，unavailable_reasons 同时包含 DUPLICATE_NAME 与 DUPLICATE_DISPLAY_NAME。
+  - 已有模型/工具原因的 entry 在追加重复原因后，原有原因保留、新原因追加且不重复；同名组内不因同一成员重复追加同一原因。
+  - 单成员组与空列表不产生任何追加，函数不抛异常。
+  - 函数返回 None，输入列表被原地修改，测试过程无未处理异常、无跨租户数据副作用。
+  forbidden_side_effects: []
+  source:
+    legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
+    legacy_sheet: 02_测试用例基线
+    legacy_row: 409
+  unit_boundary: Agent 列表可用性
+  inputs:
+  - '- 无外部资产；测试输入为内存构造的 enriched_agents 列表，每个 entry 含 raw_agent（name/display_name/create_time）与 unavailable_reasons 列表。'
+  assertions:
+  - 同名组中 create_time 最早的 entry 的 unavailable_reasons 不新增 DUPLICATE_NAME；其余后创建 entry 各追加一个 DUPLICATE_NAME。
+  - 同 display_name 组中 create_time 最早的 entry 不新增 DUPLICATE_DISPLAY_NAME；其余后创建 entry 各追加一个 DUPLICATE_DISPLAY_NAME。
+  - 同时属于同名组与同 display_name 组的后创建 entry，unavailable_reasons 同时包含 DUPLICATE_NAME 与 DUPLICATE_DISPLAY_NAME。
+  - 已有模型/工具原因的 entry 在追加重复原因后，原有原因保留、新原因追加且不重复；同名组内不因同一成员重复追加同一原因。
+  - 单成员组与空列表不产生任何追加，函数不抛异常。
+  - 函数返回 None，输入列表被原地修改，测试过程无未处理异常、无跨租户数据副作用。

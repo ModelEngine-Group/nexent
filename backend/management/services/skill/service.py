@@ -14,10 +14,13 @@ from nexent.skills.skill_loader import SkillLoader
 from nexent.skills.upload import normalize_skill_upload
 from nexent.skills.text_codec import DecodedSkillFile, decode_skill_text
 from consts.const import (
+    MAX_SKILL_UPLOAD_SIZE_BYTES,
+    MAX_SKILL_UPLOAD_SIZE_MB,
     OFFICIAL_SKILLS_ZIP_PATH,
     ROOT_DIR,
 )
-from consts.exceptions import ForbiddenError, SkillException
+from consts.error_code import ErrorCode
+from consts.exceptions import AppException, ForbiddenError, SkillException
 from database import skill_db
 from database.group_db import query_group_ids_by_user
 
@@ -342,6 +345,8 @@ class SkillService:
 
             logger.info(f"Created skill '{skill_name}' with local files")
             return self._enrich_configs_from_yaml(result)
+        except AppException:
+            raise
         except SkillException:
             raise
         except Exception as e:
@@ -367,6 +372,18 @@ class SkillService:
         ingroup_permission: Optional[str] = None, rewrite_name: bool = False,
     ) -> Dict[str, Any]:
         """Share parsing and persistence while keeping operation-specific policies."""
+        if len(content) > MAX_SKILL_UPLOAD_SIZE_BYTES:
+            raise AppException(
+                ErrorCode.FILE_TOO_LARGE,
+                f"Skill upload exceeds the maximum size of {MAX_SKILL_UPLOAD_SIZE_MB} MB",
+                details={
+                    "resource": "skill_upload",
+                    "limit_mb": MAX_SKILL_UPLOAD_SIZE_MB,
+                    "limit_bytes": MAX_SKILL_UPLOAD_SIZE_BYTES,
+                    "actual_bytes": len(content),
+                },
+            )
+
         is_zip = kind == "zip"
         manifest_path = original_root = None
         text = None
@@ -1375,6 +1392,8 @@ def install_skills_for_tenant(
                     f"create_skill returned no skill_id for '{skill_name}', "
                     f"tenant {tenant_id}"
                 )
+        except AppException:
+            raise
         except Exception as e:
             logger.error(
                 f"Failed to install skill ID {skill_id} into tenant {tenant_id}: {e}"
@@ -1539,6 +1558,8 @@ def install_skills_from_zip_for_tenant(
                 f"Installed skill '{installed_name}' for tenant {tenant_id} "
                 f"from ZIP {zip_filename}"
             )
+        except AppException:
+            raise
         except Exception as e:
             logger.error(
                 f"Failed to install skill '{skill_name}' from ZIP for tenant {tenant_id}: {e}"

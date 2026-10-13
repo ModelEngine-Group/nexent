@@ -41,6 +41,7 @@ import {
 } from "@/services/agentConfigService";
 import { normalizeSkillFiles } from "@/lib/skillFileUtils";
 import log from "@/lib/logger";
+import { getTenantResourceLimitMessage } from "@/const/errorMessageI18n";
 import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
 import { USER_ROLES } from "@/const/auth";
 import { useGroupDetails, useGroupList } from "@/hooks/group/useGroupList";
@@ -67,6 +68,7 @@ interface SkillBuildModalProps {
   editingSkill?: MyEditableSkillItem | null;
   onBeforeEditSave?: (skill: MyEditableSkillItem) => Promise<boolean>;
   zIndex?: number;
+  initialTab?: "interactive" | "upload";
 }
 
 interface StreamedFrontmatter {
@@ -152,6 +154,7 @@ export default function SkillBuildModal({
   editingSkill,
   onBeforeEditSave,
   zIndex = 1000,
+  initialTab = "interactive",
 }: SkillBuildModalProps) {
   const { t, i18n } = useTranslation("common");
   const { user, getAccessibleGroupIds } = useAuthorizationContext();
@@ -191,7 +194,7 @@ export default function SkillBuildModal({
       })),
     [filteredGroups]
   );
-  const [activeTab, setActiveTab] = useState<string>("interactive");
+  const [activeTab, setActiveTab] = useState<string>(initialTab);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isLoadingEditFiles, setIsLoadingEditFiles] = useState(false);
   const [loadedEditSkillId, setLoadedEditSkillId] = useState<number | null>(
@@ -296,7 +299,7 @@ export default function SkillBuildModal({
 
   useEffect(() => {
     if (!isOpen) {
-      setActiveTab("interactive");
+      setActiveTab(initialTab);
       setUploadFile(null);
       setInteractiveSkillName("");
       setUploadExtractingName(false);
@@ -315,7 +318,7 @@ export default function SkillBuildModal({
       setEditFilesError(null);
       setIsLoadingEditFiles(false);
     }
-  }, [isOpen]);
+  }, [isOpen, initialTab]);
 
   // Detect create/update mode when extracted skill name changes (upload tab)
   const [uploadIsCreateMode, setUploadIsCreateMode] = useState(true);
@@ -523,7 +526,10 @@ export default function SkillBuildModal({
         ]);
         return;
       }
-      message.error(t("skillManagement.message.submitFailed"));
+      message.error(
+        getTenantResourceLimitMessage(error, t) ||
+          t("skillManagement.message.submitFailed")
+      );
     } finally {
       setIsSubmitting(false);
     }

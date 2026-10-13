@@ -1,0 +1,66 @@
+schema_version: '1.0'
+stage: D1
+module: V5-BASELINE
+case:
+  case_id: UT-SDK-AUTO-B1AEA91199BFAD48
+  feature_id: F-186
+  business_rule_ids:
+  - F-186-RULE-01
+  title: BoundedExecutor 运行+排队达容量上限时非阻塞拒绝提交并抛 ThreadCapacityExceeded、permit 在完成/取消后释放｜边界/异常
+  type: SDK-UT
+  priority: P1
+  status: active
+  automation: automated
+  objective: BoundedExecutor 运行+排队达容量上限时非阻塞拒绝提交并抛 ThreadCapacityExceeded、permit 在完成/取消后释放｜边界/异常
+  preconditions:
+  - 本地依赖/组件测试环境可运行；不要求外部模型服务在线。
+  - 设置 NEXENT_TEST_HOME，目录不位于 Nexent Git 仓库内。
+  - 当次 run_id 已生成；测试代码仅直接导入 SDK，不读取生产凭据。
+  - 本用例为纯逻辑单元测试，无外部服务与本地产物资产依赖，仅需 Python 标准库 threading/concurrent.futures。
+  test_data:
+    legacy_asset_declaration: 无（纯逻辑单元测试，直接构造 LanePolicy 与 BoundedExecutor；不依赖本地 config/assets 文件）
+  steps:
+  - order: 1
+    action: 直接导入 sdk/nexent/core/concurrency/bounded_executor.py 的 BoundedExecutor、errors.py 的 ThreadCapacityExceeded 与 models.py
+      的 LanePolicy，构造 LanePolicy(name="model-tool-io", max_workers=2, max_queue_size=3)，据此创建 BoundedExecutor(service_name="test",
+      policy=该 policy)，此时 capacity 应为 max_workers+max_queue_size=5。
+    expected: 运行+排队数达到 capacity 上限时，submit 非阻塞抛出 ThreadCapacityExceeded，不进入 ThreadPoolExecutor 队列，不阻塞调用线程。
+  - order: 2
+    action: 构造一个可阻塞的任务函数（内部等待 threading.Event 置位后才返回），提交 2 个任务使运行数达 max_workers，再提交 3 个任务进入排队，使运行+排队数达到 capacity 上限 5。
+    expected: ThreadCapacityExceeded 的 lane/capacity/queued 分别等于 policy.name、max_workers+max_queue_size、当前排队任务数。
+  - order: 3
+    action: 在达到上限后第 6 次调用 executor.submit(fn)，断言其非阻塞立即抛出 ThreadCapacityExceeded（而非阻塞等待或返回 Future），并校验异常属性 lane 等于 policy.name、capacity
+      等于 5、queued 等于当前排队任务数 3。
+    expected: 拒绝提交不破坏有界性：任意时刻运行+排队任务总数不超过 capacity。
+  - order: 4
+    action: 断言拒绝提交后 executor.submitted 计数未因本次拒绝而增加，且运行+排队总数仍不超过 capacity 上限 5。
+    expected: permit 在任务完成或取消（含 future.cancel() 触发的 done_callback）后被正确释放，submitted 计数回落，随后可再次成功 submit。
+  - order: 5
+    action: 置位阻塞事件使已提交任务结束并等待各 Future 完成，随后再次 submit 一个任务应成功，断言 permit 已在任务完成时通过 done_callback 正确释放。
+    expected: 测试全程无未处理异常，日志与产物不包含明文密钥；不依赖网络或外部模型服务。
+  - order: 6
+    action: 对取消路径：提交一个可取消任务，对其返回的 Future 调用 cancel() 并等待结束，断言 permit 在取消后同样被释放、submitted 计数回落，可再次成功提交。
+    expected: 测试全程无未处理异常，日志与产物不包含明文密钥；不依赖网络或外部模型服务。
+  - order: 7
+    action: 测试结束调用 executor.shutdown(wait=False, cancel_futures=True) 释放线程资源，确保用例可重复执行且无遗留线程。
+    expected: 测试全程无未处理异常，日志与产物不包含明文密钥；不依赖网络或外部模型服务。
+  expected_results:
+  - 运行+排队数达到 capacity 上限时，submit 非阻塞抛出 ThreadCapacityExceeded，不进入 ThreadPoolExecutor 队列，不阻塞调用线程。
+  - ThreadCapacityExceeded 的 lane/capacity/queued 分别等于 policy.name、max_workers+max_queue_size、当前排队任务数。
+  - 拒绝提交不破坏有界性：任意时刻运行+排队任务总数不超过 capacity。
+  - permit 在任务完成或取消（含 future.cancel() 触发的 done_callback）后被正确释放，submitted 计数回落，随后可再次成功 submit。
+  - 测试全程无未处理异常，日志与产物不包含明文密钥；不依赖网络或外部模型服务。
+  forbidden_side_effects: []
+  source:
+    legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
+    legacy_sheet: 02_测试用例基线
+    legacy_row: 478
+  unit_boundary: 有界执行器
+  inputs:
+  - 无（纯逻辑单元测试，直接构造 LanePolicy 与 BoundedExecutor；不依赖本地 config/assets 文件）
+  assertions:
+  - 运行+排队数达到 capacity 上限时，submit 非阻塞抛出 ThreadCapacityExceeded，不进入 ThreadPoolExecutor 队列，不阻塞调用线程。
+  - ThreadCapacityExceeded 的 lane/capacity/queued 分别等于 policy.name、max_workers+max_queue_size、当前排队任务数。
+  - 拒绝提交不破坏有界性：任意时刻运行+排队任务总数不超过 capacity。
+  - permit 在任务完成或取消（含 future.cancel() 触发的 done_callback）后被正确释放，submitted 计数回落，随后可再次成功 submit。
+  - 测试全程无未处理异常，日志与产物不包含明文密钥；不依赖网络或外部模型服务。

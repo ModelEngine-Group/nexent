@@ -98,15 +98,15 @@
 
 当前状态：
 
-- `data_process_service.py` 在一个 Pod 中启动 Redis 连接检查、Ray、Celery workers、Flower 和 FastAPI。
-- `service_processes` 保存本地启动的 worker、Flower、Ray 状态。
+- `data_process_service.py` 在一个 Pod 中启动 Redis 连接检查、Celery workers、Flower 和 FastAPI。
+- `service_processes` 保存本地启动的 worker、Flower 状态。
 - `auto_summary_scheduler` 在进程内启动线程，`_in_flight` 只做单进程去重。
 
 问题：
 
-- 多个 data-process Pod 会各自启动 Ray 和 worker，需要重新设计队列消费和 Ray 拓扑。
+- 多个 data-process Pod 会各自启动 worker，需要明确队列消费边界和共享状态。
 - auto-summary 在多 Pod 下会重复扫描并处理相同知识库。
-- Flower 和 Ray dashboard 不适合作为每个副本都暴露的应用端口。
+- Flower 不适合作为每个副本都暴露的应用端口。
 
 ### 2.5 Northbound 幂等与限流
 
@@ -180,7 +180,7 @@
 - `nexent-supabase-db`
 - `nexent-openssh`
 
-`nexent-web` 和 `nexent-config` 纳入第一阶段，但只做无状态化确认、启动/迁移并发保护、代理超时和 Helm 手工多副本配置。`nexent-mcp` 的动态工具一致性、`nexent-data-process` 的 scheduler/worker/Ray 拆分均放到后续阶段。
+`nexent-web` 和 `nexent-config` 纳入第一阶段，但只做无状态化确认、启动/迁移并发保护、代理超时和 Helm 手工多副本配置。`nexent-mcp` 的动态工具一致性、`nexent-data-process` 的 scheduler/worker 拆分均放到后续阶段。
 
 ## 4. 详细修改点
 
@@ -571,15 +571,14 @@ Redis channel：
 
 - `nexent-data-process-api`: 只提供 HTTP API。
 - `nexent-data-process-worker`: Celery worker，可按队列和资源扩容。
-- `nexent-ray-head`: Ray head，StatefulSet 或独立 Deployment。
-- `nexent-ray-worker`: Ray worker，支持手工副本数或 KubeRay；HPA 不进入第一阶段。
+- `nexent-data-process-worker`: Celery prefork/threads worker，可按队列和资源扩容。
 - `nexent-flower`: 可选单副本监控。
 - `nexent-auto-summary-scheduler`: 单副本或 leader election。
 
 第一阶段需要避免：
 
 - 在应用层多副本设计中承诺 `nexent-data-process.replicaCount > 1` 可用。
-- 把 Flower/Ray dashboard 多副本暴露成生产入口。
+- 把 Flower 多副本暴露成生产入口。
 
 ### 4.7 Web 与 Config 多副本
 
@@ -759,7 +758,7 @@ Northbound 主要影响：
 | --- | --- | --- |
 | MCP 一致性 | 启动加载、Pub/Sub 广播、版本检查、管理接口兼容 | 4-6 人日 |
 | Auto Summary Scheduler | scheduler 独立部署、分布式锁或 leader election | 2-4 人日 |
-| Data Process 横向扩展 | API/worker/Ray/Flower/scheduler 拆分 | 15-30 人日 |
+| Data Process 横向扩展 | API/worker/Flower/scheduler 拆分 | 15-30 人日 |
 | 内置状态组件 HA | Postgres、Redis、ES、MinIO、Supabase DB 集群化 | 20-40 人日 |
 | 生产观测与容量模型 | 指标、告警、压测模型、容量建议 | 5-10 人日 |
 
@@ -911,13 +910,13 @@ Pod 被删除时，正在运行的 agent 无法真正从中间继续推理，只
 
 ### 8.5 Data Process 完整横扩
 
-当前 data-process 结构把 API、worker、Ray、Flower、scheduler 放在同一进程树中。
+当前 data-process 结构把 API、Celery worker、Flower、scheduler 放在同一进程树中。
 
 第一阶段不承诺：
 
-- 多个 data-process Pod 同时启动 Ray 后能正确协作。
-- Flower/Ray dashboard 多副本访问一致。
-- Celery worker 和 Ray actor 池按资源自动弹性扩缩。
+- 多个 data-process Pod 的 Celery worker 能正确协作。
+- Flower 多副本访问一致。
+- Celery worker 按队列和资源自动弹性扩缩。
 
 这些应进入第二阶段。
 

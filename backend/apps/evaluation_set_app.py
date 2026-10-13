@@ -9,6 +9,10 @@ from fastapi.responses import JSONResponse, StreamingResponse
 from nexent.core.concurrency import ManagedTaskSpec
 from pydantic import BaseModel, Field
 
+from consts.const import (
+    MAX_EVALUATION_SET_FILE_SIZE_BYTES,
+    MAX_EVALUATION_SET_FILE_SIZE_MB,
+)
 from consts.error_code import ErrorCode
 from consts.evaluation_limits import (
     CASE_ANSWER_MAX_LEN,
@@ -81,6 +85,25 @@ class GenerateCasesRequest(BaseModel):
     set_name: str | None = None
     set_description: str | None = None
     target_set_id: int | None = None
+
+
+def _validate_evaluation_set_file_size(raw: bytes, filename: str | None) -> None:
+    """Reject an evaluation-set file before parsing when it exceeds the limit."""
+    actual_bytes = len(raw)
+    if actual_bytes <= MAX_EVALUATION_SET_FILE_SIZE_BYTES:
+        return
+
+    raise AppException(
+        ErrorCode.FILE_TOO_LARGE,
+        f"Evaluation set file exceeds the maximum size of {MAX_EVALUATION_SET_FILE_SIZE_MB} MB",
+        details={
+            "resource": "evaluation_set_file",
+            "filename": filename or "unknown",
+            "limit_mb": MAX_EVALUATION_SET_FILE_SIZE_MB,
+            "limit_bytes": MAX_EVALUATION_SET_FILE_SIZE_BYTES,
+            "actual_bytes": actual_bytes,
+        },
+    )
 
 
 # ── Endpoints ───────────────────────────────────────────────────────
@@ -184,6 +207,7 @@ async def upload_evaluation_set_api(
                     ErrorCode.COMMON_VALIDATION_ERROR,
                     f"Unsupported file type: {filename}. Only .xlsx and .xls are accepted.",
                 )
+            _validate_evaluation_set_file_size(raw, filename)
             source_filenames.append(filename)
             cases = parse_evaluation_cases_from_excel(filename=filename, raw=raw)
             all_cases.extend(cases)
@@ -223,6 +247,15 @@ async def download_evaluation_set_template_api():
             "Content-Disposition": 'attachment; filename="evaluation_set_template.xlsx"'
         },
     )
+
+
+@router.get("/config")
+async def evaluation_set_config_api(
+    authorization: str | None = Header(None),
+):
+    """Return effective evaluation-set upload limits for the web client."""
+    get_current_user_id(authorization)
+    return _ok({"max_file_size_mb": MAX_EVALUATION_SET_FILE_SIZE_MB})
 
 
 @router.get("/{evaluation_set_id}")

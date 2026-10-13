@@ -1,0 +1,16 @@
+schema_version: '1.0'
+module:
+  id: V5-BASELINE
+  name: Migrated V5 baseline
+feature:
+  feature_id: F-153
+  name: monitoring status 根据 ENABLE_TELEMETRY/provider/UI URL 与角色权限返回可见状态
+  status: active
+  description: '平台运维能力 / 监控: monitoring status 根据 ENABLE_TELEMETRY/provider/UI URL 与角色权限返回可见状态'
+  business_rules:
+  - rule_id: F-153-RULE-01
+    description: monitoring status 根据 ENABLE_TELEMETRY/provider/UI URL 与角色权限返回可见状态
+  required_test_stages:
+  - D1
+  source:
+    notes: Migrated from V5 01_代码功能清单 without changing the functional description.

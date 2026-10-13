@@ -4,10 +4,17 @@ import tempfile
 import asyncio
 import socket
 import random
+from contextlib import AsyncExitStack
 from typing import Awaitable, Callable
 from fastmcp import Client
 from fastmcp.client.transports import StreamableHttpTransport, SSETransport
-from consts.const import CAN_EDIT_ALL_USER_ROLES, PERMISSION_EDIT, PERMISSION_READ, NEXENT_MCP_DOCKER_IMAGE
+from consts.const import (
+    CAN_EDIT_ALL_USER_ROLES,
+    MCP_REQUEST_TIMEOUT_SECONDS,
+    NEXENT_MCP_DOCKER_IMAGE,
+    PERMISSION_EDIT,
+    PERMISSION_READ,
+)
 from consts.exceptions import (
     MCPConnectionError,
     MCPNameIllegal,
@@ -47,9 +54,6 @@ from services.mcp_container_service import MCPContainerManager
 from utils.http_client_utils import create_httpx_client
 
 logger = logging.getLogger("remote_mcp_service")
-
-MCP_HEALTH_CHECK_TIMEOUT_SECONDS = 10
-
 
 def _iter_exception_chain(exc: BaseException):
     seen: set[int] = set()
@@ -129,16 +133,17 @@ async def _mcp_protocol_health_check(url_stripped: str, headers: dict) -> list[s
 
         async def list_mcp_tools() -> list:
             client = Client(transport=transport)
-            async with client:
+            async with AsyncExitStack() as stack:
+                await asyncio.wait_for(
+                    stack.enter_async_context(client),
+                    timeout=MCP_REQUEST_TIMEOUT_SECONDS,
+                )
                 # Verify the server can actually serve tools.
                 # This exercises API key validation and end-to-end connectivity,
                 # unlike is_connected() which only checks the initialize handshake.
                 return await client.list_tools()
 
-        tools_result = await asyncio.wait_for(
-            list_mcp_tools(),
-            timeout=MCP_HEALTH_CHECK_TIMEOUT_SECONDS,
-        )
+        tools_result = await list_mcp_tools()
         return [t.name for t in tools_result] if tools_result else []
     except BaseException as e:
         logger.debug(f"MCP protocol health check failed: {e}")
@@ -175,9 +180,16 @@ async def _mcp_protocol_connect(url_stripped: str, headers: dict) -> bool:
                 httpx_client_factory=create_httpx_client,
             )
 
-        client = Client(transport=transport)
-        async with client:
-            return client.is_connected()
+        async def connect_client() -> bool:
+            client = Client(transport=transport)
+            async with AsyncExitStack() as stack:
+                await asyncio.wait_for(
+                    stack.enter_async_context(client),
+                    timeout=MCP_REQUEST_TIMEOUT_SECONDS,
+                )
+                return client.is_connected()
+
+        return await connect_client()
     except Exception as e:
         logger.debug(f"MCP protocol connect handshake failed: {e}")
         return False
@@ -1308,12 +1320,18 @@ def attach_mcp_container_permissions(
     return enriched
 
 
-async def get_mcp_record_by_id(mcp_id: int, tenant_id: str) -> dict | None:
+async def get_mcp_record_by_id(
+    mcp_id: int,
+    tenant_id: str,
+    user_id: str | None = None,
+) -> dict | None:
     """Get MCP record by ID.
 
     Args:
         mcp_id: MCP record ID
         tenant_id: Tenant ID
+        user_id: User ID for visibility checking; when provided, records that
+            the user cannot see in the list view are treated as not found
 
     Returns:
         Dictionary containing mcp_name, mcp_server, authorization_token, and custom_headers, or None if not found
@@ -1321,6 +1339,18 @@ async def get_mcp_record_by_id(mcp_id: int, tenant_id: str) -> dict | None:
     mcp_record = get_mcp_record_by_id_and_tenant(mcp_id=mcp_id, tenant_id=tenant_id)
     if not mcp_record:
         return None
+
+    if user_id is not None:
+        visible_records = await get_remote_mcp_server_list(
+            tenant_id=tenant_id,
+            user_id=user_id,
+            is_need_auth=False,
+        )
+        visible_ids = {
+            record.get("mcp_id") for record in visible_records
+        }
+        if mcp_id not in visible_ids:
+            return None
 
     return {
         "mcp_name": mcp_record.get("mcp_name"),
@@ -1405,6 +1435,19 @@ async def check_mcp_service_health(
     server_url = record.get("mcp_server")
     if not server_url:
         raise McpValidationError("MCP server URL is empty")
+
+    # API-type MCPs are plain HTTP APIs described by OpenAPI JSON and have no
+    # MCP protocol endpoint, so skip the MCP protocol handshake and treat them
+    # as healthy (consistent with the enable/disable path).
+    config_json = record.get("config_json")
+    if isinstance(config_json, dict) and "openapi" in config_json:
+        update_mcp_record_status_by_id(
+            mcp_id=mcp_id,
+            tenant_id=tenant_id,
+            user_id=user_id,
+            status=True,
+        )
+        return "healthy"
 
     authorization_token = record.get("authorization_token")
     custom_headers = record.get("custom_headers")

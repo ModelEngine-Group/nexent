@@ -208,13 +208,17 @@ def test_client_property_lazily_creates_redis_client(monkeypatch):
     assert service.client is fake_client
 
 
-def test_reset_stream_deletes_stream_and_done_keys():
+def test_reset_stream_clears_previous_stop_before_new_run_preparation():
     client = FakeRedisClient()
     service = TestRuntimeStateService(client)
 
+    service.set_cancel_signal("user-1", 42)
+    service.mark_run_finished("user-1", 42, "stopped")
+    assert service.is_cancelled("user-1", 42)
     service.reset_stream("user-1", 42)
 
-    assert client.deletes == [("runtime:stream:user-1:42", "runtime:stream:done:user-1:42")]
+    assert not service.is_cancelled("user-1", 42)
+    assert client.deletes == [("runtime:stream:user-1:42", "runtime:stream:done:user-1:42", "runtime:cancel:user-1:42")]
 
 
 def test_reset_stream_swallows_redis_errors(caplog):
@@ -227,11 +231,13 @@ def test_reset_stream_swallows_redis_errors(caplog):
     assert "Failed to reset runtime stream state" in caplog.text
 
 
-def test_register_run_writes_owner_status_ttl_and_clears_cancel(monkeypatch):
+def test_register_run_preserves_stop_requested_during_preparation(monkeypatch):
     monkeypatch.setattr(runtime_state_module, "RUNTIME_RUN_TTL_SECONDS", 123)
     client = FakeRedisClient()
     service = TestRuntimeStateService(client)
 
+    service.reset_stream("user-1", 42)
+    service.set_cancel_signal("user-1", 42)
     service.register_run("user-1", 42, message_id=99)
 
     key, mapping = client.hsets[0]
@@ -239,7 +245,7 @@ def test_register_run_writes_owner_status_ttl_and_clears_cancel(monkeypatch):
     assert mapping["status"] == "running"
     assert mapping["message_id"] == "99"
     assert ("runtime:run:user-1:42", 123) in client.expires
-    assert ("runtime:cancel:user-1:42",) in client.deletes
+    assert service.is_cancelled("user-1", 42)
 
 
 def test_register_run_swallows_redis_errors(caplog):

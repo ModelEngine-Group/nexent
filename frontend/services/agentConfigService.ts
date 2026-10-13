@@ -6,7 +6,7 @@ import {
 } from "./api";
 
 import { NAME_CHECK_STATUS } from "@/const/agentConfig";
-import { getAuthHeaders } from "@/lib/auth";
+import { fetchWithAuth, getAuthHeaders } from "@/lib/auth";
 import { convertParamType } from "@/lib/utils";
 import log from "@/lib/logger";
 import type { Agent } from "@/types/agentConfig";
@@ -163,6 +163,7 @@ type AgentListApiItem = {
   author?: string;
   created_by?: string | null;
   create_time?: string;
+  update_time?: string;
   tags?: unknown;
   model_ids?: number[];
   model_id?: number;
@@ -182,6 +183,7 @@ type AgentListApiItem = {
   enable_protocol_repair_retry?: boolean;
   model_params_override?: Agent["model_params_override"];
   icon_url?: string;
+  repository_info?: Agent["repository_info"];
 };
 
 const formatAgentListItem = (agent: AgentListApiItem): Agent =>
@@ -193,6 +195,7 @@ const formatAgentListItem = (agent: AgentListApiItem): Agent =>
     author: agent.author,
     created_by: agent.created_by,
     create_time: agent.create_time,
+    update_time: agent.update_time,
     tags: normalizeTags(agent.tags),
     model_ids: agent.model_ids || (agent.model_id ? [agent.model_id] : []),
     model_names:
@@ -211,11 +214,13 @@ const formatAgentListItem = (agent: AgentListApiItem): Agent =>
     enable_protocol_repair_retry: agent.enable_protocol_repair_retry ?? false,
     model_params_override: agent.model_params_override ?? null,
     icon_url: agent.icon_url,
+    repository_info: agent.repository_info,
   }) as unknown as Agent;
 
 export type AgentListFilters = {
   tenantId?: string | null;
   enabled?: boolean;
+  includeRepositoryInfo?: boolean;
   permission?: "EDIT" | "READ_ONLY";
   tag?: string;
   tagPredicates?: TagResourcePredicate[];
@@ -293,6 +298,8 @@ export const fetchPagedAgentList = async (
     if (filters.tag?.trim()) queryParams.set("tag", filters.tag.trim());
     if (filters.search?.trim())
       queryParams.set("search", filters.search.trim());
+    if (filters.includeRepositoryInfo)
+      queryParams.set("include_repository_info", "true");
     queryParams.set("page", String(filters.page ?? 1));
     queryParams.set("page_size", String(filters.pageSize ?? 20));
 
@@ -377,6 +384,11 @@ export const fetchPublishedAgentList = async () => {
       model_params_override: agent.model_params_override ?? null,
       enable_protocol_repair_retry: agent.enable_protocol_repair_retry ?? false,
       icon_url: agent.icon_url,
+      tags: Array.isArray(agent.tags)
+        ? agent.tags.filter(
+            (tag: unknown): tag is string => typeof tag === "string"
+          )
+        : [],
     }));
 
     return {
@@ -1533,7 +1545,7 @@ export const createSkill = async (skillData: {
       requestBody.ingroup_permission = skillData.ingroup_permission;
     }
 
-    const response = await fetch(API_ENDPOINTS.skills.create, {
+    const response = await fetchWithErrorHandling(API_ENDPOINTS.skills.create, {
       method: "POST",
       headers: {
         ...getAuthHeaders(),
@@ -1542,17 +1554,13 @@ export const createSkill = async (skillData: {
       body: JSON.stringify(requestBody),
     });
 
-    if (!response.ok) {
-      const errorData = await response.json().catch(() => ({}));
-      throw new Error(errorData.detail || `Request failed: ${response.status}`);
-    }
-
     const data = await response.json();
 
     return {
       success: true,
       data: data,
       message: "",
+      error: null,
     };
   } catch (error) {
     log.error("Error creating skill:", error);
@@ -1561,6 +1569,7 @@ export const createSkill = async (skillData: {
       data: null,
       message:
         error instanceof Error ? error.message : "Failed to create skill",
+      error,
     };
   }
 };
@@ -1770,30 +1779,11 @@ export const createSkillFromFile = async (
       "User-Agent": "AgentFrontEnd/1.0",
     };
 
-    const response = await fetch(endpoint, {
+    const response = await fetchWithAuth(endpoint, {
       method: method,
       headers: headers,
       body: formData,
     });
-
-    if (!response.ok) {
-      let errorData: any = {};
-      try {
-        errorData = await response.json();
-      } catch {
-        // JSON parse failed
-      }
-
-      const errorMessage =
-        typeof errorData.detail === "string"
-          ? errorData.detail
-          : Array.isArray(errorData.detail)
-            ? errorData.detail
-                .map((e: any) => e.msg || JSON.stringify(e))
-                .join("; ")
-            : JSON.stringify(errorData.detail);
-      throw new Error(errorMessage || `Request failed: ${response.status}`);
-    }
 
     const data = await response.json();
 
@@ -1801,6 +1791,7 @@ export const createSkillFromFile = async (
       success: true,
       data: data,
       message: "",
+      error: null,
     };
   } catch (error) {
     log.error("Error creating skill from file:", error);
@@ -1811,6 +1802,7 @@ export const createSkillFromFile = async (
         error instanceof Error
           ? error.message
           : "Failed to create skill from file",
+      error,
     };
   }
 };

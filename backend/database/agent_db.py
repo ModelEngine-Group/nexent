@@ -6,7 +6,7 @@ from database.client import get_db_session, as_dict, filter_property
 from database.db_models import AgentInfo, ToolInstance, AgentRelation
 from database.agent_version_db import query_current_version_no
 from consts.const import ASSET_OWNER_TENANT_ID, MAX_AGENTS_PER_TENANT
-from consts.exceptions import TenantResourceLimitError
+from consts.exceptions import AgentNotFoundError, TenantResourceLimitError
 from utils.str_utils import convert_list_to_string
 
 logger = logging.getLogger("agent_db")
@@ -59,7 +59,7 @@ def search_agent_info_by_agent_id(agent_id: int, tenant_id: str, version_no: int
         ).first()
 
         if not agent:
-            raise ValueError("agent not found")
+            raise AgentNotFoundError("agent not found")
 
         agent_dict = as_dict(agent)
 
@@ -83,7 +83,7 @@ def search_agent_id_by_agent_name(agent_name: str, tenant_id: str, version_no: i
             AgentInfo.version_no == version_no,
             AgentInfo.delete_flag != 'Y').first()
         if not agent:
-            raise ValueError("agent not found")
+            raise AgentNotFoundError("agent not found")
         return agent.agent_id
 
 
@@ -548,6 +548,8 @@ def query_agent_list_candidates_by_tenant_id(
                 AgentInfo.version_no == 0,
                 AgentInfo.delete_flag != 'Y',
                 AgentInfo.enabled.is_(True),
+                or_(AgentInfo.agent_origin.is_(None), AgentInfo.agent_origin != "SYSTEM"),
+                or_(AgentInfo.system_key.is_(None), AgentInfo.system_key == ""),
             )
             .order_by(AgentInfo.create_time.desc(), AgentInfo.agent_id.desc())
             .all()

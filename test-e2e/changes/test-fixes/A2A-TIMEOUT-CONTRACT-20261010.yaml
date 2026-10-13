@@ -1,0 +1,30 @@
+schema_version: '1.0'
+change:
+  change_id: A2A-TIMEOUT-CONTRACT-20261010
+  change_type: test-fix
+  title: Align CTR-043 with the authorized current timeout compatibility contract
+  description: >-
+    No independent product requirement mandating HTTP 400 for exhausted A2A
+    timeouts was found in the inspected requirement documents. The user approved
+    retaining product behavior and changing the test contract. Assert HTTP 500
+    and message "Failed to chat with external agent", as currently returned by
+    the generic exception handler in backend/apps/a2a_client_app.py when
+    TimeoutError escapes backend/services/a2a_client_service.py. This supersedes
+    the CTR-043 status expectation in A2A-PROTOCOL-TIMEOUT-20261009, not the
+    expectations of other Cases. HTTP 504 remains a possible future product
+    contract change, not an implemented requirement. Preserve three actual
+    authenticated requests, metadata fingerprint equality, the 850-1040 second
+    product timeout window, successful recovery and owned-resource cleanup.
+    The case-local test asserts status and safe message; discovered_agent asserts
+    deletion and a 404 readback. No product code or machine configuration changes.
+    Historical executions retain their original outcomes; no retroactive PASS.
+  affected_features:
+    existing: [F-096]
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing: []
+    added: []
+    modified: [CTR-043]
+    retired: []

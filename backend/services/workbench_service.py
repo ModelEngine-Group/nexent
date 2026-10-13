@@ -102,7 +102,7 @@ class RuntimeAgentTreeComposer:
         children: list[AgentConfig] | tuple[AgentConfig, ...],
     ) -> AgentConfig:
         composed = clone_runtime_config(root)
-        composed.managed_agents = [clone_runtime_config(child) for child in children]
+        composed.worker_agents = [clone_runtime_config(child) for child in children]
         return composed
 
 

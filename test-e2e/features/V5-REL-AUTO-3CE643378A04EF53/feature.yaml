@@ -1,0 +1,19 @@
+schema_version: '1.0'
+module:
+  id: V5-BASELINE
+  name: Migrated V5 baseline
+feature:
+  feature_id: V5-REL-AUTO-3CE643378A04EF53
+  name: data-process 重启后 fail_interrupted_file_tasks 将 PROCESSING/带 forward_task_id 的 FORWARDING 置 FAILED 并取消 redis 任务标记，无
+    forward_task_id 的 FORWARDING 保留给既有链
+  status: active
+  description: worker 重启后 PROCESSING 与已转发（带 forward_task_id）的 FORWARDING 任务悬挂，用户文件永久停留在中间态无法重试，且 redis 中残留未取消的任务标记造成幽灵任务；本用例验证重启恢复逻辑正确收尾，同时不误伤仍排队等待既有
+    Celery 链的 FORWARDING（无 forward_task_id）记录。
+  business_rules:
+  - rule_id: V5-REL-AUTO-3CE643378A04EF53-RULE-01
+    description: data-process 重启后 fail_interrupted_file_tasks 将 PROCESSING/带 forward_task_id 的 FORWARDING 置 FAILED 并取消 redis
+      任务标记，无 forward_task_id 的 FORWARDING 保留给既有链
+  required_test_stages:
+  - D5
+  source:
+    notes: 'Provisional migration owner: the V5 row has no stable Feature ID. Do not infer an F-ID.'

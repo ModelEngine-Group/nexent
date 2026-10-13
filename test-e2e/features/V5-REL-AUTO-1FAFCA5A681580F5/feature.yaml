@@ -1,0 +1,16 @@
+schema_version: '1.0'
+module:
+  id: V5-BASELINE
+  name: Migrated V5 baseline
+feature:
+  feature_id: V5-REL-AUTO-1FAFCA5A681580F5
+  name: runtime_lifespan 优雅关闭顺序与超时清理（调度器→agent流任务→沙箱池→线程管理器）
+  status: active
+  description: 关闭顺序错乱或超时清理缺失会导致进程退出时残留后台线程、沙箱资源泄漏、调度器/agent 流任务状态丢失，阻塞进程退出或破坏下次启动恢复的一致性。
+  business_rules:
+  - rule_id: V5-REL-AUTO-1FAFCA5A681580F5-RULE-01
+    description: runtime_lifespan 优雅关闭顺序与超时清理（调度器→agent流任务→沙箱池→线程管理器）
+  required_test_stages:
+  - D5
+  source:
+    notes: 'Provisional migration owner: the V5 row has no stable Feature ID. Do not infer an F-ID.'

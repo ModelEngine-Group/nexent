@@ -1,0 +1,76 @@
+schema_version: '1.0'
+stage: D4
+module: V5-BASELINE
+case:
+  case_id: PW-SKILL-02
+  feature_id: V5-PW-SKILL-02
+  business_rule_ids:
+  - V5-PW-SKILL-02-RULE-01
+  title: Skill申请上架→Admin Review→Repository安装
+  type: E2E
+  priority: P1
+  status: active
+  automation: automated
+  objective: 验证Skill市场三Tab闭环。
+  preconditions:
+  - 作者Mine已有run_id Skill
+  - Admin reviewer
+  - 消费者租户
+  test_data:
+    legacy_asset_declaration: config/users.yaml；assets/skills/test_skill/
+  steps:
+  - order: 1
+    action: 作者Mine定位run_id Skill并申请上架。
+    expected: 审核权限/状态正确。
+  - order: 2
+    action: 确认状态进入审核中。
+    expected: 批准后Repository可见。
+  - order: 3
+    action: Admin进入Review分页列表，按独立Skill名称定位本次申请。
+    expected: 安装后消费者Mine有可用副本。
+  - order: 4
+    action: 点击批准并等待状态更新。
+    expected: 安装后消费者Mine有可用副本。
+  - order: 5
+    action: 消费者Repository搜索run_id Skill。
+    expected: 安装后消费者Mine有可用副本。
+  - order: 6
+    action: 在Repository的Skill卡片点击复制，填写独立副本名称并确认复制到Mine。
+    expected: 安装后消费者Mine有可用副本。
+  - order: 7
+    action: 切消费者Mine确认Skill出现且可打开。
+    expected: 安装后消费者Mine有可用副本。
+  - order: 8
+    action: 可选到Agent选择器确认该Skill可被绑定。
+    expected: 安装后消费者Mine有可用副本。
+  expected_results:
+  - 审核权限/状态正确。
+  - 批准后Repository可见。
+  - 安装后消费者Mine有可用副本。
+  forbidden_side_effects: []
+  source:
+    legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
+    legacy_sheet: 03_Playwright_Journey
+    legacy_row: 27
+  actor: Nexent browser user
+  journey:
+  - 作者Mine定位run_id Skill并申请上架。
+  - 确认状态进入审核中。
+  - Admin进入Review分页列表，按独立Skill名称定位本次申请。
+  - 点击批准并等待状态更新。
+  - 消费者Repository搜索run_id Skill。
+  - 在Repository的Skill卡片点击复制，填写独立副本名称并确认复制到Mine。
+  - 切消费者Mine确认Skill出现且可打开。
+  - 可选到Agent选择器确认该Skill可被绑定。
+  final_business_result:
+  - 审核权限/状态正确。
+  - 批准后Repository可见。
+  - 安装后消费者Mine有可用副本。
+  failure_evidence:
+  - '${NEXENT_TEST_HOME}/runs/{run_id}/playwright/PW-SKILL-02/
+
+    - screenshot.png / trace.zip / video.webm
+
+    - console.log / network.har / failure.json
+
+    - 涉及协议时关联 wire/*.jsonl；涉及下载时保留 downloads/'

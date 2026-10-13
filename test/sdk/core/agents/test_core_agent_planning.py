@@ -8,6 +8,7 @@ branches. We construct a CoreAgent by faking the smolagents CodeAgent parent
 so the heavy smolagents machinery never runs.
 """
 
+import importlib.machinery
 import importlib.util
 import sys
 from pathlib import Path
@@ -55,6 +56,7 @@ class _CodeAgent:
         self.tools = kwargs.get("tools", {}) or {}
         self.managed_agents = kwargs.get("managed_agents", {}) or {}
         self.code_block_tags = ["python", ""]
+        self.python_executor = SimpleNamespace(functions={}, tools={})
 
 
 mock_agents.CodeAgent = _CodeAgent
@@ -66,7 +68,6 @@ mock_smolagents.agents = mock_agents
 sys.modules["smolagents.agents"] = mock_agents
 
 mock_lpe = _mock_module("smolagents.local_python_executor")
-mock_lpe.fix_final_answer_code = lambda x: x
 sys.modules["smolagents.local_python_executor"] = mock_lpe
 
 mock_memory = _mock_module("smolagents.memory")
@@ -211,6 +212,11 @@ contracts_mod.ContextRuntime = type("ContextRuntime", (), {})
 token_mod = _sdk_pkg("sdk.nexent.core.utils.token_estimation")
 token_mod.msg_token_count = lambda *a, **k: 0
 
+# Agent prompt composer stub
+prompt_mod = _sdk_pkg("sdk.nexent.core.agents.prompt")
+prompt_mod.__path__ = [str(REPO_ROOT / "sdk/nexent/core/agents/prompt")]
+prompt_mod.AgentPromptComposer = MagicMock()
+
 # context budget helper stub
 budget_mod = _sdk_pkg("sdk.nexent.core.agents.context.budget")
 budget_mod.message_role = lambda message: getattr(message, "role", "")
@@ -285,11 +291,28 @@ agents_mod = sys.modules["sdk.nexent.core.agents"]
 agents_mod.__path__ = [str(OUTPUT_PROTOCOL_PATH.parent)]
 agents_mod.output_protocol = output_protocol_module
 assert output_protocol_spec and output_protocol_spec.loader
+sys.modules["sdk.nexent.core"].__path__ = [str(REPO_ROOT / "sdk/nexent/core")]
+sys.modules["sdk.nexent.core"].__spec__ = importlib.machinery.ModuleSpec("sdk.nexent.core", loader=None, is_package=True)
 output_protocol_spec.loader.exec_module(output_protocol_module)
 
 CORE_AGENT_PATH = REPO_ROOT / "sdk" / "nexent" / "core" / "agents" / "core_agent.py"
 CORE_AGENT_NAME = "sdk.nexent.core.agents.core_agent"
 sys.modules["sdk.nexent.core"].__path__ = [str(REPO_ROOT / "sdk" / "nexent" / "core")]
+
+# ``sdk.nexent.core.agents`` is an isolated shim with an empty ``__path__``
+# above, so Python cannot discover sibling modules during relative imports.
+# Register the real MCP error helper before loading ``core_agent.py``.
+MCP_ERRORS_PATH = REPO_ROOT / "sdk" / "nexent" / "consts" / "mcp_errors.py"
+MCP_ERRORS_NAME = "sdk.nexent.consts.mcp_errors"
+mcp_errors_spec = importlib.util.spec_from_file_location(MCP_ERRORS_NAME, MCP_ERRORS_PATH)
+mcp_errors_module = importlib.util.module_from_spec(mcp_errors_spec)
+sys.modules[MCP_ERRORS_NAME] = mcp_errors_module
+consts_mod = sys.modules.setdefault("sdk.nexent.consts", ModuleType("sdk.nexent.consts"))
+consts_mod.__path__ = [str(REPO_ROOT / "sdk" / "nexent" / "consts")]
+consts_mod.mcp_errors = mcp_errors_module
+assert mcp_errors_spec is not None
+assert mcp_errors_spec.loader is not None
+mcp_errors_spec.loader.exec_module(mcp_errors_module)
 sys.modules["sdk.nexent.core.utils"].__path__ = [str(REPO_ROOT / "sdk" / "nexent" / "core" / "utils")]
 spec = importlib.util.spec_from_file_location(CORE_AGENT_NAME, CORE_AGENT_PATH)
 core_agent_module = importlib.util.module_from_spec(spec)
@@ -297,6 +320,16 @@ sys.modules[CORE_AGENT_NAME] = core_agent_module
 agents_mod.core_agent = core_agent_module
 assert spec and spec.loader
 spec.loader.exec_module(core_agent_module)
+
+# The shim is needed only while loading the isolated CoreAgent module. Remove
+# it before pytest collects other SDK tests so they can import real smolagents
+# modules instead of inheriting this file's incomplete test doubles.
+for module_name in tuple(sys.modules):
+    if (
+        module_name in {"smolagents", "rich", "jinja2"}
+        or module_name.startswith(("smolagents.", "rich.", "jinja2."))
+    ):
+        del sys.modules[module_name]
 
 CoreAgent = core_agent_module.CoreAgent
 

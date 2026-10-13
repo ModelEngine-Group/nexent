@@ -14,6 +14,8 @@ export interface ResourceCardProps {
   icon?: ReactNode;
   /** Status or lifecycle content displayed beside the title. */
   badge?: ReactNode;
+  /** Status content displayed across the card above the description. */
+  statusRow?: ReactNode;
   /** Resource tags displayed below the description. */
   tags?: ReactNode;
   meta?: ReactNode;
@@ -21,6 +23,8 @@ export interface ResourceCardProps {
   footerLayout?: "inline" | "stacked";
   /** Status icons displayed beside the title, left of actions. */
   headerActions?: ReactNode;
+  /** Keep header positions stable while centering the icon vertically. */
+  fixedHeaderLayout?: boolean;
   /** Actions displayed at the top-right (e.g., "..." menu). */
   actions?: ReactNode;
   footer?: ReactNode;
@@ -43,10 +47,12 @@ export default function ResourceCard({
   descriptionLines = 3,
   icon,
   badge,
+  statusRow,
   tags,
   meta,
   footerLayout = "stacked",
   headerActions,
+  fixedHeaderLayout = false,
   actions,
   footer,
   children,
@@ -101,9 +107,20 @@ export default function ResourceCard({
               isInteractive && "pointer-events-none relative z-[1]"
             )}
           >
-            <div className="flex items-start gap-3">
+            <div
+              className={cn(
+                "flex gap-3",
+                fixedHeaderLayout ? "min-h-[60px] items-center" : "items-start"
+              )}
+            >
               {icon ? <span className="shrink-0">{icon}</span> : null}
-              <div className="min-w-0 flex-1">
+              <div
+                className={cn(
+                  "min-w-0 flex-1",
+                  fixedHeaderLayout &&
+                    "flex h-11 flex-col justify-between self-center"
+                )}
+              >
                 <h2
                   id={titleId}
                   className="truncate text-base font-semibold text-slate-900 dark:text-slate-100"
@@ -124,6 +141,7 @@ export default function ResourceCard({
                   data-resource-card-action
                   className={cn(
                     "flex shrink-0 items-start gap-1",
+                    fixedHeaderLayout && "self-center",
                     actionClassName
                   )}
                   onDoubleClick={(event) => event.stopPropagation()}
@@ -134,9 +152,15 @@ export default function ResourceCard({
               ) : null}
             </div>
             <div className="flex flex-1 flex-col">
+              {statusRow ? (
+                <div className="mt-1 min-w-0">{statusRow}</div>
+              ) : null}
               {description ? (
                 <div
-                  className="mt-4 min-h-0 overflow-hidden text-sm leading-6 text-slate-600 dark:text-slate-300"
+                  className={cn(
+                    "min-h-0 overflow-hidden text-sm leading-6 text-slate-600 dark:text-slate-300",
+                    statusRow ? "mt-3" : "mt-4"
+                  )}
                   style={{
                     display: "-webkit-box",
                     WebkitBoxOrient: "vertical",

@@ -181,13 +181,18 @@ export const conversationService = {
   },
 
   // Rename conversation
-  async rename(conversationId: number, name: string) {
+  async rename(
+    conversationId: number,
+    name: string,
+    onlyIfDefaultTitle = false
+  ) {
     const response = await fetch(API_ENDPOINTS.conversation.rename, {
       method: "POST",
       headers: getAuthHeaders(),
       body: JSON.stringify({
         conversation_id: conversationId,
         name,
+        ...(onlyIfDefaultTitle ? { only_if_default_title: true } : {}),
       }),
     });
 
@@ -1076,7 +1081,6 @@ export const conversationService = {
       retry_user_message_id?: number;
       workbench_config?: import("@/features/workbench").WorkbenchSessionConfig;
       draft_snapshot?: Record<string, unknown>;
-      complexity?: "simple" | "complicated";
       language?: "zh" | "en";
     },
     signal?: AbortSignal,
@@ -1099,7 +1103,6 @@ export const conversationService = {
       };
       if (params.runtime_mode === "nl2skill") {
         requestParams.draft_snapshot = params.draft_snapshot;
-        requestParams.complexity = params.complexity || "complicated";
         requestParams.language = params.language;
       }
       if (params.persist_history && params.runtime_mode) {

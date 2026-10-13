@@ -1,0 +1,16 @@
+schema_version: '1.0'
+module:
+  id: V5-BASELINE
+  name: Migrated V5 baseline
+feature:
+  feature_id: F-138
+  name: cases pagination/sort/filter/stats
+  status: active
+  description: '评估 / 结果: cases pagination/sort/filter/stats'
+  business_rules:
+  - rule_id: F-138-RULE-01
+    description: cases pagination/sort/filter/stats
+  required_test_stages:
+  - D3
+  source:
+    notes: Migrated from V5 01_代码功能清单 without changing the functional description.

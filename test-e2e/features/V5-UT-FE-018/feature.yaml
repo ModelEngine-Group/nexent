@@ -1,0 +1,16 @@
+schema_version: '1.0'
+module:
+  id: V5-BASELINE
+  name: Migrated V5 baseline
+feature:
+  feature_id: V5-UT-FE-018
+  name: 模板 CRUD 弹窗、重复名、删除确认
+  status: active
+  description: 模板 CRUD 弹窗、重复名、删除确认
+  business_rules:
+  - rule_id: V5-UT-FE-018-RULE-01
+    description: 模板 CRUD 弹窗、重复名、删除确认
+  required_test_stages:
+  - D1
+  source:
+    notes: 'Provisional migration owner: the V5 row has no stable Feature ID. Do not infer an F-ID.'

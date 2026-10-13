@@ -1,0 +1,109 @@
+schema_version: '1.0'
+stage: D4
+module: V5-BASELINE
+case:
+  case_id: PW-AGENT-02
+  feature_id: V5-PW-AGENT-02
+  business_rule_ids:
+  - V5-PW-AGENT-02-RULE-01
+  title: 三Tab：Basic(知识库+开场白)→Advanced(协作Agent版本选择+护栏)→Debug
+  type: E2E
+  priority: P1
+  status: active
+  automation: automated
+  objective: 覆盖重构后三 Tab 真实配置域：Basic Tab 配置知识库与开场白(Conversation Guide)，Advanced Tab 配置内部协作 Agent(含版本号 V{version_no} 展示与选择弹窗
+    current_version_no 解析)与安全护栏，保持 autosave 与 Debug 断言。
+  preconditions:
+  - 主Agent+至少1个内部协作Agent
+  - 测试KB
+  - 真实LLM
+  test_data:
+    legacy_asset_declaration: config/models.yaml；assets/knowledge/*
+  steps:
+  - order: 1
+    action: 打开 /agents，选择主 Agent，Config 面板默认【Basic】Tab。
+    expected: Basic 的知识库与开场白、Advanced 的协作 Agent 与护栏 autosave 持久化。
+  - order: 2
+    action: Basic 展开「知识库」，选择测试 KB。
+    expected: 内部协作 Agent 列表展示 V{version_no} 版本号，与 A2A 外部关系不混淆。
+  - order: 3
+    action: Basic 展开「开场白」，配置 greeting 与 example questions。
+    expected: 'Debug 用户可见结果符合配置(知识/协作生效)。
+
+      候选项展示自定义版本名 daily-baseline。'
+  - order: 4
+    action: 切【Advanced】Tab，展开「协作 Agent」。
+    expected: 'Debug 用户可见结果符合配置(知识/协作生效)。
+
+      候选项展示自定义版本名 daily-baseline。'
+  - order: 5
+    action: 点击「选择 Agent」打开 CollaborativeAgentSelectorModal，切 Internal 标签选择内部协作 Agent 并确认；断言列表展示 V{version_no} 版本号。
+    expected: 'Debug 用户可见结果符合配置(知识/协作生效)。
+
+      候选项展示自定义版本名 daily-baseline。'
+  - order: 6
+    action: Advanced 展开「安全护栏」，配置一个稳定可验证的简单规则(若启用)。
+    expected: 'Debug 用户可见结果符合配置(知识/协作生效)。
+
+      候选项展示自定义版本名 daily-baseline。'
+  - order: 7
+    action: 切回【Basic】再切回【Advanced】，确认知识库/开场白/协作 Agent/护栏选择仍在(autosave 持久化)。
+    expected: 'Debug 用户可见结果符合配置(知识/协作生效)。
+
+      候选项展示自定义版本名 daily-baseline。'
+  - order: 8
+    action: 点击底部【Debug】按钮，等待 save 完成后调试面板打开。
+    expected: 'Debug 用户可见结果符合配置(知识/协作生效)。
+
+      候选项展示自定义版本名 daily-baseline。'
+  - order: 9
+    action: 在 Debug 发送需要 KB+协作的固定问题，等待完成。
+    expected: 'Debug 用户可见结果符合配置(知识/协作生效)。
+
+      候选项展示自定义版本名 daily-baseline。'
+  - order: 10
+    action: '检查用户可见协作/知识状态，刷新确认 Basic/Advanced 配置持续。
+
+      473b6526：打开内部协作智能体选择器并选择已发布 daily-baseline 版本。'
+    expected: 'Debug 用户可见结果符合配置(知识/协作生效)。
+
+      候选项展示自定义版本名 daily-baseline。'
+  expected_results:
+  - Basic 的知识库与开场白、Advanced 的协作 Agent 与护栏 autosave 持久化。
+  - 内部协作 Agent 列表展示 V{version_no} 版本号，与 A2A 外部关系不混淆。
+  - 'Debug 用户可见结果符合配置(知识/协作生效)。
+
+    候选项展示自定义版本名 daily-baseline。'
+  forbidden_side_effects: []
+  source:
+    legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
+    legacy_sheet: 03_Playwright_Journey
+    legacy_row: 19
+  actor: Nexent browser user
+  journey:
+  - 打开 /agents，选择主 Agent，Config 面板默认【Basic】Tab。
+  - Basic 展开「知识库」，选择测试 KB。
+  - Basic 展开「开场白」，配置 greeting 与 example questions。
+  - 切【Advanced】Tab，展开「协作 Agent」。
+  - 点击「选择 Agent」打开 CollaborativeAgentSelectorModal，切 Internal 标签选择内部协作 Agent 并确认；断言列表展示 V{version_no} 版本号。
+  - Advanced 展开「安全护栏」，配置一个稳定可验证的简单规则(若启用)。
+  - 切回【Basic】再切回【Advanced】，确认知识库/开场白/协作 Agent/护栏选择仍在(autosave 持久化)。
+  - 点击底部【Debug】按钮，等待 save 完成后调试面板打开。
+  - 在 Debug 发送需要 KB+协作的固定问题，等待完成。
+  - '检查用户可见协作/知识状态，刷新确认 Basic/Advanced 配置持续。
+
+    473b6526：打开内部协作智能体选择器并选择已发布 daily-baseline 版本。'
+  final_business_result:
+  - Basic 的知识库与开场白、Advanced 的协作 Agent 与护栏 autosave 持久化。
+  - 内部协作 Agent 列表展示 V{version_no} 版本号，与 A2A 外部关系不混淆。
+  - 'Debug 用户可见结果符合配置(知识/协作生效)。
+
+    候选项展示自定义版本名 daily-baseline。'
+  failure_evidence:
+  - '${NEXENT_TEST_HOME}/runs/{run_id}/playwright/PW-AGENT-02/
+
+    - screenshot.png / trace.zip / video.webm
+
+    - console.log / network.har / failure.json
+
+    - 涉及协议时关联 wire/*.jsonl；涉及下载时保留 downloads/'

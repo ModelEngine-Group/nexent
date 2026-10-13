@@ -72,13 +72,7 @@ export default function McpToolsSearchFilterBar({
       }`}
     >
       <span>{item.label}</span>
-      <span
-        className={`ml-1.5 rounded-full px-1.5 text-xs ${
-          selected ? "bg-white/20 text-white" : "bg-white text-slate-500"
-        }`}
-      >
-        {item.count}
-      </span>
+      <span className="ml-1 text-xs opacity-80">{item.count}</span>
     </button>
   );
 

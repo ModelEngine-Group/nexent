@@ -1,0 +1,66 @@
+schema_version: '1.0'
+stage: D5
+module: V5-BASELINE
+case:
+  case_id: PERF-01
+  feature_id: V5-PERF-01
+  business_rule_ids:
+  - V5-PERF-01-RULE-01
+  title: 并行Agent P50/P95与真实重叠
+  type: PERFORMANCE
+  priority: P1
+  status: active
+  automation: automated
+  objective: 并行编排吞吐与max_workers
+  preconditions:
+  - '- ${NEXENT_TEST_HOME}/config/models.yaml
+
+    - ${NEXENT_TEST_HOME}/config/secrets.env
+
+    - ${NEXENT_TEST_HOME}/config/performance.yaml'
+  test_data:
+    legacy_asset_declaration: '- ${NEXENT_TEST_HOME}/config/models.yaml
+
+      - ${NEXENT_TEST_HOME}/config/secrets.env
+
+      - ${NEXENT_TEST_HOME}/config/performance.yaml'
+  steps:
+  - order: 1
+    action: 从 performance.yaml 读取本用例并发量/数据规模/阈值，启动本地真实测试栈并记录机器资源信息。
+    expected: 并行时长接近max单分支而非sum；P95在团队SLO内；无任务泄漏。
+  - order: 2
+    action: 准备“并行Agent P50/P95与真实重叠”所需固定测试数据和真实模型/向量服务（如涉及）。
+    expected: 并行时长接近max单分支而非sum；P95在团队SLO内；无任务泄漏。
+  - order: 3
+    action: 使用固定sleep fake agents运行20/100轮，记录start/end overlap与P50/P95。
+    expected: 并行时长接近max单分支而非sum；P95在团队SLO内；无任务泄漏。
+  - order: 4
+    action: 预热一次后再正式测量；记录 P50/P95/P99、吞吐、错误率和资源占用。
+    expected: 并行时长接近max单分支而非sum；P95在团队SLO内；无任务泄漏。
+  - order: 5
+    action: 性能场景仍要验证业务正确性，不能以返回快作为唯一通过条件。
+    expected: 并行时长接近max单分支而非sum；P95在团队SLO内；无任务泄漏。
+  - order: 6
+    action: 保存原始测量 JSON/CSV、服务日志和环境快照；P2 大型场景失败默认记录但不掩盖 P0/P1结果。
+    expected: 并行时长接近max单分支而非sum；P95在团队SLO内；无任务泄漏。
+  expected_results:
+  - 并行时长接近max单分支而非sum；P95在团队SLO内；无任务泄漏。
+  forbidden_side_effects: []
+  source:
+    legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
+    legacy_sheet: 04_安全性能可靠性
+    legacy_row: 12
+  risk_type: PERFORMANCE
+  risk: 并行编排吞吐与max_workers
+  condition:
+  - '- ${NEXENT_TEST_HOME}/config/models.yaml
+
+    - ${NEXENT_TEST_HOME}/config/secrets.env
+
+    - ${NEXENT_TEST_HOME}/config/performance.yaml'
+  metrics:
+  - 并行时长接近max单分支而非sum；P95在团队SLO内；无任务泄漏。
+  thresholds:
+  - 并行时长接近max单分支而非sum；P95在团队SLO内；无任务泄漏。
+  recovery_expectations:
+  - 并行时长接近max单分支而非sum；P95在团队SLO内；无任务泄漏。

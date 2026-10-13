@@ -58,13 +58,14 @@ patch('services.mcp_container_service.DockerContainerConfig').start()
 from backend.consts.exceptions import (
     MCPConnectionError, MCPNameIllegal, MCPContainerError,
     McpNotFoundError, McpValidationError, McpNameConflictError, McpPortConflictError,
-    UnauthorizedError,
+    UnauthorizedError, TenantResourceLimitError,
 )
 from fastapi.testclient import TestClient
 from fastapi import FastAPI
 from http import HTTPStatus
 
 from apps.remote_mcp_app import router
+from apps.app_factory import register_exception_handlers
 
 import apps.remote_mcp_app as remote_app
 remote_app.MCPConnectionError = MCPConnectionError
@@ -75,6 +76,7 @@ remote_app.McpValidationError = McpValidationError
 remote_app.McpNameConflictError = McpNameConflictError
 remote_app.McpPortConflictError = McpPortConflictError
 remote_app.UnauthorizedError = UnauthorizedError
+remote_app.TenantResourceLimitError = TenantResourceLimitError
 
 app = FastAPI()
 app.include_router(router)
@@ -172,6 +174,57 @@ class TestAddMcpService:
         }, headers=AUTH_HEADER)
         assert resp.status_code == HTTPStatus.SERVICE_UNAVAILABLE
         assert resp.json()["detail"] == "MCP connection timeout"
+
+    @patch('apps.remote_mcp_app.get_current_user_info')
+    @patch('apps.remote_mcp_app.add_mcp_service')
+    def test_add_tenant_limit_returns_standard_error(self, mock_add, mock_auth):
+        mock_auth.return_value = ("uid", "tid", "en")
+        mock_add.side_effect = TenantResourceLimitError(
+            "MCP service tenant limit reached: maximum 1000 MCP services per tenant",
+            resource="mcp_services",
+            scope="tenant",
+            limit=1000,
+            current_count=1000,
+        )
+        limited_app = FastAPI()
+        register_exception_handlers(limited_app)
+        limited_app.include_router(router)
+
+        resp = TestClient(limited_app).post("/mcp/add", json={
+            "name": "over-limit", "source": "local", "server_url": "http://srv",
+        }, headers=AUTH_HEADER)
+        assert resp.status_code == HTTPStatus.TOO_MANY_REQUESTS
+        assert resp.json()["code"] == "120104"
+        assert resp.json()["details"] == {
+            "resource": "mcp_services",
+            "scope": "tenant",
+            "limit": 1000,
+            "current_count": 1000,
+        }
+
+    @patch('apps.remote_mcp_app.get_current_user_info')
+    @patch('apps.remote_mcp_app.add_container_mcp_service')
+    def test_add_from_config_tenant_limit_returns_standard_error(self, mock_add, mock_auth):
+        mock_auth.return_value = ("uid", "tid", "en")
+        mock_add.side_effect = TenantResourceLimitError(
+            "MCP service tenant limit reached: maximum 1000 MCP services per tenant",
+            resource="mcp_services",
+            scope="tenant",
+            limit=1000,
+            current_count=1000,
+        )
+        limited_app = FastAPI()
+        register_exception_handlers(limited_app)
+        limited_app.include_router(router)
+
+        resp = TestClient(limited_app).post("/mcp/add-from-config", json={
+            "name": "over-limit", "source": "local", "port": 8080,
+            "mcp_config": {"mcpServers": {"svc": {"command": "echo"}}},
+        }, headers=AUTH_HEADER)
+
+        assert resp.status_code == HTTPStatus.TOO_MANY_REQUESTS
+        assert resp.json()["code"] == "120104"
+        assert resp.json()["details"]["limit"] == 1000
 
     @patch('apps.remote_mcp_app.get_current_user_info')
     @patch('apps.remote_mcp_app.add_mcp_service')
@@ -318,6 +371,31 @@ class TestAddFromConfig:
         assert resp.status_code == HTTPStatus.OK
         assert '"status": "container_started"' in resp.text
         assert '"status": "success"' in resp.text
+
+    @patch('apps.remote_mcp_app.get_current_user_info')
+    @patch('apps.remote_mcp_app.add_container_mcp_service')
+    def test_add_from_config_stream_emits_tenant_limit_error(self, mock_add, mock_auth):
+        mock_auth.return_value = ("uid", "tid", "en")
+
+        async def reject(**_kwargs):
+            raise TenantResourceLimitError(
+                "MCP service tenant limit reached: maximum 1000 MCP services per tenant",
+                resource="mcp_services",
+                scope="tenant",
+                limit=1000,
+                current_count=1000,
+            )
+
+        mock_add.side_effect = reject
+        resp = client.post("/mcp/add-from-config/stream", json={
+            "name": "over-limit", "source": "local", "port": 8080,
+            "mcp_config": {"mcpServers": {"svc": {"command": "echo"}}},
+        }, headers=AUTH_HEADER)
+
+        assert resp.status_code == HTTPStatus.OK
+        assert '"status": "error"' in resp.text
+        assert '"code": "120104"' in resp.text
+        assert '"limit": 1000' in resp.text
 
     @patch('apps.remote_mcp_app.get_current_user_info')
     @patch('apps.remote_mcp_app.upload_and_start_mcp_image')
@@ -878,6 +956,76 @@ class TestGetContainerLogs:
         mock_mgr_cls.side_effect = MCPContainerError("Docker unavailable")
         resp = client.get("/mcp/container/cid/logs", headers=AUTH_HEADER)
         assert resp.status_code == HTTPStatus.SERVICE_UNAVAILABLE
+
+
+# ============================================================================
+# Security audit entries
+# ============================================================================
+
+class TestMcpAuditEntries:
+    """Security audit entries emitted by MCP service management endpoints."""
+
+    @patch('apps.remote_mcp_app.get_current_user_info')
+    @patch('apps.remote_mcp_app.add_mcp_service', new_callable=AsyncMock)
+    def test_add_emits_audit_entry_without_credentials(self, mock_add, mock_auth, caplog):
+        """Successful add records name/source/server_url, never credentials."""
+        import logging
+        mock_auth.return_value = ("uid", "tid", "en")
+
+        with caplog.at_level(logging.INFO, logger="audit.security"):
+            resp = client.post("/mcp/add", headers=AUTH_HEADER, json={
+                "name": "external-mcp",
+                "server_url": "https://external.example.com/sse",
+                "authorization_token": "sk-secret-token",
+                "custom_headers": {"X-Api-Key": "header-secret"},
+            })
+
+        assert resp.status_code == HTTPStatus.OK
+        messages = [record.getMessage() for record in caplog.records
+                    if record.name == "audit.security"]
+        assert len(messages) == 1
+        assert "event=mcp_add" in messages[0]
+        assert "result=success" in messages[0]
+        assert "user_id=uid" in messages[0]
+        assert '"name":"external-mcp"' in messages[0]
+        assert '"server_url":"https://external.example.com/sse"' in messages[0]
+        assert "sk-secret-token" not in messages[0]
+        assert "header-secret" not in messages[0]
+
+    @patch('apps.remote_mcp_app.get_current_user_info')
+    @patch('apps.remote_mcp_app.delete_mcp_service', new_callable=AsyncMock)
+    def test_delete_emits_audit_entry(self, mock_delete, mock_auth, caplog):
+        """Successful delete records the removed mcp_id."""
+        import logging
+        mock_auth.return_value = ("uid", "tid", "en")
+
+        with caplog.at_level(logging.INFO, logger="audit.security"):
+            resp = client.delete("/mcp/9", headers=AUTH_HEADER)
+
+        assert resp.status_code == HTTPStatus.OK
+        messages = [record.getMessage() for record in caplog.records
+                    if record.name == "audit.security"]
+        assert len(messages) == 1
+        assert "event=mcp_delete" in messages[0]
+        assert "user_id=uid" in messages[0]
+        assert '"mcp_id":9' in messages[0]
+
+    @patch('apps.remote_mcp_app.get_current_user_info')
+    @patch('apps.remote_mcp_app.update_mcp_service_enabled', new_callable=AsyncMock)
+    def test_disable_emits_audit_entry(self, mock_update, mock_auth, caplog):
+        """Successful disable records the toggled mcp_id."""
+        import logging
+        mock_auth.return_value = ("uid", "tid", "en")
+
+        with caplog.at_level(logging.INFO, logger="audit.security"):
+            resp = client.post("/mcp/disable", headers=AUTH_HEADER, json={"mcp_id": 4})
+
+        assert resp.status_code == HTTPStatus.OK
+        messages = [record.getMessage() for record in caplog.records
+                    if record.name == "audit.security"]
+        assert len(messages) == 1
+        assert "event=mcp_disable" in messages[0]
+        assert '"mcp_id":4' in messages[0]
 
 
 if __name__ == "__main__":

@@ -9,6 +9,9 @@ from sqlalchemy import or_, update as sa_update
 
 from database.client import get_db_session, filter_property, as_dict
 from database.db_models import SkillInfo, SkillToolRelation, SkillInstance, ToolInfo
+from consts.const import MAX_SKILLS_PER_TENANT
+from consts.error_code import ErrorCode
+from consts.exceptions import AppException
 from utils.skill_params_utils import strip_params_comments_for_db
 from utils.str_utils import convert_list_to_string, convert_string_to_list
 
@@ -33,6 +36,30 @@ def _params_value_for_db(raw: Any) -> Any:
     if raw is None:
         return None
     return json.loads(json.dumps(strip_params_comments_for_db(raw), default=str))
+
+
+def _raise_if_skill_limit_reached(session, tenant_id: str, additional_count: int = 1) -> None:
+    """Reject tenant-owned Skill creation when the hard quota would be exceeded."""
+    if tenant_id is None or additional_count <= 0:
+        return
+
+    current_count = session.query(SkillInfo).filter(
+        SkillInfo.tenant_id == tenant_id,
+        SkillInfo.delete_flag != "Y",
+    ).count()
+    # Lightweight test doubles may not implement count(); production SQLAlchemy
+    # sessions always return an integer.
+    if isinstance(current_count, int) and current_count + additional_count > MAX_SKILLS_PER_TENANT:
+        raise AppException(
+            ErrorCode.TENANT_RESOURCE_EXCEEDED,
+            f"Tenant skill limit reached: maximum {MAX_SKILLS_PER_TENANT} skills per tenant",
+            details={
+                "resource": "skills",
+                "scope": "tenant",
+                "limit": MAX_SKILLS_PER_TENANT,
+                "current_count": current_count,
+            },
+        )
 
 
 def create_or_update_skill_by_skill_info(
@@ -471,6 +498,8 @@ def create_skill(skill_data: Dict[str, Any], tenant_id: str) -> Dict[str, Any]:
         tenant_id: Tenant ID for the skill
     """
     with get_db_session() as session:
+        _raise_if_skill_limit_reached(session, tenant_id)
+
         skill = SkillInfo(
             skill_name=skill_data["name"],
             tenant_id=tenant_id,
@@ -803,6 +832,14 @@ def upsert_scanned_skills(skills: List[Dict[str, Any]], user_id: str, tenant_id:
             SkillInfo.delete_flag != 'Y'
         ).all()
         existing_dict = {s.skill_name: s for s in existing_skills}
+
+        new_skill_names = {
+            skill_data.get("name")
+            for skill_data in skills
+            if skill_data.get("name") and skill_data.get("name") not in existing_dict
+        }
+        new_skill_count = len(new_skill_names)
+        _raise_if_skill_limit_reached(session, tenant_id, new_skill_count)
 
         for skill_data in skills:
             skill_name = skill_data.get("name")

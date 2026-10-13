@@ -32,6 +32,7 @@ import {
 import { stripAnsiControlSequences } from "@/lib/ansi";
 import { createFinalAnswerProjection } from "@/lib/finalAnswerProjection";
 import { createReasoningAccumulator } from "@/lib/reasoningAccumulator";
+import { unwrapFinalAnswer } from "@/lib/finalAnswerEnvelope";
 
 import { storageService } from "@/services/storageService";
 import { parseAutomationProposal } from "@/features/agentAutomation/parseProposal";
@@ -1128,7 +1129,7 @@ export class RemoteConversationHistoryAdapter implements ThreadHistoryAdapter {
             flushReasoning(part.invocation_id);
             if (part.content) {
               const meta = buildMetadata(part.invocation_id);
-              finalAnswers.apply({ ...part, answer_phase: "delta" }, meta);
+              finalAnswers.apply({ ...part, content: unwrapFinalAnswer(part.content), answer_phase: "delta" }, meta);
             }
           }
         }

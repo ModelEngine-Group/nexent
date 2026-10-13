@@ -1,0 +1,85 @@
+schema_version: '1.0'
+stage: D1
+module: V5-BASELINE
+case:
+  case_id: UT-FE-AUTO-BC23EA673FB8BEC0
+  feature_id: F-086
+  business_rule_ids:
+  - F-086-RULE-01
+  title: Mine/Repository 结构化标签筛选与标签搜索｜过滤正确/空态/清空恢复/取消不串状态｜核心流程
+  type: FE-COMP
+  priority: P1
+  status: active
+  automation: automated
+  objective: Mine/Repository 结构化标签筛选与标签搜索｜过滤正确/空态/清空恢复/取消不串状态｜核心流程
+  preconditions:
+  - 本地依赖/组件测试环境可运行；不要求外部模型服务在线。
+  - 设置 NEXENT_TEST_HOME，目录不位于 Nexent Git 仓库内。
+  - 当次 run_id 已生成，所有新建资源名称带 run_id；测试基线固定为 develop 当前批次锁定的产品提交；执行时另记录实际被测commit。
+  - 所需本地资产存在且校验通过：${NEXENT_TEST_HOME}/config/environment.yaml（仅本地测试环境参数）。
+  - 注入 Mine/Repository 服务列表 fixture（kind=local 的本地 MCP 服务带 mcpId，kind=community 的社区服务）与结构化标签定义（useTagLibraries/useTagDefinitions，默认库
+    bucket_key=default_resource），并 mock tagManagementApi.filterResourceIds。
+  test_data:
+    legacy_asset_declaration: '- ${NEXENT_TEST_HOME}/config/environment.yaml（仅本地测试环境参数）
+
+      - 组件 fixture：带结构化标签/无标签的本地 MCP 服务与社区 MCP 服务数据、default_resource 标签库定义、mock tagManagementApi.filterResourceIds'
+  steps:
+  - order: 1
+    action: 在组件测试环境加载 MCP 空间页（/mcp-space）的 MineView 与 RepositoryView 对应组件，注入最小 props、store 和本地固定测试数据（本地 MCP 服务列表、社区服务列表、结构化标签定义）。
+    expected: 初始渲染标签筛选未激活、搜索为空，Mine/Repository 列表全量展示，无未处理异常。
+  - order: 2
+    action: 首次渲染后检查默认状态：Mine 标签筛选按钮（mcpTools.tagFilter.button）默认未激活（tagPredicates 为空）、搜索框为空，Mine/Repository 列表均展示全部条目。
+    expected: 选择标签谓词后 filterResourceIds 以 ("mcp_service", 本地 mcpId 列表, 标签谓词) 被调用一次。
+  - order: 3
+    action: 打开 Mine 标签筛选弹层（TagFilterControls），选择一个结构化标签，触发 onChange 写入 tagPredicates；断言随后以 ("mcp_service", 本地 mcpId 列表, 该标签谓词)
+      调用 tagManagementApi.filterResourceIds。
+    expected: 仅 matched_resource_ids 中 kind=local 的本地服务可见；kind=community 与非匹配本地服务被排除。
+  - order: 4
+    action: 断言 matchedTagIds 过滤：仅 matched_resource_ids 中且 kind=local 的本地 MCP 服务可见，kind=community 的社区服务与非匹配本地服务被排除，卡片列表只渲染匹配项。
+    expected: 清空标签后 matchedTagIds 为 null，列表恢复显示全部 Mine 条目。
+  - order: 5
+    action: 点击"清空"按钮（setTagPredicates([])）；断言 matchedTagIds 置 null，Mine 列表恢复显示全部条目。
+    expected: 搜索关键词后 matchedSearchTagIds 为各谓词 matched_resource_ids 的并集；名称/标签关键字或结构化标签任一命中即保留。
+  - order: 6
+    action: 在搜索框输入匹配结构化标签名/名称的关键词；断言 getTagSearchPredicates(mineTagDefinitions, search, t) 生成的谓词逐个调用 filterResourceIds 并合并
+      matched_resource_ids 为 matchedSearchTagIds；名称/标签关键字或结构化标签任一命中即保留，其余过滤。
+    expected: 无匹配时 filteredItems 为空，显示空态卡片。
+  - order: 7
+    action: 输入无任何匹配的关键词或标签；断言 filteredItems 为空，页面渲染空态（AddMcpServiceCard）而非卡片列表。
+    expected: 过滤过程中无状态串扰：过期异步结果被 cancelled 标志丢弃，不覆盖最新筛选状态。
+  - order: 8
+    action: 连续快速变更标签谓词或搜索词，使异步 filterResourceIds 结果乱序返回或组件重渲染；断言通过 effect cleanup 的 cancelled 标志丢弃过期结果，旧 matchedTagIds/matchedSearchTagIds
+      不覆盖最新筛选状态。
+    expected: Repository 标签选择与清空恢复按 browser.updateFilter 生效。
+  - order: 9
+    action: 切到 Repository 视图，通过 RepositoryTagFilter 选择标签（onChange 写 browser.updateFilter("tag", value)）；清空标签（onChange 传 undefined，回落
+      FILTER_ALL）后列表恢复全量。
+    expected: Repository 标签选择与清空恢复按 browser.updateFilter 生效。
+  expected_results:
+  - 初始渲染标签筛选未激活、搜索为空，Mine/Repository 列表全量展示，无未处理异常。
+  - 选择标签谓词后 filterResourceIds 以 ("mcp_service", 本地 mcpId 列表, 标签谓词) 被调用一次。
+  - 仅 matched_resource_ids 中 kind=local 的本地服务可见；kind=community 与非匹配本地服务被排除。
+  - 清空标签后 matchedTagIds 为 null，列表恢复显示全部 Mine 条目。
+  - 搜索关键词后 matchedSearchTagIds 为各谓词 matched_resource_ids 的并集；名称/标签关键字或结构化标签任一命中即保留。
+  - 无匹配时 filteredItems 为空，显示空态卡片。
+  - 过滤过程中无状态串扰：过期异步结果被 cancelled 标志丢弃，不覆盖最新筛选状态。
+  - Repository 标签选择与清空恢复按 browser.updateFilter 生效。
+  forbidden_side_effects: []
+  source:
+    legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
+    legacy_sheet: 02_测试用例基线
+    legacy_row: 449
+  unit_boundary: 标签筛选与搜索
+  inputs:
+  - '- ${NEXENT_TEST_HOME}/config/environment.yaml（仅本地测试环境参数）
+
+    - 组件 fixture：带结构化标签/无标签的本地 MCP 服务与社区 MCP 服务数据、default_resource 标签库定义、mock tagManagementApi.filterResourceIds'
+  assertions:
+  - 初始渲染标签筛选未激活、搜索为空，Mine/Repository 列表全量展示，无未处理异常。
+  - 选择标签谓词后 filterResourceIds 以 ("mcp_service", 本地 mcpId 列表, 标签谓词) 被调用一次。
+  - 仅 matched_resource_ids 中 kind=local 的本地服务可见；kind=community 与非匹配本地服务被排除。
+  - 清空标签后 matchedTagIds 为 null，列表恢复显示全部 Mine 条目。
+  - 搜索关键词后 matchedSearchTagIds 为各谓词 matched_resource_ids 的并集；名称/标签关键字或结构化标签任一命中即保留。
+  - 无匹配时 filteredItems 为空，显示空态卡片。
+  - 过滤过程中无状态串扰：过期异步结果被 cancelled 标志丢弃，不覆盖最新筛选状态。
+  - Repository 标签选择与清空恢复按 browser.updateFilter 生效。
