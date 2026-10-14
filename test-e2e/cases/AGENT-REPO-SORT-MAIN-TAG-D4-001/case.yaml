@@ -10,16 +10,16 @@ case:
   - AGENT-REPO-SORT-MAIN-TAG-RULE-001
   - AGENT-REPO-SORT-MAIN-TAG-RULE-002
   - AGENT-REPO-SORT-MAIN-TAG-RULE-003
-  title: Sort repository listings by publish time, badge main agents and search agents by tag
+  title: Sort listings by publish time, badge main agents on both tabs and search agents by tag
   type: E2E
   priority: P1
   status: active
   automation: automated
   objective: >-
-    Choosing the latest-published order forwards the publish-time sort flag and renders dated listings newest
-    first with the undated listing last; every repository card separates a main agent from an ordinary agent;
-    and the agent management page searches by tag and renders a tag that arrived as a stringified array
-    without crashing.
+    On the repository tab and on the my-agents tab, choosing the latest-published order forwards the
+    publish-time sort flag and renders dated listings newest first with the undated listing last; every
+    listing card separates a main agent from an ordinary agent on both tabs; and the agent management page
+    searches by tag and renders a tag that arrived as a stringified array without crashing.
   preconditions:
   - >-
     A running frontend is reachable, and deterministic HTTP fixtures isolate the repository listings, the
@@ -53,6 +53,12 @@ case:
     expected: >-
       The list request carries the tag search predicates, the tag-matched agent renders the recovered tag
       value and never the raw stringified array, and the list stays usable.
+  - order: 4
+    action: Open the my-agents tab of the agent space and choose the latest-published option in the sort control.
+    expected: >-
+      The my-agents list request carries the publish-time sort flag and the my-agents listings render newest
+      published first, and only the main-agent listing shows the amber main-agent badge while the ordinary
+      listing shows none.
   expected_results:
   - >-
     The latest-published order is forwarded to the listings endpoint and dated listings render newest first
@@ -62,6 +68,9 @@ case:
   - >-
     Searching by tag on the agent management page returns the tag-matched agent and renders a tag that
     arrived as a stringified array as an individual tag.
+  - >-
+    On the my-agents tab the latest-published order is forwarded, the my-agents listings render newest
+    published first, and only the main-agent listing carries the amber main-agent badge.
   forbidden_side_effects:
   - >-
     No unrelated writes, publication, installation or Agent/model execution; browsing, sorting and searching
@@ -71,6 +80,7 @@ case:
   - Open the agent repository and choose the latest-published option in the sort control.
   - Inspect the badge on the rendered repository listing cards.
   - Search the agent management page by a tag keyword.
+  - Open the my-agents tab and choose the latest-published option in its sort control.
   final_business_result:
   - >-
     The latest-published order is forwarded to the listings endpoint and dated listings render newest first
@@ -80,22 +90,27 @@ case:
   - >-
     Searching by tag on the agent management page returns the tag-matched agent and renders a tag that
     arrived as a stringified array as an individual tag.
+  - >-
+    On the my-agents tab the latest-published order is forwarded, the my-agents listings render newest
+    published first, and only the main-agent listing carries the amber main-agent badge.
   failure_evidence:
   - Fixed Playwright journey assertions, sanitized request payloads and terminal audit.
   acceptance:
   - id: AC-01
     description: >-
-      The repository sort control forwards the latest-published order and renders dated listings newest first
-      with the undated listing last; listing cards distinguish a main agent from an ordinary agent; and the
-      agent management page searches by tag and renders a tag that arrived as a stringified array without
-      crashing.
+      On both the repository tab and the my-agents tab the sort control forwards the latest-published order
+      and renders dated listings newest published first with the undated listing last; listing cards on both
+      tabs distinguish a main agent from an ordinary agent; and the agent management page searches by tag and
+      renders a tag that arrived as a stringified array without crashing.
     steps:
     - 1
     - 2
     - 3
+    - 4
     expected_results:
     - 1
     - 2
     - 3
+    - 4
     forbidden_side_effects:
     - 1

@@ -8,9 +8,12 @@
  *  3. The agent management page matches agents by tag on top of its name and
  *     description search, and a tag persisted as a stringified array renders
  *     as an individual tag instead of crashing the page.
+ *  4. The agent repository "my agents" tab reuses the same latest-published
+ *     sort and marks its main agents with the same badge.
  *
  * Product surface exercised:
  *   - frontend/app/[locale]/agent-space/agent-space.tsx   (sort control + badge)
+ *   - frontend/app/[locale]/agent-space/my-agent.tsx      (sort control + badge)
  *   - frontend/app/[locale]/agents/page.tsx               (tag search)
  *
  * Every HTTP response is fulfilled with deterministic fixtures, so the journey
@@ -137,6 +140,10 @@ const AGENT_ROWS = [
     create_time: "2026-02-01T09:00:00",
     update_time: "2026-02-02T09:00:00",
     current_version_no: 1,
+    // The main agent publishes earlier, so latest-first ranks it after the
+    // ordinary agent on the "my agents" tab.
+    publish_time: "2026-01-20T09:00:00",
+    is_main_agent: true,
     permission: "EDIT",
   },
   {
@@ -146,10 +153,27 @@ const AGENT_ROWS = [
     description: "不参与标签匹配的普通智能体。",
     tags: ["普通标签"],
     create_time: "2026-02-03T09:00:00",
-    current_version_no: null,
+    update_time: "2026-02-04T09:00:00",
+    current_version_no: 1,
+    publish_time: "2026-02-05T09:00:00",
+    is_main_agent: false,
     permission: "EDIT",
   },
 ];
+
+/** My-agents order: latest publish time first, undated agents last. */
+const publishOrderedAgentRows = () => {
+  const dated = AGENT_ROWS.filter((agent) => agent.publish_time);
+  const undated = AGENT_ROWS.filter((agent) => !agent.publish_time);
+  const sorted = [...dated].sort((left, right) =>
+    left.publish_time === right.publish_time
+      ? right.agent_id - left.agent_id
+      : left.publish_time < right.publish_time
+        ? 1
+        : -1
+  );
+  return [...sorted, ...undated];
+};
 
 async function mockNexent(page) {
   const fixture = {
@@ -265,10 +289,14 @@ async function mockNexent(page) {
     if (endpoint === "/agent/list/page") {
       const search = url.searchParams.get("search")?.trim() ?? "";
       const predicates = url.searchParams.get("search_tag_predicates") ?? "";
+      const latest = url.searchParams.get("sort_by_update_time") === "true";
       const tagMatched =
         predicates.includes(`"definition_id":${TAG_DEFINITION_ID}`) &&
         predicates.includes(`${TAG_VALUE_ID}`);
-      const matching = AGENT_ROWS.filter((agent) => {
+      // The default order keeps the fixture order; the latest-published order
+      // returns the same rows sorted by publish time with undated rows last.
+      const source = latest ? publishOrderedAgentRows() : AGENT_ROWS;
+      const matching = source.filter((agent) => {
         const haystack = `${agent.display_name ?? agent.name} ${agent.description ?? ""}`;
         return (
           haystack.includes(search) ||
@@ -304,7 +332,18 @@ journey(ID, async (context) => {
   const repositoryTitleOrder = async () =>
     (await repositoryTitles().allInnerTexts()).map((value) => value.trim());
 
-  const repositoryCard = (title) =>
+  /** Visible "my agents" card headings, in rendered order. */
+  const mineTitles = () =>
+    page
+      .getByRole("heading", { level: 2 })
+      .filter({
+        hasText: new RegExp(`^(${TAG_AGENT_TITLE}|${ORDINARY_AGENT_TITLE})$`),
+      });
+  const mineTitleOrder = async () =>
+    (await mineTitles().allInnerTexts()).map((value) => value.trim());
+
+  /** The card group element that owns a heading, shared by both tabs. */
+  const resourceCard = (title) =>
     page
       .getByRole("heading", { level: 2, name: title, exact: true })
       .locator(
@@ -317,8 +356,11 @@ journey(ID, async (context) => {
       .filter({ has: page.getByRole("button", { name: title, exact: true }) });
 
   const selectSortOption = async (optionLabel) => {
+    // Both agent-space tabs stay mounted, so target the rendered panel's
+    // control rather than every control that shares the same label.
     await page
       .getByRole("combobox", { name: SORT_LABEL, exact: true })
+      .filter({ visible: true })
       .click();
     await page
       .locator(".ant-select-item-option:visible")
@@ -407,12 +449,12 @@ journey(ID, async (context) => {
       },
       async () => {
         await expect(
-          repositoryCard(MAIN_TITLE).locator("span.bg-amber-50")
+          resourceCard(MAIN_TITLE).locator("span.bg-amber-50")
         ).toHaveText(MAIN_AGENT_LABEL);
         await expect(
-          repositoryCard(ORDINARY_TITLE).locator("span.bg-amber-50")
+          resourceCard(ORDINARY_TITLE).locator("span.bg-amber-50")
         ).toHaveCount(0);
-        await expect(repositoryCard(ORDINARY_TITLE)).not.toContainText(
+        await expect(resourceCard(ORDINARY_TITLE)).not.toContainText(
           MAIN_AGENT_LABEL
         );
         await expect(page.locator("span.bg-amber-50:visible")).toHaveCount(1);
@@ -438,6 +480,46 @@ journey(ID, async (context) => {
         await expect(card).not.toContainText("['d4_value");
         await expect(card).not.toContainText("d4_extra");
         return "tag keyword narrowed the list to the tag-matched agent";
+      },
+      async () => {
+        await page.goto(`${baseUrl}/zh/agent-space?tab=mine`);
+        await expect(resourceCard(ORDINARY_AGENT_TITLE)).toBeVisible();
+        // The untouched default order keeps the fixture order and must not ask
+        // for publish-time sorting.
+        expect(
+          fixture.agentList.every(
+            (request) => !request.query.includes("sort_by_update_time")
+          )
+        ).toBe(true);
+        await expect.poll(mineTitleOrder).toEqual([
+          TAG_AGENT_TITLE,
+          ORDINARY_AGENT_TITLE,
+        ]);
+
+        const baseline = fixture.agentList.length;
+        await selectSortOption(SORT_LATEST_LABEL);
+        await expect
+          .poll(() =>
+            requestsSince(
+              "agentList",
+              baseline,
+              (request) => request.query.includes("sort_by_update_time=true")
+            ).length
+          )
+          .toBeGreaterThan(0);
+        await expect.poll(mineTitleOrder).toEqual([
+          ORDINARY_AGENT_TITLE,
+          TAG_AGENT_TITLE,
+        ]);
+
+        await expect(
+          resourceCard(TAG_AGENT_TITLE).locator("span.bg-amber-50")
+        ).toHaveText(MAIN_AGENT_LABEL);
+        await expect(
+          resourceCard(ORDINARY_AGENT_TITLE).locator("span.bg-amber-50")
+        ).toHaveCount(0);
+        await expect(page.locator("span.bg-amber-50:visible")).toHaveCount(1);
+        return "my-agents tab forwards latest-published order and badges only the main agent";
       },
     ],
     assertions: [
@@ -480,10 +562,10 @@ journey(ID, async (context) => {
           })
         ).toBeVisible();
         await expect(
-          repositoryCard(MAIN_TITLE).locator("span.bg-amber-50")
+          resourceCard(MAIN_TITLE).locator("span.bg-amber-50")
         ).toHaveText(MAIN_AGENT_LABEL);
         await expect(
-          repositoryCard(ORDINARY_TITLE).locator("span.bg-amber-50")
+          resourceCard(ORDINARY_TITLE).locator("span.bg-amber-50")
         ).toHaveCount(0);
         await expect(page.locator("span.bg-amber-50:visible")).toHaveCount(1);
         return "exactly the main-agent listing shows the amber main-agent badge";
@@ -513,6 +595,32 @@ journey(ID, async (context) => {
         expect(fixture.writes).toEqual([]);
         expect(fixture.providerCalls).toEqual([]);
         return "tag predicates forwarded, recovered tag rendered, no unrelated write or execution";
+      },
+      async () => {
+        await page.goto(`${baseUrl}/zh/agent-space?tab=mine`);
+        await expect(resourceCard(TAG_AGENT_TITLE)).toBeVisible();
+        const baseline = fixture.agentList.length;
+        await selectSortOption(SORT_LATEST_LABEL);
+        await expect
+          .poll(() =>
+            requestsSince(
+              "agentList",
+              baseline,
+              (request) => request.query.includes("sort_by_update_time=true")
+            ).length
+          )
+          .toBeGreaterThan(0);
+        expect(await mineTitleOrder()).toEqual([
+          ORDINARY_AGENT_TITLE,
+          TAG_AGENT_TITLE,
+        ]);
+        const ordered = publishOrderedAgentRows();
+        expect(ordered[0].display_name).toBe(ORDINARY_AGENT_TITLE);
+        await expect(
+          resourceCard(TAG_AGENT_TITLE).locator("span.bg-amber-50")
+        ).toHaveText(MAIN_AGENT_LABEL);
+        await expect(page.locator("span.bg-amber-50:visible")).toHaveCount(1);
+        return "my-agents tab renders newest-published first and badges exactly the main agent";
       },
     ],
   });
