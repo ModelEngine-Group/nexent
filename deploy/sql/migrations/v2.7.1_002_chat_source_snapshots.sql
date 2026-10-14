@@ -1,3 +1,5 @@
+-- Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 -- Preserve the original per-hit attributes without changing existing source identities.
 ALTER TABLE nexent.conversation_source_search_t
     ADD COLUMN IF NOT EXISTS source_metadata JSONB,

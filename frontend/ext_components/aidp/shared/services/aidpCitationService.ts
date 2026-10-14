@@ -1,3 +1,5 @@
+// Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 import aidpKnowledgeService from "./aidpKnowledgeService";
 import type { AidpDownloadLocator } from "@/types/source";
 

@@ -1,3 +1,5 @@
+# Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 from test.ext_components.aidp.test_aidp_search_tool import aidp_module as aidp_module
 from test.ext_components.aidp.test_aidp_search_tool import aidp_tool as aidp_tool
 from test.ext_components.aidp.test_aidp_search_tool import mock_observer as mock_observer
