@@ -1,3 +1,5 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 export const DEFAULT_AGENT_AVATAR_COLORS = [
   ["#ffb746", "#e06edc", "#b386ee"],
   ["#ff71c6", "#b06cf2", "#55bcd9"],

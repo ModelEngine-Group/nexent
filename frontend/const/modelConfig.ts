@@ -1,3 +1,5 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import { publicAsset } from "@/lib/publicAsset";
 
 export const APP_DISPLAY_NAME = "Nexent";
