@@ -14,6 +14,8 @@ import { useAgentStore } from "@/stores/agentStore";
 import type { Skill, SkillGroup, SkillParam } from "@/types/agentConfig";
 import SkillConfigModal from "@/app/agents/components/capability/skill/SkillConfigModal";
 
+import styles from "./ResourcePickerDrawer.module.css";
+
 const PAGE_SIZE = 10;
 
 // Stable fallback so the zustand selector returns a referentially-stable value
@@ -217,10 +219,7 @@ export function AddSkillDrawer({
       return {
         id: String(skill.skill_id),
         label:
-          skill.name ||
-          persistedSkill.skill_name ||
-          canonicalSkill?.name ||
-          "",
+          skill.name || persistedSkill.skill_name || canonicalSkill?.name || "",
       };
     });
   }, [availableSkills, draftSkills]);
@@ -323,9 +322,7 @@ export function AddSkillDrawer({
     (id: string) => {
       if (isReadOnly) return;
       setDraftSkills((current) =>
-        current.filter(
-          (skill) => Number(skill.skill_id) !== Number(id)
-        )
+        current.filter((skill) => Number(skill.skill_id) !== Number(id))
       );
     },
     [isReadOnly]
@@ -357,9 +354,7 @@ export function AddSkillDrawer({
       activeGroup.skills.map((skill) => Number(skill.skill_id))
     );
     setDraftSkills((current) =>
-      current.filter(
-        (skill) => !visibleSkillIds.has(Number(skill.skill_id))
-      )
+      current.filter((skill) => !visibleSkillIds.has(Number(skill.skill_id)))
     );
   }, [activeGroup, isReadOnly]);
 
@@ -381,34 +376,31 @@ export function AddSkillDrawer({
     [skillInstanceMap]
   );
 
-  const saveSkillConfig = useCallback(
-    (skill: Skill, params: SkillParam[]) => {
-      const configValues = Object.fromEntries(
-        params.map((param) => [param.name, param.value])
+  const saveSkillConfig = useCallback((skill: Skill, params: SkillParam[]) => {
+    const configValues = Object.fromEntries(
+      params.map((param) => [param.name, param.value])
+    );
+    setSkillInstanceMap((current) => ({
+      ...current,
+      [skill.skill_id]: configValues,
+    }));
+
+    const configuredSkill = { ...skill, config_values: configValues };
+    setDraftSkills((current) => {
+      const selectedIndex = current.findIndex(
+        (selectedSkill) =>
+          Number(selectedSkill.skill_id) === Number(skill.skill_id)
       );
-      setSkillInstanceMap((current) => ({
-        ...current,
-        [skill.skill_id]: configValues,
-      }));
 
-      const configuredSkill = { ...skill, config_values: configValues };
-      setDraftSkills((current) => {
-        const selectedIndex = current.findIndex(
-          (selectedSkill) =>
-            Number(selectedSkill.skill_id) === Number(skill.skill_id)
-        );
+      if (selectedIndex < 0) {
+        return [...current, configuredSkill];
+      }
 
-        if (selectedIndex < 0) {
-          return [...current, configuredSkill];
-        }
-
-        const updatedSkills = [...current];
-        updatedSkills[selectedIndex] = configuredSkill;
-        return updatedSkills;
-      });
-    },
-    []
-  );
+      const updatedSkills = [...current];
+      updatedSkills[selectedIndex] = configuredSkill;
+      return updatedSkills;
+    });
+  }, []);
 
   const onCloseDialog = useCallback(() => {
     setSearch("");
@@ -425,9 +417,13 @@ export function AddSkillDrawer({
 
   return (
     <AddResourceDrawer
+      width={768}
+      bodyClassName={styles.drawer}
       title={
-        <div className="flex items-center gap-2 pr-8">
-          <span className="flex-1">{t("resourcePicker.addSkill", "添加技能")}</span>
+        <div className="flex min-w-0 items-center gap-2">
+          <span className="min-w-0 flex-1 truncate">
+            {t("resourcePicker.addSkill", "添加技能")}
+          </span>
           {onOpenTagManagement ? (
             <Button
               type="text"
@@ -489,7 +485,7 @@ export function AddSkillDrawer({
                 role="button"
                 tabIndex={isReadOnly ? -1 : 0}
                 className={cn(
-                  "flex shrink-0 items-center gap-3 rounded-[2px] px-5 py-[9px] transition-colors",
+                  "flex h-[59px] shrink-0 items-center justify-between gap-3 rounded-[4px] py-[9px] pl-5 pr-7 transition-colors",
                   isSelected ? "bg-[#E6F2FD]" : "bg-transparent",
                   isReadOnly
                     ? "cursor-not-allowed opacity-60"
@@ -506,11 +502,11 @@ export function AddSkillDrawer({
                   }
                 }}
               >
-                <div className="flex min-w-0 flex-1 flex-col gap-0.5">
+                <div className="flex min-w-0 flex-1 flex-col">
                   <div className="flex items-center gap-2">
                     <span
                       className={cn(
-                        "text-[14px] leading-[20px]",
+                        "truncate text-[14px] leading-[22px]",
                         isSelected
                           ? "font-medium text-[#0067D1]"
                           : "font-medium text-[#191919]"
@@ -528,7 +524,7 @@ export function AddSkillDrawer({
                     ))}
                   </div>
                   {skill.description ? (
-                    <p className="truncate text-[14px] leading-[20px] text-[#737373]">
+                    <p className="m-0 truncate text-[14px] font-normal leading-[22px] text-[#777777]">
                       {skill.description}
                     </p>
                   ) : null}

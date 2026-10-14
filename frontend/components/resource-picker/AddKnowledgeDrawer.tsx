@@ -24,6 +24,7 @@ import {
 } from "@/lib/knowledgeBaseCompatibility";
 import { AddResourceDrawer, CheckMark } from "./AddResourceDrawer";
 import type { KnowledgeItem, SelectedItem } from "./types";
+import styles from "./ResourcePickerDrawer.module.css";
 
 const PAGE_SIZE = 10;
 
@@ -102,45 +103,69 @@ function KnowledgeRow({
 }) {
   return (
     <div
+      data-knowledge-selected={selected}
       className={cn(
-        "flex min-h-[120px] shrink-0 items-center gap-3 rounded-[2px] px-5 py-[9px]",
-        selected ? "bg-[#E6F2FD]" : "bg-white",
+        "relative flex h-[104px] w-full shrink-0 flex-col items-start justify-between",
         !canSelect ? "opacity-60" : ""
       )}
     >
-      <div
-        className="flex h-6 w-6 shrink-0 items-center justify-center rounded-[4px] text-white"
-        style={{ background: item.iconBg }}
-      >
-        <Database size={13} />
-      </div>
-      <div className="flex min-w-0 flex-1 flex-col gap-0.5">
-        <div className="flex items-center gap-2">
-          <span className="truncate text-[14px] leading-[22px] text-[#2673E5]">
+      <div className="flex h-8 w-full shrink-0 items-center gap-2 pr-10">
+        <div
+          className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg text-white"
+          style={{
+            background: "linear-gradient(135deg, #B8A3FF 0%, #6941D9 100%)",
+          }}
+        >
+          <Database size={20} strokeWidth={1.8} />
+        </div>
+        <div className="flex min-w-0 items-center gap-2">
+          <span
+            className="min-w-0 truncate text-[14px] font-bold leading-[21px] text-[#191919]"
+            style={{
+              fontFamily: '"HarmonyHeiTi", "HarmonyOS Sans SC", sans-serif',
+            }}
+          >
             {item.name}
           </span>
           {item.category && (
-            <span className="h-[18px] shrink-0 rounded-[2px] bg-[#F5F5F5] px-2 text-[12px] leading-[18px] text-[#4D4D4D]">
+            <span
+              className="flex h-5 shrink-0 items-center rounded-[2px] border border-[#D9D9D9] bg-[#F2F2F2] px-[6px] text-[12px] leading-[18px] text-[#4D4D4D]"
+              style={{
+                fontFamily: '"HarmonyHeiTi", "HarmonyOS Sans SC", sans-serif',
+              }}
+            >
               {item.category}
             </span>
           )}
         </div>
-        <p className="line-clamp-2 text-[14px] leading-[20px] text-[#737373]">
-          {item.description}
-        </p>
-        <div className="flex items-center gap-2.5 text-[12px] leading-[18px] text-[#999]">
-          {item.meta.map((text, i) => (
-            <span key={text} className="flex items-center gap-2.5">
-              {i > 0 && <span className="h-2.5 w-px bg-[#DDD]" />}
-              {text}
-            </span>
-          ))}
-        </div>
       </div>
-      <CheckMark
-        checked={selected}
-        onToggle={canSelect ? onToggle : undefined}
-      />
+      <p
+        className="line-clamp-2 h-9 w-[calc(100%-40px)] text-[12px] leading-[18px] text-[#191919]/70"
+        style={{
+          fontFamily: '"HarmonyHeiTi", "HarmonyOS Sans SC", sans-serif',
+        }}
+      >
+        {item.description}
+      </p>
+      <div
+        className="flex h-[18px] w-[calc(100%-40px)] items-center text-[12px] leading-[18px] text-[#191919]/40"
+        style={{
+          fontFamily: '"HarmonyHeiTi", "HarmonyOS Sans SC", sans-serif',
+        }}
+      >
+        {item.meta.map((text, i) => (
+          <span key={text} className="flex items-center">
+            {i > 0 && <span className="mx-4 h-2.5 w-px bg-[#DDD]" />}
+            {text}
+          </span>
+        ))}
+      </div>
+      <div className="absolute right-0 top-1/2 -translate-y-1/2">
+        <CheckMark
+          checked={selected}
+          onToggle={canSelect ? onToggle : undefined}
+        />
+      </div>
     </div>
   );
 }
@@ -548,6 +573,8 @@ export function AddKnowledgeDrawer({
   return (
     <>
       <AddResourceDrawer
+        width={768}
+        bodyClassName={cn(styles.drawer, styles.knowledge)}
         open={open}
         title={title ?? t("resourcePicker.addKnowledge", "添加知识库")}
         searchPlaceholder={t(
@@ -579,19 +606,27 @@ export function AddKnowledgeDrawer({
         ) : filteredKbs.length === 0 ? (
           <Empty description={t("resourcePicker.empty", "暂无数据")} />
         ) : (
-          <div className="flex flex-col gap-2">
+          <div className="flex flex-col gap-0">
             {pagedItems.map((item) => {
               const kb = filteredKbs.find((k) => k.id === item.id);
               const selected_ = selectedIdsSet.has(item.id);
               const canSelect = kb ? checkCanSelect(kb) : true;
               return (
-                <KnowledgeRow
+                <div
                   key={item.id}
-                  item={item}
-                  selected={selected_}
-                  canSelect={canSelect}
-                  onToggle={() => kb && toggleSelection(kb.id)}
-                />
+                  data-knowledge-row
+                  className={cn(
+                    "box-border flex h-32 w-full shrink-0 items-center px-4 py-3 shadow-[inset_0_-1px_0_#fff]",
+                    selected_ ? "bg-[#E6F2FD]" : "bg-white"
+                  )}
+                >
+                  <KnowledgeRow
+                    item={item}
+                    selected={selected_}
+                    canSelect={canSelect}
+                    onToggle={() => kb && toggleSelection(kb.id)}
+                  />
+                </div>
               );
             })}
           </div>

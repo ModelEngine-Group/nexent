@@ -33,6 +33,7 @@ import {
   ParamLabel,
   ParamSwitch,
   SectionHeader,
+  SectionChevron,
 } from "@/components/resource-picker/ParamDialog";
 import ToolTestPanel from "./ToolTestPanel";
 import { updateToolConfig } from "@/services/agentConfigService";
@@ -217,6 +218,15 @@ export default function ToolConfigModal({
 
   // Tool test panel visibility state
   const [testPanelVisible, setTestPanelVisible] = useState(false);
+  const revealTestSection = useCallback((section: HTMLDivElement | null) => {
+    if (!section || !testPanelVisible) return;
+    requestAnimationFrame(() => {
+      const body = section.closest<HTMLElement>('[data-config-part="body"]');
+      if (!body || !section.isConnected) return;
+      const top = section.getBoundingClientRect().top - body.getBoundingClientRect().top + body.scrollTop;
+      body.scrollTo({ top, behavior: "smooth" });
+    });
+  }, [testPanelVisible]);
 
   // Knowledge base selector state
   const [kbSelectorVisible, setKbSelectorVisible] = useState(false);
@@ -2195,6 +2205,8 @@ export default function ToolConfigModal({
   return (
     <>
       <ParamDialog
+        variant="tool"
+        description={getLocalizedDescription(tool?.description, tool?.description_zh)}
         open={isOpen}
         title={
           <span className="flex items-center gap-2">
@@ -2224,15 +2236,12 @@ export default function ToolConfigModal({
         cancelText={t("common.cancel")}
         confirmDisabled={isLoading || hasFormErrors || hasEmptyRequired}
       >
-        <p className="text-[12px] leading-[18px] text-[#191919]/40">
-          {getLocalizedDescription(tool?.description, tool?.description_zh)}
-        </p>
-
-        <div className="text-[14px] font-bold leading-6 text-[#191919]">
+        <div className="flex items-center gap-1.5 text-[14px] font-bold leading-6 text-[#191919]">
           {t("toolConfig.title.paramConfig")}
+          <SectionChevron expanded />
         </div>
 
-        <div style={{ maxHeight: "500px", overflow: "auto" }}>
+        <div data-config-part="tool-fields">
           <Form
             form={form}
             layout="vertical"
@@ -2260,7 +2269,7 @@ export default function ToolConfigModal({
                 );
               }}
             >
-              <div className="pr-2 mt-3">
+              <div className="w-full">
                 {currentParams.map((param, index) => {
                   if (param.name === "rerank_model_name" && !isRerankEnabled) {
                     return null;
@@ -2498,6 +2507,10 @@ export default function ToolConfigModal({
               </div>
             </Form>
           </div>
+          <div
+            ref={revealTestSection}
+            className="flex flex-col gap-4"
+          >
           <SectionHeader
             title={t("toolConfig.button.testTool")}
             expanded={testPanelVisible}
@@ -2583,6 +2596,7 @@ export default function ToolConfigModal({
                 haotianKnowledgeSets={haotianKnowledgeSets}
               />
             )}
+          </div>
       </ParamDialog>
 
       {/* Knowledge Base Selector Modal */}

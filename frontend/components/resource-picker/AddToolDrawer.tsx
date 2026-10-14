@@ -28,6 +28,8 @@ import {
   getToolLabels,
 } from "@/app/agents/components/capability/tool/utils";
 
+import styles from "./ResourcePickerDrawer.module.css";
+
 const PAGE_SIZE = 10;
 
 // Stable fallback so the zustand selector returns a referentially-stable value
@@ -359,9 +361,7 @@ export function AddToolDrawer({
 
       if (isCurrentlySelected) {
         setDraftTools((prev) =>
-          prev.filter(
-            (selectedTool) => parseInt(selectedTool.id) !== numericId
-          )
+          prev.filter((selectedTool) => parseInt(selectedTool.id) !== numericId)
         );
         return;
       }
@@ -511,9 +511,13 @@ export function AddToolDrawer({
   return (
     <>
       <AddResourceDrawer
+        width={768}
+        bodyClassName={cn(styles.drawer, styles.tool)}
         title={
-          <div className="flex items-center gap-2 pr-8">
-            <span className="flex-1">{t("resourcePicker.addTool", "添加工具")}</span>
+          <div className="flex min-w-0 items-center gap-2">
+            <span className="min-w-0 flex-1 truncate">
+              {t("resourcePicker.addTool", "添加工具")}
+            </span>
             {onOpenManageLabels ? (
               <Button
                 type="text"
@@ -573,7 +577,7 @@ export function AddToolDrawer({
                   role="button"
                   tabIndex={disabled ? -1 : 0}
                   className={cn(
-                    "flex shrink-0 items-center gap-3 rounded-[2px] px-5 py-[9px] transition-colors",
+                    "flex h-[59px] shrink-0 items-center justify-between gap-3 rounded-[4px] py-[9px] pl-5 pr-7 transition-colors",
                     isSelected ? "bg-[#E6F2FD]" : "bg-transparent",
                     disabled
                       ? "cursor-not-allowed opacity-50"
@@ -590,11 +594,11 @@ export function AddToolDrawer({
                     }
                   }}
                 >
-                  <div className="flex min-w-0 flex-1 flex-col gap-0.5">
+                  <div className="flex min-w-0 flex-1 flex-col">
                     <div className="flex items-center gap-2">
                       <span
                         className={cn(
-                          "truncate text-[14px] leading-[20px]",
+                          "truncate text-[14px] leading-[22px]",
                           isSelected
                             ? "font-medium text-[#0067D1]"
                             : "font-medium text-[#191919]"
@@ -614,7 +618,7 @@ export function AddToolDrawer({
                         ))}
                     </div>
                     {tool.description ? (
-                      <p className="truncate text-[14px] leading-[20px] text-[#737373]">
+                      <p className="m-0 truncate text-[14px] font-normal leading-[22px] text-[#777777]">
                         {getToolDescription(tool)}
                       </p>
                     ) : null}
@@ -640,7 +644,10 @@ export function AddToolDrawer({
               return (
                 <div key={tool.id}>
                   {disabledTooltipKey ? (
-                    <Tooltip title={t(disabledTooltipKey)} mouseEnterDelay={0.2}>
+                    <Tooltip
+                      title={t(disabledTooltipKey)}
+                      mouseEnterDelay={0.2}
+                    >
                       {row}
                     </Tooltip>
                   ) : (

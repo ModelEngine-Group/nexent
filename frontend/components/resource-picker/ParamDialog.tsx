@@ -1,8 +1,8 @@
 "use client";
 
-import { Modal, Tooltip } from "antd";
+import { Button, Modal, Tooltip } from "antd";
 import { Input as AntInput, type InputProps } from "antd";
-import { RotateCw, X } from "lucide-react";
+import { RotateCw } from "lucide-react";
 import {
   forwardRef,
   type HTMLAttributes,
@@ -14,11 +14,14 @@ import {
 import { useTranslation } from "react-i18next";
 
 import { cn } from "@/lib/utils";
+import { StandardCloseButton } from "@/components/common/StandardCloseButton";
+import styles from "./ParamDialog.module.css";
 
 /** Centered 480px parameter-config dialog (slides in the middle of the page). */
 export function ParamDialog({
   open,
   title,
+  description,
   onClose,
   onConfirm,
   confirmText = "确定",
@@ -27,9 +30,12 @@ export function ParamDialog({
   maskClosable = false,
   confirmDisabled = false,
   children,
+  variant,
 }: {
+  variant?: "skill" | "tool" | "model";
   open: boolean;
   title: ReactNode;
+  description?: ReactNode;
   onClose: () => void;
   onConfirm?: () => void;
   confirmText?: string;
@@ -54,43 +60,60 @@ export function ParamDialog({
         container: {
           padding: 0,
           borderRadius: 8,
-          boxShadow: "0 8px 30px rgba(0,0,0,.12)",
+          boxShadow: "0 0 15px rgba(26,26,26,0.1)",
         },
         body: { padding: 0 },
       }}
     >
-      <div className="flex flex-col gap-3 p-6">
-        <div className="flex items-center justify-between">
-          <span className="text-[16px] font-bold leading-6 text-[#1A1A1A]">
-            {title}
-          </span>
-          <button
-            type="button"
-            aria-label={t("common.close")}
-            onClick={onClose}
-            className="flex h-5 w-5 shrink-0 cursor-pointer items-center justify-center border-0 bg-transparent p-0 text-[#666]"
+      <div className={styles.dialog} data-config-variant={variant}>
+        <div
+          data-config-part="heading"
+          className="flex shrink-0 flex-col gap-2"
+        >
+          <div
+            data-config-part="header"
+            className="flex h-6 shrink-0 items-center justify-between gap-4"
           >
-            <X size={12} />
-          </button>
+            <span className="min-w-0 text-[16px] font-bold leading-6 text-[#1A1A1A]">
+              {title}
+            </span>
+            <StandardCloseButton
+              ariaLabel={t("common.close")}
+              onClick={onClose}
+            />
+          </div>
+          {description ? (
+            <div
+              data-config-part="description"
+              className="text-[12px] leading-[18px] text-[#191919]/40"
+            >
+              {description}
+            </div>
+          ) : null}
         </div>
-        {children}
-        <div className="flex justify-end gap-3">
-          <button
-            type="button"
+        <div data-config-part="body" className={styles.body}>
+          {children}
+        </div>
+        <div
+          data-config-part="footer"
+          className="flex h-8 shrink-0 justify-end gap-4"
+        >
+          <Button
+            autoInsertSpace={false}
             onClick={onClose}
-            className="h-8 w-[89px] rounded-[2px] border border-[#C9C9C9] bg-white text-[14px] text-[#191919]"
+            className={styles.cancelButton}
           >
             {cancelText ?? t("common.cancel")}
-          </button>
+          </Button>
           {onConfirm && (
-            <button
-              type="button"
+            <Button
+              autoInsertSpace={false}
               onClick={onConfirm}
               disabled={confirmDisabled}
-              className="h-8 w-[89px] rounded-[2px] border border-[#2673E5] bg-[#2673E5] text-[14px] text-white disabled:cursor-not-allowed disabled:opacity-50"
+              className={styles.confirmButton}
             >
               {confirmText ?? t("common.confirm")}
-            </button>
+            </Button>
           )}
         </div>
       </div>
@@ -98,7 +121,7 @@ export function ParamDialog({
   );
 }
 
-/** 58x28 toggle switch with a 22px knob (design spec). */
+/** 38x20 toggle switch with a 16px knob. */
 export function ParamSwitch({
   checked,
   onChange,
@@ -113,14 +136,14 @@ export function ParamSwitch({
       aria-checked={checked}
       onClick={() => onChange(!checked)}
       className={cn(
-        "relative h-7 w-[58px] shrink-0 cursor-pointer rounded-[14px] border-0 transition-colors",
+        "relative h-5 w-[38px] shrink-0 cursor-pointer rounded-[10px] border-0 transition-colors",
         checked ? "bg-[#0067D1]" : "bg-[#CCC]"
       )}
     >
       <span
         className={cn(
-          "absolute top-[3px] h-[22px] w-[22px] rounded-full bg-white transition-all",
-          checked ? "right-[3px]" : "left-[3px]"
+          "absolute top-[2px] h-4 w-4 rounded-full bg-white transition-all",
+          checked ? "right-[2px]" : "left-[2px]"
         )}
       />
     </button>
@@ -219,7 +242,7 @@ export const InfoIcon = forwardRef<
   );
 });
 
-/** antd Input restyled to the design's 26px ("sm") / 28px ("md") variants. */
+/** Ant Design input aligned to the 28px configuration control. */
 export function ParamInput({
   inputSize = "md",
   className,
@@ -228,11 +251,9 @@ export function ParamInput({
   return (
     <AntInput
       {...props}
+      data-input-size={inputSize}
       className={cn(
-        "!w-full !rounded-[2px] !border-solid",
-        inputSize === "sm"
-          ? "!h-[26px] !px-2 !text-[13px] !border-[#D9D9D9]"
-          : "!h-7 !px-3 !text-[14px] !border-[#D9D9D9]",
+        "!w-full !rounded-[2px] !border-solid !h-7 !px-3 !text-[14px] !leading-[22px] !border-[#C9C9C9]",
         className
       )}
     />
@@ -256,18 +277,17 @@ export function ParamLabel({
   size?: "sm" | "md";
 }) {
   const showInfo = info && !icon;
-  const infoNode = icon ?? (showInfo && <InfoIcon size={size === "md" ? 14 : 12} />);
+  const infoNode = icon ?? (showInfo && <InfoIcon size={14} />);
   return (
     <span
-      className={cn(
-        "flex items-center gap-1",
-        size === "md"
-          ? "text-[14px] leading-[22px] text-[#191919]"
-          : "text-[12px] leading-[18px] text-[#393939]"
-      )}
+      data-config-label
+      className="relative flex items-center gap-1 text-[14px] leading-[22px] text-[#191919]"
     >
       {required && (
-        <span className={size === "md" ? "text-[#E34D59]" : "text-[#E33]"}>
+        <span
+          data-config-required
+          className={size === "md" ? "text-[#E34D59]" : "text-[#E33]"}
+        >
           *
         </span>
       )}
@@ -282,7 +302,7 @@ export function ParamLabel({
   );
 }
 
-/** Ordered field (label above control), with design gap based on label size. */
+/** Ordered field with an 8px gap between its label and control. */
 export function ParamField({
   label,
   required,
@@ -301,7 +321,7 @@ export function ParamField({
   children: ReactNode;
 }) {
   return (
-    <div className={cn("flex flex-col", size === "md" ? "gap-2" : "gap-1.5")}>
+    <div className="flex flex-col gap-2">
       <ParamLabel
         label={label}
         required={required}
@@ -312,6 +332,28 @@ export function ParamField({
       />
       {children}
     </div>
+  );
+}
+
+/** Fixed chevron geometry avoids font-dependent section arrow shapes. */
+export function SectionChevron({ expanded }: { expanded: boolean }) {
+  return (
+    <svg
+      aria-hidden="true"
+      width="12"
+      height="12"
+      viewBox="0 0 12 12"
+      fill="none"
+      className="shrink-0 text-[#666]"
+    >
+      <path
+        d={expanded ? "M2 8L6 4L10 8" : "M2 4L6 8L10 4"}
+        stroke="currentColor"
+        strokeWidth="1"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
   );
 }
 
@@ -332,9 +374,7 @@ export function SectionHeader({
       className="flex h-6 items-center gap-1.5 border-0 bg-transparent p-0 text-[14px] font-bold leading-6 text-[#191919]"
     >
       {title}
-      <span className="text-[12px] font-normal text-[#666]">
-        {expanded ? "∧" : "∨"}
-      </span>
+      <SectionChevron expanded={expanded} />
     </button>
   );
 }
@@ -352,11 +392,12 @@ export function TestRunLink({
   return (
     <button
       type="button"
+      data-config-part="test-run"
       onClick={onClick}
       disabled={disabled}
-      className="flex h-6 cursor-pointer items-center gap-1.5 border-0 bg-transparent p-0 text-[14px] text-[#2673E5] disabled:cursor-not-allowed disabled:opacity-50"
+      className="flex h-[22px] cursor-pointer items-center gap-1 border-0 bg-transparent p-0 text-[14px] leading-[22px] text-[#2673E5] disabled:cursor-not-allowed disabled:opacity-50"
     >
-      <RotateCw size={14} />
+      <RotateCw size={16} />
       {label}
     </button>
   );

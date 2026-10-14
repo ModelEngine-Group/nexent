@@ -442,6 +442,7 @@ export default function SkillConfigModal({
 
   return (
     <ParamDialog
+      variant="skill"
       open={isOpen}
       title={skill.name}
       onClose={onCancel}

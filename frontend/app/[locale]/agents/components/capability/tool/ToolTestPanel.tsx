@@ -786,7 +786,7 @@ export default function ToolTestPanel({
   if (!tool) return null;
 
   return (
-    <div className="mb-4">
+    <div data-config-part="test-panel" className="flex flex-col gap-2">
       <div>
         {/* Input parameters section with conditional toggle */}
         {Object.keys(parameterValues).length > 0 && (
@@ -799,7 +799,7 @@ export default function ToolTestPanel({
                 marginBottom: 8,
               }}
             >
-              <Text strong style={{ display: "block", marginBottom: 8 }}>
+              <Text strong style={{ display: "block", marginBottom: 0, fontSize: 14, lineHeight: "22px" }}>
                 {t("toolConfig.toolTest.inputParams")}
               </Text>
               {/* Only show toggle button if parsing was successful */}
@@ -1148,8 +1148,8 @@ export default function ToolTestPanel({
         />
       </div>
       {/* Test result */}
-      <div className="mt-3">
-        <Text strong style={{ display: "block", marginBottom: 8 }}>
+      <div data-config-part="test-result" className="flex flex-col gap-2">
+        <Text strong style={{ display: "block", marginBottom: 0, fontSize: 14, lineHeight: "22px" }}>
           {t("toolConfig.toolTest.result")}
         </Text>
         <Input.TextArea

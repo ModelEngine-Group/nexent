@@ -14,6 +14,7 @@ import type { Agent } from "@/types/agentConfig";
 import { a2aClientService, type A2AExternalAgent } from "@/services/a2aService";
 import { AddResourceDrawer, CheckMark } from "./AddResourceDrawer";
 import type { AgentCardItem, SelectedItem } from "./types";
+import styles from "./ResourcePickerDrawer.module.css";
 
 const PAGE_SIZE = 10;
 
@@ -81,35 +82,35 @@ function AgentCard({
   return (
     <div
       className={cn(
-        "relative flex h-[149px] flex-col gap-1.5 rounded-[8px] border p-3",
-        selected ? "border-[#7EB6F0] bg-[#E6F2FD]" : "border-[#D9D9D9] bg-white"
+        styles.agentCard,
+        selected ? styles.agentCardSelected : "bg-white"
       )}
     >
-      <div className="absolute right-3 top-3">
+      <div className="absolute right-6 top-7">
         <CheckMark checked={selected} onToggle={onToggle} />
       </div>
-      <div className="flex items-center gap-2.5">
+      <div className="flex h-10 shrink-0 items-center gap-3 pr-6">
         <div
           className="flex h-10 w-10 shrink-0 items-center justify-center rounded-[8px] text-white"
           style={{ background: item.iconBg }}
         >
           {icon}
         </div>
-        <span className="truncate text-[14px] font-medium leading-[22px] text-[#191919]">
+        <span className="min-w-0 truncate text-[16px] font-medium leading-[24px] text-[#191919]">
           {item.name}
         </span>
       </div>
-      <p className="line-clamp-2 text-[14px] leading-[20px] text-[#737373]">
+      <p className="line-clamp-2 h-[42px] shrink-0 text-[12px] font-normal leading-[20px] text-[#777777]">
         {item.description}
       </p>
-      <div className="mt-auto flex items-center gap-3.5 text-[12px] leading-[18px] text-[#999]">
+      <div className={styles.agentMetadata}>
         {item.updatedAt && (
-          <span className="flex items-center gap-1">
-            <Clock size={14} />
+          <span className={styles.agentUpdatedAt}>
+            <Clock size={14} className="shrink-0" />
             {t("agentConfig.list.updatedAt", { date: item.updatedAt })}
           </span>
         )}
-        <span className="flex items-center gap-1">
+        <span className={styles.agentStatus}>
           <span
             className={cn(
               "size-1.5 rounded-full",
@@ -254,12 +255,7 @@ export function AddAgentDrawer({ open, onClose }: AddAgentDrawerProps) {
       return { id: `external-${id}`, label: agent?.name || String(id) };
     });
     return [...internalChips, ...externalChips];
-  }, [
-    draftExternalIds,
-    draftInternalIds,
-    externalAgents,
-    internalAgents,
-  ]);
+  }, [draftExternalIds, draftInternalIds, externalAgents, internalAgents]);
 
   const allSelected =
     filteredAgents.length > 0 &&
@@ -369,6 +365,8 @@ export function AddAgentDrawer({ open, onClose }: AddAgentDrawerProps) {
 
   return (
     <AddResourceDrawer
+      width={768}
+      bodyClassName={cn(styles.drawer, styles.agent)}
       open={open}
       title={t("resourcePicker.addAgent", "添加子智能体")}
       searchPlaceholder={t("agent.collaborative.selector.searchPlaceholder")}
@@ -406,7 +404,7 @@ export function AddAgentDrawer({ open, onClose }: AddAgentDrawerProps) {
       ) : filteredAgents.length === 0 ? (
         <Empty description={t("agent.collaborative.selector.empty")} />
       ) : (
-        <div className="grid grid-cols-2 content-start gap-2">
+        <div className={styles.agentGrid}>
           {pagedAgents.map((item) => (
             <AgentCard
               key={`${activeSource}-${item.id}`}
