@@ -1,0 +1,192 @@
+import { expect } from "playwright/test";
+import { journey } from "../../infra/automation/d4/runner/journey";
+import { prepareWorkbench } from "../../infra/automation/d4/fixtures/workbench-controls";
+
+journey("WB-CONTROLS-D4-001", async ({ page, contract }) => {
+  const state = await prepareWorkbench(page, 7);
+  await contract.precondition(contract.expectedIds("preconditions")[0], async () => {
+    await expect(page.locator("[data-workbench-composer]")).toBeVisible();
+  });
+  const drawer = page.getByRole("dialog");
+  await contract.step(contract.expectedIds("steps")[0], async () => {
+    await expect(page.locator("[data-composer-action-trigger]")).toHaveCount(0);
+    const upload = page.getByRole("button", { name: "上传附件", exact: true });
+    await expect(upload.locator(".lucide-paperclip")).toBeVisible();
+    await expect(upload).toHaveText("上传附件");
+    await expect(upload.locator("span")).toHaveClass("sr-only");
+    expect(await upload.evaluate(el => !!el.nextElementSibling?.querySelector(".lucide-mic"))).toBe(true);
+    await upload.hover();
+    await expect(page.getByRole("tooltip")).toHaveText("上传附件");
+    await expect(page.getByRole("tooltip")).toHaveAttribute("data-side", "bottom");
+    await page.mouse.move(0, 0);
+    await page.keyboard.press("Escape");
+    await expect(page.getByRole("tooltip")).toHaveCount(0);
+    const voice = page.getByRole("button").filter({ has: page.locator(".lucide-mic") });
+    await voice.locator("..").hover();
+    await expect(page.getByRole("tooltip")).toHaveText("请配置语音识别模型");
+    await expect(page.getByRole("tooltip")).toHaveAttribute("data-side", "bottom");
+    const send = page.getByRole("button", { name: "发送", exact: true });
+    const input = page.locator("[data-workbench-composer]");
+    for (const control of [upload, voice, send]) {
+      await expect(control).toHaveCSS("width", "32px");
+      await expect(control).toHaveCSS("height", "32px");
+      await expect(control.locator("svg")).toHaveCSS("width", "16px");
+      await expect(control.locator("svg")).toHaveCSS("height", "16px");
+    }
+    const uploadBounds = (await upload.boundingBox())!;
+    const voiceBounds = (await voice.boundingBox())!;
+    const sendBounds = (await send.boundingBox())!;
+    expect(Math.abs(uploadBounds.y - voiceBounds.y)).toBeLessThanOrEqual(1);
+    expect(Math.abs(voiceBounds.y - sendBounds.y)).toBeLessThanOrEqual(1);
+    expect(Math.abs((voiceBounds.x - uploadBounds.x - uploadBounds.width) - (sendBounds.x - voiceBounds.x - voiceBounds.width))).toBeLessThanOrEqual(1);
+    await expect(send).toBeDisabled();
+    const disabledColor = await voice.evaluate(el => getComputedStyle(el).color);
+    await expect(send).toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
+    await expect(send).toHaveCSS("border-top-width", "0px");
+    await expect(send.locator("svg")).toHaveCSS("color", disabledColor);
+    for (const name of ["执行模式", "智能体", "知识库", "技能"]) {
+      const control = page.getByRole("button", { name, exact: true });
+      await expect(control).toHaveCSS("font-size", "14px");
+      await expect(control).toHaveCSS("font-weight", "400");
+    }
+    await expect(page.getByText("Fixture Model", { exact: true })).toHaveCSS("font-size", "14px");
+    await expect(page.getByText("Fixture Model", { exact: true })).toHaveCSS("font-weight", "400");
+    await page.getByRole("button", { name: "执行模式", exact: true }).click();
+    const modeMenu = page.getByRole("dialog");
+    for (const name of ["规划模式", "执行模式"]) {
+      const option = modeMenu.getByRole("button", { name, exact: true });
+      await expect(option).toHaveCSS("font-size", "14px");
+      await expect(option).toHaveCSS("font-weight", "400");
+      await expect(option).toHaveCSS("line-height", "20px");
+    }
+    await page.keyboard.press("Escape");
+    await expect(modeMenu).toHaveCount(0);
+    await page.mouse.move(0, 0);
+    await page.keyboard.press("Escape");
+    await expect(page.getByRole("tooltip")).toHaveCount(0);
+    await send.locator("..").hover();
+    await expect(page.getByRole("tooltip")).toHaveText("发送");
+    await expect(page.getByRole("tooltip")).toHaveAttribute("data-side", "bottom");
+    await expect(send).toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
+    await input.fill("Draft only");
+    await input.hover();
+    await expect(send).toBeEnabled();
+    await expect(send).toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
+    await expect(send.locator("svg")).toHaveCSS("color", "rgb(0, 103, 209)");
+    await send.hover();
+    await expect(send).toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
+    await input.hover();
+    await input.fill("");
+    await expect(send).toBeDisabled();
+    await expect(send).toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
+    await expect(send.locator("svg")).toHaveCSS("color", disabledColor);
+    for (const name of ["智能体", "知识库", "技能"]) {
+      await expect(page.getByRole("button", { name, exact: true })).toHaveText(name);
+      await page.getByRole("button", { name, exact: true }).click();
+      await expect(drawer).toBeVisible();
+      await expect.poll(async () => {
+        const bounds = await page.locator(".ant-drawer-content-wrapper:visible").boundingBox();
+        return Math.round(bounds!.x + bounds!.width);
+      }).toBe(page.viewportSize()!.width);
+      const searchRow = drawer.locator("[data-resource-search-row]");
+      const searchBox = await searchRow.getByRole("searchbox").boundingBox();
+      const tagButton = await searchRow.getByRole("button", { name: "标签筛选", exact: true }).boundingBox();
+      expect(Math.abs(searchBox!.y + searchBox!.height / 2 - tagButton!.y - tagButton!.height / 2)).toBeLessThanOrEqual(1);
+      expect(searchBox!.x + searchBox!.width).toBeLessThan(tagButton!.x);
+      const list = drawer.locator("[data-resource-list]");
+      const pager = drawer.locator("[data-resource-pagination]");
+      const confirm = drawer.getByRole("button", { name: "确认选择", exact: true });
+      const verifyLayout = async () => {
+        await expect(list).toHaveCSS("overflow-y", "auto");
+        await expect.poll(async () => {
+          const l = (await list.boundingBox())!, p = (await pager.boundingBox())!;
+          return Math.round(p.y - l.y - l.height);
+        }).toBe(16);
+        await expect.poll(async () => {
+          const p = (await pager.boundingBox())!, c = (await confirm.boundingBox())!;
+          return Math.round(c.y - p.y - p.height);
+        }).toBe(16);
+        expect((await list.boundingBox())!.height).toBeGreaterThan(80);
+      };
+      await verifyLayout();
+      await pager.locator('li[title="2"]').click();
+      await expect(list.getByRole("option")).toHaveCount(1);
+      await verifyLayout();
+      await pager.locator('li[title="1"]').click();
+      await expect(list.getByRole("option")).toHaveCount(6);
+      const pagerY = (await pager.boundingBox())!.y;
+      await searchRow.getByRole("searchbox").fill("no-such-resource-layout-check");
+      await expect(list.getByRole("option")).toHaveCount(0);
+      await verifyLayout();
+      expect(Math.abs((await pager.boundingBox())!.y - pagerY)).toBeLessThanOrEqual(1);
+      await searchRow.getByRole("searchbox").fill("");
+      if (name !== "知识库") {
+        await drawer.getByRole("tab", { name: "仓库", exact: true }).click();
+        await expect(list.getByRole("option")).toHaveCount(0);
+        await verifyLayout();
+        expect(Math.abs((await pager.boundingBox())!.y - pagerY)).toBeLessThanOrEqual(1);
+        await drawer.getByRole("tab", { name: "我的", exact: true }).click();
+      }
+      await page.setViewportSize({ width: 1174, height: 650 });
+      await verifyLayout();
+      const smallPagerY = (await pager.boundingBox())!.y;
+      const searchY = (await searchRow.boundingBox())!.y;
+      await expect(list.getByRole("option")).toHaveCount(6);
+      await expect.poll(() => list.evaluate(el => el.scrollHeight > el.clientHeight)).toBe(true);
+      await list.evaluate(el => { el.scrollTop = el.scrollHeight; });
+      expect(await list.evaluate(el => el.scrollTop)).toBeGreaterThan(0);
+      expect(Math.abs((await pager.boundingBox())!.y - smallPagerY)).toBeLessThanOrEqual(1);
+      expect(Math.abs((await searchRow.boundingBox())!.y - searchY)).toBeLessThanOrEqual(1);
+      await page.setViewportSize({ width: 1174, height: 1188 });
+      await verifyLayout();
+      await drawer.getByRole("button", { name: "标签筛选", exact: true }).click();
+      await expect(page.locator(".ant-popover:visible").getByText("Business", { exact: true }).first()).toBeVisible();
+      await drawer.getByRole("button", { name: "标签筛选", exact: true }).click();
+      await drawer.getByRole("button", { name: "取消", exact: true }).click();
+      await expect(drawer).toHaveCount(0);
+    }
+  });
+  await contract.step(contract.expectedIds("steps")[1], async () => {
+    await contract.assertion(contract.expectedIds("assertions")[0], async () => {
+      await page.getByRole("button", { name: "智能体", exact: true }).click();
+      await drawer.getByRole("option", { name: "Internal Analyst", exact: true }).click();
+      await drawer.getByRole("button", { name: "取消", exact: true }).click();
+      await expect(page.getByRole("button", { name: "Agent · Internal Analyst", exact: true })).toHaveCount(0);
+      await page.getByRole("button", { name: "智能体", exact: true }).click();
+      await expect(drawer.getByRole("option", { name: "Internal Analyst", exact: true })).toHaveAttribute("aria-selected", "false");
+      await drawer.getByRole("option", { name: "Internal Analyst", exact: true }).click();
+      await drawer.getByRole("button", { name: "标签筛选", exact: true }).click();
+      await page.locator(".ant-popover:visible").getByRole("combobox").last().click();
+      await page.locator(".ant-select-dropdown:visible").getByText("Finance", { exact: true }).click();
+      await expect.poll(() => state.filters.length).toBeGreaterThan(0);
+      await expect.poll(async () => {
+        const values = await page.locator(".ant-popover:visible .ant-select").last().boundingBox();
+        const options = await page.locator(".ant-select-dropdown:visible").boundingBox();
+        return options!.y - values!.y - values!.height;
+      }).toBeGreaterThanOrEqual(-1);
+      expect(state.filters[0].resource_ids).toEqual(["7", "8", "9", "10", "11", "12", "13"]);
+      await expect(drawer.getByRole("option", { name: "Internal Analyst", exact: true })).toHaveAttribute("aria-selected", "true");
+      await drawer.getByRole("tab", { name: "仓库", exact: true }).click();
+      await expect(drawer.getByRole("tab", { name: "我的", exact: true })).toBeVisible();
+      await drawer.getByRole("tab", { name: "我的", exact: true }).click();
+      await drawer.getByRole("button", { name: "确认选择", exact: true }).click();
+      await expect(drawer).toHaveCount(0);
+      await expect(page.getByRole("button", { name: "智能体", exact: true })).toHaveText("智能体");
+      await expect(page.getByRole("button", { name: "Agent · Internal Analyst", exact: true })).toBeVisible();
+      await page.getByRole("button", { name: "技能", exact: true }).click();
+      await expect(drawer.getByRole("option", { name: "Invoice Skill", exact: true })).toBeVisible();
+      await drawer.getByRole("tab", { name: "仓库", exact: true }).click();
+      await expect(drawer.getByRole("tab", { name: "我的", exact: true })).toBeVisible();
+      await drawer.getByRole("button", { name: "取消", exact: true }).click();
+      await expect(drawer).toHaveCount(0);
+      await page.setViewportSize({ width: 760, height: 900 });
+      await page.getByRole("button", { name: "知识库", exact: true }).click();
+      await expect(drawer.getByRole("option", { name: "Company Docs", exact: true })).toBeVisible();
+      const width = await drawer.evaluate(el => el.getBoundingClientRect().width);
+      expect(Math.round(width)).toBeLessThanOrEqual(760);
+      await drawer.getByRole("button", { name: "取消", exact: true }).click();
+    });
+    expect(state.writes).toEqual([]);
+    await expect(page.getByText("A2A", { exact: true })).toHaveCount(0);
+  });
+});

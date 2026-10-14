@@ -56,6 +56,8 @@ import type { FC } from "react";
 import { setPendingThreadOperationId } from "../adapter/conversation-thread-list-adapter";
 import { getVisibleThreadIds } from "./visible-thread-ids";
 import { getVisibleAgentThreads } from "./thread-list-visibility";
+import { hoistPinnedThreads, usePinnedThreads } from "./thread-pins";
+export { PinnedThreadsProvider } from "./thread-pins";
 
 // Conversation status indicator component
 const ConversationStatusIndicator: FC<{
@@ -97,66 +99,6 @@ interface BatchSelectionValue {
 }
 
 const BatchSelectionContext = createContext<BatchSelectionValue | null>(null);
-
-interface PinnedThreadsValue {
-  pinnedIds: ReadonlySet<string>;
-  togglePin: (id: string) => void;
-}
-
-const PinnedThreadsContext = createContext<PinnedThreadsValue | null>(null);
-const PINNED_THREADS_STORAGE_KEY = "chat.pinnedThreadIds";
-
-const loadPinnedThreadIds = (): ReadonlySet<string> => {
-  if (typeof window === "undefined") return new Set();
-  try {
-    const parsed: unknown = JSON.parse(
-      window.localStorage.getItem(PINNED_THREADS_STORAGE_KEY) || "[]"
-    );
-    return Array.isArray(parsed)
-      ? new Set(
-          parsed.filter((value): value is string => typeof value === "string")
-        )
-      : new Set();
-  } catch {
-    return new Set();
-  }
-};
-
-export const PinnedThreadsProvider: FC<{ children: ReactNode }> = ({
-  children,
-}) => {
-  const [pinnedIds, setPinnedIds] =
-    useState<ReadonlySet<string>>(loadPinnedThreadIds);
-  const togglePin = useCallback((id: string) => {
-    setPinnedIds((previous) => {
-      const next = new Set(previous);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      try {
-        window.localStorage.setItem(
-          PINNED_THREADS_STORAGE_KEY,
-          JSON.stringify([...next])
-        );
-      } catch {
-        // Storage failures are non-fatal for local pin state.
-      }
-      return next;
-    });
-  }, []);
-  const value = useMemo(
-    () => ({ pinnedIds, togglePin }),
-    [pinnedIds, togglePin]
-  );
-
-  return (
-    <PinnedThreadsContext.Provider value={value}>
-      {children}
-    </PinnedThreadsContext.Provider>
-  );
-};
-
-const usePinnedThreads = (): PinnedThreadsValue | null =>
-  useContext(PinnedThreadsContext);
 
 // Safe hook: returns null outside a provider so list items render normally
 // (no batch UI) when the sidebar is not wrapped in BatchSelectionProvider.
@@ -856,7 +798,6 @@ const useThreadListGroups = (
   const threadIds = useAuiState((s) => s.threads.threadIds);
   const threadItems = useAuiState((s) => s.threads.threadItems);
   const pinned = usePinnedThreads();
-  const pinnedIds = pinned?.pinnedIds;
 
   return useMemo<ThreadTimeGroup[] | null>(() => {
     const itemsById = new Map(
@@ -864,6 +805,7 @@ const useThreadListGroups = (
         threadItems as ReadonlyArray<{
           id: string;
           title?: string;
+          remoteId?: string;
           custom?: { lastMessageAt?: string };
         }>
       ).map((item) => [item.id, item])
@@ -877,6 +819,11 @@ const useThreadListGroups = (
     );
     if (query && !matches.some(Boolean)) return [];
 
+    const pinOrder = pinned?.getPinOrder;
+    const getPinOrder = pinOrder
+      ? ({ id }: ThreadTimeGroupEntry) => pinOrder(itemsById.get(id) ?? { id })
+      : undefined;
+
     const dates: (Date | undefined)[] = threadIds.map((id) => {
       const raw = itemsById.get(id)?.custom?.lastMessageAt;
       return raw ? new Date(raw) : undefined;
@@ -884,17 +831,21 @@ const useThreadListGroups = (
     if (!dates.some(Boolean)) {
       // No usable timestamps: keep the flat-list fallback for the unfiltered
       // view, and bucket search matches under a single label when filtering.
-      return [
-        {
-          label: "chat.threadList.recentConversations",
-          entries: threadIds
-            .map((id, index) => ({ id, index }))
-            .filter(
-              (_, index) =>
-                matches[index] && visibleThreadIds.includes(threadIds[index])
-            ),
-        },
-      ];
+      return hoistPinnedThreads(
+        [
+          {
+            label: "chat.threadList.recentConversations",
+            entries: threadIds
+              .map((id, index) => ({ id, index }))
+              .filter(
+                (_, index) =>
+                  matches[index] && visibleThreadIds.includes(threadIds[index])
+              ),
+          },
+        ],
+        ({ id }) => pinned?.isPinned(itemsById.get(id) ?? { id }) ?? false,
+        getPinOrder
+      );
     }
 
     const now = new Date();
@@ -926,32 +877,17 @@ const useThreadListGroups = (
       }
     }
 
-    // Hoist locally pinned conversations into a dedicated top group.
-    if (pinnedIds && pinnedIds.size > 0) {
-      const pinnedGroup: ThreadTimeGroup = {
-        label: "chat.threadList.pinned",
-        entries: [],
-      };
-      const remaining: ThreadTimeGroup[] = [];
-      for (const group of result) {
-        const kept = group.entries.filter((entry) => pinnedIds.has(entry.id));
-        const others = group.entries.filter(
-          (entry) => !pinnedIds.has(entry.id)
-        );
-        pinnedGroup.entries.push(...kept);
-        if (others.length > 0) remaining.push({ ...group, entries: others });
-      }
-      if (pinnedGroup.entries.length > 0) {
-        return [pinnedGroup, ...remaining];
-      }
-    }
-    return result;
+    return hoistPinnedThreads(
+      result,
+      ({ id }) => pinned?.isPinned(itemsById.get(id) ?? { id }) ?? false,
+      getPinOrder
+    );
   }, [
     threadIds,
     threadItems,
     generatedTitles,
     searchQuery,
-    pinnedIds,
+    pinned,
     visibleThreadIds,
   ]);
 };
@@ -1064,7 +1000,7 @@ const ThreadListItemContent: FC<ThreadListItemContentProps> = ({
     t("chat.thread.newChat");
 
   const pinned = usePinnedThreads();
-  const isPinned = pinned?.pinnedIds.has(thread.id) ?? false;
+  const isPinned = pinned?.isPinned(thread) ?? false;
 
   const handleRename = async (newTitle: string) => {
     const normalized = newTitle.trim();
@@ -1102,7 +1038,7 @@ const ThreadListItemContent: FC<ThreadListItemContentProps> = ({
     });
   };
 
-  const togglePinned = () => pinned?.togglePin(thread.id);
+  const togglePinned = () => pinned?.togglePin(thread);
 
   const renderMainContent = () => {
     if (isEditing) {
@@ -1160,7 +1096,13 @@ const ThreadListItemContent: FC<ThreadListItemContentProps> = ({
             : "flex h-10 min-w-0 flex-1 items-center gap-3 pl-8 pr-3 text-left text-[14px] text-[#595959]"
         }
       >
-        <div className="flex min-w-0 flex-1 items-center text-left">
+        <div className="flex min-w-0 flex-1 items-center gap-1.5 text-left">
+          {variant === "time" && isPinned && (
+            <PinIcon
+              aria-label={t("chat.threadList.pinned")}
+              className="size-3.5 shrink-0 text-muted-foreground"
+            />
+          )}
           <Tooltip>
             <TooltipTrigger asChild>
               <span className="min-w-0 flex-1 truncate text-left">{title}</span>
@@ -1210,12 +1152,16 @@ const ThreadListItemContent: FC<ThreadListItemContentProps> = ({
       {renderMainContent()}
       {!isEditing && !batchMode && (
         <ThreadListItemMorePrimitive.Root>
-          <ThreadListItemMorePrimitive.Trigger className="size-7 shrink-0 rounded-md opacity-0 group-hover/item:opacity-100">
+          <ThreadListItemMorePrimitive.Trigger
+            aria-label={t("chat.threadList.moreActions", { title })}
+            className="size-7 shrink-0 rounded-md opacity-0 group-hover/item:opacity-100 group-focus-within/item:opacity-100 focus-visible:opacity-100"
+          >
             <MoreHorizontalIcon className="size-4" />
           </ThreadListItemMorePrimitive.Trigger>
           <ThreadListItemMorePrimitive.Content className="z-50 rounded-md border bg-popover p-1 shadow-md">
             <ThreadListItemMorePrimitive.Item
               onSelect={togglePinned}
+              disabled={!pinned?.canPin(thread)}
               className="flex cursor-pointer items-center gap-2 rounded-sm px-2 py-1.5 text-sm hover:bg-accent"
             >
               {isPinned ? (

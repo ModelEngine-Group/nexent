@@ -4,6 +4,7 @@ import type { AssistantRuntime } from "@assistant-ui/react";
 import {
   changeAgentTopology,
   changeCreationThread,
+  returnFromCreation,
   // @ts-expect-error -- Node's TypeScript runner requires an explicit extension.
 } from "../features/workbench/conversationTransitions.ts";
 
@@ -31,6 +32,13 @@ function fixture({ messages = 1, running = false, uploading = false } = {}) {
       },
     },
     threads: {
+      getState: () => ({ mainThreadId: "ordinary", newThreadId: undefined }),
+      getItemById: () => ({
+        initialize: async () => events.push("reserve-draft"),
+      }),
+      switchToThread: async (id: string) => {
+        events.push(["restore-thread", id]);
+      },
       switchToNewThread: async () => {
         events.push("new-thread");
       },
@@ -48,6 +56,36 @@ test("UT-FE-WB-011 returning from creation opens one generic thread without copy
   assert.deepEqual(events, ["new-thread", "generic_chat"]);
   assert.deepEqual(runtime.thread.composer.getState(), originalDraft);
 });
+
+test("an unsent ordinary draft is reserved before starting a separate creation thread", async () => {
+  const { runtime, events } = fixture({ messages: 0 });
+  runtime.threads.getState = () =>
+    ({ mainThreadId: "ordinary", newThreadId: "ordinary" }) as ReturnType<
+      typeof runtime.threads.getState
+    >;
+  await changeCreationThread(runtime, () => events.push("agent_create"));
+  assert.deepEqual(events, ["reserve-draft", "new-thread", "agent_create"]);
+  await returnFromCreation(runtime, "ordinary", () =>
+    events.push("restore-config")
+  );
+  assert.deepEqual(events.slice(-2), [
+    ["restore-thread", "ordinary"],
+    "restore-config",
+  ]);
+});
+
+for (const options of [{ running: true }, { uploading: true }]) {
+  test(`creation and return reject an active run or upload: ${JSON.stringify(options)}`, async () => {
+    const { runtime, events } = fixture(options);
+    await assert.rejects(
+      changeCreationThread(runtime, () => events.push("unexpected"))
+    );
+    await assert.rejects(
+      returnFromCreation(runtime, "ordinary", () => events.push("unexpected"))
+    );
+    assert.deepEqual(events, []);
+  });
+}
 
 test("creation transition rejects overlaps and releases its lock after failure", async () => {
   const { runtime, events } = fixture();

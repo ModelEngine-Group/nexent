@@ -369,6 +369,7 @@ export function ResourcePagination({
 }
 
 export interface AddResourceDrawerProps {
+  size?: number | string;
   open: boolean;
   title: ReactNode;
   searchPlaceholder: string;
@@ -383,6 +384,11 @@ export interface AddResourceDrawerProps {
   onPageChange?: (page: number) => void;
   onClose: () => void;
   onConfirm?: () => void;
+  confirmDisabled?: boolean;
+  confirmLoading?: boolean;
+  footerLeading?: ReactNode;
+  confirmText?: string;
+  closeText?: string;
   onRemoveSelected?: (id: string) => void;
   onSearch?: (keyword: string) => void;
   onTagChange?: (value?: string) => void;
@@ -392,6 +398,8 @@ export interface AddResourceDrawerProps {
   allSelected?: boolean;
   selectedTrailing?: ReactNode;
   children: ReactNode;
+  contentClassName?: string;
+  paginationContent?: ReactNode;
   /** Use the same drawer shell with an existing resource controller's filters. */
   searchContent?: ReactNode;
   showSelection?: boolean;
@@ -419,6 +427,12 @@ export function AddResourceDrawer({
   onPageChange,
   onClose,
   onConfirm,
+  confirmDisabled = false,
+  size = 760,
+  confirmLoading = false,
+  footerLeading,
+  confirmText,
+  closeText,
   onRemoveSelected,
   onSearch,
   onTagChange,
@@ -428,6 +442,8 @@ export function AddResourceDrawer({
   allSelected,
   selectedTrailing,
   children,
+  contentClassName,
+  paginationContent,
   searchContent,
   showSelection = true,
   showListHeader = true,
@@ -439,7 +455,7 @@ export function AddResourceDrawer({
     <Drawer
       open={open}
       placement="right"
-      size={760}
+      size={size}
       onClose={onClose}
       closable={false}
       mask={{ closable: false }}
@@ -510,31 +526,38 @@ export function AddResourceDrawer({
         />
       )}
 
-      <div className="min-h-0 flex-1 overflow-y-auto">{children}</div>
+      <div className={cn("min-h-0 flex-1 overflow-y-auto", contentClassName)}>
+        {children}
+      </div>
 
-      {showPagination && (
-        <ResourcePagination
-          total={total}
-          current={page}
-          onPageChange={onPageChange ?? (() => {})}
-        />
-      )}
+      {paginationContent !== undefined
+        ? paginationContent
+        : showPagination && (
+            <ResourcePagination
+              total={total}
+              current={page}
+              onPageChange={onPageChange ?? (() => {})}
+            />
+          )}
 
       <div className="flex shrink-0 justify-end gap-3">
+        {footerLeading && <div className="mr-auto">{footerLeading}</div>}
         <button
           type="button"
           onClick={onClose}
           className="h-8 w-[89px] cursor-pointer rounded-[2px] border border-[#C9C9C9] bg-white text-[14px] leading-[22px] text-[#191919]"
         >
-          {t("resourcePicker.close", "关闭")}
+          {closeText ?? t("resourcePicker.close", "关闭")}
         </button>
         {showConfirm && (
           <button
             type="button"
             onClick={onConfirm}
+            disabled={confirmDisabled || confirmLoading}
+            aria-busy={confirmLoading}
             className="h-8 w-[89px] cursor-pointer rounded-[2px] border-0 bg-[#1476FF] text-[14px] leading-[22px] text-white"
           >
-            {t("resourcePicker.confirm", "确认")}
+            {confirmText ?? t("resourcePicker.confirm", "确认")}
           </button>
         )}
       </div>

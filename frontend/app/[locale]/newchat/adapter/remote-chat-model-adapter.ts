@@ -1,5 +1,8 @@
 "use client";
 
+import type { ReasoningEffort } from "@/types/modelConfig";
+import { isReasoningEffort } from "@/lib/modelReasoning";
+
 import type {
   ChatModelAdapter,
   ChatModelRunOptions,
@@ -1577,7 +1580,7 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
         requestBody.generation_config = {
           deep_thinking: modelContext.deepThinking,
           ...(modelContext.deepThinking &&
-          ["low", "medium", "high"].includes(modelContext.reasoningEffort ?? "")
+          isReasoningEffort(modelContext.reasoningEffort)
             ? { thinking_effort: modelContext.reasoningEffort }
             : {}),
         };
@@ -1684,7 +1687,7 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
           generation_config: requestBody.generation_config as
             | {
                 deep_thinking: boolean;
-                thinking_effort?: "low" | "medium" | "high";
+                thinking_effort?: ReasoningEffort;
               }
             | undefined,
           metadata: custom?.runtimeMetadata,

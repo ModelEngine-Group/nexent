@@ -1,5 +1,8 @@
 "use client";
 
+import type { ReasoningEffort } from "@/types/modelConfig";
+import { isReasoningEffort } from "@/lib/modelReasoning";
+
 import {
   useMemo,
   useState,
@@ -15,6 +18,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { App, Modal, Spin } from "antd";
 import log from "@/lib/logger";
 import { SelectedResourceChips } from "@/features/workbench/components/SelectedResourceChips";
+import type { ModelParameterSettingsControl } from "@/types/modelParameterSettings";
 import { CreationExamples } from "@/features/workbench/components/CreationExamples";
 import {
   Send,
@@ -71,10 +75,6 @@ import {
 } from "@/components/ui/popover";
 import { ModelSelector, type ModelOption } from "../ui/model-selector";
 import { ComposerAttachments, ComposerAddAttachment } from "../ui/attachment";
-import {
-  useWorkbenchComposerTag,
-  setWorkbenchComposerTag,
-} from "@/features/workbench/lib/workbench-composer-tag";
 import {
   Collapsible,
   CollapsibleContent,
@@ -172,11 +172,12 @@ export interface ComposerProps {
   onModelChange?: (modelId: string) => void;
   deepThinking?: boolean;
   onDeepThinkingChange?: (enabled: boolean) => void;
-  thinkingEffort?: "low" | "medium" | "high";
-  onThinkingEffortChange?: (effort: "low" | "medium" | "high") => void;
+  thinkingEffort?: ReasoningEffort;
+  onThinkingEffortChange?: (effort: ReasoningEffort) => void;
   chatMode: ChatMode;
   onChatModeChange: (mode: ChatMode) => void;
   showModelSelector?: boolean;
+  modelParameterSettings?: ModelParameterSettingsControl;
   isDictationConfigured?: boolean;
   knowledgeScope?: ConversationKnowledgeScope | null;
   knowledgePreview?: KnowledgeScopeEffectivePreview | null;
@@ -206,17 +207,24 @@ export interface ComposerProps {
 const TooltipWrapper: FC<{
   tooltip: string;
   side?: "top" | "bottom" | "left" | "right";
+  wrapTrigger?: boolean;
   children: ReactNode;
-}> = ({ tooltip, side = "bottom", children }) => {
+}> = ({ tooltip, side = "bottom", wrapTrigger = false, children }) => {
   return (
     <Tooltip>
-      <TooltipTrigger asChild>{children}</TooltipTrigger>
+      <TooltipTrigger asChild>
+        {wrapTrigger ? (
+          <span className="inline-flex">{children}</span>
+        ) : (
+          children
+        )}
+      </TooltipTrigger>
       <TooltipContent side={side}>{tooltip}</TooltipContent>
     </Tooltip>
   );
 };
 
-const PlanView: FC = () => {
+const PlanView: FC<{ className?: string }> = ({ className }) => {
   const { t } = useTranslation();
   const plan = useSyncExternalStore<PlanData | null>(
     planRegistry.subscribe,
@@ -229,7 +237,7 @@ const PlanView: FC = () => {
   return (
     <Collapsible asChild defaultOpen>
       <section
-        className="border-b border-border"
+        className={cn("border-b border-border", className)}
         aria-label={t("chat.composer.plan")}
       >
         <CollapsibleTrigger asChild>
@@ -311,22 +319,6 @@ const SkillComposerDirectiveChip: FC<LexicalDirectiveChipProps> = ({
   />
 );
 
-const WorkbenchComposerTagPrefix: FC = () => {
-  const tag = useWorkbenchComposerTag();
-  const text = useAuiState((state) => state.composer.text);
-
-  useEffect(() => {
-    if (!text?.trim()) setWorkbenchComposerTag(null);
-  }, [text]);
-
-  if (!tag || !text?.trim()) return null;
-  return (
-    <span className="shrink-0 text-xs font-normal leading-5 text-[#197BD5]">
-      {tag}
-    </span>
-  );
-};
-
 // Dot colors for the skill quick panel rows (stable per skill name).
 const SKILL_DOT_COLORS = [
   "#14b8a6",
@@ -377,6 +369,7 @@ export const Composer: FC<ComposerProps> = ({
   chatMode,
   onChatModeChange,
   showModelSelector = true,
+  modelParameterSettings,
   isDictationConfigured = false,
   knowledgeScope = null,
   knowledgePreview = null,
@@ -541,10 +534,11 @@ export const Composer: FC<ComposerProps> = ({
   const [selectedSkillNames, setSelectedSkillNames] = useState<string[]>([]);
   // Overflow menu ("＋") with second-level submenus for the workbench
   // toolbar, so right-side functions stay reachable on narrow windows.
-  const [plusOpen, setPlusOpen] = useState(false);
-  const [plusSkillOpen, setPlusSkillOpen] = useState(false);
-  const [plusKnowledgeOpen, setPlusKnowledgeOpen] = useState(false);
+
   const isRunning = useAuiState((state) => state.thread.isRunning);
+  const modelParameterScope = useAuiState(
+    (state) => state.threads?.mainThreadId
+  );
   const hasAttachments = useAuiState(
     (state) => state.composer.attachments.length > 0
   );
@@ -732,11 +726,7 @@ export const Composer: FC<ComposerProps> = ({
         newChatDesign && "mx-auto max-w-[890px]"
       )}
     >
-      {/* Creation mode entry buttons ("Skill 创建 / Agent创建") are hidden per
-          the workbench design; creation flows remain reachable elsewhere. */}
-      {workbenchPresentation && !compact && creationMode && (
-        <div className="mb-2 h-7" aria-hidden="true" />
-      )}
+      {workbenchPresentation && !compact && workbenchPresentation.actions}
       <fieldset
         style={
           newChatDesign ? { outlineColor: "rgba(25, 25, 25, 0.08)" } : undefined
@@ -765,11 +755,9 @@ export const Composer: FC<ComposerProps> = ({
           </p>
         ) : null}
         {!compact && !creationMode && !configurationLayout && !debugLayout && (
-          <div
+          <PlanView
             className={cn(workbenchPresentation && !newChatDesign && "-mx-4")}
-          >
-            <PlanView />
-          </div>
+          />
         )}
         {configurationLayout && (
           <div className="flex px-4 pt-4">
@@ -779,18 +767,13 @@ export const Composer: FC<ComposerProps> = ({
             </span>
           </div>
         )}
-        {creationMode && (
+        {creationMode && !workbenchPresentation && (
           <div className="flex items-center border-b border-border px-3 py-2">
-            <button
-              type="button"
-              onClick={workbenchPresentation?.onExitCreation}
-              disabled={isRunning}
-              className="inline-flex items-center gap-2 rounded-full bg-primary/10 px-3 py-1 text-xs text-primary"
-              aria-label="退出创建模式"
-            >
-              {creationMode === "skill_create" ? "Skill 创建" : "Agent创建"}
-              <span aria-hidden>×</span>
-            </button>
+            <span className="inline-flex items-center gap-2 rounded-full bg-primary/10 px-3 py-1 text-xs text-primary">
+              {creationMode === "skill_create"
+                ? t("workbench.controls.skillCreate", "技能创建")
+                : t("workbench.controls.agentCreate", "智能体创建")}
+            </span>
           </div>
         )}
 
@@ -909,9 +892,6 @@ export const Composer: FC<ComposerProps> = ({
                   workbenchPresentation && !newChatDesign && "flex items-start"
                 )}
               >
-                {workbenchPresentation && !newChatDesign && (
-                  <WorkbenchComposerTagPrefix />
-                )}
                 <ComposerPrimitive.Input
                   data-workbench-composer
                   aria-label={t("chat.composer.placeholder")}
@@ -981,10 +961,7 @@ export const Composer: FC<ComposerProps> = ({
               className={cn(
                 "relative flex items-center justify-between gap-2",
                 newChatDesign && "min-h-9 flex-wrap sm:flex-nowrap",
-                workbenchPresentation &&
-                  (newChatDesign
-                    ? "flex-wrap sm:flex-nowrap"
-                    : "h-10 flex-wrap sm:flex-nowrap"),
+                workbenchPresentation && "min-h-10 flex-wrap",
                 debugLayout && "!mx-0 !mb-0 !mt-1 !h-10"
               )}
             >
@@ -1342,7 +1319,12 @@ export const Composer: FC<ComposerProps> = ({
                 </div>
               ) : null}
 
-              <div className="flex shrink-0 items-center gap-1">
+              <div
+                className={cn(
+                  "flex items-center gap-1",
+                  workbenchPresentation ? "min-w-0 flex-wrap" : "shrink-0"
+                )}
+              >
                 {(configurationLayout || debugLayout) && (
                   <ComposerAddAttachment
                     className={
@@ -1367,97 +1349,6 @@ export const Composer: FC<ComposerProps> = ({
                     <PlusIcon className="size-4" aria-hidden />
                   </button>
                 )}
-                {!compact && workbenchResources && workbenchPresentation && (
-                  <TooltipWrapper tooltip={t("chat.composer.more")}>
-                    <Popover open={plusOpen} onOpenChange={setPlusOpen}>
-                      <PopoverTrigger asChild>
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="icon"
-                          className="-ml-1.5 size-8 shrink-0 p-0"
-                          disabled={isRunning}
-                        >
-                          <PlusIcon className="size-5" />
-                        </Button>
-                      </PopoverTrigger>
-                      <PopoverContent align="start" className="w-56 p-1">
-                        <Popover
-                          open={plusSkillOpen}
-                          onOpenChange={setPlusSkillOpen}
-                        >
-                          <PopoverTrigger asChild>
-                            <button
-                              type="button"
-                              className="flex h-10 w-full items-center gap-2 rounded-lg px-2 py-2 text-base font-normal leading-6 text-foreground hover:bg-accent"
-                            >
-                              <SkillStackIcon className="size-4" />
-                              {t("chat.composer.skills")}
-                              <ChevronRight className="ml-auto size-4 opacity-50" />
-                            </button>
-                          </PopoverTrigger>
-                          <PopoverContent
-                            side="right"
-                            align="start"
-                            className="w-80 p-0"
-                          >
-                            {workbenchSkillPopover}
-                          </PopoverContent>
-                        </Popover>
-                        <Popover
-                          open={plusKnowledgeOpen}
-                          onOpenChange={setPlusKnowledgeOpen}
-                        >
-                          <PopoverTrigger asChild>
-                            <button
-                              type="button"
-                              className="flex h-10 w-full items-center gap-2 rounded-lg px-2 py-2 text-base font-normal leading-6 text-foreground hover:bg-accent"
-                            >
-                              <KnowledgeBookIcon className="size-4" />
-                              {t("chat.composer.knowledgeBase")}
-                              <ChevronRight className="ml-auto size-4 opacity-50" />
-                            </button>
-                          </PopoverTrigger>
-                          <PopoverContent
-                            side="right"
-                            align="start"
-                            className="w-80 p-0"
-                          >
-                            {workbenchKnowledgePopover}
-                          </PopoverContent>
-                        </Popover>
-                        <ComposerPrimitive.AddAttachment asChild>
-                          <button
-                            type="button"
-                            className="flex h-10 w-full items-center gap-2 rounded-lg px-2 py-2 text-base font-normal leading-6 text-foreground hover:bg-accent"
-                            onClick={() => setPlusOpen(false)}
-                          >
-                            <Paperclip className="size-4" />
-                            {t("chat.composer.uploadFile")}
-                          </button>
-                        </ComposerPrimitive.AddAttachment>
-                        <ComposerPlusItem
-                          icon={<MessageCircleMore className="size-4" />}
-                          label={t("chat.composer.planningMode")}
-                          active={chatMode === "planning"}
-                          onSelect={() => {
-                            onChatModeChange("planning");
-                            setPlusOpen(false);
-                          }}
-                        />
-                        <ComposerPlusItem
-                          icon={<Play className="size-4" />}
-                          label={t("chat.composer.executionMode")}
-                          active={chatMode === "execution"}
-                          onSelect={() => {
-                            onChatModeChange("execution");
-                            setPlusOpen(false);
-                          }}
-                        />
-                      </PopoverContent>
-                    </Popover>
-                  </TooltipWrapper>
-                )}
                 {!compact && !creationMode && workbenchPresentation && (
                   <WorkbenchPlanningMenu
                     chatMode={chatMode}
@@ -1465,7 +1356,50 @@ export const Composer: FC<ComposerProps> = ({
                     disabled={isRunning}
                   />
                 )}
-                {!compact && workbenchResources && (
+                {!compact &&
+                  !creationMode &&
+                  workbenchResources &&
+                  workbenchPresentation && (
+                    <>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        disabled={isRunning || disabled}
+                        className="text-sm font-normal"
+                        onClick={workbenchResources.onSelectAgent}
+                        aria-label={t("workbench.controls.agents", "智能体")}
+                      >
+                        <Bot className="size-5" />
+                        {t("workbench.controls.agents", "智能体")}
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        disabled={isRunning || disabled}
+                        className="text-sm font-normal"
+                        onClick={() => setKnowledgeModalOpen(true)}
+                        aria-label={t("chat.composer.knowledgeBase")}
+                      >
+                        <KnowledgeBookIcon className="size-5" />
+                        {t("chat.composer.knowledgeBase")}
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        disabled={isRunning || disabled}
+                        className="text-sm font-normal"
+                        onClick={onOpenWorkbenchSkillPicker}
+                        aria-label={t("chat.composer.skills")}
+                      >
+                        <SkillStackIcon className="size-5" />
+                        {t("chat.composer.skills")}
+                      </Button>
+                    </>
+                  )}
+                {!compact && workbenchResources && !workbenchPresentation && (
                   <>
                     <Popover>
                       <PopoverTrigger asChild>
@@ -1510,8 +1444,8 @@ export const Composer: FC<ComposerProps> = ({
                 {!newChatDesign &&
                   !compact &&
                   !creationMode &&
-                  (workbenchPresentation ||
-                    knowledgeCapabilities?.sources.local.enabled ||
+                  !workbenchPresentation &&
+                  (knowledgeCapabilities?.sources.local.enabled ||
                     knowledgeCapabilities?.sources.aidp.enabled ||
                     knowledgeScope) && (
                     <Popover>
@@ -1562,12 +1496,6 @@ export const Composer: FC<ComposerProps> = ({
                       ) : null}
                     </Popover>
                   )}
-                {!compact && workbenchPresentation && (
-                  <ComposerAddAttachment
-                    label={t("chat.composer.uploadFile")}
-                    icon={<Paperclip className="size-5" />}
-                  />
-                )}
                 {!compact &&
                   !newChatDesign &&
                   !workbenchPresentation &&
@@ -1600,19 +1528,17 @@ export const Composer: FC<ComposerProps> = ({
                 {showModelSelector && (
                   <ModelSelector
                     models={models}
+                    parameterSettings={modelParameterSettings}
+                    parameterSettingsScopeKey={modelParameterScope}
+                    parameterSettingsDisabled={disabled || isRunning}
                     showEffort={newChatDesign || Boolean(workbenchPresentation)}
                     value={selectedModelId}
                     onValueChange={onModelChange}
                     deepThinking={deepThinking}
                     onDeepThinkingChange={onDeepThinkingChange}
                     effort={thinkingEffort}
-                    defaultEffort={newChatDesign ? "low" : undefined}
                     onEffortChange={(value) => {
-                      if (
-                        value === "low" ||
-                        value === "medium" ||
-                        value === "high"
-                      )
+                      if (isReasoningEffort(value))
                         onThinkingEffortChange?.(value);
                     }}
                     variant="ghost"
@@ -1621,10 +1547,17 @@ export const Composer: FC<ComposerProps> = ({
                       "min-w-0 text-xs text-foreground [&_[data-slot=model-selector-value]]:text-foreground",
                       !debugLayout &&
                         workbenchPresentation &&
-                        "text-base leading-6 [&_[data-slot=model-selector-value]]:text-base [&_[data-slot=model-selector-value]]:leading-6",
+                        "text-sm font-normal leading-5 [&_[data-slot=model-selector-value]]:text-sm [&_[data-slot=model-selector-value]]:leading-5 [&_[data-slot=model-selector-value]_span]:font-normal",
                       debugLayout &&
                         "min-w-0 max-w-[180px] text-base text-[#191919] [&_[data-slot=model-selector-value]]:text-base [&_[data-slot=model-selector-value]]:text-[#191919]"
                     )}
+                  />
+                )}
+                {!compact && workbenchPresentation && (
+                  <ComposerAddAttachment
+                    tooltip={t("workbench.controls.uploadAttachment")}
+                    icon={<Paperclip className="size-5" />}
+                    className="size-8 text-muted-foreground"
                   />
                 )}
                 {!compact && (
@@ -1657,7 +1590,9 @@ export const Composer: FC<ComposerProps> = ({
                           </ComposerPrimitive.Dictate>
                         </span>
                       </TooltipTrigger>
-                      <TooltipContent>
+                      <TooltipContent
+                        side={workbenchPresentation ? "bottom" : "top"}
+                      >
                         {isDictationConfigured
                           ? t("chat.composer.voiceInput")
                           : t("chat.composer.voiceInputDisabled")}
@@ -1680,7 +1615,9 @@ export const Composer: FC<ComposerProps> = ({
                           </Button>
                         </ComposerPrimitive.StopDictation>
                       </TooltipTrigger>
-                      <TooltipContent>
+                      <TooltipContent
+                        side={workbenchPresentation ? "bottom" : "top"}
+                      >
                         {t("chat.composer.stopVoiceInput")}
                       </TooltipContent>
                     </Tooltip>
@@ -1699,6 +1636,8 @@ export const Composer: FC<ComposerProps> = ({
           </ComposerPrimitive.Root>
           {!compact && (
             <ConversationKnowledgeScopeModal
+              presentation={workbenchPresentation ? "drawer" : "modal"}
+              disabled={isRunning || disabled}
               open={knowledgeModalOpen}
               value={knowledgeScope}
               capabilities={knowledgeCapabilities}
@@ -1766,11 +1705,8 @@ export const Composer: FC<ComposerProps> = ({
         />
       )}
       {creationMode && !compact && workbenchPresentation && (
-        <div className="absolute inset-x-0 top-full z-10">
-          <CreationExamples
-            mode={creationMode}
-            onBack={workbenchPresentation.onExitCreation}
-          />
+        <div className="mt-6">
+          <CreationExamples mode={creationMode} />
         </div>
       )}
       {sendError ? (
@@ -1802,7 +1738,7 @@ const WorkbenchPlanningMenu: FC<{
           variant="ghost"
           size="sm"
           disabled={disabled}
-          className="h-8 shrink-0 gap-1.5 px-2 text-base leading-6 text-foreground"
+          className="h-8 shrink-0 gap-1.5 px-2 text-sm font-normal leading-5 text-foreground"
         >
           {chatMode === "planning" ? (
             <MessageCircleMore className="size-5" />
@@ -1820,7 +1756,7 @@ const WorkbenchPlanningMenu: FC<{
           <button
             key={option.value}
             type="button"
-            className="flex h-10 w-full items-center justify-between gap-2 rounded-lg px-2 py-2 text-base font-normal leading-6 hover:bg-accent"
+            className="flex h-10 w-full items-center justify-between gap-2 rounded-lg px-2 py-2 text-sm font-normal leading-5 hover:bg-accent"
             onClick={() => {
               onChatModeChange(option.value);
               setOpen(false);
@@ -1861,7 +1797,11 @@ const ComposerSendOrCancel: FC<{
   return (
     <>
       <AuiIf condition={(s) => s.thread.isRunning}>
-        <TooltipWrapper tooltip={t("chat.composer.stopGenerating")} side="top">
+        <TooltipWrapper
+          tooltip={t("chat.composer.stopGenerating")}
+          side={workbench ? "bottom" : "top"}
+          wrapTrigger={workbench}
+        >
           <ComposerPrimitive.Cancel
             asChild
             aria-label={t("chat.composer.stopGenerating")}
@@ -1886,7 +1826,11 @@ const ComposerSendOrCancel: FC<{
         </TooltipWrapper>
       </AuiIf>
       <AuiIf condition={(s) => !s.thread.isRunning}>
-        <TooltipWrapper tooltip={t("chat.composer.send")} side="top">
+        <TooltipWrapper
+          tooltip={t("chat.composer.send")}
+          side={workbench ? "bottom" : "top"}
+          wrapTrigger={workbench}
+        >
           <ComposerPrimitive.Send asChild onClick={onSend}>
             <Button
               size="icon"
@@ -1897,7 +1841,7 @@ const ComposerSendOrCancel: FC<{
                   : newChatDesign
                     ? "border-0 bg-[#191919] text-white hover:bg-[#191919]/90 disabled:bg-[#d9d9d9] disabled:text-white aria-disabled:bg-[#d9d9d9] aria-disabled:text-white [&_svg]:size-4"
                     : workbench &&
-                      "size-[30px] bg-[#191919] text-white hover:bg-[#191919]/90 disabled:opacity-70"
+                      "ml-0 rounded-md border-0 bg-transparent text-[#0067d1] hover:bg-transparent hover:text-[#0067d1]/90 disabled:bg-transparent disabled:text-muted-foreground disabled:opacity-50 aria-disabled:bg-transparent aria-disabled:text-muted-foreground [&_svg]:size-4"
               )}
               disabled={disabled || !hasText}
               aria-label={t("chat.composer.send")}
@@ -1907,7 +1851,7 @@ const ComposerSendOrCancel: FC<{
               ) : newChatDesign ? (
                 <Send className="-rotate-12" />
               ) : workbench ? (
-                <Send className="size-5" />
+                <Send className="size-4" />
               ) : (
                 <ArrowUp className="size-5" />
               )}

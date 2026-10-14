@@ -1,5 +1,8 @@
 "use client";
 
+import type { ReasoningEffort } from "@/types/modelConfig";
+import type { ModelParameterSettingsControl } from "@/types/modelParameterSettings";
+
 import {
   useCallback,
   useEffect,
@@ -95,7 +98,6 @@ import { ToolFallback } from "../ui/tool-fallback";
 import { ToolRecommendations } from "../ui/tool-recommendations";
 import { AgentDraftCard } from "../ui/agent-draft-card";
 import { AgentCreationResultCard } from "@/features/workbench/components/CreationResultCards";
-import { WorkbenchLandingExamples } from "@/features/workbench/components/WorkbenchLandingExamples";
 import { RequirementClarificationCard } from "../ui/requirement-clarification-card";
 import { InstalledResourceBindingCard } from "../ui/installed-resource-binding-card";
 import { SuggestedResourceInstallationCard } from "../ui/suggested-resource-installation-card";
@@ -194,11 +196,12 @@ export interface ThreadProps {
   onModelChange?: (modelId: string) => void;
   deepThinking?: boolean;
   onDeepThinkingChange?: (enabled: boolean) => void;
-  thinkingEffort?: "low" | "medium" | "high";
-  onThinkingEffortChange?: (effort: "low" | "medium" | "high") => void;
+  thinkingEffort?: ReasoningEffort;
+  onThinkingEffortChange?: (effort: ReasoningEffort) => void;
   chatMode: ChatMode;
   onChatModeChange: (mode: ChatMode) => void;
   showModelSelector?: boolean;
+  modelParameterSettings?: ModelParameterSettingsControl;
   modelSelectionScope?: ModelSelectionScope;
   showConversationTitle?: boolean;
   isDictationConfigured?: boolean;
@@ -264,6 +267,7 @@ export const Thread: FC<ThreadProps> = ({
   chatMode,
   onChatModeChange,
   showModelSelector = true,
+  modelParameterSettings,
   modelSelectionScope = "agent",
   showConversationTitle = true,
   isDictationConfigured = false,
@@ -527,6 +531,7 @@ export const Thread: FC<ThreadProps> = ({
         chatMode={chatMode}
         onChatModeChange={onChatModeChange}
         showModelSelector={showModelSelector}
+        modelParameterSettings={modelParameterSettings}
         showConversationTitle={showConversationTitle}
         isDictationConfigured={isDictationConfigured}
         knowledgeScope={knowledgeScope}
@@ -637,11 +642,12 @@ interface ThreadViewProps {
   onModelChange?: (modelId: string) => void;
   deepThinking?: boolean;
   onDeepThinkingChange?: (enabled: boolean) => void;
-  thinkingEffort?: "low" | "medium" | "high";
-  onThinkingEffortChange?: (effort: "low" | "medium" | "high") => void;
+  thinkingEffort?: ReasoningEffort;
+  onThinkingEffortChange?: (effort: ReasoningEffort) => void;
   chatMode: ChatMode;
   onChatModeChange: (mode: ChatMode) => void;
   showModelSelector: boolean;
+  modelParameterSettings?: ModelParameterSettingsControl;
   showConversationTitle: boolean;
   isDictationConfigured: boolean;
   knowledgeScope: ConversationKnowledgeScope | null;
@@ -705,6 +711,7 @@ const ThreadView: FC<ThreadViewProps> = ({
   chatMode,
   onChatModeChange,
   showModelSelector,
+  modelParameterSettings,
   showConversationTitle,
   isDictationConfigured,
   knowledgeScope,
@@ -768,7 +775,7 @@ const ThreadView: FC<ThreadViewProps> = ({
         className={cn(
           "flex h-full min-w-0 flex-1 flex-col",
           newChatDesign && "relative [container-type:size]",
-          workbenchLanding && "overflow-y-auto pb-[10vh]"
+          workbenchLanding && "overflow-y-auto pb-[10vh] [container-type:size]"
         )}
       >
         {newChatDesign && !hasMessages && <NewChatWelcomeBackdrop />}
@@ -887,7 +894,7 @@ const ThreadView: FC<ThreadViewProps> = ({
               !hasMessages &&
               "!max-w-none !overflow-hidden !p-0",
             workbenchLanding &&
-              "relative mt-auto flex-none max-w-[890px] overflow-visible px-4 pb-0 pt-6 sm:px-8"
+              "relative mt-[max(24px,calc(50cqh-220px))] flex-none max-w-[890px] overflow-visible px-4 pb-0 pt-6 sm:px-8"
           )}
         >
           {workbenchLanding && (
@@ -933,7 +940,7 @@ const ThreadView: FC<ThreadViewProps> = ({
               newChatDesign && "!max-w-[922px] shrink-0 !gap-0 !px-4 !pb-6",
               debugLayout && "!max-w-none !shrink-0 !gap-4 !px-0 !pb-0",
               workbenchLanding &&
-                "static mb-auto max-w-[890px] gap-4 px-4 pb-6 pt-8 sm:px-8"
+                "static shrink-0 max-w-[890px] gap-4 px-4 pb-6 pt-8 sm:px-8"
             )}
           >
             {!newChatDesign && (!debugLayout || hasMessages) && (
@@ -961,6 +968,7 @@ const ThreadView: FC<ThreadViewProps> = ({
               chatMode={chatMode}
               onChatModeChange={onChatModeChange}
               showModelSelector={showModelSelector}
+              modelParameterSettings={modelParameterSettings}
               isDictationConfigured={isDictationConfigured}
               knowledgeScope={knowledgeScope}
               knowledgePreview={knowledgePreview}
@@ -980,10 +988,6 @@ const ThreadView: FC<ThreadViewProps> = ({
               workbenchSkillPopover={workbenchSkillPopover}
               workbenchKnowledgePopover={workbenchKnowledgePopover}
             />
-            {workbenchLanding &&
-              workbenchPresentation?.mode === "generic_chat" && (
-                <WorkbenchLandingExamples />
-              )}
             {footerContent}
           </ThreadPrimitive.ViewportFooter>
         )}

@@ -12,6 +12,15 @@ export interface ConversationListParams {
   conversationType?: "agent_chat" | "workbench";
 }
 
+export interface WorkbenchPinItem extends ConversationListItem {
+  pinned_at: string;
+}
+
+export interface WorkbenchPins {
+  /** Server order: newest pin first. */
+  items: WorkbenchPinItem[];
+}
+
 export interface ConversationListResponse {
   code: number;
   data: ConversationListPage;

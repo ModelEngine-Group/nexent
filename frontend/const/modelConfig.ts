@@ -57,6 +57,17 @@ export const MODEL_STATUS = {
 
 export const DEFAULT_REASONING_EFFORT = "auto" as const;
 
+export const REASONING_EFFORT_VALUES = [
+  "auto",
+  "none",
+  "minimal",
+  "low",
+  "medium",
+  "high",
+  "xhigh",
+  "max",
+] as const;
+
 // Icon type constants
 export const ICON_TYPES = {
   PRESET: "preset",

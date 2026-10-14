@@ -10,6 +10,184 @@ import {
 import type { Agent } from "@/types/agentConfig";
 import type { ModelOption } from "@/types/modelConfig";
 
+const reasoningAgentFixture: Agent = {
+  id: "7",
+  name: "Reasoning Agent",
+  description: "Fixture",
+  model: "qwen",
+  max_step: 5,
+  provide_run_summary: false,
+  tools: [],
+};
+const reasoningModelFixture: ModelOption = {
+  id: 11,
+  name: "qwen",
+  displayName: "Reasoning Model",
+  type: "llm",
+  source: "openai",
+  apiKey: "",
+  apiUrl: "https://example.invalid",
+  maxTokens: 0,
+  connect_status: "available",
+};
+it.each([false, true, undefined])(
+  "capability levels are identical in both scopes with saved thinking=%s",
+  (enableThinking) => {
+    const capability = {
+      status: "supported" as const,
+      control: "effort" as const,
+      levels: ["low", "medium", "xhigh"] as const,
+      source: "catalog" as const,
+    };
+    const catalog: ModelOption[] = [
+      {
+        ...reasoningModelFixture,
+        id: 11,
+        name: "qwen",
+        type: "llm",
+        connect_status: "available",
+        enableThinking,
+        reasoningCapability: { ...capability, levels: [...capability.levels] },
+      },
+    ];
+    const agent: Agent = {
+      ...reasoningAgentFixture,
+      id: "7",
+      model_ids: [11],
+      model_names: ["qwen"],
+      model_params_override: {
+        "11": { extra_params: { enable_thinking: enableThinking } },
+      },
+    };
+    const tenant = deriveModelOptions(agent, catalog, "tenant")[0];
+    const configured = deriveModelOptions(agent, catalog, "agent")[0];
+    expect(configured.efforts).toEqual(tenant.efforts);
+    expect(configured.efforts).toEqual(
+      ["auto", "low", "medium", "xhigh"].map((id) => ({ id, name: id }))
+    );
+  }
+);
+
+it("resolves stale defaults while retaining valid overrides and other Workbench parameters", () => {
+  const model: ModelOption = {
+    ...reasoningModelFixture,
+    id: 11,
+    name: "qwen",
+    type: "llm",
+    connect_status: "available",
+    reasoningCapability: {
+      status: "supported",
+      control: "effort",
+      levels: ["low", "xhigh"],
+      source: "catalog",
+    },
+  };
+  const config = {
+    ...initialWorkbenchState.config,
+    model_id: 11,
+    generation_config: {
+      deep_thinking: true,
+      thinking_effort: "high" as const,
+      temperature: 0.7,
+      top_p: 0.81,
+      requested_output_tokens: 2000,
+    },
+  };
+  expect(withDefaultWorkbenchModel(config, [model]).generation_config).toEqual({
+    ...config.generation_config,
+    thinking_effort: "low",
+  });
+  const valid = {
+    ...config,
+    generation_config: {
+      ...config.generation_config,
+      thinking_effort: "xhigh" as const,
+    },
+  };
+  expect(withDefaultWorkbenchModel(valid, [model])).toBe(valid);
+  const agent: Agent = {
+    ...reasoningAgentFixture,
+    id: "7",
+    model_ids: [11],
+    model_names: ["qwen"],
+    model_params_override: {
+      "11": {
+        extra_params: { enable_thinking: false, reasoning_effort: "high" },
+      },
+    },
+  };
+  expect(deriveModelOptions(agent, [model])[0].defaultEffort).toBe("low");
+  agent.model_params_override = {
+    "11": {
+      extra_params: { enable_thinking: false, reasoning_effort: "xhigh" },
+    },
+  };
+  expect(deriveModelOptions(agent, [model])[0].defaultEffort).toBe("xhigh");
+});
+
+it.each(["unsupported", "unknown"] as const)(
+  "does not invent effort levels for %s capability",
+  (status) => {
+    const model: ModelOption = {
+      ...reasoningModelFixture,
+      id: 11,
+      name: "plain",
+      type: "llm",
+      connect_status: "available",
+      reasoningCapability: {
+        status,
+        control: "effort",
+        levels: [],
+        source: "catalog",
+      },
+    };
+    const agent: Agent = {
+      ...reasoningAgentFixture,
+      id: "7",
+      model_ids: [11],
+      model_names: ["plain"],
+    };
+    for (const scope of ["agent", "tenant"] as const) {
+      expect(
+        deriveModelOptions(agent, [model], scope)[0].efforts
+      ).toBeUndefined();
+    }
+  }
+);
+
+it("keeps budget controls available with saved thinking disabled without converting them to effort", () => {
+  const model: ModelOption = {
+    ...reasoningModelFixture,
+    id: 11,
+    name: "budget",
+    type: "llm",
+    connect_status: "available",
+    reasoningCapability: {
+      status: "supported",
+      control: "budget_tokens",
+      levels: [],
+      source: "catalog",
+      controls: [{ type: "budget_tokens", min: 1024, max: 8192 }],
+    },
+  };
+  const agent: Agent = {
+    ...reasoningAgentFixture,
+    id: "7",
+    model_ids: [11],
+    model_names: ["budget"],
+    model_params_override: {
+      "11": {
+        extra_params: { enable_thinking: false, reasoning_budget_tokens: 2048 },
+      },
+    },
+  };
+  expect(deriveModelOptions(agent, [model])[0]).toMatchObject({
+    budgetTokens: { min: 1024, max: 8192 },
+    defaultBudgetTokens: 2048,
+  });
+  expect(deriveModelOptions(agent, [model])[0].efforts).toBeUndefined();
+});
+
 const preview = {
   agent_id: 1,
   version_no: 2,
@@ -26,7 +204,7 @@ it("uses the first available tenant model as Workbench default without replacing
     withDefaultWorkbenchModel(initialWorkbenchState.config, available).model_id
   ).toBe(11);
   const explicit = { ...initialWorkbenchState.config, model_id: 12 };
-  expect(withDefaultWorkbenchModel(explicit, available)).toBe(explicit);
+  expect(withDefaultWorkbenchModel(explicit, available).model_id).toBe(12);
   expect(withDefaultWorkbenchModel(initialWorkbenchState.config, [])).toBe(
     initialWorkbenchState.config
   );
@@ -101,8 +279,8 @@ it("lists every available tenant LLM for the generic workbench agent", () => {
   ] as ModelOption[];
 
   expect(deriveModelOptions(agent, catalog, "tenant")).toEqual([
-    { id: "11", name: "Model A", efforts: true, defaultEffort: "low" },
-    { id: "12", name: "Model B", efforts: true, defaultEffort: "low" },
+    { id: "11", name: "Model A", reasoningCapability: undefined },
+    { id: "12", name: "Model B", reasoningCapability: undefined },
   ]);
 });
 

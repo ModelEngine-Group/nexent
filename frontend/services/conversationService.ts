@@ -1,3 +1,4 @@
+import type { ReasoningEffort } from "@/types/modelConfig";
 import { API_ENDPOINTS, ApiError } from "./api";
 
 import { chatConfig } from "@/const/chatConfig";
@@ -7,6 +8,7 @@ import type {
   ConversationListParams,
   ApiConversationDetail,
   ApiConversationResponse,
+  WorkbenchPins,
 } from "@/types/conversation";
 import { getAuthHeaders, fetchWithAuth } from "@/lib/auth";
 import log from "@/lib/logger";
@@ -32,6 +34,40 @@ const getWebSocketUrl = (endpoint: string): string => {
 };
 
 export const conversationService = {
+  async getWorkbenchPins(): Promise<WorkbenchPins> {
+    const response = await fetch(API_ENDPOINTS.conversation.workbenchPins);
+    const data = await response.json();
+    if (!response.ok || data.code !== 0) {
+      throw new ApiError(
+        data.code || response.status,
+        data.message || data.detail
+      );
+    }
+    return data.data;
+  },
+
+  async setWorkbenchPin(
+    conversationId: number,
+    pinned: boolean
+  ): Promise<WorkbenchPins> {
+    const response = await fetch(
+      API_ENDPOINTS.conversation.workbenchPin(conversationId),
+      {
+        method: "PUT",
+        headers: getAuthHeaders(),
+        body: JSON.stringify({ pinned }),
+      }
+    );
+    const data = await response.json();
+    if (!response.ok || data.code !== 0) {
+      throw new ApiError(
+        data.code || response.status,
+        data.message || data.detail
+      );
+    }
+    return data.data;
+  },
+
   // Get conversation list
   async getList(
     params: ConversationListParams & {
@@ -1053,7 +1089,7 @@ export const conversationService = {
       model_id?: number; // Optional model override
       generation_config?: {
         deep_thinking: boolean;
-        thinking_effort?: "low" | "medium" | "high";
+        thinking_effort?: ReasoningEffort;
       };
       reasoning_effort?:
         | "auto"

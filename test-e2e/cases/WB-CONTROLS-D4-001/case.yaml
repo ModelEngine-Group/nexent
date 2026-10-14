@@ -1,0 +1,37 @@
+schema_version: '1.0'
+stage: D4
+module: CHAT-WORKBENCH
+case:
+  case_id: WB-CONTROLS-D4-001
+  feature_id: WB-CONTROLS
+  requirement_ids: [WB-CONTROLS-20261013]
+  business_rule_ids: [WB-CONTROLS-RULE-001]
+  title: Direct resource drawers preserve draft selection
+  type: E2E
+  priority: P1
+  status: active
+  automation: automated
+  objective: Verify resource selection through actual Workbench UI with controlled API responses.
+  preconditions: [Local frontend available with authorized mock user and internal resources.]
+  test_data: {profile: mock}
+  steps:
+    - order: 1
+      action: Open Workbench, inspect planning/execution menu typography and use each direct resource trigger.
+      expected: No plus trigger; internal Agent, knowledge and Skill use right drawers with search and tag filtering on one row. Lists fill the available height and scroll independently, while pagination remains fixed immediately above confirmation across Mine/Repository, empty filtering and short viewport changes. Toolbar labels share font size and weight. Attachment, voice and send hints appear below; their control boxes are 32px with 16px icons, aligned centers and equal spacing. Send is icon-only with transparent background and no border; its icon is blue with sendable text and gray when cleared, including hover.
+    - order: 2
+      action: Select an Agent then cancel, reopen, select and confirm; inspect Mine/Repository and tag filtering on resource drawers.
+      expected: Cancel preserves empty mounts; confirm renders selection, filtering preserves it and repository tab remains available.
+  expected_results: [Resource drawers preserve selections only on confirmation and retain source and filter controls.]
+  forbidden_side_effects: [No external Agent selection or unintended resource creation on open or cancel.]
+  actor: Authorized mock tenant user
+  journey: [Open Workbench, Inspect direct triggers, Cancel draft, Confirm internal resource, Inspect filtering and repository]
+  final_business_result: [Internal resources can be chosen from drawers without accidental mounts.]
+  failure_evidence: [Browser trace and assertion screenshot.]
+  execution:
+    profiles: [{name: mock, required_services: []}]
+  acceptance:
+    - id: AC-01
+      description: Actual browser resource drawer journey and forbidden mutations.
+      steps: [1, 2]
+      expected_results: [1]
+      forbidden_side_effects: [1]

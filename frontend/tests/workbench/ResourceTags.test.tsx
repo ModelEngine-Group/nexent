@@ -1,7 +1,23 @@
-import { expect, it, vi } from "vitest";
-import { act, renderHook, waitFor } from "@testing-library/react";
+import { createElement, type ReactNode } from "react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { beforeEach, expect, it, vi } from "vitest";
+import {
+  act,
+  renderHook as originalRenderHook,
+  waitFor,
+} from "@testing-library/react";
 import { useResourceTags } from "@/features/workbench/hooks/useResourceTags";
 import { tagManagementApi } from "@/services/tagManagementService";
+const renderHook: typeof originalRenderHook = (callback, options) => {
+  const client = new QueryClient({
+    defaultOptions: { queries: { retry: false } },
+  });
+  return originalRenderHook(callback, {
+    ...options,
+    wrapper: ({ children }: { children: ReactNode }) =>
+      createElement(QueryClientProvider, { client }, children),
+  });
+};
 vi.mock("@/services/tagManagementService", () => ({
   tagManagementApi: {
     listLibraries: vi.fn().mockResolvedValue([]),
@@ -9,6 +25,58 @@ vi.mock("@/services/tagManagementService", () => ({
     filterResourceIds: vi.fn(),
   },
 }));
+beforeEach(() => vi.clearAllMocks());
+
+it("batches authorized candidates in groups of 500", async () => {
+  vi.mocked(tagManagementApi.filterResourceIds).mockImplementation(
+    async (type, ids) => ({ resource_type: type, matched_resource_ids: ids })
+  );
+  const ids = Array.from({ length: 1001 }, (_, i) => String(i));
+  const { result } = renderHook(() => useResourceTags(true, "skill", ids));
+  act(() =>
+    result.current.setPredicates([{ definition_id: 1, value_ids: [1] }])
+  );
+  await waitFor(() => expect(result.current.visibleIds?.size).toBe(1001));
+  expect(
+    vi
+      .mocked(tagManagementApi.filterResourceIds)
+      .mock.calls.map((call) => call[1].length)
+  ).toEqual([500, 500, 1]);
+});
+
+it("server filtering retains predicates without expanding or locally querying a repository page", async () => {
+  const { result } = renderHook(() => useResourceTags(true, "agent", [], true));
+  const predicates = [{ definition_id: 1, value_ids: [1] }];
+  act(() => result.current.setPredicates(predicates));
+  expect(result.current.predicates).toEqual(predicates);
+  expect(result.current.visibleIds).toBeNull();
+  expect(tagManagementApi.filterResourceIds).not.toHaveBeenCalled();
+});
+
+it("empty authorized resources do not issue a filter request", async () => {
+  const { result } = renderHook(() =>
+    useResourceTags(true, "knowledge_base", [])
+  );
+  act(() =>
+    result.current.setPredicates([{ definition_id: 1, value_ids: [1] }])
+  );
+  await waitFor(() => expect(result.current.visibleIds).toEqual(new Set()));
+  expect(tagManagementApi.filterResourceIds).not.toHaveBeenCalled();
+});
+
+it("filter errors fail closed and clearing the filter restores authorized candidates", async () => {
+  vi.mocked(tagManagementApi.filterResourceIds).mockRejectedValue(
+    new Error("unavailable")
+  );
+  const { result } = renderHook(() => useResourceTags(true, "agent", ["A"]));
+  act(() =>
+    result.current.setPredicates([{ definition_id: 1, value_ids: [1] }])
+  );
+  await waitFor(() => expect(result.current.error).toBeTruthy());
+  expect(result.current.visibleIds).toEqual(new Set());
+  act(() => result.current.setPredicates([]));
+  expect(result.current.visibleIds).toBeNull();
+});
 
 it.each(["agent", "skill", "knowledge_base"] as const)(
   "UT-FE-WB-038 %s tag results cannot expand authorized candidates",

@@ -103,6 +103,22 @@ class ConversationRecord(TableBase):
     )
 
 
+class ConversationWorkbenchPin(TableBase):
+    """Account-scoped Workbench history preference, independent of activity."""
+
+    __tablename__ = "conversation_workbench_pin_t"
+    __table_args__ = {"schema": SCHEMA}
+
+    pin_id = Column(Integer, Sequence("conversation_workbench_pin_t_pin_id_seq", schema=SCHEMA),
+                    primary_key=True, nullable=False, comment="Technical identifier of a Workbench pin")
+    user_id = Column(String(100), nullable=False, comment="Authenticated owner of the pin")
+    tenant_id = Column(String(100), nullable=False, comment="Authenticated tenant scope of the pin")
+    conversation_id = Column(Integer, nullable=False,
+                             comment="Owned active Workbench conversation; integrity enforced by pin service")
+    pinned_at = Column(TIMESTAMP(timezone=True), nullable=False,
+                       comment="Server-generated monotonic pin time; repinning refreshes ordering")
+
+
 class ConversationMessage(TableBase):
     """
     Holds the specific response message content in the conversation

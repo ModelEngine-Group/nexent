@@ -164,11 +164,12 @@ export default function TagFilterControls({
           </Space>
         </div>
       ) : null}
-      <div className="flex flex-col gap-1">
+      <div className="relative flex flex-col gap-1">
         <Typography.Text type="secondary" className="text-xs">
           {t("tagManagement.filter.definitionLabel")}
         </Typography.Text>
         <Select
+          getPopupContainer={(trigger) => trigger.parentElement ?? trigger}
           showSearch
           optionFilterProp="label"
           value={activeDefinition.definition_id}
@@ -190,7 +191,7 @@ export default function TagFilterControls({
           style={{ width: "100%" }}
         />
       </div>
-      <div className="flex flex-col gap-1">
+      <div className="relative flex flex-col gap-1">
         <Typography.Text type="secondary" className="text-xs">
           {definitionName}
         </Typography.Text>
@@ -209,6 +210,7 @@ export default function TagFilterControls({
           </Checkbox>
         ) : (
           <Select
+            getPopupContainer={(trigger) => trigger.parentElement ?? trigger}
             mode={isMultiSelect ? "multiple" : undefined}
             allowClear
             showSearch

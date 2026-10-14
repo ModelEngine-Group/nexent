@@ -20,18 +20,18 @@ it.each([
         onSelect={select}
       />
     );
-    expect(Boolean(screen.queryByRole("button", { name: "Agent创建" }))).toBe(
+    expect(Boolean(screen.queryByRole("button", { name: "智能体创建" }))).toBe(
       agent
     );
-    expect(Boolean(screen.queryByRole("button", { name: "Skill 创建" }))).toBe(
+    expect(Boolean(screen.queryByRole("button", { name: "技能创建" }))).toBe(
       skill
     );
     if (agent) {
-      await userEvent.click(screen.getByRole("button", { name: "Agent创建" }));
+      await userEvent.click(screen.getByRole("button", { name: "智能体创建" }));
       expect(select).toHaveBeenLastCalledWith("agent_create");
     }
     if (skill) {
-      await userEvent.click(screen.getByRole("button", { name: "Skill 创建" }));
+      await userEvent.click(screen.getByRole("button", { name: "技能创建" }));
       expect(select).toHaveBeenLastCalledWith("skill_create");
     }
   }

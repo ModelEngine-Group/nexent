@@ -3,7 +3,6 @@
 import { useAui, useAuiState } from "@assistant-ui/react";
 import { useTranslation } from "react-i18next";
 import {
-  ChevronLeft,
   FileText,
   ClipboardCheck,
   NotebookPen,
@@ -28,10 +27,8 @@ const examples = {
 
 export function CreationExamples({
   mode,
-  onBack,
 }: {
   mode: "skill_create" | "agent_create";
-  onBack: () => void;
 }) {
   const aui = useAui();
   const { t } = useTranslation("common");
@@ -43,17 +40,9 @@ export function CreationExamples({
   return (
     <section
       aria-label={mode === "skill_create" ? "Skill 创建示例" : "Agent创建示例"}
-      className="mt-12 px-1"
+      className="px-1"
     >
       <div className="mb-3 flex items-center gap-2">
-        <button
-          type="button"
-          aria-label="返回普通对话"
-          onClick={onBack}
-          className="rounded-lg p-1.5 hover:bg-muted focus-visible:ring-2"
-        >
-          <ChevronLeft className="size-4" />
-        </button>
         <h2 className="text-sm font-semibold">
           {t("workbench.recommendedPrompts", "推荐提示词")}
         </h2>

@@ -5,6 +5,7 @@ import type {
 } from "@/types/modelConfig";
 import type { ModelOption as SelectorModelOption } from "@/app/newchat/ui/model-selector";
 import { DEFAULT_REASONING_EFFORT } from "@/const/modelConfig";
+import { isReasoningEffort } from "@/lib/modelReasoning";
 import type { WorkbenchSessionConfig } from "./types";
 
 export type ModelSelectionScope = "agent" | "tenant";
@@ -12,10 +13,51 @@ export type ModelSelectionScope = "agent" | "tenant";
 /** Keep the model displayed in Workbench identical to the model sent at run time. */
 export function withDefaultWorkbenchModel(
   config: WorkbenchSessionConfig,
-  availableLlmModels: readonly Pick<CatalogModelOption, "id">[]
+  availableLlmModels: readonly Pick<
+    CatalogModelOption,
+    "id" | "reasoningCapability" | "defaultReasoningEffort"
+  >[]
 ): WorkbenchSessionConfig {
-  if (config.model_id != null || availableLlmModels.length === 0) return config;
-  return { ...config, model_id: availableLlmModels[0].id };
+  const modelId = config.model_id ?? availableLlmModels[0]?.id;
+  if (modelId == null) return config;
+  const model = availableLlmModels.find((item) => item.id === modelId);
+  if (!model) return config;
+  const capability = model?.reasoningCapability;
+  const effortControl =
+    capability?.status === "supported"
+      ? capability.controls?.find((control) => control.type === "effort")
+      : undefined;
+  const levels =
+    effortControl?.type === "effort"
+      ? effortControl.values.filter(isReasoningEffort)
+      : capability?.status === "supported"
+        ? capability.levels.filter(isReasoningEffort)
+        : [];
+  // Unknown capabilities never invent an effort; auto keeps provider defaults.
+  const effort = config.generation_config.thinking_effort;
+  const defaultCandidates: (ReasoningEffort | null | undefined)[] = [
+    model.defaultReasoningEffort,
+    "low",
+    capability?.default,
+    DEFAULT_REASONING_EFFORT,
+  ];
+  const resolvedEffort =
+    effort === "auto" || (effort && levels.includes(effort))
+      ? effort
+      : (defaultCandidates.find(
+          (candidate) =>
+            candidate === "auto" ||
+            (candidate != null && levels.includes(candidate))
+        ) ?? DEFAULT_REASONING_EFFORT);
+  if (modelId === config.model_id && resolvedEffort === effort) return config;
+  return {
+    ...config,
+    model_id: modelId,
+    generation_config: {
+      ...config.generation_config,
+      thinking_effort: resolvedEffort,
+    },
+  };
 }
 
 export const deriveModelOptions = (
@@ -32,14 +74,6 @@ export const deriveModelOptions = (
       (item) =>
         String(item.id) === id || item.name === id || item.displayName === id
     );
-    if (scope === "tenant" && !model?.reasoningCapability) {
-      return {
-        id,
-        name: fallbackName,
-        efforts: true,
-        defaultEffort: model?.defaultReasoningEffort ?? "low",
-      };
-    }
     const extra =
       scope === "agent"
         ? typedAgent.model_params_override?.[id]?.extra_params
@@ -48,12 +82,6 @@ export const deriveModelOptions = (
       typeof extra?.enable_thinking === "boolean" ||
       typeof extra?.reasoning_effort === "string" ||
       typeof extra?.reasoning_budget_tokens === "number";
-    const enabled = hasSnapshot
-      ? extra?.enable_thinking === true ||
-        (extra?.enable_thinking === undefined &&
-          (typeof extra?.reasoning_effort === "string" ||
-            typeof extra?.reasoning_budget_tokens === "number"))
-      : model?.enableThinking === true;
     const capability = model?.reasoningCapability;
     const effortControl =
       capability?.status === "supported"
@@ -61,9 +89,9 @@ export const deriveModelOptions = (
         : undefined;
     const levels =
       effortControl?.type === "effort"
-        ? (effortControl.values as ReasoningEffort[])
+        ? effortControl.values.filter(isReasoningEffort)
         : capability?.status === "supported"
-          ? capability.levels
+          ? capability.levels.filter(isReasoningEffort)
           : [];
     const budgetControl =
       capability?.status === "supported"
@@ -71,31 +99,27 @@ export const deriveModelOptions = (
             (control) => control.type === "budget_tokens"
           )
         : undefined;
-    const supportsBudget = enabled && budgetControl?.type === "budget_tokens";
+    const supportsBudget = budgetControl?.type === "budget_tokens";
     const effortLevels = [
       "auto",
       ...levels.filter((level) => level !== "auto"),
     ] as ReasoningEffort[];
-    const supportsEffort =
-      !supportsBudget && (scope === "tenant" || (enabled && levels.length > 0));
-    if (scope === "tenant" && levels.length === 0) {
-      effortLevels.push("low", "medium", "high");
-    }
+    const supportsEffort = !supportsBudget && levels.length > 0;
     const snapshotEffort =
       typeof extra?.reasoning_effort === "string"
         ? (extra.reasoning_effort as ReasoningEffort)
         : undefined;
     const defaultCandidates: (ReasoningEffort | null | undefined)[] = [
+      ...(hasSnapshot ? [snapshotEffort ?? ("low" as const)] : []),
       model?.defaultReasoningEffort,
       "low",
       capability?.status === "supported" ? capability.default : undefined,
       DEFAULT_REASONING_EFFORT,
     ];
-    const defaultEffort = hasSnapshot
-      ? (snapshotEffort ?? "low")
-      : (defaultCandidates.find(
-          (candidate) => candidate != null && effortLevels.includes(candidate)
-        ) ?? undefined);
+    const defaultEffort =
+      defaultCandidates.find(
+        (candidate) => candidate != null && effortLevels.includes(candidate)
+      ) ?? undefined;
     return {
       id,
       name: fallbackName,

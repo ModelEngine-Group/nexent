@@ -7,21 +7,26 @@ export const RESOURCE_SELECTION_AREA_CLASS = "min-h-[460px]";
 export function ResourceSelectionGrid({
   children,
   className,
+  columns = 3,
+  fillAvailable = false,
   ...props
-}: HTMLAttributes<HTMLDivElement>) {
+}: HTMLAttributes<HTMLDivElement> & {
+  columns?: number;
+  fillAvailable?: boolean;
+}) {
   return (
     <div
       {...props}
       className={cn(
-        RESOURCE_SELECTION_AREA_CLASS,
+        fillAvailable ? "min-h-full" : RESOURCE_SELECTION_AREA_CLASS,
         "[&_.grid]:auto-rows-[220px] [&_.grid]:gap-3",
         className
       )}
     >
       <ResourceCardGrid
         items={Children.toArray(children)}
-        columns={3}
-        rows={2}
+        columns={columns}
+        rows={Math.ceil(6 / columns)}
         paginateItems={false}
         showToolbar={false}
         showCreateCard={false}

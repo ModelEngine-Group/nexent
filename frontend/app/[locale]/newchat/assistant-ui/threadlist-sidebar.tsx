@@ -6,6 +6,7 @@ import {
   XIcon,
 } from "lucide-react";
 import { useState } from "react";
+import { message } from "antd";
 import { StandardInput } from "@/components/common/StandardInput";
 import {
   Sidebar,
@@ -53,6 +54,8 @@ interface ThreadListSidebarProps extends SidebarProps {
   newChatDesign?: boolean;
   /** Accepted for backward compatibility; the design removed the legacy switch. */
   showLegacySwitch?: boolean;
+  /** Workbench uses user-scoped server IDs; undefined retains Agent-chat pins. */
+  pinStorageKey?: string | null;
 }
 
 // "Discover agents" glyph: a magnifier with a sparkle at its top-right,
@@ -79,6 +82,7 @@ export function ThreadListSidebar({
   onAgentSelected,
   onRenameSuccess,
   newChatDesign = false,
+  pinStorageKey,
   ...props
 }: ThreadListSidebarProps) {
   const { state, toggleSidebar } = useSidebar();
@@ -139,7 +143,17 @@ export function ThreadListSidebar({
         className={cn("h-full w-[296px] min-w-[296px] max-w-[296px] p-2")}
         style={{ backgroundColor: sidebarBackground }}
       >
-        <PinnedThreadsProvider>
+        <PinnedThreadsProvider
+          storageKey={pinStorageKey}
+          serverBacked={pinStorageKey !== undefined}
+          persistedConversationIds={pinStorageKey !== undefined}
+          serverConversationIds={serverConversationIds}
+          onStorageError={
+            pinStorageKey !== undefined
+              ? () => message.error(t("chat.threadList.pinServerFailed"))
+              : undefined
+          }
+        >
           <BatchSelectionProvider
             onNewConversation={onNewConversation}
             serverConversationIds={serverConversationIds}

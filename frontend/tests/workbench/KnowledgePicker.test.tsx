@@ -1,5 +1,5 @@
 import { beforeEach, expect, it, vi } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { ConversationKnowledgeScopeModal } from "@/app/newchat/assistant-ui/conversation-knowledge-scope-modal";
 import knowledgeBaseService from "@/services/knowledgeBaseService";
@@ -197,6 +197,20 @@ it("knowledge selection preserves retrieval configuration on confirmation", asyn
   );
   await screen.findByRole("option", { name: /Alpha/ });
   await userEvent.click(screen.getByRole("option", { name: /Alpha/ }));
+  await userEvent.click(
+    screen.getByRole("button", {
+      name: "chat.knowledgeScope.retrievalSettings",
+    })
+  );
+  const dialog = (
+    await screen.findByText("agent.knowledge.configModal.title")
+  ).closest<HTMLElement>('[role="dialog"]')!;
+  const input = within(dialog).getByRole("spinbutton");
+  await userEvent.tripleClick(input);
+  await userEvent.keyboard("8");
+  await userEvent.click(
+    within(dialog).getByRole("button", { name: "common.confirm" })
+  );
   expect(confirm).not.toHaveBeenCalled();
   await userEvent.click(
     screen.getByRole("button", { name: "chat.knowledgeScope.confirm" })
@@ -308,4 +322,51 @@ it("failed catalog loading cannot be confirmed as an empty replacement", async (
     ).toBeDisabled()
   );
   expect(confirm).not.toHaveBeenCalled();
+});
+
+it("reopening knowledge selection ignores the unfinished catalog from the previous session", async () => {
+  type Result = Awaited<
+    ReturnType<typeof knowledgeBaseService.getKnowledgeBasesInfo>
+  >;
+  let finishOld!: (result: Result) => void;
+  vi.mocked(knowledgeBaseService.getKnowledgeBasesInfo).mockImplementationOnce(
+    () =>
+      new Promise((resolve) => {
+        finishOld = resolve;
+      })
+  );
+  const props = {
+    value: null,
+    capabilities: null,
+    onCancel: vi.fn(),
+    onConfirm: vi.fn(),
+  };
+  const { rerender } = render(
+    <ConversationKnowledgeScopeModal {...props} open />
+  );
+  expect(
+    screen.getByRole("button", { name: "chat.knowledgeScope.confirm" })
+  ).toBeDisabled();
+  rerender(<ConversationKnowledgeScopeModal {...props} open={false} />);
+  rerender(<ConversationKnowledgeScopeModal {...props} open />);
+  await screen.findByRole("option", { name: /Alpha/ });
+  await act(async () => {
+    finishOld({
+      knowledgeBases: [
+        {
+          id: "outdated",
+          knowledge_id: 99,
+          name: "Outdated catalog",
+          permission: "READ_ONLY",
+        },
+      ],
+    } as Result);
+  });
+  expect(
+    screen.queryByRole("option", { name: /Outdated catalog/ })
+  ).not.toBeInTheDocument();
+  expect(screen.getByRole("option", { name: /Alpha/ })).toBeInTheDocument();
+  expect(
+    screen.getByRole("button", { name: "chat.knowledgeScope.confirm" })
+  ).toBeEnabled();
 });

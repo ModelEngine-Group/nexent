@@ -14,6 +14,12 @@ import {
   type ReactNode,
 } from "react";
 import { cva, type VariantProps } from "class-variance-authority";
+import { ModelParameterSettings } from "@/components/chat/ModelParameterSettings";
+import { DEFAULT_MODEL_PARAMETER_VALUES } from "@/const/modelParameterSettings";
+import type {
+  ModelParameterValue,
+  ModelParameterSettingsControl,
+} from "@/types/modelParameterSettings";
 import { CheckIcon, ChevronDownIcon, CpuIcon } from "lucide-react";
 import { useAui } from "@assistant-ui/react";
 import { cn } from "@/lib/utils";
@@ -296,16 +302,7 @@ function ModelSelectorRoot({
       ? selectedModel.defaultEffort
       : undefined;
   const activeEffort =
-    resolveEffort(
-      selectedModel && efforts?.length
-        ? efforts
-        : showDeepThinkingControl
-          ? DEFAULT_EFFORT_OPTIONS
-          : efforts,
-      effort
-    ) ??
-    resolvedDefaultEffort ??
-    effortProp;
+    resolveEffort(efforts, effort) ?? resolvedDefaultEffort ?? efforts?.[0]?.id;
   const budgetRange = selectedModel?.budgetTokens;
   const activeBudgetTokens =
     budgetRange && budgetTokens !== undefined
@@ -479,6 +476,7 @@ function ModelSelectorContent({
   align = "start",
   sideOffset = 6,
   children,
+  onInteractOutside,
   ...props
 }: ModelSelectorContentProps) {
   const { value } = useModelSelectorContext();
@@ -493,6 +491,15 @@ function ModelSelectorContent({
         className
       )}
       {...props}
+      onInteractOutside={(event) => {
+        if (
+          event.target instanceof Element &&
+          (event.target.closest("[data-model-parameter-panel]") ||
+            event.target.closest("[data-model-effort-popup]"))
+        )
+          event.preventDefault();
+        onInteractOutside?.(event);
+      }}
     >
       {/* Seeding cmdk with the selected id makes it the active item, which
           cmdk scrolls into view when the popover opens. */}
@@ -669,7 +676,7 @@ function ModelSelectorEffort({
     setBudgetTokens,
   } = useModelSelectorContext();
   const resolvedLabel = label ?? t("chat.modelSelector.reasoningEffort");
-  const displayedEfforts = efforts?.length ? efforts : DEFAULT_EFFORT_OPTIONS;
+  const displayedEfforts = efforts ?? [];
   const budgetRange = selectedModel?.budgetTokens;
 
   return (
@@ -732,23 +739,27 @@ function ModelSelectorEffort({
           </div>
         ) : (
           <Select
-            value={effort ?? displayedEfforts[0].id}
-            disabled={!deepThinking}
+            value={effort}
+            disabled={!deepThinking || displayedEfforts.length === 0}
             onValueChange={setEffort}
           >
             <SelectTrigger
               aria-label={t("chat.modelSelector.reasoningEffort")}
               size="sm"
-              className="h-7 min-w-16 border-0 bg-transparent px-1.5 py-0 text-sm shadow-none hover:bg-accent/50 focus-visible:ring-0"
+              className="h-7 w-fit border-0 bg-transparent px-1.5 py-0 text-sm shadow-none hover:bg-accent/50 focus-visible:ring-0"
             >
               <SelectValue />
             </SelectTrigger>
-            <SelectContent className="w-[76px] min-w-0 p-1">
+            <SelectContent
+              data-model-effort-popup
+              align="end"
+              className="w-max min-w-32 p-0"
+            >
               {displayedEfforts.map((option) => (
                 <SelectItem
                   key={option.id}
                   value={option.id}
-                  className="h-7 justify-center px-2 text-sm"
+                  className="h-7 pl-2 pr-8 text-sm"
                 >
                   {t(`chat.modelSelector.effort.${option.id}`, option.name)}
                 </SelectItem>
@@ -761,7 +772,11 @@ function ModelSelectorEffort({
   );
 }
 
-export type ModelSelectorProps = Omit<ModelSelectorRootProps, "children"> &
+export type ModelSelectorProps = {
+  parameterSettings?: ModelParameterSettingsControl;
+  parameterSettingsScopeKey?: string;
+  parameterSettingsDisabled?: boolean;
+} & Omit<ModelSelectorRootProps, "children"> &
   VariantProps<typeof modelSelectorTriggerVariants> & {
     /** Render a search input above the model list. */
     searchable?: boolean;
@@ -820,7 +835,46 @@ function ModelSelectorModelContext() {
   return null;
 }
 
+export interface ModelSelectorAdvancedSettingsProps {
+  control?: ModelParameterSettingsControl;
+  scopeKey?: string;
+  disabled?: boolean;
+}
+
+/** Local sampling levels never enter assistant-ui's registered model context. */
+function ModelSelectorAdvancedSettings({
+  control,
+  scopeKey,
+  disabled = false,
+}: ModelSelectorAdvancedSettingsProps) {
+  const { value, selectedModel } = useModelSelectorContext();
+  const localScope = JSON.stringify([
+    scopeKey ?? "default",
+    value ?? "default",
+  ]);
+  const [localValues, setLocalValues] = useState<
+    Record<string, ModelParameterValue>
+  >({});
+  const resolved = control ?? {
+    scopeKey: localScope,
+    value: localValues[localScope] ?? DEFAULT_MODEL_PARAMETER_VALUES,
+    defaultValue: DEFAULT_MODEL_PARAMETER_VALUES,
+    onChange: (next: ModelParameterValue) =>
+      setLocalValues((current) => ({ ...current, [localScope]: next })),
+  };
+  return (
+    <ModelParameterSettings
+      key={resolved.scopeKey ?? localScope}
+      {...resolved}
+      disabled={disabled || Boolean(resolved.disabled) || !selectedModel}
+    />
+  );
+}
+
 const ModelSelectorImpl = ({
+  parameterSettings,
+  parameterSettingsScopeKey,
+  parameterSettingsDisabled,
   searchable,
   showEffort,
   variant,
@@ -835,9 +889,14 @@ const ModelSelectorImpl = ({
       <ModelSelectorTrigger variant={variant} size={size} className={className}>
         <ModelSelectorValue showEffort={showEffort} />
       </ModelSelectorTrigger>
-      <ModelSelectorContent className={contentClassName}>
+      <ModelSelectorContent align="end" className={contentClassName}>
         {searchable && <ModelSelectorSearch />}
-        <ModelSelectorEffort />
+        <ModelSelectorEffort className="border-b-0" />
+        <ModelSelectorAdvancedSettings
+          control={parameterSettings}
+          scopeKey={parameterSettingsScopeKey}
+          disabled={parameterSettingsDisabled}
+        />
         <ModelSelectorList />
       </ModelSelectorContent>
     </ModelSelectorRoot>
@@ -857,6 +916,7 @@ type ModelSelectorComponent = typeof ModelSelectorImpl & {
   Separator: typeof ModelSelectorSeparator;
   Item: typeof ModelSelectorItem;
   Effort: typeof ModelSelectorEffort;
+  AdvancedSettings: typeof ModelSelectorAdvancedSettings;
 };
 
 const ModelSelector = memo(
@@ -875,6 +935,7 @@ ModelSelector.Group = ModelSelectorGroup;
 ModelSelector.Separator = ModelSelectorSeparator;
 ModelSelector.Item = ModelSelectorItem;
 ModelSelector.Effort = ModelSelectorEffort;
+ModelSelector.AdvancedSettings = ModelSelectorAdvancedSettings;
 
 export {
   ModelSelector,
@@ -889,4 +950,5 @@ export {
   ModelSelectorSeparator,
   ModelSelectorItem,
   ModelSelectorEffort,
+  ModelSelectorAdvancedSettings,
 };

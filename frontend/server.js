@@ -43,9 +43,17 @@ dotenv.config({
   override: false, // Don't override existing environment variables (important for Docker)
 });
 
+// Standalone production packaging does not include development-only helpers.
+const devBundlerOptions = dev
+  ? (await import("./dev-server-options.mjs")).getDevBundlerOptions(
+      dev,
+      path.join(__dirname, "node_modules")
+    )
+  : {};
+
 const app = next({
   dev,
-  turbo: dev,
+  ...devBundlerOptions,
   ...(nextConfig && { conf: nextConfig }),
 });
 const handle = app.getRequestHandler();
