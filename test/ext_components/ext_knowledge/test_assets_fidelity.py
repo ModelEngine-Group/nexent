@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """Controlled-assets tests: Range semantics, status codes, runtime registration.
 
 These exercise the /assets route set directly over HTTP (no product adapter

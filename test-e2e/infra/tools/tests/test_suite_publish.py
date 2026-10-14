@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """Offline publication tests; no product calls, synchronization, or notifications."""
 from collections import Counter
 import hashlib

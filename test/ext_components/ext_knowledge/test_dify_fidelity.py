@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """Dify fidelity: drive the real dify adapter against the live mock."""
 import pytest
 

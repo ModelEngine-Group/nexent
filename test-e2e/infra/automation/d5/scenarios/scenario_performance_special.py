@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """D5 bounded performance and concurrency checks with configurable thresholds."""
 
 from __future__ import annotations

@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """Shared building blocks for the ext-knowledge mock service.
 
 Each external-knowledge route set (dify / datamate / idata / ragflow /

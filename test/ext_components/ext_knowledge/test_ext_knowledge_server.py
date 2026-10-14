@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """Assembly-level tests: control plane, AIDP root mount, fault-injection scoping.
 
 These exercise the unified service itself (no product adapter imports).

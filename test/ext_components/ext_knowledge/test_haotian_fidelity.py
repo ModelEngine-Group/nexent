@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """Haotian fidelity: drive the real haotian adapter against the live mock."""
 import asyncio
 

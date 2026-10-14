@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """Explicit runner/product URL selection for the ext-knowledge mock.
 
 The mock is reached through two addresses: the runner-side control plane

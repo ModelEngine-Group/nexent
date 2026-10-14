@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """Read-only checks for the selected machine-local Nexent test configuration."""
 
 from __future__ import annotations

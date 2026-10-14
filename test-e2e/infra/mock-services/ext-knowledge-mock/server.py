@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """Nexent external-knowledge mock service — single process, multiple route sets.
 
 Layout of the single port (default 30090) — every route set at its REAL

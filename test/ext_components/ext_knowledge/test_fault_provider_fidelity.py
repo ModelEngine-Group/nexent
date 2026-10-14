@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """Fault-provider fidelity: the minimal controlled OpenAI-compatible gateway.
 
 Every test here mirrors a concrete suite case (see fault_provider_mock.py's

@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """D3 real-provider model, voice, and image integration scenarios."""
 
 from __future__ import annotations

@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """Dify route set (root-mounted, real path shape).
 
 Contract mirrored from:

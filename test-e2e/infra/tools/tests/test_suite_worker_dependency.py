@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """Regression tests for the worker prerequisite-failure wiring.
 
 Pins the review finding that attach-stage dependency failures must keep

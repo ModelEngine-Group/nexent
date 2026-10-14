@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """Unified control plane: /health, /_reset, /_mock/*, /_wire-log.
 
 The AIDP sub-application mounted at the service root keeps its own /health,

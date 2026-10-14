@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """DataMate route set (root-mounted, real path shape).
 
 A real DataMate serves ``/api/knowledge-base/...`` and

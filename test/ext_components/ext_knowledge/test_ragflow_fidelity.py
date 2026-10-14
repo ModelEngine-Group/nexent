@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """RAGFlow fidelity: drive the real ragflow adapter against the live mock."""
 
 RAGFLOW_AUTH = {"Authorization": "Bearer mock-ragflow-key"}

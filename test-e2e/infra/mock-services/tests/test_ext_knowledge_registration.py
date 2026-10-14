@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """ext-knowledge registration and build-context packing tests.
 
 Offline checks only: Docker is never contacted (dry-run), the mock server

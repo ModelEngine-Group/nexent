@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """Fidelity-test bootstrap for the ext-knowledge mock service.
 
 Assembles a complete temporary copy of the mock (source + seeds, plus the

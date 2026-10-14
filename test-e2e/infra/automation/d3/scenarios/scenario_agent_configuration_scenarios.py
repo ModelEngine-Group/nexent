@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """D3 Agent configuration, NL2Agent, prompt, tool, skill and import scenarios."""
 
 from __future__ import annotations

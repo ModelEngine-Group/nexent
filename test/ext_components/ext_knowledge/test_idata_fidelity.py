@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """iData fidelity: drive the real idata adapter against the live mock."""
 
 IDATA_AUTH = {"Authorization": "Bearer mock-idata-key"}

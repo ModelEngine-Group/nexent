@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """Attach cases to the pre-deployed ext-knowledge mock instance.
 
 The suite NEVER starts or stops the mock's Compose stack (deployment and

@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """Offline ext-attach tests: fakes only, no product, Docker or listeners.
 
 The control plane is faked through ``ext_attach._request``; preparation

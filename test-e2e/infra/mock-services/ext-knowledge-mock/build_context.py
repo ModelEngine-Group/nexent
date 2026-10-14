@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """Pack the batch-owned Docker build context for the ext-knowledge mock.
 
 The repository root cannot serve as the build context: the root .dockerignore

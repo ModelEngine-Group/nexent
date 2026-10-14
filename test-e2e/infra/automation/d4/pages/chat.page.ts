@@ -1,3 +1,5 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import { expect, type Locator, type Page } from "playwright/test";
 import { writeFileSync } from "node:fs";
 import { appPath } from "../runner/runtime-config";

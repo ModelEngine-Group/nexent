@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """Typed prerequisite failure receipts, distinct from product acceptance."""
 import asyncio
 import json

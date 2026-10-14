@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """Publish a complete Daily reading bundle; never execute tests or send messages."""
 from __future__ import annotations
 

@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """Case-local plan, preflight and batch runner, independent of the old V5 controller."""
 from __future__ import annotations
 

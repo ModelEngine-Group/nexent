@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """Create batch-scoped D5 performance and reliability assets through product APIs."""
 
 from __future__ import annotations

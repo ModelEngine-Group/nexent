@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """DataMate fidelity: drive the real SDK client against the live mock."""
 import json
 from urllib.parse import quote

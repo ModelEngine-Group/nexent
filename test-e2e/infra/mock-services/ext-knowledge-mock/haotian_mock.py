@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """Haotian (昊天) route set (mounted at /haotian).
 
 Contract mirrored from:

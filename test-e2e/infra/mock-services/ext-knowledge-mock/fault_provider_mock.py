@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """Controlled OpenAI-compatible fault provider (root-mounted, real shape).
 
 Minimal by design: built strictly from what the suite cases consume, so the
