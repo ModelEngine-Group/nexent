@@ -6026,5 +6026,10 @@
   "common.select": "Select",
   "common.selected": "Selected",
   "cfg.error.loadList": "Error loading model list",
-  "cfg.error.loadListFailed": "Failed to load model list. Please refresh and try again."
+  "cfg.error.loadListFailed": "Failed to load model list. Please refresh and try again.",
+  "knowledgeBase.message.noFiles": "Please select files to upload",
+  "mcpTools.publish.tagsInheritedHint": "Tags are inherited from the source MCP service",
+  "notifications.deepLink.mcpNotFound": "The linked MCP service was not found",
+  "a2a.security.requirementRequired": "Please select an authentication method",
+  "common.error.loadFailed": "Failed to load data. Please try again later."
 }

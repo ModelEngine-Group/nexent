@@ -6026,5 +6026,10 @@
   "common.select": "选择",
   "common.selected": "已选择",
   "cfg.error.loadList": "加载模型列表出错",
-  "cfg.error.loadListFailed": "加载模型列表失败，请刷新后重试"
+  "cfg.error.loadListFailed": "加载模型列表失败，请刷新后重试",
+  "knowledgeBase.message.noFiles": "请选择要上传的文件",
+  "mcpTools.publish.tagsInheritedHint": "标签继承自源 MCP 服务",
+  "notifications.deepLink.mcpNotFound": "未找到链接对应的 MCP 服务",
+  "a2a.security.requirementRequired": "请选择认证方式",
+  "common.error.loadFailed": "加载失败，请稍后重试"
 }
