@@ -1606,7 +1606,7 @@ export const Composer: FC<ComposerProps> = ({
                     deepThinking={deepThinking}
                     onDeepThinkingChange={onDeepThinkingChange}
                     effort={thinkingEffort}
-                    defaultEffort={newChatDesign ? "high" : undefined}
+                    defaultEffort={newChatDesign ? "low" : undefined}
                     onEffortChange={(value) => {
                       if (
                         value === "low" ||
