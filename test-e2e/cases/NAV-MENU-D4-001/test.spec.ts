@@ -1,3 +1,5 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 // @ts-nocheck
 import fs from "node:fs";
 import path from "node:path";
