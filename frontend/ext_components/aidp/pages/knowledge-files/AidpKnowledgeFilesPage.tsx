@@ -303,8 +303,19 @@ const AidpKnowledgeFilesPage: React.FC<AidpKnowledgeFilesPageProps> = ({
       fixed: "left",
       width: 220,
       ellipsis: true,
-      render: (value: string) => (
-        <span className="text-blue-600">{value || UNKNOWN}</span>
+      // The name itself opens the document: a reader who wants to look at a
+      // file clicks its name, while the action column keeps the operations
+      // that change the file.
+      render: (value: string, record) => (
+        <Tooltip title={t("common.preview")}>
+          <button
+            type="button"
+            className="max-w-full truncate text-left text-blue-600 hover:text-blue-700 hover:underline"
+            onClick={() => setPreviewFile(record)}
+          >
+            {value || UNKNOWN}
+          </button>
+        </Tooltip>
       ),
     },
     {
@@ -348,17 +359,9 @@ const AidpKnowledgeFilesPage: React.FC<AidpKnowledgeFilesPageProps> = ({
       title: t("aidpKnowledge.detailOperation"),
       key: "actions",
       fixed: "right",
-      width: 170,
+      width: 120,
       render: (_value, record) => (
         <div className="flex items-center gap-3 whitespace-nowrap">
-          <Button
-            type="link"
-            size="small"
-            className="px-0"
-            onClick={() => setPreviewFile(record)}
-          >
-            {t("common.preview")}
-          </Button>
           <Button
             type="link"
             size="small"
