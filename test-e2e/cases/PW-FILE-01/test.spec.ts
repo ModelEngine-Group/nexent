@@ -16,7 +16,6 @@ journey("PW-FILE-01", async (context) => {
   const sample = fixture("sample.pdf");
   let agent = "";
   let downloadPath = "";
-  let threadTitle = "";
   let conversationId = 0;
   contract.deferCleanup(async () => { if (conversationId) await chat.deleteConversationById(conversationId); });
   await executeFixedScenario(context, {
@@ -57,7 +56,9 @@ journey("PW-FILE-01", async (context) => {
       async () => { await page.getByRole("button", { name: "预览 sample.pdf", exact: true }).last().click(); await expect(page.getByRole("dialog").or(page.locator("embed,iframe")).first()).toBeVisible(); await page.keyboard.press("Escape"); return "opened the message attachment preview"; },
       async () => { const event = page.waitForEvent("download"); await page.getByRole("button", { name: /下载/ }).last().click(); const download = await event; downloadPath = await download.path() || ""; expect(downloadPath).not.toBe(""); expect(statSync(downloadPath).size).toBeGreaterThan(0); return "captured a non-empty browser download"; },
       async () => {
-        threadTitle = await chat.persistedThreadTitle(conversationId);
+        // Verifies the persisted conversation row; the title itself is not
+        // asserted here — the refresh assertion below is the user-visible proof.
+        await chat.persistedThreadTitle(conversationId);
         await page.reload({ waitUntil: "domcontentloaded" });
         // The reload lands on the agent picker. The sidebar agent selector
         // resumes the agent's most recent conversation (its menu drives

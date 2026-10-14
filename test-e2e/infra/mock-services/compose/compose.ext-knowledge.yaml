@@ -23,9 +23,11 @@ services:
       EXT_KNOWLEDGE_SOURCE_REVISION: "${EXT_KNOWLEDGE_SOURCE_REVISION:-}"
       EXT_KNOWLEDGE_BUILD_MANIFEST_SHA256: "${EXT_KNOWLEDGE_BUILD_MANIFEST_SHA256:-}"
     ports:
-      # Published on all interfaces: host-mode product deployments (backend
-      # outside the compose network) reach the mock through the host
-      # gateway address, and the product rewrites localhost model base URLs
-      # to host.docker.internal — loopback-only publishing would cut both
-      # paths off. Runner-side access stays 127.0.0.1.
-      - "30090:30090"
+      # D-001: publish on loopback only. Runner-side callers (attach control
+      # plane, wire export, direct asset fetch, latency measurement) use
+      # 127.0.0.1; product-side callers (config/runtime/data_process outbound
+      # parameters, model records, tool configs) address the mock through the
+      # compose-network DNS name `ext-knowledge` and never traverse this
+      # published port, so the unauthenticated control surface stays off the
+      # LAN.
+      - "127.0.0.1:30090:30090"

@@ -264,6 +264,7 @@ def mock_server():
         "EXT_KNOWLEDGE_SOURCE_REVISION": identity["source_revision"],
         "EXT_KNOWLEDGE_BUILD_MANIFEST_SHA256": identity["build_manifest_sha256"],
     }
+    saved_identity = {key: os.environ.get(key) for key in identity_env}
     os.environ.update(identity_env)
 
     runner = _UvicornThread(server_module.app)
@@ -284,6 +285,11 @@ def mock_server():
     finally:
         runner.stop()
         shutil.rmtree(workdir, ignore_errors=True)
+        for key, value in saved_identity.items():
+            if value is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = value
 
 
 @pytest.fixture(scope="session")
@@ -299,10 +305,17 @@ def http_client(mock_base_url):
 
 @pytest.fixture(autouse=True)
 def _reset_all_state(mock_base_url):
-    """Fresh seed state (route sets + AIDP data/faults/knobs) per test."""
+    """Fresh seed state (route sets + AIDP data/faults/knobs) per test.
+
+    The wire log is cleared alongside the state so request records from one
+    test can never leak into the next (design §7 requires per-test state,
+    fault and wire reset; /_reset alone does not touch the wire log).
+    """
     with httpx.Client(base_url=mock_base_url, timeout=15) as client:
         response = client.post("/_reset")
         assert response.status_code == 200, response.text
+        cleared = client.post("/_wire-log/clear")
+        assert cleared.status_code == 200, cleared.text
 
 
 @pytest.fixture(scope="session")

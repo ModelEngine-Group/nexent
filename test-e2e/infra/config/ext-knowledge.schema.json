@@ -24,7 +24,7 @@
     "product_url": {
       "type": "string",
       "minLength": 1,
-      "description": "Product-container-facing root, e.g. http://ext-knowledge:30090. Same root-address rules; must differ from runner_url."
+      "description": "Product-container-facing root, e.g. http://ext-knowledge:30090. Same root-address rules; it may equal runner_url only for a host-mode product deployment that shares the runner loopback."
     },
     "compose_project": {
       "type": "string",

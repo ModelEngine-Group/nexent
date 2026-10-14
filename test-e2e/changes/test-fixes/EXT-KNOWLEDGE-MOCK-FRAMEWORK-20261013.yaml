@@ -59,12 +59,24 @@ change:
     evidence: fidelity executed 63/63 PASS (no skips), and the eight
     consumers plus the repaired daily cases ran green against the official
     dockerized test deployment (local-latest images built from this
-    baseline, deploy.sh with a one-off root dir). The compose pair publishes
-    30090 on all interfaces because a host-mode product reaches it through
-    the host gateway and the product rewrites localhost model base URLs to
-    host.docker.internal; a containerized product uses product_url
-    http://ext-knowledge:30090 through the product network overlay. AGT-002
+    baseline, deploy.sh with a one-off root dir). A containerized product
+    uses product_url http://ext-knowledge:30090 through the product network
+    overlay; the runner reaches the same instance on the loopback address.
+    AGT-002
     needed a wider wait on the forced-failure regenerate call: the current
     adapter spends its full five-attempt retry budget against the controlled
     503s, which exceeds the default model timeout. A full d4 typecheck
     still needs the d4 node_modules install outside the batch.
+    Post-review corrections (PR #4090 review pass): the worker process now
+    binds RESULT_DIR itself and adopts any prerequisite receipt, so attach
+    and dependency failures report BLOCKED_BY_DEPENDENCY with their concrete
+    reason instead of a bare AUTOMATION_ERROR (regression tests added — the
+    previous tests set RESULT_DIR themselves and masked the gap); the base
+    compose publishes the port on loopback only per D-001 (the all-interface
+    publishing was an execution-phase leftover from the hybrid host-mode
+    exploration); release() decides the instance state before dropping the
+    lock; the schema description matches the allowed host-mode equality of
+    runner_url/product_url; the fidelity conftest clears the wire log per
+    test and restores the identity environment variables; the control plane
+    validates the whole /_reset service list first and checks AIDP sub-app
+    response codes on fail-next/fail-reset.

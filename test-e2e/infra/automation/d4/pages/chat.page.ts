@@ -6,7 +6,6 @@ import { appPath } from "../runner/runtime-config";
 type AttachmentPayload = string | Parameters<FileChooser["setFiles"]>[0];
 
 export class ChatPage {
-  
   private lastServerConversationId?: number;
 
   constructor(readonly page: Page) {}

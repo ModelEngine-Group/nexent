@@ -582,9 +582,13 @@ class ExtKnowledgeAttach:
         except AttachError as exc:
             problems.append(str(exc))
         try:
+            # Decide the final instance state BEFORE releasing the lock so a
+            # concurrent attacher can never observe released=True between the
+            # unlock and an "unknown state" rewrite. Failure details land in
+            # the release evidence either way.
             if self._lock_state_path:
                 _write_state(self._lock_state_path, str(self.config["owner_run_id"]),
-                             self.case_id, released=True)
+                             self.case_id, released=not problems)
         finally:
             self._release_lock()
         if problems:
@@ -593,10 +597,6 @@ class ExtKnowledgeAttach:
             (runtime / "ext-knowledge-release.json").write_text(
                 json.dumps({"problems": problems}, indent=2) + "\n", encoding="utf-8"
             )
-            # The instance state is now unknown to the next runner.
-            if self._lock_state_path:
-                _write_state(self._lock_state_path, str(self.config["owner_run_id"]),
-                             self.case_id, released=False)
             return 2
         return 0
 

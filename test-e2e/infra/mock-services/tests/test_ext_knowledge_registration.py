@@ -107,11 +107,12 @@ class ExtKnowledgeComposeContentTests(unittest.TestCase):
             REGISTRY_DIR / "compose/compose.ext-knowledge.product-network.yaml"
         ).read_text(encoding="utf-8")
 
-    def test_base_publishes_the_fixed_port_on_all_interfaces(self):
-        # Host-mode product deployments need the gateway address to work, and
-        # the product rewrites localhost model base URLs to host.docker.internal.
-        self.assertIn("30090:30090", self.base)
-        self.assertNotIn("127.0.0.1:30090:30090", self.base)
+    def test_base_publishes_the_fixed_port_on_loopback_only(self):
+        # D-001: the unauthenticated control surface stays off the LAN. The
+        # runner uses the loopback address; product-side callers reach the
+        # mock through the compose-network DNS name, never this port.
+        self.assertIn("127.0.0.1:30090:30090", self.base)
+        self.assertNotIn('"30090:30090"', self.base)
         self.assertIn("EXT_KNOWLEDGE_BUILD_CONTEXT", self.base)
         self.assertIn("EXT_KNOWLEDGE_MOCK_RUN_ID", self.base)
         self.assertIn("EXT_KNOWLEDGE_BUILD_MANIFEST_SHA256", self.base)

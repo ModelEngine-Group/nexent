@@ -18,6 +18,15 @@ notes: >-
   configuration; the profile is selected through config/aidp-journey.yaml
   and recorded into runtime/ext-knowledge-attach.json. Mock results are
   never counted as real_smoke.
+acceptance_bindings:
+  AC-01:
+  - PW-KB-AIDP-01
+  AC-02:
+  - PW-KB-AIDP-01
+  AC-03:
+  - PW-KB-AIDP-01
+  AC-04:
+  - PW-KB-AIDP-01
 preparation:
   families: []
   anchors: true

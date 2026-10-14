@@ -134,6 +134,14 @@ def create_control_router(
     @router.post("/_reset")
     async def reset(body: Optional[ResetBody] = None) -> Dict[str, Any]:
         requested = body.services if body and body.services else _known_services()
+        # Validate the whole request before touching any state: an unknown
+        # service must fail the call without leaving a partial reset behind.
+        unknown = [service for service in requested if service not in _known_services()]
+        if unknown:
+            raise HTTPException(
+                status_code=400,
+                detail=f"unknown service {unknown[0]!r}; expected one of {_known_services()}",
+            )
         reset_done: List[str] = []
         for service in requested:
             if service == "aidp":
@@ -161,6 +169,14 @@ def create_control_router(
                 aidp_app, "POST", "/_mock/fail-next",
                 params={"n": body.count, "status": body.status},
             )
+            if response.status_code != 200:
+                raise HTTPException(
+                    status_code=502,
+                    detail=(
+                        "AIDP fail-next incomplete: POST /_mock/fail-next returned "
+                        f"{response.status_code}; retry or investigate the sub-app"
+                    ),
+                )
             return response.json()
         if body.service in SERVICE_PREFIXES:
             faults.schedule(body.service, body.count, body.status)
@@ -175,7 +191,15 @@ def create_control_router(
     async def fail_reset(body: Optional[FailResetBody] = None) -> Dict[str, Any]:
         service = body.service if body else None
         if service == "aidp":
-            await _aidp_request(aidp_app, "POST", "/_mock/fail-reset")
+            response = await _aidp_request(aidp_app, "POST", "/_mock/fail-reset")
+            if response.status_code != 200:
+                raise HTTPException(
+                    status_code=502,
+                    detail=(
+                        "AIDP fail-reset incomplete: POST /_mock/fail-reset returned "
+                        f"{response.status_code}; retry or investigate the sub-app"
+                    ),
+                )
             return {"service": "aidp", "fail_next": 0}
         if service is not None and service not in SERVICE_PREFIXES:
             raise HTTPException(status_code=400, detail=f"unknown service {service!r}")

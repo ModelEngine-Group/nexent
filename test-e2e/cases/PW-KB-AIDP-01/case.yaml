@@ -25,7 +25,7 @@ case:
     expected: 进入的文件管理属于所选KB；当前AIDP列表没有召回输入框，不以名称筛选冒充检索。
   - order: 2
     action: 打开run-owned Agent配置页并选择该Agent，通过AddKnowledgeDrawer绑定该AIDP知识库并等待真实autosave。
-    expected: agent update请求携带aidp_search工具与所选KB的kds ID。
+    expected: 绑定autosave（POST /api/tool/update 工具配置请求）携带aidp_search工具身份（以工具列表id证明）与所选KB的kds ID。
   - order: 3
     action: 进入Agent Debug发送固定问题，通过产品真实AIDP工具召回。
     expected: 回答包含预置oracle稳定文本片段。
@@ -36,11 +36,11 @@ case:
     action: 检查Debug引用（citation）来源文档。
     expected: 引用包含oracle来源文档标题。
   - order: 6
-    action: 刷新后经侧栏Agent选择器恢复run-owned会话，复核AIDP知识绑定持久化。
+    action: 刷新整页后重新进入run-owned Agent编辑器（不经侧栏会话恢复），复核AIDP知识绑定持久化。
     expected: 绑定的KB在知识库管理区块中仍可见。
   - order: 7
-    action: 新开会话向同一Agent发送固定问题，验证知识作用域。
-    expected: 新会话回答同样包含oracle文本片段。
+    action: 通过真实发布动作释放含绑定编辑的新Agent版本，随后新开会话向同一Agent发送固定问题，验证知识作用域。
+    expected: 发布成功且新会话回答同样包含oracle文本片段。
   execution:
     profiles:
     - name: mock
@@ -48,8 +48,48 @@ case:
       - knowledge-provider
     - name: real_smoke
       required_services: []
+  acceptance:
+  - id: AC-01
+    description: The AIDP branch is proven mode-exclusive (its own markers present, Local
+      personal quota controls absent) and the controlled knowledge base is selected into
+      its file management with the selected resource verified.
+    steps:
+    - 1
+    expected_results: []
+    forbidden_side_effects: []
+  - id: AC-02
+    description: The real AddKnowledgeDrawer binding autosaves the aidp_search tool
+      configuration carrying the selected KB kds id, with the tool identity proven
+      against the product tool list.
+    steps:
+    - 2
+    expected_results:
+    - 1
+    forbidden_side_effects: []
+  - id: AC-03
+    description: Agent Debug recall runs through the real AIDP tool chain; the answer
+      contains the oracle text fragment and the rendered citation names the oracle source
+      document.
+    steps:
+    - 3
+    - 4
+    - 5
+    expected_results:
+    - 2
+    forbidden_side_effects: []
+  - id: AC-04
+    description: A full refresh retains the released knowledge binding and, after the real
+      release action, a brand-new conversation recalls the same oracle under the explicitly
+      selected profile.
+    steps:
+    - 6
+    - 7
+    expected_results:
+    - 3
+    - 4
+    forbidden_side_effects: []
   expected_results:
-  - autosave请求携带aidp_search工具与所选KB的kds ID。
+  - 绑定autosave（工具配置请求）携带aidp_search工具身份与所选KB的kds ID。
   - Debug回答包含oracle稳定文本片段（真实AIDP工具召回）。
   - 新会话回答同样包含oracle文本片段（知识作用域成立）。
   - 执行profile记录为mock或real_smoke。
@@ -65,8 +105,8 @@ case:
   - Debug发送固定问题，真实AIDP工具召回并验证oracle文本。
   - 验证回答文本含稳定oracle片段。
   - 验证citation来源文档。
-  - 刷新后经侧栏Agent选择器恢复会话并复核绑定持久化。
-  - 新会话验证知识作用域。
+  - 刷新整页后重进Agent编辑器复核绑定持久化。
+  - 发布新版本后新会话验证知识作用域。
   final_business_result:
   - AIDP分支与Local互斥且无quota控件泄漏。
   - 真实AIDP召回与Agent绑定/作用域全部成立。
