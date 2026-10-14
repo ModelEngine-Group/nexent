@@ -64,3 +64,7 @@ change:
     tenant admin as owner) because the product intersects the AIDP catalog
     with local permission rows and exposes no HTTP flow to register an
     existing remote KB; the deployment preparation must seed it once.
+    Post-review re-run (2026-10-14, review-fix code on a fresh one-off
+    deployment): the full mock-profile journey passed again (4
+    preconditions / 7 steps / 4 assertions, clean cleanup) with the
+    acceptance obligations bound in this change.

@@ -53,3 +53,18 @@ change:
     locators are bound to the current product build; the legacy placeholder
     variants remaining in PW-CHAT-02/PW-MEDIA-STT-01 and the tab-based
     bindTool/bindSkill helpers are still known drift outside this change.
+    Review re-verification (2026-10-14, fresh one-off deployment, review-fix
+    code): the design's minimum regression set was executed. PW-TASK-01 and
+    AGT-001 passed; PW-KB-AIDP-01 passed its full mock-profile journey. The
+    repaired helpers were exercised successfully wherever reached —
+    PW-CHAT-01 step 1 (openAgent/selectAgent), PW-CHAT-05 steps 1-3,
+    PW-PROMPT-02 preconditions (select), PW-AGENT-01 precondition 3 (open).
+    The remaining five cases fail on their own pre-existing post-#4058 drift,
+    each attributed: PW-AGENT-01 and PW-VERSION-01 in the unchanged
+    AgentPage.create() flow (old 创建智能体 dialog / 新建 entry), PW-PROMPT-01
+    on the retired 请输入智能体描述 placeholder, PW-PROMPT-02 on the retired
+    智能体角色 tab, PW-CHAT-01 on the retired 执行 mode button, PW-CHAT-05 on
+    the retired 知识库： scope button. Those locators are outside this PR's
+    changed surface and stay recorded as known drift (without running them
+    green, the batch report states them as executed-and-failing for
+    pre-existing reasons, not as verified).
