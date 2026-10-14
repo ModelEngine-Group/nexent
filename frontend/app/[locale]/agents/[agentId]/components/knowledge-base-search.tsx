@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { KnowledgeRetrievalParamsForm } from "@/components/tool-config/KnowledgeRetrievalParamsForm";
 import { useTranslation } from "react-i18next";
 import { Button, Modal, Spin, Tag, Tooltip } from "antd";
-import { Database, ChevronRight, Settings, Trash2, Plus } from "lucide-react";
+import { Database, ExternalLink, Settings, Trash2, Plus } from "lucide-react";
 
 import { AddKnowledgeDrawer } from "@/components/resource-picker/AddKnowledgeDrawer";
 import { useDeployment } from "@/components/providers/deploymentProvider";
@@ -524,7 +524,7 @@ export default function KnowledgeBaseConfig({
         >
           <span className="inline-flex items-center gap-1">
             {t("agentConfig.layout.newKnowledgeBase")}
-            <ChevronRight size={14} />
+            <ExternalLink size={14} />
           </span>
         </Button>
         <Button

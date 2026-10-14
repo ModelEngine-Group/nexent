@@ -52,10 +52,10 @@ export default function AgentListCard({
   return (
     <article className="group relative flex h-[148px] min-w-0 flex-col justify-between rounded-[12px] bg-white px-6 py-4 ring-1 ring-[rgba(201,201,201,0.4)] hover:ring-[#0067d1] focus-within:ring-[#0067d1]">
       <button
-        data-testid="agent-card-body"
         type="button"
-        className="flex h-[86px] min-w-0 shrink-0 cursor-pointer flex-col text-left"
         onClick={() => onOpen(agent)}
+        data-testid="agent-card-body"
+        className="flex h-[86px] min-w-0 shrink-0 cursor-pointer flex-col text-left"
         aria-label={title}
       >
         <div className="flex h-10 min-w-0 items-center gap-3 pr-7">

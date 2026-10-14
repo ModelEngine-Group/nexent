@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Avatar, Button, Tooltip } from "antd";
-import { LockOpen, Pencil, Send } from "lucide-react";
+import { LockOpen, Send } from "lucide-react";
 
 import { StandardButton } from "@/components/common/StandardButton";
 import { API_ENDPOINTS } from "@/services/api";
@@ -32,7 +32,6 @@ export function AgentConfigHeader({
   readOnly,
   debugVisible,
   canManualUnlock,
-  onEditIdentity,
   onConfigure,
   onDebug,
   onPublish,
@@ -88,15 +87,6 @@ export function AgentConfigHeader({
             <span className="max-w-[240px] truncate text-xl font-medium leading-7 text-[#191919] [font-family:'HarmonyOS_Sans_SC',sans-serif]">
               {agent.display_name || agent.name}
             </span>
-            <Button
-              type="text"
-              size="small"
-              aria-label={t("agent.highFidelity.editIdentity")}
-              icon={<Pencil size={16} />}
-              disabled={readOnly}
-              onClick={onEditIdentity}
-              className="!size-6 !p-0 !text-[#2673e5]"
-            />
           </div>
           <div className="flex items-center gap-4 text-xs font-normal leading-[22px] text-[#808080]">
             <span>
@@ -153,14 +143,6 @@ export function AgentConfigHeader({
           }
         >
           {t("agent.highFidelity.debugMode")}
-        </Button>
-        <Button
-          type="text"
-          disabled={agentId === null || readOnly}
-          onClick={onPublish}
-          className="!text-[#777777]"
-        >
-          {t("agent.highFidelity.publishMode")}
         </Button>
       </div>
       <div className="flex shrink-0 items-center gap-2 justify-self-end">

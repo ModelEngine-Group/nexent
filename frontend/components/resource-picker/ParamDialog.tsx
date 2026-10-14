@@ -29,10 +29,13 @@ export function ParamDialog({
   zIndex,
   maskClosable = false,
   confirmDisabled = false,
+  confirmLoading = false,
+  cancelDisabled = false,
+  destroyOnHidden = false,
   children,
   variant,
 }: {
-  variant?: "skill" | "tool" | "model";
+  variant?: "skill" | "tool" | "model" | "publish";
   open: boolean;
   title: ReactNode;
   description?: ReactNode;
@@ -43,6 +46,9 @@ export function ParamDialog({
   zIndex?: number;
   maskClosable?: boolean;
   confirmDisabled?: boolean;
+  confirmLoading?: boolean;
+  cancelDisabled?: boolean;
+  destroyOnHidden?: boolean;
   children: ReactNode;
 }) {
   const { t } = useTranslation("common");
@@ -56,6 +62,7 @@ export function ParamDialog({
       closable={false}
       zIndex={zIndex}
       maskClosable={maskClosable}
+      destroyOnHidden={destroyOnHidden}
       styles={{
         container: {
           padding: 0,
@@ -101,6 +108,7 @@ export function ParamDialog({
           <Button
             autoInsertSpace={false}
             onClick={onClose}
+            disabled={cancelDisabled}
             className={styles.cancelButton}
           >
             {cancelText ?? t("common.cancel")}
@@ -110,6 +118,7 @@ export function ParamDialog({
               autoInsertSpace={false}
               onClick={onConfirm}
               disabled={confirmDisabled}
+              loading={confirmLoading}
               className={styles.confirmButton}
             >
               {confirmText ?? t("common.confirm")}

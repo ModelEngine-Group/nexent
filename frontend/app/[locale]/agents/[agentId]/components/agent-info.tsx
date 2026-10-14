@@ -41,19 +41,16 @@ import HighFidelityTextArea from "./HighFidelityTextArea";
 import {
   DefaultAgentAvatar,
   DEFAULT_AGENT_AVATAR_COLORS,
+  getDefaultAgentAvatarSvg,
 } from "./DefaultAgentAvatar";
 
 const HIGH_FIDELITY_DESCRIPTION_LIMIT = 200;
 
 interface AgentInfoProps {
   highFidelity?: boolean;
-  guideCompact?: boolean;
 }
 
-export default function AgentInfo({
-  highFidelity = false,
-  guideCompact = false,
-}: AgentInfoProps) {
+export default function AgentInfo({ highFidelity = false }: AgentInfoProps) {
   const { t } = useTranslation("common");
   const { message } = App.useApp();
   const queryClient = useQueryClient();
@@ -158,17 +155,10 @@ export default function AgentInfo({
     canvas.width = canvas.height = 200;
     const context = canvas.getContext("2d");
     if (!context) return;
-    const gradient = context.createLinearGradient(20, 20, 180, 180);
-    colors.forEach((color, index) => gradient.addColorStop(index, color));
-    context.fillStyle = gradient;
-    context.beginPath();
-    context.arc(100, 100, 90, 0, Math.PI * 2);
-    context.fill();
-    context.fillStyle = "white";
-    context.font = "italic bold 110px sans-serif";
-    context.textAlign = "center";
-    context.textBaseline = "middle";
-    context.fillText("n", 100, 98);
+    const image = new Image();
+    image.src = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(getDefaultAgentAvatarSvg(colors))}`;
+    await image.decode();
+    context.drawImage(image, 0, 0, 200, 200);
     const blob = await new Promise<Blob | null>((resolve) =>
       canvas.toBlob(resolve, "image/png")
     );
@@ -271,29 +261,6 @@ export default function AgentInfo({
               maxLength={AGENT_NAME_MAX_LENGTH}
               showCount
               onChange={(event) => updateDraftValue("name", event.target.value)}
-            />
-          </Form.Item>
-        </Col>
-      </Row>
-
-      <Row gutter={[12, 0]}>
-        <Col xs={24} sm={12}>
-          <Form.Item
-            label={t("agent.author")}
-            className="mb-3"
-            name="author"
-            rules={[
-              {
-                required: true,
-                message: t("agent.validation.authorRequired"),
-              },
-            ]}
-          >
-            <Input
-              disabled={isReadOnly}
-              placeholder={t("agent.authorPlaceholder")}
-              value={editedAgent.author}
-              onChange={(event) => updateDraft({ author: event.target.value })}
             />
           </Form.Item>
         </Col>
@@ -467,9 +434,9 @@ export default function AgentInfo({
                     aria-label={`${t("agent.highFidelity.defaultAvatars")} ${index + 1}`}
                     disabled={isReadOnly || uploading || agentId === null}
                     onClick={() => void selectDefaultAvatar(colors)}
-                    className="!h-9 !w-[35px] !rounded-[4px] !p-[3px]"
+                    className="!h-9 !w-[35px] !rounded-[8px] !p-0"
                   >
-                    <DefaultAgentAvatar size={29} colors={colors} />
+                    <DefaultAgentAvatar size={35} colors={colors} />
                   </Button>
                 ))}
               </div>
@@ -494,17 +461,13 @@ export default function AgentInfo({
             <div className="min-w-0">{descriptionField}</div>
             <div className="min-w-0">{avatarField}</div>
           </div>
-          <div className={guideCompact ? "hidden" : "mt-4"}>
-            {identityFields}
-            {tagFields}
-          </div>
+          <div className="mt-4">{identityFields}</div>
         </>
       ) : (
         <Row gutter={[16, 0]}>
           <Col xs={24} md={18}>
             {identityFields}
             {descriptionField}
-            {tagFields}
           </Col>
           <Col xs={24} md={6}>
             {avatarField}

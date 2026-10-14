@@ -29,7 +29,6 @@ import {
 } from "./adapter/conversation-thread-list-adapter";
 import {
   recordThreadActivity,
-  resumeLatestAgentConversation,
   startAgentConversation,
 } from "./adapter/thread-agent-registry";
 import { remoteChatModelAdapter } from "./adapter/remote-chat-model-adapter";
@@ -793,18 +792,14 @@ const HomeContent: FC<{
     async (agent: Agent) => {
       try {
         shouldRestoreAgentRef.current = true;
-        await resumeLatestAgentConversation(
-          runtime,
-          Number(agent.id),
-          generatedTitles
-        );
+        await startAgentConversation(runtime, Number(agent.id));
         setSelectedAgent(agent);
       } catch (error) {
         log.error("[HomeContent] Failed to switch agent conversation:", error);
         message.error(t("chatInterface.errorFetchingConversationDetailsError"));
       }
     },
-    [runtime, generatedTitles, setSelectedAgent, t]
+    [runtime, setSelectedAgent, t]
   );
 
   return (

@@ -16,13 +16,11 @@ const PLACEMENTS = ["right", "bottomLeft", "topLeft", "bottomRight"] as const;
 interface AgentCreationGuideProps {
   preferenceKey: string;
   workspaceRef: RefObject<HTMLDivElement | null>;
-  onOpenChange: (open: boolean) => void;
 }
 
 export function AgentCreationGuide({
   preferenceKey,
   workspaceRef,
-  onOpenChange,
 }: AgentCreationGuideProps) {
   const { t } = useTranslation("common");
   const [open, setOpen] = useState(false);
@@ -44,24 +42,21 @@ export function AgentCreationGuide({
         return;
       }
       setOpen(true);
-      onOpenChange(true);
     });
     return () => {
       window.cancelAnimationFrame(frame);
-      onOpenChange(false);
     };
-  }, [findTarget, onOpenChange, preferenceKey]);
+  }, [findTarget, preferenceKey]);
 
   const dismiss = useCallback(() => {
     completeAgentCreationGuide(preferenceKey);
     setOpen(false);
-    onOpenChange(false);
     window.requestAnimationFrame(() => {
       findTarget("assistant")
         ?.querySelector<HTMLTextAreaElement>("textarea")
         ?.focus({ preventScroll: true });
     });
-  }, [findTarget, onOpenChange, preferenceKey]);
+  }, [findTarget, preferenceKey]);
 
   useEffect(() => {
     if (!open) return;

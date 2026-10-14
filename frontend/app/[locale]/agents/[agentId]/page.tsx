@@ -11,10 +11,18 @@ import {
 import { useTranslation } from "react-i18next";
 import { useQueryClient } from "@tanstack/react-query";
 import { App, Button, Modal, Spin, Tag } from "antd";
-import { GitBranch, History, RefreshCw, Sparkles, X } from "lucide-react";
+import {
+  GitBranch,
+  History,
+  RefreshCw,
+  Sparkles,
+  ArrowLeft,
+  X,
+} from "lucide-react";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 
 import AgentConfig from "./agent-config";
+import { DefaultAgentAvatar } from "./components/DefaultAgentAvatar";
 import { AgentCreationGuide } from "./components/agent-creation-guide";
 import {
   agentCreationGuideKey,
@@ -105,12 +113,19 @@ function PanelCard({
           data-testid={headerTestId}
           className={`flex min-h-12 shrink-0 items-center justify-between border-b border-gray-200 px-4 ${headerClassName}`}
         >
-          <div className="flex items-center gap-2">
+          <div
+            className={
+              headerTestId === "agent-config-page-tabs"
+                ? "flex h-10 items-center gap-1 rounded-lg bg-white px-3 [font-family:'HarmonyOS_Sans_SC',sans-serif]"
+                : "flex items-center gap-2"
+            }
+          >
+            {headerTestId === "agent-config-page-tabs" && leftAction}
             {icon}
             <h3 className="max-w-[280px] truncate text-sm font-normal leading-[22px] text-[#191919]">
               {title}
             </h3>
-            {leftAction}
+            {headerTestId !== "agent-config-page-tabs" && leftAction}
           </div>
           {rightAction}
         </div>
@@ -131,7 +146,6 @@ function AgentSetupContent({
   const router = useRouter();
   const searchParams = useSearchParams();
   const workspaceRef = useRef<HTMLDivElement>(null);
-  const [creationGuideActive, setCreationGuideActive] = useState(false);
   const { agentId, locale: routeLocale } = useParams<{
     agentId: string;
     locale: string;
@@ -354,7 +368,6 @@ function AgentSetupContent({
           key={`${agentCreationGuideKey(tenantId, user.id)}/${requestedAgentId}`}
           preferenceKey={agentCreationGuideKey(tenantId, user.id)}
           workspaceRef={workspaceRef}
-          onOpenChange={setCreationGuideActive}
         />
       )}
       <main
@@ -434,6 +447,7 @@ function AgentSetupContent({
           <PanelCard
             frameless
             headerTestId="agent-config-page-tabs"
+            icon={<DefaultAgentAvatar size={16} />}
             title={t("agent.highFidelity.pageTab", {
               name:
                 agentInfo?.display_name ||
@@ -446,9 +460,9 @@ function AgentSetupContent({
               <Button
                 type="text"
                 aria-label={t("common.back")}
-                icon={<X size={14} />}
+                icon={<ArrowLeft size={14} />}
                 onClick={onBack}
-                className="!size-6 !p-0"
+                className="!size-[14px] !p-0 !text-[#191919]"
               />
             }
             rightAction={
@@ -488,14 +502,18 @@ function AgentSetupContent({
           >
             <div className="min-h-0 flex-1 overflow-hidden">
               <AgentConfig
-                creationGuideActive={showCreationGuide && creationGuideActive}
                 published={Boolean(agentInfo?.current_version_no)}
                 actionAreaRef={actionAreaRef}
                 canManualUnlock={canManualUnlock}
                 onManualUnlock={handleManualUnlock}
-                onToggleDebug={() =>
-                  isDebugVisible ? closeDebug() : setIsDebugVisible(true)
-                }
+                onToggleDebug={() => {
+                  if (isDebugVisible) {
+                    closeDebug();
+                  } else {
+                    setIsDebugVisible(true);
+                    setIsGenerationVisible(false);
+                  }
+                }}
                 debugVisible={isDebugVisible}
                 debugExpanded={isDebugFullscreen || isCompareMode}
                 debugPanel={
@@ -531,7 +549,10 @@ function AgentSetupContent({
                     />
                   </div>
                 }
-                onConfigure={closeDebug}
+                onConfigure={() => {
+                  closeDebug();
+                  setIsGenerationVisible(true);
+                }}
                 onOptimizePrompt={() => {
                   setIsGenerationVisible(true);
                   nl2AgentChatPanelRef.current?.sendPrompt(
@@ -585,7 +606,7 @@ export default function AgentEditor() {
   const { t } = useTranslation("common");
   const { message } = App.useApp();
   const router = useRouter();
-  const { agentId } = useParams<{ agentId: string }>();
+  const { agentId, locale } = useParams<{ agentId: string; locale: string }>();
   const requestedAgentId = Number(agentId);
   const isValidAgentId =
     Number.isInteger(requestedAgentId) && requestedAgentId > 0;
@@ -600,7 +621,7 @@ export default function AgentEditor() {
     if (isReturningRef.current) return;
 
     if (!isValidAgentId) {
-      router.replace("/agents");
+      router.replace(`/${locale}/agents`);
       return;
     }
     if (currentAgentId === requestedAgentId) return;
@@ -611,7 +632,7 @@ export default function AgentEditor() {
         message.error(
           result.message || t("agentConfig.agents.detailsLoadFailed")
         );
-        router.replace("/agents");
+        router.replace(`/${locale}/agents`);
         return;
       }
       initialize(result.data);
@@ -620,6 +641,7 @@ export default function AgentEditor() {
     currentAgentId,
     initialize,
     isValidAgentId,
+    locale,
     message,
     requestedAgentId,
     router,
@@ -636,7 +658,11 @@ export default function AgentEditor() {
             onBack={() => {
               isReturningRef.current = true;
               reset();
-              router.push("/agents");
+              if (window.history.length > 1) {
+                router.back();
+              } else {
+                router.replace(`/${locale}/agents`);
+              }
             }}
             onManageVersions={() => setIsVersionManageOpen(true)}
           />

@@ -9,7 +9,7 @@ import {
 } from "react";
 import { useTranslation } from "react-i18next";
 import { App, Avatar, Button, Col } from "antd";
-import { ChevronRight, Plus, Search, Trash2, X } from "lucide-react";
+import { ExternalLink, Plus, Search, Trash2, X } from "lucide-react";
 
 import { AddAgentDrawer } from "@/components/resource-picker/AddAgentDrawer";
 import A2AAgentDiscoveryModal from "./a2a/A2AAgentDiscoveryModal";
@@ -151,7 +151,7 @@ export function CollaborativeAgentActions({
     >
       <span className="inline-flex items-center gap-1">
         {t("agentConfig.layout.thirdPartyAgent")}
-        <ChevronRight size={14} />
+        <ExternalLink size={14} />
       </span>
     </Button>
   );

@@ -181,7 +181,6 @@ function ConfigSection({
 }
 
 interface AgentConfigProps {
-  creationGuideActive?: boolean;
   published?: boolean;
   canManualUnlock: boolean;
   onManualUnlock: () => void;
@@ -196,7 +195,6 @@ interface AgentConfigProps {
 }
 
 export default function AgentConfig({
-  creationGuideActive = false,
   published = false,
   canManualUnlock,
   onManualUnlock,
@@ -568,11 +566,11 @@ export default function AgentConfig({
                 }
                 containerRef={displayInfoSectionRef}
               >
-                <AgentInfo highFidelity guideCompact={creationGuideActive} />
+                <AgentInfo highFidelity />
               </ConfigSection>
               <ConfigSection
                 testId="agent-config-card-model"
-                referenceMinHeight={creationGuideActive ? 272 : 268}
+                referenceMinHeight={268}
                 title={t("agent.highFidelity.modelTitle")}
                 description={t("agent.highFidelity.modelDescription")}
                 icon={<Box className="size-6 shrink-0" />}
@@ -610,7 +608,7 @@ export default function AgentConfig({
                     title={t("agent.highFidelity.knowledgeTitle")}
                     description={t("agent.highFidelity.knowledgeDescription")}
                     icon={<BookOpen className="size-6 shrink-0" />}
-                    open={openSections.knowledge_base && !creationGuideActive}
+                    open={openSections.knowledge_base}
                     onOpenChange={(open) =>
                       handleSectionOpenChange("knowledge_base", open)
                     }
@@ -626,7 +624,7 @@ export default function AgentConfig({
                 title={t("agent.highFidelity.guideTitle")}
                 description={t("agent.highFidelity.guideDescription")}
                 icon={<ScrollText className="size-6 shrink-0" />}
-                open={openSections.conversation_guide && !creationGuideActive}
+                open={openSections.conversation_guide}
                 onOpenChange={(open) =>
                   handleSectionOpenChange("conversation_guide", open)
                 }
@@ -642,7 +640,7 @@ export default function AgentConfig({
                     title={t("agent.highFidelity.skillTitle")}
                     description={t("agent.highFidelity.skillDescription")}
                     icon={<GraduationCap className="size-6 shrink-0" />}
-                    open={openSections.skills && !creationGuideActive}
+                    open={openSections.skills}
                     onOpenChange={(open) =>
                       handleSectionOpenChange("skills", open)
                     }
@@ -661,7 +659,7 @@ export default function AgentConfig({
                     title={t("agent.highFidelity.toolTitle")}
                     description={t("agent.highFidelity.toolDescription")}
                     icon={<Puzzle className="size-6 shrink-0" />}
-                    open={openSections.tools && !creationGuideActive}
+                    open={openSections.tools}
                     onOpenChange={(open) =>
                       handleSectionOpenChange("tools", open)
                     }
@@ -680,9 +678,7 @@ export default function AgentConfig({
                     title={t("agent.highFidelity.childTitle")}
                     description={t("agent.highFidelity.childDescription")}
                     icon={<BlocksIcon className="size-6 shrink-0" />}
-                    open={
-                      openSections.collaborative_agents && !creationGuideActive
-                    }
+                    open={openSections.collaborative_agents}
                     onOpenChange={(open) =>
                       handleSectionOpenChange("collaborative_agents", open)
                     }

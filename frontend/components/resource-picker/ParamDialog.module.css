@@ -136,12 +136,20 @@
 }
 
 /* Align label text to controls and place required marks in the left gutter. */
-.dialog:is([data-config-variant="tool"], [data-config-variant="skill"])
+.dialog:is(
+    [data-config-variant="tool"],
+    [data-config-variant="skill"],
+    [data-config-variant="publish"]
+  )
   [data-config-label] {
   padding-left: 0;
   font-weight: 400;
 }
-.dialog:is([data-config-variant="tool"], [data-config-variant="skill"])
+.dialog:is(
+    [data-config-variant="tool"],
+    [data-config-variant="skill"],
+    [data-config-variant="publish"]
+  )
   [data-config-required] {
   position: absolute;
   left: -10px;
@@ -155,43 +163,86 @@
 }
 
 /* Keep the required-mark gutter inside the scroll viewport. */
-.dialog:is([data-config-variant="tool"], [data-config-variant="skill"]) .body {
+.dialog:is(
+    [data-config-variant="tool"],
+    [data-config-variant="skill"],
+    [data-config-variant="publish"]
+  )
+  .body {
   margin-left: -10px;
   padding-left: 10px;
 }
 
 /* Apply one horizontal text inset, including nested password inputs. */
-.dialog:is([data-config-variant="tool"], [data-config-variant="skill"])
+.dialog:is(
+    [data-config-variant="tool"],
+    [data-config-variant="skill"],
+    [data-config-variant="publish"]
+  )
   :global(textarea.ant-input) {
   padding-left: 12px !important;
   padding-right: 12px !important;
 }
-.dialog:is([data-config-variant="tool"], [data-config-variant="skill"])
+.dialog:is(
+    [data-config-variant="tool"],
+    [data-config-variant="skill"],
+    [data-config-variant="publish"]
+  )
   :global(.ant-input-affix-wrapper) {
   padding: 0 12px !important;
   min-height: 28px;
 }
-.dialog:is([data-config-variant="tool"], [data-config-variant="skill"])
+.dialog:is(
+    [data-config-variant="tool"],
+    [data-config-variant="skill"],
+    [data-config-variant="publish"]
+  )
   :global(.ant-input-affix-wrapper input.ant-input) {
   padding: 0 !important;
 }
-.dialog:is([data-config-variant="tool"], [data-config-variant="skill"])
+.dialog:is(
+    [data-config-variant="tool"],
+    [data-config-variant="skill"],
+    [data-config-variant="publish"]
+  )
   :global(.ant-input-number-input) {
   padding-left: 12px !important;
   padding-right: 12px !important;
 }
 
 /* Required marks occupy the gutter outside AntD's label text box. */
-.dialog:is([data-config-variant="tool"], [data-config-variant="skill"])
+.dialog:is(
+    [data-config-variant="tool"],
+    [data-config-variant="skill"],
+    [data-config-variant="publish"]
+  )
   :global(.ant-form-item-label),
-.dialog:is([data-config-variant="tool"], [data-config-variant="skill"])
+.dialog:is(
+    [data-config-variant="tool"],
+    [data-config-variant="skill"],
+    [data-config-variant="publish"]
+  )
   :global(.ant-form-item-label > label) {
   overflow: visible !important;
 }
 
 /* AntD number controls must not add a second text inset. */
-.dialog:is([data-config-variant="tool"], [data-config-variant="skill"])
+.dialog:is(
+    [data-config-variant="tool"],
+    [data-config-variant="skill"],
+    [data-config-variant="publish"]
+  )
   :global(.ant-input-number) {
   padding-left: 0 !important;
   padding-right: 0 !important;
+}
+
+.dialog[data-config-variant="publish"] :global(.ant-form-item) {
+  margin-bottom: 16px;
+}
+.dialog[data-config-variant="publish"] :global(textarea.ant-input) {
+  min-height: 88px;
+  border-radius: 2px;
+  padding: 8px 12px !important;
+  resize: vertical;
 }

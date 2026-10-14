@@ -2,12 +2,11 @@
 
 import { useCallback, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { useRouter } from "next/navigation";
-import { App, Button, Col, Dropdown, Flex, Row } from "antd";
+import { useParams, useRouter } from "next/navigation";
+import { App, Button, Col, Flex, Row } from "antd";
 import {
   BlocksIcon,
-  ChevronRight,
-  MoreHorizontal,
+  ExternalLink,
   Plug,
   RefreshCw,
   Wrench,
@@ -38,6 +37,7 @@ export function AgentToolCapability({
 }: ResourceSectionProps = {}) {
   const { t } = useTranslation("common");
   const router = useRouter();
+  const { locale } = useParams<{ locale: string }>();
   const { message } = App.useApp();
   const currentAgentId = useAgentStore((state) => state.agentId);
   const isReadOnly = useAgentReadOnly();
@@ -97,42 +97,14 @@ export function AgentToolCapability({
       <Button
         type="link"
         disabled={isReadOnly}
-        onClick={() => router.push("/mcp-space")}
+        onClick={() => router.push(`/${locale}/mcp-space`)}
         className="!h-[22px] !p-0 !text-sm !font-normal !leading-[22px] !tracking-[0px] !text-[#2673e5]"
       >
         <span className="inline-flex items-center gap-1">
           {t("agentConfig.layout.newTool")}
-          <ChevronRight size={14} />
+          <ExternalLink size={14} />
         </span>
       </Button>
-      <Dropdown
-        menu={{
-          items: [
-            {
-              key: "refresh",
-              label: t("toolManagement.refresh.button.refresh"),
-              disabled: isRefreshing,
-            },
-            {
-              key: "mcp",
-              label: t("toolManagement.mcp.button"),
-              disabled: isReadOnly,
-            },
-          ],
-          onClick: ({ key }) => {
-            if (key === "refresh") void handleRefreshTools();
-            if (key === "mcp") setIsMcpModalOpen(true);
-          },
-        }}
-      >
-        <Button
-          type="text"
-          size="small"
-          icon={<MoreHorizontal size={16} />}
-          aria-label={t("agentConfig.layout.moreActions")}
-          className="!size-6 !p-0 !text-[#191919]"
-        />
-      </Dropdown>
     </div>
   );
   const resourceContent = (
@@ -296,18 +268,9 @@ export function AgentSkillCapability({
       >
         <span className="inline-flex items-center gap-1">
           {t("agentConfig.layout.newSkill")}
-          <ChevronRight size={14} />
+          <ExternalLink size={14} />
         </span>
       </Button>
-      <Button
-        type="text"
-        size="small"
-        icon={<RefreshCw size={14} />}
-        onClick={handleRefreshSkills}
-        loading={isRefreshingSkill}
-        aria-label={t("skillManagement.refresh.button")}
-        className="!size-6 !p-0 !text-[#191919]"
-      />
     </div>
   );
   const addSkillEntry = (

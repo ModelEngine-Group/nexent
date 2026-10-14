@@ -996,28 +996,16 @@ export default function AgentPrompt({
               <span className="mr-1 text-[#f5222d]">*</span>
               {t("agent.highFidelity.prompt")}
             </label>
-            <div className="flex items-center gap-2">
-              <Tooltip title={t("agent.highFidelity.additionalPrompts")}>
-                <Button
-                  type="text"
-                  className="!h-[22px] !w-[22px] !p-0"
-                  icon={<Settings2 size={14} />}
-                  aria-label={t("agent.highFidelity.additionalPrompts")}
-                  disabled={false}
-                  onClick={() => setAdditionalPromptsOpen(true)}
-                />
-              </Tooltip>
-              <Button
-                type="link"
-                autoInsertSpace={false}
-                className="!h-[22px] !p-0 !text-sm !leading-[22px] !text-[#2673e5] disabled:!text-[#dfdfdf]"
-                icon={<Sparkles size={14} />}
-                disabled={isReadOnly || !onOptimizePrompt}
-                onClick={onOptimizePrompt}
-              >
-                {t("agent.highFidelity.optimizePrompt")}
-              </Button>
-            </div>
+            <Button
+              type="link"
+              autoInsertSpace={false}
+              className="!h-[22px] !p-0 !text-sm !leading-[22px] !text-[#2673e5] disabled:!text-[#dfdfdf]"
+              icon={<Sparkles size={14} />}
+              disabled={isReadOnly || !onOptimizePrompt}
+              onClick={onOptimizePrompt}
+            >
+              {t("agent.highFidelity.optimizePrompt")}
+            </Button>
           </div>
           <div className="relative">
             <HighFidelityTextArea
@@ -1028,7 +1016,7 @@ export default function AgentPrompt({
               disabled={isReadOnly}
               classNames={{
                 textarea:
-                  "!h-[52px] !min-h-[52px] !resize-none !rounded-[4px] !py-[5px] !pl-3 !pr-8 !text-sm !leading-[22px] !tracking-[0px] !text-[#191919] [font-family:'HarmonyOS_Sans_SC',sans-serif]",
+                  "!h-[160px] !min-h-[160px] !resize-none !rounded-[4px] !py-[5px] !pl-3 !pr-8 !text-sm !leading-[22px] !tracking-[0px] !text-[#191919] [font-family:'HarmonyOS_Sans_SC',sans-serif]",
                 count:
                   "!bottom-2 !right-3 !text-xs !leading-[22px] !text-[#808080]",
               }}
@@ -1036,9 +1024,6 @@ export default function AgentPrompt({
                 updateDraft({ duty_prompt: event.target.value })
               }
             />
-            <div className="absolute right-1 top-2">
-              {renderExpandButton("duty")}
-            </div>
           </div>
           <Modal
             open={additionalPromptsOpen}

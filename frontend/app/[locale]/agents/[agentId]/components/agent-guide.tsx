@@ -61,10 +61,11 @@ export default function AgentConversationGuide({
       />
       <Button
         type="text"
-        danger
+        size="small"
         disabled={isReadOnly}
         aria-label={t("agent.guide.example.removeAria")}
-        icon={<Trash2 size={16} />}
+        icon={<Trash2 size={14} />}
+        className="!size-6 !shrink-0 !p-0 !text-[#777777] hover:!text-red-500"
         onClick={() =>
           updateAgentConfig({
             example_questions: exampleQuestions.filter(
