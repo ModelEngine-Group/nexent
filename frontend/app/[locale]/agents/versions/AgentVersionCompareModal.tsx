@@ -2,19 +2,31 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Modal, Flex, Spin, Empty, Table, Tag, Typography, Button, Select, Input } from "antd";
+import {
+  Modal,
+  Flex,
+  Spin,
+  Empty,
+  Table,
+  Tag,
+  Typography,
+  Button,
+  Select,
+  Input,
+} from "antd";
 import {
   AlertTriangle,
   RotateCcw,
   FileText,
   Wrench,
   Bot,
-  PencilLine
+  PencilLine,
 } from "lucide-react";
 
 import type { VersionCompareResponse } from "@/services/agentVersionService";
-import DebugMessageList from "./DebugMessageList";
-import { useCompareStream } from "./useCompareStream";
+import { VersionCompareThread } from "./VersionCompareThread";
+import { useVersionCompareRuntime } from "./useVersionCompareRuntime";
+import type { Agent } from "@/types/agentConfig";
 
 const { Text } = Typography;
 
@@ -64,7 +76,8 @@ export default function AgentVersionCompareModal({
 
   const resolveVersionNo = useCallback(
     (side: "left" | "right") => {
-      const selected = side === "left" ? selectedVersionNoA : selectedVersionNoB;
+      const selected =
+        side === "left" ? selectedVersionNoA : selectedVersionNoB;
       if (selected !== null && selected !== undefined) return selected;
       if (compareData?.data) {
         return side === "left"
@@ -75,35 +88,20 @@ export default function AgentVersionCompareModal({
     },
     [selectedVersionNoA, selectedVersionNoB, compareData]
   );
-  const comparePersistenceKey =
-    agentId === undefined || agentId === null
-      ? "version-compare:anonymous"
-      : `version-compare:agent-${agentId}`;
-
   const {
-    leftMessages: compareLeftMessages,
-    rightMessages: compareRightMessages,
+    leftRuntime,
+    rightRuntime,
     isCompareStreaming,
-    compareStreamingLeft,
-    compareStreamingRight,
     runCompare,
     stopCompare,
     resetCompareState,
-  } = useCompareStream({
-    t,
-    buildRunParams: ({ side, question, conversationId, history }) => ({
-      query: question,
-      conversation_id: conversationId,
-      is_set: true,
-      history,
-      is_debug: true,
-      agent_id: agentId ?? undefined,
-      version_no: resolveVersionNo(side) ?? undefined,
-    }),
-    persistenceKey: comparePersistenceKey,
-    persistenceEnabled: open,
-    getHistory: () => [],
+  } = useVersionCompareRuntime({
+    agentId,
+    leftVersionNo: resolveVersionNo("left"),
+    rightVersionNo: resolveVersionNo("right"),
+    open,
   });
+  const compareAgent = { id: String(agentId), name: "Nexent" } as Agent;
 
   const versionA = compareData?.data?.version_a;
   const versionB = compareData?.data?.version_b;
@@ -111,7 +109,9 @@ export default function AgentVersionCompareModal({
   const versionOptions =
     versionList?.map((version) => {
       const baseLabel = version.version_name || `V${version.version_no}`;
-      const isCurrent = currentVersionNo !== undefined && version.version_no === currentVersionNo;
+      const isCurrent =
+        currentVersionNo !== undefined &&
+        version.version_no === currentVersionNo;
       return {
         value: version.version_no,
         label: isCurrent
@@ -179,10 +179,12 @@ export default function AgentVersionCompareModal({
   };
 
   const resolveVersionModel = (versionNo: number | null | undefined) => {
-    if ((versionNo === null || versionNo === undefined) || !compareData?.data) return "-";
+    if (versionNo === null || versionNo === undefined || !compareData?.data)
+      return "-";
     const { version_a, version_b } = compareData.data;
     const formatModelNames = (modelNames: any, modelName: any) => {
-      if (Array.isArray(modelNames) && modelNames.length > 0) return modelNames.join(", ");
+      if (Array.isArray(modelNames) && modelNames.length > 0)
+        return modelNames.join(", ");
       return modelName || "-";
     };
     if (version_a?.version?.version_no === versionNo) {
@@ -246,7 +248,9 @@ export default function AgentVersionCompareModal({
                       <Select
                         style={{ minWidth: 140 }}
                         size="small"
-                        value={selectedVersionNoA ?? version_a.version.version_no}
+                        value={
+                          selectedVersionNoA ?? version_a.version.version_no
+                        }
                         options={versionOptions}
                         onChange={onChangeVersionA}
                       />
@@ -263,7 +267,9 @@ export default function AgentVersionCompareModal({
                       <Select
                         style={{ minWidth: 140 }}
                         size="small"
-                        value={selectedVersionNoB ?? version_b.version.version_no}
+                        value={
+                          selectedVersionNoB ?? version_b.version.version_no
+                        }
                         options={versionOptions}
                         onChange={onChangeVersionB}
                       />
@@ -277,49 +283,52 @@ export default function AgentVersionCompareModal({
               ];
 
               const data = [
-{
-              key: "name_model",
-              field: (
-                <Flex align="center" gap={6}>
-                  <PencilLine size={14} className="text-gray-400" />
-                  <span>
-                    {t("agent.version.field.name")}/{t("agent.version.field.modelName")}
-                  </span>
-                </Flex>
-              ),
-              current: (
-                <span
-                  className={
-                    version_a.name !== version_b.name ||
-                    JSON.stringify(version_a.model_ids || []) !==
-                      JSON.stringify(version_b.model_ids || [])
-                      ? "text-orange-500 font-medium"
-                      : "text-gray-600"
-                  }
-                >
-                  {version_a.name || "-"} /{" "}
-                  {Array.isArray(version_a.model_names) && version_a.model_names.length > 0
-                    ? version_a.model_names.join(", ")
-                    : version_a.model_name || "-"}
-                </span>
-              ),
-              version: (
-                <span
-                  className={
-                    version_a.name !== version_b.name ||
-                    JSON.stringify(version_a.model_ids || []) !==
-                      JSON.stringify(version_b.model_ids || [])
-                      ? "text-green-500 font-medium"
-                      : "text-gray-600"
-                  }
-                >
-                  {version_b.name || "-"} /{" "}
-                  {Array.isArray(version_b.model_names) && version_b.model_names.length > 0
-                    ? version_b.model_names.join(", ")
-                    : version_b.model_name || "-"}
-                </span>
-              ),
-            },
+                {
+                  key: "name_model",
+                  field: (
+                    <Flex align="center" gap={6}>
+                      <PencilLine size={14} className="text-gray-400" />
+                      <span>
+                        {t("agent.version.field.name")}/
+                        {t("agent.version.field.modelName")}
+                      </span>
+                    </Flex>
+                  ),
+                  current: (
+                    <span
+                      className={
+                        version_a.name !== version_b.name ||
+                        JSON.stringify(version_a.model_ids || []) !==
+                          JSON.stringify(version_b.model_ids || [])
+                          ? "text-orange-500 font-medium"
+                          : "text-gray-600"
+                      }
+                    >
+                      {version_a.name || "-"} /{" "}
+                      {Array.isArray(version_a.model_names) &&
+                      version_a.model_names.length > 0
+                        ? version_a.model_names.join(", ")
+                        : version_a.model_name || "-"}
+                    </span>
+                  ),
+                  version: (
+                    <span
+                      className={
+                        version_a.name !== version_b.name ||
+                        JSON.stringify(version_a.model_ids || []) !==
+                          JSON.stringify(version_b.model_ids || [])
+                          ? "text-green-500 font-medium"
+                          : "text-gray-600"
+                      }
+                    >
+                      {version_b.name || "-"} /{" "}
+                      {Array.isArray(version_b.model_names) &&
+                      version_b.model_names.length > 0
+                        ? version_b.model_names.join(", ")
+                        : version_b.model_name || "-"}
+                    </span>
+                  ),
+                },
                 {
                   key: "description",
                   field: (
@@ -451,7 +460,10 @@ export default function AgentVersionCompareModal({
                   {t("agent.version.compareQaHint")}
                 </div>
                 <Flex gap={8}>
-                  <Button onClick={handleClearCompareHistory} disabled={isCompareStreaming}>
+                  <Button
+                    onClick={handleClearCompareHistory}
+                    disabled={isCompareStreaming}
+                  >
                     {t("agent.debug.clear")}
                   </Button>
                   {isCompareStreaming && (
@@ -471,23 +483,33 @@ export default function AgentVersionCompareModal({
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div className="flex flex-col min-h-0 border border-gray-200 rounded-md p-3 overflow-hidden">
                   <div className="text-xs text-gray-500 mb-2">
-                    {resolveVersionLabel(selectedVersionNoA ?? versionA?.version.version_no)} ·{" "}
-                    {resolveVersionModel(selectedVersionNoA ?? versionA?.version.version_no)}
+                    {resolveVersionLabel(
+                      selectedVersionNoA ?? versionA?.version.version_no
+                    )}{" "}
+                    ·{" "}
+                    {resolveVersionModel(
+                      selectedVersionNoA ?? versionA?.version.version_no
+                    )}
                   </div>
-                  <DebugMessageList
-                    messages={compareLeftMessages}
-                    isStreaming={compareStreamingLeft}
+                  <VersionCompareThread
+                    runtime={leftRuntime}
+                    agent={compareAgent}
                     emptyPlaceholder={t("agent.version.compareQaEmpty")}
                   />
                 </div>
                 <div className="flex flex-col min-h-0 border border-gray-200 rounded-md p-3 overflow-hidden">
                   <div className="text-xs text-gray-500 mb-2">
-                    {resolveVersionLabel(selectedVersionNoB ?? versionB?.version.version_no)} ·{" "}
-                    {resolveVersionModel(selectedVersionNoB ?? versionB?.version.version_no)}
+                    {resolveVersionLabel(
+                      selectedVersionNoB ?? versionB?.version.version_no
+                    )}{" "}
+                    ·{" "}
+                    {resolveVersionModel(
+                      selectedVersionNoB ?? versionB?.version.version_no
+                    )}
                   </div>
-                  <DebugMessageList
-                    messages={compareRightMessages}
-                    isStreaming={compareStreamingRight}
+                  <VersionCompareThread
+                    runtime={rightRuntime}
+                    agent={compareAgent}
                     emptyPlaceholder={t("agent.version.compareQaEmpty")}
                   />
                 </div>
@@ -501,4 +523,3 @@ export default function AgentVersionCompareModal({
     </Modal>
   );
 }
-

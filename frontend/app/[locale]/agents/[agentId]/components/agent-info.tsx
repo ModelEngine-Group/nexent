@@ -41,6 +41,7 @@ import HighFidelityTextArea from "./HighFidelityTextArea";
 import {
   DefaultAgentAvatar,
   DEFAULT_AGENT_AVATAR_COLORS,
+  DEFAULT_AGENT_AVATAR_GLYPH_PATH,
 } from "./DefaultAgentAvatar";
 
 const HIGH_FIDELITY_DESCRIPTION_LIMIT = 200;
@@ -165,10 +166,12 @@ export default function AgentInfo({
     context.arc(100, 100, 90, 0, Math.PI * 2);
     context.fill();
     context.fillStyle = "white";
-    context.font = "italic bold 110px sans-serif";
-    context.textAlign = "center";
-    context.textBaseline = "middle";
-    context.fillText("n", 100, 98);
+    // Use the preview's centered outline inside the 180px gradient circle.
+    context.save();
+    context.translate(10, 10);
+    context.scale(1.8, 1.8);
+    context.fill(new Path2D(DEFAULT_AGENT_AVATAR_GLYPH_PATH));
+    context.restore();
     const blob = await new Promise<Blob | null>((resolve) =>
       canvas.toBlob(resolve, "image/png")
     );

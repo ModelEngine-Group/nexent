@@ -21,9 +21,6 @@ export function ClientLayout({ children }: { children: ReactNode }) {
   const { isAuthorized } = useAuthorizationContext();
   const { isSpeedMode } = useDeployment();
 
-  const isSetupPage = pathname?.includes("/setup");
-  const isChatPage = pathname?.includes("/chat");
-
   const effectivePath = getEffectiveRoutePath(pathname);
   const isNewChatPage = effectivePath?.startsWith("/newchat") ?? false;
   const isHomePage = effectivePath === "/";
@@ -94,7 +91,7 @@ export function ClientLayout({ children }: { children: ReactNode }) {
 
   return (
     <Layout style={layoutStyle}>
-      <QuotaWarningMonitor enabled={!isSetupPage} />
+      <QuotaWarningMonitor />
       <MemoryEmbeddingMonitor />
 
       <Sider
@@ -113,9 +110,7 @@ export function ClientLayout({ children }: { children: ReactNode }) {
           marginLeft: `${SIDER_CONFIG.WIDTH}px`,
         }}
       >
-        {!isAgentConfigPage && !isNewChatPage && (
-          <TopNavbar isChatPage={isChatPage} />
-        )}
+        {!isAgentConfigPage && !isNewChatPage && <TopNavbar />}
 
         <Content style={contentStyle}>
           {isHomePage || isOAuthCompletePage || isSharePage || isAuthorized ? (
@@ -127,7 +122,7 @@ export function ClientLayout({ children }: { children: ReactNode }) {
           )}
         </Content>
 
-        {!isSetupPage && !isAgentConfigPage && !isNewChatPage && (
+        {!isAgentConfigPage && !isNewChatPage && (
           <Footer style={footerStyle}>
             <FooterLayout />
           </Footer>
