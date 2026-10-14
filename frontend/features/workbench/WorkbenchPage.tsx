@@ -307,6 +307,27 @@ const HomeContent: FC = () => {
     activeThreadId;
   const activeConversationIdRef = useRef(activeConversationId);
   activeConversationIdRef.current = activeConversationId;
+
+  // Keep the URL's conversation_id in sync with the active conversation so a
+  // page refresh reopens it (WorkbenchSessionProvider seeds the runtime's
+  // threadId from this param). The local thread-id placeholder (a brand-new
+  // unsent thread) is not persisted; opening a new conversation removes the
+  // param so a refresh lands back on the composer landing screen.
+  useEffect(() => {
+    const conversationId = Number(activeConversationId);
+    const url = new URL(window.location.href);
+    if (Number.isInteger(conversationId) && conversationId > 0) {
+      if (url.searchParams.get("conversation_id") !== String(conversationId)) {
+        url.searchParams.set("conversation_id", String(conversationId));
+        window.history.replaceState({}, "", url.toString());
+      }
+      return;
+    }
+    if (url.searchParams.has("conversation_id")) {
+      url.searchParams.delete("conversation_id");
+      window.history.replaceState({}, "", url.toString());
+    }
+  }, [activeConversationId]);
   const creationAgent = activeThreadId
     ? creationAgentsByThread[activeThreadId]
     : undefined;

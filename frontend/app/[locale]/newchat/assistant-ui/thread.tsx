@@ -757,6 +757,9 @@ const ThreadView: FC<ThreadViewProps> = ({
     <ThreadPrimitive.Root
       className={cn(
         "flex h-full flex-row bg-background",
+        workbenchLanding &&
+          !newChatDesign &&
+          "bg-[radial-gradient(ellipse_1100px_500px_at_50%_330px,#edf1fc_0%,#f6f8fd_55%,rgba(255,255,255,0)_100%)]",
         newChatDesign && newChatStyles.font,
         configurationLayout && "!bg-transparent",
         debugLayout && "!bg-transparent",
@@ -890,17 +893,6 @@ const ThreadView: FC<ThreadViewProps> = ({
               "relative mt-auto flex-none max-w-[890px] overflow-visible px-4 pb-0 pt-6 sm:px-8"
           )}
         >
-          {workbenchLanding && (
-            <div
-              aria-hidden
-              className="pointer-events-none absolute left-1/2 top-full z-0 h-[437px] w-[682px] -translate-x-1/2 -translate-y-1/2"
-              style={{
-                marginTop: 73,
-                background:
-                  "radial-gradient(50% 50% at 50% 50%, rgba(148,181,255,0.42) 0%, rgba(187,161,255,0.24) 48%, rgba(255,255,255,0) 100%)",
-              }}
-            />
-          )}
           {hasMessages ? (
             <ThreadMessages
               agent={agent}

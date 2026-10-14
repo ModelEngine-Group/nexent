@@ -10,7 +10,12 @@ export const WorkbenchLandingExamples: FC = () => {
   const aui = useAui();
   const { t } = useTranslation("common");
 
-  const items = [
+  const items: Array<{
+    key: "agent" | "skill";
+    category: string;
+    template: string;
+    description: string;
+  }> = [
     {
       key: "agent",
       category: t("workbench.landingExamples.agent.category", "智能体创建"),
@@ -40,7 +45,7 @@ export const WorkbenchLandingExamples: FC = () => {
   return (
     <section
       aria-label={t("workbench.askMeLikeThis", "你可以这样问我")}
-      className="mt-32 text-left"
+      className="mt-40 text-left"
     >
       <h2 className="text-base font-medium leading-[22px] text-black">
         {t("workbench.askMeLikeThis", "你可以这样问我")}
@@ -51,7 +56,7 @@ export const WorkbenchLandingExamples: FC = () => {
             key={key}
             type="button"
             onClick={() => {
-              setWorkbenchComposerTag(category);
+              setWorkbenchComposerTag({ label: category, kind: key });
               aui.composer().setText(template);
               requestAnimationFrame(() =>
                 document
@@ -61,7 +66,7 @@ export const WorkbenchLandingExamples: FC = () => {
                   ?.focus()
               );
             }}
-            className="flex w-full flex-col items-start rounded-lg text-left"
+            className="flex w-full flex-col items-start rounded-xl -mx-4 px-4 py-3 -my-2 text-left transition-colors hover:bg-[#f5f5f5] active:bg-[#d9d9d9]"
           >
             <span className="flex w-full items-center gap-2">
               <LightbulbIcon
@@ -81,7 +86,7 @@ export const WorkbenchLandingExamples: FC = () => {
                 {template}
               </span>
             </span>
-            <span className="mt-1 block text-xs leading-5 text-[rgba(25,25,25,0.5)]">
+            <span className="mt-1 block text-sm leading-6 text-[rgba(25,25,25,0.5)]">
               {description}
             </span>
           </button>

@@ -141,6 +141,8 @@ type ModelSelectorContextValue = {
   setValue: (value: string) => void;
   /** The model matching `value`, derived once for all sub-components. */
   selectedModel: ModelOption | undefined;
+  /** Render the model's provider icon next to its name in the trigger value. */
+  showIcon: boolean;
   /** The selected model's effort levels, undefined when not configurable. */
   efforts: readonly ModelSelectorEffortOption[] | undefined;
   /** Effort resolved against the selected model's supported levels. */
@@ -185,6 +187,8 @@ export function useModelSelectorEfforts(): {
 
 export type ModelSelectorRootProps = {
   models: readonly ModelOption[];
+  /** Hide the model provider icon in the trigger value (default: shown). */
+  showIcon?: boolean;
   value?: string;
   defaultValue?: string;
   onValueChange?: (value: string) => void;
@@ -205,6 +209,7 @@ export type ModelSelectorRootProps = {
 
 function ModelSelectorRoot({
   models,
+  showIcon: showIconProp = true,
   value: valueProp,
   defaultValue,
   onValueChange,
@@ -311,6 +316,7 @@ function ModelSelectorRoot({
       value,
       setValue,
       selectedModel,
+      showIcon: showIconProp,
       efforts,
       effort: activeEffort,
       setEffort,
@@ -326,6 +332,7 @@ function ModelSelectorRoot({
       value,
       setValue,
       selectedModel,
+      showIconProp,
       efforts,
       activeEffort,
       setEffort,
@@ -383,6 +390,7 @@ function ModelSelectorTrigger({
   children,
   ...props
 }: ModelSelectorTriggerProps) {
+  const { showIcon } = useModelSelectorContext();
   return (
     <PopoverTrigger
       data-slot="model-selector-trigger"
@@ -392,7 +400,7 @@ function ModelSelectorTrigger({
       className={cn(modelSelectorTriggerVariants({ variant, size }), className)}
       {...props}
     >
-      <CpuIcon className="size-4" />
+      {showIcon && <CpuIcon className="size-4" />}
       {children ?? <ModelSelectorValue />}
       <ChevronDownIcon className="size-4 opacity-50 ml-1.5" />
     </PopoverTrigger>

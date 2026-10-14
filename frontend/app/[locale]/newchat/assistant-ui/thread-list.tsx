@@ -17,7 +17,7 @@ import {
 } from "@assistant-ui/react";
 import {
   Clock,
-  MoreHorizontalIcon,
+  MoreVerticalIcon,
   PencilIcon,
   TrashIcon,
   PinIcon,
@@ -584,11 +584,16 @@ const ThreadListItems: FC<ThreadListItemsProps> = ({
     }
     return (
       <div className="flex flex-col">
-        {timeGroups.map((group) => (
+        {timeGroups.map((group, groupIndex) => (
           <Fragment key={group.label}>
             <div
               data-slot="aui_thread-list-group-label"
-              className="px-3 pt-3 pb-1 text-sm text-muted-foreground"
+              // The first group sits right under the new-conversation button;
+              // keep it closer to avoid a large empty band below the header.
+              className={cn(
+                "px-3 pb-1 text-sm text-muted-foreground",
+                groupIndex === 0 ? "pt-0" : "pt-3"
+              )}
             >
               {t(group.label)}
             </div>
@@ -1016,7 +1021,9 @@ const ThreadListItem: FC<
     <ThreadListItemPrimitive.Root
       className={
         variant === "time"
-          ? "group/item flex h-10 items-center gap-2 rounded-lg px-2 py-2 hover:bg-white data-[active=true]:bg-white"
+          ? // Drop the row's right padding so the trailing timestamp lines up
+            // with the header collapse trigger near the panel edge.
+            "group/item relative flex h-10 items-center gap-2 rounded-lg pl-2 py-2 hover:bg-[rgba(25,25,25,0.03)] active:bg-[rgba(25,25,25,0.05)] data-[active=true]:bg-[rgba(25,25,25,0.05)]"
           : "group/item flex h-10 items-center rounded-lg hover:bg-white/70 data-[active=true]:bg-white"
       }
     >
@@ -1171,9 +1178,7 @@ const ThreadListItemContent: FC<ThreadListItemContentProps> = ({
           </Tooltip>
           {!newChatDesign &&
             (variant === "time" ? (
-              <ThreadRowEndStatus
-                completedConversations={completedConversations}
-              />
+              <ThreadRowEndStatus />
             ) : (
               <ConversationStatusIndicatorWrapper
                 completedConversations={completedConversations}
@@ -1198,7 +1203,13 @@ const ThreadListItemContent: FC<ThreadListItemContentProps> = ({
               (thread as { custom?: { lastMessageAt?: string } }).custom
                 ?.lastMessageAt,
               t
-            )}
+            ) ||
+              // Conversations created in this session have no server timestamp
+              // yet; show "just now" once their first run completes instead of
+              // leaving the time slot empty.
+              (completedConversations.has(thread.id)
+                ? t("chat.threadList.justNow")
+                : "")}
           </span>
         )}
       </ThreadListItemPrimitive.Trigger>
@@ -1210,8 +1221,17 @@ const ThreadListItemContent: FC<ThreadListItemContentProps> = ({
       {renderMainContent()}
       {!isEditing && !batchMode && (
         <ThreadListItemMorePrimitive.Root>
-          <ThreadListItemMorePrimitive.Trigger className="size-7 shrink-0 rounded-md opacity-0 group-hover/item:opacity-100">
-            <MoreHorizontalIcon className="size-4" />
+          <ThreadListItemMorePrimitive.Trigger
+            className={
+              variant === "time"
+                ? // The invisible-in-idle actions button must not reserve row
+                  // space, otherwise the timestamp cannot sit flush with the
+                  // row edge; it overlays the timestamp spot on hover.
+                  "absolute right-0 top-1/2 size-7 -translate-y-1/2 rounded-md opacity-0 group-hover/item:opacity-100"
+                : "size-7 shrink-0 rounded-md opacity-0 group-hover/item:opacity-100"
+            }
+          >
+            <MoreVerticalIcon className="size-4" />
           </ThreadListItemMorePrimitive.Trigger>
           <ThreadListItemMorePrimitive.Content className="z-50 rounded-md border bg-popover p-1 shadow-md">
             <ThreadListItemMorePrimitive.Item
@@ -1266,11 +1286,8 @@ const ConversationStatusIndicatorWrapper: FC<{
 
 // End-of-row status icon for the workbench time-group list: running shows an
 // inline spinner; an error status (when surfaced) shows an orange alert.
-const ThreadRowEndStatus: FC<{ completedConversations: Set<string> }> = ({
-  completedConversations,
-}) => {
+const ThreadRowEndStatus: FC = () => {
   const aui = useAui();
-  const { t } = useTranslation();
   const item = aui.threadListItem().getState();
   const status = item.status as string;
   const runtimeRunning = useAuiState(
@@ -1291,14 +1308,6 @@ const ThreadRowEndStatus: FC<{ completedConversations: Set<string> }> = ({
   if (isError) {
     return (
       <CircleAlertIcon className="size-4 shrink-0 text-amber-500" aria-hidden />
-    );
-  }
-  if (completedConversations.has(item.id)) {
-    return (
-      <span
-        className="size-2 shrink-0 rounded-full bg-blue-500"
-        title={t("chat.threadList.completed")}
-      />
     );
   }
   return null;

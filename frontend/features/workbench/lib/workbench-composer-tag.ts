@@ -1,9 +1,14 @@
 import { useSyncExternalStore } from "react";
 
-// Module-level store for the blue category tag shown as a composer text
-// prefix (e.g. "智能体创建") when a landing example is clicked. Pure UI
+export type WorkbenchComposerTag = {
+  label: string;
+  kind: "agent" | "skill";
+};
+
+// Module-level store for the pill-shaped category tag shown in the workbench
+// composer (e.g. "智能体创建") when a landing example is clicked. Pure UI
 // state shared between the landing examples and the workbench composer.
-let composerTag: string | null = null;
+let composerTag: WorkbenchComposerTag | null = null;
 const listeners = new Set<() => void>();
 
 const subscribe = (onChange: () => void) => {
@@ -15,7 +20,7 @@ const subscribe = (onChange: () => void) => {
 
 const getSnapshot = () => composerTag;
 
-export const setWorkbenchComposerTag = (next: string | null) => {
+export const setWorkbenchComposerTag = (next: WorkbenchComposerTag | null) => {
   composerTag = next;
   listeners.forEach((onChange) => onChange());
 };

@@ -2,6 +2,11 @@ import { defineConfig } from "vitest/config";
 import { fileURLToPath, URL } from "node:url";
 
 export default defineConfig({
+  // Required for rolldown/oxc to parse JSX in .tsx test files (same as the
+  // root vitest.config.ts; without it every .tsx suite fails to transform).
+  oxc: {
+    jsx: { runtime: "automatic" },
+  },
   resolve: {
     alias: [
       {
