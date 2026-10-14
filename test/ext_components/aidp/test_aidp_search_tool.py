@@ -116,6 +116,7 @@ def aidp_module():
 def mock_observer(aidp_module):
     observer = MagicMock(spec=aidp_module.MessageObserver)
     observer.lang = "en"
+    observer.reserve_citations.side_effect = aidp_module.MessageObserver(lang="en").reserve_citations
     return observer
 
 
@@ -507,6 +508,7 @@ class TestAidpBuildImageUrl:
         assert "aidp.example.com" not in model_results[0]["text"]
         assert ui_results[0]["text"] == "Description "
         assert ui_results[0]["image_key"] == "j1"
+        assert ui_results[0]["url"] == images_url[0]
         assert images_url == [
             "https://aidp.example.com/KnowledgeBase/Tenants/aidp/"
             "KnowledgeBases/75/ViewImage/image-id.png"

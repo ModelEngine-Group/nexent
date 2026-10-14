@@ -6,6 +6,8 @@ case:
   feature_id: F-065
   business_rule_ids:
   - F-065-RULE-01
+  - F-065-RULE-02
+  - F-065-RULE-03
   title: 引用角标组合key匹配、旧角标兼容、句级高亮与来源字段透传｜核心流程
   type: FE-COMP
   priority: P1
@@ -43,13 +45,45 @@ case:
   - order: 7
     action: 对匹配不到来源的角标断言 loading 状态正确、不抛出未处理异常。
     expected: retrievalHighlightTerms/publishedDate 透传无丢失；匹配不到来源时 loading 正确且无未处理异常。
+  - order: 8
+    action: 注入同名 AIDP 多切片且 metadata 含零、false、数组、嵌套对象的来源，点击各自引用并检查面板和属性悬浮内容；无 metadata 时检查没有空区域。
+    expected: 每条命中的原始 metadata、searchType 与技术引用完整透传；提供方显示 AIDP 而业务 source 原值保留；属性可通过悬浮、聚焦和点击访问，操作不触发文件预览。
+  - order: 9
+    action: 对无定位的 AIDP 来源注入文件名、切片或图片 URL，检查无下载按钮和无本地存储调用；对有效内部定位检查复用 AIDP 下载服务，对本地附件检查原下载行为。
+    expected: AIDP 无有效原文件定位时无下载动作；有效内部定位走已有 AIDP 服务，本地附件仍走已有存储下载。
   expected_results:
   - 组合 key 精确匹配各自来源，a1 与 b1 互不混淆并返回对应 SearchSource。
   - 纯数字旧角标回退匹配到相等 citeIndex 来源，历史会话保持可读。
   - 开启句级高亮时 citationContext 返回角标前一句完整 scope 文本，且不跨段落/跨表格单元扩展。
   - 高亮开启与关闭情况下点击角标均能用 selectedCitationKey 选中并滚动到来源。
   - retrievalHighlightTerms/publishedDate 透传无丢失；匹配不到来源时 loading 正确且无未处理异常。
-  forbidden_side_effects: []
+  - metadata 和技术引用按命中完整透传，原始 key/value 可访问，提供方与业务 source 分开且空 metadata 无区域。
+  - AIDP 下载遵循有效定位和既有服务契约；本地附件回归通过。
+  forbidden_side_effects:
+  - 无定位 AIDP 不调用本地存储或按文件名、切片 ID、图片地址猜原文件；查看属性不触发预览或下载。
+  acceptance:
+  - id: AC-01
+    description: Distinct composite keys and numeric legacy compatibility remain correct.
+    steps: [1, 2, 3]
+    expected_results: [1, 2]
+  - id: AC-02
+    description: Sentence scope, selection and scrolling remain correct.
+    steps: [4, 5]
+    expected_results: [3, 4]
+  - id: AC-03
+    description: Existing source fields and unmatched markers remain readable.
+    steps: [6, 7]
+    expected_results: [5]
+  - id: AC-04
+    description: Per-hit metadata, provider and technical reference reach the real panel and selectable attributes without preview side effects.
+    steps: [8]
+    expected_results: [6]
+    forbidden_side_effects: [1]
+  - id: AC-05
+    description: AIDP downloads require explicit original identity and never fall back to local attachments; local downloads remain available.
+    steps: [9]
+    expected_results: [7]
+    forbidden_side_effects: [1]
   source:
     legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
     legacy_sheet: 02_测试用例基线

@@ -214,6 +214,11 @@ export function convertImageUrlToApiUrl(url: string): string {
     return withBasePath(url);
   }
 
+  // Protected AIDP images require the backend-owned credential on every host.
+  if (isHttpUrl && url.includes("/KnowledgeBase/Tenants/")) {
+    return API_ENDPOINTS.proxy.image(url);
+  }
+
   // For localhost URLs in development, return original URL directly to avoid proxy issues
   if (isHttpUrl && /localhost|127\.0\.0\.1/i.test(url)) {
     return url;

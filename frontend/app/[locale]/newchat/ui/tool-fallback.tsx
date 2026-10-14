@@ -1,5 +1,7 @@
 "use client";
 
+import type { SourceAttributes } from "@/types/source";
+
 import { memo } from "react";
 import { useSourcesPanel } from "./sources-panel-context";
 import type { PanelSourceItem } from "./sources-panel";
@@ -180,7 +182,7 @@ function ToolFallbackError({
   );
 }
 
-type ToolSearchSource = {
+type ToolSearchSource = SourceAttributes & {
   url?: string;
   title?: string;
   text?: string;
@@ -188,6 +190,9 @@ type ToolSearchSource = {
   filename?: string;
   sourceFile?: string;
   objectName?: string;
+  publishedDate?: string;
+  retrievalHighlightTerms?: string[];
+  downloadUrl?: string;
   citeIndex?: number;
   toolSign?: string;
   isImage?: boolean;
@@ -215,8 +220,14 @@ function ToolFallbackSearchContent({
     text: item.text,
     filename: item.filename || item.sourceFile,
     objectName: item.objectName,
+    publishedDate: item.publishedDate,
+    retrievalHighlightTerms: item.retrievalHighlightTerms,
+    downloadUrl: item.downloadUrl,
     citeIndex: item.citeIndex ?? index,
     toolSign: item.toolSign,
+    searchType: item.searchType,
+    sourceMetadata: item.sourceMetadata,
+    sourceReference: item.sourceReference,
   }));
   if (regularSources.length === 0) return null;
 

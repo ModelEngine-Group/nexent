@@ -1,5 +1,8 @@
 "use client";
 
+import type { SourceAttributes } from "@/types/source";
+import { getSourceLabel } from "@/lib/source";
+
 import "@assistant-ui/react-markdown/styles/dot.css";
 
 import {
@@ -43,7 +46,7 @@ import {
  * Checks searchSourcesRegistry first (streaming messages), then
  * conversationSourcesRegistry (historical messages).
  */
-interface MessageSourcePart {
+interface MessageSourcePart extends SourceAttributes {
   type?: string;
   sourceType?: string;
   publishedDate?: string;
@@ -98,6 +101,9 @@ function resolveCiteSources(
       isImage: part.isImage,
       imageKey: part.imageKey,
       retrievalHighlightTerms: part.retrievalHighlightTerms,
+      searchType: part.searchType,
+      sourceMetadata: part.sourceMetadata,
+      sourceReference: part.sourceReference,
     }];
   });
 
@@ -130,22 +136,6 @@ function findCiteSource(sources: SearchSource[], citekey: string): SearchSource 
   return /^\d+$/.test(normalizedKey)
     ? sources.find((source) => source.citeIndex === getCiteIndex(normalizedKey))
     : undefined;
-}
-
-const extractDomain = (url: string): string => {
-  try {
-    return new URL(url).hostname.replace(/^www\./, "");
-  } catch {
-    return url;
-  }
-};
-
-function getSourceLabel(source: PanelSourceItem | undefined): string | undefined {
-  if (!source) return undefined;
-  if (source.sourceType === "document" || !source.url) {
-    return "来源: Nexent";
-  }
-  return `来源: ${extractDomain(source.url)}`;
 }
 
 function buildCitationDisplayIndexMap(
@@ -184,6 +174,9 @@ function toPanelSource(source: SearchSource): PanelSourceItem {
     toolSign: source.toolSign,
     isImage: source.isImage,
     retrievalHighlightTerms: source.retrievalHighlightTerms,
+    searchType: source.searchType,
+    sourceMetadata: source.sourceMetadata,
+    sourceReference: source.sourceReference,
   };
 }
 
@@ -319,7 +312,12 @@ const CiteComponent: FC<
       filename={panelSource?.filename}
       url={panelSource?.url}
       sourceType={panelSource?.sourceType}
-      sourceLabel={getSourceLabel(panelSource)}
+      sourceLabel={panelSource ? getSourceLabel(panelSource, {
+        knowledgeBase: t("chat.sources.knowledgeBase"),
+        web: t("chat.sources.web"),
+        document: t("chat.sources.document"),
+        source: t("chat.sources.source"),
+      }) : undefined}
       loading={!source}
       onClick={
         source && messageId
