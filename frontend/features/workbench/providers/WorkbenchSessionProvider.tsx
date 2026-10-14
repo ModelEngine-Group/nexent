@@ -94,21 +94,24 @@ export function WorkbenchSessionProvider({
   );
   const [workbenchBootstrap, setWorkbenchBootstrap] =
     useState<WorkbenchBootstrap | null>(null);
-  const [requestedThreadId, setRequestedThreadId] = useState<
-    string | undefined
-  >(undefined);
+  // Read the deep-linked conversation id synchronously during the first
+  // render. Child effects (HomeContent's URL sync) run before this provider's
+  // own effects and may already have cleaned the URL by mount time, so a
+  // mount effect would lose the race and the restore would never start.
+  const [requestedThreadId] = useState<string | undefined>(() => {
+    if (typeof window === "undefined") return undefined;
+    const searchParams = new URLSearchParams(window.location.search);
+    return (
+      searchParams.get("thread_id") ??
+      searchParams.get("conversation_id") ??
+      undefined
+    );
+  });
   const { modelConfig } = useConfig();
   const dictationAdapter = useMemo(
     () => new ServerDictationAdapter(() => modelConfig?.stt),
     [modelConfig?.stt]
   );
-
-  useEffect(() => {
-    const searchParams = new URLSearchParams(window.location.search);
-    const threadId =
-      searchParams.get("thread_id") ?? searchParams.get("conversation_id");
-    setRequestedThreadId(threadId || undefined);
-  }, []);
 
   useEffect(() => {
     let cancelled = false;

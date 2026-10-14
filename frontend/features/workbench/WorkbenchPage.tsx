@@ -313,7 +313,17 @@ const HomeContent: FC = () => {
   // threadId from this param). The local thread-id placeholder (a brand-new
   // unsent thread) is not persisted; opening a new conversation removes the
   // param so a refresh lands back on the composer landing screen.
+  //
+  // The very first invocation is skipped: on a deep link ("?conversation_id="
+  // already present) this effect runs BEFORE the provider's restore resolves,
+  // while the active thread is still a non-numeric draft placeholder, and
+  // deleting the param here would break the restore that is about to start.
+  const urlSyncSkipFirstRunRef = useRef(true);
   useEffect(() => {
+    if (urlSyncSkipFirstRunRef.current) {
+      urlSyncSkipFirstRunRef.current = false;
+      return;
+    }
     const conversationId = Number(activeConversationId);
     const url = new URL(window.location.href);
     if (Number.isInteger(conversationId) && conversationId > 0) {
