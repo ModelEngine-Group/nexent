@@ -875,6 +875,34 @@ class TestNormalizeAidpDoc:
         assert result["created_at"] == "2024-06-10T06:20:00Z"
         assert result["status"] == "UPLOADING"
 
+    def test_history_item_keeps_an_integer_status(self, aidp_service_module):
+        """Regression: AIDP deployments also report the numeric 1-5 contract as
+        plain integers; the integer used to be dropped during normalization,
+        which left every upload-task row without a status and rendered the
+        status column as "unknown" with an empty actions column."""
+        result = aidp_service_module._normalize_history_doc({
+            "file_uuid": "uuid-2",
+            "file_name": "政策手册.pdf",
+            "status": 4,
+        })
+        assert result["status"] == "4"
+
+    def test_history_item_reads_status_from_alias_keys(self, aidp_service_module):
+        """A renamed status field still maps to the canonical ``status`` key."""
+        result = aidp_service_module._normalize_history_doc({
+            "file_uuid": "uuid-3",
+            "file_state": 5,
+        })
+        assert result["status"] == "5"
+
+    def test_history_item_drops_a_boolean_status(self, aidp_service_module):
+        """A boolean is not a status token; it must not stringify to "True"."""
+        result = aidp_service_module._normalize_history_doc({
+            "file_uuid": "uuid-4",
+            "status": True,
+        })
+        assert "status" not in result
+
     def test_empty_create_time_does_not_hide_a_reported_created_at(self, normalize):
         """A blank ``create_time`` means "not reported", not a value to keep."""
         result = normalize({
@@ -3028,8 +3056,11 @@ class TestListAidpDocHistoryImpl:
 
         assert result["value"][0]["status"] == "COMPLETED"
 
-    def test_non_string_status_values_are_ignored(self, aidp_service_module):
-        """Numeric state vocabularies must not be mistaken for a file status."""
+    def test_integer_status_from_alias_keys_is_kept(self, aidp_service_module):
+        """AIDP deployments also report the numeric 1-5 contract as plain
+        integers; dropping them left upload-task rows without a status and
+        rendered "unknown" status with an empty actions column. A blank canonical
+        ``status`` still defers to the alias keys."""
         mock_resp = _make_success_response({
             "value": [{"file_ino_no": "f-1", "file_state": 4, "status": None}],
         })
@@ -3043,7 +3074,7 @@ class TestListAidpDocHistoryImpl:
             kds_id=self._KB,
         )
 
-        assert "status" not in result["value"][0]
+        assert result["value"][0]["status"] == "4"
 
 
 

@@ -96,10 +96,12 @@ describe("AIDP-FE-LIST-01", () => {
       }),
     ).toBeNull();
     fireEvent.click(screen.getByText(kb.description));
-    expect(matching(base + "/kb-a/documents")).toHaveLength(0);
+    expect(identity.push).not.toHaveBeenCalled();
     fireEvent.click(screen.getByText(kb.kds_name));
     await waitFor(() =>
-      expect(matching(base + "/kb-a/documents")).toHaveLength(1),
+      expect(identity.push).toHaveBeenCalledWith(
+        "/zh/knowledges/detail?kb=kb-a",
+      ),
     );
   });
 

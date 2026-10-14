@@ -1,5 +1,5 @@
 import React from "react";
-import { act, fireEvent, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import {
   advance,
@@ -17,8 +17,8 @@ import {
 } from "../../infra/automation/d1/frontend/aidp-fixtures";
 import AidpKnowledgeFilesPage from "@/ext_components/aidp/pages/knowledge-files/AidpKnowledgeFilesPage";
 
-const path = base + "/kb-a/documents";
-const removePath = path + "/remove";
+const path = base + "/kb-a/files";
+const removePath = base + "/kb-a/documents/remove";
 const page = () => (
   <AidpKnowledgeFilesPage
     knowledgeBase={kb}
@@ -33,6 +33,12 @@ const headerCount = () =>
     .find((element) => element.tagName === "DT")!.parentElement!;
 const confirm = () =>
   fireEvent.click(screen.getByRole("button", { name: /确\s*定/ }));
+// The page also renders the KB-level delete and the batch delete; scope the
+// query to the file's own row so only its action button is clicked.
+const rowDelete = () =>
+  within(screen.getByText(file.file_name).closest("tr")!).getByRole("button", {
+    name: t("common.delete"),
+  });
 
 describe("AIDP-FE-FILES-01", () => {
   it("global counts survive search, empty results and pagination", async () => {
@@ -188,11 +194,11 @@ describe("AIDP-FE-FILES-01", () => {
     };
     mount(page());
     await screen.findByText(file.file_name);
-    fireEvent.click(screen.getByRole("button", { name: t("common.delete") }));
+    fireEvent.click(rowDelete());
     fireEvent.click(await screen.findByRole("button", { name: /取\s*消/ }));
     await settle();
     expect(matching(removePath, "POST")).toHaveLength(0);
-    fireEvent.click(screen.getByRole("button", { name: t("common.delete") }));
+    fireEvent.click(rowDelete());
     await screen.findByRole("button", { name: /确\s*定/ });
     const before = matching(path).length;
     confirm();
@@ -237,7 +243,7 @@ describe("AIDP-FE-FILES-01", () => {
       };
       mount(page());
       await screen.findByText(file.file_name);
-      fireEvent.click(screen.getByRole("button", { name: t("common.delete") }));
+      fireEvent.click(rowDelete());
       await screen.findByRole("button", { name: /确\s*定/ });
       const before = matching(path).length;
       confirm();

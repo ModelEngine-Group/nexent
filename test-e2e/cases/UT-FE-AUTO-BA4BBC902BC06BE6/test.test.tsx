@@ -111,7 +111,7 @@ describe("UT-FE-AUTO-BA4BBC902BC06BE6", () => {
     );
     await waitFor(() =>
       expect(identity.push).toHaveBeenCalledWith(
-        "/zh/knowledges?kb=created-kb",
+        "/zh/knowledges/detail?kb=created-kb",
       ),
     );
   });

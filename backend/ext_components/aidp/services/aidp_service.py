@@ -310,12 +310,18 @@ def _normalize_aidp_doc(raw: Dict[str, Any]) -> Dict[str, Any]:
 def _normalize_doc_status(value: Any) -> str | None:
     """Normalize an AIDP file status to its canonical upper-case token.
 
-    AIDP reports ``COMPLETED`` / ``PROCESSING`` / ``FAILED``; normalizing here
-    means the frontend can compare against one form regardless of upstream
-    capitalization. ``None`` is returned for missing/blank values so callers can
-    tell "no status reported" apart from a real status. Non-string values (for
-    example a numeric ``state``) are ignored instead of being stringified.
+    AIDP reports ``COMPLETED`` / ``PROCESSING`` / ``FAILED`` or the numeric
+    contract ``1``-``5`` (observed both as integers and numeric strings);
+    normalizing here means the frontend can compare against one form regardless
+    of upstream spelling. ``None`` is returned for missing/blank values so
+    callers can tell "no status reported" apart from a real status. Plain
+    integers map to their decimal string so a numeric status is kept instead of
+    being dropped; other non-string values are ignored.
     """
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return str(value)
     if isinstance(value, str) and value.strip():
         return value.strip().upper()
     return None
@@ -1403,6 +1409,60 @@ def remove_aidp_docs_impl(
         )
 
 
+def retry_aidp_docs_impl(
+    server_url: str,
+    api_key: str,
+    kds_id: str,
+    file_uuids: List[str],
+) -> Dict[str, Any]:
+    """Retry one or more failed AIDP knowledge files using the documented array body."""
+    normalized_url = _validate_params(server_url, api_key)
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json",
+    }
+    retry_path = f"{_get_list_path()}/{kds_id}/KnowledgeFiles/Retry"
+    retry_url = urljoin(f"{normalized_url}/", retry_path)
+    logger.info("Retrying %d AIDP documents for KB %s", len(file_uuids), kds_id)
+
+    try:
+        client = http_client_manager.get_sync_client(
+            base_url=normalized_url,
+            timeout=_AIDP_READ_TIMEOUT_SECONDS,
+            verify_ssl=False,
+        )
+        response = _request_with_retry(
+            lambda: client.post(
+                retry_url,
+                headers=headers,
+                json={"file_uuids": file_uuids},
+            ),
+            context=f"retry-docs:{kds_id}",
+        )
+        response.raise_for_status()
+        result = response.json()
+        if not isinstance(result, dict):
+            raise AppException(
+                ErrorCode.AIDP_RESPONSE_ERROR,
+                "Unexpected AIDP document retry response format",
+            )
+        return result
+    except httpx.RequestError as e:
+        logger.exception("AIDP document retry request failed: %s", e)
+        raise AppException(
+            ErrorCode.AIDP_CONNECTION_ERROR,
+            f"AIDP API request failed: {str(e)}",
+        )
+    except httpx.HTTPStatusError as e:
+        _raise_aidp_http_error(e, "document retry")
+    except ValueError as e:
+        logger.exception("Failed to parse AIDP document retry response: %s", e)
+        raise AppException(
+            ErrorCode.AIDP_RESPONSE_ERROR,
+            f"Failed to parse AIDP API response: {str(e)}",
+        )
+
+
 async def stream_aidp_doc_impl(
     server_url: str,
     api_key: str,
@@ -1842,6 +1902,9 @@ def list_aidp_doc_history_impl(
     kds_id: str,
     tenant_id: str | None = None,
     page: int = 1,
+    page_size: int | None = None,
+    status: int | None = None,
+    keyword: str | None = None,
 ) -> Dict[str, Any]:
     """List a page of a channel directory regardless of processing status.
 
@@ -1853,10 +1916,9 @@ def list_aidp_doc_history_impl(
     chunked/embedded (``PROCESSING``) or that failed (``FAILED``), which is what
     lets the UI show an upload immediately instead of only after ingestion.
 
-    The endpoint is paginated (``page`` is one-based) and sorts files that are
-    still being processed to the front, so a burst of simultaneous uploads can
-    spill past the first page: callers must walk the pages instead of reading
-    only the first one.
+    The endpoint is paginated (``page`` is one-based) and supports filtering by
+    status and file-name keyword, allowing callers to request only the page the
+    user is viewing.
     """
     normalized_url = _validate_params(server_url, api_key)
     normalized_page = page if isinstance(page, int) and page > 0 else 1
@@ -1902,6 +1964,9 @@ def list_aidp_doc_history_impl(
                     "fs_id": normalized_fs_id,
                     "dir_path": normalized_dir_path,
                     "page": normalized_page,
+                    **({"page_size": page_size} if isinstance(page_size, int) and page_size > 0 else {}),
+                    **({"status": status} if isinstance(status, int) and not isinstance(status, bool) else {}),
+                    **({"keyword": keyword.strip()} if isinstance(keyword, str) and keyword.strip() else {}),
                 },
             ),
             context=f"list-doc-history:{normalized_fs_id}",

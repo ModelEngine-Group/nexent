@@ -7,6 +7,7 @@ export interface AidpKbDetail {
   is_multimodal?: boolean;
   caption_enable?: number | null;
   created_at?: string;
+  updated_at?: string | null;
   permission?: "EDIT" | "READ_ONLY" | null;
   ingroup_permission?: "EDIT" | "READ_ONLY" | "PRIVATE";
   group_ids?: number[];
@@ -24,6 +25,8 @@ export interface AidpKbDetail {
   graph_config?: string | Record<string, unknown> | null;
   created_by?: string | null;
   creator_name?: string | null;
+  /** Owner display name some AIDP builds expose on the detail payload. */
+  user_name?: string | null;
 }
 
 export interface AidpDocumentItem {
@@ -34,6 +37,14 @@ export interface AidpDocumentItem {
   file_type?: string;
   created_at?: string;
   updated_at?: string;
+  /** Numeric code or uppercase stage name (history rows only). */
+  status?: string | number | null;
+  /** Terminal failure code reported by the history endpoint. */
+  error_code?: string | number | null;
+  /** Failure explanation fields reported by the history endpoint. */
+  extraction_failure_reason?: string | null;
+  reason?: string | null;
+  first_upload_time?: number | null;
   [key: string]: unknown;
 }
 
@@ -43,6 +54,25 @@ export interface AidpDocumentListResponse {
   has_more: boolean;
   /** False for search pagination, whose filtered global total is unavailable. */
   total_reliable: boolean;
+}
+
+export interface AidpUploadTaskStats {
+  total: number;
+  extracting: number;
+  failed: number;
+  success: number;
+  queued: number;
+}
+
+export interface AidpUploadTaskListResponse {
+  value: AidpDocumentItem[];
+  total_count: number;
+  has_more: boolean;
+  /** Whether `total_count` is an exact upstream total; when false the
+   * frontend should treat it as a lower bound and rely on `has_more`. */
+  total_reliable: boolean;
+  stats: AidpUploadTaskStats;
+  retention_days: number;
 }
 
 export interface AidpUploadSuccessItem {
@@ -175,6 +205,18 @@ export interface AidpCreateKbPayload {
   ingroup_permission?: "EDIT" | "READ_ONLY" | "PRIVATE";
   /** Group IDs granted the in-group permission. */
   group_ids?: number[];
+}
+
+/** Body for PUT /aidp-mgmt/knowledge-bases/{kds_id} (partial update, omit unchanged). */
+export interface AidpUpdateKbPayload {
+  name?: string;
+  description?: string;
+  chunk_mode?: number;
+  topk?: number;
+  /** Caption (VLM) generation toggle; 1 enabled, 0 disabled. */
+  caption_enable?: number;
+  /** VLM model identifier; required when caption_enable is 1. */
+  vlm_model?: string;
 }
 
 /** Body for PATCH /aidp-mgmt/aidp-permissions/{kds_id}. */

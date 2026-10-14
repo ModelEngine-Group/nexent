@@ -17,7 +17,7 @@ export const useAidpKnowledgeFiles = (
     queryKey: [...scope.key, "files", id, { page, pageSize, keyword }],
     queryFn: async ({ signal }) => {
       try {
-        const result = await aidpKnowledgeService.listDocs(
+        const result = await aidpKnowledgeService.listIngestedFiles(
           id,
           page,
           pageSize,

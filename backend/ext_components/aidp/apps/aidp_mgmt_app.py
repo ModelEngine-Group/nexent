@@ -14,6 +14,7 @@ FastAPI endpoints for AIDP knowledge base CRUD with permission enforcement.
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import time
 from http import HTTPStatus
@@ -37,6 +38,8 @@ from ext_components.aidp.consts.aidp_exceptions import (
 from ext_components.aidp.database import aidp_permission_db
 from ext_components.aidp.services import aidp_permission_service as perms
 from ext_components.aidp.services.aidp_access_service import (
+    get_cached_aidp_channels,
+    get_cached_aidp_doc_count,
     get_cached_aidp_kb_detail,
     invalidate_aidp_catalog_cache,
     invalidate_aidp_doc_count_cache,
@@ -56,9 +59,13 @@ from ext_components.aidp.services.aidp_service import (
     delete_aidp_kb_impl,
     get_aidp_graph_template_impl,
     get_aidp_kb_impl,
+    list_aidp_channels_impl,
+    list_aidp_doc_history_impl,
     list_aidp_docs_impl,
     list_aidp_models_impl,
     remove_aidp_docs_impl,
+    retry_aidp_docs_impl,
+    select_aidp_channel,
     stream_aidp_doc_impl,
     update_aidp_kb_impl,
     upload_aidp_docs_impl,
@@ -211,6 +218,12 @@ class UpdateKbRequest(BaseModel):
 
     name: Optional[str] = Field(None, description="Knowledge base name")
     description: Optional[str] = Field(None, description="Knowledge base description")
+    chunk_mode: Optional[int] = Field(None, ge=0, le=1, description="Chunk mode: 0 smart, 1 legal")
+    topk: Optional[int] = Field(None, ge=1, le=100, description="Vector retrieval Top K")
+    caption_enable: Optional[int] = Field(
+        None, ge=0, le=1, description="Caption (VLM) generation toggle, int 0 or 1"
+    )
+    vlm_model: Optional[str] = Field(None, description="VLM model identifier for caption generation")
 
 
 class SetPermissionRequest(BaseModel):
@@ -228,6 +241,12 @@ class SetPermissionRequest(BaseModel):
 class RemoveAidpDocumentsRequest(BaseModel):
 
     file_uuids: List[UUID] = Field(..., min_length=1, description="AIDP file UUIDs")
+
+
+class RetryAidpDocumentsRequest(BaseModel):
+    """AIDP accepts one or more failed file UUIDs in a single retry request."""
+
+    file_uuids: List[UUID] = Field(..., min_length=1)
 
 
 class DownloadAidpDocumentRequest(BaseModel):
@@ -281,6 +300,46 @@ def _infer_is_multimodal(detail: dict) -> bool:
         return False
     caption = detail.get("caption_enable")
     return caption in (1, "1", True)
+
+
+def _normalize_kb_config_fields(detail: dict) -> dict:
+    """Extract configuration fields the frontend expects from the AIDP detail response.
+
+    AIDP stores chunking and embedding configuration inside ``kms_config_str``
+    (a JSON string) and uses ``top_k`` instead of ``topk``. The frontend reads
+    ``chunk_mode``, ``embedding_model``, ``topk``, ``similarity``, ``vlm_model``,
+    ``caption_enable``, ``chunk_token_num`` and ``chunk_overlap_num`` as
+    top-level fields. Without this normalization every configuration field
+    on the detail "Information" tab renders as unknown ("-").
+    """
+    if not isinstance(detail, dict):
+        return detail
+
+    # Parse kms_config_str and merge its keys as top-level fields, but never
+    # overwrite a value already present at the top level (the top-level value
+    # is more authoritative if AIDP ever starts returning it natively).
+    raw_kms = detail.get("kms_config_str")
+    if isinstance(raw_kms, str) and raw_kms.strip():
+        try:
+            kms = json.loads(raw_kms)
+            if isinstance(kms, dict):
+                for key, value in kms.items():
+                    if key not in detail or detail[key] is None:
+                        detail[key] = value
+        except (json.JSONDecodeError, ValueError):
+            logger.warning("Failed to parse kms_config_str for KB %s", detail.get("kds_id"))
+
+    # Map AIDP's top_k -> topk (the frontend / create payload field name).
+    if "topk" not in detail or detail["topk"] is None:
+        top_k = detail.get("top_k")
+        if top_k is not None:
+            detail["topk"] = top_k
+
+    # Derive is_multimodal from caption_enable when not already present.
+    if "is_multimodal" not in detail or detail["is_multimodal"] is None:
+        detail["is_multimodal"] = _infer_is_multimodal(detail)
+
+    return detail
 
 
 def _raise_aidp_conflict(exc: IntegrityError) -> None:
@@ -350,6 +409,89 @@ def _load_cached_kb_detail(server_url: str, api_key: str, kb_id: str) -> dict:
         kds_id=kb_id,
         loader=lambda: get_aidp_kb_impl(server_url, api_key, kb_id) or {},
     )
+
+
+def _load_cached_doc_count(server_url: str, api_key: str, kb_id: str) -> int:
+    return get_cached_aidp_doc_count(
+        server_url=server_url,
+        api_key=api_key,
+        kds_id=kb_id,
+        loader=lambda: count_aidp_docs_impl(server_url, api_key, kb_id),
+    )
+
+
+# Knowledge bases whose all-status history has already been reported as
+# unavailable. Documents are polled every few seconds while they process, so the
+# fallback is reported once per KB instead of once per poll.
+_HISTORY_FALLBACK_REPORTED: set[str] = set()
+
+
+def _log_history_fallback(kds_id: str, reason: str) -> None:
+    """Report (once per KB) that the document list fell back to ingested files.
+
+    The status column can only be filled from the history payload, so a silent
+    fallback shows up as a column of dashes. Logging the concrete reason keeps
+    the cause traceable: an AIDP build without the endpoint, a channel list whose
+    fields we cannot read, and a failing history request all land here.
+    """
+    if kds_id in _HISTORY_FALLBACK_REPORTED:
+        logger.debug(
+            "AIDP file history still unavailable for KB %s (%s)",
+            kds_id,
+            reason,
+        )
+        return
+    _HISTORY_FALLBACK_REPORTED.add(kds_id)
+    logger.warning(
+        "AIDP all-status file history unavailable for KB %s (%s); the upload-task list "
+        "stays empty until the channel resolves",
+        kds_id,
+        reason,
+    )
+
+
+def _resolve_doc_history_channel(
+    server_url: str,
+    api_key: str,
+    kds_id: str,
+) -> dict | None:
+    """Resolve the ingestion channel whose directory feeds ``kds_id``.
+
+    Returns ``None`` when AIDP exposes no channel carrying both ``fs_id`` and a
+    source directory, in which case the caller keeps using the completed-files
+    listing. The channel payload shape is reported when resolution fails, so an
+    unreadable field name is visible instead of silently degrading.
+    """
+    channels = get_cached_aidp_channels(
+        server_url=server_url,
+        api_key=api_key,
+        kds_id=kds_id,
+        loader=lambda: list_aidp_channels_impl(server_url, api_key, kds_id),
+    )
+    channel = select_aidp_channel(channels, kds_id)
+    if channel is None:
+        _log_history_fallback(
+            kds_id,
+            "no channel exposes fs_id + a source dir (channels=%d, sample keys=%s)"
+            % (len(channels), sorted(channels[0].keys()) if channels else []),
+        )
+    return channel
+
+
+def _history_reports_more(payload: dict) -> bool | None:
+    """Whether the payload explicitly says another history page exists.
+
+    Only unambiguous signals are trusted: this endpoint family reports
+    ``total_count`` as the size of the current page elsewhere, so it cannot be
+    read as a grand total. ``None`` means the payload does not say, and the
+    caller has to ask for the next page to find out.
+    """
+    has_more = payload.get("has_more")
+    if isinstance(has_more, bool):
+        return has_more
+    if "next_link" in payload:
+        return bool(payload.get("next_link"))
+    return None
 
 
 @aidp_mgmt_router.get("/knowledge-bases/graph-template")
@@ -653,6 +795,7 @@ async def get_knowledge_base(
         resource_status = "UNAVAILABLE"
 
     detail = dict(detail)
+    detail = _normalize_kb_config_fields(detail)
     detail["document_count"] = await run_blocking(
         "aidp-detail-document-count", count_aidp_docs_impl, server_url, api_key, kds_id,
         lane="control-io", owner="config",
@@ -684,7 +827,7 @@ async def update_knowledge_base(
     if not payload:
         raise HTTPException(
             status_code=HTTPStatus.BAD_REQUEST,
-            detail="At least one field (name or description) must be provided for update",
+            detail="At least one supported knowledge base field must be provided for update",
         )
     server_url, api_key = _credentials()
     result = update_aidp_kb_impl(server_url, api_key, kds_id, payload)
@@ -886,6 +1029,188 @@ async def download_document(
         headers=response_headers,
         background=BackgroundTask(aidp_response.aclose),
     )
+
+
+@aidp_mgmt_router.get("/knowledge-bases/{kds_id}/files")
+async def list_ingested_files(
+    request: Request,
+    kds_id: Annotated[str, Path(description="Knowledge base ID")],
+    page: Annotated[int, Query(ge=1)] = 1,
+    page_size: Annotated[int, Query(ge=1, le=100)] = 10,
+    keyword: Annotated[str | None, Query(max_length=200)] = None,
+) -> JSONResponse:
+    """List only files AIDP confirms as ingested; upload history stays separate."""
+    user_id, tenant_id = await _auth(request)
+    perms.require_permission(kds_id, user_id, tenant_id, required="READ")
+    server_url, api_key = _credentials()
+    normalized_keyword = (keyword or "").strip()
+
+    # AIDP's list response exposes next_link as the authoritative paging signal;
+    # total_count can be page-local. The Count endpoint is unfiltered, so use it
+    # only for the unfiltered list and keep keyword results in simple paging mode.
+    if normalized_keyword:
+        list_result = await run_blocking(
+            "aidp-list-ingested-files",
+            list_aidp_docs_impl,
+            server_url,
+            api_key,
+            kds_id,
+            page,
+            page_size,
+            normalized_keyword,
+            lane="control-io",
+            owner="config",
+        )
+        count_result: int | BaseException | None = None
+    else:
+        list_result, count_result = await asyncio.gather(
+            run_blocking(
+                "aidp-list-ingested-files",
+                list_aidp_docs_impl,
+                server_url,
+                api_key,
+                kds_id,
+                page,
+                page_size,
+                None,
+                lane="control-io",
+                owner="config",
+            ),
+            run_blocking(
+                "aidp-ingested-file-count",
+                _load_cached_doc_count,
+                server_url,
+                api_key,
+                kds_id,
+                lane="control-io",
+                owner="config",
+            ),
+            return_exceptions=True,
+        )
+    if isinstance(list_result, BaseException):
+        raise list_result
+    result = dict(list_result or {})
+    rows = result.get("value") if isinstance(result.get("value"), list) else []
+    total_reliable = isinstance(count_result, int) and not isinstance(count_result, bool)
+    total = int(count_result) if total_reliable else (page - 1) * page_size + len(rows)
+    reported_more = _history_reports_more(result)
+    has_more = (
+        total > page * page_size
+        if total_reliable
+        else bool(reported_more) if reported_more is not None
+        else len(rows) >= page_size
+    )
+    # Upstream pagers can return next_link even when the current page is
+    # incomplete (fewer rows than page_size), which would create phantom
+    # pagination pages. Suppress has_more when the returned page is not full.
+    if len(rows) < page_size:
+        has_more = False
+    result.update({
+        "total_count": total,
+        "has_more": has_more,
+        "total_reliable": total_reliable,
+        "processing_count": 0,
+    })
+    return JSONResponse(status_code=HTTPStatus.OK, content=result)
+
+
+@aidp_mgmt_router.get("/knowledge-bases/{kds_id}/upload-tasks")
+async def list_upload_tasks(
+    request: Request,
+    kds_id: Annotated[str, Path(description="Knowledge base ID")],
+    page: Annotated[int, Query(ge=1)] = 1,
+    page_size: Annotated[int, Query(ge=1, le=100)] = 10,
+    keyword: Annotated[str | None, Query(max_length=200)] = None,
+    status: Annotated[int, Query(ge=0, le=5)] = 0,
+) -> JSONResponse:
+    """Read the recent AIDP upload history, separate from the ingested file list."""
+    user_id, tenant_id = await _auth(request)
+    perms.require_permission(kds_id, user_id, tenant_id, required="READ")
+    server_url, api_key = _credentials()
+    channel = await run_blocking(
+        "aidp-upload-task-channel",
+        _resolve_doc_history_channel,
+        server_url,
+        api_key,
+        kds_id,
+        lane="control-io",
+        owner="config",
+    )
+    history = {}
+    if channel:
+        history = await run_blocking(
+            "aidp-upload-tasks",
+            list_aidp_doc_history_impl,
+            server_url,
+            api_key,
+            channel["fs_id"],
+            f"/{kds_id}",
+            kds_id,
+            None,
+            page,
+            page_size,
+            status,
+            (keyword or "").strip() or None,
+            lane="control-io",
+            owner="config",
+        )
+    raw_items = history.get("value") if isinstance(history, dict) else None
+    rows = [item for item in raw_items if isinstance(item, dict)] if isinstance(raw_items, list) else []
+    raw_total = history.get("total_count") if isinstance(history, dict) else None
+    total_reliable = isinstance(raw_total, int) and not isinstance(raw_total, bool)
+    total = int(raw_total) if total_reliable else (page - 1) * page_size + len(rows)
+    reported_more = _history_reports_more(history) if isinstance(history, dict) else None
+    has_more = (
+        bool(reported_more)
+        if reported_more is not None
+        else total > page * page_size
+    )
+
+    def _history_count(field: str, fallback: int = 0) -> int:
+        value = history.get(field) if isinstance(history, dict) else None
+        return value if isinstance(value, int) and not isinstance(value, bool) else fallback
+
+    stats = {
+        "total": _history_count("total_record_count", total),
+        "extracting": _history_count("processing_record_count"),
+        "failed": _history_count("failed_record_count"),
+        "success": _history_count("success_record_count"),
+        "queued": _history_count("queued_record_count"),
+    }
+    return JSONResponse(status_code=HTTPStatus.OK, content={
+        "value": rows,
+        "total_count": total,
+        "has_more": has_more,
+        "total_reliable": total_reliable,
+        "stats": stats,
+        "retention_days": 30,
+    })
+
+
+@aidp_mgmt_router.post("/knowledge-bases/{kds_id}/upload-tasks/retry")
+async def retry_upload_tasks(
+    request: Request,
+    kds_id: Annotated[str, Path(description="Knowledge base ID")],
+    body: RetryAidpDocumentsRequest,
+) -> JSONResponse:
+    """Retry selected failed tasks; the upstream request always carries a UUID array."""
+    user_id, tenant_id = await _auth(request)
+    perms.require_permission(kds_id, user_id, tenant_id, required="EDIT")
+    file_uuids = list(dict.fromkeys(str(file_uuid) for file_uuid in body.file_uuids))
+    server_url, api_key = _credentials()
+    result = await run_blocking(
+        "aidp-retry-upload-tasks",
+        retry_aidp_docs_impl,
+        server_url,
+        api_key,
+        kds_id,
+        file_uuids,
+        lane="control-io",
+        owner="config",
+    )
+    invalidate_aidp_kb_detail_cache(server_url, api_key, kds_id)
+    invalidate_aidp_doc_count_cache(server_url, api_key, kds_id)
+    return JSONResponse(status_code=HTTPStatus.OK, content=result)
 
 
 @aidp_mgmt_router.patch("/aidp-permissions/{kds_id}")

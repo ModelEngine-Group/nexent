@@ -215,9 +215,9 @@ const AidpCreateKbPage: React.FC = () => {
 
   const goBackToList = () => router.push(`/${locale}/knowledges`);
 
-  /** Jump to the created knowledge base file view. */
+  /** Jump to the created knowledge base detail page. */
   const openCreatedKb = (kbId: string) => {
-    router.push(`/${locale}/knowledges?kb=${encodeURIComponent(kbId)}`);
+    router.push(`/${locale}/knowledges/detail?kb=${encodeURIComponent(kbId)}`);
   };
 
   const handleSubmit = async () => {
