@@ -537,6 +537,7 @@ def query_agent_list_candidates_by_tenant_id(
         AgentInfo.create_time,
         AgentInfo.group_ids,
         AgentInfo.ingroup_permission,
+        AgentInfo.current_version_no,
     ]
     if include_description:
         columns.append(AgentInfo.description)

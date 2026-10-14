@@ -106,6 +106,8 @@ export interface MyEditableAgentItem {
   current_version_no?: number | null;
   version_label?: string | null;
   version_create_time?: string | null;
+  /** Whether this agent is a main agent; absent means main. */
+  is_main_agent?: boolean;
   /** EDIT: editable, READ_ONLY: read-only (from /agent/list permission logic). */
   permission?: "EDIT" | "READ_ONLY";
   /** Total downloads summed across all repository listings for this agent_id. */

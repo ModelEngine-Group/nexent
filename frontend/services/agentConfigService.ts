@@ -224,6 +224,7 @@ type AgentListApiItem = {
   current_version_no?: number;
   version_label?: string | null;
   version_create_time?: string | null;
+  is_main_agent?: boolean;
   is_a2a_server?: boolean;
   allow_chat_metadata?: boolean;
   enable_protocol_repair_retry?: boolean;
@@ -256,6 +257,7 @@ const formatAgentListItem = (agent: AgentListApiItem): Agent =>
     current_version_no: agent.current_version_no,
     version_label: agent.version_label,
     version_create_time: agent.version_create_time,
+    is_main_agent: agent.is_main_agent,
     is_a2a_server: agent.is_a2a_server || false,
     allow_chat_metadata: agent.allow_chat_metadata ?? false,
     enable_protocol_repair_retry: agent.enable_protocol_repair_retry ?? false,
@@ -277,6 +279,8 @@ export type AgentListFilters = {
   search?: string;
   page?: number;
   pageSize?: number;
+  /** When true, request the latest-published-first ordering. */
+  sortByUpdateTime?: boolean;
 };
 
 export type AgentListPagination = {
@@ -347,6 +351,8 @@ export const fetchPagedAgentList = async (
       queryParams.set("search", filters.search.trim());
     if (filters.includeRepositoryInfo)
       queryParams.set("include_repository_info", "true");
+    if (filters.sortByUpdateTime)
+      queryParams.set("sort_by_update_time", "true");
     queryParams.set("page", String(filters.page ?? 1));
     queryParams.set("page_size", String(filters.pageSize ?? 20));
 
