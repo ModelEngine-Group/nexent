@@ -36,6 +36,11 @@ spec:
             - configMapRef:
                 name: nexent-config
           env:
+            - name: TZ
+              valueFrom:
+                configMapKeyRef:
+                  name: nexent-config
+                  key: TZ
             - name: HOSTNAME
               value: "0.0.0.0"
             - name: HTTP_BACKEND
