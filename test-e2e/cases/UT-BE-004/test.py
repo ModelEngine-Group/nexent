@@ -36,7 +36,7 @@ def _profile(version: str = "2026-01") -> SimpleNamespace:
 @STAGE
 @pytest.mark.case_id("UT-BE-004")
 def test_capacity_suggestion_boundaries_do_not_guess() -> None:
-    from services.model_capacity_suggestion_service import suggest_capacity
+    from management.services.model.capacity import suggest_capacity
 
     with pytest.raises(ValueError, match="required"):
         suggest_capacity("", catalog={})

@@ -44,8 +44,8 @@ def test_cmsr_d1_003_step_one_semantic_repair_streams_and_commits(caplog):
                 observer.add_model_new_token("修复后：<code>")
                 first_repair_chunk.set()
                 assert release_repair.wait(timeout=5)
-                observer.add_model_new_token("final_answer('ok')</code>")
-                content = "修复后：<code>final_answer('ok')</code>"
+                observer.add_model_new_token("print('ok')</code>")
+                content = "修复后：<code>print('ok')</code>"
             observer.flush_remaining_tokens()
             return SimpleNamespace(
                 content=content,
@@ -82,7 +82,7 @@ def test_cmsr_d1_003_step_one_semantic_repair_streams_and_commits(caplog):
     agent.stop_event = threading.Event()
     agent.enable_planning = False
     agent.python_executor = MagicMock(
-        return_value=SimpleNamespace(output="ok", logs="", is_final_answer=True)
+        return_value=SimpleNamespace(output="ok", logs="", is_final_answer=False)
     )
 
     def step():
@@ -154,4 +154,4 @@ def test_cmsr_d1_003_step_one_semantic_repair_streams_and_commits(caplog):
         if "event=model_output_protocol_" in record.getMessage()
     ]
     assert any("event=model_output_protocol_repair_accepted" in text for text in lifecycle_logs)
-    assert all("final_answer('ok')" not in text for text in lifecycle_logs)
+    assert all("print('ok')" not in text for text in lifecycle_logs)

@@ -509,6 +509,14 @@ class AgentRunInfo(BaseModel):
         ),
         default=None,
     )
+    tool_fastpath_enabled: bool = Field(
+        description="Enable restricted official-tool actions before ordinary Docker initialization.",
+        default=True,
+    )
+    tool_fastpath_allowed_tools: Optional[List[str]] = Field(
+        description="Deployment-approved official implementation IDs for local fast-path actions.",
+        default=None,
+    )
     minio_client: Optional[Any] = Field(
         description=(
             "MinIO client for syncing sandbox output files to object storage.  "

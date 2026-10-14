@@ -48,7 +48,7 @@ from database.conversation_db import (
     update_message_unit_status,
 )
 from database.model_management_db import get_model_by_model_id
-from services.model_gateway_service import get_llm_adapter_from_config
+from management.services.model.adapter import get_llm_adapter_from_config
 from utils.config_utils import tenant_config_manager
 from nexent.core.agents.prompt.auxiliary import compose_auxiliary_prompt
 from utils.str_utils import remove_think_blocks

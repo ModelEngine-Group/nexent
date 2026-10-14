@@ -38,6 +38,7 @@ def factory(mocker):
     runtime = NexentAgent(
         observer=MessageObserver(), model_config_list=[], stop_event=threading.Event(),
         sandbox_config=SandboxConfig(level=SandboxLevel.DOCKER, scope=SandboxScope.SYSTEM),
+        tool_fastpath_enabled=False,
     )
     mocker.patch.object(NexentAgent, "create_model", side_effect=lambda *_args: mocker.Mock())
     mocker.patch("nexent.core.agents.nexent_agent.CoreAgent", new=WarmupAgent)
