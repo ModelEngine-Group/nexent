@@ -52,6 +52,7 @@ COMMENT_STYLES = {
 
 # Search the header within the first N lines of the file.
 HEADER_SEARCH_LINES = 10
+
 # Give up after N non-trivial content lines without a copyright match.
 CONTENT_LINE_LIMIT = 5
 
