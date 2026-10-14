@@ -83,6 +83,54 @@ OpenAI-compatible API bases, and is corrected here. There is no
 (that scheme belonged to the retired test-assets fault provider), and no
 doubled `/v1/v1` — any of those would land on 404 by design.
 
+## Driving it from the product UI (agent tools + seed catalog)
+
+What a human enters in the agent editor when binding these services as
+tools: **工具管理 → 选择工具 → the 本地工具 tab → the tool's gear (配置)
+action**. Base URLs use the product-side address from the table above
+(`http://<product-host>:30090`; `ext-knowledge` is the compose DNS name in
+the bundled deployment). Credentials are credential *shapes*, never
+secrets: the route sets accept any Bearer string, so enter realistic-looking
+values.
+
+| Service | Tool (`source: local`) | Configuration fields | Runtime input | Notes |
+|---|---|---|---|---|
+| DataMate | `datamate_search` | `server_url` = root; pick KBs in the picker (`index_names`) | `query` | No auth header is validated |
+| Dify | `dify_search` | `server_url` = root **+ `/v1`** (official shape); `api_key` = any Bearer; pick datasets (`dataset_ids`) | `query` | Both `/v1/datasets` and `/datasets` are served and the product proxy strips a trailing `/v1`, so the official form works across every path |
+| RAGFlow | `ragflow_search` | `server_url` = root; `api_key` = any Bearer; pick datasets (`dataset_ids`) | `query` | |
+| iData | `idata_search` | `server_url` = root; `api_key` = any Bearer; `user_id` = any value (not validated); `knowledge_space_id` (e.g. `space-alpha`); `rerank_model_id` = **required by the tool**; pick KBs (`dataset_ids`) | **`question`** | The tool's runtime input is `question`, not `query` |
+| Haotian | `haotian_search` | `list_url` = root + `/haotian/api/knowledge-sets`; `retrieve_url` = root + `/haotian/api/retrieve`; `authorization` = any non-empty value; pick KBs (`dataset_ids`) | `query` | The connector forwards the raw header, so no `Bearer ` prefix is required |
+| AIDP (managed) | — | Use the agent's 知识库管理 section; the deployment wires `AIDP_SERVER_URL` | — | Nothing to type |
+| AIDP (independent) | `ind_aidp_search` | `server_url` = root; `api_key` = `mock-aidp-key` (exact, like a real issued key); `tenant_id` = `aidp`; pick KBs (`kds_list`) | `query` | |
+
+The built-in test panel submits the tool's runtime inputs verbatim;
+`query` / `question` is required. A validation error of the form
+`forward() missing 1 required positional argument: 'query'` means the test
+request carried no query — refill the 查询词 field and submit again
+(interacting with the KB picker after typing can reset the field in some
+builds).
+
+### Seed catalog
+
+What the pickers list and the retrieval returns. `POST /_reset` restores
+all of it.
+
+| Service | Seeded selections | Worth picking |
+|---|---|---|
+| DataMate | `datamate-kb-001` 运行手册知识库, `datamate-kb-002` 产品文档库, `datamate-kb-003`…`021` (empty page fillers), `datamate-kb-graph` | 001/002 carry retrievable chunks |
+| Dify | `dify-ds-handbook` (Nexent Product Handbook), `dify-ds-faq` 常见问题 FAQ, plus `dify-ds-empty` / `-archive` / `-legacy` / `-unicode` (empty) | handbook / faq carry chunks |
+| RAGFlow | `ragflow-ds-main` (Main Corpus, 25 docs), `ragflow-ds-legal` 合规语料库 (8), `ragflow-ds-faq` (3), `ragflow-ds-legacy` (1), `ragflow-ds-empty` | main / legal / faq carry chunks |
+| iData | `space-alpha` → `idata-kb-alpha-1` 设备维护手册, `idata-kb-alpha-2` Safety Regulations; `space-beta` → `idata-kb-beta-1` 民航规章库 | All three carry chunks |
+| Haotian | 军事知识集 → `ht-ds-001` 装备手册 (+ a `null` entry the product maps to a default UUID), 民用知识集 → `ht-ds-101` 民航规章 | Both carry chunks |
+| AIDP | 25 KBs in the catalog (`aidp-kb-product` AIDP Product Handbook, `aidp-kb-api`, `aidp-kb-faq`, `aidp-kb-04`…`25`); the product lists only KBs registered in its own permission table, so register the ones a journey needs | `aidp-kb-product` carries the retrieval oracle (`AIDP产品介绍.pdf`); `aidp-kb-faq` is renamed at startup into the 政务服务与城市治理知识库 demo with 8 Chinese files |
+
+Two AIDP seed behaviors worth knowing before a hand-run: the Chinese demo
+rename/files are applied when the mock **starts**, so a later `/_reset`
+restores the plain seeds (restart the mock to get the demo back); and the
+permission-table registration above is product state, cleared by a fresh
+product database, not by this service.
+
+
 `GET /v1/models` is deliberately absent (404): LLM model creation performs
 no connectivity probe, so no consumer needs it. Extend the provider only
 when a suite case actually calls a new endpoint.
