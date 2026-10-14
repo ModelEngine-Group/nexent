@@ -135,6 +135,8 @@ scenario("[NAV-MENU-D4-001] account menu replaces bars and switches language on 
 scenario("[NAV-MENU-D4-001] hover rail overlays content and holds account popup", async ({ page }) => {
   const text = JSON.parse(fs.readFileSync(path.join(process.env.NEXENT_REPO, "frontend/public/locales/en/common.json"), "utf8"));
   const longLabel = "Knowledge base configuration and document indexing";
+  const longBrand = "Nexent enterprise intelligent collaboration platform";
+  const brandConfig = JSON.parse(fs.readFileSync(path.join(process.env.NEXENT_REPO, "frontend/public/locales/en/custom.json"), "utf8"));
   let monitoringRequests = 0;
   let profileRequests = 0;
   page.on('request', request => { if (new URL(request.url()).pathname.endsWith('/users')) profileRequests += 1; });
@@ -142,6 +144,7 @@ scenario("[NAV-MENU-D4-001] hover rail overlays content and holds account popup"
   await page.setViewportSize({ width: 1280, height: 800 });
   await page.route("**/api/**", (route) => json(route, {}));
   await page.route("**/locales/en/common.json", (route) => json(route, { ...text, "sidebar.knowledgeBaseConfig": longLabel }));
+  await page.route("**/locales/*/custom.json", (route) => json(route, { ...brandConfig, productName: longBrand }));
   await page.route("**/api/tenant_config/deployment_version", (route) => json(route, { deployment_version: "speed", app_version: "v2.6.0", status: "success" }));
   await page.route("**/api/user/current_user_info", (route) => json(route, { data: { user: { user_id: "hover-fixture", tenant_id: "hover-tenant", user_email: "hover@nexent.test", user_role: "SPEED", role: "SPEED", auth_provider: "local", groupIds: [], permissions: [], accessibleRoutes: ["/agents", "/models", "/knowledges", "/agent-space"] } } }));
   await page.route("**/api/groups/list", (route) => json(route, { data: [], total: 0 }));
@@ -154,14 +157,39 @@ scenario("[NAV-MENU-D4-001] hover rail overlays content and holds account popup"
   await page.route("**/api/agent/list/page?*", (route) => json(route, { items: [], pagination: { total: 0, page: 1, page_size: 10, total_pages: 0 } }));
   await page.goto(`${baseUrl}/en/agent-space`);
   const rail = page.locator('[data-sidebar-expanded]');
+  const divider = rail.locator('[data-sidebar-divider]');
+  const checkDivider = async () => {
+    await expect(divider).toBeVisible();
+    await expect(divider).toHaveCSS('background-color', 'rgba(25, 25, 25, 0.15)');
+    const lineBounds = await divider.boundingBox();
+    const bounds = await rail.boundingBox();
+    expect(lineBounds.width).toBe(0.5);
+    expect(lineBounds.height).toBe(bounds.height);
+    expect(lineBounds.x + lineBounds.width).toBe(bounds.x + bounds.width);
+  };
   await expect(rail).toHaveAttribute('data-sidebar-expanded', 'false');
   const item = page.getByRole('navigation').getByRole('button', { name: longLabel, exact: true });
   await expect(item).toHaveText('');
   const contentX = await page.locator('.ant-layout-content').evaluate(el => el.getBoundingClientRect().left);
   await expect.poll(() => rail.evaluate(el => el.getBoundingClientRect().width)).toBe(64);
+  await checkDivider();
   await rail.hover({ position: { x: 30, y: 100 } });
   await expect.poll(() => rail.evaluate(el => el.getBoundingClientRect().width)).toBe(240);
+  await checkDivider();
   expect(await page.locator('.ant-layout-content').evaluate(el => el.getBoundingClientRect().left)).toBe(contentX);
+  const brand = rail.getByRole('link', { name: text['sidebar.homePage'], exact: true }).locator('.ant-typography');
+  await expect(brand).toHaveText(longBrand);
+  await expect(brand).toHaveCSS('font-size', '16px');
+  await expect(brand).toHaveCSS('font-weight', '700');
+  await expect(brand).toHaveCSS('white-space', 'nowrap');
+  await expect(brand).toHaveCSS('overflow', 'hidden');
+  await expect(brand).toHaveCSS('text-overflow', 'ellipsis');
+  expect(await brand.evaluate(el => el.scrollWidth > el.clientWidth)).toBe(true);
+  const brandBounds = await brand.boundingBox();
+  const railBounds = await rail.boundingBox();
+  expect(brandBounds.x + brandBounds.width).toBeLessThanOrEqual(railBounds.x + railBounds.width - 8);
+  await brand.hover();
+  await expect(page.getByRole('tooltip').filter({ hasText: longBrand })).toBeVisible();
   await expect(item).toHaveText(longLabel);
   const positions = await item.evaluate(el => { const icon=el.querySelector('svg').getBoundingClientRect(); const label=el.querySelector('.ant-typography').getBoundingClientRect(); return { iconY:icon.y+icon.height/2, labelY:label.y+label.height/2 }; });
   expect(Math.abs(positions.iconY-positions.labelY)).toBeLessThanOrEqual(1);

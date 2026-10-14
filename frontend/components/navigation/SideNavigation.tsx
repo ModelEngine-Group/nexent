@@ -355,10 +355,15 @@ export function SideNavigation() {
           collapseLater();
       }}
     >
+      <span
+        aria-hidden="true"
+        data-sidebar-divider
+        className="pointer-events-none absolute inset-y-0 right-0 w-[0.5px] bg-[rgba(25,25,25,0.15)]"
+      />
       <Link
         href="/"
         aria-label={t("sidebar.homePage")}
-        className="mb-4 flex h-12 w-full shrink-0 items-center overflow-hidden rounded-[4px]"
+        className="mb-4 flex h-12 min-w-0 w-full shrink-0 items-center overflow-hidden rounded-[4px] pr-2"
       >
         <span className="flex h-12 w-12 shrink-0 items-center justify-center">
           <img
@@ -370,6 +375,7 @@ export function SideNavigation() {
         <NavigationRailLabel
           expanded={expanded}
           label={config.productName || "Nexent"}
+          variant="title"
         />
       </Link>
 
