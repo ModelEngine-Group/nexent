@@ -68,7 +68,7 @@ from management.services.knowledge_base.service import get_embedding_model_by_in
 from management.services.model.resolver import get_rerank_model
 from utils.http_client_utils import create_httpx_client
 from database.client import minio_client
-from services.model_gateway_service import get_llm_adapter, get_vlm_adapter
+from management.services.model.adapter import get_llm_adapter, get_vlm_adapter
 from nexent.monitor import set_monitoring_context, set_monitoring_operation
 from nexent.core.concurrency import run_blocking
 from management.services.knowledge_base.service import get_vector_db_core

@@ -55,12 +55,11 @@ const ROUTE_CONFIG: RouteConfig[] = [
     parentKey: null,
   },
   {
-    path: "/chat",
+    path: "/newchat",
     Icon: Blocks,
     labelKey: "sidebar.startChat",
     order: 1.5,
     parentKey: null,
-    navigationPath: "/newchat",
   },
   {
     path: "/workbench",
@@ -181,10 +180,7 @@ function isRouteAccessible(
     return false;
   }
 
-  return (
-    accessibleRoutes.includes(route.path) ||
-    (route.path === "/workbench" && accessibleRoutes.includes("/chat"))
-  );
+  return accessibleRoutes.includes(route.path);
 }
 
 export function SideNavigation() {

@@ -35,7 +35,7 @@ from management.services.agent.naming import (
 from database.agent_db import update_agent
 from services.prompt_template_service import resolve_prompt_generate_template
 from services.thread_lifecycle_service import config_thread_manager
-from utils.llm_utils import call_llm_for_system_prompt
+from management.services.model.invocation import call_llm_for_system_prompt
 
 from dataclasses import dataclass
 from typing import Optional as Opt

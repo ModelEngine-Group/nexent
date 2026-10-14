@@ -6,12 +6,16 @@ from types import SimpleNamespace
 from unittest.mock import Mock
 
 import pytest
+
 from nexent.core.agents.agent_model import (
     AgentConfig,
     ToolConfig,
     copy_invocation_config,
 )
 from nexent.core.agents.nexent_agent import NexentAgent
+from nexent.core.agents.sandbox import SandboxConfig, SandboxLevel
+from nexent.core.agents.tool_fastpath import DeferredToolExecutor
+from nexent.core.tools.read_skill_config_tool import ReadSkillConfigTool
 from nexent.core.utils.observer import MessageObserver
 
 
@@ -92,3 +96,75 @@ def test_invocation_factory_passes_isolated_config_and_original_client_to_tools(
     captured[0].params["options"].append(2)
     assert captured[1].params["options"] == config.tools[0].params["options"] == [1]
     assert not factory._subagent_invocations
+
+
+@pytest.mark.parametrize("enabled, allowed", [
+    (True, None), (True, []), (True, ["ReadSkillConfigTool"]),
+    (False, None), (False, ["ReadSkillConfigTool"]),
+])
+def test_child_invocations_inherit_fastpath_policy_and_release_distinct_executors(monkeypatch, enabled, allowed):
+    from nexent.core.agents import nexent_agent, sandbox
+
+    executors = []
+
+    class FakeCore:
+        def __init__(self, **kwargs):
+            self.__dict__.update(kwargs)
+            self.state = {}
+            self.python_executor = kwargs["executor"]
+            executors.append(self.python_executor)
+
+        def __call__(self, task):
+            self.python_executor.send_tools({tool.name: tool for tool in self.tools})
+            return self.python_executor(task)
+
+    build = Mock(side_effect=lambda **kwargs: Mock(
+        _nexent_backend="docker", _nexent_session_container_group=None,
+    ))
+    cleanup = Mock()
+    monkeypatch.setattr(sandbox, "build_python_executor", build)
+    monkeypatch.setattr(sandbox, "SandboxSkillScriptRunner", Mock())
+    monkeypatch.setattr(sandbox, "cleanup_executor", cleanup)
+    monkeypatch.setattr(nexent_agent, "CoreAgent", FakeCore)
+    monkeypatch.setattr(NexentAgent, "create_model", lambda *_args: SimpleNamespace())
+    monkeypatch.setattr(NexentAgent, "create_tool", lambda *_args: ReadSkillConfigTool(
+        config_overrides={"demo": {"answer": "rules"}}, authorized_skill_names=["demo"],
+    ))
+    config = AgentConfig(name="worker", description="Worker", model_name="model", tools=[
+        ToolConfig(name="read_skill_config", class_name="ReadSkillConfigTool", source="local"),
+    ])
+    factory = NexentAgent(
+        MessageObserver(), [], Event(),
+        sandbox_config=SandboxConfig(level=SandboxLevel.DOCKER),
+        tool_fastpath_enabled=enabled, tool_fastpath_allowed_tools=allowed,
+    )
+    factory.agent = factory.create_single_agent(AgentConfig(
+        name="parent", description="Parent", model_name="model", tools=[], worker_agents=[config],
+    ))
+    child = factory.agent.managed_agents[0]
+    try:
+        assert build.call_count == (0 if enabled else 1)
+        for _ in range(2):
+            result = child(task='result = read_skill_config("demo")\nprint(result)')
+            if enabled and allowed != []:
+                assert '"answer": "rules"' in result.logs
+        left, right = executors[1:]
+        assert left is not right
+        assert isinstance(left, DeferredToolExecutor) is enabled
+        assert isinstance(right, DeferredToolExecutor) is enabled
+        expected_children = 0 if enabled and allowed != [] else 2
+        assert build.call_count == expected_children + (0 if enabled else 1)
+        assert cleanup.call_count == expected_children
+        released = [call.args[0] for call in cleanup.call_args_list]
+        expected = [executor.remote for executor in (left, right)] if enabled else [left, right]
+        assert released == (expected if expected_children else [])
+        assert not factory._subagent_invocations
+        if enabled:
+            with pytest.raises(RuntimeError, match="closed"):
+                left('import math')
+            with pytest.raises(RuntimeError, match="closed"):
+                right('import math')
+    finally:
+        factory._close_subagent_invocations()
+        factory._cleanup_sandbox()
+    assert cleanup.call_count == expected_children + (0 if enabled else 1)

@@ -30,16 +30,8 @@ sys.modules["nexent.core.models.capacity_budget"] = capacity_budget_mock
 
 # Patch storage factory before importing
 with patch_minio_client_initialization():
-    from backend.utils.config_utils import (
-        CONTEXT_COMPACTION_TRIGGER_RATIO_KEY,
-        LEGACY_CONTEXT_SOFT_LIMIT_RATIO_KEY,
-        CONTEXT_POLICY_KEY,
-        safe_value,
-        safe_list,
-        get_env_key,
-        get_model_name_from_config,
-        TenantConfigManager
-    )
+    from backend.utils.config_utils import CONTEXT_COMPACTION_TRIGGER_RATIO_KEY, LEGACY_CONTEXT_SOFT_LIMIT_RATIO_KEY, CONTEXT_POLICY_KEY, safe_value, safe_list, get_env_key, TenantConfigManager
+    from management.services.model.names import get_model_name_from_config
 
 
 class TestSafeValue:

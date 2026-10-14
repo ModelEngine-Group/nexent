@@ -11,6 +11,7 @@ export default defineConfig({
       { find: "@", replacement: fileURLToPath(new URL("./", import.meta.url)) },
     ],
   },
+  oxc: { jsx: { runtime: "automatic" } },
   test: {
     environment: "jsdom",
     include: ["tests/workbench/**/*.test.{ts,tsx}"],

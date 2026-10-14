@@ -36,7 +36,7 @@ import KnowledgeBaseSelectorModal from "@/components/tool-config/KnowledgeBaseSe
 import HaotianKnowledgeSelectorModal, {
   HaotianKnowledgeSet,
 } from "@/components/tool-config/HaotianKnowledgeSelectorModal";
-import AidpKnowledgeSelectorModal from "@/ext_components/aidp/AidpKnowledgeSelectorModal";
+import AidpKnowledgeSelectorModal from "@/ext_components/aidp/features/knowledge-selector/AidpKnowledgeSelectorModal";
 import { useConfig } from "@/hooks/useConfig";
 import {
   useKnowledgeBasesForToolConfig,

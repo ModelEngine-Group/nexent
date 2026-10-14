@@ -525,6 +525,15 @@ OAuthAccountNotFoundError = NotFoundException
 # SignatureValidationError already defined above
 
 
+class ModelProviderError(Exception):
+    """A classified provider discovery failure with its upstream status."""
+
+    def __init__(self, upstream_status: int, message: str):
+        self.upstream_status = upstream_status
+        self.message = message
+        super().__init__(f"{upstream_status}: {message}")
+
+
 class RuntimeCapacityExceededError(RuntimeError):
     """Raised when Runtime agent worker and queue capacity is full."""
 

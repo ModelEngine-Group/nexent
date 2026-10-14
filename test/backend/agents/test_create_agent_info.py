@@ -11,6 +11,10 @@ from test.common.test_mocks import bootstrap_test_env
 env_state = bootstrap_test_env()
 consts_const = env_state["mock_const"]
 consts_const.RUNTIME_PARALLEL_EXECUTOR_TIMEOUT_SECONDS = 120
+consts_const.NEXENT_TOOL_FASTPATH_ENABLED = False
+consts_const.NEXENT_TOOL_FASTPATH_ALLOWED_TOOLS = (
+    "KnowledgeBaseSearchTool", "ReadSkillMdTool", "ReadSkillConfigTool", "AidpSearchTool",
+)
 
 # Mock consts.model module with HistoryItem class
 from typing import List, Optional, Dict, Any
@@ -291,7 +295,7 @@ sys.modules['utils.prompt_template_utils'] = MagicMock()
 sys.modules['utils.config_utils'] = MagicMock()
 sys.modules['utils.http_client_utils'] = MagicMock()
 sys.modules['utils.langchain_utils'] = MagicMock()
-sys.modules['utils.model_name_utils'] = MagicMock()
+sys.modules['management.services.model.names'] = MagicMock()
 sys.modules['langchain_core.tools'] = MagicMock()
 # Build services module hierarchy with minimal functionality
 services_module = _create_stub_module("services")
@@ -305,8 +309,8 @@ sys.modules['services.ind_aidp_service'] = _create_stub_module(
     "services.ind_aidp_service",
     create_ind_aidp_image_url_builder=MagicMock(),
 )
-sys.modules['services.model_gateway_service'] = _create_stub_module(
-    "services.model_gateway_service",
+sys.modules['management.services.model.adapter'] = _create_stub_module(
+    "management.services.model.adapter",
     get_llm_adapter=MagicMock(return_value="stub_llm_adapter"),
     get_vlm_adapter=MagicMock(return_value="stub_vlm_adapter"),
 )
@@ -522,9 +526,9 @@ _redis_utils_mod.get_redis_client = MagicMock(return_value=MagicMock())
 sys.modules["utils.redis_utils"] = _redis_utils_mod
 setattr(_utils_pkg, "redis_utils", _redis_utils_mod)
 
-_model_name_utils_mod = _create_stub_module("utils.model_name_utils")
+_model_name_utils_mod = _create_stub_module("management.services.model.names")
 _model_name_utils_mod.add_repo_to_name = lambda name, repo=None, **kwargs: name
-sys.modules["utils.model_name_utils"] = _model_name_utils_mod
+sys.modules["management.services.model.names"] = _model_name_utils_mod
 setattr(_utils_pkg, "model_name_utils", _model_name_utils_mod)
 
 _prompt_template_utils_mod = _create_stub_module("utils.prompt_template_utils")
@@ -534,7 +538,7 @@ setattr(_utils_pkg, "prompt_template_utils", _prompt_template_utils_mod)
 
 _config_utils_mod = _create_stub_module("utils.config_utils")
 _config_utils_mod.tenant_config_manager = MagicMock()
-_config_utils_mod.get_model_name_from_config = MagicMock(return_value="default")
+_model_name_utils_mod.get_model_name_from_config = MagicMock(return_value="default")
 sys.modules["utils.config_utils"] = _config_utils_mod
 setattr(_utils_pkg, "config_utils", _config_utils_mod)
 
@@ -4830,6 +4834,8 @@ class TestCreateAgentRunInfo:
                 context_budget_snapshot=None,
                 redis_client=ANY,
                 sandbox_config=None,
+                tool_fastpath_enabled=False,
+                tool_fastpath_allowed_tools=list(consts_const.NEXENT_TOOL_FASTPATH_ALLOWED_TOOLS),
                 minio_client=None,
                 workspace_path=ANY,
                 workspace_run_id=ANY,

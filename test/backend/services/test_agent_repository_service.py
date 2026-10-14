@@ -59,7 +59,7 @@ sys.modules.setdefault("database.knowledge_db", MagicMock())
 sys.modules.setdefault("database.model_management_db", MagicMock())
 sys.modules.setdefault("database.remote_mcp_db", MagicMock())
 sys.modules.setdefault("database.tool_db", MagicMock())
-sys.modules.setdefault("services.model_gateway_service", MagicMock())
+sys.modules.setdefault("management.services.model.adapter", MagicMock())
 sys.modules.setdefault("utils.config_utils", MagicMock())
 
 

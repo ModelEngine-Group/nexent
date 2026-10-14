@@ -338,7 +338,7 @@ async def _first_available_embedding_model_id(tenant_id: str) -> Optional[int]:
     (model_type in embedding/multi_embedding and connect_status available).
     Returns None when the tenant has no usable embedding model.
     """
-    from services.model_management_service import list_models_for_tenant
+    from management.services.model.management import list_models_for_tenant
 
     models = await list_models_for_tenant(tenant_id)
     for model in models:
@@ -366,7 +366,7 @@ async def _missing_model_types(
     (when a KB search tool enables rerank). Returns a stable list of model type
     strings; empty when the tenant has everything the bundle needs.
     """
-    from services.model_management_service import list_models_for_tenant
+    from management.services.model.management import list_models_for_tenant
 
     models = await list_models_for_tenant(tenant_id)
     available = {
