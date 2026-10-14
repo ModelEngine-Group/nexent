@@ -24,6 +24,7 @@ from packaging.requirements import Requirement
 
 from run_cases import machine_environment, run_one, result_reason
 from report_ownership import enrich as enrich_ownership
+from ext_attach import ExtKnowledgeAttach
 from launch_runtime import test_python
 from local_preflight import live_service_problems, static_config_problems
 from static_assets import entries as static_entries, inventory as static_inventory
@@ -184,7 +185,19 @@ def worker(repo, home, record, directory, settings):
         raise RuntimeError("Preparation failed; inspect " + str(log.relative_to(directory)))
     services = controlled_services(repo, directory, env, bool((review or {}).get("anchors")))
     services_started = False
+    # ext-knowledge mock attach runs BEFORE any preparation (including the
+    # controlled test-assets services): it only validates, locks and resets a
+    # pre-deployed batch-owned instance; the suite never starts or stops the
+    # mock's Compose stack.
+    ext = ExtKnowledgeAttach(
+        repo, home, directory, env,
+        (record["execution"].get("required_mock_services") or []),
+        record["case_id"], record,
+    )
+    ext_attached = False
     try:
+        ext.attach()
+        ext_attached = True
         services.__enter__()
         services_started = True
         if (review or {}).get("anchors"):
@@ -236,6 +249,11 @@ def worker(repo, home, record, directory, settings):
                 pass
             test_details = {'evidence': evidence}
     finally:
+        # ext evidence first, then product-resource cleanup, then mock state
+        # restoration and lock release; the pre-deployed Compose stack itself
+        # is never stopped here.
+        if ext_attached:
+            ext.collect_evidence()
         cleanup_code = 1 if test_details.get("cleanup_failed") else 0
         registry = directory / "runtime/resolved-assets.yaml"
         if registry.exists():
@@ -251,6 +269,8 @@ def worker(repo, home, record, directory, settings):
                 cleanup_code = cleanup_code or registered_cleanup_code
             except Exception:
                 cleanup_code = 2
+        if ext_attached:
+            cleanup_code = ext.release() or cleanup_code
         if services_started:
             try:
                 services.__exit__(None, None, None)

@@ -40,7 +40,7 @@ journey("PW-PROMPT-01", async (context) => {
         alternateAgent = resolveReadyAsset("agents", "d4_basic_display_name", "PW-PROMPT-01");
         await agents.open();
         await agents.select(targetAgent);
-        await agents.openSection("展示信息");
+        await agents.openSection("基础信息");
         originalDescription = await page.getByPlaceholder("请输入智能体描述").inputValue();
         expect(originalDescription.trim()).not.toBe("");
         return `selected editable Draft ${targetAgent} with a persisted real LLM; alternate=${alternateAgent}`;
@@ -135,7 +135,7 @@ journey("PW-PROMPT-01", async (context) => {
       },
       async () => {
         await assertUnrelatedPrompts();
-        await agents.openSection("展示信息");
+        await agents.openSection("基础信息");
         await expect(page.getByPlaceholder("请输入智能体描述")).toHaveValue(originalDescription);
         await agents.openSection("模型与提示词");
         await expect(page.getByText(modelName, { exact: true }).first()).toBeVisible();

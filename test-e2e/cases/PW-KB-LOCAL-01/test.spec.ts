@@ -94,8 +94,10 @@ journey("PW-KB-LOCAL-01", async (context) => {
         await page.reload({ waitUntil: "domcontentloaded" });
         await agents.select(agentDisplay);
         await agents.openBasic();
-        await agents.openSection("知识库");
-        await expect(page.getByText(knowledgeName, { exact: true }).first()).toBeVisible();
+        await agents.openSection("知识库管理");
+        await expect(
+          page.getByTestId("agent-selected-knowledge-base-name").filter({ hasText: knowledgeName }),
+        ).toBeVisible();
         return "full Agent-page refresh retained the knowledge binding";
       },
     ],

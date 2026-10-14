@@ -1,0 +1,70 @@
+schema_version: '1.0'
+change:
+  change_id: EXT-KNOWLEDGE-MOCK-FRAMEWORK-20261013
+  change_type: test-fix
+  title: Migrate the ext-knowledge mock contract into the registered mock-services framework and attach it through explicit case dependencies
+  description: >-
+    Migrate the frozen ext-knowledge mock contract layer (source manifest
+    34 files from branch test-ext-knowledge-mock at 5dcba59ff) into
+    test-e2e/infra/mock-services/ext-knowledge-mock with the current-checkout
+    AIDP mock mounted in place: single process, single worker, every route
+    set at its real root path, seed-backed state, in-memory failure plans
+    and a wire log with truncation accounting. The unified control plane
+    gains a full AIDP reset (data plus failure counters plus
+    processing/upload/history/file-fault knobs, each response checked) and
+    a secret-free /_mock/identity endpoint for attach validation. The
+    Compose pair registers through the existing deploy.py dispatcher with
+    an eight-service readiness rule and a packed, batch-owned build context
+    (build_context.py) instead of the repository root. Cases declare
+    dependencies through the existing required_mock_services logical IDs
+    (knowledge-provider / http-fixture / model-provider) now strictly
+    validated; the suite worker attaches before any preparation through
+    test-e2e/infra/tools/ext_attach.py, which validates identity, takes a
+    cross-test-home per-endpoint lock, probes both the mock health and the
+    live product config/runtime services, resets per case, exports the
+    dedicated runner/product URL pair, collects wire/control evidence and
+    restores state on release; a hard-killed worker leaves an unclean state
+    file that blocks the next attach until the operator recovery path runs.
+    Eight formal consumers are migrated to the real mock addresses with
+    their business assertions preserved and strengthened: CTR-046 uses the
+    seeded datamate-kb-001/f-001 download contract, CTR-047 requires all
+    six adapters to succeed against the seeded contract instead of
+    accepting 400/401/404, CTR-016 fetches the seeded /assets/image.png
+    through the product side, PERF-09 measures the seeded large asset from
+    the runner side, and AGT-001/002/REL-02 point the fault model at the
+    OpenAI-compatible product root + /v1 so real wire traffic lands on
+    /v1/chat/completions. The suite never starts or stops the Compose
+    stack; deployment and teardown remain explicit operator steps. Fidelity
+    tests (the original 57 assertions plus six new unified-control-plane
+    regressions) live under test/ext_components/ext_knowledge and run from
+    a per-session temporary copy, never touching the source tree or a
+    deployed instance. The publisher whitelist gains the exact ext evidence
+    basenames (wire/control/attach/release) with redaction and scoping
+    regressions.
+  affected_features:
+    existing: [F-107, F-111, F-041, F-044, V5-PERF-09, V5-REL-02]
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing: []
+    added: []
+    modified: [CTR-046, CTR-047, CTR-016, CTR-017, PERF-09, AGT-001, AGT-002, REL-02]
+    retired: []
+  notes: >-
+    Baseline 39ed74b5215b78d45c8449913dfcf427269dc223. Offline evidence:
+    mock-services dispatcher tests 26/26 OK (Windows Python), ext attach
+    fake tests 24/24 OK, publisher tests 23/23 OK, mock import smoke OK,
+    fidelity collect-only 63 items (57 original + 6 new). Authorized run
+    evidence: fidelity executed 63/63 PASS (no skips), and the eight
+    consumers plus the repaired daily cases ran green against the official
+    dockerized test deployment (local-latest images built from this
+    baseline, deploy.sh with a one-off root dir). The compose pair publishes
+    30090 on all interfaces because a host-mode product reaches it through
+    the host gateway and the product rewrites localhost model base URLs to
+    host.docker.internal; a containerized product uses product_url
+    http://ext-knowledge:30090 through the product network overlay. AGT-002
+    needed a wider wait on the forced-failure regenerate call: the current
+    adapter spends its full five-attempt retry budget against the controlled
+    503s, which exceeds the default model timeout. A full d4 typecheck
+    still needs the d4 node_modules install outside the batch.

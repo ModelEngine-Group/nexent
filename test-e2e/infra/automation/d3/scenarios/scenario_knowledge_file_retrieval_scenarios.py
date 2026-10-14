@@ -20,7 +20,7 @@ from d3.assets import (
     get_test_asset,
 )
 from shared.cases import case_params
-from shared.config import controlled_asset_url
+from shared.ext_knowledge import product_url as ext_product_url
 from shared.http import MODEL_TIMEOUT, assert_no_server_error, assert_status, client
 from shared.sse import assert_terminal_event, read_sse
 
@@ -255,20 +255,28 @@ async def _file_preview(identity, valid: bool) -> None:
 
 
 async def _datamate_download_contract(identity) -> None:
-    base_url = controlled_asset_url(str(get_test_asset("external_knowledge", "local_protocol_path")))
+    # The product's download proxy fetches the upstream URL, so the mock
+    # address embedded in the request must be product-reachable; the seeded
+    # contract serves f-001 (运行手册.pdf) from datamate-kb-001 at its real
+    # root path.
+    base_url = ext_product_url()
     async with client("config", token=identity.access_token) as api:
         by_url = await api.get(
             "/file/datamate/download",
-            params={"url": f"{base_url}/api/data-management/datasets/ds-1/files/file-1/download", "filename": "asset.txt"},
+            params={
+                "url": f"{base_url}/api/data-management/datasets/datamate-kb-001/files/f-001/download",
+                "filename": "asset.txt",
+            },
         )
         by_parts = await api.get(
             "/file/datamate/download",
-            params={"base_url": base_url, "dataset_id": "ds-1", "file_id": "file-1"},
+            params={"base_url": base_url, "dataset_id": "datamate-kb-001", "file_id": "f-001"},
         )
         malformed = await api.get("/file/datamate/download", params={"url": "ftp://invalid/path"})
     assert_status(by_url, 200)
     assert_status(by_parts, 200)
     assert by_url.content == by_parts.content
+    assert b"Mock DataMate content" in by_url.content
     assert_status(malformed, 400)
 
 
@@ -382,21 +390,50 @@ async def _conversation_scope(identity, valid: bool) -> None:
 
 
 async def _external_adapter_contract(identity) -> None:
-    base = controlled_asset_url(str(get_test_asset("external_knowledge", "local_protocol_path"))).rstrip("/")
-    key = str(get_test_asset("external_knowledge", "local_api_key"))
+    # All six adapters point at the ext-knowledge mock's PRODUCT-side root
+    # (the product backend performs the outbound calls) with the seeded
+    # credentials. Every adapter must succeed against the known seed
+    # contract — a 400/401/404 means a malformed request or a wrong path,
+    # never an accepted state.
+    base = ext_product_url()
     async with client("config", token=identity.access_token, timeout=MODEL_TIMEOUT) as api:
-        responses = [
-            await api.get("/dify/datasets", params={"dify_api_base": f"{base}/dify", "api_key": key}),
-            await api.get("/ragflow/datasets", params={"ragflow_api_base": f"{base}/ragflow", "api_key": key}),
-            await api.post("/ind-aidp/knowledge-bases/list", json={"server_url": f"{base}/aidp", "api_key": key, "tenant_id": "test"}),
-            await api.get("/idata/knowledge-space", params={"idata_api_base": f"{base}/idata", "api_key": key, "user_id": "test"}),
-            await api.post("/haotian/test-connection", json={"list_url": f"{base}/haotian/knowledge-sets", "authorization": f"Bearer {key}"}),
-            await api.post("/datamate/test_connection", json={"datamate_url": f"{base}/datamate"}),
-        ]
-    for response in responses:
+        responses = {
+            "dify": await api.get("/dify/datasets", params={"dify_api_base": base, "api_key": "mock-dify-key"}),
+            "ragflow": await api.get("/ragflow/datasets", params={"ragflow_api_base": base, "api_key": "mock-ragflow-key"}),
+            "aidp": await api.post(
+                "/ind-aidp/knowledge-bases/list",
+                json={"server_url": base, "api_key": "mock-aidp-key", "tenant_id": "aidp"},
+            ),
+            "idata": await api.get(
+                "/idata/knowledge-space",
+                params={"idata_api_base": base, "api_key": "mock-idata-key", "user_id": "user-001"},
+            ),
+            "haotian": await api.post(
+                "/haotian/test-connection",
+                json={"list_url": f"{base}/haotian/api/knowledge-sets", "authorization": "Bearer mock-haotian-key"},
+            ),
+            "datamate": await api.post("/datamate/test_connection", json={"datamate_url": base}),
+        }
+    for name, response in responses.items():
         assert_no_server_error(response)
-        assert_status(response, (200, 400, 401, 403, 404))
+        assert_status(response, 200)
         assert "traceback" not in response.text.lower()
+
+    dify = responses["dify"].json()
+    assert dify["count"] == 6
+    assert "dify-ds-handbook" in dify["indices"]
+
+    ragflow_datasets = {item["id"]: item for item in responses["ragflow"].json()["data"]}
+    assert "ragflow-ds-main" in ragflow_datasets
+    assert ragflow_datasets["ragflow-ds-main"]["doc_count"] == 25
+
+    aidp_ids = {kb["kds_id"] for kb in responses["aidp"].json()["value"]}
+    assert "aidp-kb-product" in aidp_ids
+
+    assert {space["id"] for space in responses["idata"].json()} == {"space-alpha", "space-beta"}
+
+    assert responses["haotian"].json()["success"] is True
+    assert responses["datamate"].json()["success"] is True
 
 
 @pytest.mark.asyncio

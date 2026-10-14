@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 from http import HTTPStatus
+from unittest.mock import MagicMock
 
 import pytest
 from fastapi import HTTPException
+from starlette.requests import Request
 
 from apps import vectordatabase_app as vdb_app
 
@@ -58,6 +60,12 @@ async def test_document_deletion_redis_cleanup_sink(monkeypatch):
         'services.tag_management_service.TagManagementService.cleanup_document_assignments',
         lambda *args, **kwargs: None,
     )
+    # Isolate the audit trail at its actual lookup site (vectordatabase_app
+    # imports record_security_event from services.audit_service) so the
+    # direct-call test never touches a real audit sink, and so the security
+    # events themselves stay observable.
+    audit = MagicMock()
+    monkeypatch.setattr(vdb_app, 'record_security_event', audit)
 
     async def run(*, result=None, redis_result=None, redis_error=None,
                   index_name='idx-run', path_or_url='doc/run.txt', file_id=None, scope='full'):
@@ -70,6 +78,9 @@ async def test_document_deletion_redis_cleanup_sink(monkeypatch):
         monkeypatch.setattr(vdb_app, 'ElasticSearchService', service)
         monkeypatch.setattr(vdb_app, 'get_redis_service', lambda: redis_service)
         response = await vdb_app.delete_documents(
+            # The route's first parameter: a real Starlette Request carrying
+            # no credentials, consumed only by the security-event audit.
+            http_request=Request({'type': 'http', 'headers': []}),
             index_name=index_name,
             path_or_url=path_or_url,
             file_id=file_id,
@@ -94,6 +105,11 @@ async def test_document_deletion_redis_cleanup_sink(monkeypatch):
     assert redis_service.calls == 0
     assert response['redis_cleanup']['total_deleted'] == 5
     assert 'Cleaned up 5 Redis records (3 tasks, 2 cache keys).' in response['message']
+    # One security event per terminal deletion, carrying the HTTP request.
+    assert audit.call_count == 1
+    assert audit.call_args.kwargs['request'] is not None
+    assert audit.call_args.kwargs['details']['scope'] == 'full'
+    audit.reset_mock()
 
     response, service, redis_service = await run(result={
         'status': 'pending',
@@ -106,6 +122,8 @@ async def test_document_deletion_redis_cleanup_sink(monkeypatch):
     assert response['deletion_pending'] is True
     assert 'redis_cleanup' not in response
     assert 'Cleaned up' not in response.get('message', '')
+    assert audit.call_count == 1
+    audit.reset_mock()
 
     response, service, redis_service = await run(
         result={'status': 'success', 'message': 'Documents deleted successfully'},
@@ -120,6 +138,7 @@ async def test_document_deletion_redis_cleanup_sink(monkeypatch):
     assert redis_service.calls == 1
     assert response['redis_cleanup']['total_deleted'] == 4
     assert 'Cleaned up 4 Redis records (2 tasks, 2 cache keys).' in response['message']
+    audit.reset_mock()
 
     response, service, redis_service = await run(
         result={'status': 'success', 'message': 'Documents deleted successfully'},
@@ -129,6 +148,7 @@ async def test_document_deletion_redis_cleanup_sink(monkeypatch):
     assert redis_service.calls == 1
     assert response['redis_cleanup_error'] == 'redis unavailable'
     assert 'Redis cleanup encountered an error: redis unavailable' in response['message']
+    audit.reset_mock()
 
     with pytest.raises(HTTPException) as exc_info:
         await run(
@@ -136,11 +156,14 @@ async def test_document_deletion_redis_cleanup_sink(monkeypatch):
             path_or_url=None,
         )
     assert exc_info.value.status_code == HTTPStatus.BAD_REQUEST
+    # Validation failures never reach the security-event sink.
+    assert audit.call_count == 0
 
     monkeypatch.setattr(vdb_app, 'require_knowledge_base_edit_permission', _raise_permission_denied)
     with pytest.raises(HTTPException) as exc_info:
         await run(result={'status': 'success', 'message': 'Documents deleted successfully'})
     assert exc_info.value.status_code == HTTPStatus.FORBIDDEN
+    assert audit.call_count == 0
 
     monkeypatch.setattr(vdb_app, 'require_knowledge_base_edit_permission', lambda index_name, user_id, tenant_id: None)
     monkeypatch.setattr('database.knowledge_file_lifecycle_db.get_file_record', lambda **kwargs: {'file_id': 'f1'})

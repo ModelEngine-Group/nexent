@@ -11,6 +11,8 @@ from urllib.request import build_opener, ProxyHandler
 
 import yaml
 
+from test_asset_lib import repository_root
+
 
 ENV_LINE = re.compile(r"^(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)=(.*)$")
 SERVICES = ("config", "runtime", "northbound", "data_process")
@@ -105,6 +107,18 @@ def static_config_problems(home: Path, records: list[dict]) -> list[str]:
             for name in ("NEXENT_TEST_ASSETS_CONTAINER_HOST", "NEXENT_TEST_MCP_CONTAINER_HOST"):
                 if not daily.get(name):
                     problems.append(f"daily.env {name} is required by selected anchored cases")
+    # ext-knowledge attach: validate the machine-local configuration when it
+    # exists (missing config is reported at attach time, only by cases that
+    # actually declare an ext-served logical service).
+    from ext_attach import config_problems
+    problems.extend(config_problems(home, repository_root()))
+    # Profile-selected cases demand their selection config up front.
+    for record in records:
+        selection = (record.get("execution") or {}).get("profile_selection")
+        if selection and not (home / "config" / f"{selection}.yaml").is_file():
+            problems.append(
+                f"config/{selection}.yaml is required by {record['case_id']} profile selection"
+            )
     return sorted(set(problems))
 
 

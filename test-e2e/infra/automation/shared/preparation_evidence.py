@@ -40,6 +40,9 @@ def record_failure(exc):
     root = runtime_dir()
     receipt = failure_receipt(exc)
     if root:
+        # The runtime directory may not exist yet when a prerequisite fails
+        # before any preparation step ran (e.g. the ext attach gate).
+        root.mkdir(parents=True, exist_ok=True)
         (root / 'preparation-failure.json').write_text(json.dumps(receipt, indent=2) + '\n', encoding='utf-8')
     return receipt
 

@@ -56,14 +56,28 @@ journey("PW-FILE-01", async (context) => {
       async () => "assistant answer contains NEXENT_FILE_TEST_92831 from the PDF payload",
       async () => { await page.getByRole("button", { name: "预览 sample.pdf", exact: true }).last().click(); await expect(page.getByRole("dialog").or(page.locator("embed,iframe")).first()).toBeVisible(); await page.keyboard.press("Escape"); return "opened the message attachment preview"; },
       async () => { const event = page.waitForEvent("download"); await page.getByRole("button", { name: /下载/ }).last().click(); const download = await event; downloadPath = await download.path() || ""; expect(downloadPath).not.toBe(""); expect(statSync(downloadPath).size).toBeGreaterThan(0); return "captured a non-empty browser download"; },
-      async () => { threadTitle = await chat.currentThreadTitle(); await page.reload({ waitUntil: "domcontentloaded" }); await chat.openThread(threadTitle, "first"); await expect(page.getByRole("button", { name: "预览 sample.pdf", exact: true }).first()).toBeVisible(); return "refresh restored the attachment card in the newest matching conversation"; },
+      async () => {
+        threadTitle = await chat.persistedThreadTitle(conversationId);
+        await page.reload({ waitUntil: "domcontentloaded" });
+        // The reload lands on the agent picker. The sidebar agent selector
+        // resumes the agent's most recent conversation (its menu drives
+        // resumeLatestAgentConversation), which is the run-owned one —
+        // selecting a landing card instead would start a fresh conversation.
+        const selector = page
+          .locator("button:has(svg.lucide-chevron-down)")
+          .filter({ hasText: agent })
+          .first();
+        await expect(selector).toBeVisible({ timeout: 60000 });
+        await selector.click();
+        await page.getByRole("menuitem", { name: agent, exact: true }).click();
+        await expect(page.getByRole("button", { name: "预览 sample.pdf", exact: true }).first()).toBeVisible({ timeout: 60000 });
+        return "refresh restored the attachment card in the run-owned conversation";
+      },
       async () => { const response = await chat.sendAndWait("再次回复附件中的固定标记。"); await expect(response).toContainText("NEXENT_FILE_TEST_92831"); return "follow-up reused persisted attachment context"; },
       async () => {
         // Picking a file does not parse it. Exercise the documented 10 MiB
         // Composer limit with a deterministic boundary input, without storage.
-        const chooser = page.waitForEvent("filechooser");
-        await page.getByRole("button", { name: "添加附件", exact: true }).click();
-        await (await chooser).setFiles({ name: "oversized.pdf", mimeType: "application/pdf", buffer: Buffer.alloc(10 * 1024 * 1024 + 1) });
+        await chat.uploadAttachment({ name: "oversized.pdf", mimeType: "application/pdf", buffer: Buffer.alloc(10 * 1024 * 1024 + 1) });
         await expect(page.getByText(/oversized\.pdf.*超过大小限制/).first()).toBeVisible();
         await expect(page.getByRole("button", { name: "移除 oversized.pdf", exact: true })).toHaveCount(0);
         await expect(chat.userMessages().filter({ hasText: "oversized.pdf" })).toHaveCount(0);

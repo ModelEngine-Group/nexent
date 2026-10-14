@@ -1,0 +1,29 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "AIDP journey profile selection",
+  "description": "Machine-local configuration selecting the mock or real_smoke profile for PW-KB-AIDP-01. The suite worker resolves the selected profile before any preparation, records it into the case evidence and derives the effective required mock services from the case contract.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "selected_profile"],
+  "properties": {
+    "schema_version": { "const": 1 },
+    "selected_profile": {
+      "enum": ["mock", "real_smoke"],
+      "description": "mock drives the real product against the controlled AIDP mock (ext-knowledge instance); real_smoke drives it against an explicitly configured real AIDP deployment."
+    },
+    "real_smoke": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kb_id", "kb_name", "query", "expected_text", "expected_source"],
+      "description": "Oracle definition for the real_smoke profile; every field is required when that profile is selected. No developer-specific IDs are hardcoded in the repository.",
+      "properties": {
+        "kb_id": { "type": "string", "minLength": 1, "description": "kds_id of the real test knowledge base" },
+        "kb_name": { "type": "string", "minLength": 1, "description": "Display name of the real test knowledge base" },
+        "doc_name": { "type": "string", "minLength": 1, "description": "Optional document name verified in the file-management view" },
+        "query": { "type": "string", "minLength": 1, "description": "Fixed question answered by the expected text" },
+        "expected_text": { "type": "string", "minLength": 1, "description": "Stable text fragment the real retrieval must return" },
+        "expected_source": { "type": "string", "minLength": 1, "description": "Source document title expected in the citation" }
+      }
+    }
+  }
+}

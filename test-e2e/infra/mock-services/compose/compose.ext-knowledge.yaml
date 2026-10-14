@@ -1,0 +1,31 @@
+# ext-knowledge mock, single process hosting every external-knowledge route
+# set at its real (root) path shape. See ext-knowledge-mock/README.md.
+#
+# The build context is a packed, batch-owned directory produced by
+# test-e2e/infra/mock-services/ext-knowledge-mock/build_context.py; the
+# repository root cannot serve as the context (its .dockerignore excludes
+# test/, and the embedded AIDP mock must come from the current checkout).
+# The deployment step exports EXT_KNOWLEDGE_BUILD_CONTEXT plus the identity
+# metadata before running deploy.py up.
+version: "3.7"
+
+services:
+  ext-knowledge:
+    build:
+      context: ${EXT_KNOWLEDGE_BUILD_CONTEXT:?Set EXT_KNOWLEDGE_BUILD_CONTEXT to the packed context from build_context.py}
+      dockerfile: Dockerfile
+    environment:
+      EXT_KNOWLEDGE_AIDP_MOCK_PATH: "/app/aidp_mock_servers/aidp_mgmt_mock_server.py"
+      # Identity metadata surfaced by GET /_mock/identity; the runner attach
+      # step refuses foreign instances whose values differ from the local
+      # test-home configuration.
+      EXT_KNOWLEDGE_MOCK_RUN_ID: "${EXT_KNOWLEDGE_MOCK_RUN_ID:-}"
+      EXT_KNOWLEDGE_SOURCE_REVISION: "${EXT_KNOWLEDGE_SOURCE_REVISION:-}"
+      EXT_KNOWLEDGE_BUILD_MANIFEST_SHA256: "${EXT_KNOWLEDGE_BUILD_MANIFEST_SHA256:-}"
+    ports:
+      # Published on all interfaces: host-mode product deployments (backend
+      # outside the compose network) reach the mock through the host
+      # gateway address, and the product rewrites localhost model base URLs
+      # to host.docker.internal — loopback-only publishing would cut both
+      # paths off. Runner-side access stays 127.0.0.1.
+      - "30090:30090"
