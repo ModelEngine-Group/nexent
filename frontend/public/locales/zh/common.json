@@ -6006,5 +6006,14 @@
   "officialAgent.wizard.model": "选择模型",
   "officialAgent.wizard.next": "下一步",
   "officialAgent.wizard.rename": "重命名",
-  "officialAgent.wizard.select": "选择智能体"
+  "officialAgent.wizard.select": "选择智能体",
+  "workbench.creation.agentType": "智能体应用",
+  "workbench.creation.agentDraftReady": "草稿已生成",
+  "workbench.creation.agentDraftSaved": "草稿已保存",
+  "workbench.creation.openAgent": "进入智能体开发",
+  "workbench.creation.invalidSkill": "生成的 SKILL.md 缺少有效的 name 或 description，暂不能保存；请继续让智能体修正。",
+  "workbench.creation.skillCreated": "Skill 已保存",
+  "workbench.creation.skillReady": "Skill 草稿已生成",
+  "workbench.creation.openSkills": "查看我的 Skills",
+  "workbench.creation.saveSkill": "保存 Skill"
 }

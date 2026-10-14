@@ -6006,5 +6006,14 @@
   "officialAgent.wizard.model": "Select Models",
   "officialAgent.wizard.next": "Next",
   "officialAgent.wizard.rename": "Rename",
-  "officialAgent.wizard.select": "Select Agents"
+  "officialAgent.wizard.select": "Select Agents",
+  "workbench.creation.agentType": "Agent App",
+  "workbench.creation.agentDraftReady": "Draft Generated",
+  "workbench.creation.agentDraftSaved": "Draft Saved",
+  "workbench.creation.openAgent": "Go to Agent Development",
+  "workbench.creation.invalidSkill": "The generated SKILL.md is missing a valid name or description and cannot be saved yet. Please ask the agent to fix it.",
+  "workbench.creation.skillCreated": "Skill Saved",
+  "workbench.creation.skillReady": "Skill Draft Generated",
+  "workbench.creation.openSkills": "View My Skills",
+  "workbench.creation.saveSkill": "Save Skill"
 }
