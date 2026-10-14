@@ -235,7 +235,7 @@ const PlanView: FC = () => {
         <CollapsibleTrigger asChild>
           <button
             type="button"
-            className="flex w-full cursor-pointer items-center gap-2 px-4 py-3 text-left text-[14px] font-medium text-foreground transition-colors hover:bg-muted/40 data-[state=closed]:[&_svg.plan-chevron]:rotate-180"
+            className="flex w-full cursor-pointer items-center gap-2 px-4 py-3 text-left text-xs font-medium text-foreground transition-colors hover:bg-muted/40 data-[state=closed]:[&_svg.plan-chevron]:rotate-180"
           >
             <ListChecks className="size-4 shrink-0 text-primary" aria-hidden />
             <span className="min-w-0 flex-1 truncate">{plan.title}</span>
@@ -253,7 +253,7 @@ const PlanView: FC = () => {
                 <li
                   key={step.id}
                   className={cn(
-                    "flex min-w-0 items-center gap-3 text-[14px] leading-5 text-muted-foreground",
+                    "flex min-w-0 items-center gap-3 text-xs leading-5 text-muted-foreground",
                     completed && "text-muted-foreground/60"
                   )}
                 >
@@ -321,7 +321,7 @@ const WorkbenchComposerTagPrefix: FC = () => {
 
   if (!tag || !text?.trim()) return null;
   return (
-    <span className="shrink-0 text-[14px] font-normal leading-5 text-[#197BD5]">
+    <span className="shrink-0 text-xs font-normal leading-5 text-[#197BD5]">
       {tag}
     </span>
   );
@@ -356,7 +356,7 @@ const ComposerPlusItem: FC<{
 }> = ({ icon, label, active, onSelect }) => (
   <button
     type="button"
-    className="flex h-10 w-full items-center gap-2 rounded-lg px-2 py-2 text-[14px] font-normal leading-6 text-foreground hover:bg-accent"
+    className="flex h-10 w-full items-center gap-2 rounded-lg px-2 py-2 text-base font-normal leading-6 text-foreground hover:bg-accent"
     onClick={onSelect}
   >
     {icon}
@@ -760,7 +760,7 @@ export const Composer: FC<ComposerProps> = ({
         )}
       >
         {disabled && disabledReason ? (
-          <p className="px-3 pb-1 text-[14px] text-amber-700" role="status">
+          <p className="px-3 pb-1 text-xs text-amber-700" role="status">
             {disabledReason}
           </p>
         ) : null}
@@ -773,7 +773,7 @@ export const Composer: FC<ComposerProps> = ({
         )}
         {configurationLayout && (
           <div className="flex px-4 pt-4">
-            <span className="inline-flex items-center gap-1 rounded-full bg-[#669fff]/[0.15] px-2 text-[14px] leading-[22px] text-[#477bd5]">
+            <span className="inline-flex items-center gap-1 rounded-full bg-[#669fff]/[0.15] px-2 text-xs leading-[22px] text-[#477bd5]">
               <Sparkles size={14} />
               {t("nl2agent.configuration.badge")}
             </span>
@@ -785,7 +785,7 @@ export const Composer: FC<ComposerProps> = ({
               type="button"
               onClick={workbenchPresentation?.onExitCreation}
               disabled={isRunning}
-              className="inline-flex items-center gap-2 rounded-full bg-primary/10 px-3 py-1 text-[14px] text-primary"
+              className="inline-flex items-center gap-2 rounded-full bg-primary/10 px-3 py-1 text-xs text-primary"
               aria-label="退出创建模式"
             >
               {creationMode === "skill_create" ? "Skill 创建" : "Agent创建"}
@@ -834,7 +834,7 @@ export const Composer: FC<ComposerProps> = ({
                   {selectedSkillNames.map((name) => (
                     <span
                       key={`skill-${name}`}
-                      className="inline-flex h-7 max-w-60 items-center gap-1 rounded-md border border-[#e5e5e5] bg-[#f7f7f7] px-2 text-[14px] text-[#191919]"
+                      className="inline-flex h-7 max-w-60 items-center gap-1 rounded-md border border-[#e5e5e5] bg-[#f7f7f7] px-2 text-xs text-[#191919]"
                     >
                       <Layers
                         className="size-3.5 shrink-0 text-[#666]"
@@ -860,7 +860,7 @@ export const Composer: FC<ComposerProps> = ({
                   {selectedKnowledgeBaseChips.map(({ id, name }) => (
                     <span
                       key={id}
-                      className="inline-flex h-7 max-w-60 items-center gap-1 rounded-md border border-[#e5e5e5] bg-[#f7f7f7] px-2 text-[14px] text-[#191919]"
+                      className="inline-flex h-7 max-w-60 items-center gap-1 rounded-md border border-[#e5e5e5] bg-[#f7f7f7] px-2 text-xs text-[#191919]"
                     >
                       <Database
                         className="size-3.5 shrink-0 text-[#666]"
@@ -894,9 +894,9 @@ export const Composer: FC<ComposerProps> = ({
                         : t("chat.composer.placeholder")
                 }
                 className={cn(
-                  "relative mb-1 max-h-32 min-h-14 w-full bg-transparent px-3 py-1 text-[14px] outline-none [&_.aui-lexical-input]:!text-[14px] [&_.aui-lexical-placeholder]:!text-[14px] [&_.aui-lexical-input]:min-h-12 [&_.aui-lexical-input]:outline-none [&_.aui-lexical-placeholder]:pointer-events-none [&_.aui-lexical-placeholder]:absolute [&_.aui-lexical-placeholder]:top-1 [&_.aui-lexical-placeholder]:text-muted-foreground",
+                  "relative mb-1 max-h-32 min-h-14 w-full bg-transparent px-3 py-1 text-sm outline-none [&_.aui-lexical-input]:min-h-12 [&_.aui-lexical-input]:outline-none [&_.aui-lexical-placeholder]:pointer-events-none [&_.aui-lexical-placeholder]:absolute [&_.aui-lexical-placeholder]:top-1 [&_.aui-lexical-placeholder]:text-muted-foreground",
                   newChatDesign &&
-                    "!mb-0 !min-h-[88px] !px-0 !py-0 !leading-[22px] [&_.aui-lexical-input]:!min-h-[88px] [&_.aui-lexical-placeholder]:!top-0 [&_.aui-lexical-placeholder]:!text-[#191919]/40"
+                    "!text-[14px] [&_.aui-lexical-input]:!text-[14px] [&_.aui-lexical-placeholder]:!text-[14px] !mb-0 !min-h-[88px] !px-0 !py-0 !leading-[22px] [&_.aui-lexical-input]:!min-h-[88px] [&_.aui-lexical-placeholder]:!top-0 [&_.aui-lexical-placeholder]:!text-[#191919]/40"
                 )}
                 submitMode="enter"
                 autoFocus
@@ -925,18 +925,18 @@ export const Composer: FC<ComposerProps> = ({
                           : t("chat.composer.placeholder")
                   }
                   className={cn(
-                    "max-h-48 min-h-14 w-full resize-none bg-transparent px-0 py-1 text-[14px] outline-none placeholder:text-muted-foreground",
+                    "max-h-48 min-h-14 w-full resize-none bg-transparent px-0 py-1 text-sm outline-none placeholder:text-muted-foreground",
                     workbenchPresentation &&
                       !newChatDesign &&
                       "min-h-[92px] px-0 py-0",
                     newChatDesign &&
-                      "block !min-h-[88px] !px-0 !py-0 leading-[22px] text-[#191919] placeholder:text-[#191919]/40",
+                      "!text-[14px] block !min-h-[88px] !px-0 !py-0 leading-[22px] text-[#191919] placeholder:text-[#191919]/40",
                     workbenchPresentation &&
                       !newChatDesign &&
                       "w-auto min-w-0 flex-1",
                     configurationLayout && "!min-h-[56px] !px-4",
                     debugLayout &&
-                      "!mb-0 !min-h-[88px] !px-0 !py-0 !text-[14px] !font-normal !leading-6 !text-[#191919] placeholder:!text-[#191919]/40"
+                      "!mb-0 !min-h-[88px] !px-0 !py-0 !text-base !font-normal !leading-6 !text-[#191919] placeholder:!text-[#191919]/40"
                   )}
                   rows={1}
                   submitMode="enter"
@@ -1082,11 +1082,11 @@ export const Composer: FC<ComposerProps> = ({
                         />
                         <div className="mt-2 max-h-64 overflow-y-auto">
                           {skillsLoading ? (
-                            <p className="px-2 py-3 text-[14px] text-[#808080]">
+                            <p className="px-2 py-3 text-[12px] text-[#808080]">
                               {t("chat.composer.loading")}
                             </p>
                           ) : filteredSkills.length === 0 ? (
-                            <p className="px-2 py-3 text-[14px] text-[#808080]">
+                            <p className="px-2 py-3 text-[12px] text-[#808080]">
                               {t("chat.composer.emptySkills")}
                             </p>
                           ) : (
@@ -1128,7 +1128,7 @@ export const Composer: FC<ComposerProps> = ({
                                       {skill.name}
                                     </span>
                                     {skill.description ? (
-                                      <span className="block truncate text-[14px] leading-[20px] text-[#808080]">
+                                      <span className="block truncate text-[12px] leading-[20px] text-[#808080]">
                                         {skill.description}
                                       </span>
                                     ) : null}
@@ -1219,11 +1219,11 @@ export const Composer: FC<ComposerProps> = ({
                         />
                         <div className="mt-2 max-h-64 overflow-y-auto">
                           {kbLoading ? (
-                            <p className="px-2 py-3 text-[14px] text-[#808080]">
+                            <p className="px-2 py-3 text-[12px] text-[#808080]">
                               {t("chat.composer.loading")}
                             </p>
                           ) : knowledgeBases.length === 0 ? (
-                            <p className="px-2 py-3 text-[14px] text-[#808080]">
+                            <p className="px-2 py-3 text-[12px] text-[#808080]">
                               {t("chat.composer.emptyKnowledge")}
                             </p>
                           ) : (
@@ -1252,7 +1252,7 @@ export const Composer: FC<ComposerProps> = ({
                                       {kb.name}
                                     </span>
                                     {kb.description ? (
-                                      <span className="text-[14px] leading-[20px] text-[#808080]">
+                                      <span className="text-[12px] leading-[20px] text-[#808080]">
                                         {kb.description}
                                       </span>
                                     ) : null}
@@ -1389,7 +1389,7 @@ export const Composer: FC<ComposerProps> = ({
                           <PopoverTrigger asChild>
                             <button
                               type="button"
-                              className="flex h-10 w-full items-center gap-2 rounded-lg px-2 py-2 text-[14px] font-normal leading-6 text-foreground hover:bg-accent"
+                              className="flex h-10 w-full items-center gap-2 rounded-lg px-2 py-2 text-base font-normal leading-6 text-foreground hover:bg-accent"
                             >
                               <SkillStackIcon className="size-4" />
                               {t("chat.composer.skills")}
@@ -1411,7 +1411,7 @@ export const Composer: FC<ComposerProps> = ({
                           <PopoverTrigger asChild>
                             <button
                               type="button"
-                              className="flex h-10 w-full items-center gap-2 rounded-lg px-2 py-2 text-[14px] font-normal leading-6 text-foreground hover:bg-accent"
+                              className="flex h-10 w-full items-center gap-2 rounded-lg px-2 py-2 text-base font-normal leading-6 text-foreground hover:bg-accent"
                             >
                               <KnowledgeBookIcon className="size-4" />
                               {t("chat.composer.knowledgeBase")}
@@ -1429,7 +1429,7 @@ export const Composer: FC<ComposerProps> = ({
                         <ComposerPrimitive.AddAttachment asChild>
                           <button
                             type="button"
-                            className="flex h-10 w-full items-center gap-2 rounded-lg px-2 py-2 text-[14px] font-normal leading-6 text-foreground hover:bg-accent"
+                            className="flex h-10 w-full items-center gap-2 rounded-lg px-2 py-2 text-base font-normal leading-6 text-foreground hover:bg-accent"
                             onClick={() => setPlusOpen(false)}
                           >
                             <Paperclip className="size-4" />
@@ -1474,9 +1474,9 @@ export const Composer: FC<ComposerProps> = ({
                           variant="ghost"
                           size="sm"
                           className={cn(
-                            "h-8 shrink-0 gap-1.5 px-2 text-[14px]",
+                            "h-8 shrink-0 gap-1.5 px-2 text-xs",
                             workbenchPresentation &&
-                              "text-[14px] leading-6 text-foreground"
+                              "text-base leading-6 text-foreground"
                           )}
                           disabled={isRunning}
                           onClick={
@@ -1521,8 +1521,8 @@ export const Composer: FC<ComposerProps> = ({
                           variant="ghost"
                           size="sm"
                           className={cn(
-                            "h-8 shrink-0 gap-1.5 px-2 text-[14px] text-foreground",
-                            workbenchPresentation && "text-[14px] leading-6"
+                            "h-8 shrink-0 gap-1.5 px-2 text-xs text-foreground",
+                            workbenchPresentation && "text-base leading-6"
                           )}
                           onClick={
                             workbenchKnowledgePopover
@@ -1578,7 +1578,7 @@ export const Composer: FC<ComposerProps> = ({
                     type="button"
                     variant="ghost"
                     size="sm"
-                    className="h-8 shrink-0 gap-1.5 px-2 text-[14px]"
+                    className="h-8 shrink-0 gap-1.5 px-2 text-xs"
                     disabled={isRunning}
                     onClick={workbenchResources.onSelectAgent}
                   >
@@ -1621,12 +1621,12 @@ export const Composer: FC<ComposerProps> = ({
                     variant="ghost"
                     size="sm"
                     className={cn(
-                      "min-w-0 text-[14px] text-foreground [&_[data-slot=model-selector-value]]:text-foreground",
+                      "min-w-0 text-xs text-foreground [&_[data-slot=model-selector-value]]:text-foreground",
                       !debugLayout &&
                         workbenchPresentation &&
-                        "text-[14px] leading-6 [&_[data-slot=model-selector-value]]:text-[14px] [&_[data-slot=model-selector-value]]:leading-6",
+                        "text-base leading-6 [&_[data-slot=model-selector-value]]:text-base [&_[data-slot=model-selector-value]]:leading-6",
                       debugLayout &&
-                        "min-w-0 max-w-[180px] text-[14px] text-[#191919] [&_[data-slot=model-selector-value]]:text-[14px] [&_[data-slot=model-selector-value]]:text-[#191919]"
+                        "min-w-0 max-w-[180px] text-base text-[#191919] [&_[data-slot=model-selector-value]]:text-base [&_[data-slot=model-selector-value]]:text-[#191919]"
                     )}
                   />
                 )}
@@ -1777,7 +1777,7 @@ export const Composer: FC<ComposerProps> = ({
         </div>
       )}
       {sendError ? (
-        <p role="alert" className="mt-2 px-3 text-[14px] text-destructive">
+        <p role="alert" className="mt-2 px-3 text-xs text-destructive">
           {sendError}
         </p>
       ) : null}
@@ -1805,7 +1805,7 @@ const WorkbenchPlanningMenu: FC<{
           variant="ghost"
           size="sm"
           disabled={disabled}
-          className="h-8 shrink-0 gap-1.5 px-2 text-[14px] leading-6 text-foreground"
+          className="h-8 shrink-0 gap-1.5 px-2 text-base leading-6 text-foreground"
         >
           {chatMode === "planning" ? (
             <MessageCircleMore className="size-5" />
@@ -1823,7 +1823,7 @@ const WorkbenchPlanningMenu: FC<{
           <button
             key={option.value}
             type="button"
-            className="flex h-10 w-full items-center justify-between gap-2 rounded-lg px-2 py-2 text-[14px] font-normal leading-6 hover:bg-accent"
+            className="flex h-10 w-full items-center justify-between gap-2 rounded-lg px-2 py-2 text-base font-normal leading-6 hover:bg-accent"
             onClick={() => {
               onChatModeChange(option.value);
               setOpen(false);
