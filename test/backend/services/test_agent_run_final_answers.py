@@ -1,3 +1,5 @@
+# Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 """Completion-event unit regressions at the stream-to-persistence boundary."""
 
 import asyncio

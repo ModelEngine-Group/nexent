@@ -1,3 +1,5 @@
+# Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 """
 AIDP Search Tool
 Performs multimodal knowledge base retrieval via the AIDP FusionSearch API.

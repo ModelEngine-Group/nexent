@@ -1,3 +1,5 @@
+// Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 import { API_BASE_URL, API_ENDPOINTS } from "./api";
 import { StorageUploadResult } from "../types/chat";
 import { arrayBufferToBase64 } from "@/lib/agentImportUtils";

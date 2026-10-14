@@ -1,3 +1,5 @@
+// Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 import { beforeEach, expect, it, vi } from "vitest";
 import type { ChatModelRunOptions } from "@assistant-ui/react";
 import {
