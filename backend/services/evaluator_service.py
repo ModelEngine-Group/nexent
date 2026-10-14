@@ -19,7 +19,7 @@ from database.evaluator_db import (
     update_evaluator,
 )
 from utils.agent_profile_utils import fetch_agent_profile, format_agent_profile_context
-from utils.llm_utils import call_llm_for_system_prompt
+from management.services.model.invocation import call_llm_for_system_prompt
 from nexent.core.agents.prompt.evaluation import compose_evaluator_generation
 
 

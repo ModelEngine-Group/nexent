@@ -116,7 +116,8 @@ from utils.agent_stream_utils import (
     transform_skill_files_to_standard_format as _transform_skill_files_to_standard_format,
 )
 from utils.context_utils import build_authorized_context_input
-from utils.config_utils import get_model_name_from_config, tenant_config_manager
+from utils.config_utils import tenant_config_manager
+from management.services.model.names import get_model_name_from_config
 
 # Monitoring utilities: bind Agent metadata once at the request boundary.
 from nexent.monitor import agent_monitoring_context

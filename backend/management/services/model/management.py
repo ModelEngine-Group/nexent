@@ -1,78 +1,73 @@
 import logging
-import threading
-from typing import List, Dict, Any, Optional, Tuple
-
-from fastapi import HTTPException
+from typing import Any, Dict, List, Optional
 
 from consts.const import (
-    CAPACITY_SUGGESTION_ENABLED,
-    CAPACITY_VISIBILITY_ENABLED,
+    DOCKER_INTERNAL_HOST,
     LOCALHOST_IP,
     LOCALHOST_NAME,
-    DOCKER_INTERNAL_HOST,
     MODEL_CONFIG_MAPPING,
 )
+from consts.exceptions import ModelProviderError
 from consts.model import ModelConnectStatusEnum, _infer_model_type_from_name
 from consts.provider import (
-    ProviderEnum,
-    SILICON_BASE_URL,
     DASHSCOPE_BASE_URL,
     DASHSCOPE_REALTIME_BASE_URL,
-    TOKENPONY_BASE_URL,
     MODEL_ENGINE_URL_MARKER,
+    SILICON_BASE_URL,
+    TOKENPONY_BASE_URL,
+    ProviderEnum,
 )
-
 from database.model_management_db import (
     create_model_record,
     delete_model_record,
     get_model_by_model_id,
     get_model_by_name_factory,
-    get_models_by_display_name,
     get_model_records,
+    get_models_by_display_name,
     get_models_by_tenant_factory_type,
-    update_model_record
+    update_model_record,
 )
 from database.tenant_config_db import (
     get_single_config_info,
     insert_config,
     update_config_by_tenant_config_id,
 )
-from services.model_provider_service import (
-    prepare_model_dict,
-    merge_existing_model_attributes,
-    get_provider_models,
-)
-from services.model_health_service import (
-    embedding_dimension_check,
-    _embedding_url_candidates,
-    _infer_model_factory,
-)
-from services.model_capacity_suggestion_service import CapacitySuggestionMatchKind, suggest_capacity
-from utils.model_name_utils import (
+from management.services.model.names import (
     add_repo_to_name,
-    split_repo_name,
     sort_models_by_id,
+    split_repo_name,
 )
-from utils.reasoning import normalize_reasoning_params
-# Model Catalog - 预置模型目录，自动填充默认配置
+from management.services.model.probe import (
+    _infer_model_factory,
+    resolve_embedding_base_url,
+)
+from management.services.model.provider import (
+    get_provider_models,
+    merge_existing_model_attributes,
+    prepare_model_dict,
+)
+from management.services.model.reasoning import (
+    _apply_model_reasoning_default,
+    _enrich_discovered_model_reasoning_capability,
+    _enrich_model_reasoning_capability,
+)
+
+# Apply defaults from the preset model catalog.
 try:
     from configs.model_catalog_loader import (
         apply_catalog_defaults,
-        resolve_reasoning_capability,
     )
 except Exception as _exc:  # noqa: BLE001
     logger_catalog_import = logging.getLogger("model_catalog")
-    logger_catalog_import.warning("model_catalog_loader import failed: %s. Catalog auto-fill disabled.", _exc)
+    logger_catalog_import.warning(
+        "model_catalog_loader import failed: %s. Catalog auto-fill disabled.", _exc
+    )
 
-    def apply_catalog_defaults(_model_data: Dict[str, Any], _provider_hint: Optional[str]) -> bool:  # type: ignore[no-redef]
+    def apply_catalog_defaults(
+        _model_data: Dict[str, Any], _provider_hint: Optional[str]
+    ) -> bool:  # type: ignore[no-redef]
         return False
 
-    def resolve_reasoning_capability(  # type: ignore[no-redef]
-        model_name: str,
-        base_url: Optional[str] = None,
-        provider_hint: Optional[str] = None,
-    ) -> Optional[Dict[str, Any]]:
-        return None
 
 logger = logging.getLogger("model_management_service")
 
@@ -82,206 +77,9 @@ COMMON_REASONING_LEVELS = ("low", "medium", "high")
 COMMON_REASONING_DEFAULT = "auto"
 
 
-def _enrich_model_reasoning_capability(model: Dict[str, Any]) -> None:
-    """Attach catalog-declared reasoning capability to an API model row."""
-    if model.get("model_type") not in {"llm", "chat"}:
-        return
-    model_name = add_repo_to_name(
-        model.get("model_repo", ""), model.get("model_name", "")
-    )
-    capability = resolve_reasoning_capability(
-        model_name=model_name,
-        base_url=model.get("base_url"),
-        provider_hint=model.get("model_factory"),
-    )
-    model["extra_params"] = normalize_reasoning_params(
-        model.get("extra_params"), capability
-    ) or None
-    if capability is not None:
-        model["reasoning_capability"] = capability
-
-
-def get_model_reasoning_capability(
-    model_name: str,
-    base_url: Optional[str] = None,
-    provider_hint: Optional[str] = None,
-) -> Optional[Dict[str, Any]]:
-    """Resolve reasoning controls using the model ID and provider API URL."""
-    return resolve_reasoning_capability(model_name, base_url, provider_hint)
-
-
-def _enrich_discovered_model_reasoning_capability(
-    model: Dict[str, Any],
-    base_url: Optional[str],
-    provider_hint: Optional[str],
-) -> None:
-    """Attach build-time models.dev capability to a provider discovery row."""
-    # OpenAI-compatible discovery rows may omit model_type when the request
-    # already filters to LLMs; treat that legacy shape as an LLM row.
-    if model.get("model_type") not in {None, "llm", "chat"}:
-        return
-    model_name = str(model.get("id") or model.get("model_name") or "").strip()
-    if not model_name:
-        return
-    capability = resolve_reasoning_capability(model_name, base_url, provider_hint)
-    if capability is not None:
-        model["reasoning_capability"] = capability
-
-
-def _apply_model_reasoning_default(
-    model_data: Dict[str, Any], provider_hint: Optional[str]
-) -> None:
-    """Persist an enabled model's reasoning default without enabling it implicitly.
-
-    The value is kept in the existing ``extra_params`` JSONB column, so this
-    also upgrades old/custom model IDs without requiring a schema migration.
-    New models keep the switch disabled unless the caller explicitly enables
-    it.
-    """
-    if model_data.get("model_type") not in {"llm", "chat"}:
-        return
-    extra_params = dict(model_data.get("extra_params") or {})
-    enabled = extra_params.get("enable_thinking")
-    if enabled is not True:
-        if enabled is False:
-            extra_params.pop("reasoning_effort", None)
-            extra_params.pop("reasoning_budget_tokens", None)
-            model_data["extra_params"] = extra_params or None
-        return
-    model_name = add_repo_to_name(
-        model_data.get("model_repo", ""), model_data.get("model_name", "")
-    )
-    capability = resolve_reasoning_capability(
-        model_name=model_name,
-        base_url=model_data.get("base_url"),
-        provider_hint=provider_hint or model_data.get("model_factory"),
-    )
-    if isinstance(capability, dict) and capability.get("status") == "supported":
-        levels = capability.get("levels") or list(COMMON_REASONING_LEVELS)
-    else:
-        # Keep a provider-agnostic profile for unknown/custom model IDs. The
-        # provider remains the source of truth if it rejects a concrete value.
-        levels = list(COMMON_REASONING_LEVELS)
-    if extra_params.get("reasoning_effort") == "auto":
-        return
-    if extra_params.get("reasoning_effort") in levels:
-        return
-    extra_params["reasoning_effort"] = COMMON_REASONING_DEFAULT
-    model_data["extra_params"] = extra_params
-
-
-# OpenTelemetry counter for silent catalog-matcher failures during the
-# capacity-coverage scan. The matcher is called per row so we cannot raise --
-# but the silent fallback to suggestion_available=False would hide a corrupt
-# catalog entry that turns every "available" hint into "false" across a whole
-# tenant. The counter gives staging/CI a single number to watch.
-#
-# Guarded the same way as the SDK monitor module: if OpenTelemetry is not
-# installed (some deployments run without it), the counter is None and the
-# increment becomes a no-op.
-try:
-    from opentelemetry import metrics as _otel_metrics
-
-    _capacity_suggestion_meter = _otel_metrics.get_meter(__name__)
-    _capacity_suggestion_coverage_errors_total = _capacity_suggestion_meter.create_counter(
-        name="model_capacity_suggestion_coverage_errors_total",
-        description=(
-            "Count of catalog-matcher exceptions raised while computing the "
-            "per-row `suggestion_available` flag in /model/capacity-coverage. "
-            "Non-zero means catalog data or matcher logic is broken; "
-            "operators see every row as suggestion_available=False."
-        ),
-        unit="errors",
-    )
-    # W11 spec line 709: emitted when the operator clicks "Use suggestion" and
-    # saves. Combined with model_capacity_suggestion_dispatch_profile_hit_total
-    # at /agent/run, gives the "95% of accepted catalog suggestions produce
-    # the expected runtime capability_profile_version" SLO ratio.
-    _capacity_suggestion_accept_total = _capacity_suggestion_meter.create_counter(
-        name="model_capacity_suggestion_accept_total",
-        description=(
-            "Count of model save events that carried an accepted W11 "
-            "capacity suggestion, labelled by match_kind and provider. "
-            "Audit signal only -- not persisted to model_record_t."
-        ),
-        unit="accepts",
-    )
-except Exception:  # pragma: no cover - OTel is optional at runtime
-    _capacity_suggestion_coverage_errors_total = None
-    _capacity_suggestion_accept_total = None
-
-
-# Per-process dedup for the warning log emitted when the catalog-matcher
-# raises during /capacity-coverage. The OTel counter still increments per
-# failure (no monitoring impact); only the log line is deduped, so a global
-# catalog bug surfaces once per (model_id, error_type) instead of flooding
-# logs on every endpoint call. Same pattern as
-# `_warn_missing_capacity_once` in `backend/agents/create_agent_info.py`.
-_CAPACITY_SUGGESTION_ERROR_EMITTED: set = set()
-_CAPACITY_SUGGESTION_ERROR_LOCK = threading.Lock()
-
-
-def _record_capacity_coverage_error(model_id: Optional[Any], exc: Exception) -> None:
-    if _capacity_suggestion_coverage_errors_total is None:
-        return
-    try:
-        _capacity_suggestion_coverage_errors_total.add(
-            1,
-            {
-                "model_id": str(model_id) if model_id is not None else "unknown",
-                "error_type": type(exc).__name__,
-            },
-        )
-    except Exception:  # pragma: no cover - never break coverage for telemetry
-        pass
-
-
-# Wire-only fields the frontend ships when the operator clicks "Use suggestion"
-# and saves. They are audit/metrics input; runtime never reads them. The app
-# layer pops them off the request payload via `pop_capacity_accept_signal` so
-# the service/DB layer never sees them.
-_ACCEPT_SIGNAL_KEYS = (
-    "accepted_suggestion_match_kind",
-    "accepted_capability_profile_version",
-)
-
-
-def pop_capacity_accept_signal(payload: Dict[str, Any]) -> Optional[Dict[str, Any]]:
-    """Strip audit-only accept-signal fields from a save payload and return them.
-
-    Returns the popped values as {'match_kind': ..., 'capability_profile_version': ...}
-    when match_kind is present, else None. Callers forward the dict to
-    `_record_capacity_suggestion_accept` once the model_factory is known.
-    """
-    if not isinstance(payload, dict):
-        return None
-    popped = {key: payload.pop(key, None) for key in _ACCEPT_SIGNAL_KEYS}
-    match_kind = popped.get("accepted_suggestion_match_kind")
-    if not match_kind:
-        return None
-    return {
-        "match_kind": match_kind,
-        "capability_profile_version": popped.get("accepted_capability_profile_version"),
-    }
-
-
-def _record_capacity_suggestion_accept(match_kind: str, provider: Optional[str]) -> None:
-    """Emit the accept_total counter for one operator-accepted suggestion save."""
-    if _capacity_suggestion_accept_total is None:
-        return
-    try:
-        _capacity_suggestion_accept_total.add(
-            1,
-            {
-                "match_kind": match_kind,
-                "provider": (provider or "unknown").lower(),
-            },
-        )
-    except Exception:  # pragma: no cover - never break save for telemetry
-        pass
-
-
-def _has_display_name_conflict(existing_models: List[Dict[str, Any]], model_type: Optional[str]) -> bool:
+def _has_display_name_conflict(
+    existing_models: List[Dict[str, Any]], model_type: Optional[str]
+) -> bool:
     """Allow the three multimodal slots to share display names across slots."""
     if not existing_models:
         return False
@@ -319,97 +117,6 @@ def _coerce_legacy_max_tokens_alias(model_data: Dict[str, Any]) -> None:
     model_data["max_tokens"] = max_output
 
 
-def _is_bare_capacity_model(model: Dict[str, Any]) -> bool:
-    return model.get("context_window_tokens") is None or model.get("max_output_tokens") is None
-
-
-def _capacity_suggestion_available(model: Dict[str, Any]) -> bool:
-    if not CAPACITY_SUGGESTION_ENABLED:
-        return False
-
-    try:
-        model_name = add_repo_to_name(model.get("model_repo", ""), model.get("model_name", ""))
-        result = suggest_capacity(
-            model_name=model_name,
-            base_url=model.get("base_url"),
-            provider_hint=model.get("model_factory"),
-            model_type=model.get("model_type"),
-            enabled=CAPACITY_SUGGESTION_ENABLED,
-        )
-        return result.match_kind != CapacitySuggestionMatchKind.NONE
-    except Exception as exc:
-        # A catalog-matcher exception must not break /capacity-coverage --
-        # the endpoint scans every LLM/VLM row, and one bad row would make
-        # the whole tenant view explode. We fall back to False and emit a
-        # counter so a corrupt catalog is visible in metrics instead of
-        # silently turning every row into "no suggestion available".
-        dedup_key = (model.get("model_id"), type(exc).__name__)
-        should_log = False
-        with _CAPACITY_SUGGESTION_ERROR_LOCK:
-            if dedup_key not in _CAPACITY_SUGGESTION_ERROR_EMITTED:
-                _CAPACITY_SUGGESTION_ERROR_EMITTED.add(dedup_key)
-                should_log = True
-        if should_log:
-            logger.warning(
-                "Capacity coverage suggestion check failed for model_id=%s: %s "
-                "(per-process dedup; OTel counter still increments per failure)",
-                model.get("model_id"),
-                exc,
-            )
-        _record_capacity_coverage_error(model.get("model_id"), exc)
-        return False
-
-
-def get_capacity_coverage(tenant_id: str) -> Dict[str, Any]:
-    """Return bare-capacity LLM/VLM coverage for one tenant."""
-    if not CAPACITY_VISIBILITY_ENABLED:
-        return {
-            "total_llm_vlm": 0,
-            "bare_count": 0,
-            "bare_models": [],
-        }
-
-    records = get_model_records(None, tenant_id)
-    scoped_records = [
-        model for model in records
-        if model.get("model_type") in CAPACITY_COVERAGE_MODEL_TYPES
-    ]
-    bare_models = [
-        {
-            "model_id": model["model_id"],
-            "model_name": add_repo_to_name(model.get("model_repo", ""), model.get("model_name", "")),
-            "model_factory": model.get("model_factory"),
-            "model_type": model.get("model_type"),
-            "max_tokens": model.get("max_tokens"),
-            "suggestion_available": _capacity_suggestion_available(model),
-        }
-        for model in scoped_records
-        if _is_bare_capacity_model(model)
-    ]
-
-    return {
-        "total_llm_vlm": len(scoped_records),
-        "bare_count": len(bare_models),
-        "bare_models": bare_models,
-    }
-
-
-async def resolve_embedding_base_url(model_data: Dict[str, Any]) -> Tuple[Optional[str], Optional[int]]:
-    """Return the first candidate URL that served embeddings, plus its dimension.
-
-    Returns (None, None) when no candidate answered.
-    """
-    base_url = model_data.get("base_url") or ""
-    if LOCALHOST_NAME in base_url or LOCALHOST_IP in base_url:
-        base_url = base_url.replace(
-            LOCALHOST_NAME, DOCKER_INTERNAL_HOST).replace(LOCALHOST_IP, DOCKER_INTERNAL_HOST)
-    for candidate_url in _embedding_url_candidates(base_url):
-        dimension = await embedding_dimension_check({**model_data, "base_url": candidate_url})
-        if dimension is not None:
-            return candidate_url, dimension
-    return None, None
-
-
 async def create_model_for_tenant(
     user_id: str,
     tenant_id: str,
@@ -426,9 +133,8 @@ async def create_model_for_tenant(
         # This runs BEFORE any URL normalization / repo-splitting so the
         # provider hint is still whatever the caller sent (e.g. "silicon").
         # ================================================================
-        _provider_hint = (
-            model_data.get("provider_hint")
-            or model_data.get("model_factory")
+        _provider_hint = model_data.get("provider_hint") or model_data.get(
+            "model_factory"
         )
         _catalog_applied = apply_catalog_defaults(model_data, _provider_hint)
         if _catalog_applied:
@@ -441,10 +147,9 @@ async def create_model_for_tenant(
         # Replace localhost with host.docker.internal for local llm
         model_base_url = model_data.get("base_url", "")
         if LOCALHOST_NAME in model_base_url or LOCALHOST_IP in model_base_url:
-            model_data["base_url"] = (
-                model_base_url.replace(LOCALHOST_NAME, DOCKER_INTERNAL_HOST)
-                .replace(LOCALHOST_IP, DOCKER_INTERNAL_HOST)
-            )
+            model_data["base_url"] = model_base_url.replace(
+                LOCALHOST_NAME, DOCKER_INTERNAL_HOST
+            ).replace(LOCALHOST_IP, DOCKER_INTERNAL_HOST)
         # Auto-set ssl_verify based on api_key:
         # - Empty api_key (local/LAN services) -> ssl_verify=False
         # - ModelEngine URL (self-signed certs) -> ssl_verify=False
@@ -461,19 +166,24 @@ async def create_model_for_tenant(
 
         if model_data.get("model_type") in ("vlm", "vlm2", "vlm3", "vlm4"):
             model_data["model_factory"] = _infer_model_factory(
-                model_data["model_type"], model_data["base_url"], model_data.get("model_factory")
+                model_data["model_type"],
+                model_data["base_url"],
+                model_data.get("model_factory"),
             )
 
         # Split model_name into repo and name
-        model_repo, model_name = split_repo_name(
-            model_data["model_name"]) if model_data.get("model_name") else ("", "")
+        model_repo, model_name = (
+            split_repo_name(model_data["model_name"])
+            if model_data.get("model_name")
+            else ("", "")
+        )
         model_data["model_repo"] = model_repo if model_repo else ""
         model_data["model_name"] = model_name
 
         if not model_data.get("display_name"):
             model_data["display_name"] = add_repo_to_name(
                 model_repo=model_data.get("model_repo", ""),
-                model_name=model_data.get("model_name", "")
+                model_name=model_data.get("model_name", ""),
             )
 
         _coerce_legacy_max_tokens_alias(model_data)
@@ -481,18 +191,25 @@ async def create_model_for_tenant(
         _apply_model_reasoning_default(model_data, _provider_hint)
 
         # Use NOT_DETECTED status as default
-        model_data["connect_status"] = model_data.get(
-            "connect_status") or ModelConnectStatusEnum.NOT_DETECTED.value
+        model_data["connect_status"] = (
+            model_data.get("connect_status")
+            or ModelConnectStatusEnum.NOT_DETECTED.value
+        )
 
         # Check display name conflict scoped by tenant
         if model_data.get("display_name"):
             existing_models_by_display = get_models_by_display_name(
-                model_data["display_name"], tenant_id)
-            if _has_display_name_conflict(existing_models_by_display, model_data.get("model_type")):
+                model_data["display_name"], tenant_id
+            )
+            if _has_display_name_conflict(
+                existing_models_by_display, model_data.get("model_type")
+            ):
                 logging.error(
-                    f"Name {model_data['display_name']} is already in use, please choose another display name")
+                    f"Name {model_data['display_name']} is already in use, please choose another display name"
+                )
                 raise ValueError(
-                    f"Name {model_data['display_name']} is already in use, please choose another display name")
+                    f"Name {model_data['display_name']} is already in use, please choose another display name"
+                )
 
         # If embedding or multi_embedding, verify connectivity and get dimension.
         if model_data.get("model_type") in ("embedding", "multi_embedding"):
@@ -518,19 +235,20 @@ async def create_model_for_tenant(
             # Create multi_embedding record
             create_model_record(model_data, user_id, tenant_id)
             logging.debug(
-                f"Multimodal embedding model {model_data['display_name']} created successfully")
+                f"Multimodal embedding model {model_data['display_name']} created successfully"
+            )
 
             # Create embedding record variant
             embedding_data = model_data.copy()
             embedding_data["model_type"] = "embedding"
             create_model_record(embedding_data, user_id, tenant_id)
             logging.debug(
-                f"Embedding model {embedding_data['display_name']} created successfully")
+                f"Embedding model {embedding_data['display_name']} created successfully"
+            )
         else:
             # Non-multimodal
             create_model_record(model_data, user_id, tenant_id)
-            logging.debug(
-                f"Model {model_data['display_name']} created successfully")
+            logging.debug(f"Model {model_data['display_name']} created successfully")
 
         # Auto-configure default-model slots that the tenant never set.
         # Only the models created by THIS call are eligible for empty slots.
@@ -540,9 +258,11 @@ async def create_model_for_tenant(
         if skip_default_backfill:
             return {"auto_configured_defaults": []}
         created_ids = _ids_for_created_models(
-            [model_data["display_name"]], tenant_id, model_data.get("model_type"))
+            [model_data["display_name"]], tenant_id, model_data.get("model_type")
+        )
         auto_configured = _backfill_default_model_slots(
-            user_id, tenant_id, new_model_ids=created_ids)
+            user_id, tenant_id, new_model_ids=created_ids
+        )
         return {"auto_configured_defaults": auto_configured}
     except ValueError:
         # Let the API layer map conflicts to 409 instead of 500.
@@ -552,7 +272,9 @@ async def create_model_for_tenant(
         raise Exception(f"Failed to create model: {str(e)}")
 
 
-async def create_provider_models_for_tenant(tenant_id: str, provider_request: Dict[str, Any]):
+async def create_provider_models_for_tenant(
+    tenant_id: str, provider_request: Dict[str, Any]
+):
     """Create/refresh provider models in memory and merge existing attributes.
 
     Returns content dict with list data. Does not persist new records.
@@ -575,10 +297,7 @@ async def create_provider_models_for_tenant(tenant_id: str, provider_request: Di
             error_message = err.get("_message", "Provider API error")
             http_code = err.get("_http_code")
             status_code = http_code if http_code and 400 <= http_code < 600 else 502
-            raise HTTPException(
-                status_code=status_code,
-                detail=f"{error_code}: {error_message}"
-            )
+            raise ModelProviderError(status_code, f"{error_code}: {error_message}")
 
         model_type = provider_request.get("model_type")
 
@@ -593,7 +312,8 @@ async def create_provider_models_for_tenant(tenant_id: str, provider_request: Di
             # Merge existing model's attributes (max_tokens, api_key, timeout_seconds, concurrency_limit)
             # Only merge when model_type is specified; skip for multi-type discovery
             model_list = merge_existing_model_attributes(
-                model_list, tenant_id, provider_request["provider"], model_type)
+                model_list, tenant_id, provider_request["provider"], model_type
+            )
 
         # The provider /models response only identifies model IDs. Resolve
         # reasoning controls from the build-time models.dev snapshot using the
@@ -609,15 +329,11 @@ async def create_provider_models_for_tenant(tenant_id: str, provider_request: Di
         model_list = sort_models_by_id(model_list)
 
         logging.debug(
-            f"Provider model {provider_request['provider']} created successfully")
+            f"Provider model {provider_request['provider']} created successfully"
+        )
         return model_list
-    except HTTPException:
-        # Provider failures are raised above as HTTPException (e.g. 502
-        # connection_failed, or the provider's own 4xx). HTTPException is a
-        # subclass of Exception, so without this pass-through the generic
-        # handler below would swallow it, wrap it in a plain Exception, and the
-        # API layer would flatten every provider error to a 500 with the real
-        # status only surviving as text inside the message. Re-raise as-is.
+    except ModelProviderError:
+        # The HTTP boundary preserves the classified upstream status.
         raise
     except Exception as e:
         logging.error(f"Failed to create provider models: {str(e)}")
@@ -650,7 +366,11 @@ def _default_model_candidate_sort_key(record: Dict[str, Any]):
     Preference order: available models first, then larger context windows,
     then stable model_id ordering for determinism.
     """
-    is_available = 1 if record.get("connect_status") == ModelConnectStatusEnum.AVAILABLE.value else 0
+    is_available = (
+        1
+        if record.get("connect_status") == ModelConnectStatusEnum.AVAILABLE.value
+        else 0
+    )
     context_tokens = record.get("context_window_tokens") or 0
     return (-is_available, -int(context_tokens or 0), record.get("model_id") or 0)
 
@@ -740,8 +460,7 @@ def _backfill_default_model_slots(
     try:
         for slot_name, model_type in _AUTO_CONFIGURABLE_MODEL_SLOTS.items():
             config_key = MODEL_CONFIG_MAPPING[slot_name]
-            live_model_id, row = _resolve_existing_slot_config(
-                tenant_id, config_key)
+            live_model_id, row = _resolve_existing_slot_config(tenant_id, config_key)
             if live_model_id is not None:
                 # Occupied by a live model (user- or system-configured):
                 # never touch it.
@@ -751,9 +470,7 @@ def _backfill_default_model_slots(
 
             if row is None and new_model_ids is not None:
                 # Empty slot: only consider what this create call added.
-                candidates = [
-                    m for m in candidates if m["model_id"] in new_model_ids
-                ]
+                candidates = [m for m in candidates if m["model_id"] in new_model_ids]
             if not candidates:
                 continue
 
@@ -765,37 +482,52 @@ def _backfill_default_model_slots(
                     row["tenant_config_id"], str(repair["model_id"])
                 )
             else:
-                insert_pick = sorted(candidates, key=_default_model_candidate_sort_key)[0]
-                success = insert_config({
-                    "tenant_id": tenant_id,
-                    "config_key": config_key,
-                    "config_value": str(insert_pick["model_id"]),
-                    "created_by": user_id,
-                    "updated_by": user_id,
-                })
+                insert_pick = sorted(candidates, key=_default_model_candidate_sort_key)[
+                    0
+                ]
+                success = insert_config(
+                    {
+                        "tenant_id": tenant_id,
+                        "config_key": config_key,
+                        "config_value": str(insert_pick["model_id"]),
+                        "created_by": user_id,
+                        "updated_by": user_id,
+                    }
+                )
             if not success:
                 logging.warning(
                     "Auto-configure default model failed: write returned "
-                    "False for key=%s tenant=%s", config_key, tenant_id)
+                    "False for key=%s tenant=%s",
+                    config_key,
+                    tenant_id,
+                )
                 continue
 
             picked = repair if row is not None else insert_pick
             logging.info(
                 "Auto-configured default %s model to '%s' (model_id=%s) for tenant %s",
-                model_type, picked.get("display_name"), picked["model_id"], tenant_id)
-            auto_configured.append({
-                "config_key": config_key,
-                "model_id": picked["model_id"],
-                "display_name": picked.get("display_name"),
-                "model_type": model_type,
-            })
+                model_type,
+                picked.get("display_name"),
+                picked["model_id"],
+                tenant_id,
+            )
+            auto_configured.append(
+                {
+                    "config_key": config_key,
+                    "model_id": picked["model_id"],
+                    "display_name": picked.get("display_name"),
+                    "model_type": model_type,
+                }
+            )
     except Exception as exc:
         # Backfill is a best-effort enhancement: never fail the create flow.
         logging.error("Default-model backfill failed for tenant %s: %s", tenant_id, exc)
     return auto_configured
 
 
-async def batch_create_models_for_tenant(user_id: str, tenant_id: str, batch_payload: Dict[str, Any]):
+async def batch_create_models_for_tenant(
+    user_id: str, tenant_id: str, batch_payload: Dict[str, Any]
+):
     """Synchronize provider models for a tenant by creating/updating/deleting records."""
     try:
         provider = batch_payload["provider"]
@@ -810,16 +542,22 @@ async def batch_create_models_for_tenant(user_id: str, tenant_id: str, batch_pay
             # ModelEngine models carry their own base_url in each model dict
             model_url = ""
         elif provider == ProviderEnum.DASHSCOPE.value:
-            model_url = DASHSCOPE_REALTIME_BASE_URL if model_type in ("stt", "tts") else DASHSCOPE_BASE_URL
+            model_url = (
+                DASHSCOPE_REALTIME_BASE_URL
+                if model_type in ("stt", "tts")
+                else DASHSCOPE_BASE_URL
+            )
         elif provider == ProviderEnum.TOKENPONY.value:
             model_url = TOKENPONY_BASE_URL
         else:
             model_url = ""
 
         existing_model_list = get_models_by_tenant_factory_type(
-            tenant_id, provider, model_type)
-        model_list_ids = {model.get("id")
-                          for model in model_list} if model_list else set()
+            tenant_id, provider, model_type
+        )
+        model_list_ids = (
+            {model.get("id") for model in model_list} if model_list else set()
+        )
         existing_model_map = {
             add_repo_to_name(
                 model_repo=model["model_repo"],
@@ -852,10 +590,12 @@ async def batch_create_models_for_tenant(user_id: str, tenant_id: str, batch_pay
         # Create or update new models
         for model in model_list:
             model["model_type"] = model_type
-            _, model_name = split_repo_name(
-                model["id"]) if model.get("id") else ("", "")
-            model_repo, model_name_only = split_repo_name(
-                model.get("id", "")) if model.get("id") else ("", "")
+            _, model_name = (
+                split_repo_name(model["id"]) if model.get("id") else ("", "")
+            )
+            model_repo, model_name_only = (
+                split_repo_name(model.get("id", "")) if model.get("id") else ("", "")
+            )
             model_display_name = add_repo_to_name(model_repo, model_name_only)
             if model_name:
                 existing_model = existing_model_map.get(model_display_name)
@@ -864,7 +604,10 @@ async def batch_create_models_for_tenant(user_id: str, tenant_id: str, batch_pay
                     # Check if max_tokens has changed
                     existing_max_tokens = existing_model.get("max_tokens")
                     new_max_tokens = model.get("max_tokens")
-                    if new_max_tokens is not None and existing_max_tokens != new_max_tokens:
+                    if (
+                        new_max_tokens is not None
+                        and existing_max_tokens != new_max_tokens
+                    ):
                         update_data["max_tokens"] = new_max_tokens
                     # Same gap as prepare_model_dict had for the create branch:
                     # the batch refresh path only touched legacy max_tokens, so
@@ -892,7 +635,9 @@ async def batch_create_models_for_tenant(user_id: str, tenant_id: str, batch_pay
                         if existing_model.get("capacity_source") != "operator":
                             update_data["capacity_source"] = "operator"
                     if update_data:
-                        update_model_record(existing_model["model_id"], update_data, user_id)
+                        update_model_record(
+                            existing_model["model_id"], update_data, user_id
+                        )
                     continue
 
             model_dict = await prepare_model_dict(
@@ -915,10 +660,10 @@ async def batch_create_models_for_tenant(user_id: str, tenant_id: str, batch_pay
 
         # Auto-configure default-model slots that the tenant never set.
         # Only the models created by THIS call are eligible for empty slots.
-        created_ids = _ids_for_created_models(
-            created_display_names, tenant_id)
+        created_ids = _ids_for_created_models(created_display_names, tenant_id)
         auto_configured = _backfill_default_model_slots(
-            user_id, tenant_id, new_model_ids=created_ids)
+            user_id, tenant_id, new_model_ids=created_ids
+        )
         return {"auto_configured_defaults": auto_configured}
     except ValueError:
         # Let the API layer map invalid entries to 422 instead of 500.
@@ -928,11 +673,12 @@ async def batch_create_models_for_tenant(user_id: str, tenant_id: str, batch_pay
         raise Exception(f"Failed to batch create models: {str(e)}")
 
 
-async def list_provider_models_for_tenant(tenant_id: str, provider: str, model_type: str):
+async def list_provider_models_for_tenant(
+    tenant_id: str, provider: str, model_type: str
+):
     """List persisted models for a provider/type for a tenant."""
     try:
-        model_list = get_models_by_tenant_factory_type(
-            tenant_id, provider, model_type)
+        model_list = get_models_by_tenant_factory_type(tenant_id, provider, model_type)
         for model in model_list:
             # Use add_repo_to_name for consistent format with /model/list API
             model["id"] = add_repo_to_name(
@@ -948,10 +694,7 @@ async def list_provider_models_for_tenant(tenant_id: str, provider: str, model_t
 
 
 async def update_single_model_for_tenant(
-    user_id: str,
-    tenant_id: str,
-    current_display_name: str,
-    model_data: Dict[str, Any]
+    user_id: str, tenant_id: str, current_display_name: str, model_data: Dict[str, Any]
 ):
     """Update model(s) by current display_name. If embedding/multi_embedding, update both types.
 
@@ -1002,7 +745,10 @@ async def update_single_model_for_tenant(
                 or (existing_models[0].get("base_url") if existing_models else "")
                 or ""
             )
-            if not model_data["api_key"] or MODEL_ENGINE_URL_MARKER in effective_base_url:
+            if (
+                not model_data["api_key"]
+                or MODEL_ENGINE_URL_MARKER in effective_base_url
+            ):
                 model_data["ssl_verify"] = False
             else:
                 model_data["ssl_verify"] = True
@@ -1012,9 +758,12 @@ async def update_single_model_for_tenant(
         # even when the caller payload omits model_type. We don't store the
         # injected model_type back on model_data because the update path
         # explicitly strips it later.
-        existing_model_type = existing_models[0].get("model_type") if existing_models else None
-        if model_data.get("max_output_tokens") is not None and \
-                existing_model_type not in ("embedding", "multi_embedding"):
+        existing_model_type = (
+            existing_models[0].get("model_type") if existing_models else None
+        )
+        if model_data.get(
+            "max_output_tokens"
+        ) is not None and existing_model_type not in ("embedding", "multi_embedding"):
             model_data["max_tokens"] = model_data["max_output_tokens"]
 
         # The list endpoints return model_name as add_repo_to_name(repo, name)
@@ -1024,16 +773,24 @@ async def update_single_model_for_tenant(
         # breaks provider catalog matching and connectivity probes. Split the
         # incoming name the same way the create paths do.
         if "model_name" in model_data and model_data.get("model_name"):
-            incoming_repo, incoming_name = split_repo_name(str(model_data["model_name"]))
+            incoming_repo, incoming_name = split_repo_name(
+                str(model_data["model_name"])
+            )
             if incoming_repo:
                 model_data["model_repo"] = incoming_repo
             model_data["model_name"] = incoming_name
 
         # Re-probe a changed URL so the stored value is the one that was validated.
-        if "base_url" in model_data \
-                and existing_model_type in ("embedding", "multi_embedding") \
-                and model_data["base_url"] != existing_models[0].get("base_url"):
-            probe_config = {**existing_models[0], **model_data, "model_type": existing_model_type}
+        if (
+            "base_url" in model_data
+            and existing_model_type in ("embedding", "multi_embedding")
+            and model_data["base_url"] != existing_models[0].get("base_url")
+        ):
+            probe_config = {
+                **existing_models[0],
+                **model_data,
+                "model_type": existing_model_type,
+            }
             resolved_url, _ = await resolve_embedding_base_url(probe_config)
             if resolved_url is None:
                 raise ValueError(
@@ -1046,10 +803,15 @@ async def update_single_model_for_tenant(
             # Update both embedding and multi_embedding records
             for model in existing_models:
                 # Prepare update data, excluding model_type to preserve original type
-                update_data = {k: v for k, v in model_data.items() if k not in ["model_id", "model_type"]}
+                update_data = {
+                    k: v
+                    for k, v in model_data.items()
+                    if k not in ["model_id", "model_type"]
+                }
                 update_model_record(model["model_id"], update_data, user_id)
             logging.debug(
-                f"Model {current_display_name} (embedding + multi_embedding) updated successfully")
+                f"Model {current_display_name} (embedding + multi_embedding) updated successfully"
+            )
         else:
             # Single model update
             current_model = existing_models[0]
@@ -1066,19 +828,25 @@ async def update_single_model_for_tenant(
         raise Exception(f"Failed to update model: {str(e)}")
 
 
-async def batch_update_models_for_tenant(user_id: str, tenant_id: str, model_list: List[Dict[str, Any]]):
+async def batch_update_models_for_tenant(
+    user_id: str, tenant_id: str, model_list: List[Dict[str, Any]]
+):
     """Batch update models for a tenant by model_id or model_name."""
     try:
         for model in model_list:
             _coerce_legacy_max_tokens_alias(model)
             # Build update data excluding id fields
-            update_data = {k: v for k, v in model.items() if k not in ["model_id", "model_name"]}
+            update_data = {
+                k: v for k, v in model.items() if k not in ["model_id", "model_name"]
+            }
 
             model_id_or_name = model.get("model_id") or model.get("model_name")
 
             # Check if model_id is a numeric string (primary key)
             if model_id_or_name and model_id_or_name.isdigit():
-                update_model_record(int(model_id_or_name), update_data, user_id, tenant_id)
+                update_model_record(
+                    int(model_id_or_name), update_data, user_id, tenant_id
+                )
             else:
                 # Parse "model_repo/model_name" format from frontend's model_id field
                 if "/" in model_id_or_name:
@@ -1087,15 +855,23 @@ async def batch_update_models_for_tenant(user_id: str, tenant_id: str, model_lis
                     model_repo = None
                     model_name = model_id_or_name
 
-                logging.info(f"[DEBUG] Updating model by name: model_name={model_name}, model_repo={model_repo}, tenant_id={tenant_id}")
+                logging.info(
+                    f"[DEBUG] Updating model by name: model_name={model_name}, model_repo={model_repo}, tenant_id={tenant_id}"
+                )
 
                 # Query to get model_id first, then update by primary key
-                model_record = get_model_by_name_factory(model_name, model_repo, tenant_id)
+                model_record = get_model_by_name_factory(
+                    model_name, model_repo, tenant_id
+                )
                 if not model_record:
-                    logging.warning(f"Model not found: model_name={model_name}, model_repo={model_repo}, tenant_id={tenant_id}")
+                    logging.warning(
+                        f"Model not found: model_name={model_name}, model_repo={model_repo}, tenant_id={tenant_id}"
+                    )
                     continue
 
-                update_model_record(model_record["model_id"], update_data, user_id, tenant_id)
+                update_model_record(
+                    model_record["model_id"], update_data, user_id, tenant_id
+                )
 
         logging.info("[DEBUG] Batch update models successfully")
     except Exception as e:
@@ -1137,7 +913,8 @@ async def delete_model_for_tenant(user_id: str, tenant_id: str, display_name: st
             deleted_types.append(model.get("model_type", "unknown"))
 
         logging.debug(
-            f"Successfully deleted model(s) in types: {', '.join(deleted_types)}")
+            f"Successfully deleted model(s) in types: {', '.join(deleted_types)}"
+        )
         return display_name
     except LookupError:
         raise
@@ -1164,7 +941,8 @@ async def list_models_for_tenant(tenant_id: str):
                 model_name=record["model_name"],
             )
             record["connect_status"] = ModelConnectStatusEnum.get_value(
-                record.get("connect_status"))
+                record.get("connect_status")
+            )
 
             # Map model_type if necessary (for ModelEngine compatibility)
             if record.get("model_type") in type_map:
@@ -1186,25 +964,29 @@ async def list_llm_models_for_tenant(tenant_id: str):
         result: List[Dict[str, Any]] = []
         for record in records:
             _enrich_model_reasoning_capability(record)
-            result.append({
-                "model_id": record["model_id"],
-                "model_name": add_repo_to_name(
-                    model_repo=record["model_repo"],
-                    model_name=record["model_name"],
-                ),
-                "model_type": record.get("model_type", "llm"),
-                "connect_status": ModelConnectStatusEnum.get_value(record.get("connect_status")),
-                "display_name": record["display_name"],
-                "api_key": record.get("api_key", ""),
-                "base_url": record.get("base_url", ""),
-                "max_tokens": record.get("max_tokens", 4096),
-                "extra_params": record.get("extra_params"),
-                **(
-                    {"reasoning_capability": record["reasoning_capability"]}
-                    if record.get("reasoning_capability") is not None
-                    else {}
-                ),
-            })
+            result.append(
+                {
+                    "model_id": record["model_id"],
+                    "model_name": add_repo_to_name(
+                        model_repo=record["model_repo"],
+                        model_name=record["model_name"],
+                    ),
+                    "model_type": record.get("model_type", "llm"),
+                    "connect_status": ModelConnectStatusEnum.get_value(
+                        record.get("connect_status")
+                    ),
+                    "display_name": record["display_name"],
+                    "api_key": record.get("api_key", ""),
+                    "base_url": record.get("base_url", ""),
+                    "max_tokens": record.get("max_tokens", 4096),
+                    "extra_params": record.get("extra_params"),
+                    **(
+                        {"reasoning_capability": record["reasoning_capability"]}
+                        if record.get("reasoning_capability") is not None
+                        else {}
+                    ),
+                }
+            )
 
         logging.debug("Successfully retrieved model list")
         return result
@@ -1214,10 +996,7 @@ async def list_llm_models_for_tenant(tenant_id: str):
 
 
 async def list_models_for_admin(
-    tenant_id: str,
-    model_type: Optional[str] = None,
-    page: int = 1,
-    page_size: int = 20
+    tenant_id: str, model_type: Optional[str] = None, page: int = 1, page_size: int = 20
 ) -> Dict[str, Any]:
     """Get models for a specified tenant (admin operation) with pagination.
 
@@ -1252,7 +1031,8 @@ async def list_models_for_admin(
                 model_name=record["model_name"],
             )
             record["connect_status"] = ModelConnectStatusEnum.get_value(
-                record.get("connect_status"))
+                record.get("connect_status")
+            )
 
             # Map model_type if necessary
             if record.get("model_type") in type_map:
@@ -1269,6 +1049,7 @@ async def list_models_for_admin(
 
         # Get tenant name
         from services.tenant_service import get_tenant_info
+
         try:
             tenant_info = get_tenant_info(tenant_id)
             tenant_name = tenant_info.get("tenant_name", "")
@@ -1282,10 +1063,12 @@ async def list_models_for_admin(
             "total": total,
             "page": page,
             "page_size": page_size,
-            "total_pages": total_pages
+            "total_pages": total_pages,
         }
 
-        logging.debug(f"Successfully retrieved admin model list for tenant: {tenant_id}, page: {page}, page_size: {page_size}")
+        logging.debug(
+            f"Successfully retrieved admin model list for tenant: {tenant_id}, page: {page}, page_size: {page_size}"
+        )
         return result
     except Exception as e:
         logging.error(f"Failed to retrieve admin model list: {str(e)}")

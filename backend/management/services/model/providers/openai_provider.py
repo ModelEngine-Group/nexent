@@ -10,8 +10,7 @@ import logging
 from typing import Dict, List
 
 import httpx
-
-from services.providers.base import (
+from management.services.model.providers.base import (
     AbstractModelProvider,
     _classify_provider_error,
     _extract_capacity_hints_from_raw,
@@ -71,13 +70,18 @@ class OpenAICompatibleProvider(AbstractModelProvider):
 
             return model_list
 
-        except (httpx.HTTPStatusError, httpx.ConnectTimeout, httpx.ConnectError, Exception) as e:
+        except (
+            httpx.HTTPStatusError,
+            httpx.ConnectTimeout,
+            httpx.ConnectError,
+            Exception,
+        ) as e:
             if isinstance(e, httpx.HTTPStatusError):
                 status_code = e.response.status_code
                 error_message = str(e)
                 return _classify_provider_error(
-                    "OpenAI-compatible", status_code=status_code, error_message=error_message
+                    "OpenAI-compatible",
+                    status_code=status_code,
+                    error_message=error_message,
                 )
-            return _classify_provider_error(
-                "OpenAI-compatible", exception=e
-            )
+            return _classify_provider_error("OpenAI-compatible", exception=e)

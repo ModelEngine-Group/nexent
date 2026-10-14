@@ -44,16 +44,6 @@ def get_env_key(key: str) -> str:
     return re.sub('([a-z0-9])([A-Z])', r'\1_\2', s1).upper()
 
 
-def get_model_name_from_config(model_config: Dict[str, Any]) -> str:
-    """Get model name from model id"""
-    if model_config is None:
-        return ""
-    # Quick-config entries may omit model_repo; treat it as an empty repo.
-    model_repo = model_config.get("model_repo") or ""
-    model_name = model_config.get("model_name") or model_config.get("modelName") or ""
-    if not model_repo:
-        return model_name
-    return f"{model_repo}/{model_name}"
 
 
 class TenantConfigManager:

@@ -1,15 +1,14 @@
-import httpx
 import re
 from typing import Dict, List
 
+import httpx
 from consts.const import DEFAULT_LLM_MAX_TOKENS
 from consts.provider import SILICON_GET_URL
-from services.providers.base import (
+from management.services.model.providers.base import (
     AbstractModelProvider,
     _classify_provider_error,
     _extract_capacity_hints_from_raw,
 )
-
 
 SILICON_VLM_MODEL_KEYWORDS = (
     "-vl",
@@ -90,7 +89,9 @@ class SiliconModelProvider(AbstractModelProvider):
 
             headers = {"Authorization": f"Bearer {model_api_key}"}
 
-            provider_model_type = "vlm" if model_type in ("vlm2", "vlm3") else model_type
+            provider_model_type = (
+                "vlm" if model_type in ("vlm2", "vlm3") else model_type
+            )
 
             # Choose endpoint by model type
             if provider_model_type in ("llm", "vlm"):
@@ -108,9 +109,13 @@ class SiliconModelProvider(AbstractModelProvider):
                 model_list: List[Dict] = response.json()["data"]
 
             if model_type == "vlm3":
-                model_list = [item for item in model_list if _is_silicon_omni_model(item)]
+                model_list = [
+                    item for item in model_list if _is_silicon_omni_model(item)
+                ]
             elif provider_model_type == "vlm":
-                model_list = [item for item in model_list if _is_silicon_vlm_model(item)]
+                model_list = [
+                    item for item in model_list if _is_silicon_vlm_model(item)
+                ]
 
             # Annotate models with canonical fields expected downstream
             if provider_model_type in ("llm", "vlm"):
@@ -133,8 +138,17 @@ class SiliconModelProvider(AbstractModelProvider):
                 return []
 
             return model_list
-        except (httpx.HTTPStatusError, httpx.ConnectTimeout, httpx.ConnectError, Exception) as e:
-            status_code = e.response.status_code if isinstance(e, httpx.HTTPStatusError) and getattr(e, "response", None) else None
+        except (
+            httpx.HTTPStatusError,
+            httpx.ConnectTimeout,
+            httpx.ConnectError,
+            Exception,
+        ) as e:
+            status_code = (
+                e.response.status_code
+                if isinstance(e, httpx.HTTPStatusError) and getattr(e, "response", None)
+                else None
+            )
             return _classify_provider_error(
                 "SiliconFlow",
                 status_code=status_code,
