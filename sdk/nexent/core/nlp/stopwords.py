@@ -30,24 +30,30 @@ def load_stopwords(stopwords_name='baidu_stopwords.txt',
 
     Args:
         stopwords_name: Name of the stopwords file
-        backup_url: Backup download URL
+        backup_url: Backup download url
     """
     # Create a temporary file
     temp_dir = tempfile.gettempdir()
     stopwords_path = os.path.join(temp_dir, stopwords_name)
-    
+
     # Always download the latest version
     if not download_stopwords(backup_url, stopwords_path):
         logger.error(f"Unable to download stopwords from: {backup_url}")
         return
 
-    # Validate file content
-    with open(stopwords_path, 'r', encoding='utf-8') as f:
-        first_line = f.readline().strip()
+    # Validate and apply. Stopwords are an optional quality enhancement for
+    # term weighting, so any failure here (download produced an empty/partial
+    # file, or a parallel process removed the shared temp file mid-read)
+    # must degrade gracefully instead of breaking the import chain.
+    try:
+        with open(stopwords_path, 'r', encoding='utf-8') as f:
+            first_line = f.readline().strip()
         if not first_line or len(first_line) > 100:  # Simple format validation
             os.remove(stopwords_path)  # Delete potentially corrupted file
             logger.error("Stopwords file format is invalid, file has been deleted, please try again")
             return
 
-    # Configure to jieba
-    analyse.set_stop_words(stopwords_path)
+        # Configure to jieba
+        analyse.set_stop_words(stopwords_path)
+    except OSError as exc:
+        logger.warning("Failed to apply stopwords (%s); continuing without them", exc)

@@ -22,7 +22,7 @@ from fastapi import HTTPException
 # Module-level stubbing (mirrors the pattern used across the test suite so
 # that backend packages import successfully without a live venv/runtime):
 # - backend/ and backend/apps/ are added to sys.path
-# - services.vectordatabase_service is stubbed (no DB / ES dependency)
+# - management.services.knowledge_base.service is stubbed (no DB / ES dependency)
 # The real ``apps.permission_utils`` module is then imported and tested
 # against the stubbed ``ElasticSearchService``.
 # ---------------------------------------------------------------------------
@@ -33,13 +33,13 @@ for _path in (_BACKEND_DIR, _APPS_DIR):
     if _path not in sys.path:
         sys.path.insert(0, _path)
 
-sys.modules.setdefault("services.vectordatabase_service", MagicMock())  # noqa: SIM117
+sys.modules.setdefault("management.services.knowledge_base.service", MagicMock())  # noqa: SIM117
 
 with MagicMock() as _stub_es:
     # Expose the two static methods we patch in individual tests.
     _stub_es.require_knowledge_base_edit_permission = MagicMock(return_value="EDIT")
     _stub_es.require_knowledge_base_read_permission = MagicMock(return_value="READ_ONLY")
-    sys.modules["services.vectordatabase_service"].ElasticSearchService = _stub_es
+    sys.modules["management.services.knowledge_base.service"].ElasticSearchService = _stub_es
 
 from apps import permission_utils  # noqa: E402
 

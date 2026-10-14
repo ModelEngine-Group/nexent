@@ -1,0 +1,76 @@
+schema_version: '1.0'
+stage: D4
+module: V5-BASELINE
+case:
+  case_id: PW-CHAT-02
+  feature_id: V5-PW-CHAT-02
+  business_rule_ids:
+  - V5-PW-CHAT-02-RULE-01
+  title: Execution + Tool Call用户可见执行→最终结果
+  type: E2E
+  priority: P0
+  status: active
+  automation: automated
+  objective: 替代v4错误的ReAct UI模式：验证Execution中的真实Tool执行。
+  preconditions:
+  - Agent绑定get_test_code
+  - Test MCP健康
+  - 真实LLM支持tool call
+  test_data:
+    legacy_asset_declaration: config/models.yaml；config/mcp.yaml；services/test-mcp/
+  steps:
+  - order: 1
+    action: 打开newchat选择已绑定Test Tool的Agent，确认Execution。
+    expected: Execution可真实调用Tool且UI不锁死。
+  - order: 2
+    action: 输入明确要求调用测试工具并返回编号的问题。
+    expected: 最终marker正确且wire有调用。
+  - order: 3
+    action: 发送并等待streaming。
+    expected: ReAct retry/max_steps等不由Playwright证明。
+  - order: 4
+    action: 观察当前DOM真实存在的工具调用/执行状态。
+    expected: ReAct retry/max_steps等不由Playwright证明。
+  - order: 5
+    action: 等待工具执行结束和最终回答。
+    expected: ReAct retry/max_steps等不由Playwright证明。
+  - order: 6
+    action: 确认最终回答含NX-92831。
+    expected: ReAct retry/max_steps等不由Playwright证明。
+  - order: 7
+    action: 关联MCP wire log确认真实调用。
+    expected: ReAct retry/max_steps等不由Playwright证明。
+  - order: 8
+    action: 再发无需工具的问题，确认不错误复用工具状态。
+    expected: ReAct retry/max_steps等不由Playwright证明。
+  expected_results:
+  - Execution可真实调用Tool且UI不锁死。
+  - 最终marker正确且wire有调用。
+  - ReAct retry/max_steps等不由Playwright证明。
+  forbidden_side_effects: []
+  source:
+    legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
+    legacy_sheet: 03_Playwright_Journey
+    legacy_row: 39
+  actor: Nexent browser user
+  journey:
+  - 打开newchat选择已绑定Test Tool的Agent，确认Execution。
+  - 输入明确要求调用测试工具并返回编号的问题。
+  - 发送并等待streaming。
+  - 观察当前DOM真实存在的工具调用/执行状态。
+  - 等待工具执行结束和最终回答。
+  - 确认最终回答含NX-92831。
+  - 关联MCP wire log确认真实调用。
+  - 再发无需工具的问题，确认不错误复用工具状态。
+  final_business_result:
+  - Execution可真实调用Tool且UI不锁死。
+  - 最终marker正确且wire有调用。
+  - ReAct retry/max_steps等不由Playwright证明。
+  failure_evidence:
+  - '${NEXENT_TEST_HOME}/runs/{run_id}/playwright/PW-CHAT-02/
+
+    - screenshot.png / trace.zip / video.webm
+
+    - console.log / network.har / failure.json
+
+    - 涉及协议时关联 wire/*.jsonl；涉及下载时保留 downloads/'

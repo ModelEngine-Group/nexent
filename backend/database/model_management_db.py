@@ -4,6 +4,7 @@ from typing import Any, Dict, List, Optional
 from sqlalchemy import and_, desc, func, insert, select, update
 
 from consts.const import DEFAULT_EXPECTED_CHUNK_SIZE, DEFAULT_MAXIMUM_CHUNK_SIZE
+from consts.model import filter_extra_params
 from .client import as_dict, db_client, get_db_session
 from .db_models import ModelRecord
 from .utils import add_creation_tracking, add_update_tracking
@@ -35,6 +36,13 @@ def create_model_record(model_data: Dict[str, Any], user_id: str, tenant_id: str
         # Add tenant_id to cleaned_data
         if tenant_id is not None:
             cleaned_data["tenant_id"] = tenant_id
+
+        # v2.6.0: filter extra_params to only allowed keys for this model type.
+        # temperature and top_p flow through as dedicated columns (like W1 fields).
+        extra_params = cleaned_data.get("extra_params")
+        if extra_params is not None:
+            model_type = cleaned_data.get("model_type")
+            cleaned_data["extra_params"] = filter_extra_params(model_type, extra_params)
 
         # Build the insert statement
         stmt = insert(ModelRecord).values(cleaned_data)
@@ -76,6 +84,19 @@ def update_model_record(
         if tenant_id is not None:
             cleaned_data["tenant_id"] = tenant_id
 
+        # v2.6.0: filter extra_params to only allowed keys for this model type.
+        # When model_type is not part of the update payload, look it up from the
+        # existing record so filtering still applies.
+        extra_params = cleaned_data.get("extra_params")
+        if extra_params is not None:
+            model_type = cleaned_data.get("model_type")
+            if model_type is None:
+                model_type = session.scalars(
+                    select(ModelRecord.model_type).where(
+                        ModelRecord.model_id == model_id)
+                ).first()
+            cleaned_data["extra_params"] = filter_extra_params(model_type, extra_params)
+
         # Build the update statement
         stmt = update(ModelRecord).where(
             ModelRecord.model_id == model_id
@@ -85,6 +106,23 @@ def update_model_record(
         result = session.execute(stmt)
 
         return result.rowcount > 0
+
+
+def fail_detecting_models_on_startup() -> int:
+    """Finish connectivity checks interrupted by a config-service restart."""
+    with get_db_session() as session:
+        result = session.execute(
+            update(ModelRecord)
+            .where(
+                ModelRecord.connect_status == "detecting",
+                ModelRecord.delete_flag == "N",
+            )
+            .values(
+                connect_status="unavailable",
+                update_time=func.current_timestamp(),
+            )
+        )
+        return int(result.rowcount or 0)
 
 
 def delete_model_record(model_id: int, user_id: str, tenant_id: str) -> bool:

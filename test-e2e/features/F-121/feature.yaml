@@ -1,0 +1,16 @@
+schema_version: '1.0'
+module:
+  id: V5-BASELINE
+  name: Migrated V5 baseline
+feature:
+  feature_id: F-121
+  name: scoped active memory、版本 list/get/create、管理员租户 mutation
+  status: active
+  description: '记忆 / 长期记忆: scoped active memory、版本 list/get/create、管理员租户 mutation'
+  business_rules:
+  - rule_id: F-121-RULE-01
+    description: scoped active memory、版本 list/get/create、管理员租户 mutation
+  required_test_stages:
+  - D3
+  source:
+    notes: Migrated from V5 01_代码功能清单 without changing the functional description.

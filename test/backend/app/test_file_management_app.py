@@ -31,12 +31,33 @@ services_pkg = types.ModuleType("services")
 services_pkg.__path__ = []
 sys.modules.setdefault("services", services_pkg)
 
+# The empty-__path__ services stub blocks submodule imports; register the real
+# audit_service (loaded from file) so the app module's audit import resolves
+# and caplog can capture its records.
+import importlib.util
+
+_audit_spec = importlib.util.spec_from_file_location(
+    "services.audit_service",
+    os.path.join(BACKEND_ROOT, "services", "audit_service.py"),
+)
+_audit_module = importlib.util.module_from_spec(_audit_spec)
+sys.modules["services.audit_service"] = _audit_module
+_audit_spec.loader.exec_module(_audit_module)
+
 sfms_stub = types.ModuleType("services.file_management_service")
 
 async def _stub_upload_to_minio(files, folder, user_id=None):
     return []
 
-async def _stub_upload_files_impl(destination, file, folder, index_name, user_id=None):
+async def _stub_upload_files_impl(
+    destination,
+    file,
+    folder,
+    index_name,
+    user_id=None,
+    uploader_tenant_id=None,
+    upload_owner_service=None,
+):
     return [], [], []
 
 async def _stub_get_file_url_impl(object_name: str, expires: int):
@@ -126,7 +147,7 @@ sfms_stub.check_file_access_batch = _stub_check_file_access_batch
 sys.modules["services.file_management_service"] = sfms_stub
 setattr(services_pkg, "file_management_service", sfms_stub)
 
-vdb_service_stub = types.ModuleType("services.vectordatabase_service")
+vdb_service_stub = types.ModuleType("management.services.knowledge_base.service")
 
 
 class _StubElasticSearchService:
@@ -136,7 +157,7 @@ class _StubElasticSearchService:
 
 
 vdb_service_stub.ElasticSearchService = _StubElasticSearchService
-sys.modules["services.vectordatabase_service"] = vdb_service_stub
+sys.modules["management.services.knowledge_base.service"] = vdb_service_stub
 setattr(services_pkg, "vectordatabase_service", vdb_service_stub)
 
 
@@ -203,6 +224,7 @@ class QuotaExceededError(Exception): pass
 class UnauthorizedError(Exception): pass
 exceptions_stub.AppException = AppException
 exceptions_stub.NotFoundException = NotFoundException
+exceptions_stub.AppException = AppException
 exceptions_stub.OfficeConversionException = OfficeConversionException
 exceptions_stub.UnsupportedFileTypeException = UnsupportedFileTypeException
 exceptions_stub.FileTooLargeException = FileTooLargeException
@@ -243,12 +265,21 @@ async def test_options_route_ok():
 
 @pytest.mark.asyncio
 async def test_upload_files_success(monkeypatch):
-    async def fake_upload_impl(dest, files, folder, index_name, user_id=None, uploader_tenant_id=None):
+    async def fake_upload_impl(
+        dest,
+        files,
+        folder,
+        index_name,
+        user_id=None,
+        uploader_tenant_id=None,
+        upload_owner_service=None,
+    ):
+        assert upload_owner_service == "nexent-config"
         return [], ["/abs/path1"], ["a.txt"]
 
     monkeypatch.setattr(file_management_app, "upload_files_impl", fake_upload_impl)
 
-    result = await file_management_app.upload_files(
+    result = await file_management_app.upload_files(http_request=None,
         file=[make_upload_file("a.txt")], destination="local", folder="attachments", index_name=None,
         authorization=MOCK_AUTH
     )
@@ -296,7 +327,7 @@ def test_upload_files_forbidden_for_read_only(monkeypatch):
 @pytest.mark.asyncio
 async def test_upload_files_no_files_bad_request():
     with pytest.raises(Exception) as ei:
-        await file_management_app.upload_files(
+        await file_management_app.upload_files(http_request=None,
             file=[], destination="local", folder="attachments", index_name=None,
             authorization=MOCK_AUTH
         )
@@ -319,11 +350,19 @@ async def test_upload_files_no_valid_files_uploaded(monkeypatch):
             ]
             return result
 
-    async def fake_upload_impl(dest, files, folder, index_name, user_id=None, uploader_tenant_id=None):
+    async def fake_upload_impl(
+        dest,
+        files,
+        folder,
+        index_name,
+        user_id=None,
+        uploader_tenant_id=None,
+        upload_owner_service=None,
+    ):
         return UploadResult()
 
     monkeypatch.setattr(file_management_app, "upload_files_impl", fake_upload_impl)
-    response = await file_management_app.upload_files(
+    response = await file_management_app.upload_files(http_request=None,
         file=[make_upload_file("x.txt")], destination="minio", folder="attachments", index_name=None,
         authorization=MOCK_AUTH
     )
@@ -341,12 +380,20 @@ async def test_upload_files_no_valid_files_uploaded(monkeypatch):
 @pytest.mark.asyncio
 async def test_upload_files_internal_error(monkeypatch):
     """Test upload_files with internal error returns 500."""
-    async def fake_upload_impl(dest, files, folder, index_name, user_id=None, uploader_tenant_id=None):
+    async def fake_upload_impl(
+        dest,
+        files,
+        folder,
+        index_name,
+        user_id=None,
+        uploader_tenant_id=None,
+        upload_owner_service=None,
+    ):
         raise RuntimeError("Storage failed")
 
     monkeypatch.setattr(file_management_app, "upload_files_impl", fake_upload_impl)
     with pytest.raises(Exception) as ei:
-        await file_management_app.upload_files(
+        await file_management_app.upload_files(http_request=None,
             file=[make_upload_file("a.txt")], destination="local", folder="attachments", index_name=None,
             authorization=MOCK_AUTH
         )
@@ -388,6 +435,38 @@ async def test_process_files_success(monkeypatch):
     )
     assert resp.status_code == 201
     assert "Files processing triggered successfully" in resp.body.decode()
+
+
+@pytest.mark.asyncio
+async def test_process_files_persists_parent_chain_id(monkeypatch):
+    """A queued chain remains cancellable before its process task starts."""
+    async def fake_trigger(files, params):
+        return {"task_id": "chain-1"}
+
+    lifecycle_module = types.ModuleType("database.knowledge_file_lifecycle_db")
+    lifecycle_module.get_file_record = MagicMock(return_value={"file_id": "fid-1"})
+    lifecycle_module.transition_file_record = MagicMock()
+    database_module = types.ModuleType("database")
+    database_module.__path__ = []
+    monkeypatch.setitem(sys.modules, "database", database_module)
+    monkeypatch.setitem(sys.modules, "database.knowledge_file_lifecycle_db", lifecycle_module)
+    monkeypatch.setattr(file_management_app, "trigger_data_process", fake_trigger)
+
+    resp = await file_management_app.process_files(
+        files=[{"file_id": "fid-1", "path_or_url": "knowledge_base/a.txt", "filename": "a.txt"}],
+        chunking_strategy="basic",
+        index_name="kb1",
+        destination="minio",
+        authorization=MOCK_AUTH,
+    )
+
+    assert resp.status_code == 201
+    lifecycle_module.transition_file_record.assert_called_once_with(
+        "fid-1",
+        parent_task_id="chain-1",
+        expected_statuses=("UPLOADING", "UPLOADED", "PROCESSING", "FORWARDING"),
+        updated_by="user1",
+    )
 
 
 @pytest.mark.asyncio
@@ -575,6 +654,81 @@ async def test_process_files_legacy_empty_task_ids_mark_all_failed(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_process_files_skips_persisting_missing_task_id(monkeypatch):
+    async def fake_trigger(_files, _params):
+        return {
+            "results": [{"status": "SUBMITTED", "source": "knowledge_base/a.txt"}],
+            "submitted_count": 1,
+        }
+
+    lifecycle_module = types.ModuleType("database.knowledge_file_lifecycle_db")
+    lifecycle_module.get_file_record = MagicMock()
+    lifecycle_module.transition_file_record = MagicMock()
+    database_module = types.ModuleType("database")
+    database_module.__path__ = []
+    monkeypatch.setitem(sys.modules, "database", database_module)
+    monkeypatch.setitem(sys.modules, "database.knowledge_file_lifecycle_db", lifecycle_module)
+    monkeypatch.setattr(file_management_app, "trigger_data_process", fake_trigger)
+
+    response = await file_management_app.process_files(
+        files=[{"file_id": "fid-a", "path_or_url": "knowledge_base/a.txt", "filename": "a.txt"}],
+        chunking_strategy="basic", index_name="kb", destination="minio", authorization=MOCK_AUTH,
+    )
+    assert response.status_code == 201
+    lifecycle_module.get_file_record.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_process_files_matches_submitted_result_by_source(monkeypatch):
+    async def fake_trigger(_files, _params):
+        return {
+            "results": [{
+                "status": "SUBMITTED", "file_id": "unknown", "source": "knowledge_base/a.txt",
+                "task_id": "task-a",
+            }],
+            "submitted_count": 1,
+        }
+
+    lifecycle_module = types.ModuleType("database.knowledge_file_lifecycle_db")
+    lifecycle_module.get_file_record = MagicMock(return_value={"file_id": "fid-a"})
+    lifecycle_module.transition_file_record = MagicMock()
+    database_module = types.ModuleType("database")
+    database_module.__path__ = []
+    monkeypatch.setitem(sys.modules, "database", database_module)
+    monkeypatch.setitem(sys.modules, "database.knowledge_file_lifecycle_db", lifecycle_module)
+    monkeypatch.setattr(file_management_app, "trigger_data_process", fake_trigger)
+
+    response = await file_management_app.process_files(
+        files=[{"file_id": "fid-a", "path_or_url": "knowledge_base/a.txt", "filename": "a.txt"}],
+        chunking_strategy="basic", index_name="kb", destination="minio", authorization=MOCK_AUTH,
+    )
+    assert response.status_code == 201
+    lifecycle_module.transition_file_record.assert_called_once()
+    assert lifecycle_module.transition_file_record.call_args.args[0] == "fid-a"
+
+
+@pytest.mark.asyncio
+async def test_process_files_swallows_lifecycle_task_persistence_error(monkeypatch):
+    async def fake_trigger(_files, _params):
+        return {"task_id": "task-a"}
+
+    lifecycle_module = types.ModuleType("database.knowledge_file_lifecycle_db")
+    lifecycle_module.get_file_record = MagicMock(side_effect=RuntimeError("database unavailable"))
+    lifecycle_module.transition_file_record = MagicMock()
+    database_module = types.ModuleType("database")
+    database_module.__path__ = []
+    monkeypatch.setitem(sys.modules, "database", database_module)
+    monkeypatch.setitem(sys.modules, "database.knowledge_file_lifecycle_db", lifecycle_module)
+    monkeypatch.setattr(file_management_app, "trigger_data_process", fake_trigger)
+
+    response = await file_management_app.process_files(
+        files=[{"file_id": "fid-a", "path_or_url": "knowledge_base/a.txt", "filename": "a.txt"}],
+        chunking_strategy="basic", index_name="kb", destination="minio", authorization=MOCK_AUTH,
+    )
+    assert response.status_code == 201
+
+
+@pytest.mark.asyncio
 async def test_get_storage_files_maps_unauthorized_error(monkeypatch):
     def unauthorized(_authorization):
         raise file_management_app.UnauthorizedError("token expired")
@@ -615,7 +769,7 @@ async def test_storage_upload_files_knowledge_base_folder(monkeypatch):
     """Generic storage uploads cannot create unowned knowledge-base objects."""
     f1 = make_upload_file("shared.pdf")
     with pytest.raises(HTTPException) as exc_info:
-        await file_management_app.storage_upload_files(
+        await file_management_app.storage_upload_files(http_request=None,
             files=[f1],
             folder="knowledge_base",
             authorization=MOCK_AUTH
@@ -636,7 +790,7 @@ async def test_storage_upload_files_attachments_folder_user_isolation(monkeypatc
     monkeypatch.setattr(file_management_app, "upload_to_minio", fake_upload)
 
     f1 = make_upload_file("private.txt")
-    result = await file_management_app.storage_upload_files(
+    result = await file_management_app.storage_upload_files(http_request=None,
         files=[f1],
         folder="attachments",
         authorization=MOCK_AUTH
@@ -659,7 +813,7 @@ async def test_storage_upload_files_attachments_no_auth_uses_raw_folder(monkeypa
     monkeypatch.setattr(file_management_app, "upload_to_minio", fake_upload)
 
     f1 = make_upload_file("test.txt")
-    result = await file_management_app.storage_upload_files(
+    result = await file_management_app.storage_upload_files(http_request=None,
         files=[f1],
         folder="attachments",
         authorization=MOCK_AUTH_NONE
@@ -681,7 +835,7 @@ async def test_storage_upload_files_counts(monkeypatch):
     monkeypatch.setattr(file_management_app, "upload_to_minio", fake_upload)
     f1 = make_upload_file("a.txt")
     f2 = make_upload_file("b.txt")
-    result = await file_management_app.storage_upload_files(
+    result = await file_management_app.storage_upload_files(http_request=None,
         files=[f1, f2],
         folder="attachments",
         authorization=MOCK_AUTH
@@ -702,7 +856,7 @@ async def test_storage_upload_files_internal_error(monkeypatch):
     f1 = make_upload_file("a.txt")
 
     with pytest.raises(Exception) as ei:
-        await file_management_app.storage_upload_files(
+        await file_management_app.storage_upload_files(http_request=None,
             files=[f1],
             folder="attachments",
             authorization=MOCK_AUTH
@@ -2286,3 +2440,75 @@ class TestParseRangeHeader:
     def test_negative_start_returns_none(self):
         """Negative start values are invalid."""
         assert file_management_app._parse_range_header("bytes=-10-20", 1000) is None
+
+
+# ============================================================================
+# Security audit entries
+# ============================================================================
+
+class TestFileAuditEntries:
+    """Security audit entries emitted by file upload endpoints."""
+
+    def test_kb_upload_emits_audit_entry(self, monkeypatch, caplog):
+        """Successful KB source upload records names/count/index, not content."""
+        import logging
+        from fastapi import FastAPI
+        from fastapi.testclient import TestClient
+
+        mock_upload_impl = AsyncMock(return_value=([], ["/abs/path1"], ["a.txt"]))
+        monkeypatch.setattr(file_management_app, "upload_files_impl", mock_upload_impl)
+
+        app = FastAPI()
+        app.include_router(file_management_app.file_management_config_router)
+        client = TestClient(app)
+
+        with caplog.at_level(logging.INFO, logger="audit.security"):
+            response = client.post(
+                "/file/upload",
+                data={
+                    "destination": "minio",
+                    "folder": "knowledge_base",
+                    "index_name": "test_index",
+                },
+                files=[("file", ("a.txt", b"secret file body", "text/plain"))],
+                headers={"Authorization": MOCK_AUTH},
+            )
+
+        assert response.status_code == 200
+        messages = [record.getMessage() for record in caplog.records
+                    if record.name == "audit.security"]
+        assert len(messages) == 1
+        assert "event=file_upload" in messages[0]
+        assert "result=success" in messages[0]
+        assert "user_id=user1" in messages[0]
+        assert '"index_name":"test_index"' in messages[0]
+        assert '"files_count":1' in messages[0]
+        assert '"filenames":["a.txt"]' in messages[0]
+        assert "secret file body" not in messages[0]
+
+    def test_storage_upload_emits_audit_entry(self, monkeypatch, caplog):
+        """Successful chat-attachment upload records folder and filenames."""
+        import logging
+        from fastapi import FastAPI
+        from fastapi.testclient import TestClient
+
+        app = FastAPI()
+        app.include_router(file_management_app.file_management_runtime_router)
+        client = TestClient(app)
+
+        with caplog.at_level(logging.INFO, logger="audit.security"):
+            response = client.post(
+                "/file/storage",
+                files=[("files", ("note.txt", b"secret attachment body", "text/plain"))],
+                headers={"Authorization": MOCK_AUTH},
+            )
+
+        assert response.status_code == 200
+        messages = [record.getMessage() for record in caplog.records
+                    if record.name == "audit.security"]
+        assert len(messages) == 1
+        assert "event=file_storage_upload" in messages[0]
+        assert "user_id=user1" in messages[0]
+        assert '"files_count":1' in messages[0]
+        assert '"filenames":["note.txt"]' in messages[0]
+        assert "secret attachment body" not in messages[0]

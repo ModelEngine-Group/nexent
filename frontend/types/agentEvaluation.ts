@@ -9,6 +9,10 @@ export type EvaluationSet = {
   update_time?: string;
 };
 
+export type EvaluationSetConfig = {
+  max_file_size_mb: number;
+};
+
 export type EvaluationSetCase = {
   evaluation_set_case_id: number;
   evaluation_set_id: number;

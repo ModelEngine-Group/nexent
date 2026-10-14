@@ -1,0 +1,81 @@
+schema_version: '1.0'
+stage: D5
+module: V5-BASELINE
+case:
+  case_id: REL-AUTO-D7FD61217390A8EE
+  feature_id: V5-REL-AUTO-D7FD61217390A8EE
+  business_rule_ids:
+  - V5-REL-AUTO-D7FD61217390A8EE-RULE-01
+  title: 模型连通性检查启动恢复：fail_detecting_models_on_startup 将 detecting 状态模型批量置 unavailable 且不误伤其他状态
+  type: RELIABILITY
+  priority: P1
+  status: active
+  automation: automated
+  objective: config-service 重启会打断进行中的模型连通性检查，导致模型记录停留在 connect_status=detecting；若不恢复，前端长期显示检测中，依赖 available 状态的调度与展示被误导。风险为本恢复逻辑误伤
+    available/unavailable/not_detected 或已删除(delete_flag=Y)的记录。
+  preconditions:
+  - '- ${NEXENT_TEST_HOME}/config/environment.yaml（仅本地测试环境参数）
+
+    - 本地测试数据库（ModelRecord 表；可直接导入 backend/database/model_management_db.py 的 fail_detecting_models_on_startup）'
+  test_data:
+    legacy_asset_declaration: '- ${NEXENT_TEST_HOME}/config/environment.yaml（仅本地测试环境参数）
+
+      - 本地测试数据库（ModelRecord 表；可直接导入 backend/database/model_management_db.py 的 fail_detecting_models_on_startup）'
+  steps:
+  - order: 1
+    action: 在本地测试数据库的 ModelRecord 表中插入一组记录：A1/A2 为 delete_flag=N 且 connect_status=detecting；B 为 delete_flag=Y 且 connect_status=detecting；C1/C2/C3
+      分别为 delete_flag=N 且 connect_status=available/unavailable/not_detected。
+    expected: fail_detecting_models_on_startup 返回的行数等于 delete_flag=N 且 connect_status=detecting 的记录数。
+  - order: 2
+    action: 直接导入 backend/database/model_management_db.py 中的 fail_detecting_models_on_startup 并调用，记录返回的受影响行数 rowcount。
+    expected: 仅 delete_flag=N 且 connect_status=detecting 的记录的 connect_status 由 detecting 变为 unavailable，且 update_time 已更新。
+  - order: 3
+    action: 重新查询全部测试记录，逐条核对 connect_status 与 update_time 变化。
+    expected: delete_flag=Y 的 detecting 记录以及 available/unavailable/not_detected 记录的 connect_status 保持不变。
+  - order: 4
+    action: 断言返回 rowcount 等于 delete_flag=N 且 connect_status=detecting 的记录数（A1/A2 共 2 条）。
+    expected: 空场景或重复调用返回 0；全程无未处理异常、无敏感信息泄露。
+  - order: 5
+    action: 断言 A1/A2 的 connect_status 由 detecting 变为 unavailable，且 update_time 已刷新。
+    expected: 空场景或重复调用返回 0；全程无未处理异常、无敏感信息泄露。
+  - order: 6
+    action: 断言 B（delete_flag=Y 的 detecting）与 C1/C2/C3（available/unavailable/not_detected）的 connect_status 全部保持原值不变。
+    expected: 空场景或重复调用返回 0；全程无未处理异常、无敏感信息泄露。
+  - order: 7
+    action: 再次调用该函数，断言第二次返回 0（幂等，不再重复修改记录）且不产生异常。
+    expected: 空场景或重复调用返回 0；全程无未处理异常、无敏感信息泄露。
+  - order: 8
+    action: 确认全程无未处理异常，日志中不输出 api_key 等敏感字段。
+    expected: 空场景或重复调用返回 0；全程无未处理异常、无敏感信息泄露。
+  expected_results:
+  - fail_detecting_models_on_startup 返回的行数等于 delete_flag=N 且 connect_status=detecting 的记录数。
+  - 仅 delete_flag=N 且 connect_status=detecting 的记录的 connect_status 由 detecting 变为 unavailable，且 update_time 已更新。
+  - delete_flag=Y 的 detecting 记录以及 available/unavailable/not_detected 记录的 connect_status 保持不变。
+  - 空场景或重复调用返回 0；全程无未处理异常、无敏感信息泄露。
+  forbidden_side_effects: []
+  source:
+    legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
+    legacy_sheet: 04_安全性能可靠性
+    legacy_row: 62
+  risk_type: RELIABILITY
+  risk: config-service 重启会打断进行中的模型连通性检查，导致模型记录停留在 connect_status=detecting；若不恢复，前端长期显示检测中，依赖 available 状态的调度与展示被误导。风险为本恢复逻辑误伤
+    available/unavailable/not_detected 或已删除(delete_flag=Y)的记录。
+  condition:
+  - '- ${NEXENT_TEST_HOME}/config/environment.yaml（仅本地测试环境参数）
+
+    - 本地测试数据库（ModelRecord 表；可直接导入 backend/database/model_management_db.py 的 fail_detecting_models_on_startup）'
+  metrics:
+  - fail_detecting_models_on_startup 返回的行数等于 delete_flag=N 且 connect_status=detecting 的记录数。
+  - 仅 delete_flag=N 且 connect_status=detecting 的记录的 connect_status 由 detecting 变为 unavailable，且 update_time 已更新。
+  - delete_flag=Y 的 detecting 记录以及 available/unavailable/not_detected 记录的 connect_status 保持不变。
+  - 空场景或重复调用返回 0；全程无未处理异常、无敏感信息泄露。
+  thresholds:
+  - fail_detecting_models_on_startup 返回的行数等于 delete_flag=N 且 connect_status=detecting 的记录数。
+  - 仅 delete_flag=N 且 connect_status=detecting 的记录的 connect_status 由 detecting 变为 unavailable，且 update_time 已更新。
+  - delete_flag=Y 的 detecting 记录以及 available/unavailable/not_detected 记录的 connect_status 保持不变。
+  - 空场景或重复调用返回 0；全程无未处理异常、无敏感信息泄露。
+  recovery_expectations:
+  - fail_detecting_models_on_startup 返回的行数等于 delete_flag=N 且 connect_status=detecting 的记录数。
+  - 仅 delete_flag=N 且 connect_status=detecting 的记录的 connect_status 由 detecting 变为 unavailable，且 update_time 已更新。
+  - delete_flag=Y 的 detecting 记录以及 available/unavailable/not_detected 记录的 connect_status 保持不变。
+  - 空场景或重复调用返回 0；全程无未处理异常、无敏感信息泄露。

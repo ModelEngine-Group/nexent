@@ -9,6 +9,7 @@ import {
 
 // Knowledge base basic type
 export interface KnowledgeBase {
+  tags?: string[];
   id: string; // Internal index_name
   knowledge_id?: number | string; // Stable local knowledge base business ID
   name: string; // User-facing knowledge_name

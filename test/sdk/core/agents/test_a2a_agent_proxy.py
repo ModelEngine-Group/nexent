@@ -219,6 +219,26 @@ def _load_a2a_agent_proxy_module():
     sys.modules["sdk.nexent"] = ModuleType("sdk.nexent")
     sys.modules["sdk.nexent.core"] = ModuleType("sdk.nexent.core")
     sys.modules["sdk.nexent.core.agents"] = ModuleType("sdk.nexent.core.agents")
+    concurrency_module = ModuleType("sdk.nexent.core.concurrency")
+
+    class ManagedTaskSpec:
+        def __init__(self, task_name, owner, close_hook=None):
+            self.task_name = task_name
+            self.owner = owner
+            self.close_hook = close_hook
+
+    class DirectTestManager:
+        def run_sync(self, _lane, _spec, fn, *args, **kwargs):
+            from concurrent.futures import ThreadPoolExecutor
+
+            kwargs.pop("timeout", None)
+            with ThreadPoolExecutor(max_workers=1) as executor:
+                return executor.submit(fn, *args, **kwargs).result()
+
+    concurrency_module.ManagedTaskSpec = ManagedTaskSpec
+    concurrency_module.RunCancellationScope = MagicMock
+    concurrency_module.get_current_thread_manager = lambda: DirectTestManager()
+    sys.modules["sdk.nexent.core.concurrency"] = concurrency_module
 
     spec = importlib.util.spec_from_file_location("sdk.nexent.core.agents.a2a_agent_proxy", module_path)
     module = importlib.util.module_from_spec(spec)
@@ -1083,7 +1103,7 @@ class TestExternalA2AAgentProxy:
 
     @pytest.mark.asyncio
     async def test_call_raises_timeout_exception(self):
-        """Test call() re-raises TimeoutException after logging error."""
+        """Test call() re-raises TimeoutException after logging a warning."""
         info = self._make_info()
         proxy = ExternalA2AAgentProxy(info)
 
@@ -1095,9 +1115,12 @@ class TestExternalA2AAgentProxy:
         with patch.object(a2a_agent_proxy, "logger") as mock_logger:
             with pytest.raises(_mock_httpx.TimeoutException):
                 await proxy.call("test query")
-            mock_logger.error.assert_called_once()
-            assert "timeout" in mock_logger.error.call_args[0][0].lower()
-            assert info.name in mock_logger.error.call_args[0][0]
+            mock_logger.warning.assert_called_once()
+            mock_logger.error.assert_not_called()
+            warning_args = mock_logger.warning.call_args.args
+            assert "event=%s" in warning_args[0]
+            assert "a2a_request_timeout" in warning_args
+            assert info.agent_id in warning_args
 
     @pytest.mark.asyncio
     async def test_call_raises_http_status_error(self):
@@ -1190,6 +1213,25 @@ class TestExternalA2AAgentProxy:
 
             with pytest.raises(RuntimeError, match="network error"):
                 proxy.sync_call("hello")
+
+    @pytest.mark.asyncio
+    async def test_tc_tlm_014_sync_call_in_async_context_uses_managed_tool_lane(self):
+        """The sync bridge must not create and join a raw thread."""
+        proxy = ExternalA2AAgentProxy(self._make_info())
+        manager = MagicMock()
+        manager.run_sync.return_value = "managed response"
+
+        with patch.object(
+            a2a_agent_proxy,
+            "get_current_thread_manager",
+            return_value=manager,
+        ):
+            result = proxy.sync_call("hello")
+
+        assert result == "managed response"
+        call = manager.run_sync.call_args
+        assert call.args[0] == "model-tool-io"
+        assert call.args[1].task_name == "a2a-sync-call"
 
     @pytest.mark.asyncio
     async def test_extract_text_from_events_artifact_update(self):
@@ -1751,6 +1793,59 @@ class TestExternalA2AAgentWrapper:
         )
         metadata["tenant"]["region"] = "changed"
         assert wrapper.get_runtime_metadata() == {"tenant": {"region": "cn"}}
+
+
+    def test_call_merges_user_context_into_message_context(self):
+        """The caller user context is merged into the forwarded message context."""
+        wrapper = ExternalA2AAgentWrapper(
+            self._make_info(),
+            user_context={
+                "user_account": "bug-admin@qq.com",
+                "user_groups": ["Default Group"],
+            },
+        )
+        wrapper.set_runtime_metadata({"tenant": {"region": "cn"}})
+
+        with patch.object(ExternalA2AAgentProxy, "sync_call", return_value="ok") as sync_call:
+            assert wrapper(task="do something") == "ok"
+
+        sync_call.assert_called_once_with(
+            "do something",
+            [],
+            context={
+                "tenant": {"region": "cn"},
+                "user_context": {
+                    "user_account": "bug-admin@qq.com",
+                    "user_groups": ["Default Group"],
+                },
+            },
+        )
+
+    def test_user_context_is_isolated_copy(self):
+        """Mutating the source dict after construction must not leak into calls."""
+        source = {"user_account": "bug-admin@qq.com"}
+        wrapper = ExternalA2AAgentWrapper(self._make_info(), user_context=source)
+        source["user_account"] = "forged@evil.com"
+
+        with patch.object(ExternalA2AAgentProxy, "sync_call", return_value="ok") as sync_call:
+            wrapper(task="do something")
+
+        assert sync_call.call_args[1]["context"]["user_context"] == {
+            "user_account": "bug-admin@qq.com"
+        }
+
+    def test_untrusted_runtime_user_context_is_not_forwarded(self):
+        """Chat metadata cannot impersonate the authenticated user context."""
+        wrapper = ExternalA2AAgentWrapper(self._make_info())
+        wrapper.set_runtime_metadata({
+            "trace_id": "trace-1",
+            "user_context": {"user_account": "forged@example.com"},
+        })
+
+        with patch.object(ExternalA2AAgentProxy, "sync_call", return_value="ok") as sync_call:
+            wrapper(task="do something")
+
+        assert sync_call.call_args[1]["context"] == {"trace_id": "trace-1"}
 
     def test_set_runtime_metadata_rejects_non_dict(self):
         """set_runtime_metadata must reject values that are not mappings."""

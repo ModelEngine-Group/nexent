@@ -3,11 +3,19 @@ from enum import Enum
 from pathlib import Path
 from dotenv import load_dotenv
 
+try:
+    from backend.utils.config_validation import parse_positive_float, parse_positive_int
+except ModuleNotFoundError:
+    # The production service runs with ``backend`` as the working directory,
+    # where backend-local modules are imported from the top-level package.
+    from utils.config_validation import parse_positive_float, parse_positive_int
+
 # Load environment variables
 # Explicitly sourced deployment variables take precedence over a nearby
 # developer .env file. This is required for tmux/K8s-local verification and
 # avoids silently replacing operator-provided service addresses.
 load_dotenv(override=False)
+
 
 # TODO: Analyze every variable if this is used
 # Test voice file path (WAV format for volcengine STT)
@@ -43,13 +51,31 @@ UNSTRUCTURED_DEFAULT_MODEL_INITIALIZE_PARAMS_JSON_PATH = os.getenv(
 
 # Upload Configuration
 MAX_FILE_SIZE = 100 * 1024 * 1024  # 100MB
+# Knowledge-base uploads have an independently configurable hard ceiling.
+MAX_KNOWLEDGE_FILE_SIZE_MB = parse_positive_int(
+    os.getenv("MAX_KNOWLEDGE_FILE_SIZE_MB"), "MAX_KNOWLEDGE_FILE_SIZE_MB", 100
+)
+MAX_KNOWLEDGE_FILE_SIZE_BYTES = MAX_KNOWLEDGE_FILE_SIZE_MB * 1024 * 1024
 MAX_CONCURRENT_UPLOADS = 5
 UPLOAD_FOLDER = os.getenv('UPLOAD_FOLDER', 'uploads')
 AGENT_WORKSPACE_ROOT = os.getenv('AGENT_WORKSPACE_ROOT', '/mnt/nexent/workdir')
+NEXENT_SANDBOX_WORKSPACE_MODE = os.getenv('NEXENT_SANDBOX_WORKSPACE_MODE', 'legacy')
+NEXENT_SANDBOX_CONTAINER_WORKSPACE_ROOT = os.getenv('NEXENT_SANDBOX_CONTAINER_WORKSPACE_ROOT', '')
+NEXENT_SANDBOX_FAILURE_POLICY = os.getenv('NEXENT_SANDBOX_FAILURE_POLICY', 'local')
 ROOT_DIR = os.getenv("ROOT_DIR")
 
 PER_WAVE_TIMEOUT = int(os.getenv("DP_SPLIT_WAIT_TIMEOUT_PER_WAVE_S", "30"))
 MAX_TIMEOUT = int(os.getenv("DP_SPLIT_WAIT_TIMEOUT_MAX_S", "1800"))
+
+# Document deletion coordination.  The Redis deletion fence itself never
+# expires; these values only bound one drain attempt and background retry
+# cadence while workers finish an in-flight request.
+DOCUMENT_DELETE_DRAIN_TIMEOUT_S = float(
+    os.getenv("DOCUMENT_DELETE_DRAIN_TIMEOUT_S", "30")
+)
+DOCUMENT_DELETE_RETRY_INTERVAL_S = float(
+    os.getenv("DOCUMENT_DELETE_RETRY_INTERVAL_S", "2")
+)
 
 # Agent automation runtime configuration
 AGENT_AUTOMATION_ENABLED = os.getenv(
@@ -61,6 +87,14 @@ AGENT_AUTOMATION_POLL_INTERVAL_SECONDS = int(
 AGENT_AUTOMATION_MAX_CONCURRENT_RUNS = int(
     os.getenv("AGENT_AUTOMATION_MAX_CONCURRENT_RUNS", "2")
 )
+
+# Unified tag document retrieval projection rollout flag. When enabled, document
+# assignments are projected to retrieval providers and tracked in the
+# document_tag_projection ledger; canonical assignments are never rolled back
+# when a provider rejects or delays a projection.
+TAG_DOCUMENT_PROJECTION_ENABLED = os.getenv(
+    "TAG_DOCUMENT_PROJECTION_ENABLED", "true"
+).lower() in ("true", "1", "yes", "on")
 AGENT_AUTOMATION_LEASE_SECONDS = int(
     os.getenv("AGENT_AUTOMATION_LEASE_SECONDS", "120")
 )
@@ -79,7 +113,18 @@ AGENT_AUTOMATION_MIN_INTERVAL_SECONDS = int(
 CONTAINER_SKILLS_PATH = os.getenv("SKILLS_PATH")
 
 # Container-internal official skills ZIP directory
-OFFICIAL_SKILLS_ZIP_PATH = "/mnt/nexent/official-skills-zip"
+OFFICIAL_SKILLS_ZIP_PATH = os.getenv(
+    "OFFICIAL_SKILLS_ZIP_PATH", "/mnt/nexent/official-skills-zip"
+)
+
+# Container-internal official agents bundle directory (one JSON per agent)
+OFFICIAL_AGENTS_PATH = os.getenv(
+    "OFFICIAL_AGENTS_PATH", "/mnt/nexent/official-agents"
+)
+
+OFFICIAL_AGENT_PROFILES = os.getenv("OFFICIAL_AGENT_PROFILES", "")
+SYSTEM_TENANT_ID = "system"
+SYSTEM_USER_ID = "system"
 
 
 # Preview Configuration
@@ -130,6 +175,8 @@ OAUTH_LOGIN_MODE = os.getenv("OAUTH_LOGIN_MODE", "button").lower()
 # CAS SSO Configuration
 CAS_ENABLED = os.getenv("CAS_ENABLED", "false").lower() in ("true", "1", "yes", "on")
 CAS_SERVER_URL = os.getenv("CAS_SERVER_URL", "").rstrip("/")
+# Optional backend-only URL for CAS servers reachable through an internal container network.
+CAS_INTERNAL_SERVER_URL = os.getenv("CAS_INTERNAL_SERVER_URL", "").rstrip("/")
 CAS_VALIDATE_PATH = os.getenv("CAS_VALIDATE_PATH", "/p3/serviceValidate")
 CAS_CALLBACK_BASE_URL = os.getenv("CAS_CALLBACK_BASE_URL", OAUTH_CALLBACK_BASE_URL).rstrip("/")
 # CAS login mode:
@@ -179,12 +226,49 @@ IMAGE_FILTER = os.getenv("IMAGE_FILTER", "false").lower() == "true"
 DEFAULT_USER_ID = "user_id"
 DEFAULT_TENANT_ID = "tenant_id"
 
-# Tenant resource hard limits. These values are intentionally not configurable.
-MAX_TENANT_COUNT = 100
-MAX_USERS_PER_TENANT = 10_000
-MAX_GROUPS_PER_TENANT = 1_000
-MAX_SUPER_ADMIN_COUNT = 1
-MAX_ADMINS_PER_TENANT = 1_000
+# Tenant resource hard limits. Environment variables override these defaults.
+MAX_TENANT_COUNT = parse_positive_int(os.getenv("MAX_TENANT_COUNT"), "MAX_TENANT_COUNT", 100)
+MAX_USERS_PER_TENANT = parse_positive_int(os.getenv("MAX_USERS_PER_TENANT"), "MAX_USERS_PER_TENANT", 10_000)
+MAX_GROUPS_PER_TENANT = parse_positive_int(os.getenv("MAX_GROUPS_PER_TENANT"), "MAX_GROUPS_PER_TENANT", 1_000)
+MAX_SUPER_ADMIN_COUNT = parse_positive_int(os.getenv("MAX_SUPER_ADMIN_COUNT"), "MAX_SUPER_ADMIN_COUNT", 1)
+MAX_ADMINS_PER_TENANT = parse_positive_int(os.getenv("MAX_ADMINS_PER_TENANT"), "MAX_ADMINS_PER_TENANT", 1_000)
+MAX_KNOWLEDGE_BASES_PER_TENANT = parse_positive_int(
+    os.getenv("MAX_KNOWLEDGE_BASES_PER_TENANT"), "MAX_KNOWLEDGE_BASES_PER_TENANT", 10_000
+)
+MAX_KNOWLEDGE_BASES_PER_USER = parse_positive_int(
+    os.getenv("MAX_KNOWLEDGE_BASES_PER_USER"), "MAX_KNOWLEDGE_BASES_PER_USER", 10
+)
+MAX_PRIVILEGED_KNOWLEDGE_BASES_PER_USER = parse_positive_int(
+    os.getenv("MAX_PRIVILEGED_KNOWLEDGE_BASES_PER_USER"),
+    "MAX_PRIVILEGED_KNOWLEDGE_BASES_PER_USER",
+    1_000,
+)
+MAX_CONVERSATION_TURNS = parse_positive_int(
+    os.getenv("MAX_CONVERSATION_TURNS"), "MAX_CONVERSATION_TURNS", 100
+)
+MAX_CONVERSATIONS_PER_USER = parse_positive_int(
+    os.getenv("MAX_CONVERSATIONS_PER_USER"), "MAX_CONVERSATIONS_PER_USER", 1_000
+)
+MAX_AGENTS_PER_TENANT = parse_positive_int(
+    os.getenv("MAX_AGENTS_PER_TENANT"), "MAX_AGENTS_PER_TENANT", 1_000
+)
+
+# Skill resource hard limits. Environment variables override these defaults.
+MAX_SKILLS_PER_TENANT = parse_positive_int(
+    os.getenv("MAX_SKILLS_PER_TENANT"), "MAX_SKILLS_PER_TENANT", 1_000
+)
+MAX_SKILL_UPLOAD_SIZE_MB = parse_positive_int(
+    os.getenv("MAX_SKILL_UPLOAD_SIZE_MB"), "MAX_SKILL_UPLOAD_SIZE_MB", 10
+)
+MAX_SKILL_UPLOAD_SIZE_BYTES = MAX_SKILL_UPLOAD_SIZE_MB * 1024 * 1024
+
+# Evaluation-set Excel uploads.
+MAX_EVALUATION_SET_FILE_SIZE_MB = parse_positive_int(
+    os.getenv("MAX_EVALUATION_SET_FILE_SIZE_MB"),
+    "MAX_EVALUATION_SET_FILE_SIZE_MB",
+    20,
+)
+MAX_EVALUATION_SET_FILE_SIZE_BYTES = MAX_EVALUATION_SET_FILE_SIZE_MB * 1024 * 1024
 
 # Invitation code type for asset administrator registration
 ASSET_OWNER_INVITE_CODE_TYPE = "ASSET_OWNER_INVITE"
@@ -230,14 +314,11 @@ IS_SPEED_MODE = DEPLOYMENT_VERSION == "speed"
 
 # AIDP Knowledge Base configuration
 ENABLE_AIDP_KNOWLEDGE = os.getenv("ENABLE_AIDP_KNOWLEDGE", "false").lower() in ("true", "1", "yes", "on")
+ENABLE_AGENT_WORKBENCH = os.getenv("ENABLE_AGENT_WORKBENCH", "false").lower() in ("true", "1", "yes", "on")
+HIDE_HOME_PAGE = os.getenv("HIDE_HOME_PAGE", "false").lower() in ("true", "1", "yes", "on")
 AIDP_SERVER_URL = os.getenv("AIDP_SERVER_URL", "")
 AIDP_API_KEY = os.getenv("AIDP_API_KEY", "")
 AIDP_TENANT_ID = os.getenv("AIDP_TENANT_ID", "aidp")
-DEFAULT_APP_DESCRIPTION_ZH = "Nexent 是一个开源智能体平台，基于 MCP 工具生态系统，提供灵活的多模态问答、检索、数据分析、处理等能力。"
-DEFAULT_APP_DESCRIPTION_EN = "Nexent is an open-source agent platform built on the MCP tool ecosystem, providing flexible multi-modal Q&A, retrieval, data analysis, and processing capabilities."
-DEFAULT_APP_NAME_ZH = "Nexent 智能体"
-DEFAULT_APP_NAME_EN = "Nexent Agent"
-
 # Minio Configuration
 MINIO_ENDPOINT = os.getenv("MINIO_ENDPOINT")
 MINIO_ACCESS_KEY = os.getenv("MINIO_ACCESS_KEY")
@@ -270,6 +351,50 @@ RUNTIME_RUN_TTL_SECONDS = int(os.getenv("RUNTIME_RUN_TTL_SECONDS", "86400"))
 RUNTIME_CANCEL_TTL_SECONDS = int(os.getenv("RUNTIME_CANCEL_TTL_SECONDS", "86400"))
 RUNTIME_COMPLETED_TTL_SECONDS = int(os.getenv("RUNTIME_COMPLETED_TTL_SECONDS", "300"))
 RUNTIME_CANCEL_POLL_INTERVAL_SECONDS = float(os.getenv("RUNTIME_CANCEL_POLL_INTERVAL_SECONDS", "1.0"))
+RUNTIME_AGENT_ID_MAX_CONCURRENT_RUNS = int(
+    os.getenv("RUNTIME_AGENT_ID_MAX_CONCURRENT_RUNS", "50")
+)
+RUNTIME_AGENT_THREAD_MAX_WORKERS = int(os.getenv("RUNTIME_AGENT_THREAD_MAX_WORKERS", "200"))
+RUNTIME_AGENT_THREAD_MAX_QUEUE_SIZE = int(os.getenv("RUNTIME_AGENT_THREAD_MAX_QUEUE_SIZE", "32"))
+if RUNTIME_AGENT_ID_MAX_CONCURRENT_RUNS <= 0:
+    raise ValueError("RUNTIME_AGENT_ID_MAX_CONCURRENT_RUNS must be greater than zero")
+if RUNTIME_AGENT_THREAD_MAX_WORKERS <= 0:
+    raise ValueError("RUNTIME_AGENT_THREAD_MAX_WORKERS must be greater than zero")
+RUNTIME_AGENT_THREAD_QUEUE_TIMEOUT_SECONDS = float(
+    os.getenv("RUNTIME_AGENT_THREAD_QUEUE_TIMEOUT_SECONDS", "30")
+)
+if RUNTIME_AGENT_THREAD_QUEUE_TIMEOUT_SECONDS <= 0:
+    raise ValueError("RUNTIME_AGENT_THREAD_QUEUE_TIMEOUT_SECONDS must be greater than zero")
+RUNTIME_AGENT_THREAD_CANCEL_GRACE_SECONDS = float(
+    os.getenv("RUNTIME_AGENT_THREAD_CANCEL_GRACE_SECONDS", "5")
+)
+RUNTIME_MCP_TOOL_TIMEOUT_SECONDS = float(
+    os.getenv("RUNTIME_MCP_TOOL_TIMEOUT_SECONDS", "60")
+)
+RUNTIME_PARALLEL_EXECUTOR_TIMEOUT_SECONDS = int(
+    os.getenv("RUNTIME_PARALLEL_EXECUTOR_TIMEOUT_SECONDS", "120")
+)
+if RUNTIME_PARALLEL_EXECUTOR_TIMEOUT_SECONDS <= 0:
+    raise ValueError("RUNTIME_PARALLEL_EXECUTOR_TIMEOUT_SECONDS must be greater than zero")
+RUNTIME_MCP_CLOSE_TIMEOUT_SECONDS = float(
+    os.getenv("RUNTIME_MCP_CLOSE_TIMEOUT_SECONDS", "5")
+)
+if RUNTIME_MCP_TOOL_TIMEOUT_SECONDS <= 0:
+    raise ValueError("RUNTIME_MCP_TOOL_TIMEOUT_SECONDS must be greater than zero")
+if RUNTIME_MCP_CLOSE_TIMEOUT_SECONDS <= 0:
+    raise ValueError("RUNTIME_MCP_CLOSE_TIMEOUT_SECONDS must be greater than zero")
+RUNTIME_THREAD_SHUTDOWN_GRACE_SECONDS = float(
+    os.getenv("RUNTIME_THREAD_SHUTDOWN_GRACE_SECONDS", "30")
+)
+NORTHBOUND_CONTROL_THREAD_MAX_WORKERS = int(
+    os.getenv("NORTHBOUND_CONTROL_THREAD_MAX_WORKERS", "8")
+)
+NORTHBOUND_CONTROL_THREAD_MAX_QUEUE_SIZE = int(
+    os.getenv("NORTHBOUND_CONTROL_THREAD_MAX_QUEUE_SIZE", "64")
+)
+NORTHBOUND_THREAD_SHUTDOWN_GRACE_SECONDS = float(
+    os.getenv("NORTHBOUND_THREAD_SHUTDOWN_GRACE_SECONDS", "15")
+)
 NORTHBOUND_IDEMPOTENCY_TTL_SECONDS = int(os.getenv("NORTHBOUND_IDEMPOTENCY_TTL_SECONDS", "600"))
 NORTHBOUND_RATE_LIMIT_ENABLED = os.getenv("NORTHBOUND_RATE_LIMIT_ENABLED", "true").lower() == "true"
 NORTHBOUND_RATE_LIMIT_PER_MINUTE = int(os.getenv("NORTHBOUND_RATE_LIMIT_PER_MINUTE", "120"))
@@ -282,24 +407,29 @@ FORWARD_REDIS_RETRY_DELAY_S = int(os.getenv("FORWARD_REDIS_RETRY_DELAY_S", "5"))
 FORWARD_REDIS_RETRY_MAX = int(os.getenv("FORWARD_REDIS_RETRY_MAX", "12"))
 
 
-# Ray Configuration
+# Data processing parser configuration
 DP_PART_PROCESSOR_COUNT = int(os.getenv("DP_PART_PROCESSOR_COUNT", "3"))
 DP_FILE_SPLIT_SIZE_MB = int(os.getenv("DP_FILE_SPLIT_SIZE_MB", "5"))
-RAY_ACTOR_NUM_CPUS = int(os.getenv("RAY_ACTOR_NUM_CPUS", "2"))
-RAY_DASHBOARD_PORT = int(os.getenv("RAY_DASHBOARD_PORT", "8265"))
-RAY_DASHBOARD_HOST = os.getenv("RAY_DASHBOARD_HOST", "0.0.0.0")
-RAY_NUM_CPUS = DP_PART_PROCESSOR_COUNT * RAY_ACTOR_NUM_CPUS
-RAY_OBJECT_STORE_MEMORY_GB = float(os.getenv("RAY_OBJECT_STORE_MEMORY_GB", "0.25"))
-RAY_TEMP_DIR = os.getenv("RAY_TEMP_DIR", "/tmp/ray")
-RAY_LOG_LEVEL = os.getenv("RAY_LOG_LEVEL", "INFO").upper()
-# Disable plasma preallocation to reduce idle memory usage
-# When set to false, Ray will allocate object store memory on-demand instead of preallocating
-RAY_preallocate_plasma = os.getenv("RAY_preallocate_plasma", "false").lower() == "true"
+DP_PARSE_MAX_PROCESSES = int(os.getenv("DP_PARSE_MAX_PROCESSES", "3"))
+DP_PARSE_MIN_PROCESSES = int(os.getenv("DP_PARSE_MIN_PROCESSES", "1"))
+DP_PARSE_THREADS_PER_PROCESS = int(os.getenv("DP_PARSE_THREADS_PER_PROCESS", "2"))
+DP_PARSE_MAX_TASKS_PER_CHILD = int(os.getenv("DP_PARSE_MAX_TASKS_PER_CHILD", "1000"))
+DP_PRELOAD_MODELS = os.getenv("DP_PRELOAD_MODELS", "unstructured_default").strip()
+DP_PARSER_STARTUP_TIMEOUT_S = int(os.getenv("DP_PARSER_STARTUP_TIMEOUT_S", "300"))
+DP_PARSER_WORKER_GENERATION = os.getenv("DP_PARSER_WORKER_GENERATION", "").strip()
+
+
+# Logging Configuration
+LOG_DIR = os.getenv("LOG_DIR", "logs")
+LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()
+# When IS_DEBUG=true, force DEBUG level for all loggers (overrides LOG_LEVEL).
+IS_DEBUG = os.getenv("IS_DEBUG", "false").lower() == "true"
+LOG_ROTATION_INTERVAL = int(os.getenv("LOG_ROTATION_INTERVAL", "1"))  # days
+LOG_MAX_BYTES = int(os.getenv("LOG_MAX_BYTES", str(50 * 1024 * 1024)))  # 50 MB
+LOG_BACKUP_COUNT = int(os.getenv("LOG_BACKUP_COUNT", "30"))
 
 
 # Service Control Flags
-DISABLE_RAY_DASHBOARD = os.getenv(
-    "DISABLE_RAY_DASHBOARD", "false").lower() == "true"
 DISABLE_CELERY_FLOWER = os.getenv(
     "DISABLE_CELERY_FLOWER", "false").lower() == "true"
 DOCKER_ENVIRONMENT = os.getenv("DOCKER_ENVIRONMENT", "false").lower() == "true"
@@ -319,10 +449,9 @@ ELASTICSEARCH_REQUEST_TIMEOUT = int(
 
 
 # Worker Configuration
-RAY_ADDRESS = os.getenv("RAY_ADDRESS", "auto")
 QUEUES = os.getenv(
     "QUEUES",
-    "process_q,process_part_q,forward_q,forward_part_q,forward_aggregate_q",
+    "process_q,parse_q,forward_q,forward_part_q,forward_aggregate_q",
 )
 # Will be dynamically set based on PID if not provided
 WORKER_NAME = os.getenv("WORKER_NAME")
@@ -331,15 +460,6 @@ WORKER_NAME = os.getenv("WORKER_NAME")
 WORKER_CONCURRENCY = int(
     os.getenv("WORKER_CONCURRENCY", str(DP_PART_PROCESSOR_COUNT + 1))
 )
-RAY_WARM_ACTOR_POOL_SIZE_PART = int(
-    os.getenv("RAY_WARM_ACTOR_POOL_SIZE_PART", "2"))
-RAY_WARM_ACTOR_POOL_SIZE_PROCESS = int(
-    os.getenv("RAY_WARM_ACTOR_POOL_SIZE_PROCESS", "1"))
-RAY_ACTOR_WARM_TIMEOUT_S = float(os.getenv("RAY_ACTOR_WARM_TIMEOUT_S", "60"))
-RAY_GLOBAL_ACTOR_POOL_NAME = os.getenv(
-    "RAY_GLOBAL_ACTOR_POOL_NAME", "nexent_global_data_processor_pool")
-RAY_GLOBAL_ACTOR_POOL_NAMESPACE = os.getenv(
-    "RAY_GLOBAL_ACTOR_POOL_NAMESPACE", "nexent-data-process")
 
 
 # Voice Service Configuration
@@ -356,9 +476,11 @@ DREAMING_SWITCH_KEY = "DREAMING_SWITCH"
 MEMORY_AGENT_SHARE_KEY = "MEMORY_AGENT_SHARE"
 DISABLE_AGENT_ID_KEY = "DISABLE_AGENT_ID"
 DISABLE_USERAGENT_ID_KEY = "DISABLE_USERAGENT_ID"
+EXTERNAL_PROVIDER_TOP_K_KEY = "EXTERNAL_PROVIDER_TOP_K"
 DEFAULT_MEMORY_SWITCH_KEY = "Y"
 DEFAULT_DREAMING_SWITCH_KEY = "Y"
 DEFAULT_MEMORY_AGENT_SHARE_KEY = "always"
+DEFAULT_EXTERNAL_PROVIDER_TOP_K = 20
 # Boolean value representations for configuration parsing
 BOOLEAN_TRUE_VALUES = {"true", "1", "y", "yes", "on"}
 
@@ -411,9 +533,10 @@ PROVIDER_REQUEST_TIMEOUT_SECONDS = int(
     os.getenv("PROVIDER_REQUEST_TIMEOUT_SECONDS", "30")
 )
 
-# External provider toggles (configured per provider elsewhere; these constants
-# describe protocol-level defaults)
+# External provider protocol defaults. Provider records control whether each
+# configured integration participates in search and ingest.
 EXTERNAL_MEMORY_DEFAULT_ALLOWED_UNIT_TYPES = (
+    "agent",
     "model_output",
     "model_output_thinking",
     "model_output_deep_thinking",
@@ -442,6 +565,19 @@ DEFAULT_MAXIMUM_CHUNK_SIZE = 1536
 # MCP Server
 LOCAL_MCP_SERVER = os.getenv("NEXENT_MCP_SERVER")
 MCP_MANAGEMENT_API = os.getenv("MCP_MANAGEMENT_API", "http://localhost:5015")
+# Maximum number of configured MCP services per tenant.
+MAX_MCP_SERVICES_PER_TENANT = parse_positive_int(
+    os.getenv("MAX_MCP_SERVICES_PER_TENANT"),
+    "MAX_MCP_SERVICES_PER_TENANT",
+    1_000,
+)
+# Maximum time allowed to establish a connection and complete the MCP
+# initialization handshake. This does not limit tool execution time.
+MCP_REQUEST_TIMEOUT_SECONDS = parse_positive_float(
+    os.getenv("MCP_REQUEST_TIMEOUT_SECONDS"),
+    "MCP_REQUEST_TIMEOUT_SECONDS",
+    10,
+)
 
 
 # Invite code
@@ -521,8 +657,6 @@ MODEL_CONFIG_MAPPING = {
     "tts": "TTS_ID"
 }
 
-APP_NAME = "APP_NAME"
-APP_DESCRIPTION = "APP_DESCRIPTION"
 ICON_TYPE = "ICON_TYPE"
 ICON_KEY = "ICON_KEY"
 AVATAR_URI = "AVATAR_URI"
@@ -587,6 +721,8 @@ MONITORING_FASTAPI_EXCLUDE_SPANS = os.getenv(
     "MONITORING_FASTAPI_EXCLUDE_SPANS", "receive,send")
 MONITORING_PROJECT_NAME = os.getenv("MONITORING_PROJECT_NAME", "")
 MONITORING_DASHBOARD_URL = os.getenv("MONITORING_DASHBOARD_URL", "")
+MONITORING_DASHBOARD_ALLOWED_ROLES = os.getenv(
+    "MONITORING_DASHBOARD_ALLOWED_ROLES", "SU,SPEED")
 MONITORING_TRACE_CONTENT_MODE = os.getenv(
     "MONITORING_TRACE_CONTENT_MODE", "summary")
 MONITORING_TRACE_MAX_CHARS = os.getenv("MONITORING_TRACE_MAX_CHARS", "4000")
@@ -701,6 +837,18 @@ APP_VERSION = _resolve_app_version()
 # Agent Sandbox Configuration
 # =============================================================================
 
+NEXENT_TOOL_FASTPATH_ENABLED = (
+    os.getenv("NEXENT_TOOL_FASTPATH_ENABLED", "true").strip().lower() == "true"
+)
+NEXENT_TOOL_FASTPATH_ALLOWED_TOOLS = tuple(dict.fromkeys(
+    item.strip()
+    for item in os.getenv(
+        "NEXENT_TOOL_FASTPATH_ALLOWED_TOOLS",
+        "KnowledgeBaseSearchTool,ReadSkillMdTool,ReadSkillConfigTool,AidpSearchTool",
+    ).split(",")
+    if item.strip()
+))
+
 NEXENT_SANDBOX_DEFAULT_LEVEL = os.getenv("NEXENT_SANDBOX_DEFAULT_LEVEL", "local").lower()
 """Default sandbox isolation level: local / docker / wasm.
    Default 'local' preserves backward-compatibility for existing deployments."""
@@ -720,7 +868,7 @@ NEXENT_SANDBOX_WORKSPACE_VOLUME = os.getenv(
 )
 """Docker named volume shared by the runtime and the system-scoped sandbox."""
 
-NEXENT_SANDBOX_MEMORY_LIMIT_MB = int(os.getenv("NEXENT_SANDBOX_MEMORY_LIMIT_MB", "512"))
+NEXENT_SANDBOX_MEMORY_LIMIT_MB = int(os.getenv("NEXENT_SANDBOX_MEMORY_LIMIT_MB", "2048"))
 
 NEXENT_SANDBOX_CPU_QUOTA = float(os.getenv("NEXENT_SANDBOX_CPU_QUOTA", "1.0"))
 
@@ -773,3 +921,23 @@ enabling the provider to return log probability information in the response."""
 
 # SSE streaming event type for status messages
 STREAM_STATUS_EVENT = "event: stream_status\n"
+
+# Model Catalog - 预置模型目录配置文件路径
+MODEL_CATALOG_JSON_PATH = os.getenv(
+    "MODEL_CATALOG_JSON_PATH",
+    os.path.join(os.path.dirname(__file__), "..", "configs", "model_catalog.json")
+)
+"""Nexent 预置模型目录 (JSON) 文件路径。可通过环境变量覆盖。"""
+
+MODELS_DEV_CATALOG_JSON_PATH = os.getenv(
+    "MODELS_DEV_CATALOG_JSON_PATH",
+    os.path.join(os.path.dirname(__file__), "..", "configs", "models_dev_catalog.json")
+)
+"""models.dev capability catalog downloaded during the backend image build."""
+
+# External Memory Provider Configuration
+MEMORY_PROVIDER_PLUGINS_DIR = os.getenv("MEMORY_PROVIDER_PLUGINS_DIR", "")
+
+
+# Bundled LiteLLM catalog used for model capacity suggestions.
+NEXENT_LITELLM_JSON = os.environ.get("NEXENT_LITELLM_JSON", "/opt/nexent/litellm_models.json")

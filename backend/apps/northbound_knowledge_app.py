@@ -8,10 +8,12 @@ from fastapi.responses import JSONResponse, RedirectResponse, StreamingResponse
 
 from consts.const import ASSET_OWNER_TENANT_ID, VectorDatabaseType
 from consts.exceptions import (
+    AppException,
     LimitExceededError,
     UnauthorizedError,
 )
 from consts.model import HybridSearchRequest, ProcessParams
+from consts.task_recovery import NORTHBOUND_SERVICE_NAME
 from database.knowledge_db import get_index_name_by_knowledge_name
 from services.file_management_service import (
     upload_files_impl,
@@ -21,7 +23,7 @@ from services.file_management_service import (
 )
 from services.northbound_service import NorthboundContext
 from services.redis_service import get_redis_service
-from services.vectordatabase_service import (
+from management.services.knowledge_base.service import (
     ElasticSearchService,
     KnowledgeBaseNeedsModelConfigError,
     get_vector_db_core,
@@ -137,6 +139,9 @@ async def create_new_index(
             embedding_model_id=embedding_model_id,
             preserve_source_file=preserve_source_file,
         )
+    except AppException:
+        # Preserve the standard error code/details for knowledge resource limits.
+        raise
     except LimitExceededError as e:
         logger.exception("Rate limit exceeded while creating index")
         raise HTTPException(
@@ -173,6 +178,9 @@ async def delete_index(
         return await ElasticSearchService.full_delete_knowledge_base(
             index_name, vdb_core, ctx.user_id
         )
+    except AppException:
+        # Preserve the EDS code/details for northbound clients.
+        raise
     except LimitExceededError as e:
         logger.exception("Rate limit exceeded while deleting index")
         raise HTTPException(
@@ -460,7 +468,13 @@ async def upload_files(
             )
 
         errors, uploaded_file_paths, uploaded_filenames = await upload_files_impl(
-            destination, file, None, index_name, ctx.user_id, uploader_tenant_id=ctx.tenant_id
+            destination,
+            file,
+            None,
+            index_name,
+            ctx.user_id,
+            uploader_tenant_id=ctx.tenant_id,
+            upload_owner_service=NORTHBOUND_SERVICE_NAME,
         )
 
         if uploaded_file_paths:
@@ -515,6 +529,8 @@ async def upload_files(
         raise HTTPException(
             status_code=HTTPStatus.UNAUTHORIZED, detail=str(e))
     except HTTPException:
+        raise
+    except AppException:
         raise
     except Exception:
         logger.exception("File upload error")

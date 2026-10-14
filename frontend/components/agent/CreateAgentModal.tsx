@@ -1,21 +1,27 @@
 "use client";
 
-import { useEffect } from "react";
-import { App, Form, Input, Modal } from "antd";
+import { useEffect, useState } from "react";
+import { App, Empty, Form, Input, Spin } from "antd";
+import { ExternalLink } from "lucide-react";
+import Link from "next/link";
+import { useParams } from "next/navigation";
 import { useTranslation } from "react-i18next";
 
+import { StandardButton } from "@/components/common/StandardButton";
+import { StandardModal } from "@/components/common/StandardModal";
 import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
+import { getTenantResourceLimitMessage } from "@/const/errorMessageI18n";
 import {
   AGENT_NAME_MAX_LENGTH,
   createAgentNameConflictValidator,
   isValidAgentDisplayName,
-  isValidAgentName,
 } from "@/hooks/agent/useSaveGuard";
 import { updateAgentInfo } from "@/services/agentConfigService";
 
+import { useAgentCreationTemplates } from "@/hooks/agent/useAgentCreationTemplates";
+
 export interface CreatedAgentResult {
   agentId: number;
-  name: string;
   displayName: string;
 }
 
@@ -27,8 +33,9 @@ interface CreateAgentModalProps {
 
 interface CreateAgentFormValues {
   displayName: string;
-  name: string;
 }
+
+const CREATE_AGENT_MODAL_MAX_HEIGHT = 572;
 
 export default function CreateAgentModal({
   open,
@@ -38,7 +45,14 @@ export default function CreateAgentModal({
   const { t } = useTranslation("common");
   const { user } = useAuthorizationContext();
   const { message } = App.useApp();
+  const params = useParams<{ locale?: string }>();
   const [form] = Form.useForm<CreateAgentFormValues>();
+  const [selectedTemplateId, setSelectedTemplateId] = useState<string | null>(
+    null
+  );
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const templatesQuery = useAgentCreationTemplates(open);
+  const templates = templatesQuery.isError ? [] : (templatesQuery.data ?? []);
 
   useEffect(() => {
     if (open) {
@@ -46,106 +60,222 @@ export default function CreateAgentModal({
     }
   }, [form, open]);
 
+  if (!open && selectedTemplateId !== null) setSelectedTemplateId(null);
+
+  const selectedTemplate = templates.find(
+    (template) => template.id === selectedTemplateId
+  );
+
   const handleSubmit = async () => {
-    const values = await form.validateFields();
-    const result = await updateAgentInfo({
-      name: values.name.trim(),
-      display_name: values.displayName.trim(),
-      description: "",
-      author: user?.email || "",
-      max_steps: 15,
-      is_main_agent: true,
-      provide_run_summary: false,
-      enabled: true,
-    });
+    if (isSubmitting) return;
 
-    if (!result.success || !result.data?.agent_id) {
-      message.error(result.message || t("businessLogic.config.error.saveFailed"));
-      return;
+    try {
+      const values = await form.validateFields();
+      setIsSubmitting(true);
+
+      const result = await updateAgentInfo({
+        display_name: values.displayName.trim(),
+        description: selectedTemplate?.description ?? "",
+        author: user?.email || "",
+        max_steps: 15,
+        is_main_agent: true,
+        provide_run_summary: false,
+        enabled: true,
+      });
+
+      if (!result.success || !result.data?.agent_id) {
+        message.error(
+          getTenantResourceLimitMessage(result.error, t) ||
+            result.message ||
+            t("businessLogic.config.error.saveFailed")
+        );
+        return;
+      }
+
+      await onCreated({
+        agentId: Number(result.data.agent_id),
+        displayName: values.displayName.trim(),
+      });
+      setSelectedTemplateId(null);
+    } finally {
+      setIsSubmitting(false);
     }
-
-    await onCreated({
-      agentId: Number(result.data.agent_id),
-      name: values.name.trim(),
-      displayName: values.displayName.trim(),
-    });
   };
 
+  const resetModalState = () => {
+    setSelectedTemplateId(null);
+    setIsSubmitting(false);
+  };
+
+  const handleCancel = () => {
+    resetModalState();
+    onCancel();
+  };
+
+  const handleTemplateClick = (templateId: string) => {
+    setSelectedTemplateId((currentId) =>
+      currentId === templateId ? null : templateId
+    );
+  };
+
+  const locale = params.locale || "zh";
+
   return (
-    <Modal
+    <StandardModal
       open={open}
-      centered
+      width={560}
+      maxHeight={CREATE_AGENT_MODAL_MAX_HEIGHT}
       title={t("chat.agentLanding.createAgent")}
-      okText={t("common.confirm")}
+      closeLabel={t("agentConfig.createModal.close")}
       cancelText={t("common.cancel")}
-      onCancel={onCancel}
-      onOk={() => void handleSubmit()}
+      confirmText={t("common.confirm")}
+      footer={null}
+      bodyClassName="!overflow-hidden !pb-0"
+      onOpenChange={(nextOpen) => {
+        if (!nextOpen) resetModalState();
+      }}
+      onClose={handleCancel}
     >
-      <Form form={form} layout="vertical" preserve={false}>
-        <Form.Item
-          name="displayName"
-          label={t("agent.displayName")}
-          validateTrigger={["onChange", "onBlur"]}
-          rules={[
-            {
-              required: true,
-              whitespace: true,
-              message: t("agent.validation.displayNameRequired"),
-            },
-            {
-              validator: (_, value: string) =>
-                !value || isValidAgentDisplayName(value)
-                  ? Promise.resolve()
-                  : Promise.reject(
-                      new Error(
-                        t("agent.validation.displayNameMaxLength", {
-                          max: AGENT_NAME_MAX_LENGTH,
-                        })
-                      )
-                    ),
-            },
-            {
-              ...createAgentNameConflictValidator(t, "display_name"),
-              validateTrigger: "onBlur",
-            },
-          ]}
-        >
-          <Input
-            autoFocus
-            maxLength={AGENT_NAME_MAX_LENGTH}
-            showCount
-            placeholder={t("agent.displayNamePlaceholder")}
-          />
-        </Form.Item>
-        <Form.Item
-          name="name"
-          label={t("agent.name")}
-          validateTrigger={["onChange", "onBlur"]}
-          rules={[
-            {
-              required: true,
-              whitespace: true,
-              message: t("agent.validation.nameRequired"),
-            },
-            {
-              validator: (_, value: string) =>
-                !value || isValidAgentName(value)
-                  ? Promise.resolve()
-                  : Promise.reject(new Error(t("agent.validation.namePattern"))),
-            },
-            {
-              ...createAgentNameConflictValidator(t, "name"),
-              validateTrigger: "onBlur",
-            },
-          ]}
-        >
-          <Input
-            maxLength={AGENT_NAME_MAX_LENGTH}
-            showCount
-            placeholder={t("agent.namePlaceholder")}
-          />
-        </Form.Item>
+      <Form
+        form={form}
+        layout="vertical"
+        preserve={false}
+        onFinish={() => void handleSubmit()}
+        className="!m-0"
+      >
+        <div className="flex items-start gap-4">
+          <Form.Item
+            name="displayName"
+            label={t("agent.displayName")}
+            validateTrigger={["onChange", "onBlur"]}
+            className="!mb-0 min-w-0 flex-1"
+            rules={[
+              {
+                required: true,
+                whitespace: true,
+                message: t("agent.validation.displayNameRequired"),
+              },
+              {
+                validator: (_, value: string) =>
+                  !value || isValidAgentDisplayName(value)
+                    ? Promise.resolve()
+                    : Promise.reject(
+                        new Error(
+                          t("agent.validation.displayNameMaxLength", {
+                            max: AGENT_NAME_MAX_LENGTH,
+                          })
+                        )
+                      ),
+              },
+              {
+                ...createAgentNameConflictValidator(t, "display_name"),
+                validateTrigger: "onBlur",
+              },
+            ]}
+          >
+            <Input
+              autoFocus
+              maxLength={AGENT_NAME_MAX_LENGTH}
+              placeholder={t("agentConfig.createModal.namePlaceholder")}
+              className="!h-8 !rounded-[4px] !border-[#c9c9c9] !px-3 !py-[5px] !text-[14px] !leading-[22px] ![letter-spacing:0px]"
+            />
+          </Form.Item>
+          <StandardButton
+            variant="primary"
+            htmlType="submit"
+            loading={isSubmitting}
+            className="!mt-[30px] !mb-0"
+          >
+            {t("agentConfig.createModal.submit")}
+          </StandardButton>
+        </div>
       </Form>
-    </Modal>
+
+      <div className="mt-4 flex items-center gap-1 text-[14px] ![letter-spacing:0px] leading-[22px]">
+        <span className="text-[#191919]">
+          {t("agentConfig.createModal.template.create")}
+        </span>
+        <Link
+          href={`/${locale}/agent-space`}
+          className="inline-flex items-center gap-1 ![letter-spacing:0px] text-[#2673e5]"
+        >
+          {t("agentConfig.createModal.template.repository")}
+          <ExternalLink aria-hidden="true" size={14} strokeWidth={1.75} />
+        </Link>
+      </div>
+
+      <div
+        data-template-list
+        className="mt-4 min-h-0 max-h-[368px] flex-1 overflow-x-hidden overflow-y-auto"
+      >
+        {templatesQuery.isLoading ? (
+          <div role="status" className="flex justify-center py-8">
+            <Spin aria-label={t("common.loading")} />
+          </div>
+        ) : templatesQuery.isError ? (
+          <div role="alert" className="flex flex-col items-center gap-3 py-6">
+            <span>{t("agentConfig.createModal.templates.loadFailed")}</span>
+            <StandardButton
+              disabled={templatesQuery.isFetching}
+              onClick={() => void templatesQuery.refetch()}
+            >
+              {t("common.retry")}
+            </StandardButton>
+          </div>
+        ) : templates.length === 0 ? (
+          <Empty
+            image={Empty.PRESENTED_IMAGE_SIMPLE}
+            description={t("agentConfig.createModal.templates.empty")}
+          />
+        ) : (
+          <div className="grid grid-cols-2 gap-4">
+            {templates.map((template) => {
+              const isSelected = selectedTemplateId === template.id;
+
+              return (
+                <button
+                  key={template.id}
+                  type="button"
+                  aria-pressed={isSelected}
+                  onClick={() => handleTemplateClick(template.id)}
+                  className={`!m-0 flex h-[112px] w-full flex-col items-start justify-start rounded-[8px] border border-solid bg-white p-3 text-left ![letter-spacing:0px] transition-colors ${
+                    isSelected
+                      ? "!border-[#2673e5]"
+                      : "!border-[#c9c9c9] hover:!border-[#2673e5]"
+                  }`}
+                >
+                  <div className="flex w-full items-center gap-2">
+                    <span
+                      aria-hidden="true"
+                      data-template-icon
+                      className={`mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[10px] leading-none text-white bg-[#2673e5]`}
+                    >
+                      ✦
+                    </span>
+                    <span className="min-w-0 flex-1 truncate text-[14px] font-medium leading-[22px] text-[#191919]">
+                      {template.display_name || template.name}
+                    </span>
+                    {template.tags?.[0] ? (
+                      <span
+                        className="max-w-[35%] shrink-0 truncate rounded-[4px] bg-[rgba(25,25,25,0.05)] px-1 text-[12px] leading-[18px] text-[#393939]"
+                        title={template.tags[0]}
+                      >
+                        {template.tags[0]}
+                      </span>
+                    ) : null}
+                  </div>
+                  <span
+                    data-template-description
+                    className="mt-2 line-clamp-2 w-full text-[12px] leading-[18px] text-[#777]"
+                  >
+                    {template.description}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        )}
+      </div>
+    </StandardModal>
   );
 }

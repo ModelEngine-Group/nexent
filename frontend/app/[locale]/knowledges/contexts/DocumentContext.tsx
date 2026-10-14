@@ -15,6 +15,7 @@ import knowledgeBaseService from "@/services/knowledgeBaseService";
 import { DocumentState, DocumentAction } from "@/types/knowledgeBase";
 import type { QuotaStatusResponse } from "@/types/quota";
 import log from "@/lib/logger";
+import { areDocumentsEqual } from "@/lib/documentStateUtils";
 
 // Reducer function
 const documentReducer = (
@@ -23,11 +24,25 @@ const documentReducer = (
 ): DocumentState => {
   switch (action.type) {
     case DOCUMENT_ACTION_TYPES.FETCH_SUCCESS:
+      const documentsUnchanged = areDocumentsEqual(
+        state.documentsMap[action.payload.kbId],
+        action.payload.documents
+      );
+      if (
+        documentsUnchanged &&
+        !state.isLoadingDocuments &&
+        state.error === null
+      ) {
+        return state;
+      }
+
       return {
         ...state,
         documentsMap: {
           ...state.documentsMap,
-          [action.payload.kbId]: action.payload.documents,
+          [action.payload.kbId]: documentsUnchanged
+            ? state.documentsMap[action.payload.kbId]
+            : action.payload.documents,
         },
         isLoadingDocuments: false,
         error: null,

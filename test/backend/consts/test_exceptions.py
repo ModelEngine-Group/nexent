@@ -5,7 +5,12 @@ Tests the AppException class and helper functions.
 """
 import pytest
 from backend.consts.error_code import ErrorCode
-from backend.consts.exceptions import AppException, raise_error
+from backend.consts.exceptions import (
+    AppException,
+    TenantResourceLimitError,
+    raise_error,
+    tenant_resource_limit_error_payload,
+)
 
 
 class TestAppException:
@@ -162,6 +167,47 @@ class TestPersonalKbQuotaErrorCodes:
         assert exc.details == {
             "quota_limit_bytes": 1024,
             "usage_bytes": 2048,
+        }
+
+
+class TestTenantResourceLimitError:
+    """Test the structured tenant resource quota error contract."""
+
+    def test_to_detail_preserves_limit_context(self):
+        exc = TenantResourceLimitError(
+            "Tenant group limit reached: maximum 1000 groups per tenant",
+            resource="groups",
+            scope="tenant",
+            limit=1000,
+            current_count=1000,
+        )
+
+        assert exc.code == "120104"
+        assert exc.to_detail() == {
+            "resource": "groups",
+            "scope": "tenant",
+            "limit": 1000,
+            "current_count": 1000,
+        }
+
+    def test_payload_uses_standard_error_code(self):
+        exc = TenantResourceLimitError(
+            "Tenant limit reached: maximum 100 tenants",
+            resource="tenants",
+            scope="platform",
+            limit=100,
+            current_count=100,
+        )
+
+        assert tenant_resource_limit_error_payload(exc) == {
+            "code": "120104",
+            "message": "Tenant limit reached: maximum 100 tenants",
+            "details": {
+                "resource": "tenants",
+                "scope": "platform",
+                "limit": 100,
+                "current_count": 100,
+            },
         }
 
 

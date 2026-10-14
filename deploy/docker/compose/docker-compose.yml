@@ -88,15 +88,21 @@ services:
       - ${NEXENT_USER_DIR:-$HOME/nexent}:/mnt/nexent
       - ../../sql:/opt/nexent/sql:ro
       - ${ROOT_DIR}/skills:/mnt/nexent-data/skills
+      - ${ROOT_DIR}/memory-provider-plugins:/mnt/nexent-data/memory-provider-plugins
+      - ${ROOT_DIR}/logs:/mnt/nexent-data/logs
       - ${ROOT_DIR}/openssh-server/ssh-keys:/opt/ssh-keys:ro
       - ${ROOT_DIR}/scripts/sync_user_supabase2pg.py:/opt/sync_user_supabase2pg.py:ro
       - /var/run/docker.sock:/var/run/docker.sock:ro # Docker socket for MCP container management
     environment:
+      TZ: "${TZ:-Asia/Shanghai}"
       <<: [*minio-vars, *es-vars]
       NEXENT_SQL_STARTUP_MODE: migrate
       NEXENT_SQL_FILES_CHECKSUM: ${NEXENT_SQL_FILES_CHECKSUM:-}
+      # Always use the container path. A developer's backend/.env may contain
+      # a host-only Windows path, which is not valid inside this container.
+      OFFICIAL_AGENTS_PATH: /mnt/nexent/official-agents
       skip_proxy: "true"
-      UMASK: 0022
+      UMASK: "0022"
     env_file:
       - ../../env/.env
       - ../../env/monitoring.env
@@ -124,14 +130,17 @@ services:
       - nexent_agent_workspace:/mnt/nexent/workdir
       - ../../sql:/opt/nexent/sql:ro
       - ${ROOT_DIR}/skills:/mnt/nexent-data/skills
+      - ${ROOT_DIR}/memory-provider-plugins:/mnt/nexent-data/memory-provider-plugins
+      - ${ROOT_DIR}/logs:/mnt/nexent-data/logs
       - ${ROOT_DIR}/openssh-server/ssh-keys:/opt/ssh-keys:ro
       - /var/run/docker.sock:/var/run/docker.sock:ro # Docker socket for sandbox container management
     environment:
+      TZ: "${TZ:-Asia/Shanghai}"
       <<: [*minio-vars, *es-vars]
       NEXENT_SQL_STARTUP_MODE: wait
       NEXENT_SQL_FILES_CHECKSUM: ${NEXENT_SQL_FILES_CHECKSUM:-}
       skip_proxy: "true"
-      UMASK: 0022
+      UMASK: "0022"
     env_file:
       - ../../env/.env
       - ../../env/monitoring.env
@@ -157,14 +166,17 @@ services:
       - "5015:5015" # MCP management API port
     volumes:
       - ${NEXENT_USER_DIR:-$HOME/nexent}:/mnt/nexent
+      - ${ROOT_DIR}/skills:/mnt/nexent-data/skills
+      - ${ROOT_DIR}/logs:/mnt/nexent-data/logs
       - ../../sql:/opt/nexent/sql:ro
       - ${ROOT_DIR}/openssh-server/ssh-keys:/opt/ssh-keys:ro
     environment:
+      TZ: "${TZ:-Asia/Shanghai}"
       <<: [*minio-vars, *es-vars]
       NEXENT_SQL_STARTUP_MODE: wait
       NEXENT_SQL_FILES_CHECKSUM: ${NEXENT_SQL_FILES_CHECKSUM:-}
       skip_proxy: "true"
-      UMASK: 0022
+      UMASK: "0022"
     env_file:
       - ../../env/.env
     user: root
@@ -190,13 +202,15 @@ services:
       - ${NEXENT_USER_DIR:-$HOME/nexent}:/mnt/nexent
       - ../../sql:/opt/nexent/sql:ro
       - ${ROOT_DIR}/skills:/mnt/nexent-data/skills
+      - ${ROOT_DIR}/logs:/mnt/nexent-data/logs
       - ${ROOT_DIR}/openssh-server/ssh-keys:/opt/ssh-keys:ro
     environment:
+      TZ: "${TZ:-Asia/Shanghai}"
       <<: [*minio-vars, *es-vars]
       NEXENT_SQL_STARTUP_MODE: wait
       NEXENT_SQL_FILES_CHECKSUM: ${NEXENT_SQL_FILES_CHECKSUM:-}
       skip_proxy: "true"
-      UMASK: 0022
+      UMASK: "0022"
     env_file:
       - ../../env/.env
     user: root
@@ -219,21 +233,44 @@ services:
     networks:
       - nexent
     ports:
-      - "3000:3000"
+      - "${NEXENT_WEB_PORT:-3000}:3000"
+    volumes:
+      - ${ROOT_DIR}/project-config:/mnt/nexent-data/project-config
     env_file:
       - ../../env/.env
     environment:
+      - TZ=${TZ:-Asia/Shanghai}
       - HTTP_BACKEND=http://nexent-config:5010
       - WS_BACKEND=ws://nexent-runtime:5014
       - RUNTIME_HTTP_BACKEND=http://nexent-runtime:5014
       - MINIO_ENDPOINT=http://nexent-minio:9000
-      - MARKET_BACKEND=http://60.204.251.153:8010
+      - PROJECT_CONFIG_DIR=/mnt/nexent-data/project-config
       - MODEL_ENGINE_ENABLED=${MODEL_ENGINE_ENABLED:-false}
     logging:
       driver: "json-file"
       options:
         max-size: "10m" # Maximum size of a single log file
         max-file: "3" # Maximum number of log files to keep
+
+
+  nexent-nginx:
+    image: ${NGINX_IMAGE:-nginx:alpine}
+    container_name: nexent-nginx
+    restart: always
+    profiles:
+      - https
+    networks:
+      - nexent
+    ports:
+      - "3100:3100"
+    volumes:
+      - ${ROOT_DIR}/nginx/ssl:/etc/nginx/ssl:ro
+      - ../assets/nginx/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
 
   nexent-data-process:
     image: ${NEXENT_DATA_PROCESS_IMAGE}
@@ -243,11 +280,12 @@ services:
     ports:
       - "5012:5012"
       - "5555:5555" # Celery Flower port
-      - "8265:8265" # Ray Dashboardport
     volumes:
       - ${NEXENT_USER_DIR:-$HOME/nexent}:/mnt/nexent
       - ../../sql:/opt/nexent/sql:ro
+      - ${ROOT_DIR}/logs:/mnt/nexent-data/logs
     environment:
+      TZ: "${TZ:-Asia/Shanghai}"
       <<: [*proxy-vars, *es-vars, *minio-vars]
       NEXENT_SQL_STARTUP_MODE: "off"
       NEXENT_SQL_FILES_CHECKSUM: ${NEXENT_SQL_FILES_CHECKSUM:-}
@@ -265,7 +303,7 @@ services:
       - nexent
     entrypoint: >
       /bin/sh -c "
-        /opt/nexent/scripts/start-backend.sh /bin/sh -c 'python /opt/backend/data_process_service.py || (cd /opt/backend && OPENBLAS_NUM_THREADS=1 UVICORN_LOOP=asyncio uvicorn data_process_service:app --host 0.0.0.0 --port 5012)'
+        /opt/nexent/scripts/start-backend.sh /bin/sh -c 'python /opt/backend/data_process_service.py'
       "
 
     logging:

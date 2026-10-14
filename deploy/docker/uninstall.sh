@@ -194,10 +194,10 @@ resolve_delete_volumes() {
   echo ""
   if [ "$DEPLOYMENT_LANGUAGE" = "zh" ]; then
     echo "🧹 是否删除 Docker volumes 和 Nexent 数据目录？"
-    echo "   这会删除 ROOT_DIR 下的持久化数据，包括 elasticsearch、postgresql、redis、minio、scripts 和 supabase volumes。"
+    echo "   这会删除 ROOT_DIR 下的持久化数据，包括 elasticsearch、postgresql、redis、minio、project-config、scripts 和 supabase volumes。"
   else
     echo "🧹 Delete Docker volumes and Nexent data directories?"
-    echo "   This removes persistent data under ROOT_DIR, including elasticsearch, postgresql, redis, minio, scripts, and supabase volumes."
+    echo "   This removes persistent data under ROOT_DIR, including elasticsearch, postgresql, redis, minio, project-config, scripts, and supabase volumes."
   fi
   local answer
   if [ "$DEPLOYMENT_LANGUAGE" = "zh" ]; then
@@ -343,6 +343,7 @@ remove_nexent_data_dirs() {
     "$root_dir/minio"
     "$root_dir/volumes"
     "$root_dir/openssh-server"
+    "$root_dir/project-config"
     "$root_dir/scripts"
     "$root_dir/skills"
     "$work_dir"

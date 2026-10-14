@@ -168,9 +168,6 @@ export async function fetchImageBlob(url: string): Promise<Blob> {
   const apiUrl = convertImageUrlToApiUrl(url);
   log.info(`[fetchImageBlob] input=${url}, apiUrl=${apiUrl}`);
   const response = await fetch(apiUrl);
-  log.info(
-    `[fetchImageBlob] status=${response.status}, contentType=${response.headers.get("content-type")}`
-  );
   if (!response.ok) {
     throw new Error(
       `Failed to fetch image: ${response.status} ${response.statusText}`

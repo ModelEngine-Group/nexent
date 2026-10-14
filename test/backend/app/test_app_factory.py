@@ -4,8 +4,9 @@ Unit tests for app_factory module.
 Tests the create_app function and register_exception_handlers function
 for FastAPI application factory with common configurations and exception handlers.
 """
-import sys
 import os
+import sys
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
@@ -101,6 +102,15 @@ class TestCreateApp:
         assert app.description == "Full description"
         assert app.version == "3.0.0"
         assert app.root_path == "/v3"
+
+    def test_create_app_uses_lifespan_context(self):
+        @asynccontextmanager
+        async def lifespan(_app):
+            yield
+
+        app = create_app(lifespan=lifespan)
+
+        assert app.router.lifespan_context is lifespan
 
 
 class TestRegisterExceptionHandlers:
@@ -929,4 +939,3 @@ class TestGenericHandlerAppExceptionDelegation:
             "message": "Session expired, please log in again",
             "code": "TOKEN_EXPIRED",
         }
-

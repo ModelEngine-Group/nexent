@@ -24,6 +24,15 @@ import {
 } from "@/services/conversationService";
 import { getConversationDateBoundaries } from "@/lib/conversationViewport";
 import { toMessageCreatedAt } from "@/lib/messageDate";
+import { buildHistoricalMessageTiming } from "@/lib/messageTiming";
+import {
+  appendClarificationPart,
+  isClarificationFallback,
+} from "@/lib/clarification";
+import { stripAnsiControlSequences } from "@/lib/ansi";
+import { createFinalAnswerProjection } from "@/lib/finalAnswerProjection";
+import { createReasoningAccumulator } from "@/lib/reasoningAccumulator";
+import { unwrapFinalAnswer } from "@/lib/finalAnswerEnvelope";
 
 import { storageService } from "@/services/storageService";
 import { parseAutomationProposal } from "@/features/agentAutomation/parseProposal";
@@ -37,6 +46,7 @@ import {
   attachExecutionLogsToTool,
   collapseSubAgentParts,
   attachSearchContentToTool,
+  buildExecutionCodePart,
   buildToolCallPart,
   conversationSourcesRegistry,
   extractAidpImageKeys,
@@ -47,10 +57,13 @@ import {
   parseStepTokenCount,
   parsePlan,
   parsePlanStepUpdate,
+  parseNl2aMessage,
+  parseNl2AgentState,
   planRegistry,
   type PlanData,
   type SearchSource,
   type StepTokenCount,
+  type Nl2AgentCardAction,
 } from "./remote-chat-model-adapter";
 
 type RemoteThreadInitializeResponse = Awaited<
@@ -140,13 +153,23 @@ const parseImageMetadata = (value: unknown) => {
   }
 };
 
+const getRetrievalHighlightTerms = (scoreDetails: unknown): string[] => {
+  if (!scoreDetails || typeof scoreDetails !== "object") return [];
+  const terms = (scoreDetails as { retrieval_highlight_terms?: unknown })
+    .retrieval_highlight_terms;
+  return Array.isArray(terms)
+    ? terms.filter((term): term is string => typeof term === "string")
+    : [];
+};
+
 const toToolSearchItem = (value: unknown) => {
   if (typeof value !== "object" || value === null) return null;
 
   const item = value as Record<string, unknown>;
   const url = typeof item.url === "string" ? item.url : "";
   const filename = typeof item.filename === "string" ? item.filename : "";
-  const sourceFile = typeof item.source_file === "string" ? item.source_file : "";
+  const sourceFile =
+    typeof item.source_file === "string" ? item.source_file : "";
   const imageMetadata = parseImageMetadata(item.text);
   const resolvedUrl = imageMetadata?.image_url || url;
   const title =
@@ -161,20 +184,28 @@ const toToolSearchItem = (value: unknown) => {
       : typeof item.citeIndex === "number"
         ? item.citeIndex
         : undefined;
-  const toolSign = typeof item.tool_sign === "string" ? item.tool_sign : undefined;
+  const toolSign =
+    typeof item.tool_sign === "string" ? item.tool_sign : undefined;
 
   return resolvedUrl || sourceFile
     ? {
         url: resolvedUrl,
         title,
-        text: imageMetadata ? undefined : typeof item.text === "string" ? item.text : undefined,
-        sourceType: typeof item.source_type === "string" ? item.source_type : undefined,
+        text: imageMetadata
+          ? undefined
+          : typeof item.text === "string"
+            ? item.text
+            : undefined,
+        sourceType:
+          typeof item.source_type === "string" ? item.source_type : undefined,
         filename: filename || undefined,
         sourceFile: sourceFile || imageMetadata?.source_file || undefined,
-        objectName: typeof item.object_name === "string" ? item.object_name : undefined,
+        objectName:
+          typeof item.object_name === "string" ? item.object_name : undefined,
         citeIndex,
         toolSign,
         isImage: Boolean(imageMetadata),
+        retrievalHighlightTerms: getRetrievalHighlightTerms(item.score_details),
       }
     : null;
 };
@@ -352,10 +383,19 @@ export class RemoteConversationHistoryAdapter implements ThreadHistoryAdapter {
       // Backend returns message as a string for user messages, but as an array of
       // ApiMessageItem for assistant messages. Normalize to array for consistent handling.
       const messageParts = Array.isArray(msg.message)
-        ? msg.message
+        ? msg.message.map((part) => ({
+            ...part,
+            content:
+              typeof part.content === "string"
+                ? stripAnsiControlSequences(part.content)
+                : part.content,
+          }))
         : typeof msg.message === "string"
           ? [{ type: "text", content: msg.message }]
           : [];
+      const runHasFinalAnswer = messageParts.some(
+        (part) => part.type === "final_answer"
+      );
       const persistedAnswerImageKeys = extractAidpImageKeys(
         messageParts.flatMap((part) =>
           (part.type === "final_answer" || part.type === "text") &&
@@ -395,6 +435,7 @@ export class RemoteConversationHistoryAdapter implements ThreadHistoryAdapter {
                 url,
                 title,
                 text: item.text as string | undefined,
+                publishedDate: item.published_date as string | undefined,
                 sourceType: item.source_type as string | undefined,
                 searchType: item.search_type as string | undefined,
                 toolSign: item.tool_sign as string | undefined,
@@ -405,6 +446,9 @@ export class RemoteConversationHistoryAdapter implements ThreadHistoryAdapter {
                 imageKey:
                   (item.image_key as string | undefined) ||
                   (isImage ? derivedImageKey : undefined),
+                retrievalHighlightTerms: getRetrievalHighlightTerms(
+                  item.score_details
+                ),
               });
             }
           }
@@ -415,15 +459,38 @@ export class RemoteConversationHistoryAdapter implements ThreadHistoryAdapter {
       }
 
       const content: any[] = [];
+      let historicalCardAction: Nl2AgentCardAction | null = null;
+      let historicalNl2a:
+        import("./remote-chat-model-adapter").Nl2aMessage | null = null;
 
       if (msg.role === "user") {
-        const text = messageParts
+        let text = messageParts
           .filter((part) => part.type === "text")
           .map((part) => part.content)
           .join("\n");
+        try {
+          const action = JSON.parse(text) as Nl2AgentCardAction;
+          if (
+            action?.type === "nl2agent_card_action" &&
+            Number.isInteger(action.agent_id) &&
+            action.agent_id > 0
+          ) {
+            historicalCardAction = action;
+            text =
+              {
+                requirement_clarification: "Requirements submitted",
+                suggested_resource_installation:
+                  "Resource installation completed",
+                installed_resource_binding: "Resource selection completed",
+              }[action.subtype] || "Agent creation continued";
+          }
+        } catch {
+          // Ordinary user text is not a structured card action.
+        }
         if (text) content.push({ type: "text", text });
       } else {
-        let reasoningText = "";
+        const parentReasoning = createReasoningAccumulator(content);
+        const finalAnswers = createFinalAnswerProjection(content);
         // Per-invocation map of currently-open sub-agent runs reconstructed
         // from persisted ``subagent_start`` / ``subagent_end`` units. We do
         // not route inner parts into a separate ``subagent-group`` array;
@@ -446,6 +513,9 @@ export class RemoteConversationHistoryAdapter implements ThreadHistoryAdapter {
           depth: number;
           invocationId: string;
           reasoningText: string;
+          stepLabel: string;
+          pendingStepLabel: string;
+          pendingWhitespace: string;
         };
         const activeSubAgents = new Map<string, ActiveSubAgent>();
         let historicalRunCounter = 0;
@@ -485,7 +555,7 @@ export class RemoteConversationHistoryAdapter implements ThreadHistoryAdapter {
 
         const flushReasoning = (invocationId?: string) => {
           const entry = invocationId ? activeSubAgents.get(invocationId) : null;
-          if (entry?.reasoningText) {
+          if (entry?.reasoningText && entry.reasoningText !== entry.stepLabel) {
             content.push({
               type: "reasoning",
               text: entry.reasoningText,
@@ -501,14 +571,13 @@ export class RemoteConversationHistoryAdapter implements ThreadHistoryAdapter {
             });
             entry.reasoningText = "";
           }
-          if (!invocationId && reasoningText) {
-            content.push({
-              type: "reasoning",
-              text: reasoningText,
-              status: { type: "done" },
-            });
-            reasoningText = "";
+          if (entry) {
+            entry.reasoningText = "";
+            entry.stepLabel = "";
+            entry.pendingStepLabel = "";
+            entry.pendingWhitespace = "";
           }
+          if (!invocationId) parentReasoning.close();
         };
 
         const answerImageKeys = persistedAnswerImageKeys;
@@ -520,6 +589,13 @@ export class RemoteConversationHistoryAdapter implements ThreadHistoryAdapter {
           : [];
         const restoredImageUrls = new Set<string>();
         const restoredImages: any[] = [];
+        const historicalSkillFiles = new Map<string, string>();
+        let historicalSkillSummaryPart: { type: "text"; text: string } | null =
+          null;
+        const historicalSkillAttemptCheckpoints = new Map<
+          string,
+          { files: Map<string, string>; summary: string | null }
+        >();
         const appendHistoricalImage = (imageUrl: string) => {
           if (!imageUrl || restoredImageUrls.has(imageUrl)) return;
           const imageIndex = restoredImageUrls.size;
@@ -555,6 +631,97 @@ export class RemoteConversationHistoryAdapter implements ThreadHistoryAdapter {
         };
 
         for (const [partIndex, part] of messageParts.entries()) {
+          if (
+            part.type === "model_attempt_control" &&
+            detail.workbench_config?.mode === "skill_create"
+          ) {
+            try {
+              const control = JSON.parse(part.content) as {
+                phase?: string;
+                attempt_id?: string;
+              };
+              if (control.attempt_id && control.phase === "begin") {
+                historicalSkillAttemptCheckpoints.set(control.attempt_id, {
+                  files: new Map(historicalSkillFiles),
+                  summary: historicalSkillSummaryPart?.text ?? null,
+                });
+              } else if (control.attempt_id && control.phase) {
+                const checkpoint = historicalSkillAttemptCheckpoints.get(
+                  control.attempt_id
+                );
+                historicalSkillAttemptCheckpoints.delete(control.attempt_id);
+                if (control.phase === "rollback" && checkpoint) {
+                  historicalSkillFiles.clear();
+                  for (const [path, file] of checkpoint.files) {
+                    historicalSkillFiles.set(path, file);
+                  }
+                  if (checkpoint.summary === null) {
+                    historicalSkillSummaryPart = null;
+                  } else if (historicalSkillSummaryPart) {
+                    historicalSkillSummaryPart.text = checkpoint.summary;
+                  }
+                }
+              }
+            } catch {
+              log.warn("[history-adapter] Invalid model attempt control unit");
+            }
+            continue;
+          }
+          if (part.type === "nl2a") {
+            historicalNl2a = parseNl2aMessage({
+              type: "nl2a",
+              content: part.content,
+            });
+            continue;
+          }
+          if (part.type === "skill_body" || part.type === "file_content") {
+            try {
+              const event = JSON.parse(part.content) as {
+                path?: string;
+                content?: string;
+              };
+              const path = part.type === "skill_body" ? "SKILL.md" : event.path;
+              if (path) {
+                historicalSkillFiles.set(
+                  path,
+                  (historicalSkillFiles.get(path) ?? "") + (event.content ?? "")
+                );
+              }
+            } catch {
+              log.warn("[history-adapter] Invalid NL2Skill file unit");
+            }
+            continue;
+          }
+          if (part.type === "nl2a_state") {
+            const state = parseNl2AgentState(part.content);
+            if (
+              detail.workbench_config?.mode === "agent_create" &&
+              state?.event === "agent_generation_completed"
+            ) {
+              content.push({
+                type: "data",
+                name: "nl2agent-created",
+                data: { agentId: state.agent_id, completed: true },
+              });
+            }
+            continue;
+          }
+          if (part.type === "done") continue;
+          if (part.type === "summary") {
+            if (!part.content) continue;
+            if (detail.workbench_config?.mode === "skill_create") {
+              // The live NL2Skill adapter appends fragments to one text part.
+              // Defer insertion until replay ends so a persisted summary is
+              // shown after the generated answer and file cards, not before.
+              if (!historicalSkillSummaryPart) {
+                historicalSkillSummaryPart = { type: "text", text: "" };
+              }
+              historicalSkillSummaryPart.text += part.content;
+            } else {
+              content.push({ type: "text", text: part.content });
+            }
+            continue;
+          }
           // Note: do NOT early-return on `!part.content` at the top level —
           // `tool` items stored in the database have an empty `content` field
           // and only carry `tool_name` + `tool_arguments` (see the
@@ -627,7 +794,7 @@ export class RemoteConversationHistoryAdapter implements ThreadHistoryAdapter {
                     isImage: true,
                     imageKey: imagePart.imageKey,
                   },
-                  part.tool_call_id,
+                  part.tool_call_id
                 );
               }
             }
@@ -721,6 +888,9 @@ export class RemoteConversationHistoryAdapter implements ThreadHistoryAdapter {
               depth: activeSubAgents.size + 1,
               invocationId,
               reasoningText: "",
+              stepLabel: "",
+              pendingStepLabel: "",
+              pendingWhitespace: "",
             };
             activeSubAgents.set(invocationId, descriptor);
             const stampMeta = buildMetadata(invocationId);
@@ -797,10 +967,23 @@ export class RemoteConversationHistoryAdapter implements ThreadHistoryAdapter {
           }
 
           if (part.type === "step_count") {
+            // Match live NL2Skill rendering: a bare step marker is not
+            // reasoning, and must not restore an empty Reasoning card.
+            if (detail.workbench_config?.mode === "skill_create") continue;
+            flushReasoning(part.invocation_id);
             if (part.content) {
               const top = currentSubAgent(part.invocation_id);
-              if (top) top.reasoningText += part.content;
-              else reasoningText += part.content;
+              if (top) {
+                if (top.reasoningText && !top.stepLabel) {
+                  // Old persisted order: model text preceded step_count.
+                  top.reasoningText = part.content + top.reasoningText;
+                } else {
+                  flushReasoning(part.invocation_id);
+                  top.reasoningText = "";
+                  top.pendingStepLabel = part.content;
+                }
+                top.stepLabel = part.content;
+              } else parentReasoning.queueStepLabel(part.content);
             }
             continue;
           }
@@ -808,8 +991,16 @@ export class RemoteConversationHistoryAdapter implements ThreadHistoryAdapter {
           if (isReasoningChunkType(part.type)) {
             if (part.content) {
               const top = currentSubAgent(part.invocation_id);
-              if (top) top.reasoningText += part.content;
-              else reasoningText += part.content;
+              if (top) {
+                if (!top.reasoningText && !part.content.trim()) {
+                  top.pendingWhitespace += part.content;
+                } else {
+                  top.reasoningText +=
+                    top.pendingStepLabel + top.pendingWhitespace + part.content;
+                  top.pendingStepLabel = "";
+                  top.pendingWhitespace = "";
+                }
+              } else parentReasoning.append(part.content);
             }
             continue;
           }
@@ -832,6 +1023,21 @@ export class RemoteConversationHistoryAdapter implements ThreadHistoryAdapter {
             continue;
           }
 
+          if (part.type === "parse") {
+            flushReasoning(part.invocation_id);
+            if (part.content.trim()) {
+              const executionCodePart = buildExecutionCodePart({
+                type: "parse",
+                content: part.content,
+                unit_index: part.unit_index ?? partIndex,
+              });
+              const meta = buildMetadata(part.invocation_id);
+              if (meta) executionCodePart.metadata = meta;
+              content.push(executionCodePart);
+            }
+            continue;
+          }
+
           if (part.type === "execution_logs") {
             flushReasoning(part.invocation_id);
             attachExecutionLogsToTool(content, part);
@@ -844,12 +1050,43 @@ export class RemoteConversationHistoryAdapter implements ThreadHistoryAdapter {
               const errorPart: any = {
                 type: "text",
                 text: part.content,
-                isError: true,
+                ...(runHasFinalAnswer
+                  ? { isWarning: true }
+                  : { isError: true }),
               };
               const meta = buildMetadata(part.invocation_id);
               if (meta) errorPart.metadata = meta;
               content.push(errorPart);
             }
+            continue;
+          }
+
+          if (part.type === "warning") {
+            flushReasoning(part.invocation_id);
+            if (part.content) {
+              const warningPart: any = {
+                type: "text",
+                text: part.content,
+                isWarning: true,
+              };
+              const meta = buildMetadata(part.invocation_id);
+              if (meta) warningPart.metadata = meta;
+              content.push(warningPart);
+            }
+            continue;
+          }
+
+          if (
+            part.type === "human_interaction" ||
+            part.type === "clarification"
+          ) {
+            flushReasoning();
+            appendClarificationPart(
+              content,
+              part.content,
+              part.unit_index,
+              msg.status === "completed"
+            );
             continue;
           }
 
@@ -868,18 +1105,81 @@ export class RemoteConversationHistoryAdapter implements ThreadHistoryAdapter {
             continue;
           }
 
-          if (part.type === "final_answer") {
+          if (part.type === "history_summary") {
+            flushReasoning();
+            try {
+              const payload = JSON.parse(part.content || "{}");
+              if (payload && typeof payload === "object") {
+                content.push({
+                  type: "data",
+                  name: "history-summary",
+                  data: { ...payload, status: "accepted" },
+                });
+              }
+            } catch {
+              log.warn("[history-adapter] Failed to parse history summary");
+            }
+            continue;
+          }
+
+          if (
+            part.type === "final_answer" &&
+            !isClarificationFallback(content, part.content)
+          ) {
             flushReasoning(part.invocation_id);
             if (part.content) {
-              const textPart: any = { type: "text", text: part.content };
               const meta = buildMetadata(part.invocation_id);
-              if (meta) textPart.metadata = meta;
-              content.push(textPart);
+              finalAnswers.apply({ ...part, content: unwrapFinalAnswer(part.content), answer_phase: "delta" }, meta);
             }
           }
         }
 
         flushReasoning();
+
+        // Older creation turns may have returned a final answer without the
+        // trusted completion event. Show the saved draft, not a false success.
+        if (
+          detail.workbench_config?.mode === "agent_create" &&
+          Number.isInteger(Number(detail.agent_id)) &&
+          Number(detail.agent_id) > 0 &&
+          messageParts.some(
+            (part) =>
+              part.type === "final_answer" && Boolean(part.content?.trim())
+          ) &&
+          !content.some(
+            (part) => part.type === "data" && part.name === "nl2agent-created"
+          )
+        ) {
+          content.push({
+            type: "data",
+            name: "nl2agent-created",
+            data: { agentId: Number(detail.agent_id), completed: false },
+          });
+        }
+
+        for (const [path, fileContent] of historicalSkillFiles) {
+          const extension = path.split(".").pop()?.toLowerCase();
+          content.push({
+            type: "data",
+            name: "nl2skill-file",
+            data: {
+              path,
+              content: fileContent,
+              kind:
+                extension === "md"
+                  ? "markdown"
+                  : extension === "py" || extension === "sh"
+                    ? "code"
+                    : "generic",
+              ...(extension === "py"
+                ? { language: "python" }
+                : extension === "sh"
+                  ? { language: "bash" }
+                  : {}),
+              isStreaming: false,
+            },
+          });
+        }
 
         // Flush any incomplete sub-agent reasoning without changing the
         // order in which persisted units were reconstructed.
@@ -887,6 +1187,10 @@ export class RemoteConversationHistoryAdapter implements ThreadHistoryAdapter {
           flushReasoning(entry.invocationId);
         }
         activeSubAgents.clear();
+
+        if (historicalSkillSummaryPart?.text) {
+          content.push(historicalSkillSummaryPart);
+        }
 
         // Some older records only persist the message-level image list.
         if (Array.isArray(msg.picture) && msg.picture.length > 0) {
@@ -952,6 +1256,10 @@ export class RemoteConversationHistoryAdapter implements ThreadHistoryAdapter {
                 downloadUrl: item.download_url as string | undefined,
                 objectName: item.object_name as string | undefined,
                 citeIndex,
+                toolSign: item.tool_sign as string | undefined,
+                retrievalHighlightTerms: getRetrievalHighlightTerms(
+                  item.score_details
+                ),
                 messageId,
               });
             }
@@ -978,6 +1286,12 @@ export class RemoteConversationHistoryAdapter implements ThreadHistoryAdapter {
         });
       }
 
+      // An NL2Agent turn may consist only of an interactive card boundary.
+      // Keep the message so its restored metadata can render the card.
+      if (historicalNl2a && content.length === 0) {
+        content.push({ type: "text", text: "" });
+      }
+
       if (content.length === 0 && attachments.length === 0) {
         // Still track assistant index even if no content (for registry alignment)
         if (msg.role === "assistant") assistantIdx++;
@@ -991,9 +1305,21 @@ export class RemoteConversationHistoryAdapter implements ThreadHistoryAdapter {
       // always include the field and only set the token bucket when we have
       // historical step data.
       const createdAt = toMessageCreatedAt(msg.create_time);
+      const timing =
+        msg.role === "assistant"
+          ? buildHistoricalMessageTiming(stepTokenCounts)
+          : undefined;
       const metadata = {
+        ...(timing ? { timing } : {}),
         custom: {
+          ...(historicalCardAction
+            ? { nl2agentCardAction: historicalCardAction }
+            : {}),
+          ...(historicalNl2a ? { nl2a: historicalNl2a } : {}),
           ...(stepTokenCounts.length > 0 ? { stepTokenCounts } : {}),
+          ...(msg.role === "user" && typeof msg.message_index === "number"
+            ? { historicalMessageIndex: msg.message_index }
+            : {}),
           ...(createdAt ? { databaseCreateTime: createdAt.getTime() } : {}),
         },
       };
@@ -1318,7 +1644,9 @@ const waitForServerConversationId = async (
   }
 };
 
-export const conversationThreadListAdapter: RemoteThreadListAdapter = {
+export const createConversationThreadListAdapter = (
+  conversationType: "agent_chat" | "workbench"
+): RemoteThreadListAdapter => ({
   unstable_Provider: createHistoryProvider(),
 
   async list({ after } = {}): Promise<RemoteThreadListResponse> {
@@ -1331,6 +1659,7 @@ export const conversationThreadListAdapter: RemoteThreadListAdapter = {
       limit,
       todayStartMs,
       weekStartMs,
+      conversationType,
     });
     const nextOffset = offset + data.items.length;
 
@@ -1357,6 +1686,16 @@ export const conversationThreadListAdapter: RemoteThreadListAdapter = {
       remoteId: "",
       externalId: "",
     };
+  },
+
+  // New conversations do not have a backend ID until their first agent run.
+  // Accept metadata updates so assistant-ui can retain the selected agent in
+  // its local thread state while users switch between conversations.
+  async updateCustom(
+    _remoteId: string,
+    _custom: Record<string, unknown> | undefined
+  ): Promise<void> {
+    return;
   },
 
   async rename(remoteId: string, newTitle: string): Promise<void> {
@@ -1421,4 +1760,10 @@ export const conversationThreadListAdapter: RemoteThreadListAdapter = {
     // real backend conversation ID. This avoids racing the first run.
     return createAssistantStream(() => {});
   },
-};
+});
+
+export const conversationThreadListAdapter =
+  createConversationThreadListAdapter("agent_chat");
+
+export const workbenchConversationThreadListAdapter =
+  createConversationThreadListAdapter("workbench");

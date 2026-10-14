@@ -47,6 +47,9 @@ _agent_version_db_mock = MagicMock()
 _agent_version_db_mock.search_version_by_version_no = MagicMock()
 sys.modules["database.agent_version_db"] = _agent_version_db_mock
 
+_tag_management_db_mock = MagicMock()
+sys.modules["database.tag_management_db"] = _tag_management_db_mock
+
 # Additional DB mocks required because agent_repository_service imports
 # repository_import_precheck → skill_service, which depends on these modules.
 sys.modules.setdefault("database.skill_db", MagicMock())
@@ -56,6 +59,8 @@ sys.modules.setdefault("database.knowledge_db", MagicMock())
 sys.modules.setdefault("database.model_management_db", MagicMock())
 sys.modules.setdefault("database.remote_mcp_db", MagicMock())
 sys.modules.setdefault("database.tool_db", MagicMock())
+sys.modules.setdefault("management.services.model.adapter", MagicMock())
+sys.modules.setdefault("utils.config_utils", MagicMock())
 
 
 class _SkillZipEntryMock:
@@ -155,7 +160,7 @@ _agent_service_mock.export_agent_dict_for_repository_impl = AsyncMock(return_val
     "mcp_info": [],
 })
 _agent_service_mock.list_all_agent_info_impl = AsyncMock(return_value=[])
-sys.modules["services.agent_service"] = _agent_service_mock
+sys.modules["management.services.agent.service"] = _agent_service_mock
 
 _notification_service_mock = MagicMock()
 sys.modules["services.notification_service"] = _notification_service_mock
@@ -290,6 +295,79 @@ def test_list_repository_listings_filters_by_search_before_pagination():
     }
 
 
+def test_list_repository_listings_searches_structured_tags():
+    records = [
+        _repository_record(agent_repository_id=1, agent_id=10, status="shared"),
+        _repository_record(agent_repository_id=2, agent_id=11, status="shared"),
+    ]
+
+    with patch.object(
+        ars, "list_agent_repository_summaries", return_value=records
+    ), patch.object(
+        ars,
+        "_find_agent_ids_matching_any_tag_predicate",
+        return_value={"11"},
+    ):
+        result = ars.list_agent_repository_listings_impl(
+            "tenant_a",
+            status="shared",
+            search="智能体类别",
+            search_tag_predicates=[object()],
+        )
+
+    assert [item["agent_repository_id"] for item in result["items"]] == [2]
+
+
+def test_list_repository_listings_filters_all_matching_structured_tags():
+    records = [
+        _repository_record(agent_repository_id=1, agent_id=10, status="shared"),
+        _repository_record(agent_repository_id=2, agent_id=11, status="shared"),
+    ]
+    predicate = object()
+
+    with patch.object(
+        ars, "list_agent_repository_summaries", return_value=records
+    ), patch.object(
+        ars,
+        "_filter_agent_ids_by_tag_predicates",
+        return_value=["10", "11"],
+    ) as mock_filter:
+        result = ars.list_agent_repository_listings_impl(
+            "tenant_a",
+            status="shared",
+            tag_predicates=[predicate],
+        )
+
+    mock_filter.assert_called_once_with("tenant_a", ["10", "11"], [predicate])
+    assert [item["agent_repository_id"] for item in result["items"]] == [1, 2]
+
+
+def test_tag_predicate_helpers_delegate_to_authorized_resource_filter(monkeypatch):
+    calls = []
+
+    class TagManagementDB:
+        @staticmethod
+        def filter_authorized_resource_ids(tenant_id, resource_type, resource_ids, predicates):
+            calls.append((tenant_id, resource_type, resource_ids, predicates))
+            return [resource_ids[-1]]
+
+    monkeypatch.setattr(ars, "TagManagementDB", TagManagementDB)
+
+    assert ars._find_agent_ids_matching_any_tag_predicate(
+        "tenant_a", [1, 2], ["first", "second"]
+    ) == {"2"}
+    assert ars._filter_agent_ids_by_tag_predicates(
+        "tenant_a", ["1", "2"], ["all"]
+    ) == {"2"}
+    assert ars._find_agent_ids_matching_any_tag_predicate("tenant_a", [], ["first"]) == set()
+    assert ars._filter_agent_ids_by_tag_predicates("tenant_a", ["1"], []) == set()
+    assert calls == [
+        ("tenant_a", "agent", ["1", "2"], ["first"]),
+        ("tenant_a", "agent", ["1", "2"], ["second"]),
+        ("tenant_a", "agent", ["1", "2"], ["all"]),
+    ]
+
+
 def test_list_repository_listings_paginates_filtered_records():
     records = [
         {
@@ -376,24 +454,80 @@ def test_validate_card_fields_requires_structural_values():
         },
     }
 
-    with pytest.raises(ValueError, match="icon is required"):
-        ars._validate_create_payload(base)
-
     with pytest.raises(ValueError, match="tags is required"):
-        ars._validate_create_payload({**base, "icon": "🤖"})
+        ars._validate_create_payload({**base, "icon_url": None})
 
-    with pytest.raises(ValueError, match="non-empty string"):
+    with pytest.raises(ValueError, match="non-empty URL"):
         ars._validate_create_payload({
             **base,
-            "icon": "   ",
+            "icon_url": "   ",
             "tags": ["marketing"],
         })
 
     ars._validate_create_payload({
         **base,
-        "icon": "🤖",
+        "icon_url": None,
         "tags": ["marketing"],
     })
+
+
+def test_repository_icon_urls_are_scoped_to_agent_version_and_upload():
+    image_id = "d0b11a53-1808-4c79-9a04-e466f938f96a"
+    icon_url = ars._repository_icon_url(4, 2, image_id)
+    assert ars._repository_image_id(icon_url, 4, 2) == image_id
+    with pytest.raises(ValueError, match="Invalid repository icon URL"):
+        ars._repository_image_id(icon_url, 5, 2)
+    with pytest.raises(ValueError, match="Invalid repository icon URL"):
+        ars._repository_image_id(icon_url + "/other", 4, 2)
+
+
+def test_repository_icon_read_requires_matching_listing_url():
+    with patch.object(
+        ars, "get_agent_repository_by_agent_id", return_value={"icon_url": None}
+    ), patch.object(ars, "read_icon_image") as read_image:
+        with pytest.raises(FileNotFoundError):
+            ars.get_agent_repository_icon_impl(
+                4, 2, "d0b11a53-1808-4c79-9a04-e466f938f96a", "tenant_a"
+            )
+        read_image.assert_not_called()
+
+
+def test_repository_icon_read_returns_matching_listing_image():
+    image_id = "d0b11a53-1808-4c79-9a04-e466f938f96a"
+    with patch.object(
+        ars,
+        "get_agent_repository_by_agent_id",
+        return_value={"icon_url": ars._repository_icon_url(4, 2, image_id)},
+    ), patch.object(
+        ars, "read_icon_image", return_value=(b"image", "image/png")
+    ) as read_image:
+        result = ars.get_agent_repository_icon_impl(4, 2, image_id, "tenant_a")
+    assert result == (b"image", "image/png")
+    read_image.assert_called_once_with(
+        f"agent-repository-icons/tenant_a/4/2/{image_id}"
+    )
+
+
+@pytest.mark.asyncio
+async def test_repository_icon_upload_keeps_separate_object_and_agent_record():
+    image_id = "d0b11a53-1808-4c79-9a04-e466f938f96a"
+    with patch.object(
+        ars, "search_agent_info_by_agent_id", return_value={"name": "agent_one"}
+    ), patch.object(
+        ars, "_validate_create_listing_permission"
+    ), patch.object(
+        ars.uuid, "uuid4", return_value=image_id
+    ), patch.object(
+        ars, "upload_icon_image", return_value="image/png"
+    ) as upload:
+        result = await ars.upload_agent_repository_icon_impl(
+            4, 2, "tenant_a", "user_a", b"image"
+        )
+
+    assert result["icon_url"] == ars._repository_icon_url(4, 2, image_id)
+    upload.assert_called_once_with(
+        b"image", f"agent-repository-icons/tenant_a/4/2/{image_id}"
+    )
 
 
 def _list_all_agent_record(
@@ -825,6 +959,109 @@ async def test_list_my_editable_agents_impl_filters_by_search_before_pagination(
 
     assert [item["agent_id"] for item in result["items"]] == [2]
     assert result["pagination"]["total"] == 1
+
+
+@pytest.mark.asyncio
+async def test_list_my_editable_agents_impl_searches_structured_and_listing_tags():
+    agents = [
+        _list_all_agent_record(agent_id=1, display_name="Alpha Agent"),
+        _list_all_agent_record(agent_id=2, display_name="Beta Agent"),
+    ]
+    meta_by_id = {
+        1: _mine_metadata_record(agent_id=1, created_by="user_a"),
+        2: _mine_metadata_record(agent_id=2, created_by="user_a"),
+    }
+    repository_records = [
+        {
+            "agent_id": 2,
+            "agent_repository_id": 22,
+            "status": "shared",
+            "tags": ["Published Category"],
+        }
+    ]
+
+    with patch.object(
+        ars, "list_all_agent_info_impl", new_callable=AsyncMock, return_value=agents
+    ), patch.object(
+        ars, "fetch_draft_agent_mine_metadata", return_value=meta_by_id
+    ), patch.object(
+        ars,
+        "list_agent_repository_by_agent_ids",
+        return_value=repository_records,
+    ), patch.object(
+        ars,
+        "_merge_agent_tag_values",
+        return_value={1: ["Structured Finance"], 2: ["Published Category"]},
+    ):
+        structured_result = await ars.list_my_editable_agents_impl(
+            tenant_id="tenant_a",
+            user_id="user_a",
+            search="finance",
+        )
+        listing_result = await ars.list_my_editable_agents_impl(
+            tenant_id="tenant_a",
+            user_id="user_a",
+            search="category",
+        )
+
+    assert [item["agent_id"] for item in structured_result["items"]] == [1]
+    assert [item["agent_id"] for item in listing_result["items"]] == [2]
+
+
+@pytest.mark.asyncio
+async def test_list_my_editable_agents_impl_searches_localized_structured_tags():
+    agents = [
+        _list_all_agent_record(agent_id=1, display_name="Alpha Agent"),
+        _list_all_agent_record(agent_id=2, display_name="Beta Agent"),
+    ]
+    meta_by_id = {
+        1: _mine_metadata_record(agent_id=1, created_by="user_a"),
+        2: _mine_metadata_record(agent_id=2, created_by="user_a"),
+    }
+
+    with patch.object(
+        ars, "list_all_agent_info_impl", new_callable=AsyncMock, return_value=agents
+    ), patch.object(
+        ars, "fetch_draft_agent_mine_metadata", return_value=meta_by_id
+    ), patch.object(
+        ars, "list_agent_repository_by_agent_ids", return_value=[]
+    ), patch.object(
+        ars, "_merge_agent_tag_values", return_value={1: [], 2: []}
+    ), patch.object(
+        ars,
+        "_find_agent_ids_matching_any_tag_predicate",
+        return_value={"2"},
+    ):
+        result = await ars.list_my_editable_agents_impl(
+            tenant_id="tenant_a",
+            user_id="user_a",
+            search="智能体类别",
+            search_tag_predicates=[object()],
+        )
+
+    assert [item["agent_id"] for item in result["items"]] == [2]
+
+
+@pytest.mark.asyncio
+async def test_list_my_editable_agents_impl_includes_tags_without_search():
+    agents = [_list_all_agent_record(agent_id=1, display_name="Alpha Agent")]
+    meta_by_id = {1: _mine_metadata_record(agent_id=1, created_by="user_a")}
+
+    with patch.object(
+        ars, "list_all_agent_info_impl", new_callable=AsyncMock, return_value=agents
+    ), patch.object(
+        ars, "fetch_draft_agent_mine_metadata", return_value=meta_by_id
+    ), patch.object(
+        ars, "list_agent_repository_by_agent_ids", return_value=[]
+    ), patch.object(
+        ars, "_merge_agent_tag_values", return_value={1: ["Analyst"]}
+    ):
+        result = await ars.list_my_editable_agents_impl(
+            tenant_id="tenant_a",
+            user_id="user_a",
+        )
+
+    assert result["items"][0]["tags"] == ["Analyst"]
 
 
 @pytest.mark.asyncio
@@ -1300,6 +1537,161 @@ def test_update_status_same_status_noop(mock_status_update_deps):
     )
 
 
+def test_update_status_uses_official_fallback_listing(mock_status_update_deps):
+    deps = mock_status_update_deps
+    official_record = _repository_record(
+        status="shared",
+        publisher_tenant_id=ars.SYSTEM_TENANT_ID,
+    )
+    deps["get_by_id"].side_effect = [None, official_record, official_record]
+    deps["update_status"].return_value = 1
+
+    result = ars.update_agent_repository_status_impl(
+        agent_repository_id=1,
+        status="shared",
+        user_id="su_user",
+        tenant_id="tenant_a",
+    )
+
+    assert result["status"] == "shared"
+    assert deps["get_by_id"].call_args_list == [
+        call(1, "tenant_a"),
+        call(1, ars.SYSTEM_TENANT_ID),
+        call(1, "tenant_a"),
+    ]
+
+
+def test_check_repository_import_precheck_rejects_snapshotless_listing():
+    record = _repository_record(agent_repository_id=42, status="shared")
+
+    with patch.object(ars, "get_agent_repository_by_id", return_value=record):
+        with pytest.raises(ValueError, match="Repository listing has no agent snapshot"):
+            ars.check_repository_import_precheck_impl(42, "tenant_a")
+
+
+@pytest.mark.asyncio
+async def test_import_agent_from_repository_rejects_missing_listing():
+    with patch.object(ars, "get_agent_repository_by_id", return_value=None):
+        with pytest.raises(ValueError, match="Repository listing not found"):
+            await ars.import_agent_from_repository_impl(
+                agent_repository_id=42,
+                tenant_id="tenant_a",
+                authorization="Bearer token",
+            )
+
+
+@pytest.mark.asyncio
+async def test_import_agent_from_repository_rejects_snapshotless_listing():
+    record = _repository_record(agent_repository_id=42, status="shared")
+
+    with patch.object(ars, "get_agent_repository_by_id", return_value=record):
+        with pytest.raises(ValueError, match="Repository listing has no agent snapshot"):
+            await ars.import_agent_from_repository_impl(
+                agent_repository_id=42,
+                tenant_id="tenant_a",
+                authorization="Bearer token",
+            )
+
+
+def test_list_official_agent_management_marks_records_as_official():
+    records = [_repository_record(agent_repository_id=42, status="shared")]
+
+    with patch.object(ars, "list_agent_repository_summaries", return_value=records) as mock_list:
+        result = ars.list_official_agent_management_impl()
+
+    mock_list.assert_called_once_with(
+        publisher_tenant_id=ars.SYSTEM_TENANT_ID,
+        status="shared",
+    )
+    assert result == [
+        {
+            **records[0],
+            "publisher_tenant_id": ars.SYSTEM_TENANT_ID,
+        }
+    ]
+
+
+def test_delete_official_agent_removes_bundle_sources_and_listing(tmp_path):
+    bundle_dir = tmp_path / "medical-assistant"
+    bundle_dir.mkdir()
+    (bundle_dir / "agent.json").write_text("{}", encoding="utf-8")
+    nested_dir = tmp_path / "nested"
+    nested_dir.mkdir()
+    nested_json = nested_dir / "medical-assistant.json"
+    nested_zip = nested_dir / "medical-assistant.zip"
+    nested_json.write_text("{}", encoding="utf-8")
+    nested_zip.write_bytes(b"zip")
+    record = {
+        **_repository_record(
+            agent_repository_id=42,
+            publisher_tenant_id=ars.SYSTEM_TENANT_ID,
+        ),
+        "name": "medical-assistant",
+        "agent_info_json": {"agent_info": {"10": {}, "child": {}, "11": {}}},
+    }
+
+    with patch("consts.const.OFFICIAL_AGENTS_PATH", str(tmp_path)), patch.object(
+        ars, "get_agent_repository_by_id", return_value=record
+    ), patch.object(ars, "delete_agent_by_id") as mock_delete_agent, patch.object(
+        ars, "soft_delete_agent_repository_record", return_value=1
+    ) as mock_soft_delete:
+        result = ars.delete_official_agent_impl(42, "su_user")
+
+    assert not bundle_dir.exists()
+    assert not nested_json.exists()
+    assert not nested_zip.exists()
+    mock_delete_agent.assert_has_calls([
+        call(10, ars.SYSTEM_TENANT_ID, "su_user"),
+        call(11, ars.SYSTEM_TENANT_ID, "su_user"),
+    ])
+    mock_soft_delete.assert_called_once_with(
+        42,
+        publisher_tenant_id=ars.SYSTEM_TENANT_ID,
+        user_id="su_user",
+    )
+    assert result["preserved_tenant_copies"] is True
+    assert result["deleted_bundle_paths"]
+
+
+def test_delete_official_agent_rejects_missing_listing():
+    with patch.object(ars, "get_agent_repository_by_id", return_value=None):
+        with pytest.raises(ValueError, match="Official agent repository listing not found"):
+            ars.delete_official_agent_impl(42, "su_user")
+
+
+@pytest.mark.parametrize("name", ["", ".", "..", "nested/name", r"nested\\name"])
+def test_delete_official_agent_rejects_invalid_bundle_name(name):
+    record = {
+        **_repository_record(
+            agent_repository_id=42,
+            publisher_tenant_id=ars.SYSTEM_TENANT_ID,
+        ),
+        "name": name,
+    }
+
+    with patch.object(ars, "get_agent_repository_by_id", return_value=record):
+        with pytest.raises(ValueError, match="Official agent bundle name is invalid"):
+            ars.delete_official_agent_impl(42, "su_user")
+
+
+def test_delete_official_agent_rejects_already_deleted_listing(tmp_path):
+    record = {
+        **_repository_record(
+            agent_repository_id=42,
+            publisher_tenant_id=ars.SYSTEM_TENANT_ID,
+        ),
+        "name": "medical-assistant",
+    }
+
+    with patch("consts.const.OFFICIAL_AGENTS_PATH", str(tmp_path)), patch.object(
+        ars, "get_agent_repository_by_id", return_value=record
+    ), patch.object(
+        ars, "soft_delete_agent_repository_record", return_value=0
+    ):
+        with pytest.raises(ValueError, match="Official agent repository listing was already deleted"):
+            ars.delete_official_agent_impl(42, "su_user")
+
+
 def test_list_repository_listings_includes_submitted_by():
     records = [
         {
@@ -1332,8 +1724,9 @@ def test_get_agent_repository_listing_detail_impl_scopes_by_tenant():
             "agent_info": {"10": {"model_name": "gpt", "duty_prompt": "help", "tools": []}},
             "mcp_info": [],
         },
-        "icon": "🤖",
+        "icon_url": None,
         "version_name": "v1",
+        "version_no": 3,
         "downloads": 0,
         "create_time": None,
     }
@@ -1347,6 +1740,7 @@ def test_get_agent_repository_listing_detail_impl_scopes_by_tenant():
 
     mock_get.assert_called_once_with(42, "tenant_a")
     assert result["agent_repository_id"] == 42
+    assert result["version_no"] == 3
 
 
 def test_get_agent_repository_listing_detail_impl_not_found_for_other_tenant():
@@ -1412,7 +1806,7 @@ def test_count_tools_in_snapshot_invalid_input(snapshot):
 @pytest.mark.asyncio
 async def test_build_repository_data_from_agent_merges_card_fields():
     card_fields = {
-        "icon": "📊",
+        "icon_url": None,
         "tags": [" 数据 ", "数据", "自定义标签"],
         "downloads": 10,
     }
@@ -1439,7 +1833,7 @@ async def test_build_repository_data_from_agent_merges_card_fields():
             card_fields=card_fields,
         )
 
-    assert repository_data["icon"] == "📊"
+    assert repository_data["icon_url"] is None
     assert repository_data["tags"] == ["数据", "自定义标签"]
     assert repository_data["downloads"] == 10
     assert repository_data["tool_count"] == 0
@@ -1558,7 +1952,7 @@ async def test_create_agent_repository_listing_impl_success():
             "name": "agent_one",
             "agent_info_json": agent_info_json,
             "status": "pending_review",
-            "icon": "🤖",
+            "icon_url": None,
             "tags": ["营销"],
         }
         mock_get_by_agent_id.return_value = None
@@ -1633,7 +2027,7 @@ async def test_create_agent_repository_listing_impl_updates_existing():
             "name": "agent_one",
             "agent_info_json": agent_info_json,
             "status": "pending_review",
-            "icon": "🤖",
+            "icon_url": None,
             "tags": ["营销"],
             "tool_count": 3,
         }
@@ -1670,7 +2064,7 @@ async def test_create_agent_repository_listing_impl_updates_existing():
         updates={
             "status": "pending_review",
             "content": "",
-            "icon": "🤖",
+            "icon_url": None,
             "tags": ["营销"],
             "tool_count": 3,
         },
@@ -1705,7 +2099,7 @@ async def test_create_agent_repository_listing_impl_accepts_draft_version():
             "name": "agent_one",
             "agent_info_json": agent_info_json,
             "status": "pending_review",
-            "icon": "🤖",
+            "icon_url": None,
             "tags": ["营销"],
         }
         mock_get_by_agent_id.return_value = None
@@ -1845,7 +2239,7 @@ def test_validate_create_payload_requires_agent_info_json():
         "agent_id": 1,
         "version_no": 1,
         "name": "agent_one",
-        "icon": "🤖",
+        "icon_url": None,
         "tags": ["营销"],
     }
 
@@ -2033,7 +2427,7 @@ def test_get_agent_repository_listing_detail_returns_agent_level_downloads():
             "agent_info": {"10": {"model_name": "gpt", "duty_prompt": "help", "tools": []}},
             "mcp_info": [],
         },
-        "icon": "🤖",
+        "icon_url": None,
         "version_name": "v1",
         "downloads": 2,
         "create_time": None,
@@ -2081,6 +2475,209 @@ async def test_list_my_editable_agents_includes_agent_level_downloads():
 
 
 @pytest.mark.asyncio
+async def test_check_repository_import_precheck_loads_official_bundle_from_fallback_tenant():
+    record = {
+        **_repository_record(
+            agent_repository_id=42,
+            status="shared",
+            publisher_tenant_id=ars.SYSTEM_TENANT_ID,
+        ),
+        "name": "medical-assistant",
+        "display_name": "  ",
+    }
+    bundle = types.SimpleNamespace(name="medical-assistant")
+    precheck = MagicMock()
+    precheck.model_dump.return_value = {"agent_repository_id": 42, "has_abnormal": False}
+
+    with patch.object(
+        ars,
+        "get_agent_repository_by_id",
+        side_effect=[None, record],
+    ) as get_record:
+        with patch(
+            "services.official_agent_service._load_bundle",
+            return_value=bundle,
+        ) as load_bundle:
+            with patch.object(
+                ars,
+                "build_repository_import_precheck",
+                return_value=precheck,
+            ) as build_precheck:
+                result = ars.check_repository_import_precheck_impl(42, "tenant_a")
+
+    assert result == {"agent_repository_id": 42, "has_abnormal": False}
+    assert get_record.call_args_list == [
+        call(42, "tenant_a"),
+        call(42, ars.SYSTEM_TENANT_ID),
+    ]
+    load_bundle.assert_called_once_with("medical-assistant")
+    build_precheck.assert_called_once_with(
+        agent_repository_id=42,
+        display_name="medical-assistant",
+        snapshot=bundle,
+        tenant_id="tenant_a",
+        require_kb_embedding_model=True,
+    )
+
+
+def test_check_repository_import_precheck_rejects_missing_official_bundle():
+    record = {
+        **_repository_record(
+            agent_repository_id=42,
+            status="shared",
+            publisher_tenant_id=ars.SYSTEM_TENANT_ID,
+        ),
+        "name": "missing-agent",
+    }
+
+    with patch.object(ars, "get_agent_repository_by_id", side_effect=[None, record]):
+        with patch("services.official_agent_service._load_bundle", return_value=None):
+            with pytest.raises(ValueError, match="Official agent bundle not found: missing-agent"):
+                ars.check_repository_import_precheck_impl(42, "tenant_a")
+
+
+@pytest.mark.asyncio
+async def test_import_agent_from_repository_installs_official_bundle_from_fallback_tenant():
+    record = {
+        **_repository_record(
+            agent_repository_id=42,
+            agent_id=10,
+            status="shared",
+            publisher_tenant_id=ars.SYSTEM_TENANT_ID,
+        ),
+        "name": "medical-assistant",
+    }
+    install_result = types.SimpleNamespace(status="success", message=None, agent_id=100)
+
+    with patch.object(ars, "get_agent_repository_by_id", side_effect=[None, record]) as get_record:
+        with patch(
+            "services.official_agent_service.install_official_agents",
+            new_callable=AsyncMock,
+            return_value=[install_result],
+        ) as install:
+            with patch.object(ars, "increment_agent_repository_downloads", return_value=1) as increment:
+                result = await ars.import_agent_from_repository_impl(
+                    agent_repository_id=42,
+                    tenant_id="tenant_a",
+                    authorization="Bearer token",
+                    user_id="user_a",
+                    model_ids={"language": 1},
+                    embedding_model_ids={"embedding": 2},
+                    skill_resolutions=[{"skill_name": "skill", "action": "reuse"}],
+                )
+
+    assert result == {10: 100}
+    assert get_record.call_args_list == [
+        call(42, "tenant_a"),
+        call(42, ars.SYSTEM_TENANT_ID),
+    ]
+    install.assert_awaited_once_with(
+        ["medical-assistant"],
+        tenant_id="tenant_a",
+        user_id="user_a",
+        authorization="Bearer token",
+        model_ids={"language": 1},
+        embedding_model_ids={"embedding": 2},
+        skill_resolutions=[{"skill_name": "skill", "action": "reuse"}],
+        knowledge_base_resolutions=None,
+    )
+    increment.assert_called_once_with(42)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("status", "message", "expected_message"),
+    [
+        ("needs_model", "Select a model", "Select a model"),
+        ("failed", "Install failed", "Install failed"),
+        ("not_found", "Bundle missing", "Bundle missing"),
+    ],
+)
+async def test_import_agent_from_repository_rejects_failed_official_install(
+    status, message, expected_message
+):
+    record = {
+        **_repository_record(
+            agent_repository_id=42,
+            status="shared",
+            publisher_tenant_id=ars.SYSTEM_TENANT_ID,
+        ),
+        "name": "medical-assistant",
+    }
+    install_result = types.SimpleNamespace(status=status, message=message, agent_id=None)
+
+    with patch.object(ars, "get_agent_repository_by_id", side_effect=[None, record]):
+        with patch(
+            "services.official_agent_service.install_official_agents",
+            new_callable=AsyncMock,
+            return_value=[install_result],
+        ):
+            with patch.object(ars, "increment_agent_repository_downloads") as increment:
+                with pytest.raises(ValueError, match=expected_message):
+                    await ars.import_agent_from_repository_impl(
+                        agent_repository_id=42,
+                        tenant_id="tenant_a",
+                        authorization="Bearer token",
+                    )
+
+    increment.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_import_agent_from_repository_rejects_empty_official_install_result():
+    record = {
+        **_repository_record(
+            agent_repository_id=42,
+            status="shared",
+            publisher_tenant_id=ars.SYSTEM_TENANT_ID,
+        ),
+        "name": "medical-assistant",
+    }
+
+    with patch.object(ars, "get_agent_repository_by_id", side_effect=[None, record]):
+        with patch(
+            "services.official_agent_service.install_official_agents",
+            new_callable=AsyncMock,
+            return_value=[],
+        ):
+            with pytest.raises(ValueError, match="Official agent installation returned no result"):
+                await ars.import_agent_from_repository_impl(
+                    agent_repository_id=42,
+                    tenant_id="tenant_a",
+                    authorization="Bearer token",
+                )
+
+
+@pytest.mark.asyncio
+async def test_import_agent_from_repository_warns_when_official_download_increment_fails():
+    record = {
+        **_repository_record(
+            agent_repository_id=42,
+            agent_id=10,
+            status="shared",
+            publisher_tenant_id=ars.SYSTEM_TENANT_ID,
+        ),
+        "name": "medical-assistant",
+    }
+    install_result = types.SimpleNamespace(status="success", message=None, agent_id=100)
+
+    with patch.object(ars, "get_agent_repository_by_id", side_effect=[None, record]):
+        with patch(
+            "services.official_agent_service.install_official_agents",
+            new_callable=AsyncMock,
+            return_value=[install_result],
+        ):
+            with patch.object(ars, "increment_agent_repository_downloads", return_value=0):
+                result = await ars.import_agent_from_repository_impl(
+                    agent_repository_id=42,
+                    tenant_id="tenant_a",
+                    authorization="Bearer token",
+                )
+
+    assert result == {10: 100}
+
+
+@pytest.mark.asyncio
 async def test_import_agent_from_repository_increments_downloads():
     record = {
         **_repository_record(agent_repository_id=42, agent_id=10, status="shared"),
@@ -2100,7 +2697,7 @@ async def test_import_agent_from_repository_increments_downloads():
         "import_agent_impl",
         new_callable=AsyncMock,
         return_value={1: 100},
-    ), patch.object(
+    ) as mock_import, patch.object(
         ars,
         "increment_agent_repository_downloads",
         return_value=1,
@@ -2112,7 +2709,21 @@ async def test_import_agent_from_repository_increments_downloads():
         )
 
     mock_increment.assert_called_once_with(42)
+    assert mock_import.call_args.kwargs["resolve_name_conflicts"] is True
     assert result == {1: 100}
+
+
+@pytest.mark.asyncio
+async def test_workbench_import_response_identifies_root_not_first_child():
+    record = {
+        **_repository_record(agent_repository_id=42, agent_id=10, status="shared"),
+        "agent_info_json": {"agent_id": 10, "agent_info": {"10": {"name": "root"}}, "mcp_info": []},
+    }
+    with patch.object(ars, "get_agent_repository_by_id", return_value=record), \
+            patch.object(ars, "import_agent_impl", new_callable=AsyncMock, return_value={2: 102, 10: 110}), \
+            patch.object(ars, "increment_agent_repository_downloads", return_value=1):
+        result = await ars.import_agent_from_repository_impl(42, "tenant_a", "Bearer token", return_root_id=True)
+    assert result == {"agent_id": 110}
 
 
 @pytest.mark.asyncio
@@ -2189,6 +2800,7 @@ async def test_import_agent_from_repository_passes_skill_resolutions():
     mock_import.assert_called_once()
     call_kwargs = mock_import.call_args[1]
     assert call_kwargs["skill_resolutions"] == skill_resolutions
+    assert call_kwargs["resolve_name_conflicts"] is True
 
 
 @pytest.mark.asyncio

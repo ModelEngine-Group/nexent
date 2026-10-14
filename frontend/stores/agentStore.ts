@@ -23,11 +23,14 @@ export type AgentDraft = Pick<
   | "model"
   | "model_ids"
   | "model_names"
+  | "model_params_override"
+  | "unavailable_reasons"
   | "max_step"
   | "requested_output_tokens"
   | "is_main_agent"
   | "provide_run_summary"
   | "allow_chat_metadata"
+  | "enable_protocol_repair_retry"
   | "enable_context_manager"
   | "is_a2a"
   | "verification_config"
@@ -53,6 +56,8 @@ export type AgentDraftPatch = Partial<AgentDraft>;
 export interface AgentSaveTask {
   agentId: number;
   patch: AgentDraftPatch;
+  source?: "user" | "automatic-model-reconciliation";
+  signature?: string;
 }
 
 export interface PersistedResourceBindings {
@@ -66,10 +71,11 @@ interface AgentStoreState {
   isReadOnly: boolean;
   editedAgent: AgentDraft | null;
   savedAgent: AgentDraft | null;
+  lastSavedAt: number | null;
   serverSnapshotRevision: number;
   queue: AgentSaveTask[];
   isGenerating: boolean;
-  saveError: string | null;
+  saveError: Error | string | null;
   lastSaveFailed: boolean;
   defaultLlmConfig: {
     id: number | null;
@@ -81,6 +87,7 @@ interface AgentStoreState {
   updateDraft: (patch: AgentDraftPatch) => void;
   flushDraft: () => void;
   updateAgentConfig: (patch: AgentDraftPatch) => void;
+  reconcileUnavailableModels: (patch: AgentDraftPatch) => void;
   updateTools: (tools: Tool[]) => void;
   updateSkills: (skills: AgentDraft["skills"]) => void;
   updateSubAgentIds: (ids: number[]) => void;
@@ -111,11 +118,13 @@ const toDraft = (agent: Agent): AgentDraft => ({
   model: agent.model || "",
   model_ids: agent.model_ids || [],
   model_names: agent.model_names || [],
+  unavailable_reasons: agent.unavailable_reasons || [],
   max_step: agent.max_step,
   requested_output_tokens: agent.requested_output_tokens ?? null,
   is_main_agent: agent.is_main_agent ?? true,
   provide_run_summary: agent.provide_run_summary,
   allow_chat_metadata: agent.allow_chat_metadata ?? false,
+  enable_protocol_repair_retry: agent.enable_protocol_repair_retry ?? false,
   enable_context_manager: agent.enable_context_manager,
   is_a2a: agent.is_a2a,
   verification_config: agent.verification_config,
@@ -136,6 +145,10 @@ const toDraft = (agent: Agent): AgentDraft => ({
   greeting_message: agent.greeting_message || "",
   example_questions: agent.example_questions || [],
   icon_url: agent.icon_url,
+  // v2.6.0 per-agent inference-param overrides. Without this line the value
+  // loaded from the API is dropped when the agent is converted to a draft,
+  // so the override dialog always reads back empty after reopening.
+  model_params_override: agent.model_params_override ?? null,
 });
 
 const cloneDraft = <T>(value: T): T => structuredClone(value);
@@ -194,6 +207,26 @@ let draftSaveTimer: ReturnType<typeof setTimeout> | null = null;
 let saveQueue: AgentSaveTask[] = [];
 let saveQueueProcessing = false;
 let idleWaiters: Array<(success: boolean) => void> = [];
+const failedAutoReconciliationSignatures = new Set<string>();
+
+const serializeModelIds = (modelIds: number[]): string =>
+  JSON.stringify(modelIds);
+
+const getModelReconciliationSignature = (
+  agentId: number,
+  currentModelIds: number[],
+  nextModelIds: number[]
+): string =>
+  `${agentId}:${serializeModelIds(currentModelIds)}=>${serializeModelIds(nextModelIds)}`;
+
+const clearAutoReconciliationFailures = (agentId: number): void => {
+  const prefix = `${agentId}:`;
+  failedAutoReconciliationSignatures.forEach((signature) => {
+    if (signature.startsWith(prefix)) {
+      failedAutoReconciliationSignatures.delete(signature);
+    }
+  });
+};
 
 const resolveIdleWaiters = () => {
   if (saveQueueProcessing || saveQueue.length > 0) {
@@ -264,6 +297,9 @@ const toAgentPayload = (agentId: number, patch: AgentDraftPatch) => ({
     : {}),
   ...(patch.allow_chat_metadata !== undefined
     ? { allow_chat_metadata: patch.allow_chat_metadata }
+    : {}),
+  ...(patch.enable_protocol_repair_retry !== undefined
+    ? { enable_protocol_repair_retry: patch.enable_protocol_repair_retry }
     : {}),
   ...(patch.is_a2a !== undefined ? { is_a2a: patch.is_a2a } : {}),
   ...(patch.enable_context_manager !== undefined
@@ -340,6 +376,9 @@ const toAgentPayload = (agentId: number, patch: AgentDraftPatch) => ({
     : {}),
   ...(patch.example_questions !== undefined
     ? { example_questions: patch.example_questions }
+    : {}),
+  ...(patch.model_params_override !== undefined
+    ? { model_params_override: patch.model_params_override }
     : {}),
 });
 
@@ -450,7 +489,7 @@ async function processSaveQueue(): Promise<void> {
           toAgentPayload(task.agentId, task.patch)
         );
         if (!result.success) {
-          throw new Error(result.message);
+          throw result.error ?? new Error(result.message);
         }
 
         const savedAgent = useAgentStore.getState().savedAgent;
@@ -470,6 +509,7 @@ async function processSaveQueue(): Promise<void> {
         saveQueue = saveQueue.slice(1);
         useAgentStore.setState((state) => ({
           savedAgent: mergeDraft(state.savedAgent, task.patch),
+          lastSavedAt: Date.now(),
           lastSaveFailed:
             drainHadFailure || saveQueue.length > 0
               ? state.lastSaveFailed
@@ -482,6 +522,13 @@ async function processSaveQueue(): Promise<void> {
           return;
         }
 
+        if (
+          task.source === "automatic-model-reconciliation" &&
+          task.signature
+        ) {
+          failedAutoReconciliationSignatures.add(task.signature);
+        }
+
         saveQueue = saveQueue.slice(1);
         useAgentStore.setState((state) => ({
           editedAgent: mergeDraft(
@@ -490,9 +537,7 @@ async function processSaveQueue(): Promise<void> {
           ),
           lastSaveFailed: true,
           saveError:
-            error instanceof Error
-              ? error.message
-              : "Failed to save agent changes",
+            error instanceof Error ? error : "Failed to save agent changes",
         }));
       }
     }
@@ -506,13 +551,34 @@ async function processSaveQueue(): Promise<void> {
 }
 
 export const useAgentStore = create<AgentStoreState>((set) => {
-  const enqueue = (patch: AgentDraftPatch) => {
+  const enqueue = (
+    patch: AgentDraftPatch,
+    options: Pick<AgentSaveTask, "source" | "signature"> = {}
+  ) => {
     const { agentId, isReadOnly } = useAgentStore.getState();
     if (agentId === null || isReadOnly) {
       return;
     }
 
-    const task: AgentSaveTask = { agentId, patch: cloneDraft(patch) };
+    if (
+      options.source === "automatic-model-reconciliation" &&
+      options.signature &&
+      failedAutoReconciliationSignatures.has(options.signature)
+    ) {
+      return;
+    }
+
+    if (options.source !== "automatic-model-reconciliation") {
+      if (patch.model_ids !== undefined) {
+        clearAutoReconciliationFailures(agentId);
+      }
+    }
+
+    const task: AgentSaveTask = {
+      agentId,
+      patch: cloneDraft(patch),
+      ...options,
+    };
     saveQueue = [...saveQueue, task];
     set((state) => ({
       editedAgent: mergeDraft(state.editedAgent, task.patch),
@@ -527,6 +593,7 @@ export const useAgentStore = create<AgentStoreState>((set) => {
     isReadOnly: true,
     editedAgent: null,
     savedAgent: null,
+    lastSavedAt: null,
     serverSnapshotRevision: 0,
     queue: [],
     isGenerating: false,
@@ -545,6 +612,7 @@ export const useAgentStore = create<AgentStoreState>((set) => {
         isReadOnly: agent.permission === "READ_ONLY",
         editedAgent: cloneDraft(draft),
         savedAgent: cloneDraft(draft),
+        lastSavedAt: null,
         serverSnapshotRevision: state.serverSnapshotRevision + 1,
         isGenerating: false,
         saveError: null,
@@ -583,6 +651,34 @@ export const useAgentStore = create<AgentStoreState>((set) => {
       }
     },
     updateAgentConfig: enqueue,
+    reconcileUnavailableModels: (patch) => {
+      const { agentId, editedAgent, isReadOnly } = useAgentStore.getState();
+      const nextModelIds = patch.model_ids;
+      if (
+        agentId === null ||
+        isReadOnly ||
+        !editedAgent ||
+        nextModelIds === undefined
+      ) {
+        return;
+      }
+
+      const currentModelIds = editedAgent.model_ids ?? [];
+      if (
+        serializeModelIds(currentModelIds) === serializeModelIds(nextModelIds)
+      ) {
+        return;
+      }
+
+      enqueue(patch, {
+        source: "automatic-model-reconciliation",
+        signature: getModelReconciliationSignature(
+          agentId,
+          currentModelIds,
+          nextModelIds
+        ),
+      });
+    },
     updateTools: (tools) => enqueue({ tools }),
     updateSkills: (skills) => enqueue({ skills }),
     updateSubAgentIds: (sub_agent_id_list) => enqueue({ sub_agent_id_list }),
@@ -640,12 +736,14 @@ export const useAgentStore = create<AgentStoreState>((set) => {
     reset: () => {
       clearPendingDraftSave();
       saveQueue = [];
+      failedAutoReconciliationSignatures.clear();
       set((state) => ({
         agentId: null,
         currentAgentId: null,
         isReadOnly: true,
         editedAgent: null,
         savedAgent: null,
+        lastSavedAt: null,
         serverSnapshotRevision: state.serverSnapshotRevision + 1,
         isGenerating: false,
         saveError: null,

@@ -54,6 +54,8 @@ def _make_query_chain(session, results):
     method calls terminate at ``.all()`` (or ``.first()`` / ``.scalar()``)
     returning the provided values.
     """
+    queries = []
+
     def _query(*_args, **kwargs):
         query = MagicMock(name="query")
         query.filter.return_value = query
@@ -67,9 +69,11 @@ def _make_query_chain(session, results):
         query.scalar.return_value = results[0] if results else None
         query.update = MagicMock(return_value=len(results))
         session.add = MagicMock()
+        queries.append(query)
         return query
 
     session.query.side_effect = _query
+    session.test_queries = queries
     return _query
 
 
@@ -431,7 +435,7 @@ class TestListAgentEvaluationsByAgent:
                             lambda _r: {"agent_evaluation_id": 1})
 
         results = agent_evaluation_db.list_agent_evaluations_by_agent(
-            agent_id=42, tenant_id="t1",
+            agent_ids=[42, 43], tenant_id="t1",
         )
         assert len(results) == 2
         assert results[0]["case_count"] == 10
@@ -439,6 +443,8 @@ class TestListAgentEvaluationsByAgent:
         assert results[0]["fail_count"] == 3
         assert results[1]["case_count"] == 5
         assert results[1]["fail_count"] == 5
+        filters = session.test_queries[0].filter.call_args.args
+        assert any(getattr(condition.operator, "__name__", "") == "in_op" for condition in filters)
 
     def test_handles_none_counts(self, session_factory, monkeypatch):
         from backend.database import agent_evaluation_db
@@ -454,11 +460,13 @@ class TestListAgentEvaluationsByAgent:
                             lambda _r: {"agent_evaluation_id": 1})
 
         results = agent_evaluation_db.list_agent_evaluations_by_agent(
-            agent_id=42, tenant_id="t1",
+            agent_ids=[], tenant_id="t1",
         )
         assert results[0]["case_count"] == 0
         assert results[0]["pass_count"] == 0
         assert results[0]["fail_count"] == 0
+        filters = session.test_queries[0].filter.call_args.args
+        assert not any(getattr(condition.operator, "__name__", "") == "in_op" for condition in filters)
 
 
 # ---------------------------------------------------------------------------
@@ -1119,3 +1127,76 @@ class TestReapStaleRuns:
 
         n = agent_evaluation_db.reap_stale_runs("t1", timeout_minutes=10)
         assert n == 0
+
+
+class TestStartupRecovery:
+    def test_lists_only_tenants_with_running_work(self, session_factory):
+        from backend.database import agent_evaluation_db
+
+        session, _ = session_factory
+        query = MagicMock(name="query")
+        query.filter.return_value = query
+        query.distinct.return_value = query
+        query.all.return_value = [("tenant-1",), ("tenant-2",), (None,)]
+        session.query.return_value = query
+
+        assert agent_evaluation_db.list_evaluation_tenant_ids() == [
+            "tenant-1",
+            "tenant-2",
+        ]
+        query.distinct.assert_called_once_with()
+
+    def test_fails_interrupted_no_set_runs_and_their_pending_cases(
+        self, session_factory
+    ):
+        from backend.database import agent_evaluation_db
+
+        session, _ = session_factory
+        queries = [MagicMock(name=f"q{i}") for i in range(3)]
+        for query in queries:
+            query.filter.return_value = query
+        queries[0].all.return_value = [(10,), (20,)]
+        queries[1].update.return_value = 4
+        queries[2].update.return_value = 2
+        session.query.side_effect = queries
+
+        assert agent_evaluation_db.fail_interrupted_no_set_runs_on_startup() == 2
+        case_updates = queries[1].update.call_args.args[0]
+        run_updates = queries[2].update.call_args.args[0]
+        assert case_updates["status"] == "FAILED"
+        assert run_updates["status"] == "FAILED"
+        assert case_updates["error_message"] == run_updates["error_message"]
+        session.commit.assert_called_once_with()
+
+    def test_pending_recovery_is_noop_when_there_are_no_runs(self, session_factory):
+        from backend.database import agent_evaluation_db
+
+        session, _ = session_factory
+        query = MagicMock(name="query")
+        query.filter.return_value = query
+        query.all.return_value = []
+        session.query.return_value = query
+
+        assert agent_evaluation_db.fail_interrupted_no_set_runs_on_startup() == 0
+        query.update.assert_not_called()
+
+    def test_lists_dispatchable_pending_runs(self, session_factory, mocker):
+        from backend.database import agent_evaluation_db
+
+        session, _ = session_factory
+        query = MagicMock(name="query")
+        query.filter.return_value = query
+        query.order_by.return_value = query
+        rows = [MagicMock(name="pending-run")]
+        query.all.return_value = rows
+        session.query.return_value = query
+        as_dict = mocker.patch.object(
+            agent_evaluation_db,
+            "as_dict",
+            return_value={"agent_evaluation_id": 10},
+        )
+
+        assert agent_evaluation_db.list_dispatchable_pending_runs() == [
+            {"agent_evaluation_id": 10}
+        ]
+        as_dict.assert_called_once_with(rows[0])

@@ -1,0 +1,17 @@
+schema_version: '1.0'
+module:
+  id: V5-BASELINE
+  name: Migrated V5 baseline
+feature:
+  feature_id: V5-PW-AGENT-02
+  name: 三Tab：Basic(知识库+开场白)→Advanced(协作Agent版本选择+护栏)→Debug
+  status: active
+  description: 覆盖重构后三 Tab 真实配置域：Basic Tab 配置知识库与开场白(Conversation Guide)，Advanced Tab 配置内部协作 Agent(含版本号 V{version_no} 展示与选择弹窗
+    current_version_no 解析)与安全护栏，保持 autosave 与 Debug 断言。
+  business_rules:
+  - rule_id: V5-PW-AGENT-02-RULE-01
+    description: 三Tab：Basic(知识库+开场白)→Advanced(协作Agent版本选择+护栏)→Debug
+  required_test_stages:
+  - D4
+  source:
+    notes: 'Provisional migration owner: the V5 row has no stable Feature ID. Do not infer an F-ID.'

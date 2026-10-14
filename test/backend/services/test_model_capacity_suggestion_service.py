@@ -9,7 +9,7 @@ if backend_dir not in sys.path:
 
 from unittest import mock
 
-from services.model_capacity_suggestion_service import (
+from management.services.model.capacity import (
     CapacitySuggestionMatchKind,
     _fuzzy_catalog_match,
     normalize_model_name,
@@ -17,7 +17,7 @@ from services.model_capacity_suggestion_service import (
     pick_provider_from_base_url,
     suggest_capacity,
 )
-import services.model_capacity_suggestion_service as suggestion_module
+import management.services.model.capacity as suggestion_module
 
 
 class Profile:
@@ -491,6 +491,7 @@ def test_model_capacity_suggestion_response_catalog_exact_shape(_pydantic_models
 
     assert set(dumped.keys()) == {
         "suggestions",
+        "reasoning_capability",
         "match_kind",
         "match_confidence",
         "match_explanation",
@@ -499,6 +500,7 @@ def test_model_capacity_suggestion_response_catalog_exact_shape(_pydantic_models
         "capability_profile_version",
         "capacity_source_on_accept",
     }
+    assert dumped["reasoning_capability"] is None
     assert dumped["match_kind"] == "catalog_exact"
     assert dumped["match_confidence"] == "high"
     assert dumped["capacity_source_on_accept"] == "operator"
@@ -519,6 +521,7 @@ def test_model_capacity_suggestion_response_none_match_shape(_pydantic_models):
 
     assert dumped["match_kind"] == "none"
     assert dumped["suggestions"] is None
+    assert dumped["reasoning_capability"] is None
     assert dumped["match_confidence"] is None
     assert dumped["suggested_provider"] is None
     assert dumped["canonical_model_name"] is None

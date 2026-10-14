@@ -3,7 +3,6 @@
 from .embedding_model import (
     EmbeddingModelInfo,
     get_embedding_client,
-    reset_embedding_client_cache,
 )
 from .models import (
     ExternalMemoryItem,
@@ -45,11 +44,6 @@ from .providers import (
     execute_with_retry,
     get_provider_registry,
     reset_provider_registry,
-)
-
-from .providers.adapters import (
-    A800Adapter,
-    Mem0Adapter,
 )
 
 from .retrieval import (
@@ -96,7 +90,6 @@ __all__ = [
     # Embedding
     "EmbeddingModelInfo",
     "get_embedding_client",
-    "reset_embedding_client_cache",
     # Providers
     "BaseMemoryProvider",
     "SearchableMemoryProvider",
@@ -110,9 +103,6 @@ __all__ = [
     "DegradableProviderError",
     "NonRetryableProviderError",
     "execute_with_retry",
-    # Provider adapters
-    "A800Adapter",
-    "Mem0Adapter",
     # Retrieval pipeline (Phase 4)
     "Normalizer",
     "ScoreFusion",

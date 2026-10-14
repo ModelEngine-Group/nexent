@@ -1,6 +1,9 @@
 """
 Standalone mock AIDP server for Nexent AIDP management endpoint testing.
 
+CLI upload responses are delayed by 10 seconds; use --upload-seconds 0 or
+POST /_mock/upload-seconds?seconds=0 for fast uploads.
+
 Simulates the AIDP native API endpoints consumed by backend/services/aidp_service.py:
   - GET    /KnowledgeBase/Tenants/{tenant}/KnowledgeBases          (list)
   - PUT    /KnowledgeBase/Tenants/{tenant}/KnowledgeBases          (create)
@@ -9,7 +12,27 @@ Simulates the AIDP native API endpoints consumed by backend/services/aidp_servic
   - DELETE /KnowledgeBase/Tenants/{tenant}/KnowledgeBases/{id}     (delete)
   - POST   /KnowledgeBase/Tenants/{tenant}/KnowledgeBases/{id}/KnowledgeFiles/Upload  (upload docs)
   - GET    /KnowledgeBase/Tenants/{tenant}/KnowledgeBases/{id}/KnowledgeFiles         (list docs)
+  - GET    /KnowledgeBase/Tenants/{tenant}/KnowledgeBases/{id}/Channels               (ingestion channels)
+  - POST   /KnowledgeBase/Tenants/{tenant}/KnowledgeBases/{id}/KnowledgeFiles/History (all-status file history)
+  - POST   /KnowledgeBase/Tenants/{tenant}/KnowledgeBases/{id}/KnowledgeFiles/Remove  (remove docs)
+  - POST   /KnowledgeBase/Tenants/{tenant}/KnowledgeBases/{id}/KnowledgeFiles/Download (download doc)
   - POST   /KnowledgeBase/Tenants/{tenant}/Retrieval/FusionSearch  (search - preserved from reference)
+
+Document status simulation (drives the "processing status" UI):
+  * Uploads are immediately visible in the completed-files list by default, so
+    a successful upload followed by the drawer's one-time refresh has an
+    observable result. Set ``_PROCESSING_SECONDS`` above zero with
+    ``POST /_mock/processing-seconds?seconds=N`` to simulate asynchronous
+    ingestion and exercise processing-status polling.
+  * ``POST /_mock/doc-status`` (body ``{kds_id, file_ino_no, status}``) forces one
+    document into any status without waiting for the timer, including the
+    non-terminal ``UPLOADING`` / ``EXTRACTING`` stages.
+  * ``GET .../KnowledgeFiles`` keeps returning COMPLETED documents only (mirrors
+    real AIDP), while ``POST .../KnowledgeFiles/History`` returns every status.
+  * ``POST .../KnowledgeFiles/History`` is paginated (body ``page``, ten entries
+    per page) and lists files that are still being processed first, so a burst of
+    simultaneous uploads spills onto the next page and the caller has to walk the
+    pages. Tune the page size with ``POST /_mock/history-page-size?size=N``.
 
 Knowledge base + document state is persisted to ``_state/knowledge_bases.json``
 (next to this file). On restart the mock loads the file, so KBs created by
@@ -20,18 +43,22 @@ rebuilds the seed data. Run with:
     python aidp_mgmt_mock_server.py --port 30081
 """
 import argparse
+import asyncio
 import json
 import logging
+import mimetypes
 import os
+import re
 import time
 import uuid
 from pathlib import Path
 from typing import Any, Dict, List, Literal, Optional
+from urllib.parse import quote
 
 from fastapi import FastAPI, File, Header, HTTPException, Query, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
-from starlette.responses import JSONResponse
+from starlette.responses import JSONResponse, StreamingResponse
 
 logger = logging.getLogger("aidp_mgmt_mock")
 logging.basicConfig(
@@ -57,13 +84,41 @@ TENANT = "aidp"  # tenant segment used in all path prefixes
 _KB_PREFIX = f"/KnowledgeBase/Tenants/{TENANT}/KnowledgeBases"
 _MODELS_PREFIX = f"/ModelService/Tenants/{TENANT}/Service"
 
+# Document status constants mirroring the real AIDP vocabulary.
+STATUS_PROCESSING = "PROCESSING"
+STATUS_COMPLETED = "COMPLETED"
+STATUS_FAILED = "FAILED"
+_TERMINAL_STATUSES = {STATUS_COMPLETED, STATUS_FAILED}
+
+# One ingestion channel per knowledge base, exposed at the KB-scoped path the
+# real AIDP uses (``.../KnowledgeBases/{kds_id}/Channels``). ``src_dir`` embeds
+# the KB id, which is how this mock maps a History ``dir_path`` back to its
+# documents. The tenant-scoped variant is deliberately NOT served: a wrong path
+# in the adapter must fail here exactly as it fails against AIDP.
+_CHANNEL_ROOT = "/aidp/knowledge"
+
+# Seconds an uploaded document stays PROCESSING before turning COMPLETED.
+# Default to immediate completion so the single file-list refresh on drawer
+# close can show a successful upload. Tests can opt into asynchronous ingestion
+# through POST /_mock/processing-seconds.
+_PROCESSING_SECONDS = 0.0
+_UPLOAD_SECONDS = 0.0
+_FILE_QUERY_SECONDS = 0.0
+_FILE_QUERY_FAIL = False
+_FILE_DELETE_FAIL = False
+
+# Entries one history page returns. Real AIDP pages the channel directory, so the
+# backend has to walk the pages; keep this small to exercise that locally.
+_HISTORY_PAGE_SIZE = 10
+
 # Directory for persisted runtime state. Lives next to this file so the mock
 # is self-contained (no absolute paths) and stays out of version control via
 # ``.gitignore``. Only KB + document state is persisted; failure-injection
 # counters deliberately stay in-memory so each restart starts with a clean
 # failure plan.
-_STATE_DIR = Path(__file__).with_suffix("").with_name("_state")
-_STATE_FILE = _STATE_DIR / "knowledge_bases.json"
+_DEFAULT_STATE_FILE = Path(__file__).with_suffix("").with_name("_state") / "knowledge_bases.json"
+_STATE_FILE = Path(os.environ.get("AIDP_MOCK_STATE_FILE", str(_DEFAULT_STATE_FILE))).expanduser()
+_STATE_DIR = _STATE_FILE.parent
 
 # =============================================================================
 # In-memory state
@@ -118,14 +173,16 @@ def _seed_initial_data() -> None:
     # Seed some documents for the FAQ KB so list_docs is non-empty by default.
     _DOCUMENTS_BY_KB["aidp-kb-faq"] = [
         {
-            "file_ino_no": "file-faq-001",
+            "file_uuid": "00000000-0000-4000-8000-000000000001",
+            "file_ino_no": 1001,
             "file_name": "常见问题汇总.txt",
             "file_size": 2048,
             "file_type": "txt",
             "create_time": 1718000400,
         },
         {
-            "file_ino_no": "file-faq-002",
+            "file_uuid": "00000000-0000-4000-8000-000000000002",
+            "file_ino_no": 1002,
             "file_name": "troubleshooting.md",
             "file_size": 4096,
             "file_type": "md",
@@ -192,7 +249,153 @@ def _load_state() -> None:
     )
 
 
+def _ensure_document_uuids() -> None:
+    """Backfill stable UUIDs for state created before UUID support existed."""
+    for kds_id, documents in _DOCUMENTS_BY_KB.items():
+        if not isinstance(documents, list):
+            continue
+        for document in documents:
+            if not isinstance(document, dict) or document.get("file_uuid"):
+                continue
+            file_ino_no = str(document.get("file_ino_no") or uuid.uuid4())
+            document["file_uuid"] = str(
+                uuid.uuid5(uuid.NAMESPACE_URL, f"mock-aidp:{kds_id}:{file_ino_no}")
+            )
+
+
 _load_state()
+
+
+def _ensure_chinese_file_demo() -> None:
+    """Backfill one Chinese catalog/file sample without task or detail fixtures."""
+    kb_id = "aidp-kb-faq"
+    kb = _KNOWLEDGE_BASES.get(kb_id)
+    if kb is None:
+        return
+    if kb.get("kds_name") in (None, "", "AIDP FAQ"):
+        kb["kds_name"] = "政务服务与城市治理知识库"
+    if kb.get("description") in (None, "", "Frequently asked questions and troubleshooting notes."):
+        kb["description"] = "汇集政务办事指南、公共服务事项和城市运行制度，供工作人员快速检索与答疑。"
+    docs = _DOCUMENTS_BY_KB.setdefault(kb_id, [])
+    known = {str(doc.get("file_uuid")) for doc in docs}
+    now = int(time.time())
+    for number, (name, extension, size) in enumerate([
+        ("政务办事指南.pdf", "pdf", 1048576),
+        ("城市运行管理制度.docx", "docx", 3276800),
+        ("公共服务事项清单.xlsx", "xlsx", 917504),
+        ("热线常见问题.md", "md", 58368),
+        ("基层治理工作周报.csv", "csv", 393216),
+        ("应急预案与值班流程.pptx", "pptx", 6815744),
+        ("市民服务大厅导览.png", "png", 2752512),
+        ("城市运行平台使用说明.txt", "txt", 44032),
+    ], 1):
+        fixture_number = (1, 2, 7, 8, 9, 10, 11, 12)[number - 1]
+        file_uuid = f"00000000-0000-4000-8000-{fixture_number:012d}"
+        if file_uuid not in known:
+            docs.append({"file_uuid": file_uuid, "file_ino_no": 1000 + fixture_number,
+                         "file_name": name, "file_type": extension, "file_size": size,
+                         "create_time": now - number * 3600, "update_time": now - number * 1800,
+                         "status": STATUS_COMPLETED})
+    _save_state()
+
+
+_ensure_chinese_file_demo()
+_ensure_document_uuids()
+_save_state()
+
+
+def _public_document(document: Dict[str, Any]) -> Dict[str, Any]:
+    """Return document metadata without any mock-only private fields."""
+    return {key: value for key, value in document.items() if not key.startswith("_")}
+
+
+def _find_document(kds_id: str, file_uuid: str) -> Optional[Dict[str, Any]]:
+    return next(
+        (
+            document
+            for document in _DOCUMENTS_BY_KB.get(kds_id, [])
+            if document.get("file_uuid") == file_uuid
+        ),
+        None,
+    )
+
+
+def _document_content(document: Dict[str, Any]) -> bytes:
+    """Build deterministic mock content for a document download."""
+    return (
+        f"Mock AIDP content for {document.get('file_name', 'download')}\n"
+    ).encode("utf-8")
+
+
+def _content_disposition(filename: str) -> str:
+    """Build a standard ASCII fallback plus RFC 5987 UTF-8 filename header."""
+    ascii_name = "".join(
+        char if 32 <= ord(char) < 127 and char not in {'"', "\\"} else "_"
+        for char in filename
+    )
+    return f'attachment; filename="{ascii_name}"; filename*=UTF-8\'\'{quote(filename)}'
+
+
+# =============================================================================
+# Document status helpers
+# =============================================================================
+def _channel_src_dir(kds_id: str) -> str:
+    """Return the source directory of a knowledge base's ingestion channel."""
+    return f"{_CHANNEL_ROOT}/{kds_id}"
+
+
+def _kds_id_from_dir_path(dir_path: Optional[str]) -> Optional[str]:
+    """Reverse ``_channel_src_dir`` so a History request maps back to one KB."""
+    if not isinstance(dir_path, str):
+        return None
+    prefix = f"{_CHANNEL_ROOT}/"
+    if not dir_path.startswith(prefix):
+        return None
+    return dir_path[len(prefix):].strip("/") or None
+
+
+def _doc_effective_status(doc: Dict[str, Any]) -> int | str:
+    """Return the document's current status, advancing the processing timer.
+
+    AIDP's recent status contract uses numeric strings: 1 success, 2 extracting,
+    3 vector-ingestion failure, 4 queued, and 5 graph-ingestion failure.
+    Documents persisted before status simulation existed are treated as success.
+    """
+    status = doc.get("status")
+    if status is None or status == "":
+        return 1
+    if status == STATUS_PROCESSING:
+        deadline = doc.get("processing_until")
+        if isinstance(deadline, (int, float)) and time.time() < deadline:
+            return 2
+        return 1
+
+    normalized = str(status).strip().upper()
+    aliases = {
+        "COMPLETED": 1,
+        "SUCCESS": 1,
+        "PROCESSING": 2,
+        "EXTRACTING": 2,
+        "FAILED": 3,
+        "VECTOR_INGESTION_FAILED": 3,
+        "UPLOADING": 4,
+        "QUEUED": 4,
+        "GRAPH_INGESTION_FAILED": 5,
+    }
+    if normalized in aliases:
+        return aliases[normalized]
+    if normalized.isdigit():
+        return int(normalized)
+    return normalized
+
+
+def _visible_in_completed_listing(doc: Dict[str, Any]) -> bool:
+    """Whether a document appears in the legacy completed-files listing.
+
+    Real AIDP only exposes ingested files there; files still being processed are
+    invisible, which is exactly the behaviour the history endpoint replaces.
+    """
+    return _doc_effective_status(doc) == 1
 
 
 # =============================================================================
@@ -204,11 +407,39 @@ class CreateKbBody(BaseModel):
     embedding_model: Optional[str] = None
     is_multimodal: Optional[bool] = None
     vision_model: Optional[str] = None
+    chunk_token_num: int = 1024
+    chunk_overlap_num: int = 128
+    chunk_mode: int = 0
+    is_personal: int = 0
+    topk: int = 10
+    similarity: float = 0.6
+    caption_enable: int = 0
+    vlm_model: str = ""
+    is_exist_graph: bool = False
+    graph_config: Optional[str] = None
 
 
 class UpdateKbBody(BaseModel):
     name: Optional[str] = None
     description: Optional[str] = None
+
+
+class DocHistoryBody(BaseModel):
+    """Body of POST .../KnowledgeFiles/History (channel + directory scoped)."""
+
+    fs_id: Optional[str] = None
+    dir_path: Optional[str] = None
+    page: int = 1
+
+
+class DocStatusBody(BaseModel):
+    """Body of POST /_mock/doc-status (test control over one document)."""
+
+    kds_id: str
+    file_ino_no: str
+    status: Literal[
+        "UPLOADING", "PROCESSING", "EXTRACTING", "COMPLETED", "FAILED"
+    ] = "FAILED"
 
 
 class MetadataCondition(BaseModel):
@@ -228,6 +459,14 @@ class FusionSearchRequest(BaseModel):
     top_k: int = Field(10, ge=1, le=100)
     multi_modal: bool = False
     metadata_condition: Optional[MetadataCondition] = None
+
+
+class RemoveFilesBody(BaseModel):
+    file_uuids: List[uuid.UUID] = Field(..., min_length=1)
+
+
+class DownloadFileBody(BaseModel):
+    file_uuid: uuid.UUID = Field(...)
 
 
 # =============================================================================
@@ -322,6 +561,59 @@ def reset_failures() -> JSONResponse:
     })
 
 
+@app.post("/_mock/processing-seconds")
+def set_processing_seconds(
+    seconds: float = Query(8.0, ge=0.0, le=600.0, description="Seconds a new upload stays PROCESSING"),
+) -> JSONResponse:
+    """Tune how long newly uploaded documents stay PROCESSING.
+
+    Set 0 to make uploads complete immediately, or a large value to keep the
+    frontend's status polling running while you inspect it.
+    """
+    global _PROCESSING_SECONDS
+    _PROCESSING_SECONDS = seconds
+    logger.info("MOCK CONFIG  processing seconds = %s", seconds)
+    return JSONResponse(content={"processing_seconds": _PROCESSING_SECONDS})
+
+
+@app.post("/_mock/history-page-size")
+def set_history_page_size(
+    size: int = Query(10, ge=1, le=1000, description="Entries returned per history page"),
+) -> JSONResponse:
+    """Tune how many entries one history page returns.
+
+    Set it to 1 to make every file land on its own page, which is how the
+    multi-page walk is exercised locally.
+    """
+    global _HISTORY_PAGE_SIZE
+    _HISTORY_PAGE_SIZE = size
+    logger.info("MOCK CONFIG  history page size = %s", size)
+    return JSONResponse(content={"history_page_size": _HISTORY_PAGE_SIZE})
+
+
+@app.post("/_mock/doc-status")
+def force_doc_status(body: DocStatusBody) -> JSONResponse:
+    """Force one document into a given status (used to render a stage in the UI)."""
+    docs = _DOCUMENTS_BY_KB.get(body.kds_id, [])
+    for doc in docs:
+        # Compare as strings: document ids are numeric in some state files and
+        # strings in others, and callers should not have to care.
+        if str(doc.get("file_ino_no")) == str(body.file_ino_no):
+            doc["status"] = body.status
+            doc.pop("processing_until", None)
+            _save_state()
+            logger.info(
+                "MOCK CONFIG  kds_id=%s file=%s status=%s",
+                body.kds_id, body.file_ino_no, body.status,
+            )
+            return JSONResponse(content={"doc": {**doc, "status": body.status}})
+
+    raise HTTPException(
+        status_code=404,
+        detail=f"Document {body.file_ino_no} not found in {body.kds_id}",
+    )
+
+
 # =============================================================================
 # Knowledge Base CRUD
 # =============================================================================
@@ -331,17 +623,34 @@ def reset_failures() -> JSONResponse:
 def list_knowledge_bases(
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
+    keyword: Optional[str] = Query(default=None),
     authorization: Optional[str] = Header(default=None),
 ) -> JSONResponse:
-    """List knowledge bases with pagination + next_link (matches AIDP shape)."""
+    """List knowledge bases with pagination + next_link (matches AIDP shape).
+
+    ``keyword`` narrows the set by knowledge-base name (case-insensitive), the
+    way the real AIDP list endpoint does. Without this the mock returned every
+    KB for a filtered request, which made the search feature look broken in
+    local runs once the page stopped filtering client-side.
+    """
     _check_auth(authorization)
 
     all_items = list(_KNOWLEDGE_BASES.values())
+    normalized_keyword = (keyword or "").strip().lower()
+    if normalized_keyword:
+        all_items = [
+            kb
+            for kb in all_items
+            if normalized_keyword in str(kb.get("kds_name") or "").lower()
+        ]
     start = (page - 1) * page_size
     end = start + page_size
-    # Enrich each item with document_count (same as detail endpoint does)
-    enriched = [{**kb, "document_count": len(_DOCUMENTS_BY_KB.get(kb["kds_id"], []))} for kb in all_items]
-    items = enriched[start:end]
+    # Match AIDP's catalog response: file counts come from the dedicated
+    # KnowledgeFiles/Count endpoint, not from each KB row.
+    items = [
+        {key: value for key, value in kb.items() if key != "document_count"}
+        for kb in all_items[start:end]
+    ]
 
     next_link = None
     if end < len(all_items):
@@ -380,9 +689,97 @@ def count_documents(
     _check_auth(authorization)
     if kds_id not in _KNOWLEDGE_BASES:
         raise HTTPException(status_code=404, detail=f"Knowledge base {kds_id} not found")
-    count = len(_DOCUMENTS_BY_KB.get(kds_id, []))
+    # Only ingested files count on the legacy endpoint, matching the list.
+    count = len([
+        doc for doc in _DOCUMENTS_BY_KB.get(kds_id, [])
+        if _visible_in_completed_listing(doc)
+    ])
     logger.info("COUNT DOCS  kds_id=%s count=%d", kds_id, count)
     return JSONResponse(content={"count": count})
+
+
+def _graph_template(language: str) -> Dict[str, Any]:
+    """Use the captured Chinese response; English templates remain synthetic fixtures."""
+    if language == "chinese":
+        fixture = Path(__file__).with_name("graph_config_template_chinese.json")
+        return json.loads(fixture.read_text(encoding="utf-8"))
+    english = True
+    prompts = {
+        domain: (f"Extract entity relationship triples for the {domain} domain."
+                 if english else f"你是{domain}领域的信息抽取专家，请抽取明确的实体及其关系三元组。")
+        for domain in ("医疗", "金融", "常规", "法律法规")
+    }
+    entries = [
+        ("retrieve_subgraph_hop", "子图扩展跳数", "2", "^[1-3]$", True),
+        ("no_think_mode", "禁用LLM思考过程", "是", "^(是|否)$", True),
+        ("prompt_language", "提示词语言", "英文" if english else "中文", "^(中文|英文)$", False),
+        ("domain", "领域类型", "常规", "^(医疗|金融|常规|法律法规)$", False),
+        ("prompt_text", "知识抽取提示词", prompts["常规"], r"^[\s\S]{1,4096}$", False),
+        ("synonym_merge_enable", "同义词检测开关", "否", "^(是|否)$", True),
+        ("disambiguation_enable", "实体消歧开关", "否", "^(是|否)$", True),
+    ]
+    value = [dict(param_key=key, param_name=name, param_value=default,
+                  regexp=regexp, is_modifiable=modifiable, param_desc=name)
+             for key, name, default, regexp, modifiable in entries]
+    value[4]["template"] = prompts
+    return {"value": value}
+
+
+def _validate_graph_request(body: CreateKbBody) -> None:
+    if not body.is_exist_graph:
+        return
+    try:
+        config = json.loads(body.graph_config or "")
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(400, "graph_config must be a JSON string") from exc
+    parameters = _graph_template("chinese")["value"]
+    allowed = {p["param_key"] for p in parameters} | {"llm_model_name"}
+    if not isinstance(config, dict) or set(config) - allowed:
+        raise HTTPException(400, "Unrecognized graph configuration parameter")
+    for parameter in parameters:
+        value = config.get(parameter["param_key"])
+        if not isinstance(value, str) or re.fullmatch(parameter["regexp"], value) is None:
+            raise HTTPException(400, f"Invalid graph parameter: {parameter['param_key']}")
+    if "llm_model_name" in config and not isinstance(config["llm_model_name"], str):
+        raise HTTPException(400, "Invalid llm_model_name")
+
+
+@app.get(f"{_KB_PREFIX}/GraphConfigTemplate")
+def graph_config_template(
+    language: str = Query("chinese", pattern="^(chinese|english)$"),
+    authorization: Optional[str] = Header(default=None),
+) -> JSONResponse:
+    _check_auth(authorization)
+    return JSONResponse(content=_graph_template(language))
+
+
+@app.post("/_mock/upload-seconds")
+def set_upload_seconds(
+    seconds: float = Query(10.0, ge=0.0, le=600.0, description="Upload response delay in seconds"),
+) -> JSONResponse:
+    """Delay each batch once without blocking other mock requests."""
+    global _UPLOAD_SECONDS
+    _UPLOAD_SECONDS = seconds
+    logger.info("MOCK CONFIG  upload response delay = %s", seconds)
+    return JSONResponse(content={"upload_seconds": _UPLOAD_SECONDS})
+
+
+@app.post("/_mock/file-faults")
+def set_file_faults(
+    query_seconds: float = Query(0.0, ge=0.0, le=30.0),
+    query_fail: bool = Query(False),
+    delete_fail: bool = Query(False),
+) -> JSONResponse:
+    """Configure transient file-page acceptance scenarios without changing data."""
+    global _FILE_QUERY_SECONDS, _FILE_QUERY_FAIL, _FILE_DELETE_FAIL
+    _FILE_QUERY_SECONDS = query_seconds
+    _FILE_QUERY_FAIL = query_fail
+    _FILE_DELETE_FAIL = delete_fail
+    return JSONResponse(content={
+        "query_seconds": query_seconds,
+        "query_fail": query_fail,
+        "delete_fail": delete_fail,
+    })
 
 
 @app.put(_KB_PREFIX)
@@ -392,10 +789,12 @@ def create_knowledge_base(
 ) -> JSONResponse:
     """Create a new knowledge base. AIDP uses PUT on the collection endpoint."""
     _check_auth(authorization)
+    _validate_graph_request(body)
 
     kds_id = f"aidp-kb-{uuid.uuid4().hex[:8]}"
     now = int(time.time())
     new_kb = {
+        **body.model_dump(exclude_none=True),
         "kds_id": kds_id,
         "kds_name": body.name,
         "description": body.description or "",
@@ -430,9 +829,8 @@ def get_knowledge_base(
     if not kb:
         raise HTTPException(status_code=404, detail=f"Knowledge base {kds_id} not found")
 
-    # Augment with document count for richer responses
-    docs = _DOCUMENTS_BY_KB.get(kds_id, [])
-    result = {**kb, "document_count": len(docs)}
+    # Match AIDP's detail response: file counts come from the Count endpoint.
+    result = {key: value for key, value in kb.items() if key != "document_count"}
 
     logger.info("GET  kds_id=%s", kds_id)
     return JSONResponse(content=result)
@@ -498,18 +896,34 @@ async def upload_documents(
     if kds_id not in _KNOWLEDGE_BASES:
         raise HTTPException(status_code=404, detail=f"Knowledge base {kds_id} not found")
 
+    if _UPLOAD_SECONDS > 0:
+        await asyncio.sleep(_UPLOAD_SECONDS)
+
     success_docs: List[Dict[str, Any]] = []
     failed: List[Dict[str, str]] = []
     for f in files:
         try:
             content = await f.read()
-            file_ino_no = f"file-{uuid.uuid4().hex[:12]}"
+            file_ino_no = max(
+                (
+                    document["file_ino_no"]
+                    for document in _DOCUMENTS_BY_KB.get(kds_id, [])
+                    if isinstance(document.get("file_ino_no"), int)
+                ),
+                default=0,
+            ) + 1
             doc = {
+                "file_uuid": str(uuid.uuid4()),
                 "file_ino_no": file_ino_no,
                 "file_name": f.filename or "unknown",
                 "file_size": len(content),
                 "file_type": (f.filename.rsplit(".", 1)[-1] if f.filename and "." in f.filename else "bin"),
                 "create_time": int(time.time()),
+                # Uploaded files enter the ingestion pipeline immediately: the
+                # legacy list endpoint hides them until the timer elapses, while
+                # the history endpoint reports them as PROCESSING.
+                "status": STATUS_PROCESSING,
+                "processing_until": time.time() + _PROCESSING_SECONDS,
             }
             _DOCUMENTS_BY_KB.setdefault(kds_id, []).append(doc)
             success_docs.append(doc)
@@ -535,6 +949,7 @@ async def upload_documents(
                 "file_type": doc["file_type"],
                 "file_size": doc["file_size"],
                 "file_ino_no": doc["file_ino_no"],
+                "file_uuid": doc["file_uuid"],
                 "first_upload_time": doc["create_time"],
             }
             for doc in success_docs
@@ -547,30 +962,243 @@ async def upload_documents(
 def list_documents(
     kds_id: str,
     page: int = Query(1, ge=1),
-    page_size: int = Query(20, ge=1, le=100),
+    page_size: int = Query(10, ge=1, le=100),
+    keyword: Optional[str] = Query(default=None, max_length=200),
     authorization: Optional[str] = Header(default=None),
 ) -> JSONResponse:
-    """List documents in a knowledge base with pagination."""
+    """List documents in a knowledge base with pagination.
+
+    Only ingested (COMPLETED) files are returned: real AIDP hides files that are
+    still being chunked/embedded here, which is why the frontend used to show
+    nothing right after an upload.
+    """
+    _check_auth(authorization)
+
+    if _FILE_QUERY_SECONDS:
+        time.sleep(_FILE_QUERY_SECONDS)
+    if _FILE_QUERY_FAIL:
+        raise HTTPException(503, detail={
+            "code": "130501", "message": "Mock file query service unavailable",
+        })
+
+    if kds_id not in _KNOWLEDGE_BASES:
+        raise HTTPException(status_code=404, detail=f"Knowledge base {kds_id} not found")
+
+    all_docs = [
+        doc for doc in _DOCUMENTS_BY_KB.get(kds_id, [])
+        if _visible_in_completed_listing(doc)
+    ]
+    normalized_keyword = keyword.strip().casefold() if isinstance(keyword, str) else ""
+    if normalized_keyword:
+        all_docs = [
+            doc for doc in all_docs
+            if normalized_keyword in str(doc.get("file_name") or "").casefold()
+        ]
+    start = (page - 1) * page_size
+    end = start + page_size
+    items = [_public_document(doc) for doc in all_docs[start:end]]
+
+    # Real AIDP returns `next_link` as the authoritative "more pages exist"
+    # signal. When there are no more docs, next_link is simply absent.
+    # `total_count` mirrors AIDP's page count; next_link signals another page.
+    next_link = None
+    if end < len(all_docs):
+        next_link = f"{_KB_PREFIX}/{kds_id}/KnowledgeFiles?page={page + 1}&page_size={page_size}"
+        if normalized_keyword:
+            next_link += f"&keyword={quote(keyword.strip(), safe='')}"
+
+    logger.info("LIST DOCS  kds_id=%s page=%d returned=%d total=%d", kds_id, page, len(items), len(all_docs))
+    return JSONResponse(content={
+        "value": items,
+        "total_count": len(items),
+        "next_link": next_link,
+    })
+
+
+@app.post(f"{_KB_PREFIX}/{{kds_id}}/KnowledgeFiles/Remove")
+def remove_documents(
+    kds_id: str,
+    body: RemoveFilesBody,
+    authorization: Optional[str] = Header(default=None),
+) -> JSONResponse:
+    """Remove documents by file UUID and return per-file success/failure lists."""
     _check_auth(authorization)
 
     if kds_id not in _KNOWLEDGE_BASES:
         raise HTTPException(status_code=404, detail=f"Knowledge base {kds_id} not found")
 
-    all_docs = _DOCUMENTS_BY_KB.get(kds_id, [])
-    start = (page - 1) * page_size
-    end = start + page_size
-    items = all_docs[start:end]
+    documents = _DOCUMENTS_BY_KB.setdefault(kds_id, [])
+    remaining = list(documents)
+    success_list: List[Dict[str, str]] = []
+    failed_list: List[Dict[str, str]] = []
+    for raw_file_uuid in body.file_uuids:
+        file_uuid = str(raw_file_uuid)
+        matched = next(
+            (document for document in remaining if document.get("file_uuid") == file_uuid),
+            None,
+        )
+        if matched is None or _FILE_DELETE_FAIL:
+            failed_list.append({
+                "file_uuid": file_uuid,
+                **({"code": "130501", "message": "Mock file removal failed"}
+                   if _FILE_DELETE_FAIL else {}),
+            })
+            continue
+        remaining.remove(matched)
+        success_list.append({"file_uuid": file_uuid})
 
-    # Real AIDP returns `next_link` as the authoritative "more pages exist"
-    # signal. When there are no more docs, next_link is simply absent.
-    # `total_count` is the current page count, not the true total.
-    next_link = None
-    if end < len(all_docs):
-        next_link = f"{_KB_PREFIX}/{kds_id}/KnowledgeFiles?page={page + 1}&page_size={page_size}"
-
-    logger.info("LIST DOCS  kds_id=%s page=%d returned=%d total=%d", kds_id, page, len(items), len(all_docs))
+    _DOCUMENTS_BY_KB[kds_id] = remaining
+    _save_state()
+    logger.info(
+        "REMOVE DOCS  kds_id=%s total=%d success=%d failed=%d",
+        kds_id,
+        len(body.file_uuids),
+        len(success_list),
+        len(failed_list),
+    )
     return JSONResponse(content={
-        "value": items,
+        "summary": {
+            "total": len(body.file_uuids),
+            "success": len(success_list),
+            "failed": len(failed_list),
+        },
+        "success_list": success_list,
+        "failed_list": failed_list,
+    })
+
+
+@app.post(f"{_KB_PREFIX}/{{kds_id}}/KnowledgeFiles/Download")
+def download_document(
+    kds_id: str,
+    body: DownloadFileBody,
+    authorization: Optional[str] = Header(default=None),
+) -> StreamingResponse:
+    """Return deterministic binary content for a document download."""
+    _check_auth(authorization)
+
+    if kds_id not in _KNOWLEDGE_BASES:
+        raise HTTPException(status_code=404, detail=f"Knowledge base {kds_id} not found")
+
+    file_uuid = str(body.file_uuid)
+    document = _find_document(kds_id, file_uuid)
+    if document is None:
+        raise HTTPException(status_code=404, detail=f"File {file_uuid} not found")
+
+    filename = str(document.get("file_name") or "download")
+    content = _document_content(document)
+    content_type = mimetypes.guess_type(filename)[0] or "application/octet-stream"
+    response_headers = {
+        "Content-Disposition": _content_disposition(filename),
+        "X-File-Size": str(len(content)),
+    }
+    async def content_stream():
+        for offset in range(0, len(content), 8 * 1024):
+            yield content[offset : offset + 8 * 1024]
+
+    return StreamingResponse(
+        content_stream(),
+        media_type=content_type,
+        headers=response_headers,
+    )
+
+
+# =============================================================================
+# Ingestion channels + knowledge-file history
+# =============================================================================
+
+
+@app.get(f"{_KB_PREFIX}/{{kds_id}}/Channels")
+def list_channels(
+    kds_id: str,
+    authorization: Optional[str] = Header(default=None),
+) -> JSONResponse:
+    """List the ingestion channels feeding one knowledge base.
+
+    The catalog is knowledge-base scoped, so a channel exposes the file-system
+    id and source directory the history endpoint is addressed with, plus
+    ``kds_id`` so a caller can associate the channel with its KB.
+    """
+    _check_auth(authorization)
+
+    kb = _KNOWLEDGE_BASES.get(kds_id)
+    if kb is None:
+        logger.info("LIST CHANNELS  unknown kds_id=%s -> 404", kds_id)
+        return JSONResponse(
+            status_code=404,
+            content={"detail": f"Knowledge base {kds_id} not found"},
+        )
+
+    items = [
+        {
+            "fs_id": f"mock-fs-{kds_id}",
+            "src_dir": _channel_src_dir(kds_id),
+            "kds_id": kds_id,
+            "name": kb.get("kds_name"),
+        }
+    ]
+    logger.info("LIST CHANNELS  kds_id=%s returned=%d", kds_id, len(items))
+    return JSONResponse(content={"value": items})
+
+
+@app.post(f"{_KB_PREFIX}/{{kds_id}}/KnowledgeFiles/History")
+def knowledge_file_history(
+    kds_id: str,
+    body: DocHistoryBody,
+    authorization: Optional[str] = Header(default=None),
+) -> JSONResponse:
+    """List every file in a channel directory, whatever its processing status.
+
+    The endpoint is knowledge-base scoped, like the channel catalog and the
+    document list; the body still addresses the request to one channel directory
+    of that KB. Documents that are still PROCESSING are included with their live
+    status, and a directory pointing outside the KB answers with an empty list.
+    """
+    _check_auth(authorization)
+
+    if kds_id not in _KNOWLEDGE_BASES:
+        logger.info("FILE HISTORY  unknown kds_id=%s -> 404", kds_id)
+        return JSONResponse(
+            status_code=404,
+            content={"detail": f"Knowledge base {kds_id} not found"},
+        )
+
+    if _kds_id_from_dir_path(body.dir_path) != kds_id:
+        logger.info(
+            "FILE HISTORY  dir_path=%r does not belong to kds_id=%s -> empty",
+            body.dir_path,
+            kds_id,
+        )
+        return JSONResponse(content={"value": []})
+
+    items = [
+        {
+            **doc,
+            "dir_path": _channel_src_dir(kds_id),
+            "status": _doc_effective_status(doc),
+        }
+        for doc in _DOCUMENTS_BY_KB.get(kds_id, [])
+    ]
+    # Real AIDP lists files that are still being processed first and pages the
+    # directory, which is what lets more simultaneous uploads than fit in one
+    # page spill onto the next. Mirrored here, so a caller that reads only the
+    # first page is caught locally instead of in production. The sort is stable,
+    # so documents keep their insertion order inside each group.
+    items.sort(key=lambda item: item["status"] in _TERMINAL_STATUSES)
+    page = body.page if isinstance(body.page, int) and body.page > 0 else 1
+    start = (page - 1) * _HISTORY_PAGE_SIZE
+    end = start + _HISTORY_PAGE_SIZE
+    page_items = items[start:end]
+    next_link = (
+        f"{_KB_PREFIX}/{kds_id}/KnowledgeFiles/History?page={page + 1}"
+        if end < len(items)
+        else None
+    )
+    logger.info(
+        "FILE HISTORY  kds_id=%s fs_id=%s dir_path=%s page=%d returned=%d total=%d",
+        kds_id, body.fs_id, body.dir_path, page, len(page_items), len(items),
+    )
+    return JSONResponse(content={
+        "value": page_items,
         "total_count": len(items),
         "next_link": next_link,
     })
@@ -708,11 +1336,17 @@ def fusion_search(
 # backend's ``_is_kb_applicable`` post-filters by "All" or the requested app).
 _MOCK_MODELS: List[Dict[str, Any]] = [
     {
+        "model_name": "/models/FileEmbeddingModel_v0_1_1/v1.0.0/FileEmbeddingModel_v0_1_1",
+        "display_name": "bge-m3", "model_type": "embedding",
+        "application": ["KnowledgeBase", "MemoryBase"], "service": "embedding",
+    },
+    {
         "api_key": "",
         "application": "All",
         "created_at": 1782716626,
         "max_tokens": 32768,
         "model_name": "model_1",
+        "display_name": "Qwen3-8B", "model_type": "llm",
         "properties": {"description": "General purpose LLM.", "model_type": "external"},
         "service": "llm",
         "temperature": 0.6,
@@ -723,6 +1357,7 @@ _MOCK_MODELS: List[Dict[str, Any]] = [
     {
         "application": ["KnowledgeBase"],
         "model_name": "Qwen3-VL-8B-Instruct",
+        "display_name": "Qwen3-VL-8B-Instruct", "model_type": "vlm",
         "properties": {"description": "Vision-language model served internally for caption generation.", "model_type": "internal"},
         "service": "llm",
         "url": "http://caption-service.model-service.svc.cluster.local:8111/v1/chat/completions",
@@ -733,6 +1368,7 @@ _MOCK_MODELS: List[Dict[str, Any]] = [
         "created_at": 1783070801,
         "max_tokens": 32768,
         "model_name": "Qwen3-VL-32B-Instruct",
+        "display_name": "Qwen3-VL-32B-Instruct", "model_type": "vlm",
         "properties": {"description": "Larger vision-language model for high-quality captioning.", "model_type": "external"},
         "service": "llm",
         "temperature": 0.6,
@@ -746,6 +1382,7 @@ _MOCK_MODELS: List[Dict[str, Any]] = [
         "created_at": 1783474808,
         "max_tokens": 32780,
         "model_name": "InternVL2-26B",
+        "display_name": "InternVL2-26B", "model_type": "vlm",
         "properties": {"description": "Open-source multimodal model.", "model_type": "external"},
         "service": "llm",
         "temperature": 1.5,
@@ -760,6 +1397,7 @@ _MOCK_MODELS: List[Dict[str, Any]] = [
         "application": ["DocumentParsing"],
         "created_at": 1783062626,
         "model_name": "doc-parser-only",
+        "display_name": "Document parser", "model_type": "llm",
         "properties": {"description": "Should NOT appear for KnowledgeBase.", "model_type": "external"},
         "service": "llm",
     },
@@ -768,7 +1406,7 @@ _MOCK_MODELS: List[Dict[str, Any]] = [
 
 @app.get(_MODELS_PREFIX)
 def list_models(
-    service: str = Query("llm"),
+    service: str = Query(""),
     app: str = Query("KnowledgeBase"),
     authorization: Optional[str] = Header(default=None),
 ) -> JSONResponse:
@@ -778,10 +1416,11 @@ def list_models(
     raw seed data here.
     """
     _check_auth(authorization)
-    logger.info("LIST MODELS  service=%s app=%s returned=%d", service, app, len(_MOCK_MODELS))
+    models = [m for m in _MOCK_MODELS if not service or m["model_type"] == service]
+    logger.info("LIST MODELS  service=%s app=%s returned=%d", service, app, len(models))
     return JSONResponse(content={
         "service": service,
-        "models": _MOCK_MODELS,
+        "models": models,
     })
 
 
@@ -798,6 +1437,7 @@ def health() -> Dict[str, Any]:
         "platform": "aidp-mock",
         "version": "1.0.0",
         "knowledge_bases_count": len(_KNOWLEDGE_BASES),
+        "upload_seconds": _UPLOAD_SECONDS,
     }
 
 
@@ -825,7 +1465,11 @@ if __name__ == "__main__":
     parser.add_argument("--host", default="0.0.0.0", help="Bind host (default: 0.0.0.0)")
     parser.add_argument("--port", type=int, default=30081, help="Bind port (default: 30081)")
     parser.add_argument("--api-key", default=EXPECTED_API_KEY, help="Expected Bearer API key")
+    parser.add_argument("--upload-seconds", type=float, default=10.0, help="Upload response delay (default: 10 seconds)")
     args = parser.parse_args()
+    if not 0 <= args.upload_seconds <= 600:
+        parser.error("--upload-seconds must be between 0 and 600")
+    _UPLOAD_SECONDS = args.upload_seconds
 
     EXPECTED_API_KEY = args.api_key
 

@@ -1,4 +1,3 @@
-import asyncio
 import json
 import logging
 import re
@@ -8,7 +7,7 @@ from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional
 from zoneinfo import ZoneInfo
 
-from jinja2 import StrictUndefined, Template
+from nexent.core.concurrency import run_blocking
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from consts.const import (
@@ -17,7 +16,7 @@ from consts.const import (
     MODEL_CONFIG_MAPPING,
 )
 from database.model_management_db import get_model_by_model_id
-from utils.prompt_template_utils import get_prompt_template
+from nexent.core.agents.prompt.auxiliary import compose_auxiliary_prompt
 
 from .intent_parser import has_automation_schedule_signal, parse_automation_intent
 from .models import ScheduleMode, ScheduleRuleType, ScheduleTrigger
@@ -261,7 +260,13 @@ class LLMAutomationIntentStrategy(AutomationIntentAnalysisStrategy):
         if not context.force_llm and not has_automation_schedule_signal(context.message):
             return fallback
         try:
-            content = await asyncio.to_thread(self._generate_sync, context)
+            content = await run_blocking(
+                "automation-intent-analysis",
+                self._generate_sync,
+                context,
+                lane="model-tool-io",
+                owner="config",
+            )
             payload = _LLMIntentPayload.model_validate(_extract_json_object(content))
             return _payload_to_result(payload, context, fallback)
         except (ValidationError, ValueError, KeyError, json.JSONDecodeError) as exc:
@@ -274,10 +279,9 @@ class LLMAutomationIntentStrategy(AutomationIntentAnalysisStrategy):
     def _generate_sync(self, context: AutomationIntentContext) -> str:
         from nexent.core.models import OpenAIModel
         from nexent.core.utils.observer import MessageObserver
-        from utils.config_utils import get_model_name_from_config
+        from management.services.model.names import get_model_name_from_config
 
         language = detect_instruction_language(context.message)
-        prompt_template = get_prompt_template("agent_automation", language)
         now = _analysis_time(context)
         values = {
             "message": context.message.strip(),
@@ -285,10 +289,7 @@ class LLMAutomationIntentStrategy(AutomationIntentAnalysisStrategy):
             "timezone": context.timezone,
             "min_interval_seconds": AGENT_AUTOMATION_MIN_INTERVAL_SECONDS,
         }
-        user_prompt = Template(
-            prompt_template["INTENT_ANALYSIS_USER_PROMPT"],
-            undefined=StrictUndefined,
-        ).render(**values).strip()
+        prompt = compose_auxiliary_prompt(language, "automation_intent", values)
         llm = OpenAIModel(
             observer=MessageObserver(),
             model_id=get_model_name_from_config(self._model_config),
@@ -306,9 +307,9 @@ class LLMAutomationIntentStrategy(AutomationIntentAnalysisStrategy):
         response = llm([
             {
                 "role": MESSAGE_ROLE["SYSTEM"],
-                "content": prompt_template["INTENT_ANALYSIS_SYSTEM_PROMPT"],
+                "content": prompt.system,
             },
-            {"role": MESSAGE_ROLE["USER"], "content": user_prompt},
+            {"role": MESSAGE_ROLE["USER"], "content": prompt.user.strip()},
         ])
         return getattr(response, "content", "") or ""
 

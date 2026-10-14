@@ -270,7 +270,7 @@ def test_resolve_storage_object_access_uses_kb_dac(permission, expected):
     }
     with patch.object(storage_service, "resolve_storage_object_knowledge", return_value=ownership), \
             patch(
-                "services.vectordatabase_service.ElasticSearchService"
+                "management.services.knowledge_base.service.ElasticSearchService"
                 ".resolve_knowledge_base_permission",
                 return_value="EDIT",
             ) as resolve_permission:
@@ -351,7 +351,7 @@ def test_resolve_storage_object_access_fails_closed_when_dac_raises(permission_e
     with patch.object(
         storage_service, "resolve_storage_object_knowledge", return_value=ownership
     ), patch(
-        "services.vectordatabase_service.ElasticSearchService"
+        "management.services.knowledge_base.service.ElasticSearchService"
         ".resolve_knowledge_base_permission",
         side_effect=permission_error,
     ):
@@ -371,7 +371,7 @@ def test_resolve_storage_object_access_allows_creator_and_editor_only():
     with patch.object(
         storage_service, "resolve_storage_object_knowledge", return_value=ownership
     ), patch(
-        "services.vectordatabase_service.ElasticSearchService"
+        "management.services.knowledge_base.service.ElasticSearchService"
         ".resolve_knowledge_base_permission",
         side_effect=["READ_ONLY", "CREATOR"],
     ):

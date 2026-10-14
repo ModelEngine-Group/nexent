@@ -203,7 +203,7 @@ export interface AddMcpServicePayload {
   source: McpSource;
   //transport_type: McpTransportType;
   server_url: string;
-  tags: string[];
+  tags?: string[];
   authorization_token?: string;
   custom_headers?: Record<string, string>;
   container_config?: Record<string, unknown>;
@@ -224,7 +224,7 @@ export interface UpdateMcpServicePayload {
   name: string;
   description: string;
   server_url: string;
-  tags: string[];
+  tags?: string[];
   authorization_token?: string;
   custom_headers?: Record<string, string>;
   config_json?: Record<string, unknown>;

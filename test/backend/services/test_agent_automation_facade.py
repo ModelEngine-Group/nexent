@@ -1,4 +1,7 @@
 from datetime import datetime, timedelta, timezone
+import sys
+import types
+from unittest.mock import MagicMock
 
 import pytest
 from sqlalchemy.exc import IntegrityError
@@ -29,6 +32,18 @@ from services.agent_automation.models import (
     ScheduleTrigger,
 )
 from services.agent_automation.prompt_generator import AutomationTaskContent
+
+
+@pytest.fixture
+def automation_runner(monkeypatch):
+    """Isolate runner calls while testing facade orchestration and failures."""
+    import services.agent_automation as automation_package
+
+    module = types.ModuleType("services.agent_automation.runner")
+    module.agent_automation_runner = MagicMock()
+    monkeypatch.setitem(sys.modules, module.__name__, module)
+    monkeypatch.setattr(automation_package, "runner", module, raising=False)
+    return module.agent_automation_runner
 
 
 @pytest.mark.asyncio
@@ -1379,7 +1394,7 @@ async def test_patch_task_rejects_unready_capabilities_and_lost_update(monkeypat
 
 
 @pytest.mark.asyncio
-async def test_task_management_methods_cover_successful_lifecycle(monkeypatch):
+async def test_task_management_methods_cover_successful_lifecycle(monkeypatch, automation_runner):
     service = AgentAutomationFacade()
     task = {
         "task_id": 1,
@@ -1557,7 +1572,7 @@ async def test_create_task_rejects_invalid_context_capabilities_and_binding(monk
         await service.create_task(request, "tenant", "user")
 
 
-def test_enrichment_and_cancellation_tolerate_optional_failures(monkeypatch):
+def test_enrichment_and_cancellation_tolerate_optional_failures(monkeypatch, automation_runner):
     service = AgentAutomationFacade()
     assert facade_module._enrich_tasks_with_agent_names([], "tenant", "user") == []
     monkeypatch.setattr(

@@ -6,9 +6,14 @@ import sys
 import threading
 from typing import Optional, List
 
-from jinja2 import StrictUndefined, Template
+from nexent.core.agents.prompt.auxiliary import compose_auxiliary_prompt
+from nexent.core.agents.prompt.meta import (
+    append_optimization_scope_instruction, compose_agent_generation_user,
+    compose_agent_optimization, default_section_title, optimization_scope_instruction,
+)
 
 from nexent.core.tools.parallel_executor import ParallelExecutorTool
+from nexent.core.concurrency import ManagedExecution, ManagedTaskSpec
 
 from consts.const import LANGUAGE, ENABLE_JIUWEN_SDK
 from consts.tool_labels import PARALLEL_EXECUTOR_TOOL_NAME
@@ -21,25 +26,18 @@ from database.agent_db import search_agent_info_by_agent_id, query_all_agent_inf
 from database.model_management_db import get_model_by_model_id
 from database.knowledge_db import get_knowledge_name_map_by_index_names
 from database.tool_db import query_tools_by_ids, query_tool_instances_by_id
-from services.agent_service import (
-    get_enable_tool_id_by_agent_id,
-    _check_agent_name_duplicate,
-    _check_agent_display_name_duplicate,
-    _regenerate_agent_name_with_llm,
-    _regenerate_agent_display_name_with_llm,
-    _generate_unique_agent_name_with_suffix,
-    _generate_unique_display_name_with_suffix,
-    update_agent,
+from management.services.agent.service import get_enable_tool_id_by_agent_id
+from management.services.agent.naming import (
+    check_agent_value_duplicate,
+    generate_unique_agent_value,
+    regenerate_agent_value,
 )
+from database.agent_db import update_agent
 from services.prompt_template_service import resolve_prompt_generate_template
-from utils.llm_utils import call_llm_for_system_prompt
-from utils.prompt_template_utils import (
-    get_prompt_optimize_prompt_template,
-    get_prompt_template,
-    get_guardrail_regex_prompt_template,
-)
+from services.thread_lifecycle_service import config_thread_manager
+from management.services.model.invocation import call_llm_for_system_prompt
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Optional as Opt
 
 from adapters.exception import JiuwenSDKError, NexentCapabilityError
@@ -56,20 +54,6 @@ def _get_jiuwen_adapter_class():
 
 # Configure logging
 logger = logging.getLogger("prompt_service")
-
-PROMPT_SECTION_TYPE_TITLES = {
-    LANGUAGE["ZH"]: {
-        "duty": "智能体角色",
-        "constraint": "使用要求",
-        "few_shots": "示例",
-    },
-    LANGUAGE["EN"]: {
-        "duty": "Agent Role",
-        "constraint": "Usage Requirements",
-        "few_shots": "Few Shots",
-    },
-}
-
 
 def _resolve_knowledge_tool_capabilities(
     tool_info_list: List[dict],
@@ -99,21 +83,11 @@ def _resolve_knowledge_tool_capabilities(
 
 def _knowledge_agnostic_optimization_instruction(language: str) -> str:
     """Build the invariant appended to every prompt optimization entry point."""
-    if language == LANGUAGE["ZH"]:
-        return (
-            "优化后的提示词不得新增或保留具体知识库名称、知识库 ID、索引名称、KDS ID、"
-            "固定 index_names 或固定 kds_list；统一改写为使用当前会话允许的知识库范围。"
-        )
-    return (
-        "The optimized prompt must not add or retain concrete knowledge base names, IDs, index names, KDS IDs, "
-        "fixed index_names, or fixed kds_list values. Rewrite them to use the knowledge scope allowed for the "
-        "current conversation."
-    )
+    return optimization_scope_instruction(language)
 
 
 def _append_knowledge_agnostic_instruction(feedback: str, language: str) -> str:
-    instruction = _knowledge_agnostic_optimization_instruction(language)
-    return f"{(feedback or '').strip()}\n\n{instruction}".strip()
+    return append_optimization_scope_instruction(feedback, language)
 
 
 def _copy_bad_cases_with_scope_instruction(bad_cases: list, language: str) -> list:
@@ -264,97 +238,32 @@ def generate_and_save_system_prompt_impl(agent_id: int,
         else:
             # If name field is complete, check for duplicates and regenerate if needed before yielding
             if result_data.get("is_complete", False):
-                if result_type == "agent_var_name":
-                    agent_name = final_results["agent_var_name"]
-                    # Check and regenerate name if duplicate
-                    if _check_agent_name_duplicate(
-                        agent_name,
-                        tenant_id=tenant_id,
-                        exclude_agent_id=agent_id,
-                        agents_cache=all_agents
-                    ):
-                        logger.info(
-                            f"Agent name '{agent_name}' already exists, regenerating with LLM")
-                        try:
-                            agent_name = _regenerate_agent_name_with_llm(
-                                original_name=agent_name,
-                                existing_names=existing_names,
-                                task_description=task_description,
-                                model_id=model_id,
-                                tenant_id=tenant_id,
-                                language=language,
-                                agents_cache=all_agents,
-                                exclude_agent_id=agent_id,
-                                prompt_template_id=prompt_template_id,
-                                user_id=user_id,
-                            )
-                            logger.info(
-                                f"Regenerated agent name: '{agent_name}'")
-                            final_results["agent_var_name"] = agent_name
-                        except Exception as e:
-                            logger.error(
-                                f"Failed to regenerate agent name with LLM: {str(e)}, using fallback")
-                            # Fallback: add suffix
-                            agent_name = _generate_unique_agent_name_with_suffix(
-                                agent_name,
-                                tenant_id=tenant_id,
-                                agents_cache=all_agents,
-                                exclude_agent_id=agent_id
-                            )
-                            final_results["agent_var_name"] = agent_name
-
-                    # Yield the (possibly regenerated) name
-                    yield {
-                        "type": "agent_var_name",
-                        "content": final_results["agent_var_name"],
-                        "is_complete": True
-                    }
-
-                elif result_type == "agent_display_name":
-                    agent_display_name = final_results["agent_display_name"]
-                    # Check and regenerate display_name if duplicate
-                    if _check_agent_display_name_duplicate(
-                        agent_display_name,
-                        tenant_id=tenant_id,
-                        exclude_agent_id=agent_id,
-                        agents_cache=all_agents
-                    ):
-                        logger.info(
-                            f"Agent display_name '{agent_display_name}' already exists, regenerating with LLM")
-                        try:
-                            agent_display_name = _regenerate_agent_display_name_with_llm(
-                                original_display_name=agent_display_name,
-                                existing_display_names=existing_display_names,
-                                task_description=task_description,
-                                model_id=model_id,
-                                tenant_id=tenant_id,
-                                language=language,
-                                agents_cache=all_agents,
-                                exclude_agent_id=agent_id,
-                                prompt_template_id=prompt_template_id,
-                                user_id=user_id,
-                            )
-                            logger.info(
-                                f"Regenerated agent display_name: '{agent_display_name}'")
-                            final_results["agent_display_name"] = agent_display_name
-                        except Exception as e:
-                            logger.error(
-                                f"Failed to regenerate agent display_name with LLM: {str(e)}, using fallback")
-                            # Fallback: add suffix
-                            agent_display_name = _generate_unique_display_name_with_suffix(
-                                agent_display_name,
-                                tenant_id=tenant_id,
-                                agents_cache=all_agents,
-                                exclude_agent_id=agent_id
-                            )
-                            final_results["agent_display_name"] = agent_display_name
-
-                    # Yield the (possibly regenerated) display_name
-                    yield {
-                        "type": "agent_display_name",
-                        "content": final_results["agent_display_name"],
-                        "is_complete": True
-                    }
+                field_key = "name" if result_type == "agent_var_name" else "display_name"
+                value = final_results[result_type]
+                if check_agent_value_duplicate(
+                    field_key, value, tenant_id, exclude_agent_id=agent_id, agents_cache=all_agents
+                ):
+                    try:
+                        value = regenerate_agent_value(
+                            field_key=field_key,
+                            original_value=value,
+                            existing_values=existing_names if field_key == "name" else existing_display_names,
+                            task_description=task_description,
+                            model_id=model_id,
+                            tenant_id=tenant_id,
+                            language=language,
+                            agents_cache=all_agents,
+                            exclude_agent_id=agent_id,
+                            prompt_template_id=prompt_template_id,
+                            user_id=user_id,
+                        )
+                    except Exception as exc:
+                        logger.error("Failed to regenerate agent %s with LLM: %s, using fallback", field_key, exc)
+                        value = generate_unique_agent_value(
+                            field_key, value, tenant_id, all_agents, agent_id
+                        )
+                    final_results[result_type] = value
+                yield {"type": result_type, "content": value, "is_complete": True}
 
     # 2. Update agent with the final result (skip in create mode)
     if agent_id == 0:
@@ -374,11 +283,7 @@ def generate_and_save_system_prompt_impl(agent_id: int,
 
     # 3. Generate greeting message and example questions
     try:
-        greeting_template = get_prompt_template('greeting_generate', language)
-        greeting_system_prompt = greeting_template.get("GREETING_SYSTEM_PROMPT", "")
-        greeting_user_prompt_template = greeting_template.get("USER_PROMPT", "")
-
-        greeting_user_prompt = Template(greeting_user_prompt_template, undefined=StrictUndefined).render({
+        greeting_prompt = compose_auxiliary_prompt(language, "greeting", {
             "display_name": final_results.get("agent_display_name", ""),
             "duty_description": final_results.get("duty", ""),
             "business_description": task_description,
@@ -387,8 +292,8 @@ def generate_and_save_system_prompt_impl(agent_id: int,
 
         greeting_result = call_llm_for_system_prompt(
             model_id=model_id,
-            user_prompt=greeting_user_prompt,
-            system_prompt=greeting_system_prompt,
+            user_prompt=greeting_prompt.user,
+            system_prompt=greeting_prompt.system,
             tenant_id=tenant_id,
         )
 
@@ -481,26 +386,25 @@ def optimize_prompt_section_impl(
         sub_agent_ids=sub_agent_ids,
     )
 
-    prompt_template = get_prompt_optimize_prompt_template(language)
-    prompt_context = join_info_for_optimize_prompt_section(
-        prompt_for_optimize=prompt_template,
+    has_local_knowledge_tool, has_aidp_knowledge_tool = _resolve_knowledge_tool_capabilities(tool_info_list)
+    resolved_title = section_title or _default_prompt_section_title(normalized_section_type, language)
+    prompt = compose_agent_optimization(
+        language,
         section_type=normalized_section_type,
-        section_title=section_title or _default_prompt_section_title(
-            normalized_section_type, language),
+        section_title=resolved_title,
         task_description=task_description,
         current_content=current_content,
         feedback=feedback,
-        tool_info_list=tool_info_list,
-        sub_agent_info_list=sub_agent_info_list,
-        language=language,
-        knowledge_base_display_names=knowledge_base_display_names,
-        aidp_kb_display_names=aidp_kb_display_names,
+        tools=tool_info_list,
+        worker_agents=sub_agent_info_list,
+        has_local_knowledge_tool=has_local_knowledge_tool,
+        has_aidp_knowledge_tool=has_aidp_knowledge_tool,
     )
 
     optimized_content = call_llm_for_system_prompt(
         model_id=model_id,
-        user_prompt=prompt_context,
-        system_prompt=prompt_template["OPTIMIZE_SYSTEM_PROMPT"],
+        user_prompt=prompt.user,
+        system_prompt=prompt.system,
         tenant_id=tenant_id,
     ).strip()
 
@@ -509,7 +413,7 @@ def optimize_prompt_section_impl(
 
     return {
         "section_type": normalized_section_type,
-        "section_title": section_title or _default_prompt_section_title(normalized_section_type, language),
+        "section_title": resolved_title,
         "original_content": current_content,
         "optimized_content": optimized_content,
     }
@@ -587,15 +491,12 @@ def generate_guardrail_rules_impl(
             "Description is required.",
         )
 
-    prompt_template = get_guardrail_regex_prompt_template(language)
-    user_prompt = Template(
-        prompt_template["GUARDRAIL_USER_PROMPT"], undefined=StrictUndefined
-    ).render({"description": description})
+    prompt = compose_auxiliary_prompt(language, "guardrail_regex", {"description": description})
 
     raw = call_llm_for_system_prompt(
         model_id=model_id,
-        user_prompt=user_prompt,
-        system_prompt=prompt_template["GUARDRAIL_SYSTEM_PROMPT"],
+        user_prompt=prompt.user,
+        system_prompt=prompt.system,
         tenant_id=tenant_id,
     ).strip()
 
@@ -796,7 +697,7 @@ def _start_generation_threads(content, prompt_for_generate, produce_queue, lates
         finally:
             stop_flags[tag] = True
 
-    threads = []
+    executions = []
     logger.info("Generating system prompt")
 
     # Base sections always generated
@@ -826,15 +727,50 @@ def _start_generation_threads(content, prompt_for_generate, produce_queue, lates
         latest["few_shots"] = ""
 
     for tag, sys_prompt in prompt_configs:
-        thread = threading.Thread(target=run_and_flag, args=(tag, sys_prompt))
-        thread.start()
-        threads.append(thread)
+        execution = config_thread_manager.submit(
+            "evaluation",
+            ManagedTaskSpec(
+                task_name=f"prompt-generation-{tag}",
+                owner="config",
+            ),
+            run_and_flag,
+            tag,
+            sys_prompt,
+        )
+        executions.append(execution)
 
-    return threads, error_holder
+    return executions, error_holder
 
 
 def _stream_results(produce_queue, latest, stop_flags, threads, error_holder):
     """Stream prompt generation results"""
+
+    try:
+        yield from _stream_results_impl(
+            produce_queue, latest, stop_flags, threads, error_holder
+        )
+    finally:
+        for execution in threads:
+            if isinstance(execution, ManagedExecution):
+                config_thread_manager.cancel(
+                    execution.execution_id,
+                    reason="prompt result stream closed",
+                    wait_timeout=0,
+                )
+
+
+def _wait_prompt_execution(execution, timeout):
+    if isinstance(execution, ManagedExecution):
+        try:
+            execution.future.result(timeout=timeout)
+        except Exception:
+            return
+    else:
+        execution.join(timeout=timeout)
+
+
+def _stream_results_impl(produce_queue, latest, stop_flags, threads, error_holder):
+    """Yield prompt fragments while managed executions are active."""
 
     # Real-time streaming output for the first three sections
     last_results = {"duty": "", "constraint": "", "few_shots": "",
@@ -845,7 +781,7 @@ def _stream_results(produce_queue, latest, stop_flags, threads, error_holder):
         if error_holder.get("error"):
             # Wait for threads to finish
             for thread in threads:
-                thread.join(timeout=5)
+                _wait_prompt_execution(thread, timeout=5)
             raise error_holder["error"]
 
         try:
@@ -870,7 +806,7 @@ def _stream_results(produce_queue, latest, stop_flags, threads, error_holder):
 
     # Wait for all threads to complete
     for thread in threads:
-        thread.join(timeout=5)
+        _wait_prompt_execution(thread, timeout=5)
 
     # Output final results
     all_tags = ["duty", "constraint", "few_shots",
@@ -891,62 +827,18 @@ def _stream_results(produce_queue, latest, stop_flags, threads, error_holder):
 
 
 def join_info_for_generate_system_prompt(prompt_for_generate, sub_agent_info_list, task_description, tool_info_list, language: str = LANGUAGE["ZH"], knowledge_base_display_names: Optional[List[str]] = None, aidp_kb_display_names: Optional[List[str]] = None, has_selected_resources: bool = True):
-    input_label = "Inputs" if language == 'en' else "接受输入"
-    output_label = "Output type" if language == 'en' else "返回输出类型"
-
-    tool_description = "\n".join(
-        [f"- {tool['name']}: {tool['description']} \n {input_label}: {tool['inputs']}\n {output_label}: {tool['output_type']}"
-         for tool in tool_info_list])
-    assistant_description = "\n".join(
-        [f"- {sub_agent_info['name']}: {sub_agent_info['description']}" for sub_agent_info in sub_agent_info_list])
     has_local_knowledge_tool, has_aidp_knowledge_tool = _resolve_knowledge_tool_capabilities(
         tool_info_list
     )
-    if has_local_knowledge_tool or has_aidp_knowledge_tool:
-        scope_instruction = (
-            "知识库工具仅代表检索能力。不得在生成内容中写入具体知识库名称、知识库 ID、索引名称、"
-            "KDS ID、固定 index_names 或固定 kds_list；统一表述为当前会话允许的知识库范围。"
-            if language == LANGUAGE["ZH"] else
-            "Knowledge tools represent capabilities only. Do not include concrete knowledge base names, IDs, index "
-            "names, KDS IDs, fixed index_names, or fixed kds_list values. Refer to the knowledge scope allowed for "
-            "the current conversation."
-        )
-        tool_description = "\n\n".join(
-            part for part in (tool_description, scope_instruction) if part
-        )
-
-    # Build template context
-    template_context = {
-        "task_description": task_description,
-        "tool_description": tool_description,
-        "assistant_description": assistant_description,
-        # Always include knowledge_base_names to avoid StrictUndefined errors in template.
-        # An empty string is falsy, so the {% if knowledge_base_names %} block will be skipped.
-        "knowledge_base_names": "",
-        # Always include aidp_kb_names to avoid StrictUndefined errors in template.
-        # An empty string is falsy, so the {% if aidp_kb_names %} block will be skipped.
-        "aidp_kb_names": "",
-        "has_local_knowledge_tool": has_local_knowledge_tool,
-        "has_aidp_knowledge_tool": has_aidp_knowledge_tool,
-        # Flag indicating whether tools or sub-agents are selected;
-        # templates use this to suppress boilerplate in constraint/few_shots sections
-        "has_selected_resources": has_selected_resources,
-    }
-
-    # Always add knowledge_base_names to context (empty string when not available).
-    # This is necessary because Jinja2 StrictUndefined raises an error for any
-    # undefined variable, even inside an {% if %} block.
-    template_context["knowledge_base_names"] = ""
-
-    # Always add aidp_kb_names to context (empty string when not available).
-    # This is necessary because Jinja2 StrictUndefined raises an error for any
-    # undefined variable, even inside an {% if %} block.
-    template_context["aidp_kb_names"] = ""
-
-    # Generate content using template
-    content = Template(
-        prompt_for_generate["user_prompt"], undefined=StrictUndefined).render(template_context)
-    return content
+    return compose_agent_generation_user(
+        language, prompt_for_generate,
+        task_description=task_description,
+        tools=tool_info_list,
+        worker_agents=sub_agent_info_list,
+        has_local_knowledge_tool=has_local_knowledge_tool,
+        has_aidp_knowledge_tool=has_aidp_knowledge_tool,
+        has_selected_resources=has_selected_resources,
+    )
 
 
 def join_info_for_optimize_prompt_section(
@@ -962,60 +854,26 @@ def join_info_for_optimize_prompt_section(
     knowledge_base_display_names: Optional[List[str]] = None,
     aidp_kb_display_names: Optional[List[str]] = None,
 ):
-    input_label = "Inputs" if language == LANGUAGE["EN"] else "接受输入"
-    output_label = "Output type" if language == LANGUAGE["EN"] else "返回输出类型"
-
-    tool_description = "\n".join(
-        [f"- {tool['name']}: {tool['description']} \n {input_label}: {tool['inputs']}\n {output_label}: {tool['output_type']}"
-         for tool in tool_info_list]
-    )
-    assistant_description = "\n".join(
-        [f"- {sub_agent_info['name']}: {sub_agent_info['description']}" for sub_agent_info in sub_agent_info_list]
-    )
-
-    kb_names_str = ""
-    aidp_names_str = ""
     has_local_knowledge_tool, has_aidp_knowledge_tool = _resolve_knowledge_tool_capabilities(
         tool_info_list
     )
-    if has_local_knowledge_tool or has_aidp_knowledge_tool:
-        scope_instruction = (
-            "优化后的内容不得新增或保留具体知识库名称、知识库 ID、索引名称、KDS ID、固定 index_names "
-            "或固定 kds_list；应改写为当前会话允许的知识库范围。"
-            if language == LANGUAGE["ZH"] else
-            "The optimized content must not add or retain concrete knowledge base names, IDs, index names, KDS IDs, "
-            "fixed index_names, or fixed kds_list values. Refer to the scope allowed for the current conversation."
-        )
-        tool_description = "\n\n".join(
-            part for part in (tool_description, scope_instruction) if part
-        )
-
-    template_context = {
-        "section_type": section_type,
-        "section_title": section_title,
-        "task_description": task_description,
-        "current_content": current_content,
-        "feedback": feedback,
-        "tool_description": tool_description,
-        "assistant_description": assistant_description,
-        "knowledge_base_names": kb_names_str,
-        "aidp_kb_names": aidp_names_str,
-        "has_local_knowledge_tool": has_local_knowledge_tool,
-        "has_aidp_knowledge_tool": has_aidp_knowledge_tool,
-    }
-
-    return Template(
-        prompt_for_optimize["OPTIMIZE_USER_PROMPT"],
-        undefined=StrictUndefined
-    ).render(template_context)
+    return compose_agent_optimization(
+        language,
+        section_type=section_type,
+        section_title=section_title,
+        task_description=task_description,
+        current_content=current_content,
+        feedback=feedback,
+        tools=tool_info_list,
+        worker_agents=sub_agent_info_list,
+        has_local_knowledge_tool=has_local_knowledge_tool,
+        has_aidp_knowledge_tool=has_aidp_knowledge_tool,
+        template_override=prompt_for_optimize,
+    ).user
 
 
 def _default_prompt_section_title(section_type: str, language: str) -> str:
-    localized_titles = PROMPT_SECTION_TYPE_TITLES.get(
-        language,
-        PROMPT_SECTION_TYPE_TITLES[LANGUAGE["ZH"]]
-    )
-    return localized_titles.get(section_type, section_type)
+    return default_section_title(language, section_type)
 
 
 def get_enabled_tool_description_for_generate_prompt(agent_id: int, tenant_id: str):

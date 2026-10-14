@@ -6,7 +6,7 @@ from typing import Any, Dict, Optional
 from consts.const import AGENT_AUTOMATION_DEFAULT_TIMEOUT_SECONDS
 from consts.model import AgentRequest
 from database import agent_automation_db
-from services.agent_service import is_agent_running, run_agent_background, stop_agent_tasks
+from management.services.agent.service import is_agent_running, run_agent_background, stop_agent_tasks
 
 from .capability_resolver import validate_bindings_available
 from .conversation_adapter import automation_conversation_adapter

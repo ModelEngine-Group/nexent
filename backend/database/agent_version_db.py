@@ -29,6 +29,7 @@ def search_version_by_version_no(
     with get_db_session() as session:
         version = session.query(AgentVersion).filter(
             AgentVersion.agent_id == agent_id,
+            AgentVersion.tenant_id == tenant_id,
             AgentVersion.version_no == version_no,
             AgentVersion.delete_flag == 'N',
         ).first()
@@ -43,7 +44,7 @@ def batch_search_version_names(
     """
     Batch query version names for multiple (agent_id, version_no) pairs.
 
-    Returns list of dicts: [{"agent_id": int, "version_no": int, "version_name": Optional[str]}]
+    Returns version names and creation times for the requested agent versions.
     """
     if not agent_ids or not version_nos:
         return []
@@ -61,6 +62,7 @@ def batch_search_version_names(
                 "agent_id": v.agent_id,
                 "version_no": v.version_no,
                 "version_name": v.version_name,
+                "create_time": v.create_time,
             })
         return result
 

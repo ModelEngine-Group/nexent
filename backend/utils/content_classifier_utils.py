@@ -4,6 +4,10 @@ import re
 from typing import Any, Dict, List, Optional
 
 
+FINAL_ANSWER_OPEN_TAG = "<final_answer>"
+FINAL_ANSWER_CLOSE_TAG = "</final_answer>"
+
+
 class ContentClassifier:
     """Parse XML tags from LLM output and classify streaming content in real-time.
 
@@ -11,7 +15,7 @@ class ContentClassifier:
     Classifies content into:
     - skill_body: SKILL.md content (including frontmatter - detected by frontend)
     - file_content: Additional file content with path information
-    - summary: Summary text after </SKILL>
+    - summary: Summary text after </skill>
     - others: Content outside all tags (LLM reasoning process)
 
     Includes DoS protection to prevent resource exhaustion from malicious input.
@@ -31,11 +35,14 @@ class ContentClassifier:
         self._origin_type: Optional[str] = None
         self._state_before_file = "others"
         self._known_tags = {
-            "<SKILL>",
-            "</SKILL>",
-            "<SUMMARY>",
-            "</SUMMARY>",
-            "</FILE>",
+            FINAL_ANSWER_OPEN_TAG,
+            FINAL_ANSWER_CLOSE_TAG,
+
+            "<skill>",
+            "</skill>",
+            "<summary>",
+            "</summary>",
+            "</file>",
         }
         self._pending_file_path: Optional[str] = None
 
@@ -103,7 +110,12 @@ class ContentClassifier:
             content_after_tag = self.buffer[gt_pos + 1:]
             if not content_after_tag and not final:
                 return None
-            if content_after_tag and not content_after_tag.startswith(("\n", "\r\n")):
+            if (
+                content_after_tag
+                and not content_after_tag.startswith(("\n", "\r\n"))
+                and matched not in {FINAL_ANSWER_OPEN_TAG, FINAL_ANSWER_CLOSE_TAG}
+
+            ):
                 return self._emit_potential_tag_start()
             results.extend(self._handle_matched_tag(gt_pos, potential_tag, matched))
         elif len(potential_tag) > self.MAX_TAG_LENGTH:
@@ -201,15 +213,15 @@ class ContentClassifier:
         if buffer_content in self._known_tags:
             return buffer_content
 
-        # Check <FILE path="..."> pattern
-        if buffer_content.startswith("<FILE ") and buffer_content.endswith(">"):
+        # Check <file path="..."> pattern
+        if buffer_content.startswith("<file ") and buffer_content.endswith(">"):
             match = re.match(
-                r'<FILE\s+path="([^"]{1,' + str(self.MAX_PATH_LENGTH) + r'})">$',
+                r'<file\s+path="([^"]{1,' + str(self.MAX_PATH_LENGTH) + r'})">$',
                 buffer_content
             )
             if match and self._is_valid_file_path(match.group(1)):
                 self._pending_file_path = match.group(1)
-                return "<FILE>"
+                return "<file>"
 
         return None
 
@@ -258,24 +270,29 @@ class ContentClassifier:
 
     def _handle_tag(self, tag: str) -> Optional[Dict[str, Any]]:
         """Handle matched tag and update state."""
-        if tag == "<SKILL>":
+        if tag in {FINAL_ANSWER_OPEN_TAG, FINAL_ANSWER_CLOSE_TAG}:
+
+            self.saw_control_tag = True
+            return None
+
+        if tag == "<skill>":
             self.saw_control_tag = True
             self.state = "skill_body"
             return None
 
-        elif tag == "<SUMMARY>":
+        elif tag == "<summary>":
             self.saw_control_tag = True
             self.state = "summary"
             return None
 
-        elif tag == "</SUMMARY>" or tag == "</SKILL>":
-            if tag == "</SKILL>":
+        elif tag == "</summary>" or tag == "</skill>":
+            if tag == "</skill>":
                 self.state = "summary"
             else:
                 self.state = "others"
             return None
 
-        elif tag == "<FILE>":
+        elif tag == "<file>":
             self.saw_control_tag = True
             self._state_before_file = self.state
             self.state = "file"
@@ -291,7 +308,7 @@ class ContentClassifier:
                 event["origin_type"] = self._origin_type
             return event
 
-        elif tag == "</FILE>":
+        elif tag == "</file>":
             if self.state == "file":
                 self.state = self._state_before_file
             self.current_file_path = None

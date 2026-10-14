@@ -31,7 +31,13 @@ def create_tool(tool_info, version_no: int = 0):
         session.add(new_tool_instance)
 
 
-def create_or_update_tool_by_tool_info(tool_info, tenant_id: str, user_id: str, version_no: int = 0):
+def create_or_update_tool_by_tool_info(
+    tool_info,
+    tenant_id: str,
+    user_id: str,
+    version_no: int = 0,
+    allow_system: bool = False,
+):
     """
     Create or update a ToolInstance in the database.
     Default version_no=0 operates on the draft version.
@@ -45,6 +51,11 @@ def create_or_update_tool_by_tool_info(tool_info, tenant_id: str, user_id: str, 
     Returns:
         Created or updated ToolInstance object
     """
+    from .agent_db import is_system_agent
+
+    if not allow_system and is_system_agent(tool_info.agent_id, tenant_id) is True:
+        raise ValueError("System Agent is managed by the platform")
+
     tool_info_dict = tool_info.__dict__ | {
         "tenant_id": tenant_id, "user_id": user_id, "version_no": version_no}
 
@@ -335,11 +346,11 @@ def update_tool_table_from_scan_tool_list(
 
 def set_mcp_tools_unavailable(*, tenant_id: str, mcp_server_name: str, user_id: str) -> int:
     """
-    Mark all tool records belonging to a deleted MCP server as unavailable.
+    Mark a deleted MCP server's tools unavailable and unbind them from agent drafts.
 
-    Keeps the tool rows in place (agents may still reference them via tool
-    instances) but hides them from the agent tool selection list, which only
-    shows tools where is_available != False.
+    Keeps tool rows and published agent snapshots in place. Draft tool
+    instances are soft-deleted so users do not retain unusable bindings after
+    the MCP server is removed.
 
     Args:
         tenant_id: Tenant ID (stored as ToolInfo.author)
@@ -350,12 +361,29 @@ def set_mcp_tools_unavailable(*, tenant_id: str, mcp_server_name: str, user_id: 
         Number of tool records updated
     """
     with get_db_session() as session:
-        updated = session.query(ToolInfo).filter(
+        tool_rows = session.query(ToolInfo.tool_id).filter(
             ToolInfo.delete_flag != 'Y',
             ToolInfo.author == tenant_id,
             ToolInfo.source == ToolSourceEnum.MCP.value,
             ToolInfo.usage == mcp_server_name,
+        ).all()
+        tool_ids = [row[0] for row in tool_rows]
+        if not tool_ids:
+            return 0
+
+        updated = session.query(ToolInfo).filter(
+            ToolInfo.tool_id.in_(tool_ids),
         ).update({"is_available": False, "updated_by": user_id})
+
+        session.query(ToolInstance).filter(
+            ToolInstance.tenant_id == tenant_id,
+            ToolInstance.tool_id.in_(tool_ids),
+            ToolInstance.version_no == 0,
+            ToolInstance.delete_flag != 'Y',
+        ).update({
+            ToolInstance.delete_flag: 'Y',
+            "updated_by": user_id,
+        }, synchronize_session=False)
         return updated or 0
 
 
@@ -455,7 +483,13 @@ def check_tool_is_available(tool_id_list: List[int]):
         return [tool.is_available for tool in tools]
 
 
-def delete_tools_by_agent_id(agent_id, tenant_id, user_id, version_no: int = 0):
+def delete_tools_by_agent_id(
+    agent_id,
+    tenant_id,
+    user_id,
+    version_no: int = 0,
+    allow_system: bool = False,
+):
     """
     Delete all tool instances for an agent.
     Default version_no=0 deletes the draft version.
@@ -466,6 +500,10 @@ def delete_tools_by_agent_id(agent_id, tenant_id, user_id, version_no: int = 0):
         user_id: User ID
         version_no: Version number to filter. Default 0 = draft/editing state
     """
+    from .agent_db import is_system_agent
+
+    if not allow_system and is_system_agent(agent_id, tenant_id) is True:
+        raise ValueError("System Agent is managed by the platform")
     with get_db_session() as session:
         session.query(ToolInstance).filter(
             ToolInstance.agent_id == agent_id,

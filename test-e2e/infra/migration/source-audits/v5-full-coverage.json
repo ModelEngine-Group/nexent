@@ -1,0 +1,99 @@
+{
+  "schema_version": 1,
+  "source_workbook_sha256": "aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022",
+  "workbook_rows": 659,
+  "implemented": 633,
+  "unique_primary_scripts": 633,
+  "stale_old_catalog_case_ids": [
+    "API-105",
+    "PW-PROMPT-01",
+    "PW-PROMPT-02",
+    "PW-RESOURCE-04",
+    "SEC-01"
+  ],
+  "stages": {
+    "D1": {
+      "workbook_rows": 185,
+      "current_scope_excluding_retired": 185,
+      "implemented": 185,
+      "status_counts": {
+        "active": 185
+      },
+      "not_executable_ids": []
+    },
+    "D2": {
+      "workbook_rows": 158,
+      "current_scope_excluding_retired": 158,
+      "implemented": 149,
+      "status_counts": {
+        "active": 149,
+        "blocked": 9
+      },
+      "not_executable_ids": [
+        "API-092",
+        "API-093",
+        "CTR-034",
+        "CTR-035",
+        "CTR-039",
+        "CTR-040",
+        "CTR-041",
+        "CTR-042",
+        "CTR-043"
+      ]
+    },
+    "D3": {
+      "workbook_rows": 182,
+      "current_scope_excluding_retired": 181,
+      "implemented": 173,
+      "status_counts": {
+        "active": 173,
+        "blocked": 8,
+        "retired": 1
+      },
+      "not_executable_ids": [
+        "AGT-072",
+        "API-094",
+        "API-095",
+        "CTR-031",
+        "CTR-032",
+        "CTR-033",
+        "CTR-036",
+        "CTR-037",
+        "CTR-038"
+      ]
+    },
+    "D4": {
+      "workbook_rows": 53,
+      "current_scope_excluding_retired": 52,
+      "implemented": 45,
+      "status_counts": {
+        "active": 45,
+        "blocked": 5,
+        "retired": 1,
+        "skipped_by_policy": 2
+      },
+      "not_executable_ids": [
+        "PW-A2A-DISCOVERY-01",
+        "PW-A2A-PUBLISH-01",
+        "PW-AUTH-03",
+        "PW-AUTH-04",
+        "PW-HITL-01",
+        "PW-KB-AIDP-01",
+        "PW-MCP-LOCALIMG-01",
+        "PW-QUOTA-LOCAL-01"
+      ]
+    },
+    "D5": {
+      "workbook_rows": 81,
+      "current_scope_excluding_retired": 81,
+      "implemented": 81,
+      "status_counts": {
+        "active": 81
+      },
+      "not_executable_ids": []
+    }
+  },
+  "workbook_identity_steps_expected_preconditions_exact": true,
+  "script_identity_binding_verified": true,
+  "script_behavior_parity_verified": false
+}

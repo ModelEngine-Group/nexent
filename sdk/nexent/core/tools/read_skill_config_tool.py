@@ -1,5 +1,6 @@
 """Skill config reading tool."""
 import logging
+from copy import deepcopy
 import os
 from typing import Any, Dict, Optional
 
@@ -27,6 +28,7 @@ class ReadSkillConfigTool(Tool):
         tenant_id: Optional[str] = None,
         version_no: int = 0,
         config_overrides: Optional[Dict[str, Dict[str, Any]]] = None,
+        authorized_skill_names: Optional[list[str]] = None,
     ):
         """Initialize the tool with local skills directory and agent context.
 
@@ -42,7 +44,10 @@ class ReadSkillConfigTool(Tool):
         self.agent_id = agent_id
         self.tenant_id = tenant_id
         self.version_no = version_no
-        self.config_overrides = config_overrides or {}
+        self.config_overrides = deepcopy(config_overrides or {})
+        self.authorized_skill_names = (
+            frozenset(authorized_skill_names) if authorized_skill_names is not None else None
+        )
 
     def execute(self, skill_name: str) -> str:
         """Read the config.yaml file from a skill directory.
@@ -53,6 +58,12 @@ class ReadSkillConfigTool(Tool):
         Returns:
             JSON-serialized dict of the config file, or an error message.
         """
+        if self.authorized_skill_names is not None:
+            if skill_name not in self.authorized_skill_names:
+                return "[Error] Skill access is not authorized"
+            import json
+            return json.dumps(self.config_overrides.get(skill_name, {}), ensure_ascii=False, indent=2)
+
         if not skill_name:
             return "[Error] skill_name is required"
 

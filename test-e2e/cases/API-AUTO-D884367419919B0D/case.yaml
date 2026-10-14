@@ -1,0 +1,91 @@
+schema_version: '1.0'
+stage: D2
+module: V5-BASELINE
+case:
+  case_id: API-AUTO-D884367419919B0D
+  feature_id: F-024
+  business_rule_ids:
+  - F-024-RULE-01
+  title: 配额 usage 响应 source-only 计量语义与 legacy total_size 别名（total_bytes/usage_pct/available 与 es_physical_bytes 解耦）｜核心流程
+  type: API-IT
+  priority: P1
+  status: active
+  automation: automated
+  objective: 配额 usage 响应 source-only 计量语义与 legacy total_size 别名（total_bytes/usage_pct/available 与 es_physical_bytes 解耦）｜核心流程
+  preconditions:
+  - 本地 API 集成测试环境可运行；后端服务与本地 ES/MinIO 组件可用，不要求外部模型服务在线。
+  - 设置 NEXENT_TEST_HOME，目录不位于 Nexent Git 仓库内。
+  - 当次 run_id 已生成，所有新建资源名称带 run_id；测试基线固定为 develop 当前批次锁定的产品提交；执行时另记录实际被测commit。
+  - 所需本地资产存在且校验通过：${NEXENT_TEST_HOME}/config/users.yaml；${NEXENT_TEST_HOME}/config/secrets.env；${NEXENT_TEST_HOME}/assets/documents/
+  - users.yaml 中 SU/Admin/UserA/UserB 等隔离账号可登录，测试租户数据可被清理；已创建含已知源文件账本字节数（记为 S）的测试知识库，且 ES 物理索引 store_size（记为 E）与 S 存在可观测差异。
+  test_data:
+    legacy_asset_declaration: '- ${NEXENT_TEST_HOME}/config/users.yaml
+
+      - ${NEXENT_TEST_HOME}/config/secrets.env
+
+      - ${NEXENT_TEST_HOME}/assets/documents/'
+  steps:
+  - order: 1
+    action: 准备隔离测试租户并设置配额基线：以管理员身份为该租户设置 hard_limit_bytes（记为 H），并确认源文件账本已提交字节数为 S、ES 物理索引 store_size 为 E（E≠S）。
+    expected: usage 响应 source-only：total_bytes 等于源文件账本字节 S，ES 物理量仅出现在 es_physical_bytes 等独立字段，不参与 total_bytes。
+  - order: 2
+    action: 以本租户用户身份调用 GET /tenants/{tenant_id}/quota/usage?force_refresh=true&detail=true，记录 HTTP 状态码与完整响应体。
+    expected: usage_pct/available_bytes/hard_limit_bytes/tenant_warning_level 仅由源账本字节驱动，ES 物理量变化不影响配额用量、告警与可用额度。
+  - order: 3
+    action: 校验序列化契约：状态码为 200，响应体包含字段 total_bytes/total_readable、es_physical_bytes/es_physical_readable、hard_limit_bytes/hard_limit_readable、available_bytes/available_readable、usage_pct、tenant_warning_level、warning_enabled、warning_threshold_pct、critical_threshold_pct、kb_count、file_count
+      及 breakdown 数组（每项含 index_name、actual_bytes/actual_readable、es_physical_bytes/es_physical_readable、usage_pct、file_count、kb_warning_level），字段类型符合契约（数值或
+      null）。
+    expected: legacy 别名 total_size/total_size_bytes 与 source_size/source_size_bytes 一致且等于源账本字节，store_size 系列为 ES 物理量。
+  - order: 4
+    action: 校验 source-only 计量：total_bytes == S（total_readable 与之对应）；es_physical_bytes == E（独立字段）；available_bytes == max(0,
+      H - S)；usage_pct == round(S/H*100, 2)；breakdown 各项 actual_bytes 按源账本字节累计，es_physical_bytes 独立返回。
+    expected: 越权访问返回 403/401，非法参数返回 4xx，无跨租户数据泄漏，无半写入或重复副作用。
+  - order: 5
+    action: 模拟 ES 物理观测变化（触发 Lucene 段合并/回收使 store_size 变化）后再次 force_refresh=true 查询，断言 total_bytes/usage_pct/available_bytes/hard_limit_bytes/tenant_warning_level
+      保持不变，仅 es_physical_bytes 变化。
+    expected: 日志与响应中不出现明文 API Key/Token/Password。
+  - order: 6
+    action: 调用 GET /capacity/personal/users/{user_id}/kbs 与 GET /capacity/personal/summary，校验 legacy 别名：source_size/source_size_bytes
+      与 total_size/total_size_bytes 均为源账本字节且两者相等，es_physical_size/es_physical_size_bytes 与 store_size/store_size_bytes 为 ES
+      物理量且可与 total_size_bytes 不同。
+    expected: 日志与响应中不出现明文 API Key/Token/Password。
+  - order: 7
+    action: 校验错误契约：非本租户且非 SU/ASSET_OWNER 用户跨租户访问 usage 返回 403；无有效 token 返回 401；非法参数返回对应 4xx；错误响应体不泄露其他租户配额。
+    expected: 日志与响应中不出现明文 API Key/Token/Password。
+  - order: 8
+    action: 清理测试数据，确认用例可重复执行。
+    expected: 日志与响应中不出现明文 API Key/Token/Password。
+  expected_results:
+  - usage 响应 source-only：total_bytes 等于源文件账本字节 S，ES 物理量仅出现在 es_physical_bytes 等独立字段，不参与 total_bytes。
+  - usage_pct/available_bytes/hard_limit_bytes/tenant_warning_level 仅由源账本字节驱动，ES 物理量变化不影响配额用量、告警与可用额度。
+  - legacy 别名 total_size/total_size_bytes 与 source_size/source_size_bytes 一致且等于源账本字节，store_size 系列为 ES 物理量。
+  - 越权访问返回 403/401，非法参数返回 4xx，无跨租户数据泄漏，无半写入或重复副作用。
+  - 日志与响应中不出现明文 API Key/Token/Password。
+  forbidden_side_effects: []
+  source:
+    legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
+    legacy_sheet: 02_测试用例基线
+    legacy_row: 509
+  contract:
+    protocol: HTTP API
+    request_expectations:
+    - 准备隔离测试租户并设置配额基线：以管理员身份为该租户设置 hard_limit_bytes（记为 H），并确认源文件账本已提交字节数为 S、ES 物理索引 store_size 为 E（E≠S）。
+    - 以本租户用户身份调用 GET /tenants/{tenant_id}/quota/usage?force_refresh=true&detail=true，记录 HTTP 状态码与完整响应体。
+    - 校验序列化契约：状态码为 200，响应体包含字段 total_bytes/total_readable、es_physical_bytes/es_physical_readable、hard_limit_bytes/hard_limit_readable、available_bytes/available_readable、usage_pct、tenant_warning_level、warning_enabled、warning_threshold_pct、critical_threshold_pct、kb_count、file_count
+      及 breakdown 数组（每项含 index_name、actual_bytes/actual_readable、es_physical_bytes/es_physical_readable、usage_pct、file_count、kb_warning_level），字段类型符合契约（数值或
+      null）。
+    - 校验 source-only 计量：total_bytes == S（total_readable 与之对应）；es_physical_bytes == E（独立字段）；available_bytes == max(0, H - S)；usage_pct
+      == round(S/H*100, 2)；breakdown 各项 actual_bytes 按源账本字节累计，es_physical_bytes 独立返回。
+    - 模拟 ES 物理观测变化（触发 Lucene 段合并/回收使 store_size 变化）后再次 force_refresh=true 查询，断言 total_bytes/usage_pct/available_bytes/hard_limit_bytes/tenant_warning_level
+      保持不变，仅 es_physical_bytes 变化。
+    - 调用 GET /capacity/personal/users/{user_id}/kbs 与 GET /capacity/personal/summary，校验 legacy 别名：source_size/source_size_bytes
+      与 total_size/total_size_bytes 均为源账本字节且两者相等，es_physical_size/es_physical_size_bytes 与 store_size/store_size_bytes 为 ES
+      物理量且可与 total_size_bytes 不同。
+    - 校验错误契约：非本租户且非 SU/ASSET_OWNER 用户跨租户访问 usage 返回 403；无有效 token 返回 401；非法参数返回对应 4xx；错误响应体不泄露其他租户配额。
+    - 清理测试数据，确认用例可重复执行。
+    response_expectations:
+    - usage 响应 source-only：total_bytes 等于源文件账本字节 S，ES 物理量仅出现在 es_physical_bytes 等独立字段，不参与 total_bytes。
+    - usage_pct/available_bytes/hard_limit_bytes/tenant_warning_level 仅由源账本字节驱动，ES 物理量变化不影响配额用量、告警与可用额度。
+    - legacy 别名 total_size/total_size_bytes 与 source_size/source_size_bytes 一致且等于源账本字节，store_size 系列为 ES 物理量。
+    - 越权访问返回 403/401，非法参数返回 4xx，无跨租户数据泄漏，无半写入或重复副作用。
+    - 日志与响应中不出现明文 API Key/Token/Password。

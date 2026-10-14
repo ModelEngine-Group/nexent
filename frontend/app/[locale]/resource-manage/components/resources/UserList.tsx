@@ -31,6 +31,7 @@ import {
   type Group,
   type CreateGroupRequest,
 } from "@/services/groupService";
+import { getTenantResourceLimitMessage } from "@/const/errorMessageI18n";
 
 export default function UserList({ tenantId, refreshKey }: { tenantId: string | null; refreshKey?: number }) {
   const { confirm } = useConfirmModal();
@@ -111,8 +112,11 @@ export default function UserList({ tenantId, refreshKey }: { tenantId: string | 
       message.success(t("tenantResources.users.deleted"));
       refetch();
     } catch (err: any) {
-      if (err.response?.data?.message) {
-        message.error(err.response.data.message);
+      const limitMessage = getTenantResourceLimitMessage(err, t);
+      if (limitMessage) {
+        message.error(limitMessage);
+      } else if (err?.message) {
+        message.error(err.message);
       } else {
         message.error(t("common.unknownError"));
       }
@@ -156,7 +160,10 @@ export default function UserList({ tenantId, refreshKey }: { tenantId: string | 
       refetch();
     } catch (err: any) {
       message.error(
-        err?.message || err?.response?.data?.message || t("common.unknownError")
+        getTenantResourceLimitMessage(err, t) ||
+          err?.message ||
+          err?.response?.data?.message ||
+          t("common.unknownError")
       );
     }
   };
@@ -181,7 +188,10 @@ export default function UserList({ tenantId, refreshKey }: { tenantId: string | 
       // Note: useGroupList will automatically refetch on tenant change
     } catch (err: any) {
       message.error(
-        err?.message || err?.response?.data?.message || t("common.unknownError")
+        getTenantResourceLimitMessage(err, t) ||
+          err?.message ||
+          err?.response?.data?.message ||
+          t("common.unknownError")
       );
     }
   };

@@ -17,6 +17,17 @@ def generate_access_key() -> str:
     return f"nexent-{random_part}"
 
 
+def mask_access_key(access_key: Optional[str]) -> Optional[str]:
+    """Mask an access key for list responses; only create/refresh returns the secret."""
+    if not access_key:
+        return access_key
+    if len(access_key) <= 8:
+        return access_key[:2] + "****"
+    prefix, _, tail = access_key.rpartition("-")
+    shown_prefix = (prefix or access_key)[:8]
+    return f"{shown_prefix}****{access_key[-4:]}"
+
+
 def create_token(
     access_key: str,
     user_id: str,
@@ -70,7 +81,7 @@ def list_tokens_by_user(user_id: str) -> List[Dict[str, Any]]:
         return [
             {
                 "token_id": token.token_id,
-                "access_key": token.access_key,
+                "access_key": mask_access_key(token.access_key),
                 "user_id": token.user_id,
                 "create_time": token.create_time.isoformat() if token.create_time else None
             }
@@ -233,7 +244,7 @@ def list_active_tokens_by_tenant(
             "items": [
                 {
                     "token_id": row.token_id,
-                    "access_key": row.access_key,
+                    "access_key": mask_access_key(row.access_key),
                     "user_id": row.user_id,
                     "created_by": row.created_by,
                     "creator_email": row.creator_email,

@@ -1,4 +1,5 @@
 import logging
+import uuid
 from typing import Any, Collection, Dict, FrozenSet, List, Optional, Tuple
 
 from consts.agent_repository import (
@@ -13,10 +14,14 @@ from consts.agent_repository import (
     VALID_REPOSITORY_STATUSES,
 )
 from consts.exceptions import UnauthorizedError
-from consts.model import AgentRepositorySnapshot, SkillResolution
-from consts.notification import EVENT_TYPE_REPOSITORY_REVIEW_PENDING, RESOURCE_TYPE_AGENT_REPOSITORY
-from database.agent_db import search_agent_info_by_agent_id
-from database.agent_version_db import search_version_by_version_no
+from consts.const import SYSTEM_TENANT_ID
+
+from consts.model import AgentRepositorySnapshot, KnowledgeBaseResolution, SkillResolution
+from consts.notification import (
+    EVENT_TYPE_REPOSITORY_REVIEW_PENDING,
+    RESOURCE_TYPE_AGENT_REPOSITORY,
+)
+from database.agent_db import delete_agent_by_id, search_agent_info_by_agent_id
 from database.agent_repository_db import (
     fetch_draft_agent_mine_metadata,
     get_agent_repository_by_agent_id,
@@ -29,14 +34,21 @@ from database.agent_repository_db import (
     sum_agent_repository_downloads_by_agent_ids,
     update_agent_repository_by_id,
     update_agent_repository_status_by_id,
+    soft_delete_agent_repository_record,
 )
+from database.agent_version_db import search_version_by_version_no
+from database.tag_management_db import TagManagementDB
 from database.user_tenant_db import get_user_tenant_by_user_id
-from services.agent_service import (
+from management.services.agent.service import (
     collect_skill_zip_entries,
     export_agent_dict_for_repository_impl,
     import_agent_impl,
     import_agent_with_skills_impl,
     list_all_agent_info_impl,
+)
+from management.services.agent.icon_storage import (
+    read_icon_image,
+    upload_icon_image,
 )
 from services.notification_service import (
     create_repository_pending_review_notification,
@@ -73,7 +85,64 @@ _ADMIN_REVIEW_STATUS_TRANSITIONS: FrozenSet[Tuple[str, str]] = frozenset({
 
 _MAX_LISTING_TAGS = 5
 _MAX_LISTING_TAG_LENGTH = 20
-_MAX_LISTING_ICON_LENGTH = 32
+_MAX_LISTING_ICON_LENGTH = 1024
+
+
+def _repository_icon_url(agent_id: int, version_no: int, image_id: str) -> str:
+    return f"/api/repository/agent/{agent_id}/versions/{version_no}/icon/{image_id}"
+
+
+def _repository_icon_object_name(
+    tenant_id: str, agent_id: int, version_no: int, image_id: str
+) -> str:
+    return f"agent-repository-icons/{tenant_id}/{agent_id}/{version_no}/{image_id}"
+
+
+def _repository_image_id(icon_url: str, agent_id: int, version_no: int) -> str:
+    prefix = f"/api/repository/agent/{agent_id}/versions/{version_no}/icon/"
+    if not icon_url.startswith(prefix):
+        raise ValueError("Invalid repository icon URL")
+    image_id = icon_url[len(prefix):]
+    try:
+        if str(uuid.UUID(image_id)) != image_id:
+            raise ValueError("Invalid repository icon URL")
+    except ValueError as exc:
+        raise ValueError("Invalid repository icon URL") from exc
+    return image_id
+
+
+async def upload_agent_repository_icon_impl(
+    agent_id: int, version_no: int, tenant_id: str, user_id: str, content: bytes
+) -> Dict[str, str]:
+    if version_no < 0:
+        raise ValueError("version_no must be >= 0")
+    agent_info = search_agent_info_by_agent_id(agent_id, tenant_id, version_no)
+    if not agent_info:
+        raise ValueError("Agent version not found")
+    _validate_create_listing_permission(user_id=user_id, agent_info=agent_info)
+    image_id = str(uuid.uuid4())
+    content_type = upload_icon_image(
+        content, _repository_icon_object_name(tenant_id, agent_id, version_no, image_id)
+    )
+    return {
+        "icon_url": _repository_icon_url(agent_id, version_no, image_id),
+        "content_type": content_type,
+    }
+
+
+def get_agent_repository_icon_impl(
+    agent_id: int, version_no: int, image_id: str, tenant_id: str
+) -> tuple[bytes, str]:
+    listing = get_agent_repository_by_agent_id(
+        agent_id, version_no, publisher_tenant_id=tenant_id
+    )
+    if not listing or listing.get("icon_url") != _repository_icon_url(
+        agent_id, version_no, image_id
+    ):
+        raise FileNotFoundError("Repository icon not found")
+    return read_icon_image(
+        _repository_icon_object_name(tenant_id, agent_id, version_no, image_id)
+    )
 
 
 def _to_summary_item(
@@ -100,9 +169,13 @@ def _to_summary_item(
         "tags": record.get("tags") or [],
         "tool_count": record.get("tool_count") or 0,
         "version_label": record.get("version_name"),
-        "icon": record.get("icon"),
+        "version_no": record.get("version_no"),
+        "create_time": _serialize_created_at(record.get("create_time")),
+        "icon_url": record.get("icon_url"),
         "downloads": downloads,
         "content": record.get("content"),
+        "publisher_tenant_id": record.get("publisher_tenant_id"),
+        "is_official": record.get("publisher_tenant_id") == SYSTEM_TENANT_ID,
     }
 
 
@@ -134,6 +207,48 @@ def _matches_repository_listing_search_filter(record: dict, search: str) -> bool
     )
 
 
+def _find_agent_ids_matching_any_tag_predicate(
+    tenant_id: str,
+    agent_ids: Collection[int],
+    predicates: Collection[Any],
+) -> set[str]:
+    """Return visible agents matching any structured tag predicate."""
+    if not agent_ids or not predicates:
+        return set()
+
+    resource_ids = [str(agent_id) for agent_id in agent_ids]
+    matched_ids: set[str] = set()
+    for predicate in predicates:
+        matched_ids.update(
+            TagManagementDB.filter_authorized_resource_ids(
+                tenant_id,
+                "agent",
+                resource_ids,
+                [predicate],
+            )
+        )
+    return matched_ids
+
+
+def _filter_agent_ids_by_tag_predicates(
+    tenant_id: str,
+    agent_ids: Collection[str],
+    predicates: Collection[Any],
+) -> set[str]:
+    """Return visible agents matching all selected structured tag predicates."""
+    if not agent_ids or not predicates:
+        return set()
+
+    return set(
+        TagManagementDB.filter_authorized_resource_ids(
+            tenant_id,
+            "agent",
+            list(agent_ids),
+            list(predicates),
+        )
+    )
+
+
 def list_agent_repository_listings_impl(
     tenant_id: str,
     *,
@@ -142,6 +257,9 @@ def list_agent_repository_listings_impl(
     page: int = 1,
     page_size: int = 10,
     search: Optional[str] = None,
+    search_tag_predicates: Optional[list] = None,
+    tag_predicates: Optional[list] = None,
+    tag: Optional[str] = None,
 ) -> Dict[str, Any]:
     """List repository listings for the caller tenant with optional status filter."""
     if status is not None and status not in VALID_REPOSITORY_STATUSES:
@@ -154,11 +272,67 @@ def list_agent_repository_listings_impl(
         status=status,
         agent_id=agent_id,
     )
+    # Summary queries intentionally omit the publisher field. Restore it
+    # before mapping the response so official rows can be identified by the
+    # client and routed to the official copy flow.
+    for record in records:
+        record.setdefault("publisher_tenant_id", tenant_id)
+    # Official listings are published by the reserved official tenant.  They
+    # must remain visible after the standalone deployment command finishes;
+    # using OFFICIAL_AGENT_PROFILES here would incorrectly couple visibility to
+    # the Nexent container's startup environment.
+    if agent_id is None and (status is None or status == STATUS_SHARED):
+        official_records = list_agent_repository_summaries(
+            publisher_tenant_id=SYSTEM_TENANT_ID,
+            status=STATUS_SHARED,
+            agent_id=agent_id,
+        )
+        for record in official_records:
+            record["publisher_tenant_id"] = SYSTEM_TENANT_ID
+        records.extend(official_records)
+        # Keep the response stable if a repository record is visible through
+        # both tenant queries (for example during a migration or in tests).
+        unique_records = {}
+        for record in records:
+            unique_records[record.get("agent_repository_id")] = record
+        records = list(unique_records.values())
+    if tag_predicates:
+        record_agent_ids = [
+            str(record["agent_id"])
+            for record in records
+            if record.get("agent_id") is not None
+        ]
+        matched_agent_ids = _filter_agent_ids_by_tag_predicates(
+            tenant_id,
+            record_agent_ids,
+            tag_predicates,
+        )
+        records = [
+            record
+            for record in records
+            if str(record.get("agent_id")) in matched_agent_ids
+        ]
+    search_matched_agent_ids = _find_agent_ids_matching_any_tag_predicate(
+        tenant_id,
+        [
+            int(record["agent_id"])
+            for record in records
+            if record.get("agent_id") is not None
+        ],
+        search_tag_predicates or [],
+    )
     if search and search.strip():
         records = [
             record
             for record in records
             if _matches_repository_listing_search_filter(record, search)
+            or str(record.get("agent_id")) in search_matched_agent_ids
+        ]
+    if tag and tag.strip():
+        records = [
+            record
+            for record in records
+            if tag.strip() in (record.get("tags") or [])
         ]
     total = len(records)
     start = (page - 1) * page_size
@@ -186,6 +360,23 @@ def list_agent_repository_listings_impl(
             "total_pages": (total + page_size - 1) // page_size if total else 0,
         },
     }
+
+
+def list_agent_repository_tag_stats_impl(tenant_id: str) -> List[Dict[str, Any]]:
+    """Return shared repository tags and their listing counts for one tenant."""
+    counts: Dict[str, int] = {}
+    for record in list_agent_repository_summaries(
+        publisher_tenant_id=tenant_id,
+        status=STATUS_SHARED,
+    ):
+        for raw_tag in record.get("tags") or []:
+            tag = str(raw_tag).strip()
+            if tag:
+                counts[tag] = counts.get(tag, 0) + 1
+    return [
+        {"tag": tag, "count": count}
+        for tag, count in sorted(counts.items(), key=lambda item: item[0].lower())
+    ]
 
 
 def _normalize_listing_tags(tags: Any) -> List[str]:
@@ -219,12 +410,14 @@ def _normalize_listing_tags(tags: Any) -> List[str]:
 
 def _validate_card_fields(repository_data: Dict[str, Any]) -> None:
     """Validate marketplace card fields required for listing submission."""
-    icon = repository_data.get("icon")
-    if not icon or not isinstance(icon, str) or not icon.strip():
-        raise ValueError("icon is required and must be a non-empty string")
-    if len(icon.strip()) > _MAX_LISTING_ICON_LENGTH:
+    icon_url = repository_data.get("icon_url")
+    if icon_url is not None and (
+        not isinstance(icon_url, str)
+        or not icon_url.strip()
+        or len(icon_url) > _MAX_LISTING_ICON_LENGTH
+    ):
         raise ValueError(
-            f"icon must be at most {_MAX_LISTING_ICON_LENGTH} characters"
+            f"icon_url must be a non-empty URL up to {_MAX_LISTING_ICON_LENGTH} characters"
         )
 
     tags = repository_data.get("tags")
@@ -313,14 +506,56 @@ def _compute_mine_ownership_counts(
     }
 
 
-def _matches_mine_search_filter(agent: dict, search: str) -> bool:
-    """Return whether an agent matches a case-insensitive name/description search."""
+def _matches_mine_search_filter(
+    agent: dict,
+    search: str,
+    tags: Collection[str] = (),
+) -> bool:
+    """Match a mine agent by name, description, or visible tag value."""
     query = search.strip().lower()
     if not query:
         return True
     name = str(agent.get("display_name") or agent.get("name") or "").lower()
     description = str(agent.get("description") or "").lower()
-    return query in name or query in description
+    return (
+        query in name
+        or query in description
+        or any(query in str(tag).lower() for tag in tags)
+    )
+
+
+def _merge_agent_tag_values(
+    agent_ids: Collection[int],
+    tenant_id: str,
+    repository_records: Collection[Dict[str, Any]],
+) -> Dict[int, List[str]]:
+    """Merge canonical agent assignments with publisher-owned listing tags."""
+
+    try:
+        structured = (
+            TagManagementDB.list_resource_assignment_display_values_by_ids(
+                tenant_id,
+                "agent",
+                [str(agent_id) for agent_id in agent_ids],
+            )
+        )
+    except Exception as error:  # noqa: BLE001 - repository search keeps legacy fallback
+        logger.warning("Failed to load structured agent tags for search: %s", error)
+        structured = {}
+    merged: Dict[int, List[str]] = {
+        int(agent_id): list(structured.get(str(agent_id), []))
+        for agent_id in agent_ids
+    }
+    for record in repository_records:
+        record_agent_id = record.get("agent_id")
+        if record_agent_id is None:
+            continue
+        target = merged.setdefault(int(record_agent_id), [])
+        for value in record.get("tags") or []:
+            normalized = str(value).strip()
+            if normalized and normalized not in target:
+                target.append(normalized)
+    return merged
 
 
 def _paginate_mine_agents_with_optional_padding(
@@ -355,6 +590,8 @@ async def list_my_editable_agents_impl(
     search: Optional[str] = None,
     new_agent_padding: bool = False,
     agent_id: Optional[int] = None,
+    tag_predicates: Optional[list] = None,
+    search_tag_predicates: Optional[list] = None,
 ) -> Dict[str, Any]:
     """List visible draft agents for the current user with repository listing info."""
     normalized_ownership = (ownership or OWNERSHIP_ALL).strip().lower()
@@ -365,13 +602,51 @@ async def list_my_editable_agents_impl(
         )
 
     all_agents = await list_all_agent_info_impl(tenant_id=tenant_id, user_id=user_id)
+    if tag_predicates:
+        agent_ids_for_filter = [
+            str(agent["agent_id"])
+            for agent in all_agents
+            if agent.get("agent_id") is not None
+        ]
+        matched_ids = set(
+            TagManagementDB.filter_authorized_resource_ids(
+                tenant_id,
+                "agent",
+                agent_ids_for_filter,
+                tag_predicates,
+            )
+        )
+        all_agents = [
+            agent
+            for agent in all_agents
+            if str(agent.get("agent_id")) in matched_ids
+        ]
     agent_ids = [
         int(agent["agent_id"])
         for agent in all_agents
         if agent.get("agent_id") is not None
     ]
+    search_matched_agent_ids = _find_agent_ids_matching_any_tag_predicate(
+        tenant_id,
+        agent_ids,
+        search_tag_predicates or [],
+    )
     meta_by_id = fetch_draft_agent_mine_metadata(tenant_id, agent_ids)
     counts = _compute_mine_ownership_counts(all_agents, meta_by_id, user_id)
+
+    repository_records_for_search: List[Dict[str, Any]] = []
+    tags_by_agent_id: Dict[int, List[str]] = {}
+    if search and search.strip() and agent_ids:
+        repository_records_for_search = list_agent_repository_by_agent_ids(
+            agent_ids,
+            statuses=_MY_AGENT_REPOSITORY_STATUSES,
+            publisher_tenant_id=tenant_id,
+        )
+        tags_by_agent_id = _merge_agent_tag_values(
+            agent_ids,
+            tenant_id,
+            repository_records_for_search,
+        )
 
     filtered_agents = []
     for agent in all_agents:
@@ -391,7 +666,12 @@ async def list_my_editable_agents_impl(
         filtered_agents = [
             (agent, meta)
             for agent, meta in filtered_agents
-            if _matches_mine_search_filter(agent, search)
+            if _matches_mine_search_filter(
+                agent,
+                search,
+                tags_by_agent_id.get(int(agent["agent_id"]), []),
+            )
+            or str(agent["agent_id"]) in search_matched_agent_ids
         ]
 
     if agent_id is not None:
@@ -405,6 +685,7 @@ async def list_my_editable_agents_impl(
         new_agent_padding
         and normalized_ownership == OWNERSHIP_ALL
         and not (search and search.strip())
+        and not tag_predicates
         and agent_id is None
     )
     paged_entries, total = _paginate_mine_agents_with_optional_padding(
@@ -421,17 +702,32 @@ async def list_my_editable_agents_impl(
 
     repository_by_agent_id: Dict[int, List[Dict[str, Any]]] = {}
     if paged_agent_ids:
-        repository_records = list_agent_repository_by_agent_ids(
-            paged_agent_ids,
-            statuses=_MY_AGENT_REPOSITORY_STATUSES,
-            publisher_tenant_id=tenant_id,
-        )
+        if repository_records_for_search:
+            paged_id_set = set(paged_agent_ids)
+            repository_records = [
+                record
+                for record in repository_records_for_search
+                if record.get("agent_id") is not None
+                and int(record["agent_id"]) in paged_id_set
+            ]
+        else:
+            repository_records = list_agent_repository_by_agent_ids(
+                paged_agent_ids,
+                statuses=_MY_AGENT_REPOSITORY_STATUSES,
+                publisher_tenant_id=tenant_id,
+            )
         for record in repository_records:
             record_agent_id = record.get("agent_id")
             if record_agent_id is None:
                 continue
             repository_by_agent_id.setdefault(int(record_agent_id), []).append(
                 _to_repository_info_item(record)
+            )
+        if not tags_by_agent_id:
+            tags_by_agent_id = _merge_agent_tag_values(
+                paged_agent_ids,
+                tenant_id,
+                repository_records,
             )
 
     download_totals = _get_agent_download_totals(paged_agent_ids)
@@ -455,6 +751,7 @@ async def list_my_editable_agents_impl(
                 ),
                 "permission": agent.get("permission"),
                 "downloads": download_totals.get(entry_agent_id, 0),
+                "tags": tags_by_agent_id.get(entry_agent_id, []),
                 "repository_info": repository_by_agent_id.get(entry_agent_id, []),
             }
         )
@@ -542,8 +839,12 @@ def get_agent_repository_listing_detail_impl(
         tenant_id,
     )
     if not record:
+        record = get_agent_repository_by_id(
+            agent_repository_id,
+            SYSTEM_TENANT_ID,
+        )
+    if not record:
         raise ValueError("Repository listing not found")
-
     root_agent = _extract_root_agent_from_snapshot(record.get("agent_info_json"))
     agent_id = record.get("agent_id")
     download_total = 0
@@ -556,12 +857,13 @@ def get_agent_repository_listing_detail_impl(
     return {
         "agent_repository_id": record.get("agent_repository_id"),
         "agent_id": agent_id,
+        "version_no": record.get("version_no"),
         "name": record.get("name"),
         "display_name": record.get("display_name"),
         "description": record.get("description"),
         "author": record.get("author"),
         "submitted_by": record.get("submitted_by"),
-        "icon": record.get("icon"),
+        "icon_url": record.get("icon_url"),
         "status": record.get("status"),
         "version_label": record.get("version_name"),
         "downloads": download_total,
@@ -569,6 +871,7 @@ def get_agent_repository_listing_detail_impl(
         "model_name": root_agent.get("model_name"),
         "duty_prompt": root_agent.get("duty_prompt"),
         "tools": _extract_tool_names(root_agent),
+        "is_official": record.get("publisher_tenant_id") == SYSTEM_TENANT_ID,
     }
 
 
@@ -672,6 +975,11 @@ def update_agent_repository_status_impl(
         agent_repository_id,
         tenant_id,
     )
+    if not record:
+        record = get_agent_repository_by_id(
+            agent_repository_id,
+            SYSTEM_TENANT_ID,
+        )
     if not record:
         raise ValueError("Repository listing not found")
 
@@ -792,7 +1100,7 @@ def _to_list_item(record: Dict[str, Any]) -> Dict[str, Any]:
         "tags": record.get("tags") or [],
         "tool_count": record.get("tool_count"),
         "version_label": record.get("version_name"),
-        "icon": record.get("icon"),
+        "icon_url": record.get("icon_url"),
         "downloads": record.get("downloads") or 0,
         "status": record.get("status"),
         "version_no": record.get("version_no"),
@@ -911,8 +1219,10 @@ async def _build_repository_data_from_agent(
     }
 
     if card_fields:
-        for key in ("icon", "downloads", "tool_count", "content"):
-            if key in card_fields and card_fields[key] is not None:
+        for key in ("icon_url", "downloads", "tool_count", "content"):
+            if key in card_fields and (
+                key == "icon_url" or card_fields[key] is not None
+            ):
                 repository_data[key] = card_fields[key]
         if "tags" in card_fields and card_fields["tags"] is not None:
             repository_data["tags"] = _normalize_listing_tags(card_fields["tags"])
@@ -934,7 +1244,7 @@ async def create_agent_repository_listing_impl(
     then inserts or updates the marketplace table.
 
     When a listing for the same agent version already exists, its status is
-    updated to pending_review along with icon and tags when provided.
+    updated to pending_review along with icon_url and tags when provided.
     """
     if version_no < 0:
         raise ValueError("version_no must be >= 0")
@@ -948,6 +1258,15 @@ async def create_agent_repository_listing_impl(
     )
     repository_data["content"] = (card_fields or {}).get("content") or ""
     _validate_create_payload(repository_data)
+    icon_url = repository_data.get("icon_url")
+    if icon_url is not None:
+        image_id = _repository_image_id(icon_url, agent_id, version_no)
+        try:
+            read_icon_image(
+                _repository_icon_object_name(tenant_id, agent_id, version_no, image_id)
+            )
+        except FileNotFoundError as exc:
+            raise ValueError("Repository icon upload not found") from exc
 
     existing = get_agent_repository_by_agent_id(
         agent_id,
@@ -967,7 +1286,7 @@ async def create_agent_repository_listing_impl(
             "status": STATUS_PENDING_REVIEW,
             "content": repository_data["content"],
         }
-        for key in ("icon", "tags", "tool_count"):
+        for key in ("icon_url", "tags", "tool_count"):
             if key in repository_data:
                 updates[key] = repository_data[key]
         affected = update_agent_repository_by_id(
@@ -1017,10 +1336,39 @@ def check_repository_import_precheck_impl(
         tenant_id,
     )
     if not record:
+        record = get_agent_repository_by_id(
+            agent_repository_id,
+            SYSTEM_TENANT_ID,
+        )
+    if not record:
         raise ValueError("Repository listing not found")
-
     if record.get("status") != STATUS_SHARED:
         raise ValueError("Repository listing is not available for import")
+
+    if record.get("publisher_tenant_id") == SYSTEM_TENANT_ID:
+        # Re-read the mounted bundle so the precheck sees the same Skill,
+        # MCP, model and logical KB declarations that the official installer
+        # will use. The repository snapshot is intentionally not treated as
+        # the source of official seed documents.
+        from services.official_agent_service import _load_bundle
+
+        bundle_name = str(record.get("name") or "")
+        bundle = _load_bundle(bundle_name)
+        if bundle is None:
+            raise ValueError(f"Official agent bundle not found: {bundle_name}")
+        display_name = (
+            str(record.get("display_name") or "").strip()
+            or str(record.get("name") or "").strip()
+            or "Agent"
+        )
+        result = build_repository_import_precheck(
+            agent_repository_id=agent_repository_id,
+            display_name=display_name,
+            snapshot=bundle,
+            tenant_id=tenant_id,
+            require_kb_embedding_model=True,
+        )
+        return result.model_dump()
 
     agent_info_json = record.get("agent_info_json")
     if not isinstance(agent_info_json, dict):
@@ -1046,14 +1394,73 @@ async def import_agent_from_repository_impl(
     tenant_id: str,
     authorization: str,
     skill_resolutions: Optional[List[SkillResolution]] = None,
-) -> Dict[int, int]:
+    model_ids: Optional[Dict[str, int]] = None,
+    embedding_model_ids: Optional[Dict[str, int]] = None,
+    knowledge_base_resolutions: Optional[List[KnowledgeBaseResolution]] = None,
+    user_id: Optional[str] = None,
+    return_root_id: bool = False,
+) -> Dict[int, int] | Dict[str, int]:
     """Import an agent tree from a marketplace repository listing into the current tenant."""
     record = get_agent_repository_by_id(
         agent_repository_id,
         tenant_id,
     )
     if not record:
+        record = get_agent_repository_by_id(
+            agent_repository_id,
+            SYSTEM_TENANT_ID,
+        )
+    if not record:
         raise ValueError("Repository listing not found")
+
+    # Official listings are templates backed by a mounted bundle. Their
+    # knowledge bases, skills and MCP servers must be prepared in the target
+    # tenant before the normal agent snapshot is imported. Ordinary listings
+    # continue through the existing import path below.
+    if record.get("publisher_tenant_id") == SYSTEM_TENANT_ID:
+        from services.official_agent_service import install_official_agents
+
+        # The official bundle directory name is the root Agent name, which is
+        # already stored in the repository record's ``name`` field.
+        bundle_name = str(record.get("name") or "")
+        logger.info(
+            "Repository import resolved official listing id=%s name=%r "
+            "publisher_tenant_id=%r target_tenant_id=%r",
+            agent_repository_id,
+            bundle_name,
+            record.get("publisher_tenant_id"),
+            tenant_id,
+        )
+        results = await install_official_agents(
+            [bundle_name],
+            tenant_id=tenant_id,
+            user_id=user_id or "repository-import",
+            authorization=authorization,
+            model_ids=model_ids,
+            embedding_model_ids=embedding_model_ids,
+            skill_resolutions=skill_resolutions,
+            knowledge_base_resolutions=knowledge_base_resolutions,
+        )
+        item = results[0] if results else None
+        if item is None:
+            raise ValueError("Official agent installation returned no result")
+        if item.status == "needs_model":
+            raise ValueError(item.message or "Official agent requires model configuration")
+        if item.status == "failed":
+            raise ValueError(item.message or "Official agent installation failed")
+        if item.status == "not_found":
+            raise ValueError(item.message or "Official agent bundle not found")
+
+        affected = increment_agent_repository_downloads(agent_repository_id)
+        if affected == 0:
+            logger.warning(
+                "Failed to increment repository downloads after official import "
+                "(agent_repository_id=%s)",
+                agent_repository_id,
+            )
+        if return_root_id:
+            return {"agent_id": item.agent_id} if item.agent_id else {}
+        return {record.get("agent_id"): item.agent_id} if item.agent_id else {}
 
     agent_info_json = record.get("agent_info_json")
     if not isinstance(agent_info_json, dict):
@@ -1066,9 +1473,14 @@ async def import_agent_from_repository_impl(
             snapshot.skills,
             authorization,
             skill_resolutions=skill_resolutions,
+            resolve_name_conflicts=True,
         )
     else:
-        result = await import_agent_impl(snapshot, authorization)
+        result = await import_agent_impl(
+            snapshot,
+            authorization,
+            resolve_name_conflicts=True,
+        )
 
     affected = increment_agent_repository_downloads(agent_repository_id)
     if affected == 0:
@@ -1077,4 +1489,74 @@ async def import_agent_from_repository_impl(
             "(agent_repository_id=%s)",
             agent_repository_id,
         )
+    if return_root_id:
+        return {"agent_id": result[snapshot.agent_id]}
     return result
+
+
+def list_official_agent_management_impl() -> List[Dict[str, Any]]:
+    """Return active official listings for super-admin management."""
+    records = list_agent_repository_summaries(
+        publisher_tenant_id=SYSTEM_TENANT_ID,
+        status=STATUS_SHARED,
+    )
+    return [
+        {
+            **record,
+            "publisher_tenant_id": SYSTEM_TENANT_ID,
+        }
+        for record in records
+    ]
+
+
+def delete_official_agent_impl(agent_repository_id: int, user_id: str) -> Dict[str, Any]:
+    """Delete an official template and source bundle, preserving tenant copies."""
+    import os
+    import shutil
+    from consts.const import OFFICIAL_AGENTS_PATH
+
+    record = get_agent_repository_by_id(agent_repository_id, SYSTEM_TENANT_ID)
+    if not record:
+        raise ValueError("Official agent repository listing not found")
+    bundle_name = str(record.get("name") or "").strip()
+    if not bundle_name or bundle_name in {".", ".."} or "/" in bundle_name or "\\" in bundle_name:
+        raise ValueError("Official agent bundle name is invalid")
+    root = os.path.realpath(OFFICIAL_AGENTS_PATH)
+    candidates: list[str] = []
+    direct_dir = os.path.join(root, bundle_name)
+    if os.path.isdir(direct_dir):
+        candidates.append(direct_dir)
+    for current_root, directories, files in os.walk(root):
+        directories[:] = [item for item in directories if not item.startswith(".")]
+        if os.path.basename(current_root) == bundle_name and "agent.json" in files:
+            candidates.append(current_root)
+        for filename in files:
+            if filename in {f"{bundle_name}.json", f"{bundle_name}.zip"}:
+                candidates.append(os.path.join(current_root, filename))
+    deleted_paths: list[str] = []
+    for candidate in dict.fromkeys(candidates):
+        resolved = os.path.realpath(candidate)
+        if resolved == root or not resolved.startswith(root + os.sep):
+            raise ValueError("Official agent bundle path escapes configured root")
+        if os.path.isdir(resolved):
+            shutil.rmtree(resolved)
+        elif os.path.isfile(resolved):
+            os.remove(resolved)
+        deleted_paths.append(candidate)
+    snapshot = record.get("agent_info_json") or {}
+    for source_id in (snapshot.get("agent_info") or {}).keys():
+        if str(source_id).isdigit():
+            delete_agent_by_id(int(source_id), SYSTEM_TENANT_ID, user_id)
+    affected = soft_delete_agent_repository_record(
+        agent_repository_id,
+        publisher_tenant_id=SYSTEM_TENANT_ID,
+        user_id=user_id,
+    )
+    if affected == 0:
+        raise ValueError("Official agent repository listing was already deleted")
+    return {
+        "agent_repository_id": agent_repository_id,
+        "name": bundle_name,
+        "deleted_bundle_paths": deleted_paths,
+        "preserved_tenant_copies": True,
+    }

@@ -49,7 +49,7 @@ redis_service_module = types.ModuleType("services.redis_service")
 redis_service_module.get_redis_service = MagicMock()
 sys.modules["services.redis_service"] = redis_service_module
 
-vectordb_service_module = types.ModuleType("services.vectordatabase_service")
+vectordb_service_module = types.ModuleType("management.services.knowledge_base.service")
 
 
 class KnowledgeBaseNeedsModelConfigError(Exception):
@@ -108,7 +108,7 @@ vectordb_service_module.KnowledgeBaseNeedsModelConfigError = (
     KnowledgeBaseNeedsModelConfigError
 )
 vectordb_service_module.get_vector_db_core = MagicMock()
-sys.modules["services.vectordatabase_service"] = vectordb_service_module
+sys.modules["management.services.knowledge_base.service"] = vectordb_service_module
 
 database_pkg = types.ModuleType("database")
 database_pkg.__path__ = [os.path.join(backend_dir, "database")]
@@ -125,8 +125,28 @@ consts_module.__path__ = [os.path.join(backend_dir, "consts")]
 sys.modules["consts"] = consts_module
 
 consts_exceptions_module = types.ModuleType("consts.exceptions")
+class AppException(Exception):
+    def __init__(self, error_code, message=None, details=None):
+        self.error_code = error_code
+        self.message = message or str(error_code)
+        self.details = details or {}
+        super().__init__(self.message)
+
+    @property
+    def http_status(self):
+        return 500
+
+    def to_dict(self):
+        return {
+            "code": str(getattr(self.error_code, "value", self.error_code)),
+            "message": self.message,
+            "details": self.details or None,
+        }
+
+
 consts_exceptions_module.LimitExceededError = type("LimitExceededError", (Exception,), {})
 consts_exceptions_module.UnauthorizedError = type("UnauthorizedError", (Exception,), {})
+consts_exceptions_module.AppException = AppException
 sys.modules["consts.exceptions"] = consts_exceptions_module
 
 from pydantic import BaseModel, Field  # noqa: E402
@@ -179,7 +199,7 @@ sys.modules["apps.file_management_app"] = file_management_app_module
 
 from apps.northbound_knowledge_app import router  # noqa: E402
 from consts.const import ASSET_OWNER_TENANT_ID  # noqa: E402
-from consts.exceptions import LimitExceededError, UnauthorizedError  # noqa: E402
+from consts.exceptions import AppException, LimitExceededError, UnauthorizedError  # noqa: E402
 
 ASSET_CTX = NorthboundContext(
     request_id="req-1",
@@ -246,6 +266,33 @@ class TestGetListIndices:
         assert "Error listing knowledge bases" in response.json()["detail"]
 
 
+class TestCreateIndex:
+    @pytest.mark.asyncio
+    async def test_app_exception_is_propagated(self, mock_northbound_context):
+        """Structured knowledge-limit errors must not be converted to generic errors."""
+        from apps.northbound_knowledge_app import create_new_index
+
+        mock_northbound_context.return_value = ASSET_CTX
+        app_exception = AppException("knowledge base limit reached")
+        with patch(
+            "apps.northbound_knowledge_app._require_asset_owner_context",
+            new_callable=AsyncMock,
+            return_value=ASSET_CTX,
+        ), patch(
+            "apps.northbound_knowledge_app.ElasticSearchService.create_knowledge_base",
+            side_effect=app_exception,
+        ):
+            with pytest.raises(AppException) as exc_info:
+                await create_new_index(
+                    request=MagicMock(),
+                    index_name="kb1",
+                    embedding_dim=768,
+                    body={"embedding_model_id": 1},
+                )
+
+        assert exc_info.value is app_exception
+
+
 class TestUploadFiles:
     def test_missing_file_field_returns_client_error(self, client, mock_northbound_context):
         mock_northbound_context.return_value = ASSET_CTX
@@ -271,6 +318,30 @@ class TestUploadFiles:
             with pytest.raises(HTTPException) as exc_info:
                 await upload_files(request=request, file=[], index_name="kb1")
         assert exc_info.value.status_code == 400
+
+    @pytest.mark.asyncio
+    async def test_app_exception_is_propagated(self, mock_northbound_context):
+        """Structured upload errors must reach the global AppException handler unchanged."""
+        from apps.northbound_knowledge_app import upload_files
+
+        mock_northbound_context.return_value = ASSET_CTX
+        app_exception = AppException("knowledge file limit reached")
+        request = MagicMock()
+        upload = MagicMock()
+
+        with patch(
+            "apps.northbound_knowledge_app._require_asset_owner_context",
+            new_callable=AsyncMock,
+            return_value=ASSET_CTX,
+        ):
+            file_mgmt_module.upload_files_impl.side_effect = app_exception
+            try:
+                with pytest.raises(AppException) as exc_info:
+                    await upload_files(request=request, file=[upload], index_name="kb1")
+            finally:
+                file_mgmt_module.upload_files_impl.side_effect = None
+
+        assert exc_info.value is app_exception
 
     def test_no_valid_uploads_returns_400(self, client, mock_northbound_context):
         mock_northbound_context.return_value = ASSET_CTX
@@ -597,6 +668,23 @@ class TestIndexManagement:
         assert response.json() == {"status": "success"}
         mock_delete.assert_awaited_once()
 
+    def test_delete_index_preserves_app_exception(self, client, mock_northbound_context):
+        """EDS deletion errors keep their structured code and details."""
+        mock_northbound_context.return_value = ASSET_CTX
+        expected = AppException(
+            "KNOWLEDGE_DELETE_BLOCKED",
+            details={"index_name": "kb1", "blocking_files": []},
+        )
+        with patch(
+            "apps.northbound_knowledge_app.ElasticSearchService.full_delete_knowledge_base",
+            new_callable=AsyncMock,
+            side_effect=expected,
+        ):
+            with pytest.raises(AppException) as exc_info:
+                client.delete("/nb/v1/knowledge/indices/kb1")
+
+        assert exc_info.value is expected
+
     @pytest.mark.parametrize(
         ("exception", "status_code"),
         [
@@ -634,6 +722,7 @@ class TestIndexManagement:
 class TestUploadAndDownload:
     def test_upload_success_returns_created_payload(self, client, mock_northbound_context):
         mock_northbound_context.return_value = ASSET_CTX
+        file_mgmt_module.upload_files_impl.reset_mock()
         file_mgmt_module.upload_files_impl.return_value = (
             [], ["docs/guide.txt"], ["guide.txt"]
         )
@@ -647,6 +736,9 @@ class TestUploadAndDownload:
 
         assert response.status_code == 201
         assert response.json()["process_tasks"] == {"status": "queued"}
+        assert file_mgmt_module.upload_files_impl.await_args.kwargs[
+            "upload_owner_service"
+        ] == "nexent-northbound"
 
     def test_upload_processing_error_returns_detail(self, client, mock_northbound_context):
         mock_northbound_context.return_value = ASSET_CTX

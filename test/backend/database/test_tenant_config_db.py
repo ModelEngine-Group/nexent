@@ -122,7 +122,8 @@ from backend.database.tenant_config_db import (
     delete_config,
     update_config_by_tenant_config_id,
     update_config_by_tenant_config_id_and_data,
-    get_all_tenant_ids
+    get_all_tenant_ids,
+    create_tenant_with_default_group,
 )
 
 
@@ -646,3 +647,26 @@ def test_tenant_limit_boundaries(monkeypatch, mock_session, current_count, shoul
             module.insert_config({"tenant_id": "tenant-101", "config_key": "TENANT_ID"})
     else:
         assert module.insert_config({"tenant_id": "tenant-1", "config_key": "TENANT_ID"}) is True
+
+
+def test_create_tenant_with_default_group_rejects_platform_tenant_limit(monkeypatch, mock_session):
+    """Atomic tenant creation rejects the platform cap before adding records."""
+    import backend.database.tenant_config_db as module
+
+    class ResourceLimitError(Exception):
+        pass
+
+    session, query = mock_session
+    query.filter.return_value.distinct.return_value.count.return_value = 1
+    mock_ctx = MagicMock()
+    mock_ctx.__enter__.return_value = session
+    mock_ctx.__exit__.return_value = None
+    monkeypatch.setattr(module, "get_db_session", lambda: mock_ctx)
+    monkeypatch.setattr(module, "TenantResourceLimitError", ResourceLimitError)
+    monkeypatch.setattr(module, "TENANT_ID", "TENANT_ID")
+    monkeypatch.setattr(module, "MAX_TENANT_COUNT", 1)
+
+    with pytest.raises(ResourceLimitError, match="Tenant limit"):
+        create_tenant_with_default_group("tenant-101", "Tenant 101", "admin-1")
+
+    session.add.assert_not_called()

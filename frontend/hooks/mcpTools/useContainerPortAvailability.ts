@@ -31,7 +31,7 @@ export function useContainerPortAvailability({
   const [portCheckLoading, setPortCheckLoading] = useState(false);
   const [portAvailable, setPortAvailable] = useState<boolean | null>(null);
   const [suggesting, setSuggesting] = useState(false);
-  const timerRef = useRef<ReturnType<typeof setTimeout>>();
+  const timerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 
   // Check port
   const checkPort = useCallback(async (port: number) => {

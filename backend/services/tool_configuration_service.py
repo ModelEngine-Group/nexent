@@ -1,3 +1,5 @@
+import asyncio
+from contextlib import AsyncExitStack
 import importlib
 import inspect
 import json
@@ -19,7 +21,11 @@ from consts.const import (
     DATA_PROCESS_SERVICE,
     LOCAL_MCP_SERVER,
     MCP_MANAGEMENT_API,
+    MCP_REQUEST_TIMEOUT_SECONDS,
+    RUNTIME_MCP_TOOL_TIMEOUT_SECONDS,
+    TOKEN,
 )
+from utils.mcp_url_utils import get_tenant_local_mcp_server
 from consts.error_message import ErrorMessage
 from consts.exceptions import MCPConnectionError, NotFoundException, ToolExecutionException, ValidationError
 from consts.model import ToolInstanceInfoRequest, ToolInfo, ToolSourceEnum, ToolValidateRequest
@@ -58,18 +64,35 @@ from .agent_draft_permission_service import (
     ResourceBindingError,
     require_agent_draft_edit,
 )
-from services.vectordatabase_service import get_embedding_model_by_index_name, get_rerank_model
+from management.services.knowledge_base.service import get_embedding_model_by_index_name
+from management.services.model.resolver import get_rerank_model
 from utils.http_client_utils import create_httpx_client
 from database.client import minio_client
-from services.model_gateway_service import get_llm_adapter, get_vlm_adapter
+from management.services.model.adapter import get_llm_adapter, get_vlm_adapter
 from nexent.monitor import set_monitoring_context, set_monitoring_operation
-from services.vectordatabase_service import get_vector_db_core
+from nexent.core.concurrency import run_blocking
+from management.services.knowledge_base.service import get_vector_db_core
 from utils.langchain_utils import discover_langchain_modules
 from utils.tool_utils import get_local_tools_classes, get_local_tools_description_zh
 
 logger = logging.getLogger("tool_configuration_service")
 
 TOOL_PARAM_CONSTRAINT_ERROR_MESSAGES = ErrorMessage.get_param_constraint_messages()
+
+_ALWAYS_HIDDEN_KNOWLEDGE_TOOLS = frozenset({
+    "knowledge_base_search",
+    "aidp_search",
+})
+
+
+def _get_user_selectability(
+    tool_name: str,
+    default: bool,
+) -> bool:
+    """Keep managed knowledge tools hidden from manual selection."""
+    if tool_name in _ALWAYS_HIDDEN_KNOWLEDGE_TOOLS:
+        return False
+    return default
 
 
 def _parse_kds_list(value: Any) -> list[str]:
@@ -283,7 +306,10 @@ def get_local_tools() -> List[ToolInfo]:
             output_type=getattr(tool_class, 'output_type'),
             category=getattr(tool_class, 'category'),
             labels=getattr(tool_class, 'labels', None),
-            is_user_selectable=getattr(tool_class, 'is_user_selectable', True),
+            is_user_selectable=_get_user_selectability(
+                getattr(tool_class, 'name'),
+                getattr(tool_class, 'is_user_selectable', True),
+            ),
             class_name=tool_class.__name__,
             usage=None,
             origin_name=getattr(tool_class, 'name')
@@ -382,11 +408,11 @@ async def get_all_mcp_tools(tenant_id: str) -> List[ToolInfo]:
             except Exception as e:
                 logger.error(f"mcp connection error: {str(e)}")
 
-    default_mcp_url = urljoin(LOCAL_MCP_SERVER, "sse")
+    default_mcp_url = get_tenant_local_mcp_server(tenant_id)
     tools_info.extend(await get_tool_from_remote_mcp_server(
         mcp_server_name="outer-apis",
         remote_mcp_server=default_mcp_url,
-        tenant_id=None
+        tenant_id=tenant_id
     ))
     return tools_info
 
@@ -675,13 +701,23 @@ async def get_tool_from_remote_mcp_server(
             mcp_server=remote_mcp_server,
             tenant_id=tenant_id
         )
+    if tenant_id and "/mcp/" in remote_mcp_server:
+        custom_headers = {
+            **(custom_headers or {}),
+            "X-Tenant-ID": str(tenant_id),
+            "X-Nexent-Internal-Token": TOKEN,
+        }
 
     tools_info = []
 
     try:
         transport = _create_mcp_transport(remote_mcp_server, authorization_token, custom_headers)
-        client = Client(transport=transport, timeout=10)
-        async with client:
+        client = Client(transport=transport, timeout=RUNTIME_MCP_TOOL_TIMEOUT_SECONDS)
+        async with AsyncExitStack() as stack:
+            await asyncio.wait_for(
+                stack.enter_async_context(client),
+                timeout=MCP_REQUEST_TIMEOUT_SECONDS,
+            )
             # List available operations
             tools = await client.list_tools()
 
@@ -780,6 +816,15 @@ async def update_tool_list(tenant_id: str, user_id: str):
         for record in get_mcp_records_by_tenant(tenant_id=tenant_id)
         if bool(record.get("enabled"))
     }
+    # API-converted services are persisted separately from regular MCP records,
+    # but their scanned tools use the shared ``outer-apis`` usage value. Keep
+    # those tools available during a transient MCP scan failure as long as at
+    # least one API service still exists for the tenant.
+    try:
+        if query_openapi_services_by_tenant(tenant_id):
+            enabled_mcp_names.add("outer-apis")
+    except Exception as exc:
+        logger.warning("Failed to check API-converted services for tenant %s: %s", tenant_id, exc)
 
     update_tool_table_from_scan_tool_list(tenant_id=tenant_id,
                                           user_id=user_id,
@@ -872,7 +917,10 @@ async def list_all_tools(tenant_id: str, labels: Optional[List[str]] = None):
             "inputs": inputs_str,
             "category": tool.get("category"),
             "labels": tool.get("labels", []),
-            "is_user_selectable": tool.get("is_user_selectable", True),
+            "is_user_selectable": _get_user_selectability(
+                tool_name,
+                tool.get("is_user_selectable", True),
+            ),
             "updated_by": tool.get("updated_by", ""),
             "updated_by_name": updated_by_email_map.get(tool.get("updated_by"), ""),
         }
@@ -916,24 +964,34 @@ async def _call_mcp_tool(
         MCPConnectionError: If MCP connection fails
     """
     transport = _create_mcp_transport(mcp_url, authorization_token, custom_headers)
-    client = Client(transport=transport)
-    async with client:
+    client = Client(transport=transport, timeout=RUNTIME_MCP_TOOL_TIMEOUT_SECONDS)
+    async with AsyncExitStack() as stack:
+        await asyncio.wait_for(
+            stack.enter_async_context(client),
+            timeout=MCP_REQUEST_TIMEOUT_SECONDS,
+        )
         # Check if connected
         if not client.is_connected():
             logger.error("Failed to connect to MCP server")
             raise MCPConnectionError("Failed to connect to MCP server")
 
         # Call the tool
-        result = await client.call_tool(
-            name=tool_name,
-            arguments=inputs
-        )
+        try:
+            result = await asyncio.wait_for(
+                client.call_tool(name=tool_name, arguments=inputs),
+                timeout=RUNTIME_MCP_TOOL_TIMEOUT_SECONDS,
+            )
+        except asyncio.TimeoutError as exc:
+            raise MCPConnectionError(
+                f"MCP tool execution timed out after {RUNTIME_MCP_TOOL_TIMEOUT_SECONDS:g} seconds"
+            ) from exc
         return result.content[0].text
 
 
 async def _validate_mcp_tool_nexent(
     tool_name: str,
-    inputs: Optional[Dict[str, Any]]
+    inputs: Optional[Dict[str, Any]],
+    tenant_id: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
     Validate MCP tool using local nexent server.
@@ -948,7 +1006,21 @@ async def _validate_mcp_tool_nexent(
     Raises:
         MCPConnectionError: If MCP connection fails
     """
-    actual_mcp_url = urljoin(LOCAL_MCP_SERVER, "sse")
+    actual_mcp_url = (
+        get_tenant_local_mcp_server(tenant_id)
+        if tenant_id
+        else urljoin(LOCAL_MCP_SERVER, "sse")
+    )
+    if tenant_id:
+        return await _call_mcp_tool(
+            actual_mcp_url,
+            tool_name,
+            inputs,
+            custom_headers={
+                "X-Tenant-ID": str(tenant_id),
+                "X-Nexent-Internal-Token": TOKEN,
+            },
+        )
     return await _call_mcp_tool(actual_mcp_url, tool_name, inputs)
 
 
@@ -1337,11 +1409,15 @@ async def validate_tool_impl(
             request.name, request.inputs, request.source, request.usage, request.params)
         if source == ToolSourceEnum.MCP.value:
             if usage == "outer-apis":
-                return await _validate_mcp_tool_nexent(tool_name, inputs)
+                return await _validate_mcp_tool_nexent(tool_name, inputs, tenant_id)
             else:
                 return await _validate_mcp_tool_remote(tool_name, inputs, usage, tenant_id)
         elif source == ToolSourceEnum.LOCAL.value:
-            return _validate_local_tool(tool_name, inputs, params, tenant_id, user_id)
+            return await run_blocking(
+                "validate-local-tool", _validate_local_tool,
+                tool_name, inputs, params, tenant_id, user_id,
+                lane="model-tool-io", owner="services.tool_configuration_service",
+            )
         elif source == ToolSourceEnum.LANGCHAIN.value:
             return _validate_langchain_tool(tool_name, inputs)
         else:

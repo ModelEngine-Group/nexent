@@ -37,6 +37,16 @@ model_management_db_mock.get_model_by_model_id = MagicMock()
 
 # Mock the nexent modules
 datamate_core_mock = MagicMock()
+concurrency_mock = MagicMock()
+
+
+async def _run_blocking(_task_name, fn, *args, **kwargs):
+    kwargs.pop("lane", None)
+    kwargs.pop("owner", None)
+    return fn(*args, **kwargs)
+
+
+concurrency_mock.run_blocking = _run_blocking
 
 # Mock consts
 consts_mock = MagicMock()
@@ -63,6 +73,7 @@ sys.modules['database.db_models'] = database_models_mock
 sys.modules['database.tenant_config_db'] = tenant_config_db_mock
 sys.modules['database.model_management_db'] = model_management_db_mock
 sys.modules['nexent.vector_database.datamate_core'] = datamate_core_mock
+sys.modules['nexent.core.concurrency'] = concurrency_mock
 sys.modules['consts.const'] = consts_mock
 sys.modules['consts.exceptions'] = consts_exceptions_mock
 sys.modules['sqlalchemy'] = sqlalchemy_mock
@@ -549,6 +560,12 @@ async def test_sync_datamate_knowledge_bases_error_handling(monkeypatch):
     monkeypatch.setattr(
         "backend.services.datamate_service._get_datamate_core",
         MagicMock(side_effect=Exception("API connection failed"))
+    )
+    mock_config_manager = MagicMock()
+    mock_config_manager.get_app_config.return_value = "http://datamate.example.com"
+    monkeypatch.setattr(
+        "backend.services.datamate_service.tenant_config_manager",
+        mock_config_manager,
     )
 
     result = await sync_datamate_knowledge_bases_and_create_records("tenant1", "user1")

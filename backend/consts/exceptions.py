@@ -238,14 +238,81 @@ class RuntimeMetadataVersionConflict(ValueError):
         super().__init__("Runtime metadata version conflict")
 
 
+class WorkbenchError(ValidationError, ValueError):
+    """Safe Workbench boundary error without resource contents or credentials."""
+
+    def __init__(self, code: str, status_code: int = 422):
+        self.code = code
+        self.status_code = status_code
+        super().__init__(code)
+
+
+class WorkbenchConfigVersionConflict(ValueError):
+    """Raised when a Workbench optimistic-lock check fails."""
+
+    def __init__(self, current_version: int, current_config: Optional[dict] = None):
+        self.current_version = current_version
+        self.current_config = current_config
+        super().__init__("Workbench configuration version conflict")
+
+
 class TenantResourceLimitError(ValidationError, ValueError):
     """Raised when a platform or tenant hard resource limit is reached."""
 
-    pass
+    code = ErrorCode.TENANT_RESOURCE_EXCEEDED.value
+    def __init__(
+        self,
+        message: str,
+        *,
+        resource: str | None = None,
+        scope: str | None = None,
+        limit: int | None = None,
+        current_count: int | None = None,
+    ):
+        self.resource = resource
+        self.scope = scope
+        self.limit = limit
+        self.current_count = current_count
+        self.details = self.to_detail()
+        super().__init__(message)
+
+    def to_detail(self) -> dict:
+        """Return structured quota details for the standard API error contract."""
+        return {
+            key: value
+            for key, value in {
+                "resource": self.resource,
+                "scope": self.scope,
+                "limit": self.limit,
+                "current_count": self.current_count,
+            }.items()
+            if value is not None
+        }
+
+
+def tenant_resource_limit_error_payload(error: TenantResourceLimitError) -> dict:
+    """Build the standard API error payload for a tenant resource limit."""
+    return {
+        "code": ErrorCode.TENANT_RESOURCE_EXCEEDED.value,
+        "message": str(error),
+        "details": error.to_detail(),
+    }
 
 
 class NotFoundException(Exception):
     """Raised when not found exception occurs."""
+
+    pass
+
+
+class AgentRelationValidationError(ValueError):
+    """Raised when submitted Agent relationships violate the graph contract."""
+
+    pass
+
+
+class AgentNotFoundError(NotFoundException, ValueError):
+    """Raised when an Agent is absent from the caller's visible query scope."""
 
     pass
 
@@ -321,6 +388,40 @@ class SkillException(Exception):
     pass
 
 
+class WorkbenchAgentError(Exception):
+    """Stable domain error raised by the system Agent provider."""
+
+    def __init__(
+        self,
+        code: str,
+        *,
+        retryable: bool = False,
+        message: Optional[str] = None,
+    ):
+        super().__init__(message or code)
+        self.code = code
+        self.message_key = code
+        self.retryable = retryable
+        self.resource_type = "agent"
+
+
+class RuntimeSubAgentError(ValueError):
+    """Stable validation and authorization error for runtime adapters."""
+
+    def __init__(
+        self,
+        code: str,
+        *,
+        retryable: bool = False,
+        message: Optional[str] = None,
+    ):
+        super().__init__(message or code)
+        self.code = code
+        self.message_key = code
+        self.retryable = retryable
+        self.resource_type = "runtime_sub_agent"
+
+
 class QuotaExceededError(Exception):
     """Raised when tenant storage hard limit is exceeded during file upload."""
 
@@ -338,6 +439,20 @@ class PlatformQuotaConflictError(Exception):
         super().__init__(message)
         self.error = error
         self.details = details
+
+
+class TagManagementConflictError(Exception):
+    """Raised when tag management would violate an active binding or capacity rule."""
+
+    def __init__(self, message: str, details: dict | None = None):
+        super().__init__(message)
+        self.details = details or {}
+
+
+class TagManagementNotFoundError(NotFoundException):
+    """Raised for absent or cross-tenant tag-management identifiers."""
+
+    pass
 
 
 class OAuthProviderError(Exception):
@@ -381,7 +496,6 @@ InvalidCredentialsError = UnauthorizedError
 TenantNotFoundError = NotFoundException
 TenantDisabledError = Exception  # Generic fallback
 
-AgentNotFoundError = NotFoundException
 AgentDisabledError = Exception  # Generic fallback
 
 ToolNotFoundError = NotFoundException
@@ -409,3 +523,27 @@ OAuthAccountNotFoundError = NotFoundException
 
 # Signature aliases
 # SignatureValidationError already defined above
+
+
+class ModelProviderError(Exception):
+    """A classified provider discovery failure with its upstream status."""
+
+    def __init__(self, upstream_status: int, message: str):
+        self.upstream_status = upstream_status
+        self.message = message
+        super().__init__(f"{upstream_status}: {message}")
+
+
+class RuntimeCapacityExceededError(RuntimeError):
+    """Raised when Runtime agent worker and queue capacity is full."""
+
+    retry_after_seconds = 1
+
+
+class RuntimeQueueTimeoutError(RuntimeError):
+    """Raised when an accepted Runtime agent request expires in the queue."""
+
+    def __init__(self, timeout_seconds: float):
+        self.timeout_seconds = timeout_seconds
+        self.retry_after_seconds = max(1, int(timeout_seconds + 0.999))
+        super().__init__("Agent runtime queue wait timed out")

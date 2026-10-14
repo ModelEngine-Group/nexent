@@ -264,7 +264,7 @@ PYTHONPATH=sdk/benchmark/tools backend/.venv/bin/python -m ctx_debugger.langfuse
 | `compressed_pairs=0` (trace shows compression not triggered) | Ingest cumulative tokens didn't exceed `--token_threshold`. Increase `--max_ingest_chars`, reduce `--token_threshold`, or reduce `--chunk_chars`. |
 | Langfuse import blank | `--dry-run` check if trace non-empty; confirm `LANGFUSE_HOST`/keys correct; `curl -s http://localhost:3100/api/public/health` check service. |
 | `data file not found` | First run `python download_data.py`. |
-| Large amount of `no_answer` (baseline ≥50%) | Most likely model thinking mode eating up `max_tokens`, `content`来不及生成完整 `final_answer(...)` code block. See §8. |
+| Large amount of `no_answer` (baseline ≥50%) | Most likely model thinking mode eating up `max_tokens`, `content`来不及生成完整 `<final_answer>...</final_answer>`。See §8. |
 
 ---
 
@@ -368,7 +368,7 @@ Note tmux only prevents SSH disconnect; LLM endpoint jitter/timeout still causes
 Qwen3 (`qwen36` etc.) has "thinking" mode: model first in `reasoning_content` channel reasons, then produces final answer in `content`. `nexent`'s `OpenAIModel` already captures both channels separately (`openai_llm.py:148-154`), so `content` **won't** have `<tool_call>` etc. pollution.
 
 **But** thinking still impacts EventQA:
-- thinking喷的 token counts toward `max_tokens` budget, **`content` may run out of budget before producing complete `final_answer(...)` code block** → smolagents parse failure → `no_answer`
+- thinking喷的 token counts toward `max_tokens` budget, **`content` may run out of budget before producing complete `<final_answer>...</final_answer>`** → protocol parse failure → `no_answer`
 - Large context (baseline feeds ~186k tokens) thinking喷得更长更乱, compared to compressed (~70k) more easily exhausts budget
 - Measured one run (qwen36 / entire book 0 / narrative / token_threshold=200000):
   - baseline `no_answer` rate **66%** (29/44)

@@ -6,12 +6,12 @@ This service layer uses the DataMate SDK client to interact with DataMate APIs.
 """
 import logging
 from typing import Dict, List, Any, Optional
-import asyncio
 
 from consts.const import DATAMATE_URL
 from utils.config_utils import tenant_config_manager
 from database.knowledge_db import upsert_knowledge_record, get_knowledge_info_by_tenant_and_source, delete_knowledge_record
 from nexent.vector_database.datamate_core import DataMateCore
+from nexent.core.concurrency import run_blocking
 from consts.const import MODEL_ENGINE_ENABLED
 
 
@@ -54,12 +54,12 @@ async def _create_datamate_knowledge_records(knowledge_base_ids: List[str],
                 "embedding_model_name": embedding_model_names[i],
             }
 
-            # Run synchronous database operation in executor to avoid blocking
-            loop = asyncio.get_event_loop()
-            created_record = await loop.run_in_executor(
-                None,
+            created_record = await run_blocking(
+                "datamate-upsert-knowledge",
                 upsert_knowledge_record,
-                record_data
+                record_data,
+                lane="control-io",
+                owner="config",
             )
 
             created_records.append(created_record)
@@ -110,12 +110,12 @@ async def fetch_datamate_knowledge_base_file_list(knowledge_base_id: str, tenant
     """
     try:
         core = _get_datamate_core(tenant_id)
-        # Run synchronous SDK call in executor to avoid blocking
-        loop = asyncio.get_event_loop()
-        files = await loop.run_in_executor(
-            None,
+        files = await run_blocking(
+            "datamate-list-files",
             core.get_documents_detail,
-            knowledge_base_id
+            knowledge_base_id,
+            lane="control-io",
+            owner="config",
         )
 
         # Transform to match vectordatabase files endpoint format
@@ -166,13 +166,12 @@ async def sync_datamate_knowledge_bases_and_create_records(
     try:
         core = _get_datamate_core(tenant_id, effective_datamate_url)
 
-        # Run synchronous SDK calls in executor to avoid blocking event loop
-        loop = asyncio.get_event_loop()
-
         # Step 1: Get knowledge base ids
-        knowledge_base_ids = await loop.run_in_executor(
-            None,
-            core.get_user_indices
+        knowledge_base_ids = await run_blocking(
+            "datamate-list-indices",
+            core.get_user_indices,
+            lane="control-io",
+            owner="config",
         )
 
         if not knowledge_base_ids:
@@ -182,9 +181,12 @@ async def sync_datamate_knowledge_bases_and_create_records(
             }
 
         # Step 2: Get detailed information for all knowledge bases
-        details, knowledge_base_names = await loop.run_in_executor(
-            None,
-            lambda: core.get_indices_detail(knowledge_base_ids)
+        details, knowledge_base_names = await run_blocking(
+            "datamate-index-details",
+            core.get_indices_detail,
+            knowledge_base_ids,
+            lane="control-io",
+            owner="config",
         )
 
         response = {
@@ -216,12 +218,13 @@ async def sync_datamate_knowledge_bases_and_create_records(
 
         # Step 3: Handle deleted knowledge bases (soft delete)
         # Get all existing DataMate records for this tenant
-        loop = asyncio.get_event_loop()
-        existing_records = await loop.run_in_executor(
-            None,
+        existing_records = await run_blocking(
+            "datamate-existing-records",
             get_knowledge_info_by_tenant_and_source,
             tenant_id,
-            "datamate"
+            "datamate",
+            lane="control-io",
+            owner="config",
         )
 
         # Find records that exist in DB but not in API response
@@ -235,10 +238,12 @@ async def sync_datamate_knowledge_bases_and_create_records(
         # Soft delete records that are no longer in DataMate
         for index_name in records_to_delete:
             try:
-                delete_result = await loop.run_in_executor(
-                    None,
+                delete_result = await run_blocking(
+                    "datamate-delete-record",
                     delete_knowledge_record,
-                    {"index_name": index_name, "user_id": user_id}
+                    {"index_name": index_name, "user_id": user_id},
+                    lane="control-io",
+                    owner="config",
                 )
                 if delete_result:
                     logger.info(
@@ -298,13 +303,12 @@ async def check_datamate_connection(
     try:
         core = _get_datamate_core(tenant_id, effective_datamate_url)
 
-        # Run synchronous SDK call in executor to avoid blocking event loop
-        loop = asyncio.get_event_loop()
-
         # Test connection by fetching user indices
-        await loop.run_in_executor(
-            None,
-            core.get_user_indices
+        await run_blocking(
+            "datamate-connection-check",
+            core.get_user_indices,
+            lane="control-io",
+            owner="config",
         )
 
         logger.info(

@@ -1,0 +1,66 @@
+schema_version: '1.0'
+stage: D1
+module: V5-BASELINE
+case:
+  case_id: UT-BE-AUTO-3BBF7896AFA3ABF2
+  feature_id: F-069
+  business_rule_ids:
+  - F-069-RULE-01
+  title: 列表/Mine/详情 downloads 为同 agent_id 跨多条 repository 行下载总量求和｜核心流程
+  type: BE-UT
+  priority: P1
+  status: active
+  automation: automated
+  objective: 列表/Mine/详情 downloads 为同 agent_id 跨多条 repository 行下载总量求和｜核心流程
+  preconditions:
+  - 本地依赖/组件测试环境可运行；不要求外部模型服务在线。
+  - 设置 NEXENT_TEST_HOME，目录不位于 Nexent Git 仓库内。
+  - 当次 run_id 已生成，所有新建资源名称带 run_id；测试基线固定为 develop 当前批次锁定的产品提交；执行时另记录实际被测commit。
+  - 被测功能为纯查询聚合，DB 层函数经 monkeypatch 固定，无需真实外部服务或模型。
+  test_data:
+    legacy_asset_declaration: '- 本地组件测试依赖与固定 repository 行 fixture；DB 层经 monkeypatch 固定，无外部资产。'
+  steps:
+  - order: 1
+    action: 在本地工作区导入 backend/services/agent_repository_service.py 的 _get_agent_download_totals、_to_summary_item、list_agent_repository_listings_impl、list_my_editable_agents_impl、get_agent_repository_listing_detail_impl，以及
+      backend/apps/agent_repository_app.py 对应 API 路由函数。
+    expected: 列表/Mine/详情三处 downloads 均等于同 agent_id 跨全部 repository 行的 downloads 求和值（此处为 8），而非任一单行值 3 或 5。
+  - order: 2
+    action: 用 monkeypatch 固定 sum_agent_repository_downloads_by_agent_ids，对 agent_id=101 返回多行求和结果（如两行 downloads 3 与 5，求和为 8）；固定
+      list_agent_repository_summaries / get_agent_repository_by_id 返回含该 agent_id 的记录行。
+    expected: agent_id 无 repository 行时 downloads 为 0，不返回 None。
+  - order: 3
+    action: 调用 list_agent_repository_listings_impl，记录返回 items 中该 agent_id 的 downloads。
+    expected: 单行场景 downloads 等于该行自身值，且不跨 agent_id 混算。
+  - order: 4
+    action: 调用 list_my_editable_agents_impl（分页结果包含该 agent_id），记录对应 item 的 downloads。
+    expected: 测试过程无未处理异常，日志、Trace 中不出现明文密钥。
+  - order: 5
+    action: 调用 get_agent_repository_listing_detail_impl，记录返回详情中的 downloads。
+    expected: 测试过程无未处理异常，日志、Trace 中不出现明文密钥。
+  - order: 6
+    action: 边界：agent_id 无任何 repository 行时调用聚合，记录返回的 downloads 缺省值。
+    expected: 测试过程无未处理异常，日志、Trace 中不出现明文密钥。
+  - order: 7
+    action: 边界：同一 agent_id 仅一行 repository 时调用聚合，记录返回值是否与该行自身一致且不受其它 agent_id 行影响。
+    expected: 测试过程无未处理异常，日志、Trace 中不出现明文密钥。
+  - order: 8
+    action: 确认日志不输出 API Key/Token/密码，测试结束后释放临时对象，确保可重复执行。
+    expected: 测试过程无未处理异常，日志、Trace 中不出现明文密钥。
+  expected_results:
+  - 列表/Mine/详情三处 downloads 均等于同 agent_id 跨全部 repository 行的 downloads 求和值（此处为 8），而非任一单行值 3 或 5。
+  - agent_id 无 repository 行时 downloads 为 0，不返回 None。
+  - 单行场景 downloads 等于该行自身值，且不跨 agent_id 混算。
+  - 测试过程无未处理异常，日志、Trace 中不出现明文密钥。
+  forbidden_side_effects: []
+  source:
+    legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
+    legacy_sheet: 02_测试用例基线
+    legacy_row: 395
+  unit_boundary: 仓库下载统计
+  inputs:
+  - '- 本地组件测试依赖与固定 repository 行 fixture；DB 层经 monkeypatch 固定，无外部资产。'
+  assertions:
+  - 列表/Mine/详情三处 downloads 均等于同 agent_id 跨全部 repository 行的 downloads 求和值（此处为 8），而非任一单行值 3 或 5。
+  - agent_id 无 repository 行时 downloads 为 0，不返回 None。
+  - 单行场景 downloads 等于该行自身值，且不跨 agent_id 混算。
+  - 测试过程无未处理异常，日志、Trace 中不出现明文密钥。

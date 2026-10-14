@@ -24,8 +24,8 @@ from dotenv import load_dotenv  # noqa: E402
 # injects them into sys.path automatically - no manual path manipulation needed.
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import paths  # noqa: E402, F401 - side-effect: adds sdk/, backend/ to sys.path
+from management.services.agent.prompt_template_loader import load_agent_prompt_bundle  # noqa: E402
 from utils.context_utils import build_context_inputs  # noqa: E402
-from utils.prompt_template_utils import get_agent_prompt_template  # noqa: E402
 
 from nexent.core.agents.agent_model import (  # noqa: E402
     AgentConfig,
@@ -38,6 +38,7 @@ from nexent.core.agents.context import (
     ContextItemInput,  # noqa: E402
     ContextManagerConfig,  # noqa: E402
 )
+from nexent.core.agents.prompt import AgentPromptComposer  # noqa: E402
 from nexent.core.agents.run_agent import agent_run  # noqa: E402
 from nexent.core.utils.observer import MessageObserver  # noqa: E402
 
@@ -59,11 +60,6 @@ THINKING_OFF_EXTRA_BODY = {
     "chat_template_kwargs": {"enable_thinking": False},
     "thinking": {"type": "disabled"},
 }
-
-APP_NAME = os.getenv("APP_NAME", "Nexent")
-APP_DESCRIPTION = os.getenv("APP_DESCRIPTION")
-DEFAULT_APP_DESCRIPTION_ZH = "Nexent 是一个开源智能体SDK和平台"
-DEFAULT_APP_DESCRIPTION_EN = "Nexent is an open-source agent SDK and platform"
 
 # ============ Default Prompt Templates ============
 DEFAULT_DUTY_PROMPT = """You are an intelligent assistant focused on helping users solve problems. You need to:
@@ -97,16 +93,8 @@ def build_prompt_templates(
     is_manager: bool = False
 ) -> dict:
     """Build non-context templates required by CoreAgent."""
-    prompt_templates = get_agent_prompt_template(is_manager=is_manager, language=language)
-    prompt_templates["system_prompt"] = ""
-    return prompt_templates
-
-
-def resolve_app_description(language: str) -> str:
-    """Resolve the app description using the same language fallback as production."""
-    if APP_DESCRIPTION:
-        return APP_DESCRIPTION
-    return DEFAULT_APP_DESCRIPTION_ZH if language == "zh" else DEFAULT_APP_DESCRIPTION_EN
+    bundle = load_agent_prompt_bundle(is_manager=is_manager, language=language)
+    return AgentPromptComposer(bundle).compatibility_templates()
 
 
 # ============ AgentRunInfo Construction Functions ============
@@ -184,21 +172,23 @@ def build_agent_run_info(
         model_factory=model_factory,
     )
 
+    prompt_bundle = load_agent_prompt_bundle(
+        is_manager=is_manager,
+        language=language,
+    )
     context_items = build_context_inputs(
         duty=duty,
         constraint=constraint,
         few_shots=few_shots,
-        app_name=APP_NAME,
-        app_description=resolve_app_description(language),
-        user_id=user_id,
         language=language,
         is_manager=is_manager,
         tools={tool.name: tool for tool in tools},
         skills=skills or [],
-        managed_agents={agent.name: agent for agent in managed_agents},
+        worker_agents={agent.name: agent for agent in managed_agents},
         external_a2a_agents={},
         memory_list=[],
-        knowledge_base_summary="",
+        knowledge_base_summaries=[],
+        prompt_bundle=prompt_bundle,
     )
     if prompt_components:
         component_item_ids = {
@@ -234,7 +224,7 @@ def build_agent_run_info(
             content={"text": fallback_prompt},
         )]
 
-    prompt_templates = build_prompt_templates(language=language, is_manager=is_manager)
+    prompt_templates = AgentPromptComposer(prompt_bundle).compatibility_templates()
     if "final_answer_contract" in (prompt_components or {}):
         final_contract = prompt_components["final_answer_contract"]
         prompt_templates["final_answer"] = (
@@ -254,7 +244,7 @@ def build_agent_run_info(
         max_steps=max_steps,
         model_name="main_model",
         prompt_templates=prompt_templates,
-        managed_agents=managed_agents,
+        worker_agents=managed_agents,
         context_manager_config=cm_config,
         context_items=context_items,
     )
@@ -330,7 +320,7 @@ def build_agent_run_info_with_custom_prompt(
         max_steps=max_steps,
         model_name="main_model",
         prompt_templates=prompt_templates,
-        managed_agents=managed_agents,
+        worker_agents=managed_agents,
         context_manager_config=context_manager_config or ContextManagerConfig(),
         context_items=[
             ContextItemInput(
@@ -493,8 +483,9 @@ def inject_production_managed_tools(
     tenant_id: str,
     version_no: int,
     local_skills_dir: str | None,
+    has_enabled_skills: bool,
 ) -> list[ToolConfig]:
-    """Mirror production's passive parallel and builtin skill-tool assembly."""
+    """Mirror production's passive parallel and conditional skill-tool assembly."""
     from nexent.core.tools.parallel_executor import ParallelExecutorTool
 
     existing_names = {tool.name for tool in tools}
@@ -527,13 +518,6 @@ def inject_production_managed_tools(
             "containing configuration variables needed for skill workflows.",
             '{"skill_name": "str"}',
         ),
-        (
-            "WriteSkillFileTool",
-            "write_skill_file",
-            "Write content to a file within a skill directory. Creates parent "
-            "directories if they do not exist.",
-            '{"skill_name": "str", "file_path": "str", "content": "str"}',
-        ),
     )
     injected: list[ToolConfig] = []
     if ParallelExecutorTool.name not in existing_names:
@@ -541,6 +525,7 @@ def inject_production_managed_tools(
             class_name=ParallelExecutorTool.__name__,
             name=ParallelExecutorTool.name,
             description=ParallelExecutorTool.description,
+            description_zh=ParallelExecutorTool.description_zh,
             inputs=json.dumps(ParallelExecutorTool.inputs, ensure_ascii=False),
             output_type=ParallelExecutorTool.output_type,
             params={},
@@ -560,7 +545,7 @@ def inject_production_managed_tools(
             metadata=skill_context,
         )
         for class_name, name, description, inputs in definitions
-        if name not in existing_names
+        if has_enabled_skills and name not in existing_names
     )
     return [*tools, *injected]
 

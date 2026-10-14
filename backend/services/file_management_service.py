@@ -1,6 +1,7 @@
 import asyncio
-import hashlib
 import logging
+
+from utils.storage_key_utils import build_preview_pdf_object_key
 import os
 from datetime import datetime
 from io import BytesIO
@@ -10,6 +11,7 @@ from typing import Dict, List, Optional, Tuple
 import httpx
 from fastapi import UploadFile
 from nexent import MessageObserver
+from nexent.core.concurrency import run_blocking
 from nexent.core.models import OpenAILongContextModel
 from nexent.multi_modal.utils import parse_s3_url
 
@@ -18,12 +20,15 @@ from consts.const import (
     ASSET_OWNER_TENANT_ID,
     DATA_PROCESS_SERVICE,
     FILE_PREVIEW_SIZE_LIMIT,
+    MAX_KNOWLEDGE_FILE_SIZE_BYTES,
     MAX_CONCURRENT_UPLOADS,
     MODEL_CONFIG_MAPPING,
     OFFICE_MIME_TYPES,
     UPLOAD_FOLDER,
 )
+from consts.error_code import ErrorCode
 from consts.exceptions import (
+    AppException,
     FileTooLargeException,
     NotFoundException,
     OfficeConversionException,
@@ -45,8 +50,9 @@ from database.attachment_db import (
 )
 from database.knowledge_file_lifecycle_db import create_file_records, transition_file_record
 from database.model_management_db import get_model_by_model_id
-from services.vectordatabase_service import ElasticSearchService, get_vector_db_core
-from utils.config_utils import get_model_name_from_config, tenant_config_manager
+from management.services.knowledge_base.service import ElasticSearchService, get_vector_db_core
+from utils.config_utils import tenant_config_manager
+from management.services.model.names import get_model_name_from_config
 from utils.file_management_utils import save_upload_file
 from utils.knowledge_ingestion_errors import ingestion_error_fields
 from utils.knowledge_telemetry import trace_knowledge_operation
@@ -373,6 +379,73 @@ async def _get_complete_upload_batch_size(files: List[UploadFile]) -> int:
     return total_size
 
 
+async def _get_upload_size(upload: UploadFile) -> int:
+    """Return one upload's size without changing its stream position."""
+    declared_size = getattr(upload, "size", None)
+    if isinstance(declared_size, int) and not isinstance(declared_size, bool) and declared_size > 0:
+        return declared_size
+
+    file_object = getattr(upload, "file", None)
+    if file_object is not None:
+        original_position = None
+        try:
+            original_position = file_object.tell()
+            file_object.seek(0, os.SEEK_END)
+            measured_size = file_object.tell()
+            if isinstance(measured_size, int) and measured_size >= 0:
+                return measured_size
+        except (AttributeError, OSError, TypeError, ValueError):
+            pass
+        finally:
+            if original_position is not None:
+                try:
+                    file_object.seek(original_position)
+                except (AttributeError, OSError, TypeError, ValueError):
+                    logger.warning("Failed to restore upload file position")
+
+    await upload.seek(0)
+    try:
+        content = await upload.read()
+        return len(content)
+    finally:
+        await upload.seek(0)
+
+
+def _is_knowledge_base_upload(folder: Optional[str], index_name: Optional[str]) -> bool:
+    """Identify uploads that belong to the local knowledge-base document flow."""
+    # The browser path uses the explicit knowledge_base folder. Northbound
+    # uploads omit the folder but always provide an index_name. Other callers
+    # may use an index_name for filename conflict resolution in an arbitrary
+    # storage folder, which must not inherit the KB document-size policy.
+    return folder == "knowledge_base" or (folder is None and bool(index_name))
+
+
+async def _validate_knowledge_file_sizes(
+    files: List[UploadFile],
+) -> None:
+    """Reject oversized KB documents before any file is written to storage."""
+    for upload in files:
+        if not upload:
+            continue
+        file_size = await _get_upload_size(upload)
+        if file_size <= MAX_KNOWLEDGE_FILE_SIZE_BYTES:
+            continue
+
+        filename = upload.filename or "unknown"
+        limit_mb = MAX_KNOWLEDGE_FILE_SIZE_BYTES // (1024 * 1024)
+        raise AppException(
+            ErrorCode.FILE_TOO_LARGE,
+            f"Knowledge base file '{filename}' exceeds the {limit_mb} MB limit",
+            details={
+                "resource": "knowledge_file",
+                "limit_bytes": MAX_KNOWLEDGE_FILE_SIZE_BYTES,
+                "limit_mb": limit_mb,
+                "file_name": filename,
+                "actual_bytes": file_size,
+            },
+        )
+
+
 async def upload_files_impl(
     destination: str,
     file: List[UploadFile],
@@ -380,6 +453,7 @@ async def upload_files_impl(
     index_name: Optional[str] = None,
     user_id: Optional[str] = None,
     uploader_tenant_id: Optional[str] = None,
+    upload_owner_service: Optional[str] = None,
 ) -> tuple:
     """
     Upload files to local storage or MinIO based on destination.
@@ -391,6 +465,7 @@ async def upload_files_impl(
         index_name: Knowledge base index for conflict resolution
         user_id: User ID for attachment path isolation
         uploader_tenant_id: Uploader tenant ID (ASSET_OWNER uses dedicated prefix)
+        upload_owner_service: Service responsible for recovering interrupted uploads
 
     Returns:
         UploadFilesResult: Three-item tuple-compatible result with quota metadata
@@ -401,6 +476,8 @@ async def upload_files_impl(
     quota_status = None
     lifecycle_records = []
     if destination == "local":
+        if _is_knowledge_base_upload(folder, index_name):
+            await _validate_knowledge_file_sizes(file)
         async with upload_semaphore:
             for f in file:
                 if not f:
@@ -419,6 +496,8 @@ async def upload_files_impl(
                     errors.append(f"Failed to save file: {f.filename}")
 
     elif destination == "minio":
+        if _is_knowledge_base_upload(folder, index_name):
+            await _validate_knowledge_file_sizes(file)
         actual_folder = resolve_minio_upload_folder(
             folder, user_id, uploader_tenant_id)
 
@@ -444,6 +523,7 @@ async def upload_files_impl(
                     "bucket_name": storage_context.bucket_name,
                     "object_name": planned_object_name,
                     "file_size": getattr(upload, "size", None),
+                    "upload_owner_service": upload_owner_service,
                     "status": "UPLOADING",
                     "stage": "UPLOAD",
                     "created_by": user_id,
@@ -551,9 +631,14 @@ async def upload_files_impl(
                 existing = await ElasticSearchService.list_files(index_name, include_chunks=False, vdb_core=vdb_core)
                 existing_files = existing.get(
                     "files", []) if isinstance(existing, dict) else []
-                # Prefer 'file' field; fall back to 'filename' if present
+                # list_files merges durable lifecycle rows, including this
+                # batch's own -- exclude them or every first upload renames
+                # itself to <name>_1 (only merged rows carry a file_id).
+                own_file_ids = {r["file_id"] for r in lifecycle_records if r.get("file_id")}
                 existing_names = set()
                 for item in existing_files:
+                    if item.get("file_id") in own_file_ids:
+                        continue
                     name = (item.get("file") or item.get(
                         "filename") or "").strip()
                     if name:
@@ -787,13 +872,22 @@ async def delete_file_impl(
                 )
 
     if reference:
-        result = await asyncio.to_thread(
+        result = await run_blocking(
+            "delete-storage-file",
             delete_file,
+            lane="control-io",
+            owner="config",
             object_name=reference.object_name,
             bucket=reference.bucket_name,
         )
     else:
-        result = await asyncio.to_thread(delete_file, object_name=object_name)
+        result = await run_blocking(
+            "delete-storage-file",
+            delete_file,
+            object_name=object_name,
+            lane="control-io",
+            owner="config",
+        )
     if not result["success"]:
         raise Exception(
             f"File does not exist or deletion failed: {result.get('error', 'Unknown error')}")
@@ -891,11 +985,8 @@ async def resolve_preview_file(object_name: str) -> Tuple[str, str, int]:
 
     # Office documents - convert to PDF with caching
     elif content_type in OFFICE_MIME_TYPES:
-        name_without_ext = object_name.rsplit(
-            '.', 1)[0] if '.' in object_name else object_name
-        hash_suffix = hashlib.md5(object_name.encode()).hexdigest()[:8]
-        pdf_object_name = f"preview/converted/{name_without_ext}_{hash_suffix}.pdf"
-        temp_pdf_object_name = f"preview/converting/{name_without_ext}_{hash_suffix}.pdf.tmp"
+        pdf_object_name = build_preview_pdf_object_key(object_name)
+        temp_pdf_object_name = build_preview_pdf_object_key(object_name, temporary=True)
 
         # Trigger conversion if cache is missing or corrupted
         if not _is_pdf_cache_valid(pdf_object_name):

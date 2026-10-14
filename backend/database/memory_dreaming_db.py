@@ -507,12 +507,14 @@ def release_lease(run_id: int, owner_id: str) -> bool:
         return released is not None
 
 
-def recover_stale() -> int:
+def recover_stale(include_unexpired: bool = False) -> int:
     """Reap runs whose lease expired without completion.
 
     Marks them as failed and clears lock fields so they can be retried.
-    Safe to call on every worker startup.
+    ``include_unexpired`` is used by the single-replica startup path, where all
+    RUNNING rows necessarily belong to the previous process.
     """
+    lease_filter = "" if include_unexpired else "AND lock_until < now()"
     sql = text("""
         UPDATE nexent.memory_dreaming_audit_t
         SET status = 'failed',
@@ -522,9 +524,9 @@ def recover_stale() -> int:
             finished_at = now(),
             update_time = now()
         WHERE status = 'running'
-          AND lock_until < now()
+          {lease_filter}
           AND delete_flag = 'N'
-    """)
+    """.format(lease_filter=lease_filter))
     with get_db_session() as session:
         result = session.execute(sql)
         return result.rowcount or 0

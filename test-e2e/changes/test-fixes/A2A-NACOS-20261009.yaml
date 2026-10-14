@@ -1,0 +1,20 @@
+schema_version: '1.0'
+change:
+  change_id: A2A-NACOS-20261009
+  change_type: test-fix
+  title: Implement owned Nacos configuration and controlled timeout tests
+  description: >-
+    Replace copied cross-Journey templates with the Nacos-specific contract.
+    Obtain registry credentials from the protected Mock fixture and use
+    maintained machine-local proxy configuration. Exercise the product timeout,
+    restore only the owned toxic, and delete only owned configurations and Agents.
+  affected_features:
+    existing: [F-090]
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing: []
+    added: []
+    modified: [CTR-034, CTR-035]
+    retired: []

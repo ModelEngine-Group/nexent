@@ -56,6 +56,7 @@ sys.modules['consts.const'] = consts_const_mock
 sys.modules['consts.error_code'] = consts_error_code_mock
 sys.modules['consts.exceptions'] = consts_exceptions_mock
 sys.modules['consts.prompt_template'] = consts_prompt_template_mock
+sys.modules['consts.model'] = consts_mock.model
 
 # Add backend to path before patching backend modules
 current_dir = os.path.dirname(os.path.abspath(__file__))

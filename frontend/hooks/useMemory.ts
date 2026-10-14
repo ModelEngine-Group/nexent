@@ -4,6 +4,7 @@ import { useTranslation } from "react-i18next"
 import {
   loadMemoryConfig,
   setMemorySwitch,
+  subscribeMemorySwitch,
   setMemoryAgentShare,
   fetchTenantSharedGroup,
   fetchAgentSharedGroups,
@@ -373,13 +374,14 @@ export function useMemory({ visible, currentUserId, currentTenantId, message }: 
   }, [activeTabKey, pageMap])
 
   /* ------------------- Wrapped setters ------------------- */
-  const setMemoryEnabled = useCallback((enabled: boolean) => {
-    setMemoryEnabledState(enabled)
-    setMemorySwitch(enabled).catch((e) => {
-      log.error("setMemorySwitch error:", e)
+  useEffect(() => subscribeMemorySwitch(setMemoryEnabledState), [])
+
+  const setMemoryEnabled = useCallback(async (enabled: boolean) => {
+    const saved = await setMemorySwitch(enabled)
+    if (!saved) {
       message.error(t('useMemory.setMemorySwitchError'))
-    })
-  }, [])
+    }
+  }, [message, t])
 
   const setShareOption = useCallback((option: "always" | "ask" | "never") => {
     setShareOptionState(option)

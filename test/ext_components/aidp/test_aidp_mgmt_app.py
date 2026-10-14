@@ -21,6 +21,7 @@ from http import HTTPStatus
 from typing import Any
 from unittest.mock import MagicMock, patch
 
+import httpx
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
@@ -46,6 +47,11 @@ nexent_storage = _mod("nexent.storage")
 nexent_storage_factory = _mod("nexent.storage.storage_client_factory")
 nexent_storage_factory.create_storage_client_from_config = MagicMock()
 
+services_pkg = _mod("services")
+services_pkg.__path__ = [os.path.join(BACKEND_DIR, "services")]
+tag_management_service = _mod("services.tag_management_service")
+tag_management_service.TagManagementService = MagicMock()
+
 
 class _MinIOStorageConfig:
     def __init__(self, **kwargs):
@@ -55,7 +61,7 @@ class _MinIOStorageConfig:
 nexent_storage_factory.MinIOStorageConfig = _MinIOStorageConfig
 
 for mod in (nexent_pkg, nexent_utils, nexent_http_mgr, nexent_storage,
-            nexent_storage_factory):
+            nexent_storage_factory, services_pkg, tag_management_service):
     sys.modules.setdefault(mod.__name__, mod)
 
 # Register non-prefixed ``database`` / ``database.client`` stubs so that
@@ -75,6 +81,9 @@ for mod in (_db_pkg, _db_client):
 
 # Production modules under test
 from ext_components.aidp.apps.aidp_mgmt_app import (  # noqa: E402
+    CreateKbRequest,
+    SetPermissionRequest,
+    UpdateKbRequest,
     aidp_mgmt_router,
 )
 from apps.app_factory import register_exception_handlers  # noqa: E402
@@ -83,6 +92,98 @@ SERVER_URL = "http://aidp.example.com:30081"
 API_KEY = "test-aidp-api-key"
 USER_ID = "user-test"
 TENANT_ID = "tenant-test"
+
+
+def test_knowledge_base_api_models_do_not_expose_safety_guard():
+    for model in (CreateKbRequest, UpdateKbRequest, SetPermissionRequest):
+        assert "sensitive_intercept_enalbe" not in model.model_fields
+
+
+@pytest.mark.parametrize("settings", [
+    {"description": "   "},
+    {"embedding_model": ""},
+    {"chunk_token_num": True},
+    {"chunk_token_num": 255},
+    {"chunk_token_num": 4097},
+    {"chunk_overlap_num": 1.5},
+    {"chunk_token_num": 512, "chunk_overlap_num": 257},
+    {"topk": 1.5},
+    {"caption_enable": 1, "vlm_model": ""},
+])
+def test_creation_rejects_invalid_settings_in_request_model(settings):
+    from pydantic import ValidationError
+
+    with pytest.raises(ValidationError):
+        CreateKbRequest(**{"name": "kb", "description": "test", "embedding_model": "bge-m3", **settings})
+
+
+def test_creation_requires_embedding_and_trims_description():
+    from pydantic import ValidationError
+
+    with pytest.raises(ValidationError):
+        CreateKbRequest(name="kb", description="test")
+    body = CreateKbRequest(name="kb", description="  test  ", embedding_model="/models/bge-m3")
+    assert body.description == "test"
+    assert body.similarity == 0.6
+    assert body.vlm_model == ""
+
+
+
+
+@pytest.mark.parametrize("metadata,remote_fails", [
+    ({}, False),
+    ({"name": "Renamed"}, False),
+    ({"description": ""}, False),
+    ({"description": "New description"}, True),
+])
+def test_unified_save_commits_permissions_before_optional_aidp(monkeypatch, metadata, remote_fails):
+    from consts.error_code import ErrorCode
+    from consts.exceptions import AppException
+    from ext_components.aidp.apps import aidp_mgmt_app
+    from ext_components.aidp.services import aidp_kb_update_service as service
+
+    events = []
+    monkeypatch.setattr(aidp_mgmt_app.perms, "require_permission", lambda *a, **kw: None)
+
+    def save_local(**kwargs):
+        events.append(("local", kwargs))
+        return True
+
+    def save_remote(server_url, api_key, kb_id, payload):
+        assert events[0][0] == "local"
+        assert events[0][1]["ingroup_permission"] == "PRIVATE"
+        events.append(("remote", payload))
+        if remote_fails:
+            raise AppException(ErrorCode.AIDP_CONNECTION_ERROR, "Unavailable")
+        return {"kds_name": payload.get("name", "Original"), **payload}
+
+    monkeypatch.setattr(service.perms, "update_permission", save_local)
+    monkeypatch.setattr(service, "update_aidp_kb_impl", save_remote)
+    response = _client().patch(
+        "/aidp-mgmt/aidp-permissions/kb-1", headers=_bearer(),
+        json={"ingroup_permission": "PRIVATE", "group_ids": [], **metadata},
+    )
+    assert response.status_code == 200
+    result = response.json()
+    assert result["permissions_saved"] is True
+    assert result["metadata_status"] == ("failed" if remote_fails else "updated" if metadata else "unchanged")
+    assert [payload for kind, payload in events if kind == "remote"] == ([metadata] if metadata else [])
+
+
+def test_unified_save_local_failure_prevents_aidp(monkeypatch):
+    from ext_components.aidp.apps import aidp_mgmt_app
+    from ext_components.aidp.services import aidp_kb_update_service as service
+
+    monkeypatch.setattr(aidp_mgmt_app.perms, "require_permission", lambda *a, **kw: None)
+    monkeypatch.setattr(service.perms, "update_permission", lambda **kw: False)
+    remote_calls = []
+    monkeypatch.setattr(service, "update_aidp_kb_impl", lambda *a: remote_calls.append(a))
+    response = _client().patch(
+        "/aidp-mgmt/aidp-permissions/kb-1", headers=_bearer(),
+        json={"ingroup_permission": "PRIVATE", "description": "Changed"},
+    )
+    assert response.status_code == 404
+    assert remote_calls == []
 
 
 # --- Fixtures -------------------------------------------------------------
@@ -130,6 +231,40 @@ def _client():
 
 def _bearer() -> dict:
     return {"Authorization": "Bearer fake-token"}
+
+
+def test_detail_creator_comes_from_nexent_owner_in_current_tenant(monkeypatch):
+    from ext_components.aidp.apps import aidp_mgmt_app as module
+    monkeypatch.setattr(module.perms, "require_permission", lambda *a, **kw: MagicMock(permission="EDIT"))
+    monkeypatch.setattr(module, "get_aidp_kb_impl", lambda *a: {"kds_name": "资料库", "user_name": "remote-user"})
+    monkeypatch.setattr(module, "count_aidp_docs_impl", lambda *a: 7)
+    monkeypatch.setattr(module.aidp_permission_db, "get_permission_by_kb_id",
+                        lambda *a: {"owner_user_id": "local-owner", "group_ids": [],
+                                    "creator_name": "admin@example.test"})
+    result = _client().get("/aidp-mgmt/knowledge-bases/kb-1", headers=_bearer()).json()
+    assert result["creator_name"] == "admin@example.test"
+    assert result["created_by"] == "local-owner"
+    assert result["document_count"] == 7
+    assert "document_count_reliable" not in result
+
+
+def test_empty_service_query_requests_all_categories(monkeypatch):
+    from ext_components.aidp.apps import aidp_mgmt_app as module
+    lookup = MagicMock(return_value={"models": [], "service": ""})
+    monkeypatch.setattr(module, "list_aidp_models_impl", lookup)
+    response = _client().get("/aidp-mgmt/models?app=KnowledgeBase&service=", headers=_bearer())
+    assert response.status_code == 200
+    assert lookup.call_args.args[2:] == ("", "KnowledgeBase")
+
+
+def test_graph_template_route_is_authenticated_and_not_a_knowledge_base_id(monkeypatch):
+    from ext_components.aidp.apps import aidp_mgmt_app as module
+    lookup = MagicMock(return_value={"value": [{"param_key": "domain"}]})
+    monkeypatch.setattr(module, "get_aidp_graph_template_impl", lookup)
+    result = _client().get("/aidp-mgmt/knowledge-bases/graph-template?language=english", headers=_bearer())
+    assert result.status_code == 200 and result.json()["value"][0]["param_key"] == "domain"
+    lookup.assert_called_once_with(SERVER_URL, API_KEY, "english")
+    assert _client().get("/aidp-mgmt/knowledge-bases/graph-template").status_code == 401
 
 
 # --- Auth (401) -----------------------------------------------------------
@@ -207,7 +342,9 @@ class TestPermissionEnforcement:
         original_require = aidp_permission_service.require_permission
         aidp_permission_service.require_permission = MagicMock(return_value=decision)
 
-        with patch.object(aidp_mgmt_app, "get_aidp_kb_impl") as mock_get:
+        with patch.object(aidp_mgmt_app, "get_aidp_kb_impl") as mock_get, \
+             patch.object(aidp_mgmt_app.aidp_permission_db, "get_permission_by_kb_id", return_value=None), \
+             patch.object(aidp_mgmt_app, "count_aidp_docs_impl", return_value=12):
             mock_get.return_value = {"kds_name": "name", "description": "desc"}
             try:
                 response = client.get(
@@ -217,6 +354,8 @@ class TestPermissionEnforcement:
                 aidp_permission_service.require_permission = original_require
         assert response.status_code == HTTPStatus.OK
         assert response.json()["permission"] == "READ_ONLY"
+        assert response.json()["document_count"] == 12
+        assert "document_count_reliable" not in response.json()
 
     def test_update_kb_without_edit_returns_403(self):
         client = _client()
@@ -250,8 +389,14 @@ class TestPermissionEnforcement:
         )
         try:
             soft_delete = MagicMock(return_value=True)
+            cleanup_documents = MagicMock(return_value=0)
             with patch.object(aidp_mgmt_app, "delete_aidp_kb_impl", return_value=True), \
-                 patch.object(aidp_mgmt_app.perms, "soft_delete_permission", soft_delete):
+                 patch.object(aidp_mgmt_app.perms, "soft_delete_permission", soft_delete), \
+                 patch.object(
+                     aidp_mgmt_app,
+                     "_cleanup_document_assignments_for_deleted_knowledge_base",
+                     cleanup_documents,
+                 ):
                 response = client.delete(
                     "/aidp-mgmt/knowledge-bases/kb-1", headers=_bearer()
                 )
@@ -260,6 +405,7 @@ class TestPermissionEnforcement:
         assert response.status_code == HTTPStatus.OK
         assert response.json() == {"success": True}
         soft_delete.assert_called_once()
+        cleanup_documents.assert_called_once_with("tenant-test", "kb-1", "user-test")
 
     def test_set_permission_private_clears_groups(self):
         client = _client()
@@ -273,7 +419,7 @@ class TestPermissionEnforcement:
         try:
             update_perm = MagicMock(return_value=True)
             with patch.object(aidp_mgmt_app.perms, "update_permission", update_perm), \
-                 patch.object(aidp_mgmt_app, "_validate_group_ids_strict") as mock_validate:
+                 patch.object(aidp_mgmt_app.perms, "_validate_group_ids_strict") as mock_validate:
                 response = client.patch(
                     "/aidp-mgmt/aidp-permissions/kb-1",
                     headers=_bearer(),
@@ -357,8 +503,9 @@ class TestCreateKnowledgeBase:
             response = client.post(
                 "/aidp-mgmt/knowledge-bases",
                 headers=_bearer(),
-                json={
+                json={"embedding_model": "bge-m3",
                     "name": "New KB",
+                    "description": "A test knowledge base",
                     "ingroup_permission": "EDIT",
                     "group_ids": [1, 2],
                 },
@@ -386,8 +533,9 @@ class TestCreateKnowledgeBase:
             response = client.post(
                 "/aidp-mgmt/knowledge-bases",
                 headers=_bearer(),
-                json={
+                json={"embedding_model": "bge-m3",
                     "name": "New KB",
+                    "description": "A test knowledge base",
                     "ingroup_permission": "READ_ONLY",
                     "group_ids": [1],
                 },
@@ -408,8 +556,9 @@ class TestCreateKnowledgeBase:
             response = client.post(
                 "/aidp-mgmt/knowledge-bases",
                 headers=_bearer(),
-                json={
+                json={"embedding_model": "bge-m3",
                     "name": "New KB",
+                    "description": "A test knowledge base",
                     "ingroup_permission": "READ_ONLY",
                     "group_ids": [1],
                 },
@@ -422,9 +571,40 @@ class TestCreateKnowledgeBase:
         response = client.post(
             "/aidp-mgmt/knowledge-bases",
             headers=_bearer(),
-            json={"name": "New KB", "ingroup_permission": "EDIT"},
+            json={"embedding_model": "bge-m3", "name": "New KB", "description": "A test knowledge base", "ingroup_permission": "EDIT"},
         )
         assert response.status_code == HTTPStatus.BAD_REQUEST
+
+    def test_create_requires_description(self):
+        response = _client().post(
+            "/aidp-mgmt/knowledge-bases",
+            headers=_bearer(),
+            json={"embedding_model": "bge-m3", "name": "New KB", "ingroup_permission": "PRIVATE"},
+        )
+        assert response.status_code == HTTPStatus.UNPROCESSABLE_ENTITY
+
+    @pytest.mark.parametrize(
+        "legacy_field,value",
+        [
+            ("is_multimodal", True),
+            ("vision_model", "legacy-vlm"),
+            ("smartsplit", 1),
+            ("llm_model_name", "legacy-llm"),
+        ],
+    )
+    def test_create_rejects_legacy_fields(self, legacy_field, value):
+        payload = {
+            "name": "New KB",
+            "description": "A test knowledge base",
+            "ingroup_permission": "PRIVATE",
+            legacy_field: value,
+        }
+        response = _client().post(
+            "/aidp-mgmt/knowledge-bases",
+            headers=_bearer(),
+            json=payload,
+        )
+        assert response.status_code == HTTPStatus.UNPROCESSABLE_ENTITY
 
 
 # --- List KBs -------------------------------------------------------------
@@ -441,6 +621,38 @@ class TestListKnowledgeBases:
         body = response.json()
         assert body["total_count"] == 0
         assert body["has_more"] is False
+
+    @pytest.mark.parametrize("owner_id,expected_name", [
+        ("user_id", None),
+        ("missing-owner", None),
+        (USER_ID, "admin@nexent.com"),
+    ])
+    def test_list_creator_uses_only_persisted_owner(self, monkeypatch, owner_id, expected_name):
+        client = _client()
+        from ext_components.aidp.apps import aidp_mgmt_app
+        with patch.object(
+            aidp_mgmt_app,
+            "_current_accessible_rows",
+            return_value=[
+                {
+                    "kb_id": "kb-legacy",
+                    "owner_user_id": owner_id,
+                    "creator_name": expected_name,
+                    "permission": "EDIT",
+                    "ingroup_permission": "PRIVATE",
+                    "group_ids": [],
+                }
+            ],
+        ), patch.object(
+            aidp_mgmt_app,
+            "get_aidp_kb_impl",
+            return_value={"kds_name": "Legacy KB", "description": "desc"},
+        ):
+            response = client.get("/aidp-mgmt/knowledge-bases", headers=_bearer())
+
+        assert response.status_code == HTTPStatus.OK
+        assert response.json()["value"][0]["creator_name"] == expected_name
+        assert response.json()["value"][0]["created_by"] == owner_id
 
     def test_list_marks_kb_unavailable_when_aidp_detail_fails(self):
         client = _client()
@@ -505,12 +717,51 @@ class TestListKnowledgeBases:
             user_id=USER_ID,
             tenant_id=TENANT_ID,
             aidp_tenant_id="aidp",
+            keyword=None,
         )
         mock_detail.assert_called_once_with(
             aidp_mgmt_app.AIDP_SERVER_URL,
             aidp_mgmt_app.AIDP_API_KEY,
             "kb-2",
         )
+
+    def test_list_forwards_trimmed_keyword_to_aidp(self):
+        """A keyword is trimmed before it reaches AIDP."""
+        client = _client()
+        from ext_components.aidp.apps import aidp_mgmt_app
+        from types import SimpleNamespace
+
+        with patch.object(
+            aidp_mgmt_app,
+            "resolve_current_aidp_access",
+            return_value=SimpleNamespace(accessible_rows=[]),
+        ) as mock_snapshot:
+            response = client.get(
+                "/aidp-mgmt/knowledge-bases?keyword=%20report%20",
+                headers=_bearer(),
+            )
+
+        assert response.status_code == HTTPStatus.OK
+        assert mock_snapshot.call_args.kwargs["keyword"] == "report"
+
+    def test_list_treats_blank_keyword_as_unfiltered(self):
+        """A whitespace-only keyword must not narrow the listing."""
+        client = _client()
+        from ext_components.aidp.apps import aidp_mgmt_app
+        from types import SimpleNamespace
+
+        with patch.object(
+            aidp_mgmt_app,
+            "resolve_current_aidp_access",
+            return_value=SimpleNamespace(accessible_rows=[]),
+        ) as mock_snapshot:
+            response = client.get(
+                "/aidp-mgmt/knowledge-bases?keyword=%20%20",
+                headers=_bearer(),
+            )
+
+        assert response.status_code == HTTPStatus.OK
+        assert mock_snapshot.call_args.kwargs["keyword"] is None
 
     def test_list_skips_detail_when_catalog_row_has_card_metadata(self):
         client = _client()
@@ -522,7 +773,9 @@ class TestListKnowledgeBases:
             "kds_name": "Catalog KB",
             "description": "From catalog",
             "created_at": "2026-01-01T00:00:00Z",
+            "create_time": 1767225600,
             "caption_enable": 0,
+            "document_count": 8,
             "permission": "EDIT",
         }
         with patch.object(
@@ -533,8 +786,15 @@ class TestListKnowledgeBases:
             response = client.get("/aidp-mgmt/knowledge-bases", headers=_bearer())
 
         assert response.status_code == HTTPStatus.OK
-        assert response.json()["value"][0]["description"] == "From catalog"
+        item = response.json()["value"][0]
+        assert item["description"] == "From catalog"
+        assert item["created_at"] == "2026-01-01T00:00:00Z"
+        assert "updated_at" not in item
+        assert "document_count" not in item
+        assert "chunk_count" not in item
+        assert "document_count_reliable" not in item
         mock_detail.assert_not_called()
+
 
 
 # Use a lazy import for AppException at module load to avoid breaking the
@@ -677,6 +937,49 @@ class TestUploadDocuments:
         assert body["failed_list"][0]["file_name"] == "large.txt"
         assert mock_upload.call_args.args[3][0].filename == "valid.pdf"
 
+    def test_upload_applies_twenty_mb_limit_to_json_md_and_html(self):
+        client = _client()
+        from ext_components.aidp.apps import aidp_mgmt_app
+        from ext_components.aidp.services import aidp_permission_service
+
+        files = [
+            ("files", ("large.json", io.BytesIO(b"xx"), "application/json")),
+            ("files", ("large.md", io.BytesIO(b"xx"), "text/markdown")),
+            ("files", ("large.html", io.BytesIO(b"xx"), "text/html")),
+            ("files", ("valid.pdf", io.BytesIO(b"xx"), "application/pdf")),
+        ]
+        aidp_result = {
+            "summary": {"total": 1, "success": 1, "failed": 0},
+            "success_list": [{"file_name": "valid.pdf"}],
+            "failed_list": [],
+        }
+        with patch.object(
+            aidp_permission_service,
+            "require_permission",
+            return_value=MagicMock(permission="EDIT"),
+        ), patch.object(
+            aidp_mgmt_app, "AIDP_SMALL_FILE_MAX_SIZE_BYTES", 1
+        ), patch.object(
+            aidp_mgmt_app, "AIDP_OTHER_FILE_MAX_SIZE_BYTES", 10
+        ), patch.object(
+            aidp_mgmt_app, "upload_aidp_docs_impl", return_value=aidp_result
+        ) as mock_upload:
+            response = client.post(
+                "/aidp-mgmt/knowledge-bases/kb-1/documents",
+                headers=_bearer(),
+                files=files,
+            )
+
+        assert response.status_code == HTTPStatus.OK
+        body = response.json()
+        assert body["summary"] == {"total": 4, "success": 1, "failed": 3}
+        assert {item["file_name"] for item in body["failed_list"]} == {
+            "large.json",
+            "large.md",
+            "large.html",
+        }
+        assert [file.filename for file in mock_upload.call_args.args[3]] == ["valid.pdf"]
+
 
 # --- List documents ------------------------------------------------------
 
@@ -687,10 +990,12 @@ class TestListDocuments:
         from ext_components.aidp.apps import aidp_mgmt_app
         from ext_components.aidp.services import aidp_permission_service
 
+        # No channel is resolvable, so the request exercises the completed-files
+        # fallback (the history path has its own tests below).
         with patch.object(aidp_permission_service, "require_permission",
                           return_value=MagicMock(permission="READ_ONLY")), \
              patch.object(aidp_mgmt_app, "list_aidp_docs_impl",
-                          return_value={"value": [{"name": "a"}]}), \
+                          return_value={"value": [{"name": "a"}], "next_link": "/next"}), \
              patch.object(aidp_mgmt_app, "count_aidp_docs_impl", return_value=42):
             response = client.get(
                 "/aidp-mgmt/knowledge-bases/kb-1/documents",
@@ -700,6 +1005,7 @@ class TestListDocuments:
         body = response.json()
         assert body["total_count"] == 42
         assert body["has_more"] is True
+        assert "processing_count" not in body
 
     def test_list_and_count_requests_run_concurrently(self):
         client = _client()
@@ -737,6 +1043,153 @@ class TestListDocuments:
         assert response.status_code == HTTPStatus.OK
         assert response.json()["total_count"] == 1
 
+
+# --- Remove/download documents -------------------------------------------
+
+
+class TestAidpDocumentFileOperations:
+    def test_remove_forwards_only_uuids(self):
+        client = _client()
+        from ext_components.aidp.apps import aidp_mgmt_app
+        from ext_components.aidp.services import aidp_permission_service
+
+        aidp_result = {
+            "summary": {"total": 2, "success": 1, "failed": 1},
+            "success_list": [{"file_uuid": "00000000-0000-4000-8000-000000000001"}],
+            "failed_list": [{"file_uuid": "00000000-0000-4000-8000-000000000002"}],
+        }
+        with patch.object(
+            aidp_permission_service,
+            "require_permission",
+            return_value=MagicMock(permission="EDIT"),
+        ), patch.object(
+            aidp_mgmt_app,
+            "remove_aidp_docs_impl",
+            return_value=aidp_result,
+        ) as mock_remove:
+            response = client.post(
+                "/aidp-mgmt/knowledge-bases/kb-1/documents/remove",
+                headers=_bearer(),
+                json={
+                    "file_uuids": [
+                        "00000000-0000-4000-8000-000000000001",
+                        "00000000-0000-4000-8000-000000000002",
+                    ]
+                },
+            )
+
+        assert response.status_code == HTTPStatus.OK
+        assert response.json() == aidp_result
+        assert mock_remove.call_args.args[3] == [
+            "00000000-0000-4000-8000-000000000001",
+            "00000000-0000-4000-8000-000000000002",
+        ]
+
+    def test_remove_requires_file_uuids(self):
+        client = _client()
+        from ext_components.aidp.apps import aidp_mgmt_app
+
+        with patch.object(aidp_mgmt_app, "remove_aidp_docs_impl") as mock_remove:
+            response = client.post(
+                "/aidp-mgmt/knowledge-bases/kb-1/documents/remove",
+                headers=_bearer(),
+                json={},
+            )
+
+        assert response.status_code == HTTPStatus.UNPROCESSABLE_ENTITY
+        mock_remove.assert_not_called()
+
+    def test_remove_requires_standard_file_uuid(self):
+        client = _client()
+        from ext_components.aidp.apps import aidp_mgmt_app
+
+        with patch.object(aidp_mgmt_app, "remove_aidp_docs_impl") as mock_remove:
+            response = client.post(
+                "/aidp-mgmt/knowledge-bases/kb-1/documents/remove",
+                headers=_bearer(),
+                json={"file_uuids": ["uuid-1"]},
+            )
+
+        assert response.status_code == HTTPStatus.UNPROCESSABLE_ENTITY
+        mock_remove.assert_not_called()
+
+    def test_download_returns_binary_response(self):
+        client = _client()
+        from ext_components.aidp.apps import aidp_mgmt_app
+        from ext_components.aidp.services import aidp_permission_service
+
+        mock_response = httpx.Response(
+            200,
+            headers={
+                "Content-Type": "text/plain",
+                "Content-Disposition": 'attachment; filename="a.txt"',
+                "X-File-Size": "5",
+            },
+            content=b"hello",
+            request=httpx.Request("POST", SERVER_URL),
+        )
+
+        async def stream_document(*args):
+            return mock_response
+
+        with patch.object(
+            aidp_permission_service,
+            "require_permission",
+            return_value=MagicMock(permission="READ_ONLY"),
+        ), patch.object(
+            aidp_mgmt_app,
+            "stream_aidp_doc_impl",
+            side_effect=stream_document,
+        ) as mock_download:
+            response = client.post(
+                "/aidp-mgmt/knowledge-bases/kb-1/documents/download",
+                headers=_bearer(),
+                json={"file_uuid": "00000000-0000-4000-8000-000000000001"},
+            )
+
+        assert response.status_code == HTTPStatus.OK
+        assert response.content == b"hello"
+        assert response.headers["content-type"].startswith("text/plain")
+        assert response.headers["content-disposition"] == 'attachment; filename="a.txt"'
+        assert response.headers["x-file-size"] == "5"
+        assert mock_download.call_args.args == (
+            SERVER_URL,
+            API_KEY,
+            "kb-1",
+            "00000000-0000-4000-8000-000000000001",
+        )
+        assert "x-file-name" not in response.headers
+
+    def test_remove_does_not_invalidate_cache_when_no_file_succeeds(self):
+        client = _client()
+        from ext_components.aidp.apps import aidp_mgmt_app
+        from ext_components.aidp.services import aidp_permission_service
+
+        aidp_result = {
+            "summary": {"total": 1, "success": 0, "failed": 1},
+            "success_list": [],
+            "failed_list": [{"file_uuid": "00000000-0000-4000-8000-000000000001"}],
+        }
+        with patch.object(
+            aidp_permission_service,
+            "require_permission",
+            return_value=MagicMock(permission="EDIT"),
+        ), patch.object(
+            aidp_mgmt_app,
+            "remove_aidp_docs_impl",
+            return_value=aidp_result,
+        ), patch.object(aidp_mgmt_app, "invalidate_aidp_kb_detail_cache") as mock_kb_cache, patch.object(
+            aidp_mgmt_app, "invalidate_aidp_doc_count_cache"
+        ) as mock_count_cache:
+            response = client.post(
+                "/aidp-mgmt/knowledge-bases/kb-1/documents/remove",
+                headers=_bearer(),
+                json={"file_uuids": ["00000000-0000-4000-8000-000000000001"]},
+            )
+
+        assert response.status_code == HTTPStatus.OK
+        mock_kb_cache.assert_not_called()
+        mock_count_cache.assert_not_called()
 
 # --- Models list (auth only, no per-KB permission) ------------------------
 
@@ -820,20 +1273,6 @@ class TestHelperFunctions:
             )
         assert exc_info.value.status_code == HTTPStatus.CONFLICT
 
-    def test_serialize_permission_returns_dict(self):
-        from ext_components.aidp.apps import aidp_mgmt_app
-
-        decision = MagicMock()
-        decision.permission = "EDIT"
-        decision.matched_group_ids = (1, 2)
-        decision.is_management_role = True
-
-        result = aidp_mgmt_app._serialize_permission(decision)
-        assert result == {
-            "permission": "EDIT",
-            "matched_group_ids": [1, 2],
-            "is_management_role": True,
-        }
 
 
 # ---------------------------------------------------------------------------
@@ -900,7 +1339,8 @@ class TestCreateKnowledgeBaseEdgeCases:
             response = client.post(
                 "/aidp-mgmt/knowledge-bases",
                 headers=_bearer(),
-                json={"name": "User KB", "ingroup_permission": "EDIT", "group_ids": [1]},
+                json={"embedding_model": "bge-m3", "name": "User KB", "description": "A test knowledge base",
+                      "ingroup_permission": "EDIT", "group_ids": [1]},
             )
 
         assert response.status_code == HTTPStatus.OK
@@ -913,7 +1353,8 @@ class TestCreateKnowledgeBaseEdgeCases:
         response = client.post(
             "/aidp-mgmt/knowledge-bases",
             headers=_bearer(),
-            json={"name": "KB", "ingroup_permission": "INVALID_VALUE", "group_ids": [1]},
+            json={"embedding_model": "bge-m3", "name": "KB", "description": "A test knowledge base",
+                  "ingroup_permission": "INVALID_VALUE", "group_ids": [1]},
         )
         assert response.status_code == HTTPStatus.BAD_REQUEST
 
@@ -930,7 +1371,8 @@ class TestCreateKnowledgeBaseEdgeCases:
             response = client.post(
                 "/aidp-mgmt/knowledge-bases",
                 headers=_bearer(),
-                json={"name": "KB", "ingroup_permission": "EDIT", "group_ids": [999]},
+                json={"embedding_model": "bge-m3", "name": "KB", "description": "A test knowledge base",
+                      "ingroup_permission": "EDIT", "group_ids": [999]},
             )
         assert response.status_code == HTTPStatus.BAD_REQUEST
 
@@ -948,7 +1390,8 @@ class TestCreateKnowledgeBaseEdgeCases:
             response = client.post(
                 "/aidp-mgmt/knowledge-bases",
                 headers=_bearer(),
-                json={"name": "Private KB", "ingroup_permission": "PRIVATE"},
+                json={"embedding_model": "bge-m3", "name": "Private KB", "description": "A test knowledge base",
+                      "ingroup_permission": "PRIVATE"},
             )
         assert response.status_code == HTTPStatus.OK
         # No group validation was called
@@ -967,7 +1410,8 @@ class TestCreateKnowledgeBaseEdgeCases:
             response = client.post(
                 "/aidp-mgmt/knowledge-bases",
                 headers=_bearer(),
-                json={"name": "KB", "ingroup_permission": "READ_ONLY", "group_ids": [1]},
+                json={"embedding_model": "bge-m3", "name": "KB", "description": "A test knowledge base",
+                      "ingroup_permission": "READ_ONLY", "group_ids": [1]},
             )
         # AIDP_AUTH_ERROR maps to 502
         assert response.status_code == 502
@@ -990,7 +1434,8 @@ class TestCreateKnowledgeBaseEdgeCases:
             response = client.post(
                 "/aidp-mgmt/knowledge-bases",
                 headers=_bearer(),
-                json={"name": "KB", "ingroup_permission": "READ_ONLY", "group_ids": [1]},
+                json={"embedding_model": "bge-m3", "name": "KB", "description": "A test knowledge base",
+                      "ingroup_permission": "READ_ONLY", "group_ids": [1]},
             )
         assert response.status_code == HTTPStatus.CONFLICT
 
@@ -1006,7 +1451,8 @@ class TestCreateKnowledgeBaseEdgeCases:
             response = client.post(
                 "/aidp-mgmt/knowledge-bases",
                 headers=_bearer(),
-                json={"name": "KB", "ingroup_permission": "READ_ONLY", "group_ids": [1]},
+                json={"embedding_model": "bge-m3", "name": "KB", "description": "A test knowledge base",
+                      "ingroup_permission": "READ_ONLY", "group_ids": [1]},
             )
         # AIDP_SERVICE_ERROR maps to 502 in ERROR_CODE_HTTP_STATUS
         assert response.status_code == 502
@@ -1023,7 +1469,8 @@ class TestCreateKnowledgeBaseEdgeCases:
             response = client.post(
                 "/aidp-mgmt/knowledge-bases",
                 headers=_bearer(),
-                json={"name": "KB", "ingroup_permission": "READ_ONLY", "group_ids": [1]},
+                json={"embedding_model": "bge-m3", "name": "KB", "description": "A test knowledge base",
+                      "ingroup_permission": "READ_ONLY", "group_ids": [1]},
             )
         # AIDP_SERVICE_ERROR maps to 502
         assert response.status_code == 502
@@ -1047,7 +1494,8 @@ class TestCreateKnowledgeBaseEdgeCases:
             response = client.post(
                 "/aidp-mgmt/knowledge-bases",
                 headers=_bearer(),
-                json={"name": "KB", "ingroup_permission": "READ_ONLY", "group_ids": [1]},
+                json={"embedding_model": "bge-m3", "name": "KB", "description": "A test knowledge base",
+                      "ingroup_permission": "READ_ONLY", "group_ids": [1]},
             )
         assert response.status_code == HTTPStatus.INTERNAL_SERVER_ERROR
         delete_mock.assert_called_once()
@@ -1072,7 +1520,8 @@ class TestCreateKnowledgeBaseEdgeCases:
             response = client.post(
                 "/aidp-mgmt/knowledge-bases",
                 headers=_bearer(),
-                json={"name": "KB", "ingroup_permission": "READ_ONLY", "group_ids": [1]},
+                json={"embedding_model": "bge-m3", "name": "KB", "description": "A test knowledge base",
+                      "ingroup_permission": "READ_ONLY", "group_ids": [1]},
             )
         assert response.status_code == HTTPStatus.INTERNAL_SERVER_ERROR
         mock_status.assert_called_once()
@@ -1094,11 +1543,13 @@ class TestGetKbFetchFailure:
                           return_value=MagicMock(permission="READ_ONLY")), \
              patch.object(aidp_mgmt_app, "get_aidp_kb_impl",
                           side_effect=AppException(ErrorCode.AIDP_SERVICE_ERROR, "down")), \
+             patch.object(aidp_mgmt_app, "count_aidp_docs_impl",
+                          side_effect=AppException(ErrorCode.AIDP_SERVICE_ERROR, "count down")), \
+             patch.object(aidp_mgmt_app.aidp_permission_db, "get_permission_by_kb_id", return_value=None), \
              patch.object(aidp_permission_service, "update_resource_status") as mock_status:
             response = client.get("/aidp-mgmt/knowledge-bases/kb-1", headers=_bearer())
-        assert response.status_code == HTTPStatus.OK
-        body = response.json()
-        assert body["resource_status"] == "UNAVAILABLE"
+        assert response.status_code == AppException(ErrorCode.AIDP_SERVICE_ERROR).http_status
+        assert response.json()["code"] == ErrorCode.AIDP_SERVICE_ERROR.value
         mock_status.assert_called_once()
 
 
@@ -1108,7 +1559,7 @@ class TestGetKbFetchFailure:
 
 
 class TestListDocumentsCountFailure:
-    def test_list_docs_falls_back_when_count_api_fails(self):
+    def test_list_docs_fails_when_count_api_fails(self):
         client = _client()
         from ext_components.aidp.apps import aidp_mgmt_app
         from ext_components.aidp.services import aidp_permission_service
@@ -1123,11 +1574,8 @@ class TestListDocumentsCountFailure:
                 "/aidp-mgmt/knowledge-bases/kb-1/documents",
                 headers=_bearer(),
             )
-        assert response.status_code == HTTPStatus.OK
-        body = response.json()
-        # Falls back to page count
-        assert body["total_count"] == 2
-        assert body["total_reliable"] is False
+        assert response.status_code == AppException(ErrorCode.AIDP_SERVICE_ERROR).http_status
+        assert response.json()["code"] == ErrorCode.AIDP_SERVICE_ERROR.value
 
 
 # ---------------------------------------------------------------------------
@@ -1214,7 +1662,8 @@ class TestCreateKnowledgeBaseKdsName:
             response = client.post(
                 "/aidp-mgmt/knowledge-bases",
                 headers=_bearer(),
-                json={"name": body_name, "ingroup_permission": "READ_ONLY",
+                json={"embedding_model": "bge-m3", "name": body_name, "description": "A test knowledge base",
+                      "ingroup_permission": "READ_ONLY",
                       "group_ids": [1]},
             )
         assert response.status_code == HTTPStatus.OK
@@ -1294,3 +1743,103 @@ class TestUpdateKnowledgeBaseKdsNameSync:
         assert response.status_code == HTTPStatus.OK
         # kds_name is None/empty in both result and body -> sync skipped
         mock_update_perm.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# Document list - all-status history data source
+# ---------------------------------------------------------------------------
+
+
+
+
+class TestAIDPServerSideKnowledgeFileQueries:
+    """File and task page queries are delegated to AIDP without local scans."""
+
+    @staticmethod
+    def _read_only():
+        return MagicMock(permission="READ_ONLY")
+
+    def test_ingested_file_search_forwards_page_and_keyword_once(self):
+        client = _client()
+        from ext_components.aidp.apps import aidp_mgmt_app
+        from ext_components.aidp.services import aidp_permission_service
+
+        page = {
+            "value": [{"file_uuid": "f-1", "file_name": "制度手册.pdf"}],
+            "total_count": 1,
+            "next_link": "/next-page",
+        }
+        with patch.object(aidp_permission_service, "require_permission",
+                          return_value=self._read_only()), \
+             patch.object(aidp_mgmt_app, "list_aidp_docs_impl",
+                          return_value=page) as list_docs:
+            response = client.get(
+                "/aidp-mgmt/knowledge-bases/kb-1/documents?page=2&page_size=5&keyword=%E5%88%B6%E5%BA%A6",
+                headers=_bearer(),
+            )
+
+        assert response.status_code == HTTPStatus.OK
+        body = response.json()
+        assert body["value"] == page["value"]
+        assert body["has_more"] is True
+        assert body["total_reliable"] is False
+        list_docs.assert_called_once_with(
+            SERVER_URL, API_KEY, "kb-1", 2, 5, "制度"
+        )
+
+    def test_unfiltered_ingested_file_list_uses_count_endpoint(self, monkeypatch):
+        from ext_components.aidp.apps import aidp_mgmt_app as module
+
+        monkeypatch.setattr(
+            module.perms, "require_permission", lambda *a, **kw: self._read_only()
+        )
+        calls = []
+
+        async def run_blocking(name, _function, *args, **kwargs):
+            calls.append((name, args, kwargs))
+            if name == "aidp-list-documents":
+                return {"value": [{"file_uuid": "f-1", "file_name": "policy.pdf"}], "next_link": "/next"}
+            if name == "aidp-document-count":
+                return 25
+            raise AssertionError(f"Unexpected blocking call: {name}")
+
+        monkeypatch.setattr(module, "run_blocking", run_blocking)
+        response = _client().get(
+            "/aidp-mgmt/knowledge-bases/kb-1/documents?page=1&page_size=10",
+            headers=_bearer(),
+        )
+
+        assert response.status_code == HTTPStatus.OK
+        body = response.json()
+        assert body["total_count"] == 25
+        assert body["total_reliable"] is True
+        assert body["has_more"] is True
+        assert {call[0] for call in calls} == {
+            "aidp-list-documents", "aidp-document-count"
+        }
+
+    def test_unfiltered_ingested_file_list_propagates_list_failure(self, monkeypatch):
+        from ext_components.aidp.apps import aidp_mgmt_app as module
+
+        monkeypatch.setattr(
+            module.perms, "require_permission", lambda *a, **kw: self._read_only()
+        )
+        list_error = module.AppException(
+            module.ErrorCode.AIDP_CONNECTION_ERROR, "AIDP is unavailable"
+        )
+
+        async def run_blocking(name, _function, *args, **kwargs):
+            if name == "aidp-list-documents":
+                raise list_error
+            if name == "aidp-document-count":
+                return 0
+            raise AssertionError(f"Unexpected blocking call: {name}")
+
+        monkeypatch.setattr(module, "run_blocking", run_blocking)
+        response = _client().get(
+            "/aidp-mgmt/knowledge-bases/kb-1/documents",
+            headers=_bearer(),
+        )
+
+        assert response.status_code == list_error.http_status
+        assert response.json()["code"] == module.ErrorCode.AIDP_CONNECTION_ERROR.value

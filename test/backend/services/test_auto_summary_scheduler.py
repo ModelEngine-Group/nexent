@@ -229,8 +229,8 @@ group_service_mock.get_tenant_default_group_id = MagicMock(return_value=1)
 sys.modules['services.group_service'] = group_service_mock
 setattr(sys.modules['services'], 'group_service', group_service_mock)
 
-# Mock services.vectordatabase_service
-vectordatabase_service_mock = types.ModuleType('services.vectordatabase_service')
+# Mock management.services.knowledge_base.service
+vectordatabase_service_mock = types.ModuleType('management.services.knowledge_base.service')
 
 
 class MockElasticSearchService:
@@ -240,12 +240,15 @@ class MockElasticSearchService:
 
 vectordatabase_service_mock.ElasticSearchService = MockElasticSearchService
 vectordatabase_service_mock.get_vector_db_core = MagicMock()
-sys.modules['services.vectordatabase_service'] = vectordatabase_service_mock
+sys.modules['management.services.knowledge_base.service'] = vectordatabase_service_mock
 setattr(sys.modules['services'], 'vectordatabase_service', vectordatabase_service_mock)
 
 # Mock utils modules
 sys.modules['utils'] = types.ModuleType('utils')
 sys.modules['backend.utils'] = sys.modules['utils']
+# Keep the lightweight stub package-capable so const.py can load the shared
+# configuration validation helpers without importing unrelated utility modules.
+sys.modules['utils'].__path__ = [os.path.abspath(os.path.join(os.path.dirname(__file__), '../../../backend/utils'))]
 
 # Create document_vector_utils mock
 document_vector_utils_mock = types.ModuleType('backend.utils.document_vector_utils')

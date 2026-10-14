@@ -261,7 +261,7 @@ def test_conversation_unique_active_index_exists_in_orm_and_sql():
     assert unique_index.unique is True
     assert "status <> 'DELETED'" in str(unique_index.dialect_options["postgresql"]["where"])
 
-    migration_sql = AGENT_AUTOMATION_MIGRATION.read_text()
+    migration_sql = AGENT_AUTOMATION_MIGRATION.read_text(encoding="utf-8")
     assert "CREATE TABLE IF NOT EXISTS nexent.agent_automation_task_t" in migration_sql
     assert "CREATE TABLE IF NOT EXISTS nexent.agent_automation_run_t" in migration_sql
     assert "CREATE TABLE IF NOT EXISTS nexent.agent_automation_proposal_t" in migration_sql
@@ -275,7 +275,7 @@ def test_active_scheduled_occurrence_has_unique_partial_index():
     ].indexes}
     assert "uq_agent_automation_active_occurrence" in index_names
 
-    migration_sql = AGENT_AUTOMATION_MIGRATION.read_text()
+    migration_sql = AGENT_AUTOMATION_MIGRATION.read_text(encoding="utf-8")
     assert "CREATE UNIQUE INDEX IF NOT EXISTS uq_agent_automation_active_occurrence" in migration_sql
     assert "status IN ('QUEUED', 'RUNNING')" in migration_sql
 
@@ -293,7 +293,7 @@ def test_proposal_source_message_has_unique_partial_index():
         unique_index.dialect_options["postgresql"]["where"]
     )
 
-    migration_sql = AGENT_AUTOMATION_TOOL_MIGRATION.read_text()
+    migration_sql = AGENT_AUTOMATION_TOOL_MIGRATION.read_text(encoding="utf-8")
     assert "ADD COLUMN IF NOT EXISTS source_message_id BIGINT" in migration_sql
     assert "CREATE UNIQUE INDEX IF NOT EXISTS uq_agent_automation_proposal_source_message" in migration_sql
     assert "idempotency_key" not in AgentAutomationProposal.__table__.columns
@@ -312,8 +312,8 @@ def test_proposal_source_message_has_unique_partial_index():
 def test_run_capability_check_column_is_removed_from_schema():
     assert "capability_check" not in AgentAutomationRun.__table__.columns
 
-    init_sql = Path("deploy/sql/init.sql").read_text()
-    migration_sql = AGENT_AUTOMATION_MIGRATION.read_text()
+    init_sql = Path("deploy/sql/init.sql").read_text(encoding="utf-8")
+    migration_sql = AGENT_AUTOMATION_MIGRATION.read_text(encoding="utf-8")
 
     assert "agent_automation_run_t" not in init_sql
     assert "capability_check JSONB" not in init_sql
@@ -482,8 +482,15 @@ def test_lease_recovery_helpers_cover_empty_and_success_paths(monkeypatch):
     assert agent_automation_db.release_task_lock(1) is True
     assert agent_automation_db.release_task_lock(1, "scheduler-a") is True
     assert agent_automation_db.recover_orphaned_runs() == 2
+    assert agent_automation_db.release_all_task_locks() == 2
     assert agent_automation_db.release_expired_locks() == 2
-    assert any("AUTOMATION_LEASE_EXPIRED" in str(statement) for statement, _ in session.calls)
+    recovery_sql = next(
+        str(statement)
+        for statement, _ in session.calls
+        if "AUTOMATION_LEASE_EXPIRED" in str(statement)
+    )
+    assert "status = 'RUNNING'" in recovery_sql
+    assert "QUEUED" not in recovery_sql
 
 
 def test_optional_database_rows_return_empty_values(monkeypatch):

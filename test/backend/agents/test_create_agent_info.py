@@ -3,12 +3,18 @@ import sys
 import types
 import importlib.util
 from pathlib import Path
+from contextlib import ExitStack
 from unittest.mock import AsyncMock, MagicMock, patch, Mock, PropertyMock, ANY
 
 from test.common.test_mocks import bootstrap_test_env
 
 env_state = bootstrap_test_env()
 consts_const = env_state["mock_const"]
+consts_const.RUNTIME_PARALLEL_EXECUTOR_TIMEOUT_SECONDS = 120
+consts_const.NEXENT_TOOL_FASTPATH_ENABLED = False
+consts_const.NEXENT_TOOL_FASTPATH_ALLOWED_TOOLS = (
+    "KnowledgeBaseSearchTool", "ReadSkillMdTool", "ReadSkillConfigTool", "AidpSearchTool",
+)
 
 # Mock consts.model module with HistoryItem class
 from typing import List, Optional, Dict, Any
@@ -28,6 +34,15 @@ class AgentHistory(BaseModel):
 class ValidationError(Exception):
     """Mock ValidationError for testing."""
     pass
+
+
+class WorkbenchError(ValidationError):
+    """Safe runtime boundary error used by the generation overlay."""
+
+    def __init__(self, code, status_code=422):
+        self.code = code
+        self.status_code = status_code
+        super().__init__(code)
 
 
 class MCPConnectionError(Exception):
@@ -71,16 +86,28 @@ sys.modules["consts.capability_profiles"].CATALOG = {}
 # Mock consts.exceptions module with ValidationError
 consts_exceptions_module = types.ModuleType("consts.exceptions")
 consts_exceptions_module.ValidationError = ValidationError
+consts_exceptions_module.WorkbenchError = WorkbenchError
 consts_exceptions_module.MCPConnectionError = MCPConnectionError
 consts_exceptions_module.NotFoundException = NotFoundException
 consts_exceptions_module.ToolExecutionException = ToolExecutionException
 sys.modules["consts.exceptions"] = consts_exceptions_module
+
+consts_tool_labels_module = types.ModuleType("consts.tool_labels")
+consts_tool_labels_module.SYSTEM_MANAGED_TOOL_NAMES = frozenset({
+    "store_memory",
+    "search_memory",
+    "download_from_s3",
+    "upload_to_s3",
+    "parallel_executor",
+})
+sys.modules["consts.tool_labels"] = consts_tool_labels_module
 
 # Also add model and exceptions to consts module attributes
 consts_module = sys.modules.get("consts")
 if consts_module:
     setattr(consts_module, "model", consts_model_module)
     setattr(consts_module, "exceptions", consts_exceptions_module)
+    setattr(consts_module, "tool_labels", consts_tool_labels_module)
     setattr(
         consts_module,
         "capability_profiles",
@@ -121,9 +148,11 @@ consts_const.POSTGRES_DB = "test_db"
 consts_const.POSTGRES_PORT = 5432
 consts_const.DEFAULT_TENANT_ID = "default_tenant"
 consts_const.LOCAL_MCP_SERVER = "http://localhost:5011"
+consts_const.MCP_REQUEST_TIMEOUT_SECONDS = 10
 consts_const.MODEL_CONFIG_MAPPING = {"llm": "llm_config"}
 consts_const.LANGUAGE = {"ZH": "zh"}
 consts_const.DATA_PROCESS_SERVICE = "https://example.com/data-process"
+consts_const.NEXENT_SANDBOX_DEFAULT_LEVEL = "local"
 
 # Mock utils module
 utils_mock = MagicMock()
@@ -167,7 +196,7 @@ mock_message_observer = MagicMock()
 class MockAgentVerificationConfig:
     @classmethod
     def model_validate(cls, value):
-        return value or {}
+        return types.SimpleNamespace(enabled=bool((value or {}).get("enabled", False)))
 
 sys.modules['nexent.core.utils.observer'] = MagicMock(MessageObserver=mock_message_observer)
 sys.modules['nexent.core.agents.agent_model'] = _create_stub_module(
@@ -199,6 +228,30 @@ sys.modules['nexent.core.agents.context'] = _create_stub_module(
         processing_mode=(layers.get("request") or {}).get("processing_mode", "passthrough")
     ),
 )
+sys.modules['nexent.core.agents.context'].__path__ = [
+    str(Path(__file__).parents[3] / "sdk" / "nexent" / "core" / "agents" / "context")
+]
+sys.modules['nexent.core'].__path__ = [
+    str(Path(__file__).parents[3] / "sdk" / "nexent" / "core")
+]
+_agents_package = _create_stub_module("nexent.core.agents")
+_agents_package.__path__ = [
+    str(Path(__file__).parents[3] / "sdk" / "nexent" / "core" / "agents")
+]
+_composer_module = importlib.import_module("nexent.core.agents.prompt")
+
+_prompt_loader_stub = types.ModuleType("management.services.agent.prompt_template_loader")
+
+def _load_stub_prompt_bundle(*, is_manager, language, **kwargs):
+    role = "manager" if is_manager else "managed"
+    module = f"{role}_agent"
+    return _composer_module.AgentPromptComposer.from_compatibility_templates(
+        {module: {"task": "{{task}}", "report": "{{final_answer}}"},
+         "final_answer": {"pre_messages": "", "post_messages": "{{task}}"}},
+    ).bundle
+
+_prompt_loader_stub.load_agent_prompt_bundle = _load_stub_prompt_bundle
+sys.modules[_prompt_loader_stub.__name__] = _prompt_loader_stub
 sys.modules['nexent.core.agents.summary_config'] = _create_stub_module(
     "nexent.core.agents.summary_config",
     ContextManagerConfig=MagicMock(),
@@ -231,17 +284,18 @@ sys.modules['database.a2a_agent_db'] = a2a_agent_db_stub
 database_module.a2a_agent_db = a2a_agent_db_stub
 sys.modules['database.knowledge_db'] = MagicMock()
 sys.modules['database.knowledge_db'].get_knowledge_name_map_by_index_names = MagicMock()
-sys.modules['services.vectordatabase_service'] = MagicMock()
+sys.modules['management.services.knowledge_base.service'] = MagicMock()
+sys.modules['management.services.model.resolver'] = MagicMock()
 # Configure ElasticSearchService.filter_accessible_indices as a pass-through so that
 # existing tests (which don't explicitly mock this permission filter) still work correctly.
-sys.modules['services.vectordatabase_service'].ElasticSearchService.filter_accessible_indices.side_effect = \
+sys.modules['management.services.knowledge_base.service'].ElasticSearchService.filter_accessible_indices.side_effect = \
     lambda index_names, **kwargs: list(index_names)
 sys.modules['services.tenant_config_service'] = MagicMock()
 sys.modules['utils.prompt_template_utils'] = MagicMock()
 sys.modules['utils.config_utils'] = MagicMock()
 sys.modules['utils.http_client_utils'] = MagicMock()
 sys.modules['utils.langchain_utils'] = MagicMock()
-sys.modules['utils.model_name_utils'] = MagicMock()
+sys.modules['management.services.model.names'] = MagicMock()
 sys.modules['langchain_core.tools'] = MagicMock()
 # Build services module hierarchy with minimal functionality
 services_module = _create_stub_module("services")
@@ -255,12 +309,16 @@ sys.modules['services.ind_aidp_service'] = _create_stub_module(
     "services.ind_aidp_service",
     create_ind_aidp_image_url_builder=MagicMock(),
 )
-sys.modules['services.model_gateway_service'] = _create_stub_module(
-    "services.model_gateway_service",
+sys.modules['management.services.model.adapter'] = _create_stub_module(
+    "management.services.model.adapter",
     get_llm_adapter=MagicMock(return_value="stub_llm_adapter"),
     get_vlm_adapter=MagicMock(return_value="stub_vlm_adapter"),
 )
 sys.modules['services.memory_config_service'] = MagicMock()
+sys.modules['services.memory_external_provider_service'] = _create_stub_module(
+    "services.memory_external_provider_service",
+    get_memory_external_provider_service=MagicMock(return_value=None),
+)
 # Extend services hierarchy with additional stubs
 sys.modules['services.file_management_service'] = _create_stub_module(
     "services.file_management_service",
@@ -271,8 +329,8 @@ sys.modules['services.tool_configuration_service'] = _create_stub_module(
     "services.tool_configuration_service",
     initialize_tools_on_startup=AsyncMock(),
 )
-sys.modules['services.agent_service'] = _create_stub_module(
-    "services.agent_service",
+sys.modules['management.services.agent.service'] = _create_stub_module(
+    "management.services.agent.service",
     build_sandbox_policy=MagicMock(return_value=None),
     get_sandbox_minio_client=MagicMock(return_value=None),
 )
@@ -281,9 +339,23 @@ sys.modules['nexent.memory.memory_service'] = MagicMock()
 # Build top-level nexent module to avoid importing the real package
 nexent_module = _create_stub_module("nexent", MessageObserver=mock_message_observer)
 sys.modules['nexent'] = nexent_module
+sys.modules['nexent.memory'] = _create_stub_module("nexent.memory")
+sys.modules['nexent.memory.models'] = _create_stub_module("nexent.memory.models")
+sys.modules['nexent.memory'].models = sys.modules['nexent.memory.models']
 
 # Create nested modules for nexent.core to satisfy imports safely
 sys.modules['nexent.core'] = _create_stub_module("nexent.core")
+_concurrency_mod = _create_stub_module("nexent.core.concurrency")
+
+
+async def _run_blocking(_task_name, fn, *args, **kwargs):
+    kwargs.pop("lane", None)
+    kwargs.pop("owner", None)
+    return fn(*args, **kwargs)
+
+
+_concurrency_mod.run_blocking = _run_blocking
+sys.modules['nexent.core.concurrency'] = _concurrency_mod
 nexent_agents_module = _create_stub_module("nexent.core.agents")
 nexent_agents_module.__path__ = []
 sys.modules['nexent.core.utils'] = _create_stub_module("nexent.core.utils")
@@ -354,12 +426,13 @@ class MockRequestBudgetOverrides:
         self.requested_output_tokens = requested_output_tokens
 
 
-class MockSafeInputBudgetSnapshot:
+class MockContextBudgetSnapshot:
     def __init__(self, capacity_snapshot, requested_output_tokens=None):
         self.model_name = capacity_snapshot.model_name
         self.requested_output_tokens = requested_output_tokens or 4096
-        self.soft_input_budget_tokens = 24576
-        self.hard_input_budget_tokens = 28672
+        self.effective_input_limit_tokens = 28672
+        self.compaction_trigger_threshold_tokens = 24576
+        self.compaction_target_tokens = 17203
         self.fingerprint = "safe-budget-fingerprint"
         self.warnings = []
 
@@ -367,8 +440,8 @@ class MockSafeInputBudgetSnapshot:
         return self.__dict__.copy()
 
 
-class MockSafeInputBudgetCalculator:
-    def calculate_safe_input_budget(
+class MockContextBudgetCalculator:
+    def calculate_context_budget(
         self,
         capacity_snapshot,
         reserve_policy=None,
@@ -377,7 +450,7 @@ class MockSafeInputBudgetCalculator:
         output_reserve_source="model_default",
     ):
         override_tokens = getattr(request_overrides, "requested_output_tokens", None)
-        return MockSafeInputBudgetSnapshot(
+        return MockContextBudgetSnapshot(
             capacity_snapshot,
             requested_output_tokens=override_tokens or requested_output_tokens,
         )
@@ -397,7 +470,8 @@ sys.modules['nexent.core.models.capacity_resolver'] = _create_stub_module(
 sys.modules['nexent.core.models.capacity_budget'] = _create_stub_module(
     "nexent.core.models.capacity_budget",
     RequestBudgetOverrides=MockRequestBudgetOverrides,
-    SafeInputBudgetCalculator=MockSafeInputBudgetCalculator,
+    ContextBudgetCalculator=MockContextBudgetCalculator,
+    ContextBudgetSnapshot=MockContextBudgetSnapshot,
     UncertaintyReserveBasisUnknown=MockUncertaintyReserveBasisUnknown,
 )
 
@@ -419,7 +493,11 @@ _mock_parallel_executor_tool_cls = MagicMock()
 _mock_parallel_executor_tool_cls.__name__ = "ParallelExecutorTool"
 _mock_parallel_executor_tool_cls.name = "parallel_executor"
 _mock_parallel_executor_tool_cls.description = "Execute multiple independent calls in parallel."
+_mock_parallel_executor_tool_cls.description_zh = "并行执行多个互不依赖的工具或助手调用。"
 _mock_parallel_executor_tool_cls.inputs = {"tasks": {"type": "array"}}
+_mock_parallel_executor_tool_cls.inputs_for_timeout = lambda timeout: {
+    "tasks": {"type": "array"}, "timeout": {"type": "integer", "default": timeout}
+}
 _mock_parallel_executor_tool_cls.output_type = "any"
 _parallel_executor_mod = _create_stub_module(
     "nexent.core.tools.parallel_executor",
@@ -448,9 +526,9 @@ _redis_utils_mod.get_redis_client = MagicMock(return_value=MagicMock())
 sys.modules["utils.redis_utils"] = _redis_utils_mod
 setattr(_utils_pkg, "redis_utils", _redis_utils_mod)
 
-_model_name_utils_mod = _create_stub_module("utils.model_name_utils")
+_model_name_utils_mod = _create_stub_module("management.services.model.names")
 _model_name_utils_mod.add_repo_to_name = lambda name, repo=None, **kwargs: name
-sys.modules["utils.model_name_utils"] = _model_name_utils_mod
+sys.modules["management.services.model.names"] = _model_name_utils_mod
 setattr(_utils_pkg, "model_name_utils", _model_name_utils_mod)
 
 _prompt_template_utils_mod = _create_stub_module("utils.prompt_template_utils")
@@ -460,7 +538,7 @@ setattr(_utils_pkg, "prompt_template_utils", _prompt_template_utils_mod)
 
 _config_utils_mod = _create_stub_module("utils.config_utils")
 _config_utils_mod.tenant_config_manager = MagicMock()
-_config_utils_mod.get_model_name_from_config = MagicMock(return_value="default")
+_model_name_utils_mod.get_model_name_from_config = MagicMock(return_value="default")
 sys.modules["utils.config_utils"] = _config_utils_mod
 setattr(_utils_pkg, "config_utils", _config_utils_mod)
 
@@ -496,6 +574,8 @@ create_agent_info_module = importlib.util.module_from_spec(spec)
 sys.modules["backend.agents.create_agent_info"] = create_agent_info_module
 assert spec.loader is not None
 spec.loader.exec_module(create_agent_info_module)
+# Keep older patch targets available while those tests are migrated to the loader.
+create_agent_info_module.get_agent_prompt_template = MagicMock()
 setattr(agents_pkg, "create_agent_info", create_agent_info_module)
 
 # Now import the symbols under test
@@ -524,16 +604,18 @@ from backend.agents.create_agent_info import (
     _merge_tool_params,
     _resolve_runtime_tool_records,
     _resolve_input_budget,
-    _resolve_safe_input_budget,
+    _resolve_context_budget,
+    _get_external_provider_service_for_search,
 )
 
 
-@pytest.fixture(autouse=True)
-def run_create_agent_thread_work_inline(monkeypatch):
-    async def run_inline(func, *args, **kwargs):
-        return func(*args, **kwargs)
+def test_ac_ext_001_external_search_always_resolves_provider_service(monkeypatch):
+    service = object()
+    factory = MagicMock(return_value=service)
+    monkeypatch.setattr(create_agent_info_module, "get_memory_external_provider_service", factory)
 
-    monkeypatch.setattr(create_agent_info_module.asyncio, "to_thread", run_inline)
+    assert _get_external_provider_service_for_search() is service
+    factory.assert_called_once_with()
 
 
 def test_build_run_workspace_uses_user_and_run_only(monkeypatch, tmp_path):
@@ -546,6 +628,28 @@ def test_build_run_workspace_uses_user_and_run_only(monkeypatch, tmp_path):
     workspace = create_agent_info_module._build_run_workspace("user-1", "run-1")
 
     assert Path(workspace) == tmp_path.resolve() / "user-1" / "run-1"
+
+
+@pytest.mark.parametrize(
+    ("sandbox_level", "verification_enabled", "expected_local"),
+    [("local", False, True), ("docker", True, False)],
+)
+def test_ut_be_dpr_007_prompt_runtime_flags_follow_backend_configuration(
+    monkeypatch, sandbox_level, verification_enabled, expected_local,
+):
+    """UT-BE-DPR-007: Backend resolves sandbox and verification prompt gates."""
+    monkeypatch.setattr(
+        create_agent_info_module,
+        "NEXENT_SANDBOX_DEFAULT_LEVEL",
+        sandbox_level,
+    )
+
+    verification, is_local = create_agent_info_module._resolve_prompt_runtime_flags(
+        {"verification_config": {"enabled": verification_enabled}}
+    )
+
+    assert verification.enabled is verification_enabled
+    assert is_local is expected_local
 
 # Import HistoryItem for testing (from mocked consts.model)
 HistoryItem = sys.modules["consts.model"].HistoryItem
@@ -573,7 +677,7 @@ class TestResolveInputBudget:
         }
 
         input_budget, capacity_snapshot, resolved_capacity_snapshot = _resolve_input_budget(model_info)
-        safe_budget_snapshot = _resolve_safe_input_budget(
+        context_budget_snapshot = _resolve_context_budget(
             capacity_snapshot=resolved_capacity_snapshot,
             tenant_id="tenant_1",
             agent_requested_output_tokens=None,
@@ -584,7 +688,7 @@ class TestResolveInputBudget:
         assert isinstance(capacity_snapshot, dict)
         assert capacity_snapshot["capacity_fingerprint"] == resolved_capacity_snapshot.fingerprint
         assert isinstance(resolved_capacity_snapshot, MockModelCapacitySnapshot)
-        assert safe_budget_snapshot["model_name"] == resolved_capacity_snapshot.model_name
+        assert context_budget_snapshot.model_name == resolved_capacity_snapshot.model_name
 
 
 class TestGetSkillsForTemplate:
@@ -595,8 +699,8 @@ class TestGetSkillsForTemplate:
         mock_skill1 = {"name": "skill1", "description": "desc1"}
         mock_skill2 = {"name": "skill2", "description": "desc2"}
 
-        with patch.dict('sys.modules', {'services.skill_service': MagicMock()}):
-            mock_skill_service = sys.modules['services.skill_service'].SkillService
+        with patch.dict('sys.modules', {'management.services.skill.service': MagicMock()}):
+            mock_skill_service = sys.modules['management.services.skill.service'].SkillService
             mock_instance = MagicMock()
             mock_instance.get_enabled_skills_for_agent.return_value = [mock_skill1, mock_skill2]
             mock_skill_service.return_value = mock_instance
@@ -623,8 +727,8 @@ class TestGetSkillsForTemplate:
         mock_skill2 = {"description": "desc2"}  # Missing name
         mock_skill3 = {}  # Missing both
 
-        with patch.dict('sys.modules', {'services.skill_service': MagicMock()}):
-            mock_skill_service = sys.modules['services.skill_service'].SkillService
+        with patch.dict('sys.modules', {'management.services.skill.service': MagicMock()}):
+            mock_skill_service = sys.modules['management.services.skill.service'].SkillService
             mock_instance = MagicMock()
             mock_instance.get_enabled_skills_for_agent.return_value = [mock_skill1, mock_skill2, mock_skill3]
             mock_skill_service.return_value = mock_instance
@@ -643,8 +747,8 @@ class TestGetSkillsForTemplate:
 
     def test_get_skills_for_template_empty_list(self):
         """Test case when no skills are enabled"""
-        with patch.dict('sys.modules', {'services.skill_service': MagicMock()}):
-            mock_skill_service = sys.modules['services.skill_service'].SkillService
+        with patch.dict('sys.modules', {'management.services.skill.service': MagicMock()}):
+            mock_skill_service = sys.modules['management.services.skill.service'].SkillService
             mock_instance = MagicMock()
             mock_instance.get_enabled_skills_for_agent.return_value = []
             mock_skill_service.return_value = mock_instance
@@ -659,8 +763,8 @@ class TestGetSkillsForTemplate:
 
     def test_get_skills_for_template_exception_handling(self):
         """Test case for exception handling when SkillService fails"""
-        with patch.dict('sys.modules', {'services.skill_service': MagicMock()}):
-            mock_skill_service = sys.modules['services.skill_service'].SkillService
+        with patch.dict('sys.modules', {'management.services.skill.service': MagicMock()}):
+            mock_skill_service = sys.modules['management.services.skill.service'].SkillService
             mock_skill_service.side_effect = Exception("Service unavailable")
 
             with patch('backend.agents.create_agent_info.logger') as mock_logger:
@@ -676,8 +780,8 @@ class TestGetSkillsForTemplate:
 
     def test_get_skills_for_template_with_version_no(self):
         """Test case with specific version number"""
-        with patch.dict('sys.modules', {'services.skill_service': MagicMock()}):
-            mock_skill_service = sys.modules['services.skill_service'].SkillService
+        with patch.dict('sys.modules', {'management.services.skill.service': MagicMock()}):
+            mock_skill_service = sys.modules['management.services.skill.service'].SkillService
             mock_instance = MagicMock()
             mock_instance.get_enabled_skills_for_agent.return_value = [
                 {"name": "v2_skill", "description": "version 2 skill"}
@@ -701,8 +805,73 @@ class TestGetSkillsForTemplate:
 class TestGetSkillScriptTools:
     """Tests for the _get_skill_script_tools function"""
 
+    @pytest.fixture(autouse=True)
+    def _enabled_skill_service(self):
+        module = types.ModuleType("management.services.skill.service")
+        module.SkillService = MagicMock(
+            return_value=MagicMock(
+                get_enabled_skills_for_agent=MagicMock(
+                    return_value=[{"name": "test_skill", "config_values": {}}]
+                )
+            )
+        )
+        with patch.dict(sys.modules, {module.__name__: module}):
+            yield
+
+    def test_ut_be_dpr_006_omits_skill_tools_without_enabled_skills(self):
+        """UT-BE-DPR-006: a skill-free Agent receives only fixed file tools."""
+        mock_tool_config.reset_mock()
+        skill_service_module = types.ModuleType("management.services.skill.service")
+        skill_service_module.SkillService = MagicMock(
+            return_value=MagicMock(get_enabled_skills_for_agent=MagicMock(return_value=[]))
+        )
+
+        with patch.dict(sys.modules, {skill_service_module.__name__: skill_service_module}):
+            _get_skill_script_tools(agent_id=1, tenant_id="tenant_1")
+
+        names = [call.kwargs["name"] for call in mock_tool_config.call_args_list]
+        assert names == ["download_from_s3", "upload_to_s3"]
+        assert "write_skill_file" not in names
+
+    def test_ut_be_fps_010_injects_skill_tools_per_agent_without_write_tool(self):
+        """UT-BE-FPS-010: only enabled skills add their SDK-described tools."""
+        mock_tool_config.reset_mock()
+        service = MagicMock()
+        service.get_enabled_skills_for_agent.side_effect = lambda *, agent_id, **_: (
+            [{"name": "analysis", "config_values": {"format": "csv"}}]
+            if agent_id == 2 else []
+        )
+        skill_service_module = types.ModuleType("management.services.skill.service")
+        skill_service_module.SkillService = MagicMock(return_value=service)
+
+        with patch.dict(sys.modules, {skill_service_module.__name__: skill_service_module}):
+            parent_tools = _get_skill_script_tools(agent_id=1, tenant_id="tenant_1")
+            parent_names = [call.kwargs["name"] for call in mock_tool_config.call_args_list]
+            mock_tool_config.reset_mock()
+            child_tools = _get_skill_script_tools(agent_id=2, tenant_id="tenant_1")
+            child_names = [call.kwargs["name"] for call in mock_tool_config.call_args_list]
+
+        assert len(parent_tools) == 2
+        assert parent_names == ["download_from_s3", "upload_to_s3"]
+        assert len(child_tools) == 5
+        assert child_names == [
+            "run_skill_script",
+            "read_skill_md",
+            "read_skill_config",
+            "download_from_s3",
+            "upload_to_s3",
+        ]
+        assert "write_skill_file" not in child_names
+        run_skill_call = mock_tool_config.call_args_list[0]
+        assert run_skill_call.kwargs["params"]["authorized_skill_names"] == ["analysis"]
+        from nexent.core.prompts import load_prompt
+
+        assert run_skill_call.kwargs["description"] == load_prompt(
+            "en", "agent/context_sections"
+        )["builtin_tools"]["run_skill_script"]
+
     def test_get_skill_script_tools_success(self):
-        """Test case for successfully getting skill script tools"""
+        """UT-BE-WMA-019: standard runtime injects upload/download helpers."""
         mock_tool_config.reset_mock()
         with patch('consts.const.CONTAINER_SKILLS_PATH', "/container/skills"):
             result = _get_skill_script_tools(
@@ -711,8 +880,8 @@ class TestGetSkillScriptTools:
                 version_no=0
             )
 
-            assert len(result) == 6
-            assert mock_tool_config.call_count == 6
+            assert len(result) == 5
+            assert mock_tool_config.call_count == 5
 
             # Verify the calls made to ToolConfig
             calls = mock_tool_config.call_args_list
@@ -731,14 +900,10 @@ class TestGetSkillScriptTools:
             assert calls[2][1]['class_name'] == "ReadSkillConfigTool"
             assert calls[2][1]['name'] == "read_skill_config"
 
-            # Fourth call: WriteSkillFileTool
-            assert calls[3][1]['class_name'] == "WriteSkillFileTool"
-            assert calls[3][1]['name'] == "write_skill_file"
-
-            assert calls[4][1]['class_name'] == "DownloadFromS3Tool"
-            assert calls[4][1]['name'] == "download_from_s3"
-            assert calls[5][1]['class_name'] == "UploadToS3Tool"
-            assert calls[5][1]['name'] == "upload_to_s3"
+            assert calls[3][1]['class_name'] == "DownloadFromS3Tool"
+            assert calls[3][1]['name'] == "download_from_s3"
+            assert calls[4][1]['class_name'] == "UploadToS3Tool"
+            assert calls[4][1]['name'] == "upload_to_s3"
 
     def test_get_skill_script_tools_metadata_context(self):
         """Test that skill context metadata is correctly set for all tools"""
@@ -750,16 +915,16 @@ class TestGetSkillScriptTools:
                 version_no=7
             )
 
-            assert len(result) == 6
+            assert len(result) == 5
             # Skill tools retain skill context; file tools use run-scoped metadata.
             calls = mock_tool_config.call_args_list
-            for call in calls[:4]:
+            for call in calls[:3]:
                 assert call[1]['metadata'] == {
                     "agent_id": 123,
                     "tenant_id": "test_tenant",
                     "version_no": 7
                 }
-            for call in calls[4:]:
+            for call in calls[3:]:
                 assert call[1]['metadata'] == {}
 
     def test_get_skill_script_tools_input_schemas(self):
@@ -785,11 +950,6 @@ class TestGetSkillScriptTools:
 
             # ReadSkillConfigTool
             assert '"skill_name": "str"' in calls[2][1]['inputs']
-
-            # WriteSkillFileTool
-            assert '"skill_name": "str"' in calls[3][1]['inputs']
-            assert '"file_path": "str"' in calls[3][1]['inputs']
-            assert '"content": "str"' in calls[3][1]['inputs']
 
     def test_get_skill_script_tools_output_types(self):
         """Test that output types are correctly set for all tools"""
@@ -836,6 +996,8 @@ class TestGetSkillScriptTools:
                 desc = call[1]['description']
                 assert len(desc) > 0
                 assert isinstance(desc, str)
+                assert isinstance(call[1]["description_zh"], str)
+                assert call[1]["description_zh"]
 
     def test_get_skill_script_tools_injects_runtime_file_context(self):
         mock_tool_config.reset_mock()
@@ -851,7 +1013,7 @@ class TestGetSkillScriptTools:
 
         calls = mock_tool_config.call_args_list
         assert calls[0][1]["params"]["workspace_path"] == file_context["workspace_path"]
-        for call in calls[4:]:
+        for call in calls[3:]:
             assert call[1]["metadata"] == file_context
             assert call[1]["params"]["workspace_path"] == file_context["workspace_path"]
 
@@ -1075,12 +1237,37 @@ class TestCreateToolConfigList:
                 class_name="TestTool",
                 name="test_tool",
                 description="A test tool",
+                description_zh=None,
                 inputs="string",
                 output_type="string",
                 params={"param1": "value1"},
                 source="local",
                 usage=None
             )
+
+    @pytest.mark.asyncio
+    async def test_create_tool_config_list_ignores_legacy_system_managed_bindings(self):
+        """Legacy S3 bindings are replaced by the run-scoped built-in tools."""
+        with patch(
+            "backend.agents.create_agent_info.discover_langchain_tools",
+            return_value=[],
+        ), patch(
+            "backend.agents.create_agent_info.search_tools_for_sub_agent",
+            return_value=[
+                {"tool_id": 1, "class_name": "DownloadFromS3Tool", "name": "download_from_s3"},
+                {"tool_id": 2, "class_name": "UploadToS3Tool", "name": "upload_to_s3"},
+            ],
+        ), patch(
+            "backend.agents.create_agent_info.skill_db.search_skills_for_agent",
+            return_value=[],
+        ), patch(
+            "backend.agents.create_agent_info.search_agent_info_by_agent_id",
+            return_value={"name": "legacy-agent"},
+        ), patch("backend.agents.create_agent_info.ToolConfig") as mock_tool_config:
+            result = await create_tool_config_list("agent_1", "tenant_1", "user_1")
+
+        assert result == []
+        mock_tool_config.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_create_tool_config_list_with_knowledge_base_tool(self):
@@ -2035,6 +2222,7 @@ class TestCreateAgentConfig:
                 ):
             mock_search_agent.return_value = {
                 "name": "test_agent",
+                "display_name": "知识助手",
                 "description": "test description",
                 "duty_prompt": "test duty",
                 "constraint_prompt": "test constraint",
@@ -2085,8 +2273,11 @@ class TestCreateAgentConfig:
         )
 
         mocks["build_components"].assert_called_once()
-        mocks["prepare_templates"].assert_awaited_once()
+        mocks["prepare_templates"].assert_not_awaited()
         assert mocks["agent_config"].call_args.kwargs["context_items"] is components
+        # UT-BE-TRACE-021: preserve the UI name separately from the variable name.
+        assert mocks["agent_config"].call_args.kwargs["name"] == "test_agent"
+        assert mocks["agent_config"].call_args.kwargs["display_name"] == "知识助手"
         config = mocks["agent_config"].call_args.kwargs["context_manager_config"]
         assert config.policy_layers["platform"]["processing_mode"] == "adaptive_compact"
 
@@ -2106,10 +2297,8 @@ class TestCreateAgentConfig:
             )
 
         context_kwargs = mocks["build_components"].call_args.kwargs
-        policy = context_kwargs["memory_tool_policy"]
-        assert "### Memory Tool Policy" in policy
-        assert "search_memory" not in policy
-        assert "store_memory" in policy
+        assert context_kwargs["enable_memory_tool_policy"] is True
+        assert "memory_tool_policy" not in context_kwargs
         assert "instructions" not in mocks["agent_config"].call_args.kwargs
 
     @pytest.mark.asyncio
@@ -2120,8 +2309,8 @@ class TestCreateAgentConfig:
     ):
         sdk_authorized_imports = ["sdk_default_import", "sdk_extra_import"]
         with patch(
-            "backend.agents.create_agent_info.os.getenv",
-            return_value=sandbox_default_level,
+            "backend.agents.create_agent_info.NEXENT_SANDBOX_DEFAULT_LEVEL",
+            sandbox_default_level,
         ), patch(
             "backend.agents.create_agent_info.get_local_python_authorized_imports",
             return_value=sdk_authorized_imports,
@@ -2140,6 +2329,9 @@ class TestCreateAgentConfig:
             ]
             == expected_authorized_imports
         )
+        assert mocks["build_components"].call_args.kwargs[
+            "sandbox_workspace_enabled"
+        ] is (sandbox_default_level != "local")
         if sandbox_default_level == "local":
             get_authorized_imports.assert_called_once_with()
         else:
@@ -2164,7 +2356,7 @@ class TestCreateAgentConfig:
             "memory_level": "agent",
         }]
         assert "search_memory" not in context_kwargs["tools"]
-        assert "search_memory" not in context_kwargs["memory_tool_policy"]
+        assert "memory_tool_policy" not in context_kwargs
         assert all(
             tool.name != "search_memory"
             for tool in mocks["agent_config"].call_args.kwargs["tools"]
@@ -2192,7 +2384,8 @@ class TestCreateAgentConfig:
             types.SimpleNamespace(name="run_skill_script"),
             types.SimpleNamespace(name="read_skill_md"),
             types.SimpleNamespace(name="read_skill_config"),
-            types.SimpleNamespace(name="write_skill_file"),
+            types.SimpleNamespace(name="download_from_s3"),
+            types.SimpleNamespace(name="upload_to_s3"),
         ]
         with patch(
             'backend.agents.create_agent_info._get_skill_script_tools',
@@ -2210,7 +2403,7 @@ class TestCreateAgentConfig:
         assert "run_skill_script" in context_tools
         assert "read_skill_md" in context_tools
         assert "read_skill_config" in context_tools
-        assert "write_skill_file" in context_tools
+        assert "write_skill_file" not in context_tools
         assert set(context_tools) == {tool.name for tool in agent_tools}
 
     @pytest.mark.asyncio
@@ -2222,7 +2415,8 @@ class TestCreateAgentConfig:
             types.SimpleNamespace(name="run_skill_script"),
             types.SimpleNamespace(name="read_skill_md"),
             types.SimpleNamespace(name="read_skill_config"),
-            types.SimpleNamespace(name="write_skill_file"),
+            types.SimpleNamespace(name="download_from_s3"),
+            types.SimpleNamespace(name="upload_to_s3"),
         ]
         with patch(
             'backend.agents.create_agent_info._get_skill_script_tools',
@@ -2239,7 +2433,7 @@ class TestCreateAgentConfig:
         assert "run_skill_script" in context_tools
         assert "read_skill_md" in context_tools
         assert "read_skill_config" in context_tools
-        assert "write_skill_file" in context_tools
+        assert "write_skill_file" not in context_tools
         assert set(context_tools) == {tool.name for tool in agent_tools}
 
     @pytest.mark.asyncio
@@ -2255,14 +2449,14 @@ class TestCreateAgentConfig:
         )
 
         mocks["build_components"].assert_called_once()
-        assert "system_prompt" not in mocks["prepare_templates"].call_args.kwargs
+        mocks["prepare_templates"].assert_not_called()
         assert mocks["agent_config"].call_args.kwargs["context_items"] is components
         config = mocks["agent_config"].call_args.kwargs["context_manager_config"]
         assert config.policy_layers["platform"]["processing_mode"] == "passthrough"
 
     @pytest.mark.asyncio
     async def test_create_agent_config_basic(self):
-        """Test case for basic agent configuration creation"""
+        """UT-BE-DPR-010: basic agent keeps parallel tool's bilingual metadata."""
         # Reset module-level mock - parallel_executor appends an extra
         # ToolConfig call after create_tool_config_list returns.  Both
         # call history and side_effect must be cleared because prior
@@ -2277,7 +2471,8 @@ class TestCreateAgentConfig:
                 patch('backend.agents.create_agent_info.build_memory_context') as mock_build_memory, \
                 patch('backend.agents.create_agent_info.AgentConfig') as mock_agent_config, \
                 patch('backend.agents.create_agent_info.prepare_prompt_templates') as mock_prepare_templates, \
-                patch('backend.agents.create_agent_info.get_model_by_model_id') as mock_get_model_by_id:
+                patch('backend.agents.create_agent_info.get_model_by_model_id') as mock_get_model_by_id, \
+                patch('backend.agents.create_agent_info.RUNTIME_PARALLEL_EXECUTOR_TIMEOUT_SECONDS', 240):
 
             # Set mock return values
             mock_search_agent.return_value = {
@@ -2288,7 +2483,8 @@ class TestCreateAgentConfig:
                 "few_shots_prompt": "test few shots",
                 "max_steps": 5,
                 "model_ids": [123],
-                "provide_run_summary": True
+                "provide_run_summary": True,
+                "enable_protocol_repair_retry": False,
             }
             mock_query_sub.return_value = []
             mock_create_tools.return_value = []
@@ -2312,21 +2508,24 @@ class TestCreateAgentConfig:
             # Verify that AgentConfig was called correctly
             mock_agent_config.assert_called_once_with(
                 name="test_agent",
+                display_name=None,
                 description="test description",
-                prompt_templates={"system_prompt": "populated_system_prompt"},
+                prompt_templates=ANY,
                 tools=ANY,
                 max_steps=5,
                 requested_output_tokens=None,
                 model_name="test_model",
                 provide_run_summary=True,
                 allow_chat_metadata=False,
-                managed_agents=[],
+                worker_agents=[],
+                enable_protocol_repair_retry=False,
                 external_a2a_agents=[],
                 context_manager_config=ANY,
                 context_items=ANY,
+                prompt_tool_policy_snapshot=ANY,
                 pre_run_tool_events=ANY,
                 capacity_snapshot=ANY,
-                safe_input_budget_snapshot=ANY,
+                context_budget_snapshot=ANY,
                 verification_config=ANY,
                 enable_planning=ANY
             )
@@ -2338,6 +2537,10 @@ class TestCreateAgentConfig:
             assert len(pe_calls) == 1
             assert pe_calls[0][1]["name"] == "parallel_executor"
             assert pe_calls[0][1]["source"] == "local"
+            assert pe_calls[0][1]["description_zh"] == _mock_parallel_executor_tool_cls.description_zh
+            assert pe_calls[0][1]["description"] == _mock_parallel_executor_tool_cls.description
+            assert pe_calls[0][1]["params"] == {"default_timeout_seconds": 240}
+            assert '"default": 240' in pe_calls[0][1]["inputs"]
 
     @pytest.mark.asyncio
     async def test_create_agent_config_with_sub_agents(self):
@@ -2396,25 +2599,89 @@ class TestCreateAgentConfig:
                 # Verify that AgentConfig was called correctly, including sub-agents
                 mock_agent_config.assert_called_once_with(
                     name="test_agent",
+                    display_name=None,
                     description="test description",
-                    prompt_templates={
-                        "system_prompt": "populated_system_prompt"},
+                    prompt_templates=ANY,
                     tools=ANY,
                     max_steps=5,
                     requested_output_tokens=None,
                     model_name="test_model",
                     provide_run_summary=True,
                     allow_chat_metadata=False,
-                    managed_agents=[mock_sub_agent_config],
+                    worker_agents=[mock_sub_agent_config],
+                    enable_protocol_repair_retry=False,
                     external_a2a_agents=[],
                     context_manager_config=ANY,
                     context_items=ANY,
+                    prompt_tool_policy_snapshot=ANY,
                     pre_run_tool_events=ANY,
                     capacity_snapshot=ANY,
-                    safe_input_budget_snapshot=ANY,
+                    context_budget_snapshot=ANY,
                     verification_config=ANY,
                     enable_planning=ANY
                 )
+
+    @pytest.mark.asyncio
+    async def test_create_agent_config_mounts_runtime_sub_agents_without_relation_write(self):
+        """Workbench children are pinned request inputs, not persisted relations."""
+        with patch('backend.agents.create_agent_info.search_agent_info_by_agent_id') as mock_search_agent, \
+                patch('backend.agents.create_agent_info.query_sub_agent_relations', return_value=[]) as mock_query_sub, \
+                patch('backend.agents.create_agent_info.create_tool_config_list', new_callable=AsyncMock, return_value=[]), \
+                patch('backend.agents.create_agent_info.tenant_config_manager') as mock_tenant_config, \
+                patch('backend.agents.create_agent_info.build_memory_context') as mock_build_memory, \
+                patch('backend.agents.create_agent_info.AgentConfig') as mock_agent_config, \
+                patch('backend.agents.create_agent_info.prepare_prompt_templates', new_callable=AsyncMock, return_value={"system_prompt": "manager"}), \
+                patch('backend.agents.create_agent_info.get_model_by_model_id', return_value={"display_name": "test_model"}):
+
+            mock_search_agent.return_value = {
+                "name": "workbench_main",
+                "description": "root",
+                "model_ids": [123],
+                "max_steps": 5,
+            }
+            mock_tenant_config.get_app_config.side_effect = ["TestApp", "Test Description"]
+            mock_build_memory.return_value = Mock(
+                user_config=Mock(memory_switch=False),
+                memory_config={},
+                tenant_id="tenant_1",
+                user_id="user_1",
+                agent_id=99,
+            )
+            child = Mock()
+            child.name = "published-name"
+            child.invocation_name = "published-name"
+            child.display_name = "Published name"
+
+            with patch(
+                'backend.agents.create_agent_info.create_agent_config',
+                new_callable=AsyncMock,
+                return_value=child,
+            ) as recursive_create:
+                mock_agent_config.reset_mock()
+                await create_agent_config(
+                    99,
+                    "tenant_1",
+                    "user_1",
+                    runtime_sub_agent_mounts=[{
+                        "agent_id": 7,
+                        "version_no": 3,
+                        "runtime_ref": "agent:7:v3",
+                        "invocation_name": "agent_7_v3",
+                        "display_name": "Research",
+                    }],
+                )
+
+            recursive_create.assert_awaited_once()
+            assert recursive_create.await_args.kwargs["agent_id"] == 7
+            assert recursive_create.await_args.kwargs["version_no"] == 3
+            assert recursive_create.await_args.kwargs["runtime_sub_agent_mounts"] is None
+            assert child.name == "agent_7_v3"
+            assert child.runtime_ref == "agent:7:v3"
+            assert child.display_name == "Research"
+            assert mock_agent_config.call_args.kwargs["worker_agents"] == [child]
+            mock_query_sub.assert_called_once_with(
+                main_agent_id=99, tenant_id="tenant_1", version_no=0
+            )
 
     @pytest.mark.asyncio
     async def test_create_agent_config_with_pinned_sub_agent_version(self):
@@ -2474,10 +2741,11 @@ class TestCreateAgentConfig:
                 )
                 mock_recursive_create.assert_called_once()
                 assert mock_recursive_create.call_args.kwargs["version_no"] == 3
+                assert mock_sub_agent_config.invocation_name == "sub_agent"
 
     @pytest.mark.asyncio
     async def test_create_agent_config_with_memory(self):
-        """Test case for creating agent configuration with memory"""
+        """UT-BE-WMA-018: standard Agent configuration preserves memory."""
         with patch('backend.agents.create_agent_info.search_agent_info_by_agent_id') as mock_search_agent, \
                 patch('backend.agents.create_agent_info.query_sub_agent_relations') as mock_query_sub, \
                 patch('backend.agents.create_agent_info.create_tool_config_list') as mock_create_tools, \
@@ -2683,21 +2951,24 @@ class TestCreateAgentConfig:
 
             mock_agent_config.assert_called_with(
                 name="test_agent",
+                display_name=None,
                 description="test description",
-                prompt_templates={"system_prompt": "populated_system_prompt"},
+                prompt_templates=ANY,
                 tools=ANY,
                 max_steps=5,
                 requested_output_tokens=None,
                 model_name="main_model",
                 provide_run_summary=True,
                 allow_chat_metadata=False,
-                managed_agents=[],
+                worker_agents=[],
+                enable_protocol_repair_retry=False,
                 external_a2a_agents=[],
                 context_manager_config=ANY,
                 context_items=ANY,
+                prompt_tool_policy_snapshot=ANY,
                 pre_run_tool_events=ANY,
                 capacity_snapshot=None,
-                safe_input_budget_snapshot=None,
+                context_budget_snapshot=None,
                 verification_config=ANY,
                 enable_planning=ANY
             )
@@ -2714,7 +2985,7 @@ class TestCreateAgentConfig:
         """
         services_pkg = types.ModuleType("services")
         services_pkg.__path__ = []
-        skill_service_mod = types.ModuleType("services.skill_service")
+        skill_service_mod = types.ModuleType("management.services.skill.service")
         skill_service_mod.SkillService = MagicMock(
             return_value=MagicMock(get_enabled_skills_for_agent=MagicMock(return_value=[]))
         )
@@ -2749,7 +3020,7 @@ class TestCreateAgentConfig:
             ) as mock_logger,
             patch.dict(sys.modules, {
                 'services': services_pkg,
-                'services.skill_service': skill_service_mod,
+                'management.services.skill.service': skill_service_mod,
                 'services.memory_record_service': MagicMock(
                     _resolve_tenant_embedding_model_info=MagicMock(return_value=None),
                 ),
@@ -3218,6 +3489,7 @@ class TestCreateAgentConfig:
             kb_tool_1.name = "kb_tool_1"
             kb_tool_1.params = {"index_names": ["idx_a", "idx_b"]}
             kb_tool_1.metadata = {
+                "allowed_index_names": ["idx_a", "idx_b"],
                 "index_name_to_display_map": {"idx_a": "idx_a", "idx_b": "idx_b"}
             }
 
@@ -3231,6 +3503,7 @@ class TestCreateAgentConfig:
             kb_tool_2.name = "kb_tool_2"
             kb_tool_2.params = {"index_names": ["idx_c"]}
             kb_tool_2.metadata = {
+                "allowed_index_names": ["idx_c"],
                 "index_name_to_display_map": {"idx_c": "idx_c"}
             }
 
@@ -3265,8 +3538,9 @@ class TestCreateAgentConfig:
                 "zh",
                 "test query",
                 runtime_knowledge_context={
-                    "policy": "scope policy",
-                    "resources": "selected resources",
+                    "scope": {"local_capable": True, "aidp_capable": False,
+                              "local_disabled": False, "aidp_disabled": False,
+                              "local_display_names": ["selected resources"], "aidp_display_names": []},
                 },
             )
 
@@ -3277,16 +3551,13 @@ class TestCreateAgentConfig:
             mock_logger.warning.assert_called_once()
             assert "idx_b" in mock_logger.warning.call_args[0][0]
 
-            mock_prepare_templates.assert_called_once()
+            mock_prepare_templates.assert_not_called()
             assert create_agent_info_module.build_context_inputs.call_args.kwargs[
-                "knowledge_base_summary"
-            ] == "**idx_a**: AAA\n\n"
+                "knowledge_base_summaries"
+            ] == [{"index_name": "idx_a", "display_name": "idx_a", "summary": "AAA"}]
             assert create_agent_info_module.build_context_inputs.call_args.kwargs[
-                "knowledge_scope_policy"
-            ] == "scope policy"
-            assert create_agent_info_module.build_context_inputs.call_args.kwargs[
-                "knowledge_scope_resources"
-            ] == "selected resources"
+                "knowledge_scope"
+            ]["local_display_names"] == ["selected resources"]
 
             # Ensure only the first KnowledgeBaseSearchTool is processed.
             assert "idx_c" not in str(mock_es_instance.get_summary.call_args_list)
@@ -3297,6 +3568,7 @@ class TestCreateAgentConfig:
             class_name="KnowledgeBaseSearchTool",
             params={"index_names": ["selected-index"]},
             metadata={
+                "allowed_index_names": ["selected-index"],
                 "index_name_to_display_map": {
                     "selected-index": "Selected Knowledge Base"
                 }
@@ -3309,20 +3581,52 @@ class TestCreateAgentConfig:
             mock_es_service.return_value.get_summary.return_value = {
                 "summary": "Selected summary"
             }
-            summary, kb_ids = (
+            summaries, no_indexes = (
                 create_agent_info_module._build_effective_knowledge_base_summary(
                     [kb_tool],
-                    "en",
                     include_empty_message=False,
                 )
             )
 
-        assert summary == (
-            "**Selected Knowledge Base**: Selected summary\n\n"
-        )
-        assert kb_ids == ["selected-index"]
+        assert summaries == [{"index_name": "selected-index", "display_name": "Selected Knowledge Base",
+                              "summary": "Selected summary"}]
+        assert no_indexes is False
         mock_es_service.return_value.get_summary.assert_called_once_with(
             index_name="selected-index"
+        )
+
+    def test_scoped_summary_excludes_configured_but_denied_indices(self):
+        """Permission-filtered indices must not enter the routing summary."""
+        kb_tool = Mock(
+            class_name="KnowledgeBaseSearchTool",
+            params={"index_names": ["allowed-index", "denied-index"]},
+            metadata={
+                "allowed_index_names": ["allowed-index"],
+                "index_name_to_display_map": {
+                    "allowed-index": "Allowed Knowledge Base",
+                    "denied-index": "Denied Knowledge Base",
+                },
+            },
+        )
+
+        with patch(
+            "backend.agents.create_agent_info.ElasticSearchService"
+        ) as mock_es_service:
+            mock_es_service.return_value.get_summary.return_value = {
+                "summary": "Allowed summary"
+            }
+            summaries, no_indexes = (
+                create_agent_info_module._build_effective_knowledge_base_summary(
+                    [kb_tool],
+                    include_empty_message=False,
+                )
+            )
+
+        assert summaries == [{"index_name": "allowed-index", "display_name": "Allowed Knowledge Base",
+                              "summary": "Allowed summary"}]
+        assert no_indexes is False
+        mock_es_service.return_value.get_summary.assert_called_once_with(
+            index_name="allowed-index"
         )
 
     def test_scoped_empty_summary_does_not_restore_agent_defaults(self):
@@ -3330,22 +3634,21 @@ class TestCreateAgentConfig:
         kb_tool = Mock(
             class_name="KnowledgeBaseSearchTool",
             params={"index_names": []},
-            metadata={},
+            metadata={"allowed_index_names": []},
         )
 
         with patch(
             "backend.agents.create_agent_info.ElasticSearchService"
         ) as mock_es_service:
-            summary, kb_ids = (
+            summaries, no_indexes = (
                 create_agent_info_module._build_effective_knowledge_base_summary(
                     [kb_tool],
-                    "en",
                     include_empty_message=False,
                 )
             )
 
-        assert summary == ""
-        assert kb_ids == []
+        assert summaries == []
+        assert no_indexes is False
         mock_es_service.assert_not_called()
 
     @pytest.mark.asyncio
@@ -3413,6 +3716,7 @@ class TestCreateAgentConfig:
             kb_tool.params = {"index_names": ["idx1", "idx2"]}
             # The tool.metadata contains the index_name -> display_name mapping
             kb_tool.metadata = {
+                "allowed_index_names": ["idx1", "idx2"],
                 "index_name_to_display_map": {
                     "idx1": "Custom Name 1",
                     "idx2": "Custom Name 2"
@@ -3453,14 +3757,12 @@ class TestCreateAgentConfig:
             mock_get_knowledge_name_map.assert_not_called()
 
             # Verify the SDK context component uses display names from metadata.
-            mock_prepare_templates.assert_called_once()
+            mock_prepare_templates.assert_not_called()
             knowledge_summary = create_agent_info_module.build_context_inputs.call_args.kwargs[
-                "knowledge_base_summary"
+                "knowledge_base_summaries"
             ]
-            assert "**Custom Name 1**" in knowledge_summary
-            assert "**Custom Name 2**" in knowledge_summary
-            assert "idx1" not in knowledge_summary
-            assert "idx2" not in knowledge_summary
+            assert [item["display_name"] for item in knowledge_summary] == ["Custom Name 1", "Custom Name 2"]
+            assert [item["index_name"] for item in knowledge_summary] == ["idx1", "idx2"]
 
     @pytest.mark.asyncio
     async def test_create_agent_config_metadata_without_index_name_to_display_map(self):
@@ -3524,7 +3826,7 @@ class TestCreateAgentConfig:
             kb_tool.class_name = "KnowledgeBaseSearchTool"
             kb_tool.name = "kb_tool"
             kb_tool.params = {"index_names": ["idx1", "idx2"]}
-            kb_tool.metadata = {}  # Empty metadata
+            kb_tool.metadata = {"allowed_index_names": ["idx1", "idx2"]}
 
             mock_create_tools.return_value = [kb_tool]
             mock_get_template.return_value = {"system_prompt": "{{ knowledge_base_summary }}"}
@@ -3553,23 +3855,16 @@ class TestCreateAgentConfig:
 
             # When metadata is empty, it should fall back to using index_name
             # as the display_name (no mapping available)
-            mock_prepare_templates.assert_called_once()
+            mock_prepare_templates.assert_not_called()
             knowledge_summary = create_agent_info_module.build_context_inputs.call_args.kwargs[
-                "knowledge_base_summary"
+                "knowledge_base_summaries"
             ]
-            assert "**idx1**" in knowledge_summary
-            assert "**idx2**" in knowledge_summary
+            assert [item["display_name"] for item in knowledge_summary] == ["idx1", "idx2"]
 
-    @pytest.mark.parametrize(
-        "language,expected_message",
-        [
-            ("zh", "当前没有可用的知识库索引。\n"),
-            ("en", "No knowledge base indexes are currently available.\n"),
-        ],
-    )
+    @pytest.mark.parametrize("language", ["zh", "en"])
     @pytest.mark.asyncio
     async def test_create_agent_config_knowledge_base_summary_no_indexes_message(
-        self, language, expected_message
+        self, language
     ):
         with (
             patch(
@@ -3635,9 +3930,9 @@ class TestCreateAgentConfig:
             )
 
             mock_es_service.assert_not_called()
-            assert create_agent_info_module.build_context_inputs.call_args.kwargs[
-                "knowledge_base_summary"
-            ] == expected_message
+            context_kwargs = create_agent_info_module.build_context_inputs.call_args.kwargs
+            assert context_kwargs["knowledge_base_summaries"] == []
+            assert context_kwargs["knowledge_base_no_indexes"] is True
 
     @pytest.mark.asyncio
     async def test_create_agent_config_knowledge_base_summary_error(self):
@@ -3728,9 +4023,90 @@ class TestCreateAgentConfig:
                 assert last_tool.class_name == "ParallelExecutorTool"
                 assert last_tool.source == "local"
 
-
 class TestCreateModelConfigList:
     """Tests for the create_model_config_list function"""
+
+    def test_reasoning_helpers_filter_model_fields_and_resolve_effort(self):
+        module = create_agent_info_module
+
+        assert module._is_thinking_enabled(None) is False
+        assert module._is_thinking_enabled({"enable_thinking": True}) is True
+        assert module._is_thinking_enabled({"enable_thinking": False}) is False
+        assert module._is_thinking_enabled({"reasoning_effort": "high"}) is True
+
+        assert module._build_extra_body({
+            "enable_thinking": True,
+            "reasoning_effort": "high",
+            "temperature": 0.2,
+            "__custom__": {"top_k": 4},
+        }) == {"enable_thinking": True, "temperature": 0.2, "top_k": 4}
+
+        supported = {"status": "supported", "levels": ["low", "high"], "default": "high"}
+        assert module._resolve_model_reasoning_effort(
+            {"enable_thinking": True, "reasoning_effort": "low"}, supported
+        ) == "low"
+        assert module._resolve_model_reasoning_effort(
+            {"enable_thinking": True, "reasoning_effort": "medium"}, supported
+        ) == "high"
+        assert module._resolve_model_reasoning_effort(
+            {"enable_thinking": True}, {"status": "supported", "levels": [], "default": None}
+        ) is None
+        assert module._resolve_model_reasoning_effort(
+            {"enable_thinking": True}, {"status": "unsupported"}
+        ) is None
+        assert module._resolve_model_reasoning_effort(
+            {"enable_thinking": True, "reasoning_effort": "high"},
+            {"status": "unsupported"},
+        ) == "high"
+        assert module._resolve_model_reasoning_effort(
+            {"enable_thinking": True, "reasoning_effort": "auto"}, supported
+        ) is None
+        assert module._resolve_model_reasoning_effort(
+            {"enable_thinking": False, "reasoning_effort": "high"}, supported
+        ) is None
+
+        budget_capability = {
+            "status": "supported",
+            "controls": [{"type": "budget_tokens", "min": 128, "max": 32768}],
+        }
+        assert module._resolve_model_reasoning_budget(
+            {"enable_thinking": True, "reasoning_budget_tokens": 64},
+            budget_capability,
+        ) == 128
+        assert module._resolve_model_reasoning_budget(
+            {"enable_thinking": True, "reasoning_budget_tokens": 65536},
+            budget_capability,
+        ) == 32768
+        assert module._resolve_model_reasoning_budget(
+            {"enable_thinking": True, "reasoning_budget_tokens": 4096},
+            {"status": "supported", "controls": []},
+        ) == 4096
+        for value in (True, 0, -1, "4096"):
+            assert module._resolve_model_reasoning_budget(
+                {"enable_thinking": True, "reasoning_budget_tokens": value},
+                budget_capability,
+            ) is None
+
+    def test_reasoning_capability_resolver_delegates_to_catalog(self):
+        module = create_agent_info_module
+        capability = {"status": "supported", "levels": ["low"], "default": "low"}
+        loader = types.ModuleType("configs.model_catalog_loader")
+        resolver = MagicMock(return_value=capability)
+        loader.resolve_reasoning_capability = resolver
+        configs = types.ModuleType("configs")
+        configs.__path__ = []
+        with patch.dict(
+            sys.modules,
+            {"configs": configs, "configs.model_catalog_loader": loader},
+        ):
+            assert module._resolve_reasoning_capability(
+                "openai/o3", "https://api.openai.com/v1", "openai"
+            ) == capability
+        resolver.assert_called_once_with(
+            model_name="openai/o3",
+            base_url="https://api.openai.com/v1",
+            provider_hint="openai",
+        )
 
     @pytest.mark.asyncio
     async def test_create_model_config_list(self):
@@ -3816,6 +4192,37 @@ class TestCreateModelConfigList:
             assert calls[3][1]['url'] == "http://main.url"
 
     @pytest.mark.asyncio
+    async def test_create_model_config_list_includes_reasoning_metadata(self):
+        mock_model_config.reset_mock()
+        capability = {"status": "supported", "levels": ["low", "high"], "default": "high"}
+        with patch("backend.agents.create_agent_info.get_model_records") as records, \
+                patch("backend.agents.create_agent_info.tenant_config_manager") as manager, \
+                patch("backend.agents.create_agent_info.get_model_name_from_config", return_value="default"), \
+                patch("backend.agents.create_agent_info.add_repo_to_name", return_value="openai/o3"), \
+                patch("backend.agents.create_agent_info._resolve_reasoning_capability", return_value=capability):
+            records.return_value = [{
+                "display_name": "O3",
+                "api_key": "key",
+                "model_repo": "openai",
+                "model_name": "o3",
+                "base_url": "https://api.openai.com/v1",
+                "model_factory": "openai",
+                "extra_params": {"enable_thinking": True, "reasoning_effort": "low"},
+            }]
+            manager.get_model_config.return_value = {
+                "api_key": "key",
+                "model_name": "default",
+                "base_url": "https://api.openai.com/v1",
+            }
+
+            await create_model_config_list("tenant-1")
+
+        first_call = mock_model_config.call_args_list[0].kwargs
+        assert first_call["enable_thinking"] is True
+        assert first_call["reasoning_effort"] == "low"
+        assert first_call["reasoning_capability"] == capability
+
+    @pytest.mark.asyncio
     async def test_create_model_config_list_empty_database(self):
         """Test case when database returns no records"""
         # Reset mock call count before test
@@ -3897,7 +4304,7 @@ class TestFilterMcpServersAndTools:
 
         mock_agent_config = Mock()
         mock_agent_config.tools = [mock_tool]
-        mock_agent_config.managed_agents = []
+        mock_agent_config.worker_agents = []
 
         mcp_info_dict = {
             "test_server": {
@@ -3918,7 +4325,7 @@ class TestFilterMcpServersAndTools:
 
         mock_agent_config = Mock()
         mock_agent_config.tools = [mock_tool]
-        mock_agent_config.managed_agents = []
+        mock_agent_config.worker_agents = []
 
         mcp_info_dict = {}
 
@@ -3936,7 +4343,7 @@ class TestFilterMcpServersAndTools:
 
         mock_sub_agent = Mock()
         mock_sub_agent.tools = [mock_sub_tool]
-        mock_sub_agent.managed_agents = []
+        mock_sub_agent.worker_agents = []
 
         # Create mock tool for the main agent
         mock_main_tool = Mock()
@@ -3945,7 +4352,7 @@ class TestFilterMcpServersAndTools:
 
         mock_agent_config = Mock()
         mock_agent_config.tools = [mock_main_tool]
-        mock_agent_config.managed_agents = [mock_sub_agent]
+        mock_agent_config.worker_agents = [mock_sub_agent]
 
         mcp_info_dict = {
             "main_server": {
@@ -3971,7 +4378,7 @@ class TestFilterMcpServersAndTools:
 
         mock_agent_config = Mock()
         mock_agent_config.tools = [mock_tool]
-        mock_agent_config.managed_agents = []
+        mock_agent_config.worker_agents = []
 
         mcp_info_dict = {
             "different_server": {
@@ -3989,6 +4396,384 @@ class TestCreateAgentRunInfo:
     """Tests for the create_agent_run_info function"""
 
     @pytest.mark.asyncio
+    async def test_create_agent_run_info_applies_reasoning_overrides(self):
+        selected = types.SimpleNamespace(
+            cite_name="selected",
+            enable_thinking=True,
+            reasoning_effort="high",
+            reasoning_capability={"status": "supported", "levels": ["low", "high"]},
+            extra_body={"keep": True, "remove": True},
+        )
+        with patch(
+            "backend.agents.create_agent_info.join_minio_file_description_to_query",
+            new_callable=AsyncMock,
+            return_value="processed_query",
+        ), patch(
+            "backend.agents.create_agent_info.create_model_config_list",
+            new_callable=AsyncMock,
+            return_value=[selected],
+        ), patch(
+            "backend.agents.create_agent_info.create_agent_config",
+            new_callable=AsyncMock,
+            return_value=types.SimpleNamespace(model_name="selected", sandbox_policy=None),
+        ), patch(
+            "backend.agents.create_agent_info.search_agent_info_by_agent_id",
+            return_value={
+                "model_params_override": {
+                    "7": {
+                        "extra_params": {
+                            "enable_thinking": False,
+                            "reasoning_effort": "high",
+                            "__custom__": {"remove": None, "added": "yes"},
+                        },
+                        "reasoning_effort": "low",
+                    }
+                }
+            },
+        ), patch(
+            "backend.agents.create_agent_info.get_model_by_model_id",
+            return_value={"display_name": "selected"},
+        ), patch(
+            "backend.agents.create_agent_info.get_remote_mcp_server_list",
+            new_callable=AsyncMock,
+            return_value=[],
+        ), patch(
+            "backend.agents.create_agent_info.filter_mcp_servers_and_tools",
+            return_value=[],
+        ), patch(
+            "backend.agents.create_agent_info.urljoin",
+            return_value="http://nexent.mcp/sse",
+        ), patch(
+            "backend.agents.create_agent_info.threading"
+        ) as threading_mock:
+            threading_mock.Event.return_value = "stop_event"
+            await create_agent_run_info(
+                agent_id="agent-1",
+                minio_files=[],
+                query="query",
+                history=[],
+                user_id="user-1",
+                tenant_id="tenant-1",
+                language="zh",
+                is_debug=True,
+            )
+
+        assert selected.enable_thinking is False
+        assert selected.reasoning_effort == "low"
+        assert selected.extra_body == {"keep": True, "added": "yes"}
+
+    @pytest.mark.asyncio
+    async def test_create_agent_run_info_applies_budget_override(self):
+        selected = types.SimpleNamespace(
+            cite_name="selected",
+            enable_thinking=True,
+            reasoning_effort="auto",
+            reasoning_budget_tokens=None,
+            reasoning_capability={
+                "status": "supported",
+                "levels": [],
+                "controls": [{"type": "budget_tokens", "min": 128, "max": 32768}],
+            },
+            extra_body=None,
+        )
+        with patch(
+            "backend.agents.create_agent_info.join_minio_file_description_to_query",
+            new_callable=AsyncMock,
+            return_value="processed_query",
+        ), patch(
+            "backend.agents.create_agent_info.create_model_config_list",
+            new_callable=AsyncMock,
+            return_value=[selected],
+        ), patch(
+            "backend.agents.create_agent_info.create_agent_config",
+            new_callable=AsyncMock,
+            return_value=types.SimpleNamespace(model_name="selected", sandbox_policy=None),
+        ), patch(
+            "backend.agents.create_agent_info.search_agent_info_by_agent_id",
+            return_value={
+                "model_params_override": {
+                    "7": {"extra_params": {"enable_thinking": True, "reasoning_budget_tokens": 4096}}
+                }
+            },
+        ), patch(
+            "backend.agents.create_agent_info.get_model_by_model_id",
+            return_value={"display_name": "selected"},
+        ), patch(
+            "backend.agents.create_agent_info.get_remote_mcp_server_list",
+            new_callable=AsyncMock,
+            return_value=[],
+        ), patch(
+            "backend.agents.create_agent_info.filter_mcp_servers_and_tools",
+            return_value=[],
+        ), patch(
+            "backend.agents.create_agent_info.urljoin",
+            return_value="http://nexent.mcp/sse",
+        ), patch("backend.agents.create_agent_info.threading") as threading_mock:
+            threading_mock.Event.return_value = "stop_event"
+            await create_agent_run_info(
+                agent_id="agent-1",
+                minio_files=[],
+                query="query",
+                history=[],
+                user_id="user-1",
+                tenant_id="tenant-1",
+                language="zh",
+                is_debug=True,
+            )
+
+        assert selected.reasoning_budget_tokens == 4096
+
+    @pytest.mark.asyncio
+    async def test_create_agent_run_info_validates_request_budget(self):
+        selected = types.SimpleNamespace(
+            cite_name="selected",
+            enable_thinking=True,
+            reasoning_effort=None,
+            reasoning_budget_tokens=None,
+            reasoning_capability={
+                "status": "supported",
+                "levels": [],
+                "controls": [{"type": "budget_tokens", "min": 128, "max": 32768}],
+            },
+            extra_body=None,
+        )
+        common_patches = [
+            patch(
+                "backend.agents.create_agent_info.join_minio_file_description_to_query",
+                new_callable=AsyncMock,
+                return_value="processed_query",
+            ),
+            patch(
+                "backend.agents.create_agent_info.create_model_config_list",
+                new_callable=AsyncMock,
+                return_value=[selected],
+            ),
+            patch(
+                "backend.agents.create_agent_info.create_agent_config",
+                new_callable=AsyncMock,
+                return_value=types.SimpleNamespace(model_name="selected", sandbox_policy=None),
+            ),
+            patch("backend.agents.create_agent_info.search_agent_info_by_agent_id", return_value={}),
+            patch(
+                "backend.agents.create_agent_info.get_remote_mcp_server_list",
+                new_callable=AsyncMock,
+                return_value=[],
+            ),
+            patch("backend.agents.create_agent_info.filter_mcp_servers_and_tools", return_value=[]),
+            patch("backend.agents.create_agent_info.urljoin", return_value="http://nexent.mcp/sse"),
+            patch("backend.agents.create_agent_info.threading"),
+        ]
+        with ExitStack() as stack:
+            for item in common_patches:
+                stack.enter_context(item)
+            await create_agent_run_info(
+                agent_id="agent-1",
+                minio_files=[],
+                query="query",
+                history=[],
+                user_id="user-1",
+                tenant_id="tenant-1",
+                language="zh",
+                is_debug=True,
+                reasoning_budget_tokens=4096,
+            )
+
+        assert selected.reasoning_budget_tokens == 4096
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("enable_thinking", "extra_effort", "override_effort", "expected_enabled", "expected_effort"),
+        [
+            (True, "medium", None, True, "medium"),
+            (False, "high", None, False, "high"),
+            ("invalid", 123, None, True, "high"),
+            (True, 123, "low", True, "low"),
+        ],
+    )
+    async def test_create_agent_run_info_covers_reasoning_override_boundaries(
+        self, enable_thinking, extra_effort, override_effort, expected_enabled, expected_effort
+    ):
+        selected = types.SimpleNamespace(
+            cite_name="selected",
+            enable_thinking=True,
+            reasoning_effort="high",
+            reasoning_capability={"status": "supported", "levels": ["low", "medium", "high"]},
+            extra_body={"keep": True},
+        )
+        with patch(
+            "backend.agents.create_agent_info.join_minio_file_description_to_query",
+            new_callable=AsyncMock,
+            return_value="processed_query",
+        ), patch(
+            "backend.agents.create_agent_info.create_model_config_list",
+            new_callable=AsyncMock,
+            return_value=[selected],
+        ), patch(
+            "backend.agents.create_agent_info.create_agent_config",
+            new_callable=AsyncMock,
+            return_value=types.SimpleNamespace(model_name="selected", sandbox_policy=None),
+        ), patch(
+            "backend.agents.create_agent_info.search_agent_info_by_agent_id",
+            return_value={
+                "model_params_override": {
+                    "7": {
+                        "extra_params": {
+                            "enable_thinking": enable_thinking,
+                            "reasoning_effort": extra_effort,
+                        },
+                        "reasoning_effort": override_effort,
+                    }
+                }
+            },
+        ), patch(
+            "backend.agents.create_agent_info.get_model_by_model_id",
+            return_value={"display_name": "selected"},
+        ), patch(
+            "backend.agents.create_agent_info.get_remote_mcp_server_list",
+            new_callable=AsyncMock,
+            return_value=[],
+        ), patch(
+            "backend.agents.create_agent_info.filter_mcp_servers_and_tools",
+            return_value=[],
+        ), patch(
+            "backend.agents.create_agent_info.urljoin",
+            return_value="http://nexent.mcp/sse",
+        ), patch(
+            "backend.agents.create_agent_info.threading"
+        ) as threading_mock:
+            threading_mock.Event.return_value = "stop_event"
+            await create_agent_run_info(
+                agent_id="agent-1",
+                minio_files=[],
+                query="query",
+                history=[],
+                user_id="user-1",
+                tenant_id="tenant-1",
+                language="zh",
+                is_debug=True,
+            )
+
+        assert selected.enable_thinking is expected_enabled
+        assert selected.reasoning_effort == expected_effort
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "model_config",
+        [
+            None,
+            types.SimpleNamespace(
+                cite_name="selected",
+                enable_thinking=False,
+                reasoning_capability={"status": "supported", "levels": ["low", "high"]},
+            ),
+            types.SimpleNamespace(
+                cite_name="selected",
+                enable_thinking=True,
+                reasoning_capability={"status": "supported", "levels": ["low"]},
+            ),
+        ],
+    )
+    async def test_create_agent_run_info_rejects_invalid_reasoning_effort(self, model_config):
+        with patch(
+            "backend.agents.create_agent_info.join_minio_file_description_to_query",
+            new_callable=AsyncMock,
+            return_value="processed_query",
+        ), patch(
+            "backend.agents.create_agent_info.create_model_config_list",
+            new_callable=AsyncMock,
+            return_value=[] if model_config is None else [model_config],
+        ), patch(
+            "backend.agents.create_agent_info.create_agent_config",
+            new_callable=AsyncMock,
+            return_value=types.SimpleNamespace(model_name="selected"),
+        ), patch(
+            "backend.agents.create_agent_info.search_agent_info_by_agent_id",
+            return_value={},
+        ):
+            with pytest.raises(ValidationError, match="does not support"):
+                await create_agent_run_info(
+                    agent_id="agent-1",
+                    minio_files=[],
+                    query="query",
+                    history=[],
+                    user_id="user-1",
+                    tenant_id="tenant-1",
+                    language="zh",
+                    is_debug=True,
+                    reasoning_effort="high",
+                )
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "reasoning_effort, expected_effort, capability",
+        [
+            (
+                "high",
+                "high",
+                {"status": "supported", "levels": ["low", "high"]},
+            ),
+            (
+                "auto",
+                None,
+                {"status": "supported", "levels": ["low", "high"]},
+            ),
+            ("high", "high", None),
+        ],
+    )
+    async def test_create_agent_run_info_accepts_valid_reasoning_effort(
+        self, reasoning_effort, expected_effort, capability
+    ):
+        selected = types.SimpleNamespace(
+            cite_name="selected",
+            enable_thinking=True,
+            reasoning_effort=None,
+            reasoning_capability=capability,
+            extra_body=None,
+        )
+        with patch(
+            "backend.agents.create_agent_info.join_minio_file_description_to_query",
+            new_callable=AsyncMock,
+            return_value="processed_query",
+        ), patch(
+            "backend.agents.create_agent_info.create_model_config_list",
+            new_callable=AsyncMock,
+            return_value=[selected],
+        ), patch(
+            "backend.agents.create_agent_info.create_agent_config",
+            new_callable=AsyncMock,
+            return_value=types.SimpleNamespace(model_name="selected", sandbox_policy=None),
+        ), patch(
+            "backend.agents.create_agent_info.search_agent_info_by_agent_id",
+            return_value={},
+        ), patch(
+            "backend.agents.create_agent_info.get_remote_mcp_server_list",
+            new_callable=AsyncMock,
+            return_value=[],
+        ), patch(
+            "backend.agents.create_agent_info.filter_mcp_servers_and_tools",
+            return_value=[],
+        ), patch(
+            "backend.agents.create_agent_info.urljoin",
+            return_value="http://nexent.mcp/sse",
+        ), patch(
+            "backend.agents.create_agent_info.threading"
+        ) as threading_mock:
+            threading_mock.Event.return_value = "stop_event"
+            await create_agent_run_info(
+                agent_id="agent-1",
+                minio_files=[],
+                query="query",
+                history=[],
+                user_id="user-1",
+                tenant_id="tenant-1",
+                language="zh",
+                is_debug=True,
+                reasoning_effort=reasoning_effort,
+            )
+
+        assert selected.reasoning_effort == expected_effort
+
+    @pytest.mark.asyncio
     async def test_create_agent_run_info_success(self):
         """Test case for successfully creating agent run info with dict format mcp_host"""
         mock_agent_run_info.reset_mock()
@@ -3997,6 +4782,7 @@ class TestCreateAgentRunInfo:
                 patch('backend.agents.create_agent_info.get_remote_mcp_server_list', new_callable=AsyncMock) as mock_get_mcp, \
                 patch('backend.agents.create_agent_info.create_agent_config') as mock_create_agent, \
                 patch('backend.agents.create_agent_info.filter_mcp_servers_and_tools') as mock_filter, \
+                patch('backend.agents.create_agent_info.get_tenant_local_mcp_server', return_value='http://nexent.mcp/sse'), \
                 patch('backend.agents.create_agent_info.urljoin') as mock_urljoin, \
                 patch('backend.agents.create_agent_info.threading') as mock_threading, \
                 patch('backend.agents.create_agent_info.query_current_version_no') as mock_version_no:
@@ -4039,22 +4825,28 @@ class TestCreateAgentRunInfo:
                     "url": "http://test.server",
                     "transport": "streamable-http"
                 }],
+                mcp_request_timeout_seconds=10,
                 history=[],
                 stop_event="stop_event",
+                mcp_tool_timeout_seconds=ANY,
+                mcp_close_timeout_seconds=ANY,
                 capacity_snapshot=None,
-                safe_input_budget_snapshot=None,
+                context_budget_snapshot=None,
                 redis_client=ANY,
                 sandbox_config=None,
+                tool_fastpath_enabled=False,
+                tool_fastpath_allowed_tools=list(consts_const.NEXENT_TOOL_FASTPATH_ALLOWED_TOOLS),
                 minio_client=None,
                 workspace_path=ANY,
                 workspace_run_id=ANY,
                 tenant_id="tenant_1",
                 minio_files=[],
+                user_context=None,
             )
 
             # Verify that other functions were called correctly
             mock_join_query.assert_called_once_with(
-                minio_files=[], query="test query", history=[])
+                minio_files=[], query="test query", history=[], language="zh")
             mock_create_models.assert_called_once_with("tenant_1")
             mock_create_agent.assert_called_once_with(
                 agent_id="agent_1",
@@ -4145,6 +4937,7 @@ class TestCreateAgentRunInfo:
                 patch('backend.agents.create_agent_info.get_remote_mcp_server_list', new_callable=AsyncMock) as mock_get_mcp, \
                 patch('backend.agents.create_agent_info.create_agent_config') as mock_create_agent, \
                 patch('backend.agents.create_agent_info.filter_mcp_servers_and_tools') as mock_filter, \
+                patch('backend.agents.create_agent_info.get_tenant_local_mcp_server', return_value='http://nexent.mcp/sse'), \
                 patch('backend.agents.create_agent_info.urljoin') as mock_urljoin, \
                 patch('backend.agents.create_agent_info.threading') as mock_threading, \
                 patch('backend.agents.create_agent_info.query_current_version_no') as mock_version_no:
@@ -4401,6 +5194,7 @@ class TestCreateAgentRunInfo:
                 patch('backend.agents.create_agent_info.get_remote_mcp_server_list', new_callable=AsyncMock) as mock_get_mcp, \
                 patch('backend.agents.create_agent_info.create_agent_config') as mock_create_agent, \
                 patch('backend.agents.create_agent_info.filter_mcp_servers_and_tools') as mock_filter, \
+                patch('backend.agents.create_agent_info.get_tenant_local_mcp_server', return_value='http://nexent.mcp/sse'), \
                 patch('backend.agents.create_agent_info.urljoin') as mock_urljoin, \
                 patch('backend.agents.create_agent_info.threading') as mock_threading, \
                 patch('backend.agents.create_agent_info.query_current_version_no') as mock_version_no:
@@ -4433,6 +5227,10 @@ class TestCreateAgentRunInfo:
                 "url": "http://nexent.mcp/sse",
                 "transport": "sse",
                 "httpx_client_factory": create_agent_info_module.create_httpx_client,
+                "headers": {
+                    "X-Tenant-ID": "tenant_1",
+                    "X-Nexent-Internal-Token": create_agent_info_module.TOKEN,
+                },
             }
 
     @pytest.mark.asyncio
@@ -5060,45 +5858,35 @@ class TestPreparePromptTemplates:
 
     @pytest.mark.asyncio
     async def test_prepare_prompt_templates_manager_zh(self):
-        """Test case for manager mode Chinese prompt templates"""
-        with patch('backend.agents.create_agent_info.get_agent_prompt_template') as mock_get_template:
-
-            mock_get_template.return_value = {"test": "template"}
-
+        """Manager templates are loaded once through the bundle boundary."""
+        with patch('backend.agents.create_agent_info.load_agent_prompt_bundle', wraps=_load_stub_prompt_bundle) as mock_loader:
             result = await prepare_prompt_templates(True, "zh")
-
-            mock_get_template.assert_called_once_with(True, "zh")
+            mock_loader.assert_called_once_with(is_manager=True, language="zh")
             assert result["system_prompt"] == ""
-            assert result["test"] == "template"
+            assert "manager_agent" in result
 
     @pytest.mark.asyncio
     async def test_prepare_prompt_templates_worker_en(self):
-        """Test case for worker mode English prompt templates"""
-        with patch('backend.agents.create_agent_info.get_agent_prompt_template') as mock_get_template:
-
-            mock_get_template.return_value = {"test": "template"}
-
+        """Worker templates are loaded once through the bundle boundary."""
+        with patch('backend.agents.create_agent_info.load_agent_prompt_bundle', wraps=_load_stub_prompt_bundle) as mock_loader:
             result = await prepare_prompt_templates(False, "en")
-
-            mock_get_template.assert_called_once_with(False, "en")
+            mock_loader.assert_called_once_with(is_manager=False, language="en")
             assert result["system_prompt"] == ""
-            assert result["test"] == "template"
+            assert "managed_agent" in result
 
     @pytest.mark.asyncio
     async def test_prepare_prompt_templates_clears_existing_system_prompt(self):
         """Template files cannot introduce a second stable-context source."""
-        with patch('backend.agents.create_agent_info.get_agent_prompt_template') as mock_get_template:
-            mock_get_template.return_value = {
-                "system_prompt": "stale prompt",
-                "user_prompt": "keep me",
-            }
-
+        stale_bundle = _composer_module.AgentPromptComposer.from_compatibility_templates(
+            {
+                "managed_agent": {"task": "{{task}}", "report": "{{final_answer}}"},
+                "system_prompt": "stale prompt", "user_prompt": "keep me",
+            },
+        ).bundle
+        with patch('backend.agents.create_agent_info.load_agent_prompt_bundle', return_value=stale_bundle):
             result = await prepare_prompt_templates(False, "en")
-
-            assert result == {
-                "system_prompt": "",
-                "user_prompt": "keep me",
-            }
+            assert result["system_prompt"] == ""
+            assert result["user_prompt"] == "keep me"
 
 
 class TestAdditionalAgentInfoCoverage:
@@ -5127,15 +5915,15 @@ class TestAdditionalAgentInfoCoverage:
         assert result == (32768, None, None)
         mock_logger.warning.assert_called_once()
 
-    def test_resolve_safe_input_budget_returns_none_for_uncertain_basis(self):
+    def test_resolve_context_budget_returns_none_for_uncertain_basis(self):
         capacity = MockModelCapacitySnapshot(model_name="legacy-model")
         calculator = MagicMock()
-        calculator.calculate_safe_input_budget.side_effect = MockUncertaintyReserveBasisUnknown("missing context")
+        calculator.calculate_context_budget.side_effect = MockUncertaintyReserveBasisUnknown("missing context")
         with patch(
-            "backend.agents.create_agent_info.SafeInputBudgetCalculator",
+            "backend.agents.create_agent_info.ContextBudgetCalculator",
             return_value=calculator,
         ):
-            result = _resolve_safe_input_budget(
+            result = _resolve_context_budget(
                 capacity_snapshot=capacity,
                 tenant_id="tenant-1",
                 agent_requested_output_tokens=None,
@@ -5161,6 +5949,27 @@ class TestAdditionalAgentInfoCoverage:
 
         assert len(tools) == 2
         assert mock_tool_config.call_count == 2
+
+    def test_ut_be_dpr_006_plan_tools_follow_planning_mode(self):
+        """UT-BE-DPR-006: execution mode omits plan tools; planning mode adds both."""
+        tools = []
+        mock_tool_config.reset_mock()
+        first_tool = MagicMock(name="create_plan")
+        first_tool.name = "create_plan"
+        second_tool = MagicMock(name="update_plan_step")
+        second_tool.name = "update_plan_step"
+        mock_tool_config.side_effect = [first_tool, second_tool]
+
+        try:
+            create_agent_info_module._inject_plan_tools(tools, False)
+            assert tools == []
+            assert mock_tool_config.call_count == 0
+
+            create_agent_info_module._inject_plan_tools(tools, True)
+        finally:
+            mock_tool_config.side_effect = None
+
+        assert [tool.name for tool in tools] == ["create_plan", "update_plan_step"]
 
     def test_resolve_runtime_tool_records_rejects_missing_or_unavailable_dependency(self):
         common_patches = (
@@ -6098,11 +6907,11 @@ class TestFilterMcpServersAndTools:
 
         mock_sub_agent = MagicMock()
         mock_sub_agent.tools = []
-        mock_sub_agent.managed_agents = []
+        mock_sub_agent.worker_agents = []
 
         mock_agent_config = MagicMock()
         mock_agent_config.tools = [mock_tool1, mock_tool2, mock_tool3]
-        mock_agent_config.managed_agents = [mock_sub_agent]
+        mock_agent_config.worker_agents = [mock_sub_agent]
 
         mcp_info_dict = {
             "server1": {"remote_mcp_server": "http://server1.example.com"},
@@ -6123,15 +6932,15 @@ class TestFilterMcpServersAndTools:
 
         mock_sub_sub_agent = MagicMock()
         mock_sub_sub_agent.tools = [mock_tool1]
-        mock_sub_sub_agent.managed_agents = []
+        mock_sub_sub_agent.worker_agents = []
 
         mock_sub_agent = MagicMock()
         mock_sub_agent.tools = []
-        mock_sub_agent.managed_agents = [mock_sub_sub_agent]
+        mock_sub_agent.worker_agents = [mock_sub_sub_agent]
 
         mock_agent_config = MagicMock()
         mock_agent_config.tools = []
-        mock_agent_config.managed_agents = [mock_sub_agent]
+        mock_agent_config.worker_agents = [mock_sub_agent]
 
         mcp_info_dict = {
             "nested_server": {"remote_mcp_server": "http://nested.example.com"},
@@ -6154,7 +6963,7 @@ class TestFilterMcpServersAndTools:
 
         mock_agent_config = MagicMock()
         mock_agent_config.tools = [mock_tool1, mock_tool2]
-        mock_agent_config.managed_agents = []
+        mock_agent_config.worker_agents = []
 
         mcp_info_dict = {
             "enabled_server": {"remote_mcp_server": "http://enabled.example.com"},
@@ -6170,7 +6979,7 @@ class TestFilterMcpServersAndTools:
         """Test filtering with no tools returns empty list"""
         mock_agent_config = MagicMock()
         mock_agent_config.tools = []
-        mock_agent_config.managed_agents = []
+        mock_agent_config.worker_agents = []
 
         mcp_info_dict = {
             "server1": {"remote_mcp_server": "http://server1.example.com"},
@@ -6725,6 +7534,38 @@ class TestDispatchProfileHitMetric:
 # ============================================================================
 
 
+@pytest.mark.asyncio
+async def test_runtime_knowledge_records_reach_tool_constructor_without_mutation(mocker):
+    from copy import deepcopy
+    from types import SimpleNamespace
+
+    original = [{"name": "aidp_search", "class_name": "AidpSearchTool", "params": []}]
+    runtime = [{"name": "knowledge_base_search", "class_name": "KnowledgeBaseSearchTool",
+                "description": "Search", "inputs": "{}", "output_type": "string",
+                "params": [{"name": "top_k", "default": 8},
+                           {"name": "index_names", "default": ["old"]}]}]
+    before = deepcopy(runtime)
+    prefix = "backend.agents.create_agent_info."
+    mocker.patch(prefix + "_resolve_runtime_tool_records", return_value=original)
+    mocker.patch(prefix + "discover_langchain_tools", new_callable=AsyncMock, return_value=[])
+    mocker.patch(prefix + "search_agent_info_by_agent_id", return_value={"name": "root"})
+    mocker.patch(prefix + "get_vector_db_core", return_value=MagicMock())
+    mocker.patch(prefix + "get_embedding_model_by_index_name", return_value=(MagicMock(), None, None))
+    mocker.patch(prefix + "get_knowledge_name_map_by_index_names", return_value={"new": "Selected"})
+    mocker.patch(prefix + "ElasticSearchService.filter_accessible_indices", return_value=["new"])
+    mocker.patch(prefix + "ToolConfig", side_effect=lambda **kwargs: SimpleNamespace(metadata=None, **kwargs))
+    configs = await create_agent_info_module.create_tool_config_list(
+        1, "tenant", "user", runtime_knowledge_tools=runtime,
+        tool_params={"agents": {"root": {"tools": {"knowledge_base_search": {"index_names": ["new"]}}}}},
+    )
+    assert len(configs) == 1
+    assert configs[0].params["top_k"] == 8
+    assert configs[0].params["index_names"] == ["new"]
+    assert configs[0].metadata["allowed_index_names"] == ["new"]
+    assert runtime == before
+    assert original[0]["class_name"] == "AidpSearchTool"
+
+
 class TestKBPermissionFilteringInCreateToolConfigList:
     """Tests for knowledge base permission filtering in create_tool_config_list."""
 
@@ -6789,10 +7630,18 @@ class TestKBPermissionFilteringInCreateToolConfigList:
                 user_id="user_789",
             )
 
-            # Tool should be included (2 accessible KBs remain)
+            # Tool should retain the full configured scope while enforcing the ACL
+            # through metadata.
             assert len(result) == 1
-            # Verify params.index_names was updated to filtered list
-            assert mock_tc_instance.params["index_names"] == ["kb_allowed", "kb_creator"]
+            assert mock_tc_instance.params["index_names"] == [
+                "kb_allowed",
+                "kb_forbidden",
+                "kb_creator",
+            ]
+            assert mock_tc_instance.metadata["allowed_index_names"] == [
+                "kb_allowed",
+                "kb_creator",
+            ]
 
     @pytest.mark.asyncio
     async def test_create_tool_config_list_keeps_tool_when_no_accessible_kbs(self):
@@ -6849,6 +7698,67 @@ class TestKBPermissionFilteringInCreateToolConfigList:
             # Tool should be kept in the list (not skipped) so the LLM can call it
             # and receive a clear permission-denial message from the SDK forward()
             assert len(result) == 1
+            assert mock_tc_instance.params["index_names"] == ["kb1", "kb2"]
+            assert mock_tc_instance.metadata["allowed_index_names"] == []
+
+    @pytest.mark.asyncio
+    async def test_create_tool_config_list_normalizes_null_index_names(self):
+        """A persisted null index_names value behaves like an empty KB selection."""
+        with (
+            patch(
+                "backend.agents.create_agent_info.search_tools_for_sub_agent"
+            ) as mock_tools,
+            patch(
+                "backend.agents.create_agent_info.search_agent_info_by_agent_id",
+                return_value={"name": "workbench_main"},
+            ),
+            patch(
+                "backend.agents.create_agent_info.get_vector_db_core",
+                return_value=MagicMock(),
+            ),
+            patch(
+                "backend.agents.create_agent_info.get_embedding_model_by_index_name"
+            ) as mock_get_embedding,
+            patch(
+                "backend.agents.create_agent_info.ToolConfig"
+            ) as mock_tool_config,
+        ):
+            mock_tools.return_value = [{
+                "class_name": "KnowledgeBaseSearchTool",
+                "name": "knowledge_base_search",
+                "description": "Search knowledge base",
+                "inputs": "{}",
+                "output_type": "string",
+                "params": [
+                    {"name": "index_names", "default": None},
+                    {"name": "rerank", "default": False},
+                ],
+            }]
+
+            class MockToolConfigInstance:
+                def __init__(self):
+                    self.params = {}
+                    self.metadata = {}
+
+            instance = MockToolConfigInstance()
+
+            def capture_and_return(**kwargs):
+                for key, value in kwargs.items():
+                    setattr(instance, key, value)
+                return instance
+
+            mock_tool_config.side_effect = capture_and_return
+
+            result = await create_agent_info_module.create_tool_config_list(
+                agent_id="agent_123",
+                tenant_id="tenant_456",
+                user_id="user_789",
+            )
+
+            assert result == [instance]
+            assert instance.params["index_names"] == []
+            assert instance.metadata["allowed_index_names"] == []
+            mock_get_embedding.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_create_tool_config_list_preserves_order_after_filtering(self):
@@ -6909,8 +7819,16 @@ class TestKBPermissionFilteringInCreateToolConfigList:
             )
 
             assert len(result) == 1
-            # Order should be preserved from original index_names list
-            assert mock_tc_instance.params["index_names"] == ["kb_b", "kb_d"]
+            assert mock_tc_instance.params["index_names"] == [
+                "kb_a",
+                "kb_b",
+                "kb_c",
+                "kb_d",
+            ]
+            assert mock_tc_instance.metadata["allowed_index_names"] == [
+                "kb_b",
+                "kb_d",
+            ]
 
 
 
@@ -7259,6 +8177,10 @@ class TestCreateToolConfigListAidpSearch:
                 "Allowed 2": "kb_allowed_2",
                 "Not selected": "kb_not_selected",
             },
+            tenant_name_to_id={
+                "Allowed 2": "kb_allowed_2",
+                "Denied configured": "kb_not_accessible",
+            },
         )
         with patch("backend.agents.create_agent_info.discover_langchain_tools",
                    new_callable=AsyncMock, return_value=[]), \
@@ -7305,15 +8227,19 @@ class TestCreateToolConfigListAidpSearch:
             assert len(result) == 1
             assert mock_tc_instance.metadata is not None
             assert "allowed_kds_set" in mock_tc_instance.metadata
-            assert mock_tc_instance.params["kds_list"] == ["kb_allowed_2"]
+            assert mock_tc_instance.params["kds_list"] == [
+                "kb_allowed_2",
+                "kb_not_accessible",
+            ]
             assert mock_tc_instance.metadata["allowed_kds_set"] == ["kb_allowed_2"]
             assert mock_tc_instance.metadata["kds_name_to_id_map"] == {
                 "Allowed 2": "kb_allowed_2",
+                "Denied configured": "kb_not_accessible",
             }
 
     @pytest.mark.asyncio
     async def test_aidp_search_permission_whitelist_failure_fallback(self):
-        """When get_allowed_kds_list raises, a warning is logged and allowed_kds_set stays empty."""
+        """Snapshot failure keeps configured scope but leaves execution denied."""
         access_module = MagicMock()
         access_module.resolve_current_aidp_access.side_effect = Exception("AIDP down")
         with patch("backend.agents.create_agent_info.discover_langchain_tools",
@@ -7356,10 +8282,11 @@ class TestCreateToolConfigListAidpSearch:
             )
 
             assert len(result) == 1
-            # Snapshot failure is fail-closed even when the tool requested a KB.
-            assert mock_tc_instance.params["kds_list"] == []
+            # The configured scope is independent from permission resolution.
+            assert mock_tc_instance.params["kds_list"] == ["kb_requested"]
             assert mock_tc_instance.metadata is not None
             assert mock_tc_instance.metadata["allowed_kds_set"] == []
+            assert mock_tc_instance.metadata["kds_name_to_id_map"] == {}
 
     @pytest.mark.asyncio
     async def test_aidp_search_metadata_merges_langchain_tool(self):
@@ -7552,3 +8479,20 @@ class TestBuildSecurityHeaders:
             "security_credentials": {"k": "v"},
         }
         assert _build_security_headers(agent) == {}
+
+    def test_select_agent_model_id_prefers_first_available_model(self):
+        """Runtime model selection skips unavailable configured models."""
+        from backend.agents.create_agent_info import _select_agent_model_id
+        records = {
+            7: {"connect_status": "unavailable"},
+            8: {"connect_status": "available"},
+        }
+        with patch(
+            "backend.agents.create_agent_info.get_model_by_model_id",
+            side_effect=lambda model_id, **kwargs: records[model_id],
+        ), patch(
+            "backend.agents.create_agent_info.is_model_available",
+            side_effect=lambda record: bool(record) and record.get("connect_status") == "available",
+        ):
+            assert _select_agent_model_id([7, 8], None, "tenant") == 8
+            assert _select_agent_model_id([7, 8], 9, "tenant") == 9

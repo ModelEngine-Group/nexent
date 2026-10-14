@@ -27,7 +27,10 @@ elasticsearch_module.__spec__ = importlib.machinery.ModuleSpec("elasticsearch", 
 sys.modules['elasticsearch'] = elasticsearch_module
 # Pre-mock nexent module hierarchy to prevent deep SDK import chain
 nexent_mod = types.ModuleType("nexent")
-nexent_mod.__path__ = []
+_sdk_nexent_path = os.path.abspath(
+    os.path.join(os.path.dirname(__file__), "../../../sdk/nexent")
+)
+nexent_mod.__path__ = [_sdk_nexent_path]
 nexent_mod.__spec__ = importlib.machinery.ModuleSpec("nexent", loader=None)
 sys.modules['nexent'] = nexent_mod
 
@@ -54,7 +57,11 @@ for _mod_name in [
     if _mod_name not in sys.modules:
         _parts = _mod_name.split('.')
         _mod = types.ModuleType(_mod_name)
-        _mod.__path__ = []
+        _mod.__path__ = (
+            [os.path.join(_sdk_nexent_path, "core")]
+            if _mod_name == "nexent.core"
+            else []
+        )
         _mod.__spec__ = importlib.machinery.ModuleSpec(_mod_name, loader=None)
         sys.modules[_mod_name] = _mod
 
@@ -73,6 +80,10 @@ nexent_container.ContainerConnectionError = Exception
 # Pre-mock services.tool_configuration_service so patches resolve correctly
 tool_config_mod = types.ModuleType("services.tool_configuration_service")
 tool_config_mod.get_tool_from_remote_mcp_server = AsyncMock()
+tool_config_mod.import_openapi_service = MagicMock()
+tool_config_mod.delete_openapi_service = MagicMock()
+tool_config_mod._refresh_openapi_services_in_mcp = MagicMock()
+tool_config_mod.update_tool_list = AsyncMock()
 tool_config_mod.__spec__ = importlib.machinery.ModuleSpec("services.tool_configuration_service", loader=None)
 sys.modules['services.tool_configuration_service'] = tool_config_mod
 
@@ -235,7 +246,7 @@ class TestMcpConnectionErrorFormatting(unittest.IsolatedAsyncioTestCase):
                 return []
 
         with patch("backend.services.remote_mcp_service.Client", return_value=SlowConnectClient()), \
-             patch("backend.services.remote_mcp_service.MCP_HEALTH_CHECK_TIMEOUT_SECONDS", 0.001):
+             patch("backend.services.remote_mcp_service.MCP_REQUEST_TIMEOUT_SECONDS", 0.001):
             with self.assertRaises(MCPConnectionError) as context:
                 await _mcp_protocol_health_check("http://example.com/mcp", {})
 
@@ -634,8 +645,9 @@ class TestAddMcpServiceApiType(unittest.IsolatedAsyncioTestCase):
 
     @patch('backend.services.remote_mcp_service.create_mcp_record')
     @patch('backend.services.remote_mcp_service.check_mcp_name_exists')
+    @patch('services.tool_configuration_service.update_tool_list', new_callable=AsyncMock)
     async def test_api_type_skips_mcp_protocol_and_extracts_tools(
-        self, mock_check_name, mock_create
+        self, mock_update_tool_list, mock_check_name, mock_create
     ):
         """API-type MCP should skip MCP protocol check and extract tool names from OpenAPI."""
         mock_check_name.return_value = False
@@ -663,6 +675,7 @@ class TestAddMcpServiceApiType(unittest.IsolatedAsyncioTestCase):
             call_data['registry_json']['_toolNames'],
             ["ping", "echo"],
         )
+        mock_update_tool_list.assert_awaited_once_with(tenant_id='tid', user_id='uid')
 
 
 # ============================================================================
@@ -1377,6 +1390,49 @@ class TestGetMcpRecordByIdCustomHeaders(unittest.IsolatedAsyncioTestCase):
 
         self.assertIsNotNone(result)
         self.assertIsNone(result["custom_headers"])
+
+    @patch('backend.services.remote_mcp_service.get_remote_mcp_server_list')
+    @patch('backend.services.remote_mcp_service.get_mcp_record_by_id_and_tenant')
+    async def test_get_record_hidden_for_non_creator_private_mcp(
+        self, mock_get_record, mock_list
+    ):
+        """PRIVATE MCP detail must be hidden from users who cannot see it in the list."""
+        mock_get_record.return_value = {
+            "mcp_name": "private-service",
+            "mcp_server": "https://private.com/mcp",
+            "authorization_token": "Bearer token",
+            "custom_headers": None,
+        }
+        # List view applies visibility filtering; an empty result means the
+        # record is invisible to this user (e.g. PRIVATE group MCP).
+        mock_list.return_value = []
+
+        result = await get_mcp_record_by_id(
+            mcp_id=1, tenant_id="tenant123", user_id="user_a"
+        )
+
+        self.assertIsNone(result)
+        mock_list.assert_awaited_once_with(
+            tenant_id="tenant123", user_id="user_a", is_need_auth=False
+        )
+
+    @patch('backend.services.remote_mcp_service.get_remote_mcp_server_list')
+    @patch('backend.services.remote_mcp_service.get_mcp_record_by_id_and_tenant')
+    async def test_get_record_visible_without_user_id(
+        self, mock_get_record, mock_list
+    ):
+        """Legacy callers without user_id keep the old behavior (no visibility check)."""
+        mock_get_record.return_value = {
+            "mcp_name": "test-service",
+            "mcp_server": "https://test.com/mcp",
+            "authorization_token": "Bearer token123",
+            "custom_headers": None,
+        }
+
+        result = await get_mcp_record_by_id(mcp_id=1, tenant_id="tenant123")
+
+        self.assertIsNotNone(result)
+        mock_list.assert_not_awaited()
 
 
 # ============================================================================
@@ -2582,6 +2638,34 @@ class TestUpdateMcpServiceEnabledContainerRebuild(unittest.IsolatedAsyncioTestCa
 class TestDeleteMcpServiceToolsUnavailable(unittest.IsolatedAsyncioTestCase):
     """Test delete_mcp_service hides the deleted MCP's tools."""
 
+    @patch('services.tool_configuration_service._refresh_openapi_services_in_mcp')
+    @patch('services.tool_configuration_service.delete_openapi_service')
+    @patch('backend.services.remote_mcp_service.delete_mcp_record_by_id')
+    @patch('backend.services.remote_mcp_service.set_mcp_tools_unavailable')
+    @patch('backend.services.remote_mcp_service.MCPContainerManager')
+    @patch('backend.services.remote_mcp_service.get_mcp_record_by_id_and_tenant')
+    async def test_delete_api_mcp_removes_openapi_service_and_outer_tools(
+        self, mock_get, mock_mgr_cls, mock_tools, mock_delete, mock_delete_openapi, mock_refresh_openapi
+    ):
+        """Deleting an API MCP also removes its converted service and tools."""
+        mock_get.return_value = {
+            "mcp_id": 1,
+            "mcp_name": "api-svc",
+            "container_id": None,
+            "config_json": {"openapi": "3.0.0", "paths": {}},
+        }
+
+        await delete_mcp_service(tenant_id='tid', user_id='uid', mcp_id=1)
+
+        mock_delete_openapi.assert_called_once_with(
+            service_name='api-svc', tenant_id='tid', user_id='uid'
+        )
+        mock_refresh_openapi.assert_called_once_with('tid')
+        mock_tools.assert_called_once_with(
+            tenant_id='tid', mcp_server_name='outer-apis', user_id='uid'
+        )
+        mock_delete.assert_called_once()
+
     @patch('backend.services.remote_mcp_service.delete_mcp_record_by_id')
     @patch('backend.services.remote_mcp_service.set_mcp_tools_unavailable')
     @patch('backend.services.remote_mcp_service.MCPContainerManager')
@@ -2610,17 +2694,18 @@ class TestDeleteMcpServiceToolsUnavailable(unittest.IsolatedAsyncioTestCase):
     @patch('backend.services.remote_mcp_service.delete_mcp_record_by_id')
     @patch('backend.services.remote_mcp_service.set_mcp_tools_unavailable')
     @patch('backend.services.remote_mcp_service.get_mcp_record_by_id_and_tenant')
-    async def test_tools_unavailable_failure_does_not_block_delete(
+    async def test_tools_cleanup_failure_blocks_delete(
         self, mock_get, mock_tools, mock_delete,
     ):
-        """Even if marking tools fails, the MCP record is still deleted."""
+        """A failed tool cleanup must keep the MCP record intact."""
         mock_get.return_value = {"mcp_id": 1, "mcp_name": "test-svc", "container_id": None}
         mock_tools.side_effect = Exception("tool db down")
 
-        await delete_mcp_service(tenant_id='tid', user_id='uid', mcp_id=1)
+        with self.assertRaisesRegex(Exception, "tool db down"):
+            await delete_mcp_service(tenant_id='tid', user_id='uid', mcp_id=1)
 
         mock_tools.assert_called_once()
-        mock_delete.assert_called_once()
+        mock_delete.assert_not_called()
 
     @patch('backend.services.remote_mcp_service.delete_mcp_record_by_id')
     @patch('backend.services.remote_mcp_service.set_mcp_tools_unavailable')
@@ -2683,33 +2768,35 @@ class TestDeleteMcpByContainerIdToolsUnavailable(unittest.IsolatedAsyncioTestCas
     @patch('backend.services.remote_mcp_service.delete_mcp_record_by_container_id')
     @patch('backend.services.remote_mcp_service.set_mcp_tools_unavailable')
     @patch('backend.services.remote_mcp_service.get_mcp_records_by_tenant')
-    async def test_tools_unavailable_failure_does_not_block_delete(
+    async def test_tools_cleanup_failure_blocks_delete(
         self, mock_records, mock_tools, mock_delete,
     ):
-        """set_mcp_tools_unavailable raising is swallowed; delete still runs."""
+        """A failed tool cleanup must keep the container MCP record intact."""
         mock_records.return_value = [
             {"container_id": "target-cid", "mcp_name": "target-svc"},
         ]
         mock_tools.side_effect = Exception("tool db down")
 
-        await delete_mcp_by_container_id(tenant_id='tid', user_id='uid', container_id='target-cid')
+        with self.assertRaisesRegex(Exception, "tool db down"):
+            await delete_mcp_by_container_id(tenant_id='tid', user_id='uid', container_id='target-cid')
 
         mock_tools.assert_called_once()
-        mock_delete.assert_called_once()
+        mock_delete.assert_not_called()
 
     @patch('backend.services.remote_mcp_service.delete_mcp_record_by_container_id')
     @patch('backend.services.remote_mcp_service.set_mcp_tools_unavailable')
     @patch('backend.services.remote_mcp_service.get_mcp_records_by_tenant')
-    async def test_record_query_failure_does_not_block_delete(
+    async def test_record_query_failure_blocks_delete(
         self, mock_records, mock_tools, mock_delete,
     ):
-        """get_mcp_records_by_tenant raising is swallowed; delete still runs."""
+        """A failed MCP lookup must not skip cleanup and delete the record."""
         mock_records.side_effect = Exception("db down")
 
-        await delete_mcp_by_container_id(tenant_id='tid', user_id='uid', container_id='target-cid')
+        with self.assertRaisesRegex(Exception, "db down"):
+            await delete_mcp_by_container_id(tenant_id='tid', user_id='uid', container_id='target-cid')
 
         mock_tools.assert_not_called()
-        mock_delete.assert_called_once()
+        mock_delete.assert_not_called()
 
 
 # ============================================================================

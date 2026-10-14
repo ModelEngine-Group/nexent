@@ -1,6 +1,6 @@
 "use client";
 
-import { memo, useMemo } from "react";
+import { memo } from "react";
 import { cva, type VariantProps } from "class-variance-authority";
 import { BrainIcon, ChevronDownIcon } from "lucide-react";
 import {
@@ -39,58 +39,6 @@ export function extractStepLabel(text: string | undefined): string | undefined {
  */
 export function stripStepLabel(text: string): string {
   return text.replace(STEP_LABEL_RE, "");
-}
-
-const CODE_TAG_RE = /<code>([\s\S]*?)(<\/code>|$)/gi;
-const BACKTICK_RUN_RE = /`+/g;
-
-export function normalizeReasoningCodeBlocks(text: string): string {
-  return text.replace(CODE_TAG_RE, (_, rawCode: string, closingTag: string) => {
-    let code = rawCode.replace(/^\r?\n/, "");
-    if (closingTag) {
-      code = code.replace(/\r?\n$/, "");
-    }
-    const longestBacktickRun = Math.max(
-      0,
-      ...Array.from(code.matchAll(BACKTICK_RUN_RE), (match) => match[0].length),
-    );
-    const fence = "`".repeat(Math.max(3, longestBacktickRun + 1));
-
-    return `\n\n${fence}\n${code}\n${fence}\n\n`;
-  });
-}
-
-interface StreamingReasoningSegment {
-  type: "text" | "code";
-  content: string;
-}
-
-function splitStreamingReasoning(text: string): StreamingReasoningSegment[] {
-  const segments: StreamingReasoningSegment[] = [];
-  let cursor = 0;
-  let match: RegExpExecArray | null;
-
-  CODE_TAG_RE.lastIndex = 0;
-  while ((match = CODE_TAG_RE.exec(text)) !== null) {
-    if (match.index > cursor) {
-      segments.push({
-        type: "text",
-        content: text.slice(cursor, match.index),
-      });
-    }
-
-    segments.push({
-      type: "code",
-      content: match[1].replace(/^\r?\n/, ""),
-    });
-    cursor = CODE_TAG_RE.lastIndex;
-  }
-
-  if (cursor < text.length) {
-    segments.push({ type: "text", content: text.slice(cursor) });
-  }
-
-  return segments;
 }
 
 const reasoningVariants = cva(
@@ -331,36 +279,19 @@ const StreamingReasoning = () => {
   const isRunning = useAuiState(
     (s) => s.part?.type === "reasoning" && s.part.status.type === "running",
   );
-  const segments = useMemo(() => splitStreamingReasoning(text), [text]);
-
   if (!isRunning) {
     return (
       <MarkdownTextPrimitive
         remarkPlugins={[remarkGfm]}
         className="aui-md prose prose-sm max-w-none dark:prose-invert"
         components={{ ...defaultComponents, img: () => null }}
-        preprocess={normalizeReasoningCodeBlocks}
       />
     );
   }
 
   return (
     <div className="aui-streaming-reasoning space-y-3 text-sm leading-relaxed text-muted-foreground/90">
-      {segments.map((segment, index) =>
-        segment.type === "code" ? (
-          <pre
-            key={`code-${index}`}
-            className="aui-md-pre border-border/50 bg-muted/30 overflow-x-auto rounded-xl border p-3.5 text-[13px] leading-relaxed whitespace-pre"
-          >
-            <code>{segment.content}</code>
-          </pre>
-        ) : (
-          <StreamingMarkdownSegment
-            key={`text-${index}`}
-            content={segment.content}
-          />
-        ),
-      )}
+      <StreamingMarkdownSegment content={text} />
     </div>
   );
 };

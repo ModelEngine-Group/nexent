@@ -1,0 +1,19 @@
+schema_version: "1.0"
+module: {id: AGENT-EDITOR, name: Agent editor, description: Agent configuration and debug workflow}
+features:
+  - feature_id: AGENT-DEBUG-LAYOUT
+    name: Measured Agent debug panel
+    status: active
+    description: Present draft debug below the shared editor identity row with measured welcome, single-column questions and composer while preserving chat controls.
+    business_rules:
+      - rule_id: AGENT-DEBUG-RULE-001
+        description: Debug uses488px desktop width,24px padding, radius8, measured20/28 header and36/54 welcome,46px suggestion rows and164px composer; short viewports retain internal scrolling and no page overflow.
+      - rule_id: AGENT-DEBUG-RULE-002
+        description: Draft values drive welcome and questions; selecting a question fills the composer only; send/stop/clear/model and mode controls remain usable and maximize/restore preserve conversation state.
+      - rule_id: AGENT-DEBUG-RULE-003
+        description: Presentation is opt-in; layout and question selection do not persist Agent configuration and default chat/generation retain their existing styles and guarded debug entry.
+    required_test_stages: [D1, D4]
+    source:
+      requirement_ids: [AGENT-DEBUG-REQ-001]
+      spec_path: ../nexent-doc/docs/Developing/agt-editor-debug-panel-layout/proposal.md
+      notes: Inspector numeric values are frozen in product handoff. D2/D3/D5 excluded for unchanged protocol/provider/deployment. Font glyph parity and unexposed gradient positions are unverified.

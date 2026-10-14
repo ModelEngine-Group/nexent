@@ -3,7 +3,7 @@ import json
 from http import HTTPStatus
 from typing import Annotated, Any, Dict, List, Optional
 
-from fastapi import APIRouter, Body, Depends, Header, HTTPException, Path, Query
+from fastapi import APIRouter, Body, Depends, Header, HTTPException, Path, Query, Request
 from fastapi.responses import JSONResponse
 import re
 
@@ -17,13 +17,14 @@ from consts.exceptions import (
 from consts.model import ChunkCreateRequest, ChunkUpdateRequest, HybridSearchRequest, IndexingResponse
 from consts.scheduler import VALID_SUMMARY_FREQUENCIES, SUMMARY_FREQUENCY_OPTIONS_FOR_API
 from nexent.vector_database.base import VectorDatabaseCore
-from services.vectordatabase_service import (
+from management.services.model.resolver import get_embedding_model_by_id
+from management.services.knowledge_base.service import (
     ElasticSearchService,
-    get_embedding_model_by_id,
     get_vector_db_core,
     check_knowledge_base_exist_impl,
     KnowledgeBaseNeedsModelConfigError,
 )
+from services.audit_service import record_security_event
 from services.file_management_service import check_file_access
 from services.quota_service import QuotaService
 from services.redis_service import get_redis_service
@@ -86,6 +87,7 @@ async def check_knowledge_base_exist(
 
 @router.post("/{index_name}")
 def create_new_index(
+        http_request: Request,
         index_name: str = Path(..., description="Name of the index to create"),
         embedding_dim: Optional[int] = Query(
             None, description="Dimension of the embedding vectors"),
@@ -115,7 +117,7 @@ def create_new_index(
             raise ValueError("embedding_model_id must be an integer")
 
         # Treat path parameter as user-facing knowledge base name for new creations
-        return ElasticSearchService.create_knowledge_base(
+        result = ElasticSearchService.create_knowledge_base(
             knowledge_name=index_name,
             embedding_dim=embedding_dim,
             vdb_core=vdb_core,
@@ -128,7 +130,16 @@ def create_new_index(
             quota_limit_bytes=quota_limit_bytes,
             user_role=user_role,
         )
+        record_security_event("kb_index_create", request=http_request,
+                              user_id=user_id, tenant_id=tenant_id,
+                              details={"knowledge_name": index_name,
+                                       "embedding_model_id": embedding_model_id,
+                                       "quota_limit_bytes": quota_limit_bytes})
+        return result
     except HTTPException:
+        raise
+    except AppException:
+        # Keep structured knowledge-resource errors (including HTTP 429) intact.
         raise
     except DuplicateError as e:
         raise HTTPException(
@@ -148,6 +159,7 @@ def create_new_index(
 
 @router.delete("/{index_name}")
 async def delete_index(
+        http_request: Request,
         index_name: str = Path(..., description="Name of the index to delete"),
         vdb_core: VectorDatabaseCore = Depends(get_vector_db_core),
         authorization: Optional[str] = Header(None)
@@ -159,7 +171,21 @@ async def delete_index(
         require_knowledge_base_edit_permission(index_name, user_id, tenant_id)
         # Call the centralized full deletion service
         result = await ElasticSearchService.full_delete_knowledge_base(index_name, vdb_core, user_id)
+        from services.tag_management_service import TagManagementService
+
+        TagManagementService.cleanup_resource_assignments(
+            tenant_id, "knowledge_base", index_name, user_id
+        )
+        TagManagementService.cleanup_document_assignments_for_knowledge_base(
+            tenant_id, "local", index_name, user_id
+        )
+        record_security_event("kb_index_delete", request=http_request,
+                              user_id=user_id, tenant_id=tenant_id,
+                              details={"index_name": index_name})
         return result
+    except AppException:
+        # Preserve the EDS code/details for the common application handler.
+        raise
     except HTTPException:
         raise
     except TokenExpiredError as e:
@@ -377,6 +403,7 @@ def get_embedding_model_status(
 
 @router.put("/{index_name}/embedding-model")
 def update_embedding_model(
+        http_request: Request,
         index_name: str = Path(
             ..., description="Internal index name of the knowledge base to update"),
         request: Dict[str, Any] = Body(...,
@@ -405,6 +432,11 @@ def update_embedding_model(
             tenant_id=tenant_id,
             user_id=user_id,
         )
+
+        record_security_event("kb_embedding_model_change", request=http_request,
+                              user_id=user_id, tenant_id=tenant_id,
+                              details={"index_name": index_name,
+                                       "model_id": model_id})
 
         return JSONResponse(
             status_code=HTTPStatus.OK,
@@ -623,6 +655,7 @@ async def get_index_files(
 
 @router.delete("/{index_name}/documents")
 async def delete_documents(
+        http_request: Request,
         index_name: str = Path(..., description="Name of the index"),
         path_or_url: Optional[str] = Query(None,
                                            description="Legacy object path to delete"),
@@ -663,6 +696,11 @@ async def delete_documents(
                         status_code=HTTPStatus.BAD_REQUEST,
                         detail="A file without a storage object can only use full deletion",
                     )
+                record_security_event("kb_document_delete", request=http_request,
+                                      user_id=user_id, tenant_id=tenant_id,
+                                      details={"index_name": index_name,
+                                               "file_id": file_id,
+                                               "scope": scope})
                 return ElasticSearchService.delete_lifecycle_record_without_object(
                     lifecycle_record,
                     requested_by=user_id,
@@ -672,44 +710,71 @@ async def delete_documents(
                 status_code=HTTPStatus.BAD_REQUEST,
                 detail="Either path_or_url or file_id is required",
             )
+        # Pass the durable ID when available so deletion cannot select an older
+        # tombstone that happens to reuse the same object path.  The optional
+        # arguments keep path-only clients on the legacy contract.
+        delete_kwargs = {}
+        if file_id:
+            delete_kwargs = {"file_id": file_id, "requested_by": user_id}
         result = await ElasticSearchService.delete_document_by_scope(
-            index_name, path_or_url, scope, vdb_core
+            index_name, path_or_url, scope, vdb_core, **delete_kwargs
         )
 
         if scope == "full":
-            try:
-                redis_service = get_redis_service()
-                redis_cleanup_result = redis_service.delete_document_records(
-                    index_name, path_or_url
-                )
-                result["redis_cleanup"] = redis_cleanup_result
-                original_message = result.get(
-                    "message", "Documents deleted successfully"
-                )
-                result["message"] = (
-                    f"{original_message}. "
-                    f"Cleaned up {redis_cleanup_result['total_deleted']} Redis records "
-                    f"({redis_cleanup_result['celery_tasks_deleted']} tasks, "
-                    f"{redis_cleanup_result['cache_keys_deleted']} cache keys)."
-                )
-                if redis_cleanup_result.get("errors"):
-                    result["redis_warnings"] = redis_cleanup_result["errors"]
-            except Exception as redis_error:
-                logger.warning(
-                    "Redis cleanup failed for document %s in index %s: %s",
-                    path_or_url,
-                    index_name,
-                    redis_error,
-                )
-                result["redis_cleanup_error"] = str(redis_error)
-                original_message = result.get(
-                    "message", "Documents deleted successfully"
-                )
-                result["message"] = (
-                    f"{original_message}, but Redis cleanup encountered an error: "
-                    f"{str(redis_error)}"
-                )
+            from services.tag_management_service import TagManagementService
 
+            TagManagementService.cleanup_document_assignments(
+                tenant_id, "local", index_name, path_or_url, user_id
+            )
+            # The deletion service performs Redis cleanup for new callers. Keep
+            # the legacy fallback only when an older service implementation did
+            # not include that result, and avoid duplicate deletion calls.
+            if "redis_cleanup" not in result and not result.get("deletion_pending"):
+                try:
+                    redis_service = get_redis_service()
+                    redis_cleanup_result = redis_service.delete_document_records(
+                        index_name, path_or_url
+                    )
+                    result["redis_cleanup"] = redis_cleanup_result
+                    if redis_cleanup_result.get("errors"):
+                        result["redis_warnings"] = redis_cleanup_result["errors"]
+                except Exception as redis_error:
+                    logger.warning(
+                        "Redis cleanup failed for document %s in index %s: %s",
+                        path_or_url,
+                        index_name,
+                        redis_error,
+                    )
+                    result["redis_cleanup_error"] = str(redis_error)
+
+            # Preserve the response message contract used by existing clients.
+            # The new deletion service may already provide redis_cleanup, while
+            # the fallback above adds it for older service implementations.
+            # Only terminal responses receive the summary; pending responses
+            # must keep their retry-oriented message.
+            if not result.get("deletion_pending"):
+                original_message = result.get("message", "Documents deleted successfully")
+                if result.get("redis_cleanup_error"):
+                    if "Redis cleanup encountered an error" not in original_message:
+                        result["message"] = (
+                            f"{original_message}, but Redis cleanup encountered an error: "
+                            f"{result['redis_cleanup_error']}"
+                        )
+                elif result.get("redis_cleanup") and "Cleaned up" not in original_message:
+                    redis_cleanup = result["redis_cleanup"]
+                    result["message"] = (
+                        f"{original_message}. "
+                        f"Cleaned up {redis_cleanup.get('total_deleted', 0)} Redis records "
+                        f"({redis_cleanup.get('celery_tasks_deleted', 0)} tasks, "
+                        f"{redis_cleanup.get('cache_keys_deleted', 0)} cache keys)."
+                    )
+
+        record_security_event("kb_document_delete", request=http_request,
+                              user_id=user_id, tenant_id=tenant_id,
+                              details={"index_name": index_name,
+                                       "path_or_url": path_or_url,
+                                       "file_id": file_id,
+                                       "scope": scope})
         return result
 
     except ValueError as exc:
@@ -1056,14 +1121,17 @@ async def hybrid_search(
                 index_name=resolved_name, user_id=user_id, tenant_id=tenant_id,
             )
             resolved_index_names.append(resolved_name)
-        result = ElasticSearchService.search_hybrid(
-            index_names=resolved_index_names,
-            query=payload.query,
-            tenant_id=tenant_id,
-            top_k=payload.top_k,
-            weight_accurate=payload.weight_accurate,
-            vdb_core=vdb_core,
-        )
+        search_kwargs = {
+            "index_names": resolved_index_names,
+            "query": payload.query,
+            "tenant_id": tenant_id,
+            "top_k": payload.top_k,
+            "weight_accurate": payload.weight_accurate,
+            "vdb_core": vdb_core,
+        }
+        if payload.tag_predicates:
+            search_kwargs["tag_predicates"] = payload.tag_predicates
+        result = ElasticSearchService.search_hybrid(**search_kwargs)
         return JSONResponse(status_code=HTTPStatus.OK, content=result)
     except KnowledgeBaseNeedsModelConfigError as exc:
         # Return a specific error that frontend can detect to show the config dialog

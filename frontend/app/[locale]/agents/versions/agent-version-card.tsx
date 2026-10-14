@@ -45,7 +45,6 @@ import { searchAgentInfo } from "@/services/agentConfigService";
 import { useAgentStore } from "@/stores/agentStore"
 import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
 import log from "@/lib/logger";
-import { resolveAgentListTenantKey } from "@/lib/agentListTenant";
 import { message } from "antd";
 import { useQueryClient } from "@tanstack/react-query";
 import AgentVersionCompareModal from "./AgentVersionCompareModal";
@@ -122,10 +121,12 @@ export function VersionCardItem({
   version,
   agentId,
   currentVersionNo,
+  onRefreshAgentInfo,
 }: {
   version: AgentVersion;
   agentId: number;
   currentVersionNo?: number;
+  onRefreshAgentInfo?: () => Promise<Agent | null>;
 }) {
   // Calculate isCurrentVersion based on version.version_no and currentVersionNo
   const isCurrentVersion = currentVersionNo === version.version_no;
@@ -256,6 +257,7 @@ export function VersionCardItem({
             store.initialize(agentResult.data);
           }
         }
+        await onRefreshAgentInfo?.();
       } else {
         message.error(result.message || t("agent.version.rollbackError"));
       }

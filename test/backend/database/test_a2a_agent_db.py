@@ -12,6 +12,7 @@ import pytest
 from unittest.mock import MagicMock, patch
 from datetime import datetime, timezone
 
+from consts.exceptions import AgentNotFoundError
 
 # ---------------------------------------------------------------------------
 # Mock consts module
@@ -183,6 +184,7 @@ def _make_artifact_cls():
 # Build mock db_models module
 # ---------------------------------------------------------------------------
 db_models_mock = MagicMock()
+db_models_mock.AgentInfo = _make_cls('AgentInfo', ['agent_id', 'tenant_id', 'version_no', 'delete_flag'])
 db_models_mock.A2AExternalAgent = _make_ext_agent_cls()
 db_models_mock.A2AExternalAgentRelation = _make_ext_rel_cls()
 db_models_mock.A2AServerAgent = _make_server_agent_cls()
@@ -1152,6 +1154,21 @@ class TestUpdateAgentAvailability:
 # ===========================================================================
 
 class TestAddExternalAgentRelation:
+    @pytest.fixture(autouse=True)
+    def owned_references(self):
+        original_query = MockSession.query
+
+        def query(session, model, *others):
+            if model is db_models_mock.AgentInfo:
+                return MockQuery([db_models_mock.AgentInfo(
+                    agent_id=100, tenant_id='tenant-1', version_no=0, delete_flag='N')])
+            if model is db_models_mock.A2AExternalAgent:
+                return MockQuery([factory_external_agent(id=1)])
+            return original_query(session, model, *others)
+
+        with patch.object(MockSession, 'query', query):
+            yield
+
     def test_creates_new_relation(self):
         with patch.object(a2a_db, '_get_db_session') as mk:
             mk.return_value = MockSession()
@@ -1477,6 +1494,26 @@ class TestUpdateTaskState:
             mk.return_value = MockSession()
             result = a2a_db.update_task_state('nonexistent', 'TASK_STATE_WORKING')
             assert result is False
+
+
+class TestFailActiveTasksOnStartup:
+    def test_moves_submitted_and_working_tasks_to_failed(self):
+        query = MagicMock(name="query")
+        query.filter.return_value = query
+        query.update.return_value = 2
+        session = MagicMock(name="session")
+        session.query.return_value = query
+        context = MagicMock(name="context")
+        context.__enter__.return_value = session
+        context.__exit__.return_value = None
+
+        with patch.object(a2a_db, '_get_db_session', return_value=context):
+            assert a2a_db.fail_active_tasks_on_startup() == 2
+
+        updates = query.update.call_args.args[0]
+        assert updates["task_state"] == "TASK_STATE_FAILED"
+        assert updates["result_data"]["error"]["code"] == "CONTAINER_RESTARTED"
+        assert updates["completed_at"] is not None
 
 
 class TestListTasks:

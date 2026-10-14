@@ -66,9 +66,9 @@ cd nexent
 bash deploy.sh k8s
 ```
 
-Kubernetes 真实实现为 `bash deploy/k8s/deploy.sh`。它会读取同一个`deploy/env/.env`，并显式渲染为 Helm ConfigMap 和 Secret 覆盖值。PVC 可通过 `--persistence-mode local|dynamic|existing`、`--storage-class`/`--sc`、`--local-path`、`--local-node-name`、`--existing-claim-prefix` 控制。local 模式会渲染 `hostPath` PV，不再需要 nodeAffinity。
+Kubernetes 真实实现为 `bash deploy/k8s/deploy.sh`。它会先安装仅包含 Elasticsearch、PostgreSQL、Redis、MinIO 的 `nexent-infrastructure` Helm release，在基础组件和 Elasticsearch API Key 就绪后，再安装应用侧 `nexent` release。可通过 `--release-scope all|infrastructure|nexent` 部署两侧或单独一侧。脚本会读取同一个 `deploy/env/.env` 并渲染 Helm ConfigMap 和 Secret 覆盖值；PVC 可通过 `--persistence-mode local|dynamic|existing`、`--storage-class`/`--sc`、`--local-path`、`--local-node-name`、`--existing-claim-prefix` 控制。
 
-根目录卸载入口为 `bash uninstall.sh docker ...` 或 `bash uninstall.sh k8s ...`，具体实现仍分别在 `deploy/docker/uninstall.sh` 和 `deploy/k8s/uninstall.sh`。
+根目录卸载入口为 `bash uninstall.sh docker ...` 或 `bash uninstall.sh k8s ...`。Kubernetes 默认先卸载 `nexent`、再卸载 `nexent-infrastructure`；也可使用相同的 `--release-scope` 单独卸载，并对基础 release 执行依赖保护。
 
 Kubernetes 离线包使用同一个构建脚本，传入 `--target k8s` 或 `--target all`。部署前需要在每个需要运行 Pod 的节点上执行 `load-images.sh`，或使用 `--push-images --image-registry-prefix registry.example.com/nexent` 将镜像推送到集群可访问的内部镜像仓库，再使用与打包时一致的版本、镜像源和镜像仓库前缀部署。
 

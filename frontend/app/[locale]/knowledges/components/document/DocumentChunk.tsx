@@ -62,8 +62,6 @@ interface DocumentChunkProps {
   knowledgeBaseId: string; // Internal knowledge base ID / Elasticsearch index name
   documents: Document[];
   getFileIcon: (type: string) => string;
-  currentEmbeddingModel?: string | null;
-  knowledgeBaseEmbeddingModel?: string;
   onChunkCountChange?: () => void; // Callback when chunk count changes (for updating KnowledgeBaseList)
   permission?: string; // User's permission for this knowledge base (READ_ONLY, EDIT, etc.)
 }
@@ -84,8 +82,6 @@ const DocumentChunk: React.FC<DocumentChunkProps> = ({
   knowledgeBaseId,
   documents,
   getFileIcon,
-  currentEmbeddingModel,
-  knowledgeBaseEmbeddingModel,
   onChunkCountChange,
   permission,
 }) => {
@@ -140,33 +136,10 @@ const DocumentChunk: React.FC<DocumentChunkProps> = ({
 
   const effectiveIndexName = knowledgeBaseId || knowledgeBaseName;
 
-  const hasKnowledgeBaseModel =
-    Boolean(knowledgeBaseEmbeddingModel) &&
-    knowledgeBaseEmbeddingModel !== "unknown";
-  const hasCurrentModel = Boolean(currentEmbeddingModel);
-
-  // Determine if embedding models mismatch (specific condition for tooltip)
-  const isEmbeddingModelMismatch = React.useMemo(() => {
-    if (!hasKnowledgeBaseModel) {
-      return false;
-    }
-    return (
-      !hasCurrentModel || currentEmbeddingModel !== knowledgeBaseEmbeddingModel
-    );
-  }, [
-    currentEmbeddingModel,
-    hasCurrentModel,
-    hasKnowledgeBaseModel,
-    knowledgeBaseEmbeddingModel,
-  ]);
-
-  // Determine if in read-only mode (embedding model mismatch OR user has READ_ONLY permission)
-  // Note: isReadOnlyMode is broader, includes model mismatch and other conditions
-  const isReadOnlyMode = React.useMemo(() => {
-    return permission === "READ_ONLY" || isEmbeddingModelMismatch;
-  }, [permission, isEmbeddingModelMismatch]);
-
-  const isSearchDisabled = isEmbeddingModelMismatch;
+  // The knowledge base owns its embedding model, so the global model must not
+  // disable chunk search or editing in this knowledge base.
+  const isReadOnlyMode = permission === "READ_ONLY";
+  const isSearchDisabled = false;
 
   useEffect(() => {
     if (isSearchDisabled) {
@@ -644,11 +617,12 @@ const DocumentChunk: React.FC<DocumentChunkProps> = ({
     }, {});
   }, [chunkSearchResult]);
 
-  const visibleDocuments = isChunkSearchActive && !chunkSearchLoading
-    ? documents.filter(
-        (doc) => (chunkSearchResultMap?.[doc.id]?.length ?? 0) > 0
-      )
-    : documents;
+  const visibleDocuments =
+    isChunkSearchActive && !chunkSearchLoading
+      ? documents.filter(
+          (doc) => (chunkSearchResultMap?.[doc.id]?.length ?? 0) > 0
+        )
+      : documents;
 
   const tabItems = visibleDocuments.map((doc) => {
     const chunkCount = isChunkSearchActive
@@ -762,7 +736,9 @@ const DocumentChunk: React.FC<DocumentChunkProps> = ({
                                   className="self-center"
                                 />
                               </TooltipTrigger>
-                              <TooltipContent>{t("document.chunk.tooltip.edit")}</TooltipContent>
+                              <TooltipContent>
+                                {t("document.chunk.tooltip.edit")}
+                              </TooltipContent>
                             </Tooltip>
                           )}
                           <Tooltip>
@@ -775,7 +751,9 @@ const DocumentChunk: React.FC<DocumentChunkProps> = ({
                                 className="self-center"
                               />
                             </TooltipTrigger>
-                            <TooltipContent>{t("document.chunk.tooltip.download")}</TooltipContent>
+                            <TooltipContent>
+                              {t("document.chunk.tooltip.download")}
+                            </TooltipContent>
                           </Tooltip>
                           {!isReadOnlyMode && (
                             <Tooltip>
@@ -789,7 +767,9 @@ const DocumentChunk: React.FC<DocumentChunkProps> = ({
                                   className="self-center"
                                 />
                               </TooltipTrigger>
-                              <TooltipContent>{t("document.chunk.tooltip.delete")}</TooltipContent>
+                              <TooltipContent>
+                                {t("document.chunk.tooltip.delete")}
+                              </TooltipContent>
                             </Tooltip>
                           )}
                         </div>
@@ -913,7 +893,9 @@ const DocumentChunk: React.FC<DocumentChunkProps> = ({
                   onClick={openCreateChunkModal}
                 />
               </TooltipTrigger>
-              <TooltipContent>{t("document.chunk.tooltip.create")}</TooltipContent>
+              <TooltipContent>
+                {t("document.chunk.tooltip.create")}
+              </TooltipContent>
             </Tooltip>
           )}
         </div>

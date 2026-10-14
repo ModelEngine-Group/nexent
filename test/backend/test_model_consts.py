@@ -156,6 +156,123 @@ def test_capacity_suggestion_response_has_required_fields():
     )
 
 
+def test_filter_extra_params_passes_through_custom_object():
+    """__custom__ sub-object is preserved regardless of model_type, alongside
+    the existing allow-listed keys like enable_thinking."""
+    result = model_consts.filter_extra_params(
+        "llm",
+        {
+            "enable_thinking": True,
+            "__custom__": {
+                "my_key": "my_value",
+                "nested": {"limit": 3, "flags": [True, False]},
+                "nullable": None,
+            },
+        },
+    )
+    assert result is not None
+    assert result["enable_thinking"] is True
+    assert result["__custom__"] == {
+        "my_key": "my_value",
+        "nested": {"limit": 3, "flags": [True, False]},
+        "nullable": None,
+    }
+
+
+def test_filter_extra_params_accepts_reasoning_effort_for_llm_only():
+    assert model_consts.filter_extra_params(
+        "llm", {"reasoning_effort": "high"}
+    ) == {"reasoning_effort": "high"}
+    assert model_consts.filter_extra_params(
+        "llm", {"reasoning_effort": "unsupported"}
+    ) is None
+    assert model_consts.filter_extra_params(
+        "embedding", {"reasoning_effort": "high"}
+    ) is None
+
+
+def test_filter_extra_params_validates_reasoning_switch():
+    assert model_consts.filter_extra_params(
+        "llm", {"enable_thinking": True, "reasoning_effort": "medium"}
+    ) == {"enable_thinking": True, "reasoning_effort": "medium"}
+    assert model_consts.filter_extra_params(
+        "llm", {"enable_thinking": False, "reasoning_effort": "high"}
+    ) == {"enable_thinking": False, "reasoning_effort": "high"}
+    assert model_consts.filter_extra_params(
+        "llm", {"enable_thinking": "true"}
+    ) is None
+
+
+def test_filter_extra_params_validates_reasoning_budget_tokens():
+    assert model_consts.filter_extra_params(
+        "llm", {"reasoning_budget_tokens": 4096}
+    ) == {"reasoning_budget_tokens": 4096}
+    for value in (True, 0, -1, "4096"):
+        assert model_consts.filter_extra_params(
+            "llm", {"reasoning_budget_tokens": value}
+        ) is None
+
+
+def test_filter_extra_params_passes_through_custom_for_all_types():
+    """__custom__ is type-agnostic: it survives for embedding/rerank/vlm too."""
+    for model_type in ("embedding", "rerank", "vlm", "stt", "tts"):
+        result = model_consts.filter_extra_params(
+            model_type,
+            {"__custom__": {"k1": "v1", "k2": "0.5"}},
+        )
+        assert result == {"__custom__": {"k1": "v1", "k2": "0.5"}}, (
+            f"__custom__ should pass through for model_type={model_type}"
+        )
+
+
+def test_filter_extra_params_drops_invalid_custom_shape():
+    """__custom__ must be a dict; non-dict values are dropped entirely."""
+    result = model_consts.filter_extra_params("llm", {"__custom__": "not-a-dict"})
+    assert result is None
+
+    result = model_consts.filter_extra_params("llm", {"__custom__": ["list", "not", "dict"]})
+    assert result is None
+
+
+def test_filter_extra_params_drops_invalid_custom_entries():
+    """Inside __custom__: non-string keys and non-JSON values are dropped
+    individually; valid siblings survive."""
+    result = model_consts.filter_extra_params(
+        "llm",
+        {
+            "__custom__": {
+                1: "int-key-dropped",
+                "ok": "ok-value",
+                "nested": {"accepted": [1, {"enabled": True}]},
+                "bad": {"unsupported": object()},
+            }
+        },
+    )
+    assert result == {
+        "__custom__": {
+            "ok": "ok-value",
+            "nested": {"accepted": [1, {"enabled": True}]},
+        }
+    }
+
+
+def test_filter_extra_params_keeps_custom_alongside_allowed_keys():
+    """__custom__ coexists with the type's allow-listed extra_params keys."""
+    # LLM allows enable_thinking in extra_params; __custom__ rides alongside.
+    result = model_consts.filter_extra_params(
+        "llm",
+        {"enable_thinking": False, "unknown_key": "dropped", "__custom__": {"x": "1"}},
+    )
+    assert result == {"enable_thinking": False, "__custom__": {"x": "1"}}
+
+
+def test_filter_extra_params_drops_empty_custom():
+    """An empty __custom__ dict (or all-invalid entries) yields no __custom__ key."""
+    assert model_consts.filter_extra_params("llm", {"__custom__": {}}) is None
+    assert model_consts.filter_extra_params(
+        "llm", {"__custom__": {"bad": {"nested": object()}}}
+    ) is None
+
 def test_user_sign_up_request_validation():
     """Test UserSignUpRequest validation rules"""
     # Valid signup request
@@ -255,13 +372,14 @@ def test_model_config_hierarchy():
     """Test ModelConfig, AppConfig, and GlobalConfig hierarchy"""
     # Build a complete config
     app_config = model_consts.AppConfig(
-        appName="TestApp",
-        appDescription="Test Description",
+        appName="Legacy App",
+        appDescription="Legacy description",
         iconType="icon",
         modelEngineEnabled=True
     )
-    assert app_config.appName == "TestApp"
     assert app_config.modelEngineEnabled is True
+    assert "appName" not in app_config.model_dump()
+    assert "appDescription" not in app_config.model_dump()
 
     # Single model config
     single_model = model_consts.SingleModelConfig(
@@ -565,10 +683,29 @@ def test_generate_title_request():
     """Test GenerateTitleRequest"""
     req = model_consts.GenerateTitleRequest(
         conversation_id=42,
-        question="How do I learn Python?"
+        question="How do I learn Python?",
+        model_id=7,
     )
     assert req.conversation_id == 42
     assert "Python" in req.question
+    assert req.model_id == 7
+
+    legacy_req = model_consts.GenerateTitleRequest(
+        conversation_id=42,
+        question="How do I learn Python?",
+    )
+    assert legacy_req.model_id is None
+
+
+@pytest.mark.parametrize("model_id", [0, -1])
+def test_generate_title_request_rejects_non_positive_model_id(model_id):
+    """GenerateTitleRequest only accepts positive explicit model IDs."""
+    with pytest.raises(ValueError):
+        model_consts.GenerateTitleRequest(
+            conversation_id=42,
+            question="How do I learn Python?",
+            model_id=model_id,
+        )
 
 
 def test_agent_info_request():
@@ -990,11 +1127,12 @@ def test_nl2_agent_skill_requests():
 
     nl2_skill = model_consts.NL2SkillRunRequest(
         query="Build an automation",
-        complexity="simple",
-        language="en"
+        language="en",
+        minio_files=[{"name": "requirements.pdf", "object_name": "files/1"}],
     )
-    assert nl2_skill.complexity == "simple"
+    assert "complexity" not in nl2_skill.model_dump()
     assert nl2_skill.language == "en"
+    assert nl2_skill.minio_files[0]["name"] == "requirements.pdf"
 
 
 def test_export_import_requests():
@@ -1035,6 +1173,45 @@ def test_agent_repository_snapshot():
         ]
     )
     assert len(snapshot.skills) == 1
+
+
+def test_official_agent_bundle_derives_card_fields_from_root_agent():
+    root_agent = model_consts.ExportAndImportAgentInfo(
+        agent_id=1,
+        tenant_id="official",
+        name="medical_assistant",
+        display_name="Medical Assistant",
+        description="Medical assistant",
+        max_steps=5,
+        provide_run_summary=False,
+        enabled=True,
+        tools=[],
+        managed_agents=[],
+    )
+
+    bundle = model_consts.OfficialAgentBundle(
+        agent_id=1,
+        agent_info={"1": root_agent},
+        mcp_info=[],
+    )
+
+    assert bundle.name == "medical_assistant"
+    assert bundle.display_name == "Medical Assistant"
+    assert bundle.icon == "🤖"
+    assert bundle.version_label == "V1"
+
+
+def test_official_agent_bundle_uses_defaults_without_root_agent():
+    bundle = model_consts.OfficialAgentBundle(
+        agent_id=1,
+        agent_info={},
+        mcp_info=[],
+    )
+
+    assert bundle.name == "agent"
+    assert bundle.display_name == "agent"
+    assert bundle.icon == "🤖"
+    assert bundle.version_label == "V1"
 
 
 def test_repository_import_requests():
@@ -1083,19 +1260,12 @@ def test_agent_name_batch_requests():
     assert len(batch_check.items) == 1
 
 
-def test_nl2_skill_run_with_complexity():
-    """Test NL2SkillRunRequest with different complexity modes"""
-    req_simple = model_consts.NL2SkillRunRequest(
-        query="Simple task",
-        complexity="simple"
+def test_nl2_skill_run_ignores_retired_complexity_field():
+    """Legacy clients cannot select a different NL2Skill prompt."""
+    request = model_consts.NL2SkillRunRequest.model_validate(
+        {"query": "Create a skill", "complexity": "simple"}
     )
-    assert req_simple.complexity == "simple"
-
-    req_complicated = model_consts.NL2SkillRunRequest(
-        query="Complex task",
-        complexity="complicated"
-    )
-    assert req_complicated.complexity == "complicated"
+    assert "complexity" not in request.model_dump()
 
 
 def test_model_api_config():
@@ -1276,15 +1446,17 @@ def test_manage_tenant_model_list_response():
 
 
 def test_agent_repository_listing_requests():
-    """Test AgentRepositoryListingCreateRequest"""
+    """Test the repository icon URL in the listing creation request."""
+    icon_url = "/api/repository/agent/1/versions/1/icon/image-id"
     req = model_consts.AgentRepositoryListingCreateRequest(
-        icon="🚀",
+        icon_url=icon_url,
         downloads=100,
         tags=["ai", "automation"],
         tool_count=10,
         content="This is a great agent"
     )
-    assert req.icon == "🚀"
+    assert req.icon_url == icon_url
+    assert req.model_dump(exclude_unset=True)["icon_url"] == icon_url
     assert req.downloads == 100
 
 
@@ -1332,3 +1504,57 @@ def test_delete_mcp_service_request():
         mcp_id=42
     )
     assert req.mcp_id == 42
+
+
+def test_reasoning_capability_normalizes_unsupported_profiles():
+    capability = model_consts.ReasoningCapability(
+        status="unsupported",
+        levels=["low"],
+        default="low",
+        effort_budgets={"low": 2048},
+    )
+
+    assert capability.levels == []
+    assert capability.default is None
+    assert capability.effort_budgets == {}
+
+
+def test_reasoning_capability_accepts_toggle_without_effort_levels():
+    capability = model_consts.ReasoningCapability(
+        status="supported",
+        control="toggle",
+        wire_format="thinking_toggle",
+    )
+
+    assert capability.levels == []
+
+
+def test_reasoning_control_validates_effort_and_budget_shapes():
+    with pytest.raises(ValidationError):
+        model_consts.ReasoningControl(type="effort")
+
+    with pytest.raises(ValidationError):
+        model_consts.ReasoningControl(type="budget_tokens", min=1024)
+
+    with pytest.raises(ValidationError):
+        model_consts.ReasoningControl(type="budget_tokens", min=4096, max=1024)
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {"status": "supported", "control": "effort"},
+        {"status": "supported", "levels": ["low"], "default": "high"},
+        {"status": "supported", "levels": ["low"], "effort_budgets": {"high": 2048}},
+        {"status": "supported", "levels": ["low"], "effort_budgets": {"low": 512}},
+        {
+            "status": "supported",
+            "levels": ["none", "high"],
+            "wire_format": "thinking_budget",
+            "effort_budgets": {},
+        },
+    ],
+)
+def test_reasoning_capability_rejects_invalid_profiles(payload):
+    with pytest.raises(ValidationError):
+        model_consts.ReasoningCapability(**payload)

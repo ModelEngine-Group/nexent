@@ -1,0 +1,31 @@
+schema_version: '1.0'
+case_id: UT-FE-AUTO-55E9952C32F60844
+implementations:
+- framework: vitest
+  file: test.test.tsx
+  selector: UT-FE-AUTO-55E9952C32F60844
+notes: Migrated to real newchat stream/history adapters and ReadOnlyConversation with
+  controlled external transport.
+acceptance_bindings:
+  AC-01:
+  - UT-FE-AUTO-55E9952C32F60844 newchat history summaries > UT-FE-AUTO-55E9952C32F60844
+    compacting adds one transient summary and renders a spinner without body
+  AC-02:
+  - UT-FE-AUTO-55E9952C32F60844 newchat history summaries > accepted replaces compacting
+    and repeated summaries without duplication
+  AC-03:
+  - UT-FE-AUTO-55E9952C32F60844 newchat history summaries > idle removes only the
+    current summary and preserves ordinary content
+  AC-04:
+  - UT-FE-AUTO-55E9952C32F60844 newchat history summaries > invalid JSON and unsupported
+    status leave an accepted summary unchanged
+  AC-05:
+  - 'UT-FE-AUTO-55E9952C32F60844 newchat history summaries > restores and renders
+    persisted string or markdown-object summaries: "final summary"'
+  - 'UT-FE-AUTO-55E9952C32F60844 newchat history summaries > restores and renders
+    persisted string or markdown-object summaries: {"markdown":"# final summary"}'
+  AC-06:
+  - 'UT-FE-AUTO-55E9952C32F60844 newchat history summaries > restores and renders
+    persisted string or markdown-object summaries: "final summary"'
+  - 'UT-FE-AUTO-55E9952C32F60844 newchat history summaries > restores and renders
+    persisted string or markdown-object summaries: {"markdown":"# final summary"}'

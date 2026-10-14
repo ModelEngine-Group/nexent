@@ -1,6 +1,7 @@
 import json
 import logging
 import re
+import time
 from typing import Any, Dict, List, Optional, Set, Tuple
 
 import redis
@@ -50,6 +51,106 @@ class RedisService:
     # ------------------------------------------------------------------
     # Cancellation helpers
     # ------------------------------------------------------------------
+
+    @staticmethod
+    def _document_fence_key(file_id: Optional[str]) -> Optional[str]:
+        """Return the deletion-fence key for a lifecycle file record."""
+        if not file_id:
+            return None
+        return f"kb:delete:fence:file:{file_id}"
+
+    def mark_document_delete_requested(
+        self,
+        *,
+        file_id: Optional[str] = None,
+        requested_by: Optional[str] = None,
+    ) -> bool:
+        """Install a durable document deletion fence.
+
+        The fence intentionally has no TTL.  A stale worker must remain unable
+        to recreate a deleted document until the deletion coordinator has
+        explicitly completed and removed the fence.
+        """
+        key = self._document_fence_key(file_id)
+        if not key:
+            return False
+        payload = json.dumps(
+            {
+                "file_id": file_id,
+                "requested_by": requested_by,
+                "requested_at": time.time(),
+            },
+            ensure_ascii=False,
+        )
+        try:
+            # Use SET (not SETEX) so this marker survives worker/service
+            # restarts and is removed only by the successful finalizer.
+            self.client.set(key, payload)
+            logger.info(
+                "Installed document deletion fence file_id=%s key=%s",
+                file_id,
+                key,
+            )
+            return True
+        except Exception as exc:
+            logger.error(
+                "Failed to install document deletion fence file_id=%s: %s",
+                file_id,
+                exc,
+            )
+            return False
+
+    def is_document_delete_requested(
+        self,
+        *,
+        file_id: Optional[str] = None,
+    ) -> bool:
+        """Check whether a lifecycle file has an active deletion fence.
+
+        A healthy Redis miss returns ``False``. Redis errors are re-raised so
+        the caller can fall back to the durable PG lifecycle status instead of
+        treating an unavailable Redis service as a healthy miss.
+        """
+        key = self._document_fence_key(file_id)
+        if not key:
+            return False
+        try:
+            return bool(self.client.exists(key))
+        except Exception as exc:
+            logger.warning(
+                "Failed to read document deletion fence file_id=%s: %s",
+                file_id,
+                exc,
+            )
+            # Let the caller distinguish a healthy Redis miss from an
+            # unavailable Redis service and decide whether PG fallback is
+            # required.
+            raise
+
+    def clear_document_delete_fence(
+        self,
+        *,
+        file_id: Optional[str] = None,
+    ) -> int:
+        """Remove a document deletion fence after all cleanup completed."""
+        key = self._document_fence_key(file_id)
+        if not key:
+            return 0
+        try:
+            deleted = int(self.client.delete(key) or 0)
+            logger.info(
+                "Cleared document deletion fence file_id=%s deleted=%s",
+                file_id,
+                deleted,
+            )
+            return deleted
+        except Exception as exc:
+            logger.error(
+                "Failed to clear document deletion fence file_id=%s: %s",
+                file_id,
+                exc,
+            )
+            return 0
 
     def mark_task_cancelled(self, task_id: str, ttl_hours: int = 24) -> bool:
         """
@@ -124,6 +225,17 @@ class RedisService:
                 deleted_count += deleted
                 if deleted:
                     logger.debug(f"Deleted chunk cache key: {chunk_key}")
+                ready_key = f"{chunk_key}:ready"
+                # The ready marker is an internal companion key.  Discover it
+                # first so deployments that never created the marker incur no
+                # extra delete call (and retain the historical cleanup count).
+                ready_keys = list(self.backend_client.scan_iter(match=ready_key, count=10))
+                if ready_keys:
+                    deleted_count += self.backend_client.delete(*ready_keys)
+                part_keys = list(self.backend_client.scan_iter(match=f"dp:{task_id}:part:*", count=100))
+                if part_keys:
+                    deleted_count += self.backend_client.delete(*part_keys)
+                    logger.debug("Deleted %s split chunk keys for task %s", len(part_keys), task_id)
             except Exception as exc:
                 logger.warning(f"Error deleting chunk cache key {chunk_key}: {exc}")
 

@@ -1,0 +1,81 @@
+agent_profile_name: |-
+  ## Agent Profile
+  - Name: {{ value }}
+agent_profile_description: "- Description: {{ value }}"
+agent_profile_duty: "- Duty: {{ value }}"
+agent_profile_constraints: "- Constraints: {{ value }}"
+agent_profile_business: "- Business Context: {{ value }}"
+scene: |-
+  ## Scene Description
+  {{ description }}
+knowledge_results: |-
+  ## Retrieved Knowledge Base Content
+  {{ content }}
+knowledge_empty: |-
+  ## Related Knowledge Bases: {{ names }}
+  (No results found)
+file: |-
+  ## Uploaded Document: {{ name }}
+  {{ content }}
+history_header: "## Previous Conversation Turns"
+history_user: "User: {{ content }}"
+history_agent: "Agent: {{ content }}"
+runtime_header: "## Agent Execution Log"
+runtime_empty: |-
+  ## Agent Execution Log
+
+  (No execution data)
+runtime_step: |-
+  Step {{ index }}:
+  {{ content }}
+runtime_final: |-
+  ─ Final Answer ─
+  {{ content }}
+analysis_stats: "Total cases: {{ total }}, Passed: {{ passed }}, Failed: {{ failed }}, Pass rate: {{ passed }}/{{ total }}"
+analysis_thresholds: "Evaluator pass thresholds: {{ thresholds }}"
+analysis_no_fail: "No failed cases."
+analysis_case: "Case {{ index }}: Q={{ query }}"
+analysis_score: "Score: {{ score }}"
+analysis_reason: "Reason: {{ reason }}"
+analysis_answer: "Answer: {{ answer }}"
+analysis_user: |-
+  {{ stats }}
+
+  Failed case details (up to {{ max_failures }} examples):{{ failures }}
+profile_title: "## Agent Configuration"
+profile_agent: "### Agent: {{ value }}"
+profile_description: "Description: {{ value }}"
+profile_duty: "Duty: {{ value }}"
+profile_constraints: "Constraints: {{ value }}"
+profile_business: "Business Context: {{ value }}"
+profile_list_item: "{{ name }}"
+profile_list_item_described: "{{ name }} ({{ description }})"
+profile_list_line: "{{ label }}: {{ items }}"
+profile_tool_item: "{{ name }}{{ tag }}"
+profile_tool_item_described: "{{ name }}{{ tag }}: {{ description }}"
+profile_tool_tag: " [{{ source }}]"
+profile_tools_label: "Tools"
+profile_skills_label: "Skills"
+profile_workers_label: "Sub-agents"
+profile_knowledge_label: "Knowledge Bases"
+kb_description: "- {{ name }} - {{ description }}"
+kb_no_description: "- {{ name }} (no description)"
+kb_result_header: "### {{ name }}"
+kb_result_hit: "- [{{ query }}] (score={{ score }}) {{ content }}"
+kb_display_name: "{{ name }} ({{ description }})"
+runtime_label_tool: "  → "
+runtime_label_kb: "  [KB] "
+runtime_label_log: "    "
+runtime_label_artifact: "  [Artifact] "
+runtime_label_file: "  [File created] "
+runtime_label_error: "  [ERROR] "
+runtime_tool_call: "  → {{ name }}({{ arguments }})"
+runtime_stats: |-
+  ─ Stats ─
+  Steps: {{ steps }} | Tool calls: {{ tool_calls }} | Output tokens: {{ output_tokens }} | Errors: {{ errors }}
+  Max steps reached: {{ max_steps_reached }} | Has final answer: {{ has_final_answer }}
+source_scene: Scene description
+source_kb: Knowledge base search results
+source_agent: Agent configuration including tools, skills, and sub-agents
+source_file: Uploaded reference document
+source_separator: ", "

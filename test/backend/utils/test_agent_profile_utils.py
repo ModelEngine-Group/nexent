@@ -19,7 +19,7 @@ Targets
 The pattern mirrors ``test_evaluator_db.py``: sys.path injection, idempotent
 ``_register_package`` registration and permanent (never-uninstalled)
 ``sys.modules`` stubs for the module's transitive imports
-(``database.agent_db``, ``database.tool_db``, ``services.skill_service`` plus
+(``database.agent_db``, ``database.tool_db``, ``management.services.skill.service`` plus
 the lazy ``database.knowledge_db`` / ``database.client`` /
 ``database.db_models`` imports inside ``_fetch_knowledge_bases``).
 """
@@ -109,12 +109,34 @@ def _install_stubs():
     sys.modules["database.db_models"] = db_models
     db_pkg.db_models = db_models
 
-    # services.skill_service – SkillService is a (mock) class
+    # management.services.skill.service – SkillService is a (mock) class
     services_pkg = _register_package("services")
-    skill_service = types.ModuleType("services.skill_service")
+    skill_service = types.ModuleType("management.services.skill.service")
     skill_service.SkillService = MagicMock(name="SkillService")
-    sys.modules["services.skill_service"] = skill_service
+    sys.modules["management.services.skill.service"] = skill_service
     services_pkg.skill_service = skill_service
+
+    sdk_root = _REPO_ROOT / "sdk/nexent"
+    for package_name, package_path in (
+        ("nexent", sdk_root),
+        ("nexent.core", sdk_root / "core"),
+        ("nexent.core.prompts", sdk_root / "core/prompts"),
+    ):
+        package = types.ModuleType(package_name)
+        package.__path__ = [str(package_path)]
+        sys.modules[package_name] = package
+
+    def load_test_prompt(language, path):
+        import yaml
+        source = sdk_root / "core/prompts" / language / f"{path}.yaml"
+        return yaml.safe_load(source.read_text(encoding="utf-8"))
+
+    def render_test_prompt(source, parameters):
+        from jinja2 import Environment, StrictUndefined
+        return Environment(undefined=StrictUndefined).from_string(source).render(**parameters)
+
+    sys.modules["nexent.core.prompts"].load_prompt = load_test_prompt
+    sys.modules["nexent.core.prompts"].render_prompt_text = render_test_prompt
 
     return _StubBundle(agent_db, tool_db, knowledge_db, client, db_models, skill_service)
 

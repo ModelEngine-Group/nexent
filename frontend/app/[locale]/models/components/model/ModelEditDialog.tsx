@@ -1,1263 +1,529 @@
-﻿import { useState, useEffect, useRef } from "react";
+"use client";
+
+import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { App } from "antd";
+import { Loader2, ChevronDown, ChevronRight, ShieldCheck } from "lucide-react";
 
-import { Alert, Modal, Select, Input, Button, Switch, App } from "antd";
-
-import { MODEL_TYPES, MODEL_STATUS } from "@/const/modelConfig";
-import { useConfig } from "@/hooks/useConfig";
-import { useCapacitySuggestion } from "@/hooks/useCapacitySuggestion";
-import { modelService } from "@/services/modelService";
-import { ModelOption, ModelType } from "@/types/modelConfig";
-import { getConnectivityMeta, ConnectivityStatusType } from "@/lib/utils";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import {
-  ModelChunkSizeSlider,
-  DEFAULT_EXPECTED_CHUNK_SIZE,
-  DEFAULT_MAXIMUM_CHUNK_SIZE,
-} from "./ModelChunkSizeSilder";
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import {
-  isValidMaxTokens,
-  ModelMaxTokensInput,
-  parseMaxTokens,
-} from "./ModelMaxTokensInput";
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { cn } from "@/lib/utils";
+
+import { MODEL_TYPES } from "@/const/modelConfig";
+import { modelService, ModelError } from "@/services/modelService";
 import {
-  buildCapacityPayload,
-  capacityFormFromSuggestion,
-  capacityFormFromModel,
-  emptyCapacityForm,
-  ModelCapacityFields,
-  ModelCapacityFormState,
-  validateCapacityForm,
-} from "./ModelCapacityFields";
+  ModelOption,
+  ModelType,
+  ReasoningCapability,
+} from "@/types/modelConfig";
+import log from "@/lib/logger";
 
-const { Option } = Select;
+import {
+  ModelAdvancedSettingsValue,
+  buildInferenceParamsPayload,
+  buildVoiceCredentialParams,
+  formatCustomValueForEditing,
+} from "./ModelAdvancedSettings";
+import { ModelAdvancedConfig } from "./ModelAdvancedConfig";
+import {
+  isEmbeddingModelType,
+  supportsMaxTokensField,
+  TYPE_BADGE_CLASS,
+  useTypeOptions,
+} from "./modelTypeUi";
 
-interface ModelEditDialogProps {
-  isOpen: boolean;
+/**
+ * v2.6.1 redesign (v0 design): the per-model edit dialog.
+ *
+ * Replaces the old tab-based ModelAddDialogV2 edit flow with a single-page
+ * form: basic info + connection at top, expandable advanced config (capacity
+ * + inference params) below. Built on the project's shadcn/ui primitives.
+ *
+ * The connectivity check from the old dialog is intentionally dropped here —
+ * models are checked from the library list (per-row button / one-click
+ * verify). Edit is for configuration, not testing.
+ */
+
+export interface ModelEditDialogProps {
   model: ModelOption | null;
   onClose: () => void;
-  onSuccess: () => Promise<void>;
-  tenantId?: string; // Optional tenant ID for manage operations
+  onSuccess: () => void;
 }
 
 export const ModelEditDialog = ({
-  isOpen,
   model,
   onClose,
   onSuccess,
-  tenantId,
 }: ModelEditDialogProps) => {
   const { t } = useTranslation();
   const { message } = App.useApp();
-  const { updateModelConfig } = useConfig();
-  const {
-    suggestion: capacitySuggestion,
-    setSuggestion: setCapacitySuggestion,
-    acceptedSuggestion: acceptedCapacitySuggestion,
-    setAcceptedSuggestion: setAcceptedCapacitySuggestion,
-    checking: checkingCapacitySuggestion,
-    suggest: suggestCapacity,
-    reset: resetCapacitySuggestion,
-  } = useCapacitySuggestion();
-  const [form, setForm] = useState({
-    type: MODEL_TYPES.LLM as ModelType,
-    name: "",
-    displayName: "",
-    url: "",
-    apiKey: "",
-    maxTokens: "",
-    timeoutSeconds: "120",
-    concurrencyLimit: "",
-    vectorDimension: "1024",
-    chunkSizeRange: [
-      DEFAULT_EXPECTED_CHUNK_SIZE,
-      DEFAULT_MAXIMUM_CHUNK_SIZE,
-    ] as [number, number],
-    chunkingBatchSize: "10",
-    // Voice model fields (STT/TTS)
-    modelFactory: "",
-    modelAppid: "",
-    accessToken: "",
-    ...emptyCapacityForm,
-  });
-  const [loading, setLoading] = useState(false);
-  const [verifyingConnectivity, setVerifyingConnectivity] = useState(false);
-  const [capacitySuggestionEnabled, setCapacitySuggestionEnabled] =
-    useState(true);
-  const [connectivityStatus, setConnectivityStatus] = useState<{
-    status: ConnectivityStatusType;
-    message: string;
-  }>({
-    status: null,
-    message: "",
-  });
 
-  // Auto-suggest fires at most once per dialog instance. With the parent's
-  // key remount, "per instance" == "per model", which is the desired
-  // semantic. The fired-once guard is needed because the auto-suggest
-  // effect depends on `form.name` and `form.url`, which change as the
-  // [model] effect populates the form on first mount AND every time the
-  // operator types in those inputs -- only the populate transition
-  // should trigger an API call.
-  const autoSuggestFiredRef = useRef(false);
+  const [displayName, setDisplayName] = useState("");
+  const [apiKey, setApiKey] = useState("");
+  const [baseUrl, setBaseUrl] = useState("");
+  const [type, setType] = useState<ModelType>(MODEL_TYPES.LLM as ModelType);
+  const [advanced, setAdvanced] = useState<ModelAdvancedSettingsValue>({});
+  const [showAdvanced, setShowAdvanced] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [name, setName] = useState("");
+  // In-dialog connectivity probe. "available" is only meaningful for the
+  // current form values — any name/type/URL/key change resets it to "idle".
+  const [probe, setProbe] = useState<
+    "idle" | "checking" | "available" | "unavailable"
+  >("idle");
+  // Catalog-driven reasoning capability; refreshed (debounced) when the
+  // name, URL or type changes so the effort/budget controls track the
+  // target model.
+  const [reasoningCapability, setReasoningCapability] = useState<
+    ReasoningCapability | undefined
+  >(undefined);
 
+  // Re-initialize whenever a different model opens (key in the parent forces
+  // remount, but this effect also handles the initial open).
   useEffect(() => {
-    if (model) {
-      setForm({
-        type: model.type,
-        name: model.name,
-        displayName: model.displayName || model.name,
-        url: model.apiUrl || "",
-        apiKey: model.apiKey || "",
-        maxTokens: model.maxTokens?.toString() || "",
-        timeoutSeconds: model.timeoutSeconds?.toString() || "120",
-        concurrencyLimit: model.concurrencyLimit?.toString() || "",
-        vectorDimension: model.maxTokens?.toString() || "1024",
-        chunkSizeRange: [
-          model.expectedChunkSize || DEFAULT_EXPECTED_CHUNK_SIZE,
-          model.maximumChunkSize || DEFAULT_MAXIMUM_CHUNK_SIZE,
-        ] as [number, number],
-        chunkingBatchSize: (model.chunkingBatchSize || 10).toString(),
-        modelFactory: model.modelFactory || "",
-        modelAppid: model.modelAppid || "",
-        accessToken: model.accessToken || "",
-        ...capacityFormFromModel(model),
-      });
-      setCapacitySuggestionEnabled(true);
-      resetCapacitySuggestion();
-    }
-  }, [model, resetCapacitySuggestion]);
-
-  const handleFormChange = (field: string, value: string) => {
-    setForm((prev) => ({ ...prev, [field]: value }));
-    // If the key configuration item changes, clear the verification status
+    if (!model) return;
+    setDisplayName(model.displayName || model.name);
+    setName(model.name);
+    setApiKey(model.apiKey || "");
+    setBaseUrl(model.apiUrl || "");
+    setType(model.type);
+    setProbe("idle");
+    setReasoningCapability(model.reasoningCapability);
+    const extra = (model.extraParams ?? {}) as Record<string, unknown>;
+    const next: ModelAdvancedSettingsValue = {};
+    if (model.temperature != null) next.temperature = model.temperature;
+    if (model.topP != null) next.top_p = model.topP;
+    if (model.contextWindowTokens != null)
+      next.context_window_tokens = model.contextWindowTokens;
+    if (model.maxInputTokens != null)
+      next.max_input_tokens = model.maxInputTokens;
+    if (model.maxOutputTokens != null)
+      next.max_output_tokens = model.maxOutputTokens;
+    if (model.defaultOutputReserveTokens != null)
+      next.default_output_reserve_tokens = model.defaultOutputReserveTokens;
+    if (extra.enable_thinking !== undefined)
+      next.enable_thinking = extra.enable_thinking === true;
+    // Reasoning effort / budget (develop's #3953) are managed by the spec-
+    // driven dialog; carry them through so saving the v0 form does not
+    // silently drop stored values from extra_params.
+    if (typeof extra.reasoning_effort === "string")
+      next.reasoning_effort = extra.reasoning_effort;
     if (
-      [
-        "url",
-        "apiKey",
-        "maxTokens",
-        "timeoutSeconds",
-        "concurrencyLimit",
-        "vectorDimension",
-        "modelFactory",
-        "modelAppid",
-        "accessToken",
-        "name",
-      ].includes(field)
+      typeof extra.reasoning_budget_tokens === "number" &&
+      Number.isFinite(extra.reasoning_budget_tokens)
+    )
+      next.reasoning_budget_tokens = extra.reasoning_budget_tokens;
+    const customRaw = extra.__custom__;
+    if (
+      customRaw &&
+      typeof customRaw === "object" &&
+      !Array.isArray(customRaw)
     ) {
-      setConnectivityStatus({ status: null, message: "" });
-      if (["url", "apiKey", "modelFactory", "name"].includes(field)) {
-        setCapacitySuggestion(null);
-        setAcceptedCapacitySuggestion(null);
-      }
+      next.__custom__ = Object.entries(
+        customRaw as Record<string, unknown>
+      ).map(
+        ([k, v]) => [k, formatCustomValueForEditing(v)] as [string, string]
+      );
     }
-  };
+    // Type-specific dedicated fields (edit parity with the add-dialog gear
+    // panel): embedding chunk fields, voice credentials, rerank/tts max
+    // tokens.
+    if (
+      model.type === MODEL_TYPES.EMBEDDING ||
+      model.type === MODEL_TYPES.MULTI_EMBEDDING
+    ) {
+      if (model.expectedChunkSize != null)
+        next.expected_chunk_size = model.expectedChunkSize;
+      if (model.maximumChunkSize != null)
+        next.maximum_chunk_size = model.maximumChunkSize;
+      if (model.chunkingBatchSize != null)
+        next.chunk_batch = model.chunkingBatchSize;
+    }
+    if (model.type === MODEL_TYPES.STT || model.type === MODEL_TYPES.TTS) {
+      // getAllModels maps the API's model_factory into `source` only
+      // (model.modelFactory is never populated by the list mapper), so fall
+      // back to source for the provider prefill.
+      const voiceFactory = model.modelFactory || model.source;
+      if (voiceFactory) next.model_factory = voiceFactory;
+      if (model.modelAppid) next.model_appid = model.modelAppid;
+      if (model.accessToken) next.access_token = model.accessToken;
+    }
+    if (model.type === MODEL_TYPES.RERANK || model.type === MODEL_TYPES.TTS) {
+      // > 0: the list mapper falls back to 0 for an unset max_tokens, and a
+      // literal 0 in the field reads worse than the empty default.
+      if (model.maxTokens > 0) next.max_tokens = model.maxTokens;
+    }
+    setAdvanced(next);
+  }, [model]);
 
-  const isEmbeddingModel =
-    form.type === MODEL_TYPES.EMBEDDING ||
-    form.type === MODEL_TYPES.MULTI_EMBEDDING;
-  const isRerankModel = form.type === MODEL_TYPES.RERANK;
-  const connectivityModelType =
-    form.type === MODEL_TYPES.VLM2 || form.type === MODEL_TYPES.VLM3 || form.type === MODEL_TYPES.VLM4
-      ? (MODEL_TYPES.VLM as ModelType)
-      : form.type;
-  const isVoiceModel =
-    form.type === MODEL_TYPES.STT || form.type === MODEL_TYPES.TTS;
-  const supportsCapacityFields =
-    !isEmbeddingModel && !isRerankModel && !isVoiceModel;
-  const capacityValidationError = supportsCapacityFields
-    ? validateCapacityForm(form, [])
-    : null;
-
-  const canSuggestCapacity = () =>
-    supportsCapacityFields && form.name.trim() !== "" && form.url.trim() !== "";
-
-  const applyCapacitySuggestion = (
-    suggestion: typeof acceptedCapacitySuggestion
-  ) => {
-    const next = capacityFormFromSuggestion(suggestion);
-    if (!next || Object.keys(next).length === 0) return;
-    setForm((prev) => ({
-      ...prev,
-      ...next,
-      name: suggestion?.canonicalModelName || prev.name,
-      // Do NOT overwrite `modelFactory` from the catalog suggestion. The
-      // catalog's `suggested_provider` namespace (deepseek, openai, jina,
-      // ...) is a superset of the frontend dropdown's allowed values; writing
-      // an unknown one back into `model_factory` makes the model disappear
-      // from the active list and the edit dropdown.
-    }));
-    setAcceptedCapacitySuggestion(suggestion);
-  };
-
-  // W11 V1.5: when the dialog opens on a bare-capacity LLM/VLM row
-  // (per-row badge condition: context_window_tokens or max_output_tokens
-  // is null), auto-fire /suggest-capacity once so the operator does not
-  // have to also click "Check". The trigger is derived from `model`
-  // itself rather than a caller-supplied flag, so any entry path (row
-  // click, badge click, future gear-icon shortcut) gets the same
-  // affordance. No-op if the model already has capacity, the suggestion
-  // switch is off, or required form fields are missing at open time.
-  //
-  // form.name and form.url are in the dependency list because the
-  // [model] effect above populates them asynchronously after this
-  // component mounts. With the parent's key remount, the first render
-  // here has form.name == "" / form.url == "", so canSuggestCapacity()
-  // is false and we cannot fire yet. The [model] effect's setForm
-  // then re-renders with populated values, this effect re-runs, and
-  // canSuggestCapacity() finally returns true. The autoSuggestFiredRef
-  // guards against re-firing later when the operator types into name
-  // or url -- only the populate transition should kick off auto-suggest.
-  const isBareCapacityModel = Boolean(
-    model &&
-    supportsCapacityFields &&
-    (!model.contextWindowTokens || !model.maxOutputTokens)
-  );
+  // Refresh the reasoning capability from the catalog when the name, URL or
+  // type changes so the effort/budget controls track the target model.
+  // Mirrors the edit-dialog behaviour of #3953.
   useEffect(() => {
-    if (autoSuggestFiredRef.current) return;
-    if (!isOpen || !isBareCapacityModel) return;
-    if (!capacitySuggestionEnabled) return;
-    if (!canSuggestCapacity()) return;
-    autoSuggestFiredRef.current = true;
-    suggestCapacity({
-      modelName: form.name.trim(),
-      baseUrl: form.url.trim(),
-      providerHint: form.modelFactory || model?.source,
-      apiKey: form.apiKey.trim() || undefined,
-      modelType: connectivityModelType,
-    });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [
-    isOpen,
-    isBareCapacityModel,
-    capacitySuggestionEnabled,
-    form.name,
-    form.url,
-  ]);
-
-  const isFormValid = () => {
-    if (
-      supportsCapacityFields &&
-      // context_window/max_output not required; only data-shape checks gate Save.
-      validateCapacityForm(form, [])
-    ) {
-      return false;
-    }
-
-    // Capacity panel replaces the legacy max_tokens field for LLM/VLM, so
-    // the standalone max_tokens is only required for the types that still
-    // render that field (voice and rerank-style).
-    const needsMaxTokens =
-      !supportsCapacityFields && !isEmbeddingModel && !isRerankModel;
-
-    if (isVoiceModel) {
-      if (needsMaxTokens && !isValidMaxTokens(form.maxTokens)) {
-        return false;
-      }
-      if (form.modelFactory === "volcengine") {
-        return form.modelAppid.trim() !== "" && form.accessToken.trim() !== "";
-      } else {
-        return form.name.trim() !== "" && form.apiKey.trim() !== "";
-      }
-    }
-    return (
-      form.name.trim() !== "" &&
-      form.url.trim() !== "" &&
-      (!needsMaxTokens || isValidMaxTokens(form.maxTokens))
-    );
-  };
-
-  // Verify model connectivity
-  const handleVerifyConnectivity = async () => {
-    if (!isFormValid()) {
-      message.warning(t("model.dialog.warning.incompleteForm"));
+    if (!name.trim() || !baseUrl.trim()) {
+      setReasoningCapability(undefined);
       return;
     }
-
-    setVerifyingConnectivity(true);
-    setConnectivityStatus({
-      status: "checking",
-      message: t("model.dialog.status.verifying"),
-    });
-
-    try {
-      // For LLM/VLM the legacy form.maxTokens field is no longer rendered;
-      // use form.maxOutputTokens (capacity panel) for the connectivity-probe
-      // budget. Do NOT fall back to form.maxTokens for capacity types --
-      // the W1/W2 plan deprecates that field for LLM/VLM, and isFormValid
-      // already guarantees form.maxOutputTokens is filled before this
-      // probe runs.
-      const llmProbeMaxTokens = supportsCapacityFields
-        ? Number.parseInt(form.maxOutputTokens || "0", 10)
-        : parseMaxTokens(form.maxTokens);
-      const config: any = {
-        modelName: form.name,
-        modelType: connectivityModelType,
-        baseUrl: form.url,
-        apiKey: form.apiKey.trim() === "" ? "sk-no-api-key" : form.apiKey,
-        maxTokens:
-          form.type === MODEL_TYPES.EMBEDDING
-            ? parseInt(form.vectorDimension)
-            : form.type === MODEL_TYPES.RERANK
-              ? 0
-              : llmProbeMaxTokens,
-        embeddingDim:
-          form.type === MODEL_TYPES.EMBEDDING
-            ? parseInt(form.vectorDimension)
-            : undefined,
-      };
-
-      // Add voice model fields for STT/TTS
-      if (isVoiceModel) {
-        config.modelFactory = form.modelFactory;
-        if (form.modelFactory === "volcengine") {
-          config.modelAppid = form.modelAppid;
-          config.accessToken = form.accessToken;
+    let cancelled = false;
+    const timer = setTimeout(async () => {
+      try {
+        const suggestion = await modelService.suggestCapacity({
+          modelName: name.trim(),
+          baseUrl: baseUrl.trim(),
+          providerHint: model?.source || undefined,
+          modelType: type,
+        });
+        if (!cancelled) {
+          setReasoningCapability(suggestion?.reasoningCapability);
         }
+      } catch {
+        if (!cancelled) setReasoningCapability(undefined);
       }
+    }, 500);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [model, name, baseUrl, type]);
 
-      const result = await modelService.verifyModelConfigConnectivity(config);
-      if (
-        capacitySuggestionEnabled &&
-        supportsCapacityFields &&
-        result.capacitySuggestion
-      ) {
-        setCapacitySuggestion(result.capacitySuggestion);
-      }
-
-      // Set connectivity status
-      let connectivityMessage = "";
-      if (result.connectivity) {
-        connectivityMessage = t("model.dialog.connectivity.status.available");
-      } else {
-        connectivityMessage = t("model.dialog.connectivity.status.unavailable");
-      }
-      setConnectivityStatus({
-        status: result.connectivity
-          ? MODEL_STATUS.AVAILABLE
-          : MODEL_STATUS.UNAVAILABLE,
-        message: connectivityMessage,
-      });
-    } catch (error) {
-      setConnectivityStatus({
-        status: "unavailable",
-        message: t("model.dialog.connectivity.status.unavailable"),
-      });
-    } finally {
-      setVerifyingConnectivity(false);
-    }
-  };
-
-  const handleSave = async () => {
-    if (!model) return;
-    // Defensive gate: the Save button is already disabled via
-    // `!isFormValid()`, but disabled state can lag a tick behind state
-    // updates and the handler is also reachable from non-click paths.
-    // Re-check here so we never persist a row whose required W2 capacity
-    // fields are empty (this is how production glm-5.2 rows ended up with
-    // context_window_tokens=NULL and max_output_tokens=NULL).
-    if (!isFormValid()) return;
-    setLoading(true);
-    try {
-      // Use update interface instead of delete + add
-      const modelType = form.type as ModelType;
-      // Determine max tokens.
-      // For LLM/VLM (supportsCapacityFields), the legacy form.maxTokens
-      // input is hidden and must not be read here per the W1/W2 plan
-      // ("Never use legacy max_tokens"). Seed the legacy column with 0;
-      // buildCapacityPayload(form) spreads max_tokens := max_output_tokens
-      // a few lines below, keeping the deprecated NOT NULL column aligned
-      // with the W2 source of truth.
-      let maxTokensValue = supportsCapacityFields
-        ? 0
-        : parseMaxTokens(form.maxTokens) || 0;
-      if (isEmbeddingModel || isRerankModel) maxTokensValue = 0;
-
-      // Use original displayName for lookup, pass new displayName in body if changed
-      const originalDisplayName = model.displayName || model.name;
-      const newDisplayName = form.displayName;
-      const acceptedModelName =
-        acceptedCapacitySuggestion?.canonicalModelName || form.name;
-      // `acceptedCapacitySuggestion?.suggestedProvider` is intentionally NOT
-      // used here. See applyCapacitySuggestion above for the rationale.
-
-      // Use manage interface if tenantId is provided
-      if (tenantId) {
-        await modelService.updateManageTenantModel({
-          tenantId,
-          currentDisplayName: originalDisplayName,
-          name: acceptedCapacitySuggestion ? acceptedModelName : undefined,
-          displayName:
-            newDisplayName !== originalDisplayName ? newDisplayName : undefined,
-          url: form.url,
-          apiKey: form.apiKey.trim() === "" ? "sk-no-api-key" : form.apiKey,
-          maxTokens: maxTokensValue !== 0 ? maxTokensValue : undefined,
-          expectedChunkSize: isEmbeddingModel
-            ? form.chunkSizeRange[0]
-            : undefined,
-          maximumChunkSize: isEmbeddingModel
-            ? form.chunkSizeRange[1]
-            : undefined,
-          chunkingBatchSize: isEmbeddingModel
-            ? parseInt(form.chunkingBatchSize) || 10
-            : undefined,
-          modelFactory: isVoiceModel ? form.modelFactory : undefined,
-          modelAppid:
-            isVoiceModel && form.modelFactory === "volcengine"
-              ? form.modelAppid
-              : undefined,
-          accessToken:
-            isVoiceModel && form.modelFactory === "volcengine"
-              ? form.accessToken
-              : undefined,
-          timeoutSeconds:
-            !isEmbeddingModel && !isRerankModel
-              ? parseInt(form.timeoutSeconds) || 120
-              : undefined,
-          concurrencyLimit:
-            !isEmbeddingModel && !isRerankModel
-              ? form.concurrencyLimit
-                ? parseInt(form.concurrencyLimit)
-                : undefined
-              : undefined,
-          ...(supportsCapacityFields ? buildCapacityPayload(form) : {}),
-          ...(acceptedCapacitySuggestion
-            ? {
-                acceptedSuggestionMatchKind:
-                  acceptedCapacitySuggestion.matchKind,
-                ...(acceptedCapacitySuggestion.capabilityProfileVersion
-                  ? {
-                      acceptedCapabilityProfileVersion:
-                        acceptedCapacitySuggestion.capabilityProfileVersion,
-                    }
-                  : {}),
-              }
-            : {}),
-        });
-      } else {
-        await modelService.updateSingleModel({
-          currentDisplayName: originalDisplayName,
-          // Only send displayName if it changed
-          ...(newDisplayName !== originalDisplayName
-            ? { displayName: newDisplayName }
-            : {}),
-          ...(acceptedCapacitySuggestion ? { name: acceptedModelName } : {}),
-          url: form.url,
-          apiKey: form.apiKey.trim() === "" ? "sk-no-api-key" : form.apiKey,
-          ...(maxTokensValue !== 0 ? { maxTokens: maxTokensValue } : {}),
-          source: model.source,
-          // Send chunk size range for embedding models
-          ...(isEmbeddingModel
-            ? {
-                expectedChunkSize: form.chunkSizeRange[0],
-                maximumChunkSize: form.chunkSizeRange[1],
-                chunkingBatchSize: parseInt(form.chunkingBatchSize) || 10,
-              }
-            : {}),
-          // Send voice model fields
-          ...(isVoiceModel
-            ? {
-                modelFactory: form.modelFactory,
-                modelAppid:
-                  form.modelFactory === "volcengine"
-                    ? form.modelAppid
-                    : undefined,
-                accessToken:
-                  form.modelFactory === "volcengine"
-                    ? form.accessToken
-                    : undefined,
-              }
-            : {}),
-          // Send timeout for non-embedding models
-          ...(!isEmbeddingModel && !isRerankModel
-            ? {
-                timeoutSeconds: parseInt(form.timeoutSeconds) || 120,
-                concurrencyLimit: form.concurrencyLimit
-                  ? parseInt(form.concurrencyLimit)
-                  : undefined,
-              }
-            : {}),
-          ...(supportsCapacityFields ? buildCapacityPayload(form) : {}),
-          ...(acceptedCapacitySuggestion
-            ? {
-                acceptedSuggestionMatchKind:
-                  acceptedCapacitySuggestion.matchKind,
-                ...(acceptedCapacitySuggestion.capabilityProfileVersion
-                  ? {
-                      acceptedCapabilityProfileVersion:
-                        acceptedCapacitySuggestion.capabilityProfileVersion,
-                    }
-                  : {}),
-              }
-            : {}),
-        });
-      }
-
-      // Update local configuration (only when currently edited model is selected in configuration)
-      const modelConfigKeyMap: Record<ModelType, string> = {
-        llm: MODEL_TYPES.LLM,
-        embedding: MODEL_TYPES.EMBEDDING,
-        multi_embedding: MODEL_TYPES.MULTI_EMBEDDING,
-        vlm: MODEL_TYPES.VLM,
-        vlm2: MODEL_TYPES.VLM2,
-        vlm3: MODEL_TYPES.VLM3,
-        vlm4: MODEL_TYPES.VLM4,
-        rerank: MODEL_TYPES.RERANK,
-        tts: MODEL_TYPES.TTS,
-        stt: MODEL_TYPES.STT,
-      };
-      const configKey = modelConfigKeyMap[modelType];
-      updateModelConfig({
-        [configKey]: {
-          modelName: acceptedModelName,
-          displayName: form.displayName || form.name,
-          apiConfig: {
-            apiKey: form.apiKey,
-            modelUrl: form.url,
-          },
-          ...(supportsCapacityFields ? buildCapacityPayload(form) : {}),
-          ...(isEmbeddingModel
-            ? { dimension: parseInt(form.vectorDimension) }
-            : {}),
-          ...(isVoiceModel
-            ? {
-                modelFactory: form.modelFactory,
-                modelAppid:
-                  form.modelFactory === "volcengine" ? form.modelAppid : "",
-                accessToken:
-                  form.modelFactory === "volcengine" ? form.accessToken : "",
-              }
-            : {}),
-        },
-      });
-
-      await onSuccess();
-      message.success(t("model.dialog.editSuccess"));
-      onClose();
-    } catch (error: any) {
-      if (error.code === 409) {
-        message.error(
-          t("model.dialog.error.nameConflict", {
-            name: form.displayName || form.name,
-          })
-        );
-      } else if (error.code === 404) {
-        message.error(t("model.dialog.error.modelNotFound"));
-      } else if (error.code === 500) {
-        message.error(t("model.dialog.error.serverError"));
-      } else {
-        message.error(t("model.dialog.error.editFailed"));
-        console.error(error);
-      }
-    } finally {
-      setLoading(false);
-    }
-  };
+  const typeOptions = useTypeOptions();
 
   if (!model) return null;
 
-  return (
-    <Modal
-      title={t("model.dialog.editTitle")}
-      open={isOpen}
-      onCancel={onClose}
-      footer={null}
-      destroyOnHidden
-    >
-      <div className="space-y-4">
-        {/* Model Name */}
-        <div>
-          <label className="block mb-1 text-sm font-medium text-gray-700">
-            {t("model.dialog.label.displayName")}
-          </label>
-          <Input
-            value={form.displayName}
-            onChange={(e) => handleFormChange("displayName", e.target.value)}
-          />
-        </div>
+  // Embedding / multi_embedding records share one display name and are
+  // updated as a pair; the backend update path deliberately ignores
+  // model_type there, so the field is not editable for those types.
+  const typeLocked =
+    model.type === MODEL_TYPES.EMBEDDING ||
+    model.type === MODEL_TYPES.MULTI_EMBEDDING;
 
-        {/* URL */}
-        {!isVoiceModel && (
-          <div>
-            <label className="block mb-1 text-sm font-medium text-gray-700">
-              {t("model.dialog.label.url")}
-            </label>
-            <Input
-              value={form.url}
-              onChange={(e) => handleFormChange("url", e.target.value)}
-            />
-          </div>
-        )}
+  const nameChanged = name.trim() !== model.name;
+  const canSubmit =
+    name.trim().length > 0 &&
+    displayName.trim().length > 0 &&
+    baseUrl.trim().length > 0;
 
-        {/* Voice Model Factory */}
-        {isVoiceModel && (
-          <div>
-            <label className="block mb-1 text-sm font-medium text-gray-700">
-              {form.type === MODEL_TYPES.TTS
-                ? t("model.dialog.label.ttsProvider")
-                : t("model.dialog.label.sttProvider")}
-            </label>
-            <Select
-              style={{ width: "100%" }}
-              value={form.modelFactory || "dashscope"}
-              onChange={(value) => handleFormChange("modelFactory", value)}
-            >
-              <Option value="dashscope">{t("model.provider.dashscope")}</Option>
-              <Option value="volcengine">
-                {t("model.provider.volcengine")}
-              </Option>
-            </Select>
-          </div>
-        )}
-
-        {/* Voice Model App ID and Access Token (Volcengine) */}
-        {isVoiceModel && form.modelFactory === "volcengine" && (
-          <>
-            <div>
-              <label className="block mb-1 text-sm font-medium text-gray-700">
-                {t("model.dialog.label.modelAppid")}
-              </label>
-              <Input
-                value={form.modelAppid}
-                onChange={(e) => handleFormChange("modelAppid", e.target.value)}
-                autoComplete="new-password"
-              />
-            </div>
-            <div>
-              <label className="block mb-1 text-sm font-medium text-gray-700">
-                {t("model.dialog.label.accessToken")}
-              </label>
-              <Input.Password
-                value={form.accessToken}
-                onChange={(e) =>
-                  handleFormChange("accessToken", e.target.value)
-                }
-                autoComplete="new-password"
-                visibilityToggle={false}
-              />
-            </div>
-          </>
-        )}
-
-        {/* API Key */}
-        <div>
-          <label className="block mb-1 text-sm font-medium text-gray-700">
-            {t("model.dialog.label.apiKey")}
-          </label>
-          <Input.Password
-            value={form.apiKey}
-            onChange={(e) => handleFormChange("apiKey", e.target.value)}
-            autoComplete="new-password"
-            visibilityToggle={false}
-          />
-        </div>
-
-        {supportsCapacityFields && (
-          <div className="space-y-2">
-            <div className="flex items-center justify-between gap-3 rounded-md border border-gray-200 bg-gray-50 p-3">
-              <div className="text-sm font-medium text-gray-700">
-                {t("model.dialog.capacity.suggestion.title")}
-              </div>
-              <div className="flex shrink-0 items-center gap-2">
-                <Switch
-                  size="small"
-                  checked={capacitySuggestionEnabled}
-                  onChange={setCapacitySuggestionEnabled}
-                />
-                <Button
-                  size="small"
-                  onClick={() =>
-                    suggestCapacity({
-                      modelName: form.name.trim(),
-                      baseUrl: form.url.trim(),
-                      providerHint: form.modelFactory || model?.source,
-                      apiKey: form.apiKey.trim() || undefined,
-                      modelType: connectivityModelType,
-                    })
-                  }
-                  loading={checkingCapacitySuggestion}
-                  disabled={!capacitySuggestionEnabled || !canSuggestCapacity()}
-                >
-                  {t("model.dialog.capacity.suggestion.check")}
-                </Button>
-              </div>
-            </div>
-            <ModelCapacityFields
-              value={form}
-              onChange={(field, value) => handleFormChange(field, value)}
-              validationError={capacityValidationError}
-              capacitySource={model.capacitySource}
-              capabilityProfileVersion={model.capabilityProfileVersion}
-              // context_window/max_output no longer required; empty input
-              // lands DEFAULT_* via buildCapacityPayload at save time.
-              suggestion={capacitySuggestionEnabled ? capacitySuggestion : null}
-              suggestionLoading={checkingCapacitySuggestion}
-              onUseSuggestion={() =>
-                applyCapacitySuggestion(capacitySuggestion)
-              }
-              acceptedSuggestion={acceptedCapacitySuggestion}
-              // Legacy max_tokens is now surfaced via the actionable
-              // legacyMaxTokensCandidate prompt with two-target buttons
-              // (Context Window vs Max Output). The prompt is offered while
-              // EITHER target field is still empty -- ModelCapacityFields
-              // hides individual buttons once that column is filled, and the
-              // whole alert disappears once both are filled. The plain
-              // deprecation banner only kicks in if both targets are filled
-              // but the legacy column still has a value.
-              legacyMaxTokensCandidate={
-                model.contextWindowTokens && model.maxOutputTokens
-                  ? undefined
-                  : model.maxTokens
-              }
-            />
-          </div>
-        )}
-
-        {/* maxTokens (legacy; only kept for types not covered by the capacity panel) */}
-        {!isEmbeddingModel && !isRerankModel && !supportsCapacityFields && (
-          <div>
-            <label className="block mb-1 text-sm font-medium text-gray-700">
-              {t("model.dialog.label.maxTokens")}{" "}
-              <span className="text-red-500">*</span>
-            </label>
-            <ModelMaxTokensInput
-              value={form.maxTokens}
-              placeholder={t("model.dialog.placeholder.maxTokens")}
-              onChange={(value) => handleFormChange("maxTokens", value)}
-            />
-          </div>
-        )}
-
-        {/* Timeout Seconds */}
-        {!isEmbeddingModel && !isRerankModel && (
-          <div>
-            <label className="block mb-1 text-sm font-medium text-gray-700">
-              {t("model.dialog.label.timeoutSeconds")}
-            </label>
-            <Input
-              type="number"
-              min="1"
-              value={form.timeoutSeconds}
-              onChange={(e) =>
-                handleFormChange("timeoutSeconds", e.target.value)
-              }
-            />
-          </div>
-        )}
-
-        {/* Concurrency Limit */}
-        {!isEmbeddingModel && !isRerankModel && (
-          <div>
-            <label className="block mb-1 text-sm font-medium text-gray-700">
-              {t("model.dialog.label.concurrencyLimit")}
-            </label>
-            <Input
-              type="number"
-              min="1"
-              value={form.concurrencyLimit}
-              onChange={(e) =>
-                handleFormChange("concurrencyLimit", e.target.value)
-              }
-              placeholder={t("model.dialog.placeholder.concurrencyLimit")}
-            />
-            <div className="text-xs text-gray-500 mt-1">
-              {t("model.dialog.hint.concurrencyLimit")}
-            </div>
-          </div>
-        )}
-
-        {/* Chunk Size Range for embedding models */}
-        {isEmbeddingModel && (
-          <div>
-            <label className="block mb-2 text-sm font-medium text-gray-700">
-              {t("modelConfig.slider.chunkingSize")}
-            </label>
-            <ModelChunkSizeSlider
-              value={form.chunkSizeRange}
-              onChange={(value) => {
-                setForm((prev) => ({
-                  ...prev,
-                  chunkSizeRange: value,
-                }));
-              }}
-            />
-          </div>
-        )}
-
-        {/* Concurrent Request Count (Embedding model only) */}
-        {isEmbeddingModel && (
-          <div>
-            <label
-              htmlFor="chunkingBatchSize"
-              className="block mb-1 text-sm font-medium text-gray-700"
-            >
-              {t("modelConfig.input.chunkingBatchSize")}
-            </label>
-            <Input
-              id="chunkingBatchSize"
-              type="number"
-              min="1"
-              placeholder="10"
-              value={form.chunkingBatchSize}
-              onChange={(e) =>
-                handleFormChange("chunkingBatchSize", e.target.value)
-              }
-            />
-          </div>
-        )}
-
-        {/* Connectivity verification area */}
-        <div className="p-3 bg-gray-50 border border-gray-200 rounded-md">
-          <div className="flex items-center justify-between mb-1">
-            <div className="flex items-center">
-              <span className="text-sm font-medium text-gray-700">
-                {t("model.dialog.connectivity.title")}
-              </span>
-              {connectivityStatus.status && (
-                <div className="ml-2 flex items-center">
-                  {getConnectivityMeta(connectivityStatus.status).icon}
-                  <span
-                    className="ml-1 text-xs"
-                    style={{
-                      color: getConnectivityMeta(connectivityStatus.status)
-                        .color,
-                    }}
-                  >
-                    {connectivityStatus.status === "available" &&
-                      t("model.dialog.connectivity.status.available")}
-                    {connectivityStatus.status === "unavailable" &&
-                      t("model.dialog.connectivity.status.unavailable")}
-                    {connectivityStatus.status === "checking" &&
-                      t("model.dialog.status.verifying")}
-                  </span>
-                </div>
-              )}
-            </div>
-            <Button
-              size="small"
-              type="default"
-              onClick={handleVerifyConnectivity}
-              loading={verifyingConnectivity}
-              disabled={!isFormValid() || verifyingConnectivity}
-            >
-              {verifyingConnectivity
-                ? t("model.dialog.button.verifying")
-                : t("model.dialog.button.verify")}
-            </Button>
-          </div>
-        </div>
-
-        <div className="flex justify-end space-x-3">
-          <Button onClick={onClose}>{t("common.button.cancel")}</Button>
-          <Button
-            type="primary"
-            onClick={handleSave}
-            loading={loading}
-            disabled={!isFormValid()}
-          >
-            {t("common.button.save")}
-          </Button>
-        </div>
-      </div>
-    </Modal>
-  );
-};
-
-// New: provider config edit dialog (only apiKey and maxTokens)
-interface ProviderConfigInitialCapacity {
-  contextWindowTokens?: number;
-  maxInputTokens?: number;
-  maxOutputTokens?: number;
-  /** Legacy alias passed through so capacityFormFromModel can auto-migrate it. */
-  maxTokens?: number;
-  defaultOutputReserveTokens?: number;
-  tokenizerFamily?: string;
-  capacitySource?: string;
-  capabilityProfileVersion?: string;
-}
-
-interface ProviderConfigEditDialogProps {
-  isOpen: boolean;
-  initialApiKey?: string;
-  initialMaxTokens?: string;
-  initialTimeoutSeconds?: string;
-  initialConcurrencyLimit?: string;
-  initialCapacity?: ProviderConfigInitialCapacity;
-  hideCapacityFields?: boolean; // Suppress capacity controls when caller is a provider-level batch (not per-model)
-  modelType?: ModelType;
-  showApiKeyField?: boolean; // Whether to show API Key field (default: true)
-  modelName?: string;
-  baseUrl?: string;
-  providerHint?: string;
-  onClose: () => void;
-  onSave: (config: {
-    apiKey?: string;
-    maxTokens: number;
-    timeoutSeconds?: number;
-    concurrencyLimit?: number;
-    contextWindowTokens?: number;
-    maxInputTokens?: number;
-    maxOutputTokens?: number;
-    defaultOutputReserveTokens?: number;
-    tokenizerFamily?: string;
-    capacitySource?: string;
-    acceptedSuggestionMatchKind?: string;
-    acceptedCapabilityProfileVersion?: string;
-  }) => Promise<void> | void;
-  onSuccess?: () => Promise<void> | void;
-}
-
-export const ProviderConfigEditDialog = ({
-  isOpen,
-  initialApiKey = "",
-  initialMaxTokens = "",
-  initialTimeoutSeconds = "120",
-  initialConcurrencyLimit = "",
-  initialCapacity,
-  hideCapacityFields = false,
-  modelType,
-  showApiKeyField = true,
-  modelName,
-  baseUrl,
-  providerHint,
-  onClose,
-  onSave,
-  onSuccess,
-}: ProviderConfigEditDialogProps) => {
-  const { t } = useTranslation();
-  const [apiKey, setApiKey] = useState<string>(initialApiKey);
-  const [maxTokens, setMaxTokens] = useState<string>(initialMaxTokens);
-  const [timeoutSeconds, setTimeoutSeconds] = useState<string>(
-    initialTimeoutSeconds
-  );
-  const [concurrencyLimit, setConcurrencyLimit] = useState<string>(
-    initialConcurrencyLimit
-  );
-  const [capacityForm, setCapacityForm] = useState(
-    initialCapacity ? capacityFormFromModel(initialCapacity) : emptyCapacityForm
-  );
-  const [saving, setSaving] = useState<boolean>(false);
-  const [capacitySuggestionEnabled, setCapacitySuggestionEnabled] =
-    useState(true);
-  const {
-    suggestion: capacitySuggestion,
-    acceptedSuggestion: acceptedCapacitySuggestion,
-    setAcceptedSuggestion: setAcceptedCapacitySuggestion,
-    checking: checkingCapacitySuggestion,
-    suggest: suggestCapacity,
-    reset: resetCapacitySuggestion,
-  } = useCapacitySuggestion();
-
-  useEffect(() => {
-    setApiKey(initialApiKey);
-    setMaxTokens(initialMaxTokens);
-    setTimeoutSeconds(initialTimeoutSeconds);
-    setConcurrencyLimit(initialConcurrencyLimit);
-    setCapacityForm(
-      initialCapacity
-        ? capacityFormFromModel(initialCapacity)
-        : emptyCapacityForm
-    );
-    resetCapacitySuggestion();
-    setCapacitySuggestionEnabled(true);
-  }, [
-    initialApiKey,
-    initialMaxTokens,
-    initialTimeoutSeconds,
-    initialConcurrencyLimit,
-    initialCapacity,
-    modelName,
-    baseUrl,
-    providerHint,
-    resetCapacitySuggestion,
-  ]);
-
-  const isEmbeddingModel =
-    modelType === MODEL_TYPES.EMBEDDING ||
-    modelType === MODEL_TYPES.MULTI_EMBEDDING;
-  const isRerankModel = modelType === MODEL_TYPES.RERANK;
-  const isVoiceModel =
-    modelType === MODEL_TYPES.STT || modelType === MODEL_TYPES.TTS;
-  const isLlmOrVlm = !isEmbeddingModel && !isRerankModel && !isVoiceModel;
-  // Per-model capacity panel: shown when the dialog is editing a single
-  // model's W2 capacity (gear icon next to a row).
-  const supportsCapacityFields = !hideCapacityFields && isLlmOrVlm;
-  // Provider-level "bulk apply" capacity panel: shown when the dialog is
-  // editing shared provider settings (the "修改配置" button). Renders the
-  // same ModelCapacityFields panel; context_window / max_output / etc. are
-  // reasonable defaults to broadcast across N models.
-  const supportsBulkCapacity = hideCapacityFields && isLlmOrVlm;
-  // Only rerank and voice models legitimately need the deprecated max_tokens
-  // input. Per the W1/W2 plan, never surface legacy max_tokens for LLM/VLM
-  // regardless of the hideCapacityFields flag.
-  const needsLegacyMaxTokens = isRerankModel || isVoiceModel;
-  // Neither mode marks any field required:
-  // - per-row mode (supportsCapacityFields): context_window/max_output are
-  //   optional and get DEFAULT_* substituted at save by buildCapacityPayload
-  // - bulk-apply mode (supportsBulkCapacity): optional broadcast -- "fill
-  //   to override; leave empty to keep each row's current value"
-  const capacityRequiredFields: Array<keyof ModelCapacityFormState> = [];
-  const capacityValidationError =
-    supportsCapacityFields || supportsBulkCapacity
-      ? validateCapacityForm(capacityForm, capacityRequiredFields)
-      : null;
-
-  const handleCapacityChange = (
-    field: keyof typeof capacityForm,
-    value: string
-  ) => {
-    setCapacityForm((prev) => ({ ...prev, [field]: value }));
-  };
-
-  const applyCapacitySuggestion = (
-    suggestion: typeof acceptedCapacitySuggestion
-  ) => {
-    const next = capacityFormFromSuggestion(suggestion);
-    if (!next || Object.keys(next).length === 0) return;
-    setCapacityForm((prev) => ({ ...prev, ...next }));
-    setAcceptedCapacitySuggestion(suggestion);
-  };
-
-  const valid = () => {
-    if (supportsCapacityFields) {
-      // Per-model capacity edit: required fields enforced by
-      // validateCapacityForm.
-      return !capacityValidationError;
-    }
-    if (supportsBulkCapacity) {
-      // Provider-level bulk apply: capacity fields are optional ("fill to
-      // override; leave empty to keep current per-model value"). Only fail
-      // when a typed value is not a positive integer.
-      return !capacityValidationError;
-    }
-    if (needsLegacyMaxTokens) {
-      return isValidMaxTokens(maxTokens);
-    }
-    // Embedding shared config: the dialog only owns
-    // apiKey/timeoutSeconds/concurrencyLimit, so always valid.
-    return true;
-  };
-
-  const handleSave = async () => {
-    if (!valid()) return;
+  async function handleCheck() {
+    if (!model || probe === "checking") return;
+    setProbe("checking");
     try {
-      setSaving(true);
-      // Only rerank/voice models legitimately surface the legacy maxTokens
-      // input. In every other case the maxTokens state still carries the
-      // backend's DEFAULT_LLM_MAX_TOKENS sentinel from the row prefill, so
-      // reading it would either be a no-op (LLM/VLM with capacity panel:
-      // buildCapacityPayload's max_output_tokens mirror overrides) or
-      // actively wrong (LLM/VLM provider-level config: would force the
-      // 4096 sentinel onto every existing row). Sending 0 here makes
-      // handleProviderConfigSave's `maxTokens || m.maxTokens` fall back to
-      // each row's current value, preserving it.
-      const legacyMaxTokens = needsLegacyMaxTokens
-        ? parseMaxTokens(maxTokens) || 0
-        : 0;
-      await onSave({
-        ...(showApiKeyField
-          ? { apiKey: apiKey.trim() === "" ? "sk-no-api-key" : apiKey }
-          : {}),
-        maxTokens: legacyMaxTokens,
-        ...(!isEmbeddingModel && !isRerankModel
-          ? { timeoutSeconds: parseInt(timeoutSeconds) || 120 }
-          : {}),
-        ...(!isEmbeddingModel && !isRerankModel
-          ? {
-              concurrencyLimit: concurrencyLimit
-                ? parseInt(concurrencyLimit)
-                : undefined,
-            }
-          : {}),
-        // Both per-model and bulk-apply modes write capacity via
-        // buildCapacityPayload. Per-model (supportsCapacityFields) opts
-        // into default substitution: empty context_window/max_output land
-        // DEFAULT_CONTEXT_WINDOW_TOKENS / DEFAULT_MAX_OUTPUT_TOKENS at the
-        // wire. Bulk-apply (supportsBulkCapacity) passes applyDefaults=false
-        // so empty fields stay omitted ("don't broadcast this value"), and
-        // an apiKey-only bulk edit doesn't accidentally null out per-row
-        // capacity by writing 32K/4K across N rows.
-        ...(supportsCapacityFields
-          ? buildCapacityPayload(capacityForm)
-          : supportsBulkCapacity
-            ? buildCapacityPayload(capacityForm, { applyDefaults: false })
-            : {}),
-        ...(supportsCapacityFields && acceptedCapacitySuggestion
-          ? {
-              acceptedSuggestionMatchKind: acceptedCapacitySuggestion.matchKind,
-              ...(acceptedCapacitySuggestion.capabilityProfileVersion
-                ? {
-                    acceptedCapabilityProfileVersion:
-                      acceptedCapacitySuggestion.capabilityProfileVersion,
-                  }
-                : {}),
-            }
-          : {}),
+      // Empty apiKey falls back to the stored key via probe_model_id. The
+      // inference params (temperature / top_p / extra_params incl.
+      // __custom__) ride along so an invalid custom param fails the probe
+      // here instead of at runtime — same contract as the backend probe.
+      const result = await modelService.verifyModelConfigConnectivity({
+        modelName: name.trim(),
+        modelType: type,
+        baseUrl: baseUrl.trim(),
+        apiKey: apiKey.trim() || undefined,
+        modelId: model.id,
+        modelFactory: model.source || "OpenAI-API-Compatible",
+        ...buildInferenceParamsPayload(advanced, reasoningCapability),
+        // voice 凭证随探测透传，按当前类型门控防止类型切换后过期值泄漏
+        ...buildVoiceCredentialParams(type, advanced),
       });
-      onClose();
-      if (onSuccess) {
-        await onSuccess();
+      setProbe(result.connectivity ? "available" : "unavailable");
+    } catch {
+      setProbe("unavailable");
+    }
+  }
+
+  async function handleSave() {
+    if (!canSubmit || saving || !model) return;
+    setSaving(true);
+    try {
+      const typeChanged = type !== model.type;
+      const params: Record<string, any> = {
+        currentDisplayName: model.displayName,
+        displayName: displayName.trim(),
+        url: baseUrl.trim(),
+        modelFactory: model.source || "OpenAI-API-Compatible",
+        ...(apiKey.trim() ? { apiKey: apiKey.trim() } : {}),
+        ...buildInferenceParamsPayload(advanced, reasoningCapability),
+      };
+      if (nameChanged) {
+        params.name = name.trim();
       }
+      if (typeChanged) {
+        params.type = type;
+      }
+      if (probe === "available") {
+        // The in-dialog probe passed with the exact values being saved.
+        params.connectStatus = "available";
+      } else if (typeChanged || nameChanged) {
+        // No passing probe for the new identity; reset so the row must be
+        // re-checked before it counts as available.
+        params.connectStatus = "not_detected";
+      }
+      // Capacity fields: only re-send what the advanced section carries
+      // (pre-filled from the record, so unchanged values round-trip). The
+      // camelCase mapping is required because buildCapacityRequestBody in
+      // modelService only reads camelCase keys.
+      if (advanced.context_window_tokens != null)
+        params.contextWindowTokens = advanced.context_window_tokens;
+      if (advanced.max_input_tokens != null)
+        params.maxInputTokens = advanced.max_input_tokens;
+      if (advanced.max_output_tokens != null) {
+        params.maxOutputTokens = advanced.max_output_tokens;
+        // Mirror into the deprecated max_tokens column so legacy readers
+        // stay consistent (same mirroring as buildCapacityPayload).
+        params.maxTokens = advanced.max_output_tokens;
+      }
+      if (advanced.default_output_reserve_tokens != null)
+        params.defaultOutputReserveTokens =
+          advanced.default_output_reserve_tokens;
+      if (
+        advanced.context_window_tokens != null ||
+        advanced.max_input_tokens != null ||
+        advanced.max_output_tokens != null ||
+        advanced.default_output_reserve_tokens != null
+      ) {
+        params.capacitySource = "operator";
+      }
+      // Type-specific dedicated fields (chunk / voice credentials / max
+      // tokens) — updateSingleModel reads camelCase keys, while the payload
+      // builder only emits the snake_case ones. Gated by the CURRENT type:
+      // prefills for the original type must not leak when the operator
+      // retypes the model (chunk → embedding family, credentials → stt/tts,
+      // max tokens → rerank/tts).
+      if (isEmbeddingModelType(type)) {
+        if (advanced.expected_chunk_size != null)
+          params.expectedChunkSize = advanced.expected_chunk_size;
+        if (advanced.maximum_chunk_size != null)
+          params.maximumChunkSize = advanced.maximum_chunk_size;
+        if (advanced.chunk_batch != null)
+          params.chunkingBatchSize = advanced.chunk_batch;
+      }
+      Object.assign(params, buildVoiceCredentialParams(type, advanced));
+      if (supportsMaxTokensField(type) && advanced.max_tokens != null) {
+        params.maxTokens = advanced.max_tokens;
+      }
+
+      await modelService.updateSingleModel(params as any);
+      onSuccess();
+      onClose();
+    } catch (error: any) {
+      log.error("update model failed", error);
+      message.error(
+        error instanceof ModelError
+          ? error.message
+          : t("modelConfig.editDialog.updateFailed", {
+              defaultValue: "更新模型失败",
+            })
+      );
     } finally {
       setSaving(false);
     }
-  };
+  }
 
   return (
-    <Modal
-      title={t("common.button.editConfig")}
-      open={isOpen}
-      onCancel={onClose}
-      footer={null}
-      destroyOnHidden
-    >
-      <div className="space-y-4">
-        {showApiKeyField && (
-          <div>
-            <label className="block mb-1 text-sm font-medium text-gray-700">
-              {t("model.dialog.label.apiKey")}
-            </label>
-            <Input.Password
-              value={apiKey}
-              onChange={(e) => setApiKey(e.target.value)}
-              visibilityToggle={false}
-            />
-          </div>
-        )}
-        {supportsCapacityFields && (
-          <div className="flex items-center justify-between gap-3 rounded-md border border-gray-200 bg-gray-50 p-3 mb-3">
-            <div className="text-sm font-medium text-gray-700">
-              {t("model.dialog.capacity.suggestion.title")}
-            </div>
-            <div className="flex shrink-0 items-center gap-2">
-              <Switch
-                size="small"
-                checked={capacitySuggestionEnabled}
-                onChange={setCapacitySuggestionEnabled}
+    <Dialog open onOpenChange={(v) => !v && onClose()}>
+      <DialogContent className="flex max-h-[85vh] w-[calc(100vw-2rem)] flex-col gap-0 overflow-hidden p-0 sm:max-w-2xl">
+        <DialogHeader className="border-b px-6 py-4">
+          <DialogTitle className="text-base">
+            {t("modelConfig.editDialog.title", { defaultValue: "编辑模型" })}
+          </DialogTitle>
+          <DialogDescription>
+            {t("modelConfig.editDialog.description", {
+              defaultValue:
+                "修改模型基本信息与连接凭证，或展开高级配置调整推理参数。",
+            })}
+          </DialogDescription>
+        </DialogHeader>
+
+        <div className="min-h-0 flex-1 overflow-y-auto px-6 py-5">
+          <div className="grid grid-cols-2 gap-x-4 gap-y-5">
+            <div className="space-y-2">
+              <Label>
+                {t("modelConfig.editDialog.displayName", {
+                  defaultValue: "展示名称",
+                })}
+              </Label>
+              <Input
+                value={displayName}
+                onChange={(e) => setDisplayName(e.target.value)}
               />
-              <Button
-                size="small"
-                onClick={() =>
-                  suggestCapacity({
-                    modelName: modelName?.trim() || "",
-                    baseUrl: baseUrl?.trim() || undefined,
-                    providerHint: providerHint?.trim() || undefined,
-                    modelType: modelType || undefined,
-                  })
-                }
-                loading={checkingCapacitySuggestion}
-                disabled={
-                  !capacitySuggestionEnabled ||
-                  !modelName?.trim() ||
-                  (!baseUrl?.trim() && !providerHint?.trim())
-                }
+            </div>
+            <div className="space-y-2">
+              <Label>
+                {t("modelConfig.editDialog.modelName", {
+                  defaultValue: "模型名称",
+                })}
+                <span className="ml-2 text-xs font-normal text-muted-foreground">
+                  {t("modelConfig.editDialog.modelNameHint", {
+                    defaultValue: "服务商提供的模型 ID",
+                  })}
+                </span>
+              </Label>
+              <Input
+                value={name}
+                onChange={(e) => {
+                  setName(e.target.value);
+                  setProbe("idle");
+                  setReasoningCapability(undefined);
+                }}
+                className="font-mono"
+                autoComplete="off"
+              />
+            </div>
+            <div className="flex items-center gap-2">
+              <Select
+                value={type}
+                onValueChange={(v) => {
+                  setType(v as ModelType);
+                  setProbe("idle");
+                }}
+                disabled={typeLocked}
               >
-                {t("model.dialog.capacity.suggestion.check")}
-              </Button>
+                <SelectTrigger
+                  className={cn(
+                    "h-6 w-fit gap-1 border-0 px-2 text-xs font-normal shadow-none focus:ring-0",
+                    TYPE_BADGE_CLASS[type]
+                  )}
+                >
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {typeOptions.map((opt) => (
+                    <SelectItem
+                      key={opt.value}
+                      value={opt.value}
+                      className="text-xs"
+                    >
+                      {opt.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <Badge variant="secondary" className="border-0 text-xs">
+                {model.source}
+              </Badge>
+            </div>
+            <div />
+            <div className="space-y-2">
+              <Label>
+                {t("modelConfig.editDialog.apiKey", {
+                  defaultValue: "API Key",
+                })}
+              </Label>
+              <Input
+                type="password"
+                value={apiKey}
+                onChange={(e) => {
+                  setApiKey(e.target.value);
+                  setProbe("idle");
+                }}
+                placeholder={t("modelConfig.editDialog.apiKeyKeepHint", {
+                  defaultValue: "留空保持原有 Key",
+                })}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label>
+                {t("modelConfig.editDialog.baseUrl", {
+                  defaultValue: "Base URL",
+                })}
+              </Label>
+              <Input
+                value={baseUrl}
+                onChange={(e) => {
+                  setBaseUrl(e.target.value);
+                  setProbe("idle");
+                }}
+              />
             </div>
           </div>
-        )}
-        {supportsCapacityFields && (
-          <ModelCapacityFields
-            value={capacityForm}
-            onChange={handleCapacityChange}
-            validationError={capacityValidationError}
-            capacitySource={initialCapacity?.capacitySource}
-            capabilityProfileVersion={initialCapacity?.capabilityProfileVersion}
-            // context_window/max_output optional; DEFAULT_* substitute at save.
-            legacyMaxTokensCandidate={
-              initialCapacity?.contextWindowTokens &&
-              initialCapacity?.maxOutputTokens
-                ? undefined
-                : initialCapacity?.maxTokens
-            }
-            suggestion={capacitySuggestionEnabled ? capacitySuggestion : null}
-            suggestionLoading={checkingCapacitySuggestion}
-            onUseSuggestion={() => applyCapacitySuggestion(capacitySuggestion)}
-            acceptedSuggestion={acceptedCapacitySuggestion}
-          />
-        )}
-        {supportsBulkCapacity && (
-          <div className="space-y-2">
-            <Alert
-              type="info"
-              showIcon
-              message={t("model.dialog.capacity.bulkApply.title")}
-              description={t("model.dialog.capacity.bulkApply.hint")}
-            />
-            <ModelCapacityFields
-              value={capacityForm}
-              onChange={handleCapacityChange}
-              validationError={capacityValidationError}
-              formMode="add"
-              // Bulk-apply broadcast: empty input means "do not broadcast";
-              // showing DEFAULT_* placeholders here would mislead operators
-              // into thinking empty would land 32K/4K on every selected row.
-              applyDefaultsOnEmpty={false}
-            />
+
+          {/* Advanced config (expandable) */}
+          <div className="mt-5">
+            <button
+              type="button"
+              onClick={() => setShowAdvanced(!showAdvanced)}
+              className="flex w-full items-center gap-1.5 text-sm font-medium text-muted-foreground transition-colors hover:text-foreground"
+            >
+              {showAdvanced ? (
+                <ChevronDown className="size-4" />
+              ) : (
+                <ChevronRight className="size-4" />
+              )}
+              {t("modelConfig.editDialog.advancedConfig", {
+                defaultValue: "高级配置",
+              })}
+            </button>
+            {showAdvanced && (
+              <div className="mt-4 border-t pt-4">
+                <ModelAdvancedConfig
+                  value={advanced}
+                  onChange={(next) => {
+                    setAdvanced(next);
+                    // Inference params ride along in the probe, so changing
+                    // them invalidates a previous probe result.
+                    setProbe("idle");
+                  }}
+                  modelType={type}
+                  reasoningCapability={reasoningCapability}
+                />
+              </div>
+            )}
           </div>
-        )}
-        {/* Legacy max_tokens input — only rendered for model types that
-            legitimately still own this field (rerank, STT/TTS). LLM/VLM use
-            the capacity panel; if hideCapacityFields=true is set (provider-
-            level config edit) the dialog deliberately drops both the
-            capacity panel and the legacy input -- per the W1/W2 plan
-            ("Never use legacy max_tokens") capacity is set per-model from
-            the gear icon, not via a provider-level shared value. */}
-        {needsLegacyMaxTokens && (
-          <div>
-            <label className="block mb-1 text-sm font-medium text-gray-700">
-              {t("model.dialog.label.maxTokens")}{" "}
-              <span className="text-red-500">*</span>
-            </label>
-            <ModelMaxTokensInput
-              value={maxTokens}
-              placeholder={t("model.dialog.placeholder.maxTokens")}
-              onChange={setMaxTokens}
-            />
-          </div>
-        )}
-        {!isEmbeddingModel && !isRerankModel && (
-          <div>
-            <label className="block mb-1 text-sm font-medium text-gray-700">
-              {t("model.dialog.label.timeoutSeconds")}
-            </label>
-            <Input
-              type="number"
-              min="1"
-              value={timeoutSeconds}
-              onChange={(e) => setTimeoutSeconds(e.target.value)}
-            />
-          </div>
-        )}
-        {!isEmbeddingModel && !isRerankModel && (
-          <div>
-            <label className="block mb-1 text-sm font-medium text-gray-700">
-              {t("model.dialog.label.concurrencyLimit")}
-            </label>
-            <Input
-              type="number"
-              min="1"
-              value={concurrencyLimit}
-              onChange={(e) => setConcurrencyLimit(e.target.value)}
-              placeholder={t("model.dialog.placeholder.concurrencyLimit")}
-            />
-            <div className="text-xs text-gray-500 mt-1">
-              {t("model.dialog.hint.concurrencyLimit")}
-            </div>
-          </div>
-        )}
-        <div className="flex justify-end space-x-3">
-          <Button onClick={onClose}>{t("common.button.cancel")}</Button>
-          <Button
-            type="primary"
-            onClick={handleSave}
-            loading={saving}
-            disabled={!valid()}
-          >
-            {t("common.button.save")}
-          </Button>
         </div>
-      </div>
-    </Modal>
+
+        <div className="flex items-center justify-between border-t px-6 py-4">
+          <div className="flex min-w-0 items-center gap-2.5">
+            <Button
+              variant="outline"
+              onClick={handleCheck}
+              disabled={probe === "checking" || saving}
+            >
+              {probe === "checking" ? (
+                <Loader2 className="size-4 animate-spin" />
+              ) : (
+                <ShieldCheck className="size-4" />
+              )}
+              {t("modelConfig.editDialog.checkConnectivity", {
+                defaultValue: "检测连通性",
+              })}
+            </Button>
+            {probe === "available" && (
+              <span className="flex items-center gap-1.5 text-xs text-emerald-600">
+                <span className="size-2 rounded-full bg-emerald-500" />
+                {t("model.status.available", { defaultValue: "可用" })}
+              </span>
+            )}
+            {probe === "unavailable" && (
+              <span className="flex items-center gap-1.5 text-xs text-red-500">
+                <span className="size-2 rounded-full bg-red-500" />
+                {t("model.status.unavailable", { defaultValue: "不可用" })}
+              </span>
+            )}
+          </div>
+          <div className="flex shrink-0 gap-2">
+            <Button variant="outline" onClick={onClose}>
+              {t("common.cancel", { defaultValue: "取消" })}
+            </Button>
+            <Button disabled={!canSubmit || saving} onClick={handleSave}>
+              {saving && <Loader2 className="size-4 animate-spin" />}
+              {t("common.save", { defaultValue: "保存" })}
+            </Button>
+          </div>
+        </div>
+      </DialogContent>
+    </Dialog>
   );
 };

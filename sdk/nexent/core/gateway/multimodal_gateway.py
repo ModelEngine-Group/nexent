@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any, Dict, Tuple
+from typing import Any
 
 from .multimodal_adapter import MultimodalAdapter
 from .model_context import ModelContext
@@ -10,32 +10,28 @@ from .registry import AdapterRegistry, get_registry
 
 
 class MultimodalGateway:
-    """Resolve and cache :class:`MultimodalAdapter` instances by context."""
+    """Resolve :class:`MultimodalAdapter` instances by context."""
 
     def __init__(self, registry: AdapterRegistry = None) -> None:
-        """Initializes the gateway with a registry and empty cache.
+        """Initializes the gateway with a registry.
 
         Args:
             registry: The adapter registry to resolve from. Defaults to the
                 process-wide singleton.
         """
         self._registry = registry or get_registry()
-        self._adapter_cache: Dict[Tuple, MultimodalAdapter] = {}
 
     def get_adapter(self, context: ModelContext) -> MultimodalAdapter:
-        """Returns the adapter for ``context``, building and caching it once.
+        """Returns the adapter for ``context``.
 
         Args:
             context: The construction context identifying the desired model.
 
         Returns:
-            The cached or newly built adapter instance.
+            The newly built adapter instance.
         """
         cls = self._registry.resolve(context.factory, context.modality)
-        key = context.cache_key()
-        if key not in self._adapter_cache:
-            self._adapter_cache[key] = cls(context)
-        return self._adapter_cache[key]
+        return cls(context)
 
     async def invoke(self, context: ModelContext, request: Any) -> Any:
         """Resolves the adapter for ``context`` and invokes it.
@@ -71,18 +67,6 @@ class MultimodalGateway:
             True if the model is reachable, False otherwise.
         """
         return await self.get_adapter(context).health_check()
-
-    def invalidate(self, context: ModelContext = None) -> None:
-        """Drops cached adapter instances.
-
-        Args:
-            context: If provided, drops only that context's cached adapter.
-                If None, drops the entire cache.
-        """
-        if context is None:
-            self._adapter_cache.clear()
-        else:
-            self._adapter_cache.pop(context.cache_key(), None)
 
 
 _gateway: MultimodalGateway = None

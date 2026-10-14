@@ -3,6 +3,7 @@ ARG MIRROR
 ARG APT_MIRROR
 ARG TARGETARCH
 LABEL authors="nexent"
+ENV TZ=Asia/Shanghai
 
 # Set correct permissions as root
 USER root
@@ -24,12 +25,24 @@ RUN --mount=type=cache,id=nexent-main-apt-cache-${TARGETARCH},target=/var/cache/
         done; \
     fi && \
     apt-get update && \
-    apt-get install -y --no-install-recommends \
+    DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
         curl \
+        tzdata \
         postgresql-client \
         fontconfig \
         fonts-noto-cjk && \
     fc-cache -f
+
+FROM base AS litellm-models
+ARG MODELS_DEV_CATALOG_URL=https://models.dev/catalog.json
+
+# Bundle reasoning capabilities independently of application code changes.
+RUN curl -fsSL --proto '=https' -o /models_dev_catalog.json "$MODELS_DEV_CATALOG_URL"
+
+# Bundle the LiteLLM catalog for offline capacity lookup.
+RUN curl -fsSL --proto '=https' -o /litellm_models.json \
+    https://cdn.jsdelivr.net/gh/BerriAI/litellm@main/model_prices_and_context_window.json \
+    || echo '{}' > /litellm_models.json
 
 FROM base AS builder
 ARG MIRROR
@@ -61,9 +74,11 @@ WORKDIR /opt/backend
 COPY --from=builder /opt/backend/.venv /opt/backend/.venv
 COPY --from=builder /opt/sdk /opt/sdk
 COPY --from=builder /opt/tiktoken-cache /opt/tiktoken-cache
+COPY --from=litellm-models /litellm_models.json /opt/nexent/litellm_models.json
 
 # Layer 2: copy backend code
 COPY backend /opt/backend
+COPY --from=litellm-models /models_dev_catalog.json /opt/backend/configs/models_dev_catalog.json
 COPY VERSION /opt/nexent/VERSION
 COPY deploy/common/run-sql-migrations.sh deploy/common/start-backend.sh /opt/nexent/scripts/
 RUN chmod +x /opt/nexent/scripts/run-sql-migrations.sh /opt/nexent/scripts/start-backend.sh

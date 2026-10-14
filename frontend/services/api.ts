@@ -55,6 +55,8 @@ export const API_ENDPOINTS = {
     detail: (id: number) => `${API_BASE_URL}/conversation/${id}`,
     knowledgeScope: (id: number) =>
       `${API_BASE_URL}/conversation/${id}/knowledge-scope`,
+    workbenchConfig: (id: number) =>
+      `${API_BASE_URL}/conversation/${id}/workbench-config`,
     delete: (id: number) => `${API_BASE_URL}/conversation/${id}`,
     batchDelete: `${API_BASE_URL}/conversation/batch-delete`,
     generateTitle: `${API_BASE_URL}/conversation/generate_title`,
@@ -85,9 +87,9 @@ export const API_ENDPOINTS = {
     nl2agentRun: `${API_BASE_URL}/agent/nl2agent/run`,
     update: `${API_BASE_URL}/agent/update`,
     list: `${API_BASE_URL}/agent/list`,
+    listPage: `${API_BASE_URL}/agent/list/page`,
     publishedList: `${API_BASE_URL}/agent/published_list`,
     delete: `${API_BASE_URL}/agent`,
-    getCreatingSubAgentId: `${API_BASE_URL}/agent/get_creating_sub_agent_id`,
     stop: (runId: string | number) =>
       `${API_BASE_URL}/agent/stop/${encodeURIComponent(String(runId))}`,
     export: `${API_BASE_URL}/agent/export`,
@@ -101,11 +103,14 @@ export const API_ENDPOINTS = {
       `${API_BASE_URL}/agent/by-name/${encodeURIComponent(agentName)}`,
     knowledgeCapabilities: (agentId: number) =>
       `${API_BASE_URL}/agent/${agentId}/knowledge-capabilities`,
+    workbenchBootstrap: `${API_BASE_URL}/agent/workbench/bootstrap`,
+    workbenchPreview: `${API_BASE_URL}/agent/workbench/capabilities/preview`,
     clearNew: (agentId: string | number) =>
       `${API_BASE_URL}/agent/clear_new/${agentId}`,
     generateGuardrailRules: `${API_BASE_URL}/agent/generate_guardrail_rules`,
     publish: (agentId: number) => `${API_BASE_URL}/agent/${agentId}/publish`,
-    icon: (agentId: number) => `${API_BASE_URL}/agent/${agentId}/icon`,
+    icon: (agentId: number, revision?: string | null) =>
+      `${API_BASE_URL}/agent/${agentId}/icon${revision ? `?v=${encodeURIComponent(revision)}` : ""}`,
     versions: {
       version: (agentId: number, versionNo: number) =>
         `${API_BASE_URL}/agent/${agentId}/versions/${versionNo}`,
@@ -181,6 +186,7 @@ export const API_ENDPOINTS = {
   },
   evaluationSets: {
     list: `${API_BASE_URL}/evaluation-sets`,
+    config: `${API_BASE_URL}/evaluation-sets/config`,
     detail: (id: number) => `${API_BASE_URL}/evaluation-sets/${id}`,
     cases: (id: number) => `${API_BASE_URL}/evaluation-sets/${id}/cases`,
     upload: `${API_BASE_URL}/evaluation-sets/upload`,
@@ -200,7 +206,7 @@ export const API_ENDPOINTS = {
   },
   agentEvaluations: {
     create: `${API_BASE_URL}/agent-evaluations`,
-    listByAgent: `${API_BASE_URL}/agent-evaluations`,
+    list: `${API_BASE_URL}/agent-evaluations`,
     detail: (id: number) => `${API_BASE_URL}/agent-evaluations/${id}`,
     cases: (id: number) => `${API_BASE_URL}/agent-evaluations/${id}/cases`,
     report: (id: number) => `${API_BASE_URL}/agent-evaluations/${id}/report`,
@@ -264,6 +270,7 @@ export const API_ENDPOINTS = {
     customModelCreate: `${API_BASE_URL}/model/create`,
     customModelCreateProvider: `${API_BASE_URL}/model/provider/create`,
     customModelBatchCreate: `${API_BASE_URL}/model/provider/batch_create`,
+    customModelBackfillDefaults: `${API_BASE_URL}/model/backfill_defaults`,
     getProviderSelectedModalList: `${API_BASE_URL}/model/provider/list`,
     customModelDelete: (displayName: string) =>
       `${API_BASE_URL}/model/delete?display_name=${encodeURIComponent(
@@ -292,6 +299,19 @@ export const API_ENDPOINTS = {
       `${API_BASE_URL}/model/manage/delete?display_name=${encodeURIComponent(displayName)}`,
     manageProviderModelList: `${API_BASE_URL}/model/manage/provider/list`,
     manageProviderModelCreate: `${API_BASE_URL}/model/manage/provider/create`,
+    // Preset Model Catalog (预置模型目录)
+    catalogAll: `${API_BASE_URL}/model/catalog/all`,
+    catalogProviders: `${API_BASE_URL}/model/catalog/providers`,
+    catalogProviderModels: (provider: string, modelType?: string) => {
+      const base = `${API_BASE_URL}/model/catalog/${encodeURIComponent(provider)}/models`;
+      return modelType
+        ? `${base}?model_type=${encodeURIComponent(modelType)}`
+        : base;
+    },
+    catalogModelProfile: (provider: string, modelName: string) =>
+      `${API_BASE_URL}/model/catalog/${encodeURIComponent(provider)}/${encodeURIComponent(modelName)}`,
+    // v2.6.0: fixed inference field specs by model type (advanced settings)
+    catalogInferenceFieldSpecs: `${API_BASE_URL}/model/catalog/inference_field_specs`,
   },
   knowledgeBase: {
     // Elasticsearch service
@@ -366,7 +386,12 @@ export const API_ENDPOINTS = {
     kbDetail: (id: string) => `${API_BASE_URL}/aidp-mgmt/knowledge-bases/${id}`,
     kbDocuments: (id: string) =>
       `${API_BASE_URL}/aidp-mgmt/knowledge-bases/${id}/documents`,
+    removeKbDocuments: (id: string) =>
+      `${API_BASE_URL}/aidp-mgmt/knowledge-bases/${id}/documents/remove`,
+    downloadKbDocument: (id: string) =>
+      `${API_BASE_URL}/aidp-mgmt/knowledge-bases/${id}/documents/download`,
     models: `${API_BASE_URL}/aidp-mgmt/models`,
+    graphTemplate: `${API_BASE_URL}/aidp-mgmt/knowledge-bases/graph-template`,
     /** PATCH endpoint for the per-KB in-group permission. */
     kbPermission: (id: string) =>
       `${API_BASE_URL}/aidp-mgmt/aidp-permissions/${id}`,
@@ -550,6 +575,19 @@ export const API_ENDPOINTS = {
       if (params?.search?.trim()) {
         queryParams.append("search", params.search.trim());
       }
+      if (params?.search_tag_predicates?.length) {
+        queryParams.append(
+          "search_tag_predicates",
+          JSON.stringify(params.search_tag_predicates)
+        );
+      }
+      if (params?.tag_predicates?.length) {
+        queryParams.append(
+          "tag_predicates",
+          JSON.stringify(params.tag_predicates)
+        );
+      }
+      if (params?.tag?.trim()) queryParams.append("tag", params.tag.trim());
       const queryString = queryParams.toString();
       return `${API_BASE_URL}/repository/agent${queryString ? `?${queryString}` : ""}`;
     },
@@ -573,11 +611,29 @@ export const API_ENDPOINTS = {
       if (params?.agent_id != null) {
         queryParams.append("agent_id", String(params.agent_id));
       }
+      if (params?.tag_predicates?.length) {
+        queryParams.append(
+          "tag_predicates",
+          JSON.stringify(params.tag_predicates)
+        );
+      }
+      if (params?.search_tag_predicates?.length) {
+        queryParams.append(
+          "search_tag_predicates",
+          JSON.stringify(params.search_tag_predicates)
+        );
+      }
       const queryString = queryParams.toString();
       return `${API_BASE_URL}/repository/agent/mine${queryString ? `?${queryString}` : ""}`;
     },
     detail: (agentRepositoryId: number) =>
       `${API_BASE_URL}/repository/agent/${agentRepositoryId}`,
+    official: `${API_BASE_URL}/repository/agent/official`,
+    officialInstall: `${API_BASE_URL}/repository/agent/official/install`,
+    officialManagement: `${API_BASE_URL}/repository/agent/official/management`,
+    officialManagementItem: (agentRepositoryId: number) =>
+      `${API_BASE_URL}/repository/agent/official/management/${agentRepositoryId}`,
+    tagStats: `${API_BASE_URL}/repository/agent/tags`,
     importPrecheck: (agentRepositoryId: number) =>
       `${API_BASE_URL}/repository/agent/${agentRepositoryId}/import_precheck`,
     import: (agentRepositoryId: number) =>
@@ -586,6 +642,8 @@ export const API_ENDPOINTS = {
       `${API_BASE_URL}/repository/agent/${agentRepositoryId}/status`,
     createListing: (agentId: number, versionNo: number) =>
       `${API_BASE_URL}/repository/agent/${agentId}/versions/${versionNo}`,
+    icon: (agentId: number, versionNo: number) =>
+      `${API_BASE_URL}/repository/agent/${agentId}/versions/${versionNo}/icon`,
   },
   skillRepository: {
     listings: (params?: SkillRepositoryListingListParams) => {
@@ -606,6 +664,13 @@ export const API_ENDPOINTS = {
       if (params?.search?.trim()) {
         queryParams.append("search", params.search.trim());
       }
+      if (params?.tag_predicates?.length) {
+        queryParams.append(
+          "tag_predicates",
+          JSON.stringify(params.tag_predicates)
+        );
+      }
+      if (params?.tag?.trim()) queryParams.append("tag", params.tag.trim());
       if (params?.sort_by_update_time) {
         queryParams.append("sort_by_update_time", "true");
       }
@@ -629,12 +694,19 @@ export const API_ENDPOINTS = {
       if (params?.new_skill_padding) {
         queryParams.append("new_skill_padding", "true");
       }
+      if (params?.tag_predicates?.length) {
+        queryParams.append(
+          "tag_predicates",
+          JSON.stringify(params.tag_predicates)
+        );
+      }
       const queryString = queryParams.toString();
       return `${API_BASE_URL}/repository/skill/mine${queryString ? `?${queryString}` : ""}`;
     },
     mineSkillCounts: `${API_BASE_URL}/repository/skill/mine/counts`,
     detail: (skillRepositoryId: number) =>
       `${API_BASE_URL}/repository/skill/${skillRepositoryId}`,
+    tagStats: `${API_BASE_URL}/repository/skill/tags`,
     install: (skillRepositoryId: number) =>
       `${API_BASE_URL}/repository/skill/${skillRepositoryId}/install`,
     updateStatus: (skillRepositoryId: number) =>
@@ -857,7 +929,8 @@ export const fetchWithErrorHandling = async (
           if (errorData?.error === "TenantStorageFull") {
             throw new ApiError(
               413,
-              errorData.message || "Tenant storage limit reached"
+              errorData.message || "Tenant storage limit reached",
+              errorData
             );
           }
         } catch (error) {
@@ -865,9 +938,12 @@ export const fetchWithErrorHandling = async (
             throw error;
           }
         }
+        // Preserve structured FILE_TOO_LARGE responses so upload callers can
+        // display the configured limit from details.limit_mb.
         throw new ApiError(
-          ErrorCode.FILE_TOO_LARGE,
-          "File size exceeds limit."
+          errorCode,
+          errorMessage || "File size exceeds limit.",
+          errorDetails
         );
       }
 

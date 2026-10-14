@@ -58,6 +58,8 @@ jobs:
       - name: Run deployment script tests
         run: |
           bash deploy/tests/test_common.sh
+          bash deploy/tests/test_docker_backup.sh
+          bash deploy/tests/test_k8s_backup.sh
           bash deploy/tests/test_sql_migrations.sh
           bash deploy/tests/test_super_admin_init.sh
           bash deploy/tests/test_build_offline_package.sh

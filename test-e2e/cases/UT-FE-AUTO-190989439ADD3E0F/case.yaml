@@ -1,0 +1,78 @@
+schema_version: '1.0'
+stage: D1
+module: V5-BASELINE
+case:
+  case_id: UT-FE-AUTO-190989439ADD3E0F
+  feature_id: F-018
+  business_rule_ids:
+  - F-018-RULE-01
+  title: 个人资料账户信息区按 authProvider 区分 Username/Email 展示与 CAS 空用户名回退邮箱｜核心流程
+  type: FE-COMP
+  priority: P1
+  status: active
+  automation: automated
+  objective: 个人资料账户信息区按 authProvider 区分 Username/Email 展示与 CAS 空用户名回退邮箱｜核心流程
+  preconditions:
+  - 本地依赖/组件测试环境可运行；不要求外部模型服务在线。
+  - 设置 NEXENT_TEST_HOME，目录不位于 Nexent Git 仓库内。
+  - 当次 run_id 已生成，所有新建资源名称带 run_id；测试基线固定为 develop 当前批次锁定的产品提交；执行时另记录实际被测commit。
+  - 所需本地资产存在且校验通过：${NEXENT_TEST_HOME}/config/users.yaml；${NEXENT_TEST_HOME}/config/secrets.env
+  - users.yaml 中 SU/Admin/UserA/UserB 等隔离账号可登录，测试租户数据可被清理。
+  - 组件测试可注入包含 authProvider（local/cas）与 username/email 的本地固定 user fixture；不需要真实 CAS Server 或 OAuth Provider。
+  test_data:
+    legacy_asset_declaration: '- ${NEXENT_TEST_HOME}/config/users.yaml
+
+      - ${NEXENT_TEST_HOME}/config/secrets.env'
+  steps:
+  - order: 1
+    action: 在组件测试环境加载 frontend/app/[locale]/users/components/UserProfileComp.tsx，mock useAuthenticationContext 与 useAuthorizationContext，注入最小
+      props 与本地固定 user fixture（含 id/email/username/authProvider/role/tenantId）。
+    expected: 功能结果与代码契约一致，测试过程无未处理异常。
+  - order: 2
+    action: 首次渲染后定位“账户信息区”（Account Info 区块）第一行标签与对应值元素。
+    expected: 标签判定严格以 user.authProvider==="cas" 为准：CAS 显示 "Username"，本地显示 "Email"。
+  - order: 3
+    action: 场景 A（CAS 有用户名）：注入 authProvider="cas"、username="cas_user_01"、email="cas01@example.com" 的 user，断言标签显示 "Username"、值显示
+      "cas_user_01"。
+    expected: CAS 用户取值顺序为 username.trim() 优先、回退 email.trim()、两者皆空显示 "-"。
+  - order: 4
+    action: 场景 B（本地用户）：注入 authProvider="local"、username 为空或省略、email="local01@example.com" 的 user，断言标签显示 "Email"、值显示 "local01@example.com"，且不读取
+      username。
+    expected: 本地用户取值仅 email.trim()，两者皆空显示 "-"，不使用 username。
+  - order: 5
+    action: 场景 C（CAS 空用户名回退）：注入 authProvider="cas"、username=null 或空串、email="cas02@example.com" 的 user，断言标签仍显示 "Username"、值回退为
+      "cas02@example.com"。
+    expected: 展示值均经 trim 处理，无首尾空格。
+  - order: 6
+    action: 场景 D（两端皆空）：注入 authProvider="cas"、username 与 email 均为空的 user，断言值显示 "-"，且渲染不抛异常。
+    expected: 日志、DOM 快照、报告中不出现明文 API Key/Token/Password/模型密钥。
+  - order: 7
+    action: 场景 E（trim）：注入 username="  cas_user_02  "、email=" cas03@example.com " 的 user，断言展示值分别为 "cas_user_02" 与 "cas03@example.com"。
+    expected: 日志、DOM 快照、报告中不出现明文 API Key/Token/Password/模型密钥。
+  - order: 8
+    action: 每次渲染后检查 loading/empty/error 状态与组件卸载后无残留监听或副作用。
+    expected: 日志、DOM 快照、报告中不出现明文 API Key/Token/Password/模型密钥。
+  expected_results:
+  - 功能结果与代码契约一致，测试过程无未处理异常。
+  - 标签判定严格以 user.authProvider==="cas" 为准：CAS 显示 "Username"，本地显示 "Email"。
+  - CAS 用户取值顺序为 username.trim() 优先、回退 email.trim()、两者皆空显示 "-"。
+  - 本地用户取值仅 email.trim()，两者皆空显示 "-"，不使用 username。
+  - 展示值均经 trim 处理，无首尾空格。
+  - 日志、DOM 快照、报告中不出现明文 API Key/Token/Password/模型密钥。
+  forbidden_side_effects: []
+  source:
+    legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
+    legacy_sheet: 02_测试用例基线
+    legacy_row: 424
+  unit_boundary: 个人资料
+  inputs:
+  - '- ${NEXENT_TEST_HOME}/config/users.yaml
+
+    - ${NEXENT_TEST_HOME}/config/secrets.env'
+  assertions:
+  - 功能结果与代码契约一致，测试过程无未处理异常。
+  - 标签判定严格以 user.authProvider==="cas" 为准：CAS 显示 "Username"，本地显示 "Email"。
+  - CAS 用户取值顺序为 username.trim() 优先、回退 email.trim()、两者皆空显示 "-"。
+  - 本地用户取值仅 email.trim()，两者皆空显示 "-"，不使用 username。
+  - 展示值均经 trim 处理，无首尾空格。
+  - 日志、DOM 快照、报告中不出现明文 API Key/Token/Password/模型密钥。

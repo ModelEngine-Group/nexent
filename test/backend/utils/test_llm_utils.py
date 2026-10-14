@@ -1,3 +1,4 @@
+import os
 import sys
 import types
 import pytest
@@ -13,7 +14,10 @@ sys.modules['elasticsearch'] = elasticsearch_mock
 
 # Create placeholder nexent package hierarchy for patching
 nexent_module = types.ModuleType("nexent")
-nexent_module.__path__ = []
+_sdk_nexent_path = os.path.abspath(
+    os.path.join(os.path.dirname(__file__), "../../../sdk/nexent")
+)
+nexent_module.__path__ = [_sdk_nexent_path]
 sys.modules['nexent'] = nexent_module
 
 sys.modules['nexent.monitor'] = types.ModuleType('nexent.monitor')
@@ -83,6 +87,7 @@ sys.modules["nexent.core.utils.observer"] = observer_mod
 
 # Minimal nexent.core.models.OpenAIModel stub to satisfy imports (tests will patch behavior)
 models_mod = types.ModuleType("nexent.core.models")
+models_mod.__path__ = [os.path.join(_sdk_nexent_path, "core", "models")]
 
 
 class _SimpleOpenAIModel:
@@ -100,8 +105,32 @@ sys.modules["nexent.core.models"] = models_mod
 # Stub the gateway bridge modules so importing model_gateway_service via
 # llm_utils does not pull the real gateway registry (heavy + vendor imports).
 nexent_core_pkg = types.ModuleType("nexent.core")
-nexent_core_pkg.__path__ = []
+nexent_core_pkg.__path__ = [os.path.join(_sdk_nexent_path, "core")]
 sys.modules["nexent.core"] = nexent_core_pkg
+# Stub nexent.core.agents.agent_model: backend/consts/model.py (reached via
+# database.model_management_db) imports AgentVerificationConfig/ToolConfig from
+# it at module level, and the empty __path__ above blocks the real SDK package.
+agents_pkg = types.ModuleType("nexent.core.agents")
+agents_pkg.__path__ = []
+sys.modules["nexent.core.agents"] = agents_pkg
+nexent_core_pkg.agents = agents_pkg
+agent_model_mod = types.ModuleType("nexent.core.agents.agent_model")
+
+
+class _StubAgentVerificationConfig:  # pylint: disable=too-few-public-methods
+    def __init__(self, *args, **kwargs):
+        pass
+
+
+class _StubToolConfig:  # pylint: disable=too-few-public-methods
+    def __init__(self, *args, **kwargs):
+        pass
+
+
+agent_model_mod.AgentVerificationConfig = _StubAgentVerificationConfig
+agent_model_mod.ToolConfig = _StubToolConfig
+sys.modules["nexent.core.agents.agent_model"] = agent_model_mod
+agents_pkg.agent_model = agent_model_mod
 gateway_mod = types.ModuleType("nexent.core.gateway")
 for _name in ("EmbeddingContext", "LLMContext", "LongContextLLMContext", "ModelContext", "VLMContext", "get_gateway"):
     setattr(gateway_mod, _name, MagicMock(name=f"nexent.core.gateway.{_name}"))
@@ -118,13 +147,13 @@ nexent_module.MessageObserver = observer_mod.MessageObserver
 import backend.database.client  # noqa: E402,F401
 import database.client  # noqa: E402,F401
 
-from backend.utils.llm_utils import call_llm_for_system_prompt, _process_thinking_tokens
+from management.services.model.invocation import call_llm_for_system_prompt, _process_thinking_tokens
 
 
 class TestCallLLMForSystemPrompt:
     def test_call_llm_for_system_prompt_success(self, mocker: MockFixture):
-        mock_get_model_by_id = mocker.patch('backend.utils.llm_utils.get_model_by_model_id')
-        mock_adapter = mocker.patch('backend.utils.llm_utils.get_llm_adapter_from_config')
+        mock_get_model_by_id = mocker.patch('management.services.model.invocation.get_model_by_model_id')
+        mock_adapter = mocker.patch('management.services.model.invocation.get_llm_adapter_from_config')
 
         mock_model_config = {
             "base_url": "http://example.com",
@@ -162,12 +191,41 @@ class TestCallLLMForSystemPrompt:
             timeout_seconds=None,
         )
 
+    def test_call_llm_for_system_prompt_removes_prepared_stream(self, mocker: MockFixture):
+        mock_get_model_by_id = mocker.patch('management.services.model.invocation.get_model_by_model_id')
+        mock_adapter = mocker.patch('management.services.model.invocation.get_llm_adapter_from_config')
+
+        mock_get_model_by_id.return_value = {
+            "base_url": "http://example.com",
+            "api_key": "fake-key",
+            "model_factory": "qwen",
+        }
+
+        mock_llm_instance = mock_adapter.return_value
+        mock_chunk = MagicMock()
+        mock_chunk.choices = [MagicMock()]
+        mock_chunk.choices[0].delta.content = "Generated prompt"
+        mock_llm_instance.client = MagicMock()
+        mock_llm_instance.client.chat.completions.create.return_value = [mock_chunk]
+        mock_llm_instance._prepare_completion_kwargs.return_value = {
+            "stream": False,
+            "temperature": 0.3,
+        }
+
+        result = call_llm_for_system_prompt(1, "user prompt", "system prompt")
+
+        assert result == "Generated prompt"
+        mock_llm_instance.client.chat.completions.create.assert_called_once_with(
+            stream=True,
+            temperature=0.3,
+        )
+
     def test_call_llm_for_system_prompt_exception(self, mocker: MockFixture):
         from consts.error_code import ErrorCode
         from consts.exceptions import AppException
 
-        mock_get_model_by_id = mocker.patch('backend.utils.llm_utils.get_model_by_model_id')
-        mock_adapter = mocker.patch('backend.utils.llm_utils.get_llm_adapter_from_config')
+        mock_get_model_by_id = mocker.patch('management.services.model.invocation.get_model_by_model_id')
+        mock_adapter = mocker.patch('management.services.model.invocation.get_llm_adapter_from_config')
 
         mock_model_config = {
             "base_url": "http://example.com",
@@ -462,8 +520,8 @@ class TestAdditionalLLMUtilsTests:
 
     def test_call_llm_for_system_prompt_skips_none_tokens_and_joins(self, mocker: MockFixture):
         # Setup model config and gateway adapter behavior
-        mock_get_model_by_id = mocker.patch('backend.utils.llm_utils.get_model_by_model_id')
-        mock_adapter = mocker.patch('backend.utils.llm_utils.get_llm_adapter_from_config')
+        mock_get_model_by_id = mocker.patch('management.services.model.invocation.get_model_by_model_id')
+        mock_adapter = mocker.patch('management.services.model.invocation.get_llm_adapter_from_config')
 
         mock_get_model_by_id.return_value = {"base_url": "http://x", "api_key": "k"}
 
@@ -487,8 +545,8 @@ class TestAdditionalLLMUtilsTests:
         mock_adapter.assert_called_once()
 
     def test_call_llm_for_system_prompt_generator_like_response(self, mocker: MockFixture):
-        mock_get_model_by_id = mocker.patch('backend.utils.llm_utils.get_model_by_model_id')
-        mock_adapter = mocker.patch('backend.utils.llm_utils.get_llm_adapter_from_config')
+        mock_get_model_by_id = mocker.patch('management.services.model.invocation.get_model_by_model_id')
+        mock_adapter = mocker.patch('management.services.model.invocation.get_llm_adapter_from_config')
 
         mock_get_model_by_id.return_value = {"base_url": "http://y", "api_key": "k2"}
 
@@ -510,8 +568,8 @@ class TestAdditionalLLMUtilsTests:
         assert res == "ABC"
 
     def test_call_llm_for_system_prompt_skips_chunk_without_choices(self, mocker: MockFixture):
-        mock_get_model_by_id = mocker.patch('backend.utils.llm_utils.get_model_by_model_id')
-        mock_adapter = mocker.patch('backend.utils.llm_utils.get_llm_adapter_from_config')
+        mock_get_model_by_id = mocker.patch('management.services.model.invocation.get_model_by_model_id')
+        mock_adapter = mocker.patch('management.services.model.invocation.get_llm_adapter_from_config')
 
         mock_get_model_by_id.return_value = {"base_url": "http://y", "api_key": "k2"}
 
@@ -533,8 +591,8 @@ class TestAdditionalLLMUtilsTests:
 
     def test_call_llm_for_system_prompt_with_callback(self, mocker: MockFixture):
         """Test call_llm_for_system_prompt with callback"""
-        mock_get_model_by_id = mocker.patch('backend.utils.llm_utils.get_model_by_model_id')
-        mock_adapter = mocker.patch('backend.utils.llm_utils.get_llm_adapter_from_config')
+        mock_get_model_by_id = mocker.patch('management.services.model.invocation.get_model_by_model_id')
+        mock_adapter = mocker.patch('management.services.model.invocation.get_llm_adapter_from_config')
 
         mock_get_model_by_id.return_value = {"base_url": "http://example.com", "api_key": "fake-key"}
 
@@ -565,8 +623,9 @@ class TestAdditionalLLMUtilsTests:
 
     def test_call_llm_for_system_prompt_with_reasoning_content(self, mocker: MockFixture):
         """Test call_llm_for_system_prompt with reasoning_content"""
-        mock_get_model_by_id = mocker.patch('backend.utils.llm_utils.get_model_by_model_id')
-        mock_adapter = mocker.patch('backend.utils.llm_utils.get_llm_adapter_from_config')
+        mock_logger = mocker.patch('management.services.model.invocation.logger')
+        mock_get_model_by_id = mocker.patch('management.services.model.invocation.get_model_by_model_id')
+        mock_adapter = mocker.patch('management.services.model.invocation.get_llm_adapter_from_config')
 
         mock_get_model_by_id.return_value = {"base_url": "http://example.com", "api_key": "fake-key"}
 
@@ -574,6 +633,7 @@ class TestAdditionalLLMUtilsTests:
         mock_chunk = MagicMock()
         mock_chunk.choices = [MagicMock()]
         mock_chunk.choices[0].delta.content = "Generated prompt"
+        mock_chunk.choices[0].delta.reasoning = None
         mock_chunk.choices[0].delta.reasoning_content = "Some reasoning"
 
         mock_llm_instance.client = MagicMock()
@@ -587,11 +647,44 @@ class TestAdditionalLLMUtilsTests:
         )
 
         assert result == "Generated prompt"
+        mock_logger.debug.assert_any_call(
+            "Received reasoning_content (metadata only, not filtering content)"
+        )
+
+    def test_call_llm_for_system_prompt_with_reasoning(self, mocker: MockFixture):
+        """Test call_llm_for_system_prompt with the alternate reasoning field."""
+        mock_logger = mocker.patch('management.services.model.invocation.logger')
+        mock_get_model_by_id = mocker.patch('management.services.model.invocation.get_model_by_model_id')
+        mock_adapter = mocker.patch('management.services.model.invocation.get_llm_adapter_from_config')
+
+        mock_get_model_by_id.return_value = {"base_url": "http://example.com", "api_key": "fake-key"}
+
+        mock_llm_instance = mock_adapter.return_value
+        mock_chunk = MagicMock()
+        mock_chunk.choices = [MagicMock()]
+        mock_chunk.choices[0].delta.content = "Generated prompt"
+        mock_chunk.choices[0].delta.reasoning = "Some reasoning"
+        mock_chunk.choices[0].delta.reasoning_content = None
+
+        mock_llm_instance.client = MagicMock()
+        mock_llm_instance.client.chat.completions.create.return_value = [mock_chunk]
+        mock_llm_instance._prepare_completion_kwargs.return_value = {}
+
+        result = call_llm_for_system_prompt(
+            1,
+            "user prompt",
+            "system prompt",
+        )
+
+        assert result == "Generated prompt"
+        mock_logger.debug.assert_any_call(
+            "Received reasoning_content (metadata only, not filtering content)"
+        )
 
     def test_call_llm_for_system_prompt_multiple_chunks(self, mocker: MockFixture):
         """Test call_llm_for_system_prompt with multiple chunks"""
-        mock_get_model_by_id = mocker.patch('backend.utils.llm_utils.get_model_by_model_id')
-        mock_adapter = mocker.patch('backend.utils.llm_utils.get_llm_adapter_from_config')
+        mock_get_model_by_id = mocker.patch('management.services.model.invocation.get_model_by_model_id')
+        mock_adapter = mocker.patch('management.services.model.invocation.get_llm_adapter_from_config')
 
         mock_get_model_by_id.return_value = {"base_url": "http://example.com", "api_key": "fake-key"}
 
@@ -620,8 +713,8 @@ class TestAdditionalLLMUtilsTests:
 
     def test_call_llm_for_system_prompt_with_none_content(self, mocker: MockFixture):
         """Test call_llm_for_system_prompt with delta.content as None"""
-        mock_get_model_by_id = mocker.patch('backend.utils.llm_utils.get_model_by_model_id')
-        mock_adapter = mocker.patch('backend.utils.llm_utils.get_llm_adapter_from_config')
+        mock_get_model_by_id = mocker.patch('management.services.model.invocation.get_model_by_model_id')
+        mock_adapter = mocker.patch('management.services.model.invocation.get_llm_adapter_from_config')
 
         mock_get_model_by_id.return_value = {"base_url": "http://example.com", "api_key": "fake-key"}
 
@@ -645,8 +738,8 @@ class TestAdditionalLLMUtilsTests:
 
     def test_call_llm_for_system_prompt_skips_empty_choices_chunk(self, mocker: MockFixture):
         """Test call_llm_for_system_prompt skips chunks with empty choices."""
-        mock_get_model_by_id = mocker.patch('backend.utils.llm_utils.get_model_by_model_id')
-        mock_adapter = mocker.patch('backend.utils.llm_utils.get_llm_adapter_from_config')
+        mock_get_model_by_id = mocker.patch('management.services.model.invocation.get_model_by_model_id')
+        mock_adapter = mocker.patch('management.services.model.invocation.get_llm_adapter_from_config')
 
         mock_get_model_by_id.return_value = {"base_url": "http://example.com", "api_key": "fake-key"}
 
@@ -674,8 +767,8 @@ class TestAdditionalLLMUtilsTests:
 
     def test_call_llm_for_system_prompt_with_thinking_tags(self, mocker: MockFixture):
         """Test call_llm_for_system_prompt with thinking tags"""
-        mock_get_model_by_id = mocker.patch('backend.utils.llm_utils.get_model_by_model_id')
-        mock_adapter = mocker.patch('backend.utils.llm_utils.get_llm_adapter_from_config')
+        mock_get_model_by_id = mocker.patch('management.services.model.invocation.get_model_by_model_id')
+        mock_adapter = mocker.patch('management.services.model.invocation.get_llm_adapter_from_config')
 
         mock_get_model_by_id.return_value = {"base_url": "http://example.com", "api_key": "fake-key"}
 
@@ -718,9 +811,9 @@ class TestAdditionalLLMUtilsTests:
 
     def test_call_llm_for_system_prompt_empty_result_with_tokens(self, mocker: MockFixture):
         """Test call_llm_for_system_prompt with empty result but processed tokens"""
-        mock_logger = mocker.patch('backend.utils.llm_utils.logger')
-        mock_get_model_by_id = mocker.patch('backend.utils.llm_utils.get_model_by_model_id')
-        mock_adapter = mocker.patch('backend.utils.llm_utils.get_llm_adapter_from_config')
+        mock_logger = mocker.patch('management.services.model.invocation.logger')
+        mock_get_model_by_id = mocker.patch('management.services.model.invocation.get_model_by_model_id')
+        mock_adapter = mocker.patch('management.services.model.invocation.get_llm_adapter_from_config')
 
         mock_get_model_by_id.return_value = {"base_url": "http://example.com", "api_key": "fake-key"}
 
@@ -750,8 +843,8 @@ class TestAdditionalLLMUtilsTests:
 
     def test_call_llm_for_system_prompt_with_tenant_id(self, mocker: MockFixture):
         """Test call_llm_for_system_prompt with tenant_id"""
-        mock_get_model_by_id = mocker.patch('backend.utils.llm_utils.get_model_by_model_id')
-        mock_adapter = mocker.patch('backend.utils.llm_utils.get_llm_adapter_from_config')
+        mock_get_model_by_id = mocker.patch('management.services.model.invocation.get_model_by_model_id')
+        mock_adapter = mocker.patch('management.services.model.invocation.get_llm_adapter_from_config')
 
         mock_get_model_by_id.return_value = {"base_url": "http://example.com", "api_key": "fake-key"}
 
@@ -779,8 +872,8 @@ class TestAdditionalLLMUtilsTests:
 
     def test_call_llm_for_system_prompt_with_none_model_config(self, mocker: MockFixture):
         """Test call_llm_for_system_prompt with None model config"""
-        mock_get_model_by_id = mocker.patch('backend.utils.llm_utils.get_model_by_model_id')
-        mock_adapter = mocker.patch('backend.utils.llm_utils.get_llm_adapter_from_config')
+        mock_get_model_by_id = mocker.patch('management.services.model.invocation.get_model_by_model_id')
+        mock_adapter = mocker.patch('management.services.model.invocation.get_llm_adapter_from_config')
 
         mock_get_model_by_id.return_value = None
 
@@ -812,9 +905,9 @@ class TestAdditionalLLMUtilsTests:
 
     def test_call_llm_for_system_prompt_reasoning_content_logging(self, mocker: MockFixture):
         """Test call_llm_for_system_prompt logs when reasoning_content is received"""
-        mock_logger = mocker.patch('backend.utils.llm_utils.logger')
-        mock_get_model_by_id = mocker.patch('backend.utils.llm_utils.get_model_by_model_id')
-        mock_adapter = mocker.patch('backend.utils.llm_utils.get_llm_adapter_from_config')
+        mock_logger = mocker.patch('management.services.model.invocation.logger')
+        mock_get_model_by_id = mocker.patch('management.services.model.invocation.get_model_by_model_id')
+        mock_adapter = mocker.patch('management.services.model.invocation.get_llm_adapter_from_config')
 
         mock_get_model_by_id.return_value = {"base_url": "http://example.com", "api_key": "fake-key"}
 
@@ -842,9 +935,9 @@ class TestAdditionalLLMUtilsTests:
 
     def test_call_llm_for_system_prompt_exception_logging(self, mocker: MockFixture):
         """Test call_llm_for_system_prompt exception handling and logging"""
-        mock_logger = mocker.patch('backend.utils.llm_utils.logger')
-        mock_get_model_by_id = mocker.patch('backend.utils.llm_utils.get_model_by_model_id')
-        mock_adapter = mocker.patch('backend.utils.llm_utils.get_llm_adapter_from_config')
+        mock_logger = mocker.patch('management.services.model.invocation.logger')
+        mock_get_model_by_id = mocker.patch('management.services.model.invocation.get_model_by_model_id')
+        mock_adapter = mocker.patch('management.services.model.invocation.get_llm_adapter_from_config')
 
         mock_get_model_by_id.return_value = {"base_url": "http://example.com", "api_key": "fake-key"}
 
@@ -881,8 +974,8 @@ class TestCallLLMForSystemPromptErrorHandling:
 
     def _create_mock_llm_setup(self, mocker: MockFixture):
         """Helper to setup common mocks for LLM error tests."""
-        mock_get_model_by_id = mocker.patch('backend.utils.llm_utils.get_model_by_model_id')
-        mock_adapter = mocker.patch('backend.utils.llm_utils.get_llm_adapter_from_config')
+        mock_get_model_by_id = mocker.patch('management.services.model.invocation.get_model_by_model_id')
+        mock_adapter = mocker.patch('management.services.model.invocation.get_llm_adapter_from_config')
 
         mock_get_model_by_id.return_value = {"base_url": "http://example.com", "api_key": "fake-key"}
 
@@ -1148,10 +1241,10 @@ class TestCallLLMForSystemPromptErrorHandling:
 
     def test_monitoring_context_set_with_tenant_id(self, mocker: MockFixture):
         """set_monitoring_context must be called with tenant_id when provided."""
-        mock_set_ctx = mocker.patch('backend.utils.llm_utils.set_monitoring_context')
-        mocker.patch('backend.utils.llm_utils.set_monitoring_operation')
-        mock_get_model_by_id = mocker.patch('backend.utils.llm_utils.get_model_by_model_id')
-        mock_adapter = mocker.patch('backend.utils.llm_utils.get_llm_adapter_from_config')
+        mock_set_ctx = mocker.patch('management.services.model.invocation.set_monitoring_context')
+        mocker.patch('management.services.model.invocation.set_monitoring_operation')
+        mock_get_model_by_id = mocker.patch('management.services.model.invocation.get_model_by_model_id')
+        mock_adapter = mocker.patch('management.services.model.invocation.get_llm_adapter_from_config')
 
         mock_get_model_by_id.return_value = {"base_url": "http://x", "api_key": "k"}
 
@@ -1169,10 +1262,10 @@ class TestCallLLMForSystemPromptErrorHandling:
 
     def test_monitoring_context_not_called_without_tenant_id(self, mocker: MockFixture):
         """set_monitoring_context must NOT be called when tenant_id is None."""
-        mock_set_ctx = mocker.patch('backend.utils.llm_utils.set_monitoring_context')
-        mocker.patch('backend.utils.llm_utils.set_monitoring_operation')
-        mock_get_model_by_id = mocker.patch('backend.utils.llm_utils.get_model_by_model_id')
-        mock_adapter = mocker.patch('backend.utils.llm_utils.get_llm_adapter_from_config')
+        mock_set_ctx = mocker.patch('management.services.model.invocation.set_monitoring_context')
+        mocker.patch('management.services.model.invocation.set_monitoring_operation')
+        mock_get_model_by_id = mocker.patch('management.services.model.invocation.get_model_by_model_id')
+        mock_adapter = mocker.patch('management.services.model.invocation.get_llm_adapter_from_config')
 
         mock_get_model_by_id.return_value = {"base_url": "http://x", "api_key": "k"}
 
@@ -1190,9 +1283,9 @@ class TestCallLLMForSystemPromptErrorHandling:
 
     def test_set_monitoring_operation_with_display_name(self, mocker: MockFixture):
         """set_monitoring_operation called with display_name from model config."""
-        mock_set_op = mocker.patch('backend.utils.llm_utils.set_monitoring_operation')
-        mock_get_model_by_id = mocker.patch('backend.utils.llm_utils.get_model_by_model_id')
-        mock_adapter = mocker.patch('backend.utils.llm_utils.get_llm_adapter_from_config')
+        mock_set_op = mocker.patch('management.services.model.invocation.set_monitoring_operation')
+        mock_get_model_by_id = mocker.patch('management.services.model.invocation.get_model_by_model_id')
+        mock_adapter = mocker.patch('management.services.model.invocation.get_llm_adapter_from_config')
 
         mock_get_model_by_id.return_value = {
             "base_url": "http://x", "api_key": "k", "display_name": "MyModel"
@@ -1214,9 +1307,9 @@ class TestCallLLMForSystemPromptErrorHandling:
 
     def test_set_monitoring_operation_without_display_name(self, mocker: MockFixture):
         """set_monitoring_operation called with display_name=None when not in config."""
-        mock_set_op = mocker.patch('backend.utils.llm_utils.set_monitoring_operation')
-        mock_get_model_by_id = mocker.patch('backend.utils.llm_utils.get_model_by_model_id')
-        mock_adapter = mocker.patch('backend.utils.llm_utils.get_llm_adapter_from_config')
+        mock_set_op = mocker.patch('management.services.model.invocation.set_monitoring_operation')
+        mock_get_model_by_id = mocker.patch('management.services.model.invocation.get_model_by_model_id')
+        mock_adapter = mocker.patch('management.services.model.invocation.get_llm_adapter_from_config')
 
         mock_get_model_by_id.return_value = {"base_url": "http://x", "api_key": "k"}
 
@@ -1258,8 +1351,8 @@ class TestCallLLMForSystemPromptRetry:
 
     def _create_mock_llm_setup(self, mocker: MockFixture):
         """Helper to setup common mocks for LLM retry tests."""
-        mock_get_model_by_id = mocker.patch('backend.utils.llm_utils.get_model_by_model_id')
-        mock_adapter = mocker.patch('backend.utils.llm_utils.get_llm_adapter_from_config')
+        mock_get_model_by_id = mocker.patch('management.services.model.invocation.get_model_by_model_id')
+        mock_adapter = mocker.patch('management.services.model.invocation.get_llm_adapter_from_config')
 
         mock_get_model_by_id.return_value = {"base_url": "http://example.com", "api_key": "fake-key"}
         mock_llm_instance = mock_adapter.return_value
@@ -1338,8 +1431,8 @@ class TestCallLLMForSystemPromptCoverageGaps:
     """
 
     def _base_setup(self, mocker: MockFixture):
-        mock_get_model_by_id = mocker.patch('backend.utils.llm_utils.get_model_by_model_id')
-        mock_adapter = mocker.patch('backend.utils.llm_utils.get_llm_adapter_from_config')
+        mock_get_model_by_id = mocker.patch('management.services.model.invocation.get_model_by_model_id')
+        mock_adapter = mocker.patch('management.services.model.invocation.get_llm_adapter_from_config')
         mock_get_model_by_id.return_value = {"base_url": "http://x", "api_key": "k"}
         mock_instance = mock_adapter.return_value
         mock_instance._prepare_completion_kwargs.return_value = {}
@@ -1351,7 +1444,7 @@ class TestCallLLMForSystemPromptCoverageGaps:
 
     def test_error_with_int_status_code_429_is_retryable(self, mocker: MockFixture):
         """Exception with status_code=429 as int hits numeric branch (L30)."""
-        from backend.utils.llm_utils import _is_transient_llm_error
+        from management.services.model.invocation import _is_transient_llm_error
 
         exc = Exception("rate limited")
         exc.status_code = 429  # int, not string
@@ -1359,7 +1452,7 @@ class TestCallLLMForSystemPromptCoverageGaps:
 
     def test_error_with_int_status_code_500_is_retryable(self, mocker: MockFixture):
         """Exception with status_code=500 as int hits numeric branch (L30)."""
-        from backend.utils.llm_utils import _is_transient_llm_error
+        from management.services.model.invocation import _is_transient_llm_error
 
         exc = Exception("server error")
         exc.status_code = 500
@@ -1367,7 +1460,7 @@ class TestCallLLMForSystemPromptCoverageGaps:
 
     def test_error_with_int_status_code_401_not_retryable(self, mocker: MockFixture):
         """Exception with status_code=401 as int is NOT retryable (L30)."""
-        from backend.utils.llm_utils import _is_transient_llm_error
+        from management.services.model.invocation import _is_transient_llm_error
 
         exc = Exception("unauthorized")
         exc.status_code = 401
@@ -1450,7 +1543,7 @@ class TestCallLLMForSystemPromptCoverageGaps:
 
     def test_stream_all_content_filtered_by_thinking_tags(self, mocker: MockFixture):
         """All content tokens are inside think tags → result="" but tokens>0 triggers warning (L178)."""
-        mock_logger = mocker.patch('backend.utils.llm_utils.logger')
+        mock_logger = mocker.patch('management.services.model.invocation.logger')
         mock_instance = self._base_setup(mocker)
 
         mock_chunk = MagicMock()
@@ -1473,7 +1566,7 @@ class TestCallLLMForSystemPromptCoverageGaps:
 
     def test_stream_think_tags_produce_empty_result_with_warning(self, mocker: MockFixture):
         """Explicit ... tags filter all content → result="" + tokens>0 → L178 warning."""
-        mock_logger = mocker.patch('backend.utils.llm_utils.logger')
+        mock_logger = mocker.patch('management.services.model.invocation.logger')
         mock_instance = self._base_setup(mocker)
 
         # Chunk with content that starts a think block but never ends it in this chunk:

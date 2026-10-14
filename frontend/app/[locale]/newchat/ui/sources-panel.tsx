@@ -1,15 +1,33 @@
 "use client";
 
-import { useEffect, useRef, useState, type FC } from "react";
 import {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type FC,
+  type ReactNode,
+} from "react";
+import {
+  DatabaseIcon,
   DownloadIcon,
+  ExternalLinkIcon,
   FileTextIcon,
   ImageIcon,
   LoaderCircleIcon,
+  ServerIcon,
   XIcon,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+import {
+  CiteIndexBadge,
+  HighlightedChunkText,
+} from "@/components/common/highlightedSourceText";
+import {
+  extractHighlightTerms,
+  mergeHighlightTerms,
+} from "@/lib/citationHighlight";
 import { useTranslation } from "react-i18next";
 import {
   extractObjectNameFromUrl,
@@ -30,11 +48,35 @@ export interface PanelSourceItem {
   url?: string;
   title?: string;
   text?: string;
+  publishedDate?: string;
   filename?: string;
   downloadUrl?: string;
   objectName?: string;
   isImage?: boolean;
   citeIndex?: number;
+  toolSign?: string;
+  retrievalHighlightTerms?: string[];
+}
+
+export function getCitationKey(item: Pick<PanelSourceItem, "citeIndex" | "toolSign">): string | undefined {
+  if (!Number.isFinite(item.citeIndex)) return undefined;
+  const index = item.citeIndex as number;
+  const toolSign = item.toolSign?.trim().toLowerCase();
+  return toolSign ? `${toolSign}${index}` : String(index);
+}
+
+export function getCitationLabel(
+  item: Pick<PanelSourceItem, "citeIndex" | "toolSign" | "sourceType">,
+  labels: { knowledgeBase: string; web: string; source: string },
+): string {
+  const index = item.citeIndex ?? 0;
+  if (item.toolSign === "a" || item.sourceType === "document") {
+    return `${labels.knowledgeBase} ${index}`;
+  }
+  if (["b", "c", "d", "e"].includes(item.toolSign ?? "")) {
+    return `${labels.web} ${index}`;
+  }
+  return `${labels.source} ${index}`;
 }
 
 export interface SourcesPanelProps {
@@ -44,7 +86,8 @@ export interface SourcesPanelProps {
   images: PanelSourceItem[];
   /** Whether the panel is currently open. Allows mount/unmount transitions. */
   open: boolean;
-  selectedCiteIndex?: number;
+  selectedCitationKey?: string;
+  citationContext?: string;
   className?: string;
   onClose: () => void;
 }
@@ -60,7 +103,8 @@ export const SourcesPanel: FC<SourcesPanelProps> = ({
   sources,
   images,
   open,
-  selectedCiteIndex,
+  selectedCitationKey,
+  citationContext,
   className,
   onClose,
 }) => {
@@ -73,16 +117,16 @@ export const SourcesPanel: FC<SourcesPanelProps> = ({
     if (!open) return;
 
     const selectedIsImage =
-      selectedCiteIndex !== undefined &&
-      images.some((item) => item.citeIndex === selectedCiteIndex);
+      selectedCitationKey !== undefined &&
+      images.some((item) => getCitationKey(item) === selectedCitationKey);
     if (selectedIsImage) {
       setActiveTab("images");
-    } else if (selectedCiteIndex !== undefined || sources.length > 0) {
+    } else if (selectedCitationKey !== undefined || sources.length > 0) {
       setActiveTab("sources");
     } else if (images.length > 0) {
       setActiveTab("images");
     }
-  }, [open, selectedCiteIndex, sources.length, images.length]);
+  }, [open, selectedCitationKey, sources.length, images.length]);
 
   if (!open) return null;
 
@@ -93,15 +137,13 @@ export const SourcesPanel: FC<SourcesPanelProps> = ({
     <aside
       data-slot="sources-panel"
       className={cn(
-        "flex h-full w-80 shrink-0 flex-col border-l bg-background",
-        className
+        "flex h-full w-[380px] shrink-0 flex-col border-l border-slate-200 bg-white",
+        className,
       )}
       aria-label={t("chat.sources.panel")}
     >
-      <header className="flex items-center justify-between gap-2 border-b px-4 py-2">
-        <h2 className="text-sm font-semibold text-foreground">
-          {t("chat.sources.title")}
-        </h2>
+      <header className="flex items-center justify-between gap-2 border-b border-slate-200 px-4 py-2">
+        <h2 className="text-sm font-semibold text-slate-800">{t("chatRightPanel.searchTitle")}</h2>
         <Button
           variant="ghost"
           size="icon"
@@ -115,7 +157,7 @@ export const SourcesPanel: FC<SourcesPanelProps> = ({
       <div
         role="tablist"
         aria-label={t("chat.sources.tabs")}
-        className="flex items-center gap-1 border-b px-2 py-2"
+        className="grid grid-cols-2 gap-0 border-b border-slate-200 px-3 py-2"
       >
         <TabButton
           label={t("chat.sources.sources")}
@@ -133,7 +175,7 @@ export const SourcesPanel: FC<SourcesPanelProps> = ({
         />
       </div>
 
-      <div className="flex-1 overflow-y-auto px-3 py-3">
+      <div className="flex-1 overflow-y-auto bg-slate-50/40 px-3 py-3">
         {currentItems.length === 0 ? (
           <p className="py-8 text-center text-sm text-muted-foreground">
             {showSources
@@ -146,7 +188,8 @@ export const SourcesPanel: FC<SourcesPanelProps> = ({
               <SourceListItem
                 key={`${item.url ?? item.title ?? "source"}-${index}`}
                 item={item}
-                selected={item.citeIndex === selectedCiteIndex}
+                selected={getCitationKey(item) === selectedCitationKey}
+                citationContext={citationContext}
               />
             ))}
           </ul>
@@ -188,8 +231,8 @@ const TabButton: FC<TabButtonProps> = ({
       className={cn(
         "flex flex-1 items-center justify-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium transition-colors",
         active
-          ? "bg-primary/10 text-primary"
-          : "text-muted-foreground hover:bg-accent hover:text-accent-foreground"
+          ? "bg-[#1677ff] text-white"
+          : "text-slate-700 hover:bg-slate-100 hover:text-slate-900",
       )}
     >
       {icon}
@@ -197,9 +240,7 @@ const TabButton: FC<TabButtonProps> = ({
       <span
         className={cn(
           "ml-1 inline-flex min-w-5 items-center justify-center rounded-full px-1.5 text-[10px]",
-          active
-            ? "bg-primary text-primary-foreground"
-            : "bg-muted text-muted-foreground"
+          active ? "bg-white/25 text-white" : "bg-slate-100 text-slate-500",
         )}
       >
         {count}
@@ -216,19 +257,115 @@ const extractDomain = (url: string): string => {
   }
 };
 
-const SourceSummary: FC<{ text?: string }> = ({ text }) => {
+const SourceSummary: FC<{
+  text?: string;
+  highlighted?: boolean;
+  highlightTerms?: string[];
+}> = ({ text, highlighted = false, highlightTerms = [] }) => {
+  const textRef = useRef<HTMLParagraphElement>(null);
+
+  useEffect(() => {
+    if (!highlighted || !highlightTerms.length || !textRef.current) return;
+    const firstHighlight = textRef.current.querySelector("mark");
+    if (firstHighlight) {
+      textRef.current.scrollTop = Math.max(
+        0,
+        firstHighlight.offsetTop - textRef.current.offsetTop - 16,
+      );
+    }
+  }, [highlighted, highlightTerms]);
+
   if (!text?.trim()) return null;
 
+  if (highlighted) {
+    return (
+      <div className="mt-2">
+        <p ref={textRef} className="max-h-52 overflow-y-auto whitespace-pre-wrap wrap-break-word pr-1 text-sm leading-6 text-gray-700">
+          <HighlightedChunkText
+            text={text}
+            terms={highlightTerms}
+          />
+        </p>
+      </div>
+    );
+  }
+
   return (
-    <p className="mt-1 line-clamp-4 wrap-break-word text-xs leading-5 text-muted-foreground">
+    <p className="mt-1 line-clamp-3 wrap-break-word text-sm leading-6 text-gray-700">
       {text}
     </p>
   );
 };
 
-const SourceListItem: FC<{ item: PanelSourceItem; selected: boolean }> = ({
+const SourceFooter: FC<{ item: PanelSourceItem; sourceLabel: string }> = ({
+  item,
+  sourceLabel,
+}) => {
+  const fileLabel = item.filename || item.title || item.url || "";
+  if (!fileLabel) return null;
+
+  return (
+    <div className="mt-2 flex min-w-0 flex-col gap-0.5 text-xs text-gray-500">
+      <div className="flex min-w-0 items-center gap-1">
+        {item.sourceType === "document" ? (
+          <DatabaseIcon className="size-3 shrink-0" />
+        ) : (
+          <ExternalLinkIcon className="size-3 shrink-0" />
+        )}
+        <span className="truncate text-[#1677ff]">{fileLabel}</span>
+      </div>
+      <div className="flex min-w-0 items-center gap-1">
+        <ServerIcon className="size-3 shrink-0" />
+        <span className="truncate">{sourceLabel}</span>
+      </div>
+    </div>
+  );
+};
+
+/**
+ * Card content shared by all three source card variants (document, url,
+ * fallback): title row with index badge, date line, summary, and footer.
+ */
+const SourceCardBody: FC<{
+  title: ReactNode;
+  dateFallback?: ReactNode;
+  item: PanelSourceItem;
+  selected: boolean;
+  highlightTerms: string[];
+  sourceLabel: string;
+}> = ({ title, dateFallback, item, selected, highlightTerms, sourceLabel }) => (
+  <>
+    <div className="flex items-start gap-1.5">
+      {title}
+      <CiteIndexBadge
+        index={item.citeIndex}
+        className="inline-flex shrink-0 items-center justify-center"
+      />
+    </div>
+    {item.publishedDate ? (
+      <span className="mt-1 block text-sm text-gray-500">
+        {item.publishedDate}
+      </span>
+    ) : (
+      dateFallback
+    )}
+    <SourceSummary
+      text={item.text}
+      highlighted={selected}
+      highlightTerms={highlightTerms}
+    />
+    <SourceFooter item={item} sourceLabel={sourceLabel} />
+  </>
+);
+
+const SourceListItem: FC<{
+  item: PanelSourceItem;
+  selected: boolean;
+  citationContext?: string;
+}> = ({
   item,
   selected,
+  citationContext,
 }) => {
   const { t } = useTranslation();
   const itemRef = useRef<HTMLLIElement>(null);
@@ -279,8 +416,31 @@ const SourceListItem: FC<{ item: PanelSourceItem; selected: boolean }> = ({
   };
 
   const selectedClassName = selected
-    ? "ring-2 ring-primary/50 ring-offset-2 ring-offset-background"
-    : undefined;
+    ? "border-[#1677ff] bg-white shadow-none"
+    : "border-slate-200 bg-white hover:border-slate-300";
+  const retrievalHighlightTerms = useMemo(() => {
+    if (!selected) return [];
+
+    const sourceText = item.text || "";
+    return (item.retrievalHighlightTerms || [])
+      .map((term) => term.trim())
+      .filter(
+        (term, index, terms) =>
+          term.length >= 2 &&
+          sourceText.toLowerCase().includes(term.toLowerCase()) &&
+          terms.indexOf(term) === index,
+      );
+  }, [item.retrievalHighlightTerms, item.text, selected]);
+  const highlightTerms = useMemo(
+    () =>
+      selected
+        ? mergeHighlightTerms(
+            retrievalHighlightTerms,
+            extractHighlightTerms(citationContext || "", item.text || ""),
+          )
+        : [],
+    [citationContext, retrievalHighlightTerms, item.text, selected],
+  );
   const previewUrl = getLocalFilePreviewUrl(
     item.url,
     item.filename || item.title,
@@ -289,8 +449,8 @@ const SourceListItem: FC<{ item: PanelSourceItem; selected: boolean }> = ({
 
   if (item.sourceType === "document") {
     return (
-      <li ref={itemRef} className={cn("rounded-md", selectedClassName)}>
-        <div className="flex items-start gap-2 rounded-md border bg-card px-3 py-2 text-left text-sm">
+      <li ref={itemRef} className={cn("rounded-lg border p-3", selectedClassName)}>
+        <div className="flex items-start gap-2 text-left text-sm">
           <button
             type="button"
             onClick={() =>
@@ -305,13 +465,17 @@ const SourceListItem: FC<{ item: PanelSourceItem; selected: boolean }> = ({
           >
             <FileTextIcon className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
             <div className="min-w-0 flex-1">
-              <span className="block wrap-break-word font-medium text-foreground">
-                {item.title || item.filename || t("chat.sources.document")}
-              </span>
-              <span className="block truncate text-xs text-muted-foreground">
-                {t("chat.sources.knowledgeBase")}
-              </span>
-              <SourceSummary text={item.text} />
+              <SourceCardBody
+                title={
+                  <span className="block min-w-0 flex-1 wrap-break-word text-base font-medium text-[#1677ff] group-hover:underline">
+                    {item.title || item.filename || t("chat.sources.document")}
+                  </span>
+                }
+                item={item}
+                selected={selected}
+                highlightTerms={highlightTerms}
+                sourceLabel="来源: Nexent"
+              />
             </div>
           </button>
           <button
@@ -331,7 +495,7 @@ const SourceListItem: FC<{ item: PanelSourceItem; selected: boolean }> = ({
           </button>
         </div>
         {downloadError && (
-          <p className="px-3 pb-2 text-xs text-destructive">{downloadError}</p>
+          <p className="pt-2 text-xs text-destructive">{downloadError}</p>
         )}
       </li>
     );
@@ -341,22 +505,31 @@ const SourceListItem: FC<{ item: PanelSourceItem; selected: boolean }> = ({
     const domain = extractDomain(item.url);
     const displayTitle = item.title || domain;
     return (
-      <li ref={itemRef} className={cn("rounded-md", selectedClassName)}>
+      <li ref={itemRef} className={cn("rounded-lg border p-3", selectedClassName)}>
         <a
           href={item.url}
           target="_blank"
           rel="noopener noreferrer"
-          className="flex items-start gap-2 rounded-md border bg-card px-3 py-2 text-sm transition-colors hover:border-primary/40 hover:bg-accent/40"
+          className="flex items-start gap-2 text-sm"
         >
           <FileTextIcon className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
           <div className="min-w-0 flex-1">
-            <span className="block truncate font-medium text-foreground">
-              {displayTitle}
-            </span>
-            <span className="block truncate text-xs text-muted-foreground">
-              {domain}
-            </span>
-            <SourceSummary text={item.text} />
+            <SourceCardBody
+              title={
+                <span className="block min-w-0 flex-1 truncate text-base font-medium text-[#1677ff] hover:underline">
+                  {displayTitle}
+                </span>
+              }
+              dateFallback={
+                <span className="block truncate text-xs text-muted-foreground">
+                  {domain}
+                </span>
+              }
+              item={item}
+              selected={selected}
+              highlightTerms={highlightTerms}
+              sourceLabel={`来源: ${domain}`}
+            />
           </div>
         </a>
       </li>
@@ -366,15 +539,19 @@ const SourceListItem: FC<{ item: PanelSourceItem; selected: boolean }> = ({
   return (
     <li
       ref={itemRef}
-      className={cn(
-        "rounded-md border bg-card px-3 py-2 text-sm text-foreground",
-        selectedClassName
-      )}
+      className={cn("rounded-lg border p-3 text-sm text-foreground", selectedClassName)}
     >
-      <span className="font-medium">
-        {item.title || t("chat.sources.untitled")}
-      </span>
-      <SourceSummary text={item.text} />
+      <SourceCardBody
+        title={
+          <span className="min-w-0 flex-1 text-base font-medium text-[#1677ff]">
+            {item.title || t("chat.sources.untitled")}
+          </span>
+        }
+        item={item}
+        selected={selected}
+        highlightTerms={highlightTerms}
+        sourceLabel="来源: Nexent"
+      />
     </li>
   );
 };

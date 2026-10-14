@@ -94,7 +94,7 @@ Keep the server process running and note the endpoint (e.g., `http://127.0.0.1:8
 2. On the "Select Agent Tools" tab, click **MCP Configuration** on the right
 3. Enter the server name and server URL
    - ⚠️ **Important**:
-     - Server name must contain only letters and digits (no spaces or symbols)
+     - Server name can only contain letters, digits, underscores (`_`), and hyphens (`-`); spaces and other characters are not allowed
      - When Nexent runs inside Docker and MCP server runs on the host, replace `127.0.0.1` with `host.docker.internal` (e.g., `http://host.docker.internal:8000`)
 4. Click **Add** to finish registration
 

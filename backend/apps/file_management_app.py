@@ -3,11 +3,11 @@ import logging
 import re
 from datetime import datetime
 from http import HTTPStatus
-from typing import Annotated, List, Optional
+from typing import Annotated, List, Literal, Optional
 from urllib.parse import quote, unquote, urlparse, urlunparse
 
 import httpx
-from fastapi import APIRouter, Body, File, Form, Header, HTTPException, Query, UploadFile
+from fastapi import APIRouter, Body, File, Form, Header, HTTPException, Query, Request, UploadFile
 from fastapi import Path as PathParam
 from fastapi.responses import JSONResponse, RedirectResponse, StreamingResponse
 from starlette.background import BackgroundTask
@@ -22,6 +22,7 @@ from consts.exceptions import (
     UnsupportedFileTypeException,
 )
 from consts.model import ProcessParams
+from consts.task_recovery import CONFIG_SERVICE_NAME
 from services.file_management_service import (
     check_file_access,
     delete_file_impl,
@@ -34,6 +35,7 @@ from services.file_management_service import (
     upload_files_impl,
     upload_to_minio,
 )
+from services.audit_service import AUDIT_DETAIL_LIST_LIMIT, record_security_event
 from utils.auth_utils import get_current_user_id
 from utils.file_management_utils import trigger_data_process
 from utils.knowledge_ingestion_errors import classify_ingestion_exception
@@ -113,8 +115,9 @@ async def options_route(full_path: str):
 
 @file_management_config_router.post("/upload")
 async def upload_files(
+        http_request: Request,
         file: List[UploadFile] = File(..., alias="file"),
-        destination: str = Form(...,
+        destination: Literal["local", "minio"] = Form(...,
                                 description="Upload destination: 'local' or 'minio'"),
         folder: str = Form(
             "attachments", description="Storage folder path for MinIO (optional)"),
@@ -137,6 +140,7 @@ async def upload_files(
             index_name,
             user_id,
             uploader_tenant_id=tenant_id,
+            upload_owner_service=CONFIG_SERVICE_NAME,
         )
         errors, uploaded_file_paths, uploaded_filenames = upload_result
         quota_status = getattr(upload_result, "quota_status", None)
@@ -169,6 +173,15 @@ async def upload_files(
             }
             if quota_status:
                 response_content["quota_status"] = quota_status.get("quota_status")
+            # Audit the successful upload with identifiers only (names, count,
+            # target index); file content never reaches the log. This is the
+            # KB source-file path where storage-quota abuse would show up.
+            record_security_event("file_upload", request=http_request,
+                                  user_id=user_id, tenant_id=tenant_id,
+                                  details={"destination": destination,
+                                           "index_name": index_name,
+                                           "files_count": len(uploaded_filenames),
+                                           "filenames": uploaded_filenames[:AUDIT_DETAIL_LIST_LIMIT]})
             return JSONResponse(
                 status_code=HTTPStatus.OK,
                 content=response_content,
@@ -192,9 +205,9 @@ async def upload_files(
             )
     except HTTPException:
         raise
-    except QuotaExceededError:
-        raise
     except AppException:
+        raise
+    except QuotaExceededError:
         raise
     except Exception as e:
         logger.error(f"File upload error: {str(e)}")
@@ -258,6 +271,38 @@ async def process_files(
         except Exception as lifecycle_exc:
             logger.warning("Failed to persist process-submit error: %s", lifecycle_exc)
 
+    def persist_submit_task(file_details: dict, task_id: Optional[str]):
+        """Persist the parent chain ID so deletion can revoke a queued chain."""
+        if not task_id:
+            return
+        try:
+            from database.knowledge_file_lifecycle_db import get_file_record, transition_file_record
+
+            record = get_file_record(
+                file_id=file_details.get("file_id"),
+                tenant_id=tenant_id,
+                index_name=index_name,
+                object_name=file_details.get("path_or_url"),
+                include_hidden=True,
+            )
+            if record and file_details.get("file_id") and record.get("file_id") != file_details.get("file_id"):
+                logger.warning(
+                    "Ignoring mismatched lifecycle row while persisting task ID %s: expected=%s actual=%s",
+                    task_id,
+                    file_details.get("file_id"),
+                    record.get("file_id"),
+                )
+                return
+            if record:
+                transition_file_record(
+                    record["file_id"],
+                    parent_task_id=task_id,
+                    expected_statuses=("UPLOADING", "UPLOADED", "PROCESSING", "FORWARDING"),
+                    updated_by=user_id,
+                )
+        except Exception as lifecycle_exc:
+            logger.warning("Failed to persist process task ID %s: %s", task_id, lifecycle_exc)
+
     if process_result is None or (isinstance(process_result, dict) and process_result.get("status") == "error"):
         error_message = "Data process service failed"
         if isinstance(process_result, dict) and "message" in process_result:
@@ -270,10 +315,6 @@ async def process_files(
     # New batch responses identify every submitted file. Persist only the failed items,
     # allowing successful files to continue through their Celery chains.
     if isinstance(process_result, dict) and isinstance(process_result.get("results"), list):
-        failed_results = [
-            result for result in process_result["results"]
-            if isinstance(result, dict) and result.get("status") == "FAILED"
-        ]
         files_by_id = {
             file_details.get("file_id"): file_details
             for file_details in files
@@ -284,6 +325,19 @@ async def process_files(
             for file_details in files
             if file_details.get("path_or_url")
         }
+        for submitted_result in process_result["results"]:
+            if not isinstance(submitted_result, dict) or submitted_result.get("status") != "SUBMITTED":
+                continue
+            file_details = files_by_id.get(submitted_result.get("file_id"))
+            if file_details is None:
+                file_details = files_by_source.get(submitted_result.get("source"))
+            if file_details is not None:
+                persist_submit_task(file_details, submitted_result.get("task_id"))
+
+        failed_results = [
+            result for result in process_result["results"]
+            if isinstance(result, dict) and result.get("status") == "FAILED"
+        ]
         for failed_result in failed_results:
             file_details = files_by_id.get(failed_result.get("file_id"))
             if file_details is None:
@@ -314,6 +368,11 @@ async def process_files(
                     "failed_files": failed_results,
                 },
             )
+
+    elif isinstance(process_result, dict) and process_result.get("task_id"):
+        # Single-file / legacy data-process responses expose one parent chain ID.
+        if len(files) == 1:
+            persist_submit_task(files[0], process_result["task_id"])
 
     # A legacy batch service may only return task_ids. An explicit empty list means
     # no file was submitted; mark every file failed instead of leaving UPLOADED rows.
@@ -439,6 +498,7 @@ async def get_storage_file(
 
 @file_management_runtime_router.post("/storage")
 async def storage_upload_files(
+    http_request: Request,
     files: List[UploadFile] = File(..., description="List of files to upload"),
     folder: str = Form(
         "attachments", description="Storage folder path (optional)"),
@@ -469,6 +529,13 @@ async def storage_upload_files(
 
         actual_folder = resolve_minio_upload_folder(folder, user_id, tenant_id)
         results = await upload_to_minio(files=files, folder=actual_folder)
+
+        # Chat-attachment upload path; identifiers only, content never logged.
+        record_security_event("file_storage_upload", request=http_request,
+                              user_id=user_id, tenant_id=tenant_id,
+                              details={"folder": folder,
+                                       "files_count": len(files),
+                                       "filenames": [f.filename for f in files][:AUDIT_DETAIL_LIST_LIMIT]})
 
         return {
             "message": f"Processed {len(results)} files",

@@ -1,0 +1,19 @@
+schema_version: '1.0'
+module:
+  id: V5-BASELINE
+  name: Migrated V5 baseline
+feature:
+  feature_id: F-131
+  name: Runtime/Config lifespan 启动调度与优雅关闭；中断任务恢复；ThreadManager 多 lane 生命周期、容量与泄漏回收；孤儿 workspace 清理；数据流程删除栅栏
+  status: active
+  description: '自动任务 / 生命周期: Runtime/Config lifespan 启动调度与优雅关闭；中断任务恢复；ThreadManager 多 lane 生命周期、容量与泄漏回收；孤儿 workspace 清理；数据流程删除栅栏'
+  business_rules:
+  - rule_id: F-131-RULE-01
+    description: Runtime/Config lifespan 启动调度与优雅关闭；中断任务恢复；ThreadManager 多 lane 生命周期、容量与泄漏回收；孤儿 workspace 清理；数据流程删除栅栏
+  required_test_stages:
+  - D1
+  - D2
+  - D3
+  - D5
+  source:
+    notes: Migrated from V5 01_代码功能清单 without changing the functional description.

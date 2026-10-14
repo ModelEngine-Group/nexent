@@ -58,7 +58,6 @@ export const Nl2SkillChatPanel: FC<Nl2SkillChatPanelProps> = ({
               ...options.runConfig?.custom,
               runtimeMode: "nl2skill",
               draftSnapshot: getDraftSnapshot(),
-              complexity: "complicated",
               language,
               onNl2SkillEvent: onStreamEvent,
               modelId,

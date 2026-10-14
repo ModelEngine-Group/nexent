@@ -63,7 +63,7 @@ class MockVectorDatabaseCore:
 nexent_nexent_vector_database.VectorDatabaseCore = MockVectorDatabaseCore
 sys.modules['nexent.vector_database.base'] = nexent_nexent_vector_database
 # Create mock for vectordatabase_service BEFORE importing the app
-vectordatabase_service_mock = types.ModuleType('services.vectordatabase_service')
+vectordatabase_service_mock = types.ModuleType('management.services.knowledge_base.service')
 
 
 class MockElasticSearchService:
@@ -81,7 +81,7 @@ def mock_get_vector_db_core():
 
 vectordatabase_service_mock.ElasticSearchService = MockElasticSearchService
 vectordatabase_service_mock.get_vector_db_core = mock_get_vector_db_core
-sys.modules['services.vectordatabase_service'] = vectordatabase_service_mock
+sys.modules['management.services.knowledge_base.service'] = vectordatabase_service_mock
 
 # Mock other services that might be imported
 sys.modules['services.redis_service'] = types.ModuleType('services.redis_service')

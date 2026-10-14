@@ -151,6 +151,18 @@ sys.modules["database.attachment_db"] = attachment_db_mod
 nexent_utils_mod = types.ModuleType("nexent.multi_modal.utils")
 nexent_utils_mod.parse_s3_url = MagicMock(return_value=("bucket", "path/file.txt"))
 sys.modules["nexent"] = types.ModuleType("nexent")
+sys.modules["nexent.core"] = types.ModuleType("nexent.core")
+concurrency_mod = types.ModuleType("nexent.core.concurrency")
+
+
+class ManagedTaskSpec:
+    def __init__(self, task_name, owner):
+        self.task_name = task_name
+        self.owner = owner
+
+
+concurrency_mod.ManagedTaskSpec = ManagedTaskSpec
+sys.modules["nexent.core.concurrency"] = concurrency_mod
 sys.modules["nexent.multi_modal"] = types.ModuleType("nexent.multi_modal")
 sys.modules["nexent.multi_modal.utils"] = nexent_utils_mod
 
@@ -167,9 +179,9 @@ runtime_state_service_mod.runtime_state_service.consume_rate_limit_async = Async
 sys.modules["services.runtime_state_service"] = runtime_state_service_mod
 
 # Mock agent_service
-agent_service_mod = types.ModuleType("services.agent_service")
+agent_service_mod = types.ModuleType("management.services.agent.service")
 agent_service_mod.get_agent_by_name_impl = MagicMock(return_value={"agent_id": 1, "latest_version_no": 1})
-sys.modules["services.agent_service"] = agent_service_mod
+sys.modules["management.services.agent.service"] = agent_service_mod
 
 # Mock runtime forwarding service
 runtime_proxy_mod = types.ModuleType("services.runtime_proxy_service")
@@ -177,18 +189,32 @@ runtime_proxy_mod.forward_agent_run = AsyncMock()
 runtime_proxy_mod.forward_agent_stop = AsyncMock(return_value={"message": "stopped"})
 sys.modules["services.runtime_proxy_service"] = runtime_proxy_mod
 
+thread_lifecycle_mod = types.ModuleType("services.thread_lifecycle_service")
+thread_lifecycle_mod.northbound_thread_manager = MagicMock()
+
+
+async def _run_managed_test_task(_lane, _spec, func, *args, **kwargs):
+    return func(*args, **kwargs)
+
+
+thread_lifecycle_mod.northbound_thread_manager.run = AsyncMock(
+    side_effect=_run_managed_test_task
+)
+sys.modules["services.thread_lifecycle_service"] = thread_lifecycle_mod
+
 # Mock conversation_management_service
 conv_mgmt_mod = types.ModuleType("services.conversation_management_service")
 conv_mgmt_mod.save_conversation_user = MagicMock()
 conv_mgmt_mod.create_new_conversation = MagicMock(return_value={"conversation_id": 123})
 conv_mgmt_mod.generate_conversation_title_service = AsyncMock(return_value="Generated title")
 conv_mgmt_mod.update_conversation_title = MagicMock()
+conv_mgmt_mod.get_conversation_service = MagicMock(return_value={"conversation_id": 123})
 sys.modules["services.conversation_management_service"] = conv_mgmt_mod
 
 # Mock model_management_service
-model_mgmt_mod = types.ModuleType("services.model_management_service")
+model_mgmt_mod = types.ModuleType("management.services.model.management")
 model_mgmt_mod.list_models_for_tenant = AsyncMock(return_value=[])
-sys.modules["services.model_management_service"] = model_mgmt_mod
+sys.modules["management.services.model.management"] = model_mgmt_mod
 
 # Mock agent_version_service
 agent_version_mod = types.ModuleType("services.agent_version_service")
@@ -203,13 +229,18 @@ knowledge_scope_service_mod.AIDP_TOOL_CLASS = "AidpSearchTool"
 knowledge_scope_service_mod.get_agent_knowledge_capabilities = MagicMock()
 sys.modules["services.knowledge_scope_service"] = knowledge_scope_service_mod
 
-vectordatabase_service_mod = types.ModuleType("services.vectordatabase_service")
+vectordatabase_service_mod = types.ModuleType("management.services.knowledge_base.service")
 vectordatabase_service_mod.ElasticSearchService = MagicMock()
 vectordatabase_service_mod.ElasticSearchService.filter_accessible_indices = MagicMock(
     return_value=[]
 )
-vectordatabase_service_mod._is_multimodal_by_model_id = MagicMock(return_value=False)
-sys.modules["services.vectordatabase_service"] = vectordatabase_service_mod
+sys.modules["management.services.knowledge_base.service"] = vectordatabase_service_mod
+
+model_resolver_mod = types.ModuleType("management.services.model.resolver")
+model_resolver_mod.get_model_descriptor = MagicMock(
+    return_value=types.SimpleNamespace(is_multimodal=False)
+)
+sys.modules["management.services.model.resolver"] = model_resolver_mod
 
 # Mock file_management_service
 file_mgmt_mod = types.ModuleType("services.file_management_service")
@@ -264,6 +295,8 @@ def reset_test_isolation():
     """Reset test isolation state before each test."""
     ns._IDEMPOTENCY_RUNNING.clear()
     ns._RATE_STATE.clear()
+    ns.get_conversation_service.reset_mock(side_effect=True)
+    ns.get_conversation_service.return_value = {"conversation_id": 123}
     token_db_mod.log_token_usage.reset_mock(side_effect=True)
     token_db_mod.log_token_usage.return_value = 1
     agent_version_mod.list_published_agents_impl.reset_mock(side_effect=True)
@@ -604,6 +637,7 @@ class TestStartStreamingChat:
 
         mock_response = MagicMock()
         mock_response.headers = {}
+        mock_response.status_code = 200
 
         async def response_chunks():
             yield b"data: {\"type\": \"final_answer\", \"content\": \"ok\"}\n\n"
@@ -640,6 +674,7 @@ class TestStartStreamingChat:
         conv_mgmt_mod.create_new_conversation.reset_mock()
         mock_response = MagicMock()
         mock_response.headers = {}
+        mock_response.status_code = 200
         runtime_proxy_mod.forward_agent_run.return_value = mock_response
 
         with patch.object(ns, "check_and_consume_rate_limit", new_callable=AsyncMock), \
@@ -675,6 +710,7 @@ class TestStartStreamingChat:
 
         mock_response = MagicMock()
         mock_response.headers = {}
+        mock_response.status_code = 200
         runtime_proxy_mod.forward_agent_run.return_value = mock_response
 
         with patch.object(ns, 'check_and_consume_rate_limit', new_callable=AsyncMock), \
@@ -714,6 +750,7 @@ class TestStartStreamingChat:
 
         mock_response = MagicMock()
         mock_response.headers = {}
+        mock_response.status_code = 200
         runtime_proxy_mod.forward_agent_run.return_value = mock_response
 
         async def mock_get_history(*args, **kwargs):
@@ -739,6 +776,7 @@ class TestStartStreamingChat:
 
         mock_response = MagicMock()
         mock_response.headers = {}
+        mock_response.status_code = 200
         runtime_proxy_mod.forward_agent_run.return_value = mock_response
 
         async def mock_get_history(*args, **kwargs):
@@ -764,6 +802,7 @@ class TestStartStreamingChat:
 
         mock_response = MagicMock()
         mock_response.headers = {}
+        mock_response.status_code = 200
         runtime_proxy_mod.forward_agent_run.return_value = mock_response
 
         with patch.object(ns, 'check_and_consume_rate_limit', new_callable=AsyncMock), \
@@ -794,6 +833,7 @@ class TestStartStreamingChat:
 
         mock_response = MagicMock()
         mock_response.headers = {}
+        mock_response.status_code = 200
         runtime_proxy_mod.forward_agent_run.return_value = mock_response
 
         async def mock_get_history(*args, **kwargs):
@@ -825,6 +865,7 @@ class TestStartStreamingChat:
 
         mock_response = MagicMock()
         mock_response.headers = {}
+        mock_response.status_code = 200
         runtime_proxy_mod.forward_agent_run.return_value = mock_response
 
         async def mock_get_history(*args, **kwargs):
@@ -854,6 +895,7 @@ class TestStartStreamingChat:
 
         mock_response = MagicMock()
         mock_response.headers = {}
+        mock_response.status_code = 200
         runtime_proxy_mod.forward_agent_run.return_value = mock_response
 
         with patch.object(ns, 'check_and_consume_rate_limit', new_callable=AsyncMock), \
@@ -1022,6 +1064,7 @@ class TestNorthboundModelAndGeneratedTitleServices:
             conversation_id=42,
             question="Summarize this conversation",
             language="en",
+            model_id=7,
         )
 
         assert result == {
@@ -1035,6 +1078,7 @@ class TestNorthboundModelAndGeneratedTitleServices:
             user_id="user-title",
             tenant_id="tenant-title",
             language="en",
+            model_id=7,
         )
 
 
@@ -1551,6 +1595,7 @@ class TestStartStreamingChatErrorHandling:
 
         mock_response = MagicMock()
         mock_response.headers = {}
+        mock_response.status_code = 200
         runtime_proxy_mod.forward_agent_run.return_value = mock_response
 
         async def mock_get_history(*args, **kwargs):
@@ -1560,7 +1605,12 @@ class TestStartStreamingChatErrorHandling:
                 patch.object(ns, 'idempotency_start', new_callable=AsyncMock), \
                 patch.object(ns, 'idempotency_end', new_callable=AsyncMock), \
                 patch.object(ns, 'get_conversation_history_internal', side_effect=mock_get_history), \
-                patch('backend.services.northbound_service.asyncio.to_thread', side_effect=Exception("DB error")):
+                patch.object(
+                    ns.northbound_thread_manager,
+                    'run',
+                    new_callable=AsyncMock,
+                    side_effect=Exception("DB error"),
+                ):
             with pytest.raises(Exception) as exc_info:
                 await ns.start_streaming_chat(
                     ctx=ctx,
@@ -1576,6 +1626,7 @@ class TestStartStreamingChatErrorHandling:
 
         mock_response = MagicMock()
         mock_response.headers = {}
+        mock_response.status_code = 200
         runtime_proxy_mod.forward_agent_run.return_value = mock_response
         token_db_mod.log_token_usage.side_effect = Exception("Logging failed")
 
@@ -1607,6 +1658,7 @@ class TestStartStreamingChatErrorHandling:
 
         mock_response = MagicMock()
         mock_response.headers = {}
+        mock_response.status_code = 200
 
         async def mock_get_history(*args, **kwargs):
             return {"data": {"history": []}}
@@ -1635,33 +1687,33 @@ class TestStartStreamingChatErrorHandling:
             assert call_kwargs["agent_request"].version_no == 5
             assert call_kwargs["agent_request"].agent_id == 42
 
-    async def test_start_streaming_chat_save_conversation_user_via_asyncio_to_thread(self, mocker):
-        """Test that save_conversation_user is called via asyncio.to_thread (PR 3498 change).
-
-        PR 3498 changed save_conversation_user from a direct synchronous call to
-        asyncio.to_thread(save_conversation_user, ...) to avoid blocking the event loop
-        while preserving synchronous commit semantics.
-        """
-        import asyncio as async_lib
+    async def test_tc_tlm_009_start_streaming_chat_uses_managed_control_io(self, mocker):
+        """User persistence must use the northbound control-I/O lane."""
         ctx = MockNorthboundContext(token_id=0)
 
         mock_response = MagicMock()
         mock_response.headers = {}
+        mock_response.status_code = 200
         runtime_proxy_mod.forward_agent_run.return_value = mock_response
 
         async def mock_get_history(*args, **kwargs):
             return {"data": {"history": []}}
 
-        async def mock_to_thread(func, *args):
+        async def mock_managed_run(lane, spec, func, *args, **kwargs):
+            assert lane == "control-io"
+            assert spec.task_name == "northbound-save-user-message"
             func(*args)
             return None
+
+        mock_manager = MagicMock()
+        mock_manager.run = AsyncMock(side_effect=mock_managed_run)
 
         with patch.object(ns, 'check_and_consume_rate_limit', new_callable=AsyncMock), \
                 patch.object(ns, 'idempotency_start', new_callable=AsyncMock), \
                 patch.object(ns, 'idempotency_end', new_callable=AsyncMock), \
                 patch.object(ns, 'get_conversation_history_internal', side_effect=mock_get_history), \
                 patch.object(ns, 'save_conversation_user') as mock_save, \
-                patch('backend.services.northbound_service.asyncio.to_thread', side_effect=mock_to_thread):
+                patch.object(ns, 'northbound_thread_manager', mock_manager):
             mock_save.reset_mock()
 
             await ns.start_streaming_chat(
@@ -1672,6 +1724,7 @@ class TestStartStreamingChatErrorHandling:
             )
 
             assert mock_save.call_count == 1
+            mock_manager.run.assert_awaited_once()
 
     async def test_start_streaming_chat_get_agent_by_name_impl_error_wrapped(self):
         """Test that get_agent_by_name_impl error is wrapped by outer exception handler.
@@ -2236,3 +2289,58 @@ class TestNorthboundFileDescriptorAndUpload:
         assert result["summary"]["total"] == 2
         assert result["summary"]["uploaded"] == 1
         assert result["summary"]["failed"] == 1
+
+
+
+
+@pytest.mark.asyncio
+async def test_runtime_error_is_not_prefixed_with_conversation_created():
+    from fastapi.responses import StreamingResponse
+
+    async def chunks():
+        yield b'{"message":"Agent run already active"}'
+
+    runtime_proxy_mod.forward_agent_run.return_value = StreamingResponse(chunks(), status_code=409)
+    with patch.object(ns, "check_and_consume_rate_limit", new_callable=AsyncMock), \
+            patch.object(ns, "idempotency_start", new_callable=AsyncMock), \
+            patch.object(ns, "get_conversation_history_internal", new_callable=AsyncMock, return_value={"data": {}}):
+        response = await ns.start_streaming_chat(
+            ctx=MockNorthboundContext(token_id=0), conversation_id=None, agent_name="test_agent", query="hello",
+        )
+    assert response.status_code == 409
+    assert b"".join([chunk async for chunk in response.body_iterator]) == b'{"message":"Agent run already active"}'
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("unavailable", [None])
+async def test_inaccessible_chat_rejected_before_persistence(unavailable):
+    ns.get_conversation_service.return_value = unavailable
+    conv_mgmt_mod.save_conversation_user.reset_mock()
+    with patch.object(ns, "check_and_consume_rate_limit", new_callable=AsyncMock), \
+            patch.object(ns, "idempotency_start", new_callable=AsyncMock) as idempotency:
+        with pytest.raises(PermissionError, match="not accessible"):
+            await ns.start_streaming_chat(
+                ctx=MockNorthboundContext(), conversation_id=987,
+                agent_name="test_agent", query="rejected message",
+            )
+    ns.get_conversation_service.assert_called_once_with(987, "user-1", "tenant-1")
+    conv_mgmt_mod.save_conversation_user.assert_not_called()
+    runtime_proxy_mod.forward_agent_run.assert_not_awaited()
+    idempotency.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("available", [False, True])
+async def test_northbound_history_is_owner_scoped(available):
+    ns.get_conversation_service.return_value = {"conversation_id": 987} if available else None
+    with patch.object(ns, "get_conversation_messages", return_value=[
+        {"message_role": "user", "message_content": "private"},
+    ]) as messages:
+        result = await ns.get_conversation_history_internal(MockNorthboundContext(), 987)
+    ns.get_conversation_service.assert_called_once_with(987, "user-1", "tenant-1")
+    if available:
+        assert result["data"]["history"][0]["content"] == "private"
+        messages.assert_called_once_with(987)
+    else:
+        assert result["data"] == {"conversation_id": 987, "history": []}
+        messages.assert_not_called()

@@ -35,24 +35,33 @@ def client(mocker):
     mocker.patch('boto3.client')
     # Patch MinioClient at both possible import paths
     mocker.patch('backend.database.client.MinioClient')
-    # Stub services.vectordatabase_service to avoid real VDB initialization
+    # Stub management.services.knowledge_base.service to avoid real VDB initialization
     import types
     import sys as _sys
-    if "services.vectordatabase_service" not in _sys.modules:
-        services_vdb_mod = types.ModuleType("services.vectordatabase_service")
+    if "management.services.knowledge_base.service" not in _sys.modules:
+        services_vdb_mod = types.ModuleType("management.services.knowledge_base.service")
 
         def _get_vector_db_core():  # minimal stub
             return object()
 
         services_vdb_mod.get_vector_db_core = _get_vector_db_core
-        _sys.modules["services.vectordatabase_service"] = services_vdb_mod
-    
+        _sys.modules["management.services.knowledge_base.service"] = services_vdb_mod
+
     # Import after mocking (only backend path is required by app imports)
     from backend.apps.model_managment_app import router
-    
+    from permissions.depends import authenticate
+    from permissions.models import CurrentUser
+
+    # Grant all model permissions so existing business-logic tests pass
+    # without touching the RBAC database; RBAC behavior is covered by
+    # test_model_rbac.py.
+    mocker.patch('permissions.depends.has_permission', return_value=True)
+
     # Create test client
     app = FastAPI()
     app.include_router(router)
+    app.dependency_overrides[authenticate] = lambda: CurrentUser(
+        user_id="test_user", tenant_id="test_tenant", role="SU")
     return TestClient(app)
 
 
@@ -128,6 +137,47 @@ async def test_suggest_capacity_success(client, auth_header, user_credentials, m
     assert data["suggestions"]["context_window_tokens"] == 128000
     assert data["suggested_provider"] == "openai"
     mock_suggest.assert_called_once()
+
+
+def test_suggest_capacity_includes_reasoning_capability(mocker):
+    """The shared model/base-URL lookup is returned to custom-access callers."""
+    from backend.apps.model_managment_app import _suggest_capacity_for_request
+    from backend.consts.model import ModelCapacitySuggestionRequest
+    from management.services.model.capacity import (
+        CapacitySuggestionMatchKind,
+        CapacitySuggestionResult,
+    )
+
+    mocker.patch(
+        "backend.apps.model_managment_app.suggest_capacity",
+        return_value=CapacitySuggestionResult(
+            suggestions=None,
+            match_kind=CapacitySuggestionMatchKind.NONE,
+            match_confidence=None,
+            match_explanation="No capacity profile",
+        ),
+    )
+    mocker.patch(
+        "backend.apps.model_managment_app.get_model_reasoning_capability",
+        return_value={
+            "status": "supported",
+            "control": "effort",
+            "levels": ["high", "max"],
+            "default": "auto",
+            "wire_format": "reasoning_effort",
+            "source": "models_dev",
+        },
+    )
+
+    response = _suggest_capacity_for_request(
+        ModelCapacitySuggestionRequest(
+            model_name="deepseek-v4-pro",
+            base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
+        )
+    )
+
+    assert response.reasoning_capability is not None
+    assert response.reasoning_capability.levels == ["high", "max"]
 
 
 @pytest.mark.asyncio
@@ -277,7 +327,7 @@ async def test_create_model_success(client, auth_header, user_credentials, sampl
     mocker.patch('backend.apps.model_managment_app.get_current_user_id', return_value=user_credentials)
     
     async def _create(*args, **kwargs):
-        return None
+        return {"auto_configured_defaults": []}
     
     mock_create = mocker.patch('backend.apps.model_managment_app.create_model_for_tenant', side_effect=_create)
     
@@ -300,7 +350,7 @@ async def test_create_model_records_accept_signal_when_present(client, auth_head
     mocker.patch('backend.apps.model_managment_app.get_current_user_id', return_value=user_credentials)
 
     async def _create(*args, **kwargs):
-        return None
+        return {"auto_configured_defaults": []}
 
     mock_create = mocker.patch('backend.apps.model_managment_app.create_model_for_tenant', side_effect=_create)
     mock_record = mocker.patch('backend.apps.model_managment_app._record_capacity_suggestion_accept')
@@ -340,7 +390,7 @@ async def test_create_model_skips_accept_recorder_without_match_kind(client, aut
     mocker.patch('backend.apps.model_managment_app.get_current_user_id', return_value=user_credentials)
 
     async def _create(*args, **kwargs):
-        return None
+        return {"auto_configured_defaults": []}
 
     mocker.patch('backend.apps.model_managment_app.create_model_for_tenant', side_effect=_create)
     mock_record = mocker.patch('backend.apps.model_managment_app._record_capacity_suggestion_accept')
@@ -399,7 +449,12 @@ async def test_create_provider_model_success(client, auth_header, user_credentia
     
     mock_get = mocker.patch(
         'backend.apps.model_managment_app.create_provider_models_for_tenant', 
-        return_value=[{"id": "A1"}, {"id": "a0"}, {"id": "b2"}, {"id": "c3"}]
+        return_value=[
+            {"id": "A1", "api_key": "provider-secret"},
+            {"id": "a0"},
+            {"id": "b2"},
+            {"id": "c3"},
+        ]
     )
     
     # Fix: Add required model_type field
@@ -412,6 +467,7 @@ async def test_create_provider_model_success(client, auth_header, user_credentia
     assert "Provider model created successfully" in data["message"]
     # Check that models are sorted by first letter in ascending order
     assert [m["id"] for m in data["data"]] == ["A1", "a0", "b2", "c3"]
+    assert "api_key" not in data["data"][0]
     mock_get.assert_called_once()
 
 
@@ -437,6 +493,51 @@ async def test_create_provider_model_exception(client, auth_header, user_credent
     mock_get.assert_called_once()
 
 
+@pytest.mark.asyncio
+async def test_create_provider_model_preserves_http_exception(client, auth_header, user_credentials, mocker):
+    """A provider failure classified by the service layer keeps its status.
+
+    Regression for API-049: an upstream connection failure is raised as
+    HTTPException(502) by create_provider_models_for_tenant, but the generic
+    ``except Exception`` handlers used to swallow it and the endpoint answered
+    500 with the real status buried in the message body.
+    """
+    from fastapi import HTTPException as FastAPIHTTPException
+
+    mocker.patch('backend.apps.model_managment_app.get_current_user_id', return_value=user_credentials)
+
+    mock_get = mocker.patch(
+        'backend.apps.model_managment_app.create_provider_models_for_tenant',
+        side_effect=FastAPIHTTPException(
+            status_code=HTTPStatus.BAD_GATEWAY,
+            detail="connection_failed: Failed to connect to OpenAI-compatible",
+        ),
+    )
+
+    request_data = {"provider": "silicon", "model_type": "llm", "api_key": "test_key"}
+    response = client.post(
+        "/model/provider/create", json=request_data, headers=auth_header)
+
+    assert response.status_code == HTTPStatus.BAD_GATEWAY
+    assert "connection_failed" in response.json().get("detail", "")
+    mock_get.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_create_provider_model_rejects_blank_provider(client, auth_header, user_credentials, mocker):
+    """A blank provider is rejected at the boundary with 422, not a 500."""
+    mocker.patch('backend.apps.model_managment_app.get_current_user_id', return_value=user_credentials)
+    mock_get = mocker.patch(
+        'backend.apps.model_managment_app.create_provider_models_for_tenant')
+
+    request_data = {"provider": "", "model_type": "llm", "api_key": "", "base_url": "not-a-url"}
+    response = client.post(
+        "/model/provider/create", json=request_data, headers=auth_header)
+
+    assert response.status_code == HTTPStatus.UNPROCESSABLE_ENTITY
+    mock_get.assert_not_called()
+
+
 # Tests for /model/provider/batch_create endpoint
 @pytest.mark.asyncio
 async def test_provider_batch_create_success(client, auth_header, user_credentials, mocker):
@@ -444,7 +545,7 @@ async def test_provider_batch_create_success(client, auth_header, user_credentia
     mocker.patch('backend.apps.model_managment_app.get_current_user_id', return_value=user_credentials)
     
     async def _batch(*args, **kwargs):
-        return None
+        return {"auto_configured_defaults": []}
     
     mock_batch = mocker.patch('backend.apps.model_managment_app.batch_create_models_for_tenant', side_effect=_batch)
     
@@ -504,7 +605,7 @@ async def test_provider_batch_create_strips_accept_signal_and_records(
     )
 
     async def _batch(*args, **kwargs):
-        return None
+        return {"auto_configured_defaults": []}
 
     mock_batch = mocker.patch(
         'backend.apps.model_managment_app.batch_create_models_for_tenant',
@@ -592,6 +693,7 @@ async def test_get_model_list_success(client, auth_header, user_credentials, moc
                 "model_name": "huggingface/llama",
                 "display_name": "LLaMA Model",
                 "model_type": "llm",
+                "api_key": "stored-secret",
                 "connect_status": "operational"
             },
             {
@@ -614,6 +716,7 @@ async def test_get_model_list_success(client, auth_header, user_credentials, moc
     assert data["data"][0]["model_name"] == "huggingface/llama"
     assert data["data"][1]["model_name"] == "openai/clip"
     assert data["data"][1]["connect_status"] == "not_detected"
+    assert "api_key" not in data["data"][0]
     mock_list.assert_called_once_with(user_credentials[1])
 
 
@@ -629,6 +732,7 @@ async def test_get_llm_model_list_success(client, auth_header, user_credentials,
                 "model_id": "llm1",
                 "model_name": "huggingface/llama-2",
                 "display_name": "LLaMA 2 Model",
+                "api_key": "stored-secret",
                 "connect_status": "operational"
             },
             {
@@ -651,6 +755,7 @@ async def test_get_llm_model_list_success(client, auth_header, user_credentials,
     assert data["data"][1]["model_name"] == "openai/gpt-4"
     assert data["data"][0]["connect_status"] == "operational"
     assert data["data"][1]["connect_status"] == "not_detected"
+    assert "api_key" not in data["data"][0]
     mock_list.assert_called_once_with(user_credentials[1])
 
 
@@ -737,6 +842,7 @@ async def test_check_model_health_lookup_error(client, auth_header, user_credent
 @pytest.mark.asyncio
 async def test_verify_model_config_success(client, auth_header, sample_model_data, mocker):
     """Test successful model config verification."""
+    mocker.patch("backend.apps.model_managment_app.get_current_user_id", return_value=("test_user", "test_tenant"))
     mock_verify = mocker.patch(
         'backend.apps.model_managment_app.verify_model_config_connectivity', 
         return_value={"connectivity": True, "model_name": "gpt-4"}
@@ -750,7 +856,7 @@ async def test_verify_model_config_success(client, auth_header, sample_model_dat
     )
     
     response = client.post(
-        "/model/temporary_healthcheck", json=sample_model_data)
+        "/model/temporary_healthcheck", json=sample_model_data, headers=auth_header)
     
     assert response.status_code == HTTPStatus.OK
     data = response.json()
@@ -766,6 +872,7 @@ async def test_verify_model_config_success(client, auth_header, sample_model_dat
 @pytest.mark.asyncio
 async def test_verify_model_config_failure_with_error(client, auth_header, sample_model_data, mocker):
     """Test model config verification failure with detailed error message."""
+    mocker.patch("backend.apps.model_managment_app.get_current_user_id", return_value=("test_user", "test_tenant"))
     mock_verify = mocker.patch(
         'backend.apps.model_managment_app.verify_model_config_connectivity', 
         return_value={
@@ -777,7 +884,7 @@ async def test_verify_model_config_failure_with_error(client, auth_header, sampl
     mock_suggest = mocker.patch('backend.apps.model_managment_app._capacity_suggestion_for_model_request')
     
     response = client.post(
-        "/model/temporary_healthcheck", json=sample_model_data)
+        "/model/temporary_healthcheck", json=sample_model_data, headers=auth_header)
     
     assert response.status_code == HTTPStatus.OK
     data = response.json()
@@ -795,14 +902,92 @@ async def test_verify_model_config_failure_with_error(client, auth_header, sampl
 @pytest.mark.asyncio
 async def test_verify_model_config_exception(client, auth_header, sample_model_data, mocker):
     """Test model config verification with exception."""
+    mocker.patch("backend.apps.model_managment_app.get_current_user_id", return_value=("test_user", "test_tenant"))
     mocker.patch(
-        'backend.apps.model_managment_app.verify_model_config_connectivity', 
+        'backend.apps.model_managment_app.verify_model_config_connectivity',
         side_effect=Exception("err")
     )
-    
+
     response = client.post(
-        "/model/temporary_healthcheck", json=sample_model_data)
+        "/model/temporary_healthcheck", json=sample_model_data, headers=auth_header)
     assert response.status_code == HTTPStatus.INTERNAL_SERVER_ERROR
+
+
+@pytest.mark.asyncio
+async def test_probe_falls_back_to_stored_key_for_stored_url(client, auth_header, user_credentials, mocker):
+    """Empty-key probe of an existing model borrows the stored key when the
+    probe targets the stored endpoint (edit dialog, URL untouched)."""
+    mocker.patch(
+        'backend.apps.model_managment_app.get_current_user_id',
+        return_value=user_credentials,
+    )
+    stored = {
+        "api_key": "stored-secret-key",
+        "base_url": "https://api.example.com/v1/",  # trailing slash on purpose
+    }
+    mocker.patch(
+        'backend.apps.model_managment_app.get_model_by_model_id',
+        return_value=stored,
+    )
+    mock_verify = mocker.patch(
+        'backend.apps.model_managment_app.verify_model_config_connectivity',
+        return_value={"connectivity": False, "model_name": "m"},
+    )
+
+    response = client.post(
+        "/model/temporary_healthcheck",
+        headers=auth_header,
+        json={
+            "model_name": "m",
+            "model_type": "llm",
+            "base_url": "https://api.example.com/v1",  # no trailing slash
+            "api_key": "sk-no-api-key",
+            "probe_model_id": 7,
+        },
+    )
+
+    assert response.status_code == HTTPStatus.OK
+    probed_config = mock_verify.call_args.args[0]
+    assert probed_config["api_key"] == "stored-secret-key"
+
+
+@pytest.mark.asyncio
+async def test_probe_does_not_borrow_stored_key_for_foreign_url(client, auth_header, user_credentials, mocker):
+    """A probe pointing at a different base_url must NOT receive the stored
+    key — otherwise any tenant member could exfiltrate stored keys by
+    directing the probe at their own server."""
+    mocker.patch(
+        'backend.apps.model_managment_app.get_current_user_id',
+        return_value=user_credentials,
+    )
+    stored = {
+        "api_key": "stored-secret-key",
+        "base_url": "https://api.example.com/v1/",
+    }
+    mocker.patch(
+        'backend.apps.model_managment_app.get_model_by_model_id',
+        return_value=stored,
+    )
+    mock_verify = mocker.patch(
+        'backend.apps.model_managment_app.verify_model_config_connectivity',
+        return_value={"connectivity": False, "model_name": "m"},
+    )
+
+    response = client.post(
+        "/model/temporary_healthcheck",
+        headers=auth_header,
+        json={
+            "model_name": "m",
+            "model_type": "llm",
+            "base_url": "https://attacker.example/collect",
+            "api_key": "sk-no-api-key",
+            "probe_model_id": 7,
+        },
+    )
+
+    assert response.status_code == HTTPStatus.OK
+    probed_config = mock_verify.call_args.args[0]
+    assert probed_config["api_key"] == "sk-no-api-key"
 
 
 # Tests for /model/update endpoint
@@ -942,6 +1127,7 @@ async def test_get_manage_model_list_success(client, auth_header, user_credentia
                     "model_name": "huggingface/llama",
                     "display_name": "LLaMA Model",
                     "model_type": "llm",
+                    "api_key": "stored-secret",
                     "connect_status": "operational"
                 },
                 {
@@ -980,6 +1166,7 @@ async def test_get_manage_model_list_success(client, auth_header, user_credentia
     assert len(data["data"]["models"]) == 2
     assert data["data"]["models"][0]["model_name"] == "huggingface/llama"
     assert data["data"]["models"][1]["model_name"] == "openai/clip"
+    assert "api_key" not in data["data"]["models"][0]
     mock_list.assert_called_once_with("target_tenant", None, 1, 20)
 
 
@@ -1091,7 +1278,7 @@ async def test_manage_create_model_success(client, auth_header, user_credentials
     mocker.patch('backend.apps.model_managment_app.get_current_user_id', return_value=user_credentials)
 
     async def _create(*args, **kwargs):
-        return None
+        return {"auto_configured_defaults": []}
 
     mock_create = mocker.patch('backend.apps.model_managment_app.create_model_for_tenant', side_effect=_create)
 
@@ -1137,7 +1324,7 @@ async def test_manage_create_model_records_accept_signal_when_present(
     )
 
     async def _create(*args, **kwargs):
-        return None
+        return {"auto_configured_defaults": []}
 
     mock_create = mocker.patch(
         'backend.apps.model_managment_app.create_model_for_tenant',
@@ -1407,7 +1594,7 @@ async def test_manage_batch_create_models_success(client, auth_header, user_cred
     mocker.patch('backend.apps.model_managment_app.get_current_user_id', return_value=user_credentials)
 
     async def _batch_create(*args, **kwargs):
-        return None
+        return {"auto_configured_defaults": []}
 
     mock_batch_create = mocker.patch('backend.apps.model_managment_app.batch_create_models_for_tenant', side_effect=_batch_create)
 
@@ -1476,7 +1663,7 @@ async def test_manage_batch_create_models_empty_list(client, auth_header, user_c
     mocker.patch('backend.apps.model_managment_app.get_current_user_id', return_value=user_credentials)
 
     async def _batch_create(*args, **kwargs):
-        return None
+        return {"auto_configured_defaults": []}
 
     mock_batch_create = mocker.patch('backend.apps.model_managment_app.batch_create_models_for_tenant', side_effect=_batch_create)
 
@@ -1871,14 +2058,135 @@ MODEL_TOKEN_EXPIRED_ENDPOINTS = [
 
 @pytest.mark.parametrize("method,url,kwargs", MODEL_TOKEN_EXPIRED_ENDPOINTS)
 def test_model_endpoints_return_401_on_token_expired(client, auth_header, mocker, method, url, kwargs):
-    """Expired token maps to 401 on every authenticated model endpoint."""
-    from consts.exceptions import TokenExpiredError
+    """Expired token maps to 401 on every authenticated model endpoint.
 
-    mocker.patch(
-        "backend.apps.model_managment_app.get_current_user_id",
-        side_effect=TokenExpiredError("expired"),
-    )
-    response = getattr(client, method)(url, headers=auth_header, **kwargs)
+    In production the global TokenExpiredError handler (app_factory) maps the
+    exception raised inside ``authenticate`` to 401; the bare test app has no
+    such handler, so emulate the same mapping here.
+    """
+    from fastapi import HTTPException as FastAPIHTTPException
+    from permissions.depends import authenticate
+
+    def _expired_user():
+        raise FastAPIHTTPException(
+            status_code=HTTPStatus.UNAUTHORIZED, detail="expired")
+
+    client.app.dependency_overrides[authenticate] = _expired_user
+    try:
+        response = getattr(client, method)(url, headers=auth_header, **kwargs)
+    finally:
+        # Restore the default override for other tests using this client.
+        from permissions.models import CurrentUser
+        client.app.dependency_overrides[authenticate] = lambda: CurrentUser(
+            user_id="test_user", tenant_id="test_tenant", role="SU")
 
     assert response.status_code == HTTPStatus.UNAUTHORIZED
     assert "expired" in response.json()["detail"]
+
+
+class TestModelAuditEntries:
+    """Security audit entries emitted by model configuration endpoints."""
+
+    def test_model_create_emits_audit_entry_without_credentials(self, client, caplog):
+        import logging
+        from unittest.mock import AsyncMock, patch
+
+        with patch("backend.apps.model_managment_app.create_model_for_tenant",
+                   new_callable=AsyncMock) as mock_create:
+            mock_create.return_value = {"auto_configured_defaults": []}
+
+            with caplog.at_level(logging.INFO, logger="audit.security"):
+                response = client.post(
+                    "/model/create",
+                    json={"model_name": "gpt-x", "model_type": "llm",
+                          "base_url": "https://api.example.com/v1",
+                          "api_key": "sk-secret", "display_name": "GPT X"},
+                )
+
+        assert response.status_code == HTTPStatus.OK
+        messages = [record.getMessage() for record in caplog.records
+                    if record.name == "audit.security"]
+        assert len(messages) == 1
+        assert "event=model_create" in messages[0]
+        assert "result=success" in messages[0]
+        assert "user_id=test_user" in messages[0]
+        assert "tenant_id=test_tenant" in messages[0]
+        assert '"model_name":"gpt-x"' in messages[0]
+        assert '"base_url":"https://api.example.com/v1"' in messages[0]
+        assert "sk-secret" not in messages[0]
+
+    def test_manage_batch_import_emits_audit_entry(self, client, caplog):
+        import logging
+        from unittest.mock import AsyncMock, patch
+
+        with patch("backend.apps.model_managment_app.batch_create_models_for_tenant",
+                   new_callable=AsyncMock) as mock_batch:
+            mock_batch.return_value = {"auto_configured_defaults": []}
+
+            with caplog.at_level(logging.INFO, logger="audit.security"):
+                response = client.post(
+                    "/model/manage/batch_create",
+                    json={"tenant_id": "tenant-9", "provider": "silicon", "type": "llm",
+                          "api_key": "sk-batch",
+                          "models": [
+                              {"model_name": "Qwen/Qwen2.5-7B", "model_repo": "Qwen",
+                               "display_name": "qwen-7b"},
+                              {"model_name": "Qwen/Qwen2.5-14B", "model_repo": "Qwen"},
+                          ]},
+                )
+
+        assert response.status_code == HTTPStatus.OK
+        messages = [record.getMessage() for record in caplog.records
+                    if record.name == "audit.security"]
+        assert len(messages) == 1
+        assert "event=tenant_model_batch_import" in messages[0]
+        assert "result=success" in messages[0]
+        assert "user_id=test_user" in messages[0]
+        assert '"target_tenant_id":"tenant-9"' in messages[0]
+        assert '"provider":"silicon"' in messages[0]
+        assert '"models_count":2' in messages[0]
+        assert '"model_repo":"Qwen"' in messages[0]
+        assert "sk-batch" not in messages[0]
+
+    def test_backfill_defaults_emits_audit_entry(self, client, caplog):
+        import logging
+        from unittest.mock import patch
+
+        with patch("backend.apps.model_managment_app._ids_for_created_models") as mock_ids, \
+                patch("backend.apps.model_managment_app._backfill_default_model_slots") as mock_backfill:
+            mock_ids.return_value = [11, 12]
+            mock_backfill.return_value = ["llm"]
+
+            with caplog.at_level(logging.INFO, logger="audit.security"):
+                response = client.post(
+                    "/model/backfill_defaults",
+                    json={"display_names": ["qwen-7b", "qwen-14b"]},
+                )
+
+        assert response.status_code == HTTPStatus.OK
+        messages = [record.getMessage() for record in caplog.records
+                    if record.name == "audit.security"]
+        assert len(messages) == 1
+        assert "event=model_defaults_backfill" in messages[0]
+        assert "result=success" in messages[0]
+        assert '"display_names":["qwen-7b","qwen-14b"]' in messages[0]
+        assert '"auto_configured_defaults":["llm"]' in messages[0]
+
+
+@pytest.mark.parametrize("endpoint", ["/model/provider/create", "/model/manage/provider/create"])
+@pytest.mark.parametrize("status_code", [401, 403, 502])
+def test_provider_domain_error_preserves_upstream_http_contract(client, auth_header, mocker, endpoint, status_code):
+    """Map the model domain error to develop's unchanged HTTP status and detail."""
+    from consts.exceptions import ModelProviderError
+
+    discover = mocker.patch(
+        "backend.apps.model_managment_app.create_provider_models_for_tenant",
+        side_effect=ModelProviderError(status_code, "provider_error: Provider unavailable"),
+    )
+    payload = {"provider": "silicon", "model_type": "llm", "api_key": "fixture"}
+    if "/manage/" in endpoint:
+        payload["tenant_id"] = "test_tenant"
+    response = client.post(endpoint, json=payload, headers=auth_header)
+    assert response.status_code == status_code
+    assert response.json() == {"detail": "provider_error: Provider unavailable"}
+    discover.assert_awaited_once()

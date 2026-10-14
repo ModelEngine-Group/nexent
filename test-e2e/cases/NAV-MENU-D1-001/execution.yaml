@@ -1,0 +1,14 @@
+schema_version: '1.0'
+case_id: NAV-MENU-D1-001
+implementations:
+- framework: vitest
+  file: test.test.tsx
+  selector: NAV-MENU-D1-001
+timeout_seconds: 180
+acceptance_bindings:
+  AC-01:
+  - '[NAV-MENU-D1-001] children retain permissions, localized routes and nested selection'
+  - '[NAV-MENU-D1-001] English chat alias and workbench feature gate remain functional'
+  - '[NAV-MENU-D1-001] anonymous login interception resumes navigation and preserves
+    home/bell'
+  - '[NAV-MENU-D1-001] normal notification mutations retain their arguments'

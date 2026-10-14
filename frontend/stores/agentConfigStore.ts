@@ -37,9 +37,11 @@ export type EditableAgent = Pick<
   | "model_ids"
   | "max_step"
   | "requested_output_tokens"
+  | "model_params_override"
   | "is_main_agent"
   | "provide_run_summary"
   | "allow_chat_metadata"
+  | "enable_protocol_repair_retry"
   | "tools"
   | "duty_prompt"
   | "constraint_prompt"
@@ -206,9 +208,11 @@ function createEmptyEditableAgent(llmConfig?: {
     model_ids: llmConfig?.id ? [llmConfig.id] : [],
     max_step: 15,
     requested_output_tokens: null,
+    model_params_override: null,
     is_main_agent: true,
     provide_run_summary: false,
     allow_chat_metadata: false,
+    enable_protocol_repair_retry: false,
     tools: [],
     skills: [],
     duty_prompt: "",
@@ -246,9 +250,12 @@ const toEditable = (agent: Agent | null): EditableAgent =>
         model_ids: agent.model_ids || [],
         max_step: agent.max_step,
         requested_output_tokens: agent.requested_output_tokens ?? null,
+        model_params_override: agent.model_params_override ?? null,
         is_main_agent: agent.is_main_agent ?? true,
         provide_run_summary: agent.provide_run_summary,
         allow_chat_metadata: agent.allow_chat_metadata ?? false,
+        enable_protocol_repair_retry:
+          agent.enable_protocol_repair_retry ?? false,
         tools: [...(agent.tools || [])],
         skills: [...(agent.skills || [])],
         duty_prompt: agent.duty_prompt || "",
@@ -383,9 +390,13 @@ const isDirty = (
       normalizeArray(editedAgent.model_ids || []).length > 0 ||
       editedAgent.max_step !== 0 ||
       editedAgent.requested_output_tokens != null ||
+      // v2.6.0: treat any non-empty override map as a dirty state on new agents
+      (editedAgent.model_params_override != null &&
+        Object.keys(editedAgent.model_params_override || {}).length > 0) ||
       editedAgent.is_main_agent !== true ||
       editedAgent.provide_run_summary !== false ||
       editedAgent.allow_chat_metadata !== false ||
+      editedAgent.enable_protocol_repair_retry !== false ||
       editedAgent.duty_prompt !== "" ||
       editedAgent.constraint_prompt !== "" ||
       editedAgent.few_shots_prompt !== "" ||
@@ -420,11 +431,15 @@ const isDirty = (
     baselineAgent.max_step !== editedAgent.max_step ||
     (baselineAgent.requested_output_tokens ?? null) !==
       (editedAgent.requested_output_tokens ?? null) ||
+    JSON.stringify(baselineAgent.model_params_override ?? null) !==
+      JSON.stringify(editedAgent.model_params_override ?? null) ||
     (baselineAgent.is_main_agent ?? true) !==
       (editedAgent.is_main_agent ?? true) ||
     baselineAgent.provide_run_summary !== editedAgent.provide_run_summary ||
     (baselineAgent.allow_chat_metadata ?? false) !==
       (editedAgent.allow_chat_metadata ?? false) ||
+    (baselineAgent.enable_protocol_repair_retry ?? false) !==
+      (editedAgent.enable_protocol_repair_retry ?? false) ||
     baselineAgent.duty_prompt !== editedAgent.duty_prompt ||
     baselineAgent.constraint_prompt !== editedAgent.constraint_prompt ||
     baselineAgent.few_shots_prompt !== editedAgent.few_shots_prompt ||

@@ -1,0 +1,91 @@
+schema_version: '1.0'
+stage: D2
+module: V5-BASELINE
+case:
+  case_id: API-AUTO-22F6CB69A36D094D
+  feature_id: F-111
+  business_rule_ids:
+  - F-111-RULE-01
+  title: 创建AIDP知识库：USER强制PRIVATE、非USER缺group_ids/跨租户拒绝、kds_id冲突409、权限落库失败回滚
+  type: API-IT
+  priority: P0
+  status: active
+  automation: automated
+  objective: 创建AIDP知识库：USER强制PRIVATE、非USER缺group_ids/跨租户拒绝、kds_id冲突409、权限落库失败回滚
+  preconditions:
+  - Nexent 本地测试全栈已启动并 health check 通过，AIDP 依赖服务（AIDP_SERVER_URL/AIDP_API_KEY）可访问且 ENABLE_AIDP_KNOWLEDGE 开启。
+  - 设置 NEXENT_TEST_HOME，目录不位于 Nexent Git 仓库内。
+  - 当次 run_id 已生成，所有新建资源名称带 run_id；测试基线固定为 develop 当前批次锁定的产品提交；执行时另记录实际被测commit。
+  - 所需本地资产存在且校验通过：${NEXENT_TEST_HOME}/config/users.yaml；${NEXENT_TEST_HOME}/config/secrets.env
+  - users.yaml 中 SU/Admin/UserA/UserB/DevA 等隔离账号可登录，测试租户与跨租户 group 数据可被清理，AIDP 侧创建的测试 KB 可删除。
+  test_data:
+    legacy_asset_declaration: '- ${NEXENT_TEST_HOME}/config/users.yaml
+
+      - ${NEXENT_TEST_HOME}/config/secrets.env'
+  steps:
+  - order: 1
+    action: 从 config/users.yaml 读取 SU/Admin/USER/DEV 等隔离账号与租户/group 关系，另准备一个不属于当前租户的跨租户 group_id；密码/Token 仅从 secrets.env 注入。
+    expected: 成功创建返回 200 且响应含 kds_id 与 permission=EDIT；数据库权限行与角色归一化结果一致（USER 强制 PRIVATE、group_ids 为空）。
+  - order: 2
+    action: 清理 run_id 命名的历史资源：删除 aidp_kb_permission_t 中本次将使用的 kb_id 行与 AIDP 侧同名 KB，保证用例可重复执行。
+    expected: 非法/缺失入参按契约返回 400/401/409，错误 detail 与源码文案一致，不产生半写入资源。
+  - order: 3
+    action: 以 USER 角色调用 POST /aidp-mgmt/knowledge-bases，body 传 name 并显式传 ingroup_permission=EDIT 与 group_ids（本租户合法 ID），断言返回
+      200、响应含 kds_id 且 permission=EDIT；再查询 aidp_kb_permission_t 确认该行 ingroup_permission 被归一化为 PRIVATE 且 group_ids 为空。
+    expected: kds_id 冲突返回 409，不重复落库、不产生重复 AIDP 资源。
+  - order: 4
+    action: 以非 USER 角色调用创建，body 传 ingroup_permission=READ_ONLY（或 EDIT）但省略 group_ids，断言返回 400 且 detail 与源码 group_ids is required
+      文案一致。
+    expected: 权限落库失败时 AIDP 资源被回滚删除；回滚失败时权限行标记 ORPHANED 且接口返回 500。
+  - order: 5
+    action: 以非 USER 角色调用创建，body 的 group_ids 含跨租户 group_id，断言返回 400（AidpGroupValidationError 映射），且未创建 AIDP 资源。
+    expected: 日志与响应不含明文 API Key/Token/Password；清理后环境可重复执行。
+  - order: 6
+    action: 以非 USER 角色调用创建，body 传非法 ingroup_permission（非 EDIT/READ_ONLY/PRIVATE），断言返回 400 且 detail 为 Unsupported ingroup_permission。
+    expected: 日志与响应不含明文 API Key/Token/Password；清理后环境可重复执行。
+  - order: 7
+    action: 用与步骤3相同的 kds_id（同租户已存在权限行）再次调用创建，断言返回 409 且 detail 含 already exists，权限表不新增行。
+    expected: 日志与响应不含明文 API Key/Token/Password；清理后环境可重复执行。
+  - order: 8
+    action: 构造权限落库失败（使 create_permission 抛出非 IntegrityError 异常），断言后端调用 delete_aidp_kb_impl 回滚 AIDP 资源；再构造回滚也失败，断言 aidp_kb_permission_t
+      行 resource_status 被标记为 ORPHANED 且接口返回 500、detail 为 Failed to save knowledge base permission record。
+    expected: 日志与响应不含明文 API Key/Token/Password；清理后环境可重复执行。
+  - order: 9
+    action: 缺失 Authorization 头或携带无效 Token 调用创建，断言返回 401。
+    expected: 日志与响应不含明文 API Key/Token/Password；清理后环境可重复执行。
+  - order: 10
+    action: 结束清理 AIDP 资源与权限行，检查日志与响应不含明文 Token/Password/API Key。
+    expected: 日志与响应不含明文 API Key/Token/Password；清理后环境可重复执行。
+  expected_results:
+  - 成功创建返回 200 且响应含 kds_id 与 permission=EDIT；数据库权限行与角色归一化结果一致（USER 强制 PRIVATE、group_ids 为空）。
+  - 非法/缺失入参按契约返回 400/401/409，错误 detail 与源码文案一致，不产生半写入资源。
+  - kds_id 冲突返回 409，不重复落库、不产生重复 AIDP 资源。
+  - 权限落库失败时 AIDP 资源被回滚删除；回滚失败时权限行标记 ORPHANED 且接口返回 500。
+  - 日志与响应不含明文 API Key/Token/Password；清理后环境可重复执行。
+  forbidden_side_effects: []
+  source:
+    legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
+    legacy_sheet: 02_测试用例基线
+    legacy_row: 492
+  contract:
+    protocol: HTTP API
+    request_expectations:
+    - 从 config/users.yaml 读取 SU/Admin/USER/DEV 等隔离账号与租户/group 关系，另准备一个不属于当前租户的跨租户 group_id；密码/Token 仅从 secrets.env 注入。
+    - 清理 run_id 命名的历史资源：删除 aidp_kb_permission_t 中本次将使用的 kb_id 行与 AIDP 侧同名 KB，保证用例可重复执行。
+    - 以 USER 角色调用 POST /aidp-mgmt/knowledge-bases，body 传 name 并显式传 ingroup_permission=EDIT 与 group_ids（本租户合法 ID），断言返回 200、响应含
+      kds_id 且 permission=EDIT；再查询 aidp_kb_permission_t 确认该行 ingroup_permission 被归一化为 PRIVATE 且 group_ids 为空。
+    - 以非 USER 角色调用创建，body 传 ingroup_permission=READ_ONLY（或 EDIT）但省略 group_ids，断言返回 400 且 detail 与源码 group_ids is required
+      文案一致。
+    - 以非 USER 角色调用创建，body 的 group_ids 含跨租户 group_id，断言返回 400（AidpGroupValidationError 映射），且未创建 AIDP 资源。
+    - 以非 USER 角色调用创建，body 传非法 ingroup_permission（非 EDIT/READ_ONLY/PRIVATE），断言返回 400 且 detail 为 Unsupported ingroup_permission。
+    - 用与步骤3相同的 kds_id（同租户已存在权限行）再次调用创建，断言返回 409 且 detail 含 already exists，权限表不新增行。
+    - 构造权限落库失败（使 create_permission 抛出非 IntegrityError 异常），断言后端调用 delete_aidp_kb_impl 回滚 AIDP 资源；再构造回滚也失败，断言 aidp_kb_permission_t
+      行 resource_status 被标记为 ORPHANED 且接口返回 500、detail 为 Failed to save knowledge base permission record。
+    - 缺失 Authorization 头或携带无效 Token 调用创建，断言返回 401。
+    - 结束清理 AIDP 资源与权限行，检查日志与响应不含明文 Token/Password/API Key。
+    response_expectations:
+    - 成功创建返回 200 且响应含 kds_id 与 permission=EDIT；数据库权限行与角色归一化结果一致（USER 强制 PRIVATE、group_ids 为空）。
+    - 非法/缺失入参按契约返回 400/401/409，错误 detail 与源码文案一致，不产生半写入资源。
+    - kds_id 冲突返回 409，不重复落库、不产生重复 AIDP 资源。
+    - 权限落库失败时 AIDP 资源被回滚删除；回滚失败时权限行标记 ORPHANED 且接口返回 500。
+    - 日志与响应不含明文 API Key/Token/Password；清理后环境可重复执行。

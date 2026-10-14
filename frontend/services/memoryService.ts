@@ -62,6 +62,7 @@ export interface MemoryConfig {
   shareOption: "always" | "ask" | "never";
   disableAgentIds: string[];
   disableUserAgentIds: string[];
+  externalProviderTopK: number;
 }
 
 export interface MemoryEmbeddingStatus {
@@ -136,7 +137,9 @@ export async function loadMemoryEmbeddingStatus(): Promise<MemoryEmbeddingStatus
   });
 }
 
-export async function loadMemoryConfig(): Promise<MemoryConfig> {
+export async function loadMemoryConfig(
+  options: { throwOnError?: boolean } = {}
+): Promise<MemoryConfig> {
   try {
     const res = await requestJson(API_ENDPOINTS.memory.config.load, {
       method: "GET",
@@ -154,23 +157,39 @@ export async function loadMemoryConfig(): Promise<MemoryConfig> {
       cfg.DISABLE_AGENT_ID ?? cfg.disable_agent_id ?? [];
     const disableUserAgentIds: string[] =
       cfg.DISABLE_USERAGENT_ID ?? cfg.disable_useragent_id ?? [];
+    const externalProviderTopK: number = parseInt(
+      cfg.EXTERNAL_PROVIDER_TOP_K ?? cfg.external_provider_top_k ?? "20",
+      10
+    );
 
     return {
       memoryEnabled: memorySwitchVal === "Y",
       shareOption: (shareVal || "always") as "always" | "ask" | "never",
       disableAgentIds,
       disableUserAgentIds,
+      externalProviderTopK,
     };
   } catch (e) {
     log.error("loadMemoryConfig error", e);
-    // fall back to defaults
+    if (options.throwOnError) throw e;
     return {
       memoryEnabled: true,
       shareOption: "always",
       disableAgentIds: [],
       disableUserAgentIds: [],
+      externalProviderTopK: 20,
     };
   }
+}
+
+const MEMORY_SWITCH_CHANGED = "memorySwitchChanged";
+
+export function subscribeMemorySwitch(listener: (enabled: boolean) => void) {
+  const handler = (event: Event) => {
+    listener((event as CustomEvent<boolean>).detail);
+  };
+  window.addEventListener(MEMORY_SWITCH_CHANGED, handler);
+  return () => window.removeEventListener(MEMORY_SWITCH_CHANGED, handler);
 }
 
 export async function setMemorySwitch(enabled: boolean): Promise<boolean> {
@@ -182,7 +201,13 @@ export async function setMemorySwitch(enabled: boolean): Promise<boolean> {
       body: JSON.stringify(body),
     });
     // Backend returns { success: true } on OK
-    return !!res?.success;
+    const saved = !!res?.success;
+    if (saved && typeof window !== "undefined") {
+      window.dispatchEvent(
+        new CustomEvent(MEMORY_SWITCH_CHANGED, { detail: enabled })
+      );
+    }
+    return saved;
   } catch (e) {
     log.error("setMemorySwitch error", e);
     return false;
@@ -202,6 +227,21 @@ export async function setMemoryAgentShare(
     return !!res?.success;
   } catch (e) {
     log.error("setMemoryAgentShare error", e);
+    return false;
+  }
+}
+
+export async function setExternalProviderTopK(topK: number): Promise<boolean> {
+  try {
+    const body = { key: "EXTERNAL_PROVIDER_TOP_K", value: topK };
+    const res = await requestJson(API_ENDPOINTS.memory.config.set, {
+      method: "POST",
+      headers: getAuthHeaders(),
+      body: JSON.stringify(body),
+    });
+    return !!res?.success;
+  } catch (e) {
+    log.error("setExternalProviderTopK error", e);
     return false;
   }
 }

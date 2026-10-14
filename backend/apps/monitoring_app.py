@@ -14,6 +14,7 @@ from sqlalchemy import text
 
 from consts.const import (
     ENABLE_TELEMETRY,
+    MONITORING_DASHBOARD_ALLOWED_ROLES,
     MONITORING_DASHBOARD_URL,
     MONITORING_PROVIDER,
 )
@@ -31,6 +32,18 @@ def _normalize_monitoring_provider(value: str | None) -> str:
     return str(value or "otlp").strip().lower()
 
 
+def _normalize_monitoring_dashboard_allowed_roles(value: str | None) -> list[str]:
+    """Normalize a comma-separated dashboard role allowlist."""
+    roles: list[str] = []
+    seen: set[str] = set()
+    for item in str(value or "").split(","):
+        role = item.strip().upper()
+        if role and role not in seen:
+            roles.append(role)
+            seen.add(role)
+    return roles
+
+
 def get_monitoring_status() -> dict[str, Any]:
     """Return telemetry state and the monitoring UI entrypoint for frontend use."""
     telemetry_enabled = ENABLE_TELEMETRY
@@ -41,6 +54,9 @@ def get_monitoring_status() -> dict[str, Any]:
         "telemetry_enabled": telemetry_enabled,
         "provider": provider,
         "dashboard_url": dashboard_url,
+        "dashboard_allowed_roles": _normalize_monitoring_dashboard_allowed_roles(
+            MONITORING_DASHBOARD_ALLOWED_ROLES
+        ),
         "dashboard_port": None,
         "dashboard_path": None,
     }
