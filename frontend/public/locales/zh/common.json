@@ -6015,5 +6015,12 @@
   "workbench.creation.skillCreated": "Skill 已保存",
   "workbench.creation.skillReady": "Skill 草稿已生成",
   "workbench.creation.openSkills": "查看我的 Skills",
-  "workbench.creation.saveSkill": "保存 Skill"
+  "workbench.creation.saveSkill": "保存 Skill",
+  "modelConfig.addDialog.baseUrl": "Base URL",
+  "modelConfig.addDialog.apiKey": "API Key",
+  "modelConfig.advancedConfig.topP": "Top P",
+  "modelConfig.editDialog.apiKey": "API Key",
+  "modelConfig.editDialog.baseUrl": "Base URL",
+  "modelConfig.batchEdit.apiKey": "API Key",
+  "modelConfig.batchEdit.baseUrl": "Base URL"
 }

@@ -6015,5 +6015,12 @@
   "workbench.creation.skillCreated": "Skill Saved",
   "workbench.creation.skillReady": "Skill Draft Generated",
   "workbench.creation.openSkills": "View My Skills",
-  "workbench.creation.saveSkill": "Save Skill"
+  "workbench.creation.saveSkill": "Save Skill",
+  "modelConfig.addDialog.baseUrl": "Base URL",
+  "modelConfig.addDialog.apiKey": "API Key",
+  "modelConfig.advancedConfig.topP": "Top P",
+  "modelConfig.editDialog.apiKey": "API Key",
+  "modelConfig.editDialog.baseUrl": "Base URL",
+  "modelConfig.batchEdit.apiKey": "API Key",
+  "modelConfig.batchEdit.baseUrl": "Base URL"
 }
