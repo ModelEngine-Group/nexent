@@ -17,8 +17,16 @@ on:
           - changed
   pull_request:
     branches: [develop, 'release/**', 'hotfix/**']
-  push:
-    branches: [develop, 'release/**', 'hotfix/**']
+    paths:
+      - '**.py'
+      - '**.sh'
+      - '**.sql'
+      - '**.ts'
+      - '**.tsx'
+      - '**.js'
+      - '**.jsx'
+      - '**.mjs'
+      - '.github/workflows/copyright-check.yml'
 
 permissions:
   contents: read
@@ -45,14 +53,7 @@ jobs:
           if [ "${{ github.event_name }}" = "pull_request" ]; then
             git diff --name-only --diff-filter=ACMR "origin/${{ github.base_ref }}...HEAD" > changed_files.txt
           else
-            BEFORE_SHA="${{ github.event.before }}"
-            if [ -n "${BEFORE_SHA}" ] \
-               && [ "${BEFORE_SHA}" != "0000000000000000000000000000000000000000" ] \
-               && git cat-file -e "${BEFORE_SHA}^{commit}"; then
-              git diff --name-only --diff-filter=ACMR "${BEFORE_SHA}..HEAD" > changed_files.txt
-            else
-              git diff --name-only --diff-filter=ACMR HEAD~1..HEAD > changed_files.txt
-            fi
+            git diff --name-only --diff-filter=ACMR HEAD~1..HEAD > changed_files.txt
           fi
           echo "---- changed files ----"
           cat changed_files.txt
