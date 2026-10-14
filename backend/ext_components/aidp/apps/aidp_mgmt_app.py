@@ -18,10 +18,12 @@ import logging
 import time
 from http import HTTPStatus
 from typing import Annotated, List, Literal, Optional
+from urllib.parse import quote
 from uuid import UUID
 
 from fastapi import APIRouter, File, HTTPException, Path, Query, Request, UploadFile
 from fastapi.responses import JSONResponse, StreamingResponse
+import httpx
 from nexent.core.concurrency import run_blocking
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 from sqlalchemy.exc import IntegrityError
@@ -60,6 +62,7 @@ from ext_components.aidp.services.aidp_service import (
     list_aidp_models_impl,
     remove_aidp_docs_impl,
     stream_aidp_doc_impl,
+    stream_aidp_preview_impl,
     update_aidp_kb_impl,
     upload_aidp_docs_impl,
 )
@@ -886,6 +889,86 @@ async def download_document(
         headers=response_headers,
         background=BackgroundTask(aidp_response.aclose),
     )
+
+
+def _build_inline_disposition(file_name: str) -> str:
+    """Build an ``inline`` disposition for a name AIDP reports.
+
+    AIDP only tells us the served name through ``X-File-Name``; non-ASCII names
+    need the RFC 5987 ``filename*`` form, so an ASCII fallback is emitted too.
+    """
+    ascii_name = "".join(
+        char if 32 <= ord(char) < 127 and char not in {'"', "\\"} else "_"
+        for char in file_name
+    )
+    return (
+        f'inline; filename="{ascii_name}"; filename*=UTF-8\'\'{quote(file_name)}'
+    )
+
+
+def _stream_aidp_preview(aidp_response: httpx.Response) -> StreamingResponse:
+    """Forward an AIDP preview stream together with the served file name.
+
+    AIDP serves the original bytes for docx/xlsx/pptx/pdf/txt and a PDF
+    conversion for every other format, so the served name differs from the
+    uploaded one whenever a conversion happened. ``X-File-Name`` is how that
+    name reaches the browser, which picks its renderer from its extension; the
+    disposition is rebuilt from it so saving the stream keeps the same name.
+
+    Response header values are latin-1 on the wire, while AIDP reports names
+    verbatim (Chinese names included), so the name is URI-encoded: forwarding it
+    unchanged would raise ``UnicodeEncodeError`` on the way out and fail the
+    whole preview. Encoding every name keeps the rule single - the extension
+    stays readable and the frontend decodes unconditionally.
+    """
+    response_headers: dict[str, str] = {}
+    served_file_name = aidp_response.headers.get("X-File-Name")
+    if served_file_name:
+        response_headers["X-File-Name"] = quote(served_file_name, safe="")
+        response_headers["Content-Disposition"] = _build_inline_disposition(
+            served_file_name
+        )
+    else:
+        response_headers["Content-Disposition"] = "inline"
+
+    file_size = aidp_response.headers.get("X-File-Size")
+    if file_size:
+        response_headers["X-File-Size"] = file_size
+
+    return StreamingResponse(
+        aidp_response.aiter_bytes(),
+        media_type=aidp_response.headers.get(
+            "Content-Type", "application/octet-stream"
+        ),
+        headers=response_headers,
+        background=BackgroundTask(aidp_response.aclose),
+    )
+
+
+@aidp_mgmt_router.get("/knowledge-bases/{kds_id}/documents/{file_uuid}/preview")
+async def preview_document(
+    request: Request,
+    kds_id: Annotated[str, Path(description="Knowledge base ID")],
+    file_uuid: Annotated[UUID, Path(description="AIDP file UUID")],
+) -> StreamingResponse:
+    """Stream one AIDP document inline so the browser can render it.
+
+    AIDP serves the original bytes for the formats it can render itself and a
+    PDF conversion for the rest; the frontend therefore resolves the format
+    from the ``X-File-Name`` header this response carries, not from the name
+    the document was uploaded with.
+    """
+    user_id, tenant_id = await _auth(request)
+    perms.require_permission(kds_id, user_id, tenant_id, required="READ")
+
+    server_url, api_key = _credentials()
+    aidp_response = await stream_aidp_preview_impl(
+        server_url,
+        api_key,
+        kds_id,
+        str(file_uuid),
+    )
+    return _stream_aidp_preview(aidp_response)
 
 
 @aidp_mgmt_router.patch("/aidp-permissions/{kds_id}")

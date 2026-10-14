@@ -1,5 +1,6 @@
 import Papa from 'papaparse';
 import type { DetectedFileType } from '@/types/file';
+import { decodeServedFileName } from '@/lib/officePreview';
 import log from '@/lib/logger';
 
 export const CHUNK_SIZE = 128 * 1024;
@@ -374,11 +375,24 @@ export function getPreviewAccessReasonFromStatus(
   return null;
 }
 
-/** Fetch remote preview content; throws PreviewAccessError on 403/404. */
-export async function fetchPreviewBlob(
+export interface PreviewBlobResult {
+  blob: Blob;
+  /**
+   * File name the server reports for the returned bytes, when it sends one.
+   * AIDP reveals the name it actually served (not the uploaded one) through
+   * `X-File-Name`, which is the only way to know a file was converted. The
+   * value is URI-encoded, so it is decoded here.
+   */
+  fileName?: string;
+  /** MIME type the server reported for the returned bytes. */
+  mimeType: string;
+}
+
+/** Fetch remote preview content with its response metadata; throws PreviewAccessError on 403/404. */
+export async function fetchPreviewBlobWithMeta(
   url: string,
   signal?: AbortSignal,
-): Promise<Blob> {
+): Promise<PreviewBlobResult> {
   const resp = await fetch(url, {
     cache: 'no-store',
     credentials: 'include',
@@ -391,5 +405,18 @@ export async function fetchPreviewBlob(
   if (!resp.ok) {
     throw new Error(`HTTP ${resp.status}`);
   }
-  return resp.blob();
+  return {
+    blob: await resp.blob(),
+    fileName: decodeServedFileName(resp.headers.get('X-File-Name')),
+    mimeType: resp.headers.get('Content-Type') ?? '',
+  };
+}
+
+/** Fetch remote preview content; throws PreviewAccessError on 403/404. */
+export async function fetchPreviewBlob(
+  url: string,
+  signal?: AbortSignal,
+): Promise<Blob> {
+  const { blob } = await fetchPreviewBlobWithMeta(url, signal);
+  return blob;
 }

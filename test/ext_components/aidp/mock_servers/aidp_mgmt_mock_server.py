@@ -16,6 +16,7 @@ Simulates the AIDP native API endpoints consumed by backend/services/aidp_servic
   - POST   /KnowledgeBase/Tenants/{tenant}/KnowledgeBases/{id}/KnowledgeFiles/History (all-status file history)
   - POST   /KnowledgeBase/Tenants/{tenant}/KnowledgeBases/{id}/KnowledgeFiles/Remove  (remove docs)
   - POST   /KnowledgeBase/Tenants/{tenant}/KnowledgeBases/{id}/KnowledgeFiles/Download (download doc)
+  - GET    /KnowledgeBase/Tenants/{tenant}/KnowledgeBases/{id}/OcrAnnotate/{file_uuid}  (preview doc)
   - POST   /KnowledgeBase/Tenants/{tenant}/Retrieval/FusionSearch  (search - preserved from reference)
 
 Document status simulation (drives the "processing status" UI):
@@ -33,6 +34,10 @@ Document status simulation (drives the "processing status" UI):
     per page) and lists files that are still being processed first, so a burst of
     simultaneous uploads spills onto the next page and the caller has to walk the
     pages. Tune the page size with ``POST /_mock/history-page-size?size=N``.
+  * ``GET .../OcrAnnotate/{file_uuid}`` serves docx/xlsx/pptx/pdf/txt unchanged
+    and answers every other format with a synthetic PDF - which is what real AIDP
+    does - reporting the name it served in the ``X-File-Name`` header, so a
+    converted document no longer carries its uploaded extension.
 
 Knowledge base + document state is persisted to ``_state/knowledge_bases.json``
 (next to this file). On restart the mock loads the file, so KBs created by
@@ -125,6 +130,13 @@ _STATE_DIR = _STATE_FILE.parent
 # =============================================================================
 _KNOWLEDGE_BASES: Dict[str, Dict[str, Any]] = {}
 _DOCUMENTS_BY_KB: Dict[str, List[Dict[str, Any]]] = {}
+# Uploaded file payloads keyed by ``file_uuid``.
+#
+# Real AIDP hands the original file back on download and preview, which is what
+# lets the frontend render Office formats itself. Payloads therefore have to
+# survive an upload, but they are kept in memory only: ``_save_state`` serializes
+# metadata, and a mock restart legitimately loses the bytes it received.
+_DOCUMENT_PAYLOADS: dict[str, bytes] = {}
 
 # =============================================================================
 # Failure injection counters (used to test retry logic end-to-end)
@@ -321,7 +333,16 @@ def _find_document(kds_id: str, file_uuid: str) -> Optional[Dict[str, Any]]:
 
 
 def _document_content(document: Dict[str, Any]) -> bytes:
-    """Build deterministic mock content for a document download."""
+    """Return the bytes AIDP would serve for a document download.
+
+    Uploaded documents are returned unchanged, mirroring real AIDP. Documents
+    that only exist as metadata (the seeded ones, or anything restored from the
+    state file after a restart) have no payload, so they fall back to
+    deterministic text that keeps the download contract testable.
+    """
+    payload = _DOCUMENT_PAYLOADS.get(str(document.get("file_uuid")))
+    if payload is not None:
+        return payload
     return (
         f"Mock AIDP content for {document.get('file_name', 'download')}\n"
     ).encode("utf-8")
@@ -334,6 +355,77 @@ def _content_disposition(filename: str) -> str:
         for char in filename
     )
     return f'attachment; filename="{ascii_name}"; filename*=UTF-8\'\'{quote(filename)}'
+
+
+# Extensions AIDP can render itself: those are served byte-for-byte, everything
+# else is converted, which is why only these keep their extension in the name
+# reported through ``X-File-Name``.
+_NATIVE_PREVIEW_EXTENSIONS = {"docx", "xlsx", "pptx", "pdf", "txt"}
+
+
+def _synthetic_pdf(text: str) -> bytes:
+    """Build a minimal, valid single-page PDF standing in for a conversion.
+
+    The mock cannot really convert a document, so a converted preview has to be
+    answered with something a PDF viewer accepts. Offsets are computed here so
+    the cross-reference table is correct and the file opens in pdf.js.
+    """
+    stream = f"BT /F1 12 Tf 40 60 Td ({text}) Tj ET".encode("ascii", "replace")
+    objects = [
+        b"<< /Type /Catalog /Pages 2 0 R >>",
+        b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+        (
+            b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 300 120] "
+            b"/Resources << /Font << /F1 5 0 R >> >> /Contents 4 0 R >>"
+        ),
+        b"<< /Length %d >>\nstream\n" % len(stream) + stream + b"\nendstream",
+        b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+    ]
+
+    pdf = bytearray(b"%PDF-1.4\n")
+    offsets: list[int] = []
+    for index, body in enumerate(objects, start=1):
+        offsets.append(len(pdf))
+        pdf += b"%d 0 obj\n" % index + body + b"\nendobj\n"
+
+    xref_offset = len(pdf)
+    pdf += b"xref\n0 %d\n" % (len(objects) + 1)
+    pdf += b"0000000000 65535 f \n"
+    for offset in offsets:
+        pdf += b"%010d 00000 n \n" % offset
+    pdf += b"trailer\n<< /Size %d /Root 1 0 R >>\nstartxref\n%d\n%%%%EOF\n" % (
+        len(objects) + 1,
+        xref_offset,
+    )
+    return bytes(pdf)
+
+
+def _preview_payload(document: Dict[str, Any]) -> tuple[bytes, str]:
+    """Return ``(content, served_file_name)`` for a preview request.
+
+    Mirrors AIDP: docx/xlsx/pptx/pdf/txt come back unchanged, every other format
+    comes back as a PDF whose name replaces the uploaded extension. The served
+    name is what the caller reads from ``X-File-Name``.
+    """
+    filename = str(document.get("file_name") or "document")
+    stem, dot, extension = filename.rpartition(".")
+    if dot and extension.lower() in _NATIVE_PREVIEW_EXTENSIONS:
+        return _document_content(document), filename
+
+    served_name = f"{stem or 'document'}.pdf"
+    return _synthetic_pdf(f"AIDP conversion of {filename}"), served_name
+
+
+def _attach_served_file_name(response: StreamingResponse, file_name: str) -> StreamingResponse:
+    """Attach ``X-File-Name`` the way AIDP does: raw UTF-8 header bytes.
+
+    Starlette encodes header values as latin-1, which a Chinese file name cannot
+    survive, so the header is appended to ``raw_headers`` directly. Real AIDP
+    sends these bytes as-is, and reproducing that is what keeps the proxy's
+    non-ASCII handling covered by local runs.
+    """
+    response.raw_headers.append((b"x-file-name", file_name.encode("utf-8")))
+    return response
 
 
 # =============================================================================
@@ -926,6 +1018,7 @@ async def upload_documents(
                 "processing_until": time.time() + _PROCESSING_SECONDS,
             }
             _DOCUMENTS_BY_KB.setdefault(kds_id, []).append(doc)
+            _DOCUMENT_PAYLOADS[doc["file_uuid"]] = content
             success_docs.append(doc)
             logger.info("UPLOAD  kds_id=%s file=%s size=%d", kds_id, f.filename, len(content))
         except Exception as e:
@@ -1099,6 +1192,49 @@ def download_document(
         content_stream(),
         media_type=content_type,
         headers=response_headers,
+    )
+
+
+@app.get(f"{_KB_PREFIX}/{{kds_id}}/OcrAnnotate/{{file_uuid}}")
+def preview_document(
+    kds_id: str,
+    file_uuid: str,
+    authorization: Optional[str] = Header(default=None),
+) -> StreamingResponse:
+    """Serve one document the way AIDP's preview endpoint does.
+
+    The served name travels in ``X-File-Name`` because a converted document is
+    answered with a PDF whose name replaces the uploaded extension; the
+    disposition stays ``attachment`` upstream, so the proxy under test has to
+    build its own ``inline`` header instead of forwarding this one.
+    """
+    _check_auth(authorization)
+
+    if kds_id not in _KNOWLEDGE_BASES:
+        raise HTTPException(status_code=404, detail=f"Knowledge base {kds_id} not found")
+
+    document = _find_document(kds_id, str(file_uuid))
+    if document is None:
+        raise HTTPException(status_code=404, detail=f"File {file_uuid} not found")
+
+    content, served_name = _preview_payload(document)
+    content_type = mimetypes.guess_type(served_name)[0] or "application/octet-stream"
+    response_headers = {
+        "X-File-Size": str(len(content)),
+        "Content-Disposition": _content_disposition(served_name),
+    }
+
+    async def content_stream():
+        for offset in range(0, len(content), 8 * 1024):
+            yield content[offset : offset + 8 * 1024]
+
+    return _attach_served_file_name(
+        StreamingResponse(
+            content_stream(),
+            media_type=content_type,
+            headers=response_headers,
+        ),
+        served_name,
     )
 
 
@@ -1451,6 +1587,7 @@ def reset_state() -> Dict[str, str]:
     """
     _KNOWLEDGE_BASES.clear()
     _DOCUMENTS_BY_KB.clear()
+    _DOCUMENT_PAYLOADS.clear()
     _seed_initial_data()
     _save_state()
     logger.info("RESET  state restored to seeds, persisted to %s", _STATE_FILE)
