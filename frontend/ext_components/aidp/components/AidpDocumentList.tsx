@@ -11,6 +11,7 @@ import {
 import type { AidpKnowledgeBaseItem } from "@/types/agentConfig";
 import type { AidpDocumentItem } from "@/ext_components/aidp/services/aidpKnowledgeService";
 import aidpKnowledgeService from "@/ext_components/aidp/services/aidpKnowledgeService";
+import { FilePreviewDrawer } from "@/components/common/filePreviewDrawer";
 import { AIDP_ACCEPT_STRING } from "@/const/knowledgeBase";
 import {
   AIDP_DOC_IN_PROGRESS_STATUSES,
@@ -180,6 +181,8 @@ const AidpDocumentList: React.FC<AidpDocumentListProps> = ({
   // flush: validation + upload run exactly ONCE per user selection.
   const pendingFilesRef = useRef<File[]>([]);
   const rafIdRef = useRef<number | null>(null);
+  // Document currently open in the preview drawer, or null when it is closed.
+  const [previewDoc, setPreviewDoc] = useState<AidpDocumentItem | null>(null);
 
   const handleUpload = useCallback(
     async (fileList: File[]) => {
@@ -319,6 +322,9 @@ const AidpDocumentList: React.FC<AidpDocumentListProps> = ({
                   <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">
                     {t("aidpKnowledge.docCreatedAt")}
                   </th>
+                  <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">
+                    {t("aidpKnowledge.docActions")}
+                  </th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-200">
@@ -339,6 +345,43 @@ const AidpDocumentList: React.FC<AidpDocumentListProps> = ({
                       {doc.created_at
                         ? new Date(doc.created_at).toLocaleString()
                         : "-"}
+                    </td>
+                    <td className="px-4 py-2 text-sm">
+                      {(() => {
+                        const normalizedStatus = normalizeAidpDocStatus(
+                          doc.status
+                        );
+                        // AIDP cannot serve a file it is still ingesting, so
+                        // the action stays disabled until the status resolves.
+                        const isProcessing = Boolean(
+                          normalizedStatus &&
+                          AIDP_DOC_IN_PROGRESS_STATUSES.includes(
+                            normalizedStatus
+                          )
+                        );
+                        return (
+                          <Tooltip
+                            title={
+                              isProcessing
+                                ? t("aidpKnowledge.previewProcessing")
+                                : t("common.preview")
+                            }
+                          >
+                            {/* antd needs a wrapper element to show a tooltip
+                                for a disabled button. */}
+                            <span>
+                              <Button
+                                type="link"
+                                size="small"
+                                disabled={isProcessing}
+                                onClick={() => setPreviewDoc(doc)}
+                              >
+                                {t("common.preview")}
+                              </Button>
+                            </span>
+                          </Tooltip>
+                        );
+                      })()}
                     </td>
                   </tr>
                 ))}
@@ -462,6 +505,31 @@ const AidpDocumentList: React.FC<AidpDocumentListProps> = ({
           );
         })()}
       </div>
+
+      {/* Preview reuses the shared preview surface, so an AIDP document looks
+          and behaves like a document of a built-in knowledge base. `rawStream`
+          tells it that AIDP decides the served format (it converts unsupported
+          formats to PDF), so the renderer comes from the `X-File-Name` response
+          header and no download is offered; `presentation` opens it as a
+          full-screen page with a back arrow instead of a side drawer. */}
+      {previewDoc && activeKb && (
+        <FilePreviewDrawer
+          open
+          source="remote"
+          objectName={previewDoc.file_uuid}
+          fileName={previewDoc.file_name}
+          fileType={previewDoc.file_type}
+          fileSize={previewDoc.file_size}
+          previewUrl={aidpKnowledgeService.getPreviewUrl(
+            activeKb.kds_id,
+            previewDoc.file_uuid
+          )}
+          rawStream
+          presentation="fullscreen"
+          previewContext="knowledgeBase"
+          onClose={() => setPreviewDoc(null)}
+        />
+      )}
     </div>
   );
 };
