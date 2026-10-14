@@ -25,8 +25,8 @@
   height: 20px;
   padding: 0 8px;
   border-radius: 3px;
-  background: var(--muted);
-  color: var(--foreground);
+  background: hsl(var(--muted));
+  color: hsl(var(--foreground));
   font-size: 12px;
   font-weight: 400;
   line-height: 20px;
@@ -61,7 +61,7 @@
   padding: 4px;
   border: 0;
   background: transparent;
-  color: var(--muted-foreground);
+  color: hsl(var(--muted-foreground));
 }
 .properties {
   display: grid;
@@ -76,7 +76,7 @@
   margin: 0;
 }
 .property dt {
-  color: var(--muted-foreground);
+  color: hsl(var(--muted-foreground));
   overflow-wrap: anywhere;
 }
 .property dd {
@@ -91,7 +91,7 @@
 .children {
   margin-top: 8px;
   padding-left: 10px;
-  border-left: 1px solid var(--border);
+  border-left: 1px solid hsl(var(--border));
 }
 .json {
   margin: 0;
