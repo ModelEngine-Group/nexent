@@ -14,6 +14,7 @@ import {
   type ReactNode,
 } from "react";
 import { cva, type VariantProps } from "class-variance-authority";
+import { Select } from "antd";
 import { CheckIcon, ChevronDownIcon, CpuIcon } from "lucide-react";
 import { useAui } from "@assistant-ui/react";
 import { cn } from "@/lib/utils";
@@ -46,8 +47,11 @@ export const DEFAULT_EFFORT_OPTIONS: readonly ModelSelectorEffortOption[] = [
   { id: "high", name: "High" },
 ];
 
-const getReasoningEffortName = (option: ModelSelectorEffortOption): string =>
-  option.id;
+const getReasoningEffortName = (
+  option: ModelSelectorEffortOption,
+  t: (key: string, options?: Record<string, unknown>) => string
+): string =>
+  t(`chat.modelSelector.effort.${option.id}`, { defaultValue: option.name });
 
 export type ModelOption = {
   id: string;
@@ -142,6 +146,9 @@ type ModelSelectorContextValue = {
   /** Effort resolved against the selected model's supported levels. */
   effort: string | undefined;
   setEffort: (effort: string) => void;
+  deepThinking: boolean;
+  setDeepThinking: (enabled: boolean) => void;
+  showDeepThinkingControl: boolean;
   budgetTokens: number | undefined;
   setBudgetTokens: (budget: number) => void;
   setOpen: (open: boolean) => void;
@@ -184,6 +191,9 @@ export type ModelSelectorRootProps = {
   effort?: string;
   defaultEffort?: string;
   onEffortChange?: (effort: string) => void;
+  deepThinking?: boolean;
+  defaultDeepThinking?: boolean;
+  onDeepThinkingChange?: (enabled: boolean) => void;
   budgetTokens?: number;
   defaultBudgetTokens?: number;
   onBudgetTokensChange?: (budget: number) => void;
@@ -201,6 +211,9 @@ function ModelSelectorRoot({
   effort: effortProp,
   defaultEffort,
   onEffortChange,
+  deepThinking: deepThinkingProp,
+  defaultDeepThinking = false,
+  onDeepThinkingChange,
   budgetTokens: budgetTokensProp,
   defaultBudgetTokens,
   onBudgetTokensChange,
@@ -220,8 +233,14 @@ function ModelSelectorRoot({
       defaultEffort ??
       models.find(
         (model) => model.id === (valueProp ?? defaultValue ?? models[0]?.id)
-      )?.defaultEffort,
+      )?.defaultEffort ??
+      "low",
     onChange: onEffortChange,
+  });
+  const [deepThinking, setDeepThinking] = useControllableState({
+    prop: deepThinkingProp,
+    defaultProp: defaultDeepThinking,
+    onChange: onDeepThinkingChange,
   });
   const [budgetTokens, setBudgetTokens] = useControllableState({
     prop: budgetTokensProp,
@@ -238,6 +257,8 @@ function ModelSelectorRoot({
     onChange: onOpenChange,
   });
   const selectedModel = models.find((m) => m.id === value);
+  // Keep the shared selector settings visible before a model is selected.
+  const showDeepThinkingControl = true;
 
   // Model lists are loaded asynchronously.  Without this sync an initially
   // empty list leaves the selector permanently unselected because
@@ -268,7 +289,17 @@ function ModelSelectorRoot({
     efforts?.some((option) => option.id === selectedModel.defaultEffort)
       ? selectedModel.defaultEffort
       : undefined;
-  const activeEffort = resolveEffort(efforts, effort) ?? resolvedDefaultEffort;
+  const activeEffort =
+    resolveEffort(
+      selectedModel && efforts?.length
+        ? efforts
+        : showDeepThinkingControl
+          ? DEFAULT_EFFORT_OPTIONS
+          : efforts,
+      effort
+    ) ??
+    resolvedDefaultEffort ??
+    effortProp;
   const budgetRange = selectedModel?.budgetTokens;
   const activeBudgetTokens =
     budgetRange && budgetTokens !== undefined
@@ -283,6 +314,9 @@ function ModelSelectorRoot({
       efforts,
       effort: activeEffort,
       setEffort,
+      deepThinking: deepThinking ?? false,
+      setDeepThinking,
+      showDeepThinkingControl,
       budgetTokens: activeBudgetTokens,
       setBudgetTokens,
       setOpen,
@@ -295,6 +329,9 @@ function ModelSelectorRoot({
       efforts,
       activeEffort,
       setEffort,
+      deepThinking,
+      setDeepThinking,
+      showDeepThinkingControl,
       activeBudgetTokens,
       setBudgetTokens,
       setOpen,
@@ -312,7 +349,7 @@ function ModelSelectorRoot({
 }
 
 export const modelSelectorTriggerVariants = cva(
-  "focus-visible:ring-ring/50 flex w-fit cursor-pointer items-center justify-between gap-2 overflow-hidden rounded-md text-sm whitespace-nowrap transition-colors outline-none focus-visible:ring-2 disabled:cursor-not-allowed disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4",
+  "focus-visible:ring-ring/50 flex w-fit min-w-0 cursor-pointer items-center justify-between gap-2 overflow-hidden rounded-md text-sm whitespace-nowrap transition-colors outline-none focus-visible:ring-2 disabled:cursor-not-allowed disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4",
   {
     variants: {
       variant: {
@@ -379,7 +416,7 @@ function ModelIcon({ children }: { children: ReactNode }) {
 
 function ModelSelectorValue({
   placeholder,
-  showEffort = true,
+  showEffort = false,
   className,
 }: ModelSelectorValueProps) {
   const { t } = useTranslation();
@@ -399,10 +436,17 @@ function ModelSelectorValue({
   }
 
   const effortName =
-    showEffort && selectedModel.budgetTokens === undefined && effort !== undefined
+    showEffort &&
+    selectedModel.budgetTokens === undefined &&
+    effort !== undefined
       ? (() => {
           const option = efforts?.find((e) => e.id === effort);
-          return option ? getReasoningEffortName(option) : undefined;
+          if (option) return getReasoningEffortName(option, t);
+          // Models without catalog effort options still show the current
+          // effort level next to the name (design: "DeepSeek 高").
+          return t(`chat.modelSelector.effort.${effort}`, {
+            defaultValue: effort,
+          });
         })()
       : undefined;
 
@@ -414,7 +458,7 @@ function ModelSelectorValue({
       {selectedModel.icon && <ModelIcon>{selectedModel.icon}</ModelIcon>}
       <span className="truncate font-medium">{selectedModel.name}</span>
       {effortName && (
-        <span className="text-muted-foreground truncate">{effortName}</span>
+        <span className="shrink-0 text-muted-foreground">{effortName}</span>
       )}
     </span>
   );
@@ -613,85 +657,98 @@ function ModelSelectorEffort({
     efforts,
     effort,
     setEffort,
+    deepThinking,
+    setDeepThinking,
     budgetTokens,
     setBudgetTokens,
   } = useModelSelectorContext();
   const resolvedLabel = label ?? t("chat.modelSelector.reasoningEffort");
+  const displayedEfforts = efforts?.length ? efforts : DEFAULT_EFFORT_OPTIONS;
   const budgetRange = selectedModel?.budgetTokens;
-
-  if (!efforts?.length && !budgetRange) return null;
 
   return (
     <div
       data-slot="model-selector-effort"
-      className={cn(
-        "flex items-center justify-between gap-3 border-t px-3 py-2",
-        className
-      )}
+      className={cn("border-b px-3 py-2", className)}
       onKeyDown={(e: KeyboardEvent<HTMLDivElement>) => {
-        // cmdk's root keydown handler claims Enter to select the highlighted
-        // model; stop it from seeing Enter so the focused toggle activates.
+        // cmdk must not turn Enter on a focused setting into model selection.
         if (e.key === "Enter") e.stopPropagation();
         onKeyDown?.(e);
       }}
       {...props}
     >
-      <span className="text-muted-foreground text-xs">
-        {budgetRange
-          ? t("model.advanced.reasoningBudget", {
-              defaultValue: "Budget tokens",
-            })
-          : resolvedLabel}
-      </span>
-      {budgetRange ? (
-        <div className="flex min-w-0 flex-1 items-center gap-2">
-          <input
-            type="range"
-            min={budgetRange.min}
-            max={budgetRange.max}
-            value={budgetTokens ?? budgetRange.min}
-            aria-label={t("model.advanced.reasoningBudget", {
-              defaultValue: "Budget tokens",
-            })}
-            onChange={(event) => setBudgetTokens(Number(event.target.value))}
-            className="min-w-0 flex-1"
-          />
-          <span className="w-14 text-right text-xs text-muted-foreground">
-            {budgetTokens ?? "auto"}
-          </span>
-        </div>
-      ) : (
-        <div
-          role="group"
-          aria-label={
-            typeof resolvedLabel === "string"
-              ? resolvedLabel
-              : t("chat.modelSelector.reasoningEffort")
-          }
-          className="flex items-center gap-0.5"
+      <div className="flex items-center justify-between gap-3 py-1">
+        <span className="text-sm">{t("chat.modelSelector.deepThinking")}</span>
+        <button
+          type="button"
+          role="switch"
+          aria-label={t("chat.modelSelector.deepThinking")}
+          aria-checked={deepThinking}
+          onClick={() => setDeepThinking(!deepThinking)}
+          className={cn(
+            "relative h-5 w-9 rounded-full transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary",
+            deepThinking ? "bg-primary" : "bg-muted-foreground/40"
+          )}
         >
-          {efforts?.map((option) => {
-            const isActive = option.id === effort;
-            return (
-              <button
-                key={option.id}
-                type="button"
-                aria-pressed={isActive}
-                data-state={isActive ? "on" : "off"}
-                onClick={() => setEffort(option.id)}
-                className={cn(
-                  "focus-visible:ring-ring/50 cursor-pointer rounded-md px-2 py-1 text-xs transition-colors outline-none focus-visible:ring-2",
-                  isActive
-                    ? "bg-accent text-accent-foreground font-medium"
-                    : "text-muted-foreground hover:text-foreground"
-                )}
-              >
-                {getReasoningEffortName(option)}
-              </button>
-            );
-          })}
-        </div>
-      )}
+          <span
+            className={cn(
+              "absolute top-0.5 size-4 rounded-full bg-white shadow-sm transition-transform",
+              deepThinking ? "left-[18px]" : "left-0.5"
+            )}
+          />
+        </button>
+      </div>
+      <div className="flex items-center justify-between gap-3 py-1">
+        <span className="text-sm">
+          {budgetRange
+            ? t("model.advanced.reasoningBudget", {
+                defaultValue: "Budget tokens",
+              })
+            : resolvedLabel}
+        </span>
+        {budgetRange ? (
+          <div className="flex min-w-0 flex-1 items-center gap-2">
+            <input
+              type="range"
+              min={budgetRange.min}
+              max={budgetRange.max}
+              value={budgetTokens ?? budgetRange.min}
+              disabled={!deepThinking}
+              aria-label={t("model.advanced.reasoningBudget", {
+                defaultValue: "Budget tokens",
+              })}
+              onChange={(event) => setBudgetTokens(Number(event.target.value))}
+              className="min-w-0 flex-1"
+            />
+            <span className="w-14 text-right text-xs text-muted-foreground">
+              {budgetTokens ?? "auto"}
+            </span>
+          </div>
+        ) : (
+          <Select
+            aria-label={t("chat.modelSelector.reasoningEffort")}
+            value={effort ?? displayedEfforts[0].id}
+            disabled={!deepThinking}
+            onChange={setEffort}
+            onKeyDown={(event) => event.stopPropagation()}
+            getPopupContainer={(trigger) =>
+              (trigger.closest(
+                '[data-slot="model-selector-content"]'
+              ) as HTMLElement | null) ??
+              trigger.parentElement ??
+              document.body
+            }
+            popupMatchSelectWidth={false}
+            size="small"
+            variant="borderless"
+            className="min-w-16 text-sm"
+            options={displayedEfforts.map((option) => ({
+              value: option.id,
+              label: t(`chat.modelSelector.effort.${option.id}`, option.name),
+            }))}
+          />
+        )}
+      </div>
     </div>
   );
 }
@@ -700,6 +757,8 @@ export type ModelSelectorProps = Omit<ModelSelectorRootProps, "children"> &
   VariantProps<typeof modelSelectorTriggerVariants> & {
     /** Render a search input above the model list. */
     searchable?: boolean;
+    /** Show the active effort level next to the model name. */
+    showEffort?: boolean;
     className?: string;
     contentClassName?: string;
   };
@@ -707,36 +766,55 @@ export type ModelSelectorProps = Omit<ModelSelectorRootProps, "children"> &
 /** Registers the selection with assistant-ui's ModelContext system. The
  * context's effort is already resolved against the selected model. */
 function ModelSelectorModelContext() {
-  const { selectedModel, value, effort, budgetTokens } =
-    useModelSelectorContext();
+  const {
+    selectedModel,
+    value,
+    effort,
+    budgetTokens,
+    deepThinking,
+    showDeepThinkingControl,
+  } = useModelSelectorContext();
   const api = useAui();
+  const budgetPreferred = selectedModel?.budgetTokens !== undefined;
 
   useEffect(() => {
     if (value === undefined) return;
-    const budgetPreferred = selectedModel?.budgetTokens !== undefined;
     const config = {
       config: {
         modelName: value,
+        ...(showDeepThinkingControl ? { deepThinking } : undefined),
         reasoningCapability: selectedModel?.reasoningCapability,
-        ...(budgetPreferred
-          ? budgetTokens !== undefined
-            ? { reasoningBudgetTokens: budgetTokens }
-            : undefined
-          : effort !== undefined
-            ? { reasoningEffort: effort }
-            : undefined),
+        ...(deepThinking
+          ? budgetPreferred
+            ? budgetTokens !== undefined
+              ? { reasoningBudgetTokens: budgetTokens }
+              : undefined
+            : effort !== undefined
+              ? { reasoningEffort: effort }
+              : undefined
+          : undefined),
       },
     };
     return api.modelContext().register({
       getModelContext: () => config,
     });
-  }, [api, budgetTokens, effort, selectedModel, value]);
+  }, [
+    api,
+    budgetTokens,
+    deepThinking,
+    effort,
+    budgetPreferred,
+    showDeepThinkingControl,
+    selectedModel?.reasoningCapability,
+    value,
+  ]);
 
   return null;
 }
 
 const ModelSelectorImpl = ({
   searchable,
+  showEffort,
   variant,
   size,
   className,
@@ -746,15 +824,13 @@ const ModelSelectorImpl = ({
   return (
     <ModelSelectorRoot {...rootProps}>
       <ModelSelectorModelContext />
-      <ModelSelectorTrigger
-        variant={variant}
-        size={size}
-        className={className}
-      />
+      <ModelSelectorTrigger variant={variant} size={size} className={className}>
+        <ModelSelectorValue showEffort={showEffort} />
+      </ModelSelectorTrigger>
       <ModelSelectorContent className={contentClassName}>
         {searchable && <ModelSelectorSearch />}
-        <ModelSelectorList />
         <ModelSelectorEffort />
+        <ModelSelectorList />
       </ModelSelectorContent>
     </ModelSelectorRoot>
   );

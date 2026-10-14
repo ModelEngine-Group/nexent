@@ -22,6 +22,7 @@ from services.cas_service import (
     renew_with_ticket,
     revoke_from_logout_request,
 )
+from services.audit_service import record_security_event
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/user/cas", tags=["cas"])
@@ -46,9 +47,13 @@ async def login(redirect: str = Query("/", description="URL to return to after l
 
 
 @router.get("/callback")
-async def callback(ticket: str = "", redirect: str = "/"):
+async def callback(http_request: Request, ticket: str = "", redirect: str = "/"):
     try:
         result = await login_with_ticket(ticket, redirect)
+        result_user = (result or {}).get("user") or {}
+        record_security_event("cas_login", request=http_request,
+                              user_id=result_user.get("id"),
+                              user_email=result_user.get("email"))
         return JSONResponse(
             status_code=HTTPStatus.OK,
             content={"message": "CAS login successful", "data": result},
@@ -118,6 +123,11 @@ async def _handle_logout_request(
     )
     result = revoke_from_logout_request(logout_request)
     logger.info("CAS SLO %s revoke result: %s", endpoint, result)
+    record_security_event("cas_logout", request=request,
+                          details={"endpoint": endpoint,
+                                   "revoked": (result or {}).get("revoked"),
+                                   "cas_user_id": (result or {}).get("cas_user_id", ""),
+                                   "session_index": (result or {}).get("session_index", "")})
     return JSONResponse(
         status_code=HTTPStatus.OK,
         content={"message": "success", "data": result},

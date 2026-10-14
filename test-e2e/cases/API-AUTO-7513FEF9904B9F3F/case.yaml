@@ -1,0 +1,83 @@
+schema_version: '1.0'
+stage: D3
+module: V5-BASELINE
+case:
+  case_id: API-AUTO-7513FEF9904B9F3F
+  feature_id: F-111
+  business_rule_ids:
+  - F-111-RULE-01
+  title: AIDP 知识库更新(name/description 同步 kds_name 到权限表并失效目录/详情缓存)与删除(软删除权限、清理 TagManagement 文档分配、失效目录/详情/计数缓存)、更新空 payload
+    返回400｜核心流程
+  type: INTEGRATION
+  priority: P1
+  status: active
+  automation: automated
+  objective: AIDP 知识库更新(name/description 同步 kds_name 到权限表并失效目录/详情缓存)与删除(软删除权限、清理 TagManagement 文档分配、失效目录/详情/计数缓存)、更新空 payload
+    返回400｜核心流程
+  preconditions:
+  - Nexent 本地测试全栈已启动，health check 通过。
+  - 设置 NEXENT_TEST_HOME，目录不位于 Nexent Git 仓库内。
+  - 当次 run_id 已生成，所有新建资源名称带 run_id；测试基线固定为 develop 当前批次锁定的产品提交；执行时另记录实际被测commit。
+  - 所需本地资产存在且校验通过：${NEXENT_TEST_HOME}/config/users.yaml；${NEXENT_TEST_HOME}/config/secrets.env
+  - users.yaml 中 SU/Admin/UserA/UserB 等隔离账号可登录，测试租户数据可被清理。
+  - ENABLE_AIDP_KNOWLEDGE 已开启，consts.const 的 AIDP_SERVER_URL 与 AIDP_API_KEY 已配置且 AIDP 服务真实可达，预检连通性通过。
+  test_data:
+    legacy_asset_declaration: '- ${NEXENT_TEST_HOME}/config/users.yaml
+
+      - ${NEXENT_TEST_HOME}/config/secrets.env'
+  steps:
+  - order: 1
+    action: 从 config/users.yaml 读取隔离测试账号（SU/Admin/UserA/UserB）与租户关系，密码/Token 仅从 secrets.env 注入；确认 ENABLE_AIDP_KNOWLEDGE 开启且
+      AIDP 服务健康检查通过。
+    expected: 更新后 API 返回、权限表 kds_name 与目录/详情读取三者一致，name→id 映射同步为“新名”。
+  - order: 2
+    action: 通过实际 HTTP API 调用 POST /aidp-mgmt/knowledge-bases 创建名称带 RunID 的测试知识库（管理角色使用 ingroup_permission=READ_ONLY 与合法 group_ids），记录返回的
+      kds_id 与初始 kds_name，随后 GET 列表/详情确认权限表存在 ACTIVE 记录且目录可见。
+    expected: 更新空 payload 返回 400，不产生半写入，权限表 kds_name 不被覆盖为空。
+  - order: 3
+    action: 通过 POST /aidp-mgmt/knowledge-bases/{kds_id}/documents 上传少量测试文档，并调用 GET 列表与 GET 文档列表/计数接口，确保目录、详情、文档计数三类缓存已被填充。
+    expected: 删除成功后软删除权限生效：列表/详情/计数不再返回该 kds_id，require_permission 走 404。
+  - order: 4
+    action: 更新：调用 PUT /aidp-mgmt/knowledge-bases/{kds_id}，body 传 {"name":"<RunID>-新名","description":"更新描述"}，记录返回状态码与响应中的 kds_name。
+    expected: 目录、详情、文档计数三类缓存均已失效，删除后的读取反映真实状态而非旧缓存。
+  - order: 5
+    action: 更新后复读：重新调用 GET /aidp-mgmt/knowledge-bases 列表、GET /aidp-mgmt/knowledge-bases/{kds_id} 详情及权限表 name→id 映射，确认 kds_name
+      已同步为“新名”，目录与详情缓存失效后拉取到新值而非旧缓存。
+    expected: TagManagement 文档分配无孤儿记录；日志、Trace、报告不出现明文 API Key/Token/Password。
+  - order: 6
+    action: 更新边界：对同一 kds_id 发送空 body {}（不含 name/description），断言返回 400 且 detail 提示至少提供 name 或 description，随后复读权限表确认 kds_name
+      未被覆盖为空、无半写入。
+    expected: 越权/跨租户重放得到明确 401/403/404，无跨租户泄露。
+  - order: 7
+    action: '删除：调用 DELETE /aidp-mgmt/knowledge-bases/{kds_id}，记录返回 {"success": true}。'
+    expected: 越权/跨租户重放得到明确 401/403/404，无跨租户泄露。
+  - order: 8
+    action: 删除后复读：再次 GET 列表/详情/计数，确认该 kds_id 不再出现在可访问目录与计数中（软删除权限使 require_permission 走 404），目录/详情/计数三类缓存均已失效。
+    expected: 越权/跨租户重放得到明确 401/403/404，无跨租户泄露。
+  - order: 9
+    action: 清理断言：查询 TagManagement 中该 (tenant_id, "aidp", kds_id) 的文档分配，确认 cleanup_document_assignments_for_knowledge_base
+      已清理、无孤儿记录；用另一用户/租户重放该 kds_id 请求确认 401/403/404 与数据隔离；最后清理当次测试资源并确认日志无明文 API Key/Token。
+    expected: 越权/跨租户重放得到明确 401/403/404，无跨租户泄露。
+  expected_results:
+  - 更新后 API 返回、权限表 kds_name 与目录/详情读取三者一致，name→id 映射同步为“新名”。
+  - 更新空 payload 返回 400，不产生半写入，权限表 kds_name 不被覆盖为空。
+  - 删除成功后软删除权限生效：列表/详情/计数不再返回该 kds_id，require_permission 走 404。
+  - 目录、详情、文档计数三类缓存均已失效，删除后的读取反映真实状态而非旧缓存。
+  - TagManagement 文档分配无孤儿记录；日志、Trace、报告不出现明文 API Key/Token/Password。
+  - 越权/跨租户重放得到明确 401/403/404，无跨租户泄露。
+  forbidden_side_effects: []
+  source:
+    legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
+    legacy_sheet: 02_测试用例基线
+    legacy_row: 528
+  integration_boundary:
+  - REAL_REQUIRED：使用真实 AIDP 服务（AIDP_SERVER_URL/AIDP_API_KEY）与本地真实 PostgreSQL/Redis；不得以纯 Mock 代替 AIDP 更新/删除调用、权限表/缓存/文档分配清理链路。
+  observations:
+  - 更新后 API 返回、权限表 kds_name 与目录/详情读取三者一致，name→id 映射同步为“新名”。
+  - 更新空 payload 返回 400，不产生半写入，权限表 kds_name 不被覆盖为空。
+  - 删除成功后软删除权限生效：列表/详情/计数不再返回该 kds_id，require_permission 走 404。
+  - 目录、详情、文档计数三类缓存均已失效，删除后的读取反映真实状态而非旧缓存。
+  - TagManagement 文档分配无孤儿记录；日志、Trace、报告不出现明文 API Key/Token/Password。
+  - 越权/跨租户重放得到明确 401/403/404，无跨租户泄露。
+  cleanup:
+  - JUnit/XML、请求/响应摘要（脱敏）、服务日志、必要的 DB/权限表/缓存状态快照与 TagManagement 文档分配查询结果；协议场景保存 wire capture。

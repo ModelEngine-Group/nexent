@@ -260,12 +260,12 @@ export const extractSkillInfoFromContent = (content: string): { name: string; de
 
   if (!content) return result;
 
-  // Content may or may not have <SKILL> wrapper tags depending on source.
+  // Content may or may not have <skill> wrapper tags depending on source.
   // Use indexOf-based approach instead of regex to avoid catastrophic backtracking.
   // The [\s\S]*? pattern in regex can cause exponential time complexity on crafted input.
   let blockContent = content;
-  const openTag = "<SKILL>";
-  const closeTag = "</SKILL>";
+  const openTag = "<skill>";
+  const closeTag = "</skill>";
   const openIdx = content.indexOf(openTag);
   if (openIdx !== -1) {
     const closeIdx = content.indexOf(closeTag, openIdx + openTag.length);
@@ -340,7 +340,7 @@ export const extractSkillInfoFromContent = (content: string): { name: string; de
 // ========== Skill Build Modal Methods ==========
 
 /**
- * Parse <SKILL>...</SKILL> block from assistant message content.
+ * Parse <skill>...</skill> block from assistant message content.
  * @param content The content containing SKILL block
  * @returns Parsed skill draft or null if not found
  */
@@ -352,8 +352,8 @@ export const parseSkillDraft = (content: string): {
 } | null => {
   // Use indexOf-based approach instead of regex to avoid catastrophic backtracking.
   // The [\s\S]*? pattern can cause exponential time complexity on crafted input.
-  const openTag = "<SKILL>";
-  const closeTag = "</SKILL>";
+  const openTag = "<skill>";
+  const closeTag = "</skill>";
   const openIdx = content.indexOf(openTag);
   if (openIdx === -1) return null;
 

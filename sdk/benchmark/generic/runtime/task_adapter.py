@@ -241,7 +241,7 @@ def make_nexent_task(
                 ],
                 "managed_agents": [
                     agent.name
-                    for agent in (agent_run_info.agent_config.managed_agents or [])
+                    for agent in (agent_run_info.agent_config.worker_agents or [])
                 ],
                 "context_processing_mode": (
                     agent_run_info.agent_config.context_manager_config.policy_layers.platform[

@@ -54,7 +54,7 @@ global:
     langsmithProject: "nexent"
     otlpMetricsEnabled: true
     instrumentRequests: false
-    fastapiIncludedUrls: "/agent/run"
+    fastapiIncludedUrls: "/agent/run,/conversation/generate_title,/nb/v1/generate_title"
     fastapiExcludedUrls: ""
     fastapiExcludeSpans: "receive,send"
     dashboardUrl: ""

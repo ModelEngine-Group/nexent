@@ -1,0 +1,81 @@
+schema_version: '1.0'
+stage: D2
+module: V5-BASELINE
+case:
+  case_id: API-018
+  feature_id: F-012
+  business_rule_ids:
+  - F-012-RULE-01
+  title: 租户 API key 列表、refresh、revoke、角色约束｜异常/边界/越权
+  type: API-IT
+  priority: P0
+  status: active
+  automation: automated
+  objective: 租户 API key 列表、refresh、revoke、角色约束｜异常/边界/越权
+  preconditions:
+  - Nexent 本地测试全栈已启动，health check 通过。
+  - 设置 NEXENT_TEST_HOME，目录不位于 Nexent Git 仓库内。
+  - 当次 run_id 已生成，所有新建资源名称带 run_id；测试基线固定为 develop 当前批次锁定的产品提交；执行时另记录实际被测commit。
+  - 所需本地资产存在且校验通过：${NEXENT_TEST_HOME}/config/users.yaml；${NEXENT_TEST_HOME}/config/secrets.env；${NEXENT_TEST_HOME}/config/northbound.yaml
+  - users.yaml 中 SU/Admin/UserA/UserB 等隔离账号可登录，测试租户数据可被清理。
+  test_data:
+    legacy_asset_declaration: '- ${NEXENT_TEST_HOME}/config/users.yaml
+
+      - ${NEXENT_TEST_HOME}/config/secrets.env
+
+      - ${NEXENT_TEST_HOME}/config/northbound.yaml'
+  steps:
+  - order: 1
+    action: 从 config/users.yaml 读取隔离测试账号（SU/Admin/UserA/UserB）与租户关系；密码/Token 仅从 secrets.env 注入。
+    expected: 功能结果与代码契约一致，测试过程无未处理异常。
+  - order: 2
+    action: 启动本地完整认证依赖；OAuth/CAS 类同时启动测试 Provider 并记录 callback/base URL。
+    expected: 关键状态在 API 返回、数据库/存储和后续读取中保持一致。
+  - order: 3
+    action: 按“租户 API key 列表、refresh、revoke、角色约束｜异常/边界/越权”通过实际 HTTP API 执行注册/登录/session/token/API Key/OAuth/CAS 操作。
+    expected: 失败路径返回明确错误，不出现半写入、重复副作用或跨租户泄露。
+  - order: 4
+    action: 保存响应状态、Set-Cookie/Token 是否存在（只记录掩码）、current_user 和权限信息；不得把 secret 写入报告。
+    expected: 日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。
+  - order: 5
+    action: 需要跨用户/跨租户时，用 UserB/OtherTenant 重放同一资源请求，检查 401/403/404 与数据隔离。
+    expected: 日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。
+  - order: 6
+    action: OAuth/CAS 类必须走真实 redirect→callback→session 流程；state/replay/error 用测试 Provider 生成。
+    expected: 日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。
+  - order: 7
+    action: logout/revoke 后再次访问受保护接口，确认旧 session/token/key 不可继续使用。
+    expected: 日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。
+  - order: 8
+    action: '检查日志和错误响应不含明文 password/token/API key；清理临时账号/token。
+
+      补充异常断言：对本用例涉及的非法/失败条件至少重复一次，确认重试不会产生重复资源、脏状态或权限绕过。'
+    expected: 日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。
+  expected_results:
+  - 功能结果与代码契约一致，测试过程无未处理异常。
+  - 关键状态在 API 返回、数据库/存储和后续读取中保持一致。
+  - 失败路径返回明确错误，不出现半写入、重复副作用或跨租户泄露。
+  - 日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。
+  forbidden_side_effects: []
+  source:
+    legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
+    legacy_sheet: 02_测试用例基线
+    legacy_row: 24
+  contract:
+    protocol: HTTP API
+    request_expectations:
+    - 从 config/users.yaml 读取隔离测试账号（SU/Admin/UserA/UserB）与租户关系；密码/Token 仅从 secrets.env 注入。
+    - 启动本地完整认证依赖；OAuth/CAS 类同时启动测试 Provider 并记录 callback/base URL。
+    - 按“租户 API key 列表、refresh、revoke、角色约束｜异常/边界/越权”通过实际 HTTP API 执行注册/登录/session/token/API Key/OAuth/CAS 操作。
+    - 保存响应状态、Set-Cookie/Token 是否存在（只记录掩码）、current_user 和权限信息；不得把 secret 写入报告。
+    - 需要跨用户/跨租户时，用 UserB/OtherTenant 重放同一资源请求，检查 401/403/404 与数据隔离。
+    - OAuth/CAS 类必须走真实 redirect→callback→session 流程；state/replay/error 用测试 Provider 生成。
+    - logout/revoke 后再次访问受保护接口，确认旧 session/token/key 不可继续使用。
+    - '检查日志和错误响应不含明文 password/token/API key；清理临时账号/token。
+
+      补充异常断言：对本用例涉及的非法/失败条件至少重复一次，确认重试不会产生重复资源、脏状态或权限绕过。'
+    response_expectations:
+    - 功能结果与代码契约一致，测试过程无未处理异常。
+    - 关键状态在 API 返回、数据库/存储和后续读取中保持一致。
+    - 失败路径返回明确错误，不出现半写入、重复副作用或跨租户泄露。
+    - 日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。

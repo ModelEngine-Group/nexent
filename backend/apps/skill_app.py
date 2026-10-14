@@ -4,24 +4,32 @@ import logging
 from http import HTTPStatus
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, File, Form, Header, HTTPException, Query, UploadFile
+from fastapi import APIRouter, Depends, File, Form, Header, HTTPException, Query, Request, UploadFile
 from pydantic import BaseModel, Field
 from starlette.responses import JSONResponse, StreamingResponse
 
-from consts.exceptions import ForbiddenError, SkillException, UnauthorizedError
+from consts.exceptions import AppException, ForbiddenError, SkillException, UnauthorizedError
+from consts.const import ENABLE_AGENT_WORKBENCH
 from consts.model import (
     NL2SkillRunRequest,
     SkillCreateRequest,
     SkillInstanceInfoRequest,
     SkillUpdateRequest,
 )
+from permissions.depends import require
+from permissions.models import CurrentUser
 from services.asset_owner_visibility import can_view_skill
+from services.audit_service import AUDIT_DETAIL_LIST_LIMIT, record_security_event
 from services.agent_draft_permission_service import (
     AgentDraftEditError,
     ResourceBindingError,
     require_agent_draft_edit,
 )
 from services.nl2skill_service import create_nl2skill_stream
+from services.workbench_creation_history_service import (
+    prepare_creation_history,
+    persist_creation_stream,
+)
 from management.services.skill.service import (
     SkillService,
     UnsupportedSkillFilePreview,
@@ -38,6 +46,7 @@ _NOT_FOUND_TEXT = "not found"
 
 router = APIRouter(prefix="/skills", tags=["skills"])
 skill_creator_router = APIRouter(prefix="/skills", tags=["nl2skill"])
+require_skill_create_permission = require("skill:create")
 
 
 def _asset_owner_skill_view_denied_response(skill: Optional[Dict[str, Any]], tenant_id: str):
@@ -125,6 +134,7 @@ class InstallSkillsRequest(BaseModel):
 @router.post("/install")
 async def install_skills(
     request: InstallSkillsRequest,
+    http_request: Request,
     tenant_id: Optional[str] = Query(
         None, description="Tenant ID for super admin to install skills for a specific tenant"),
     authorization: Optional[str] = Header(None)
@@ -144,11 +154,16 @@ async def install_skills(
             user_id=user_id,
             locale=request.locale
         )
+        record_security_event("skill_install", request=http_request,
+                              user_id=user_id, tenant_id=effective_tenant_id,
+                              details={"skill_names": request.skill_names[:AUDIT_DETAIL_LIST_LIMIT] if request.skill_names else None})
         return JSONResponse(content={
             "message": "Skills installed successfully",
             "installed": installed_names,
             "total": len(installed_names)
         })
+    except AppException:
+        raise
     except Exception as e:
         logger.error(f"Error installing skills: {e}")
         raise HTTPException(status_code=500, detail="Internal server error")
@@ -158,6 +173,7 @@ async def install_skills(
 @router.post("")
 async def create_skill(
     request: SkillCreateRequest,
+    http_request: Request,
     authorization: Optional[str] = Header(None)
 ) -> JSONResponse:
     """Create a new skill (JSON format)."""
@@ -186,9 +202,17 @@ async def create_skill(
         }
         skill = service.create_skill(
             skill_data, tenant_id=tenant_id, user_id=user_id)
+        # Skill body/description/config_values are free-form content and
+        # never reach the log; name and source identify the skill.
+        record_security_event("skill_create", request=http_request,
+                              user_id=user_id, tenant_id=tenant_id,
+                              details={"skill_name": request.name,
+                                       "source": request.source})
         return JSONResponse(content=skill, status_code=201)
     except UnauthorizedError as e:
         raise HTTPException(status_code=401, detail=str(e))
+    except AppException:
+        raise
     except SkillException as e:
         error_msg = str(e).lower()
         if "already exists" in error_msg:
@@ -201,6 +225,7 @@ async def create_skill(
 
 @router.post("/upload")
 async def create_skill_from_file(
+    http_request: Request,
     file: UploadFile = File(..., description="SKILL.md file or ZIP archive"),
     skill_name: Optional[str] = Form(
         None, description="Optional skill name override"),
@@ -234,10 +259,18 @@ async def create_skill_from_file(
             user_id=user_id,
             tenant_id=tenant_id
         )
+        # File content never reaches the log; filename/source identify the upload.
+        record_security_event("skill_upload", request=http_request,
+                              user_id=user_id, tenant_id=tenant_id,
+                              details={"filename": file.filename,
+                                       "skill_name": skill_name,
+                                       "source": source})
         return JSONResponse(content=skill, status_code=201)
     except UnauthorizedError as e:
         logger.warning(f"Unauthorized: {e}")
         raise HTTPException(status_code=401, detail=str(e))
+    except AppException:
+        raise
     except ForbiddenError as e:
         raise HTTPException(status_code=403, detail=str(e))
     except SkillException as e:
@@ -343,6 +376,7 @@ async def get_skill_file_content(
 )
 async def update_skill_from_file(
     skill_name: str,
+    http_request: Request,
     file: UploadFile = File(..., description="SKILL.md file or ZIP archive"),
     authorization: Optional[str] = Header(None)
 ) -> JSONResponse:
@@ -370,9 +404,16 @@ async def update_skill_from_file(
             user_id=user_id,
             tenant_id=tenant_id
         )
+        # File content never reaches the log.
+        record_security_event("skill_update", request=http_request,
+                              user_id=user_id, tenant_id=tenant_id,
+                              details={"skill_name": skill_name,
+                                       "filename": file.filename})
         return JSONResponse(content=skill)
     except UnauthorizedError as e:
         raise HTTPException(status_code=401, detail=str(e))
+    except AppException:
+        raise
     except ForbiddenError as e:
         raise HTTPException(status_code=403, detail=str(e))
     except SkillException as e:
@@ -439,6 +480,7 @@ async def get_skill_instance(
 @router.post("/instance/update")
 async def update_skill_instance(
     request: SkillInstanceInfoRequest,
+    http_request: Request,
     authorization: Optional[str] = Header(None)
 ) -> JSONResponse:
     """Create or update a skill instance for a specific agent.
@@ -489,6 +531,12 @@ async def update_skill_instance(
         merged.update(instance_config_values)
         instance["config_values"] = merged
 
+        # config_values may embed secrets and never reaches the log.
+        record_security_event("skill_instance_update", request=http_request,
+                              user_id=user_id, tenant_id=tenant_id,
+                              details={"skill_id": request.skill_id,
+                                       "agent_id": request.agent_id,
+                                       "enabled": request.enabled})
         return JSONResponse(content={"message": "Skill instance updated", "instance": instance})
     except (AgentDraftEditError, ResourceBindingError) as exc:
         status_code = (
@@ -608,6 +656,7 @@ async def get_skill_by_id(skill_id: int, authorization: Optional[str] = Header(N
 async def update_skill_by_id(
     skill_id: int,
     request: SkillUpdateRequest,
+    http_request: Request,
     authorization: Optional[str] = Header(None)
 ) -> JSONResponse:
     """Update an existing skill by ID."""
@@ -625,6 +674,12 @@ async def update_skill_by_id(
             tenant_id=tenant_id,
             user_id=user_id,
         )
+        # patch_keys carries field names only; content/config_values values
+        # are free-form and never reach the log.
+        record_security_event("skill_update", request=http_request,
+                              user_id=user_id, tenant_id=tenant_id,
+                              details={"skill_id": skill_id,
+                                       "patch_keys": sorted(update_data.keys())[:AUDIT_DETAIL_LIST_LIMIT]})
         return JSONResponse(content=skill)
     except UnauthorizedError as e:
         raise HTTPException(status_code=401, detail=str(e))
@@ -668,6 +723,7 @@ async def get_skill(skill_name: str, authorization: Optional[str] = Header(None)
 async def update_skill(
     skill_name: str,
     request: SkillUpdateRequest,
+    http_request: Request,
     authorization: Optional[str] = Header(None)
 ) -> JSONResponse:
     """Update an existing skill.
@@ -702,6 +758,11 @@ async def update_skill(
             tenant_id=tenant_id,
             user_id=user_id,
         )
+        # patch_keys carries field names only; values never reach the log.
+        record_security_event("skill_update", request=http_request,
+                              user_id=user_id, tenant_id=tenant_id,
+                              details={"skill_name": skill_name,
+                                       "patch_keys": sorted(update_data.keys())[:AUDIT_DETAIL_LIST_LIMIT]})
         return JSONResponse(content=skill)
     except UnauthorizedError as e:
         raise HTTPException(status_code=401, detail=str(e))
@@ -721,6 +782,7 @@ async def update_skill(
 @router.delete("/{skill_name}")
 async def delete_skill(
     skill_name: str,
+    http_request: Request,
     authorization: Optional[str] = Header(None)
 ) -> JSONResponse:
     """Delete a skill."""
@@ -728,6 +790,9 @@ async def delete_skill(
         user_id, tenant_id = get_current_user_id(authorization)
         service = SkillService(tenant_id=tenant_id)
         service.delete_skill(skill_name, tenant_id=tenant_id, user_id=user_id)
+        record_security_event("skill_delete", request=http_request,
+                              user_id=user_id, tenant_id=tenant_id,
+                              details={"skill_name": skill_name})
         return JSONResponse(content={"message": f"Skill {skill_name} deleted successfully"})
     except UnauthorizedError as e:
         raise HTTPException(status_code=401, detail=str(e))
@@ -741,9 +806,12 @@ async def delete_skill(
 @skill_creator_router.post("/nl2skill/run")
 async def nl2skill_run_api(
     request: NL2SkillRunRequest,
-    authorization: Optional[str] = Header(None)
+    authorization: Optional[str] = Header(None),
+    _current_user: CurrentUser = Depends(require_skill_create_permission),
 ):
-    """Run one non-persistent, multi-turn NL2Skill conversation turn."""
+    """Run NL2Skill; Workbench turns opt into conversation persistence."""
+    if (request.persist_history or request.workbench_config is not None) and not ENABLE_AGENT_WORKBENCH:
+        raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail={"code": "WORKBENCH_DISABLED"})
     try:
         _, tenant_id, user_language = get_current_user_info(authorization)
     except Exception as e:
@@ -756,7 +824,35 @@ async def nl2skill_run_api(
             tenant_id=tenant_id,
             language=request.language or user_language or "zh",
         )
+        if request.persist_history:
+            user_id, _ = get_current_user_id(authorization)
+            conversation_id, assistant_index = prepare_creation_history(
+                conversation_id=request.conversation_id,
+                mode="skill_create",
+                query=request.query,
+                minio_files=request.minio_files,
+                workbench_config=request.workbench_config,
+                agent_id=None,
+                user_id=user_id,
+                tenant_id=tenant_id,
+                retry_user_message_id=request.retry_user_message_id,
+                retry_message_index=request.retry_message_index,
+            )
+            stream = persist_creation_stream(
+                stream,
+                conversation_id=conversation_id,
+                assistant_index=assistant_index,
+                user_id=user_id,
+                tenant_id=tenant_id,
+            )
+            return StreamingResponse(
+                stream,
+                media_type="text/event-stream",
+                headers={"conversation_id": str(conversation_id)},
+            )
         return StreamingResponse(stream, media_type="text/event-stream")
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="Invalid Workbench creation session.") from exc
     except HTTPException:
         raise
     except Exception:

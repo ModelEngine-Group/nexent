@@ -1,0 +1,78 @@
+schema_version: '1.0'
+stage: D1
+module: V5-BASELINE
+case:
+  case_id: UT-FE-AUTO-0330CCC385F313B2
+  feature_id: F-115
+  business_rule_ids:
+  - F-115-RULE-01
+  title: CiteMarker 按 sourceType 渲染图标/标题/文件名/来源标签、hover 卡片白名单安全渲染、索引一致与 Enter/Space 键盘激活｜核心流程
+  type: FE-COMP
+  priority: P1
+  status: active
+  automation: automated
+  objective: CiteMarker 按 sourceType 渲染图标/标题/文件名/来源标签、hover 卡片白名单安全渲染、索引一致与 Enter/Space 键盘激活｜核心流程
+  preconditions:
+  - 本地依赖/组件测试环境可运行；不要求外部模型服务在线。
+  - 设置 NEXENT_TEST_HOME，目录不位于 Nexent Git 仓库内。
+  - 当次 run_id 已生成，所有新建资源名称带 run_id；测试基线固定为 develop 当前批次锁定的产品提交；执行时另记录实际被测commit。
+  - 前端组件测试框架（Testing Library/Jest 或等价）与 Tooltip 组件依赖可正常挂载；无需后端服务或本地文件资产。
+  test_data:
+    legacy_asset_declaration: 无外部本地资产：仅注入组件 props 与固定来源条目 fixture（document/url 两种 sourceType、含白名单/黑名单 HTML 的 text、可选 filename/url/sourceLabel）。
+  steps:
+  - order: 1
+    action: 在组件测试环境加载 CiteMarker（frontend/app/[locale]/newchat/ui/cite-marker.tsx），注入最小 props（citekey、displayIndex、sourceIndex、label、title、text、filename、url、sourceType、sourceLabel）与本地固定来源条目
+      fixture，不访问真实模型或后端。
+    expected: 角标渲染 displayIndex，data-citekey 为 citekey.trim().toLowerCase()，aria-label 语义正确，测试过程无未处理异常。
+  - order: 2
+    action: '首次渲染断言角标 <button> 展示 displayIndex，包含 data-citation-marker、data-citekey（小写 trimmed）、data-citation-source-index、data-citation-display-index
+      属性，aria-label 为 "Open {label}: {title}"，type=button。'
+    expected: document 来源渲染 DatabaseIcon、url 来源渲染 ExternalLinkIcon；title、文件名（filename||title||url 回退）与 sourceLabel 显示顺序与来源卡（sources-panel）一致。
+  - order: 3
+    action: 使用真实用户事件 hover 触发 Tooltip 卡片，断言卡片内渲染 title 与 CiteIndexBadge，且索引值等于 displayIndex。
+    expected: hover 卡片中 CiteIndexBadge 展示的索引与角标 displayIndex 一致。
+  - order: 4
+    action: 分别以 sourceType=document 与 sourceType=url 渲染，断言 document 类型显示 DatabaseIcon、url 类型显示 ExternalLinkIcon；文件名按 filename||title||url
+      回退规则渲染，来源标签按 sourceLabel 渲染。
+    expected: 白名单 HTML 标签安全渲染，script/img 等危险标签被剥离，不产生 XSS 可执行内容。
+  - order: 5
+    action: 对 text 传入含白名单标签（p/br/strong/b/em/i/table/thead/tbody/tr/th/td）的 HTML 片段，断言各标签按语义渲染；传入白名单外标签（如 script、img、a、div），断言被剥离或按文本处理，不产生可执行节点。
+    expected: text 为空时不渲染文本区，sourceLabel 为空时不渲染来源标签行。
+  - order: 6
+    action: 传入 text 为空/空白，断言 hover 卡片不渲染 CitationPreview 文本区；传入 sourceLabel 为空，断言不渲染来源标签行。
+    expected: loading 时按钮 disabled 且显示加载文案；非 loading 时按钮可交互并触发 onClick。
+  - order: 7
+    action: 设置 loading=true，断言角标 disabled 且 hover 显示 "Source details are loading"；loading=false 且传入 onClick 时，断言 hover 显示详情且按钮可交互。
+    expected: Enter/Space 键盘激活与点击等价触发 onClick，参数为 marker 元素。
+  - order: 8
+    action: 通过键盘 Tab 聚焦角标后分别触发 Enter 与 Space，断言 onClick 以 marker 元素为参数被调用，验证键盘激活与鼠标点击行为一致。
+    expected: 日志/console 不出现明文 API Key/Token/Password/模型密钥。
+  - order: 9
+    action: 断言组件为 memo 化（相同 props 无多余重渲染），并验证卸载后无残留事件监听或 DOM 泄漏。
+    expected: 日志/console 不出现明文 API Key/Token/Password/模型密钥。
+  expected_results:
+  - 角标渲染 displayIndex，data-citekey 为 citekey.trim().toLowerCase()，aria-label 语义正确，测试过程无未处理异常。
+  - document 来源渲染 DatabaseIcon、url 来源渲染 ExternalLinkIcon；title、文件名（filename||title||url 回退）与 sourceLabel 显示顺序与来源卡（sources-panel）一致。
+  - hover 卡片中 CiteIndexBadge 展示的索引与角标 displayIndex 一致。
+  - 白名单 HTML 标签安全渲染，script/img 等危险标签被剥离，不产生 XSS 可执行内容。
+  - text 为空时不渲染文本区，sourceLabel 为空时不渲染来源标签行。
+  - loading 时按钮 disabled 且显示加载文案；非 loading 时按钮可交互并触发 onClick。
+  - Enter/Space 键盘激活与点击等价触发 onClick，参数为 marker 元素。
+  - 日志/console 不出现明文 API Key/Token/Password/模型密钥。
+  forbidden_side_effects: []
+  source:
+    legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
+    legacy_sheet: 02_测试用例基线
+    legacy_row: 422
+  unit_boundary: 引用角标与来源卡
+  inputs:
+  - 无外部本地资产：仅注入组件 props 与固定来源条目 fixture（document/url 两种 sourceType、含白名单/黑名单 HTML 的 text、可选 filename/url/sourceLabel）。
+  assertions:
+  - 角标渲染 displayIndex，data-citekey 为 citekey.trim().toLowerCase()，aria-label 语义正确，测试过程无未处理异常。
+  - document 来源渲染 DatabaseIcon、url 来源渲染 ExternalLinkIcon；title、文件名（filename||title||url 回退）与 sourceLabel 显示顺序与来源卡（sources-panel）一致。
+  - hover 卡片中 CiteIndexBadge 展示的索引与角标 displayIndex 一致。
+  - 白名单 HTML 标签安全渲染，script/img 等危险标签被剥离，不产生 XSS 可执行内容。
+  - text 为空时不渲染文本区，sourceLabel 为空时不渲染来源标签行。
+  - loading 时按钮 disabled 且显示加载文案；非 loading 时按钮可交互并触发 onClick。
+  - Enter/Space 键盘激活与点击等价触发 onClick，参数为 marker 元素。
+  - 日志/console 不出现明文 API Key/Token/Password/模型密钥。

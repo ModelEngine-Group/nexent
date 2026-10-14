@@ -123,7 +123,11 @@ class ContextManager:
         final_answer_templates: Optional[Dict[str, Any]] = None,
         run_context: ManagedRunContext | None = None,
         force_compaction: bool = False,
+        request_system_messages: Sequence[ChatMessage | dict[str, object]] = (),
+        request_tail_messages: Sequence[ChatMessage | dict[str, object]] = (),
     ) -> FinalContext:
+        if purpose != "step" and (request_system_messages or request_tail_messages):
+            raise ValueError("Request-only action messages require step purpose")
         run_context = run_context or self.prepare_run_context(memory, "")
         policy = resolve_policy(self.config.policy_layers)
         persisted_items = list(run_context.items)
@@ -145,6 +149,8 @@ class ContextManager:
             task=task,
             final_answer_templates=final_answer_templates,
         )
+        purpose_stable = [*purpose_stable, *request_system_messages]
+        purpose_dynamic = [*purpose_dynamic, *request_tail_messages]
         canonical_tools = self._canonical_tools(tools or ())
         raw_tokens = self._estimate_items(items, purpose_stable, purpose_dynamic, canonical_tools)
         final_items = list(items)
@@ -288,6 +294,7 @@ class ContextManager:
         # Stable item messages remain first for KV-cache reuse.
         stable = [message for message in rendered if message_role(message) in {"system", "developer"}]
         dynamic = [message for message in rendered if message_role(message) not in {"system", "developer"}]
+        memory_messages = [*stable, *dynamic]
         messages = [*stable, *purpose_stable, *dynamic, *purpose_dynamic]
         final_tokens = self._message_tokens(messages) + self._tools_tokens(canonical_tools)
         self._last_uncompressed_token_count = raw_tokens
@@ -316,6 +323,7 @@ class ContextManager:
         history_messages = [message for message in messages if message_role(message) not in {"system", "developer"}]
         return FinalContext(
             messages=messages,
+            memory_messages=memory_messages,
             tools=canonical_tools,
             evidence=ContextEvidence(
                 purpose=purpose,
@@ -414,8 +422,8 @@ class ContextManager:
             for item in candidates:
                 compact = item.compact()
                 saving = max(0, item.token_estimate - compact.token_estimate)
-                savings.append((saving, item.layout_key, item, compact))
-            for _, _, original, compact in sorted(savings, key=lambda row: (-row[0], row[1])):
+                savings.append((saving, item.priority, item.layout_key, item, compact))
+            for _, _, _, original, compact in sorted(savings, key=lambda row: (-row[0], row[1], row[2])):
                 index = result.index(original)
                 result[index] = compact
                 if (
@@ -564,20 +572,18 @@ class ContextManager:
             return [], []
         if not final_answer_templates:
             raise ValueError("final_answer purpose requires final_answer_templates")
-        from jinja2 import StrictUndefined, Template
+        from ..prompt import AgentPromptComposer
 
-        template = final_answer_templates["final_answer"]
+        composer = AgentPromptComposer.from_compatibility_templates(final_answer_templates)
         return (
-            [{"role": "system", "content": [{"type": "text", "text": template["pre_messages"]}]}],
+            [{"role": "system", "content": [{"type": "text", "text": composer.render_final_answer_pre_message()}]}],
             [
                 {
                     "role": "user",
                     "content": [
                         {
                             "type": "text",
-                            "text": Template(template["post_messages"], undefined=StrictUndefined).render(
-                                task=task or ""
-                            ),
+                            "text": composer.render_final_answer_post_message(task or ""),
                         }
                     ],
                 }
@@ -771,7 +777,7 @@ class ContextManager:
                 ContextItemType.SYSTEM,
                 ContextItemType.TOOL,
                 ContextItemType.SKILL,
-                ContextItemType.MANAGED_AGENT,
+                ContextItemType.WORKER_AGENT,
                 ContextItemType.EXTERNAL_AGENT,
             }
         }

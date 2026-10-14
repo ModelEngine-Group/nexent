@@ -4,7 +4,7 @@ Invitation management API endpoints
 import logging
 from typing import Optional
 
-from fastapi import APIRouter, HTTPException, Header
+from fastapi import APIRouter, Header, HTTPException, Request
 from http import HTTPStatus
 from starlette.responses import JSONResponse
 
@@ -12,6 +12,7 @@ from consts.model import (
     InvitationCreateRequest, InvitationUpdateRequest, InvitationListRequest
 )
 from consts.exceptions import NotFoundException, ValidationError, UnauthorizedError, DuplicateError
+from services.audit_service import record_security_event
 from services.invitation_service import (
     create_invitation_code, update_invitation_code, get_invitation_by_code,
     check_invitation_available, use_invitation_code, update_invitation_code_status,
@@ -86,6 +87,7 @@ async def list_invitations_endpoint(
 @router.post("")
 async def create_invitation_endpoint(
     request: InvitationCreateRequest,
+    http_request: Request,
     authorization: Optional[str] = Header(None)
 ) -> JSONResponse:
     """
@@ -100,7 +102,7 @@ async def create_invitation_endpoint(
     """
     try:
         # Get current user ID from token
-        user_id, _ = get_current_user_id(authorization)
+        user_id, operator_tenant_id = get_current_user_id(authorization)
 
         # Validate tenant_id from request
         tenant_id = request.tenant_id
@@ -123,6 +125,13 @@ async def create_invitation_endpoint(
 
         logger.info(f"Created invitation code {invitation_info['invitation_code']} (type: {request.code_type}) for tenant {tenant_id} by user {user_id}")
 
+        record_security_event("invitation_create", request=http_request,
+                              user_id=user_id, tenant_id=operator_tenant_id,
+                              details={"invitation_code": (invitation_info or {}).get("invitation_code"),
+                                       "code_type": request.code_type,
+                                       "tenant_id": request.tenant_id,
+                                       "capacity": request.capacity,
+                                       "group_ids": (request.group_ids or [])[:20]})
         return JSONResponse(
             status_code=HTTPStatus.CREATED,
             content={
@@ -173,6 +182,7 @@ async def create_invitation_endpoint(
 async def update_invitation_endpoint(
     invitation_code: str,
     request: InvitationUpdateRequest,
+    http_request: Request,
     authorization: Optional[str] = Header(None)
 ) -> JSONResponse:
     """
@@ -188,7 +198,7 @@ async def update_invitation_endpoint(
     """
     try:
         # Get current user ID from token
-        user_id, _ = get_current_user_id(authorization)
+        user_id, operator_tenant_id = get_current_user_id(authorization)
 
         # Get invitation info to find invitation_id
         invitation_info = get_invitation_by_code(invitation_code)
@@ -221,6 +231,10 @@ async def update_invitation_endpoint(
 
         logger.info(f"Updated invitation code {invitation_code} by user {user_id}")
 
+        record_security_event("invitation_update", request=http_request,
+                              user_id=user_id, tenant_id=operator_tenant_id,
+                              details={"invitation_code": invitation_code,
+                                       "updates": updates})
         return JSONResponse(
             status_code=HTTPStatus.OK,
             content={
@@ -334,6 +348,7 @@ async def check_invitation_code_endpoint(invitation_code: str) -> JSONResponse:
 @router.delete("/{invitation_code}")
 async def delete_invitation_endpoint(
     invitation_code: str,
+    http_request: Request,
     authorization: Optional[str] = Header(None)
 ) -> JSONResponse:
     """
@@ -348,7 +363,7 @@ async def delete_invitation_endpoint(
     """
     try:
         # Get current user ID from token
-        user_id, _ = get_current_user_id(authorization)
+        user_id, operator_tenant_id = get_current_user_id(authorization)
 
         # Get invitation info to find invitation_id
         invitation_info = get_invitation_by_code(invitation_code)
@@ -368,6 +383,9 @@ async def delete_invitation_endpoint(
 
         logger.info(f"Deleted invitation code {invitation_code} by user {user_id}")
 
+        record_security_event("invitation_delete", request=http_request,
+                              user_id=user_id, tenant_id=operator_tenant_id,
+                              details={"invitation_code": invitation_code})
         return JSONResponse(
             status_code=HTTPStatus.OK,
             content={
@@ -438,6 +456,7 @@ async def check_invitation_available_endpoint(invitation_code: str) -> JSONRespo
 @router.post("/{invitation_code}/use")
 async def use_invitation_endpoint(
     invitation_code: str,
+    http_request: Request,
     authorization: Optional[str] = Header(None)
 ) -> JSONResponse:
     """
@@ -452,7 +471,7 @@ async def use_invitation_endpoint(
     """
     try:
         # Get current user ID from token
-        current_user_id, _ = get_current_user_id(authorization)
+        current_user_id, operator_tenant_id = get_current_user_id(authorization)
 
         # Users can use invitation codes for themselves
 
@@ -464,6 +483,9 @@ async def use_invitation_endpoint(
 
         logger.info(f"User {current_user_id} used invitation code {invitation_code}")
 
+        record_security_event("invitation_use", request=http_request,
+                              user_id=current_user_id, tenant_id=operator_tenant_id,
+                              details={"invitation_code": invitation_code})
         return JSONResponse(
             status_code=HTTPStatus.OK,
             content={

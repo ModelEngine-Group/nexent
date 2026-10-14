@@ -1,14 +1,15 @@
 import json
 import logging
 from http import HTTPStatus
+from urllib.parse import quote
 from typing import Optional
 
-from fastapi import APIRouter, Body, File, Header, HTTPException, Query, Request, UploadFile
+from fastapi import APIRouter, Body, Depends, File, Header, HTTPException, Query, Request, UploadFile
 from fastapi.encoders import jsonable_encoder
 from nexent.core.concurrency import run_blocking
 from starlette.responses import JSONResponse, Response, StreamingResponse
 
-from consts.const import ASSET_OWNER_TENANT_ID
+from consts.const import ASSET_OWNER_TENANT_ID, ENABLE_AGENT_WORKBENCH
 from consts.model import (
     AgentRequest,
     AgentInfoRequest,
@@ -27,17 +28,28 @@ from consts.model import (
     VersionCompareRequest,
     VersionUpdateRequest,
     NL2AgentRunRequest,
+    TagAssignmentFilter,
+    WorkbenchCapabilityPreviewRequest,
 )
 from consts.exceptions import (
+    AgentNotFoundError,
+    AgentRelationValidationError,
     ForbiddenError,
     SkillDuplicateError,
     AppException,
     UnauthorizedError,
+    TenantResourceLimitError,
+    tenant_resource_limit_error_payload,
     ValidationError,
     RuntimeCapacityExceededError,
     RuntimeQueueTimeoutError,
+    WorkbenchConfigVersionConflict,
+    WorkbenchError,
 )
+from permissions.depends import require
+from permissions.models import CurrentUser
 from services.asset_owner_visibility import apply_agent_detail_prompt_visibility
+from services.audit_service import AUDIT_DETAIL_LIST_LIMIT, record_security_event
 
 from management.services.agent.service import (
     get_agent_info_impl,
@@ -50,6 +62,7 @@ from management.services.agent.service import (
     check_agent_name_conflict_batch_impl,
     regenerate_agent_name_batch_impl,
     list_all_agent_info_impl,
+    list_agent_page_impl,
     run_agent_stream,
     stop_agent_tasks,
     get_agent_call_relationship_impl,
@@ -61,8 +74,17 @@ from management.services.agent.service import (
 )
 from services.prompt_service import generate_guardrail_rules_impl
 from services.knowledge_scope_service import get_agent_knowledge_capabilities
+from services.workbench_service import (
+    build_workbench_capability_preview,
+    build_workbench_main_profile,
+)
+from management.services.agent.system_agent_provider import ensure_workbench_main_agent
 from services.agent_draft_permission_service import AgentDraftEditError
 from services.nl2agent_service import Nl2AgentDraftSaveError, create_nl2agent_stream
+from services.workbench_creation_history_service import (
+    prepare_creation_history,
+    persist_creation_stream,
+)
 from services.agent_version_service import (
     publish_version_impl,
     get_version_list_impl,
@@ -85,6 +107,7 @@ from utils.auth_utils import (
 
 agent_runtime_router = APIRouter(prefix="/agent")
 agent_config_router = APIRouter(prefix="/agent")
+require_agent_create_permission = require("agent:create")
 logger = logging.getLogger("agent_app")
 
 
@@ -104,6 +127,81 @@ def _runtime_overload_response(exc: Exception) -> JSONResponse:
     )
 
 
+@agent_config_router.get("/workbench/bootstrap")
+async def get_workbench_bootstrap_api(
+    authorization: Optional[str] = Header(None),
+):
+    """Return server-authoritative Workbench modes and creation capabilities."""
+    if not ENABLE_AGENT_WORKBENCH:
+        raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail={"code": "WORKBENCH_DISABLED"})
+    _, tenant_id = get_current_user_id(authorization)
+    try:
+        generic_agent = build_workbench_main_profile(tenant_id)
+    except Exception:
+        # The feature may be enabled after this tenant was created. Initialize
+        # lazily if the startup backfill has not reached it yet.
+        try:
+            await run_blocking(
+                "workbench-bootstrap",
+                ensure_workbench_main_agent,
+                tenant_id,
+                "system",
+            )
+            generic_agent = build_workbench_main_profile(tenant_id)
+        except Exception:
+            logger.exception(
+                "Failed to load workbench_main presentation profile for tenant %s",
+                tenant_id,
+            )
+            generic_agent = {
+                "display_name": "Nexent Workbench",
+                "default_skill_resources": [],
+            }
+    return {
+        "code": 0,
+        "message": "success",
+        "data": {
+            "schema_version": 3,
+            "modes": {
+                "generic_chat": {"enabled": True},
+                "single_agent_chat": {"enabled": True},
+                "multi_agent_chat": {"enabled": True},
+                "skill_create": {"enabled": False},
+                "agent_create": {"enabled": False},
+            },
+            "generic_agent": generic_agent,
+        },
+    }
+
+
+@agent_config_router.post("/workbench/capabilities/preview")
+async def preview_workbench_capabilities_api(
+    request: WorkbenchCapabilityPreviewRequest,
+    authorization: Optional[str] = Header(None),
+):
+    """Lock an Agent version and return its published Workbench defaults."""
+    if not ENABLE_AGENT_WORKBENCH:
+        raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail={"code": "WORKBENCH_DISABLED"})
+    user_id, tenant_id = get_current_user_id(authorization)
+    try:
+        data = build_workbench_capability_preview(
+            agent_id=request.agent_id,
+            version_no=request.version_no,
+            tenant_id=tenant_id,
+            user_id=user_id,
+        )
+        return {"code": 0, "message": "success", "data": data}
+    except WorkbenchError as exc:
+        raise HTTPException(status_code=exc.status_code, detail={"code": exc.code}) from exc
+    except ForbiddenError as exc:
+        raise HTTPException(status_code=HTTPStatus.FORBIDDEN, detail=str(exc)) from exc
+    except (ValueError, ValidationError) as exc:
+        raise HTTPException(
+            status_code=HTTPStatus.UNPROCESSABLE_ENTITY,
+            detail={"code": "WORKBENCH_RESOURCE_UNAVAILABLE"},
+        ) from exc
+
+
 @agent_config_router.get("/{agent_id}/knowledge-capabilities")
 async def get_agent_knowledge_capabilities_api(
     agent_id: int,
@@ -116,11 +214,15 @@ async def get_agent_knowledge_capabilities_api(
         return {
             "code": 0,
             "message": "success",
-            "data": get_agent_knowledge_capabilities(
+            "data": await run_blocking(
+                "agent-knowledge-capabilities",
+                get_agent_knowledge_capabilities,
                 agent_id=agent_id,
                 tenant_id=tenant_id,
                 version_no=version_no,
                 user_id=user_id,
+                lane="control-io",
+                owner="apps.agent_app",
             ),
         }
     except ValueError as exc:
@@ -154,6 +256,8 @@ async def agent_run_api(
         )
     except ForbiddenError as e:
         raise HTTPException(status_code=HTTPStatus.FORBIDDEN, detail=str(e)) from e
+    except WorkbenchError as e:
+        raise HTTPException(status_code=e.status_code, detail={"code": e.code}) from e
     except ValidationError as e:
         raise HTTPException(
             status_code=HTTPStatus.UNPROCESSABLE_ENTITY,
@@ -161,6 +265,14 @@ async def agent_run_api(
         ) from e
     except (RuntimeCapacityExceededError, RuntimeQueueTimeoutError) as exc:
         return _runtime_overload_response(exc)
+    except WorkbenchConfigVersionConflict as e:
+        raise HTTPException(
+            status_code=HTTPStatus.CONFLICT,
+            detail={
+                "code": "WORKBENCH_CONFIG_VERSION_CONFLICT",
+                "current_version": e.current_version,
+            },
+        ) from e
     except AppException:
         raise
     except Exception as e:
@@ -223,8 +335,11 @@ async def nl2agent_run_api(
     nl2agent_request: NL2AgentRunRequest,
     http_request: Request,
     authorization: Optional[str] = Header(None),
+    _current_user: CurrentUser = Depends(require_agent_create_permission),
 ):
-    """Run one non-persistent NL2Agent turn."""
+    """Run NL2Agent; Workbench turns opt into conversation persistence."""
+    if (nl2agent_request.persist_history or nl2agent_request.workbench_config is not None) and not ENABLE_AGENT_WORKBENCH:
+        raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail={"code": "WORKBENCH_DISABLED"})
 
     try:
         _, tenant_id, language = get_current_user_info(
@@ -236,6 +351,32 @@ async def nl2agent_run_api(
             language=language,
             authorization=authorization,
         )
+        if nl2agent_request.persist_history:
+            user_id, _ = get_current_user_id(authorization)
+            conversation_id, assistant_index = prepare_creation_history(
+                conversation_id=nl2agent_request.conversation_id,
+                mode="agent_create",
+                query=nl2agent_request.query,
+                minio_files=nl2agent_request.minio_files,
+                workbench_config=nl2agent_request.workbench_config,
+                agent_id=nl2agent_request.agent_id,
+                user_id=user_id,
+                tenant_id=tenant_id,
+                retry_user_message_id=nl2agent_request.retry_user_message_id,
+                retry_message_index=nl2agent_request.retry_message_index,
+            )
+            stream = persist_creation_stream(
+                stream,
+                conversation_id=conversation_id,
+                assistant_index=assistant_index,
+                user_id=user_id,
+                tenant_id=tenant_id,
+            )
+            return StreamingResponse(
+                stream,
+                media_type="text/event-stream",
+                headers={"conversation_id": str(conversation_id)},
+            )
         return StreamingResponse(stream, media_type="text/event-stream")
     except UnauthorizedError as exc:
         raise HTTPException(
@@ -258,6 +399,11 @@ async def nl2agent_run_api(
         raise HTTPException(
             status_code=HTTPStatus.BAD_REQUEST,
             detail={"code": exc.code, "message": "Agent context is invalid."},
+        ) from exc
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=HTTPStatus.BAD_REQUEST,
+            detail="Invalid Workbench creation session.",
         ) from exc
     except PermissionError as exc:
         raise HTTPException(
@@ -319,6 +465,15 @@ async def search_agent_info_api(
         effective_tenant_id = tenant_id or auth_tenant_id
         agent_info = await get_agent_info_impl(agent_id, effective_tenant_id, version_no, user_id)
         return apply_agent_detail_prompt_visibility(auth_tenant_id, agent_info)
+    except AgentNotFoundError as e:
+        raise HTTPException(
+            status_code=HTTPStatus.NOT_FOUND, detail="Agent not found."
+        ) from e
+    except ForbiddenError as e:
+        raise HTTPException(
+            status_code=HTTPStatus.FORBIDDEN,
+            detail=str(e),
+        ) from e
     except Exception as e:
         logger.error(f"Agent search info error: {str(e)}")
         raise HTTPException(
@@ -340,20 +495,65 @@ async def get_agent_by_name_api(
         effective_tenant_id = tenant_id or auth_tenant_id
         result = get_agent_by_name_impl(agent_name, effective_tenant_id)
         return JSONResponse(status_code=HTTPStatus.OK, content=result)
+    except AgentNotFoundError as e:
+        raise HTTPException(
+            status_code=HTTPStatus.NOT_FOUND, detail="Agent not found."
+        ) from e
     except Exception as e:
         logger.error(f"Agent by name lookup error: {str(e)}")
         raise HTTPException(
-            status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail="Agent not found.")
+            status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail="Agent by name lookup error.")
 
 
 @agent_config_router.post("/update")
-async def update_agent_info_api(request: AgentInfoRequest, authorization: Optional[str] = Header(None)):
+async def update_agent_info_api(
+    request: AgentInfoRequest,
+    http_request: Request,
+    authorization: Optional[str] = Header(None)
+):
     """
     Update an existing agent
     """
+    # Best-effort identity resolution for audit only; the service resolves
+    # identity itself, so a failure here must not change endpoint behavior.
+    try:
+        user_id, tenant_id = get_current_user_id(authorization)
+    except Exception:
+        user_id, tenant_id = None, None
+    # exclude_unset is what makes this the patch: fields the caller omitted
+    # are not changes. Free-form content (prompts, description) never reaches
+    # the log - patch_keys carries field names only.
+    audit_details = {"agent_id": request.agent_id,
+                     "display_name": request.display_name,
+                     "model_ids": request.model_ids[:AUDIT_DETAIL_LIST_LIMIT] if request.model_ids else None,
+                     "patch_keys": sorted(request.model_dump(exclude_unset=True, exclude_none=True))[:AUDIT_DETAIL_LIST_LIMIT]}
     try:
         result = await update_agent_info_impl(request, authorization)
+        record_security_event("agent_update", request=http_request,
+                              user_id=user_id, tenant_id=tenant_id,
+                              details=audit_details)
         return result or {}
+    except AgentRelationValidationError as exc:
+        raise HTTPException(
+            status_code=HTTPStatus.BAD_REQUEST, detail=str(exc)
+        ) from exc
+    except AgentNotFoundError as exc:
+        raise HTTPException(
+            status_code=HTTPStatus.NOT_FOUND, detail="Agent not found."
+        ) from exc
+    except ForbiddenError as exc:
+        raise HTTPException(
+            status_code=HTTPStatus.FORBIDDEN,
+            detail=str(exc),
+        ) from exc
+    except TenantResourceLimitError as exc:
+        logger.warning("Agent update rejected by resource limit: %s", exc)
+        return JSONResponse(
+            status_code=HTTPStatus.TOO_MANY_REQUESTS,
+            content=tenant_resource_limit_error_payload(exc),
+        )
+    except AppException:
+        raise
     except Exception as e:
         logger.error(f"Agent update error: {str(e)}")
         raise HTTPException(
@@ -363,18 +563,25 @@ async def update_agent_info_api(request: AgentInfoRequest, authorization: Option
 @agent_config_router.post("/{agent_id}/icon")
 async def upload_agent_icon_api(
     agent_id: int,
+    http_request: Request,
     file: UploadFile = File(...),
     authorization: Optional[str] = Header(None),
 ):
     """Upload and attach an image icon to an editable agent."""
+    audit_details = {"agent_id": agent_id, "filename": file.filename}
     try:
         user_id, tenant_id = get_current_user_id(authorization)
+        content = await file.read()
+        audit_details["size"] = len(content)
         result = await upload_agent_icon_impl(
             agent_id=agent_id,
-            content=await file.read(),
+            content=content,
             tenant_id=tenant_id,
             user_id=user_id,
         )
+        record_security_event("agent_icon_upload", request=http_request,
+                              user_id=user_id, tenant_id=tenant_id,
+                              details=audit_details)
         return JSONResponse(status_code=HTTPStatus.OK, content=result)
     except ForbiddenError as exc:
         raise HTTPException(status_code=HTTPStatus.FORBIDDEN, detail=str(exc)) from exc
@@ -484,7 +691,15 @@ async def delete_agent_api(
         # Use explicit tenant_id if provided, otherwise fall back to auth tenant_id
         effective_tenant_id = tenant_id or auth_tenant_id
         await delete_agent_impl(request.agent_id, effective_tenant_id, user_id)
+        record_security_event("agent_delete", request=http_request,
+                              user_id=user_id, tenant_id=auth_tenant_id,
+                              details={"agent_id": request.agent_id})
         return {}
+    except ForbiddenError as exc:
+        raise HTTPException(
+            status_code=HTTPStatus.FORBIDDEN,
+            detail=str(exc),
+        ) from exc
     except Exception as e:
         logger.error(f"Agent delete error: {str(e)}")
         raise HTTPException(
@@ -492,24 +707,45 @@ async def delete_agent_api(
 
 
 @agent_config_router.post("/export")
-async def export_agent_api(request: AgentIDRequest, authorization: Optional[str] = Header(None)):
+async def export_agent_api(
+    request: AgentIDRequest,
+    http_request: Request,
+    authorization: Optional[str] = Header(None)
+):
     """
     export an agent.
 
     Returns a ZIP file if the agent has skill instances, otherwise returns plain JSON.
     The response Content-Type and body differ based on the agent's skill configuration.
     """
+    # Best-effort identity resolution for audit only; the service resolves
+    # identity itself, so a failure here must not change endpoint behavior.
+    try:
+        user_id, tenant_id = get_current_user_id(authorization)
+    except Exception:
+        user_id, tenant_id = None, None
     try:
         result = await export_agent_with_skills_impl(request.agent_id, authorization)
+        record_security_event("agent_export", request=http_request,
+                              user_id=user_id, tenant_id=tenant_id,
+                              details={"agent_id": request.agent_id})
         if isinstance(result, dict) and result.get("_zip"):
+            filename = result.get("filename", "agent_export.zip")
+            encoded_filename = quote(filename)
             return Response(
                 content=result["data"],
                 media_type="application/zip",
                 headers={
-                    "Content-Disposition": f"attachment; filename=\"{result.get('filename', 'agent_export.zip')}\""
+                    # RFC 5987 encoding supports non-ASCII agent display names
+                    "Content-Disposition": f"attachment; filename*=UTF-8''{encoded_filename}",
                 }
             )
         return ConversationResponse(code=0, message="success", data=result)
+    except ForbiddenError as exc:
+        raise HTTPException(
+            status_code=HTTPStatus.FORBIDDEN,
+            detail=str(exc),
+        ) from exc
     except Exception as e:
         logger.error(f"Agent export error: {str(e)}")
         raise HTTPException(
@@ -517,7 +753,11 @@ async def export_agent_api(request: AgentIDRequest, authorization: Optional[str]
 
 
 @agent_config_router.post("/import")
-async def import_agent_api(request: AgentImportRequest, authorization: Optional[str] = Header(None)):
+async def import_agent_api(
+    request: AgentImportRequest,
+    http_request: Request,
+    authorization: Optional[str] = Header(None)
+):
     """
     import an agent.
 
@@ -525,6 +765,16 @@ async def import_agent_api(request: AgentImportRequest, authorization: Optional[
     (agent with skills). The skills field, if present, should contain base64-encoded
     ZIP packages for each skill.
     """
+    # Best-effort identity resolution for audit only; the service resolves
+    # identity itself, so a failure here must not change endpoint behavior.
+    try:
+        user_id, tenant_id = get_current_user_id(authorization)
+    except Exception:
+        user_id, tenant_id = None, None
+    # Audit records identifiers and counts only; ZIP/skill payloads never reach the log.
+    audit_details = {"source_agent_id": request.agent_info.agent_id,
+                     "force_import": request.force_import,
+                     "skills_count": len(request.skills) if request.skills else 0}
     try:
         if request.skills:
             agent_id_mapping = await import_agent_with_skills_impl(
@@ -540,6 +790,9 @@ async def import_agent_api(request: AgentImportRequest, authorization: Optional[
                 authorization,
                 force_import=request.force_import
             )
+        record_security_event("agent_import", request=http_request,
+                              user_id=user_id, tenant_id=tenant_id,
+                              details=audit_details)
         return {
             "agent_id": agent_id_mapping.get(request.agent_info.agent_id),
             "agent_id_mapping": agent_id_mapping,
@@ -550,6 +803,12 @@ async def import_agent_api(request: AgentImportRequest, authorization: Optional[
             "duplicate_skills": exc.duplicate_names,
             "skill_conflicts": exc.skill_conflicts,
         })
+    except TenantResourceLimitError as exc:
+        logger.warning("Agent import rejected by resource limit: %s", exc)
+        return JSONResponse(
+            status_code=HTTPStatus.TOO_MANY_REQUESTS,
+            content=tenant_resource_limit_error_payload(exc),
+        )
     except Exception as e:
         logger.error(f"Agent import error: {str(e)}")
         raise HTTPException(
@@ -655,6 +914,67 @@ async def list_all_agent_info_api(
             status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail="Agent list error.")
 
 
+@agent_config_router.get("/list/page")
+async def list_agent_page_api(
+    tenant_id: Optional[str] = Query(None, description="Tenant ID for filtering"),
+    permission: Optional[str] = Query(None, description="EDIT or READ_ONLY"),
+    tag: Optional[str] = Query(None, description="Exact agent tag"),
+    search: Optional[str] = Query(None, description="Agent name or description search"),
+    created_by: Optional[str] = Query(None, description="Exact creator user ID"),
+    created_by_not: Optional[str] = Query(None, description="Exclude creator user ID"),
+    tag_predicates: Optional[str] = Query(None, description="Structured tag predicates as JSON"),
+    search_tag_predicates: Optional[str] = Query(None, description="Text-search tag predicates as JSON"),
+    page: int = Query(1, ge=1, description="Page number starting from 1"),
+    page_size: int = Query(20, ge=1, le=100, description="Items per page"),
+    include_repository_info: bool = Query(
+        False, description="Include repository listings for agents on this page"
+    ),
+    authorization: Optional[str] = Header(None),
+    request: Request = None,
+):
+    """List visible agents with filters and pagination."""
+    try:
+        user_id, auth_tenant_id, _ = get_current_user_info(authorization, request)
+        resolved_tenant_id = tenant_id or auth_tenant_id
+        additional_tenant_id = (
+            ASSET_OWNER_TENANT_ID
+            if tenant_id is None and auth_tenant_id != ASSET_OWNER_TENANT_ID
+            else None
+        )
+        kwargs = {
+            "tenant_id": resolved_tenant_id,
+            "user_id": user_id,
+            "caller_tenant_id": auth_tenant_id,
+            "permission": permission,
+            "tag": tag,
+            "search": search,
+            "page": page,
+            "page_size": page_size,
+            "include_repository_info": include_repository_info,
+        }
+        if created_by:
+            kwargs["created_by"] = created_by
+        if created_by_not:
+            kwargs["created_by_not"] = created_by_not
+        for key, raw in (("tag_predicates", tag_predicates), ("search_tag_predicates", search_tag_predicates)):
+            if raw:
+                parsed = json.loads(raw)
+                if not isinstance(parsed, list):
+                    raise ValueError(f"{key} must be a list")
+                kwargs[key] = [TagAssignmentFilter.model_validate(item) for item in parsed]
+        if additional_tenant_id:
+            kwargs["additional_tenant_id"] = additional_tenant_id
+        return await list_agent_page_impl(**kwargs)
+    except ValueError as error:
+        raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail=str(error)) from error
+    except Exception as error:
+        logger.error(f"Paged agent list error: {str(error)}")
+        raise HTTPException(
+            status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
+            detail="Paged agent list error.",
+        ) from error
+
+
 @agent_config_router.get("/call_relationship/{agent_id}")
 async def get_agent_call_relationship_api(agent_id: int, authorization: Optional[str] = Header(None)):
     """
@@ -677,6 +997,7 @@ async def get_agent_call_relationship_api(agent_id: int, authorization: Optional
 async def publish_version_api(
     agent_id: int,
     request: VersionPublishRequest,
+    http_request: Request,
     authorization: str = Header(None),
 ):
     """
@@ -691,6 +1012,9 @@ async def publish_version_api(
             version_name=request.version_name,
             release_note=request.release_note,
         )
+        record_security_event("agent_version_publish", request=http_request,
+                              user_id=user_id, tenant_id=tenant_id,
+                              details={"agent_id": agent_id, "version_name": request.version_name})
         return JSONResponse(status_code=HTTPStatus.OK, content=result)
     except ValueError as e:
         raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail=str(e))
@@ -808,6 +1132,7 @@ async def get_version_detail_api(
 async def rollback_version_api(
     agent_id: int,
     version_no: int,
+    http_request: Request,
     authorization: str = Header(None),
 ):
     """
@@ -817,12 +1142,15 @@ async def rollback_version_api(
     The user can then edit or re-publish from the restored state.
     """
     try:
-        _, tenant_id = get_current_user_id(authorization)
+        user_id, tenant_id = get_current_user_id(authorization)
         result = rollback_version_impl(
             agent_id=agent_id,
             tenant_id=tenant_id,
             target_version_no=version_no,
         )
+        record_security_event("agent_version_rollback", request=http_request,
+                              user_id=user_id, tenant_id=tenant_id,
+                              details={"agent_id": agent_id, "version_no": version_no})
         return JSONResponse(status_code=HTTPStatus.OK, content=result)
     except ValueError as e:
         raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail=str(e))
@@ -837,6 +1165,7 @@ async def update_version_status_api(
     agent_id: int,
     version_no: int,
     request: VersionStatusRequest,
+    http_request: Request,
     authorization: str = Header(None),
 ):
     """
@@ -851,6 +1180,10 @@ async def update_version_status_api(
             version_no=version_no,
             status=request.status,
         )
+        record_security_event("agent_version_status_update", request=http_request,
+                              user_id=user_id, tenant_id=tenant_id,
+                              details={"agent_id": agent_id, "version_no": version_no,
+                                       "status": request.status})
         return JSONResponse(status_code=HTTPStatus.OK, content=result)
     except ValueError as e:
         raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail=str(e))
@@ -865,6 +1198,7 @@ async def update_version_api(
     agent_id: int,
     version_no: int,
     request: VersionUpdateRequest,
+    http_request: Request,
     authorization: str = Header(None),
 ):
     """
@@ -880,6 +1214,10 @@ async def update_version_api(
             version_name=request.version_name,
             release_note=request.release_note,
         )
+        record_security_event("agent_version_update", request=http_request,
+                              user_id=user_id, tenant_id=tenant_id,
+                              details={"agent_id": agent_id, "version_no": version_no,
+                                       "version_name": request.version_name})
         return JSONResponse(status_code=HTTPStatus.OK, content=result)
     except ValueError as e:
         raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail=str(e))
@@ -893,6 +1231,7 @@ async def update_version_api(
 async def delete_version_api(
     agent_id: int,
     version_no: int,
+    http_request: Request,
     authorization: str = Header(None),
 ):
     """
@@ -906,6 +1245,9 @@ async def delete_version_api(
             user_id=user_id,
             version_no=version_no,
         )
+        record_security_event("agent_version_delete", request=http_request,
+                              user_id=user_id, tenant_id=tenant_id,
+                              details={"agent_id": agent_id, "version_no": version_no})
         return JSONResponse(status_code=HTTPStatus.OK, content=result)
     except ValueError as e:
         raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail=str(e))

@@ -1,0 +1,35 @@
+schema_version: '1.0'
+change:
+  change_id: AGENT-COPY-DUP-20261012
+  change_type: bugfix
+  bug_id: AGENT-COPY-DUP-20261012
+  title: Copied agents become unavailable instead of receiving unique names
+  description: Copying an agent in the repository must keep the duplicate available by generating a unique name and display_name with a numeric suffix, backed by backend deduplication for direct update-API creates.
+  observed_behavior: Copying an agent, or creating an agent with an existing name through the update API, produced a duplicate_name/duplicate_display_name resource that the list API marked is_available=false and that could not be published.
+  expected_behavior: A copy gets name/display_name like base_1/base_2 when the base exists, the backend create branch also deduplicates, and the copied agent stays available and publishable.
+  escaped_stage: D4
+  coverage_gap:
+    type: missing_boundary
+    description: API-058 asserted the legacy duplicate-unavailable contract instead of the fixed unique-suffix behavior, and no D4 journey exercised the real repository copy menu.
+  feature_contract_changed: false
+  traditional_ut:
+    decision: strengthen
+    reason: The fix commits add backend update-API deduplication coverage and the frontend unique-suffix generator; existing service tests already cover regenerate-name fallback, so the regression obligations below reuse those additions.
+    behaviors:
+    - Creating an agent via update_agent_info_impl resolves duplicate name and display_name to a unique _N suffix.
+    - The frontend generateUniqueCopyName helper probes check_name and appends _1/_2 suffixes for both identifiers.
+    - Copying through the agent repository produces an available agent without duplicate unavailable reasons.
+    test_selectors:
+    - test/backend/services/test_agent_service.py
+    - frontend/tests/component/agentExportFilename.test.tsx
+  affected_features:
+    existing: [F-043]
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing: []
+    added: [PW-AGENT-COPY-01]
+    modified: [API-058]
+    retired: []
+  notes: Product commits 5bcdba66b (frontend unique copy name) and 8d1711316 (backend create deduplication). Frontend selector currently lives in agentExportFilename.test.tsx which exercises shared agentConfigService helpers; a dedicated copy-name component test remains deferred coverage.

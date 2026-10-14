@@ -34,10 +34,12 @@ def dependency(monkeypatch, name, **attributes):
     ("hello", None, "hello"),
     ("hello", "invalid/zone", "hello"),
     ("", "UTC", ""),
-    ("[Current time: existing] hello", "UTC", "[Current time: existing] hello"),
-    ("hello", "Asia/Shanghai", "[Current time: 2026-08-31 08:00:00]\n\nhello"),
+    ("hello", "Asia/Shanghai", "hello\n\n[Current time: 2026-08-31 08:00:00]"),
+    ("hello\n\n[Current time: existing]", "UTC", "hello\n\n[Current time: existing]"),
+    ("hello\n\nRun workspace: /run/1", "UTC",
+     "hello\n\n[Current time: 2026-08-31 00:00:00]\n\nRun workspace: /run/1"),
 ])
-def test_ac002_prepend_time_compatibility(monkeypatch, query, zone, expected):
+def test_ac002_append_runtime_time(monkeypatch, query, zone, expected):
     module = load_source(monkeypatch, "backend/utils/time_context_utils.py", "slimming_time")
     assert module.prepend_current_time(
         query, zone, now=datetime(2026, 8, 31, tzinfo=timezone.utc)
@@ -46,10 +48,10 @@ def test_ac002_prepend_time_compatibility(monkeypatch, query, zone, expected):
 
 @pytest.mark.parametrize("query,expected", [
     (None, None), ("", ""), ("  hello  ", "  hello  "),
-    ("[Current time: incomplete", "[Current time: incomplete"),
-    ("[Current time: now]\n\n hello  ", "hello"),
+    ("hello\n\n[Current time: now]", "hello"),
+    ("hello\n\n[当前时间: now]\n\nRun workspace: /run/1", "hello\n\nRun workspace: /run/1"),
 ])
-def test_ac002_strip_time_compatibility(monkeypatch, query, expected):
+def test_ac002_strip_runtime_time(monkeypatch, query, expected):
     module = load_source(monkeypatch, "backend/utils/time_context_utils.py", "slimming_time")
     assert module.strip_current_time_prefix(query) == expected
 
@@ -82,7 +84,7 @@ def test_ac002_preview_key_matches_existing_contract(monkeypatch):
 def naming(monkeypatch):
     dependency(monkeypatch, "consts.const", LANGUAGE={"ZH": "zh", "EN": "en"})
     dependency(monkeypatch, "database.agent_db", query_all_agent_info_by_tenant_id=lambda tenant: [])
-    dependency(monkeypatch, "utils.llm_utils", call_llm_for_system_prompt=lambda **kw: "fresh")
+    dependency(monkeypatch, "management.services.model.invocation", call_llm_for_system_prompt=lambda **kw: "fresh")
     dependency(
         monkeypatch, "utils.prompt_template_utils",
         get_prompt_generate_prompt_template=lambda language: {},
@@ -203,6 +205,7 @@ def test_ac008_shared_run_preparation(monkeypatch, enabled, debug):
 
     dependency(monkeypatch, "services.memory_config_service", build_memory_context=memory)
     dependency(monkeypatch, "utils.monitoring", monitoring_manager=types.SimpleNamespace(bind_agent_context=lambda value: value))
+    dependency(monkeypatch, "utils.monitoring_identity", resolve_monitoring_user_email=lambda user, tenant: "person@example.com")
     module = load_source(monkeypatch, "backend/management/services/agent/run_context.py", "slimming_run_context")
     request = types.SimpleNamespace(
         agent_id=3, conversation_id=4, query="hello", is_debug=debug, history=[1, 2], minio_files=[]
@@ -211,6 +214,8 @@ def test_ac008_shared_run_preparation(monkeypatch, enabled, debug):
     assert context.enable_memory is (enabled and not debug)
     assert calls == [(("user", "tenant", 3), {"skip_query": debug})]
     assert context.metadata.memory_enabled is enabled
+    assert context.metadata.user_id == "user"
+    assert context.metadata.user_email == "person@example.com"
     assert context.metadata.history_count == 2
     assert context.metadata.minio_files_count == 0
     assert context.metadata.extra_metadata == {"agent_share_option": "private", "background": True}
@@ -228,7 +233,7 @@ def model_resolver(monkeypatch):
         get_model_by_model_id_ignore_delete=lambda *args: None,
         get_valid_model_ids=lambda ids, tenant: [mid for mid in ids if mid != 9],
     )
-    dependency(monkeypatch, "services.model_gateway_service", build_adapter_fresh=lambda *args: args)
+    dependency(monkeypatch, "management.services.model.adapter", build_adapter_fresh=lambda *args: args)
     dependency(
         monkeypatch, "utils.config_utils",
         tenant_config_manager=types.SimpleNamespace(get_model_config=lambda **kwargs: {}),

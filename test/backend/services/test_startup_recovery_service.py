@@ -259,3 +259,21 @@ async def test_schedule_interrupted_upload_cleanup_checks_now_and_after_grace(
         "nexent-config",
         "nexent-config",
     ]
+
+
+@pytest.mark.asyncio
+async def test_schedule_workbench_main_backfill_runs_in_background(monkeypatch):
+    """UT-BE-SAL-006: historical bootstrap must not block config startup."""
+    backfill = MagicMock(return_value={"total": 2, "succeeded": 2, "failed": 0})
+    tenant_service_module = types.ModuleType("services.tenant_service")
+    tenant_service_module.backfill_workbench_main_agents = backfill
+    monkeypatch.setitem(sys.modules, "services.tenant_service", tenant_service_module)
+    startup_recovery_service._system_agent_backfill_tasks.clear()
+
+    startup_recovery_service.schedule_workbench_main_backfill()
+    pending = list(startup_recovery_service._system_agent_backfill_tasks)
+    assert pending
+
+    await asyncio.gather(*pending)
+
+    backfill.assert_called_once_with()

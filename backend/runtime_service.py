@@ -21,11 +21,11 @@ from utils.logging_utils import (
 )
 
 
-logging.config.dictConfig(get_uvicorn_logging_config(categories=["runtime"]))
+logging.config.dictConfig(get_uvicorn_logging_config(categories=["runtime", "model_call"]))
 configure_elasticsearch_logging()
 logger = logging.getLogger("runtime")
 
 if __name__ == "__main__":
     logger.info("Starting server initialization...")
     logger.info(f"APP version is: {APP_VERSION}")
-    uvicorn.run(app, host="0.0.0.0", port=5014, log_level="info", log_config=get_uvicorn_logging_config(categories=["runtime"]))
+    uvicorn.run(app, host="0.0.0.0", port=5014, log_level="info", log_config=get_uvicorn_logging_config(categories=["runtime", "model_call"]))

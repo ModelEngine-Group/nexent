@@ -1,17 +1,47 @@
 from __future__ import annotations
 
+from copy import deepcopy
+from dataclasses import fields, is_dataclass
 from threading import Event
 from typing import TYPE_CHECKING, Any, Dict, List, Literal, Optional, Union
 
 from pydantic import BaseModel, Field, model_validator
 
-from ..utils.observer import MessageObserver
 from ..models.capacity_budget import ContextBudgetSnapshot
+from ..utils.observer import MessageObserver
 from .context.models import ContextItemInput
 
 
 if TYPE_CHECKING:
     from .a2a_agent_proxy import A2AAgentInfo
+
+def copy_invocation_config(config: "AgentConfig") -> "AgentConfig":
+    """Copy configuration data while retaining injected runtime objects."""
+    memo = {}
+    visited = set()
+
+    def preserve_services(value):
+        identity = id(value)
+        if identity in visited:
+            return
+        visited.add(identity)
+        if isinstance(value, BaseModel):
+            children = [vars(value), value.__pydantic_extra__, value.__pydantic_private__]
+        elif isinstance(value, dict):
+            children = [*value.keys(), *value.values()]
+        elif isinstance(value, (list, tuple, set, frozenset)):
+            children = value
+        elif is_dataclass(value) and not isinstance(value, type):
+            children = [getattr(value, field.name) for field in fields(value)]
+        else:
+            memo[identity] = value
+            return
+        for child in children:
+            preserve_services(child)
+
+    preserve_services(config)
+    return deepcopy(config, memo)
+
 
 # Protocol type constants (must match backend/database/a2a_agent_db.py definitions)
 PROTOCOL_JSONRPC = "JSONRPC"
@@ -134,6 +164,7 @@ class ToolConfig(BaseModel):
     class_name: str = Field(description="Tool class name")
     name: Optional[str] = Field(description="Tool name")
     description: Optional[str] = Field(description="Tool description", default=None)
+    description_zh: Optional[str] = Field(description="Chinese tool description", default=None)
     inputs: Optional[str] = Field(description="Tool inputs", default=None)
     output_type: Optional[str] = Field(description="Tool output type", default=None)
     params: Dict[str, Any] = Field(description="Initialization parameters", default=None)
@@ -261,7 +292,22 @@ class AgentVerificationConfig(BaseModel):
 
 
 class AgentConfig(BaseModel):
+    runtime_ref: Optional[str] = None
+    origin: Literal["SYSTEM", "PERSISTED", "BUILTIN_RUNTIME"] = "PERSISTED"
+    agent_id: Optional[Union[int, str]] = Field(
+        description="Stable persisted Agent identity used for runtime events",
+        default=None,
+    )
+    version_no: Optional[int] = Field(
+        description="Resolved immutable Agent version used by this run",
+        default=None,
+    )
+    invocation_name: Optional[str] = Field(
+        description="Stable, unique callable name within the resolved Agent tree",
+        default=None,
+    )
     name: str = Field(description="Agent name")
+    display_name: Optional[str] = Field(description="User-facing Agent name", default=None)
     description: str = Field(description="Agent description")
     prompt_templates: Optional[Dict[str, Any]] = Field(description="Prompt templates", default=None)
     tools: List[ToolConfig] = Field(description="List of tool information")
@@ -272,9 +318,13 @@ class AgentConfig(BaseModel):
         ge=1,
     )
     model_name: str = Field(description="Model alias from ModelConfig")
-    output_protocol: Literal["code_action", "final_answer_envelope"] = Field(
+    output_protocol: Literal["code_action", "final_envelope"] = Field(
         description="Closed model-output protocol used by the Agent runtime",
         default="code_action",
+    )
+    enable_protocol_repair_retry: bool = Field(
+        description="Whether the Agent uses strict output validation and silent protocol repair",
+        default=False,
     )
     provide_run_summary: Optional[bool] = Field(
         description="Whether to provide run summary to upper-level Agent", default=False
@@ -286,7 +336,7 @@ class AgentConfig(BaseModel):
     instructions: Optional[str] = Field(
         description="Additional instructions to prepend to system prompt", default=None
     )
-    managed_agents: List["AgentConfig"] = Field(description="Internal managed sub-agents created locally", default=[])
+    worker_agents: List["AgentConfig"] = Field(description="Internal worker sub-agents created locally", default=[])
     external_a2a_agents: List["ExternalA2AAgentConfig"] = Field(
         description="External A2A agents called via HTTP requests", default=[]
     )
@@ -295,6 +345,9 @@ class AgentConfig(BaseModel):
     )
     context_items: Optional[List[ContextItemInput]] = Field(
         description="Authorized fine-grained context item inputs for SDK assembly", default=None
+    )
+    prompt_tool_policy_snapshot: Optional[Dict[str, Any]] = Field(
+        description="Immutable versioned tool policy values injected for this Agent run", default=None
     )
     pre_run_tool_events: List[Dict[str, Any]] = Field(
         description=(
@@ -373,6 +426,13 @@ class AgentRunInfo(BaseModel):
         "Authorization can be provided as 'authorization' (e.g., 'Bearer token') or as 'headers' dict.",
         default=None,
     )
+    mcp_request_timeout_seconds: Optional[float] = Field(
+        description=(
+            "Maximum seconds allowed to establish an MCP connection and complete "
+            "the initialization handshake. It does not limit tool execution."
+        ),
+        default=None,
+    )
     history: Optional[List[AgentHistory]] = Field(description="Historical conversation information", default=None)
     stop_event: Event = Field(description="Stop event control")
     cancellation_scope: Optional[Any] = Field(
@@ -447,6 +507,14 @@ class AgentRunInfo(BaseModel):
             "and NEXENT_SANDBOX_* environment variables.  "
             "When None the SDK uses LocalPythonExecutor (backwards-compatible)."
         ),
+        default=None,
+    )
+    tool_fastpath_enabled: bool = Field(
+        description="Enable restricted official-tool actions before ordinary Docker initialization.",
+        default=True,
+    )
+    tool_fastpath_allowed_tools: Optional[List[str]] = Field(
+        description="Deployment-approved official implementation IDs for local fast-path actions.",
         default=None,
     )
     minio_client: Optional[Any] = Field(

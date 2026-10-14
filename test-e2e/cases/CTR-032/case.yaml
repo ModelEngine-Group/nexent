@@ -1,0 +1,48 @@
+schema_version: '1.0'
+stage: D3
+module: V5-BASELINE
+case:
+  case_id: CTR-032
+  feature_id: F-089
+  business_rule_ids:
+  - F-089-RULE-01
+  title: URL Agent Card discover + custom headers｜异常/边界/越权
+  type: INTEGRATION
+  priority: P0
+  status: active
+  automation: automated
+  objective: URL Agent Card discover + custom headers｜异常/边界/越权
+  preconditions:
+  - Nexent服务与仓库受控A2A Mock就绪，无其他故障注入批次。
+  - config/a2a.yaml符合统一Schema，控制令牌由既有环境或secrets.env提供。
+  - 使用本次动态ID、唯一source URL及受控测试身份，不借用历史资源。
+  test_data:
+    configuration: config/a2a.yaml
+    mock_service: a2a-agent
+  steps:
+  - order: 1
+    action: 通过Nexent发现缺认证的idkey卡片
+    expected: 返回400，wire认证失败，不新增Agent记录
+  - order: 2
+    action: 注入malformed-card并经Nexent发现
+    expected: 返回400，不新增记录；finally恢复原场景
+  - order: 3
+    action: 核对前后Agent ID集合及wire证据
+    expected: 记录集合不变，证据脱敏保存
+  expected_results:
+  - 返回400，wire认证失败，不新增Agent记录
+  - 返回400，不新增记录；finally恢复原场景
+  - 记录集合不变，证据脱敏保存
+  forbidden_side_effects: []
+  source:
+    legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
+    legacy_sheet: 02_测试用例基线
+    legacy_row: 175
+  integration_boundary:
+  - Nexent实际HTTP API与受控外部A2A服务及本地持久化，非Mock自测。
+  observations:
+  - 返回400，wire认证失败，不新增Agent记录
+  - 返回400，不新增记录；finally恢复原场景
+  - 记录集合不变，证据脱敏保存
+  cleanup:
+  - 清理本次动态资源或恢复故障场景；本地保留脱敏wire、JUnit及清理记录。

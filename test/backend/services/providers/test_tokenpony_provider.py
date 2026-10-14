@@ -9,7 +9,7 @@ from pytest_mock import MockFixture
 
 import httpx
 
-from backend.services.providers.tokenpony_provider import TokenPonyModelProvider
+from management.services.model.providers.tokenpony_provider import TokenPonyModelProvider
 
 
 class TestTokenPonyModelProvider:
@@ -44,15 +44,15 @@ class TestTokenPonyModelProvider:
         mock_cm.__aexit__ = AsyncMock(return_value=None)
 
         mocker.patch(
-            "backend.services.providers.tokenpony_provider.httpx.AsyncClient",
+            "management.services.model.providers.tokenpony_provider.httpx.AsyncClient",
             return_value=mock_cm
         )
         mocker.patch(
-            "backend.services.providers.tokenpony_provider.TOKENPONY_GET_URL",
+            "management.services.model.providers.tokenpony_provider.TOKENPONY_GET_URL",
             "https://api.tokenpony.cn/v1/models"
         )
         mocker.patch(
-            "backend.services.providers.tokenpony_provider.DEFAULT_LLM_MAX_TOKENS",
+            "management.services.model.providers.tokenpony_provider.DEFAULT_LLM_MAX_TOKENS",
             4096
         )
 
@@ -98,7 +98,7 @@ class TestTokenPonyModelProvider:
         mock_cm.__aexit__ = AsyncMock(return_value=None)
 
         mocker.patch(
-            "backend.services.providers.tokenpony_provider.httpx.AsyncClient",
+            "management.services.model.providers.tokenpony_provider.httpx.AsyncClient",
             return_value=mock_cm
         )
 
@@ -137,11 +137,11 @@ class TestTokenPonyModelProvider:
         mock_cm.__aexit__ = AsyncMock(return_value=None)
 
         mocker.patch(
-            "backend.services.providers.tokenpony_provider.httpx.AsyncClient",
+            "management.services.model.providers.tokenpony_provider.httpx.AsyncClient",
             return_value=mock_cm
         )
         mocker.patch(
-            "backend.services.providers.tokenpony_provider.TOKENPONY_GET_URL",
+            "management.services.model.providers.tokenpony_provider.TOKENPONY_GET_URL",
             "https://api.tokenpony.cn/v1/models"
         )
 
@@ -192,11 +192,11 @@ class TestTokenPonyModelProvider:
         mock_cm.__aexit__ = AsyncMock(return_value=None)
 
         mocker.patch(
-            "backend.services.providers.tokenpony_provider.httpx.AsyncClient",
+            "management.services.model.providers.tokenpony_provider.httpx.AsyncClient",
             return_value=mock_cm
         )
         mocker.patch(
-            "backend.services.providers.tokenpony_provider.TOKENPONY_GET_URL",
+            "management.services.model.providers.tokenpony_provider.TOKENPONY_GET_URL",
             "https://api.tokenpony.cn/v1/models"
         )
 
@@ -251,7 +251,7 @@ class TestTokenPonyModelProvider:
         mock_cm.__aexit__ = AsyncMock(return_value=None)
 
         mocker.patch(
-            "backend.services.providers.tokenpony_provider.httpx.AsyncClient",
+            "management.services.model.providers.tokenpony_provider.httpx.AsyncClient",
             return_value=mock_cm
         )
 
@@ -307,7 +307,7 @@ class TestTokenPonyModelProvider:
         mock_cm.__aexit__ = AsyncMock(return_value=None)
 
         mocker.patch(
-            "backend.services.providers.tokenpony_provider.httpx.AsyncClient",
+            "management.services.model.providers.tokenpony_provider.httpx.AsyncClient",
             return_value=mock_cm
         )
 
@@ -347,11 +347,11 @@ class TestTokenPonyModelProvider:
         mock_cm.__aexit__ = AsyncMock(return_value=None)
 
         mocker.patch(
-            "backend.services.providers.tokenpony_provider.httpx.AsyncClient",
+            "management.services.model.providers.tokenpony_provider.httpx.AsyncClient",
             return_value=mock_cm
         )
         mocker.patch(
-            "backend.services.providers.tokenpony_provider.TOKENPONY_GET_URL",
+            "management.services.model.providers.tokenpony_provider.TOKENPONY_GET_URL",
             "https://api.tokenpony.cn/v1/models"
         )
 
@@ -392,11 +392,11 @@ class TestTokenPonyModelProvider:
         mock_cm.__aexit__ = AsyncMock(return_value=None)
 
         mocker.patch(
-            "backend.services.providers.tokenpony_provider.httpx.AsyncClient",
+            "management.services.model.providers.tokenpony_provider.httpx.AsyncClient",
             return_value=mock_cm
         )
         mocker.patch(
-            "backend.services.providers.tokenpony_provider.TOKENPONY_GET_URL",
+            "management.services.model.providers.tokenpony_provider.TOKENPONY_GET_URL",
             "https://api.tokenpony.cn/v1/models"
         )
 
@@ -437,11 +437,11 @@ class TestTokenPonyModelProvider:
         mock_cm.__aexit__ = AsyncMock(return_value=None)
 
         mocker.patch(
-            "backend.services.providers.tokenpony_provider.httpx.AsyncClient",
+            "management.services.model.providers.tokenpony_provider.httpx.AsyncClient",
             return_value=mock_cm
         )
         mocker.patch(
-            "backend.services.providers.tokenpony_provider.TOKENPONY_GET_URL",
+            "management.services.model.providers.tokenpony_provider.TOKENPONY_GET_URL",
             "https://api.tokenpony.cn/v1/models"
         )
 
@@ -482,11 +482,11 @@ class TestTokenPonyModelProvider:
         mock_cm.__aexit__ = AsyncMock(return_value=None)
 
         mocker.patch(
-            "backend.services.providers.tokenpony_provider.httpx.AsyncClient",
+            "management.services.model.providers.tokenpony_provider.httpx.AsyncClient",
             return_value=mock_cm
         )
         mocker.patch(
-            "backend.services.providers.tokenpony_provider.TOKENPONY_GET_URL",
+            "management.services.model.providers.tokenpony_provider.TOKENPONY_GET_URL",
             "https://api.tokenpony.cn/v1/models"
         )
 
@@ -518,11 +518,11 @@ class TestTokenPonyModelProvider:
         mock_cm.__aexit__ = AsyncMock(return_value=None)
 
         mocker.patch(
-            "backend.services.providers.tokenpony_provider.httpx.AsyncClient",
+            "management.services.model.providers.tokenpony_provider.httpx.AsyncClient",
             return_value=mock_cm
         )
         mocker.patch(
-            "backend.services.providers.tokenpony_provider.TOKENPONY_GET_URL",
+            "management.services.model.providers.tokenpony_provider.TOKENPONY_GET_URL",
             "https://api.tokenpony.cn/v1/models"
         )
 
@@ -551,11 +551,11 @@ class TestTokenPonyModelProvider:
         mock_cm.__aexit__ = AsyncMock(return_value=None)
 
         mocker.patch(
-            "backend.services.providers.tokenpony_provider.httpx.AsyncClient",
+            "management.services.model.providers.tokenpony_provider.httpx.AsyncClient",
             return_value=mock_cm
         )
         mocker.patch(
-            "backend.services.providers.tokenpony_provider.TOKENPONY_GET_URL",
+            "management.services.model.providers.tokenpony_provider.TOKENPONY_GET_URL",
             "https://api.tokenpony.cn/v1/models"
         )
 
@@ -586,11 +586,11 @@ class TestTokenPonyModelProvider:
         mock_cm.__aexit__ = AsyncMock(return_value=None)
 
         mocker.patch(
-            "backend.services.providers.tokenpony_provider.httpx.AsyncClient",
+            "management.services.model.providers.tokenpony_provider.httpx.AsyncClient",
             return_value=mock_cm
         )
         mocker.patch(
-            "backend.services.providers.tokenpony_provider.TOKENPONY_GET_URL",
+            "management.services.model.providers.tokenpony_provider.TOKENPONY_GET_URL",
             "https://api.tokenpony.cn/v1/models"
         )
 
@@ -617,11 +617,11 @@ class TestTokenPonyModelProvider:
         mock_cm.__aexit__ = AsyncMock(return_value=None)
 
         mocker.patch(
-            "backend.services.providers.tokenpony_provider.httpx.AsyncClient",
+            "management.services.model.providers.tokenpony_provider.httpx.AsyncClient",
             return_value=mock_cm
         )
         mocker.patch(
-            "backend.services.providers.tokenpony_provider.TOKENPONY_GET_URL",
+            "management.services.model.providers.tokenpony_provider.TOKENPONY_GET_URL",
             "https://api.tokenpony.cn/v1/models"
         )
 
@@ -648,11 +648,11 @@ class TestTokenPonyModelProvider:
         mock_cm.__aexit__ = AsyncMock(return_value=None)
 
         mocker.patch(
-            "backend.services.providers.tokenpony_provider.httpx.AsyncClient",
+            "management.services.model.providers.tokenpony_provider.httpx.AsyncClient",
             return_value=mock_cm
         )
         mocker.patch(
-            "backend.services.providers.tokenpony_provider.TOKENPONY_GET_URL",
+            "management.services.model.providers.tokenpony_provider.TOKENPONY_GET_URL",
             "https://api.tokenpony.cn/v1/models"
         )
 
@@ -692,11 +692,11 @@ class TestTokenPonyModelProvider:
         mock_cm.__aexit__ = AsyncMock(return_value=None)
 
         mocker.patch(
-            "backend.services.providers.tokenpony_provider.httpx.AsyncClient",
+            "management.services.model.providers.tokenpony_provider.httpx.AsyncClient",
             return_value=mock_cm
         )
         mocker.patch(
-            "backend.services.providers.tokenpony_provider.TOKENPONY_GET_URL",
+            "management.services.model.providers.tokenpony_provider.TOKENPONY_GET_URL",
             "https://api.tokenpony.cn/v1/models"
         )
 
@@ -737,11 +737,11 @@ class TestTokenPonyModelProvider:
         mock_cm.__aexit__ = AsyncMock(return_value=None)
 
         mocker.patch(
-            "backend.services.providers.tokenpony_provider.httpx.AsyncClient",
+            "management.services.model.providers.tokenpony_provider.httpx.AsyncClient",
             return_value=mock_cm
         )
         mocker.patch(
-            "backend.services.providers.tokenpony_provider.TOKENPONY_GET_URL",
+            "management.services.model.providers.tokenpony_provider.TOKENPONY_GET_URL",
             "https://api.tokenpony.cn/v1/models"
         )
 
@@ -789,11 +789,11 @@ class TestTokenPonyModelProvider:
         mock_cm.__aexit__ = AsyncMock(return_value=None)
 
         mocker.patch(
-            "backend.services.providers.tokenpony_provider.httpx.AsyncClient",
+            "management.services.model.providers.tokenpony_provider.httpx.AsyncClient",
             return_value=mock_cm
         )
         mocker.patch(
-            "backend.services.providers.tokenpony_provider.TOKENPONY_GET_URL",
+            "management.services.model.providers.tokenpony_provider.TOKENPONY_GET_URL",
             "https://api.tokenpony.cn/v1/models"
         )
 
@@ -839,11 +839,11 @@ class TestTokenPonyModelProvider:
         mock_cm.__aexit__ = AsyncMock(return_value=None)
 
         mocker.patch(
-            "backend.services.providers.tokenpony_provider.httpx.AsyncClient",
+            "management.services.model.providers.tokenpony_provider.httpx.AsyncClient",
             return_value=mock_cm
         )
         mocker.patch(
-            "backend.services.providers.tokenpony_provider.TOKENPONY_GET_URL",
+            "management.services.model.providers.tokenpony_provider.TOKENPONY_GET_URL",
             "https://api.tokenpony.cn/v1/models"
         )
 
@@ -884,15 +884,15 @@ class TestTokenPonyModelProvider:
         mock_cm.__aexit__ = AsyncMock(return_value=None)
 
         mocker.patch(
-            "backend.services.providers.tokenpony_provider.httpx.AsyncClient",
+            "management.services.model.providers.tokenpony_provider.httpx.AsyncClient",
             return_value=mock_cm
         )
         mocker.patch(
-            "backend.services.providers.tokenpony_provider.TOKENPONY_GET_URL",
+            "management.services.model.providers.tokenpony_provider.TOKENPONY_GET_URL",
             "https://api.tokenpony.cn/v1/models"
         )
         mocker.patch(
-            "backend.services.providers.tokenpony_provider.DEFAULT_LLM_MAX_TOKENS",
+            "management.services.model.providers.tokenpony_provider.DEFAULT_LLM_MAX_TOKENS",
             4096
         )
 

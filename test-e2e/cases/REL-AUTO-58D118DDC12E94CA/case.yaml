@@ -1,0 +1,78 @@
+schema_version: '1.0'
+stage: D5
+module: V5-BASELINE
+case:
+  case_id: REL-AUTO-58D118DDC12E94CA
+  feature_id: V5-REL-AUTO-58D118DDC12E94CA
+  business_rule_ids:
+  - V5-REL-AUTO-58D118DDC12E94CA-RULE-01
+  title: 单副本重启后孤儿运行恢复与调度锁释放（recover_orphaned_runs / release_all_task_locks）
+  type: RELIABILITY
+  priority: P1
+  status: active
+  automation: automated
+  objective: 可靠性：单副本 runtime 重启后，RUNNING 运行被置为 TIMEOUT、QUEUED 运行被保留，所有残留调度锁被释放，任务可被调度器继续消费，不因残留锁卡死。
+  preconditions:
+  - '- ${NEXENT_TEST_HOME}/config/environment.yaml（仅本地测试环境参数）
+
+    - pytest 测试环境可连接本地 PostgreSQL（nexent.agent_automation_run_t / nexent.agent_automation_task_t）'
+  test_data:
+    legacy_asset_declaration: '- ${NEXENT_TEST_HOME}/config/environment.yaml（仅本地测试环境参数）
+
+      - pytest 测试环境可连接本地 PostgreSQL（nexent.agent_automation_run_t / nexent.agent_automation_task_t）'
+  steps:
+  - order: 1
+    action: 设置 NEXENT_TEST_HOME 指向仓库外目录，生成当次 run_id，确认可连接本地 PostgreSQL，测试代码不读取生产凭据。
+    expected: recover_orphaned_runs 仅将 status='RUNNING' 的 run 置为 'TIMEOUT' 且 error_code='AUTOMATION_LEASE_EXPIRED'，返回值等于受影响的
+      RUNNING 行数。
+  - order: 2
+    action: 通过 backend/database/agent_automation_db.py 的 create_task/create_run 构造测试数据：插入一条 status='RUNNING'、trigger_type='SCHEDULED'
+      的 run 与一条 status='QUEUED'、trigger_type='SCHEDULED' 的 run，并为该 task 设置 lock_owner='prev-instance'、lock_until 为未来时间。
+    expected: status='QUEUED' 的 run 维持 'QUEUED' 不变，未被置为 TIMEOUT。
+  - order: 3
+    action: 调用 recover_orphaned_runs()，记录返回值，并按 task_id 查询 run 表状态。
+    expected: release_all_task_locks 释放所有 delete_flag='N' 且 lock_owner 非空的 task：lock_owner 与 lock_until 均清空，返回值等于受影响行数。
+  - order: 4
+    action: 调用 release_all_task_locks()，记录返回值，并按 task_id 查询 task 表的 lock_owner/lock_until。
+    expected: 锁释放后 claim_due_tasks 能重新占用该任务（lock_owner 变为新 instance_id 且返回含该 task_id 的行），不存在残留锁导致的调度卡死。
+  - order: 5
+    action: 以新的 instance_id 调用 claim_due_tasks(...)，断言原被锁任务可被重新抢占并返回包含该 task_id 的行。
+    expected: 锁释放后 claim_due_tasks 能重新占用该任务（lock_owner 变为新 instance_id 且返回含该 task_id 的行），不存在残留锁导致的调度卡死。
+  - order: 6
+    action: 清理本次构造的测试数据，确认可重复执行。
+    expected: 锁释放后 claim_due_tasks 能重新占用该任务（lock_owner 变为新 instance_id 且返回含该 task_id 的行），不存在残留锁导致的调度卡死。
+  expected_results:
+  - recover_orphaned_runs 仅将 status='RUNNING' 的 run 置为 'TIMEOUT' 且 error_code='AUTOMATION_LEASE_EXPIRED'，返回值等于受影响的 RUNNING
+    行数。
+  - status='QUEUED' 的 run 维持 'QUEUED' 不变，未被置为 TIMEOUT。
+  - release_all_task_locks 释放所有 delete_flag='N' 且 lock_owner 非空的 task：lock_owner 与 lock_until 均清空，返回值等于受影响行数。
+  - 锁释放后 claim_due_tasks 能重新占用该任务（lock_owner 变为新 instance_id 且返回含该 task_id 的行），不存在残留锁导致的调度卡死。
+  forbidden_side_effects: []
+  source:
+    legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
+    legacy_sheet: 04_安全性能可靠性
+    legacy_row: 55
+  risk_type: RELIABILITY
+  risk: 可靠性：单副本 runtime 重启后，RUNNING 运行被置为 TIMEOUT、QUEUED 运行被保留，所有残留调度锁被释放，任务可被调度器继续消费，不因残留锁卡死。
+  condition:
+  - '- ${NEXENT_TEST_HOME}/config/environment.yaml（仅本地测试环境参数）
+
+    - pytest 测试环境可连接本地 PostgreSQL（nexent.agent_automation_run_t / nexent.agent_automation_task_t）'
+  metrics:
+  - recover_orphaned_runs 仅将 status='RUNNING' 的 run 置为 'TIMEOUT' 且 error_code='AUTOMATION_LEASE_EXPIRED'，返回值等于受影响的 RUNNING
+    行数。
+  - status='QUEUED' 的 run 维持 'QUEUED' 不变，未被置为 TIMEOUT。
+  - release_all_task_locks 释放所有 delete_flag='N' 且 lock_owner 非空的 task：lock_owner 与 lock_until 均清空，返回值等于受影响行数。
+  - 锁释放后 claim_due_tasks 能重新占用该任务（lock_owner 变为新 instance_id 且返回含该 task_id 的行），不存在残留锁导致的调度卡死。
+  thresholds:
+  - recover_orphaned_runs 仅将 status='RUNNING' 的 run 置为 'TIMEOUT' 且 error_code='AUTOMATION_LEASE_EXPIRED'，返回值等于受影响的 RUNNING
+    行数。
+  - status='QUEUED' 的 run 维持 'QUEUED' 不变，未被置为 TIMEOUT。
+  - release_all_task_locks 释放所有 delete_flag='N' 且 lock_owner 非空的 task：lock_owner 与 lock_until 均清空，返回值等于受影响行数。
+  - 锁释放后 claim_due_tasks 能重新占用该任务（lock_owner 变为新 instance_id 且返回含该 task_id 的行），不存在残留锁导致的调度卡死。
+  recovery_expectations:
+  - recover_orphaned_runs 仅将 status='RUNNING' 的 run 置为 'TIMEOUT' 且 error_code='AUTOMATION_LEASE_EXPIRED'，返回值等于受影响的 RUNNING
+    行数。
+  - status='QUEUED' 的 run 维持 'QUEUED' 不变，未被置为 TIMEOUT。
+  - release_all_task_locks 释放所有 delete_flag='N' 且 lock_owner 非空的 task：lock_owner 与 lock_until 均清空，返回值等于受影响行数。
+  - 锁释放后 claim_due_tasks 能重新占用该任务（lock_owner 变为新 instance_id 且返回含该 task_id 的行），不存在残留锁导致的调度卡死。

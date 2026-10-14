@@ -81,6 +81,7 @@ class FinalContext:
     messages: list[ModelMessage]
     tools: list[dict[str, object]] = field(default_factory=list)
     evidence: ContextEvidence = field(default_factory=ContextEvidence)
+    memory_messages: list[ModelMessage] | None = None
 
 
 class ContextRuntime(Protocol):
@@ -101,6 +102,8 @@ class ContextRuntime(Protocol):
         memory: AgentMemory,
         current_run_start_idx: int,
         tools: Sequence[ModelTool] | None = None,
+        request_system_messages: Sequence[ModelMessage] = (),
+        request_tail_messages: Sequence[ModelMessage] = (),
     ) -> FinalContext:
         """Return all model messages for the current step."""
 
@@ -123,6 +126,8 @@ class ContextRuntime(Protocol):
         memory: AgentMemory,
         current_run_start_idx: int,
         tools: Sequence[ModelTool] | None = None,
+        request_system_messages: Sequence[ModelMessage] = (),
+        request_tail_messages: Sequence[ModelMessage] = (),
     ) -> FinalContext:
         """Force a source-backed step rebuild after Provider overflow."""
 

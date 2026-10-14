@@ -19,6 +19,8 @@ import { ExecutionCodeBlock } from "../ui/execution-code-block";
 import { SubAgentContainer } from "../ui/subagent";
 import { TooltipIconButton } from "../ui/tooltip-icon-button";
 import { Composer, type ChatMode } from "./composer";
+import { NewChatWelcomeBackdrop } from "./newchat-welcome-backdrop";
+import newChatStyles from "./newchat-design.module.css";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -47,7 +49,6 @@ import {
   type SourcesPanelSelection,
 } from "../ui/sources-panel-context";
 import {
-  ArrowDownIcon,
   CheckIcon,
   CopyIcon,
   DownloadIcon,
@@ -57,8 +58,10 @@ import {
   MoreHorizontalIcon,
   RefreshCwIcon,
   ArrowLeft,
+  ArrowDownIcon,
   AlertTriangleIcon,
   SparklesIcon,
+  Lightbulb,
   type LucideIcon,
   PencilIcon,
   Share2Icon,
@@ -67,11 +70,14 @@ import {
 } from "lucide-react";
 import { message } from "antd";
 import type { Agent, PublishedAgent } from "@/types/agentConfig";
-import type { ReasoningCapability, ReasoningEffort } from "@/types/modelConfig";
+import { getConversationResourceLimitMessage } from "@/const/errorMessageI18n";
 import { getAgentIcon } from "@/lib/chat/agentIconUtils";
 import { useModelList } from "@/hooks/model/useModelList";
+import {
+  deriveModelOptions,
+  type ModelSelectionScope,
+} from "@/features/workbench/modelOptions";
 import type { ModelOption } from "../ui/model-selector";
-import { DEFAULT_REASONING_EFFORT } from "@/const/modelConfig";
 import AutomationProposalMessage from "@/features/agentAutomation/components/AutomationProposalMessage";
 import type { AgentAutomationProposalData } from "@/types/agentAutomation";
 import {
@@ -81,12 +87,15 @@ import {
 import { DirectiveText, SkillDirectiveText } from "../ui/directive-text";
 import { QuoteBlock } from "../ui/quote";
 import { BranchPicker } from "../ui/branch-picker";
+import { getCreationRetryTarget } from "@/features/workbench/creationRetry";
 import { DotMatrix } from "../ui/dot-matrix";
 import { MessageTiming } from "../ui/message-timing";
 import { SingleTurnTokenUsage } from "../ui/token-usage";
 import { ToolFallback } from "../ui/tool-fallback";
 import { ToolRecommendations } from "../ui/tool-recommendations";
 import { AgentDraftCard } from "../ui/agent-draft-card";
+import { AgentCreationResultCard } from "@/features/workbench/components/CreationResultCards";
+import { WorkbenchLandingExamples } from "@/features/workbench/components/WorkbenchLandingExamples";
 import { RequirementClarificationCard } from "../ui/requirement-clarification-card";
 import { InstalledResourceBindingCard } from "../ui/installed-resource-binding-card";
 import { SuggestedResourceInstallationCard } from "../ui/suggested-resource-installation-card";
@@ -108,26 +117,6 @@ type HistorySummaryData = {
   status?: "compacting" | "accepted";
   summary?: { markdown?: string } | string;
   covered_through_message_id?: number;
-};
-
-const resolveDefaultReasoningEffort = (
-  modelDefault: ReasoningEffort | undefined,
-  capability: ReasoningCapability | undefined,
-  levels: readonly ReasoningEffort[]
-): ReasoningEffort | undefined => {
-  if (modelDefault && levels.includes(modelDefault)) return modelDefault;
-  if (levels.includes("auto")) return "auto";
-  if (capability?.default && levels.includes(capability.default)) {
-    return capability.default;
-  }
-  if (levels.includes(DEFAULT_REASONING_EFFORT)) {
-    return DEFAULT_REASONING_EFFORT;
-  }
-  return levels[0];
-};
-
-const formatReasoningEffortName = (level: ReasoningEffort): string => {
-  return level;
 };
 
 const HistorySummaryCard: FC<{ data: HistorySummaryData }> = ({ data }) => {
@@ -197,13 +186,20 @@ export interface ThreadProps {
   generatedTitle?: string;
   welcomeTitle?: string;
   welcomeSuggestions?: readonly WelcomeSuggestion[];
+  welcomeContent?: ReactNode;
   conversationId?: number;
+  newChatDesign?: boolean;
   onBack?: () => void;
   selectedModelId?: string;
   onModelChange?: (modelId: string) => void;
+  deepThinking?: boolean;
+  onDeepThinkingChange?: (enabled: boolean) => void;
+  thinkingEffort?: "low" | "medium" | "high";
+  onThinkingEffortChange?: (effort: "low" | "medium" | "high") => void;
   chatMode: ChatMode;
   onChatModeChange: (mode: ChatMode) => void;
   showModelSelector?: boolean;
+  modelSelectionScope?: ModelSelectionScope;
   showConversationTitle?: boolean;
   isDictationConfigured?: boolean;
   knowledgeScope?: ConversationKnowledgeScope | null;
@@ -219,8 +215,19 @@ export interface ThreadProps {
   runtimeMetadata?: Record<string, unknown>;
   onRuntimeMetadataChange?: (value: Record<string, unknown>) => void;
   readOnly?: boolean;
+  readOnlyReason?: string;
   showComposer?: boolean;
+  configurationLayout?: boolean;
+  debugLayout?: boolean;
+  emptyFooterContent?: ReactNode;
+  footerContent?: ReactNode;
   interactionContent?: ReactNode;
+  workbenchPresentation?: import("@/features/workbench/types").WorkbenchComposerPresentation;
+  workbenchResources?: import("@/features/workbench/types").WorkbenchResourceControls;
+  onRemoveWorkbenchSkill?: (skillId: number) => void;
+  onOpenWorkbenchSkillPicker?: () => void;
+  workbenchSkillPopover?: ReactNode;
+  workbenchKnowledgePopover?: ReactNode;
 }
 
 /**
@@ -228,149 +235,15 @@ export interface ThreadProps {
  * Falls back to model_name for single model scenarios.
  */
 const useAgentModels = (
-  agent: Agent | PublishedAgent
+  agent: Agent | PublishedAgent,
+  scope: ModelSelectionScope
 ): readonly ModelOption[] => {
   const { models: availableModels } = useModelList();
 
-  return useMemo(() => {
-    const typedAgent = agent as PublishedAgent;
-    const { model_ids, model_names } = typedAgent;
-
-    const toSelectorModel = (id: string, fallbackName: string) => {
-      const model = availableModels.find(
-        (item) =>
-          String(item.id) === id || item.name === id || item.displayName === id
-      );
-      const agentOverride = typedAgent.model_params_override?.[id];
-      const overrideExtra = agentOverride?.extra_params;
-      const hasAgentReasoningSnapshot =
-        typeof overrideExtra?.enable_thinking === "boolean" ||
-        typeof overrideExtra?.reasoning_effort === "string" ||
-        typeof overrideExtra?.reasoning_budget_tokens === "number";
-      const capability = model?.reasoningCapability;
-      const reasoningEnabled = hasAgentReasoningSnapshot
-        ? overrideExtra?.enable_thinking === true ||
-          (overrideExtra?.enable_thinking === undefined &&
-            (typeof overrideExtra?.reasoning_effort === "string" ||
-              typeof overrideExtra?.reasoning_budget_tokens === "number"))
-        : model?.enableThinking === true;
-      const effortControl =
-        capability?.status === "supported"
-          ? capability.controls?.find((control) => control.type === "effort")
-          : undefined;
-      const capabilityLevels =
-        effortControl?.type === "effort"
-          ? (effortControl.values as ReasoningEffort[])
-          : capability?.status === "supported" && capability.levels.length > 0
-            ? capability.levels
-            : [];
-      const budgetControl =
-        capability?.status === "supported"
-          ? capability.controls?.find(
-              (control) => control.type === "budget_tokens"
-            )
-          : undefined;
-      const supportsBudget =
-        reasoningEnabled && budgetControl?.type === "budget_tokens";
-      // A numeric budget is the preferred control when the catalog exposes
-      // both budget_tokens and effort for the same model.
-      const supportsEffort =
-        reasoningEnabled && !supportsBudget && capabilityLevels.length > 0;
-      const effortLevels = [
-        "auto",
-        ...capabilityLevels.filter((level) => level !== "auto"),
-      ] as ReasoningEffort[];
-      const snapshotEffort =
-        typeof overrideExtra?.reasoning_effort === "string"
-          ? (overrideExtra.reasoning_effort as ReasoningEffort)
-          : undefined;
-      const defaultEffort = hasAgentReasoningSnapshot
-        ? (snapshotEffort ?? "auto")
-        : resolveDefaultReasoningEffort(
-            model?.defaultReasoningEffort,
-            capability,
-            effortLevels
-          );
-      const snapshotBudget =
-        typeof overrideExtra?.reasoning_budget_tokens === "number"
-          ? overrideExtra.reasoning_budget_tokens
-          : undefined;
-      return {
-        id,
-        name: fallbackName,
-        reasoningCapability: capability,
-        ...(supportsEffort
-          ? {
-              efforts: effortLevels.map((level) => ({
-                id: level,
-                name: formatReasoningEffortName(level),
-              })),
-              defaultEffort: defaultEffort ?? undefined,
-            }
-          : {}),
-        ...(supportsBudget
-          ? {
-              budgetTokens: {
-                min: budgetControl.min,
-                max: budgetControl.max,
-              },
-              defaultBudgetTokens: snapshotBudget,
-            }
-          : {}),
-      };
-    };
-
-    if (
-      model_ids &&
-      model_ids.length > 0 &&
-      model_names &&
-      model_names.length > 0
-    ) {
-      const configuredModels = model_ids.map((id, i) =>
-        toSelectorModel(String(id), model_names[i] ?? `Model ${id}`)
-      );
-      return configuredModels.filter((configuredModel) =>
-        availableModels.some(
-          (model) =>
-            model.connect_status !== "unavailable" &&
-            (String(model.id) === configuredModel.id ||
-              model.name === configuredModel.id ||
-              model.displayName === configuredModel.id)
-        )
-      );
-    }
-
-    // Fallback for single model: check model_name on typedAgent
-    const modelName = (typedAgent as unknown as { model_name?: string })
-      .model_name;
-    const modelIsAvailable = availableModels.some(
-      (model) =>
-        model.connect_status !== "unavailable" &&
-        (model.displayName === modelName || model.name === modelName)
-    );
-    if (modelName && modelIsAvailable) {
-      const model = availableModels.find(
-        (item) => item.displayName === modelName || item.name === modelName
-      );
-      return [toSelectorModel(String(model?.id ?? modelName), modelName)];
-    }
-
-    // Fallback to the single model field (used by AgentDraft / debug panel)
-    const singleModel = (typedAgent as unknown as { model?: string }).model;
-    const singleModelIsAvailable = availableModels.some(
-      (model) =>
-        model.connect_status !== "unavailable" &&
-        (model.displayName === singleModel || model.name === singleModel)
-    );
-    if (singleModel && singleModelIsAvailable) {
-      const model = availableModels.find(
-        (item) => item.displayName === singleModel || item.name === singleModel
-      );
-      return [toSelectorModel(String(model?.id ?? singleModel), singleModel)];
-    }
-
-    return [];
-  }, [agent, availableModels]);
+  return useMemo(
+    () => deriveModelOptions(agent, availableModels, scope),
+    [agent, availableModels, scope]
+  );
 };
 
 export const Thread: FC<ThreadProps> = ({
@@ -378,13 +251,20 @@ export const Thread: FC<ThreadProps> = ({
   generatedTitle,
   welcomeTitle,
   welcomeSuggestions,
+  welcomeContent,
   conversationId,
+  newChatDesign = false,
   onBack,
   selectedModelId,
   onModelChange,
+  deepThinking,
+  onDeepThinkingChange,
+  thinkingEffort,
+  onThinkingEffortChange,
   chatMode,
   onChatModeChange,
   showModelSelector = true,
+  modelSelectionScope = "agent",
   showConversationTitle = true,
   isDictationConfigured = false,
   knowledgeScope = null,
@@ -397,11 +277,22 @@ export const Thread: FC<ThreadProps> = ({
   runtimeMetadata = {},
   onRuntimeMetadataChange,
   readOnly = false,
+  readOnlyReason,
   showComposer = true,
+  configurationLayout = false,
+  debugLayout = false,
+  emptyFooterContent,
+  footerContent,
   interactionContent,
+  workbenchPresentation,
+  workbenchResources,
+  onRemoveWorkbenchSkill,
+  onOpenWorkbenchSkillPicker,
+  workbenchSkillPopover,
+  workbenchKnowledgePopover,
 }) => {
   const { t } = useTranslation();
-  const models = useAgentModels(agent);
+  const models = useAgentModels(agent, modelSelectionScope);
   const [localSelectedModelId, setLocalSelectedModelId] = useState<string>();
   const selectedModelIsValid = Boolean(
     selectedModelId && models.some((model) => model.id === selectedModelId)
@@ -409,20 +300,22 @@ export const Thread: FC<ThreadProps> = ({
   const fallbackModelId = models[0]?.id;
   const effectiveSelectedModelId = selectedModelIsValid
     ? selectedModelId
-    : localSelectedModelId &&
-        models.some((model) => model.id === localSelectedModelId)
-      ? localSelectedModelId
-      : fallbackModelId;
+    : onModelChange
+      ? ""
+      : localSelectedModelId &&
+          models.some((model) => model.id === localSelectedModelId)
+        ? localSelectedModelId
+        : fallbackModelId;
   const handleModelChange = useCallback(
     (modelId: string) => {
       if (!models.some((model) => model.id === modelId)) return;
-      if (selectedModelId !== undefined) {
-        onModelChange?.(modelId);
+      if (onModelChange) {
+        onModelChange(modelId);
       } else {
         setLocalSelectedModelId(modelId);
       }
     },
-    [models, onModelChange, selectedModelId]
+    [models, onModelChange]
   );
 
   const messages = useAuiState((s) => s.thread.messages);
@@ -622,10 +515,15 @@ export const Thread: FC<ThreadProps> = ({
         agent={agent}
         welcomeTitle={welcomeTitle}
         welcomeSuggestions={welcomeSuggestions}
+        welcomeContent={welcomeContent}
         onBack={onBack}
         models={models}
         selectedModelId={effectiveSelectedModelId}
         onModelChange={handleModelChange}
+        deepThinking={deepThinking}
+        onDeepThinkingChange={onDeepThinkingChange}
+        thinkingEffort={thinkingEffort}
+        onThinkingEffortChange={onThinkingEffortChange}
         chatMode={chatMode}
         onChatModeChange={onChatModeChange}
         showModelSelector={showModelSelector}
@@ -641,12 +539,24 @@ export const Thread: FC<ThreadProps> = ({
         runtimeMetadata={runtimeMetadata}
         onRuntimeMetadataChange={onRuntimeMetadataChange}
         readOnly={readOnly}
+        readOnlyReason={readOnlyReason}
         showComposer={showComposer}
+        configurationLayout={configurationLayout}
+        debugLayout={debugLayout}
+        emptyFooterContent={emptyFooterContent}
+        footerContent={footerContent}
         interactionContent={interactionContent}
+        workbenchPresentation={workbenchPresentation}
+        workbenchResources={workbenchResources}
+        onRemoveWorkbenchSkill={onRemoveWorkbenchSkill}
+        onOpenWorkbenchSkillPicker={onOpenWorkbenchSkillPicker}
+        workbenchSkillPopover={workbenchSkillPopover}
+        workbenchKnowledgePopover={workbenchKnowledgePopover}
         hasMessages={hasMessages}
         displayName={displayName}
         conversationTitle={conversationTitle}
         conversationId={conversationId}
+        newChatDesign={newChatDesign}
         isRunning={isRunning}
         isShareMode={isShareMode}
         selectedShareMessageIds={selectedShareMessageIds}
@@ -720,10 +630,15 @@ interface ThreadViewProps {
   agent: Agent | PublishedAgent;
   welcomeTitle?: string;
   welcomeSuggestions?: readonly WelcomeSuggestion[];
+  welcomeContent?: ReactNode;
   onBack?: () => void;
   models: readonly ModelOption[];
   selectedModelId?: string;
   onModelChange?: (modelId: string) => void;
+  deepThinking?: boolean;
+  onDeepThinkingChange?: (enabled: boolean) => void;
+  thinkingEffort?: "low" | "medium" | "high";
+  onThinkingEffortChange?: (effort: "low" | "medium" | "high") => void;
   chatMode: ChatMode;
   onChatModeChange: (mode: ChatMode) => void;
   showModelSelector: boolean;
@@ -740,6 +655,7 @@ interface ThreadViewProps {
   displayName: string;
   conversationTitle: string;
   conversationId?: number;
+  newChatDesign?: boolean;
   isRunning: boolean;
   isShareMode: boolean;
   selectedShareMessageIds: Set<number>;
@@ -758,18 +674,34 @@ interface ThreadViewProps {
   runtimeMetadata: Record<string, unknown>;
   onRuntimeMetadataChange?: (value: Record<string, unknown>) => void;
   readOnly: boolean;
+  readOnlyReason?: string;
   showComposer: boolean;
+  configurationLayout: boolean;
+  debugLayout: boolean;
+  emptyFooterContent?: ReactNode;
+  footerContent?: ReactNode;
   interactionContent?: ReactNode;
+  workbenchPresentation?: import("@/features/workbench/types").WorkbenchComposerPresentation;
+  workbenchResources?: import("@/features/workbench/types").WorkbenchResourceControls;
+  onRemoveWorkbenchSkill?: (skillId: number) => void;
+  onOpenWorkbenchSkillPicker?: () => void;
+  workbenchSkillPopover?: ReactNode;
+  workbenchKnowledgePopover?: ReactNode;
 }
 
 const ThreadView: FC<ThreadViewProps> = ({
   agent,
   welcomeTitle,
   welcomeSuggestions,
+  welcomeContent,
   onBack,
   models,
   selectedModelId,
   onModelChange,
+  deepThinking,
+  onDeepThinkingChange,
+  thinkingEffort,
+  onThinkingEffortChange,
   chatMode,
   onChatModeChange,
   showModelSelector,
@@ -783,6 +715,7 @@ const ThreadView: FC<ThreadViewProps> = ({
   displayName,
   conversationTitle,
   conversationId,
+  newChatDesign = false,
   isRunning,
   isShareMode,
   selectedShareMessageIds,
@@ -801,71 +734,105 @@ const ThreadView: FC<ThreadViewProps> = ({
   runtimeMetadata,
   onRuntimeMetadataChange,
   readOnly,
+  readOnlyReason,
   showComposer,
+  configurationLayout,
+  debugLayout,
+  emptyFooterContent,
+  footerContent,
   interactionContent,
+  workbenchPresentation,
+  workbenchResources,
+  onRemoveWorkbenchSkill,
+  onOpenWorkbenchSkillPicker,
+  workbenchSkillPopover,
+  workbenchKnowledgePopover,
 }) => {
   const { t } = useTranslation();
+  const workbenchLanding = Boolean(
+    workbenchPresentation && !hasMessages && !isShareMode
+  );
 
   return (
     <ThreadPrimitive.Root
       className={cn(
         "flex h-full flex-row bg-background",
+        newChatDesign && newChatStyles.font,
+        configurationLayout && "!bg-transparent",
+        debugLayout && "!bg-transparent",
         variant === "embedded" &&
           "[&_.aui-assistant-action-bar-root]:hidden [&_.aui-user-action-bar-root]:hidden"
       )}
     >
-      <div className="flex h-full min-w-0 flex-1 flex-col">
-        {showConversationTitle && (
-          <header className="flex items-center gap-2 border-b px-3 py-2">
-            {isShareMode ? (
-              <>
-                <div className="flex min-w-0 flex-1 justify-center text-sm font-medium text-foreground">
-                  {conversationTitle}
-                </div>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  onClick={onLeaveShareMode}
-                  aria-label={t("common.close", "关闭")}
-                >
-                  <XIcon className="size-4" />
-                </Button>
-              </>
-            ) : (
-              <>
-                {onBack && (
-                  <Button variant="ghost" size="icon" onClick={onBack}>
-                    <ArrowLeft className="size-4" />
-                  </Button>
-                )}
-                <div className="flex min-w-0 flex-1 flex-col">
-                  <span className="text-sm font-medium text-foreground">
-                    {hasMessages ? conversationTitle : displayName}
-                  </span>
-                  {hasMessages && variant !== "embedded" && (
-                    <span className="text-xs text-muted-foreground">
-                      {displayName}
-                    </span>
-                  )}
-                </div>
-                {hasMessages && conversationId && (
+      <div
+        className={cn(
+          "flex h-full min-w-0 flex-1 flex-col",
+          newChatDesign && "relative [container-type:size]",
+          workbenchLanding && "overflow-y-auto pb-[10vh]"
+        )}
+      >
+        {newChatDesign && !hasMessages && <NewChatWelcomeBackdrop />}
+        {showConversationTitle &&
+          (isShareMode || (!newChatDesign && workbenchPresentation)) && (
+            <header className="flex items-center gap-2 border-b px-3 py-2">
+              {isShareMode ? (
+                <>
+                  <div className="flex min-w-0 flex-1 justify-center text-sm font-medium text-foreground">
+                    {conversationTitle}
+                  </div>
                   <Button
                     variant="ghost"
                     size="icon"
-                    aria-label={t(
-                      "chatInterface.shareConversation",
-                      "分享对话"
-                    )}
-                    disabled={isRunning}
-                    onClick={onEnterShareMode}
+                    onClick={onLeaveShareMode}
+                    aria-label={t("common.close", "关闭")}
                   >
-                    <Share2Icon className="size-4" />
+                    <XIcon className="size-4" />
                   </Button>
-                )}
-              </>
-            )}
-          </header>
-        )}
+                </>
+              ) : (
+                <>
+                  {onBack && (
+                    <Button variant="ghost" size="icon" onClick={onBack}>
+                      <ArrowLeft className="size-4" />
+                    </Button>
+                  )}
+                  <div className="flex min-w-0 flex-1 flex-col">
+                    <span className="text-sm font-medium text-foreground">
+                      {workbenchPresentation || hasMessages
+                        ? conversationTitle
+                        : displayName}
+                    </span>
+                    {hasMessages && variant !== "embedded" && (
+                      <span className="text-xs text-muted-foreground">
+                        {displayName}
+                      </span>
+                    )}
+                    {!hasMessages &&
+                      workbenchPresentation &&
+                      variant !== "embedded" && (
+                        <span className="text-xs text-muted-foreground">
+                          {displayName}
+                        </span>
+                      )}
+                  </div>
+                  {hasMessages && conversationId && (
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      aria-label={t(
+                        "chatInterface.shareConversation",
+                        "分享对话"
+                      )}
+                      disabled={isRunning}
+                      onClick={onEnterShareMode}
+                    >
+                      <Share2Icon className="size-4" />
+                    </Button>
+                  )}
+                </>
+              )}
+            </header>
+          )}
 
         {isShareMode && (
           <div className="flex items-center justify-between border-b bg-muted/30 px-4 py-2">
@@ -912,9 +879,28 @@ const ThreadView: FC<ThreadViewProps> = ({
         <ThreadPrimitive.Viewport
           className={cn(
             "mx-auto flex min-h-0 min-w-0 w-full max-w-4xl flex-1 flex-col overflow-x-hidden overflow-y-auto",
-            variant === "embedded" ? "px-4 py-4" : "px-8 py-6"
+            variant === "embedded" ? "px-4 py-4" : "px-8 py-6",
+            newChatDesign && "relative !max-w-[922px] !px-4 !py-0",
+            newChatDesign && !hasMessages && "!max-w-none",
+            debugLayout && "!max-w-none !p-0",
+            configurationLayout &&
+              !hasMessages &&
+              "!max-w-none !overflow-hidden !p-0",
+            workbenchLanding &&
+              "relative mt-auto flex-none max-w-[890px] overflow-visible px-4 pb-0 pt-6 sm:px-8"
           )}
         >
+          {workbenchLanding && (
+            <div
+              aria-hidden
+              className="pointer-events-none absolute left-1/2 top-full z-0 h-[437px] w-[682px] -translate-x-1/2 -translate-y-1/2"
+              style={{
+                marginTop: 73,
+                background:
+                  "radial-gradient(50% 50% at 50% 50%, rgba(148,181,255,0.42) 0%, rgba(187,161,255,0.24) 48%, rgba(255,255,255,0) 100%)",
+              }}
+            />
+          )}
           {hasMessages ? (
             <ThreadMessages
               agent={agent}
@@ -927,11 +913,14 @@ const ThreadView: FC<ThreadViewProps> = ({
               onToggleShareMessage={onToggleShareMessage}
             />
           ) : (
-            <ThreadWelcomeContent
-              agent={agent}
-              title={welcomeTitle}
-              suggestions={welcomeSuggestions}
-            />
+            (welcomeContent ?? (
+              <ThreadWelcomeContent
+                agent={agent}
+                newChatDesign={newChatDesign}
+                title={welcomeTitle}
+                suggestions={welcomeSuggestions}
+              />
+            ))
           )}
           {interactionContent}
         </ThreadPrimitive.Viewport>
@@ -940,14 +929,35 @@ const ThreadView: FC<ThreadViewProps> = ({
           <ThreadPrimitive.ViewportFooter
             className={cn(
               "sticky bottom-0 mx-auto flex w-full max-w-4xl flex-col",
-              variant === "embedded" ? "gap-2 px-4 pb-4" : "gap-4 px-8 pb-8"
+              variant === "embedded" ? "gap-2 px-4 pb-4" : "gap-4 px-8 pb-8",
+              newChatDesign && "!max-w-[922px] shrink-0 !gap-0 !px-4 !pb-6",
+              debugLayout && "!max-w-none !shrink-0 !gap-4 !px-0 !pb-0",
+              workbenchLanding &&
+                "static mb-auto max-w-[890px] gap-4 px-4 pb-6 pt-8 sm:px-8"
             )}
           >
-            <ThreadScrollToBottom />
+            {!newChatDesign && (!debugLayout || hasMessages) && (
+              <ThreadScrollToBottom />
+            )}
+            {!hasMessages &&
+              emptyFooterContent &&
+              (debugLayout ? (
+                <div className="agent-debug-question-scroll">
+                  {emptyFooterContent}
+                </div>
+              ) : (
+                emptyFooterContent
+              ))}
             <Composer
+              newChatDesign={newChatDesign}
+              debugLayout={debugLayout}
               models={models}
               selectedModelId={selectedModelId}
               onModelChange={onModelChange}
+              deepThinking={deepThinking}
+              onDeepThinkingChange={onDeepThinkingChange}
+              thinkingEffort={thinkingEffort}
+              onThinkingEffortChange={onThinkingEffortChange}
               chatMode={chatMode}
               onChatModeChange={onChatModeChange}
               showModelSelector={showModelSelector}
@@ -962,7 +972,19 @@ const ThreadView: FC<ThreadViewProps> = ({
               onRuntimeMetadataChange={onRuntimeMetadataChange}
               allowRuntimeMetadata={agent.allow_chat_metadata === true}
               disabled={readOnly}
+              disabledReason={readOnlyReason}
+              workbenchPresentation={workbenchPresentation}
+              workbenchResources={workbenchResources}
+              onRemoveWorkbenchSkill={onRemoveWorkbenchSkill}
+              onOpenWorkbenchSkillPicker={onOpenWorkbenchSkillPicker}
+              workbenchSkillPopover={workbenchSkillPopover}
+              workbenchKnowledgePopover={workbenchKnowledgePopover}
             />
+            {workbenchLanding &&
+              workbenchPresentation?.mode === "generic_chat" && (
+                <WorkbenchLandingExamples />
+              )}
+            {footerContent}
           </ThreadPrimitive.ViewportFooter>
         )}
       </div>
@@ -1035,13 +1057,14 @@ export const ReadOnlyConversation: FC<{
 
 interface ThreadWelcomeContentProps {
   agent: Agent | PublishedAgent;
+  newChatDesign?: boolean;
   title?: string;
   suggestions?: readonly WelcomeSuggestion[];
 }
 
 const ThreadWelcomeContent: FC<ThreadWelcomeContentProps> = ({
   agent,
-  title,
+  newChatDesign = false,
   suggestions = [],
 }) => {
   const aui = useAui();
@@ -1058,71 +1081,114 @@ const ThreadWelcomeContent: FC<ThreadWelcomeContentProps> = ({
     [aui]
   );
 
+  const suggestionRows =
+    displayedSuggestions.length > 0
+      ? displayedSuggestions.map((suggestion) => ({
+          id: suggestion.id,
+          text: suggestion.title,
+          prompt: suggestion.prompt,
+        }))
+      : sampleQuestions.map((question, index) => ({
+          id: `question-${index}`,
+          text: question,
+          prompt: question,
+        }));
+
   return (
-    <div className="flex h-full flex-col overflow-y-auto px-8 py-8">
-      <div className="flex flex-1 items-center justify-center">
-        <div className="flex w-full max-w-2xl flex-col items-center gap-6">
-          <div className="flex size-16 items-center justify-center rounded-full bg-primary/10 ring-4 ring-primary/10">
-            <Icon className="size-8 text-primary" />
-          </div>
+    <div
+      className={cn(
+        "flex h-full min-h-0 flex-col overflow-y-auto px-8 py-6",
+        newChatDesign &&
+          "!px-0 !pb-6 !pt-[min(30.5556cqh,max(32px,calc(100cqh-694px)))] [font-family:'HarmonyOS_Sans_SC',sans-serif]"
+      )}
+    >
+      {/* elastic space above the welcome block, per design */}
+      {!newChatDesign && <div className="min-h-6 flex-[3]" aria-hidden />}
 
-          <div className="text-center">
-            <h1 className="text-balance text-2xl font-bold text-foreground md:text-3xl">
-              {title ?? t("chat.thread.helloAgent", { agent: displayName })}
-            </h1>
-            <p className="mx-auto mt-3 max-w-xl text-pretty text-sm leading-relaxed text-muted-foreground">
-              {agent.greeting_message || agent.description}
-            </p>
-          </div>
-
-          {displayedSuggestions.length > 0 ? (
-            <div className="grid w-full auto-rows-fr grid-cols-1 gap-2 sm:grid-cols-2">
-              {displayedSuggestions.map((suggestion) => {
-                const SuggestionIcon = suggestion.icon;
-                return (
-                  <button
-                    key={suggestion.id}
-                    type="button"
-                    onClick={() => handleSampleQuestionClick(suggestion.prompt)}
-                    className="flex h-full min-h-20 items-center gap-3 rounded-lg border border-border bg-card px-4 py-3 text-left transition-colors hover:border-primary/40 hover:bg-accent/50"
-                  >
-                    <span className="flex size-9 shrink-0 items-center justify-center rounded-md bg-primary/10 text-primary">
-                      <SuggestionIcon className="size-5" />
-                    </span>
-                    <span className="min-w-0">
-                      <span className="block text-sm font-medium leading-5 text-foreground">
-                        {suggestion.title}
-                      </span>
-                      <span className="mt-1 block text-xs leading-5 text-muted-foreground">
-                        {suggestion.description}
-                      </span>
-                    </span>
-                  </button>
-                );
-              })}
-            </div>
-          ) : sampleQuestions.length > 0 ? (
-            <div className="w-full">
-              <p className="mb-4 flex items-center justify-center gap-1.5 text-xs font-medium text-muted-foreground">
-                <SparklesIcon className="size-3.5 text-primary" />
-                {t("chat.thread.tryQuestions")}
-              </p>
-              <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-                {sampleQuestions.map((q, index) => (
-                  <button
-                    key={index}
-                    type="button"
-                    onClick={() => handleSampleQuestionClick(q)}
-                    className="truncate rounded-xl border border-border bg-card px-4 py-3 text-left text-sm text-foreground transition-colors hover:border-primary/40 hover:bg-accent/50"
-                  >
-                    {q}
-                  </button>
-                ))}
-              </div>
-            </div>
-          ) : null}
+      {/* The design uses a 72px heading row and a 24px greeting gap. */}
+      <div
+        className={cn(
+          "mx-auto flex w-full max-w-[890px] shrink-0 flex-col items-center gap-6 pb-6",
+          newChatDesign && "!pb-0"
+        )}
+      >
+        <div
+          className={cn(
+            "flex items-center justify-center gap-4",
+            newChatDesign && "min-h-[72px] px-2"
+          )}
+        >
+          <span
+            className={cn(
+              "flex size-14 shrink-0 items-center justify-center",
+              newChatDesign && "size-[72px]"
+            )}
+          >
+            <span className="flex size-14 items-center justify-center rounded-full bg-gradient-to-r from-[#FFA654] to-[#F056A0]">
+              <Icon className="size-7 text-white" aria-hidden />
+            </span>
+          </span>
+          <h1 className="text-[36px] font-bold leading-[54px] text-[#191919]">
+            {displayName}
+          </h1>
         </div>
+        <p
+          className={cn(
+            "text-center text-[14px] leading-[22px] text-[#191919]",
+            newChatDesign && "text-[16px] font-medium leading-6"
+          )}
+        >
+          {agent.greeting_message || agent.description}
+        </p>
       </div>
+
+      {!newChatDesign && <div className="min-h-6 flex-1" aria-hidden />}
+
+      {suggestionRows.length > 0 && (
+        <div
+          className={cn(
+            "mx-auto w-full max-w-[890px] shrink-0",
+            newChatDesign && "mt-[120px] px-4"
+          )}
+        >
+          <p
+            className={cn(
+              "text-[14px] font-bold leading-[22px] text-[#191919]",
+              newChatDesign && "text-[16px] font-medium text-black"
+            )}
+          >
+            {t("chat.thread.tryQuestions")}
+          </p>
+          <div
+            className={cn("mt-2 flex flex-col", newChatDesign && "mt-3 gap-2")}
+          >
+            {suggestionRows.map((row) => (
+              <button
+                key={row.id}
+                type="button"
+                onClick={() => handleSampleQuestionClick(row.prompt)}
+                className={cn(
+                  "flex h-12 items-center gap-3 rounded-[4px] px-1 text-left transition-colors hover:bg-white/70",
+                  newChatDesign && "h-[46px] gap-1 px-0 py-3"
+                )}
+              >
+                <Lightbulb
+                  className={cn(
+                    "size-4 shrink-0 text-[#191919]",
+                    newChatDesign && "size-[18px]"
+                  )}
+                  aria-hidden
+                />
+                <span className="min-w-0 truncate text-[14px] leading-[22px] text-[#191919]">
+                  {row.text}
+                </span>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {!newChatDesign && <div className="min-h-10 flex-[2]" aria-hidden />}
     </div>
   );
 };
@@ -1280,10 +1346,21 @@ const ThreadScrollToBottom: FC = () => {
 };
 
 const MessageError: FC = () => {
+  const { t } = useTranslation();
+  const rawError = useAuiState((state) => {
+    const status = state.message.status;
+    return status?.type === "incomplete" && status.reason === "error"
+      ? status.error
+      : undefined;
+  });
+  const localizedMessage = getConversationResourceLimitMessage(rawError, t);
+
   return (
     <MessagePrimitive.Error>
       <ErrorPrimitive.Root className="aui-message-error-root border-destructive bg-destructive/10 text-destructive dark:bg-destructive/5 mt-2 rounded-md border p-3 text-sm dark:text-red-200">
-        <ErrorPrimitive.Message className="aui-message-error-message line-clamp-2" />
+        <ErrorPrimitive.Message className="aui-message-error-message line-clamp-2">
+          {localizedMessage ?? undefined}
+        </ErrorPrimitive.Message>
       </ErrorPrimitive.Root>
     </MessagePrimitive.Error>
   );
@@ -1412,11 +1489,19 @@ const AssistantMessage: FC<{
     (s) =>
       (s.message.metadata?.custom as { nl2a?: Nl2aMessage } | undefined)?.nl2a
   );
+  const isLatestMessage = useAuiState(
+    (s) => s.thread.messages.at(-1)?.id === s.message.id
+  );
   const messageId = useAuiState((s) => s.message.id as string | undefined);
   const content = useAuiState((s) => s.message.content) as ReadonlyArray<{
     type?: string;
+    name?: string;
+    data?: { agentId?: number; completed?: boolean };
     skillFileAttachments?: CompleteAttachment[];
   }>;
+  const createdAgent = content.find(
+    (part) => part.type === "data" && part.name === "nl2agent-created"
+  )?.data;
   const streamedSkillFileAttachments = useMemo(() => {
     for (let index = content.length - 1; index >= 0; index -= 1) {
       const part = content[index];
@@ -1736,7 +1821,7 @@ const AssistantMessage: FC<{
         {nl2a?.content.subtype === "requirement_clarification" ? (
           <RequirementClarificationCard
             payload={nl2a.content}
-            disabled={readOnly}
+            disabled={readOnly || !isLatestMessage}
           />
         ) : nl2a?.content.subtype === "local_mcp_recommendation" ? (
           <ToolRecommendations payload={nl2a.content} disabled={readOnly} />
@@ -1745,16 +1830,23 @@ const AssistantMessage: FC<{
         ) : nl2a?.content.subtype === "suggested_resource_installation" ? (
           <SuggestedResourceInstallationCard
             payload={nl2a.content}
-            disabled={readOnly}
+            disabled={readOnly || !isLatestMessage}
           />
         ) : nl2a?.content.subtype === "installed_resource_binding" ? (
           <InstalledResourceBindingCard
             payload={nl2a.content}
-            disabled={readOnly}
+            disabled={readOnly || !isLatestMessage}
           />
         ) : null}
         {skillFileAttachments?.length ? (
           <AssistantMessageAttachments attachments={skillFileAttachments} />
+        ) : null}
+        {typeof createdAgent?.agentId === "number" &&
+        createdAgent.agentId > 0 ? (
+          <AgentCreationResultCard
+            agentId={createdAgent.agentId}
+            completed={createdAgent.completed === true}
+          />
         ) : null}
         <MessageError />
       </div>
@@ -1772,6 +1864,42 @@ const AssistantMessage: FC<{
 
 const AssistantActionBar: FC = () => {
   const { t } = useTranslation();
+  const aui = useAui();
+  const creationMode = useAuiState((s) => {
+    const custom = s.thread.composer.runConfig.custom as
+      { runtimeMode?: string } | undefined;
+    return (
+      custom?.runtimeMode === "nl2skill" || custom?.runtimeMode === "nl2agent"
+    );
+  });
+  const creationRetryDisabled = useAuiState(
+    (s) =>
+      s.thread.isRunning || s.thread.isDisabled || !s.thread.capabilities.reload
+  );
+
+  const reloadMessage = () => {
+    const runConfig = aui.thread.composer().getState().runConfig;
+    const custom = runConfig.custom as
+      { runtimeMode?: string; [key: string]: unknown } | undefined;
+    if (
+      custom?.runtimeMode !== "nl2skill" &&
+      custom?.runtimeMode !== "nl2agent"
+    ) {
+      aui.message.reload();
+      return;
+    }
+    const target = getCreationRetryTarget(
+      aui.thread.getState().messages,
+      aui.message.getState().parentId
+    );
+    if (!target) {
+      message.error(t("chat.thread.refresh"));
+      return;
+    }
+    aui.message.reload({
+      runConfig: { ...runConfig, custom: { ...custom, ...target } },
+    });
+  };
 
   return (
     <ActionBarPrimitive.Root
@@ -1790,11 +1918,21 @@ const AssistantActionBar: FC = () => {
             </AuiIf>
           </TooltipIconButton>
         </ActionBarPrimitive.Copy>
-        <ActionBarPrimitive.Reload asChild>
-          <TooltipIconButton tooltip={t("chat.thread.refresh")}>
+        {creationMode ? (
+          <TooltipIconButton
+            tooltip={t("chat.thread.refresh")}
+            onClick={reloadMessage}
+            disabled={creationRetryDisabled}
+          >
             <RefreshCwIcon />
           </TooltipIconButton>
-        </ActionBarPrimitive.Reload>
+        ) : (
+          <ActionBarPrimitive.Reload asChild>
+            <TooltipIconButton tooltip={t("chat.thread.refresh")}>
+              <RefreshCwIcon />
+            </TooltipIconButton>
+          </ActionBarPrimitive.Reload>
+        )}
         <ActionBarMorePrimitive.Root>
           <ActionBarMorePrimitive.Trigger asChild>
             <TooltipIconButton

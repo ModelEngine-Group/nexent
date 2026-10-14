@@ -43,13 +43,11 @@ spec:
               name: http
             - containerPort: 5555
               name: flower
-            - containerPort: 8265
-              name: ray-dashboard
           command:
             - /opt/nexent/scripts/start-backend.sh
             - /bin/sh
             - -c
-            - python /opt/backend/data_process_service.py || (cd /opt/backend && OPENBLAS_NUM_THREADS=1 UVICORN_LOOP=asyncio uvicorn data_process_service:app --host 0.0.0.0 --port 5012)
+            - python /opt/backend/data_process_service.py
           envFrom:
             - configMapRef:
                 name: nexent-config

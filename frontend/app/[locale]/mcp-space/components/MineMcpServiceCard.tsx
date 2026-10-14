@@ -25,6 +25,8 @@ export type MineMcpCardItem =
   | { kind: "local"; service: McpServiceItem }
   | { kind: "community"; service: CommunityMcpCard };
 
+export type McpConnectionStatus = "unchecked" | "success" | "failed";
+
 interface MineMcpServiceCardProps {
   item: MineMcpCardItem;
   onlineService?: CommunityMcpCard;
@@ -32,6 +34,8 @@ interface MineMcpServiceCardProps {
   publishing?: boolean;
   unpublishing?: boolean;
   healthChecking?: boolean;
+  connectionStatus?: McpConnectionStatus;
+  tagRefreshKey?: string | number;
   onEditLocal: (service: McpServiceItem) => void;
   onEditCommunity: (service: CommunityMcpCard) => void;
   onToggle: (service: McpServiceItem) => void;
@@ -58,6 +62,8 @@ export default function MineMcpServiceCard({
   publishing,
   unpublishing,
   healthChecking = false,
+  connectionStatus = "unchecked",
+  tagRefreshKey,
   onEditLocal,
   onEditCommunity,
   onToggle,
@@ -83,11 +89,10 @@ export default function MineMcpServiceCard({
         onlineService?.reviewStatus === "pending")
     : reviewStatus === "approved";
   const reviewBadge = getMineCardReviewBadge(item, onlineService);
-  const timeSource = item.service as any;
   const createDate = formatRegistryDate(
     item.kind === "local"
-      ? timeSource.createTime || ""
-      : timeSource.createdAt || ""
+      ? item.service.createTime || ""
+      : item.service.createdAt || ""
   );
   const toolCount = resolveToolCount(item);
 
@@ -176,6 +181,29 @@ export default function MineMcpServiceCard({
     <ResourceCard
       className="h-full"
       title={service.name}
+      subtitle={
+        <span
+          className={`inline-flex items-center gap-1.5 ${
+            connectionStatus === "success"
+              ? "text-green-600 dark:text-green-400"
+              : connectionStatus === "failed"
+                ? "text-red-600 dark:text-red-400"
+                : "text-slate-500 dark:text-slate-400"
+          }`}
+        >
+          <span
+            aria-hidden="true"
+            className={`size-1.5 shrink-0 rounded-full ${
+              connectionStatus === "success"
+                ? "bg-green-500"
+                : connectionStatus === "failed"
+                  ? "bg-red-500"
+                  : "bg-slate-400"
+            }`}
+          />
+          {t(`mcpTools.mine.connectionStatus.${connectionStatus}`)}
+        </span>
+      }
       onClick={handleEdit}
       footerLayout="inline"
       icon={
@@ -211,6 +239,7 @@ export default function MineMcpServiceCard({
               resourceType="mcp_service"
               resourceId={String(item.service.mcpId)}
               max={3}
+              refreshKey={tagRefreshKey}
             />
           ) : null}
           <span className="rounded-md border border-slate-200 px-2 py-0.5 text-slate-500 dark:border-slate-700 dark:text-slate-400">
@@ -278,6 +307,11 @@ export default function MineMcpServiceCard({
           <Button
             type="text"
             size="small"
+            className={
+              isEnabled
+                ? "!bg-emerald-50 !text-emerald-700 hover:!bg-emerald-100 hover:!text-emerald-800 dark:!bg-emerald-900/30 dark:!text-emerald-300 dark:hover:!bg-emerald-900/50"
+                : "!text-slate-600 hover:!bg-transparent hover:!text-blue-500"
+            }
             loading={toggling}
             icon={<Power className="size-3.5" />}
             onClick={() => onToggle(localService)}

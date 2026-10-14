@@ -9,7 +9,13 @@ import { parseMcpReviewDeepLinkParams } from "@/lib/notificationNavigation";
 import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
 import { USER_ROLES } from "@/const/auth";
 import { FILTER_ALL, McpToolsServicesTab } from "@/const/mcpTools";
-import { filterByDeploymentType, matchesNameOrTag } from "@/lib/mcpTools";
+import {
+  filterByDeploymentType,
+  getDeploymentTypeLabelKey,
+  matchesNameOrTag,
+  resolveDeploymentType,
+} from "@/lib/mcpTools";
+import { McpDetail } from "@/components/mcp/mcp-detail";
 import type { CommunityMcpCard, McpServiceItem } from "@/types/mcpTools";
 import { useMcpServicesList } from "@/hooks/mcpTools/useMcpServicesList";
 import { useMcpCommunityBrowser } from "@/hooks/mcpTools/useMcpCommunityBrowser";
@@ -27,7 +33,7 @@ import AddMcpServiceModal from "./components/add/AddMcpServiceModal";
 import CommunityQuickAddModal from "./components/add/community/CommunityQuickAddModal";
 import McpCommunityDetailModal from "./components/add/community/McpCommunityDetailModal";
 import McpServiceDetailModal from "./components/McpServiceDetailModal";
-import RepositoryMcpDetailModal from "./components/RepositoryMcpDetailModal";
+import TransportIcon from "./components/shared/TransportIcon";
 import PublishedServiceDetailModal from "./components/PublishedServiceDetailModal";
 import {
   type DeploymentFilter,
@@ -298,12 +304,20 @@ export function useMcpSpaceController() {
     setSelectedLocal(null);
   };
 
+  const [mineTagRefreshKeys, setMineTagRefreshKeys] = useState<
+    Record<number, number>
+  >({});
+
   const handleToggled = async (mcpId: number) => {
     const result = await localList.refetch();
     const updated = result.data?.find((s) => s.mcpId === mcpId);
     if (updated && detailMcpIdRef.current === mcpId) {
       setSelectedLocal(updated);
     }
+  };
+
+  const handleTagsChanged = (mcpId: number) => {
+    setMineTagRefreshKeys((prev) => ({ ...prev, [mcpId]: (prev[mcpId] ?? 0) + 1 }));
   };
 
   const handleRepositoryOffline = (service: CommunityMcpCard) => {
@@ -369,13 +383,28 @@ export function useMcpSpaceController() {
           selectedService={selectedLocal}
           onClose={closeLocalDetail}
           onToggled={handleToggled}
+          onTagsChanged={handleTagsChanged}
         />
       ) : null}
 
       {selectedRepository ? (
-        <RepositoryMcpDetailModal
+        <McpDetail
+          open
           service={selectedRepository}
           installed={isRepositoryInstalled(selectedRepository)}
+          icon={
+            <TransportIcon
+              transportType={selectedRepository.transportType}
+              deploymentType={resolveDeploymentType(selectedRepository)}
+              label={t(
+                getDeploymentTypeLabelKey(
+                  resolveDeploymentType(selectedRepository)
+                )
+              )}
+              seed={selectedRepository.name}
+              className="!size-12 shrink-0 rounded-xl"
+            />
+          }
           onClose={() => setSelectedRepository(null)}
           onInstall={quickAdd.open}
         />
@@ -440,6 +469,7 @@ export function useMcpSpaceController() {
       onEditLocal: openLocalDetail,
       onEditCommunity: setSelectedPublished,
       onToggled: handleToggled,
+      tagRefreshKeys: mineTagRefreshKeys,
     },
     reviewProps: {
       browser: reviewBrowser,

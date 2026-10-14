@@ -12,14 +12,18 @@ from nexent.core.agents.agent_model import AgentHistory, AgentRunInfo
 from nexent.core.agents.run_agent import agent_run
 from nexent.core.utils.observer import MessageObserver
 
-from agents.create_agent_info import create_model_config_list
+from agents.create_agent_info import (
+    create_model_config_list,
+    join_minio_file_description_to_query,
+)
 from agents.nl2skill_agent import create_nl2skill_agent_config
 from consts.const import LANGUAGE, MODEL_CONFIG_MAPPING
 from consts.model import HistoryItem, NL2SkillRunRequest
 from database.model_management_db import get_model_by_model_id
-from utils.config_utils import tenant_config_manager, get_model_name_from_config
+from utils.config_utils import tenant_config_manager
+from management.services.model.names import get_model_name_from_config
 from utils.content_classifier_utils import ContentClassifier
-from utils.prompt_template_utils import get_skill_creation_simple_prompt_template
+from utils.prompt_template_utils import get_nl2skill_prompt_template
 from services.thread_lifecycle_service import runtime_thread_manager
 
 logger = logging.getLogger(__name__)
@@ -97,12 +101,12 @@ def _assemble_draft_content(draft_snapshot: dict[str, Any]) -> str:
         if path == "SKILL.md":
             skill_content = file_content
         elif path and file_content.strip():
-            parts.append(f'<FILE path="{path}">\n{file_content}\n</FILE>')
+            parts.append(f'<file path="{path}">\n{file_content}\n</file>')
 
     if not skill_content.strip() and not parts:
         return ""
 
-    return "\n\n".join([f"<SKILL>\n{skill_content}\n</SKILL>", *parts])
+    return "\n\n".join([f"<skill>\n{skill_content}\n</skill>", *parts])
 
 
 def _normalize_draft_snapshot(
@@ -183,11 +187,16 @@ async def build_nl2skill_run_info(
     template_language = LANGUAGE["EN"] if language == LANGUAGE["EN"] else LANGUAGE["ZH"]
     target_files = _extract_target_files(request.query, request.draft_snapshot)
     draft_snapshot = _normalize_draft_snapshot(request.draft_snapshot)
-    template = get_skill_creation_simple_prompt_template(
+    final_query = await join_minio_file_description_to_query(
+        minio_files=request.minio_files,
+        query=request.query,
+        history=request.history,
+        language=template_language,
+    )
+    template = get_nl2skill_prompt_template(
         language=template_language,
         existing_skill=draft_snapshot,
-        complexity=request.complexity,
-        user_request=request.query,
+        user_request=final_query,
         target_files=target_files,
     )
     model_config_list = await create_model_config_list(tenant_id)
@@ -202,7 +211,7 @@ async def build_nl2skill_run_info(
     )
 
     return AgentRunInfo(
-        query=template.get("user_prompt") or request.query,
+        query=template.get("user_prompt") or final_query,
         model_config_list=model_config_list,
         observer=MessageObserver(lang=template_language),
         agent_config=create_nl2skill_agent_config(

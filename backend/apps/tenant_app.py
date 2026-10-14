@@ -4,7 +4,7 @@ Tenant management API endpoints
 import logging
 from typing import Optional
 
-from fastapi import APIRouter, HTTPException, Header, Body
+from fastapi import APIRouter, Body, Header, HTTPException, Request
 from http import HTTPStatus
 from starlette.responses import JSONResponse
 
@@ -21,6 +21,7 @@ from consts.exceptions import (
     ValidationError,
     tenant_resource_limit_error_payload,
 )
+from services.audit_service import record_security_event
 from services.tenant_service import (
     create_tenant,
     get_tenant_info_for_user,
@@ -37,6 +38,7 @@ router = APIRouter(prefix="/tenants", tags=["tenants"])
 @router.post("", response_model=None)
 async def create_tenant_endpoint(
     request: TenantCreateRequest,
+    http_request: Request,
     authorization: Optional[str] = Header(None)
 ) -> JSONResponse:
     """
@@ -51,7 +53,7 @@ async def create_tenant_endpoint(
     """
     try:
         # Get current user ID from token
-        user_id, _ = get_current_user_id(authorization)
+        user_id, operator_tenant_id = get_current_user_id(authorization)
 
         # Create tenant
         tenant_info = create_tenant(
@@ -64,6 +66,10 @@ async def create_tenant_endpoint(
 
         logger.info(f"Created tenant {tenant_info['tenant_id']} by user {user_id}")
 
+        record_security_event("tenant_create", request=http_request,
+                              user_id=user_id, tenant_id=operator_tenant_id,
+                              details={"tenant_id": (tenant_info or {}).get("tenant_id"),
+                                       "tenant_name": request.tenant_name})
         return JSONResponse(
             status_code=HTTPStatus.CREATED,
             content={
@@ -196,6 +202,7 @@ async def get_all_tenants_endpoint(
 async def update_tenant_endpoint(
     tenant_id: str,
     request: TenantUpdateRequest,
+    http_request: Request,
     authorization: Optional[str] = Header(None)
 ) -> JSONResponse:
     """
@@ -211,7 +218,7 @@ async def update_tenant_endpoint(
     """
     try:
         # Get current user ID from token
-        user_id, _ = get_current_user_id(authorization)
+        user_id, operator_tenant_id = get_current_user_id(authorization)
 
         # Update tenant
         updated_tenant = update_tenant_info(
@@ -222,6 +229,10 @@ async def update_tenant_endpoint(
 
         logger.info(f"Updated tenant {tenant_id} by user {user_id}")
 
+        record_security_event("tenant_update", request=http_request,
+                              user_id=user_id, tenant_id=operator_tenant_id,
+                              details={"tenant_id": tenant_id,
+                                       "tenant_name": request.tenant_name})
         return JSONResponse(
             status_code=HTTPStatus.OK,
             content={
@@ -259,6 +270,7 @@ async def update_tenant_endpoint(
 @router.delete("/{tenant_id}")
 async def delete_tenant_endpoint(
     tenant_id: str,
+    http_request: Request,
     authorization: Optional[str] = Header(None)
 ) -> JSONResponse:
     """
@@ -283,13 +295,16 @@ async def delete_tenant_endpoint(
     """
     try:
         # Get current user ID from token
-        user_id, _ = get_current_user_id(authorization)
+        user_id, operator_tenant_id = get_current_user_id(authorization)
 
         # Perform tenant deletion with all associated resources
         await delete_tenant(tenant_id, deleted_by=user_id)
 
         logger.info(f"Deleted tenant {tenant_id} and all associated resources by user {user_id}")
 
+        record_security_event("tenant_delete", request=http_request,
+                              user_id=user_id, tenant_id=operator_tenant_id,
+                              details={"tenant_id": tenant_id})
         return JSONResponse(
             status_code=HTTPStatus.OK,
             content={

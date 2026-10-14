@@ -107,7 +107,7 @@ def test_mixed_actions_are_not_partially_executed(build_agent, output):
 
 
 def test_structured_model_output_uses_same_terminal_parser(build_agent):
-    agent, model, _ = build_agent([json.dumps({"code": CODE})])
+    agent, model, _ = build_agent([json.dumps({"code": CODE})], enable_protocol_repair_retry=True)
     agent._use_structured_outputs_internally = True
     assert str(agent.run("Help")) == "1. Which region?"
     assert len(model.calls) == 1
@@ -121,10 +121,13 @@ def test_invalid_options_get_schema_feedback_before_repair(build_agent):
     agent, model, observer = build_agent([
         f"思考：需要确认范围。\n代码：\n<code>ask_user(questions={[question]!r})</code>",
         f"<code>{CODE}</code>",
-    ])
+    ], enable_protocol_repair_retry=True)
     assert str(agent.run("Help")) == "1. Which region?"
     assert len(model.calls) == 2
-    feedback = str(model.calls[1][-1].content)
+    feedback = "\n".join(
+        str(message.get("content") if isinstance(message, dict) else message.content)
+        for message in model.calls[1]
+    )
     assert "questions.0.options: too_long" in feedback
     assert "2-12 options" in feedback
     assert sum(event["type"] == "human_interaction" for event in events(observer)) == 1
@@ -171,7 +174,6 @@ def test_cancel_exception_bypasses_ordinary_exception_handlers():
 async def test_worker_drains_card_or_terminal_protocol_error(monkeypatch, invalid_output):
     from nexent.core.agents.agent_model import AgentConfig, AgentRunInfo
     from nexent.core.agents.nexent_agent import NexentAgent
-    from nexent.core.agents.output_protocol import ModelOutputProtocolExhaustedError
     from nexent.core.agents.run_agent import agent_run
     from nexent.core.concurrency import LanePolicy, ThreadManager
 
@@ -182,7 +184,10 @@ async def test_worker_drains_card_or_terminal_protocol_error(monkeypatch, invali
     })
     manager.start()
     info = AgentRunInfo(query="Analyze sales", model_config_list=[], observer=MessageObserver(), stop_event=threading.Event(),
-                        agent_config=AgentConfig(name="root", description="test", model_name="test", tools=[]))
+                        agent_config=AgentConfig(
+                            name="root", description="test", model_name="test", tools=[],
+                            enable_protocol_repair_retry=invalid_output,
+                        ))
     try:
         chunks = []
 
@@ -192,14 +197,10 @@ async def test_worker_drains_card_or_terminal_protocol_error(monkeypatch, invali
 
         await drain()
         if invalid_output:
-            assert isinstance(info.thread_future.exception(), ModelOutputProtocolExhaustedError)
-            assert info.attempt_outcome == "failed"
-            errors = [chunk for chunk in chunks if chunk["type"] == "error"]
-            assert len(errors) == 1
-            assert errors[0]["error_code"] == "model_output_protocol_exhausted"
-            assert errors[0]["retryable"] is False
-            assert errors[0]["content"].startswith("模型连续未遵循")
-            assert not any(chunk["type"] == "final_answer" for chunk in chunks)
+            assert info.thread_future.exception() is None
+            assert info.attempt_outcome == "completed"
+            assert not any(chunk["type"] == "error" for chunk in chunks)
+            assert [chunk["content"] for chunk in chunks if chunk["type"] == "final_answer"] == ["bare answer"]
             assert len(model.calls) == 3
         else:
             assert info.attempt_outcome == "completed"

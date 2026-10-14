@@ -1,6 +1,6 @@
 import logging
 from http import HTTPStatus
-from typing import Optional, Dict, Any
+from typing import Any, Dict, List, Optional
 from urllib.parse import urlparse, unquote
 import re
 import uuid
@@ -38,6 +38,7 @@ from services.api_key_service import (
     refresh_user_api_key,
     revoke_user_api_keys,
 )
+from services.audit_service import record_security_event
 from services.northbound_service import (
     NorthboundContext,
     get_conversation_history,
@@ -197,6 +198,40 @@ def _raise_api_key_http_exception(exc: Exception) -> None:
     raise exc
 
 
+def _audit_safe_target(result: Dict[str, Any], request_id: str) -> Dict[str, Any]:
+    """Pick non-secret target fields for the audit trail.
+
+    The service results carry the freshly created plaintext API key; only the
+    whitelisted identifiers below are handed to the audit entry.
+    """
+    return {
+        "target_user_id": (result or {}).get("user_id"),
+        "target_email": (result or {}).get("email"),
+        "revoked_count": (result or {}).get("revoked_count"),
+        "request_id": request_id,
+    }
+
+
+def _audit_safe_batch(
+    payload: ApiUserBatchCreateRequest,
+    created: List[Dict[str, Any]],
+    request_id: str,
+) -> Dict[str, Any]:
+    """Pick non-secret batch fields for the audit trail.
+
+    Each created item carries a plaintext API key, so only the request intent
+    and the created user ids (bounded) are recorded.
+    """
+    created = created or []
+    return {
+        "role": payload.role,
+        "group_id": payload.group_id,
+        "count": len(created),
+        "user_ids": [item.get("user_id") for item in created][:20],
+        "request_id": request_id,
+    }
+
+
 @router.post(
     "/api-users/batch",
     status_code=HTTPStatus.CREATED,
@@ -216,6 +251,9 @@ async def create_api_users_batch_endpoint(
             group_id=payload.group_id,
             count=payload.count,
         )
+        record_security_event("northbound_api_users_batch_create", request=request,
+                              user_id=ctx.user_id, tenant_id=ctx.tenant_id,
+                              details=_audit_safe_batch(payload, data, ctx.request_id))
         return JSONResponse(
             status_code=HTTPStatus.CREATED,
             content={"message": "success", "requestId": ctx.request_id, "data": data},
@@ -242,6 +280,9 @@ async def refresh_api_key_endpoint(
             user_id=payload.user_id,
             email=str(payload.email) if payload.email else None,
         )
+        record_security_event("northbound_api_key_refresh", request=request,
+                              user_id=ctx.user_id, tenant_id=ctx.tenant_id,
+                              details=_audit_safe_target(data, ctx.request_id))
         return JSONResponse(
             status_code=HTTPStatus.OK,
             content={"message": "success", "requestId": ctx.request_id, "data": data},
@@ -266,6 +307,9 @@ async def revoke_api_key_endpoint(
             user_id=target.user_id,
             email=str(target.email) if target.email else None,
         )
+        record_security_event("northbound_api_key_revoke", request=request,
+                              user_id=ctx.user_id, tenant_id=ctx.tenant_id,
+                              details=_audit_safe_target(data, ctx.request_id))
         return JSONResponse(
             status_code=HTTPStatus.OK,
             content={"message": "success", "requestId": ctx.request_id, "data": data},

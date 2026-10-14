@@ -1,0 +1,16 @@
+schema_version: "1.0"
+changes:
+  - change_id: AGENT-LIST-BUG-001
+    change_type: bugfix
+    bug_id: AGENT-LIST-BUG-001
+    title: Agent table header separators and content-responsive height
+    description: Show centered text-height internal header dividers and size the table to its rows while retaining the existing 500px cap and internal scrolling.
+    observed_behavior: Header separators are shifted upward by 7.5px because Tailwind's independent translate stacks with Ant Design's transform; the previous D4 calculation ignored that second offset. The table wrapper also flexes into unused list space when the rendered rows need less height.
+    expected_behavior: Internal header columns have 1px #c9c9c9 separators that are 14px high and vertically centered, except after the final column; there are no body vertical separators or outer border. The table follows its rendered content up to 500px, shrinks to the available list area when needed, and scrolls internally when content exceeds that area.
+    escaped_stage: production
+    coverage_gap:
+      type: missing_assertion
+      description: The D4 centering assertion counted the CSS transform but omitted Tailwind's independent translate property, so the double offset was not detected; D1 only checked the style class.
+    feature_contract_changed: true
+    affected_features: {existing: [], added: [], modified: [AGENT-LIST-VIEWS], retired: []}
+    affected_cases: {existing: [], added: [], modified: [AGENT-LIST-D1-001, AGENT-LIST-D4-001], retired: []}

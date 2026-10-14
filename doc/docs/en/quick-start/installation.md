@@ -72,9 +72,29 @@ bash deploy.sh docker --components infrastructure,application,data-process,supab
 # Use mainland China image sources
 bash deploy.sh docker --image-source mainland
 
-# Use local latest images
++# Use local latest images
 bash deploy.sh docker --image-source local-latest
 ```
+
+#### HTTPS (Optional)
+
+Nexent can terminate HTTPS at an Nginx reverse proxy installed alongside the stack. The option is disabled by default; when enabled, HTTPS uses a dedicated entry port: port 3100 for Docker deployments and NodePort 31000 for Kubernetes deployments. The plain HTTP entry (Docker 3000 / K8s 30000) stays unchanged, so both entries can be used at the same time. To change the entry ports, set `NEXENT_WEB_PORT` (HTTP entry) or `NEXENT_HTTPS_PORT` (HTTPS entry) in `deploy/env/.env`.
+
+Enable it interactively (the installer asks one question: the HTTPS mode) or non-interactively:
+
+```bash
+# Self-signed certificate (recommended for internal deployments)
+bash deploy.sh docker --defaults --https-mode self-signed
+
+# Your own certificate (paths may also be preset via deploy/env/.env)
+bash deploy.sh docker --defaults --https-mode custom --https-cert-file /path/to/server.pem --https-key-file /path/to/server.key
+```
+
+- **self-signed**: the installer generates a 99-year certificate with an unencrypted private key under `<ROOT_DIR>/nginx/ssl/` and reuses it on redeployment. SAN entries are auto-detected from the host network interfaces (loopback and Docker bridges excluded); preset `NEXENT_HTTPS_SAN` in `deploy/env/.env` to override (for example `NEXENT_HTTPS_SAN=10.0.0.5,example.com`). Browsers show an untrusted-certificate warning; import the certificate into your trust store to silence it.
+- **custom**: point `NEXENT_HTTPS_CERT_FILE` and `NEXENT_HTTPS_KEY_FILE` at your PEM files. The installer validates the pair (PEM format, key/cert match, expiry) before deploying. Encrypted private keys are supported: provide the passphrase via `NEXENT_HTTPS_KEY_PASSPHRASE` or `--https-key-passphrase`; like other deployment credentials, it is stored in plain text in `deploy/env/.env`.
+- After enabling HTTPS, update `SITE_URL` in `deploy/env/.env` (for example `SITE_URL=https://your-host:3100`) so auth callbacks and generated links use the HTTPS entry point.
+- After changing the HTTP/HTTPS entry ports, update callback URLs such as `OAUTH_CALLBACK_BASE_URL` and `CAS_CALLBACK_BASE_URL` if they contain the old port.
+- Disabling HTTPS again (`--https-mode disabled`) removes the Nginx container; the certificate files are kept and can be reused later.
 
 After a successful deployment, non-sensitive choices are saved to `deploy/docker/deploy.options`. `--defaults` reuses that file when it exists, otherwise it uses built-in defaults. The next interactive deployment can reuse the local config or run a full reconfiguration.
 
@@ -246,7 +266,8 @@ The Docker uninstall script reads `deploy/env/.env` to resolve `ROOT_DIR` and re
 
 | Service | Internal Port | External Port | Description |
 |---------|---------------|---------------|-------------|
-| Web Interface | 3000 | 3000 | Main application access |
+| Web Interface | 3000 | 3000 (`NEXENT_WEB_PORT`) | Main application access |
+| HTTPS Entry | 3100 | 3100 (`NEXENT_HTTPS_PORT`) | Optional encrypted entry via Nginx (when HTTPS is enabled) |
 | Backend API | 5010 | 5010 | Backend service |
 | Runtime API | 5014 | 5014 | Agent runtime service |
 | MCP API | 5011/5015 | 5011/5015 | MCP management and tool service |
@@ -538,6 +559,74 @@ NORTHBOUND_EXTERNAL_URL=https://api.yourdomain.com/api
 ```
 
 > **Important**: The URL must include the `/api` suffix because the Northbound service uses FastAPI's `root_path="/api"` configuration.
+
+## 🤖 Official Agent Deployment
+
+After Nexent is deployed, you can install official agents from the official agent resources included in the deployment package. Official agent deployment is decoupled from the Nexent platform deployment and does not run automatically when the platform starts.
+
+### Prerequisites
+
+Before deployment, make sure that:
+
+1. Nexent has been deployed with Docker or Kubernetes;
+2. The `nexent-config` service is running and database initialization is complete;
+3. The deployment package contains `deploy/official-agents`;
+4. Docker deployments use Git Bash or WSL to run the script; Kubernetes deployments use a terminal with access to the target cluster.
+
+No additional environment variables are required, and users do not need to run Git commands, `docker cp`, or the synchronization API manually.
+
+### Interactive Deployment
+
+Run the following command from the Nexent repository root:
+
+```bash
+bash deploy/deploy-official-agents.sh
+```
+
+The script scans the actual first-level directories under `deploy/official-agents` and presents them as the available profiles. You can enter one profile, multiple profiles such as `2,3`, or `all` to install every profile. The script validates the directories and `agent.json` files. Invalid selections stop before any copy or synchronization operation.
+
+For Docker deployments, the selected profiles are copied to `/mnt/nexent/official-agents/` in the `nexent-config` container and then synchronized to the official agent repository.
+
+For Kubernetes deployments, run:
+
+```bash
+bash deploy/deploy-official-agents.sh --kubernetes
+```
+
+To specify a namespace:
+
+```bash
+bash deploy/deploy-official-agents.sh \
+  --kubernetes \
+  --namespace custom-namespace
+```
+
+### Using Official Agents After Deployment
+
+After deployment, users can find the templates in the **Agent Repository** under the official agent list. When copying an official agent, follow the dialog to select models and choose whether to reuse or create the required knowledge bases, Skills, and MCP configurations.
+
+The deployment stage only publishes templates. It does not create knowledge bases for every tenant. When an official agent includes a knowledge base, the target tenant must have an available embedding model when the agent is copied for the first time.
+
+### Verification
+
+For Docker deployments, inspect the copied resources with:
+
+```bash
+docker exec nexent-config find /mnt/nexent/official-agents -name agent.json -print
+```
+
+Then sign in to Nexent, open the **Agent Repository**, switch to the official agent list, and confirm that the selected profiles are available.
+
+### Delete an Official Agent
+
+Deleting an official template requires Super Administrator privileges:
+
+1. Open **Resource Management**;
+2. Open the **Agents** page;
+3. Click **Manage Official Agents**;
+4. Select the template and confirm deletion.
+
+This removes the official repository listing, the source Agent in the system tenant, and the corresponding server-side Bundle files. Agent copies already created in regular tenants are not deleted.
 
 ## 💡 Need Help
 

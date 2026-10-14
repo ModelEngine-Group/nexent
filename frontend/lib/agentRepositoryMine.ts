@@ -3,9 +3,33 @@ import type {
   MyAgentRepositoryInfoItem,
   MyEditableAgentItem,
 } from "@/types/agentRepository";
-import { isSingleSimpleEmoji } from "@/lib/agentRepositoryIcon";
+import type { TagAssignmentValue, TagDefinition } from "@/types/tagManagement";
 
 export type MineCardMenuAction = "apply" | "review" | "reviewUpdate";
+
+export function toMineRepositoryInfo(
+  listings: AgentRepositoryListingItem[]
+): MyAgentRepositoryInfoItem[] {
+  return listings.flatMap((item) => {
+    if (
+      item.status !== "shared" &&
+      item.status !== "pending_review" &&
+      item.status !== "rejected"
+    ) {
+      return [];
+    }
+    return [
+      {
+        agent_repository_id: item.agent_repository_id,
+        status: item.status,
+        version_no: item.version_no,
+        version_label: item.version_label,
+        create_time: item.create_time,
+        content: item.content,
+      },
+    ];
+  });
+}
 
 function parseCreateTime(value?: string | null): number {
   if (!value) {
@@ -133,7 +157,9 @@ export function getMineCardMenuActions(
       (item) => item.status === "pending_review"
     );
     const hasShared = repositoryInfo.some((item) => item.status === "shared");
-    const hasRejected = repositoryInfo.some((item) => item.status === "rejected");
+    const hasRejected = repositoryInfo.some(
+      (item) => item.status === "rejected"
+    );
     if ((hasPending || hasRejected) && hasShared) {
       actions.push("reviewUpdate");
     } else {
@@ -228,8 +254,36 @@ export function pickApplyListingPrefillSource(
 }
 
 export interface ApplyListingFormPrefill {
-  icon: string | null;
+  icon_url: string | null;
   tags: string[];
+}
+
+export function getListingTagsFromAssignments(
+  assignments: Pick<
+    TagAssignmentValue,
+    "definition_id" | "value_id" | "display_value"
+  >[],
+  agentCategory: Pick<TagDefinition, "definition_id" | "values"> | null
+): string[] {
+  const tags: string[] = [];
+  const seen = new Set<string>();
+  for (const assignment of assignments) {
+    const categoryValue =
+      assignment.definition_id === agentCategory?.definition_id
+        ? agentCategory.values?.find(
+            (value) => value.value_id === assignment.value_id
+          )
+        : null;
+    const tag = (
+      categoryValue?.normalized_value || assignment.display_value
+    ).trim();
+    const key = tag.toLocaleLowerCase();
+    if (key && !seen.has(key)) {
+      seen.add(key);
+      tags.push(tag);
+    }
+  }
+  return tags;
 }
 
 function normalizeApplyListingTags(tags: string[], maxTags: number): string[] {
@@ -260,15 +314,10 @@ export function buildApplyListingFormPrefill(
   }
 
   const maxTags = options.maxTags ?? 5;
-  const trimmedIcon = item.icon?.trim();
-
-  const icon =
-    trimmedIcon && isSingleSimpleEmoji(trimmedIcon) ? trimmedIcon : null;
-
   const tags = normalizeApplyListingTags(item.tags ?? [], maxTags);
 
   return {
-    icon,
+    icon_url: item.icon_url?.trim() || null,
     tags,
   };
 }

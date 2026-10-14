@@ -11,6 +11,7 @@ import {
   deleteSkill,
 } from "@/services/agentConfigService";
 import { API_ENDPOINTS, fetchWithErrorHandling } from "@/services/api";
+import { getTenantResourceLimitMessage } from "@/const/errorMessageI18n";
 import { InstallableSkill } from "@/types/agentConfig";
 import {
   THINKING_STEPS_ZH,
@@ -61,6 +62,7 @@ export interface SkillListItem {
 export interface SkillOperationResult {
   success: boolean;
   message?: string;
+  error?: unknown;
 }
 
 /**
@@ -287,7 +289,7 @@ export const submitSkillForm = async (
       onCancel();
       return true;
     } else {
-      throw new Error(
+      throw (result as { error?: unknown }).error || new Error(
         result.message || t("skillManagement.message.submitFailed")
       );
     }
@@ -306,7 +308,7 @@ export const submitSkillFromFile = async (
   allSkills: SkillListItem[],
   onSuccess: () => void,
   onCancel: () => void,
-  t: (key: string) => string
+  t: (key: string, options?: Record<string, unknown>) => string
 ): Promise<boolean> => {
   try {
     const result = await createSkillFromFile(skillName.trim(), file, false);
@@ -317,14 +319,36 @@ export const submitSkillFromFile = async (
       onCancel();
       return true;
     } else {
+      const limitMessage = getTenantResourceLimitMessage(result.error, t);
+      const errorCode = result.error && typeof result.error === "object"
+        ? String((result.error as { code?: string | number }).code || "")
+        : "";
       message.error(
-        result.message || t("skillManagement.message.submitFailed")
+        limitMessage ||
+          (errorCode === "000403"
+            ? t("skillManagement.message.fileTooLarge", {
+                limit: (result.error as { details?: { limit_mb?: number } } | undefined)
+                  ?.details?.limit_mb ?? "",
+              })
+            : result.message || t("skillManagement.message.submitFailed"))
       );
       return false;
     }
   } catch (error) {
     log.error("Skill file upload error:", error);
-    message.error(t("skillManagement.message.submitFailed"));
+    const limitMessage = getTenantResourceLimitMessage(error, t);
+    const errorCode = error && typeof error === "object"
+      ? String((error as { code?: string | number }).code || "")
+      : "";
+    message.error(
+      limitMessage ||
+        (errorCode === "000403"
+          ? t("skillManagement.message.fileTooLarge", {
+              limit: (error as { details?: { limit_mb?: number } } | undefined)
+                ?.details?.limit_mb ?? "",
+            })
+          : t("skillManagement.message.submitFailed"))
+    );
     return false;
   }
 };
@@ -370,12 +394,12 @@ export { updateSkill };
 
 /**
  * Extract summary content from final_answer.
- * final_answer contains the FULL response including <SKILL> block.
+ * final_answer contains the FULL response including <skill> block.
  * The SKILL content was already streamed via skill_content events,
- * so we only need the summary (content AFTER </SKILL>).
+ * so we only need the summary (content AFTER </skill>).
  */
 function extractSummaryFromFinalAnswer(fullContent: string): string {
-  const SKILL_CLOSE = "</SKILL>";
+  const SKILL_CLOSE = "</skill>";
   const closeIndex = fullContent.indexOf(SKILL_CLOSE);
   if (closeIndex === -1) {
     return fullContent;
@@ -386,8 +410,8 @@ function extractSummaryFromFinalAnswer(fullContent: string): string {
 /**
  * Initialize a skill content parser state that handles multi-file streaming.
  * Supports:
- * - <SKILL>...</SKILL>: Default SKILL.md content
- * - <FILE path="...">...</FILE>: Additional files
+ * - <skill>...</skill>: Default SKILL.md content
+ * - <file path="...">...</file>: Additional files
  * - Text outside all tags: Summary for chat bubble
  */
 export function createSkillContentParser(): {
@@ -423,10 +447,10 @@ export function createSkillContentParser(): {
   let pendingCloseTag = "";
 
   // Regex patterns
-  const SKILL_OPEN = "<SKILL>";
-  const SKILL_CLOSE = "</SKILL>";
-  const FILE_OPEN_PATTERN = /<FILE\s+path="([^"]+)">/i;
-  const FILE_CLOSE = "</FILE>";
+  const SKILL_OPEN = "<skill>";
+  const SKILL_CLOSE = "</skill>";
+  const FILE_OPEN_PATTERN = /<file\s+path="([^"]+)">/;
+  const FILE_CLOSE = "</file>";
 
   function findTagInBuffer(): {
     type: "skill_open" | "skill_close" | "file_open" | "file_close" | "none";
@@ -520,7 +544,7 @@ export function createSkillContentParser(): {
 
         switch (tagInfo.type) {
           case "skill_open":
-            // Content before <SKILL> is noise, ignore
+            // Content before <skill> is noise, ignore
             // Switch to SKILL.md tab
             activeTab = "SKILL.md";
             // Find or ensure SKILL.md tab exists

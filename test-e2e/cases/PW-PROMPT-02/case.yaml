@@ -1,0 +1,76 @@
+schema_version: '1.0'
+stage: D4
+module: V5-BASELINE
+case:
+  case_id: PW-PROMPT-02
+  feature_id: V5-PW-PROMPT-02
+  business_rule_ids:
+  - V5-PW-PROMPT-02-RULE-01
+  title: Debug Compare→修改Prompt→重新执行对比
+  type: E2E
+  priority: P1
+  status: active
+  automation: automated
+  objective: 依据当前Debug Compare Mode验证调试-修改-再验证闭环。
+  preconditions:
+  - Agent已配置两个真实LLM（glm-5.2与config/models.yaml中的第二候选模型，均须通过真实连通性检查）。
+  - 共享Agent作者字段已持久化，满足Debug按钮的表单校验。
+  - 固定badcase输入。
+  test_data:
+    legacy_asset_declaration: config/models.yaml；expected/debug_cases.json
+  steps:
+  - order: 1
+    action: 点击Debug打开面板。
+    expected: Compare Mode是真实UI状态。
+  - order: 2
+    action: 打开顶部【Compare Mode】Switch。
+    expected: 第二轮使用新Prompt。
+  - order: 3
+    action: 执行固定badcase第一轮。
+    expected: 两次结果可稳定对比。
+  - order: 4
+    action: 回Config修改明确影响行为的Prompt。
+    expected: 两次结果可稳定对比。
+  - order: 5
+    action: 等待autosave后执行相同badcase第二轮。
+    expected: 两次结果可稳定对比。
+  - order: 6
+    action: 检查Compare中两次结果可区分，不互相覆盖。
+    expected: 两次结果可稳定对比。
+  - order: 7
+    action: 用oracle判断第二次满足目标marker/结构。
+    expected: 两次结果可稳定对比。
+  - order: 8
+    action: 关闭Compare确认普通Debug仍可运行。
+    expected: 两次结果可稳定对比。
+  expected_results:
+  - Compare Mode是真实UI状态。
+  - 第二轮使用新Prompt。
+  - 两次结果可稳定对比。
+  forbidden_side_effects: []
+  source:
+    legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
+    legacy_sheet: 03_Playwright_Journey
+    legacy_row: 22
+  actor: Nexent browser user
+  journey:
+  - 点击Debug打开面板。
+  - 打开顶部【Compare Mode】Switch。
+  - 执行固定badcase第一轮。
+  - 回Config修改明确影响行为的Prompt。
+  - 等待autosave后执行相同badcase第二轮。
+  - 检查Compare中两次结果可区分，不互相覆盖。
+  - 用oracle判断第二次满足目标marker/结构。
+  - 关闭Compare确认普通Debug仍可运行。
+  final_business_result:
+  - Compare Mode是真实UI状态。
+  - 第二轮使用新Prompt。
+  - 两次结果可稳定对比。
+  failure_evidence:
+  - '${NEXENT_TEST_HOME}/runs/{run_id}/playwright/PW-PROMPT-02/
+
+    - screenshot.png / trace.zip / video.webm
+
+    - console.log / network.har / failure.json
+
+    - 涉及协议时关联 wire/*.jsonl；涉及下载时保留 downloads/'

@@ -60,6 +60,7 @@ from consts.const import (
     AIDP_API_KEY,
     AIDP_SERVER_URL,
     ENABLE_AIDP_KNOWLEDGE,
+    ENABLE_AGENT_WORKBENCH,
     IS_SPEED_MODE,
     RUNTIME_THREAD_SHUTDOWN_GRACE_SECONDS,
 )
@@ -81,6 +82,7 @@ async def recover_config_tasks_on_startup():
     from services.startup_recovery_service import (
         recover_config_tasks,
         schedule_interrupted_upload_cleanup,
+        schedule_workbench_main_backfill,
     )
 
     await config_thread_manager.run(
@@ -93,6 +95,8 @@ async def recover_config_tasks_on_startup():
     )
     start_eval_maintenance(config_thread_manager)
     await schedule_interrupted_upload_cleanup(CONFIG_SERVICE_NAME)
+    if ENABLE_AGENT_WORKBENCH:
+        schedule_workbench_main_backfill()
 
 
 async def sync_default_prompt_template_on_startup():

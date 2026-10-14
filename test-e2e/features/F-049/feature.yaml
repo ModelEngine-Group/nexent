@@ -1,0 +1,16 @@
+schema_version: '1.0'
+module:
+  id: V5-BASELINE
+  name: Migrated V5 baseline
+feature:
+  feature_id: F-049
+  name: 模板 list/detail/create/update/delete、重复名与租户/用户可见性
+  status: active
+  description: '智能体配置 / Prompt模板: 模板 list/detail/create/update/delete、重复名与租户/用户可见性'
+  business_rules:
+  - rule_id: F-049-RULE-01
+    description: 模板 list/detail/create/update/delete、重复名与租户/用户可见性
+  required_test_stages:
+  - D3
+  source:
+    notes: Migrated from V5 01_代码功能清单 without changing the functional description.

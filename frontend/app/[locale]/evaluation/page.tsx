@@ -1,5 +1,12 @@
 "use client";
-import { useState, useEffect, useRef, useCallback, type Key } from "react";
+import {
+  useState,
+  useEffect,
+  useRef,
+  useCallback,
+  type Key,
+  type ReactNode,
+} from "react";
 import {
   Tabs,
   Typography,
@@ -39,7 +46,14 @@ import {
 } from "lucide-react";
 import { API_ENDPOINTS } from "@/services/api";
 import { getAuthHeaders } from "@/lib/auth";
+import {
+  DEFAULT_EVALUATION_SET_FILE_SIZE_MB,
+  evaluationSetFileSizeToBytes,
+} from "@/const/agentEvaluation";
 import { useModelList } from "@/hooks/model/useModelList";
+import { useDeployment } from "@/components/providers/deploymentProvider";
+import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
+import { USER_ROLES } from "@/const/auth";
 import { getI18nErrorMessage } from "@/const/errorMessageI18n";
 import {
   buildEvaluationTaskQuery,
@@ -48,6 +62,46 @@ import {
 } from "@/lib/evaluationTaskFilters";
 import AnnotationLabels from "./components/AnnotationLabels";
 const { Text, Title } = Typography;
+
+// Roles allowed to delete ANY evaluation run. Mirrors the backend's
+// CAN_EDIT_ALL_USER_ROLES (backend/consts/const.py); all other roles can
+// only delete runs they created themselves.
+const EVALUATION_DELETE_ALL_ROLES = new Set<string>([
+  USER_ROLES.SU,
+  USER_ROLES.ADMIN,
+  USER_ROLES.SPEED,
+  USER_ROLES.ASSET_OWNER,
+]);
+
+/**
+ * Fire a body-less mutating request (DELETE / POST) and surface backend
+ * errors as a toast. Returns true only on success so callers can skip
+ * their success path (local row removal / list refresh).
+ */
+async function requestWithErrorToast(
+  url: string,
+  method: "DELETE" | "POST",
+  failKey: string,
+  t: (key: string) => string,
+  message: { error: (content: ReactNode) => void }
+): Promise<boolean> {
+  try {
+    const resp = await fetch(url, { method, headers: getAuthHeaders() });
+    if (!resp.ok) {
+      const d = await resp.json().catch(() => ({}));
+      message.error(
+        d.code
+          ? getI18nErrorMessage(d.code, t)
+          : d.detail || d.message || t(failKey)
+      );
+      return false;
+    }
+    return true;
+  } catch {
+    message.error(t(failKey));
+    return false;
+  }
+}
 
 function useList(url: string) {
   /**
@@ -99,6 +153,14 @@ function RunsTab() {
   const { availableLlmModels } = useModelList();
   const [evalSets, setEvalSets] = useState<any[]>([]);
   const [evaluators, setEvaluators] = useState<any[]>([]);
+
+  // The backend rejects DELETE for non-creators outside the admin-like
+  // roles (error 160208), so hide the delete button for those users
+  // instead of letting them hit the rejection.
+  const { user } = useAuthorizationContext();
+  const canDeleteRun = (r: any) =>
+    (user?.id != null && r?.created_by === user.id) ||
+    EVALUATION_DELETE_ALL_ROLES.has(user?.role ?? "");
 
   // ── Drawer (create-evaluation form) state ─────────────────────────────
   // Short variable names intentionally match the drawer inputs one-to-one:
@@ -344,29 +406,36 @@ function RunsTab() {
               }
             />
           </Tooltip>
-          <Popconfirm
-            title={t("agentEvaluation.deleteConfirm")}
-            onConfirm={async () => {
-              await fetch(
-                API_ENDPOINTS.agentEvaluations.delete(r.agent_evaluation_id),
-                { method: "DELETE", headers: getAuthHeaders() }
-              );
-              setRuns((prev) =>
-                prev.filter(
-                  (x) => x.agent_evaluation_id !== r.agent_evaluation_id
-                )
-              );
-            }}
-          >
-            <Tooltip title={t("agentEvaluation.delete")}>
-              <Button
-                type="link"
-                size="small"
-                danger
-                icon={<Trash2 className="size-3.5" />}
-              />
-            </Tooltip>
-          </Popconfirm>
+          {canDeleteRun(r) && (
+            <Popconfirm
+              title={t("agentEvaluation.deleteConfirm")}
+              onConfirm={async () => {
+                const ok = await requestWithErrorToast(
+                  API_ENDPOINTS.agentEvaluations.delete(r.agent_evaluation_id),
+                  "DELETE",
+                  "agentEvaluation.message.deleteRunFailed",
+                  t,
+                  message
+                );
+                if (ok) {
+                  setRuns((prev) =>
+                    prev.filter(
+                      (x) => x.agent_evaluation_id !== r.agent_evaluation_id
+                    )
+                  );
+                }
+              }}
+            >
+              <Tooltip title={t("agentEvaluation.delete")}>
+                <Button
+                  type="link"
+                  size="small"
+                  danger
+                  icon={<Trash2 className="size-3.5" />}
+                />
+              </Tooltip>
+            </Popconfirm>
+          )}
         </Space>
       ),
     },
@@ -847,6 +916,16 @@ function EvaluatorsTab() {
   const { message } = App.useApp();
   const currentLang = (i18n.language || "zh").startsWith("zh") ? "zh" : "en";
   const [evaluators, refreshEval] = useList(API_ENDPOINTS.evaluators.list);
+  // Shared by the table and card views; a failed delete keeps its row data
+  // out of the UI anyway because the refresh re-syncs from the server.
+  const deleteEvaluator = (evaluatorId: number) =>
+    requestWithErrorToast(
+      API_ENDPOINTS.evaluators.delete(evaluatorId),
+      "DELETE",
+      "agentEvaluation.deleteFailed",
+      t,
+      message
+    ).then(() => refreshEval());
   const { availableLlmModels } = useModelList();
   const [agents] = useList(API_ENDPOINTS.agent.list);
   const [drawer, setDrawer] = useState(false);
@@ -1081,13 +1160,7 @@ function EvaluatorsTab() {
           )}
           <Popconfirm
             title={t("agentEvaluation.deleteConfirm")}
-            onConfirm={async () => {
-              await fetch(API_ENDPOINTS.evaluators.delete(e.evaluator_id), {
-                method: "DELETE",
-                headers: getAuthHeaders(),
-              });
-              refreshEval();
-            }}
+            onConfirm={() => deleteEvaluator(e.evaluator_id)}
           >
             <Tooltip title={t("agentEvaluation.delete")}>
               <Button
@@ -1330,13 +1403,7 @@ function EvaluatorsTab() {
                     />
                     <Popconfirm
                       title={t("agentEvaluation.deleteConfirm")}
-                      onConfirm={async () => {
-                        await fetch(
-                          API_ENDPOINTS.evaluators.delete(e.evaluator_id),
-                          { method: "DELETE", headers: getAuthHeaders() }
-                        );
-                        refreshEval();
-                      }}
+                      onConfirm={() => deleteEvaluator(e.evaluator_id)}
                     >
                       <Button
                         type="text"
@@ -1350,11 +1417,14 @@ function EvaluatorsTab() {
                         type="link"
                         size="small"
                         onClick={async () => {
-                          await fetch(
+                          const ok = await requestWithErrorToast(
                             API_ENDPOINTS.evaluators.publish(e.evaluator_id),
-                            { method: "POST", headers: getAuthHeaders() }
+                            "POST",
+                            "agentEvaluation.publishFailed",
+                            t,
+                            message
                           );
-                          refreshEval();
+                          if (ok) refreshEval();
                         }}
                       >
                         {t("agentEvaluation.publish")}
@@ -1999,7 +2069,12 @@ function SetsTab() {
   const [ulDesc, setUlDesc] = useState("");
   const [ulFile, setUlFile] = useState<File | null>(null);
   const [fileErr, setFileErr] = useState("");
+  const [evaluationFileSizeMb, setEvaluationFileSizeMb] = useState(
+    DEFAULT_EVALUATION_SET_FILE_SIZE_MB
+  );
   const fileRef = useRef<HTMLInputElement>(null);
+  const evaluationFileSizeBytes =
+    evaluationSetFileSizeToBytes(evaluationFileSizeMb);
 
   const validateFile = (file: File) => {
     const ext = file.name.split(".").pop()?.toLowerCase();
@@ -2007,8 +2082,12 @@ function SetsTab() {
       setFileErr(t("agentEvaluation.uploadFileInvalid"));
       return false;
     }
-    if (file.size > 20 * 1024 * 1024) {
-      setFileErr(t("agentEvaluation.uploadFileTooBig"));
+    if (file.size > evaluationFileSizeBytes) {
+      setFileErr(
+        t("agentEvaluation.uploadFileTooBig", {
+          limit: evaluationFileSizeMb,
+        })
+      );
       return false;
     }
     setFileErr("");
@@ -2020,22 +2099,67 @@ function SetsTab() {
   const [genSetModel, setGenSetModel] = useState<number | undefined>(undefined);
   const [busy, setBusy] = useState(false);
   const [genAgentId, setGenAgentId] = useState<number | undefined>(undefined);
-  const [genFiles, setGenFiles] = useState<File[]>([]);
-  const [genFileErr, setGenFileErr] = useState("");
-  const [genKbIds, setGenKbIds] = useState<number[]>([]);
-  const [kbList, setKbList] = useState<any[]>([]);
+  const [genKbIds, setGenKbIds] = useState<string[]>([]);
+  const [kbList, setKbList] = useState<{ label: string; value: string }[]>([]);
   const [genSetName, setGenSetName] = useState("");
   const [genSetDesc, setGenSetDesc] = useState("");
   const [genTargetSetId, setGenTargetSetId] = useState<number | undefined>(
     undefined
   );
   const { availableLlmModels } = useModelList();
+  const { enableAidpKnowledge } = useDeployment();
   const [agentList] = useList("/api/agent/published_list");
-  const genFileRef = useRef<HTMLInputElement>(null);
   useEffect(() => {
     if (!genSetModel && availableLlmModels.length > 0)
       setGenSetModel(availableLlmModels[0].id);
   }, [availableLlmModels]);
+  const loadKbOptions = async () => {
+    // Source the KB dropdown from the implementation selected by the
+    // deployment switch: AIDP kds_id-keyed KBs, or local ES display names.
+    try {
+      if (enableAidpKnowledge) {
+        // Pull every page so KBs beyond the first 100 stay selectable.
+        const items: any[] = [];
+        let page = 1;
+        let hasMore = true;
+        while (hasMore && page <= 10) {
+          const resp = await fetch(
+            `/api/aidp-mgmt/knowledge-bases?page=${page}&page_size=100`,
+            { headers: getAuthHeaders() }
+          );
+          if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+          const data = await resp.json();
+          items.push(...(Array.isArray(data?.value) ? data.value : []));
+          hasMore = Boolean(data?.has_more);
+          page += 1;
+        }
+        setKbList(
+          items
+            .filter((k: any) => k.kds_id)
+            .map((k: any) => ({
+              label: k.kds_name || k.kds_id,
+              value: k.kds_id,
+            }))
+        );
+      } else {
+        const resp = await fetch("/api/indices?include_stats=true", {
+          headers: getAuthHeaders(),
+        });
+        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+        const data = await resp.json();
+        const info = data.indices_info || [];
+        setKbList(
+          info.map((x: any) => ({
+            label: x.display_name || x.name,
+            value: x.display_name || x.name,
+          }))
+        );
+      }
+    } catch {
+      setKbList([]);
+      message.warning(t("agentEvaluation.genKbLoadFailed"));
+    }
+  };
   const [editingCase, setEditingCase] = useState<any>(null);
   const [adding, setAdding] = useState(false);
   const [newQ, setNewQ] = useState("");
@@ -2056,6 +2180,24 @@ function SetsTab() {
       .then((d) => {
         setSets(d.data || d.items || []);
       });
+
+  useEffect(() => {
+    let active = true;
+    fetch(API_ENDPOINTS.evaluationSets.config, { headers: getAuthHeaders() })
+      .then((response) => (response.ok ? response.json() : null))
+      .then((payload) => {
+        const configuredLimit = Number(payload?.data?.max_file_size_mb);
+        if (active && Number.isFinite(configuredLimit) && configuredLimit > 0) {
+          setEvaluationFileSizeMb(configuredLimit);
+        }
+      })
+      .catch(() => {
+        // Keep the backend default fallback when the config endpoint is unavailable.
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
 
   useEffect(() => {
     setLoading(true);
@@ -2651,7 +2793,9 @@ function SetsTab() {
               {t("agentEvaluation.uploadSetFile")} <Text type="danger">*</Text>
             </Text>
             <Text className="text-xs" type="secondary">
-              {t("agentEvaluation.uploadSetHint")}
+              {t("agentEvaluation.uploadSetHint", {
+                maxSizeMb: evaluationFileSizeMb,
+              })}
             </Text>
             <div
               style={{
@@ -2755,6 +2899,14 @@ function SetsTab() {
                     refreshSets();
                   } else {
                     const d = await r.json();
+                    if (String(d?.code) === "000403") {
+                      setFileErr(
+                        t("agentEvaluation.uploadFileTooBig", {
+                          limit: d?.details?.limit_mb ?? evaluationFileSizeMb,
+                        })
+                      );
+                      return;
+                    }
                     const arrayDetail = Array.isArray(d?.detail)
                       ? d.detail
                           .map(
@@ -2763,7 +2915,9 @@ function SetsTab() {
                           .join("; ")
                       : t("agentEvaluation.uploadErrorFormat");
                     const msg =
-                      typeof d?.detail === "string" ? d.detail : arrayDetail;
+                      typeof d?.detail === "string"
+                        ? d.detail
+                        : d?.message || arrayDetail;
                     setFileErr(msg);
                   }
                 } catch {
@@ -2788,7 +2942,6 @@ function SetsTab() {
           setGenSetName("");
           setGenSetDesc("");
           setGenKbIds([]);
-          setGenFiles([]);
         }}
         size="large"
         mask={{ closable: !busy }}
@@ -2908,7 +3061,10 @@ function SetsTab() {
                 {/* Knowledge base */}
                 <Flex vertical gap={4}>
                   <Text className="text-xs">
-                    {t("agentEvaluation.genKbLabel")}
+                    {t("agentEvaluation.genKbLabel")}{" "}
+                    <Text className="text-xs" type="secondary">
+                      {t("agentEvaluation.refDocHint")}
+                    </Text>
                   </Text>
                   <Select
                     mode="multiple"
@@ -2917,27 +3073,9 @@ function SetsTab() {
                     placeholder={t("agentEvaluation.genSelectKb")}
                     value={genKbIds}
                     onChange={setGenKbIds}
-                    options={kbList.map((k: any) => ({
-                      label: k.display_name || k.name || k,
-                      value: k.display_name || k.name || k,
-                    }))}
+                    options={kbList}
                     onOpenChange={(open) => {
-                      if (open) {
-                        fetch("/api/indices?include_stats=true", {
-                          headers: getAuthHeaders(),
-                        })
-                          .then((r) => r.json())
-                          .then((d) => {
-                            const info = d.indices_info || [];
-                            setKbList(
-                              info.map((x: any) => ({
-                                name: x.name,
-                                display_name: x.display_name,
-                                kb_id: x.display_name,
-                              }))
-                            );
-                          });
-                      }
+                      if (open) void loadKbOptions();
                     }}
                   />
                 </Flex>
@@ -2956,62 +3094,6 @@ function SetsTab() {
                       value: a.agent_id,
                     }))}
                   />
-                </Flex>
-                {/* File upload */}
-                <Flex vertical gap={4}>
-                  <Text className="text-xs">
-                    {t("agentEvaluation.genRefDocLabel")}{" "}
-                    <Text className="text-xs" type="secondary">
-                      {t("agentEvaluation.refDocHint")}
-                    </Text>
-                  </Text>
-                  <Flex gap={8} align="center" wrap>
-                    <Button
-                      icon={<Upload className="size-4" />}
-                      disabled={genFiles.length >= 1}
-                      onClick={() => genFileRef.current?.click()}
-                    >
-                      {t("agentEvaluation.selectFileButton")}
-                    </Button>
-                    <input
-                      ref={genFileRef}
-                      type="file"
-                      accept=".docx"
-                      style={{ display: "none" }}
-                      onChange={(e) => {
-                        const files = Array.from(e.target.files || []);
-                        const valid = files.filter((f) => {
-                          if (f.size > 20 * 1024 * 1024) {
-                            setGenFileErr(
-                              t("agentEvaluation.over20MBHint", {
-                                name: f.name,
-                              })
-                            );
-                            return false;
-                          }
-                          return true;
-                        });
-                        setGenFileErr("");
-                        setGenFiles(valid.slice(0, 1));
-                      }}
-                    />
-                    {genFiles.map((f, i) => (
-                      <Tag
-                        key={`${f.name}_${f.size}`}
-                        closable
-                        onClose={() =>
-                          setGenFiles((p) => p.filter((_, j) => j !== i))
-                        }
-                      >
-                        {f.name} ({(f.size / 1024).toFixed(1)}KB)
-                      </Tag>
-                    ))}
-                  </Flex>
-                  {genFileErr && (
-                    <Text type="danger" className="text-xs">
-                      {genFileErr}
-                    </Text>
-                  )}
                 </Flex>
               </Flex>
             </Card>
@@ -3075,47 +3157,38 @@ function SetsTab() {
                       body.set_name = genSetName.trim();
                       if (genSetDesc) body.set_description = genSetDesc;
                     }
-                    let r: Response;
-                    if (genFiles.length > 0) {
-                      const fd = new FormData();
-                      fd.append("payload", JSON.stringify(body));
-                      fd.append("file", genFiles[0]);
-                      r = await fetch(
-                        "/api/evaluation-sets/generate-cases-async",
-                        {
-                          method: "POST",
-                          headers: { ...getAuthHeaders() },
-                          body: fd,
-                        }
-                      );
-                    } else {
-                      r = await fetch(
-                        "/api/evaluation-sets/generate-cases-async",
-                        {
-                          method: "POST",
-                          headers: {
-                            ...getAuthHeaders(),
-                            "Content-Type": "application/json",
-                          },
-                          body: JSON.stringify(body),
-                        }
-                      );
-                    }
+                    const r = await fetch(
+                      "/api/evaluation-sets/generate-cases-async",
+                      {
+                        method: "POST",
+                        headers: {
+                          ...getAuthHeaders(),
+                          "Content-Type": "application/json",
+                        },
+                        body: JSON.stringify(body),
+                      }
+                    );
                     const d = await r.json();
                     if (d?.data?.evaluation_set_id) {
                       setGenD(false);
                       setGenDesc("");
                       setGenDescError(null);
                       setGenAgentId(undefined);
-                      setGenFiles([]);
                       setGenSetName("");
                       setGenSetDesc("");
                       setGenTargetSetId(undefined);
                       refreshSets();
                     } else {
-                      message.error(
-                        d?.detail || t("agentEvaluation.createFailedShort")
-                      );
+                      const errorMessage =
+                        String(d?.code) === "000403"
+                          ? t("agentEvaluation.uploadFileTooBig", {
+                              limit:
+                                d?.details?.limit_mb ?? evaluationFileSizeMb,
+                            })
+                          : d?.detail ||
+                            d?.message ||
+                            t("agentEvaluation.createFailedShort");
+                      message.error(errorMessage);
                     }
                   } catch {
                   } finally {

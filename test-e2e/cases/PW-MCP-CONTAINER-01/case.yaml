@@ -1,0 +1,76 @@
+schema_version: '1.0'
+stage: D4
+module: V5-BASELINE
+case:
+  case_id: PW-MCP-CONTAINER-01
+  feature_id: V5-PW-MCP-CONTAINER-01
+  business_rule_ids:
+  - V5-PW-MCP-CONTAINER-01-RULE-01
+  title: Mine新增Container MCP→启动/健康→启停
+  type: E2E
+  priority: P1
+  status: active
+  automation: automated
+  objective: 验证deployment_type=CONTAINER真实创建和生命周期。
+  preconditions:
+  - Docker/容器运行时可用
+  - 已有config/mcp.yaml的container_config或显式NEXENT_TEST_MCP_CONTAINER_CONFIG提供受控Test MCP配置；显式配置优先
+  - 端口可用
+  test_data:
+    legacy_asset_declaration: config/mcp.yaml；services/container-mcp/
+  steps:
+  - order: 1
+    action: MCP Mine→Add，选择Container类型。
+    expected: 只填写当前UI真实字段，不假设通用env字段。
+  - order: 2
+    action: 按当前表单填run_id名称、镜像/来源、端口及实际必填字段。
+    expected: 生命周期状态与真实容器一致。
+  - order: 3
+    action: 提交，等待容器创建/启动。
+    expected: 删除后无资源残留。
+  - order: 4
+    action: 执行健康检查直到healthy。
+    expected: 删除后无资源残留。
+  - order: 5
+    action: 打开详情确认Tool列表。
+    expected: 删除后无资源残留。
+  - order: 6
+    action: 禁用/停止并观察状态，再重新启用。
+    expected: 删除后无资源残留。
+  - order: 7
+    action: 若当前类型可直接绑定Agent，可执行一个确定性Tool smoke。
+    expected: 删除后无资源残留。
+  - order: 8
+    action: 删除Container MCP并确认运行时无run_id残留。
+    expected: 删除后无资源残留。
+  expected_results:
+  - 只填写当前UI真实字段，不假设通用env字段。
+  - 生命周期状态与真实容器一致。
+  - 删除后无资源残留。
+  forbidden_side_effects: []
+  source:
+    legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
+    legacy_sheet: 03_Playwright_Journey
+    legacy_row: 29
+  actor: Nexent browser user
+  journey:
+  - MCP Mine→Add，选择Container类型。
+  - 按当前表单填run_id名称、镜像/来源、端口及实际必填字段。
+  - 提交，等待容器创建/启动。
+  - 执行健康检查直到healthy。
+  - 打开详情确认Tool列表。
+  - 禁用/停止并观察状态，再重新启用。
+  - 若当前类型可直接绑定Agent，可执行一个确定性Tool smoke。
+  - 删除Container MCP并确认运行时无run_id残留。
+  final_business_result:
+  - 只填写当前UI真实字段，不假设通用env字段。
+  - 生命周期状态与真实容器一致。
+  - 删除后无资源残留。
+  failure_evidence:
+  - '${NEXENT_TEST_HOME}/runs/{run_id}/playwright/PW-MCP-CONTAINER-01/
+
+    - screenshot.png / trace.zip / video.webm
+
+    - console.log / network.har / failure.json
+
+    - 涉及协议时关联 wire/*.jsonl；涉及下载时保留 downloads/'

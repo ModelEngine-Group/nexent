@@ -1,0 +1,16 @@
+schema_version: '1.0'
+module:
+  id: V5-BASELINE
+  name: Migrated V5 baseline
+feature:
+  feature_id: F-160
+  name: locale 切换、路由保留、关键文案 fallback
+  status: active
+  description: '前端与全局UI / i18n: locale 切换、路由保留、关键文案 fallback'
+  business_rules:
+  - rule_id: F-160-RULE-01
+    description: locale 切换、路由保留、关键文案 fallback
+  required_test_stages:
+  - D1
+  source:
+    notes: Migrated from V5 01_代码功能清单 without changing the functional description.

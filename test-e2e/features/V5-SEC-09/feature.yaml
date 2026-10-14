@@ -1,0 +1,16 @@
+schema_version: '1.0'
+module:
+  id: V5-BASELINE
+  name: Migrated V5 baseline
+feature:
+  feature_id: V5-SEC-09
+  name: Prompt Injection与数据外泄
+  status: active
+  description: 文件/KB中的恶意指令不得越过工具/tenant安全边界
+  business_rules:
+  - rule_id: V5-SEC-09-RULE-01
+    description: Prompt Injection与数据外泄
+  required_test_stages:
+  - D5
+  source:
+    notes: 'Provisional migration owner: the V5 row has no stable Feature ID. Do not infer an F-ID.'

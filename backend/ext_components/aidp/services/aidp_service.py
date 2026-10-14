@@ -2,6 +2,7 @@
 AIDP Service Layer
 Handles API calls to AIDP for paginated knowledge base listing.
 """
+import json
 import logging
 import time
 from datetime import datetime, timezone
@@ -867,67 +868,110 @@ def count_aidp_kbs_impl(server_url: str, api_key: str) -> int:
         )
 
 
-# Default values for AIDP create KB payload, aligned with
-# sdk/nexent/core/knowledge_base/config.py (build_create_payload).
-# Used as defense-in-depth: any client calling create_aidp_kb_impl
-# without these fields will get them filled in automatically.
-_AIDP_CREATE_DEFAULTS: Dict[str, Any] = {
-    "chunk_token_num": 1024,
-    "chunk_overlap_num": 128,
-    "embedding_model": "default",
-    # AIDP expects the VLM model identifier exactly as registered in its system.
-    "vlm_model": "Qwen3-VL-8B-Instruct",
-    "is_personal": 0,
-    "topk": 10,
-    "similarity": 0.0,
-    "smartsplit": 1,
-    # caption_enable: int 0/1, not string or bool.
-    "caption_enable": 0,
-}
+_GRAPH_PROMPT_LANGUAGES = {"中文", "英文"}
+_GRAPH_CONFIG_FIELDS = frozenset(
+    {
+        "domain",
+        "retrieve_subgraph_hop",
+        "no_think_mode",
+        "prompt_language",
+        "prompt_text",
+        "synonym_merge_enable",
+        "disambiguation_enable",
+        "llm_model_name",
+    }
+)
+_GRAPH_PROMPT_MAX_CHARS = 4096
 
 
-def _apply_create_defaults(payload: Dict[str, Any]) -> Dict[str, Any]:
-    """Fill missing AIDP create-KB fields with reference defaults.
 
-    Defensive layer: if the client omits any of these fields, the backend
-    injects them before forwarding to AIDP. Matches the frontend
-    AIDP_CREATE_DEFAULTS and the SDK build_create_payload defaults exactly.
 
-    Special rules:
-      * if payload.is_multimodal is truthy, caption_enable defaults to ``1``
-        (matching SDK mapper logic).
-      * when caption_enable is disabled (``0`` or ``"0"``), clear ``vlm_model``
-        so AIDP never receives a stale model identifier for a non-multimodal KB.
-      * ``description`` is normalized: AIDP rejects empty strings (the spec
-        declares length 1-255). Any None/empty/whitespace-only description is
-        replaced with the KB name, falling back to ``"Nexent knowledge base"``
-        if name is also empty. This converts an AIDP 500 into a successful
-        create, because the server-side 500 we observed was traced to an
-        empty description in the UI payload.
+
+def _serialize_graph_config(config: Dict[str, Any]) -> str:
+    """Validate a structured graph configuration and serialize it for AIDP.
+
+    Only documented keys are accepted, and out-of-range values are not
+    clamped. Domain validity is deliberately NOT enforced here: the frontend
+    sources domain choices from the live AIDP graph template, so a fixed
+    backend whitelist would reject newly added AIDP domains. AIDP remains
+    the authority on whether a domain is supported. The result is the JSON
+    string AIDP expects in ``graph_config``; the frontend never builds that
+    string itself.
     """
+    unsupported_fields = set(config).difference(_GRAPH_CONFIG_FIELDS)
+    if unsupported_fields:
+        names = ", ".join(sorted(unsupported_fields))
+        raise AppException(
+            ErrorCode.COMMON_PARAMETER_INVALID,
+            f"Unsupported graph configuration fields: {names}",
+        )
+
+    domain = config.get("domain")
+    if not isinstance(domain, str) or not domain.strip():
+        raise AppException(
+            ErrorCode.COMMON_PARAMETER_INVALID,
+            "Graph domain must be a non-empty string",
+        )
+
+    prompt_language = config.get("prompt_language")
+    if not isinstance(prompt_language, str):
+        raise AppException(ErrorCode.COMMON_PARAMETER_INVALID, "Graph prompt language must be a string")
+    if prompt_language not in _GRAPH_PROMPT_LANGUAGES:
+        raise AppException(
+            ErrorCode.COMMON_PARAMETER_INVALID,
+            f"Unsupported graph prompt language: {prompt_language}",
+        )
+
+    prompt_text = config.get("prompt_text")
+    if not isinstance(prompt_text, str):
+        raise AppException(
+            ErrorCode.COMMON_PARAMETER_INVALID,
+            "Graph prompt text must be a string",
+        )
+    if not 1 <= len(prompt_text) <= _GRAPH_PROMPT_MAX_CHARS:
+        raise AppException(
+            ErrorCode.COMMON_PARAMETER_INVALID,
+            f"Graph prompt must contain 1 to {_GRAPH_PROMPT_MAX_CHARS} characters",
+        )
+
+    hop = config.get("retrieve_subgraph_hop")
+    if hop not in ("1", "2", "3"):
+        raise AppException(ErrorCode.COMMON_PARAMETER_INVALID, "Graph retrieve_subgraph_hop must be 1, 2 or 3")
+
+    def _yes_no(key: str) -> str:
+        value = config.get(key)
+        if value not in ("是", "否"):
+            raise AppException(ErrorCode.COMMON_PARAMETER_INVALID, f"Graph parameter {key} must be 是 or 否")
+        return value
+
+    payload = {
+        "domain": domain,
+        "retrieve_subgraph_hop": hop,
+        "no_think_mode": _yes_no("no_think_mode"),
+        "prompt_language": prompt_language,
+        "prompt_text": prompt_text,
+        "synonym_merge_enable": _yes_no("synonym_merge_enable"),
+        "disambiguation_enable": _yes_no("disambiguation_enable"),
+    }
+    llm_model_name = config.get("llm_model_name")
+    if not isinstance(llm_model_name, str) or not llm_model_name.strip():
+        raise AppException(ErrorCode.COMMON_PARAMETER_INVALID, "Graph LLM model name must be a non-empty string")
+    payload["llm_model_name"] = llm_model_name
+    return json.dumps(payload, ensure_ascii=False)
+
+
+def _prepare_create_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
+    """Convert validated creation settings into the AIDP request format."""
     result = dict(payload)
-    for key, default in _AIDP_CREATE_DEFAULTS.items():
-        if key not in result:
-            result[key] = default
-
-    # Normalize description: AIDP spec declares length 1-255, but some
-    # backend implementations return HTTP 500 (instead of 400) when a
-    # required string field arrives as an empty string. This defensive
-    # rewrite guarantees the field is never forwarded empty.
-    desc = result.get("description")
-    if not isinstance(desc, str) or not desc.strip():
-        fallback_name = result.get("name")
-        if isinstance(fallback_name, str) and fallback_name.strip():
-            result["description"] = fallback_name.strip()
-        else:
-            result["description"] = "Nexent knowledge base"
-
-    if result.get("is_multimodal") and "caption_enable" not in payload:
-        result["caption_enable"] = 1
-
-    caption = result.get("caption_enable")
-    if caption in (0, "0", False):
+    if not result["caption_enable"]:
         result["vlm_model"] = ""
+    if result["is_exist_graph"]:
+        graph_config = result.get("graph_config")
+        if not isinstance(graph_config, dict):
+            raise AppException(ErrorCode.COMMON_PARAMETER_INVALID, "Graph configuration is required")
+        result["graph_config"] = _serialize_graph_config(graph_config)
+    else:
+        result.pop("graph_config", None)
     return result
 
 
@@ -944,8 +988,8 @@ def create_aidp_kb_impl(
         "Content-Type": "application/json",
     }
 
-    # Fill missing fields with SDK-aligned defaults before forwarding.
-    full_payload = _apply_create_defaults(payload)
+    # Convert the validated request into the upstream representation.
+    full_payload = _prepare_create_payload(payload)
 
     create_url = urljoin(f"{normalized_url}/", _get_list_path())
     logger.info("Creating AIDP knowledge base at %s with payload=%s", create_url, full_payload)
@@ -1167,7 +1211,12 @@ def delete_aidp_kb_impl(
     api_key: str,
     kds_id: str,
 ) -> bool:
-    """Delete a knowledge base via AIDP API."""
+    """Delete a knowledge base via AIDP API.
+
+    A 404 response means the KB is already gone upstream (orphan cleanup),
+    which satisfies the delete intent: report success so the caller proceeds
+    with local permission cleanup instead of failing the whole operation.
+    """
     normalized_url = _validate_params(server_url, api_key)
 
     headers = {
@@ -1210,6 +1259,13 @@ def delete_aidp_kb_impl(
                 ErrorCode.AIDP_RATE_LIMIT,
                 f"AIDP rate limit exceeded: {str(e)}",
             )
+        if e.response.status_code == 404:
+            logger.warning(
+                "AIDP knowledge base %s already absent upstream (404); "
+                "treating delete as success",
+                kds_id,
+            )
+            return True
         raise AppException(
             ErrorCode.AIDP_SERVICE_ERROR,
             f"AIDP API HTTP error {e.response.status_code}: {str(e)}",
@@ -1509,7 +1565,13 @@ def count_aidp_docs_impl(server_url: str, api_key: str, kds_id: str) -> int:
                 ErrorCode.AIDP_RESPONSE_ERROR,
                 "Unexpected AIDP doc count response format",
             )
-        return int(result.get("count") or 0)
+        count = result.get("count")
+        if not isinstance(count, int) or isinstance(count, bool) or count < 0:
+            raise AppException(
+                ErrorCode.AIDP_RESPONSE_ERROR,
+                "AIDP doc Count API response must contain a non-negative integer count",
+            )
+        return count
     except httpx.RequestError as e:
         logger.exception("AIDP request failed: %s", e)
         raise AppException(
@@ -1527,10 +1589,6 @@ def count_aidp_docs_impl(server_url: str, api_key: str, kds_id: str) -> int:
                 ErrorCode.AIDP_AUTH_ERROR,
                 f"AIDP authentication failed: {str(e)}",
             )
-        if e.response.status_code == 404:
-            # KB does not exist or Count endpoint is not supported
-            logger.warning("AIDP doc Count API returned 404 for KB %s", kds_id)
-            return 0
         if e.response.status_code == 429:
             raise AppException(
                 ErrorCode.AIDP_RATE_LIMIT,
@@ -1554,6 +1612,7 @@ def list_aidp_docs_impl(
     kds_id: str,
     page: int = 1,
     page_size: int = 10,
+    keyword: str | None = None,
 ) -> Dict[str, Any]:
     """List documents in a knowledge base via AIDP API."""
     normalized_url = _validate_params(server_url, api_key)
@@ -1564,6 +1623,8 @@ def list_aidp_docs_impl(
     }
 
     list_path = f"{_get_list_path()}/{kds_id}/KnowledgeFiles?page={page}&page_size={page_size}"
+    if keyword:
+        list_path += f"&keyword={quote(keyword, safe='')}"
     list_url = urljoin(f"{normalized_url}/", list_path)
     logger.info("Listing AIDP documents from %s", list_url)
 
@@ -2018,7 +2079,9 @@ def list_aidp_models_impl(
         "Content-Type": "application/json",
     }
 
-    models_path = f"{_get_models_path()}?service={service}&app={app}"
+    models_path = f"{_get_models_path()}?app={quote(app, safe='')}"
+    if service:
+        models_path += f"&service={quote(service, safe='')}"
     models_url = urljoin(f"{normalized_url}/", models_path.lstrip("/"))
     logger.info("Fetching AIDP models from %s", models_url)
 
@@ -2039,7 +2102,7 @@ def list_aidp_models_impl(
                 ErrorCode.AIDP_RESPONSE_ERROR,
                 "Unexpected AIDP models response format",
             )
-        raw_models = result.get("models") or []
+        raw_models = result.get("models")
         if not isinstance(raw_models, list):
             raise AppException(
                 ErrorCode.AIDP_RESPONSE_ERROR,
@@ -2087,3 +2150,111 @@ def list_aidp_models_impl(
             ErrorCode.AIDP_RESPONSE_ERROR,
             f"Failed to parse AIDP models response: {str(e)}",
         )
+
+
+def get_aidp_graph_template_impl(
+    server_url: str, api_key: str, language: str = "chinese",
+) -> Dict[str, Any]:
+    """Read the live graph parameter defaults, constraints and domain templates."""
+    normalized_url = _validate_params(server_url, api_key)
+    url = urljoin(f"{normalized_url}/", f"{_get_list_path()}/GraphConfigTemplate?language={language}")
+    logger.info("Fetching AIDP graph template from %s", url)
+    try:
+        client = http_client_manager.get_sync_client(
+            base_url=normalized_url, timeout=_AIDP_READ_TIMEOUT_SECONDS, verify_ssl=False,
+        )
+        response = _request_with_retry(
+            lambda: client.get(url, headers={"Authorization": f"Bearer {api_key}"}),
+            context="graph-template",
+        )
+        response.raise_for_status()
+        result = response.json()
+        if not isinstance(result, dict) or not isinstance(result.get("value"), list):
+            raise AppException(ErrorCode.AIDP_RESPONSE_ERROR, "Unexpected AIDP graph template response")
+        return result
+    except httpx.RequestError as exc:
+        logger.exception("AIDP graph template request failed")
+        raise AppException(ErrorCode.AIDP_CONNECTION_ERROR, "AIDP graph template request failed") from exc
+    except httpx.HTTPStatusError as exc:
+        _raise_aidp_http_error(exc, "graph template")
+    except ValueError as exc:
+        logger.exception("Failed to parse AIDP graph template response")
+        raise AppException(ErrorCode.AIDP_RESPONSE_ERROR, "Invalid AIDP graph template JSON") from exc
+
+
+def _get_retrieval_path(tenant_id: str | None = None) -> str:
+    """Build the tenant-scoped retrieval (FusionSearch) API path."""
+    return f"/KnowledgeBase/Tenants/{_resolve_tenant_id(tenant_id)}/Retrieval/FusionSearch"
+
+
+def fusion_search_impl(
+    server_url: str,
+    api_key: str,
+    tenant_id: str | None = None,
+    query: str = "",
+    kds_list: list[str] | None = None,
+    search_method: str = "hybrid_search",
+    top_k: int = 3,
+    score_threshold: float = 0.0,
+    reranking_enable: bool = True,
+    rewrite_enable: bool = False,
+    related_search_enable: bool = False,
+    multi_modal: bool = False,
+) -> list[dict[str, Any]]:
+    """Run one FusionSearch retrieval against AIDP and return raw hit records.
+
+    Mirrors the SDK ``AidpSearchTool`` wire contract so server-side callers
+    (evaluation case generation) retrieve through the same channel as agents.
+    Records come back as ``{title, text, score, file_url, chunk_type, ...}``.
+    """
+    normalized_url = _validate_params(server_url, api_key)
+
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json",
+    }
+    payload = {
+        "query": query,
+        "kds_list": [str(kds_id) for kds_id in kds_list],
+        "search_method": search_method,
+        "reranking_enable": reranking_enable,
+        "rewrite_enable": rewrite_enable,
+        "related_search_enable": related_search_enable,
+        "score_threshold": score_threshold,
+        "top_k": top_k,
+        "multi_modal": multi_modal,
+    }
+    retrieval_url = urljoin(f"{normalized_url}/", _get_retrieval_path(tenant_id))
+
+    try:
+        client = http_client_manager.get_sync_client(
+            base_url=normalized_url,
+            timeout=_AIDP_READ_TIMEOUT_SECONDS,
+            verify_ssl=False,
+        )
+        response = _request_with_retry(
+            lambda: client.post(retrieval_url, headers=headers, json=payload),
+            context="fusion-search",
+        )
+        response.raise_for_status()
+        result = response.json()
+    except httpx.RequestError as e:
+        logger.exception("AIDP fusion search request failed")
+        raise AppException(
+            ErrorCode.AIDP_CONNECTION_ERROR,
+            f"AIDP fusion search request failed: {e!s}",
+        )
+    except httpx.HTTPStatusError as e:
+        _raise_aidp_http_error(e, "fusion search")
+    except ValueError as e:
+        logger.exception("Failed to parse AIDP fusion search response")
+        raise AppException(
+            ErrorCode.AIDP_RESPONSE_ERROR,
+            f"Failed to parse AIDP fusion search response: {e!s}",
+        )
+
+    records = result.get("result", []) if isinstance(result, dict) else []
+    if not isinstance(records, list):
+        logger.warning("AIDP fusion search returned non-list result field")
+        return []
+    return records

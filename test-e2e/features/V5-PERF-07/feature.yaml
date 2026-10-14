@@ -1,0 +1,16 @@
+schema_version: '1.0'
+module:
+  id: V5-BASELINE
+  name: Migrated V5 baseline
+feature:
+  feature_id: V5-PERF-07
+  name: 长上下文+记忆检索token预算（外部provider并入、MMR候选上限与内容去重）
+  status: active
+  description: 长期对话不突破上下文预算；外部 provider 记忆并入检索管线不导致超预算；MMR 候选上限(=200)与 SHA-256 内容去重不引入指数级时延；无 embedding 客户端缓存下写入/检索延迟可控。
+  business_rules:
+  - rule_id: V5-PERF-07-RULE-01
+    description: 长上下文+记忆检索token预算（外部provider并入、MMR候选上限与内容去重）
+  required_test_stages:
+  - D5
+  source:
+    notes: 'Provisional migration owner: the V5 row has no stable Feature ID. Do not infer an F-ID.'

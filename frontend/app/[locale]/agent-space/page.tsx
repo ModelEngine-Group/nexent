@@ -10,10 +10,8 @@ import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
 import { USER_ROLES } from "@/const/auth";
 import { useSetupFlow } from "@/hooks/useSetupFlow";
-import {
-  useAgentRepositoryListings,
-  useMyEditableAgents,
-} from "@/hooks/agentRepository/useAgentRepositoryListings";
+import { useAgentRepositoryListings } from "@/hooks/agentRepository/useAgentRepositoryListings";
+import { useAgentList } from "@/hooks/agent/useAgentList";
 import { AgentSpace } from "./agent-space";
 import { MyAgent } from "./my-agent";
 import { ReviewCenter } from "./review-center";
@@ -62,20 +60,25 @@ export default function AgentRepositoryPage() {
   const isRepositoryTab = tab === AgentRepositoryTab.REPOSITORY;
   const isReviewTab = tab === AgentRepositoryTab.REVIEW && isAdmin;
   const isMineTab = tab === AgentRepositoryTab.MINE;
+  const [activeMineCount, setActiveMineCount] = useState<number | null>(null);
   const { data: repositoryCountData } = useAgentRepositoryListings(
     { status: "shared", page: 1, page_size: 1 },
-    true
+    isRepositoryTab
   );
-  const { data: mineCountData } = useMyEditableAgents(
-    { page: 1, page_size: 1, ownership: "all" },
-    true
-  );
+  const { pagination: mineCountPagination } = useAgentList({
+    tenantId: user?.tenantId ?? null,
+    page: 1,
+    pageSize: 1,
+    enabled: !isMineTab,
+  });
   const { data: reviewCountData } = useAgentRepositoryListings(
     { status: "pending_review", page: 1, page_size: 1 },
     isAdmin
   );
-  const repositoryTabCount = repositoryCountData?.pagination?.total ?? 0;
-  const mineTabCount = mineCountData?.counts?.all ?? 0;
+  const repositoryTabCount = repositoryCountData?.pagination?.total;
+  const mineTabCount = isMineTab
+    ? (activeMineCount ?? mineCountPagination?.total)
+    : mineCountPagination?.total;
   const pendingReviewCount = reviewCountData?.pagination?.total ?? 0;
 
   return (
@@ -119,9 +122,11 @@ export default function AgentRepositoryPage() {
                   >
                     <Inbox className="size-4" aria-hidden />
                     {t("repository.page.tab.repository")}
-                    <span className="ml-1 rounded-md bg-background/70 px-1.5 text-xs text-muted-foreground">
-                      {repositoryTabCount}
-                    </span>
+                    {repositoryTabCount != null ? (
+                      <span className="ml-1 rounded-md bg-background/70 px-1.5 text-xs text-muted-foreground">
+                        {repositoryTabCount}
+                      </span>
+                    ) : null}
                   </TabsTrigger>
                   <TabsTrigger
                     value={AgentRepositoryTab.MINE}
@@ -129,9 +134,11 @@ export default function AgentRepositoryPage() {
                   >
                     <User className="size-4" aria-hidden />
                     {t("agentRepository.page.tab.mine")}
-                    <span className="ml-1 rounded-md bg-background/70 px-1.5 text-xs text-muted-foreground">
-                      {mineTabCount}
-                    </span>
+                    {mineTabCount != null ? (
+                      <span className="ml-1 rounded-md bg-background/70 px-1.5 text-xs text-muted-foreground">
+                        {mineTabCount}
+                      </span>
+                    ) : null}
                   </TabsTrigger>
                   {isAdmin ? (
                     <TabsTrigger
@@ -159,7 +166,10 @@ export default function AgentRepositoryPage() {
                 </div>
               ) : null}
               <div hidden={!isMineTab}>
-                <MyAgent active={isMineTab} />
+                <MyAgent
+                  active={isMineTab}
+                  onTotalChange={setActiveMineCount}
+                />
               </div>
             </div>
           </motion.div>

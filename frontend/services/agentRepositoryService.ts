@@ -14,6 +14,10 @@ import type {
   AgentRepositoryListingStatus,
   MyEditableAgentListParams,
   MyEditableAgentListResponse,
+  OfficialAgentInstallItem,
+  OfficialAgentInstallOptions,
+  OfficialAgentItem,
+  OfficialAgentManagementItem,
   RepositoryImportPrecheckResponse,
 } from "@/types/agentRepository";
 
@@ -47,7 +51,8 @@ export async function fetchAgentRepositoryTagStats(): Promise<
     API_ENDPOINTS.agentRepository.tagStats,
     { method: "GET", headers: getAuthHeaders() }
   );
-  if (!response.ok) throw new Error("Failed to fetch agent repository tag stats");
+  if (!response.ok)
+    throw new Error("Failed to fetch agent repository tag stats");
   const data = (await response.json()) as {
     items?: Array<{ tag: string; count: number }>;
   };
@@ -92,7 +97,9 @@ export async function fetchMyEditableAgents(
     );
 
     if (!response.ok) {
-      throw new Error(`Failed to fetch my editable agents: ${response.statusText}`);
+      throw new Error(
+        `Failed to fetch my editable agents: ${response.statusText}`
+      );
     }
 
     return response.json();
@@ -199,17 +206,46 @@ export interface SkillResolutionInput {
   new_name?: string;
 }
 
+export interface RepositoryImportModelOptions {
+  modelIds?: Record<string, number>;
+  embeddingModelIds?: Record<string, number>;
+  knowledgeBaseResolutions?: {
+    knowledge_name: string;
+    action: "reuse" | "create_new";
+  }[];
+}
+
 export async function importAgentFromRepository(
   agentRepositoryId: number,
-  skillResolutions?: SkillResolutionInput[]
-): Promise<void> {
+  skillResolutions?: SkillResolutionInput[],
+  modelOptions?: RepositoryImportModelOptions
+): Promise<{ agent_id: number }> {
   try {
     const response = await fetch(
       API_ENDPOINTS.agentRepository.import(agentRepositoryId),
       {
         method: "POST",
         headers: getAuthHeaders(),
-        body: skillResolutions ? JSON.stringify(skillResolutions) : undefined,
+        body:
+          skillResolutions || modelOptions
+            ? JSON.stringify({
+                ...(skillResolutions
+                  ? { skill_resolutions: skillResolutions }
+                  : {}),
+                ...(modelOptions?.modelIds
+                  ? { model_ids: modelOptions.modelIds }
+                  : {}),
+                ...(modelOptions?.embeddingModelIds
+                  ? { embedding_model_ids: modelOptions.embeddingModelIds }
+                  : {}),
+                ...(modelOptions?.knowledgeBaseResolutions
+                  ? {
+                      knowledge_base_resolutions:
+                        modelOptions.knowledgeBaseResolutions,
+                    }
+                  : {}),
+              })
+            : undefined,
       }
     );
 
@@ -225,6 +261,7 @@ export async function importAgentFromRepository(
       error.detail = detail;
       throw error;
     }
+    return response.json();
   } catch (error) {
     if (error instanceof Error && "status" in error) {
       throw error;
@@ -232,6 +269,95 @@ export async function importAgentFromRepository(
     log.error("Error importing agent from repository:", error);
     throw error;
   }
+}
+
+export async function fetchOfficialAgentsWithStatus(
+  tenantId?: string
+): Promise<OfficialAgentItem[]> {
+  try {
+    const url = tenantId
+      ? `${API_ENDPOINTS.agentRepository.official}?tenant_id=${encodeURIComponent(tenantId)}`
+      : API_ENDPOINTS.agentRepository.official;
+    const response = await fetchWithErrorHandling(url, {
+      method: "GET",
+      headers: getAuthHeaders(),
+    });
+
+    if (!response.ok) {
+      throw new Error(
+        `Failed to fetch official agents: ${response.statusText}`
+      );
+    }
+
+    const data = await response.json();
+    return data.agents ?? [];
+  } catch (error) {
+    log.error("Error fetching official agents:", error);
+    throw error;
+  }
+}
+
+export async function installOfficialAgents(
+  agentNames: string[],
+  options?: OfficialAgentInstallOptions,
+  tenantId?: string
+): Promise<OfficialAgentInstallItem[]> {
+  try {
+    const url = tenantId
+      ? `${API_ENDPOINTS.agentRepository.officialInstall}?tenant_id=${encodeURIComponent(tenantId)}`
+      : API_ENDPOINTS.agentRepository.officialInstall;
+    const response = await fetchWithErrorHandling(url, {
+      method: "POST",
+      headers: {
+        ...getAuthHeaders(),
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        agent_names: agentNames,
+        ...(options?.renames ? { renames: options.renames } : {}),
+        ...(options?.model_ids ? { model_ids: options.model_ids } : {}),
+        ...(options?.embedding_model_ids
+          ? { embedding_model_ids: options.embedding_model_ids }
+          : {}),
+      }),
+    });
+
+    if (!response.ok) {
+      throw new Error(
+        `Failed to install official agents: ${response.statusText}`
+      );
+    }
+
+    const data = await response.json();
+    return data.results ?? [];
+  } catch (error) {
+    log.error("Error installing official agents:", error);
+    throw error;
+  }
+}
+
+export async function fetchOfficialAgentManagement(): Promise<
+  OfficialAgentManagementItem[]
+> {
+  const response = await fetchWithErrorHandling(
+    API_ENDPOINTS.agentRepository.officialManagement,
+    { method: "GET", headers: getAuthHeaders() }
+  );
+  if (!response.ok)
+    throw new Error(`Failed to fetch official agents: ${response.statusText}`);
+  const data = await response.json();
+  return data.items ?? [];
+}
+
+export async function deleteOfficialAgent(
+  agentRepositoryId: number
+): Promise<void> {
+  const response = await fetchWithErrorHandling(
+    API_ENDPOINTS.agentRepository.officialManagementItem(agentRepositoryId),
+    { method: "DELETE", headers: getAuthHeaders() }
+  );
+  if (!response.ok)
+    throw new Error(`Failed to delete official agent: ${response.statusText}`);
 }
 
 const agentRepositoryService = {
@@ -243,6 +369,10 @@ const agentRepositoryService = {
   updateAgentRepositoryStatus,
   fetchRepositoryImportPrecheck,
   importAgentFromRepository,
+  fetchOfficialAgentsWithStatus,
+  installOfficialAgents,
+  fetchOfficialAgentManagement,
+  deleteOfficialAgent,
 };
 
 export default agentRepositoryService;

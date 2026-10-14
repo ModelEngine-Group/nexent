@@ -12,7 +12,7 @@ import type {
   SkillRepositoryListingItem,
   SkillRepositoryListingStatus,
 } from "@/types/skillRepository";
-import { SkillRepositoryDetailModal } from "./components/SkillRepositoryDetailModal";
+import { SkillDetail } from "@/components/skill/skill-detail";
 import { ReviewSkillList } from "./components/ReviewSkillList";
 import {
   SkillRepositoryReviewConfirmModal,
@@ -149,7 +149,7 @@ export function ReviewCenter({ active }: { active: boolean }) {
           onReject={(listing) => openReviewConfirmModal(listing, "reject")}
         />
       ) : null}
-      <SkillRepositoryDetailModal
+      <SkillDetail
         open={detailRepositoryId != null}
         detail={detailData}
         isLoading={isDetailLoading}

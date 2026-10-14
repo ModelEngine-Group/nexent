@@ -19,7 +19,6 @@ export default function TenantResourcesPage() {
     <>
       <Flex
         vertical
-        style={{ width: "100%", height: "100%" }}
         className="h-full w-full overflow-hidden"
       >
         <UserManageComp />

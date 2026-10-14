@@ -8,7 +8,8 @@ import pytest
 from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
 
-from consts.exceptions import ValidationError
+from consts.error_code import ErrorCode
+from consts.exceptions import AppException, ValidationError
 
 # Dynamically determine the backend path
 current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -155,6 +156,31 @@ async def test_create_new_conversation_failure(conversation_mocks):
 
 
 @pytest.mark.asyncio
+async def test_create_new_conversation_propagates_resource_limit(conversation_mocks):
+    """Conversation quota errors must reach the global AppException handler."""
+    conversation_mocks['get_current_user_id'].return_value = (
+        "user_id", "tenant_id")
+    conversation_mocks['create_new_convo'].side_effect = AppException(
+        ErrorCode.TENANT_RESOURCE_EXCEEDED,
+        "Conversation history limit reached: maximum 1 conversations per user",
+        details={
+            "resource": "conversations",
+            "scope": "user",
+            "limit": 1,
+            "current_count": 1,
+        },
+    )
+
+    with pytest.raises(AppException) as exc_info:
+        await create_new_conversation_endpoint(
+            MagicMock(title="At limit"), authorization="Bearer test-token"
+        )
+
+    assert exc_info.value.http_status == 429
+    assert exc_info.value.error_code == ErrorCode.TENANT_RESOURCE_EXCEEDED
+
+
+@pytest.mark.asyncio
 async def test_list_conversations_success(conversation_mocks):
     """Verify successful retrieval of conversation list"""
     # Arrange
@@ -216,6 +242,30 @@ async def test_list_conversations_forwards_pagination(conversation_mocks):
         week_start_ms=1000,
         limit=10,
         offset=20,
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("conversation_type", ["agent_chat", "workbench"])
+async def test_list_conversations_filters_by_entrypoint(conversation_mocks, conversation_type):
+    """Each page requests only conversations owned by its entrypoint."""
+    conversation_mocks['get_current_user_id'].return_value = ("user_id", "tenant_id")
+    conversation_mocks['get_conversation_list'].return_value = {"items": [], "metadata": {}}
+
+    await list_conversations_endpoint(
+        authorization="Bearer test-token",
+        today_start_ms=2000,
+        week_start_ms=1000,
+        conversation_type=conversation_type,
+    )
+
+    conversation_mocks['get_conversation_list'].assert_called_once_with(
+        user_id="user_id",
+        today_start_ms=2000,
+        week_start_ms=1000,
+        limit=None,
+        offset=0,
+        conversation_type=conversation_type,
     )
 
 
@@ -289,12 +339,13 @@ async def test_rename_conversation_success(conversation_mocks):
     # Setup mocks
     conversation_mocks['get_current_user_id'].return_value = (
         "user_id", "tenant_id")
-    # rename_conversation_service returns None, indicating success
+    conversation_mocks['rename_conversation'].return_value = True
 
     # Create a request-like object with required attributes
     request_obj = MagicMock()
     request_obj.conversation_id = conversation_id
     request_obj.name = new_title
+    request_obj.only_if_default_title = False
 
     # Act
     result = await rename_conversation_endpoint(request_obj, authorization=mock_auth_header)
@@ -306,6 +357,21 @@ async def test_rename_conversation_success(conversation_mocks):
         mock_auth_header)
     conversation_mocks['rename_conversation'].assert_called_once_with(
         conversation_id, new_title, "user_id")
+
+
+@pytest.mark.asyncio
+async def test_automatic_fallback_rename_returns_false_without_claiming_a_write(conversation_mocks):
+    from consts.model import RenameRequest
+
+    conversation_mocks['get_current_user_id'].return_value = ("user", "tenant")
+    conversation_mocks['rename_conversation'].return_value = False
+    request = RenameRequest(conversation_id=42, name="Fallback", only_if_default_title=True)
+    response = await rename_conversation_endpoint(request, authorization="Bearer test-token")
+    assert response.code == 0
+    assert response.data is False
+    conversation_mocks['rename_conversation'].assert_called_once_with(
+        42, "Fallback", "user", only_if_default_title=True,
+    )
 
 
 # -----------------------------
@@ -610,6 +676,23 @@ async def test_update_opinion_failure(conversation_mocks):
 
     assert exc_info.value.status_code == 500
     conversation_mocks['logging'].error.assert_called_once()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("route", ["opinion", "lookup"])
+async def test_missing_message_returns_404(conversation_mocks, route):
+    from consts.exceptions import ConversationNotFoundError
+
+    request_obj = MagicMock(message_id=123, opinion="Y", conversation_id=1, message_index=0)
+    if route == "opinion":
+        conversation_mocks['update_opinion_service'].side_effect = ConversationNotFoundError("Message not found")
+        endpoint = update_opinion_endpoint
+    else:
+        conversation_mocks['get_message_id_impl'].side_effect = ConversationNotFoundError("Message not found")
+        endpoint = get_message_id_endpoint
+    with pytest.raises(HTTPException) as error:
+        await endpoint(request_obj)
+    assert error.value.status_code == 404
 
 
 # get_message_id_endpoint

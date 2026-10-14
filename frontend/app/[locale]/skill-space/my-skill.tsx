@@ -18,6 +18,7 @@ import {
 import { parseSkillReviewDeepLinkParams } from "@/lib/notificationNavigation";
 import { ApiError } from "@/services/api";
 import { deleteSkillByName } from "@/services/skillService";
+import { fetchMyEditableSkills } from "@/services/skillRepositoryService";
 import type {
   MineOwnershipFilter,
   MyEditableSkillItem,
@@ -30,11 +31,11 @@ import {
 } from "./components/MineSkillsView";
 
 const SkillBuildModal = dynamic(
-  () => import("../agents/components/agentConfig/SkillBuildModal"),
+  () => import("../agents/components/capability/SkillBuildModal"),
   { ssr: false }
 );
 const SkillDetailModal = dynamic(
-  () => import("../agents/components/agentConfig/SkillDetailModal"),
+  () => import("../agents/components/capability/SkillDetailModal"),
   { ssr: false }
 );
 const CARD_GAP = 20;
@@ -109,6 +110,44 @@ export function MySkill({ active }: { active: boolean }) {
   const [editingSkill, setEditingSkill] = useState<MyEditableSkillItem | null>(
     null
   );
+  useEffect(() => {
+    if (!active) return;
+    const id = Number(searchParams.get("edit_skill_id"));
+    if (!Number.isInteger(id) || id <= 0) return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        for (let page = 1; ; page += 1) {
+          const result = await fetchMyEditableSkills({
+            ownership: "all",
+            page,
+            page_size: 100,
+            new_skill_padding: false,
+          });
+          if (cancelled) return;
+          const skill = result.items.find(
+            (item): item is MyEditableSkillItem =>
+              "skill_id" in item && item.skill_id === id
+          );
+          if (skill) {
+            setEditingSkill(skill);
+            setSkillBuildLoaded(true);
+            setSkillBuildOpen(true);
+            return;
+          }
+          if (page >= result.pagination.total_pages) {
+            message.warning("Skill 不存在或没有编辑权限");
+            return;
+          }
+        }
+      } catch {
+        if (!cancelled) message.error("Skill 加载失败");
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [active, searchParams, message]);
   const [skillDetailLoaded, setSkillDetailLoaded] = useState(false);
   const [viewingSkill, setViewingSkill] = useState<MyEditableSkillItem | null>(
     null

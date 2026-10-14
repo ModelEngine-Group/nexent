@@ -1,0 +1,68 @@
+schema_version: '1.0'
+stage: D1
+module: V5-BASELINE
+case:
+  case_id: UT-FE-AUTO-02FA904A1C3AD386
+  feature_id: F-065
+  business_rule_ids:
+  - F-065-RULE-01
+  title: 线程模型选择器仅展示可用模型并回退、不可用不可选、会话切换不串｜核心流程
+  type: FE-COMP
+  priority: P1
+  status: active
+  automation: automated
+  objective: 线程模型选择器仅展示可用模型并回退、不可用不可选、会话切换不串｜核心流程
+  preconditions:
+  - 本地依赖/组件测试环境可运行；不要求外部模型服务在线。
+  - 设置 NEXENT_TEST_HOME，目录不位于 Nexent Git 仓库内。
+  - 当次 run_id 已生成；测试基线固定为 develop 当前批次锁定的产品提交；执行时另记录实际被测commit。
+  - 组件测试脚手架可加载 newchat 的 Thread 组件与 useAgentModels，并对 useModelList(模型列表)与 PublishedAgent(model_ids/model_names)注入固定最小数据。
+  test_data:
+    legacy_asset_declaration: '- 无（模型列表与 Agent 配置通过组件测试注入固定 fixture，不使用真实模型/资产）'
+  steps:
+  - order: 1
+    action: 在组件测试环境加载 newchat Thread 组件与 useAgentModels hook，注入 useModelList 返回的固定模型列表（m1 connect_status=available、m2 connect_status=unavailable、m3
+      connect_status=available）与 PublishedAgent（model_ids=[m1,m2,m3]、model_names=["模型A","模型B","模型C"]）。
+    expected: 派生模型列表仅保留 connect_status==="available" 的模型，connect_status 非 available 的模型被过滤。
+  - order: 2
+    action: 首轮渲染后断言 useAgentModels 派生出的模型选项仅包含 m1、m3，m2 被过滤。
+    expected: agent 配置模型全部不可用时派生列表为空，选中态回退为 undefined（置空），不选中任何已不可用模型。
+  - order: 3
+    action: 将模型列表改为全部 connect_status 均为 available 以外值（m1/m2/m3 均不可用），断言 useAgentModels 返回空数组，Thread 的 effectiveSelectedModelId
+      回退为 undefined（置空）。
+    expected: 单模型回退仅在模型可用时返回该模型，不可用时返回空数组。
+  - order: 4
+    action: 构造 agent 未配置 model_ids/model_names 而仅配置 model_name 的 PublishedAgent：当该 model_name 对应模型 connect_status=available
+      时断言回退为单模型选项；当同一模型改为不可用时断言返回空数组。
+    expected: 不可用模型不可被选中：handleModelChange 对不在派生列表内的模型 id 直接返回，不产生选中态或回调。
+  - order: 5
+    action: 渲染后对不可用模型 id 调用 handleModelChange，断言不触发 onModelChange 且不更新本地选中态。
+    expected: 会话切换后本地选中态在新模型集合外时回退到首个可用模型，不跨会话串用选中模型。
+  - order: 6
+    action: 切换会话（变更 agent 或传入不同 models），当本地选中态(localSelectedModelId)不在新模型集合内时，断言 effectiveSelectedModelId 回退到首个可用模型，不串用上一会话的选中模型。
+    expected: 测试过程无未处理异常，日志/Trace 中无明文 API Key/Token/Password/模型密钥。
+  - order: 7
+    action: 断言测试过程未抛出未处理异常，且日志中不输出 API Key/Token/用户密码/模型密钥。
+    expected: 测试过程无未处理异常，日志/Trace 中无明文 API Key/Token/Password/模型密钥。
+  expected_results:
+  - 派生模型列表仅保留 connect_status==="available" 的模型，connect_status 非 available 的模型被过滤。
+  - agent 配置模型全部不可用时派生列表为空，选中态回退为 undefined（置空），不选中任何已不可用模型。
+  - 单模型回退仅在模型可用时返回该模型，不可用时返回空数组。
+  - 不可用模型不可被选中：handleModelChange 对不在派生列表内的模型 id 直接返回，不产生选中态或回调。
+  - 会话切换后本地选中态在新模型集合外时回退到首个可用模型，不跨会话串用选中模型。
+  - 测试过程无未处理异常，日志/Trace 中无明文 API Key/Token/Password/模型密钥。
+  forbidden_side_effects: []
+  source:
+    legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
+    legacy_sheet: 02_测试用例基线
+    legacy_row: 421
+  unit_boundary: 模型选择器
+  inputs:
+  - '- 无（模型列表与 Agent 配置通过组件测试注入固定 fixture，不使用真实模型/资产）'
+  assertions:
+  - 派生模型列表仅保留 connect_status==="available" 的模型，connect_status 非 available 的模型被过滤。
+  - agent 配置模型全部不可用时派生列表为空，选中态回退为 undefined（置空），不选中任何已不可用模型。
+  - 单模型回退仅在模型可用时返回该模型，不可用时返回空数组。
+  - 不可用模型不可被选中：handleModelChange 对不在派生列表内的模型 id 直接返回，不产生选中态或回调。
+  - 会话切换后本地选中态在新模型集合外时回退到首个可用模型，不跨会话串用选中模型。
+  - 测试过程无未处理异常，日志/Trace 中无明文 API Key/Token/Password/模型密钥。

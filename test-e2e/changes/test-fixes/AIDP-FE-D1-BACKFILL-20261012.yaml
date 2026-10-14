@@ -1,0 +1,48 @@
+schema_version: '1.0'
+change:
+  change_id: AIDP-FE-D1-BACKFILL-20261012
+  change_type: test-fix
+  title: Repair stale AIDP frontend D1 and fill page collaboration gaps
+  description: Keep the existing Case ID and valid permission/update/multipart assertions;
+    replace obsolete two-step creation with the approved standalone page and import
+    drawer. Add only list and file-page component contracts; do not enable paused
+    AIDP service cases or change product code.
+  affected_features:
+    existing: []
+    added: []
+    modified:
+    - F-111
+    retired: []
+  affected_cases:
+    existing: []
+    added:
+    - AIDP-FE-LIST-01
+    - AIDP-FE-FILES-01
+    modified:
+    - UT-FE-AUTO-BA4BBC902BC06BE6
+    retired: []
+  notes: 'Proof-gap/admission review: existing D1 covers obsolete creation/update
+    and upload service paths, not current pages. Existing backend UT already proves
+    Count errors, permission checks and size helpers and is reused without copies.
+    Retain valid assertions in the existing Case; list and file Cases execute real
+    page/state/query/cache/service collaboration through controlled transport. Cache
+    isolation is owned only by the list Case; file count/search/header behavior only
+    by the file Case; upload validation/row outcomes only by the existing Case, while
+    parent Cases prove close-to-refresh propagation. No deployed API or protocol integration
+    is claimed. Fake clock/deferred responses remove 10/30-second waits; metadata
+    citation/download and handed-off detail tabs remain out of scope.
+    Assertion review: creation binds actual form values to HTTP bodies and verifies
+    model/template loading errors, optional-setting removal and duplicate-submit
+    prevention; imports bind controlled transport progress to real row states;
+    list/files bind real query results to pagination, caches and close/delete refresh.
+    Every collected test is mapped to an acceptance obligation. A negative control
+    removing user/tenant cache scope was detected by the existing isolation test;
+    the product source was restored byte-for-byte. There are no real sleeps, large
+    file allocations, deployed requests, test wrappers around legacy UT, or copied
+    list/cache/count helper assertions.
+    Remaining product finding: file-delete onOk intentionally rejects after showing
+    failure; AntD static confirmation re-rejects that promise without a consumer.
+    The failure test owns the confirmation callback and asserts its rejection,
+    unchanged file/count and visible error. It does not certify browser handling
+    of that unhandled rejection. Product code and service-test pause policy remain
+    unchanged.'

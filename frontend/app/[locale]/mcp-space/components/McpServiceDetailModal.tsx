@@ -47,6 +47,7 @@ interface McpServiceDetailModalProps {
   selectedService: McpServiceItem | null;
   onClose: () => void;
   onToggled?: (mcpId: number, next: McpServiceStatus) => void;
+  onTagsChanged?: (mcpId: number) => void;
 }
 
 const DEPLOYMENT_OPTIONS = [
@@ -75,6 +76,7 @@ const DEPLOYMENT_OPTIONS = [
 export default function McpServiceDetailModal({
   selectedService,
   onClose,
+  onTagsChanged,
 }: McpServiceDetailModalProps) {
   const { modal } = App.useApp();
   const { t } = useTranslation("common");
@@ -1057,6 +1059,9 @@ export default function McpServiceDetailModal({
         onClose={() => {
           setAssignOpen(false);
           setTagPreviewRefreshKey((current) => current + 1);
+          if (selectedService) {
+            onTagsChanged?.(selectedService.mcpId);
+          }
         }}
         resourceType="mcp_service"
         resourceId={String(selectedService.mcpId)}

@@ -471,6 +471,8 @@ class KnowledgeBaseManagementService:
                               "embedding_model_id": actual_model_id}
             create_knowledge_record(knowledge_data)
             return {"status": "success", "message": f"Index {index_name} created successfully"}
+        except AppException:
+            raise
         except Exception as e:
             raise Exception(f"Error creating index: {str(e)}")
 
@@ -557,14 +559,30 @@ class KnowledgeBaseManagementService:
             record_info = create_knowledge_record(knowledge_data)
             index_name = record_info["index_name"]
 
-            # Create Elasticsearch index with generated internal index_name
-            success = vdb_core.create_index(
-                index_name,
-                embedding_dim=embedding_dim
-                or (embedding_model.embedding_dim if embedding_model else 1024),
-            )
-            if not success:
-                raise Exception(f"Failed to create index {index_name}")
+            # Create Elasticsearch index with generated internal index_name.
+            # If this fails (e.g. ES auth/connectivity), roll back the just-inserted
+            # record so we don't leave an orphan row pointing at a missing index.
+            try:
+                success = vdb_core.create_index(
+                    index_name,
+                    embedding_dim=embedding_dim
+                    or (embedding_model.embedding_dim if embedding_model else 1024),
+                )
+                if not success:
+                    raise Exception(f"Failed to create index {index_name}")
+            except Exception:
+                try:
+                    delete_knowledge_record(
+                        {"index_name": index_name, "user_id": user_id}
+                    )
+                except Exception as rollback_error:
+                    logger.warning(
+                        "Failed to roll back knowledge record %s after index "
+                        "creation error: %s",
+                        index_name,
+                        rollback_error,
+                    )
+                raise
 
             return {
                 "status": "success",
@@ -575,6 +593,9 @@ class KnowledgeBaseManagementService:
                 "knowledge_id": record_info["knowledge_id"],
                 "name": record_info.get("knowledge_name", knowledge_name),
             }
+        except AppException:
+            # Preserve structured resource-limit errors for the application layer.
+            raise
         except (DuplicateError, ValueError):
             raise
         except Exception as e:
@@ -984,6 +1005,14 @@ class KnowledgeBaseManagementService:
 
         indices = [record["index_name"] for record in visible_knowledgebases]
 
+        if include_stats:
+            from services.resource_tag_projection import project_authorized_resource_tags
+
+            visible_knowledgebases = project_authorized_resource_tags(
+                visible_knowledgebases, resource_type="knowledge_base", id_field="index_name",
+                default_tenant_id=target_tenant_id,
+            )
+
         response = {
             "indices": indices,
             "count": len(indices),
@@ -1019,6 +1048,7 @@ class KnowledgeBaseManagementService:
 
                     stats_info.append({
                         "knowledge_id": record.get("knowledge_id"),
+                        "tags": record.get("tags", []),
                         # Internal index name (used as ID)
                         "name": index_name,
                         # User-facing knowledge base name from PostgreSQL (fallback to index_name)
@@ -1297,10 +1327,23 @@ class KnowledgeBaseManagementService:
                     utc_create_timestamp = time.time()
 
                 path_or_url = file_info.get('path_or_url')
+                file_size = file_info.get('file_size', 0)
+                # Fall back to the real storage size when the ES record reports
+                # zero (e.g. the data-process task could not resolve it), so the
+                # KB list never shows a 0-byte document for an existing file.
+                if not file_size and path_or_url:
+                    try:
+                        file_size = get_file_size(
+                            file_info.get('source_type', 'minio'), path_or_url)
+                    except Exception as size_err:
+                        logger.warning(
+                            "Failed to derive file size for '%s': %s",
+                            path_or_url, size_err)
+                        file_size = 0
                 file_data = {
                     'path_or_url': path_or_url,
                     'file': file_info.get('filename', ''),
-                    'file_size': file_info.get('file_size', 0),
+                    'file_size': file_size,
                     'create_time': int(utc_create_timestamp * 1000),
                     'status': "COMPLETED",
                     'latest_task_id': '',

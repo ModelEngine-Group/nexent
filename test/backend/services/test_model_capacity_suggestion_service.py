@@ -9,7 +9,7 @@ if backend_dir not in sys.path:
 
 from unittest import mock
 
-from services.model_capacity_suggestion_service import (
+from management.services.model.capacity import (
     CapacitySuggestionMatchKind,
     _fuzzy_catalog_match,
     normalize_model_name,
@@ -17,7 +17,7 @@ from services.model_capacity_suggestion_service import (
     pick_provider_from_base_url,
     suggest_capacity,
 )
-import services.model_capacity_suggestion_service as suggestion_module
+import management.services.model.capacity as suggestion_module
 
 
 class Profile:

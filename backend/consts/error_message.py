@@ -76,6 +76,7 @@ class ErrorMessage:
         ErrorCode.KNOWLEDGE_STORAGE_COMMIT_FAILED: "File upload failed because the storage service is unavailable.",
         ErrorCode.KNOWLEDGE_TASK_SUBMIT_FAILED: "The file was uploaded, but the ingestion service is unavailable.",
         ErrorCode.KNOWLEDGE_DELETE_BLOCKED: "Knowledge base deletion is blocked while files are being processed.",
+        ErrorCode.KNOWLEDGE_RESOURCE_EXCEEDED: "Knowledge resource limit exceeded.",
 
         # ==================== 07 MCPTools / MCP 工具 ====================
         ErrorCode.MCP_TOOL_NOT_FOUND: "Tool not found.",

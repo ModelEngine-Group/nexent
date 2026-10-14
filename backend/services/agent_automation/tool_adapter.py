@@ -109,15 +109,11 @@ class AgentLoopAutomationToolAdapter:
             tool_params=tool_params,
             has_attachments=has_attachments,
         )
-        description = (
-            CreateScheduledTaskProposalTool.description
-            if language == "en"
-            else CreateScheduledTaskProposalTool.description_zh
-        )
         return ToolConfig(
             class_name=CreateScheduledTaskProposalTool.__name__,
             name=CreateScheduledTaskProposalTool.name,
-            description=description,
+            description=CreateScheduledTaskProposalTool.description,
+            description_zh=CreateScheduledTaskProposalTool.description_zh,
             inputs=json.dumps(
                 CreateScheduledTaskProposalTool.inputs,
                 ensure_ascii=False,

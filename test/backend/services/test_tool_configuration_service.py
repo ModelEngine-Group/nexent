@@ -112,10 +112,6 @@ for name in ["CodeAgent", "handle_agent_output_types", "ActionOutput", "RunResul
     setattr(mock_smolagents.agents, name, MagicMock(
         name=f"smolagents.agents.{name}"))
 
-# Populate smolagents.local_python_executor with required attributes
-setattr(mock_smolagents.local_python_executor, "fix_final_answer_code",
-        MagicMock(name="fix_final_answer_code"))
-
 # Populate smolagents.memory with required attributes
 for name in ["ActionStep", "PlanningStep", "FinalAnswerStep", "ToolCall", "TaskStep", "SystemPromptStep"]:
     setattr(mock_smolagents.memory, name, MagicMock(
@@ -1224,9 +1220,8 @@ class TestGetAllMcpTools:
 
     @patch('backend.services.tool_configuration_service.get_mcp_records_by_tenant')
     @patch('backend.services.tool_configuration_service.get_tool_from_remote_mcp_server')
-    @patch('backend.services.tool_configuration_service.LOCAL_MCP_SERVER', "http://default-server.com")
-    @patch('backend.services.tool_configuration_service.urljoin')
-    async def test_get_all_mcp_tools_success(self, mock_urljoin, mock_get_tools, mock_get_records):
+    @patch('backend.services.tool_configuration_service.get_tenant_local_mcp_server', return_value="http://default-server.com/sse")
+    async def test_get_all_mcp_tools_success(self, mock_get_tenant_url, mock_get_tools, mock_get_records):
         """Test successfully getting all MCP tools"""
         # Mock MCP records - must include "enabled" field as implementation checks both enabled AND status
         mock_get_records.return_value = [
@@ -1253,8 +1248,6 @@ class TestGetAllMcpTools:
         # Call order: server1, server3 (server2 is skipped due to status=False), default server
         mock_get_tools.side_effect = [
             mock_tools1, mock_tools2, mock_default_tools]
-        mock_urljoin.return_value = "http://default-server.com/sse"
-
         from backend.services.tool_configuration_service import get_all_mcp_tools
 
         result = await get_all_mcp_tools("test_tenant")
@@ -1270,12 +1263,13 @@ class TestGetAllMcpTools:
 
         # Verify calls
         assert mock_get_tools.call_count == 3
+        assert mock_get_tools.call_args_list[-1].kwargs["mcp_server_name"] == "outer-apis"
+        assert mock_get_tools.call_args_list[-1].kwargs["tenant_id"] == "test_tenant"
 
     @patch('backend.services.tool_configuration_service.get_mcp_records_by_tenant')
     @patch('backend.services.tool_configuration_service.get_tool_from_remote_mcp_server')
-    @patch('backend.services.tool_configuration_service.LOCAL_MCP_SERVER', "http://default-server.com")
-    @patch('backend.services.tool_configuration_service.urljoin')
-    async def test_get_all_mcp_tools_connection_error(self, mock_urljoin, mock_get_tools, mock_get_records):
+    @patch('backend.services.tool_configuration_service.get_tenant_local_mcp_server', return_value="http://default-server.com/sse")
+    async def test_get_all_mcp_tools_connection_error(self, mock_get_tenant_url, mock_get_tools, mock_get_records):
         """Test MCP connection error scenario"""
         mock_get_records.return_value = [
             {"mcp_name": "server1", "mcp_server": "http://server1.com", "enabled": True, "status": True}
@@ -1285,8 +1279,6 @@ class TestGetAllMcpTools:
                                       [ToolInfo(name="default_tool", description="Default Tool", params=[],
                                                 source=ToolSourceEnum.MCP.value, inputs="{}", output_type="string",
                                                 class_name="DefaultTool", usage="nexent")]]
-        mock_urljoin.return_value = "http://default-server.com/sse"
-
         from backend.services.tool_configuration_service import get_all_mcp_tools
 
         result = await get_all_mcp_tools("test_tenant")
@@ -1297,9 +1289,8 @@ class TestGetAllMcpTools:
 
     @patch('backend.services.tool_configuration_service.get_mcp_records_by_tenant')
     @patch('backend.services.tool_configuration_service.get_tool_from_remote_mcp_server')
-    @patch('backend.services.tool_configuration_service.LOCAL_MCP_SERVER', "http://default-server.com")
-    @patch('backend.services.tool_configuration_service.urljoin')
-    async def test_get_all_mcp_tools_no_connected_servers(self, mock_urljoin, mock_get_tools, mock_get_records):
+    @patch('backend.services.tool_configuration_service.get_tenant_local_mcp_server', return_value="http://default-server.com/sse")
+    async def test_get_all_mcp_tools_no_connected_servers(self, mock_get_tenant_url, mock_get_tools, mock_get_records):
         """Test scenario with no connected servers"""
         mock_get_records.return_value = [
             {"mcp_name": "server1", "mcp_server": "http://server1.com", "enabled": True, "status": False},
@@ -1310,8 +1301,6 @@ class TestGetAllMcpTools:
                      inputs="{}", output_type="string", class_name="DefaultTool", usage="nexent")
         ]
         mock_get_tools.return_value = mock_default_tools
-        mock_urljoin.return_value = "http://default-server.com/sse"
-
         from backend.services.tool_configuration_service import get_all_mcp_tools
 
         result = await get_all_mcp_tools("test_tenant")
@@ -1323,9 +1312,8 @@ class TestGetAllMcpTools:
 
     @patch('backend.services.tool_configuration_service.get_mcp_records_by_tenant')
     @patch('backend.services.tool_configuration_service.get_tool_from_remote_mcp_server')
-    @patch('backend.services.tool_configuration_service.LOCAL_MCP_SERVER', "http://default-server.com")
-    @patch('backend.services.tool_configuration_service.urljoin')
-    async def test_get_all_mcp_tools_with_custom_headers(self, mock_urljoin, mock_get_tools, mock_get_records):
+    @patch('backend.services.tool_configuration_service.get_tenant_local_mcp_server', return_value="http://default-server.com/sse")
+    async def test_get_all_mcp_tools_with_custom_headers(self, mock_get_tenant_url, mock_get_tools, mock_get_records):
         """Test get_all_mcp_tools passes custom_headers from records to get_tool_from_remote_mcp_server."""
         mock_get_records.return_value = [
             {"mcp_name": "server1", "mcp_server": "http://server1.com", "enabled": True, "status": True,
@@ -1343,8 +1331,6 @@ class TestGetAllMcpTools:
                      inputs="{}", output_type="string", class_name="DefaultTool", usage="nexent")
         ]
         mock_get_tools.side_effect = [mock_tools, mock_tools, mock_default_tools]
-        mock_urljoin.return_value = "http://default-server.com/sse"
-
         from backend.services.tool_configuration_service import get_all_mcp_tools
 
         result = await get_all_mcp_tools("test_tenant")
@@ -1361,9 +1347,8 @@ class TestGetAllMcpTools:
 
     @patch('backend.services.tool_configuration_service.get_mcp_records_by_tenant')
     @patch('backend.services.tool_configuration_service.get_tool_from_remote_mcp_server')
-    @patch('backend.services.tool_configuration_service.LOCAL_MCP_SERVER', "http://default-server.com")
-    @patch('backend.services.tool_configuration_service.urljoin')
-    async def test_get_all_mcp_tools_with_null_custom_headers(self, mock_urljoin, mock_get_tools, mock_get_records):
+    @patch('backend.services.tool_configuration_service.get_tenant_local_mcp_server', return_value="http://default-server.com/sse")
+    async def test_get_all_mcp_tools_with_null_custom_headers(self, mock_get_tenant_url, mock_get_tools, mock_get_records):
         """Test get_all_mcp_tools handles null custom_headers in records."""
         mock_get_records.return_value = [
             {"mcp_name": "server1", "mcp_server": "http://server1.com", "enabled": True, "status": True,
@@ -1379,8 +1364,6 @@ class TestGetAllMcpTools:
                      inputs="{}", output_type="string", class_name="DefaultTool", usage="nexent")
         ]
         mock_get_tools.side_effect = [mock_tools, mock_default_tools]
-        mock_urljoin.return_value = "http://default-server.com/sse"
-
         from backend.services.tool_configuration_service import get_all_mcp_tools
 
         result = await get_all_mcp_tools("test_tenant")
@@ -1449,7 +1432,7 @@ class TestGetToolFromRemoteMcpServer:
 
         # Verify calls
         mock_create_transport.assert_called_once_with("http://test-server.com", None, None)
-        mock_client_cls.assert_called_once_with(transport=mock_transport, timeout=10)
+        mock_client_cls.assert_called_once_with(transport=mock_transport, timeout=60)
         assert mock_client.list_tools.call_count == 1
 
     @patch('backend.services.tool_configuration_service.Client')
@@ -2317,7 +2300,7 @@ class TestLoadLastToolConfigImpl:
 
         assert result == "test result"
         mock_create_transport.assert_called_once_with("http://test-server.com", None, None)
-        mock_client_cls.assert_called_once_with(transport=mock_transport)
+        mock_client_cls.assert_called_once_with(transport=mock_transport, timeout=60)
         mock_client.call_tool.assert_called_once_with(
             name="test_tool", arguments={"param": "value"})
 
@@ -2352,7 +2335,7 @@ class TestLoadLastToolConfigImpl:
 
         assert result == "test result with token"
         mock_create_transport.assert_called_once_with("http://test-server.com", "Bearer token123", None)
-        mock_client_cls.assert_called_once_with(transport=mock_transport)
+        mock_client_cls.assert_called_once_with(transport=mock_transport, timeout=60)
         mock_client.call_tool.assert_called_once_with(
             name="test_tool", arguments={"param": "value"})
 
@@ -2379,7 +2362,7 @@ class TestLoadLastToolConfigImpl:
 
         # Verify client was created and connection was checked
         mock_create_transport.assert_called_once_with("http://test-server.com", None, None)
-        mock_client_cls.assert_called_once_with(transport=mock_transport)
+        mock_client_cls.assert_called_once_with(transport=mock_transport, timeout=60)
         mock_client.is_connected.assert_called_once()
 
     @patch('backend.services.tool_configuration_service.urljoin')
@@ -4353,34 +4336,10 @@ class TestGetLocalToolsDescriptionZhCoverage:
         inputs = json.loads(result[0].inputs)
         assert inputs == {"query": "string"}
 
-    @pytest.mark.parametrize(
-        ("enable_aidp_knowledge", "expected_selectability"),
-        [
-            (
-                True,
-                {
-                    "knowledge_base_search": False,
-                    "aidp_search": False,
-                    "ind_aidp_search": False,
-                },
-            ),
-            (
-                False,
-                {
-                    "knowledge_base_search": False,
-                    "aidp_search": False,
-                    "ind_aidp_search": True,
-                },
-            ),
-        ],
-    )
     @patch('backend.services.tool_configuration_service.get_local_tools_classes')
-    def test_get_local_tools_applies_knowledge_tool_selectability_by_deployment(
+    def test_get_local_tools_keeps_independent_aidp_search_selectable(
         self,
         mock_get_classes,
-        monkeypatch,
-        enable_aidp_knowledge,
-        expected_selectability,
     ):
         class KnowledgeTool:
             name = "knowledge_base_search"
@@ -4404,36 +4363,24 @@ class TestGetLocalToolsDescriptionZhCoverage:
             AidpTool,
             IndependentAidpTool,
         ]
-        monkeypatch.setattr(
-            _tool_cfg_service,
-            "ENABLE_AIDP_KNOWLEDGE",
-            enable_aidp_knowledge,
-        )
-
         result = _tool_cfg_service.get_local_tools()
 
         assert {
             tool.name: tool.is_user_selectable
             for tool in result
-        } == expected_selectability
+        } == {
+            "knowledge_base_search": False,
+            "aidp_search": False,
+            "ind_aidp_search": True,
+        }
 
-    @pytest.mark.parametrize(
-        ("enable_aidp_knowledge", "expected_selectability"),
-        [
-            (True, [False, False, False]),
-            (False, [False, False, True]),
-        ],
-    )
     @patch('backend.services.tool_configuration_service.get_local_tools_description_zh')
     @patch('backend.services.tool_configuration_service.query_all_tools')
     @pytest.mark.asyncio
-    async def test_list_all_tools_applies_deployment_selectability_to_stale_records(
+    async def test_list_all_tools_preserves_independent_aidp_search_selectability(
         self,
         mock_query,
         mock_get_descriptions,
-        monkeypatch,
-        enable_aidp_knowledge,
-        expected_selectability,
     ):
         mock_query.return_value = [
             {
@@ -4454,15 +4401,9 @@ class TestGetLocalToolsDescriptionZhCoverage:
             )
         ]
         mock_get_descriptions.return_value = {}
-        monkeypatch.setattr(
-            _tool_cfg_service,
-            "ENABLE_AIDP_KNOWLEDGE",
-            enable_aidp_knowledge,
-        )
-
         result = await _tool_cfg_service.list_all_tools("tenant-a")
 
-        assert [tool["is_user_selectable"] for tool in result] == expected_selectability
+        assert [tool["is_user_selectable"] for tool in result] == [False, False, True]
 
     @patch('backend.services.tool_configuration_service.get_local_tools_description_zh')
     @patch('backend.services.tool_configuration_service.query_all_tools')
@@ -5658,8 +5599,9 @@ class TestUpdateToolListMcpErrorExplicit:
            new_callable=AsyncMock, side_effect=ConnectionError("MCP down"))
     @patch("backend.services.tool_configuration_service.update_tool_table_from_scan_tool_list")
     @patch("backend.services.tool_configuration_service.get_mcp_records_by_tenant", return_value=[])
+    @patch("backend.services.tool_configuration_service.query_openapi_services_by_tenant", return_value=[{"mcp_service_name": "weather-api"}])
     async def test_mcp_error_sets_empty_tools_and_continues(
-        self, mock_get_mcp_records, mock_update, mock_mcp, mock_lc, mock_local, mock_refresh
+        self, mock_openapi_services, mock_get_mcp_records, mock_update, mock_mcp, mock_lc, mock_local, mock_refresh
     ):
         """MCP failure must set mcp_tools=[] and still call update_tool_table_from_scan_tool_list."""
         from backend.services.tool_configuration_service import update_tool_list
@@ -5668,7 +5610,7 @@ class TestUpdateToolListMcpErrorExplicit:
         # update_tool_table called with only local + langchain (mcp_tools is [])
         mock_update.assert_called_once_with(
             tenant_id="tenant1", user_id="user1", tool_list=[],
-            enabled_mcp_names=set(),
+            enabled_mcp_names={"outer-apis"},
         )
 
 
@@ -6044,3 +5986,26 @@ class TestValidateToolParamRanges:
             _tool_cfg_service._validate_tool_param_ranges(
                 1, {"top_k": 50, "threshold": 0.5}
             )
+
+
+@pytest.mark.asyncio
+async def test_call_mcp_tool_enforces_runtime_timeout(monkeypatch):
+    """A stalled remote tool call uses the independent runtime tool timeout."""
+    client = AsyncMock()
+    client.__aenter__.return_value = client
+    client.is_connected.return_value = True
+
+    async def stalled_call(*_args, **_kwargs):
+        await asyncio.sleep(1)
+
+    client.call_tool.side_effect = stalled_call
+    monkeypatch.setattr(_tool_cfg_service, "Client", MagicMock(return_value=client))
+    monkeypatch.setattr(_tool_cfg_service, "_create_mcp_transport", MagicMock())
+    monkeypatch.setattr(_tool_cfg_service, "RUNTIME_MCP_TOOL_TIMEOUT_SECONDS", 0.01)
+
+    with pytest.raises(MCPConnectionError, match="tool execution timed out after 0.01 seconds"):
+        await _tool_cfg_service._call_mcp_tool(
+            "https://mcp.example/mcp",
+            "slow_tool",
+            {},
+        )

@@ -128,7 +128,7 @@ export default function AgentVersionManage({
                 <Empty />
               </Flex>
             ) : (
-              <div className="flex flex-col gap-2 px-3">
+              <div className="flex flex-col gap-2 px-3 py-4">
                 {agentVersionList.map((version) => (
                   <VersionCardItem
                     key={version.version_no}
