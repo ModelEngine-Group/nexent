@@ -18,6 +18,10 @@ feature:
   - rule_id: NAV-MENU-RULE-003
     description: Authorized enabled workbench menu is labeled 工作台 / Workbench and
       appears immediately after Home, before Start Chat.
+  - rule_id: NAV-MENU-RULE-004
+    description: Shared pages omit global top and bottom bars; account menu retains their information, visibility policies and language switching without appearance settings.
+  - rule_id: NAV-MENU-RULE-005
+    description: Collapsed sidebar shows icons only; hover expands to240px over content with inline labels, truncation and popup-safe collapse.
   required_test_stages:
   - D1
   - D4
@@ -25,4 +29,6 @@ feature:
     requirement_ids:
     - NAV-MENU-REQ-001
     - NAV-MENU-REQ-002
+    - NAV-MENU-REQ-003
+    - NAV-MENU-REQ-004
     spec_path: ../nexent-doc/docs/Developing/nav-sidebar-menu-visibility/proposal.md

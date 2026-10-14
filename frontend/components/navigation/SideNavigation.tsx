@@ -1,6 +1,12 @@
 "use client";
 
-import { useEffect, useMemo, useState, type ComponentType } from "react";
+import {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ComponentType,
+} from "react";
 import { useTranslation } from "react-i18next";
 import { useParams, usePathname, useRouter } from "next/navigation";
 import Link from "next/link";
@@ -26,6 +32,8 @@ import { useAuthorizationContext } from "@/components/providers/AuthorizationPro
 import { useAuthenticationContext } from "@/components/providers/AuthenticationProvider";
 import { useDeployment } from "@/components/providers/deploymentProvider";
 import { NotificationBell } from "@/components/navigation/NotificationBell";
+import { NavigationRailLabel } from "@/components/navigation/NavigationRailLabel";
+import { useGlobalConfigStore } from "@/stores/global";
 import { AUTH_EVENTS } from "@/const/auth";
 import {
   useMarkAllNotificationsRead,
@@ -164,12 +172,9 @@ const ROUTE_CONFIG: RouteConfig[] = [
 ];
 
 const RAIL_ITEM_CLASS =
-  "flex h-12 w-12 shrink-0 flex-col items-center justify-center rounded-[4px] border-0 bg-transparent p-2 text-[#191919]";
-const MENU_ITEM_CLASS = `${RAIL_ITEM_CLASS} !h-auto min-h-12 !px-0 !py-1`;
+  "flex h-11 w-full shrink-0 items-center overflow-hidden rounded-lg border-0 bg-transparent p-0 pr-2 text-left text-[#191919] hover:bg-[rgba(25,25,25,0.08)]";
 const RAIL_ICON_CLASS = "h-5 w-5 shrink-0";
-const RAIL_LABEL_CLASS =
-  "w-11 max-w-11 break-words text-center text-[12px] leading-[20px] ![letter-spacing:0px] text-[#191919]";
-const SELECTED_ITEM_CLASS = "!bg-[rgba(25,25,25,0.05)] !rounded-[12px]";
+const SELECTED_ITEM_CLASS = "!bg-[rgba(25,25,25,0.08)]";
 
 function isRouteAccessible(
   route: RouteConfig,
@@ -192,6 +197,34 @@ export function SideNavigation() {
   const pathname = usePathname();
   const params = useParams<{ locale: string }>();
   const locale = params.locale === "en" ? "en" : "zh";
+  const { config } = useGlobalConfigStore();
+  const [expanded, setExpanded] = useState(false);
+  const hovered = useRef(false);
+  const popups = useRef({ account: false, notification: false });
+  const closeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const expand = () => {
+    if (closeTimer.current) clearTimeout(closeTimer.current);
+    setExpanded(true);
+  };
+  const collapseLater = () => {
+    if (closeTimer.current) clearTimeout(closeTimer.current);
+    if (popups.current.account || popups.current.notification) return;
+    closeTimer.current = setTimeout(() => setExpanded(false), 160);
+  };
+  const handlePopupChange = (
+    key: "account" | "notification",
+    open: boolean
+  ) => {
+    popups.current[key] = open;
+    if (open) expand();
+    else if (!hovered.current) collapseLater();
+  };
+  useEffect(
+    () => () => {
+      if (closeTimer.current) clearTimeout(closeTimer.current);
+    },
+    []
+  );
 
   const [pendingNavigationPath, setPendingNavigationPath] = useState<
     string | null
@@ -267,6 +300,8 @@ export function SideNavigation() {
   const notificationAction = isSpeedMode ? null : isAuthenticated ? (
     <NotificationBell
       rail
+      expanded={expanded}
+      onOpenChange={(open) => handlePopupChange("notification", open)}
       unreadCount={unreadCount}
       items={items}
       isLoading={isNotificationsLoading}
@@ -289,26 +324,57 @@ export function SideNavigation() {
         }
       }}
     >
-      <Bell className={RAIL_ICON_CLASS} />
+      <span className="flex h-11 w-12 shrink-0 items-center justify-center">
+        <Bell className={RAIL_ICON_CLASS} />
+      </span>
+      <NavigationRailLabel
+        expanded={expanded}
+        label={t("notifications.bell.label")}
+      />
     </button>
   );
 
   return (
-    <div className="flex h-full w-full flex-col items-center bg-[#f0f0f0] p-2">
+    <div
+      data-sidebar-expanded={expanded}
+      className={`relative flex h-full flex-col bg-[#f0f0f0] p-2 transition-[width,box-shadow] duration-[180ms] ease-out motion-reduce:transition-none ${expanded ? "w-[240px] shadow-[8px_0_24px_rgba(0,0,0,0.16)]" : "w-16"}`}
+      onMouseEnter={() => {
+        hovered.current = true;
+        expand();
+      }}
+      onMouseLeave={() => {
+        hovered.current = false;
+        collapseLater();
+      }}
+      onFocusCapture={expand}
+      onBlurCapture={(event) => {
+        if (
+          !event.currentTarget.contains(event.relatedTarget) &&
+          !hovered.current
+        )
+          collapseLater();
+      }}
+    >
       <Link
         href="/"
         aria-label={t("sidebar.homePage")}
-        className="flex h-12 w-12 shrink-0 items-center justify-center rounded-[4px] p-2"
+        className="mb-4 flex h-12 w-full shrink-0 items-center overflow-hidden rounded-[4px]"
       >
-        <img
-          src={publicAsset("/modelengine-logo.png")}
-          alt="logo"
-          className="h-8 w-8 object-contain"
+        <span className="flex h-12 w-12 shrink-0 items-center justify-center">
+          <img
+            src={publicAsset("/modelengine-logo.png")}
+            alt="logo"
+            className="h-8 w-8 object-contain"
+          />
+        </span>
+        <NavigationRailLabel
+          expanded={expanded}
+          label={config.productName || "Nexent"}
         />
       </Link>
 
-      <nav className="min-h-0 w-12 flex-1 overflow-y-auto overflow-x-hidden">
-        <div className="flex flex-col items-center gap-[12px]">
+      <nav className="min-h-0 w-full flex-1 overflow-y-auto overflow-x-hidden">
+        <div className="flex flex-col gap-2">
           {accessibleMenuItems.map((route) => {
             const Icon = route.Icon;
             const isSelected = selectedKey === route.path;
@@ -318,20 +384,30 @@ export function SideNavigation() {
                 key={route.path}
                 type="button"
                 aria-current={isSelected ? "page" : undefined}
-                className={`${MENU_ITEM_CLASS} ${isSelected ? SELECTED_ITEM_CLASS : ""}`}
+                aria-label={t(route.labelKey)}
+                className={`${RAIL_ITEM_CLASS} ${isSelected ? SELECTED_ITEM_CLASS : ""}`}
                 onClick={() => handleRouteClick(route)}
               >
-                <Icon className={RAIL_ICON_CLASS} />
-                <span className={RAIL_LABEL_CLASS}>{t(route.labelKey)}</span>
+                <span className="flex h-11 w-12 shrink-0 items-center justify-center">
+                  <Icon className={RAIL_ICON_CLASS} />
+                </span>
+                <NavigationRailLabel
+                  expanded={expanded}
+                  label={t(route.labelKey)}
+                />
               </button>
             );
           })}
         </div>
       </nav>
 
-      <div className="flex w-12 shrink-0 flex-col items-center">
+      <div className="flex w-full shrink-0 flex-col gap-1">
         {notificationAction}
-        <AvatarDropdown rail />
+        <AvatarDropdown
+          rail
+          expanded={expanded}
+          onOpenChange={(open) => handlePopupChange("account", open)}
+        />
       </div>
     </div>
   );

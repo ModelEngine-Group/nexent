@@ -5776,5 +5776,10 @@
   "modelParams.token.maxOutputInfo": "Maximum output length per request",
   "modelParams.token.outputReserve": "Reserved output tokens",
   "modelParams.token.outputReserveHint": "Recommended: 2,000–10,000",
-  "modelParams.token.outputReserveInfo": "Output space reserved within the context window"
+  "modelParams.token.outputReserveInfo": "Output space reserved within the context window",
+  "accountMenu.open": "User settings",
+  "accountMenu.language": "Language settings",
+  "accountMenu.version": "Current version",
+  "accountMenu.github": "Go to GitHub",
+  "accountMenu.selectedLanguage": "Current language"
 }

@@ -5790,5 +5790,10 @@
   "modelParams.token.maxOutputInfo": "单次请求允许的最大输出长度",
   "modelParams.token.outputReserve": "输出预留Token数",
   "modelParams.token.outputReserveHint": "建议：2000-10000",
-  "modelParams.token.outputReserveInfo": "从上下文窗口中预留的输出空间"
+  "modelParams.token.outputReserveInfo": "从上下文窗口中预留的输出空间",
+  "accountMenu.open": "用户设置",
+  "accountMenu.language": "语言设置",
+  "accountMenu.version": "当前版本",
+  "accountMenu.github": "跳转到 GitHub",
+  "accountMenu.selectedLanguage": "当前语言"
 }

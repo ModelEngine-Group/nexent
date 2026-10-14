@@ -13,12 +13,15 @@ import {
 } from "@/lib/notificationNavigation";
 import { formatDateTime } from "@/lib/utils";
 import type { NotificationItem } from "@/types/notification";
+import { NavigationRailLabel } from "@/components/navigation/NavigationRailLabel";
 
 interface NotificationBellProps {
   unreadCount: number;
   items: NotificationItem[];
   isLoading: boolean;
   rail?: boolean;
+  expanded?: boolean;
+  onOpenChange?: (open: boolean) => void;
   onMarkRead?: (receiverId: number) => Promise<void>;
   onMarkAllRead?: () => Promise<void>;
   isMarkingAllRead?: boolean;
@@ -29,6 +32,8 @@ export function NotificationBell({
   items,
   isLoading,
   rail = false,
+  expanded = false,
+  onOpenChange,
   onMarkRead,
   onMarkAllRead,
   isMarkingAllRead = false,
@@ -38,6 +43,10 @@ export function NotificationBell({
   const params = useParams<{ locale: string }>();
   const locale = params.locale || "en";
   const [dropdownOpen, setDropdownOpen] = useState(false);
+  const changeOpen = (open: boolean) => {
+    setDropdownOpen(open);
+    onOpenChange?.(open);
+  };
 
   const tooltipTitle =
     unreadCount > 0
@@ -54,7 +63,7 @@ export function NotificationBell({
       return;
     }
 
-    setDropdownOpen(false);
+    changeOpen(false);
     if (onMarkRead) {
       await onMarkRead(item.receiver_id);
     }
@@ -144,27 +153,33 @@ export function NotificationBell({
     <Button
       type="text"
       aria-label={t("notifications.bell.label")}
-      className="!h-12 !w-12 !min-w-12 rounded-[4px] p-2 text-[#191919]"
+      className="!flex !h-11 !w-full !justify-start !gap-0 overflow-hidden rounded-lg !p-0 !pr-2 text-[#191919]"
     >
-      <Badge
-        count={unreadCount}
-        size="small"
-        color="#ff4d4f"
-        overflowCount={99}
-        offset={[0, 0]}
-        styles={{
-          root: {
-            display: "inline-flex",
-            alignItems: "center",
-            justifyContent: "center",
-            height: 20,
-            width: 20,
-            lineHeight: 1,
-          },
-        }}
-      >
-        <Bell className="h-5 w-5" />
-      </Badge>
+      <span className="flex h-11 w-12 shrink-0 items-center justify-center">
+        <Badge
+          count={unreadCount}
+          size="small"
+          color="#ff4d4f"
+          overflowCount={99}
+          offset={[0, 0]}
+          styles={{
+            root: {
+              display: "inline-flex",
+              alignItems: "center",
+              justifyContent: "center",
+              height: 20,
+              width: 20,
+              lineHeight: 1,
+            },
+          }}
+        >
+          <Bell className="h-5 w-5" />
+        </Badge>
+      </span>
+      <NavigationRailLabel
+        expanded={expanded}
+        label={t("notifications.bell.label")}
+      />
     </Button>
   ) : (
     <Badge
@@ -199,7 +214,7 @@ export function NotificationBell({
         trigger={["click"]}
         placement={rail ? "rightTop" : "bottomRight"}
         open={dropdownOpen}
-        onOpenChange={setDropdownOpen}
+        onOpenChange={changeOpen}
         getPopupContainer={() => document.body}
         popupRender={() => panel}
       >
