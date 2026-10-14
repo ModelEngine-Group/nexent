@@ -27,6 +27,10 @@ RUN --mount=type=cache,id=nexent-main-apt-cache-${TARGETARCH},target=/var/cache/
     apt-get update && \
     DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
         curl \
+        vim \
+        procps \
+        wget \
+        less \
         tzdata \
         postgresql-client \
         fontconfig \

@@ -1,5 +1,79 @@
 # Design — Kubernetes deployment environment injection
 
+## K8S deployment version selection — K8S-VERSION-DEFAULT
+
+This follow-up reuses the existing deployment configuration design path and
+the owning `F-173` capability. Inspection on 2026-10-14 covered the unavailable
+external `nexent-doc` directory, the repository-local deployment design,
+`deploy/common/version.sh`, the K8s options loader and actual existing UT/formal
+assertions. The user observed `app_version=v2.5.0` and requires the current
+repository `VERSION`, `v2.7.0`, to be displayed by default.
+
+The coherent configuration boundary reads the current version and command-line
+arguments, reloads deployment/storage preferences, then supplies the resolved
+version to deployment output and shared image selection. Application versions
+are not durable machine preferences: absent an explicit `--version` or
+`--app-version`, the repository `VERSION` is authoritative. Explicit arguments
+still select a requested release or `latest`. Saved storage mode, StorageClass,
+registry and component choices retain their existing behavior. Malformed or
+unrecognized saved version values must never be executed or used as a default.
+
+The defect is in `apply_loaded_deploy_option`: restoring nested `k8s.appVersion`
+or legacy `APP_VERSION` populates the variable before the current-version
+fallback. Ignore these historical version keys and stop writing `k8s.appVersion`
+in `persist_deploy_options`. Preserve the existing version resolver and explicit
+CLI parsing. Refresh help text that incorrectly identifies `const.py` as the
+default source. No cluster resource or local credential/preference file needs
+to be rewritten for this code correction.
+
+| AC | Observable requirement | Traditional UT | Formal case | Result |
+| --- | --- | --- | --- | --- |
+| VERSION-AC-001 | Nested YAML and legacy shell saved v2.5.0 cannot override current VERSION; other storage preferences still reload. | `test_saved_version_does_not_override_current_repository_version` | N/A: local option rule | PASS |
+| VERSION-AC-002 | Explicit --version and --app-version remain authoritative, including latest; missing/empty options use current VERSION. | `test_explicit_version_wins_over_saved_and_repository_versions`; `test_missing_or_empty_saved_options_use_current_repository_version` | N/A: local option rule | PASS |
+| VERSION-AC-003 | Persisted options retain deployment/storage choices and omit application versions. | `test_persisted_options_do_not_pin_an_application_version` | DEP-AUTO-7177AC18CCE799DD, unchanged adjacent regression | UT PASS; formal script PASS, historical acceptance completeness UNREVIEWED |
+
+| Feature / rule / AC | Traditional UT | D1 | D2 | D3 | D4 | D5 | Notes |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| F-173 / VERSION-AC-001,002 | Add version precedence and option-loader assertions | N/A | N/A | N/A | N/A | N/A | This unit defect does not change deployment resources or introduce another proof boundary. |
+| Retained saved configuration / VERSION-AC-003 | Add K8s persistence assertions; existing common-script version assertions inspected | N/A | N/A | N/A | N/A | DEP-AUTO-7177AC18CCE799DD | Reuse unchanged sandbox option/persistence regression; it does not establish version acceptance. |
+
+The existing shared-shell tests ignore top-level `appVersion`, but neither those
+assertions nor the sandbox formal script invokes the K8s nested/legacy version
+loader. New traditional UT supplies the missing regression without creating a
+duplicate formal Case. Keep UT evidence separate from the unchanged D5 result.
+Only current version-selection acceptance and its adjacent persistence
+regression are selected; the original live env-injection acceptance below is
+unaffected. Image rebuilds and Supabase expiry configuration are separate issues.
+
+Verification on 2026-10-14:
+
+- Before the product fix, `backend/.venv/bin/python -m pytest
+  test/backend/deploy/test_k8s_version_selection.py -q` reported **3 failed,
+  6 passed**. The nested YAML and legacy shell regressions both returned
+  `v2.5.0` instead of the current `v2.7.0`; serialization retained `appVersion`.
+- After the fix, the deployment UT selection reported **33 passed**, including
+  all nine new version variants and 24 existing env-injection tests. The first
+  broader attempt encountered 13 environment failures: the Windows-mounted
+  temporary directory could not enforce mode 0600 and Snap's launcher could not
+  start Helm. The successful run used the same configured backend interpreter,
+  an exact temporary Linux copy of tracked deployment/test sources plus the new
+  test, and `/snap/helm/current/helm` directly. Local secrets were excluded.
+- A read-only invocation of the actual `apply_deployment_common_config` with the
+  existing saved `k8s.appVersion=v2.5.0` resolved **APP_VERSION=v2.7.0**.
+- Strict design validation with `--generate --require-ut-change
+  K8S-VERSION-DEFAULT` and implementation validation with
+  `--require-ut-change K8S-VERSION-DEFAULT` both passed. Generated views are
+  unchanged, and Bash syntax / Git whitespace checks passed.
+- The unchanged formal `DEP-AUTO-7177AC18CCE799DD` script passed through
+  `test-e2e/infra/tools/run_cases.py` using a dedicated, case-specific temporary
+  Python runtime. Evidence is under
+  `/tmp/nexent-k8s-version-tests/runs/repository-local/20261014T074307536399Z-DEP-AUTO-7177AC18CCE799DD`.
+  This is adjacent sandbox/configuration regression execution; its historical
+  acceptance completeness remains UNREVIEWED and it does not prove the new
+  version rule. The traditional UT above proves that rule.
+
+No existing cluster, local `.env`, saved `deploy.options`, SQL or CI was changed.
+
 ## Context and functional boundary
 
 Change: `K8S-ENV-INJECTION`; owner: `F-173`, rule `F-173-RULE-02`.

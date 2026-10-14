@@ -471,7 +471,7 @@ render_k8s_runtime_config_values() {
   } > "$output_file"
 }
 
-# Get APP_VERSION from backend/consts/const.py
+# Read the current repository VERSION through the shared resolver.
 get_app_version() {
   if declare -F deployment_read_version >/dev/null 2>&1; then
     deployment_read_version ""
@@ -496,7 +496,6 @@ persist_deploy_options() {
   deployment_persist_local_config "$DEPLOY_OPTIONS_FILE"
   {
     printf 'k8s:\n'
-    printf '  appVersion: %s\n' "$(yaml_quote "$APP_VERSION")"
     printf '  isMainland: %s\n' "$(yaml_quote "$IS_MAINLAND_SAVED")"
     printf '  deploymentVersion: %s\n' "$(yaml_quote "$VERSION_CHOICE_SAVED")"
     printf '  persistenceMode: %s\n' "$(yaml_quote "$PERSISTENCE_MODE")"
@@ -524,7 +523,8 @@ apply_loaded_deploy_option() {
   local value="$2"
   case "$key" in
     APP_VERSION|appVersion)
-      [ -n "${K8S_APP_VERSION_EXPLICIT:-}" ] || APP_VERSION="$value"
+      # Saved release versions must not pin subsequent deployments.
+      return 0
       ;;
     IS_MAINLAND|isMainland)
       [ -n "${K8S_IS_MAINLAND_EXPLICIT:-}" ] || IS_MAINLAND="$value"
@@ -629,7 +629,7 @@ update_values_yaml() {
   fi
 
   if [ -z "$APP_VERSION" ]; then
-    echo "Failed to determine APP_VERSION from const.py, using 'latest'"
+    echo "Failed to determine APP_VERSION from VERSION, using 'latest'"
     APP_VERSION="latest"
   fi
   echo "Using APP_VERSION: $APP_VERSION"
@@ -1515,7 +1515,7 @@ print_usage() {
         echo "  --image-source SOURCE      general、mainland 或 local-latest"
         echo "  --image-registry-prefix P  镜像仓库前缀，例如 registry.example.com/nexent"
         echo "  --is-mainland Y|N          兼容旧参数，映射为 mainland/general 镜像源"
-        echo "  --version VERSION          指定应用版本（未设置时自动从 const.py 检测）"
+        echo "  --version VERSION          指定应用版本（未设置时读取当前仓库 VERSION）"
         echo "  --defaults                 复用保存配置或内置默认值并跳过交互界面"
         echo "  --deployment-version VER   兼容旧部署版本：speed 或 full"
         echo "  --persistence-mode MODE    local、dynamic 或 existing"
@@ -1549,7 +1549,7 @@ print_usage() {
     echo "  --image-source SOURCE      general, mainland, or local-latest"
     echo "  --image-registry-prefix P  Image registry prefix, e.g. registry.example.com/nexent"
     echo "  --is-mainland Y|N          Legacy alias for image source mainland/general"
-    echo "  --version VERSION          Specify app version (auto-detected from const.py if not set)"
+    echo "  --version VERSION          Specify app version (defaults to the current repository VERSION)"
     echo "  --defaults                 Use saved config or built-in defaults and skip TUI"
     echo "  --deployment-version VER   Legacy deployment version: speed or full"
     echo "  --persistence-mode MODE    local, dynamic, or existing"
