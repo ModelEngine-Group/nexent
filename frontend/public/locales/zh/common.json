@@ -6024,5 +6024,7 @@
   "modelConfig.batchEdit.apiKey": "API Key",
   "modelConfig.batchEdit.baseUrl": "Base URL",
   "common.select": "选择",
-  "common.selected": "已选择"
+  "common.selected": "已选择",
+  "cfg.error.loadList": "加载模型列表出错",
+  "cfg.error.loadListFailed": "加载模型列表失败，请刷新后重试"
 }

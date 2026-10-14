@@ -6024,5 +6024,7 @@
   "modelConfig.batchEdit.apiKey": "API Key",
   "modelConfig.batchEdit.baseUrl": "Base URL",
   "common.select": "Select",
-  "common.selected": "Selected"
+  "common.selected": "Selected",
+  "cfg.error.loadList": "Error loading model list",
+  "cfg.error.loadListFailed": "Failed to load model list. Please refresh and try again."
 }
