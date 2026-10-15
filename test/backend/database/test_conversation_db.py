@@ -1255,8 +1255,8 @@ def test_persist_assistant_run_batch_uses_one_transaction(monkeypatch):
             "source_title": "Result",
             "source_location": "https://example.com",
             "source_content": "content",
-            "source_metadata": {"count": 0, "enabled": False, "nested": {"tags": [0, False]}},
-            "source_reference": {"chunk_id": "chunk-first", "retrieval_source": "vector"},
+            "aidp_metadata": {"count": 0, "enabled": False, "nested": {"tags": [0, False]}},
+            "aidp_source_reference": {"chunk_id": "chunk-first", "retrieval_source": "vector"},
             "cite_index": 1,
             "search_type": "web_search",
             "tool_sign": "web",
@@ -1274,8 +1274,8 @@ def test_persist_assistant_run_batch_uses_one_transaction(monkeypatch):
     ctx.__exit__.assert_called_once()
     assert session.execute.call_count == 5
     source_row = session.execute.call_args_list[2].args[1][0]
-    assert source_row["source_metadata"] == {"count": 0, "enabled": False, "nested": {"tags": [0, False]}}
-    assert source_row["source_reference"] == {"chunk_id": "chunk-first", "retrieval_source": "vector"}
+    assert source_row["aidp_metadata"] == {"count": 0, "enabled": False, "nested": {"tags": [0, False]}}
+    assert source_row["aidp_source_reference"] == {"chunk_id": "chunk-first", "retrieval_source": "vector"}
     assert source_row["unit_id"] == 101
     assert parent.message_content == "done"
     assert parent.status == "completed"
@@ -2791,16 +2791,16 @@ def test_create_source_search_with_unit_id(monkeypatch, fresh_insert_mock):
             "search_type": "search",
             "tool_sign": "web_search",
             "unit_id": 42,
-            "source_metadata": {"count": 0, "enabled": False, "list": ["a", "b"]},
-            "source_reference": {"chunk_id": "chunk-42"},
+            "aidp_metadata": {"count": 0, "enabled": False, "list": ["a", "b"]},
+            "aidp_source_reference": {"chunk_id": "chunk-42"},
         },
         user_id="actor",
     )
 
     assert search_id == 88
     assert fresh_insert_mock["unit_id"] == 42
-    assert fresh_insert_mock["source_metadata"] == {"count": 0, "enabled": False, "list": ["a", "b"]}
-    assert fresh_insert_mock["source_reference"] == {"chunk_id": "chunk-42"}
+    assert fresh_insert_mock["aidp_metadata"] == {"count": 0, "enabled": False, "list": ["a", "b"]}
+    assert fresh_insert_mock["aidp_source_reference"] == {"chunk_id": "chunk-42"}
 
 
 def test_create_source_search_with_published_date(monkeypatch, fresh_insert_mock):

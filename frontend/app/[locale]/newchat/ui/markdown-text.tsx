@@ -35,6 +35,10 @@ import {
   isLocalStorageObjectUrl,
 } from "@/services/storageService";
 import { useSourcesPanel } from "./sources-panel-context";
+import {
+  buildCitationDisplayIndexMap,
+  withCitationDisplayIndices,
+} from "@/lib/citationDisplay";
 import { getCitationKey, getCitationLabel, type PanelSourceItem } from "./sources-panel";
 import {
   searchSourcesRegistry,
@@ -138,25 +142,6 @@ function findCiteSource(sources: SearchSource[], citekey: string): SearchSource 
   return /^\d+$/.test(normalizedKey)
     ? sources.find((source) => source.citeIndex === getCiteIndex(normalizedKey))
     : undefined;
-}
-
-function buildCitationDisplayIndexMap(
-  content: readonly MessageSourcePart[]
-): Map<string, number> {
-  const displayIndexMap = new Map<string, number>();
-
-  for (const part of content) {
-    if (part.type !== "text" || typeof part.text !== "string") continue;
-
-    for (const match of part.text.matchAll(/\[\[([^\]]+)\]\]/g)) {
-      const citekey = match[1];
-      if (!displayIndexMap.has(citekey)) {
-        displayIndexMap.set(citekey, displayIndexMap.size + 1);
-      }
-    }
-  }
-
-  return displayIndexMap;
 }
 
 function toPanelSource(source: SearchSource): PanelSourceItem {
@@ -287,15 +272,24 @@ const CiteComponent: FC<
 
   const messageSources = resolveCiteSources(messageId, content);
   const source = findCiteSource(messageSources, citekey);
-  const panelSource = source ? toPanelSource(source) : undefined;
   const citeIndex = getCiteIndex(citekey);
   const sourceIndex = source?.citeIndex ?? citeIndex ?? 0;
   const citationKey = source
     ? getCitationKey({ citeIndex: source.citeIndex, toolSign: source.toolSign })
     : citekey.trim().toLowerCase();
-  const citationDisplayIndexMap = buildCitationDisplayIndexMap(content);
-  const displayIndex = citationDisplayIndexMap.get(citekey) ?? sourceIndex;
-  const panelItems = messageSources.map(toPanelSource);
+  const citationDisplayIndexMap = buildCitationDisplayIndexMap(
+    content,
+    messageSources
+  );
+  const displayIndex =
+    citationDisplayIndexMap.get(citekey.trim().toLowerCase()) ?? sourceIndex;
+  const panelItems = withCitationDisplayIndices(
+    messageSources.map(toPanelSource),
+    citationDisplayIndexMap
+  );
+  const panelSource = source
+    ? panelItems.find((item) => getCitationKey(item) === citationKey)
+    : undefined;
   const sources = panelItems.filter((item) => !item.isImage);
   const images = panelItems.filter((item) => item.isImage);
 
@@ -304,7 +298,7 @@ const CiteComponent: FC<
       citekey={citekey}
       displayIndex={displayIndex}
       sourceIndex={sourceIndex}
-      label={source ? getCitationLabel(toPanelSource(source), {
+      label={panelSource ? getCitationLabel(panelSource, {
         knowledgeBase: t("chat.sources.knowledgeBase"),
         web: t("chat.sources.web"),
         source: t("chat.sources.source"),
@@ -360,8 +354,11 @@ const MarkdownTextImpl = () => {
     );
   });
   const citationDisplayIndexMap = useMemo(
-    () => buildCitationDisplayIndexMap(content),
-    [content]
+    () => buildCitationDisplayIndexMap(
+      content,
+      resolveCiteSources(messageId, content)
+    ),
+    [content, messageId]
   );
   const citationIndexMapAttribute = useMemo(
     () => JSON.stringify(Object.fromEntries(citationDisplayIndexMap)),

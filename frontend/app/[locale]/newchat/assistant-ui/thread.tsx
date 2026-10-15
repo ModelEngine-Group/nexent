@@ -3,6 +3,10 @@
 "use client";
 
 import type { SourceAttributes } from "@/types/source";
+import {
+  buildCitationDisplayIndexMap,
+  withCitationDisplayIndices,
+} from "@/lib/citationDisplay";
 
 import {
   useCallback,
@@ -999,6 +1003,7 @@ const ThreadView: FC<ThreadViewProps> = ({
         open={selection !== null}
         selectedCitationKey={selection?.selectedCitationKey}
         citationContext={selection?.citationContext}
+        selectionToken={selection ?? undefined}
         onClose={onPanelClose}
       />
     </ThreadPrimitive.Root>
@@ -1052,6 +1057,7 @@ export const ReadOnlyConversation: FC<{
           open={selection !== null}
           selectedCitationKey={selection?.selectedCitationKey}
           citationContext={selection?.citationContext}
+          selectionToken={selection ?? undefined}
           onClose={close}
         />
       </ThreadPrimitive.Root>
@@ -2333,7 +2339,11 @@ const SourceGroupButton: FC<SourceGroupButtonProps> = ({ indices }) => {
           retrievalHighlightTerms: source.retrievalHighlightTerms,
         }))
       : groupedSources;
-    for (const item of displaySources) {
+    const numberedSources = withCitationDisplayIndices(
+      displaySources,
+      buildCitationDisplayIndexMap(content, displaySources)
+    );
+    for (const item of numberedSources) {
       if (item.isImage) {
         imgs.push(item);
       } else {

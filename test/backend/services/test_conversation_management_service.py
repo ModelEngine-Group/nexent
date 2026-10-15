@@ -1053,8 +1053,8 @@ class TestConversationManagementService(unittest.TestCase):
                 "cite_index": 1,
                 "search_type": "web_search",
                 "tool_sign": "web_search",
-                "source_metadata": {"count": 0, "enabled": False, "nested": {"values": [0, False]}},
-                "source_reference": {"chunk_id": "chunk-source", "retrieval_source": "vector"},
+                "aidp_metadata": {"count": 0, "enabled": False, "nested": {"values": [0, False]}},
+                "aidp_source_reference": {"chunk_id": "chunk-source", "retrieval_source": "vector"},
             }
         ]
         mock_get_searches.return_value = mock_searches
@@ -1737,14 +1737,14 @@ class TestGetConversationHistoryServiceEdgeCases(unittest.TestCase):
                  "score_overall": 0.9, "score_accuracy": 0.8, "score_semantic": 0.7,
                  "retrieval_highlight_terms": ["Content"],
                  "cite_index": 1, "search_type": "aidp_search", "tool_sign": "j",
-                 "source_metadata": {"section": 0, "enabled": False, "tags": [0, False]},
-                 "source_reference": {"chunk_id": "chunk-first"}},
+                 "aidp_metadata": {"section": 0, "enabled": False, "tags": [0, False]},
+                 "aidp_source_reference": {"chunk_id": "chunk-first"}},
                 {"unit_id": 10, "message_id": 2, "source_title": "Doc 1", "source_content": "Second content",
                  "source_type": "file", "source_location": "", "published_date": None,
                  "score_overall": 0.8, "score_accuracy": None, "score_semantic": None,
                  "cite_index": 2, "search_type": "aidp_search", "tool_sign": "j",
-                 "source_metadata": {"section": 1, "standards": {"code": {"level": "E"}}},
-                 "source_reference": {"chunk_id": "chunk-second"}},
+                 "aidp_metadata": {"section": 1, "standards": {"code": {"level": "E"}}},
+                 "aidp_source_reference": {"chunk_id": "chunk-second"}},
             ],
             "image_records": []
         }

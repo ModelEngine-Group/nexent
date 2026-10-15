@@ -5,8 +5,8 @@ change:
   change_id: CHAT-AIDP-SOURCES-20261014
   change_type: requirement
   requirement_id: CHAT-AIDP-SOURCES-20261014
-  title: Persist per-hit citation metadata and prevent AIDP local download fallback
-  description: Show two-row raw-key source attributes with hover details, restore metadata and provider/reference snapshots in history, and require explicit original-file identity for AIDP downloads.
+  title: Persist per-hit citation metadata and hide unsupported AIDP citation downloads
+  description: Show two-row raw-key source attributes with hover details, restore metadata and provider/reference snapshots in history, hide unsupported AIDP citation downloads, and preserve local attachment downloads.
   affected_features:
     existing: [F-065]
     added: []
@@ -32,4 +32,4 @@ change:
       - test/backend/services/test_agent_run_final_answers.py
       - frontend/tests/workbench/StreamCancellation.test.ts
       - frontend/tests/workbench/StorageImageRouting.test.ts
-  notes: Real AIDP original UUID and byte verification remain unverified; the documented FusionSearch contract supplies no original download locator. Preserve existing blocked higher-layer Cases, pipeline/history logic, and local attachment behavior. Syncthing documents are read-only; the approved SPEC and local verification record are maintained outside Git.
+  notes: The documented FusionSearch contract supplies no original-file identity, so citation downloads remain unavailable until the backend exposes and validates that contract; preserve local attachment behavior. Preserve existing blocked higher-layer Cases and pipeline/history logic. Syncthing documents are read-only; the approved SPEC and local verification record are maintained outside Git.

@@ -23,5 +23,7 @@ acceptance_bindings:
     - per-hit attributes and safe citation downloads > keeps same-name hit snapshots distinct from citation click through the real panel
     - per-hit attributes and safe citation downloads > omits empty attributes and supports focus access to a complete raw snapshot
   AC-05:
-    - per-hit attributes and safe citation downloads > never enables AIDP downloads from names, business metadata, chunk IDs or image URLs
-    - per-hit attributes and safe citation downloads > uses the existing AIDP proxy for explicit locators and preserves local downloads
+    - per-hit attributes and safe citation downloads > never enables unsupported AIDP citation downloads
+    - per-hit attributes and safe citation downloads > preserves local downloads while AIDP citation downloads remain unsupported
+  AC-06:
+    - SourcesPanel selection and passthrough > keeps citation, tooltip and panel numbers aligned across source and image tabs

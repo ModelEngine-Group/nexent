@@ -831,9 +831,9 @@ def get_conversation_history_service(conversation_id: int, user_id: str) -> List
                            "cite_index": record["cite_index"], "search_type": record["search_type"],
                            "tool_sign": record["tool_sign"], "score_details": {}}
 
-            search_item["score_details"].update(record.get("source_reference") or {})
-            if record.get("source_metadata") is not None:
-                search_item["score_details"]["metadata"] = record["source_metadata"]
+            search_item["score_details"].update(record.get("aidp_source_reference") or {})
+            if record.get("aidp_metadata") is not None:
+                search_item["score_details"]["metadata"] = record["aidp_metadata"]
 
             if record["score_accuracy"] is not None:
                 search_item["score_details"]["accuracy"] = record["score_accuracy"]
@@ -1104,9 +1104,9 @@ def get_sources_service(conversation_id: Optional[int], message_id: Optional[int
                 }
 
                 search_item["score_details"] = {}
-                search_item["score_details"].update(record.get("source_reference") or {})
-                if record.get("source_metadata") is not None:
-                    search_item["score_details"]["metadata"] = record["source_metadata"]
+                search_item["score_details"].update(record.get("aidp_source_reference") or {})
+                if record.get("aidp_metadata") is not None:
+                    search_item["score_details"]["metadata"] = record["aidp_metadata"]
                 if record["score_accuracy"] is not None:
                     search_item["score_details"]["accuracy"] = record["score_accuracy"]
                 if record["score_semantic"] is not None:

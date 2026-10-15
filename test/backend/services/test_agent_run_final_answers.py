@@ -101,9 +101,9 @@ async def test_search_hit_snapshots_survive_stream_buffering_without_filename_gr
     assert json.loads(published[0]["content"]) == hits
     records = batch["search_records"]
     assert len(records) == 2
-    assert [record["source_metadata"] for record in records] == metadata
-    assert [record["source_reference"]["chunk_id"] for record in records] == ["chunk-0", "chunk-1"]
-    assert all("metadata" not in record["source_reference"] for record in records)
+    assert [record["aidp_metadata"] for record in records] == metadata
+    assert [record["aidp_source_reference"]["chunk_id"] for record in records] == ["chunk-0", "chunk-1"]
+    assert all("metadata" not in record["aidp_source_reference"] for record in records)
     unit = batch["message_units"][0]
     assert unit["tool_call_id"] == "call-search" and unit["invocation_id"] == "child"
     assert all(record["unit_index"] == unit["unit_index"] for record in records)

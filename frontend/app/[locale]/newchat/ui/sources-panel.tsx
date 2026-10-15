@@ -21,6 +21,7 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+import { getCitationKey } from "@/lib/citationDisplay";
 import {
   CiteIndexBadge,
   HighlightedChunkText,
@@ -39,10 +40,11 @@ import {
 } from "@/services/storageService";
 import { AuthenticatedImage } from "./authenticated-image";
 import type { SourceAttributes } from "@/types/source";
-import { getAidpDownloadLocator, getSourceLabel, getSourceProvider, isAidpSource } from "@/lib/source";
+import { getSourceLabel, getSourceProvider, isAidpSource } from "@/lib/source";
 import { SourceMetadata } from "@/components/common/sourceMetadata";
-import { downloadAidpCitation } from "@/ext_components/aidp/shared/services/aidpCitationService";
 import log from "@/lib/logger";
+
+export { getCitationKey } from "@/lib/citationDisplay";
 
 /**
  * Loose typing for the source items handled by the side panel. Matches the
@@ -60,22 +62,17 @@ export interface PanelSourceItem extends SourceAttributes {
   objectName?: string;
   isImage?: boolean;
   citeIndex?: number;
+  /** Message-wide number shared with inline citations, including image hits. */
+  displayIndex?: number;
   toolSign?: string;
   retrievalHighlightTerms?: string[];
 }
 
-export function getCitationKey(item: Pick<PanelSourceItem, "citeIndex" | "toolSign">): string | undefined {
-  if (!Number.isFinite(item.citeIndex)) return undefined;
-  const index = item.citeIndex as number;
-  const toolSign = item.toolSign?.trim().toLowerCase();
-  return toolSign ? `${toolSign}${index}` : String(index);
-}
-
 export function getCitationLabel(
-  item: Pick<PanelSourceItem, "citeIndex" | "toolSign" | "sourceType">,
+  item: Pick<PanelSourceItem, "citeIndex" | "displayIndex" | "toolSign" | "sourceType">,
   labels: { knowledgeBase: string; web: string; source: string },
 ): string {
-  const index = item.citeIndex ?? 0;
+  const index = item.displayIndex ?? item.citeIndex ?? 0;
   if (item.toolSign === "a" || item.sourceType === "document") {
     return `${labels.knowledgeBase} ${index}`;
   }
@@ -94,6 +91,8 @@ export interface SourcesPanelProps {
   open: boolean;
   selectedCitationKey?: string;
   citationContext?: string;
+  /** Changes for every citation click, including repeated clicks on one marker. */
+  selectionToken?: object;
   className?: string;
   onClose: () => void;
 }
@@ -111,6 +110,7 @@ export const SourcesPanel: FC<SourcesPanelProps> = ({
   open,
   selectedCitationKey,
   citationContext,
+  selectionToken,
   className,
   onClose,
 }) => {
@@ -132,7 +132,13 @@ export const SourcesPanel: FC<SourcesPanelProps> = ({
     } else if (images.length > 0) {
       setActiveTab("images");
     }
-  }, [open, selectedCitationKey, sources.length, images.length]);
+  }, [
+    open,
+    selectedCitationKey,
+    sources.length,
+    images.length,
+    selectionToken,
+  ]);
 
   if (!open) return null;
 
@@ -197,8 +203,12 @@ export const SourcesPanel: FC<SourcesPanelProps> = ({
               <SourceListItem
                 key={`${item.url ?? item.title ?? "source"}-${index}`}
                 item={item}
-                selected={selectedCitationKey !== undefined && getCitationKey(item) === selectedCitationKey}
+                selected={
+                  selectedCitationKey !== undefined &&
+                  getCitationKey(item) === selectedCitationKey
+                }
                 citationContext={citationContext}
+                selectionToken={selectionToken}
               />
             ))}
           </ul>
@@ -206,7 +216,14 @@ export const SourcesPanel: FC<SourcesPanelProps> = ({
           <ul className="grid grid-cols-2 gap-2">
             {currentItems.map((item, index) => (
               <li key={`${item.url ?? "image"}-${index}`}>
-                <ImageListItem item={item} />
+                <ImageListItem
+                  item={item}
+                  selected={
+                    selectedCitationKey !== undefined &&
+                    getCitationKey(item) === selectedCitationKey
+                  }
+                  selectionToken={selectionToken}
+                />
               </li>
             ))}
           </ul>
@@ -339,7 +356,7 @@ const SourceCardBody: FC<{
     <div className="flex items-start gap-1.5">
       {title}
       <CiteIndexBadge
-        index={item.citeIndex}
+        index={item.displayIndex ?? item.citeIndex}
         className="inline-flex shrink-0 items-center justify-center"
       />
     </div>
@@ -362,16 +379,12 @@ const SourceListItem: FC<{
   item: PanelSourceItem;
   selected: boolean;
   citationContext?: string;
-}> = ({
-  item,
-  selected,
-  citationContext,
-}) => {
+  selectionToken?: object;
+}> = ({ item, selected, citationContext, selectionToken }) => {
   const { t } = useTranslation();
   const itemRef = useRef<HTMLLIElement>(null);
   const [isDownloading, setIsDownloading] = useState(false);
   const [downloadError, setDownloadError] = useState<string | null>(null);
-  const aidpLocator = getAidpDownloadLocator(item);
   const isAidp = isAidpSource(item);
   const sourceLabel = getSourceLabel(item, {
     knowledgeBase: t("chat.sources.knowledgeBase"),
@@ -384,19 +397,15 @@ const SourceListItem: FC<{
     if (selected) {
       itemRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
     }
-  }, [selected]);
+  }, [selected, selectionToken]);
 
   const handleDocumentDownload = async () => {
-    if (isDownloading || (isAidp && !aidpLocator)) return;
+    if (isDownloading) return;
 
     setIsDownloading(true);
     setDownloadError(null);
     try {
       const filename = item.filename || item.title || "download";
-      if (isAidp && aidpLocator) {
-        await downloadAidpCitation(aidpLocator, filename);
-        return;
-      }
       if (item.downloadUrl) {
         const link = document.createElement("a");
         link.href = item.downloadUrl;
@@ -490,21 +499,24 @@ const SourceListItem: FC<{
               />
             </div>
           </button>
-          {(!isAidp || aidpLocator) && <button
-            type="button"
-            onClick={() => void handleDocumentDownload()}
-            disabled={isDownloading}
-            className="shrink-0 rounded p-1.5 text-muted-foreground hover:bg-accent hover:text-foreground disabled:cursor-wait disabled:opacity-70"
-            aria-label={t("chat.sources.download", {
-              name: item.filename || item.title || t("chat.sources.document"),
-            })}
-          >
-            {isDownloading ? (
-              <LoaderCircleIcon className="size-4 animate-spin" />
-            ) : (
-              <DownloadIcon className="size-4" />
-            )}
-          </button>}
+          {!isAidp && (
+            <button
+              type="button"
+              onClick={() => void handleDocumentDownload()}
+              disabled={isDownloading}
+              className="shrink-0 rounded p-1.5 text-muted-foreground hover:bg-accent hover:text-foreground disabled:cursor-wait disabled:opacity-70"
+              aria-label={t("chat.sources.download", {
+                name:
+                  item.filename || item.title || t("chat.sources.document"),
+              })}
+            >
+              {isDownloading ? (
+                <LoaderCircleIcon className="size-4 animate-spin" />
+              ) : (
+                <DownloadIcon className="size-4" />
+              )}
+            </button>
+          )}
         </div>
         <SourceMetadata metadata={item.sourceMetadata} />
         <SourceFooter item={item} sourceLabel={sourceLabel} />
@@ -572,9 +584,14 @@ const SourceListItem: FC<{
   );
 };
 
-const ImageListItem: FC<{ item: PanelSourceItem }> = ({ item }) => {
+const ImageListItem: FC<{
+  item: PanelSourceItem;
+  selected: boolean;
+  selectionToken?: object;
+}> = ({ item, selected, selectionToken }) => {
   const { t } = useTranslation();
   const imageUrl = item.url || "";
+  const itemRef = useRef<HTMLDivElement>(null);
   const [resolvedUrl, setResolvedUrl] = useState<string | null>(null);
   const [loadError, setLoadError] = useState(false);
   const usesBackendStream = isLocalStorageObjectUrl(imageUrl);
@@ -607,24 +624,56 @@ const ImageListItem: FC<{ item: PanelSourceItem }> = ({ item }) => {
     };
   }, [imageUrl, usesBackendStream]);
 
+  useEffect(() => {
+    if (selected) {
+      itemRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+    }
+  }, [selected, selectionToken]);
+
   if (!imageUrl) return null;
+  const cardClassName = cn(
+    "aui-global-search-image relative overflow-hidden rounded-md border bg-muted/50",
+    selected && "border-[#1677ff] ring-1 ring-[#1677ff]"
+  );
   if (usesBackendStream && !resolvedUrl && !loadError) {
     return (
-      <div className="flex aspect-square items-center justify-center rounded-md border bg-muted/50">
+      <div
+        ref={itemRef}
+        className={cn(
+          cardClassName,
+          "flex aspect-square items-center justify-center"
+        )}
+        data-citation-selected={selected ? "true" : undefined}
+      >
         <LoaderCircleIcon className="size-5 animate-spin text-muted-foreground" />
       </div>
     );
   }
   if (loadError) {
     return (
-      <div className="flex aspect-square items-center justify-center rounded-md border bg-muted/50 px-2 text-center text-xs text-muted-foreground">
+      <div
+        ref={itemRef}
+        className={cn(
+          cardClassName,
+          "flex aspect-square items-center justify-center px-2 text-center text-xs text-muted-foreground"
+        )}
+        data-citation-selected={selected ? "true" : undefined}
+      >
         {item.title || imageUrl}
       </div>
     );
   }
 
   return (
-    <div className="aui-global-search-image overflow-hidden rounded-md border bg-muted/50">
+    <div
+      ref={itemRef}
+      className={cardClassName}
+      data-citation-selected={selected ? "true" : undefined}
+    >
+      <CiteIndexBadge
+        index={item.displayIndex ?? item.citeIndex}
+        className="absolute top-2 right-2 z-10"
+      />
       <AuthenticatedImage
         src={resolvedUrl || imageUrl}
         alt={item.title || imageUrl}
@@ -634,14 +683,21 @@ const ImageListItem: FC<{ item: PanelSourceItem }> = ({ item }) => {
         className="aspect-square w-full object-contain"
       />
       <div className="px-2 pb-2">
-        {(item.filename || (item.title && item.title !== item.url)) && <p className="mt-1 truncate text-xs text-muted-foreground">{item.filename || item.title}</p>}
+        {(item.filename || (item.title && item.title !== item.url)) && (
+          <p className="mt-1 truncate text-xs text-muted-foreground">
+            {item.filename || item.title}
+          </p>
+        )}
         <SourceMetadata metadata={item.sourceMetadata} />
-        <SourceFooter item={item} sourceLabel={getSourceLabel(item, {
-          knowledgeBase: t("chat.sources.knowledgeBase"),
-          web: t("chat.sources.web"),
-          document: t("chat.sources.document"),
-          source: t("chat.sources.source"),
-        })} />
+        <SourceFooter
+          item={item}
+          sourceLabel={getSourceLabel(item, {
+            knowledgeBase: t("chat.sources.knowledgeBase"),
+            web: t("chat.sources.web"),
+            document: t("chat.sources.document"),
+            source: t("chat.sources.source"),
+          })}
+        />
       </div>
     </div>
   );

@@ -14,7 +14,9 @@ feature:
   - rule_id: F-065-RULE-02
     description: 引用来源按每条命中保留业务 metadata、技术引用和检索提供方；实时与历史一致，原始字段两行标签及悬浮详情可访问，业务 source 不覆盖提供方。
   - rule_id: F-065-RULE-03
-    description: AIDP 原文下载必须具备明确有效的原文件定位并复用已有代理；缺定位不提供下载动作、不按切片或文件名走本地存储，本地附件功能保留。
+    description: 当前 AIDP 检索来源不支持原文下载，来源面板不显示下载动作；本地附件下载功能保留。
+  - rule_id: F-065-RULE-04
+    description: 正文角标、引用悬浮提示、侧栏来源与图片卡片使用同一回答首次引用顺序的显示编号，图片参与统一编号；未引用命中随后编号，原始引用键不变，角标和来源汇总入口保持一致。
   required_test_stages:
   - D1
   source:

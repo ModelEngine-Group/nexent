@@ -15,7 +15,6 @@ const h = vi.hoisted(() => ({
   open: vi.fn(),
   citeMarkerProps: [] as any[],
   storageDownload: vi.fn(),
-  aidpDownload: vi.fn(),
 }));
 
 vi.mock('react-i18next', () => ({
@@ -41,10 +40,6 @@ vi.mock('@/services/storageService', () => ({
   fetchImageBlob: () => Promise.reject(new Error('not-implemented')),
   getLocalFilePreviewUrl: () => undefined,
   storageService: { downloadFileWithAuth: h.storageDownload },
-}));
-
-vi.mock('@/ext_components/aidp/shared/services/aidpKnowledgeService', () => ({
-  default: { downloadDoc: h.aidpDownload },
 }));
 
 vi.mock('@assistant-ui/react-markdown', () => ({
@@ -99,7 +94,9 @@ vi.mock('@/components/ui/button', () => ({
 }));
 
 vi.mock('@/components/common/highlightedSourceText', () => ({
-  CiteIndexBadge: () => null,
+  CiteIndexBadge: ({ index }: { index?: number }) => Number.isFinite(index)
+    ? <span data-testid='citation-index-badge'>{index}</span>
+    : null,
   HighlightedChunkText: () => null,
 }));
 
@@ -120,7 +117,6 @@ beforeEach(() => {
   h.open.mockClear();
   h.citeMarkerProps.length = 0;
   h.storageDownload.mockReset().mockResolvedValue(undefined);
-  h.aidpDownload.mockReset().mockResolvedValue({ blob: async () => new Blob(['mock sample']) });
 });
 
 describe('getCitationKey combined citation key generation', () => {
@@ -278,6 +274,41 @@ describe('citation click behaviour', () => {
 });
 
 describe('SourcesPanel selection and passthrough', () => {
+  it('keeps citation, tooltip and panel numbers aligned across source and image tabs', async () => {
+    h.aui.message.content = [
+      { type: 'text', text: 'Text [[a1]], figures [[a3]][[a4]], guideline [[a2]]' },
+      { type: 'source', sourceType: 'document', citeIndex: 1, toolSign: 'a', title: 'Text' },
+      { type: 'source', sourceType: 'document', citeIndex: 2, toolSign: 'a', title: 'Guideline' },
+      { type: 'source', citeIndex: 3, toolSign: 'a', title: 'First figure', url: 'https://example.com/first.png', isImage: true },
+      { type: 'source', citeIndex: 4, toolSign: 'a', title: 'Second figure', url: 'https://example.com/second.png', isImage: true },
+    ];
+    const marker = render(<Cite citekey='a2' />);
+    const markerProps = h.citeMarkerProps.at(-1);
+    expect(markerProps.displayIndex).toBe(4);
+    expect(markerProps.sourceIndex).toBe(2);
+    expect(markerProps.label).toBe('chat.sources.knowledgeBase 4');
+    markerProps.onClick(null);
+    const payload = h.open.mock.calls.at(-1)![0];
+    expect(payload.selectedCitationKey).toBe('a2');
+    expect(payload.sources.map((item: any) => item.citeIndex)).toEqual([1, 2]);
+    const panel = render(<SourcesPanel {...payload} open onClose={() => {}} />);
+    expect(within(panel.container).getAllByTestId('citation-index-badge').map((node) => node.textContent))
+      .toEqual(['1', '4']);
+    expect(screen.getByText('Guideline').closest('li')?.className).toContain('border-[#1677ff]');
+
+    marker.rerender(<Cite citekey='a4' />);
+    const imageMarkerProps = h.citeMarkerProps.at(-1);
+    expect(imageMarkerProps.displayIndex).toBe(3);
+    imageMarkerProps.onClick(null);
+    const imagePayload = h.open.mock.calls.at(-1)![0];
+    panel.rerender(<SourcesPanel {...imagePayload} selectionToken={imagePayload} open onClose={() => {}} />);
+    await waitFor(() => expect(within(panel.container).getAllByTestId('citation-index-badge')
+      .map((node) => node.textContent)).toEqual(['2', '3']));
+    expect(screen.getByText('Second figure').closest('[data-citation-selected="true"]')).toBeTruthy();
+    expect(imagePayload.selectedCitationKey).toBe('a4');
+    marker.unmount();
+  });
+
   it('selects and scrolls to the source matching selectedCitationKey and renders publishedDate', () => {
     const original = HTMLElement.prototype.scrollIntoView;
     const scrollSpy = vi.fn();
@@ -355,7 +386,6 @@ describe('per-hit attributes and safe citation downloads', () => {
     expect(within(panel.container).getAllByText('chat.sources.knowledgeBase · AIDP')).toHaveLength(2);
     expect(preview).not.toHaveBeenCalled();
     expect(h.storageDownload).not.toHaveBeenCalled();
-    expect(h.aidpDownload).not.toHaveBeenCalled();
     preview.mockRestore();
   });
 
@@ -374,45 +404,23 @@ describe('per-hit attributes and safe citation downloads', () => {
     await waitFor(() => expect(trigger.getAttribute('aria-expanded')).toBe('false'));
   });
 
-  it('never enables AIDP downloads from names, business metadata, chunk IDs or image URLs', () => {
-    const uuid = '12345678-1234-1234-1234-123456789abc';
+  it('never enables unsupported AIDP citation downloads', () => {
     const panel = render(<SourcesPanel sources={[
-      { ...sources[0], url: '/md_image/chunk.png', downloadUrl: 'https://example.com/chunk.pdf', objectName: 'attachments/same.pdf', sourceMetadata: { kds_id: 'kb-business', file_uuid: uuid }, sourceReference: { chunk_id: uuid } },
-      { ...sources[1], sourceReference: { download_locator: { provider: 'aidp', kds_id: 'kb-explicit', file_uuid: 'chunk-2' } } },
-      { ...sources[0], searchType: undefined, citeIndex: 3, url: 'https://example.com/image.png', sourceReference: {} },
-      { ...sources[0], searchType: 'ind_aidp_search', toolSign: 'l', citeIndex: 1, sourceReference: { download_locator: { provider: 'aidp', kds_id: 'kb-explicit', file_uuid: uuid } } },
+      { ...sources[0], url: '/md_image/chunk.png', downloadUrl: 'https://example.com/chunk.pdf', objectName: 'attachments/same.pdf', sourceMetadata: { kds_id: 'kb-business', file_uuid: 'file-id' }, sourceReference: { chunk_id: 'chunk-id' } },
+      { ...sources[1], searchType: 'ind_aidp_search', toolSign: 'l', citeIndex: 3, sourceReference: {} },
     ]} images={[]} open onClose={() => {}} />);
     expect(within(panel.container).queryByRole('button', { name: 'chat.sources.download' })).toBeNull();
     expect(h.storageDownload).not.toHaveBeenCalled();
-    expect(h.aidpDownload).not.toHaveBeenCalled();
   });
 
-  it('uses the existing AIDP proxy for explicit locators and preserves local downloads', async () => {
-    const uuid = '12345678-1234-1234-1234-123456789abc';
-    const create = URL.createObjectURL, revoke = URL.revokeObjectURL;
-    URL.createObjectURL = vi.fn(() => 'blob:unit-download');
-    URL.revokeObjectURL = vi.fn();
-    const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {});
-    try {
-      const panel = render(<SourcesPanel sources={[
-        { ...sources[0], sourceReference: { download_locator: { provider: 'aidp', kds_id: 'kb-explicit', file_uuid: uuid } } },
-        { sourceType: 'document', searchType: 'knowledge_base_search', title: 'local.pdf', filename: 'local.pdf', objectName: 'attachments/local.pdf' },
-      ]} images={[]} open onClose={() => {}} />);
-      const buttons = within(panel.container).getAllByRole('button', { name: 'chat.sources.download' });
-      fireEvent.click(buttons[0]);
-      await waitFor(() => expect(h.aidpDownload).toHaveBeenCalledWith('kb-explicit', uuid));
-      expect(h.storageDownload).not.toHaveBeenCalled();
-      await waitFor(() => expect(click).toHaveBeenCalledOnce());
-      fireEvent.click(buttons[1]);
-      await waitFor(() => expect(h.storageDownload).toHaveBeenCalledWith('attachments/local.pdf', 'local.pdf'));
-      expect(h.aidpDownload).toHaveBeenCalledOnce();
-      h.aidpDownload.mockRejectedValueOnce(new Error('AIDP file unavailable'));
-      fireEvent.click(buttons[0]);
-      await screen.findByText('chat.sources.downloadError');
-      expect(h.storageDownload).toHaveBeenCalledOnce();
-      fireEvent.click(buttons[0]);
-      await waitFor(() => expect(h.aidpDownload).toHaveBeenCalledTimes(3));
-      await waitFor(() => expect(within(panel.container).queryByText('chat.sources.downloadError')).toBeNull());
-    } finally { click.mockRestore(); URL.createObjectURL = create; URL.revokeObjectURL = revoke; }
+  it('preserves local downloads while AIDP citation downloads remain unsupported', async () => {
+    const panel = render(<SourcesPanel sources={[
+      { ...sources[0], downloadUrl: 'https://example.com/aidp.pdf', objectName: 'attachments/aidp.pdf' },
+      { sourceType: 'document', searchType: 'knowledge_base_search', title: 'local.pdf', filename: 'local.pdf', objectName: 'attachments/local.pdf' },
+    ]} images={[]} open onClose={() => {}} />);
+    const buttons = within(panel.container).getAllByRole('button', { name: 'chat.sources.download' });
+    expect(buttons).toHaveLength(1);
+    fireEvent.click(buttons[0]);
+    await waitFor(() => expect(h.storageDownload).toHaveBeenCalledWith('attachments/local.pdf', 'local.pdf'));
   });
 });

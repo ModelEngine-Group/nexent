@@ -429,23 +429,35 @@ export class RemoteConversationHistoryAdapter implements ThreadHistoryAdapter {
             const item = searchItem as Record<string, unknown>;
             const url = (item.url as string | undefined) ?? "";
             const filename = (item.filename as string | undefined) ?? "";
-            const title = (item.title as string | undefined) || filename || url;
+            const imageMetadata = parseImageMetadata(item.text);
+            const resolvedUrl = imageMetadata?.image_url || url;
+            const title =
+              (item.title as string | undefined) ||
+              filename ||
+              imageMetadata?.source_file ||
+              resolvedUrl;
             if (url || filename || title) {
               const derivedImageKey = `${item.tool_sign ?? ""}${item.cite_index ?? ""}`;
               const isImage =
                 (item.score_details as Record<string, unknown> | undefined)
                   ?.chunk_type === "image" ||
+                Boolean(imageMetadata) ||
                 persistedAnswerImageKeys.includes(derivedImageKey);
               sources.push({
                 citeIndex: (item.cite_index as number | undefined) ?? 0,
-                url,
+                url: resolvedUrl,
                 title,
-                text: item.text as string | undefined,
+                text: imageMetadata
+                  ? undefined
+                  : (item.text as string | undefined),
                 publishedDate: item.published_date as string | undefined,
                 sourceType: item.source_type as string | undefined,
                 searchType: item.search_type as string | undefined,
                 toolSign: item.tool_sign as string | undefined,
                 filename,
+                sourceFile:
+                  (item.source_file as string | undefined) ||
+                  imageMetadata?.source_file,
                 downloadUrl: item.download_url as string | undefined,
                 objectName: item.object_name as string | undefined,
                 isImage,
@@ -610,7 +622,8 @@ export class RemoteConversationHistoryAdapter implements ThreadHistoryAdapter {
           const imageKey = answerImageKeys[imageIndex];
           const matchingSources = persistedImageSources.filter((searchItem) => {
             const item = searchItem as Record<string, unknown>;
-            return item.url === imageUrl;
+            const metadata = parseImageMetadata(item.text);
+            return (metadata?.image_url || item.url) === imageUrl;
           }) as Record<string, unknown>[];
           const fallbackMetadata = persistedImageSources.find((searchItem) => {
             const item = searchItem as Record<string, unknown>;
@@ -622,14 +635,21 @@ export class RemoteConversationHistoryAdapter implements ThreadHistoryAdapter {
           for (const metadata of matchingSources.length
             ? matchingSources
             : [fallbackMetadata]) {
+            const imageMetadata = metadata
+              ? parseImageMetadata(metadata.text)
+              : null;
             const sourceImageKey =
               (metadata?.image_key as string | undefined) ||
               (metadata?.tool_sign && metadata?.cite_index !== undefined
                 ? `${metadata.tool_sign}${metadata.cite_index}`
                 : undefined) ||
               imageKey;
-            if (sourceImageKey && restoredImageKeys.has(sourceImageKey)) continue;
-            const title = (metadata?.title as string | undefined) || imageUrl;
+            if (sourceImageKey && restoredImageKeys.has(sourceImageKey))
+              continue;
+            const title =
+              (metadata?.title as string | undefined) ||
+              imageMetadata?.source_file ||
+              imageUrl;
             const imagePart: any = {
               ...getSourceAttributes(
                 metadata?.search_type,
@@ -639,8 +659,13 @@ export class RemoteConversationHistoryAdapter implements ThreadHistoryAdapter {
               sourceType: "url",
               url: imageUrl,
               title,
-              text: metadata?.text as string | undefined,
+              text: imageMetadata
+                ? undefined
+                : (metadata?.text as string | undefined),
               filename: metadata?.filename as string | undefined,
+              sourceFile:
+                (metadata?.source_file as string | undefined) ||
+                imageMetadata?.source_file,
               toolSign: metadata?.tool_sign as string | undefined,
               citeIndex:
                 (metadata?.cite_index as number | undefined) ?? undefined,
@@ -1266,8 +1291,10 @@ export class RemoteConversationHistoryAdapter implements ThreadHistoryAdapter {
               const scoreDetails = item.score_details as
                 Record<string, unknown> | undefined;
               const searchImageKey = `${item.tool_sign ?? ""}${item.cite_index ?? ""}`;
+              const imageMetadata = parseImageMetadata(item.text);
               if (
                 scoreDetails?.chunk_type === "image" ||
+                imageMetadata ||
                 answerImageKeys.includes(searchImageKey)
               )
                 continue;

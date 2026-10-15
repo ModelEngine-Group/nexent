@@ -1,7 +1,6 @@
 // Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
 
 import type {
-  AidpDownloadLocator,
   JsonObject,
   SourceAttributes,
 } from "@/types/source";
@@ -68,33 +67,6 @@ export function getSourceAttributes(
         : undefined,
     sourceReference,
   };
-}
-
-export function getAidpDownloadLocator(
-  source: SourceAttributes
-): AidpDownloadLocator | undefined {
-  if (
-    source.searchType !== "aidp_search" &&
-    !(!source.searchType && source.toolSign?.toLowerCase() === "j")
-  )
-    return undefined;
-  const locator = source.sourceReference?.download_locator;
-  if (!locator || typeof locator !== "object") return undefined;
-  const value = locator as Record<string, unknown>;
-  if (
-    value.provider !== "aidp" ||
-    typeof value.kds_id !== "string" ||
-    !value.kds_id.trim()
-  )
-    return undefined;
-  if (
-    typeof value.file_uuid !== "string" ||
-    !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
-      value.file_uuid
-    )
-  )
-    return undefined;
-  return value as unknown as AidpDownloadLocator;
 }
 
 export function isAidpSource(source: SourceAttributes): boolean {

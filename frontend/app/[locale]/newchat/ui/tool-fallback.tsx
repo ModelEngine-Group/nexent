@@ -3,6 +3,11 @@
 "use client";
 
 import type { SourceAttributes } from "@/types/source";
+import {
+  buildCitationDisplayIndexMap,
+  getCitationKey,
+  withCitationDisplayIndices,
+} from "@/lib/citationDisplay";
 
 import { memo } from "react";
 import { useSourcesPanel } from "./sources-panel-context";
@@ -14,6 +19,7 @@ import {
   XCircleIcon,
 } from "lucide-react";
 import {
+  useAuiState,
   type ToolCallMessagePartStatus,
   type ToolCallMessagePartProps,
   type ToolCallMessagePartComponent,
@@ -208,6 +214,12 @@ function ToolFallbackSearchContent({
   searchContent?: ToolSearchSource[];
 }) {
   const { open } = useSourcesPanel();
+  const content = useAuiState((s) => s.message.content) as readonly {
+    type?: string;
+    text?: unknown;
+    citeIndex?: number;
+    toolSign?: string;
+  }[];
   const regularSources = (searchContent ?? []).filter((item) => !item.isImage);
   const panelSources: PanelSourceItem[] = regularSources.map((item, index) => ({
     sourceType:
@@ -231,6 +243,13 @@ function ToolFallbackSearchContent({
     sourceMetadata: item.sourceMetadata,
     sourceReference: item.sourceReference,
   }));
+  const numberedSources = withCitationDisplayIndices(
+    panelSources,
+    buildCitationDisplayIndexMap(content, [
+      ...content.filter((part) => part.type === "source"),
+      ...panelSources,
+    ])
+  );
   if (regularSources.length === 0) return null;
 
   return (
@@ -250,9 +269,9 @@ function ToolFallbackSearchContent({
                   open({
                     messageId: "tool-search",
                     groupId: `tool-search-${index}`,
-                    sources: panelSources,
+                    sources: numberedSources,
                     images: [],
-                    selectedCitationKey: `${item.toolSign ?? ""}${item.citeIndex ?? index}`,
+                    selectedCitationKey: getCitationKey(panelSources[index]),
                   })
                 }
               >
