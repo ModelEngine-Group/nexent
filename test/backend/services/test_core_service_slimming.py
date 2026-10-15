@@ -84,7 +84,7 @@ def test_ac002_preview_key_matches_existing_contract(monkeypatch):
 def naming(monkeypatch):
     dependency(monkeypatch, "consts.const", LANGUAGE={"ZH": "zh", "EN": "en"})
     dependency(monkeypatch, "database.agent_db", query_all_agent_info_by_tenant_id=lambda tenant: [])
-    dependency(monkeypatch, "utils.llm_utils", call_llm_for_system_prompt=lambda **kw: "fresh")
+    dependency(monkeypatch, "management.services.model.invocation", call_llm_for_system_prompt=lambda **kw: "fresh")
     dependency(
         monkeypatch, "utils.prompt_template_utils",
         get_prompt_generate_prompt_template=lambda language: {},
@@ -233,7 +233,7 @@ def model_resolver(monkeypatch):
         get_model_by_model_id_ignore_delete=lambda *args: None,
         get_valid_model_ids=lambda ids, tenant: [mid for mid in ids if mid != 9],
     )
-    dependency(monkeypatch, "services.model_gateway_service", build_adapter_fresh=lambda *args: args)
+    dependency(monkeypatch, "management.services.model.adapter", build_adapter_fresh=lambda *args: args)
     dependency(
         monkeypatch, "utils.config_utils",
         tenant_config_manager=types.SimpleNamespace(get_model_config=lambda **kwargs: {}),

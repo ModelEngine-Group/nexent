@@ -80,10 +80,6 @@ vi.mock('@/components/navigation/NotificationBell', () => ({
   NotificationBell: () => null,
 }));
 
-vi.mock('@/components/navigation/ChatTopNavContent', () => ({
-  ChatTopNavContent: () => null,
-}));
-
 vi.mock('next/link', () => ({
   default: (props: any) => null,
 }));
@@ -142,41 +138,41 @@ beforeEach(() => {
 describe('TopNavbar 用户区 username/email/- 展示逻辑', () => {
   it('UT-FE-AUTO-63334E6F5D10C7FD 登录态 username 存在时优先显示 username', () => {
     authState.user = makeUser({ username: 'alice', email: 'alice@example.com' });
-    render(<TopNavbar isChatPage={false} />);
+    render(<TopNavbar />);
     const node = screen.getByText('alice');
     expect(node.textContent).toBe('alice');
   });
 
   it('username 带首尾空格时显示 trim 后的值', () => {
     authState.user = makeUser({ username: '  bob  ', email: 'bob@example.com' });
-    render(<TopNavbar isChatPage={false} />);
+    render(<TopNavbar />);
     const node = screen.getByText('bob');
     expect(node.textContent).toBe('bob');
   });
 
   it('username 为空字符串时回退显示 email', () => {
     authState.user = makeUser({ username: '', email: 'carol@example.com' });
-    render(<TopNavbar isChatPage={false} />);
+    render(<TopNavbar />);
     expect(screen.getByText('carol@example.com')).toBeTruthy();
     expect(screen.queryByText('-')).toBeNull();
   });
 
   it('username 为 null 时回退显示 email', () => {
     authState.user = makeUser({ username: null, email: 'carol@example.com' });
-    render(<TopNavbar isChatPage={false} />);
+    render(<TopNavbar />);
     expect(screen.getByText('carol@example.com')).toBeTruthy();
   });
 
   it('username 与 email 均为空时显示 -', () => {
     authState.user = makeUser({ username: '', email: '' });
-    render(<TopNavbar isChatPage={false} />);
+    render(<TopNavbar />);
     const node = screen.getByText('-');
     expect(node.textContent).toBe('-');
   });
 
   it('未登录态不渲染用户信息且不出现 -', () => {
     authState.user = null;
-    render(<TopNavbar isChatPage={false} />);
+    render(<TopNavbar />);
     expect(screen.queryByText('-')).toBeNull();
   });
 });
@@ -221,7 +217,7 @@ describe('AvatarDropdown 用户区展示与一致性', () => {
 
   it('顶栏用户区与头像下拉菜单展示一致', async () => {
     authState.user = makeUser({ username: '  dave  ', email: 'dave@example.com' });
-    const { container } = render(<TopNavbar isChatPage={false} />);
+    const { container } = render(<TopNavbar />);
     const span = screen.getByText('dave');
     expect(span.textContent).toBe('dave');
     fireEvent.click(container.querySelector('.ant-avatar') as HTMLElement);

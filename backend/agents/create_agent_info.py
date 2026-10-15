@@ -50,7 +50,7 @@ from services.memory_external_provider_service import get_memory_external_provid
 from database.a2a_agent_db import PROTOCOL_JSONRPC
 from services.memory_config_service import build_memory_context
 from services.ind_aidp_service import create_ind_aidp_image_url_builder
-from services.model_gateway_service import get_llm_adapter, get_vlm_adapter
+from management.services.model.adapter import get_llm_adapter, get_vlm_adapter
 from database.agent_db import (
     search_agent_info_by_agent_id,
     query_sub_agent_relations,
@@ -62,10 +62,15 @@ from database.tool_db import query_tools_by_ids, search_tools_for_sub_agent
 from database.model_management_db import get_model_records, get_model_by_model_id
 from database.knowledge_db import get_knowledge_name_map_by_index_names
 from database.client import minio_client
-from utils.model_name_utils import add_repo_to_name
+from management.services.model.names import add_repo_to_name
 from management.services.agent.prompt_template_loader import load_agent_prompt_bundle
 from nexent.core.agents.prompt import AgentPromptComposer, get_builtin_tool_descriptions
-from utils.config_utils import tenant_config_manager, get_model_name_from_config
+from utils.config_utils import (
+    tenant_config_manager,
+)
+from management.services.model.names import (
+    get_model_name_from_config,
+)
 from utils.memory_tool_prompt import should_enable_memory_tool_policy
 from utils.automation_tool_prompt import should_enable_automation_tool_policy
 from utils.context_utils import build_context_inputs
@@ -90,6 +95,8 @@ from consts.const import (
     MODEL_CONFIG_MAPPING,
     NEXENT_SANDBOX_DEFAULT_LEVEL,
     NEXENT_SANDBOX_WORKSPACE_VOLUME,
+    NEXENT_TOOL_FASTPATH_ALLOWED_TOOLS,
+    NEXENT_TOOL_FASTPATH_ENABLED,
     RUNTIME_MCP_CLOSE_TIMEOUT_SECONDS,
     RUNTIME_MCP_TOOL_TIMEOUT_SECONDS,
     RUNTIME_PARALLEL_EXECUTOR_TIMEOUT_SECONDS,
@@ -2957,6 +2964,8 @@ async def create_agent_run_info(
             None,
         ),
         sandbox_config=sandbox_config,
+        tool_fastpath_enabled=NEXENT_TOOL_FASTPATH_ENABLED,
+        tool_fastpath_allowed_tools=list(NEXENT_TOOL_FASTPATH_ALLOWED_TOOLS),
         minio_client=sandbox_minio_client,
         workspace_path=workspace_path,
         workspace_run_id=workspace_run_id,

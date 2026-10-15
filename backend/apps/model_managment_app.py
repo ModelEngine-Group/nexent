@@ -47,12 +47,12 @@ from fastapi.encoders import jsonable_encoder
 from http import HTTPStatus
 from typing import Annotated, Any, List, Optional
 from services.audit_service import record_security_event
-from services.model_health_service import (
+from management.services.model.health import (
     check_model_connectivity,
     verify_model_config_connectivity,
 )
-from services.model_capacity_suggestion_service import suggest_capacity
-from services.model_management_service import (
+from management.services.model.capacity import suggest_capacity
+from management.services.model.management import (
     create_model_for_tenant,
     create_provider_models_for_tenant,
     batch_create_models_for_tenant,
@@ -63,17 +63,21 @@ from services.model_management_service import (
     list_models_for_tenant,
     list_llm_models_for_tenant,
     list_models_for_admin,
+    _ids_for_created_models,
+    _backfill_default_model_slots,
+)
+from management.services.model.capacity import (
     get_capacity_coverage,
     pop_capacity_accept_signal,
     _record_capacity_suggestion_accept,
+)
+from management.services.model.reasoning import (
     get_model_reasoning_capability,
-    _ids_for_created_models,
-    _backfill_default_model_slots,
 )
 from permissions.depends import authenticate, require
 from permissions.models import CurrentUser
 from utils.auth_utils import get_current_user_id
-from consts.exceptions import TokenExpiredError
+from consts.exceptions import TokenExpiredError, ModelProviderError
 from nexent.core.concurrency import run_blocking
 from database.model_management_db import get_model_by_model_id
 
@@ -436,6 +440,8 @@ async def create_provider_model(
     except TokenExpiredError as e:
         logging.warning("Session expired")
         raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(e))
+    except ModelProviderError as exc:
+        raise HTTPException(status_code=exc.upstream_status, detail=exc.message) from exc
     except HTTPException:
         # Surface provider failures (e.g. 502 connection_failed) with the
         # status the service layer classified, instead of flattening every
@@ -1199,6 +1205,8 @@ async def manage_create_provider_models(
     except TokenExpiredError as e:
         logging.warning("Session expired")
         raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(e))
+    except ModelProviderError as exc:
+        raise HTTPException(status_code=exc.upstream_status, detail=exc.message) from exc
     except HTTPException:
         # Same contract as /provider/create: keep the classified provider
         # status (e.g. 502) instead of flattening it to 500.

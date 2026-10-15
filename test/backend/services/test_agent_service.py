@@ -313,9 +313,9 @@ sys.modules["services.prompt_template_service"] = prompt_template_service_mock
 sys.modules["services.file_management_service"] = MagicMock()
 sys.modules["services.streaming_channel"] = MagicMock()
 
-model_gateway_service_mock = types.ModuleType("services.model_gateway_service")
+model_gateway_service_mock = types.ModuleType("management.services.model.adapter")
 model_gateway_service_mock.build_adapter_fresh = MagicMock()
-sys.modules["services.model_gateway_service"] = model_gateway_service_mock
+sys.modules["management.services.model.adapter"] = model_gateway_service_mock
 setattr(services_module, "model_gateway_service", model_gateway_service_mock)
 
 
@@ -524,6 +524,9 @@ sys.modules["nexent.core.utils"] = MagicMock()
 
 # Mock ProcessType enum for observer module
 class MockProcessType:
+    class FINAL_ANSWER:
+        value = "final_answer"
+
     class MODEL_OUTPUT_CODE:
         value = "model_output_code"
 
@@ -578,7 +581,7 @@ sys.modules["utils.str_utils"].convert_string_to_list = lambda s: (
 
 sys.modules["utils.config_utils"] = MagicMock()
 sys.modules["utils.prompt_template_utils"] = MagicMock()
-sys.modules["utils.llm_utils"] = MagicMock()
+sys.modules["management.services.model.invocation"] = MagicMock()
 sys.modules["utils.monitoring"] = MagicMock()
 
 # =============================================================================

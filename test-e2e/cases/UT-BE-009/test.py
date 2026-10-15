@@ -46,7 +46,7 @@ def _profile(version: str = "2026-01") -> SimpleNamespace:
 @STAGE
 @pytest.mark.case_id("UT-BE-009")
 def test_capacity_defaults_and_catalog_coverage_are_deterministic() -> None:
-    from services.model_capacity_suggestion_service import normalize_model_name, pick_provider
+    from management.services.model.capacity import normalize_model_name, pick_provider
 
     catalog = {("openai", "org/model-v1"): _profile()}
     assert normalize_model_name(" Org/Model-v1 ") == "orgmodelv1"

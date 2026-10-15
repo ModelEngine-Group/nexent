@@ -23,6 +23,41 @@ sys.modules["services.file_management_service"] = file_management_service
 from backend.utils import agent_stream_utils
 
 
+def test_rollback_removes_only_failed_attempt_and_preserves_list_identity():
+    accepted = {"type": "final_answer", "_attempt_id": "accepted", "content": "Result"}
+    sibling = {"type": "model_output_thinking", "content": "Unrelated"}
+    units = [accepted, {"type": "final_answer", "_attempt_id": "failed", "content": "Rejected"}, sibling]
+    reference = units
+    assert agent_stream_utils.rollback_model_attempt_units(units, "failed") == 1
+    assert units is reference and units == [accepted, sibling]
+    assert agent_stream_utils.rollback_model_attempt_units(units, "missing") == 0
+    assert units == [accepted, sibling]
+
+
+@pytest.mark.parametrize("changed_field,value", [
+    ("type", "model_output_thinking"),
+    ("_attempt_id", "retry"),
+    ("invocation_id", "sibling"),
+    ("_step_id", "next"),
+])
+def test_answer_fragments_do_not_merge_across_type_attempt_invocation_or_step(changed_field, value):
+    current = {"type": "final_answer", "_attempt_id": "attempt", "invocation_id": "child", "_step_id": "step"}
+    data = {"attempt_id": "attempt", "invocation_id": "child", "step_id": "step"}
+    assert agent_stream_utils.is_stream_unit_continuation(current, True, "final_answer", data)
+    current[changed_field] = value
+    assert not agent_stream_utils.is_stream_unit_continuation(current, True, "final_answer", data)
+
+
+def test_failed_presigned_url_lookup_keeps_uploaded_file_metadata(mocker):
+    uploads = [{"object_name": "outputs/result.txt", "url": "stored", "size": 10}]
+    mocker.patch.object(agent_stream_utils, "get_file_url", side_effect=RuntimeError("Storage unavailable"))
+    log = mocker.patch.object(agent_stream_utils.logger, "exception")
+    result = agent_stream_utils.enrich_file_uploads_with_presigned_urls(uploads)
+    assert result == uploads and result[0] is not uploads[0]
+    assert "presigned_url" not in result[0]
+    log.assert_called_once()
+
+
 class TestJsonExtraction:
     @pytest.mark.parametrize("text", ["", "plain text without JSON"])
     def test_returns_empty_when_no_json_object_exists(self, text):
