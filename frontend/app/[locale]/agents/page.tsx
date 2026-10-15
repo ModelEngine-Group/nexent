@@ -1,3 +1,5 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -24,13 +26,13 @@ import {
   type ImportAgentData,
 } from "@/lib/agentImportUtils";
 import log from "@/lib/logger";
+import { AgentDetail } from "@/components/agent/agent-detail";
+import { mapAgentInfoDetail } from "@/lib/myAgentDetail";
+import AgentAvatar from "./components/agent-avatar";
 import { searchAgentInfo } from "@/services/agentConfigService";
 import { useAgentStore } from "@/stores/agentStore";
 import type { Agent } from "@/types/agentConfig";
-import { AgentDetail } from "@/components/agent/agent-detail";
-import { mapAgentInfoDetail } from "@/lib/myAgentDetail";
 
-import AgentAvatar from "./components/agent-avatar";
 import AgentConfigurationGuide from "./components/agent-configuration-guide";
 import AgentListCard from "./components/agent-list-card";
 import AgentListTable from "./components/agent-list-table";
@@ -48,8 +50,8 @@ export default function AgentsPage() {
   const [pageSize, setPageSize] = useState(10);
   const [jumpPage, setJumpPage] = useState<number | null>(null);
   const [view, setView] = useState<"grid" | "list">("grid");
-  const [selectedAgent, setSelectedAgent] = useState<Agent | null>(null);
   const [detailOpen, setDetailOpen] = useState(false);
+  const [selectedAgent, setSelectedAgent] = useState<Agent | null>(null);
   const [isVersionManageOpen, setIsVersionManageOpen] = useState(false);
   const [isCreateOpen, setIsCreateOpen] = useState(false);
   const [importData, setImportData] = useState<ImportAgentData | null>(null);
@@ -358,7 +360,7 @@ export default function AgentsPage() {
                       view === "list" ? (
                         <AgentListTable
                           agents={agents}
-                          onOpen={(selected) => void handleOpenDetail(selected)}
+                          onOpen={(agent) => void handleOpenDetail(agent)}
                           onConfigure={updateUrl}
                           onPublish={openPublishFlow}
                           onManageVersions={handleManageVersions}
@@ -369,9 +371,7 @@ export default function AgentsPage() {
                             <AgentListCard
                               key={agent.id}
                               agent={agent}
-                              onOpen={(selected) =>
-                                void handleOpenDetail(selected)
-                              }
+                              onOpen={(agent) => void handleOpenDetail(agent)}
                               onConfigure={updateUrl}
                               onPublish={openPublishFlow}
                               onManageVersions={handleManageVersions}

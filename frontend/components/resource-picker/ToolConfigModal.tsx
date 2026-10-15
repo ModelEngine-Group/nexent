@@ -1,3 +1,5 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 "use client";
 
 import { useEffect, useState } from "react";
@@ -80,12 +82,16 @@ export function ToolConfigModal({
 
   return (
     <ParamDialog
+      variant="tool"
+      description={DESCRIPTION}
       open={open}
       title={`${toolName} 配置`}
       onClose={onClose}
       onConfirm={() => onConfirm?.(values)}
     >
-      <p className="text-[12px] leading-[18px] text-[#191919]/40">{DESCRIPTION}</p>
+      <p className="text-[12px] leading-[18px] text-[#191919]/40">
+        {DESCRIPTION}
+      </p>
 
       {mode === "config" ? (
         <>

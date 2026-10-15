@@ -1,3 +1,5 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 "use client";
 
 import {
@@ -896,7 +898,7 @@ export const Composer: FC<ComposerProps> = ({
                 className={cn(
                   "relative mb-1 max-h-32 min-h-14 w-full bg-transparent px-3 py-1 text-sm outline-none [&_.aui-lexical-input]:min-h-12 [&_.aui-lexical-input]:outline-none [&_.aui-lexical-placeholder]:pointer-events-none [&_.aui-lexical-placeholder]:absolute [&_.aui-lexical-placeholder]:top-1 [&_.aui-lexical-placeholder]:text-muted-foreground",
                   newChatDesign &&
-                    "!mb-0 !min-h-[88px] !px-0 !py-0 !leading-[22px] [&_.aui-lexical-input]:!min-h-[88px] [&_.aui-lexical-placeholder]:!top-0 [&_.aui-lexical-placeholder]:!text-[#191919]/40"
+                    "!text-[14px] [&_.aui-lexical-input]:!text-[14px] [&_.aui-lexical-placeholder]:!text-[14px] !mb-0 !min-h-[88px] !px-0 !py-0 !leading-[22px] [&_.aui-lexical-input]:!min-h-[88px] [&_.aui-lexical-placeholder]:!top-0 [&_.aui-lexical-placeholder]:!text-[#191919]/40"
                 )}
                 submitMode="enter"
                 autoFocus
@@ -930,7 +932,7 @@ export const Composer: FC<ComposerProps> = ({
                       !newChatDesign &&
                       "min-h-[92px] px-0 py-0",
                     newChatDesign &&
-                      "block !min-h-[88px] !px-0 !py-0 leading-[22px] text-[#191919] placeholder:text-[#191919]/40",
+                      "!text-[14px] block !min-h-[88px] !px-0 !py-0 leading-[22px] text-[#191919] placeholder:text-[#191919]/40",
                     workbenchPresentation &&
                       !newChatDesign &&
                       "w-auto min-w-0 flex-1",

@@ -1,11 +1,15 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 "use client";
 
-import { useEffect, useMemo, useState, type ReactNode } from "react";
-import { Cpu } from "lucide-react";
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import { Empty, Spin } from "antd";
+import { Sparkles } from "lucide-react";
 import { useTranslation } from "react-i18next";
+import Image from "next/image";
 
 import { cn } from "@/lib/utils";
+import { MODEL_PROVIDER_LOGOS } from "@/const/modelConfig";
 import { useModelList } from "@/hooks/model/useModelList";
 import type { ModelOption } from "@/types/modelConfig";
 import { AddResourceDrawer, CheckMark } from "./AddResourceDrawer";
@@ -23,16 +27,18 @@ function iconColorFor(seed: string): string {
   return ICON_BG_PALETTE[hash % ICON_BG_PALETTE.length];
 }
 
-function toModelItem(model: ModelOption): ModelItem {
+function toModelItem(model: ModelOption, capabilityTags: string[]): ModelItem {
   const tags: string[] = [];
-  if (model.contextWindowTokens) {
-    tags.push(`${Math.round(model.contextWindowTokens / 1000)}k`);
+  const contextTokens = model.contextWindowTokens ?? model.maxInputTokens;
+  if (contextTokens && contextTokens > 0) {
+    tags.push(`${Math.round(contextTokens / 1000)}k`);
   }
-  if (model.source) tags.push(model.source);
+  tags.push(...capabilityTags);
   return {
     id: String(model.id),
     name: model.displayName || model.name,
     tags,
+    provider: String(model.modelFactory || model.source || "").toLowerCase(),
   };
 }
 
@@ -67,21 +73,38 @@ export function AddModelDrawer({
   const isLoading = !models && queryLoading;
 
   const [activeGroup, setActiveGroup] = useState("");
-  const [uncontrolledIds, setSelectedIds] = useState<Set<string>>(
-    () => new Set()
-  );
-  const selectedIds = useMemo(
-    () =>
-      selectedModelIds === undefined
-        ? uncontrolledIds
-        : new Set(selectedModelIds.map(String)),
-    [selectedModelIds, uncontrolledIds]
-  );
+  // Draft selection edited locally inside the drawer. Changes are only committed
+  // to the parent when the confirm button is clicked.
+  const [draftIds, setDraftIds] = useState<number[]>([]);
+  useEffect(() => {
+    if (!open) return;
+    setDraftIds(selectedModelIds ? [...selectedModelIds] : []);
+  }, [open, selectedModelIds]);
+  const draftIdSet = useMemo(() => new Set(draftIds.map(String)), [draftIds]);
   const [keyword, setKeyword] = useState("");
   const [page, setPage] = useState(1);
 
   // Base helper: source key for a model (falls back for models without one).
   const sourceOf = (model: ModelOption) => model.source || "unknown";
+
+  // Capability tags mirror the outer selected-model card so the drawer list and
+  // the agent's model list present the same labels.
+  const capabilityTagsFor = useCallback(
+    (model: ModelOption): string[] => {
+      const tags: string[] = [];
+      if (model.type === "llm") {
+        tags.push(t("agent.highFidelity.modelCapability.text"));
+      }
+      if (model.reasoningCapability?.status === "supported") {
+        tags.push(t("agent.highFidelity.modelCapability.reasoning"));
+      }
+      if (model.supportToolCalls === true) {
+        tags.push(t("agent.highFidelity.modelCapability.tools"));
+      }
+      return tags;
+    },
+    [t]
+  );
 
   // Group the account's own LLM models by their source in first-seen order.
   const groups: ModelGroup[] = useMemo(() => {
@@ -108,12 +131,15 @@ export function AddModelDrawer({
     }
   }, [groups, activeGroup]);
 
-  const allModels = useMemo(() => llmModels.map(toModelItem), [llmModels]);
+  const allModels = useMemo(
+    () => llmModels.map((model) => toModelItem(model, capabilityTagsFor(model))),
+    [llmModels, capabilityTagsFor]
+  );
 
   const activeModels = useMemo(() => {
     const list = llmModels
       .filter((model) => !activeGroup || sourceOf(model) === activeGroup)
-      .map(toModelItem);
+      .map((model) => toModelItem(model, capabilityTagsFor(model)));
     const kw = keyword.trim().toLowerCase();
     if (!kw) return list;
     return list.filter(
@@ -121,7 +147,7 @@ export function AddModelDrawer({
         item.name.toLowerCase().includes(kw) ||
         item.tags.some((tag) => tag.toLowerCase().includes(kw))
     );
-  }, [llmModels, activeGroup, keyword]);
+  }, [llmModels, activeGroup, keyword, capabilityTagsFor]);
 
   // Reset to the first page whenever the source group or search changes.
   useEffect(() => {
@@ -135,38 +161,33 @@ export function AddModelDrawer({
 
   const selected: SelectedItem[] = useMemo(
     () =>
-      (selectedModelIds === undefined
-        ? allModels
-        : selectedModelIds.flatMap((id) => {
-            const item = allModels.find((model) => model.id === String(id));
-            return item ? [item] : [];
-          })
-      )
-        .filter((item) => selectedIds.has(item.id))
-        .map((item) => ({ id: item.id, label: item.name })),
-    [allModels, selectedIds, selectedModelIds]
+      draftIds.flatMap((id) => {
+        const item = allModels.find((model) => model.id === String(id));
+        return item ? [{ id: item.id, label: item.name }] : [];
+      }),
+    [allModels, draftIds]
   );
 
   const toggleModel = (id: string) => {
     if (disabled) return;
-    if (selectedModelIds !== undefined) {
-      const modelId = Number(id);
-      onSelectionChange?.(
-        selectedModelIds.includes(modelId)
-          ? selectedModelIds.filter((value) => value !== modelId)
-          : [...selectedModelIds, modelId]
-      );
-      return;
-    }
-    setSelectedIds((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
+    const modelId = Number(id);
+    setDraftIds((prev) =>
+      prev.includes(modelId)
+        ? prev.filter((value) => value !== modelId)
+        : [...prev, modelId]
+    );
   };
 
-  const activeGroupConf = groups.find((g) => g.key === activeGroup);
+  const handleConfirm = () => {
+    if (selectedModelIds !== undefined) {
+      onSelectionChange?.(draftIds);
+    } else {
+      onConfirm?.(
+        allModels.filter((model) => draftIds.includes(Number(model.id)))
+      );
+    }
+    onClose();
+  };
 
   return (
     <AddResourceDrawer
@@ -179,9 +200,8 @@ export function AddModelDrawer({
       total={activeModels.length}
       page={page}
       onPageChange={setPage}
-      showConfirm={false}
       onClose={onClose}
-      onConfirm={() => onConfirm?.([])}
+      onConfirm={handleConfirm}
       onRemoveSelected={(id) => toggleModel(id)}
       onSearch={setKeyword}
       onRefresh={() => {
@@ -223,7 +243,9 @@ export function AddModelDrawer({
               <Empty description={t("resourcePicker.empty", "暂无数据")} />
             ) : (
               pagedModels.map((item) => {
-                const isSelected = selectedIds.has(item.id);
+                const isSelected = draftIdSet.has(item.id);
+                const providerLogo =
+                  MODEL_PROVIDER_LOGOS[item.provider ?? ""];
                 return (
                   <div
                     key={item.id}
@@ -233,13 +255,23 @@ export function AddModelDrawer({
                     )}
                   >
                     <div className="flex items-center gap-3">
-                      <span
-                        className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-white"
-                        style={{
-                          background: activeGroupConf?.iconBg ?? "#2E5BFF",
-                        }}
-                      >
-                        <Cpu size={13} />
+                      <span className="flex size-5 shrink-0 items-center justify-center overflow-hidden">
+                        {providerLogo ? (
+                          <Image
+                            src={providerLogo}
+                            alt=""
+                            aria-hidden="true"
+                            width={20}
+                            height={20}
+                            className="size-5 object-contain"
+                          />
+                        ) : (
+                          <Sparkles
+                            size={17}
+                            className="text-[#2673e5]"
+                            aria-hidden="true"
+                          />
+                        )}
                       </span>
                       <div className="flex min-w-0 flex-col gap-0.5">
                         <span
