@@ -3,6 +3,7 @@
 "use client";
 
 import { UserIdentity } from "@/components/auth/UserIdentity";
+import { UserIdentityLabel } from "@/components/auth/UserIdentityLabel";
 import { UserIdentityInput } from "@/components/auth/UserIdentityInput";
 import { useUserDisplayName } from "@/hooks/auth/useUserDisplayName";
 
@@ -212,7 +213,7 @@ export default function UserList({
   const columns: ColumnsType<User> = useMemo(
     () => [
       {
-        title: t("common.email"),
+        title: <UserIdentityLabel emailLabelKey="common.email" />,
         dataIndex: "username",
         key: "username",
         render: (value: string, record: User) => (

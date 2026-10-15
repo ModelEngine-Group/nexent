@@ -6,11 +6,11 @@ change:
   title: Prefer CAS usernames in page identity values
   description: Add read-only identity metadata and viewer-dependent rendering across existing user identity surfaces, including gated AIDP pages.
   observed_behavior: User/member APIs store email in the legacy username field and many identity surfaces render email directly.
-  expected_behavior: CAS viewers see linked CAS names with legacy fallback; raw values and operations remain unchanged.
+  expected_behavior: CAS viewers see linked CAS names with legacy fallback and matching username column labels; local email labels, raw values and operations remain unchanged.
   escaped_stage: D2
   coverage_gap:
     type: missing_assertion
-    description: Existing user/group tests assert legacy emails but do not assert optional CAS identity metadata or viewer-dependent rendering.
+    description: Existing user/group tests assert legacy emails but do not assert optional CAS identity metadata or viewer-dependent rendering. The initial display fix also omitted identity column labels in user lists, tenant previews and API keys.
   feature_contract_changed: true
   traditional_ut:
     decision: add
@@ -19,6 +19,7 @@ change:
     - Resolve only active linked CAS users and tolerate optional lookup failure.
     - Preserve raw identities, filtering, ordering and write payloads while rendering CAS names.
     - Preserve custom authors and AIDP feature gating.
+    - Match user, tenant-preview and API-key identity column labels to CAS or local login in Chinese and English, including viewer changes.
     test_selectors:
     - test/backend/services/test_user_identity_service.py
     - test/backend/database/test_user_identity_db.py

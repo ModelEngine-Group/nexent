@@ -10,6 +10,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import UserList from "../../app/[locale]/resource-manage/components/resources/UserList";
 import GroupList from "../../app/[locale]/resource-manage/components/resources/GroupList";
+import ApiKeyList from "../../app/[locale]/resource-manage/components/resources/ApiKeyList";
 const fixtures = vi.hoisted(() => ({
   provider: "cas",
   userList: vi.fn(),
@@ -73,6 +74,31 @@ vi.mock("@/hooks/group/useGroupList", () => ({
     refetch: fixtures.refetch,
   }),
 }));
+vi.mock("@/hooks/user/useApiKeyList", () => ({
+  useApiKeyList: () => ({
+    data: {
+      items: [
+        {
+          token_id: 1,
+          user_id: "a",
+          access_key: "test-key",
+          owner_email: "a@test",
+          owner_cas_username: "owner",
+          creator_email: "b@test",
+          creator_cas_username: "creator",
+          total_usage_count: 0,
+        },
+      ],
+      total: 1,
+    },
+    isLoading: false,
+    refetch: fixtures.refetch,
+  }),
+}));
+vi.mock("@/services/apiKeyService", () => ({
+  refreshTenantApiKey: vi.fn(),
+  revokeTenantApiKeys: vi.fn(),
+}));
 vi.mock("@/hooks/useConfirmModal", () => ({
   useConfirmModal: () => ({ confirm: fixtures.confirm }),
 }));
@@ -103,6 +129,9 @@ function groupView() {
 describe("resource identity operations", () => {
   it("shows names in user rows, edit and confirmation but saves original user ID and role", async () => {
     render(<UserList tenantId="tenant" />);
+    expect(
+      screen.getByRole("columnheader", { name: "common.username" })
+    ).toBeInTheDocument();
     expect(screen.getAllByText("同名用户")).toHaveLength(2);
     const row = screen.getAllByRole("row")[1];
     fireEvent.click(within(row).getAllByRole("button")[0]);
@@ -126,9 +155,33 @@ describe("resource identity operations", () => {
   it("retains local email display", () => {
     fixtures.provider = "local";
     render(<UserList tenantId="tenant" />);
+    expect(
+      screen.getByRole("columnheader", { name: "common.email" })
+    ).toBeInTheDocument();
     expect(screen.getByText("a@test")).toBeInTheDocument();
     expect(screen.queryByText("同名用户")).not.toBeInTheDocument();
   });
+  it.each(["cas", "local"])(
+    "matches API-key owner and creator headers to the %s viewer",
+    (provider) => {
+      fixtures.provider = provider;
+      render(<ApiKeyList tenantId="tenant" />);
+      const suffix = provider === "cas" ? "Username" : "Email";
+      for (const role of ["owner", "creator"]) {
+        expect(
+          screen.getByRole("columnheader", {
+            name: `tenantResources.apiKeys.${role}${suffix}`,
+          })
+        ).toBeInTheDocument();
+      }
+      expect(
+        screen.getByText(provider === "cas" ? "owner" : "a@test")
+      ).toBeInTheDocument();
+      expect(
+        screen.getByText(provider === "cas" ? "creator" : "b@test")
+      ).toBeInTheDocument();
+    }
+  );
   it("renders CAS member options while preserving IDs and email filtering", async () => {
     groupView();
     fireEvent.click(

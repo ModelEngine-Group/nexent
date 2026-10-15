@@ -1,15 +1,88 @@
 // Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { Button, Form } from "antd";
+import { createInstance } from "i18next";
+import { I18nextProvider } from "react-i18next";
 import { describe, expect, it, vi } from "vitest";
 import { UserIdentity } from "@/components/auth/UserIdentity";
 import { UserIdentityInput } from "@/components/auth/UserIdentityInput";
+import { UserIdentityLabel } from "@/components/auth/UserIdentityLabel";
 import { getUserDisplayName } from "@/lib/userIdentity";
-const session = vi.hoisted(() => ({ provider: "cas" }));
+import zh from "@/public/locales/zh/common.json";
+import en from "@/public/locales/en/common.json";
+const session = vi.hoisted(() => ({
+  provider: "cas" as string | undefined,
+}));
 vi.mock("@/components/providers/AuthorizationProvider", () => ({
   useAuthorizationContext: () => ({ user: { authProvider: session.provider } }),
 }));
 describe("CAS presentation values", () => {
+  it.each([
+    {
+      locale: "zh",
+      casLabels: ["用户名", "用户名", "所属用户名", "创建人用户名"],
+      emailLabels: ["邮箱", "邮箱", "所属用户邮箱", "创建人邮箱"],
+    },
+    {
+      locale: "en",
+      casLabels: ["Username", "Username", "Owner Username", "Creator Username"],
+      emailLabels: ["Email", "Email", "Owner Email", "Creator Email"],
+    },
+  ])(
+    "keeps $locale identity headers consistent with viewer changes",
+    async ({ locale, casLabels, emailLabels }) => {
+      const i18n = createInstance();
+      await i18n.init({
+        lng: locale,
+        resources: { zh: { common: zh }, en: { common: en } },
+        defaultNS: "common",
+        keySeparator: false,
+        interpolation: { escapeValue: false },
+      });
+      const view = () => (
+        <I18nextProvider i18n={i18n}>
+          <table>
+            <thead>
+              <tr>
+                <th>
+                  <UserIdentityLabel emailLabelKey="common.email" />
+                </th>
+                <th>
+                  <UserIdentityLabel emailLabelKey="tenantResources.users.email" />
+                </th>
+                <th>
+                  <UserIdentityLabel
+                    emailLabelKey="tenantResources.apiKeys.ownerEmail"
+                    usernameLabelKey="tenantResources.apiKeys.ownerUsername"
+                  />
+                </th>
+                <th>
+                  <UserIdentityLabel
+                    emailLabelKey="tenantResources.apiKeys.creatorEmail"
+                    usernameLabelKey="tenantResources.apiKeys.creatorUsername"
+                  />
+                </th>
+              </tr>
+            </thead>
+          </table>
+        </I18nextProvider>
+      );
+      session.provider = "cas";
+      const { rerender } = render(view());
+      expect(
+        screen.getAllByRole("columnheader").map((header) => header.textContent)
+      ).toEqual(casLabels);
+      for (const provider of ["local", undefined, "cas"]) {
+        session.provider = provider;
+        rerender(view());
+        expect(
+          screen
+            .getAllByRole("columnheader")
+            .map((header) => header.textContent)
+        ).toEqual(provider === "cas" ? casLabels : emailLabels);
+      }
+    }
+  );
   it.each([
     ["cas", " 用户 ", "mail@test", "用户"],
     ["local", "用户", "mail@test", "mail@test"],

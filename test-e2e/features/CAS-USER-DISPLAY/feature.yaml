@@ -9,7 +9,7 @@ feature:
   description: Prefer linked CAS usernames for CAS viewers while retaining legacy identity values and operations.
   business_rules:
   - rule_id: CAS-DISPLAY-RULE-01
-    description: CAS viewers prefer nonblank CAS usernames; other viewers preserve legacy presentation.
+    description: CAS viewers prefer nonblank CAS usernames and username identity column labels; other viewers preserve legacy values and email labels.
   - rule_id: CAS-DISPLAY-RULE-02
     description: Optional response metadata does not replace original email, IDs, author text, filtering or mutation payloads.
   - rule_id: CAS-DISPLAY-RULE-03

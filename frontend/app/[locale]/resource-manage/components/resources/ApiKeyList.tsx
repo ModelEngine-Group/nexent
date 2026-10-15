@@ -3,6 +3,7 @@
 "use client";
 
 import { UserIdentity } from "@/components/auth/UserIdentity";
+import { UserIdentityLabel } from "@/components/auth/UserIdentityLabel";
 
 import React, { useMemo, useState } from "react";
 import { App, Button, Table, Tag } from "antd";
@@ -76,7 +77,12 @@ export default function ApiKeyList({ tenantId }: { tenantId: string | null }) {
         ),
       },
       {
-        title: t("tenantResources.apiKeys.ownerEmail"),
+        title: (
+          <UserIdentityLabel
+            emailLabelKey="tenantResources.apiKeys.ownerEmail"
+            usernameLabelKey="tenantResources.apiKeys.ownerUsername"
+          />
+        ),
         dataIndex: "owner_email",
         key: "owner_email",
         render: (value: string | null | undefined, record: TenantApiKey) =>
@@ -125,7 +131,12 @@ export default function ApiKeyList({ tenantId }: { tenantId: string | null }) {
         },
       },
       {
-        title: t("tenantResources.apiKeys.creatorEmail"),
+        title: (
+          <UserIdentityLabel
+            emailLabelKey="tenantResources.apiKeys.creatorEmail"
+            usernameLabelKey="tenantResources.apiKeys.creatorUsername"
+          />
+        ),
         dataIndex: "creator_email",
         key: "creator_email",
         render: (value: string | null | undefined, record: TenantApiKey) => (
