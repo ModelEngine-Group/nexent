@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """
 Standalone mock AIDP server for Nexent AIDP management endpoint testing.
 
@@ -33,6 +35,10 @@ Document status simulation (drives the "processing status" UI):
     per page) and lists files that are still being processed first, so a burst of
     simultaneous uploads spills onto the next page and the caller has to walk the
     pages. Tune the page size with ``POST /_mock/history-page-size?size=N``.
+  * Retrieval: a knowledge base that holds files but has no seeded chunks (one
+    created through Nexent) returns one canned hit, so a self-created KB can
+    exercise the search pipeline from the UI. KBs without files return nothing,
+    mirroring real AIDP for unindexed content.
 
 Knowledge base + document state is persisted to ``_state/knowledge_bases.json``
 (next to this file). On restart the mock loads the file, so KBs created by
@@ -1289,7 +1295,23 @@ def fusion_search(
     results: List[Dict[str, Any]] = []
 
     for kb_id in request.kds_list:
-        for chunk in _CHUNKS_BY_KB.get(kb_id, []):
+        chunks = _CHUNKS_BY_KB.get(kb_id, [])
+        if not chunks and _DOCUMENTS_BY_KB.get(kb_id):
+            # A KB created through Nexent holds files but has no seeded chunks:
+            # return one canned hit so the search pipeline can be exercised from
+            # the UI. KBs without files keep the real empty-result behaviour.
+            chunks = [{
+                "id": f"mock-canned-{kb_id}",
+                "score": 0.95,
+                "title": "（mock）固定检索内容.txt",
+                "text": (
+                    f"这是 mock 为知识库 {kb_id} 返回的固定检索内容，"
+                    "用于验证检索链路、检索范围与引用来源展示。"
+                ),
+                "chunk_type": "text",
+                "metadata": {},
+            }]
+        for chunk in chunks:
             if not _match_metadata(chunk, request.metadata_condition):
                 continue
             if not request.multi_modal and chunk.get("chunk_type") == "image":
