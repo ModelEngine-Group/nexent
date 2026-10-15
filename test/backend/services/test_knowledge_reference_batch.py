@@ -2,18 +2,17 @@
 
 """Batch cleanup, provider isolation, transaction and deletion entry contracts."""
 
-from contextlib import contextmanager
 from copy import deepcopy
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
+import httpx
 import pytest
 
 import database.client as db_client
 import database.knowledge_reference_db as reference_db
-import ext_components.aidp.apps.aidp_mgmt_app as aidp_app
+import ext_components.aidp.services.aidp_service as aidp_service
 import management.services.knowledge_base.management as local_management
-import services.knowledge_reference_service as service
 
 
 def _session(*results):
@@ -78,115 +77,98 @@ def test_empty_cleanup_batch_does_not_query_database():
     session.query.assert_not_called()
 
 
-@pytest.mark.parametrize("fails", [False, True])
-def test_cleanup_transaction_is_owned_by_session_context(monkeypatch, fails):
+@pytest.mark.asyncio
+@pytest.mark.parametrize("delete_fails,cleanup_fails", [(False, False), (True, False), (False, True)])
+async def test_local_delete_cascades_only_after_success_and_owns_transaction(monkeypatch, delete_fails, cleanup_fails):
+    cls = local_management.KnowledgeBaseManagementService
+    events = []
     session = MagicMock()
     monkeypatch.setattr(db_client.db_client, "session_maker", lambda: session)
-    monkeypatch.setattr(service, "get_db_session", db_client.get_db_session)
-    cleanup = MagicMock(return_value={"tool_instances": 2})
-    if fails:
-        cleanup.side_effect = RuntimeError("update failed")
-    monkeypatch.setattr(service, "strip_deleted_resource_from_bindings", cleanup)
-    resources = [("local", "idx-1"), ("aidp", "kds-1")]
-    if fails:
-        with pytest.raises(RuntimeError, match="update failed"):
-            service.remove_knowledge_references(resources)
-        session.rollback.assert_called_once()
-        session.commit.assert_not_called()
-    else:
-        assert service.remove_knowledge_references(resources) == {"tool_instances": 2}
-        session.commit.assert_called_once()
-        session.rollback.assert_not_called()
-    cleanup.assert_called_once_with(session, resources)
-    session.close.assert_called_once()
-
-
-def test_delete_and_write_batches_share_lock_keys(monkeypatch):
-    held = []
-
-    @contextmanager
-    def locks(keys):
-        held.append(set(keys))
-        yield
-
-    monkeypatch.setattr(service, "acquire_lock_keys", locks)
-    resources = [("local", "213"), ("aidp", "213")]
-    with service.knowledge_deletion_guard(resources):
-        pass
-    with service.knowledge_reference_write_guard(list(reversed(resources))):
-        pass
-    assert held[0] == held[1]
-    assert len(held[0]) == 2
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize("fails", [False, True])
-async def test_local_delete_passes_a_single_element_batch_after_index_deletion(monkeypatch, fails):
-    events = []
-
-    @contextmanager
-    def guard(resources):
-        assert resources == [("local", "idx-1")]
-        events.append("locked")
-        try:
-            yield
-        finally:
-            events.append("released")
+    monkeypatch.setattr(local_management, "get_db_session", db_client.get_db_session)
+    monkeypatch.setattr(cls, "_assert_knowledge_base_delete_allowed", lambda _: [])
+    monkeypatch.setattr(cls, "_delete_kb_source_objects", AsyncMock(return_value={
+        "deleted_count": 0, "failed_count": 0,
+    }))
+    monkeypatch.setattr(local_management, "get_redis_service", MagicMock())
 
     async def delete_index(*args):
         events.append("deleted")
-        if fails:
-            raise RuntimeError("es unavailable")
+        if delete_fails:
+            raise RuntimeError("ES failed")
         return {"success": True}
 
-    monkeypatch.setattr(local_management, "knowledge_deletion_guard", guard)
-    cleanup = MagicMock(side_effect=lambda resources: events.append("cleaned"))
-    monkeypatch.setattr(local_management, "remove_knowledge_references", cleanup)
-    cls = local_management.KnowledgeBaseManagementService
-    monkeypatch.setattr(cls, "_full_delete_knowledge_base_locked", staticmethod(delete_index))
-    if fails:
-        with pytest.raises(RuntimeError, match="es unavailable"):
+    def clean(db_session, resources):
+        assert db_session is session
+        assert resources == [("local", "idx-1")]
+        events.append("cleaned")
+        if cleanup_fails:
+            raise RuntimeError("cleanup failed")
+        return {"tool_instances": 1}
+
+    monkeypatch.setattr(cls, "delete_index", staticmethod(delete_index))
+    cleanup = MagicMock(side_effect=clean)
+    monkeypatch.setattr(local_management, "strip_deleted_resource_from_bindings", cleanup)
+    if delete_fails or cleanup_fails:
+        with pytest.raises(RuntimeError, match="ES failed" if delete_fails else "cleanup failed"):
             await cls.full_delete_knowledge_base("idx-1", MagicMock(), "u1")
-        cleanup.assert_not_called()
-        assert events == ["locked", "deleted", "released"]
+        session.commit.assert_not_called()
+        if delete_fails:
+            cleanup.assert_not_called()
+            session.rollback.assert_not_called()
+        else:
+            session.rollback.assert_called_once()
     else:
-        assert await cls.full_delete_knowledge_base("idx-1", MagicMock(), "u1") == {"success": True}
-        cleanup.assert_called_once_with([("local", "idx-1")])
-        assert events == ["locked", "deleted", "cleaned", "released"]
+        result = await cls.full_delete_knowledge_base("idx-1", MagicMock(), "u1")
+        assert result["status"] == "success"
+        session.commit.assert_called_once()
+        session.rollback.assert_not_called()
+    assert events == (["deleted"] if delete_fails else ["deleted", "cleaned"])
 
 
-@pytest.mark.asyncio
-@pytest.mark.parametrize("success", [False, True])
-async def test_aidp_delete_only_cleans_a_single_element_batch_after_upstream_success(monkeypatch, success):
+@pytest.mark.parametrize("status", [204, 404, 403, 500])
+def test_aidp_delete_cascades_only_on_success_or_already_absent(monkeypatch, status):
     events = []
+    session = MagicMock()
+    monkeypatch.setattr(db_client.db_client, "session_maker", lambda: session)
+    monkeypatch.setattr(aidp_service, "get_db_session", db_client.get_db_session)
+    response = httpx.Response(status, request=httpx.Request("DELETE", "http://aidp.test/kb/kds-1"))
 
-    @contextmanager
-    def guard(resources):
+    def remote_delete(*args, **kwargs):
+        events.append("deleted")
+        return response
+
+    manager = MagicMock()
+    manager.get_sync_client.return_value.delete.side_effect = remote_delete
+    monkeypatch.setattr(aidp_service, "http_client_manager", manager)
+
+    def clean(db_session, resources):
+        assert db_session is session
         assert resources == [("aidp", "kds-1")]
-        events.append("locked")
-        yield
-        events.append("released")
+        events.append("cleaned")
 
-    monkeypatch.setattr(aidp_app, "_auth", AsyncMock(return_value=("u1", "t1")))
-    monkeypatch.setattr(aidp_app, "_credentials", lambda: ("http://aidp.test", "test-key"))
-    monkeypatch.setattr(aidp_app, "perms", MagicMock())
-    monkeypatch.setattr(aidp_app, "knowledge_deletion_guard", guard)
-    upstream = MagicMock(side_effect=lambda *args: events.append("deleted") or success)
-    monkeypatch.setattr(aidp_app, "delete_aidp_kb_impl", upstream)
-    for name in (
-        "invalidate_aidp_catalog_cache", "invalidate_aidp_kb_detail_cache", "invalidate_aidp_doc_count_cache",
-        "_cleanup_document_assignments_for_deleted_knowledge_base",
-    ):
-        monkeypatch.setattr(aidp_app, name, MagicMock())
-    cleanup = MagicMock(side_effect=lambda resources: events.append("cleaned"))
-    monkeypatch.setattr(aidp_app, "remove_knowledge_references", cleanup)
-    response = await aidp_app.delete_knowledge_base(MagicMock(), "kds-1")
-    assert response.status_code == 200
-    upstream.assert_called_once_with("http://aidp.test", "test-key", "kds-1")
-    if success:
-        cleanup.assert_called_once_with([("aidp", "kds-1")])
-        assert events == ["locked", "deleted", "cleaned", "released"]
+    cleanup = MagicMock(side_effect=clean)
+    monkeypatch.setattr(aidp_service, "strip_deleted_resource_from_bindings", cleanup)
+    if status in (204, 404):
+        assert aidp_service.delete_aidp_kb_impl("http://aidp.test", "test-key", "kds-1") is True
+        assert events == ["deleted", "cleaned"]
+        session.commit.assert_called_once()
     else:
+        with pytest.raises(aidp_service.AppException):
+            aidp_service.delete_aidp_kb_impl("http://aidp.test", "test-key", "kds-1")
         cleanup.assert_not_called()
-        aidp_app.perms.soft_delete_permission.assert_not_called()
-        assert events == ["locked", "deleted", "released"]
+        session.commit.assert_not_called()
+        assert events == ["deleted"]
+
+
+def test_aidp_cleanup_failure_rolls_back_and_propagates(monkeypatch):
+    session = MagicMock()
+    monkeypatch.setattr(db_client.db_client, "session_maker", lambda: session)
+    monkeypatch.setattr(aidp_service, "get_db_session", db_client.get_db_session)
+    monkeypatch.setattr(aidp_service, "http_client_manager", MagicMock())
+    monkeypatch.setattr(aidp_service, "strip_deleted_resource_from_bindings", MagicMock(
+        side_effect=RuntimeError("cleanup failed"),
+    ))
+    with pytest.raises(RuntimeError, match="cleanup failed"):
+        aidp_service.delete_aidp_kb_impl("http://aidp.test", "test-key", "kds-1")
+    session.rollback.assert_called_once()
+    session.commit.assert_not_called()

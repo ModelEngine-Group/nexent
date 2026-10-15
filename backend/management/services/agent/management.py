@@ -81,10 +81,6 @@ from services.conversation_management_service import (
     save_message_unit,  # noqa: F401 - retained as a compatibility re-export
     update_unit_status,  # noqa: F401 - retained as a compatibility re-export
 )
-from services.knowledge_reference_service import (
-    knowledge_reference_write_guard,
-    reject_confirmed_deleted_knowledge_references,
-)
 from services.prompt_template_service import (
     SYSTEM_PROMPT_TEMPLATE_ID,
     SYSTEM_PROMPT_TEMPLATE_NAME,
@@ -92,7 +88,6 @@ from services.prompt_template_service import (
 from utils.agent_transfer_utils import portable_tool_params, validate_import_tool_params
 from utils.auth_utils import get_current_user_info
 from utils.config_utils import tenant_config_manager
-from utils.knowledge_reference import optional_resources_from_params
 from utils.skill_import_utils import generate_available_copy_skill_name
 from utils.str_utils import convert_list_to_string, convert_string_to_list
 
@@ -723,34 +718,23 @@ async def import_agent_by_agent_id(
                              tenant_id=tenant_id,
                              user_id=user_id)
     new_agent_id = new_agent["agent_id"]
-    # Knowledge references inside the imported payload must not re-bind a
-    # resource that was deleted in this deployment, and the write must not
-    # interleave with a concurrent deletion of the same resource.
-    imported_refs = list(dict.fromkeys(
-        resource
-        for tool in tool_list
-        for resource in optional_resources_from_params(tool.params)
-    ))
-    if imported_refs:
-        reject_confirmed_deleted_knowledge_references(imported_refs, tenant_id=tenant_id)
     # create tool_instance
-    with knowledge_reference_write_guard(imported_refs):
-        for tool in tool_list:
-            tool.agent_id = new_agent_id
-            create_or_update_tool_by_tool_info(
-                tool_info=tool, tenant_id=tenant_id, user_id=user_id)
-        # Auto-publish initial version V1 for market-imported agents
-        try:
-            publish_version_impl(
-                agent_id=new_agent_id,
-                tenant_id=tenant_id,
-                user_id=user_id,
-                version_name="V1",
-                release_note="Initial version from Agent Market"
-            )
-        except Exception as e:
-            logger.warning(
-                f"Failed to auto-publish version V1 for agent {new_agent_id}: {str(e)}")
+    for tool in tool_list:
+        tool.agent_id = new_agent_id
+        create_or_update_tool_by_tool_info(
+            tool_info=tool, tenant_id=tenant_id, user_id=user_id)
+    # Auto-publish initial version V1 for market-imported agents
+    try:
+        publish_version_impl(
+            agent_id=new_agent_id,
+            tenant_id=tenant_id,
+            user_id=user_id,
+            version_name="V1",
+            release_note="Initial version from Agent Market"
+        )
+    except Exception as e:
+        logger.warning(
+            f"Failed to auto-publish version V1 for agent {new_agent_id}: {str(e)}")
     return new_agent_id
 
 

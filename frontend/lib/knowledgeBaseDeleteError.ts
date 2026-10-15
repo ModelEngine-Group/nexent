@@ -35,10 +35,6 @@ export function formatKnowledgeBaseDeleteError(
       : t("knowledgeBase.message.deleteBlocked");
   }
 
-  if (isErrorCode(error, ErrorCode.KNOWLEDGE_RESOURCE_BUSY)) {
-    return t("knowledgeBase.message.deleteBusy");
-  }
-
   if (error instanceof Error && error.message) {
     return error.message;
   }

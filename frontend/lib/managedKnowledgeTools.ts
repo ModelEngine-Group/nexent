@@ -32,39 +32,3 @@ export const isManagedKnowledgeTool = (
 export const isAidpManagedKnowledgeTool = (
   tool: Pick<Tool, "name" | "origin_name">
 ): boolean => getSemanticToolName(tool) === "aidp_search";
-
-/** Knowledge range param name per managed retrieval tool. */
-export const KNOWLEDGE_RANGE_PARAM_BY_TOOL_NAME: Record<string, string> = {
-  knowledge_base_search: "index_names",
-  aidp_search: "kds_list",
-};
-
-/** Return the persisted range param of a managed knowledge tool, or null. */
-export const getKnowledgeRangeParam = (
-  tool: Pick<Tool, "name" | "origin_name">
-): string | null =>
-  KNOWLEDGE_RANGE_PARAM_BY_TOOL_NAME[getSemanticToolName(tool)] ?? null;
-
-/**
- * Normalize a persisted or submitted knowledge id collection into unique ids.
- *
- * Accepts arrays, JSON-encoded strings, and comma separated legacy strings so a
- * removal diff can never miss an id because of its storage form.
- */
-export const parseKnowledgeIds = (value: unknown): string[] => {
-  const normalize = (values: unknown[]): string[] =>
-    Array.from(
-      new Set(values.map((item) => String(item).trim()).filter(Boolean))
-    );
-
-  if (Array.isArray(value)) return normalize(value);
-  if (typeof value !== "string" || !value.trim()) return [];
-  try {
-    const parsed = JSON.parse(value);
-    if (Array.isArray(parsed)) return normalize(parsed);
-    if (typeof parsed === "string") return normalize(parsed.split(","));
-  } catch {
-    return normalize(value.split(","));
-  }
-  return [];
-};

@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """
 AIDP Service Layer
 Handles API calls to AIDP for paginated knowledge base listing.
@@ -15,6 +17,8 @@ from nexent.utils.http_client_manager import http_client_manager
 from consts.const import AIDP_TENANT_ID
 from consts.error_code import ErrorCode
 from consts.exceptions import AppException
+from database.client import get_db_session
+from database.knowledge_reference_db import strip_deleted_resource_from_bindings
 
 
 logger = logging.getLogger("aidp_service")
@@ -1218,7 +1222,6 @@ def delete_aidp_kb_impl(
         )
         response = client.delete(delete_url, headers=headers)
         response.raise_for_status()
-        return True
     except httpx.RequestError as e:
         logger.exception("AIDP request failed: %s", e)
         raise AppException(
@@ -1247,11 +1250,15 @@ def delete_aidp_kb_impl(
                 "treating delete as success",
                 kds_id,
             )
-            return True
-        raise AppException(
-            ErrorCode.AIDP_SERVICE_ERROR,
-            f"AIDP API HTTP error {e.response.status_code}: {str(e)}",
-        )
+        else:
+            raise AppException(
+                ErrorCode.AIDP_SERVICE_ERROR,
+                f"AIDP API HTTP error {e.response.status_code}: {str(e)}",
+            )
+
+    with get_db_session() as session:
+        strip_deleted_resource_from_bindings(session, [("aidp", kds_id)])
+    return True
 
 
 def upload_aidp_docs_impl(

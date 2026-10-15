@@ -29,6 +29,7 @@ from consts.const import (
 from consts.error_code import ErrorCode
 from consts.exceptions import AppException, DuplicateError
 from database.attachment_db import delete_file, file_exists, get_file_stream
+from database.client import get_db_session
 from database.group_db import query_group_ids_by_user
 from database.knowledge_db import (
     create_knowledge_record,
@@ -44,6 +45,7 @@ from database.knowledge_file_lifecycle_db import (
     delete_file_records_for_knowledge_base,
     list_file_records,
 )
+from database.knowledge_reference_db import strip_deleted_resource_from_bindings
 from database.knowledge_storage_object_db import list_committed_storage_objects
 from database.model_management_db import get_model_by_model_id
 from database.user_tenant_db import get_user_tenant_by_user_id
@@ -76,10 +78,6 @@ from permissions.dac import ResourceAccessControl
 from permissions.models import Resource
 from services.asset_owner_visibility import postprocess_knowledge_visibility
 from services.group_service import get_tenant_default_group_id
-from services.knowledge_reference_service import (
-    knowledge_deletion_guard,
-    remove_knowledge_references,
-)
 from services.knowledge_storage_service import (
     release_storage_charge,
     resolve_storage_reference,
@@ -87,7 +85,6 @@ from services.knowledge_storage_service import (
 from services.redis_service import get_redis_service
 from utils.config_utils import tenant_config_manager
 from utils.file_management_utils import get_all_files_status, get_file_size
-from utils.knowledge_reference import PROVIDER_LOCAL
 from utils.storage_key_utils import build_preview_pdf_object_key
 from utils.str_utils import convert_list_to_string, convert_string_to_list
 
@@ -112,25 +109,7 @@ class KnowledgeBaseManagementService:
     @staticmethod
     async def full_delete_knowledge_base(index_name: str, vdb_core: VectorDatabaseCore, user_id: str):
         """
-        Completely delete a knowledge base, including its index, associated files in MinIO,
-        and all related records in Redis and PostgreSQL.
-
-        Delete the index and its files, then remove its bindings from agent
-        versions and conversations. The resource lock excludes concurrent
-        reference writes throughout deletion and binding cleanup.
-        """
-        resources = [(PROVIDER_LOCAL, index_name)]
-        with knowledge_deletion_guard(resources):
-            result = await KnowledgeBaseManagementService._full_delete_knowledge_base_locked(
-                index_name, vdb_core, user_id
-            )
-            remove_knowledge_references(resources)
-            return result
-
-    @staticmethod
-    async def _full_delete_knowledge_base_locked(index_name: str, vdb_core: VectorDatabaseCore, user_id: str):
-        """
-        Perform the full deletion while the caller holds the resource lock.
+        Delete the knowledge base and clean up its persisted bindings.
         """
         logger.debug(
             f"Starting full deletion process for knowledge base (index): {index_name}")
@@ -242,6 +221,8 @@ class KnowledgeBaseManagementService:
             if "errors" in redis_cleanup_result:
                 result["redis_warnings"] = redis_cleanup_result["errors"]
 
+            with get_db_session() as session:
+                strip_deleted_resource_from_bindings(session, [("local", index_name)])
             logger.info(
                 f"Successfully completed full deletion process for knowledge base '{index_name}'.")
             return result

@@ -11,10 +11,8 @@ import {
 import type { Agent, Skill, Tool } from "@/types/agentConfig";
 import {
   AIDP_NON_PERSISTED_PARAM_NAMES,
-  getKnowledgeRangeParam,
   isAidpManagedKnowledgeTool,
   isManagedKnowledgeTool,
-  parseKnowledgeIds,
 } from "@/lib/managedKnowledgeTools";
 
 export type AgentDraft = Pick<
@@ -419,37 +417,6 @@ const areToolParamsEqual = (left: Tool, right: Tool): boolean => {
   });
 };
 
-const readRangeIds = (tool: Tool): string[] => {
-  const rangeParam = getKnowledgeRangeParam(tool);
-  if (!rangeParam) return [];
-  const value = tool.initParams?.find(
-    (item) => item.name === rangeParam
-  )?.value;
-  return parseKnowledgeIds(value);
-};
-
-/**
- * Compute the knowledge ids the user explicitly removed from one tool.
- *
- * The diff uses the persisted selection from the server snapshot, so ids that
- * are no longer visible (deleted, permission changed, or unreachable) are
- * still reported as removals instead of being silently restored by the
- * backend merge.
- */
-const computeRemovedKnowledgeIds = (
-  savedTool: Tool | undefined,
-  currentTool: Tool
-): string[] => {
-  if (!savedTool) return [];
-  const rangeParam =
-    getKnowledgeRangeParam(currentTool) ?? getKnowledgeRangeParam(savedTool);
-  if (!rangeParam) return [];
-  const persistedIds = readRangeIds(savedTool);
-  if (persistedIds.length === 0) return [];
-  const selectedIds = new Set(readRangeIds(currentTool));
-  return persistedIds.filter((id) => !selectedIds.has(id));
-};
-
 async function persistToolChanges(
   agentId: number,
   currentTools: Tool[],
@@ -465,12 +432,7 @@ async function persistToolChanges(
       continue;
     }
     const savedTool = savedToolsById.get(Number(tool.id));
-    const removedKnowledgeIds = computeRemovedKnowledgeIds(savedTool, tool);
-    if (
-      savedTool &&
-      areToolParamsEqual(tool, savedTool) &&
-      removedKnowledgeIds.length === 0
-    ) {
+    if (savedTool && areToolParamsEqual(tool, savedTool)) {
       continue;
     }
 
@@ -478,8 +440,7 @@ async function persistToolChanges(
       Number(tool.id),
       agentId,
       toToolParams(tool),
-      true,
-      removedKnowledgeIds
+      true
     );
     if (!result.success) {
       throw new Error(result.message);
@@ -492,35 +453,6 @@ async function persistToolChanges(
       continue;
     }
     if (tool.is_available === false) {
-      continue;
-    }
-
-    const rangeParam = getKnowledgeRangeParam(tool);
-    if (rangeParam) {
-      // Removing the last knowledge base must clear the persisted range
-      // parameter instead of only disabling the tool, so the draft stops
-      // referencing the knowledge base. Non-range params come from the saved
-      // snapshot; when the snapshot carries none, fall back to the stored
-      // configuration so the removal never drops them.
-      const persistedIds = readRangeIds(tool);
-      let params: Record<string, unknown> = {
-        ...toToolParams(tool),
-        [rangeParam]: [],
-      };
-      if (Object.keys(params).length <= 1) {
-        const existingConfig = await searchToolConfig(toolId, agentId);
-        params = { ...(existingConfig.data?.params ?? {}), [rangeParam]: [] };
-      }
-      const result = await updateToolConfig(
-        toolId,
-        agentId,
-        params,
-        false,
-        persistedIds
-      );
-      if (!result.success) {
-        throw new Error(result.message);
-      }
       continue;
     }
 

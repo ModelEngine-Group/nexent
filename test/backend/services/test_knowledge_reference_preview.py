@@ -12,7 +12,7 @@ from pydantic import ValidationError
 
 import apps.knowledge_reference_app as routes
 import database.knowledge_reference_db as reference_db
-import services.knowledge_reference_service as service
+import management.services.agent.read as service
 from consts.const import ASSET_OWNER_TENANT_ID
 from consts.model import KnowledgeReferencePreviewRequest
 from middleware.exception_handler import ExceptionHandlerMiddleware
@@ -97,7 +97,8 @@ def test_preview_without_references_does_not_lookup_knowledge(monkeypatch):
     monkeypatch.setattr(service, "get_db_session", session)
     monkeypatch.setattr(service, "query_live_agent_reference_rows", lambda *args: [])
     context = MagicMock(side_effect=AssertionError("no agent metadata needed"))
-    monkeypatch.setattr(service, "build_visibility_context", context)
+    monkeypatch.setattr(service, "query_agent_reference_metadata", lambda *args, **kwargs: {})
+    monkeypatch.setattr(service, "get_user_tenant_by_user_id", context)
     assert service.collect_agent_reference_preview(
         [("aidp", "missing-kds")], user_id="u1", tenant_id="t1",
     ) == {"agents": [], "hidden_agent_count": 0, "total_agent_count": 0}
@@ -113,3 +114,33 @@ def test_preview_metadata_query_is_scoped_to_current_tenant_and_shared_assets():
     tenant_predicate = next(item for item in predicates if str(item.left).endswith(".tenant_id"))
     assert set(tenant_predicate.right.value) == {"t1", ASSET_OWNER_TENANT_ID}
     session.commit.assert_not_called()
+
+
+@pytest.mark.parametrize("role,expected_ids,hidden", [
+    ("ADMIN", [7, 8, 9, 10], 0), ("USER", [7, 9, 10], 1),
+])
+def test_preview_keeps_creator_shared_and_group_agents_but_hides_private_names(
+    monkeypatch, role, expected_ids, hidden,
+):
+    @contextmanager
+    def session():
+        yield object()
+
+    monkeypatch.setattr(service, "get_db_session", session)
+    monkeypatch.setattr(service, "query_live_agent_reference_rows", lambda *args: [
+        {"agent_id": 7, "version_no": 0}, {"agent_id": 7, "version_no": 1},
+        {"agent_id": 8, "version_no": 0}, {"agent_id": 9, "version_no": 0},
+        {"agent_id": 10, "version_no": 0},
+    ])
+    monkeypatch.setattr(service, "get_user_tenant_by_user_id", lambda _: {"user_role": role})
+    monkeypatch.setattr(service, "query_group_ids_by_user", lambda _: [1])
+    monkeypatch.setattr(service, "query_agent_reference_metadata", lambda *args, **kwargs: {
+        7: {"display_name": "A creator", "created_by": "u1"},
+        8: {"display_name": "B private", "created_by": "other", "group_ids": "1", "ingroup_permission": "PRIVATE"},
+        9: {"display_name": "C group", "created_by": "other", "group_ids": "1", "ingroup_permission": "READ_ONLY"},
+        10: {"display_name": "D shared", "tenant_id": ASSET_OWNER_TENANT_ID},
+    })
+    result = service.collect_agent_reference_preview([("aidp", "kds-1")], user_id="u1", tenant_id="t1")
+    assert [agent["agent_id"] for agent in result["agents"]] == expected_ids
+    assert result["hidden_agent_count"] == hidden
+    assert result["total_agent_count"] == 4

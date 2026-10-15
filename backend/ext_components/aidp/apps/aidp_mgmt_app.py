@@ -65,12 +65,7 @@ from ext_components.aidp.services.aidp_service import (
     update_aidp_kb_impl,
     upload_aidp_docs_impl,
 )
-from services.knowledge_reference_service import (
-    knowledge_deletion_guard,
-    remove_knowledge_references,
-)
 from utils import auth_utils as auth_utils_module
-from utils.knowledge_reference import PROVIDER_AIDP
 
 
 aidp_mgmt_router = APIRouter(prefix="/aidp-mgmt")
@@ -723,20 +718,16 @@ async def delete_knowledge_base(
     user_id, tenant_id = await _auth(request)
     perms.require_permission(kds_id, user_id, tenant_id, required="EDIT")
 
-    # Keep AIDP deletion and local binding cleanup under the same resource lock.
-    resources = [(PROVIDER_AIDP, kds_id)]
-    with knowledge_deletion_guard(resources):
-        server_url, api_key = _credentials()
-        success = delete_aidp_kb_impl(server_url, api_key, kds_id)
-        if success:
-            perms.soft_delete_permission(
-                kb_id=kds_id, tenant_id=tenant_id, updated_by=user_id,
-            )
-            invalidate_aidp_catalog_cache(server_url, api_key)
-            invalidate_aidp_kb_detail_cache(server_url, api_key, kds_id)
-            invalidate_aidp_doc_count_cache(server_url, api_key, kds_id)
-            _cleanup_document_assignments_for_deleted_knowledge_base(tenant_id, kds_id, user_id)
-            remove_knowledge_references(resources)
+    server_url, api_key = _credentials()
+    success = delete_aidp_kb_impl(server_url, api_key, kds_id)
+    if success:
+        perms.soft_delete_permission(
+            kb_id=kds_id, tenant_id=tenant_id, updated_by=user_id,
+        )
+        invalidate_aidp_catalog_cache(server_url, api_key)
+        invalidate_aidp_kb_detail_cache(server_url, api_key, kds_id)
+        invalidate_aidp_doc_count_cache(server_url, api_key, kds_id)
+        _cleanup_document_assignments_for_deleted_knowledge_base(tenant_id, kds_id, user_id)
     return JSONResponse(status_code=HTTPStatus.OK, content={"success": success})
 
 

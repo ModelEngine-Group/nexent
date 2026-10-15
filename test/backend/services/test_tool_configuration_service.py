@@ -390,32 +390,6 @@ sys.modules['nexent.multi_modal'] = MagicMock()
 sys.modules['nexent.multi_modal.utils'] = MagicMock()
 sys.modules['nexent.multi_modal.utils'].parse_s3_url = MagicMock(return_value=("bucket", "key"))
 
-# Register the shared knowledge-reference modules while the real packages are
-# still importable, then neutralize the cross-process resource lock so unit
-# tests do not need a live database connection. The lock behavior itself is
-# covered by the dedicated integration checks, not by these mocked tests.
-import contextlib as _contextlib  # noqa: E402
-
-for _knowledge_module_name in (
-    "utils.knowledge_reference",
-    "database.knowledge_reference_db",
-    "services.knowledge_reference_service",
-):
-    sys.modules.setdefault(
-        _knowledge_module_name,
-        importlib.import_module(_knowledge_module_name),
-    )
-
-_knowledge_reference_service_module = sys.modules["services.knowledge_reference_service"]
-
-
-@_contextlib.contextmanager
-def _noop_resource_lock(*args, **kwargs):
-    yield
-
-
-_knowledge_reference_service_module.acquire_lock_keys = _noop_resource_lock
-
 # Mock services modules before importing tool_configuration_service so absolute
 # imports inside that module do not walk into real service dependency chains.
 sys.modules['services'] = _create_package_mock('services')
@@ -5469,9 +5443,7 @@ class TestUpdateToolInfoImplAidpPermission:
         assert tool_info.params["kds_list"] == ["kb-old"]
 
     @patch("backend.services.tool_configuration_service.create_or_update_tool_by_tool_info")
-    @patch("backend.services.tool_configuration_service.query_tool_instances_by_id")
-    def test_non_aidp_tool_skips_aidp_merge(self, mock_existing, mock_create_update):
-        mock_existing.return_value = {"params": {"index_names": ["idx-1"]}}
+    def test_non_aidp_tool_skips_merge(self, mock_create_update):
         mock_create_update.return_value = {"id": 5}
         tool_info = self._request(["kb1"])
         tool_info.name = "knowledge_base_search"
@@ -5481,109 +5453,6 @@ class TestUpdateToolInfoImplAidpPermission:
         result = update_tool_info_impl(tool_info, "tenant1", "user1")
 
         assert result["tool_instance"] == {"id": 5}
-        # AIDP kds_list validation does not apply to the local knowledge tool;
-        # its persisted index_names are preserved when the caller did not edit
-        # the scope, and unrelated params pass through unchanged.
-        assert tool_info.params["kds_list"] == ["kb1"]
-        assert tool_info.params["index_names"] == ["idx-1"]
-
-    @staticmethod
-    def _local_request(index_names, removed=None):
-        request = Mock()
-        request.name = "knowledge_base_search"
-        request.tool_id = 8
-        request.agent_id = 3
-        request.params = {"index_names": index_names, "top_k": 5}
-        request.version_no = 0
-        if removed is not None:
-            request.removed_knowledge_ids = removed
-        return request
-
-    @patch("backend.services.tool_configuration_service.create_or_update_tool_by_tool_info")
-    @patch("backend.services.tool_configuration_service.query_tool_instances_by_id")
-    def test_rejects_unknown_removed_ids(self, mock_existing, mock_create_update):
-        from consts.exceptions import ValidationError
-
-        mock_existing.return_value = {"params": {"kds_list": ["kb-old"]}}
-        tool_info = self._request(["kb-old"])
-        tool_info.removed_knowledge_ids = ["kb-ghost"]
-
-        from backend.services.tool_configuration_service import update_tool_info_impl
-        with pytest.raises(ValidationError, match="currently bound"):
-            update_tool_info_impl(tool_info, "tenant1", "user1")
-        mock_create_update.assert_not_called()
-
-    @patch("backend.services.tool_configuration_service.create_or_update_tool_by_tool_info")
-    @patch("backend.services.tool_configuration_service.query_tool_instances_by_id")
-    def test_rejects_removed_ids_overlapping_submitted(self, mock_existing, mock_create_update):
-        from consts.exceptions import ValidationError
-
-        mock_existing.return_value = {"params": {"kds_list": ["kb-old"]}}
-        tool_info = self._request(["kb-old"])
-        tool_info.removed_knowledge_ids = ["kb-old"]
-
-        from backend.services.tool_configuration_service import update_tool_info_impl
-        with pytest.raises(ValidationError, match="must not overlap"):
-            update_tool_info_impl(tool_info, "tenant1", "user1")
-        mock_create_update.assert_not_called()
-
-    @patch("backend.services.tool_configuration_service.create_or_update_tool_by_tool_info")
-    @patch("backend.services.tool_configuration_service.query_tool_instances_by_id")
-    @patch("backend.services.tool_configuration_service.get_accessible_local_indices")
-    def test_local_merge_keeps_hidden_and_accepts_visible(
-        self, mock_access, mock_existing, mock_create_update
-    ):
-        mock_existing.return_value = {"params": {"index_names": ["idx-1", "idx-hidden"]}}
-        mock_create_update.return_value = {"id": 7}
-        mock_access.return_value = {"idx-1", "idx-2"}
-        tool_info = self._local_request(["idx-2"])
-
-        from backend.services.tool_configuration_service import update_tool_info_impl
-        result = update_tool_info_impl(tool_info, "tenant1", "user1")
-
-        assert result["tool_instance"] == {"id": 7}
-        # The stored binding the caller cannot see stays; the visible new one is added.
-        assert tool_info.params["index_names"] == ["idx-hidden", "idx-2"]
-
-    @patch("backend.services.tool_configuration_service.create_or_update_tool_by_tool_info")
-    @patch("backend.services.tool_configuration_service.query_tool_instances_by_id")
-    @patch("backend.services.tool_configuration_service.get_accessible_local_indices")
-    def test_local_new_unavailable_id_is_rejected(
-        self, mock_access, mock_existing, mock_create_update
-    ):
-        from consts.exceptions import ValidationError
-
-        mock_existing.return_value = {"params": {"index_names": []}}
-        mock_access.return_value = set()
-        tool_info = self._local_request(["idx-2"])
-
-        from backend.services.tool_configuration_service import update_tool_info_impl
-        with pytest.raises(ValidationError, match="index_names contains"):
-            update_tool_info_impl(tool_info, "tenant1", "user1")
-        mock_create_update.assert_not_called()
-
-    @patch("backend.services.tool_configuration_service.create_or_update_tool_by_tool_info")
-    @patch("backend.services.tool_configuration_service.query_tool_instances_by_id")
-    @patch("backend.services.tool_configuration_service.get_accessible_local_indices")
-    def test_local_lookup_failure_blocks_new_ids_but_keeps_removals(
-        self, mock_access, mock_existing, mock_create_update
-    ):
-        from consts.exceptions import ValidationError
-
-        mock_existing.return_value = {"params": {"index_names": ["idx-1"]}}
-        mock_create_update.return_value = {"id": 9}
-        mock_access.side_effect = RuntimeError("permission backend unavailable")
-        tool_info = self._local_request(["idx-2"])
-
-        from backend.services.tool_configuration_service import update_tool_info_impl
-        with pytest.raises(ValidationError, match="unavailable"):
-            update_tool_info_impl(tool_info, "tenant1", "user1")
-
-        # Removal-only saves still go through while the lookup is degraded.
-        mock_access.side_effect = RuntimeError("permission backend unavailable")
-        tool_info = self._local_request([], removed=["idx-1"])
-        update_tool_info_impl(tool_info, "tenant1", "user1")
-        assert tool_info.params["index_names"] == []
 
 
 @patch("backend.services.tool_configuration_service._resolve_aidp_snapshot")

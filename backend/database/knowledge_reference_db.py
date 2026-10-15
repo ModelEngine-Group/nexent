@@ -1,33 +1,18 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
-"""Reference queries and advisory locks backing the knowledge-base guards.
-
-The guards answer two questions without any remote call:
-
-* which non-deleted agent configurations reference a knowledge resource, and
-* which resource is currently being deleted (cross-process exclusion).
-
-References are stored as opaque JSON params, so candidate rows are narrowed by
-managed retrieval tool ids and then matched with an exact id comparison instead
-of a substring search.
-"""
+"""Query bound agents and remove deleted knowledge bases from persisted bindings."""
 
 from __future__ import annotations
 
 import json
-import logging
-import time
-from contextlib import contextmanager
 from copy import deepcopy
-from typing import Any, Dict, Iterable, Iterator, List, Optional, Sequence, Set, Tuple
+from typing import Any, Dict, Iterable, List, Sequence, Set, Tuple
 
-from sqlalchemy import String, cast, or_, text
+from sqlalchemy import String, cast, or_
 from sqlalchemy.orm import Session
 
 from consts.const import ASSET_OWNER_TENANT_ID
-from consts.error_code import ErrorCode
-from consts.exceptions import AppException
-from database.client import as_dict, get_db_session
+from database.client import as_dict
 from database.db_models import (
     AgentInfo,
     AgentVersion,
@@ -39,23 +24,32 @@ from database.db_models import (
     ToolInfo,
     ToolInstance,
 )
-from utils.knowledge_reference import (
-    KNOWLEDGE_RANGE_PARAM_BY_TOOL_NAME,
-    PROVIDER_AIDP,
-    PROVIDER_LOCAL,
-    RANGE_PARAM_BY_PROVIDER,
-    REFERENCE_ORIGIN_SKILL,
-    REFERENCE_ORIGIN_TOOL,
-    dedupe_ids,
-    parse_knowledge_id_list,
-)
 
 
-logger = logging.getLogger("knowledge_reference_db")
+PROVIDER_LOCAL = "local"
+PROVIDER_AIDP = "aidp"
+KNOWLEDGE_RANGE_PARAM_BY_TOOL_NAME = {
+    "knowledge_base_search": "index_names",
+    "aidp_search": "kds_list",
+}
+RANGE_PARAM_BY_PROVIDER = {PROVIDER_LOCAL: "index_names", PROVIDER_AIDP: "kds_list"}
+REFERENCE_ORIGIN_TOOL = "tool"
+REFERENCE_ORIGIN_SKILL = "skill"
 
-_RESOURCE_LOCK_TIMEOUT_SECONDS = 3.0
-_RESOURCE_LOCK_POLL_SECONDS = 0.05
 
+def _parse_knowledge_ids(value: Any) -> List[str]:
+    """Read lists or JSON arrays, as produced by the knowledge selectors."""
+    if isinstance(value, str):
+        try:
+            value = json.loads(value)
+        except json.JSONDecodeError:
+            return []
+    if not isinstance(value, list):
+        return []
+    return list(dict.fromkeys(
+        str(item).strip() for item in value
+        if type(item) in (str, int) and str(item).strip()
+    ))
 
 def _knowledge_tool_ids(session: Session, param_name: str) -> Set[int]:
     """Return ids of managed retrieval tools whose params may carry ``param_name``."""
@@ -101,7 +95,7 @@ def query_tool_instance_reference_rows(
         params = data.get("params") or {}
         if not isinstance(params, dict):
             continue
-        if not resource_ids.intersection(parse_knowledge_id_list(params.get(param_name))):
+        if not resource_ids.intersection(_parse_knowledge_ids(params.get(param_name))):
             continue
         rows.append(
             {
@@ -169,7 +163,7 @@ def query_skill_instance_reference_rows(
             continue
         effective_config: Dict[str, Any] = dict(skill.get("config_values") or {})
         effective_config.update(data.get("config_values") or {})
-        if not resource_ids.intersection(parse_knowledge_id_list(effective_config.get(param_name))):
+        if not resource_ids.intersection(_parse_knowledge_ids(effective_config.get(param_name))):
             continue
         rows.append(
             {
@@ -311,7 +305,7 @@ def strip_deleted_resource_from_bindings(
             if not isinstance(params, dict):
                 continue
             current = params.get(param_name)
-            ids = parse_knowledge_id_list(current)
+            ids = _parse_knowledge_ids(current)
             if not target_ids.intersection(ids):
                 continue
             names = params.get("display_names")
@@ -346,7 +340,7 @@ def strip_deleted_resource_from_bindings(
         updated = dict(config_values)
         for param_name, target_ids in targets_by_param.items():
             current = config_values.get(param_name)
-            ids = parse_knowledge_id_list(current)
+            ids = _parse_knowledge_ids(current)
             if not target_ids.intersection(ids):
                 continue
             kept_ids = [item for item in ids if item not in target_ids]
@@ -449,155 +443,3 @@ def query_agent_reference_metadata(
         data = as_dict(row) or {}
         metadata[int(data["agent_id"])] = data
     return metadata
-
-
-def query_local_knowledge_records(
-    session: Session,
-    index_names: Sequence[str],
-    *,
-    include_deleted: bool = False,
-) -> Dict[str, Dict[str, Any]]:
-    """Return knowledge records keyed by index name."""
-    names = dedupe_ids(index_names)
-    if not names:
-        return {}
-    query = session.query(KnowledgeRecord).filter(KnowledgeRecord.index_name.in_(tuple(names)))
-    if not include_deleted:
-        query = query.filter(KnowledgeRecord.delete_flag != "Y")
-    records: Dict[str, Dict[str, Any]] = {}
-    for record in query.all():
-        data = as_dict(record) or {}
-        index_name = data.get("index_name")
-        if not index_name:
-            continue
-        records[str(index_name)] = data
-    return records
-
-
-def query_deleted_local_knowledge_ids(
-    session: Session,
-    index_names: Sequence[str],
-) -> Set[str]:
-    """Return ids that were confirmed deleted inside this deployment.
-
-    A soft-deleted record proves the resource is gone here, which is stronger
-    evidence than "not found" and is used to reject late reference writes.
-    """
-    names = dedupe_ids(index_names)
-    if not names:
-        return set()
-    rows = (
-        session.query(KnowledgeRecord.index_name)
-        .filter(
-            KnowledgeRecord.index_name.in_(tuple(names)),
-            KnowledgeRecord.delete_flag == "Y",
-        )
-        .all()
-    )
-    return {str(row[0]) for row in rows if row[0]}
-
-
-def query_knowledge_tool_params_by_ids(
-    session: Session,
-    tool_ids: Sequence[int],
-) -> Dict[int, str]:
-    """Map tool ids to the knowledge range param they persist, if any.
-
-    Used by reference-writing paths that must know whether a given tool can
-    introduce a knowledge reference without loading every tool record.
-    """
-    ids = sorted({int(tool_id) for tool_id in tool_ids})
-    if not ids:
-        return {}
-    rows = (
-        session.query(ToolInfo.tool_id, ToolInfo.name)
-        .filter(
-            ToolInfo.tool_id.in_(tuple(ids)),
-            ToolInfo.delete_flag != "Y",
-        )
-        .all()
-    )
-    params: Dict[int, str] = {}
-    for tool_id, name in rows:
-        param_name = KNOWLEDGE_RANGE_PARAM_BY_TOOL_NAME.get(name)
-        if tool_id is not None and param_name:
-            params[int(tool_id)] = param_name
-    return params
-
-
-def query_deleted_aidp_kb_ids(    session: Session,
-    kb_ids: Sequence[str],
-    tenant_id: Optional[str] = None,
-) -> Set[str]:
-    """Return AIDP knowledge ids whose local permission record was soft deleted."""
-    from ext_components.aidp.database.aidp_permission_db import AidpKbPermission
-
-    ids = dedupe_ids(kb_ids)
-    if not ids:
-        return set()
-    query = session.query(AidpKbPermission.kb_id).filter(
-        AidpKbPermission.kb_id.in_(tuple(ids)),
-        AidpKbPermission.delete_flag == "Y",
-    )
-    if tenant_id:
-        query = query.filter(AidpKbPermission.tenant_id == tenant_id)
-    rows = query.all()
-    return {str(row[0]) for row in rows if row[0]}
-
-
-@contextmanager
-def acquire_lock_keys(
-    keys: Iterable[int],
-    *,
-    timeout_seconds: float = _RESOURCE_LOCK_TIMEOUT_SECONDS,
-) -> Iterator[None]:
-    """Hold PostgreSQL session advisory locks for every key in stable order.
-
-    Locks live on a dedicated connection so no transaction stays open while an
-    external deletion runs. Multiple resources are locked in ascending key
-    order to avoid deadlocks between concurrent multi-resource writers, and a
-    bounded wait keeps a stuck holder from hanging unrelated requests.
-    """
-    sorted_keys = sorted({int(key) for key in keys})
-    if not sorted_keys:
-        yield
-        return
-    keys = sorted_keys
-
-    # The session keeps its pooled connection for the whole context, so the
-    # session-level advisory locks stay valid without holding an open
-    # transaction across the external deletion.
-    with get_db_session() as session:
-        acquired: List[int] = []
-        try:
-            deadline = time.monotonic() + max(timeout_seconds, 0.0)
-            while True:
-                for key in keys:
-                    if key in acquired:
-                        continue
-                    locked = session.execute(
-                        text("SELECT pg_try_advisory_lock(:key)"), {"key": key}
-                    ).scalar()
-                    if locked:
-                        acquired.append(key)
-                if len(acquired) == len(keys):
-                    break
-                if time.monotonic() >= deadline:
-                    raise AppException(
-                        ErrorCode.KNOWLEDGE_RESOURCE_BUSY,
-                        "The knowledge base is busy with another operation; try again later",
-                        details={"remaining_locks": len(keys) - len(acquired)},
-                    )
-                time.sleep(_RESOURCE_LOCK_POLL_SECONDS)
-            yield
-        finally:
-            for key in acquired:
-                try:
-                    session.execute(
-                        text("SELECT pg_advisory_unlock(:key)"), {"key": key}
-                    )
-                except Exception:
-                    logger.warning(
-                        "Failed to release knowledge resource lock %s; it is released when the connection closes",
-                        key,
-                    )

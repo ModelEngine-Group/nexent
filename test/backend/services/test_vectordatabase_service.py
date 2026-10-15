@@ -22,6 +22,14 @@ from fastapi.responses import StreamingResponse
 
 
 @pytest.fixture(autouse=True)
+def isolate_binding_cleanup(monkeypatch):
+    """Storage deletion tests isolate binding persistence, tested separately."""
+    module = importlib.import_module("management.services.knowledge_base.management")
+    monkeypatch.setattr(module, "get_db_session", MagicMock())
+    monkeypatch.setattr(module, "strip_deleted_resource_from_bindings", MagicMock())
+
+
+@pytest.fixture(autouse=True)
 def isolate_list_tag_projection(monkeypatch):
     """Keep list tests independent from tag persistence, which has its own tests."""
     module = types.ModuleType("services.resource_tag_projection")
@@ -336,39 +344,6 @@ sys.modules['redis.client'] = MagicMock()
 sys.modules['redis.connection'] = MagicMock()
 sys.modules['redis.lock'] = MagicMock()
 
-# Register the shared knowledge-reference modules while the real packages are
-# still importable, then neutralize the cross-process resource lock so unit
-# tests do not need a live database connection. The lock behavior itself is
-# covered by the dedicated integration checks, not by these mocked tests.
-import contextlib as _contextlib  # noqa: E402
-
-for _knowledge_module_name in (
-    "utils.knowledge_reference",
-    "database.knowledge_reference_db",
-    "services.knowledge_reference_service",
-):
-    sys.modules.setdefault(
-        _knowledge_module_name,
-        importlib.import_module(_knowledge_module_name),
-    )
-
-_knowledge_reference_service_module = sys.modules["services.knowledge_reference_service"]
-
-
-@_contextlib.contextmanager
-def _noop_resource_lock(*args, **kwargs):
-    yield
-
-
-_knowledge_reference_service_module.acquire_lock_keys = _noop_resource_lock
-
-# The delete flow strips draft bindings through a real database session; these
-# mocked tests do not own a database, so stub the cleanup out. Its behavior is
-# covered by the dedicated integration checks.
-_knowledge_reference_service_module.remove_knowledge_references = (
-    lambda *args, **kwargs: {"tool_instances": 0, "skill_instances": 0}
-)
-
 # Mock services.* modules that vectordatabase_service imports
 # These must be registered in sys.modules so import can find them
 sys.modules['services'] = _create_package_mock('services')
@@ -517,20 +492,6 @@ with patch('botocore.client.BaseClient._make_api_call'), \
     from management.services.knowledge_base.deletion import KnowledgeBaseDocumentDeletionService
     from management.services.knowledge_base.management import KnowledgeBaseManagementService
     from management.services.knowledge_base.service import ElasticSearchService, check_knowledge_base_exist_impl, KnowledgeBaseNeedsModelConfigError
-
-# The knowledge-reference deletion guard queries the database for agent
-# references, which these mocked unit tests do not provide. Its blocking
-# behavior is verified by dedicated integration checks; here it is replaced by
-# a pass-through context manager so the deletion flows stay testable.
-import management.services.knowledge_base.management as _kb_management_module  # noqa: E402
-
-
-@_contextlib.contextmanager
-def _noop_deletion_guard(*args, **kwargs):
-    yield
-
-
-_kb_management_module.knowledge_deletion_guard = _noop_deletion_guard
 
 
 def _accurate_search_impl(request, vdb_core):

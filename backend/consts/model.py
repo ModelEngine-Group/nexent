@@ -1395,7 +1395,6 @@ class ToolInstanceInfoRequest(BaseModel):
     # Optional explicit removal intent for managed knowledge tools. Every id
     # must already be persisted on the draft tool instance and must not appear
     # in the submitted params. Not persisted and never forwarded to the SDK.
-    removed_knowledge_ids: Optional[List[str]] = None
 
 
 class KnowledgeReferencePreviewRequest(BaseModel):

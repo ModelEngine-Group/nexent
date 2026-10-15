@@ -10,7 +10,7 @@ from fastapi.responses import JSONResponse
 from nexent.core.concurrency import run_blocking
 
 from consts.model import KnowledgeReferencePreviewRequest
-from services.knowledge_reference_service import collect_agent_reference_preview
+from management.services.agent.read import collect_agent_reference_preview
 from utils.auth_utils import get_current_user_id
 
 

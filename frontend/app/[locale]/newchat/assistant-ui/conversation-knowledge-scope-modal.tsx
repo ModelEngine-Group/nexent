@@ -179,20 +179,16 @@ export const ConversationKnowledgeScopeModal: FC<
           );
         setLocalKnowledgeBases(localItems);
         setAidpKnowledgeBases(aidpItems);
-        // Configured ids keep unavailable inherited items visible and marked;
-        // the permission-filtered defaults are only a fallback for older
-        // backends that do not report configured ids.
-        const configuredIds =
-          (configuredSource
-            ? capabilities?.sources[configuredSource].configured_knowledge_ids
-            : undefined) ?? [];
-        const accessibleIds =
+        const availableIds = new Set(
+          configuredSource === "local"
+            ? localItems.map((kb: KnowledgeBase) => String(kb.knowledge_id))
+            : aidpItems.map((kb: KnowledgeBase) => String(kb.id))
+        );
+        const defaults =
           (configuredSource
             ? capabilities?.sources[configuredSource].default_knowledge_ids
-            : undefined) ?? [];
-        const defaults = (
-          configuredIds.length ? configuredIds : accessibleIds
-        ).map(String);
+            : []
+          )?.filter((id) => availableIds.has(String(id))) ?? [];
         const selected =
           configuredSource === "local"
             ? normalized.local.mode === "override"
@@ -207,13 +203,14 @@ export const ConversationKnowledgeScopeModal: FC<
                   ? []
                   : defaults
               : [];
-        // Unavailable selections are kept (they are marked with a warning and
-        // stay removable) instead of being dropped when the list no longer
-        // contains them.
-        const visibleSelected = selected.map(String);
+        const visibleSelected = selected.filter((id) =>
+          availableIds.has(String(id))
+        );
         setDefaultSelectedIds(defaults.map(String));
         setInitialSelectedIds(visibleSelected.map(String));
-        setInitialSelectionWasFiltered(false);
+        setInitialSelectionWasFiltered(
+          selected.length !== visibleSelected.length
+        );
         setDraft(
           configuredSource === "local"
             ? {
@@ -486,26 +483,9 @@ export const ConversationKnowledgeScopeModal: FC<
       )
     );
     const selectedSet = new Set(values);
-    const loadedSelected = allKnowledgeBases.filter((knowledgeBase) =>
+    const selectedKnowledgeBases = allKnowledgeBases.filter((knowledgeBase) =>
       selectedSet.has(getKnowledgeBaseId(source, knowledgeBase))
     );
-    // Selected ids the loaded list no longer contains stay visible as
-    // placeholder entries so the user can still remove them explicitly.
-    const missingSelected: KnowledgeBase[] = values
-      .filter(
-        (id) =>
-          !allKnowledgeBases.some((kb) => getKnowledgeBaseId(source, kb) === id)
-      )
-      .map(
-        (id) =>
-          ({
-            id,
-            knowledge_id: id,
-            name: id,
-            display_name: id,
-          }) as unknown as KnowledgeBase
-      );
-    const selectedKnowledgeBases = [...loadedSelected, ...missingSelected];
     const selectedLocalModel =
       source === "local"
         ? selectedKnowledgeBases[0]
@@ -571,13 +551,10 @@ export const ConversationKnowledgeScopeModal: FC<
         <div className="rounded bg-blue-50 px-4 py-3">
           <div className="flex items-center justify-between gap-3">
             <SelectedResourceTags
-              items={selectedKnowledgeBases.map((kb) => {
-                const id = getKnowledgeBaseId(source, kb);
-                return {
-                  id,
-                  name: kb.display_name || kb.name,
-                };
-              })}
+              items={selectedKnowledgeBases.map((kb) => ({
+                id: getKnowledgeBaseId(source, kb),
+                name: kb.display_name || kb.name,
+              }))}
               onRemove={(id) => toggleKnowledgeBase(source, id)}
             />
             <ResourceSelectionActions

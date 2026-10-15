@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import importlib.util
 import json
 import logging
@@ -56,6 +58,10 @@ def aidp_service_module():
     module.__package__ = "backend.services"
     register_module(module_name, module)
     spec.loader.exec_module(module)
+
+    # Remote API tests isolate binding persistence, covered by cascade tests.
+    module.get_db_session = MagicMock()
+    module.strip_deleted_resource_from_bindings = MagicMock()
 
     try:
         yield module

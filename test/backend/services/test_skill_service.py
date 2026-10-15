@@ -180,9 +180,6 @@ consts_const_mock.CAN_EDIT_ALL_USER_ROLES = {"ADMIN"}
 consts_const_mock.PERMISSION_EDIT = "EDIT"
 consts_const_mock.PERMISSION_PRIVATE = "PRIVATE"
 consts_const_mock.PERMISSION_READ = "READ_ONLY"
-# Constants consumed by the shared knowledge-reference guard modules.
-consts_const_mock.ASSET_OWNER_ROLE = "ASSET_OWNER"
-consts_const_mock.ASSET_OWNER_TENANT_ID = "asset_owner_tenant_id"
 consts_exceptions_mock = types.ModuleType('consts.exceptions')
 
 class SkillException(Exception):
@@ -308,17 +305,6 @@ database_db_models_mock.SkillInfo = MagicMock()
 database_db_models_mock.KnowledgeRecord = MagicMock()
 database_db_models_mock.KnowledgeFileLifecycle = MagicMock()
 database_db_models_mock.KnowledgeStorageObject = MagicMock()
-# Models read by the knowledge-reference guard shared module.
-for _reference_model_name in (
-    'AgentInfo',
-    'AgentVersion',
-    'ConversationRecord',
-    'SkillInstance',
-    'SkillToolRelation',
-    'ToolInfo',
-    'ToolInstance',
-):
-    setattr(database_db_models_mock, _reference_model_name, MagicMock())
 database_group_db_mock = types.ModuleType('database.group_db')
 database_group_db_mock.query_group_ids_by_user = MagicMock(return_value=[])
 database_user_tenant_db_mock = types.ModuleType('database.user_tenant_db')
