@@ -658,7 +658,7 @@ const ThreadListItems: FC<ThreadListItemsProps> = ({
             <button
               type="button"
               data-slot="aui_thread-list-group-label"
-              className="flex h-10 items-center gap-3 px-3 text-left text-[14px] text-[#191919] hover:bg-white/70"
+              className="flex h-10 items-center gap-3 rounded-lg px-3 text-left text-[14px] text-[#191919] hover:bg-white/70"
               onClick={() => onToggleAgentExpanded(groupKey)}
               aria-expanded={isExpanded}
             >
