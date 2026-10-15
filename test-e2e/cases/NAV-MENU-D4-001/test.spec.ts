@@ -202,10 +202,16 @@ scenario("[NAV-MENU-D4-001] hover rail overlays content and holds account popup"
   await expect(item.locator('.ant-typography')).toHaveCSS('font-size', '14px');
   await expect(item.locator('.ant-typography')).toHaveCSS('cursor', 'pointer');
   const labelGap = await item.evaluate(el => el.querySelector('.ant-typography').getBoundingClientRect().left - el.querySelector('svg').getBoundingClientRect().right);
-  expect(labelGap).toBe(14);
+  expect(labelGap).toBe(8);
+  for (const navItem of await page.getByRole('navigation').getByRole('button').all()) {
+    const gap = await navItem.evaluate(el => el.querySelector('.ant-typography').getBoundingClientRect().left - el.querySelector('svg').getBoundingClientRect().right);
+    expect(gap).toBe(8);
+  }
   const account = page.getByRole('button', { name: text['accountMenu.open'], exact: true });
   await expect(account).toHaveCSS('cursor', 'pointer');
-  await expect(account.locator('.ant-typography')).toHaveCSS('margin-left', '0px');
+  await expect(account.locator('.ant-typography')).toHaveCSS('margin-left', '-6px');
+  const accountGap = await account.evaluate(el => el.querySelector('.ant-typography').getBoundingClientRect().left - el.querySelector('.ant-avatar').getBoundingClientRect().right);
+  expect(accountGap).toBe(8);
   const positions = await item.evaluate(el => { const icon=el.querySelector('svg').getBoundingClientRect(); const label=el.querySelector('.ant-typography').getBoundingClientRect(); return { iconY:icon.y+icon.height/2, labelY:label.y+label.height/2 }; });
   expect(Math.abs(positions.iconY-positions.labelY)).toBeLessThanOrEqual(1);
   await item.locator('.ant-typography').hover();

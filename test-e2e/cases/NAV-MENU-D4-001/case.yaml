@@ -57,7 +57,7 @@ case:
     expected: Global header/footer are absent; identity, version, copyright, gated links and selected-language submenu match design and English preserves the route.
   - order: 5
     action: Inspect collapsed icons, hover sidebar, compare content position, inspect inline/truncated localized labels, leave and reopen account popup.
-    expected: 'Rail expands64 to240px without content movement; a0.5px solid right divider with #191919 at15% opacity is visible only when collapsed and hidden when expanded; interactive sidebar items show a pointer cursor and labels omit the extra8px margin while preserving icon and font sizes; collapsed text is absent, long brand title is16px bold and clipped with a full-name tooltip, long menu text tooltip works, exit collapses and account popup holds expansion without profile-route prefetch requests.'
+    expected: 'Rail expands64 to240px without content movement; a0.5px solid right divider with #191919 at15% opacity is visible only when collapsed and hidden when expanded; interactive sidebar items show a pointer cursor and all sidebar icons and labels have an8px visual gap while preserving icon and font sizes; collapsed text is absent, long brand title is16px bold and clipped with a full-name tooltip, long menu text tooltip works, exit collapses and account popup holds expansion without profile-route prefetch requests.'
   expected_results:
   - Both inert section buttons are absent; authorized children remain and denied routes
     stay hidden. Chat navigates to localized newchat and child pages remain usable.

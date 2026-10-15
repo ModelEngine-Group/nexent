@@ -4,7 +4,7 @@ change:
   change_type: requirement
   requirement_id: NAV-MENU-REQ-004
   title: Refine the sidebar brand title and overflow
-  description: Apply the documented Title 2 typography to the logo name with constrained single-line ellipsis and a full-name tooltip; show the inspected 0.5px vertical divider only while collapsed, use a pointer cursor for interactive items and remove the extra8px label margin throughout the expanded sidebar without changing icon or font sizes.
+  description: Apply the documented Title 2 typography to the logo name with constrained single-line ellipsis and a full-name tooltip; show the inspected 0.5px vertical divider only while collapsed, use a pointer cursor for interactive items and use an8px visual gap between all expanded sidebar icons and labels without changing icon or font sizes.
   affected_features:
     existing: []
     added: []
