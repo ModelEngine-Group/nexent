@@ -1,8 +1,10 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import {
+  ChevronLeftIcon,
   PanelLeftIcon,
   PlusIcon,
   SearchIcon,
-  Sparkle,
   XIcon,
 } from "lucide-react";
 import { useState } from "react";
@@ -53,20 +55,6 @@ interface ThreadListSidebarProps extends SidebarProps {
   newChatDesign?: boolean;
   /** Accepted for backward compatibility; the design removed the legacy switch. */
   showLegacySwitch?: boolean;
-}
-
-// "Discover agents" glyph: a magnifier with a sparkle at its top-right,
-// matching the design's AI-discovery icon.
-function DiscoverAgentsIcon({ className }: { className?: string }) {
-  return (
-    <span className={cn("relative inline-flex shrink-0", className)}>
-      <SearchIcon className="size-4" aria-hidden />
-      <Sparkle
-        className="absolute -right-1 -top-1 size-2 fill-current"
-        aria-hidden
-      />
-    </span>
-  );
 }
 
 export function ThreadListSidebar({
@@ -155,6 +143,21 @@ export function ThreadListSidebar({
                 <div className="flex flex-col gap-2 px-1">
                   {newChatDesign ? (
                     <div className="flex items-center gap-1">
+                      {/* Back chevron: returns to the discover-agents landing
+                          page (same handler the old filled button used).
+                          -mr-3 pulls the dropdown trigger over the button's
+                          inner padding so the title sits close to the glyph. */}
+                      {onPrepareNewConversation && (
+                        <TooltipIconButton
+                          tooltip={t("chat.sidebar.discoverAgents")}
+                          variant="ghost"
+                          size="icon"
+                          className="size-8 shrink-0 -mr-3"
+                          onClick={onPrepareNewConversation}
+                        >
+                          <ChevronLeftIcon className="size-4" />
+                        </TooltipIconButton>
+                      )}
                       {onAgentSelected && (
                         <div className="min-w-0 flex-1">
                           <AgentSelectorDropdown
@@ -215,32 +218,25 @@ export function ThreadListSidebar({
                       }
                     />
                   )}
-                  {newChatDesign ? (
-                    <ThreadListPrimitive.New
-                      className="flex h-9 w-full items-center gap-2 rounded-lg border px-3 text-sm hover:bg-muted truncate bg-[#e4e4e4] border-[#e4e4e4]"
-                      onClick={onPrepareNewConversation}
-                    >
-                      <DiscoverAgentsIcon className="size-4" />
-                      {t("chat.sidebar.discoverAgents")}
-                    </ThreadListPrimitive.New>
-                  ) : onNewConversation ? (
-                    <button
-                      type="button"
-                      className="flex h-9 flex-1 items-center gap-2 rounded-lg px-3 text-sm hover:bg-muted truncate"
-                      onClick={onNewConversation}
-                    >
-                      <PlusIcon className="size-4 shrink-0" />
-                      {t("chat.sidebar.newConversation")}
-                    </button>
-                  ) : (
-                    <ThreadListPrimitive.New
-                      className="flex h-9 flex-1 items-center gap-2 rounded-lg px-3 text-sm hover:bg-muted truncate"
-                      onClick={onPrepareNewConversation}
-                    >
-                      <PlusIcon className="size-4 shrink-0" />
-                      {t("chat.sidebar.newConversation")}
-                    </ThreadListPrimitive.New>
-                  )}
+                  {!newChatDesign &&
+                    (onNewConversation ? (
+                      <button
+                        type="button"
+                        className="flex h-9 flex-1 items-center gap-2 rounded-lg px-3 text-sm hover:bg-muted truncate"
+                        onClick={onNewConversation}
+                      >
+                        <PlusIcon className="size-4 shrink-0" />
+                        {t("chat.sidebar.newConversation")}
+                      </button>
+                    ) : (
+                      <ThreadListPrimitive.New
+                        className="flex h-9 flex-1 items-center gap-2 rounded-lg px-3 text-sm hover:bg-muted truncate"
+                        onClick={onPrepareNewConversation}
+                      >
+                        <PlusIcon className="size-4 shrink-0" />
+                        {t("chat.sidebar.newConversation")}
+                      </ThreadListPrimitive.New>
+                    ))}
                 </div>
               </SidebarHeader>
               <SidebarContent className="focus:outline-none">

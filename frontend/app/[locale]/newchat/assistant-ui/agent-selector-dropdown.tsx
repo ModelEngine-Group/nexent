@@ -111,7 +111,7 @@ export const AgentSelectorDropdown: FC<AgentSelectorDropdownProps> = ({
     >
       <button
         type="button"
-        className="flex w-full cursor-pointer items-center gap-1.5 rounded-[4px] px-2 py-1 text-[16px] leading-[24px] text-[#191919] hover:bg-white"
+        className="flex w-full cursor-pointer items-center gap-1.5 rounded-[4px] py-1 pl-0.5 pr-2 text-[16px] leading-[24px] text-[#191919] hover:bg-white"
       >
         <span className="min-w-0 flex-1 truncate text-left">
           {selectedAgent?.display_name ||
