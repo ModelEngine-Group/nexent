@@ -1,3 +1,5 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 "use client";
 
 import {
@@ -9,7 +11,7 @@ import {
 } from "react";
 import { useTranslation } from "react-i18next";
 import { App, Avatar, Button, Col } from "antd";
-import { ChevronRight, Plus, Search, Trash2, X } from "lucide-react";
+import { ExternalLink, Plus, Search, Trash2, X } from "lucide-react";
 
 import { AddAgentDrawer } from "@/components/resource-picker/AddAgentDrawer";
 import A2AAgentDiscoveryModal from "./a2a/A2AAgentDiscoveryModal";
@@ -151,7 +153,7 @@ export function CollaborativeAgentActions({
     >
       <span className="inline-flex items-center gap-1">
         {t("agentConfig.layout.thirdPartyAgent")}
-        <ChevronRight size={14} />
+        <ExternalLink size={14} />
       </span>
     </Button>
   );
@@ -427,6 +429,7 @@ export default function CollaborativeAgent({
           <SelectedResourceRow
             key={`internal-${agent.id}`}
             data-testid={`agent-selected-child-internal-${agent.id}`}
+            className="shadow-none"
             icon={
               <AgentAvatar
                 agent={agent}
@@ -482,6 +485,7 @@ export default function CollaborativeAgent({
         <SelectedResourceRow
           key={`external-${agent.id}`}
           data-testid={`agent-selected-child-external-${agent.id}`}
+          className="shadow-none"
           icon={
             <Avatar
               shape="square"

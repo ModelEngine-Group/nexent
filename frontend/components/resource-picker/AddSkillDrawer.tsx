@@ -1,9 +1,11 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Button } from "antd";
-import { BlocksIcon, Eye, Pencil, Settings, Tag } from "lucide-react";
+import { Settings, Tag } from "lucide-react";
 
 import { AddResourceDrawer, CheckMark } from "./AddResourceDrawer";
 import { useSkillList } from "@/hooks/agent/useSkillList";
@@ -12,8 +14,9 @@ import { cn } from "@/lib/utils";
 import { fetchSkillInstances } from "@/services/agentConfigService";
 import { useAgentStore } from "@/stores/agentStore";
 import type { Skill, SkillGroup, SkillParam } from "@/types/agentConfig";
-import SkillDetailModal from "@/app/agents/components/capability/SkillDetailModal";
 import SkillConfigModal from "@/app/agents/components/capability/skill/SkillConfigModal";
+
+import styles from "./ResourcePickerDrawer.module.css";
 
 const PAGE_SIZE = 10;
 
@@ -76,7 +79,6 @@ export interface AddSkillDrawerProps {
   onClose: () => void;
   onOpenManageTags?: () => void;
   onOpenTagManagement?: () => void;
-  onEditSkill?: (skill: Skill) => void;
   currentAgentId?: number;
   isReadOnly?: boolean;
 }
@@ -104,7 +106,6 @@ export function AddSkillDrawer({
   onClose,
   onOpenManageTags,
   onOpenTagManagement,
-  onEditSkill,
   currentAgentId,
   isReadOnly,
 }: AddSkillDrawerProps) {
@@ -116,7 +117,6 @@ export function AddSkillDrawer({
   const [activeTag, setActiveTag] = useState("");
   const [activeTab, setActiveTab] = useState("");
   const [page, setPage] = useState(1);
-  const [detailSkill, setDetailSkill] = useState<Skill | null>(null);
   const [configSkill, setConfigSkill] = useState<Skill | null>(null);
   const [skillInstanceMap, setSkillInstanceMap] = useState<
     Record<string, Record<string, unknown>>
@@ -126,9 +126,19 @@ export function AddSkillDrawer({
     (state) => state.editedAgent?.skills ?? EMPTY_SKILLS
   );
   const updateSkills = useAgentStore((state) => state.updateSkills);
+
+  // Local draft of the selected skills. Changes are only committed to the
+  // agent store when the confirm button is clicked.
+  const [draftSkills, setDraftSkills] = useState<Skill[]>([]);
+
+  useEffect(() => {
+    if (!open) return;
+    setDraftSkills(selectedSkills);
+  }, [open, selectedSkills]);
+
   const selectedSkillIds = useMemo(
-    () => new Set(selectedSkills.map((skill) => Number(skill.skill_id))),
-    [selectedSkills]
+    () => new Set(draftSkills.map((skill) => Number(skill.skill_id))),
+    [draftSkills]
   );
 
   const allTags = useMemo(() => {
@@ -205,19 +215,16 @@ export function AddSkillDrawer({
     const catalogById = new Map(
       catalogSkills.map((skill: Skill) => [Number(skill.skill_id), skill])
     );
-    return selectedSkills.map((skill) => {
+    return draftSkills.map((skill) => {
       const persistedSkill = skill as Skill & { skill_name?: string };
       const canonicalSkill = catalogById.get(Number(skill.skill_id));
       return {
         id: String(skill.skill_id),
         label:
-          skill.name ||
-          persistedSkill.skill_name ||
-          canonicalSkill?.name ||
-          "",
+          skill.name || persistedSkill.skill_name || canonicalSkill?.name || "",
       };
     });
-  }, [availableSkills, selectedSkills]);
+  }, [availableSkills, draftSkills]);
 
   const total = activeGroup?.skills.length ?? 0;
   const pagedSkills = useMemo(() => {
@@ -280,15 +287,14 @@ export function AddSkillDrawer({
     (skill: Skill) => {
       if (isReadOnly) return;
 
-      const currentSkills = useAgentStore.getState().editedAgent?.skills ?? [];
-      const isSelected = currentSkills.some(
+      const isSelected = draftSkills.some(
         (selectedSkill) =>
           Number(selectedSkill.skill_id) === Number(skill.skill_id)
       );
 
       if (isSelected) {
-        updateSkills(
-          currentSkills.filter(
+        setDraftSkills((current) =>
+          current.filter(
             (selectedSkill) =>
               Number(selectedSkill.skill_id) !== Number(skill.skill_id)
           )
@@ -309,45 +315,38 @@ export function AddSkillDrawer({
         return;
       }
 
-      updateSkills([...currentSkills, configuredSkill]);
+      setDraftSkills((current) => [...current, configuredSkill]);
     },
-    [isReadOnly, skillInstanceMap, updateSkills]
+    [isReadOnly, skillInstanceMap, draftSkills]
   );
 
   const removeSkill = useCallback(
     (id: string) => {
       if (isReadOnly) return;
-      const currentSkills = useAgentStore.getState().editedAgent?.skills ?? [];
-      updateSkills(
-        currentSkills.filter(
-          (skill) => Number(skill.skill_id) !== Number(id)
-        )
+      setDraftSkills((current) =>
+        current.filter((skill) => Number(skill.skill_id) !== Number(id))
       );
     },
-    [isReadOnly, updateSkills]
+    [isReadOnly]
   );
 
   const selectAllVisibleSkills = useCallback(() => {
     if (isReadOnly || selectableSkillsInActiveGroup.length === 0) return;
 
-    const currentSkills = useAgentStore.getState().editedAgent?.skills ?? [];
-    const currentSkillIds = new Set(
-      currentSkills.map((skill) => Number(skill.skill_id))
-    );
     const skillsToAdd = selectableSkillsInActiveGroup
-      .filter((skill) => !currentSkillIds.has(Number(skill.skill_id)))
+      .filter((skill) => !selectedSkillIds.has(Number(skill.skill_id)))
       .map((skill) =>
         withEffectiveSkillConfig(skill, skillInstanceMap[skill.skill_id])
       );
 
     if (skillsToAdd.length > 0) {
-      updateSkills([...currentSkills, ...skillsToAdd]);
+      setDraftSkills((current) => [...current, ...skillsToAdd]);
     }
   }, [
     isReadOnly,
     selectableSkillsInActiveGroup,
     skillInstanceMap,
-    updateSkills,
+    selectedSkillIds,
   ]);
 
   const deselectAllVisibleSkills = useCallback(() => {
@@ -356,13 +355,10 @@ export function AddSkillDrawer({
     const visibleSkillIds = new Set(
       activeGroup.skills.map((skill) => Number(skill.skill_id))
     );
-    const currentSkills = useAgentStore.getState().editedAgent?.skills ?? [];
-    updateSkills(
-      currentSkills.filter(
-        (skill) => !visibleSkillIds.has(Number(skill.skill_id))
-      )
+    setDraftSkills((current) =>
+      current.filter((skill) => !visibleSkillIds.has(Number(skill.skill_id)))
     );
-  }, [activeGroup, isReadOnly, updateSkills]);
+  }, [activeGroup, isReadOnly]);
 
   const handleSelectAll = useCallback(
     (checked: boolean) => {
@@ -370,18 +366,6 @@ export function AddSkillDrawer({
       else deselectAllVisibleSkills();
     },
     [selectAllVisibleSkills, deselectAllVisibleSkills]
-  );
-
-  const openSkillAction = useCallback(
-    (skill: Skill, event: React.MouseEvent<HTMLButtonElement>) => {
-      event.stopPropagation();
-      if (!isReadOnly && skill.permission === "EDIT" && onEditSkill) {
-        onEditSkill(skill);
-        return;
-      }
-      setDetailSkill(skill);
-    },
-    [isReadOnly, onEditSkill]
   );
 
   const openSkillConfig = useCallback(
@@ -394,34 +378,31 @@ export function AddSkillDrawer({
     [skillInstanceMap]
   );
 
-  const saveSkillConfig = useCallback(
-    (skill: Skill, params: SkillParam[]) => {
-      const configValues = Object.fromEntries(
-        params.map((param) => [param.name, param.value])
-      );
-      setSkillInstanceMap((current) => ({
-        ...current,
-        [skill.skill_id]: configValues,
-      }));
+  const saveSkillConfig = useCallback((skill: Skill, params: SkillParam[]) => {
+    const configValues = Object.fromEntries(
+      params.map((param) => [param.name, param.value])
+    );
+    setSkillInstanceMap((current) => ({
+      ...current,
+      [skill.skill_id]: configValues,
+    }));
 
-      const currentSkills = useAgentStore.getState().editedAgent?.skills ?? [];
-      const configuredSkill = { ...skill, config_values: configValues };
-      const selectedIndex = currentSkills.findIndex(
+    const configuredSkill = { ...skill, config_values: configValues };
+    setDraftSkills((current) => {
+      const selectedIndex = current.findIndex(
         (selectedSkill) =>
           Number(selectedSkill.skill_id) === Number(skill.skill_id)
       );
 
       if (selectedIndex < 0) {
-        updateSkills([...currentSkills, configuredSkill]);
-        return;
+        return [...current, configuredSkill];
       }
 
-      const updatedSkills = [...currentSkills];
+      const updatedSkills = [...current];
       updatedSkills[selectedIndex] = configuredSkill;
-      updateSkills(updatedSkills);
-    },
-    [updateSkills]
-  );
+      return updatedSkills;
+    });
+  }, []);
 
   const onCloseDialog = useCallback(() => {
     setSearch("");
@@ -431,24 +412,20 @@ export function AddSkillDrawer({
     onClose();
   }, [onClose]);
 
+  const handleConfirm = useCallback(() => {
+    updateSkills(draftSkills);
+    onCloseDialog();
+  }, [draftSkills, updateSkills, onCloseDialog]);
+
   return (
     <AddResourceDrawer
+      width={768}
+      bodyClassName={styles.drawer}
       title={
-        <div className="flex items-center gap-2 pr-8">
-          <BlocksIcon className="size-4" />
-          <span className="flex-1">{t("skillPool.selectSkills")}</span>
-          {onOpenManageTags ? (
-            <Button
-              type="text"
-              size="small"
-              icon={<Tag size={13} />}
-              disabled={!skillMetadataModifiable}
-              onClick={onOpenManageTags}
-              className="h-6 text-xs !text-purple-500 hover:!text-purple-600 hover:!bg-purple-50 disabled:!text-gray-400"
-            >
-              {t("skillPool.manageTags")}
-            </Button>
-          ) : null}
+        <div className="flex min-w-0 items-center gap-2">
+          <span className="min-w-0 flex-1 truncate">
+            {t("resourcePicker.addSkill", "添加技能")}
+          </span>
           {onOpenTagManagement ? (
             <Button
               type="text"
@@ -468,12 +445,25 @@ export function AddSkillDrawer({
       tagOptions={tagOptions}
       selected={selectedChips}
       listTitle={t("resourcePicker.list.skill")}
+      listHeaderExtra={
+        onOpenManageTags ? (
+          <button
+            type="button"
+            disabled={!skillMetadataModifiable}
+            onClick={onOpenManageTags}
+            className="flex cursor-pointer items-center gap-1 border-0 bg-transparent p-0 text-[#2673E5] disabled:cursor-not-allowed disabled:text-[#B3B3B3]"
+          >
+            <Tag size={14} />
+            {t("skillPool.manageTags")}
+          </button>
+        ) : undefined
+      }
       tabs={tabItems}
       activeTab={activeTab}
       total={total}
       page={page}
-      showConfirm={false}
       onClose={onCloseDialog}
+      onConfirm={handleConfirm}
       onSearch={setSearch}
       onTagChange={(value) => setActiveTag(value ?? "")}
       onTabChange={setActiveTab}
@@ -487,10 +477,6 @@ export function AddSkillDrawer({
         <div className="flex flex-col gap-2">
           {pagedSkills.map((skill) => {
             const isSelected = selectedSkillIds.has(Number(skill.skill_id));
-            const canEditSkill =
-              !isReadOnly &&
-              skill.permission === "EDIT" &&
-              Boolean(onEditSkill);
             const hasConfigurableParams =
               Array.isArray(skill.config_schemas) &&
               skill.config_schemas.length > 0;
@@ -501,7 +487,7 @@ export function AddSkillDrawer({
                 role="button"
                 tabIndex={isReadOnly ? -1 : 0}
                 className={cn(
-                  "flex shrink-0 items-center gap-3 rounded-[2px] px-5 py-[9px] transition-colors",
+                  "flex h-[59px] shrink-0 items-center justify-between gap-3 rounded-[4px] py-[9px] pl-5 pr-7 transition-colors",
                   isSelected ? "bg-[#E6F2FD]" : "bg-transparent",
                   isReadOnly
                     ? "cursor-not-allowed opacity-60"
@@ -518,11 +504,11 @@ export function AddSkillDrawer({
                   }
                 }}
               >
-                <div className="flex min-w-0 flex-1 flex-col gap-0.5">
+                <div className="flex min-w-0 flex-1 flex-col">
                   <div className="flex items-center gap-2">
                     <span
                       className={cn(
-                        "text-[14px] leading-[20px]",
+                        "truncate text-[14px] leading-[22px]",
                         isSelected
                           ? "font-medium text-[#0067D1]"
                           : "font-medium text-[#191919]"
@@ -540,7 +526,7 @@ export function AddSkillDrawer({
                     ))}
                   </div>
                   {skill.description ? (
-                    <p className="truncate text-[14px] leading-[20px] text-[#737373]">
+                    <p className="m-0 truncate text-[14px] font-normal leading-[22px] text-[#777777]">
                       {skill.description}
                     </p>
                   ) : null}
@@ -549,27 +535,6 @@ export function AddSkillDrawer({
                   className="flex shrink-0 items-center gap-1"
                   data-testid={`skill-picker-actions-${skill.skill_id}`}
                 >
-                  <button
-                    type="button"
-                    onClick={(event) => openSkillAction(skill, event)}
-                    aria-label={t(
-                      canEditSkill
-                        ? "skillManagement.edit.title"
-                        : "skillPool.viewDetails"
-                    )}
-                    title={t(
-                      canEditSkill
-                        ? "skillManagement.edit.title"
-                        : "skillPool.viewDetails"
-                    )}
-                    className="flex size-7 shrink-0 items-center justify-center rounded-md text-gray-400 transition-colors hover:bg-gray-100 hover:text-gray-600"
-                  >
-                    {canEditSkill ? (
-                      <Pencil className="size-4" />
-                    ) : (
-                      <Eye className="size-4" />
-                    )}
-                  </button>
                   {hasConfigurableParams ? (
                     <button
                       type="button"
@@ -593,14 +558,6 @@ export function AddSkillDrawer({
           {t("skillPool.noSearchResults")}
         </div>
       )}
-
-      <SkillDetailModal
-        skill={detailSkill}
-        open={Boolean(detailSkill)}
-        zIndex={1100}
-        maskClosable
-        onClose={() => setDetailSkill(null)}
-      />
 
       {configSkill ? (
         <SkillConfigModal

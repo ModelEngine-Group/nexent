@@ -1,3 +1,5 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import { Form, Input } from "antd";
 import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
@@ -35,7 +37,6 @@ function setup(readOnly: boolean, agentId: number | null = 42) {
     onConfigure: vi.fn(),
     onDebug: vi.fn(),
     onPublish: vi.fn(),
-    onEditIdentity: vi.fn(),
     onManualUnlock: vi.fn(),
   };
   render(
@@ -67,12 +68,11 @@ describe("AgentConfigHeader workflow navigation", () => {
       screen.getByRole("textbox", { name: "Protected field" })
     ).toBeDisabled();
     const publish = screen.getByRole("button", {
-      name: "agent.highFidelity.publishMode",
+      name: "agent.config.button.publish",
     });
     expect(publish).toBeDisabled();
     fireEvent.click(publish);
     expect(callbacks.onPublish).not.toHaveBeenCalled();
-    expect(callbacks.onEditIdentity).not.toHaveBeenCalled();
   });
   it("preserves editable configure, debug and publish callbacks", () => {
     const callbacks = setup(false);
@@ -83,7 +83,7 @@ describe("AgentConfigHeader workflow navigation", () => {
       screen.getByRole("button", { name: "agent.highFidelity.debugMode" })
     );
     fireEvent.click(
-      screen.getByRole("button", { name: "agent.highFidelity.publishMode" })
+      screen.getByRole("button", { name: "agent.config.button.publish" })
     );
     expect(callbacks.onConfigure).toHaveBeenCalledTimes(1);
     expect(callbacks.onDebug).toHaveBeenCalledTimes(1);
@@ -96,7 +96,7 @@ describe("AgentConfigHeader workflow navigation", () => {
     const callbacks = setup(false, null);
     for (const name of [
       "agent.highFidelity.debugMode",
-      "agent.highFidelity.publishMode",
+      "agent.config.button.publish",
     ]) {
       const button = screen.getByRole("button", { name });
       expect(button).toBeDisabled();
