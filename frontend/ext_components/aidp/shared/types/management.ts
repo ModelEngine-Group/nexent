@@ -1,3 +1,5 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 export interface AidpKbDetail {
   kds_id: string;
   kds_name: string;
@@ -24,6 +26,7 @@ export interface AidpKbDetail {
   graph_config?: string | Record<string, unknown> | null;
   created_by?: string | null;
   creator_name?: string | null;
+  creator_cas_username?: string | null;
 }
 
 export interface AidpDocumentItem {

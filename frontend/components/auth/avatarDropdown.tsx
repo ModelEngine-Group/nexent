@@ -1,3 +1,5 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 "use client";
 
 import React, { useState } from "react";
@@ -18,6 +20,7 @@ import { useAuthorizationContext } from "@/components/providers/AuthorizationPro
 import { useConfirmModal } from "@/hooks/useConfirmModal";
 import { getRoleColor } from "@/lib/auth";
 import { USER_ROLES } from "@/const/auth";
+import { UserIdentity } from "@/components/auth/UserIdentity";
 
 interface AvatarDropdownProps {
   rail?: boolean;
@@ -133,7 +136,10 @@ export function AvatarDropdown({ rail = false }: AvatarDropdownProps) {
       label: (
         <div className="py-1">
           <div className="font-medium">
-            {user.username?.trim() || user.email?.trim() || "-"}
+            <UserIdentity
+              casUsername={user.username}
+              fallback={user.username?.trim() || user.email?.trim() || "-"}
+            />
           </div>
           <div className="mt-1">
             <Tag color={getRoleColor(user.role)}>

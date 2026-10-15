@@ -1,4 +1,8 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 "use client";
+
+import { UserIdentity } from "@/components/auth/UserIdentity";
 
 import React, { useState, useEffect, useRef } from "react";
 import { useParams } from "next/navigation";
@@ -1029,7 +1033,10 @@ function TenantList({
                       className="hover:bg-gray-50 dark:hover:bg-gray-800"
                     >
                       <td className="px-3 py-1.5 text-gray-900 dark:text-gray-100 text-sm">
-                        {user.username || "-"}
+                        <UserIdentity
+                          casUsername={user.cas_username}
+                          fallback={user.username || "-"}
+                        />
                       </td>
                       <td className="px-3 py-1.5 text-gray-900 dark:text-gray-100 text-sm">
                         {t(`user.role.${user.role?.toLowerCase()}`) || "-"}

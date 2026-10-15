@@ -1,0 +1,44 @@
+schema_version: '1.0'
+change:
+  change_id: CAS-USER-DISPLAY-20261015
+  change_type: bugfix
+  bug_id: CAS-USER-DISPLAY-20261015
+  title: Prefer CAS usernames in page identity values
+  description: Add read-only identity metadata and viewer-dependent rendering across existing user identity surfaces, including gated AIDP pages.
+  observed_behavior: User/member APIs store email in the legacy username field and many identity surfaces render email directly.
+  expected_behavior: CAS viewers see linked CAS names with legacy fallback; raw values and operations remain unchanged.
+  escaped_stage: D2
+  coverage_gap:
+    type: missing_assertion
+    description: Existing user/group tests assert legacy emails but do not assert optional CAS identity metadata or viewer-dependent rendering.
+  feature_contract_changed: true
+  traditional_ut:
+    decision: add
+    reason: New batch enrichment and viewer-dependent display need success, boundary, failure and author-provenance regressions.
+    behaviors:
+    - Resolve only active linked CAS users and tolerate optional lookup failure.
+    - Preserve raw identities, filtering, ordering and write payloads while rendering CAS names.
+    - Preserve custom authors and AIDP feature gating.
+    test_selectors:
+    - test/backend/services/test_user_identity_service.py
+    - test/backend/database/test_user_identity_db.py
+    - frontend/tests/component/userIdentity.test.tsx
+    - frontend/tests/component/casResourceIdentity.test.tsx
+    - frontend/tests/component/casIdentityApiContract.test.tsx
+    - frontend/tests/component/casAidpIdentity.test.tsx
+    - frontend/tests/component/casAidpGate.test.tsx
+    - frontend/tests/component/casRepositoryIdentity.test.tsx
+    - frontend/tests/component/agentListTable.test.tsx
+    - test/backend/services/test_api_key_service.py::test_api_key_display_metadata_keeps_owners_creators_and_ordering
+    - test/ext_components/aidp/test_aidp_cas_display.py::test_detail_optional_cas_creator_preserves_local_owner_contract
+  affected_features:
+    existing: [F-018, F-029]
+    added: [CAS-USER-DISPLAY]
+    modified: []
+    retired: []
+  affected_cases:
+    existing: [PW-RESOURCE-02]
+    added: [CAS-DISPLAY-D2-001]
+    modified: []
+    retired: []
+  notes: Design is in the ignored local nexent-doc/docs/Developing/auth-cas-user-display/design.md. Actual CAS authentication journeys retain their existing skipped_by_policy status; this change concerns post-authentication display only.
