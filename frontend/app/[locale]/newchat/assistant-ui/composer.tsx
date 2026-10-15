@@ -36,7 +36,6 @@ import {
   Bot,
   Layers,
   Link2,
-  MessagesSquare,
   SearchIcon,
   Settings,
   SlidersHorizontal,
@@ -347,25 +346,6 @@ function hashString(value: string): number {
   }
   return Math.abs(hash);
 }
-
-// Item row of the workbench "＋" overflow menu, styled after the
-// planning-mode menu.
-const ComposerPlusItem: FC<{
-  icon: ReactNode;
-  label: string;
-  active?: boolean;
-  onSelect: () => void;
-}> = ({ icon, label, active, onSelect }) => (
-  <button
-    type="button"
-    className="flex h-10 w-full items-center gap-2 rounded-lg px-2 py-2 text-base font-normal leading-6 text-foreground hover:bg-accent"
-    onClick={onSelect}
-  >
-    {icon}
-    {label}
-    {active ? <Check className="ml-auto size-4" /> : null}
-  </button>
-);
 
 export const Composer: FC<ComposerProps> = ({
   newChatDesign = false,
@@ -1307,40 +1287,6 @@ export const Composer: FC<ComposerProps> = ({
                       <span>{t("chat.composer.uploadFile")}</span>
                     </button>
                   </ComposerPrimitive.AddAttachment>
-                  <button
-                    type="button"
-                    className="flex h-10 w-full items-center gap-3 rounded-[6px] px-2 text-left text-[14px] text-[#191919] hover:bg-[#f5f5f5]"
-                    onClick={() => {
-                      onChatModeChange("planning");
-                      setActionPanel(null);
-                    }}
-                  >
-                    <MessagesSquare className="size-4 shrink-0" aria-hidden />
-                    <span>{t("chat.composer.planningMode")}</span>
-                    {chatMode === "planning" ? (
-                      <Check
-                        className="ml-auto size-4 text-[#191919]"
-                        aria-hidden
-                      />
-                    ) : null}
-                  </button>
-                  <button
-                    type="button"
-                    className="flex h-10 w-full items-center gap-3 rounded-[6px] px-2 text-left text-[14px] text-[#191919] hover:bg-[#f5f5f5]"
-                    onClick={() => {
-                      onChatModeChange("execution");
-                      setActionPanel(null);
-                    }}
-                  >
-                    <Play className="size-4 shrink-0" aria-hidden />
-                    <span>{t("chat.composer.executionMode")}</span>
-                    {chatMode === "execution" ? (
-                      <Check
-                        className="ml-auto size-4 text-[#191919]"
-                        aria-hidden
-                      />
-                    ) : null}
-                  </button>
                 </div>
               ) : null}
 
@@ -1368,6 +1314,13 @@ export const Composer: FC<ComposerProps> = ({
                   >
                     <PlusIcon className="size-4" aria-hidden />
                   </button>
+                )}
+                {newChatDesign && !compact && (
+                  <ChatModeMenu
+                    chatMode={chatMode}
+                    onChatModeChange={onChatModeChange}
+                    disabled={isRunning}
+                  />
                 )}
                 {!compact && workbenchResources && workbenchPresentation && (
                   <TooltipWrapper tooltip={t("chat.composer.more")}>
@@ -1438,35 +1391,20 @@ export const Composer: FC<ComposerProps> = ({
                             {t("chat.composer.uploadFile")}
                           </button>
                         </ComposerPrimitive.AddAttachment>
-                        <ComposerPlusItem
-                          icon={<MessageCircleMore className="size-4" />}
-                          label={t("chat.composer.planningMode")}
-                          active={chatMode === "planning"}
-                          onSelect={() => {
-                            onChatModeChange("planning");
-                            setPlusOpen(false);
-                          }}
-                        />
-                        <ComposerPlusItem
-                          icon={<Play className="size-4" />}
-                          label={t("chat.composer.executionMode")}
-                          active={chatMode === "execution"}
-                          onSelect={() => {
-                            onChatModeChange("execution");
-                            setPlusOpen(false);
-                          }}
-                        />
                       </PopoverContent>
                     </Popover>
                   </TooltipWrapper>
                 )}
-                {!compact && !creationMode && workbenchPresentation && (
-                  <WorkbenchPlanningMenu
-                    chatMode={chatMode}
-                    onChatModeChange={onChatModeChange}
-                    disabled={isRunning}
-                  />
-                )}
+                {!compact &&
+                  !newChatDesign &&
+                  !creationMode &&
+                  workbenchPresentation && (
+                    <ChatModeMenu
+                      chatMode={chatMode}
+                      onChatModeChange={onChatModeChange}
+                      disabled={isRunning}
+                    />
+                  )}
                 {!compact && workbenchResources && (
                   <>
                     <Popover>
@@ -1784,7 +1722,7 @@ export const Composer: FC<ComposerProps> = ({
   );
 };
 
-const WorkbenchPlanningMenu: FC<{
+const ChatModeMenu: FC<{
   chatMode: ChatMode;
   onChatModeChange: (mode: ChatMode) => void;
   disabled?: boolean;
@@ -1804,7 +1742,7 @@ const WorkbenchPlanningMenu: FC<{
           variant="ghost"
           size="sm"
           disabled={disabled}
-          className="h-8 shrink-0 gap-1.5 px-2 text-base leading-6 text-foreground"
+          className="h-10 shrink-0 gap-2 rounded-lg px-3 py-2 text-base font-normal leading-6 text-[#191919] hover:bg-[rgba(25,25,25,0.03)] data-[state=open]:bg-[rgba(25,25,25,0.03)]"
         >
           {chatMode === "planning" ? (
             <MessageCircleMore className="size-5" />
@@ -1814,15 +1752,22 @@ const WorkbenchPlanningMenu: FC<{
           {chatMode === "planning"
             ? t("chat.composer.planningMode")
             : t("chat.composer.executionMode")}
-          <ChevronDown className="size-4 opacity-50" />
         </Button>
       </PopoverTrigger>
-      <PopoverContent align="start" className="w-56 p-1">
+      <PopoverContent
+        side="top"
+        sideOffset={8}
+        align="start"
+        className="w-48 rounded-xl border-[#e5e5e5] bg-white p-1 shadow-[0_8px_24px_rgba(0,0,0,0.12)]"
+      >
         {options.map((option) => (
           <button
             key={option.value}
             type="button"
-            className="flex h-10 w-full items-center justify-between gap-2 rounded-lg px-2 py-2 text-base font-normal leading-6 hover:bg-accent"
+            className={cn(
+              "flex h-10 w-full items-center justify-between gap-2 rounded-lg px-3 py-2 text-base font-normal leading-6 text-[#191919] hover:bg-[rgba(25,25,25,0.03)]",
+              chatMode === option.value && "bg-[rgba(25,25,25,0.03)]"
+            )}
             onClick={() => {
               onChatModeChange(option.value);
               setOpen(false);

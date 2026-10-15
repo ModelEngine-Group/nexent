@@ -34,6 +34,7 @@ import {
   ActionBarMorePrimitive,
   ActionBarPrimitive,
   AuiIf,
+  ComposerPrimitive,
   ErrorPrimitive,
   groupPartByType,
   MessagePrimitive,
@@ -82,6 +83,7 @@ import AutomationProposalMessage from "@/features/agentAutomation/components/Aut
 import type { AgentAutomationProposalData } from "@/types/agentAutomation";
 import {
   AssistantMessageAttachments,
+  ComposerAttachments,
   UserMessageAttachments,
 } from "../ui/attachment";
 import { DirectiveText, SkillDirectiveText } from "../ui/directive-text";
@@ -1243,10 +1245,11 @@ export const ThreadMessages: FC<{
     () => ({
       UserMessage: () => (
         <UserMessage
-          readOnly={readOnly}
+          readOnly={readOnly || shareMode}
           enableSkillDirectives={enableSkillDirectives}
         />
       ),
+      UserEditComposer: () => <UserEditComposer />,
       AssistantMessage: () => (
         <AssistantMessage
           agent={agent}
@@ -1255,7 +1258,7 @@ export const ThreadMessages: FC<{
         />
       ),
     }),
-    [agent, enableSkillDirectives, onSkillFileSelect, readOnly]
+    [agent, enableSkillDirectives, onSkillFileSelect, readOnly, shareMode]
   );
 
   if (shareMode) {
@@ -1303,31 +1306,7 @@ export const ThreadMessages: FC<{
     );
   }
 
-  return (
-    <ThreadPrimitive.Messages>
-      {({ message }) => {
-        if (message.role === "user") {
-          return (
-            <UserMessage
-              readOnly={readOnly}
-              enableSkillDirectives={enableSkillDirectives}
-              shareMode={shareMode}
-              selectedShareMessageIds={selectedShareMessageIds}
-              backendMessageIdsByAuiId={backendMessageIdsByAuiId}
-              onToggleShareMessage={onToggleShareMessage}
-            />
-          );
-        }
-        return (
-          <AssistantMessage
-            agent={agent}
-            readOnly={readOnly}
-            onSkillFileSelect={onSkillFileSelect}
-          />
-        );
-      }}
-    </ThreadPrimitive.Messages>
-  );
+  return <ThreadPrimitive.Messages components={messageComponents} />;
 };
 
 const ThreadScrollToBottom: FC = () => {
@@ -2056,6 +2035,39 @@ const UserActionBar: FC = () => {
         </TooltipIconButton>
       </ActionBarPrimitive.Edit>
     </ActionBarPrimitive.Root>
+  );
+};
+
+const UserEditComposer: FC = () => {
+  const { t } = useTranslation();
+
+  return (
+    <MessagePrimitive.Root
+      data-slot="aui_user-message-root"
+      data-role="user"
+      className="relative mx-auto grid w-full max-w-(--thread-max-width) grid-cols-[minmax(72px,1fr)_auto] content-start gap-y-2 px-2 [&:where(>*)]:col-start-2"
+    >
+      <div className="col-start-2 flex min-w-0 flex-col gap-2">
+        <ComposerPrimitive.Root className="flex min-w-0 flex-col gap-3 self-end rounded-2xl border border-border bg-background p-3 shadow-sm">
+          <ComposerAttachments className="px-0 py-0" />
+          <ComposerPrimitive.Input
+            aria-label={t("chat.composer.placeholder")}
+            className="min-h-20 w-full resize-y bg-transparent text-sm leading-6 outline-none placeholder:text-muted-foreground"
+            rows={3}
+            submitMode="enter"
+            autoFocus
+          />
+          <div className="flex justify-end gap-2">
+            <ComposerPrimitive.Cancel asChild>
+              <Button variant="outline">{t("common.cancel")}</Button>
+            </ComposerPrimitive.Cancel>
+            <ComposerPrimitive.Send asChild>
+              <Button>{t("chat.composer.send")}</Button>
+            </ComposerPrimitive.Send>
+          </div>
+        </ComposerPrimitive.Root>
+      </div>
+    </MessagePrimitive.Root>
   );
 };
 
