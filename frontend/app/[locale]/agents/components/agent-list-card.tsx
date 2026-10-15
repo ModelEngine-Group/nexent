@@ -1,3 +1,5 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 "use client";
 
 import { Clock3 } from "lucide-react";
@@ -52,15 +54,23 @@ export default function AgentListCard({
   return (
     <article className="group relative flex h-[148px] min-w-0 flex-col justify-between rounded-[12px] bg-white px-6 py-4 ring-1 ring-[rgba(201,201,201,0.4)] hover:ring-[#0067d1] focus-within:ring-[#0067d1]">
       <button
-        data-testid="agent-card-body"
         type="button"
-        className="flex h-[86px] min-w-0 shrink-0 cursor-pointer flex-col text-left"
         onClick={() => onOpen(agent)}
+        data-testid="agent-card-body"
+        className="flex h-[86px] w-full min-w-0 shrink-0 cursor-pointer flex-col text-left"
         aria-label={title}
       >
-        <div className="flex h-10 min-w-0 items-center gap-3 pr-7">
-          <AgentAvatar agent={agent} size={40} iconSize={20} />
-          <span className="min-w-0 truncate text-[16px] font-medium leading-6 ![letter-spacing:0px] text-[#191919]">
+        <div className="flex h-10 w-full min-w-0 items-center gap-3 pr-7">
+          <AgentAvatar
+            agent={agent}
+            size={40}
+            iconSize={20}
+            className="shrink-0"
+          />
+          <span
+            title={title}
+            className="min-w-0 flex-1 truncate text-[16px] font-medium leading-6 ![letter-spacing:0px] text-[#191919]"
+          >
             {title}
           </span>
           {category ? (

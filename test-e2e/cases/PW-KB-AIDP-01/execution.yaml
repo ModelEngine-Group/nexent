@@ -1,0 +1,35 @@
+schema_version: '1.0'
+case_id: PW-KB-AIDP-01
+# The effective mock dependency is profile-driven: the mock profile requires
+# knowledge-provider (the ext-knowledge instance), real_smoke requires the
+# real AIDP oracle from the same machine-local configuration and attaches no
+# mock. The suite worker resolves the selection before any preparation.
+required_mock_services: []
+profile_selection: aidp-journey
+implementations:
+- framework: playwright
+  file: test.spec.ts
+  selector: PW-KB-AIDP-01
+  profiles:
+  - mock
+  - real_smoke
+notes: >-
+  Local and AIDP execution groups are mutually exclusive by deployment
+  configuration; the profile is selected through config/aidp-journey.yaml
+  and recorded into runtime/ext-knowledge-attach.json. Mock results are
+  never counted as real_smoke.
+acceptance_bindings:
+  AC-01:
+  - PW-KB-AIDP-01
+  AC-02:
+  - PW-KB-AIDP-01
+  AC-03:
+  - PW-KB-AIDP-01
+  AC-04:
+  - PW-KB-AIDP-01
+preparation:
+  families: []
+  anchors: true
+  special_assets: false
+  d4_groups:
+  - llm_agent

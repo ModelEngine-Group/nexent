@@ -30,6 +30,7 @@ change:
     - frontend/tests/component/casAidpGate.test.tsx
     - frontend/tests/component/casRepositoryIdentity.test.tsx
     - frontend/tests/component/agentListTable.test.tsx
+    - frontend/tests/component/accountMenu.test.tsx
     - test/backend/services/test_api_key_service.py::test_api_key_display_metadata_keeps_owners_creators_and_ordering
     - test/ext_components/aidp/test_aidp_cas_display.py::test_detail_optional_cas_creator_preserves_local_owner_contract
   affected_features:

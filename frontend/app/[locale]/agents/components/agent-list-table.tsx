@@ -61,9 +61,9 @@ export default function AgentListTable({
         return (
           <button
             type="button"
+            onClick={() => onOpen(agent)}
             className="block max-w-full truncate text-left text-[#191919] hover:text-[#0067d1]"
             title={title}
-            onClick={() => onOpen(agent)}
           >
             {title}
           </button>

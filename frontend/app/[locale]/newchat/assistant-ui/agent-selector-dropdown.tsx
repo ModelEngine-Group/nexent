@@ -1,8 +1,10 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 "use client";
 
 import type { FC } from "react";
 import { useMemo } from "react";
-import { Dropdown } from "antd";
+import { Dropdown, Tooltip } from "antd";
 import type { MenuProps } from "antd";
 import { ChevronDown } from "lucide-react";
 import { usePublishedAgentList } from "@/hooks/agent/usePublishedAgentList";
@@ -104,6 +106,12 @@ export const AgentSelectorDropdown: FC<AgentSelectorDropdownProps> = ({
     }
   };
 
+  const agentName =
+    selectedAgent?.display_name ||
+    selectedAgent?.name ||
+    lastUsedAgent.display_name ||
+    lastUsedAgent.name;
+
   return (
     <Dropdown
       menu={{ items: menuItems, onClick: handleMenuClick }}
@@ -113,12 +121,9 @@ export const AgentSelectorDropdown: FC<AgentSelectorDropdownProps> = ({
         type="button"
         className="flex w-full cursor-pointer items-center gap-1.5 rounded-[4px] px-2 py-1 text-[16px] leading-[24px] text-[#191919] hover:bg-white"
       >
-        <span className="min-w-0 flex-1 truncate text-left">
-          {selectedAgent?.display_name ||
-            selectedAgent?.name ||
-            lastUsedAgent.display_name ||
-            lastUsedAgent.name}
-        </span>
+        <Tooltip title={agentName}>
+          <span className="min-w-0 flex-1 truncate text-left">{agentName}</span>
+        </Tooltip>
         <ChevronDown className="size-4 shrink-0 text-[#808080]" aria-hidden />
       </button>
     </Dropdown>
