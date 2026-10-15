@@ -19,7 +19,6 @@ interface AgentConfigHeaderProps {
   readOnly: boolean;
   debugVisible: boolean;
   canManualUnlock: boolean;
-  onEditIdentity: () => void;
   onConfigure: () => void;
   onDebug: () => void;
   onPublish: () => void;

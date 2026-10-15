@@ -3879,6 +3879,7 @@
   "a2a.service.deleteFailed": "删除失败",
   "a2a.service.healthCheckFailed": "健康检查失败",
   "a2a.service.addRelationFailed": "添加关联失败",
+  "a2a.service.syncRelationsPartialFailed": "已保存 {{succeeded}} 项关系，{{failed}} 项失败。成功项已保留，可再次确认以重试剩余项。",
   "a2a.service.removeRelationSuccess": "关联已移除",
   "a2a.service.removeRelationFailed": "移除关联失败",
   "a2a.service.getSubAgentsFailed": "获取子 Agent 失败",

@@ -415,6 +415,7 @@ export interface AddResourceDrawerProps {
   onPageChange?: (page: number) => void;
   onClose: () => void;
   onConfirm?: () => void;
+  confirmLoading?: boolean;
   onRemoveSelected?: (id: string) => void;
   onSearch?: (keyword: string) => void;
   onTagChange?: (value?: string) => void;
@@ -455,6 +456,7 @@ export function AddResourceDrawer({
   onPageChange,
   onClose,
   onConfirm,
+  confirmLoading = false,
   onRemoveSelected,
   onSearch,
   onTagChange,
@@ -471,6 +473,9 @@ export function AddResourceDrawer({
   showPagination = true,
 }: AddResourceDrawerProps) {
   const { t } = useTranslation("common");
+  const handleClose = () => {
+    if (!confirmLoading) onClose();
+  };
 
   return (
     <Drawer
@@ -478,7 +483,7 @@ export function AddResourceDrawer({
       placement="right"
       size={width}
       classNames={{ body: bodyClassName }}
-      onClose={onClose}
+      onClose={handleClose}
       closable={false}
       mask={{ closable: false }}
       styles={{
@@ -506,7 +511,7 @@ export function AddResourceDrawer({
         </span>
         <StandardCloseButton
           ariaLabel={t("resourcePicker.close", "关闭")}
-          onClick={onClose}
+          onClick={handleClose}
         />
       </div>
 
@@ -575,7 +580,8 @@ export function AddResourceDrawer({
       >
         <button
           type="button"
-          onClick={onClose}
+          onClick={handleClose}
+          disabled={confirmLoading}
           className="h-8 w-[89px] cursor-pointer rounded-[2px] border border-[#C9C9C9] bg-white text-[14px] leading-[22px] text-[#191919]"
         >
           {t("resourcePicker.close", "关闭")}
@@ -584,8 +590,13 @@ export function AddResourceDrawer({
           <button
             type="button"
             onClick={onConfirm}
-            className="h-8 w-[89px] cursor-pointer rounded-[2px] border-0 bg-[#1476FF] text-[14px] leading-[22px] text-white"
+            disabled={confirmLoading}
+            aria-busy={confirmLoading}
+            className="inline-flex h-8 w-[89px] cursor-pointer items-center justify-center gap-2 rounded-[2px] border-0 bg-[#1476FF] text-[14px] leading-[22px] text-white"
           >
+            {confirmLoading && (
+              <RefreshCw aria-hidden size={14} className="animate-spin" />
+            )}
             {t("resourcePicker.confirm", "确认")}
           </button>
         )}

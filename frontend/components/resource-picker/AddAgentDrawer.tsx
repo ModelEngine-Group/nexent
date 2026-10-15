@@ -12,6 +12,7 @@ import { usePublishedAgentList } from "@/hooks/agent/usePublishedAgentList";
 import { useExternalAgents } from "@/hooks/agent/useExternalAgents";
 import { useAgentStore } from "@/stores/agentStore";
 import { formatDate } from "@/lib/date";
+import { synchronizeExternalAgentRelations } from "@/lib/externalAgentRelations";
 import type { Agent } from "@/types/agentConfig";
 import { a2aClientService, type A2AExternalAgent } from "@/services/a2aService";
 import { AddResourceDrawer, CheckMark } from "./AddResourceDrawer";
@@ -174,15 +175,29 @@ export function AddAgentDrawer({ open, onClose }: AddAgentDrawerProps) {
   const [draftInternalIds, setDraftInternalIds] = useState<number[]>([]);
   const [draftExternalIds, setDraftExternalIds] = useState<number[]>([]);
 
+  const selectionSessionRef = useRef({ open: false, agentId: currentAgentId });
+  const synchronizedExternalIdsRef = useRef<number[]>([]);
+  const [isConfirming, setIsConfirming] = useState(false);
   useEffect(() => {
-    if (!open) return;
+    if (!open) {
+      selectionSessionRef.current.open = false;
+      return;
+    }
+    // Store updates from partial success must not discard the user's draft.
+    if (
+      selectionSessionRef.current.open &&
+      selectionSessionRef.current.agentId === currentAgentId
+    )
+      return;
+    selectionSessionRef.current = { open: true, agentId: currentAgentId };
+    synchronizedExternalIdsRef.current = [...selectedExternalIds];
     setActiveSource("internal");
     setSearch("");
     setPage(1);
     setTagFilter("");
     setDraftInternalIds(selectedInternalIds);
     setDraftExternalIds(selectedExternalIds);
-  }, [open, selectedInternalIds, selectedExternalIds]);
+  }, [open, currentAgentId, selectedInternalIds, selectedExternalIds]);
 
   const selectableInternalAgents = useMemo(
     () =>
@@ -329,25 +344,28 @@ export function AddAgentDrawer({ open, onClose }: AddAgentDrawerProps) {
   const handleConfirm = async () => {
     if (confirmingRef.current) return;
     confirmingRef.current = true;
+    setIsConfirming(true);
     try {
-      // Complete external relations before committing any local selections.
-      const added = draftExternalIds.filter(
-        (id) => !selectedExternalIds.includes(id)
-      );
-      const removed = selectedExternalIds.filter(
-        (id) => !draftExternalIds.includes(id)
-      );
-      if (currentAgentId && (added.length || removed.length)) {
-        const results = await Promise.all([
-          ...added.map((id) =>
-            a2aClientService.addRelation(Number(currentAgentId), id)
-          ),
-          ...removed.map((id) =>
-            a2aClientService.removeRelation(Number(currentAgentId), id)
-          ),
-        ]);
-        if (results.some((result) => !result.success)) {
-          messageApi.error(t("a2a.service.addRelationFailed"));
+      // Track confirmed changes so retries only submit pending relations.
+      if (currentAgentId) {
+        const { synchronizedIds, succeeded, failed } =
+          await synchronizeExternalAgentRelations(
+            Number(currentAgentId),
+            synchronizedExternalIdsRef.current,
+            draftExternalIds,
+            a2aClientService
+          );
+        synchronizedExternalIdsRef.current = synchronizedIds;
+        if (failed > 0) {
+          if (succeeded > 0) updateExternalSubAgentIds(synchronizedIds);
+          messageApi.error(
+            succeeded > 0
+              ? t("a2a.service.syncRelationsPartialFailed", {
+                  succeeded,
+                  failed,
+                })
+              : t("a2a.service.addRelationFailed")
+          );
           return;
         }
       }
@@ -359,6 +377,7 @@ export function AddAgentDrawer({ open, onClose }: AddAgentDrawerProps) {
       messageApi.error(t("a2a.service.addRelationFailed"));
     } finally {
       confirmingRef.current = false;
+      setIsConfirming(false);
     }
   };
 
@@ -397,6 +416,7 @@ export function AddAgentDrawer({ open, onClose }: AddAgentDrawerProps) {
       onPageChange={setPage}
       onClose={onClose}
       onConfirm={handleConfirm}
+      confirmLoading={isConfirming}
       onRemoveSelected={removeSelected}
       onSearch={setSearch}
       onTagChange={(value) => setTagFilter(value ?? "")}

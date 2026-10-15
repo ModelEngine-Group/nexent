@@ -496,9 +496,6 @@ export default function AgentConfig({
           readOnly={isReadOnly}
           debugVisible={debugVisible}
           canManualUnlock={canManualUnlock}
-          onEditIdentity={() => {
-            handleSectionOpenChange("display_info", true);
-          }}
           onConfigure={onConfigure}
           onDebug={handleDebug}
           onPublish={handlePublish}

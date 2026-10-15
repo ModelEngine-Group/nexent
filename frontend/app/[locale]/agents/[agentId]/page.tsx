@@ -472,27 +472,34 @@ function AgentSetupContent({
               />
             }
             rightAction={
-              <div className="flex items-center gap-2">
+              <div className="ml-auto flex min-w-0 max-w-full items-center gap-2">
                 <Button
                   type="text"
                   icon={<GitBranch size={16} />}
                   aria-label={t("agent.version.manage")}
+                  className="shrink-0"
                   onClick={onManageVersions}
                 />
                 {agentInfo?.current_version_no && total > 0 ? (
-                  <div className="flex items-center gap-1">
-                    <History size={16} />
-                    {t("agent.version.current")}:
+                  <div className="flex min-w-0 flex-1 items-center gap-1">
+                    <History size={16} className="shrink-0" />
+                    <span className="shrink-0 whitespace-nowrap">
+                      {t("agent.version.current")}:
+                    </span>
                     <Tag
                       color="cyan"
                       variant="outlined"
-                      className="cursor-pointer rounded-md font-mono text-sm"
+                      title={
+                        agentVersionDetail?.version.version_name ||
+                        `V${agentInfo.current_version_no}`
+                      }
+                      className="!m-0 min-w-0 cursor-pointer truncate rounded-md font-mono text-sm"
                       onClick={() => setIsShowVersionManagePanel(true)}
                     >
                       {agentVersionDetail?.version.version_name ||
                         `V${agentInfo.current_version_no}`}
                     </Tag>
-                    <span className="text-xs text-gray-500">
+                    <span className="shrink-0 whitespace-nowrap text-xs text-gray-500">
                       / {t("agent.version.totalVersions", { count: total })}
                     </span>
                   </div>
@@ -502,6 +509,7 @@ function AgentSetupContent({
                   onClick={() => setIsGenerationVisible((visible) => !visible)}
                   type="text"
                   aria-label={t("agent.page.panel.nl2agent")}
+                  className="ml-auto shrink-0"
                 ></Button>
               </div>
             }

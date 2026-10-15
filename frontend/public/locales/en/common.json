@@ -4074,6 +4074,7 @@
   "a2a.service.deleteFailed": "Delete failed",
   "a2a.service.healthCheckFailed": "Health check failed",
   "a2a.service.addRelationFailed": "Failed to add relation",
+  "a2a.service.syncRelationsPartialFailed": "{{succeeded}} relations saved; {{failed}} failed. Successful changes are kept. Confirm again to retry the remaining changes.",
   "a2a.service.removeRelationSuccess": "Relation removed",
   "a2a.service.removeRelationFailed": "Failed to remove relation",
   "a2a.service.getSubAgentsFailed": "Failed to get sub-agents",
