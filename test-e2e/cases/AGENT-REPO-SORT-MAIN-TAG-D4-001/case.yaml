@@ -10,6 +10,8 @@ case:
   - AGENT-REPO-SORT-MAIN-TAG-RULE-001
   - AGENT-REPO-SORT-MAIN-TAG-RULE-002
   - AGENT-REPO-SORT-MAIN-TAG-RULE-003
+  - AGENT-REPO-SORT-MAIN-TAG-RULE-004
+  - AGENT-REPO-SORT-MAIN-TAG-RULE-005
   title: Sort listings by publish time, badge main agents on both tabs and search agents by tag
   type: E2E
   priority: P1
@@ -19,11 +21,14 @@ case:
     On the repository tab and on the my-agents tab, choosing the latest-published order forwards the
     publish-time sort flag and renders dated listings newest first with the undated listing last; every
     listing card separates a main agent from an ordinary agent on both tabs; and the agent management page
-    searches by tag and renders a tag that arrived as a stringified array without crashing.
+    searches by tag, renders a tag that arrived as a stringified array without crashing, and narrows its
+    list through the tag filter, which combines with the text query and clears; a sort change while the
+    list sits on a later page returns the list to the first page under the newly selected order.
   preconditions:
   - >-
     A running frontend is reachable, and deterministic HTTP fixtures isolate the repository listings, the
-    default tag library and the agent list so no live tenant or provider data is required.
+    default tag library and the agent list so no live tenant or provider data is required; the agent list
+    spans more than one page at the frozen viewport so paging behaviour is observable.
   test_data:
     profile: mock
     locale: zh
@@ -37,6 +42,8 @@ case:
     tag_search_keyword: d4_key
     tag_search_value: d4_value
     stringified_tag_payload: "['d4_value', 'd4_extra']"
+    agent_list_rows: 15
+    agent_list_page_size: 12
   steps:
   - order: 1
     action: Open the agent repository and choose the latest-published option in the sort control.
@@ -59,6 +66,23 @@ case:
       The my-agents list request carries the publish-time sort flag and the my-agents listings render newest
       published first, and only the main-agent listing shows the amber main-agent badge while the ordinary
       listing shows none.
+  - order: 5
+    action: Open the tag filter on the agent management page and select the fixture tag value.
+    expected: >-
+      The list request carries the tag filter predicates, the list narrows to the tag-matched agent only,
+      and the recovered tag renders without the raw stringified array.
+  - order: 6
+    action: >-
+      With the tag filter still active, type the title of an untagged agent into the search box, then clear
+      the tag filter.
+    expected: >-
+      The active tag filter and the text query combine as an intersection so no listing remains, and
+      clearing the tag filter restores the query-only result.
+  - order: 7
+    action: On the my-agents tab move to the second page and then choose the latest-published option.
+    expected: >-
+      The list request returns to the first page and carries the publish-time sort flag, and the listings
+      render in the newest-published order.
   expected_results:
   - >-
     The latest-published order is forwarded to the listings endpoint and dated listings render newest first
@@ -71,6 +95,15 @@ case:
   - >-
     On the my-agents tab the latest-published order is forwarded, the my-agents listings render newest
     published first, and only the main-agent listing carries the amber main-agent badge.
+  - >-
+    The tag filter on the agent management page forwards its predicates, narrows the list to the
+    tag-matched agents and renders the recovered tag instead of the raw stringified array.
+  - >-
+    The tag filter and the text query act as an intersection, and clearing the tag filter restores the
+    query-only result.
+  - >-
+    Changing the sort option while the list sits on a later page requests the first page under the newly
+    selected order.
   forbidden_side_effects:
   - >-
     No unrelated writes, publication, installation or Agent/model execution; browsing, sorting and searching
@@ -81,6 +114,9 @@ case:
   - Inspect the badge on the rendered repository listing cards.
   - Search the agent management page by a tag keyword.
   - Open the my-agents tab and choose the latest-published option in its sort control.
+  - Narrow the agent management list with the tag filter and select the fixture tag value.
+  - Intersect the active tag filter with a text query and then clear the tag filter.
+  - Move the my-agents list to the second page and change its sort option.
   final_business_result:
   - >-
     The latest-published order is forwarded to the listings endpoint and dated listings render newest first
@@ -93,6 +129,15 @@ case:
   - >-
     On the my-agents tab the latest-published order is forwarded, the my-agents listings render newest
     published first, and only the main-agent listing carries the amber main-agent badge.
+  - >-
+    The tag filter on the agent management page forwards its predicates, narrows the list to the
+    tag-matched agents and renders the recovered tag instead of the raw stringified array.
+  - >-
+    The tag filter and the text query act as an intersection, and clearing the tag filter restores the
+    query-only result.
+  - >-
+    Changing the sort option while the list sits on a later page requests the first page under the newly
+    selected order.
   failure_evidence:
   - Fixed Playwright journey assertions, sanitized request payloads and terminal audit.
   acceptance:
@@ -101,16 +146,24 @@ case:
       On both the repository tab and the my-agents tab the sort control forwards the latest-published order
       and renders dated listings newest published first with the undated listing last; listing cards on both
       tabs distinguish a main agent from an ordinary agent; and the agent management page searches by tag and
-      renders a tag that arrived as a stringified array without crashing.
+      renders a tag that arrived as a stringified array without crashing, narrows its list through the tag
+      filter which intersects with the text query and clears, and returns to the first page when the sort
+      option changes while the list sits on a later page.
     steps:
     - 1
     - 2
     - 3
     - 4
+    - 5
+    - 6
+    - 7
     expected_results:
     - 1
     - 2
     - 3
     - 4
+    - 5
+    - 6
+    - 7
     forbidden_side_effects:
     - 1

@@ -11,7 +11,8 @@ feature:
     The agent space lists tenant agents on the repository tab and the my-agents tab, each with an optional
     latest-published-first order, and marks each listing card as a main or an ordinary agent on both tabs;
     the agent management page matches agents by tag on top of its name and description search, recovering tags
-    that arrive as a stringified array instead of crashing.
+    that arrive as a stringified array instead of crashing, and narrows its list through a tag filter that
+    combines with the text query and clears.
   business_rules:
   - rule_id: AGENT-REPO-SORT-MAIN-TAG-RULE-001
     description: >-
@@ -28,6 +29,15 @@ feature:
     description: >-
       The agent management page matches agents by tag from its search box, including a tag persisted as a stringified
       array, renders the recovered tag instead of the raw stringified value, and keeps the list usable.
+  - rule_id: AGENT-REPO-SORT-MAIN-TAG-RULE-004
+    description: >-
+      The agent management page's tag filter narrows the list to the agents carrying the selected tag, combines with
+      the free-text query as an intersection rather than a union, and clearing the tag filter restores the
+      query-only result.
+  - rule_id: AGENT-REPO-SORT-MAIN-TAG-RULE-005
+    description: >-
+      Changing the sort option while a listing sits on a later page resets that listing to the first page under the
+      newly selected order, on the repository tab and the my-agents tab of the agent space alike.
   required_test_stages:
   - D4
   source:

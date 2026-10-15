@@ -10,11 +10,17 @@
  *     as an individual tag instead of crashing the page.
  *  4. The agent repository "my agents" tab reuses the same latest-published
  *     sort and marks its main agents with the same badge.
+ *  5. The agent management page's tag filter narrows the list to the selected
+ *     tag, combines with the text query so only agents matching both criteria
+ *     remain, and clears back to the query result.
+ *  6. Changing the my-agents sort option while the list sits on a later page
+ *     returns the list to the first page under the newly selected order.
  *
  * Product surface exercised:
  *   - frontend/app/[locale]/agent-space/agent-space.tsx   (sort control + badge)
  *   - frontend/app/[locale]/agent-space/my-agent.tsx      (sort control + badge)
- *   - frontend/app/[locale]/agents/page.tsx               (tag search)
+ *   - frontend/app/[locale]/agents/page.tsx               (tag search + filter)
+ *   - frontend/components/tag/TagFilterPopover.tsx        (tag filter control)
  *
  * Every HTTP response is fulfilled with deterministic fixtures, so the journey
  * never depends on a live tenant, provider or database.
@@ -47,6 +53,8 @@ const SORT_DEFAULT_LABEL = label("agentRepository.sort.default");
 const SORT_LATEST_LABEL = label("agentRepository.sort.latest");
 const MAIN_AGENT_LABEL = label("agentRepository.card.mainAgent");
 const AGENT_SEARCH_PLACEHOLDER = label("agentSelector.searchPlaceholder");
+const TAG_FILTER_BUTTON = label("repository.tagFilter.button");
+const TAG_FILTER_CLEAR = label("repository.tagFilter.clear");
 
 const MAIN_TITLE = "仓库智能体二";
 const ORDINARY_TITLE = "仓库智能体一";
@@ -63,6 +71,11 @@ const TAG_VALUE_ID = 311;
 const TAG_BUCKET_ID = 7;
 /** The historical defect: a tag array persisted as a Python-style string. */
 const STRINGIFIED_TAG_PAYLOAD = "['d4_value', 'd4_extra']";
+/** Accessible name of the tag filter's value selector for the fixture tag. */
+const TAG_FILTER_SELECT_ARIA = label("tagManagement.filter.ariaLabel").replace(
+  "{{definition}}",
+  TAG_SEARCH_KEYWORD
+);
 
 /** POST endpoints that only read data; every other non-GET is a write. */
 const READ_ONLY_POST_ENDPOINTS = new Set(["/agent/search_info", "/groups/list"]);
@@ -161,10 +174,37 @@ const AGENT_ROWS = [
   },
 ];
 
+/**
+ * Filler agents that only exist to make the my-agents list span more than one
+ * page at the frozen test viewport (twelve cards per page). They publish
+ * earlier than both tracked agents, so the tracked pair stays on page one in
+ * both the default and the latest-published order.
+ */
+const FILLER_AGENT_ROWS = Array.from({ length: 13 }, (_, index) => {
+  const sequence = index + 1;
+  const suffix = String(sequence).padStart(2, "0");
+  return {
+    agent_id: 300 + sequence,
+    name: `filler_agent_${suffix}`,
+    display_name: `批量智能体${suffix}`,
+    description: "仅用于让我的智能体列表跨页的填充智能体。",
+    tags: ["批量标签"],
+    create_time: "2025-10-01T09:00:00",
+    update_time: "2025-10-02T09:00:00",
+    current_version_no: 1,
+    publish_time: `2025-11-${suffix}T09:00:00`,
+    is_main_agent: false,
+    permission: "EDIT",
+  };
+});
+
+/** Every agent row the list endpoint may return. */
+const AGENT_LIST_ROWS = [...AGENT_ROWS, ...FILLER_AGENT_ROWS];
+
 /** My-agents order: latest publish time first, undated agents last. */
 const publishOrderedAgentRows = () => {
-  const dated = AGENT_ROWS.filter((agent) => agent.publish_time);
-  const undated = AGENT_ROWS.filter((agent) => !agent.publish_time);
+  const dated = AGENT_LIST_ROWS.filter((agent) => agent.publish_time);
+  const undated = AGENT_LIST_ROWS.filter((agent) => !agent.publish_time);
   const sorted = [...dated].sort((left, right) =>
     left.publish_time === right.publish_time
       ? right.agent_id - left.agent_id
@@ -288,19 +328,28 @@ async function mockNexent(page) {
     }
     if (endpoint === "/agent/list/page") {
       const search = url.searchParams.get("search")?.trim() ?? "";
-      const predicates = url.searchParams.get("search_tag_predicates") ?? "";
+      const searchPredicates =
+        url.searchParams.get("search_tag_predicates") ?? "";
+      const filterPredicates = url.searchParams.get("tag_predicates") ?? "";
       const latest = url.searchParams.get("sort_by_update_time") === "true";
-      const tagMatched =
-        predicates.includes(`"definition_id":${TAG_DEFINITION_ID}`) &&
-        predicates.includes(`${TAG_VALUE_ID}`);
+      // "search_tag_predicates" widens the free-text search to tag matches,
+      // while "tag_predicates" restricts the list to the tagged agents, so the
+      // fixture models the two parameters with the semantics the page relies on.
+      const matchesFixtureTag = (value) =>
+        value.includes(`"definition_id":${TAG_DEFINITION_ID}`) &&
+        value.includes(`${TAG_VALUE_ID}`);
+      const searchTagMatched = matchesFixtureTag(searchPredicates);
       // The default order keeps the fixture order; the latest-published order
       // returns the same rows sorted by publish time with undated rows last.
-      const source = latest ? publishOrderedAgentRows() : AGENT_ROWS;
+      let source = latest ? publishOrderedAgentRows() : AGENT_LIST_ROWS;
+      if (matchesFixtureTag(filterPredicates))
+        source = source.filter((agent) => agent.agent_id === TAG_AGENT_ID);
       const matching = source.filter((agent) => {
+        if (!search) return true;
         const haystack = `${agent.display_name ?? agent.name} ${agent.description ?? ""}`;
         return (
           haystack.includes(search) ||
-          (tagMatched && agent.agent_id === TAG_AGENT_ID)
+          (searchTagMatched && agent.agent_id === TAG_AGENT_ID)
         );
       });
       const current = Number(url.searchParams.get("page") ?? 1);
@@ -367,6 +416,40 @@ journey(ID, async (context) => {
       .filter({ hasText: optionLabel })
       .click();
   };
+
+  const queryParam = (request, name) =>
+    new URLSearchParams(request?.query ?? "").get(name);
+
+  /** Open the agent management page's tag filter popover. */
+  const openTagFilter = async () => {
+    await page
+      .getByRole("button", { name: TAG_FILTER_BUTTON, exact: true })
+      .filter({ visible: true })
+      .click();
+    await expect(page.getByLabel(TAG_FILTER_SELECT_ARIA)).toBeVisible();
+  };
+
+  /** Select the fixture tag value offered by the open tag filter popover. */
+  const selectTagFilterValue = async () => {
+    await page.getByLabel(TAG_FILTER_SELECT_ARIA).click();
+    await page
+      .locator(".ant-select-item-option:visible")
+      .filter({ hasText: TAG_SEARCH_VALUE })
+      .click();
+  };
+
+  /** Drop the active tag selection through the popover's clear action. */
+  const clearTagFilter = async () => {
+    await page
+      .getByRole("button", { name: TAG_FILTER_CLEAR, exact: true })
+      .filter({ visible: true })
+      .click();
+  };
+
+  const lastTagFilterRequest = () =>
+    fixture.agentList
+      .filter((request) => queryParam(request, "tag_predicates") !== null)
+      .at(-1);
 
   const requestsSince = (kind, offset, predicate) =>
     fixture[kind].slice(offset).filter(predicate);
@@ -521,6 +604,101 @@ journey(ID, async (context) => {
         await expect(page.locator("span.bg-amber-50:visible")).toHaveCount(1);
         return "my-agents tab forwards latest-published order and badges only the main agent";
       },
+      async () => {
+        await page.goto(`${baseUrl}/zh/agents`);
+        await expect(
+          page.getByPlaceholder(AGENT_SEARCH_PLACEHOLDER)
+        ).toBeVisible();
+
+        const baseline = fixture.agentList.length;
+        await openTagFilter();
+        await selectTagFilterValue();
+        await expect
+          .poll(
+            () =>
+              requestsSince(
+                "agentList",
+                baseline,
+                (request) => queryParam(request, "tag_predicates") !== null
+              ).length
+          )
+          .toBeGreaterThan(0);
+
+        await expect(page.locator("article")).toHaveCount(1);
+        await expect(agentCard(TAG_AGENT_TITLE)).toBeVisible();
+        await expect(agentCard(ORDINARY_AGENT_TITLE)).toHaveCount(0);
+        await expect(agentCard(TAG_AGENT_TITLE)).not.toContainText("['d4_value");
+        return "tag filter narrowed the list to the tag-matched agent only";
+      },
+      async () => {
+        await page.goto(`${baseUrl}/zh/agents`);
+        const search = page.getByPlaceholder(AGENT_SEARCH_PLACEHOLDER);
+        await openTagFilter();
+        await selectTagFilterValue();
+        await expect(page.locator("article")).toHaveCount(1);
+
+        // The ordinary agent matches this query but carries no fixture tag, so
+        // an intersection must hide it while both criteria are active.
+        const baseline = fixture.agentList.length;
+        await search.fill(ORDINARY_AGENT_TITLE);
+        await expect
+          .poll(
+            () =>
+              requestsSince(
+                "agentList",
+                baseline,
+                (request) =>
+                  queryParam(request, "search") === ORDINARY_AGENT_TITLE &&
+                  queryParam(request, "tag_predicates") !== null
+              ).length
+          )
+          .toBeGreaterThan(0);
+        await expect(page.locator("article")).toHaveCount(0);
+
+        await clearTagFilter();
+        await expect
+          .poll(() => queryParam(fixture.agentList.at(-1), "tag_predicates"))
+          .toBeNull();
+        await expect(agentCard(ORDINARY_AGENT_TITLE)).toBeVisible();
+        await expect(page.locator("article")).toHaveCount(1);
+        return "tag filter and query combined as an intersection and cleared back to the query result";
+      },
+      async () => {
+        await page.goto(`${baseUrl}/zh/agent-space?tab=mine`);
+        await expect(resourceCard(TAG_AGENT_TITLE)).toBeVisible();
+
+        const pagingBaseline = fixture.agentList.length;
+        await page.locator(".ant-pagination-item-2:visible").click();
+        await expect
+          .poll(
+            () =>
+              requestsSince(
+                "agentList",
+                pagingBaseline,
+                (request) => queryParam(request, "page") === "2"
+              ).length
+          )
+          .toBeGreaterThan(0);
+
+        const sortBaseline = fixture.agentList.length;
+        await selectSortOption(SORT_LATEST_LABEL);
+        await expect
+          .poll(
+            () =>
+              requestsSince(
+                "agentList",
+                sortBaseline,
+                (request) =>
+                  queryParam(request, "page") === "1" &&
+                  queryParam(request, "sort_by_update_time") === "true"
+              ).length
+          )
+          .toBeGreaterThan(0);
+        await expect
+          .poll(mineTitleOrder)
+          .toEqual([ORDINARY_AGENT_TITLE, TAG_AGENT_TITLE]);
+        return "a sort change from a later page returned the list to the first page under the new order";
+      },
     ],
     assertions: [
       async () => {
@@ -621,6 +799,103 @@ journey(ID, async (context) => {
         ).toHaveText(MAIN_AGENT_LABEL);
         await expect(page.locator("span.bg-amber-50:visible")).toHaveCount(1);
         return "my-agents tab renders newest-published first and badges exactly the main agent";
+      },
+      async () => {
+        const baseline = fixture.agentList.length;
+        await page.goto(`${baseUrl}/zh/agents`);
+        await expect(
+          page.getByPlaceholder(AGENT_SEARCH_PLACEHOLDER)
+        ).toBeVisible();
+        await openTagFilter();
+        await selectTagFilterValue();
+        await expect
+          .poll(
+            () =>
+              requestsSince(
+                "agentList",
+                baseline,
+                (request) => queryParam(request, "tag_predicates") !== null
+              ).length
+          )
+          .toBeGreaterThan(0);
+
+        const filters =
+          queryParam(lastTagFilterRequest(), "tag_predicates") ?? "";
+        expect(filters).toContain(`"definition_id":${TAG_DEFINITION_ID}`);
+        expect(filters).toContain(`${TAG_VALUE_ID}`);
+        await expect(page.locator("article")).toHaveCount(1);
+        await expect(agentCard(TAG_AGENT_TITLE)).toBeVisible();
+        await expect(agentCard(ORDINARY_AGENT_TITLE)).toHaveCount(0);
+        await expect(agentCard(TAG_AGENT_TITLE)).not.toContainText("['d4_value");
+        expect(fixture.writes).toEqual([]);
+        expect(fixture.providerCalls).toEqual([]);
+        return "the tag filter forwarded its predicates, narrowed the list and triggered no unrelated write";
+      },
+      async () => {
+        await page.goto(`${baseUrl}/zh/agents`);
+        const search = page.getByPlaceholder(AGENT_SEARCH_PLACEHOLDER);
+        await openTagFilter();
+        await selectTagFilterValue();
+        await expect(page.locator("article")).toHaveCount(1);
+
+        const baseline = fixture.agentList.length;
+        await search.fill(ORDINARY_AGENT_TITLE);
+        await expect
+          .poll(
+            () =>
+              requestsSince(
+                "agentList",
+                baseline,
+                (request) =>
+                  queryParam(request, "search") === ORDINARY_AGENT_TITLE
+              ).length
+          )
+          .toBeGreaterThan(0);
+        await expect(page.locator("article")).toHaveCount(0);
+
+        await clearTagFilter();
+        await expect
+          .poll(() => queryParam(fixture.agentList.at(-1), "tag_predicates"))
+          .toBeNull();
+        await expect(agentCard(ORDINARY_AGENT_TITLE)).toBeVisible();
+        await expect(agentCard(TAG_AGENT_TITLE)).toHaveCount(0);
+        return "only agents satisfying both the query and the selected tag remained, and clearing the filter restored the query result";
+      },
+      async () => {
+        await page.goto(`${baseUrl}/zh/agent-space?tab=mine`);
+        await expect(resourceCard(TAG_AGENT_TITLE)).toBeVisible();
+        const pagingBaseline = fixture.agentList.length;
+        await page.locator(".ant-pagination-item-2:visible").click();
+        await expect
+          .poll(
+            () =>
+              requestsSince(
+                "agentList",
+                pagingBaseline,
+                (request) => queryParam(request, "page") === "2"
+              ).length
+          )
+          .toBeGreaterThan(0);
+
+        const sortBaseline = fixture.agentList.length;
+        await selectSortOption(SORT_LATEST_LABEL);
+        await expect
+          .poll(
+            () =>
+              requestsSince(
+                "agentList",
+                sortBaseline,
+                (request) =>
+                  queryParam(request, "page") === "1" &&
+                  queryParam(request, "sort_by_update_time") === "true"
+              ).length
+          )
+          .toBeGreaterThan(0);
+        await expect
+          .poll(mineTitleOrder)
+          .toEqual([ORDINARY_AGENT_TITLE, TAG_AGENT_TITLE]);
+        expect(fixture.writes).toEqual([]);
+        return "a sort change on a later page requested page one under the latest-published order";
       },
     ],
   });
