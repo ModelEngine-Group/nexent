@@ -776,10 +776,8 @@ const HomeContent: FC<{
       await runtime.threads.reload();
     } catch (error) {
       log.error("[HomeContent] Failed to start a new conversation:", error);
-    } finally {
-      onBack();
     }
-  }, [onBack, runtime]);
+  }, [runtime]);
 
   const handleAgentSelectedFromLanding = useCallback(
     async (agent: Agent) => {
