@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import math
 from datetime import datetime
 from enum import Enum
@@ -1390,6 +1392,24 @@ class ToolInstanceInfoRequest(BaseModel):
     params: Dict[str, Any]
     enabled: bool
     version_no: int = 0
+    # Optional explicit removal intent for managed knowledge tools. Every id
+    # must already be persisted on the draft tool instance and must not appear
+    # in the submitted params. Not persisted and never forwarded to the SDK.
+    removed_knowledge_ids: Optional[List[str]] = None
+
+
+class KnowledgeResourceStatusItem(BaseModel):
+    """One knowledge resource identity used by the batch status API."""
+
+    provider: str
+    resource_id: str
+
+
+class KnowledgeResourceStatusRequest(BaseModel):
+    """Batch status query for the currently selected knowledge resources."""
+
+    items: List[KnowledgeResourceStatusItem] = []
+    context: Optional[Dict[str, Any]] = None
 
 
 class SkillInstanceInfoRequest(BaseModel):

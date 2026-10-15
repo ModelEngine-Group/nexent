@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import hashlib
 import json
 import re
@@ -172,6 +174,50 @@ def _walk_agent_tree(
     return nodes
 
 
+def get_configured_scope_ids(
+    agent_id: int,
+    tenant_id: str,
+    version_no: Optional[int] = None,
+    is_debug: bool = False,
+) -> Dict[str, List[str]]:
+    """Return knowledge ids configured on the agent tree without permission filtering.
+
+    Conversation scope updates use this baseline to tell "already selected"
+    apart from "newly added", so an already selected but currently unavailable
+    item can be kept (or removed) without failing the save while a genuinely
+    new item still has to pass validation.
+    """
+    resolved_version = resolve_root_version(agent_id, tenant_id, version_no, is_debug)
+    agent_tree = _walk_agent_tree(agent_id, tenant_id, resolved_version)
+    local_indices = list(dict.fromkeys(
+        index_name
+        for node in agent_tree
+        for tool in node["tools"]
+        if tool.get("class_name") == LOCAL_TOOL_CLASS
+        for index_name in _tool_default(tool, LOCAL_RANGE_PARAM)
+    ))
+    aidp_ids = list(dict.fromkeys(
+        kds_id
+        for node in agent_tree
+        for tool in node["tools"]
+        if tool.get("class_name") == AIDP_TOOL_CLASS
+        for kds_id in _tool_default(tool, AIDP_RANGE_PARAM)
+    ))
+    local_id_by_index = {
+        str(record.get("index_name")): str(record.get("knowledge_id"))
+        for record in get_knowledge_info_by_tenant_id(tenant_id)
+        if record.get("index_name") and record.get("knowledge_id") is not None
+    }
+    return {
+        "local": [
+            local_id_by_index[index_name]
+            for index_name in local_indices
+            if index_name in local_id_by_index
+        ],
+        "aidp": aidp_ids,
+    }
+
+
 def snapshot_runtime_knowledge_tree(
     agent_id: int,
     tenant_id: str,
@@ -179,6 +225,7 @@ def snapshot_runtime_knowledge_tree(
 ) -> List[Dict[str, Any]]:
     """Freeze the knowledge-capable static tree for one request."""
     return deepcopy(_walk_agent_tree(agent_id, tenant_id, version_no))
+
 
 
 def get_agent_knowledge_capabilities(
@@ -226,9 +273,28 @@ def get_agent_knowledge_capabilities(
                 user_id=user_id,
                 tenant_id=tenant_id,
             )
+    # Configured values are reported separately from the permission-filtered
+    # defaults so clients can keep unavailable selections visible and marked
+    # instead of silently dropping them.
+    local_configured_indices = list(dict.fromkeys(
+        index_name
+        for node in agent_tree
+        for tool in node["tools"]
+        if tool.get("class_name") == LOCAL_TOOL_CLASS
+        for index_name in _tool_default(tool, LOCAL_RANGE_PARAM)
+    ))
+    aidp_configured_ids = list(dict.fromkeys(
+        kds_id
+        for node in agent_tree
+        for tool in node["tools"]
+        if tool.get("class_name") == AIDP_TOOL_CLASS
+        for kds_id in _tool_default(tool, AIDP_RANGE_PARAM)
+    ))
+    # Records are only needed when a caller identity is present: the filtered
+    # defaults and the configured ids both map index names to knowledge ids.
     local_records = (
         get_knowledge_info_by_tenant_id(tenant_id)
-        if user_id and local_default_indices
+        if user_id and (local_default_indices or local_configured_indices)
         else []
     )
     local_id_by_index = {
@@ -241,6 +307,11 @@ def get_agent_knowledge_capabilities(
         for index_name in local_default_indices
         if index_name in local_id_by_index
     ]
+    configured_id_by_index = {
+        index_name: local_id_by_index[index_name]
+        for index_name in local_configured_indices
+        if index_name in local_id_by_index
+    }
     affected_agent_ids = [
         node["agent_id"]
         for node in agent_tree
@@ -262,6 +333,12 @@ def get_agent_knowledge_capabilities(
             "default_summary": "Follow each agent's default configuration",
             "default_knowledge_ids": local_default_ids,
             "default_range_values": local_default_indices,
+            "configured_knowledge_ids": [
+                configured_id_by_index[index_name]
+                for index_name in local_configured_indices
+                if index_name in configured_id_by_index
+            ],
+            "configured_range_values": local_configured_indices,
         },
         "aidp": {
             "default_retrieval_config": root_parameters(AIDP_TOOL_CLASS),
@@ -270,6 +347,8 @@ def get_agent_knowledge_capabilities(
             "default_summary": "Follow each agent's default configuration",
             "default_knowledge_ids": aidp_default_ids,
             "default_range_values": aidp_default_ids,
+            "configured_knowledge_ids": aidp_configured_ids,
+            "configured_range_values": aidp_configured_ids,
         },
     }
     revision_payload = json.dumps(
@@ -316,12 +395,24 @@ def _resolve_local_override(
     ))
     accessible = [record for record in records if record["index_name"] in accessible_indices]
     warnings = []
+    accessible_knowledge_ids = {
+        str(record.get("knowledge_id")) for record in accessible
+        if record.get("knowledge_id") is not None
+    }
+    unavailable_ids = list(dict.fromkeys(
+        str(value) for value in knowledge_ids
+        if str(value) not in accessible_knowledge_ids
+    ))
     removed_count = invalid_count + len(numeric_ids) - len(accessible)
     if removed_count:
         warnings.append({
             "code": "KNOWLEDGE_SCOPE_ITEM_UNAVAILABLE",
             "source": "local",
             "count": removed_count,
+            # Resource ids let the conversation update distinguish already
+            # selected unavailable items (kept and removable) from newly
+            # added ones (which must pass validation).
+            "resource_ids": unavailable_ids,
         })
 
     model_keys = {
@@ -355,6 +446,9 @@ def _resolve_aidp_override(
             "code": "KNOWLEDGE_SCOPE_ITEM_UNAVAILABLE",
             "source": "aidp",
             "count": len(requested) - len(accessible),
+            "resource_ids": list(dict.fromkeys(
+                kds_id for kds_id in requested if kds_id not in accessible_id_set
+            )),
         })
     return accessible, name_map, warnings
 

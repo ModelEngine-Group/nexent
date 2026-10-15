@@ -1,3 +1,5 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 "use client";
 
 import type React from "react";
@@ -27,7 +29,11 @@ import { ErrorCode } from "@/const/errorCode";
 import { getKnowledgeResourceLimitMessage } from "@/const/errorMessageI18n";
 import { useConfirmModal } from "@/hooks/useConfirmModal";
 import log from "@/lib/logger";
-import { formatKnowledgeBaseDeleteError } from "@/lib/knowledgeBaseDeleteError";
+import {
+  formatKnowledgeBaseDeleteError,
+  getKnowledgeReferenceDetails,
+  isKnowledgeReferenceConflict,
+} from "@/lib/knowledgeBaseDeleteError";
 import { createKnowledgeBaseFilterKey } from "@/lib/knowledgeBaseViewport";
 import knowledgeBaseService from "@/services/knowledgeBaseService";
 import knowledgeBasePollingService from "@/services/knowledgeBasePollingService";
@@ -43,6 +49,8 @@ import type { KBQuotaStatus, QuotaUsageResponse } from "@/types/quota";
 
 import KnowledgeBaseList from "./components/knowledge/KnowledgeBaseList";
 import DocumentList from "./components/document/DocumentList";
+import KnowledgeReferenceConflictModal from "@/components/knowledge-base/KnowledgeReferenceConflictModal";
+import type { KnowledgeReferenceConflictDetails } from "@/types/knowledgeResource";
 import {
   useKnowledgeBaseContext,
   KnowledgeBaseProvider,
@@ -301,6 +309,9 @@ function DataConfig({ isActive }: DataConfigProps) {
   // Search and filter state
   const [searchQuery, setSearchQuery] = useState("");
   const [sourceFilter, setSourceFilter] = useState<string[]>([]);
+  const [referenceConflictOpen, setReferenceConflictOpen] = useState(false);
+  const [referenceConflictDetails, setReferenceConflictDetails] =
+    useState<KnowledgeReferenceConflictDetails | null>(null);
   const [modelFilter, setModelFilter] = useState<string[]>([]);
   const lastRequestedFilterKeyRef = useRef(
     createKnowledgeBaseFilterKey(searchQuery, sourceFilter, modelFilter)
@@ -643,6 +654,11 @@ function DataConfig({ isActive }: DataConfigProps) {
             message.success(t("knowledgeBase.message.deleteSuccess"));
           }, 1000);
         } catch (error) {
+          if (isKnowledgeReferenceConflict(error)) {
+            setReferenceConflictDetails(getKnowledgeReferenceDetails(error));
+            setReferenceConflictOpen(true);
+            return;
+          }
           message.error(
             formatKnowledgeBaseDeleteError(
               error,
@@ -1456,6 +1472,11 @@ function DataConfig({ isActive }: DataConfigProps) {
           </div>
         </div>
       </Modal>
+      <KnowledgeReferenceConflictModal
+        open={referenceConflictOpen}
+        details={referenceConflictDetails}
+        onClose={() => setReferenceConflictOpen(false)}
+      />
     </>
   );
 }

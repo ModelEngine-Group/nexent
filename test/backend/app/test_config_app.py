@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """
 Unit tests for config_app module.
 
@@ -138,6 +140,7 @@ class TestConfigAppRouterConfiguration:
             "apps.file_management_app": {"file_management_config_router": APIRouter()},
             "apps.image_app": {"router": APIRouter()},
             "apps.knowledge_summary_app": {"router": APIRouter()},
+            "apps.knowledge_reference_app": {"router": APIRouter()},
             "apps.mock_user_management_app": {"router": APIRouter()},
             "apps.model_managment_app": {"router": APIRouter()},
             "apps.oauth_app": {"router": APIRouter()},

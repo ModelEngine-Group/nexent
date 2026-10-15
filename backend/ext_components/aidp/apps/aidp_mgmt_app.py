@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """AIDP Management App Layer (v7.1).
 
 FastAPI endpoints for AIDP knowledge base CRUD with permission enforcement.
@@ -63,7 +65,9 @@ from ext_components.aidp.services.aidp_service import (
     update_aidp_kb_impl,
     upload_aidp_docs_impl,
 )
+from services.knowledge_reference_service import knowledge_deletion_guard
 from utils import auth_utils as auth_utils_module
+from utils.knowledge_reference import PROVIDER_AIDP, KnowledgeResourceRef
 
 
 aidp_mgmt_router = APIRouter(prefix="/aidp-mgmt")
@@ -716,16 +720,21 @@ async def delete_knowledge_base(
     user_id, tenant_id = await _auth(request)
     perms.require_permission(kds_id, user_id, tenant_id, required="EDIT")
 
-    server_url, api_key = _credentials()
-    success = delete_aidp_kb_impl(server_url, api_key, kds_id)
-    if success:
-        perms.soft_delete_permission(
-            kb_id=kds_id, tenant_id=tenant_id, updated_by=user_id,
-        )
-        invalidate_aidp_catalog_cache(server_url, api_key)
-        invalidate_aidp_kb_detail_cache(server_url, api_key, kds_id)
-        invalidate_aidp_doc_count_cache(server_url, api_key, kds_id)
-        _cleanup_document_assignments_for_deleted_knowledge_base(tenant_id, kds_id, user_id)
+    # Refuse deletion while any non-deleted agent configuration references this
+    # knowledge base, and exclude concurrent reference writes for the whole
+    # deletion so a binding cannot succeed after the reference check.
+    ref = KnowledgeResourceRef(provider=PROVIDER_AIDP, resource_id=kds_id)
+    with knowledge_deletion_guard(ref, user_id=user_id, tenant_id=tenant_id):
+        server_url, api_key = _credentials()
+        success = delete_aidp_kb_impl(server_url, api_key, kds_id)
+        if success:
+            perms.soft_delete_permission(
+                kb_id=kds_id, tenant_id=tenant_id, updated_by=user_id,
+            )
+            invalidate_aidp_catalog_cache(server_url, api_key)
+            invalidate_aidp_kb_detail_cache(server_url, api_key, kds_id)
+            invalidate_aidp_doc_count_cache(server_url, api_key, kds_id)
+            _cleanup_document_assignments_for_deleted_knowledge_base(tenant_id, kds_id, user_id)
     return JSONResponse(status_code=HTTPStatus.OK, content={"success": success})
 
 

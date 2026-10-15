@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """Skill management service."""
 
 import aiofiles
@@ -1075,6 +1077,54 @@ class SkillService:
 
     # ============== Skill Instance Methods ==============
 
+    @staticmethod
+    def _skill_knowledge_references(skill_info, tenant_id: str):
+        """Return the knowledge resources a skill instance configuration injects.
+
+        Mirrors the runtime merge: skill template values are overridden by the
+        per-agent instance values before they are applied to every tool the
+        skill lists. Only managed retrieval tools carry knowledge references.
+        """
+        from database.client import get_db_session
+        from database.knowledge_reference_db import query_knowledge_tool_params_by_ids
+        from utils.knowledge_reference import (
+            KnowledgeResourceRef,
+            iter_reference_params,
+        )
+
+        skill_id = getattr(skill_info, "skill_id", None)
+        if skill_id is None and isinstance(skill_info, dict):
+            skill_id = skill_info.get("skill_id")
+        if skill_id is None:
+            return []
+        skill = skill_db.get_skill_by_id(int(skill_id), tenant_id)
+        if not skill:
+            return []
+        tool_ids = [int(tool_id) for tool_id in (skill.get("tool_ids") or [])]
+        if not tool_ids:
+            return []
+        with get_db_session() as session:
+            param_by_tool_id = query_knowledge_tool_params_by_ids(session, tool_ids)
+        knowledge_params = set(param_by_tool_id.values())
+        if not knowledge_params:
+            return []
+        effective_values: Dict[str, Any] = dict(skill.get("config_values") or {})
+        instance_values = getattr(skill_info, "config_values", None)
+        if instance_values is None and isinstance(skill_info, dict):
+            instance_values = skill_info.get("config_values")
+        effective_values.update(instance_values or {})
+        refs = []
+        seen = set()
+        for provider, param_name, resource_id in iter_reference_params(effective_values):
+            if param_name not in knowledge_params:
+                continue
+            key = (provider, resource_id)
+            if key in seen:
+                continue
+            seen.add(key)
+            refs.append(KnowledgeResourceRef(provider=provider, resource_id=resource_id))
+        return refs
+
     def create_or_update_skill_instance(
         self,
         skill_info,
@@ -1094,12 +1144,21 @@ class SkillService:
             Created or updated skill instance dict
         """
         from database import skill_db as skill_db_module
-        return skill_db_module.create_or_update_skill_by_skill_info(
-            skill_info=skill_info,
-            tenant_id=tenant_id,
-            user_id=user_id,
-            version_no=version_no
+        from services.knowledge_reference_service import (
+            knowledge_reference_write_guard,
+            reject_confirmed_deleted_knowledge_references,
         )
+
+        refs = SkillService._skill_knowledge_references(skill_info, tenant_id)
+        if refs:
+            reject_confirmed_deleted_knowledge_references(refs, tenant_id=tenant_id)
+        with knowledge_reference_write_guard(refs):
+            return skill_db_module.create_or_update_skill_by_skill_info(
+                skill_info=skill_info,
+                tenant_id=tenant_id,
+                user_id=user_id,
+                version_no=version_no
+            )
 
     def list_skill_instances(
         self,

@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import json
 import logging
 
@@ -556,6 +558,86 @@ def _resolve_knowledge_scope_for_update(
     )
 
 
+def _scope_ids_for_source(scope: Optional[Dict[str, Any]], source: str) -> List[str]:
+    """Return the override ids selected for one source, or [] when not an override."""
+    if not isinstance(scope, dict):
+        return []
+    payload = scope.get(source)
+    if not isinstance(payload, dict) or payload.get("mode") != "override":
+        return []
+    key = "knowledge_ids" if source == "local" else "kds_ids"
+    raw = payload.get(key) or []
+    return [str(item) for item in raw]
+
+
+def _previous_selected_ids(
+    conversation: Dict[str, Any],
+    knowledge_scope: Dict[str, Any],
+    tenant_id: str,
+) -> Dict[str, List[str]]:
+    """Return the ids already selected before this save, per source.
+
+    An override keeps exactly its own ids; inherit (or a conversation without a
+    stored scope) is based on the agent's configured defaults, so switching
+    from inherit to override cannot silently re-add an unavailable item.
+    """
+    previous_scope = conversation.get("knowledge_scope") or {}
+    previous: Dict[str, List[str]] = {}
+    for source in ("local", "aidp"):
+        if isinstance(previous_scope.get(source), dict):
+            previous[source] = _scope_ids_for_source(previous_scope, source)
+        else:
+            previous[source] = []
+    if conversation.get("agent_id") is None:
+        return previous
+    try:
+        from services.knowledge_scope_service import get_configured_scope_ids
+
+        configured = get_configured_scope_ids(
+            agent_id=int(conversation["agent_id"]),
+            tenant_id=tenant_id,
+            version_no=None,
+            is_debug=False,
+        )
+    except Exception:
+        logger.warning(
+            "Failed to resolve configured knowledge ids for conversation %s",
+            conversation.get("conversation_id"),
+            exc_info=True,
+        )
+        return previous
+    for source in ("local", "aidp"):
+        if not isinstance(previous_scope.get(source), dict) or previous_scope[source].get("mode") == "inherit":
+            previous[source] = list(configured.get(source) or [])
+    return previous
+
+
+def _blocking_unavailable_sources(
+    unavailable_warnings: List[Dict[str, Any]],
+    previous_ids: Dict[str, List[str]],
+    requested_scope: Dict[str, Any],
+) -> List[str]:
+    """Return sources whose newly added ids are unavailable or inaccessible.
+
+    Already selected unavailable items stay selectable (and removable); only
+    genuinely new ids must pass validation, so a save that adds an invalid id
+    fails as a whole while removals alone still succeed.
+    """
+    blocking: List[str] = []
+    for warning in unavailable_warnings:
+        source = str(warning.get("source") or "")
+        requested_ids = set(_scope_ids_for_source(requested_scope, source))
+        added_ids = requested_ids - set(previous_ids.get(source) or [])
+        resource_ids = {str(item) for item in warning.get("resource_ids") or []}
+        if resource_ids:
+            if resource_ids.intersection(added_ids):
+                blocking.append(source)
+        elif added_ids:
+            # Older payloads carry counts only; keep the source-level guard.
+            blocking.append(source)
+    return sorted(set(blocking))
+
+
 def update_conversation_knowledge_scope_service(
     conversation_id: int,
     knowledge_scope: Optional[Dict[str, Any]],
@@ -608,12 +690,16 @@ def update_conversation_knowledge_scope_service(
             if warning.get("code") == "KNOWLEDGE_SCOPE_ITEM_UNAVAILABLE"
         ]
         if unavailable:
-            sources = ", ".join(
-                sorted({str(warning.get("source")) for warning in unavailable})
+            blocking_sources = _blocking_unavailable_sources(
+                unavailable,
+                _previous_selected_ids(conversation, knowledge_scope, tenant_id),
+                knowledge_scope,
             )
-            raise ValidationError(
-                f"Some selected knowledge bases are unavailable or inaccessible: {sources}."
-            )
+            if blocking_sources:
+                raise ValidationError(
+                    "Some selected knowledge bases are unavailable or inaccessible: "
+                    f"{', '.join(blocking_sources)}."
+                )
         warnings = resolved.warnings
         effective_preview = {
             "local": {

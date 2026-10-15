@@ -1,3 +1,5 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import {
   API_ENDPOINTS,
   ApiError,
@@ -418,7 +420,8 @@ export const updateToolConfig = async (
   toolId: number,
   agentId: number,
   params: Record<string, any>,
-  enable: boolean
+  enable: boolean,
+  removedKnowledgeIds?: string[]
 ): Promise<{
   success: boolean;
   data: unknown;
@@ -434,6 +437,12 @@ export const updateToolConfig = async (
         agent_id: agentId,
         params: params,
         enabled: enable,
+        // Optional explicit removal intent for managed knowledge tools. Sent
+        // only when the caller computed an actual removal so unchanged saves
+        // keep the legacy merge behavior.
+        ...(removedKnowledgeIds && removedKnowledgeIds.length > 0
+          ? { removed_knowledge_ids: removedKnowledgeIds }
+          : {}),
       }),
     });
 

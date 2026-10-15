@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import asyncio
 import logging
 from contextlib import asynccontextmanager
@@ -17,6 +19,7 @@ from apps.file_management_app import (
 )
 from apps.image_app import router as proxy_router
 from apps.knowledge_summary_app import router as summary_router
+from apps.knowledge_reference_app import router as knowledge_reference_router
 from apps.mock_user_management_app import router as mock_user_management_router
 from apps.model_managment_app import router as model_manager_router
 from apps.oauth_app import router as oauth_router
@@ -227,3 +230,4 @@ app.include_router(personal_quota_router)
 app.include_router(memory_dreaming_router)
 app.include_router(memory_provider_router)
 app.include_router(tag_management_router)
+app.include_router(knowledge_reference_router)

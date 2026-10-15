@@ -1,3 +1,5 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import { STATUS_CODES } from "@/const/auth";
 import { ErrorCode } from "@/const/errorCode";
 import { withBasePath } from "@/lib/basePath";
@@ -319,6 +321,8 @@ export const API_ENDPOINTS = {
     summaryFrequencyOptions: `${API_BASE_URL}/indices/summary_frequency_options`,
     indices: `${API_BASE_URL}/indices`,
     checkName: `${API_BASE_URL}/indices/check_exist`,
+    // Batch availability status for selected knowledge resources
+    statuses: `${API_BASE_URL}/knowledge-bases/statuses`,
     listFiles: (indexName: string) =>
       `${API_BASE_URL}/indices/${indexName}/files`,
     indexDetail: (indexName: string) => `${API_BASE_URL}/indices/${indexName}`,

@@ -1,3 +1,5 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 /**
  * Error code definitions for the frontend.
  *
@@ -96,6 +98,8 @@ export const ErrorCode = {
   KNOWLEDGE_TASK_SUBMIT_FAILED: "060108",
   KNOWLEDGE_DELETE_BLOCKED: "060109",
   KNOWLEDGE_RESOURCE_EXCEEDED: "060110",
+  KNOWLEDGE_REFERENCED_BY_AGENT: "060111",
+  KNOWLEDGE_RESOURCE_BUSY: "060112",
 
   // ==================== 07 MCPTools / MCP 工具 ====================
   // 01 - Tool

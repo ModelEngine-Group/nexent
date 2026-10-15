@@ -1,3 +1,5 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 export type KnowledgeScopeMode = "inherit" | "override" | "disabled";
 
 export interface ConversationKnowledgeScope {
@@ -31,6 +33,9 @@ export interface KnowledgeCapabilities {
       default_summary: string;
       default_knowledge_ids: string[];
       default_range_values: string[];
+      /** Configured default ids without permission filtering (may include unavailable items). */
+      configured_knowledge_ids?: string[];
+      configured_range_values?: string[];
     };
     aidp: {
       default_retrieval_config?: Record<string, unknown>;
@@ -39,6 +44,9 @@ export interface KnowledgeCapabilities {
       default_summary: string;
       default_knowledge_ids: string[];
       default_range_values: string[];
+      /** Configured default ids without permission filtering (may include unavailable items). */
+      configured_knowledge_ids?: string[];
+      configured_range_values?: string[];
     };
   };
 }
@@ -47,6 +55,8 @@ export interface KnowledgeScopeWarning {
   code: string;
   source?: "local" | "aidp";
   count: number;
+  /** Offending ids, used to tell kept selections apart from newly added ones. */
+  resource_ids?: string[];
 }
 
 export interface KnowledgeScopeEffectivePreview {

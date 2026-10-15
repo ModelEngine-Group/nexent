@@ -1,3 +1,5 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 "use client";
 
 import { ResourceSelectionActions } from "@/features/workbench/components/ResourceSelectionActions";
@@ -22,6 +24,13 @@ import { useAuthorizationContext } from "@/components/providers/AuthorizationPro
 import { useDeployment } from "@/components/providers/deploymentProvider";
 import knowledgeBaseService from "@/services/knowledgeBaseService";
 import { useGroupList } from "@/hooks/group/useGroupList";
+import { useKnowledgeResourceStatuses } from "@/hooks/useKnowledgeResourceStatuses";
+import KnowledgeResourceWarning from "@/components/knowledge-base/KnowledgeResourceWarning";
+import {
+  isWarningStatus,
+  knowledgeResourceKey,
+  type KnowledgeResourceProvider,
+} from "@/types/knowledgeResource";
 import type { KnowledgeBase } from "@/types/knowledgeBase";
 import type {
   ConversationKnowledgeScope,
@@ -177,16 +186,20 @@ export const ConversationKnowledgeScopeModal: FC<
           );
         setLocalKnowledgeBases(localItems);
         setAidpKnowledgeBases(aidpItems);
-        const availableIds = new Set(
-          configuredSource === "local"
-            ? localItems.map((kb: KnowledgeBase) => String(kb.knowledge_id))
-            : aidpItems.map((kb: KnowledgeBase) => String(kb.id))
-        );
-        const defaults =
+        // Configured ids keep unavailable inherited items visible and marked;
+        // the permission-filtered defaults are only a fallback for older
+        // backends that do not report configured ids.
+        const configuredIds =
+          (configuredSource
+            ? capabilities?.sources[configuredSource].configured_knowledge_ids
+            : undefined) ?? [];
+        const accessibleIds =
           (configuredSource
             ? capabilities?.sources[configuredSource].default_knowledge_ids
-            : []
-          )?.filter((id) => availableIds.has(String(id))) ?? [];
+            : undefined) ?? [];
+        const defaults = (
+          configuredIds.length ? configuredIds : accessibleIds
+        ).map(String);
         const selected =
           configuredSource === "local"
             ? normalized.local.mode === "override"
@@ -201,14 +214,13 @@ export const ConversationKnowledgeScopeModal: FC<
                   ? []
                   : defaults
               : [];
-        const visibleSelected = selected.filter((id) =>
-          availableIds.has(String(id))
-        );
+        // Unavailable selections are kept (they are marked with a warning and
+        // stay removable) instead of being dropped when the list no longer
+        // contains them.
+        const visibleSelected = selected.map(String);
         setDefaultSelectedIds(defaults.map(String));
         setInitialSelectedIds(visibleSelected.map(String));
-        setInitialSelectionWasFiltered(
-          selected.length !== visibleSelected.length
-        );
+        setInitialSelectionWasFiltered(false);
         setDraft(
           configuredSource === "local"
             ? {
@@ -278,6 +290,28 @@ export const ConversationKnowledgeScopeModal: FC<
     String(
       knowledgeBase.embeddingModelId ?? knowledgeBase.embeddingModel ?? ""
     );
+
+  // Availability markers for the current conversation selection. Selection
+  // context returns only statuses for the current account, never names.
+  const statusRefs = useMemo(() => {
+    const refs: { provider: KnowledgeResourceProvider; resourceId: string }[] =
+      [];
+    if (configuredSource === "local") {
+      draft.local.knowledge_ids.forEach((id) =>
+        refs.push({ provider: "local", resourceId: String(id) })
+      );
+    } else if (configuredSource === "aidp") {
+      draft.aidp.kds_ids.forEach((id) =>
+        refs.push({ provider: "aidp", resourceId: String(id) })
+      );
+    }
+    return refs;
+  }, [configuredSource, draft]);
+  const resourceStatuses = useKnowledgeResourceStatuses(
+    statusRefs,
+    open ? { type: "selection" } : null,
+    true
+  );
 
   const updateSelectedValues = (source: "local" | "aidp", values: string[]) => {
     setSelectionTouched(true);
@@ -481,9 +515,32 @@ export const ConversationKnowledgeScopeModal: FC<
       )
     );
     const selectedSet = new Set(values);
-    const selectedKnowledgeBases = allKnowledgeBases.filter((knowledgeBase) =>
+    const knowledgeResourceProvider: KnowledgeResourceProvider =
+      source === "local" ? "local" : "aidp";
+    const statusEntryFor = (id: string) =>
+      resourceStatuses.statusByKey[
+        knowledgeResourceKey(knowledgeResourceProvider, id)
+      ];
+    const loadedSelected = allKnowledgeBases.filter((knowledgeBase) =>
       selectedSet.has(getKnowledgeBaseId(source, knowledgeBase))
     );
+    // Selected ids the loaded list no longer contains stay visible as
+    // placeholder entries so the user can still remove them explicitly.
+    const missingSelected: KnowledgeBase[] = values
+      .filter(
+        (id) =>
+          !allKnowledgeBases.some((kb) => getKnowledgeBaseId(source, kb) === id)
+      )
+      .map(
+        (id) =>
+          ({
+            id,
+            knowledge_id: id,
+            name: id,
+            display_name: id,
+          }) as unknown as KnowledgeBase
+      );
+    const selectedKnowledgeBases = [...loadedSelected, ...missingSelected];
     const selectedLocalModel =
       source === "local"
         ? selectedKnowledgeBases[0]
@@ -549,10 +606,17 @@ export const ConversationKnowledgeScopeModal: FC<
         <div className="rounded bg-blue-50 px-4 py-3">
           <div className="flex items-center justify-between gap-3">
             <SelectedResourceTags
-              items={selectedKnowledgeBases.map((kb) => ({
-                id: getKnowledgeBaseId(source, kb),
-                name: kb.display_name || kb.name,
-              }))}
+              items={selectedKnowledgeBases.map((kb) => {
+                const id = getKnowledgeBaseId(source, kb);
+                const statusEntry = statusEntryFor(id);
+                return {
+                  id,
+                  name: kb.display_name || kb.name,
+                  warning: isWarningStatus(statusEntry?.status) ? (
+                    <KnowledgeResourceWarning entry={statusEntry!} />
+                  ) : undefined,
+                };
+              })}
               onRemove={(id) => toggleKnowledgeBase(source, id)}
             />
             <ResourceSelectionActions
@@ -588,6 +652,7 @@ export const ConversationKnowledgeScopeModal: FC<
                 Boolean(modelIdentity) &&
                 modelIdentity !== selectedLocalModel;
               const name = knowledgeBase.display_name || knowledgeBase.name;
+              const statusEntry = statusEntryFor(id);
               const groupNames = (knowledgeBase.group_ids ?? [])
                 .map((groupId) => groupNameById.get(groupId))
                 .filter((groupName): groupName is string => Boolean(groupName));
@@ -595,7 +660,19 @@ export const ConversationKnowledgeScopeModal: FC<
                 <ResourceCard
                   resourceType="knowledge"
                   key={id}
-                  title={name}
+                  title={
+                    isWarningStatus(statusEntry?.status) ? (
+                      <span className="flex min-w-0 items-center gap-1">
+                        <KnowledgeResourceWarning
+                          entry={statusEntry!}
+                          className="pointer-events-auto"
+                        />
+                        <span className="truncate">{name}</span>
+                      </span>
+                    ) : (
+                      name
+                    )
+                  }
                   tags={knowledgeBase.tags || []}
                   description={knowledgeBase.description || undefined}
                   subtitle={`${knowledgeBase.documentCount ?? 0} ${t("knowledgeBase.document", "篇文档")}`}

@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import asyncio
 import base64
 import io
@@ -32,6 +34,11 @@ from consts.model import (
     ToolSourceEnum,
 )
 from services.asset_owner_visibility import resolve_agent_list_permission
+from services.knowledge_reference_service import (
+    knowledge_reference_write_guard,
+    reject_confirmed_deleted_knowledge_references,
+)
+from utils.knowledge_reference import optional_resources_from_params
 from management.services.agent.read import (
     apply_deleted_model_reason, apply_duplicate_name_availability_rules, check_agent_availability,
     project_agent_models,
@@ -715,23 +722,38 @@ async def import_agent_by_agent_id(
                              tenant_id=tenant_id,
                              user_id=user_id)
     new_agent_id = new_agent["agent_id"]
-    # create tool_instance
+    # Knowledge references inside the imported payload must not re-bind a
+    # resource that was deleted in this deployment, and the write must not
+    # interleave with a concurrent deletion of the same resource.
+    imported_refs = []
+    seen_ref_keys = set()
     for tool in tool_list:
-        tool.agent_id = new_agent_id
-        create_or_update_tool_by_tool_info(
-            tool_info=tool, tenant_id=tenant_id, user_id=user_id)
-    # Auto-publish initial version V1 for market-imported agents
-    try:
-        publish_version_impl(
-            agent_id=new_agent_id,
-            tenant_id=tenant_id,
-            user_id=user_id,
-            version_name="V1",
-            release_note="Initial version from Agent Market"
-        )
-    except Exception as e:
-        logger.warning(
-            f"Failed to auto-publish version V1 for agent {new_agent_id}: {str(e)}")
+        for ref in optional_resources_from_params(tool.params):
+            ref_key = (ref.provider, ref.resource_id)
+            if ref_key in seen_ref_keys:
+                continue
+            seen_ref_keys.add(ref_key)
+            imported_refs.append(ref)
+    if imported_refs:
+        reject_confirmed_deleted_knowledge_references(imported_refs, tenant_id=tenant_id)
+    # create tool_instance
+    with knowledge_reference_write_guard(imported_refs):
+        for tool in tool_list:
+            tool.agent_id = new_agent_id
+            create_or_update_tool_by_tool_info(
+                tool_info=tool, tenant_id=tenant_id, user_id=user_id)
+        # Auto-publish initial version V1 for market-imported agents
+        try:
+            publish_version_impl(
+                agent_id=new_agent_id,
+                tenant_id=tenant_id,
+                user_id=user_id,
+                version_name="V1",
+                release_note="Initial version from Agent Market"
+            )
+        except Exception as e:
+            logger.warning(
+                f"Failed to auto-publish version V1 for agent {new_agent_id}: {str(e)}")
     return new_agent_id
 
 

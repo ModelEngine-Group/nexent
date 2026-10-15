@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """
 Error code definitions for the application.
 
@@ -113,6 +115,8 @@ class ErrorCode(Enum):
     KNOWLEDGE_TASK_SUBMIT_FAILED = "060108"  # Data-process task submission failed
     KNOWLEDGE_DELETE_BLOCKED = "060109"  # Delete blocked by in-flight file processing
     KNOWLEDGE_RESOURCE_EXCEEDED = "060110"  # Knowledge resource limit exceeded
+    KNOWLEDGE_REFERENCED_BY_AGENT = "060111"  # Delete blocked by agent references
+    KNOWLEDGE_RESOURCE_BUSY = "060112"  # Knowledge resource is locked by a concurrent operation
 
     # ==================== 07 MCPTools / MCP 工具 ====================
     # 01 - Tool
@@ -310,6 +314,8 @@ ERROR_CODE_HTTP_STATUS = {
     # Knowledge base lifecycle
     ErrorCode.KNOWLEDGE_DELETE_BLOCKED: 409,
     ErrorCode.KNOWLEDGE_RESOURCE_EXCEEDED: 429,
+    ErrorCode.KNOWLEDGE_REFERENCED_BY_AGENT: 409,
+    ErrorCode.KNOWLEDGE_RESOURCE_BUSY: 409,
     # Chat - Runtime metadata
     ErrorCode.CHAT_METADATA_NOT_ALLOWED: 400,
     ErrorCode.CHAT_METADATA_INVALID: 422,

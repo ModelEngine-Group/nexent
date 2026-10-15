@@ -1,3 +1,5 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 // Unified encapsulation of knowledge base related API calls
 
 import i18n from "i18next";
@@ -1208,9 +1210,17 @@ class KnowledgeBaseService {
         }
       );
 
-      const result = await response.json();
-      if (result.status !== "success") {
-        throw new Error(result.message || "Failed to delete knowledge base");
+      const result = await response.json().catch(() => null);
+      if (!response.ok || result?.status !== "success") {
+        // Preserve the EDS code and details (for example the agent reference
+        // conflict) so the caller can render the dedicated dialog.
+        throw new ApiError(
+          result?.code ?? response.status,
+          result?.message ||
+            result?.detail?.message ||
+            "Failed to delete knowledge base",
+          result?.details
+        );
       }
       emitQuotaUsageChanged();
     } catch (error) {

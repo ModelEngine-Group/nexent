@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import asyncio
 from contextlib import AsyncExitStack
 import importlib
@@ -59,6 +61,12 @@ from database.knowledge_db import get_knowledge_name_map_by_index_names
 from database.user_tenant_db import get_user_email_map
 from mcpadapt.smolagents_adapter import _sanitize_function_name
 from services.file_management_service import validate_urls_access
+from services.knowledge_reference_service import (
+    STATUS_AVAILABLE,
+    STATUS_LOOKUP_FAILED,
+    knowledge_reference_write_guard,
+    resolve_local_reference_access,
+)
 from .agent_draft_permission_service import (
     AgentDraftEditError,
     ResourceBindingError,
@@ -73,6 +81,14 @@ from nexent.monitor import set_monitoring_context, set_monitoring_operation
 from nexent.core.concurrency import run_blocking
 from management.services.knowledge_base.service import get_vector_db_core
 from utils.langchain_utils import discover_langchain_modules
+from utils.knowledge_reference import (
+    AIDP_RANGE_PARAM,
+    LOCAL_RANGE_PARAM,
+    PROVIDER_AIDP,
+    PROVIDER_BY_RANGE_PARAM,
+    KnowledgeResourceRef,
+    dedupe_ids,
+)
 from utils.tool_utils import get_local_tools_classes, get_local_tools_description_zh
 
 logger = logging.getLogger("tool_configuration_service")
@@ -573,6 +589,141 @@ def _validate_tool_param_ranges(tool_id: int, params: Dict[str, Any]):
         )
 
 
+def _merge_managed_knowledge_scope(
+    *,
+    tool_info: ToolInstanceInfoRequest,
+    tenant_id: str,
+    user_id: str,
+    version_no: int,
+    param_name: str,
+) -> Dict[str, Any]:
+    """Merge a managed knowledge tool scope with explicit-removal semantics.
+
+    Rules (see the knowledge-reference specification):
+
+    * Explicitly removed ids are always unbound, even when the knowledge
+      service is unreachable or the id is no longer visible to the caller.
+    * Stored bindings are never dropped just because a permission or upstream
+      lookup failed; only the submitted visible selection is authoritative for
+      visible ids.
+    * Newly added ids must pass existence and permission validation. When the
+      lookup fails and new ids were submitted, the whole save fails instead of
+      partially applying removals.
+    """
+    provider = PROVIDER_BY_RANGE_PARAM[param_name]
+    existing = query_tool_instances_by_id(
+        tool_info.agent_id,
+        tool_info.tool_id,
+        tenant_id,
+        version_no,
+    )
+    existing_params = dict((existing or {}).get("params") or {})
+    existing_ids = _parse_kds_list(existing_params.get(param_name))
+
+    params = dict(tool_info.params or {})
+    removed_raw = getattr(tool_info, "removed_knowledge_ids", None)
+    removed_ids = _parse_kds_list(removed_raw) if removed_raw is not None else []
+    submitted_provided = param_name in params
+    submitted_ids = _parse_kds_list(params.get(param_name)) if submitted_provided else []
+
+    existing_set = set(existing_ids)
+    removed_set = set(removed_ids)
+    unknown_removed = [item for item in removed_ids if item not in existing_set]
+    if unknown_removed:
+        raise ValidationError(
+            "removed_knowledge_ids must reference knowledge bases currently bound "
+            "to the draft tool instance"
+        )
+    if removed_set.intersection(submitted_ids):
+        raise ValidationError(
+            "removed_knowledge_ids must not overlap the submitted knowledge base selection"
+        )
+
+    # A missing key means the caller did not edit the knowledge scope; removals
+    # then apply on top of the stored selection.
+    if not submitted_provided:
+        submitted_ids = list(existing_ids)
+    if not submitted_provided and not removed_ids:
+        params[param_name] = existing_ids
+        return params
+
+    # Serialize against deletion of every touched resource while the read,
+    # merge, and write happen, so no reference can be re-created after a
+    # concurrent deletion released its guard.
+    touched_refs = [
+        KnowledgeResourceRef(provider=provider, resource_id=item)
+        for item in dedupe_ids([*submitted_ids, *removed_ids])
+    ]
+    with knowledge_reference_write_guard(touched_refs):
+        new_ids = [item for item in submitted_ids if item not in existing_set]
+        available: Optional[set] = None
+        lookup_error: Optional[Exception] = None
+        if provider == PROVIDER_AIDP:
+            try:
+                available = set(_resolve_aidp_snapshot(user_id, tenant_id).accessible_id_set)
+            except Exception as exc:  # upstream outage must not erase stored bindings
+                lookup_error = exc
+        else:
+            try:
+                # Accessibility is resolved for every relevant id, not only the
+                # submitted ones: a stored id that is still accessible but was
+                # dropped from the submitted list keeps the legacy semantics
+                # (removed by omission), while genuinely unavailable stored ids
+                # are preserved unless the caller removes them explicitly.
+                access = resolve_local_reference_access(
+                    dedupe_ids([*existing_ids, *submitted_ids, *new_ids]),
+                    user_id=user_id,
+                    tenant_id=tenant_id,
+                )
+                if any(payload["status"] == STATUS_LOOKUP_FAILED for payload in access.values()):
+                    lookup_error = RuntimeError("local knowledge status lookup failed")
+                else:
+                    available = {
+                        item
+                        for item, payload in access.items()
+                        if payload["status"] == STATUS_AVAILABLE
+                    }
+            except Exception as exc:
+                lookup_error = exc
+
+        if lookup_error is not None:
+            if new_ids:
+                raise ValidationError(
+                    "The knowledge base service is unavailable; the configuration "
+                    "was not changed"
+                ) from lookup_error
+            # Explicit removals must stay saveable; every other stored binding
+            # is preserved as-is.
+            params[param_name] = [
+                item
+                for item in dedupe_ids([*existing_ids, *submitted_ids])
+                if item not in removed_set
+            ]
+            return params
+
+        invalid_new = [item for item in new_ids if item not in available]
+        if invalid_new:
+            if provider == PROVIDER_AIDP:
+                raise ValidationError(
+                    "aidp_search kds_list contains a knowledge base the user cannot configure"
+                )
+            raise ValidationError(
+                "index_names contains a knowledge base the user cannot access: "
+                + ", ".join(sorted(invalid_new))
+            )
+
+        # Keep stored bindings the caller cannot currently see (only explicit
+        # removals unbind them) and use the visible submitted selection.
+        kept_stored = [item for item in existing_ids if item not in available]
+        visible_submitted = [item for item in submitted_ids if item in available]
+        params[param_name] = [
+            item
+            for item in dedupe_ids([*kept_stored, *visible_submitted])
+            if item not in removed_set
+        ]
+        return params
+
+
 def update_tool_info_impl(tool_info: ToolInstanceInfoRequest, tenant_id: str, user_id: str):
     """
     Update tool configuration information
@@ -612,50 +763,21 @@ def update_tool_info_impl(tool_info: ToolInstanceInfoRequest, tenant_id: str, us
         raise ResourceBindingError("resource_not_visible")
 
     if _is_aidp_search_tool(tool_info.tool_id, tool.get("name")):
-        existing = query_tool_instances_by_id(
-            tool_info.agent_id,
-            tool_info.tool_id,
-            tenant_id,
-            version_no,
+        tool_info.params = _merge_managed_knowledge_scope(
+            tool_info=tool_info,
+            tenant_id=tenant_id,
+            user_id=user_id,
+            version_no=version_no,
+            param_name=AIDP_RANGE_PARAM,
         )
-        existing_params = dict((existing or {}).get("params") or {})
-        existing_ids = _parse_kds_list(existing_params.get("kds_list"))
-        params = dict(tool_info.params or {})
-
-        # A missing key means the caller did not edit the knowledge scope.
-        if "kds_list" not in params:
-            params["kds_list"] = existing_ids
-        else:
-            submitted_ids = _parse_kds_list(params.get("kds_list"))
-            try:
-                snapshot = _resolve_aidp_snapshot(user_id, tenant_id)
-            except Exception as exc:
-                new_ids = [kds_id for kds_id in submitted_ids if kds_id not in set(existing_ids)]
-                if new_ids:
-                    raise ValidationError(
-                        "AIDP is unavailable; the knowledge base configuration was not changed"
-                    ) from exc
-                params["kds_list"] = existing_ids
-            else:
-                existing_set = set(existing_ids)
-                invalid_ids = [
-                    kds_id for kds_id in submitted_ids
-                    if kds_id not in snapshot.accessible_id_set and kds_id not in existing_set
-                ]
-                if invalid_ids:
-                    raise ValidationError(
-                        "aidp_search kds_list contains a knowledge base the user cannot configure"
-                    )
-                hidden_existing = [
-                    kds_id for kds_id in existing_ids
-                    if kds_id not in snapshot.accessible_id_set
-                ]
-                visible_submitted = [
-                    kds_id for kds_id in submitted_ids
-                    if kds_id in snapshot.accessible_id_set
-                ]
-                params["kds_list"] = list(dict.fromkeys(hidden_existing + visible_submitted))
-        tool_info.params = params
+    elif tool.get("name") == "knowledge_base_search":
+        tool_info.params = _merge_managed_knowledge_scope(
+            tool_info=tool_info,
+            tenant_id=tenant_id,
+            user_id=user_id,
+            version_no=version_no,
+            param_name=LOCAL_RANGE_PARAM,
+        )
 
     _validate_tool_param_ranges(
         tool_info.tool_id,

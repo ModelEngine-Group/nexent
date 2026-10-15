@@ -1,3 +1,5 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 "use client";
 
 import React, { useCallback, useEffect, useRef, useState } from "react";
@@ -5,6 +7,13 @@ import { useTranslation } from "react-i18next";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 
 import { App, Modal } from "antd";
+
+import KnowledgeReferenceConflictModal from "@/components/knowledge-base/KnowledgeReferenceConflictModal";
+import {
+  getKnowledgeReferenceDetails,
+  isKnowledgeReferenceConflict,
+} from "@/lib/knowledgeBaseDeleteError";
+import type { KnowledgeReferenceConflictDetails } from "@/types/knowledgeResource";
 
 import { KB_SEARCH_DEBOUNCE_MS } from "./pages/knowledge-list/constants";
 import type { AidpKnowledgeBaseItem } from "@/ext_components/aidp/shared/types/knowledge";
@@ -39,6 +48,8 @@ const AidpKnowledgeConfiguration: React.FC = () => {
   const { refreshLists, updateKnowledgeBase, fetchKnowledgeBase } =
     useAidpKnowledgeCache();
   const deleteMutation = useDeleteAidpKnowledgeBase();
+  const [referenceConflict, setReferenceConflict] =
+    useState<KnowledgeReferenceConflictDetails | null>(null);
   const [viewMode, setViewMode] = useState<AidpKbViewMode>("cards");
   const [visibleColumns, setVisibleColumns] = useState<AidpKbColumnKey[]>([
     ...AIDP_KB_DEFAULT_COLUMNS,
@@ -235,6 +246,12 @@ const AidpKnowledgeConfiguration: React.FC = () => {
             message.success(t("aidpKnowledge.deleteKbSuccess"));
             handleBackToList();
           } catch (error) {
+            // A knowledge base that agents still reference is refused by the
+            // backend with a 409 conflict; show which agents block it.
+            if (isKnowledgeReferenceConflict(error)) {
+              setReferenceConflict(getKnowledgeReferenceDetails(error));
+              return;
+            }
             handleError(error, {
               showMessage: false,
               handleSession: false,
@@ -275,6 +292,11 @@ const AidpKnowledgeConfiguration: React.FC = () => {
             pollingPaused={deleteConfirmOpen}
           />
         </div>
+        <KnowledgeReferenceConflictModal
+          open={referenceConflict !== null}
+          details={referenceConflict}
+          onClose={() => setReferenceConflict(null)}
+        />
       </div>
     );
   }
@@ -324,6 +346,12 @@ const AidpKnowledgeConfiguration: React.FC = () => {
           }}
         />
       )}
+
+      <KnowledgeReferenceConflictModal
+        open={referenceConflict !== null}
+        details={referenceConflict}
+        onClose={() => setReferenceConflict(null)}
+      />
     </div>
   );
 };

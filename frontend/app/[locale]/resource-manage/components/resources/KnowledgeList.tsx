@@ -1,3 +1,5 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 "use client";
 
 import React, { useMemo, useState, useEffect, useCallback } from "react";
@@ -37,7 +39,13 @@ import PersonalKnowledgeBaseCapacity from "./PersonalKnowledgeBaseCapacity";
 import { QuotaSettingsModal } from "./QuotaSettingsModal";
 import { SuQuotaModal } from "./SuQuotaModal";
 import { formatDateTime as formatDateTimeUtil } from "@/lib/date";
-import { formatKnowledgeBaseDeleteError } from "@/lib/knowledgeBaseDeleteError";
+import {
+  formatKnowledgeBaseDeleteError,
+  getKnowledgeReferenceDetails,
+  isKnowledgeReferenceConflict,
+} from "@/lib/knowledgeBaseDeleteError";
+import KnowledgeReferenceConflictModal from "@/components/knowledge-base/KnowledgeReferenceConflictModal";
+import type { KnowledgeReferenceConflictDetails } from "@/types/knowledgeResource";
 
 // Color constants for progress bars
 const STROKE_COLORS = {
@@ -111,6 +119,9 @@ export default function KnowledgeList({
   const [summaryModalVisible, setSummaryModalVisible] = useState(false);
   const [summaryLoading, setSummaryLoading] = useState(false);
   const [summaryContent, setSummaryContent] = useState<string>("");
+  const [referenceConflictOpen, setReferenceConflictOpen] = useState(false);
+  const [referenceConflictDetails, setReferenceConflictDetails] =
+    useState<KnowledgeReferenceConflictDetails | null>(null);
 
   // Fetch quota usage
   const fetchQuotaUsage = useCallback(async () => {
@@ -192,6 +203,11 @@ export default function KnowledgeList({
       message.success(t("tenantResources.knowledgeBase.deleted"));
       handleRefetch();
     } catch (error: any) {
+      if (isKnowledgeReferenceConflict(error)) {
+        setReferenceConflictDetails(getKnowledgeReferenceDetails(error));
+        setReferenceConflictOpen(true);
+        return;
+      }
       message.error(
         formatKnowledgeBaseDeleteError(
           error,
@@ -750,6 +766,11 @@ export default function KnowledgeList({
           </Modal>
         </>
       )}
+      <KnowledgeReferenceConflictModal
+        open={referenceConflictOpen}
+        details={referenceConflictDetails}
+        onClose={() => setReferenceConflictOpen(false)}
+      />
     </div>
   );
 }
