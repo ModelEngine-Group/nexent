@@ -8,17 +8,14 @@ import logging
 import os
 import zipfile
 from collections import deque
-from typing import Any, Optional, Dict, List
+from typing import Any, Dict, List, Optional
 
 from fastapi import Header
 from fastapi.responses import JSONResponse
 
 from agents.create_agent_info import create_tool_config_list
-from utils.agent_transfer_utils import portable_tool_params, validate_import_tool_params
-from services.agent_version_service import publish_version_impl
 from consts.agent_repository import STATUS_PENDING_REVIEW, STATUS_REJECTED, STATUS_SHARED
-from consts.const import TOOL_TYPE_MAPPING, \
-    MODEL_CONFIG_MAPPING, CAN_EDIT_ALL_USER_ROLES, PERMISSION_PRIVATE
+from consts.const import CAN_EDIT_ALL_USER_ROLES, MODEL_CONFIG_MAPPING, PERMISSION_PRIVATE, TOOL_TYPE_MAPPING
 from consts.exceptions import (
     ForbiddenError,
     SkillDuplicateError,
@@ -33,68 +30,72 @@ from consts.model import (
     ToolInstanceInfoRequest,
     ToolSourceEnum,
 )
-from services.asset_owner_visibility import resolve_agent_list_permission
-from services.knowledge_reference_service import (
-    knowledge_reference_write_guard,
-    reject_confirmed_deleted_knowledge_references,
-)
-from utils.knowledge_reference import optional_resources_from_params
-from management.services.agent.read import (
-    apply_deleted_model_reason, apply_duplicate_name_availability_rules, check_agent_availability,
-    project_agent_models,
-)
-from management.services.agent.naming import check_agent_value_duplicate, generate_unique_agent_value
+from database import skill_db
+from database.a2a_agent_db import get_server_agent_ids
 from database.agent_db import (
+    clear_agent_new_mark,
     create_agent,
     delete_agent_by_id,
     delete_agent_relationship,
     delete_related_agent,
     insert_related_agent,
     is_system_agent,
-    query_all_agent_info_by_tenant_id,
     query_agent_info_by_ids,
     query_agent_list_candidates_by_tenant_id,
+    query_all_agent_info_by_tenant_id,
     query_sub_agent_relations,
     query_sub_agents_id_list,
     resolve_sub_agent_version_no,
     search_agent_id_by_agent_name,
     search_agent_info_by_agent_id,
-    clear_agent_new_mark
 )
+from database.agent_repository_db import list_agent_repository_by_agent_ids
+from database.agent_version_db import batch_search_version_names, query_version_list
+from database.group_db import query_group_ids_by_user
 from database.model_management_db import (
     get_model_by_model_id,
     get_model_id_by_display_name,
 )
 from database.remote_mcp_db import get_mcp_server_by_name_and_tenant
+from database.tag_management_db import TagManagementDB
 from database.tool_db import (
     create_or_update_tool_by_tool_info,
     delete_tools_by_agent_id,
     query_all_tools,
     query_tool_instances_by_id,  # noqa: F401 - compatibility patch point
-    search_tools_for_sub_agent
+    search_tools_for_sub_agent,
 )
-from database import skill_db
-from management.services.skill.service import SkillService
-from database.agent_repository_db import list_agent_repository_by_agent_ids
-from database.agent_version_db import batch_search_version_names, query_version_list
-from database.group_db import query_group_ids_by_user
 from database.user_tenant_db import get_user_tenant_by_user_id
-from database.a2a_agent_db import get_server_agent_ids
-from database.tag_management_db import TagManagementDB
-from services.prompt_template_service import (
-    SYSTEM_PROMPT_TEMPLATE_ID,
-    SYSTEM_PROMPT_TEMPLATE_NAME,
+from management.services.agent.naming import check_agent_value_duplicate, generate_unique_agent_value
+from management.services.agent.read import (
+    apply_deleted_model_reason,
+    apply_duplicate_name_availability_rules,
+    check_agent_availability,
+    project_agent_models,
 )
-from utils.str_utils import convert_list_to_string, convert_string_to_list
-from utils.skill_import_utils import generate_available_copy_skill_name
+from management.services.skill.service import SkillService
+from services.agent_version_service import publish_version_impl
+from services.asset_owner_visibility import resolve_agent_list_permission
 from services.conversation_management_service import (
     generate_conversation_title_service,  # noqa: F401 - compatibility patch point
     save_message_unit,  # noqa: F401 - retained as a compatibility re-export
     update_unit_status,  # noqa: F401 - retained as a compatibility re-export
 )
+from services.knowledge_reference_service import (
+    knowledge_reference_write_guard,
+    reject_confirmed_deleted_knowledge_references,
+)
+from services.prompt_template_service import (
+    SYSTEM_PROMPT_TEMPLATE_ID,
+    SYSTEM_PROMPT_TEMPLATE_NAME,
+)
+from utils.agent_transfer_utils import portable_tool_params, validate_import_tool_params
 from utils.auth_utils import get_current_user_info
 from utils.config_utils import tenant_config_manager
+from utils.knowledge_reference import optional_resources_from_params
 from utils.skill_import_utils import generate_available_copy_skill_name
+from utils.str_utils import convert_list_to_string, convert_string_to_list
+
 
 # Monitoring utilities: bind Agent metadata once at the request boundary.
 
@@ -725,15 +726,11 @@ async def import_agent_by_agent_id(
     # Knowledge references inside the imported payload must not re-bind a
     # resource that was deleted in this deployment, and the write must not
     # interleave with a concurrent deletion of the same resource.
-    imported_refs = []
-    seen_ref_keys = set()
-    for tool in tool_list:
-        for ref in optional_resources_from_params(tool.params):
-            ref_key = (ref.provider, ref.resource_id)
-            if ref_key in seen_ref_keys:
-                continue
-            seen_ref_keys.add(ref_key)
-            imported_refs.append(ref)
+    imported_refs = list(dict.fromkeys(
+        resource
+        for tool in tool_list
+        for resource in optional_resources_from_params(tool.params)
+    ))
     if imported_refs:
         reject_confirmed_deleted_knowledge_references(imported_refs, tenant_id=tenant_id)
     # create tool_instance
@@ -1667,16 +1664,16 @@ def build_sandbox_policy(tenant_id: str, agent_type: str) -> Optional[dict]:
         A sandbox policy dict, or None when ``NEXENT_SANDBOX_DEFAULT_LEVEL=local``.
     """
     from consts.const import (
+        NEXENT_SANDBOX_AUTO_SYNC_OUTPUTS,
+        NEXENT_SANDBOX_CPU_QUOTA,
         NEXENT_SANDBOX_DEFAULT_LEVEL,
         NEXENT_SANDBOX_DEFAULT_SCOPE,
         NEXENT_SANDBOX_DOCKER_IMAGE,
-        NEXENT_SANDBOX_MEMORY_LIMIT_MB,
-        NEXENT_SANDBOX_CPU_QUOTA,
-        NEXENT_SANDBOX_TIMEOUT_S,
         NEXENT_SANDBOX_HOST_TOOL_TIMEOUT_S,
+        NEXENT_SANDBOX_MEMORY_LIMIT_MB,
         NEXENT_SANDBOX_NETWORK_DISABLED,
         NEXENT_SANDBOX_SHELL_POLICY,
-        NEXENT_SANDBOX_AUTO_SYNC_OUTPUTS,
+        NEXENT_SANDBOX_TIMEOUT_S,
     )
 
     level = NEXENT_SANDBOX_DEFAULT_LEVEL
@@ -1708,11 +1705,11 @@ def get_sandbox_minio_client() -> Optional[Any]:
     after the run finishes.
     """
     from consts.const import (
-        NEXENT_SANDBOX_OUTPUT_BUCKET,
-        MINIO_ENDPOINT,
         MINIO_ACCESS_KEY,
+        MINIO_ENDPOINT,
         MINIO_SECRET_KEY,
         MINIO_SECURE,
+        NEXENT_SANDBOX_OUTPUT_BUCKET,
     )
 
     if not MINIO_ENDPOINT:

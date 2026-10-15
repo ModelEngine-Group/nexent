@@ -56,7 +56,7 @@ def _app_patches(monkeypatch):
         ref_app,
         "resolve_item_statuses",
         lambda refs, user_id, tenant_id, vdb_core=None: [
-            {"provider": ref.provider, "resource_id": ref.resource_id, "status": "available"}
+            {"provider": ref[0], "resource_id": ref[1], "status": "available"}
             for ref in refs
         ],
     )
@@ -261,7 +261,7 @@ def test_skill_knowledge_references_resolution(monkeypatch):
     )
     # Template ids and per-instance overrides merge; the local param is not a
     # knowledge param for this tool map and drops out.
-    assert [(ref.provider, ref.resource_id) for ref in refs] == [("aidp", "kds-2")]
+    assert [(ref[0], ref[1]) for ref in refs] == [("aidp", "kds-2")]
 
 
 # ---------------------------------------------------------------------------

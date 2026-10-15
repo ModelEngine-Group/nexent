@@ -49,7 +49,6 @@ from database.user_tenant_db import get_user_tenant_by_user_id
 from utils.knowledge_reference import (
     PROVIDER_AIDP,
     PROVIDER_LOCAL,
-    KnowledgeResourceRef,
     dedupe_ids,
     resource_lock_key,
 )
@@ -114,7 +113,7 @@ def is_agent_visible(context: VisibilityContext, agent: Dict[str, Any]) -> bool:
     """Mirror the agent list visibility rule without its enabled filter.
 
     A disabled agent still owns its persisted configuration, so it stays
-    visible (and blocking) instead of being treated as permission-hidden.
+    visible in the deletion preview instead of being treated as permission-hidden.
     """
     if context.can_edit_all:
         return True
@@ -132,19 +131,19 @@ def is_agent_visible(context: VisibilityContext, agent: Dict[str, Any]) -> bool:
 
 
 def collect_agent_reference_preview(
-    ref: KnowledgeResourceRef,
+    resources: Sequence[tuple[str, str]],
     *,
     user_id: str,
     tenant_id: Optional[str] = None,
 ) -> Dict[str, Any]:
-    """Return the permission-filtered agent list bound to one resource.
+    """Return the permission-filtered agent list bound to the resources.
 
     Deletion cascades, so this only feeds the second confirmation dialog: one
     row per agent (draft and every published version collapse into the single
     agent name), with hidden references reported as an aggregate count.
     """
     with get_db_session() as session:
-        rows = query_live_agent_reference_rows(session, ref)
+        rows = query_live_agent_reference_rows(session, resources)
         if not rows:
             return {
                 "agents": [],
@@ -210,28 +209,27 @@ def assert_agent_context_visible(
         )
 
 
-def remove_knowledge_references(ref: KnowledgeResourceRef) -> Dict[str, int]:
-    """Strip one deleted resource out of every binding that still lists it.
+def remove_knowledge_references(resources: Sequence[tuple[str, str]]) -> Dict[str, int]:
+    """Strip deleted resources out of every binding that still lists them.
 
     Deletion cascades, so this runs once the resource is actually gone: agent
     tool instances (draft and published versions), skill instances, and
     conversation knowledge scopes all stop referencing it.
     """
     with get_db_session() as session:
-        counts = strip_deleted_resource_from_bindings(session, ref)
+        counts = strip_deleted_resource_from_bindings(session, resources)
     if any(counts.values()):
         logger.info(
-            "Deleted resource cleaned from bindings %s:%s -> %s",
-            ref.provider,
-            ref.resource_id,
+            "Deleted resources cleaned from bindings %s -> %s",
+            resources,
             counts,
         )
     return counts
 
 
-def lock_namespace_for(ref: KnowledgeResourceRef) -> str:
+def lock_namespace_for(provider: str) -> str:
     """Return the deployment namespace used in the resource lock key."""
-    if ref.provider == PROVIDER_AIDP:
+    if provider == PROVIDER_AIDP:
         # AIDP deployment configuration is read lazily: non-AIDP deployments
         # do not need these constants to import the shared service.
         from consts.const import AIDP_SERVER_URL, AIDP_TENANT_ID
@@ -241,30 +239,28 @@ def lock_namespace_for(ref: KnowledgeResourceRef) -> str:
     return ""
 
 
-def resource_lock_keys_for(refs: Iterable[KnowledgeResourceRef]) -> List[int]:
+def resource_lock_keys_for(refs: Iterable[tuple[str, str]]) -> List[int]:
     """Compute lock keys for a mixed set of resources."""
-    return [resource_lock_key(ref, lock_namespace_for(ref)) for ref in refs]
+    return [
+        resource_lock_key(provider, resource_id, lock_namespace_for(provider))
+        for provider, resource_id in refs
+    ]
 
 
 @contextmanager
-def knowledge_deletion_guard(
-    ref: KnowledgeResourceRef,
-    *,
-    user_id: str,
-    tenant_id: Optional[str] = None,
-):
+def knowledge_deletion_guard(resources: Sequence[tuple[str, str]]):
     """Exclude reference writes while the deletion cascades over the resource.
 
     A binding arriving after the deletion cannot succeed because the resource
     no longer passes existence validation, and the lock closes the window
     where one could commit between the cascade cleanup and the deletion.
     """
-    with acquire_lock_keys(resource_lock_keys_for([ref])):
+    with acquire_lock_keys(resource_lock_keys_for(resources)):
         yield
 
 
 @contextmanager
-def knowledge_reference_write_guard(refs: Sequence[KnowledgeResourceRef]):
+def knowledge_reference_write_guard(refs: Sequence[tuple[str, str]]):
     """Serialize a reference write against concurrent deletion of the same resources."""
     with acquire_lock_keys(resource_lock_keys_for(refs)):
         yield
@@ -393,21 +389,18 @@ def resolve_local_reference_access(
 
 
 def resolve_item_statuses(
-    items: Sequence[KnowledgeResourceRef],
+    items: Sequence[tuple[str, str]],
     *,
     user_id: str,
     tenant_id: Optional[str] = None,
     vdb_core: Any = None,
 ) -> List[Dict[str, Any]]:
     """Resolve per-item statuses for the batch status API, preserving input order."""
-    unique: Dict[Tuple[str, str], KnowledgeResourceRef] = {}
-    for ref in items:
-        unique.setdefault((ref.provider, ref.resource_id), ref)
+    unique = list(dict.fromkeys(items))
     statuses: Dict[Tuple[str, str], Dict[str, Any]] = {}
 
-    local_refs = [ref for ref in unique.values() if ref.provider == PROVIDER_LOCAL]
-    if local_refs:
-        local_names = [ref.resource_id for ref in local_refs]
+    local_names = [resource_id for provider, resource_id in unique if provider == PROVIDER_LOCAL]
+    if local_names:
         with get_db_session() as session:
             records = _resolve_local_records(session, local_names)
         existing_index_names: Optional[Set[str]] = None
@@ -434,9 +427,8 @@ def resolve_item_statuses(
                 )
             statuses[(PROVIDER_LOCAL, name)] = payload
 
-    aidp_refs = [ref for ref in unique.values() if ref.provider == PROVIDER_AIDP]
-    if aidp_refs:
-        aidp_ids = [ref.resource_id for ref in aidp_refs]
+    aidp_ids = [resource_id for provider, resource_id in unique if provider == PROVIDER_AIDP]
+    if aidp_ids:
         try:
             snapshot = _resolve_aidp_snapshot(user_id, str(tenant_id or ""))
         except Exception as exc:
@@ -460,7 +452,7 @@ def resolve_item_statuses(
                     )
                 statuses[(PROVIDER_AIDP, resource_id)] = payload
 
-    return [statuses[(ref.provider, ref.resource_id)] for ref in unique.values()]
+    return [statuses[resource] for resource in unique]
 
 
 def _classify_upstream_failure(exc: Exception) -> str:
@@ -477,13 +469,13 @@ def _classify_upstream_failure(exc: Exception) -> str:
 
 
 def require_available_knowledge_references(
-    refs: Sequence[KnowledgeResourceRef],
+    refs: Sequence[tuple[str, str]],
     *,
     user_id: str,
     tenant_id: Optional[str] = None,
 ) -> None:
     """Validate newly added bindings against existence and permission rules."""
-    local_ids = [ref.resource_id for ref in refs if ref.provider == PROVIDER_LOCAL]
+    local_ids = [resource_id for provider, resource_id in refs if provider == PROVIDER_LOCAL]
     if local_ids:
         access = resolve_local_reference_access(local_ids, user_id=user_id, tenant_id=tenant_id)
         invalid = [
@@ -497,7 +489,7 @@ def require_available_knowledge_references(
                 + ", ".join(sorted(invalid))
             )
 
-    aidp_ids = dedupe_ids(ref.resource_id for ref in refs if ref.provider == PROVIDER_AIDP)
+    aidp_ids = dedupe_ids(resource_id for provider, resource_id in refs if provider == PROVIDER_AIDP)
     if aidp_ids:
         try:
             snapshot = _resolve_aidp_snapshot(user_id, str(tenant_id or ""))
@@ -514,7 +506,7 @@ def require_available_knowledge_references(
 
 
 def reject_confirmed_deleted_knowledge_references(
-    refs: Sequence[KnowledgeResourceRef],
+    refs: Sequence[tuple[str, str]],
     *,
     tenant_id: Optional[str] = None,
 ) -> None:
@@ -525,8 +517,8 @@ def reject_confirmed_deleted_knowledge_references(
     row) are refused. This closes the race where a deletion completed after the
     importing client started but before its reference write committed.
     """
-    local_ids = [ref.resource_id for ref in refs if ref.provider == PROVIDER_LOCAL]
-    aidp_ids = dedupe_ids(ref.resource_id for ref in refs if ref.provider == PROVIDER_AIDP)
+    local_ids = [resource_id for provider, resource_id in refs if provider == PROVIDER_LOCAL]
+    aidp_ids = dedupe_ids(resource_id for provider, resource_id in refs if provider == PROVIDER_AIDP)
     confirmed: Set[str] = set()
     if local_ids or aidp_ids:
         with get_db_session() as session:

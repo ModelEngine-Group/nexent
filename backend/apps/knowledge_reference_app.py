@@ -34,7 +34,6 @@ from utils.knowledge_reference import (
     MAX_STATUS_ITEMS,
     PROVIDER_LOCAL,
     SUPPORTED_PROVIDERS,
-    KnowledgeResourceRef,
 )
 
 
@@ -61,12 +60,13 @@ async def query_knowledge_resource_statuses(
     refs = []
     for item in raw_items:
         provider = str(item.provider or "").strip().lower()
-        if provider not in SUPPORTED_PROVIDERS or not str(item.resource_id or "").strip():
+        resource_id = str(item.resource_id or "").strip()
+        if provider not in SUPPORTED_PROVIDERS or not resource_id:
             raise AppException(
                 ErrorCode.COMMON_VALIDATION_ERROR,
                 details={"item": item.model_dump()},
             )
-        refs.append(KnowledgeResourceRef(provider=provider, resource_id=item.resource_id))
+        refs.append((provider, resource_id))
 
     context = request.context or {}
     context_type = str(context.get("type") or "selection").strip().lower()
@@ -100,7 +100,7 @@ async def query_knowledge_resource_statuses(
         )
 
     vdb_core = None
-    if any(ref.provider == PROVIDER_LOCAL for ref in refs):
+    if any(provider == PROVIDER_LOCAL for provider, _ in refs):
         try:
             vdb_core = get_vector_db_core()
         except Exception:
@@ -137,9 +137,9 @@ async def query_knowledge_reference_preview(
             details={"provider": request.provider, "resource_id": request.resource_id},
         )
 
-    ref = KnowledgeResourceRef(provider=provider, resource_id=resource_id)
+    resources = [(provider, resource_id)]
     status = resolve_item_statuses(
-        [ref], user_id=user_id, tenant_id=tenant_id, vdb_core=None
+        resources, user_id=user_id, tenant_id=tenant_id, vdb_core=None
     )[0]
     if status.get("status") != "available":
         raise AppException(
@@ -148,6 +148,6 @@ async def query_knowledge_reference_preview(
         )
 
     preview = collect_agent_reference_preview(
-        ref, user_id=user_id, tenant_id=tenant_id
+        resources, user_id=user_id, tenant_id=tenant_id
     )
     return JSONResponse(status_code=HTTPStatus.OK, content=preview)

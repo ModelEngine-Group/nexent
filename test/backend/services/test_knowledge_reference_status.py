@@ -49,7 +49,7 @@ def _fake_session():
 
 
 def _local_ref(resource_id: str):
-    return service.KnowledgeResourceRef(provider="local", resource_id=resource_id)
+    return ("local", resource_id)
 
 
 @pytest.fixture(autouse=True)

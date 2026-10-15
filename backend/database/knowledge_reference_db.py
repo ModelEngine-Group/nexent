@@ -41,9 +41,10 @@ from database.db_models import (
 from utils.knowledge_reference import (
     KNOWLEDGE_RANGE_PARAM_BY_TOOL_NAME,
     PROVIDER_AIDP,
+    PROVIDER_LOCAL,
+    RANGE_PARAM_BY_PROVIDER,
     REFERENCE_ORIGIN_SKILL,
     REFERENCE_ORIGIN_TOOL,
-    KnowledgeResourceRef,
     dedupe_ids,
     parse_knowledge_id_list,
 )
@@ -77,10 +78,12 @@ def _knowledge_tool_ids(session: Session, param_name: str) -> Set[int]:
 
 def query_tool_instance_reference_rows(
     session: Session,
-    ref: KnowledgeResourceRef,
+    provider: str,
+    resource_ids: Set[str],
 ) -> List[Dict[str, Any]]:
-    """Return reference rows persisted in tool instances for one resource."""
-    tool_ids = _knowledge_tool_ids(session, ref.range_param)
+    """Return tool instances referencing any requested ID for this provider."""
+    param_name = RANGE_PARAM_BY_PROVIDER[provider]
+    tool_ids = _knowledge_tool_ids(session, param_name)
     if not tool_ids:
         return []
     instances = (
@@ -97,7 +100,7 @@ def query_tool_instance_reference_rows(
         params = data.get("params") or {}
         if not isinstance(params, dict):
             continue
-        if ref.resource_id not in parse_knowledge_id_list(params.get(ref.range_param)):
+        if not resource_ids.intersection(parse_knowledge_id_list(params.get(param_name))):
             continue
         rows.append(
             {
@@ -111,7 +114,8 @@ def query_tool_instance_reference_rows(
 
 def query_skill_instance_reference_rows(
     session: Session,
-    ref: KnowledgeResourceRef,
+    provider: str,
+    resource_ids: Set[str],
 ) -> List[Dict[str, Any]]:
     """Return reference rows injected through enabled skill configurations.
 
@@ -119,7 +123,8 @@ def query_skill_instance_reference_rows(
     overridden by the per-agent skill instance values before the merged config
     is applied to every tool listed on the skill.
     """
-    knowledge_tool_ids = _knowledge_tool_ids(session, ref.range_param)
+    param_name = RANGE_PARAM_BY_PROVIDER[provider]
+    knowledge_tool_ids = _knowledge_tool_ids(session, param_name)
     if not knowledge_tool_ids:
         return []
     instances = (
@@ -163,7 +168,7 @@ def query_skill_instance_reference_rows(
             continue
         effective_config: Dict[str, Any] = dict(skill.get("config_values") or {})
         effective_config.update(data.get("config_values") or {})
-        if ref.resource_id not in parse_knowledge_id_list(effective_config.get(ref.range_param)):
+        if not resource_ids.intersection(parse_knowledge_id_list(effective_config.get(param_name))):
             continue
         rows.append(
             {
@@ -175,12 +180,14 @@ def query_skill_instance_reference_rows(
     return rows
 
 
-def query_reference_rows(session: Session, ref: KnowledgeResourceRef) -> List[Dict[str, Any]]:
-    """Return deduplicated reference rows for one resource across all write paths."""
-    rows = [
-        *query_tool_instance_reference_rows(session, ref),
-        *query_skill_instance_reference_rows(session, ref),
-    ]
+def query_reference_rows(session: Session, resources: Sequence[tuple[str, str]]) -> List[Dict[str, Any]]:
+    """Return deduplicated reference rows across providers and write paths."""
+    rows = []
+    for provider in RANGE_PARAM_BY_PROVIDER:
+        resource_ids = {resource_id for kind, resource_id in resources if kind == provider}
+        if resource_ids:
+            rows.extend(query_tool_instance_reference_rows(session, provider, resource_ids))
+            rows.extend(query_skill_instance_reference_rows(session, provider, resource_ids))
     deduped: Dict[Tuple[Any, int, str], Dict[str, Any]] = {}
     for row in rows:
         agent_id = row.get("agent_id")
@@ -193,15 +200,15 @@ def query_reference_rows(session: Session, ref: KnowledgeResourceRef) -> List[Di
 
 def query_live_agent_reference_rows(
     session: Session,
-    ref: KnowledgeResourceRef,
+    resources: Sequence[tuple[str, str]],
 ) -> List[Dict[str, Any]]:
     """Return reference rows whose agent and version still exist undeleted.
 
     Agent and tool ``enabled`` flags are intentionally ignored: a disabled
-    agent or a disabled tool keeps its persisted configuration and therefore
-    still blocks deletion.
+    agent or a disabled tool keeps its bindings and therefore still appears
+    in the deletion preview.
     """
-    rows = query_reference_rows(session, ref)
+    rows = query_reference_rows(session, resources)
     if not rows:
         return []
     agent_ids = {int(row["agent_id"]) for row in rows}
@@ -269,9 +276,9 @@ def _strip_scope_ids(scope: Any, provider: str, target_ids: Set[str]) -> Tuple[A
 
 
 def strip_deleted_resource_from_bindings(
-    session: Session, ref: KnowledgeResourceRef
+    session: Session, resources: Sequence[tuple[str, str]]
 ) -> Dict[str, int]:
-    """Remove a deleted resource from every binding that still lists it.
+    """Remove deleted resources from bindings within the caller's transaction.
 
     The deletion cascades: agent tool instances (draft and published versions),
     skill instances, and conversation scopes all stop referencing the resource
@@ -280,8 +287,15 @@ def strip_deleted_resource_from_bindings(
     an instance actually carries them.
     """
     counts = {"tool_instances": 0, "skill_instances": 0, "conversations": 0}
-    tool_ids = _knowledge_tool_ids(session, ref.range_param)
-    if tool_ids:
+    targets_by_param: Dict[str, Set[str]] = {}
+    for provider, resource_id in resources:
+        targets_by_param.setdefault(RANGE_PARAM_BY_PROVIDER[provider], set()).add(resource_id)
+    if not targets_by_param:
+        return counts
+    for param_name, target_ids in targets_by_param.items():
+        tool_ids = _knowledge_tool_ids(session, param_name)
+        if not tool_ids:
+            continue
         instances = (
             session.query(ToolInstance)
             .filter(
@@ -295,9 +309,9 @@ def strip_deleted_resource_from_bindings(
             params = data.get("params") or {}
             if not isinstance(params, dict):
                 continue
-            current = params.get(ref.range_param)
+            current = params.get(param_name)
             ids = parse_knowledge_id_list(current)
-            if ref.resource_id not in ids:
+            if not target_ids.intersection(ids):
                 continue
             names = params.get("display_names")
             aligned_names = (
@@ -305,16 +319,16 @@ def strip_deleted_resource_from_bindings(
                 if isinstance(names, list) and len(names) == len(ids)
                 else None
             )
-            kept_ids = [item for item in ids if item != ref.resource_id]
+            kept_ids = [item for item in ids if item not in target_ids]
             updated = dict(params)
-            updated[ref.range_param] = (
+            updated[param_name] = (
                 json.dumps(kept_ids) if isinstance(current, str) else kept_ids
             )
             if aligned_names is not None:
                 updated["display_names"] = [
                     name
                     for item, name in zip(ids, aligned_names)
-                    if item != ref.resource_id
+                    if item not in target_ids
                 ]
             instance.params = updated
             counts["tool_instances"] += 1
@@ -328,31 +342,29 @@ def strip_deleted_resource_from_bindings(
         config_values = data.get("config_values") or {}
         if not isinstance(config_values, dict):
             continue
-        current = config_values.get(ref.range_param)
-        ids = parse_knowledge_id_list(current)
-        if ref.resource_id not in ids:
-            continue
-        kept_ids = [item for item in ids if item != ref.resource_id]
         updated = dict(config_values)
-        updated[ref.range_param] = (
-            json.dumps(kept_ids) if isinstance(current, str) else kept_ids
-        )
-        instance.config_values = updated
-        counts["skill_instances"] += 1
+        for param_name, target_ids in targets_by_param.items():
+            current = config_values.get(param_name)
+            ids = parse_knowledge_id_list(current)
+            if not target_ids.intersection(ids):
+                continue
+            kept_ids = [item for item in ids if item not in target_ids]
+            updated[param_name] = json.dumps(kept_ids) if isinstance(current, str) else kept_ids
+        if updated != config_values:
+            instance.config_values = updated
+            counts["skill_instances"] += 1
 
     counts["conversations"] = _strip_deleted_resource_from_conversation_scopes(
-        session, ref
+        session, resources
     )
 
-    if any(counts.values()):
-        session.commit()
     return counts
 
 
 def _strip_deleted_resource_from_conversation_scopes(
-    session: Session, ref: KnowledgeResourceRef
+    session: Session, resources: Sequence[tuple[str, str]]
 ) -> int:
-    """Strip one deleted resource from conversation knowledge scopes.
+    """Strip deleted resources from both persisted conversation scope copies.
 
     Local conversation scopes persist the numeric ``knowledge_id`` while AIDP
     scopes persist the ``kds_id``; both spellings of the target are removed.
@@ -360,18 +372,22 @@ def _strip_deleted_resource_from_conversation_scopes(
     ``knowledge_scope`` and inside ``workbench_config`` — and both copies are
     updated so the next workbench save cannot resurrect the stale reference.
     """
-    target_ids = {str(ref.resource_id)}
-    if ref.provider != PROVIDER_AIDP:
-        record = (
+    targets_by_provider: Dict[str, Set[str]] = {}
+    for provider, resource_id in resources:
+        targets_by_provider.setdefault(provider, set()).add(resource_id)
+    if not targets_by_provider:
+        return 0
+    if PROVIDER_LOCAL in targets_by_provider:
+        records = (
             session.query(KnowledgeRecord)
-            .filter(KnowledgeRecord.index_name == ref.resource_id)
-            .first()
+            .filter(KnowledgeRecord.index_name.in_(tuple(targets_by_provider[PROVIDER_LOCAL])))
+            .all()
         )
-        knowledge_id = getattr(record, "knowledge_id", None) if record else None
-        if knowledge_id is not None:
-            target_ids.add(str(knowledge_id))
+        targets_by_provider[PROVIDER_LOCAL].update(
+            str(record.knowledge_id) for record in records if record.knowledge_id is not None
+        )
 
-    patterns = [f"%{item}%" for item in target_ids]
+    patterns = {f"%{item}%" for ids in targets_by_provider.values() for item in ids}
     filters = []
     for pattern in patterns:
         filters.append(cast(ConversationRecord.knowledge_scope, String).like(pattern))
@@ -388,22 +404,21 @@ def _strip_deleted_resource_from_conversation_scopes(
     changed = 0
     for record in rows:
         row_changed = False
-        scope, scope_changed = _strip_scope_ids(
-            deepcopy(record.knowledge_scope), ref.provider, target_ids
-        )
-        if scope_changed:
-            record.knowledge_scope = scope
-            row_changed = True
+        scope = record.knowledge_scope
         workbench = deepcopy(record.workbench_config)
-        if isinstance(workbench, dict):
-            inner_scope, inner_changed = _strip_scope_ids(
-                workbench.get("knowledge_scope"), ref.provider, target_ids
-            )
-            if inner_changed:
-                workbench["knowledge_scope"] = inner_scope
-                record.workbench_config = workbench
-                row_changed = True
+        for provider, target_ids in targets_by_provider.items():
+            scope, scope_changed = _strip_scope_ids(scope, provider, target_ids)
+            row_changed |= scope_changed
+            if isinstance(workbench, dict):
+                inner_scope, inner_changed = _strip_scope_ids(
+                    workbench.get("knowledge_scope"), provider, target_ids
+                )
+                if inner_changed:
+                    workbench["knowledge_scope"] = inner_scope
+                    row_changed = True
         if row_changed:
+            record.knowledge_scope = scope
+            record.workbench_config = workbench
             changed += 1
     return changed
 

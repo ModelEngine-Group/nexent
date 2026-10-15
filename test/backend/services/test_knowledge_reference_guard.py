@@ -30,8 +30,8 @@ import backend.utils.knowledge_reference as reference_utils  # noqa: E402
 import consts.const as const_module  # noqa: E402
 
 
-AIDP_REF = reference_utils.KnowledgeResourceRef(provider="aidp", resource_id="kds-1")
-LOCAL_REF = reference_utils.KnowledgeResourceRef(provider="local", resource_id="idx-1")
+AIDP_REF = ("aidp", "kds-1")
+LOCAL_REF = ("local", "idx-1")
 
 
 class _SequencedSession:
@@ -94,68 +94,6 @@ def _use_service_session(monkeypatch, session):
 
 
 # ---------------------------------------------------------------------------
-# utils
-# ---------------------------------------------------------------------------
-
-
-def test_resource_ref_normalizes_and_validates():
-    ref = reference_utils.KnowledgeResourceRef(provider="aidp", resource_id="  kds-9  ")
-    assert ref.resource_id == "kds-9"
-    assert ref.range_param == "kds_list"
-    assert ref.as_dict() == {"provider": "aidp", "resource_id": "kds-9"}
-    local = reference_utils.KnowledgeResourceRef(provider="local", resource_id=213.0)
-    assert local.resource_id == "213"
-    assert local.range_param == "index_names"
-    with pytest.raises(ValueError):
-        reference_utils.KnowledgeResourceRef(provider="other", resource_id="x")
-    with pytest.raises(ValueError):
-        reference_utils.KnowledgeResourceRef(provider="local", resource_id="   ")
-
-
-def test_normalize_resource_id_edge_cases():
-    assert reference_utils.normalize_resource_id(None) == ""
-    assert reference_utils.normalize_resource_id(True) == "1"
-    assert reference_utils.normalize_resource_id(False) == "0"
-    assert reference_utils.normalize_resource_id(2.0) == "2"
-    assert reference_utils.normalize_resource_id(2.5) == "2.5"
-    assert reference_utils.normalize_resource_id(" idx ") == "idx"
-
-
-def test_parse_knowledge_id_list_accepts_every_persisted_form():
-    assert reference_utils.parse_knowledge_id_list("") == []
-    assert reference_utils.parse_knowledge_id_list(None) == []
-    assert reference_utils.parse_knowledge_id_list(["a", "a", " b ", ""]) == ["a", "b"]
-    assert reference_utils.parse_knowledge_id_list('["a", "b"]') == ["a", "b"]
-    assert reference_utils.parse_knowledge_id_list("a, b ,,") == ["a", "b"]
-    assert reference_utils.parse_knowledge_id_list("not json") == ["not json"]
-    assert reference_utils.parse_knowledge_id_list(213) == ["213"]
-
-
-def test_dedupe_ids_and_optional_resources_from_params():
-    assert reference_utils.dedupe_ids([213, "213", "", None, "b"]) == ["213", "b"]
-    params = {
-        "index_names": ["idx-1", "idx-1"],
-        "kds_list": '["kds-1"]',
-        "unrelated": "x",
-    }
-    refs = reference_utils.optional_resources_from_params(params)
-    assert [(ref.provider, ref.resource_id) for ref in refs] == [
-        ("local", "idx-1"),
-        ("aidp", "kds-1"),
-    ]
-    assert reference_utils.optional_resources_from_params("nope") == []
-    assert reference_utils.iter_reference_params(None) == []
-
-
-def test_resource_lock_key_is_stable_and_namespaced():
-    key = reference_utils.resource_lock_key(AIDP_REF, "ns")
-    assert key == reference_utils.resource_lock_key(AIDP_REF, "ns")
-    assert -2**63 <= key < 2**63
-    assert reference_utils.resource_lock_key(AIDP_REF, "other") != key
-    assert reference_utils.resource_lock_key(LOCAL_REF, "ns") != key
-
-
-# ---------------------------------------------------------------------------
 # database layer
 # ---------------------------------------------------------------------------
 
@@ -182,7 +120,7 @@ def test_tool_instance_rows_parse_list_and_json_params(monkeypatch):
         [matching_list, matching_json, other_id, bad_params],
     )
     _use_session(monkeypatch, session)
-    rows = reference_db.query_tool_instance_reference_rows(session, AIDP_REF)
+    rows = reference_db.query_tool_instance_reference_rows(session, "aidp", {"kds-1"})
     assert [(row["agent_id"], row["version_no"], row["reference_origin"]) for row in rows] == [
         (7, 0, reference_utils.REFERENCE_ORIGIN_TOOL),
         (7, 1, reference_utils.REFERENCE_ORIGIN_TOOL),
@@ -191,7 +129,7 @@ def test_tool_instance_rows_parse_list_and_json_params(monkeypatch):
     empty = _SequencedSession([])
     _use_session(monkeypatch, empty)
     # No mapped tool rows -> no instance query at all.
-    assert reference_db.query_tool_instance_reference_rows(empty, AIDP_REF) == []
+    assert reference_db.query_tool_instance_reference_rows(empty, "aidp", {"kds-1"}) == []
 
 
 def test_skill_instance_rows_follow_template_and_instance_overrides(monkeypatch):
@@ -211,7 +149,7 @@ def test_skill_instance_rows_follow_template_and_instance_overrides(monkeypatch)
         [(5, 64)],
     )
     _use_session(monkeypatch, session)
-    rows = reference_db.query_skill_instance_reference_rows(session, AIDP_REF)
+    rows = reference_db.query_skill_instance_reference_rows(session, "aidp", {"kds-1"})
     assert [(row["agent_id"], row["version_no"], row["reference_origin"]) for row in rows] == [
         (7, 0, reference_utils.REFERENCE_ORIGIN_SKILL),
         (7, 1, reference_utils.REFERENCE_ORIGIN_SKILL),
@@ -219,18 +157,18 @@ def test_skill_instance_rows_follow_template_and_instance_overrides(monkeypatch)
 
     no_instances = _SequencedSession([(64,)], [])
     _use_session(monkeypatch, no_instances)
-    assert reference_db.query_skill_instance_reference_rows(no_instances, AIDP_REF) == []
+    assert reference_db.query_skill_instance_reference_rows(no_instances, "aidp", {"kds-1"}) == []
 
     no_tools = _SequencedSession([])
     _use_session(monkeypatch, no_tools)
-    assert reference_db.query_skill_instance_reference_rows(no_tools, AIDP_REF) == []
+    assert reference_db.query_skill_instance_reference_rows(no_tools, "aidp", {"kds-1"}) == []
 
 
 def test_reference_rows_dedupe_and_drop_missing_agent(monkeypatch):
     monkeypatch.setattr(
         reference_db,
         "query_tool_instance_reference_rows",
-        lambda session, ref: [
+        lambda session, provider, resource_ids: [
             {"agent_id": 7, "version_no": 0, "reference_origin": "tool"},
             {"agent_id": 7, "version_no": 0, "reference_origin": "tool"},
             {"agent_id": None, "version_no": 0, "reference_origin": "tool"},
@@ -239,12 +177,12 @@ def test_reference_rows_dedupe_and_drop_missing_agent(monkeypatch):
     monkeypatch.setattr(
         reference_db,
         "query_skill_instance_reference_rows",
-        lambda session, ref: [
+        lambda session, provider, resource_ids: [
             {"agent_id": 7, "version_no": 0, "reference_origin": "skill"},
             {"agent_id": 7, "version_no": 1, "reference_origin": "skill"},
         ],
     )
-    rows = reference_db.query_reference_rows(object(), AIDP_REF)
+    rows = reference_db.query_reference_rows(object(), [AIDP_REF])
     keys = {
         (row["agent_id"], row["version_no"], row["reference_origin"]) for row in rows
     }
@@ -267,7 +205,7 @@ def test_live_agent_reference_rows_filters_deleted_versions(monkeypatch):
     session.execute_results = []
     # AgentVersion query: version 1 of agent 9 was deleted, agent 7's stayed.
     session._results = [[(7, 0), (7, 1), (8, 0)], [(7, 1)]]
-    rows = reference_db.query_live_agent_reference_rows(session, AIDP_REF)
+    rows = reference_db.query_live_agent_reference_rows(session, [AIDP_REF])
     keys = {(row["agent_id"], row["version_no"]) for row in rows}
     assert keys == {(7, 0), (7, 1), (8, 0)}
 
@@ -276,7 +214,7 @@ def test_live_agent_reference_rows_filters_deleted_versions(monkeypatch):
         reference_db, "query_reference_rows", lambda session, ref: []
     )
     _use_session(monkeypatch, empty)
-    assert reference_db.query_live_agent_reference_rows(empty, AIDP_REF) == []
+    assert reference_db.query_live_agent_reference_rows(empty, [AIDP_REF]) == []
 
 
 def test_strip_scope_ids_falls_back_to_inherit_when_emptied():
@@ -339,9 +277,9 @@ def test_strip_deleted_resource_from_bindings_cleans_all_three_stores(monkeypatc
         [conversation],
     )
     _use_session(monkeypatch, session)
-    counts = reference_db.strip_deleted_resource_from_bindings(session, AIDP_REF)
+    counts = reference_db.strip_deleted_resource_from_bindings(session, [AIDP_REF])
     assert counts == {"tool_instances": 2, "skill_instances": 1, "conversations": 1}
-    assert session.commits == 1
+    assert session.commits == 0
     assert tool_list.params["kds_list"] == ["kds-2"]
     assert tool_list.params["display_names"] == ["B"]
     assert tool_json.params["kds_list"] == "[]"
@@ -374,11 +312,9 @@ def test_strip_conversation_scopes_handles_workbench_copy_and_local_ids(monkeypa
         [scope_only, workbench_only, unchanged],
     )
     _use_session(monkeypatch, session)
-    local_ref = reference_utils.KnowledgeResourceRef(
-        provider="local", resource_id="idx-1"
-    )
+    local_ref = ("local", "idx-1")
     changed = reference_db._strip_deleted_resource_from_conversation_scopes(
-        session, local_ref
+        session, [local_ref]
     )
     assert changed == 2
     assert scope_only.knowledge_scope["local"]["knowledge_ids"] == ["9"]
@@ -389,7 +325,7 @@ def test_strip_conversation_scopes_handles_workbench_copy_and_local_ids(monkeypa
     _use_session(monkeypatch, aidp_session)
     assert (
         reference_db._strip_deleted_resource_from_conversation_scopes(
-            aidp_session, AIDP_REF
+            aidp_session, [AIDP_REF]
         )
         == 0
     )
@@ -605,7 +541,7 @@ def test_collect_agent_reference_preview_dedupes_and_counts_hidden(monkeypatch):
     )
     _use_service_session(monkeypatch, _SequencedSession())
     preview = service_module.collect_agent_reference_preview(
-        AIDP_REF, user_id="u1", tenant_id="t1"
+        [AIDP_REF], user_id="u1", tenant_id="t1"
     )
     assert preview == {
         "agents": [{"agent_id": 7, "display_name": "Alpha"}],
@@ -617,7 +553,7 @@ def test_collect_agent_reference_preview_dedupes_and_counts_hidden(monkeypatch):
         service_module, "query_live_agent_reference_rows", lambda session, ref: []
     )
     empty = service_module.collect_agent_reference_preview(
-        AIDP_REF, user_id="u1", tenant_id="t1"
+        [AIDP_REF], user_id="u1", tenant_id="t1"
     )
     assert empty == {"agents": [], "hidden_agent_count": 0, "total_agent_count": 0}
 
@@ -715,8 +651,8 @@ def test_status_resolution_aidp_branches_and_failure_classification(monkeypatch)
     statuses = service.resolve_item_statuses(
         [
             AIDP_REF,
-            reference_utils.KnowledgeResourceRef(provider="aidp", resource_id="kds-2"),
-            reference_utils.KnowledgeResourceRef(provider="aidp", resource_id="kds-3"),
+            ("aidp", "kds-2"),
+            ("aidp", "kds-3"),
             AIDP_REF,  # duplicate input collapses
         ],
         user_id="u1",
@@ -843,15 +779,15 @@ def test_remove_knowledge_references_returns_cleanup_counts(monkeypatch):
         "strip_deleted_resource_from_bindings",
         lambda session, ref: {"tool_instances": 1, "skill_instances": 0, "conversations": 1},
     )
-    counts = service.remove_knowledge_references(AIDP_REF)
+    counts = service.remove_knowledge_references([AIDP_REF])
     assert counts == {"tool_instances": 1, "skill_instances": 0, "conversations": 1}
 
 
 def test_lock_namespace_and_guards(monkeypatch):
     monkeypatch.setattr(const_module, "AIDP_SERVER_URL", "http://AIDP:30081/")
     monkeypatch.setattr(const_module, "AIDP_TENANT_ID", "aidp")
-    assert service.lock_namespace_for(AIDP_REF) == "aidp:http://aidp:30081:aidp"
-    assert service.lock_namespace_for(LOCAL_REF) == ""
+    assert service.lock_namespace_for(AIDP_REF[0]) == "aidp:http://aidp:30081:aidp"
+    assert service.lock_namespace_for(LOCAL_REF[0]) == ""
     keys = service.resource_lock_keys_for([AIDP_REF, LOCAL_REF])
     assert len(keys) == 2 and all(isinstance(key, int) for key in keys)
 
@@ -865,7 +801,7 @@ def test_lock_namespace_and_guards(monkeypatch):
         yield
 
     monkeypatch.setattr(service, "acquire_lock_keys", _record_locks)
-    with service.knowledge_deletion_guard(AIDP_REF, user_id="u1", tenant_id="t1"):
+    with service.knowledge_deletion_guard([AIDP_REF]):
         pass
     with service.knowledge_reference_write_guard([AIDP_REF]):
         pass
@@ -880,7 +816,7 @@ def test_skill_instance_rows_skip_incomplete_configurations(monkeypatch):
     session = _SequencedSession([(64,)], [no_skill_id])
     _use_session(monkeypatch, session)
     # No usable skill ids at all -> early return.
-    assert reference_db.query_skill_instance_reference_rows(session, AIDP_REF) == []
+    assert reference_db.query_skill_instance_reference_rows(session, "aidp", {"kds-1"}) == []
 
     matching = SimpleNamespace(
         skill_id=5, agent_id=7, version_no=0, config_values={"kds_list": ["kds-1"]}
@@ -893,7 +829,7 @@ def test_skill_instance_rows_skip_incomplete_configurations(monkeypatch):
     )
     _use_session(monkeypatch, session)
     # The orphan instance is skipped, the matching one resolves.
-    rows = reference_db.query_skill_instance_reference_rows(session, AIDP_REF)
+    rows = reference_db.query_skill_instance_reference_rows(session, "aidp", {"kds-1"})
     assert [(row["agent_id"], row["version_no"]) for row in rows] == [(7, 0)]
 
     missing_id = SimpleNamespace(
@@ -908,7 +844,7 @@ def test_skill_instance_rows_skip_incomplete_configurations(monkeypatch):
     )
     _use_session(monkeypatch, session)
     # Skill exists but does not list the managed knowledge tool.
-    assert reference_db.query_skill_instance_reference_rows(session, AIDP_REF) == []
+    assert reference_db.query_skill_instance_reference_rows(session, "aidp", {"kds-1"}) == []
 
     session = _SequencedSession(
         [(64,)],
@@ -918,7 +854,7 @@ def test_skill_instance_rows_skip_incomplete_configurations(monkeypatch):
     )
     _use_session(monkeypatch, session)
     # Tool is listed, but neither the override nor the template holds the id.
-    assert reference_db.query_skill_instance_reference_rows(session, AIDP_REF) == []
+    assert reference_db.query_skill_instance_reference_rows(session, "aidp", {"kds-1"}) == []
 
 
 def test_live_rows_draft_only_skips_version_query(monkeypatch):
@@ -931,7 +867,7 @@ def test_live_rows_draft_only_skips_version_query(monkeypatch):
     )
     session = _SequencedSession([(7, 0)])
     _use_session(monkeypatch, session)
-    rows = reference_db.query_live_agent_reference_rows(session, AIDP_REF)
+    rows = reference_db.query_live_agent_reference_rows(session, [AIDP_REF])
     assert {(row["agent_id"], row["version_no"]) for row in rows} == {(7, 0)}
     assert len(session._results) == 0  # the AgentVersion query never ran
 
@@ -947,20 +883,20 @@ def test_live_rows_drop_versions_missing_from_the_version_table(monkeypatch):
     )
     session = _SequencedSession([(7, 0), (7, 1)], [])
     _use_session(monkeypatch, session)
-    rows = reference_db.query_live_agent_reference_rows(session, AIDP_REF)
+    rows = reference_db.query_live_agent_reference_rows(session, [AIDP_REF])
     assert {(row["agent_id"], row["version_no"]) for row in rows} == {(7, 0)}
 
 
 def test_strip_bindings_no_changes_skips_commit(monkeypatch):
     session = _SequencedSession([(64,)], [], [], [])
     _use_session(monkeypatch, session)
-    counts = reference_db.strip_deleted_resource_from_bindings(session, AIDP_REF)
+    counts = reference_db.strip_deleted_resource_from_bindings(session, [AIDP_REF])
     assert counts == {"tool_instances": 0, "skill_instances": 0, "conversations": 0}
     assert session.commits == 0
 
     no_tools = _SequencedSession([], [], [])
     _use_session(monkeypatch, no_tools)
-    assert reference_db.strip_deleted_resource_from_bindings(no_tools, AIDP_REF) == {
+    assert reference_db.strip_deleted_resource_from_bindings(no_tools, [AIDP_REF]) == {
         "tool_instances": 0,
         "skill_instances": 0,
         "conversations": 0,
@@ -980,7 +916,7 @@ def test_strip_bindings_ignores_malformed_entries(monkeypatch):
         [],
     )
     _use_session(monkeypatch, session)
-    counts = reference_db.strip_deleted_resource_from_bindings(session, AIDP_REF)
+    counts = reference_db.strip_deleted_resource_from_bindings(session, [AIDP_REF])
     assert counts == {"tool_instances": 0, "skill_instances": 0, "conversations": 0}
 
 
@@ -991,11 +927,9 @@ def test_local_conversation_strip_without_knowledge_id(monkeypatch):
     )
     session = _SequencedSession(SimpleNamespace(knowledge_id=None), [row])
     _use_session(monkeypatch, session)
-    local_ref = reference_utils.KnowledgeResourceRef(
-        provider="local", resource_id="idx-1"
-    )
+    local_ref = ("local", "idx-1")
     changed = reference_db._strip_deleted_resource_from_conversation_scopes(
-        session, local_ref
+        session, [local_ref]
     )
     assert changed == 1
     assert row.knowledge_scope["local"]["mode"] == "inherit"
@@ -1049,7 +983,7 @@ def test_preview_skips_rows_without_agent_metadata(monkeypatch):
     monkeypatch.setattr(service_module, "is_agent_visible", lambda context, agent: True)
     _use_service_session(monkeypatch, _SequencedSession())
     preview = service_module.collect_agent_reference_preview(
-        AIDP_REF, user_id="u1", tenant_id="t1"
+        [AIDP_REF], user_id="u1", tenant_id="t1"
     )
     assert preview["agents"] == [{"agent_id": 7, "display_name": "Alpha"}]
     assert preview["total_agent_count"] == 1
@@ -1066,7 +1000,7 @@ def test_remove_knowledge_references_without_changes_skips_logging(monkeypatch):
             "conversations": 0,
         },
     )
-    counts = service.remove_knowledge_references(AIDP_REF)
+    counts = service.remove_knowledge_references([AIDP_REF])
     assert all(value == 0 for value in counts.values())
 
 
@@ -1147,10 +1081,3 @@ def test_resolve_local_records_without_requested_ids(monkeypatch):
     session = _SequencedSession()
     _use_session(monkeypatch, session)
     assert service._resolve_local_records(session, []) == {}
-
-
-def test_parse_knowledge_id_list_scalar_json_and_missing_param():
-    assert reference_utils.parse_knowledge_id_list("213") == ["213"]
-    assert reference_utils.iter_reference_params({"index_names": ["idx-1"]}) == [
-        ("local", "index_names", "idx-1")
-    ]

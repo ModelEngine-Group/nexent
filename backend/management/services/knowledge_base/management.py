@@ -29,50 +29,30 @@ from consts.const import (
 from consts.error_code import ErrorCode
 from consts.exceptions import AppException, DuplicateError
 from database.attachment_db import delete_file, file_exists, get_file_stream
+from database.group_db import query_group_ids_by_user
 from database.knowledge_db import (
     create_knowledge_record,
     delete_knowledge_record,
-    get_knowledge_record,
-    update_knowledge_record,
     get_knowledge_info_by_tenant_id,
-    update_model_name_by_index_name,
-    update_last_doc_update_time,
+    get_knowledge_record,
     update_embedding_model_by_index_name,
+    update_knowledge_record,
+    update_last_doc_update_time,
+    update_model_name_by_index_name,
 )
-from database.knowledge_storage_object_db import list_committed_storage_objects
 from database.knowledge_file_lifecycle_db import (
     delete_file_records_for_knowledge_base,
     list_file_records,
 )
-from services.knowledge_storage_service import (
-    release_storage_charge,
-    resolve_storage_reference,
-)
-from utils.str_utils import convert_list_to_string
-from database.user_tenant_db import get_user_tenant_by_user_id
-from database.group_db import query_group_ids_by_user
+from database.knowledge_storage_object_db import list_committed_storage_objects
 from database.model_management_db import get_model_by_model_id
-from permissions.dac import ResourceAccessControl
-from permissions.models import Resource
-from services.redis_service import get_redis_service
-from services.group_service import get_tenant_default_group_id
-from services.asset_owner_visibility import postprocess_knowledge_visibility
-from utils.config_utils import tenant_config_manager
-from management.services.model.resolver import (
-    create_embedding_model, get_embedding_model_by_id, get_model_descriptor,
-)
-from utils.file_management_utils import get_all_files_status, get_file_size
-from utils.str_utils import convert_string_to_list
-from utils.storage_key_utils import build_preview_pdf_object_key
-
-
-
+from database.user_tenant_db import get_user_tenant_by_user_id
 from management.services.knowledge_base.common import (
     _QUOTA_LIMIT_UNSET,
     _SKIP_INDEX_SOURCE_CLEANUP,
+    _rethrow_or_plain,
     _update_progress,
     get_vector_db_core,
-    _rethrow_or_plain,
     logger,
 )
 from management.services.knowledge_base.listing import (
@@ -87,11 +67,29 @@ from management.services.knowledge_base.permission import (
     require_knowledge_base_read_permission,
     resolve_knowledge_base_permission,
 )
+from management.services.model.resolver import (
+    create_embedding_model,
+    get_embedding_model_by_id,
+    get_model_descriptor,
+)
+from permissions.dac import ResourceAccessControl
+from permissions.models import Resource
+from services.asset_owner_visibility import postprocess_knowledge_visibility
+from services.group_service import get_tenant_default_group_id
 from services.knowledge_reference_service import (
     knowledge_deletion_guard,
     remove_knowledge_references,
 )
-from utils.knowledge_reference import PROVIDER_LOCAL, KnowledgeResourceRef
+from services.knowledge_storage_service import (
+    release_storage_charge,
+    resolve_storage_reference,
+)
+from services.redis_service import get_redis_service
+from utils.config_utils import tenant_config_manager
+from utils.file_management_utils import get_all_files_status, get_file_size
+from utils.knowledge_reference import PROVIDER_LOCAL
+from utils.storage_key_utils import build_preview_pdf_object_key
+from utils.str_utils import convert_list_to_string, convert_string_to_list
 
 
 # A knowledge base deletion is rejected while any file is still owned by the
@@ -117,18 +115,16 @@ class KnowledgeBaseManagementService:
         Completely delete a knowledge base, including its index, associated files in MinIO,
         and all related records in Redis and PostgreSQL.
 
-        Deletion is refused with a 409 conflict while a published agent version
-        still references the index. Draft bindings do not block; they are
-        stripped once the index is gone. The resource lock excludes concurrent
-        reference writes for the whole deletion so a binding cannot slip in
-        after the reference check.
+        Delete the index and its files, then remove its bindings from agent
+        versions and conversations. The resource lock excludes concurrent
+        reference writes throughout deletion and binding cleanup.
         """
-        ref = KnowledgeResourceRef(provider=PROVIDER_LOCAL, resource_id=index_name)
-        with knowledge_deletion_guard(ref, user_id=user_id):
+        resources = [(PROVIDER_LOCAL, index_name)]
+        with knowledge_deletion_guard(resources):
             result = await KnowledgeBaseManagementService._full_delete_knowledge_base_locked(
                 index_name, vdb_core, user_id
             )
-            remove_knowledge_references(ref)
+            remove_knowledge_references(resources)
             return result
 
     @staticmethod
@@ -1201,7 +1197,7 @@ class KnowledgeBaseManagementService:
                     "languages": metadata.get("languages", []),
                     "embedding_model_name": embedding_model_name
                 }
-                
+
                 image_url = metadata.get("image_url", "")
                 if len(image_url) > 0:
                     # Fetch image bytes from MinIO (supports s3://bucket/key or /bucket/key)

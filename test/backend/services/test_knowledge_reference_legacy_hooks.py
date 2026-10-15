@@ -53,7 +53,7 @@ def test_skill_instance_creation_guards_knowledge_references(monkeypatch):
         "create_or_update_skill_by_skill_info",
         lambda **kwargs: {"skill_instance_id": 1, "kwargs": kwargs},
     )
-    ref = ref_service.KnowledgeResourceRef(provider="aidp", resource_id="kds-1")
+    ref = ("aidp", "kds-1")
     monkeypatch.setattr(
         skill_service_module.SkillService,
         "_skill_knowledge_references",

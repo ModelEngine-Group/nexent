@@ -2,7 +2,6 @@
 
 """Skill management service."""
 
-import aiofiles
 import io
 import logging
 import ntpath
@@ -10,11 +9,12 @@ import os
 import zipfile
 from typing import Any, Dict, List, Optional, Tuple, Union
 
-
+import aiofiles
 from nexent.skills import SkillManager
 from nexent.skills.skill_loader import SkillLoader
-from nexent.skills.upload import normalize_skill_upload
 from nexent.skills.text_codec import DecodedSkillFile, decode_skill_text
+from nexent.skills.upload import normalize_skill_upload
+
 from consts.const import (
     MAX_SKILL_UPLOAD_SIZE_BYTES,
     MAX_SKILL_UPLOAD_SIZE_MB,
@@ -25,6 +25,7 @@ from consts.error_code import ErrorCode
 from consts.exceptions import AppException, ForbiddenError, SkillException
 from database import skill_db
 from database.group_db import query_group_ids_by_user
+
 
 logger = logging.getLogger(__name__)
 _SKILL_UPDATE_FORBIDDEN_MESSAGE = "Not authorized to update this skill"
@@ -57,56 +58,57 @@ _TEXT_PREVIEW_EXTENSIONS = frozenset({
 
 from management.services.skill.support import (
     UnsupportedSkillFilePreview,
-    _decode_zip_member_name,
-    _zip_members,
-    _zip_file_list,
-    _read_zip_member,
-    _is_obviously_binary,
-    _skill_file_preview_status,
-    _replace_skill_frontmatter_name,
-    _to_group_id_set,
-    can_view_skill,
-    resolve_skill_permission,
     _apply_default_skill_permission_fields,
-    _get_user_role,
+    _apply_inline_comment_to_scalar,
+    _ast_literal_eval,
     _can_edit_skill,
     _can_manage_skill_access,
-    _has_skill_access_changes,
-    _validate_skill_access_update,
-    _normalize_zip_entry_path,
-    _find_zip_member_config_yaml,
-    _params_dict_to_storable,
-    _comment_text_from_token,
-    _tuple_slot2,
-    _is_before_next_sibling_comment_token,
-    _flatten_ca_comment_to_text,
     _comment_from_map_block_header,
-    _tooltip_for_commented_map_key,
-    _tooltip_for_commented_seq_index,
-    _apply_inline_comment_to_scalar,
+    _comment_text_from_token,
     _commented_tree_to_plain,
-    _ruamel_tree_to_plain,
-    _parse_yaml_ruamel_plain,
-    _parse_yaml_with_ruamel_merge_eol_comments,
-    _get_skill_inputs_from_code,
-    _is_add_argument_call,
+    _decode_zip_member_name,
     _extract_arg_from_add_argument,
-    _get_type_name,
-    _ast_literal_eval,
-    _parse_yaml_fallback_pyyaml,
-    _parse_skill_params_from_config_bytes,
-    _parse_skill_schema_from_yaml_bytes,
-    _read_params_from_zip_config_yaml,
+    _find_zip_member_config_yaml,
     _find_zip_member_schema_yaml,
-    _read_schema_yaml_from_zip,
+    _flatten_ca_comment_to_text,
+    _get_skill_inputs_from_code,
     _get_skill_inputs_from_zip,
+    _get_type_name,
+    _get_user_role,
+    _has_skill_access_changes,
+    _is_add_argument_call,
+    _is_before_next_sibling_comment_token,
+    _is_obviously_binary,
     _local_skill_config_yaml_path,
     _local_skill_schema_yaml_path,
-    _resolve_local_skill_path,
-    _write_skill_params_to_local_config_yaml,
+    _normalize_zip_entry_path,
+    _params_dict_to_storable,
+    _parse_skill_params_from_config_bytes,
+    _parse_skill_schema_from_yaml_bytes,
+    _parse_yaml_fallback_pyyaml,
+    _parse_yaml_ruamel_plain,
+    _parse_yaml_with_ruamel_merge_eol_comments,
+    _read_params_from_zip_config_yaml,
+    _read_schema_yaml_from_zip,
+    _read_zip_member,
     _remove_local_skill_config_yaml,
+    _replace_skill_frontmatter_name,
+    _resolve_local_skill_path,
+    _ruamel_tree_to_plain,
+    _skill_file_preview_status,
+    _to_group_id_set,
+    _tooltip_for_commented_map_key,
+    _tooltip_for_commented_seq_index,
+    _tuple_slot2,
+    _validate_skill_access_update,
+    _write_skill_params_to_local_config_yaml,
+    _zip_file_list,
+    _zip_members,
+    can_view_skill,
     get_skill_manager,
+    resolve_skill_permission,
 )
+
 
 __all__ = ('UnsupportedSkillFilePreview', '_decode_zip_member_name', '_zip_members', '_zip_file_list', '_read_zip_member', '_is_obviously_binary', '_skill_file_preview_status', '_replace_skill_frontmatter_name', '_to_group_id_set', 'can_view_skill', 'resolve_skill_permission', '_apply_default_skill_permission_fields', '_get_user_role', '_can_edit_skill', '_can_manage_skill_access', '_has_skill_access_changes', '_validate_skill_access_update', '_normalize_zip_entry_path', '_find_zip_member_config_yaml', '_params_dict_to_storable', '_comment_text_from_token', '_tuple_slot2', '_is_before_next_sibling_comment_token', '_flatten_ca_comment_to_text', '_comment_from_map_block_header', '_tooltip_for_commented_map_key', '_tooltip_for_commented_seq_index', '_apply_inline_comment_to_scalar', '_commented_tree_to_plain', '_ruamel_tree_to_plain', '_parse_yaml_ruamel_plain', '_parse_yaml_with_ruamel_merge_eol_comments', '_get_skill_inputs_from_code', '_is_add_argument_call', '_extract_arg_from_add_argument', '_get_type_name', '_ast_literal_eval', '_parse_yaml_fallback_pyyaml', '_parse_skill_params_from_config_bytes', '_parse_skill_schema_from_yaml_bytes', '_read_params_from_zip_config_yaml', '_find_zip_member_schema_yaml', '_read_schema_yaml_from_zip', '_get_skill_inputs_from_zip', '_local_skill_config_yaml_path', '_local_skill_schema_yaml_path', '_resolve_local_skill_path', '_write_skill_params_to_local_config_yaml', '_remove_local_skill_config_yaml', 'get_skill_manager')
 
@@ -940,10 +942,10 @@ class SkillService:
                 name = escape_xml(skill.get("name", ""))
                 description = escape_xml(skill.get("description", ""))
 
-                lines.append(f'  <skill>')
+                lines.append('  <skill>')
                 lines.append(f'    <name>{name}</name>')
                 lines.append(f'    <description>{description}</description>')
-                lines.append(f'  </skill>')
+                lines.append('  </skill>')
 
             lines.append("</skills>")
 
@@ -1087,10 +1089,7 @@ class SkillService:
         """
         from database.client import get_db_session
         from database.knowledge_reference_db import query_knowledge_tool_params_by_ids
-        from utils.knowledge_reference import (
-            KnowledgeResourceRef,
-            iter_reference_params,
-        )
+        from utils.knowledge_reference import iter_reference_params
 
         skill_id = getattr(skill_info, "skill_id", None)
         if skill_id is None and isinstance(skill_info, dict):
@@ -1113,17 +1112,11 @@ class SkillService:
         if instance_values is None and isinstance(skill_info, dict):
             instance_values = skill_info.get("config_values")
         effective_values.update(instance_values or {})
-        refs = []
-        seen = set()
-        for provider, param_name, resource_id in iter_reference_params(effective_values):
-            if param_name not in knowledge_params:
-                continue
-            key = (provider, resource_id)
-            if key in seen:
-                continue
-            seen.add(key)
-            refs.append(KnowledgeResourceRef(provider=provider, resource_id=resource_id))
-        return refs
+        return [
+            (provider, resource_id)
+            for provider, param_name, resource_id in iter_reference_params(effective_values)
+            if param_name in knowledge_params
+        ]
 
     def create_or_update_skill_instance(
         self,
