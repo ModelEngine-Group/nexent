@@ -1,3 +1,5 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 "use client";
 
 import {
@@ -417,7 +419,6 @@ function AgentSetupContent({
                 key={`${currentAgentId ?? "unselected"}-${sessionGeneration}`}
                 agentId={currentAgentId}
                 showOptimizationSuggestions={showOptimizationSuggestions}
-                configurationLayout
                 disabled={
                   isComposerDisabled ||
                   isRequestedAgentLoading ||
