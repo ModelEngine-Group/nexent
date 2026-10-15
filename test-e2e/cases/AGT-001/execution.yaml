@@ -1,5 +1,6 @@
 schema_version: '1.0'
 case_id: AGT-001
+required_mock_services: [model-provider]
 implementations:
 - framework: pytest
   file: test.py

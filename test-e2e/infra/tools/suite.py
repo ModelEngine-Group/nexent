@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """Case-local plan, preflight and batch runner, independent of the old V5 controller."""
 from __future__ import annotations
 
@@ -24,6 +26,7 @@ from packaging.requirements import Requirement
 
 from run_cases import machine_environment, run_one, result_reason
 from report_ownership import enrich as enrich_ownership
+from ext_attach import ExtKnowledgeAttach
 from launch_runtime import test_python
 from local_preflight import live_service_problems, static_config_problems
 from static_assets import entries as static_entries, inventory as static_inventory
@@ -156,6 +159,44 @@ def execute_hooks(name, settings, repo, home, directory, env):
             raise RuntimeError(f"{name} command {index} failed with exit {code}; inspect local log")
 
 
+def bind_result_directory(env: dict, directory) -> None:
+    """Bind the Case result directory for the worker process and its children.
+
+    Workers are one-Case processes, so setting the variable in this process
+    too is race-free. Prerequisite failures raised before any preparation
+    subprocess starts (e.g. the ext-knowledge attach gate) must still write
+    their receipt through the same RESULT_DIR-scoped runtime directory
+    instead of being dropped.
+    """
+    env["RESULT_DIR"] = str(directory)
+    os.environ["RESULT_DIR"] = str(directory)
+
+
+def dependency_failure_outcome(directory, env, *, outcome, exc, preparation_log=None):
+    """Adopt a prerequisite-failure receipt into the worker outcome.
+
+    Preparation steps and the ext-knowledge attach gate both write a typed
+    receipt into the Case runtime directory. Attach failures raise before any
+    preparation subprocess runs, so the receipt — not only the exception
+    type — must map the outcome to BLOCKED / BLOCKED_BY_DEPENDENCY and keep
+    the concrete reason in the batch report.
+    """
+    reason = type(exc).__name__
+    evidence: list[str] = []
+    if preparation_log:
+        evidence.append(preparation_log.relative_to(directory).as_posix())
+        reason = str(exc)
+    try:
+        receipt = json.loads((directory / 'runtime/preparation-failure.json').read_text(encoding='utf-8'))
+        if outcome != 'TIMEOUT' and receipt.get('result') in {'BLOCKED', 'BLOCKED_BY_DEPENDENCY', 'TIMEOUT'}:
+            outcome = receipt['result']
+            reason = result_reason(receipt.get('reason') or receipt.get('error_type'), env)
+            evidence.append('runtime/preparation-failure.json')
+    except (OSError, ValueError, AttributeError):
+        pass
+    return outcome, reason, ({'evidence': evidence} if evidence else None)
+
+
 def worker(repo, home, record, directory, settings):
     """Run one Case with its own asset registry; never clean another run's assets."""
     env = machine_environment(home, repo)
@@ -163,7 +204,7 @@ def worker(repo, home, record, directory, settings):
     run_logged = partial(logged, new_session=False)
     automation = repo / "test-e2e/infra/automation"
     env["PYTHONPATH"] = os.pathsep.join([str(automation), str(repo / "backend"), str(repo / "sdk"), env.get("PYTHONPATH", "")])
-    env["RESULT_DIR"] = str(directory)
+    bind_result_directory(env, directory)
     if (home / "runtime/playwright-browsers").is_dir():
         env["PLAYWRIGHT_BROWSERS_PATH"] = str(home / "runtime/playwright-browsers")
     directory.mkdir(parents=True, exist_ok=True)
@@ -184,7 +225,19 @@ def worker(repo, home, record, directory, settings):
         raise RuntimeError("Preparation failed; inspect " + str(log.relative_to(directory)))
     services = controlled_services(repo, directory, env, bool((review or {}).get("anchors")))
     services_started = False
+    # ext-knowledge mock attach runs BEFORE any preparation (including the
+    # controlled test-assets services): it only validates, locks and resets a
+    # pre-deployed batch-owned instance; the suite never starts or stops the
+    # mock's Compose stack.
+    ext = ExtKnowledgeAttach(
+        repo, home, directory, env,
+        (record["execution"].get("required_mock_services") or []),
+        record["case_id"], record,
+    )
+    ext_attached = False
     try:
+        ext.attach()
+        ext_attached = True
         services.__enter__()
         services_started = True
         if (review or {}).get("anchors"):
@@ -222,20 +275,16 @@ def worker(repo, home, record, directory, settings):
             test_details = json.loads(status_path.read_text(encoding="utf-8"))
             reason = test_details.get("reason")
     except Exception as exc:
-        reason = type(exc).__name__
-        if preparation_log:
-            evidence = [preparation_log.relative_to(directory).as_posix()]
-            reason = str(exc)
-            try:
-                receipt = json.loads((directory / 'runtime/preparation-failure.json').read_text(encoding='utf-8'))
-                if outcome != 'TIMEOUT' and receipt.get('result') in {'BLOCKED', 'BLOCKED_BY_DEPENDENCY', 'TIMEOUT'}:
-                    outcome = receipt['result']
-                    reason = result_reason(receipt.get('reason') or receipt.get('error_type'), env)
-                    evidence.append('runtime/preparation-failure.json')
-            except (OSError, ValueError, AttributeError):
-                pass
-            test_details = {'evidence': evidence}
+        outcome, reason, failure_details = dependency_failure_outcome(
+            directory, env, outcome=outcome, exc=exc, preparation_log=preparation_log)
+        if failure_details:
+            test_details = failure_details
     finally:
+        # ext evidence first, then product-resource cleanup, then mock state
+        # restoration and lock release; the pre-deployed Compose stack itself
+        # is never stopped here.
+        if ext_attached:
+            ext.collect_evidence()
         cleanup_code = 1 if test_details.get("cleanup_failed") else 0
         registry = directory / "runtime/resolved-assets.yaml"
         if registry.exists():
@@ -251,6 +300,8 @@ def worker(repo, home, record, directory, settings):
                 cleanup_code = cleanup_code or registered_cleanup_code
             except Exception:
                 cleanup_code = 2
+        if ext_attached:
+            cleanup_code = ext.release() or cleanup_code
         if services_started:
             try:
                 services.__exit__(None, None, None)

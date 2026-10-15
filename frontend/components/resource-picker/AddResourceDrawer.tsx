@@ -1,3 +1,5 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 "use client";
 
 import { Fragment, useMemo, useRef, type ReactNode } from "react";
@@ -56,7 +58,7 @@ export function SearchRow({
 }) {
   const { t } = useTranslation("common");
   return (
-    <div className="flex shrink-0 items-center gap-2">
+    <div data-picker-part="search" className="flex shrink-0 items-center gap-4">
       <Input
         allowClear
         placeholder={placeholder}
@@ -66,9 +68,19 @@ export function SearchRow({
           "[&::placeholder]:!text-[#B8B8B8]",
           !tagOptions ? "flex-1" : "h-8 flex-1"
         )}
-        classNames={{ input: "!placeholder:text-[#B8B8B8]" }}
+        classNames={{
+          input:
+            "!border-0 !bg-transparent !p-0 !outline-none !shadow-none !placeholder:text-[#B8B8B8]",
+        }}
         styles={{
-          root: { width: "100%" },
+          root: {
+            width: "100%",
+            height: 32,
+            padding: "5px 12px",
+            gap: 8,
+            boxSizing: "border-box",
+            borderColor: "rgba(217, 217, 217, 1)",
+          },
         }}
         style={!tagOptions ? undefined : { flex: 1 }}
         variant="outlined"
@@ -80,9 +92,16 @@ export function SearchRow({
           options={tagOptions}
           onChange={onTagChange}
           suffixIcon={<ChevronDown size={12} className="text-[#666]" />}
-          className="w-[212px] shrink-0"
+          className={cn(
+            "w-[222px] shrink-0",
+            "[&_.ant-select-selector]:!h-8 [&_.ant-select-selector]:!px-3 [&_.ant-select-selector]:!py-[5px] [&_.ant-select-selector]:!border-[rgba(201,201,201,1)]"
+          )}
           styles={{
-            root: { width: 212 },
+            root: {
+              width: 222,
+              height: 32,
+              boxSizing: "border-box",
+            },
           }}
           variant="outlined"
         />
@@ -104,11 +123,15 @@ export function SelectedChips({
   const { t } = useTranslation("common");
   if (items.length === 0 && !trailing) return null;
   return (
-    <div className="flex shrink-0 flex-wrap items-center gap-2">
+    <div
+      data-picker-part="chips"
+      className="flex shrink-0 flex-wrap items-center gap-2"
+    >
       {items.map((item) => (
         <span
           key={item.id}
-          className="flex h-6 items-center gap-1 rounded-[2px] bg-[#F2F2F2] px-2 text-[12px] leading-[20px] text-[#191919]"
+          className="flex h-7 items-center gap-1 rounded-[4px] bg-[rgba(25,25,25,0.04)] px-3 text-[12px] leading-[20px] text-[#191919]"
+          style={{ fontFamily: '"HarmonyHeiTi", sans-serif' }}
         >
           {item.label}
           <button
@@ -132,11 +155,13 @@ export function ListHeader({
   onSelectAll,
   allSelected,
   onRefresh,
+  extra,
 }: {
   title: string;
   onSelectAll?: (checked: boolean) => void;
   allSelected?: boolean;
   onRefresh?: () => void;
+  extra?: ReactNode;
 }) {
   const { t } = useTranslation("common");
   return (
@@ -145,6 +170,7 @@ export function ListHeader({
         {title}
       </span>
       <div className="flex items-center gap-4 text-[14px] leading-[22px]">
+        {extra}
         {onRefresh && (
           <button
             type="button"
@@ -230,7 +256,7 @@ export function ResourceTabs({
   onChange?: (key: string) => void;
 }) {
   return (
-    <div className="flex shrink-0 items-center gap-3">
+    <div data-picker-part="tabs" className="flex shrink-0 items-center gap-3">
       {tabs.map((tab, index) => (
         <Fragment key={tab.key}>
           {index > 0 && <span className="h-[14px] w-px bg-[#D9D9D9]" />}
@@ -287,7 +313,10 @@ export function ResourcePagination({
   };
 
   return (
-    <div className="flex h-8 shrink-0 items-center gap-4">
+    <div
+      data-picker-part="pagination"
+      className="flex h-8 shrink-0 items-center gap-4"
+    >
       <span className="text-[14px] leading-[22px] text-[#191919]">
         {t("resourcePicker.total", "总计")}: {total}
       </span>
@@ -369,6 +398,9 @@ export function ResourcePagination({
 }
 
 export interface AddResourceDrawerProps {
+  /** Optional presentation overrides; the default resource drawers retain their layout. */
+  width?: number;
+  bodyClassName?: string;
   open: boolean;
   title: ReactNode;
   searchPlaceholder: string;
@@ -383,6 +415,7 @@ export interface AddResourceDrawerProps {
   onPageChange?: (page: number) => void;
   onClose: () => void;
   onConfirm?: () => void;
+  confirmLoading?: boolean;
   onRemoveSelected?: (id: string) => void;
   onSearch?: (keyword: string) => void;
   onTagChange?: (value?: string) => void;
@@ -396,6 +429,8 @@ export interface AddResourceDrawerProps {
   searchContent?: ReactNode;
   showSelection?: boolean;
   showListHeader?: boolean;
+  /** Extra action rendered to the left of the refresh button in the list header. */
+  listHeaderExtra?: ReactNode;
   showPagination?: boolean;
 }
 
@@ -405,6 +440,8 @@ export interface AddResourceDrawerProps {
  * buttons are identical across the five designs; only the list body differs.
  */
 export function AddResourceDrawer({
+  width = 760,
+  bodyClassName,
   open,
   title,
   searchPlaceholder,
@@ -419,6 +456,7 @@ export function AddResourceDrawer({
   onPageChange,
   onClose,
   onConfirm,
+  confirmLoading = false,
   onRemoveSelected,
   onSearch,
   onTagChange,
@@ -431,16 +469,21 @@ export function AddResourceDrawer({
   searchContent,
   showSelection = true,
   showListHeader = true,
+  listHeaderExtra,
   showPagination = true,
 }: AddResourceDrawerProps) {
   const { t } = useTranslation("common");
+  const handleClose = () => {
+    if (!confirmLoading) onClose();
+  };
 
   return (
     <Drawer
       open={open}
       placement="right"
-      size={760}
-      onClose={onClose}
+      size={width}
+      classNames={{ body: bodyClassName }}
+      onClose={handleClose}
       closable={false}
       mask={{ closable: false }}
       styles={{
@@ -454,7 +497,10 @@ export function AddResourceDrawer({
         },
       }}
     >
-      <div className="flex h-[28px] shrink-0 items-center justify-between">
+      <div
+        data-picker-part="header"
+        className="flex h-[28px] shrink-0 items-center justify-between"
+      >
         <span
           className={cn(
             "overflow-hidden whitespace-nowrap text-[20px] font-medium leading-[28px] text-[#191919]",
@@ -465,7 +511,7 @@ export function AddResourceDrawer({
         </span>
         <StandardCloseButton
           ariaLabel={t("resourcePicker.close", "关闭")}
-          onClick={onClose}
+          onClick={handleClose}
         />
       </div>
 
@@ -481,8 +527,8 @@ export function AddResourceDrawer({
       )}
 
       {showSelection && (
-        <>
-          <div className="shrink-0 text-[14px] leading-[20px] text-[#191919]">
+        <div data-picker-part="selection" className="contents">
+          <div className="shrink-0 text-[14px] leading-[20px] text-[#999999]">
             {t("resourcePicker.selected", "已选")}
           </div>
           <SelectedChips
@@ -490,27 +536,35 @@ export function AddResourceDrawer({
             onRemove={onRemoveSelected}
             trailing={selectedTrailing}
           />
-        </>
+        </div>
       )}
 
-      {showListHeader && (
-        <ListHeader
-          title={listTitle}
-          onSelectAll={onSelectAll}
-          allSelected={allSelected}
-          onRefresh={onRefresh}
-        />
-      )}
+      <div data-picker-part="list-heading" className="contents">
+        {showListHeader && (
+          <ListHeader
+            title={listTitle}
+            onSelectAll={onSelectAll}
+            allSelected={allSelected}
+            onRefresh={onRefresh}
+            extra={listHeaderExtra}
+          />
+        )}
 
-      {tabs && activeTab !== undefined && (
-        <ResourceTabs
-          tabs={tabs}
-          activeKey={activeTab}
-          onChange={onTabChange}
-        />
-      )}
+        {tabs && activeTab !== undefined && (
+          <ResourceTabs
+            tabs={tabs}
+            activeKey={activeTab}
+            onChange={onTabChange}
+          />
+        )}
+      </div>
 
-      <div className="min-h-0 flex-1 overflow-y-auto">{children}</div>
+      <div
+        data-picker-part="list-content"
+        className="min-h-0 flex-1 overflow-y-auto"
+      >
+        {children}
+      </div>
 
       {showPagination && (
         <ResourcePagination
@@ -520,10 +574,14 @@ export function AddResourceDrawer({
         />
       )}
 
-      <div className="flex shrink-0 justify-end gap-3">
+      <div
+        data-picker-part="footer"
+        className="flex shrink-0 justify-end gap-3"
+      >
         <button
           type="button"
-          onClick={onClose}
+          onClick={handleClose}
+          disabled={confirmLoading}
           className="h-8 w-[89px] cursor-pointer rounded-[2px] border border-[#C9C9C9] bg-white text-[14px] leading-[22px] text-[#191919]"
         >
           {t("resourcePicker.close", "关闭")}
@@ -532,8 +590,13 @@ export function AddResourceDrawer({
           <button
             type="button"
             onClick={onConfirm}
-            className="h-8 w-[89px] cursor-pointer rounded-[2px] border-0 bg-[#1476FF] text-[14px] leading-[22px] text-white"
+            disabled={confirmLoading}
+            aria-busy={confirmLoading}
+            className="inline-flex h-8 w-[89px] cursor-pointer items-center justify-center gap-2 rounded-[2px] border-0 bg-[#1476FF] text-[14px] leading-[22px] text-white"
           >
+            {confirmLoading && (
+              <RefreshCw aria-hidden size={14} className="animate-spin" />
+            )}
             {t("resourcePicker.confirm", "确认")}
           </button>
         )}

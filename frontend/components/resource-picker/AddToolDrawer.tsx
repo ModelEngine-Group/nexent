@@ -1,9 +1,11 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Button, Tooltip } from "antd";
-import { Settings, Wrench, Tag } from "lucide-react";
+import { Settings, Tag } from "lucide-react";
 import i18n from "i18next";
 
 import { AddResourceDrawer, CheckMark } from "./AddResourceDrawer";
@@ -27,6 +29,8 @@ import {
   getToolKbType,
   getToolLabels,
 } from "@/app/agents/components/capability/tool/utils";
+
+import styles from "./ResourcePickerDrawer.module.css";
 
 const PAGE_SIZE = 10;
 
@@ -151,6 +155,15 @@ export function AddToolDrawer({
   );
   const updateTools = useAgentStore((state) => state.updateTools);
 
+  // Local draft of the selected tools. Changes are only committed to the
+  // agent store when the confirm button is clicked.
+  const [draftTools, setDraftTools] = useState<Tool[]>([]);
+
+  useEffect(() => {
+    if (!open) return;
+    setDraftTools(selectedTools);
+  }, [open, selectedTools]);
+
   const [search, setSearch] = useState("");
   const [activeTag, setActiveTag] = useState("");
   const [activeTab, setActiveTab] = useState("local");
@@ -216,8 +229,8 @@ export function AddToolDrawer({
   }, [activeTabTools, activeTag, search]);
 
   const selectedToolIds = useMemo(
-    () => new Set(selectedTools.map((tool) => parseInt(tool.id))),
-    [selectedTools]
+    () => new Set(draftTools.map((tool) => parseInt(tool.id))),
+    [draftTools]
   );
 
   const mergeInstanceParams = useMergedToolParams(currentAgentId);
@@ -237,7 +250,7 @@ export function AddToolDrawer({
   const selectableToolsInActiveTab = useMemo(() => {
     return filteredTools.filter((tool: Tool) => {
       const toolId = parseInt(tool.id);
-      const hasDuplicateName = selectedTools.some(
+      const hasDuplicateName = draftTools.some(
         (selectedTool) =>
           parseInt(selectedTool.id) !== toolId &&
           selectedTool.name === tool.name
@@ -262,7 +275,7 @@ export function AddToolDrawer({
     isImageUnderstandingAvailable,
     isVideoUnderstandingAvailable,
     isAudioUnderstandingAvailable,
-    selectedTools,
+    draftTools,
   ]);
 
   const allVisibleToolsSelected = useMemo(
@@ -276,11 +289,11 @@ export function AddToolDrawer({
 
   const selectedChips = useMemo(
     () =>
-      selectedTools.map((tool) => ({
+      draftTools.map((tool) => ({
         id: String(tool.id),
         label: tool.name,
       })),
-    [selectedTools]
+    [draftTools]
   );
 
   const total = filteredTools.length;
@@ -322,8 +335,7 @@ export function AddToolDrawer({
       const kbType = getToolKbType(tool.name);
       if (kbType) prefetchKnowledgeBases(kbType);
 
-      const currentSelected = useAgentStore.getState().editedAgent?.tools ?? [];
-      const configuredTool = currentSelected.find(
+      const configuredTool = draftTools.find(
         (selectedTool) => parseInt(selectedTool.id) === numericId
       );
       const toolToUse = configuredTool
@@ -336,7 +348,7 @@ export function AddToolDrawer({
       setConfigParams(mergedParams);
       setConfigModalOpen(true);
     },
-    [mergeInstanceParams, prefetchKnowledgeBases]
+    [mergeInstanceParams, prefetchKnowledgeBases, draftTools]
   );
 
   const handleToolToggle = useCallback(
@@ -345,22 +357,19 @@ export function AddToolDrawer({
       const kbType = getToolKbType(tool.name);
       if (kbType) prefetchKnowledgeBases(kbType);
 
-      const currentSelected = useAgentStore.getState().editedAgent?.tools ?? [];
-      const isCurrentlySelected = currentSelected.some(
+      const isCurrentlySelected = draftTools.some(
         (selectedTool) => parseInt(selectedTool.id) === numericId
       );
 
       if (isCurrentlySelected) {
-        updateTools(
-          currentSelected.filter(
-            (selectedTool) => parseInt(selectedTool.id) !== numericId
-          )
+        setDraftTools((prev) =>
+          prev.filter((selectedTool) => parseInt(selectedTool.id) !== numericId)
         );
         return;
       }
 
       // Duplicate name check
-      const dup = currentSelected.find(
+      const dup = draftTools.find(
         (selectedTool) => selectedTool.name === tool.name
       );
       const doAdd = async () => {
@@ -372,8 +381,7 @@ export function AddToolDrawer({
           setConfigParams(mergedParams);
           setConfigModalOpen(true);
         } else {
-          const latest = useAgentStore.getState().editedAgent?.tools ?? [];
-          updateTools([...latest, toolToUse]);
+          setDraftTools((prev) => [...prev, toolToUse]);
         }
       };
 
@@ -393,11 +401,11 @@ export function AddToolDrawer({
       }
     },
     [
+      draftTools,
       prefetchKnowledgeBases,
       mergeInstanceParams,
       hasMissingRequired,
       confirm,
-      updateTools,
       t,
     ]
   );
@@ -405,9 +413,8 @@ export function AddToolDrawer({
   const selectAllVisibleTools = useCallback(async () => {
     if (isSelectingAll) return;
 
-    const currentSelected = useAgentStore.getState().editedAgent?.tools ?? [];
     const currentSelectedIds = new Set(
-      currentSelected.map((tool) => parseInt(tool.id))
+      draftTools.map((tool) => parseInt(tool.id))
     );
     const toolsToAdd = selectableToolsInActiveTab.filter(
       (tool: Tool) => !currentSelectedIds.has(parseInt(tool.id))
@@ -422,57 +429,48 @@ export function AddToolDrawer({
           return initParams ? { ...tool, initParams } : null;
         })
       );
-      const latestSelected = useAgentStore.getState().editedAgent?.tools ?? [];
-      const latestIds = new Set(
-        latestSelected.map((tool) => parseInt(tool.id))
-      );
-      const names = new Set(latestSelected.map((tool) => tool.name));
-      const additions = toolsWithParams.filter((tool): tool is Tool => {
-        if (!tool) return false;
-        if (
-          latestIds.has(parseInt(tool.id)) ||
-          names.has(tool.name) ||
-          hasMissingRequired(tool.initParams)
-        ) {
-          return false;
-        }
-        names.add(tool.name);
-        return true;
-      });
+      setDraftTools((prev) => {
+        const latestIds = new Set(prev.map((tool) => parseInt(tool.id)));
+        const names = new Set(prev.map((tool) => tool.name));
+        const additions = toolsWithParams.filter((tool): tool is Tool => {
+          if (!tool) return false;
+          if (
+            latestIds.has(parseInt(tool.id)) ||
+            names.has(tool.name) ||
+            hasMissingRequired(tool.initParams)
+          ) {
+            return false;
+          }
+          names.add(tool.name);
+          return true;
+        });
 
-      if (additions.length > 0) {
-        updateTools([...latestSelected, ...additions]);
-      }
+        if (additions.length === 0) return prev;
+        return [...prev, ...additions];
+      });
     } finally {
       setIsSelectingAll(false);
     }
   }, [
+    draftTools,
     hasMissingRequired,
     isSelectingAll,
     mergeInstanceParams,
     selectableToolsInActiveTab,
-    updateTools,
   ]);
 
   const deselectAllVisibleTools = useCallback(() => {
     const visibleToolIds = new Set(
       filteredTools.map((tool: Tool) => parseInt(tool.id))
     );
-    const currentSelected = useAgentStore.getState().editedAgent?.tools ?? [];
-    updateTools(
-      currentSelected.filter(
-        (tool) => !visibleToolIds.has(parseInt(tool.id))
-      )
+    setDraftTools((prev) =>
+      prev.filter((tool) => !visibleToolIds.has(parseInt(tool.id)))
     );
-  }, [filteredTools, updateTools]);
+  }, [filteredTools]);
 
-  const removeTool = useCallback(
-    (id: string) => {
-      const currentTools = useAgentStore.getState().editedAgent?.tools ?? [];
-      updateTools(currentTools.filter((tool) => String(tool.id) !== id));
-    },
-    [updateTools]
-  );
+  const removeTool = useCallback((id: string) => {
+    setDraftTools((prev) => prev.filter((tool) => String(tool.id) !== id));
+  }, []);
 
   const handleSelectAll = useCallback(
     (checked: boolean) => {
@@ -490,13 +488,38 @@ export function AddToolDrawer({
     onClose();
   }, [onClose]);
 
+  // Commit a tool configured via ToolConfigModal into the local draft (add or
+  // replace). The modal runs in localOnly mode here, so it does not write the
+  // agent store directly.
+  const saveToolConfig = useCallback((tool: Tool) => {
+    setDraftTools((prev) => {
+      const existingIndex = prev.findIndex(
+        (item) => parseInt(item.id) === parseInt(tool.id)
+      );
+      if (existingIndex >= 0) {
+        const next = [...prev];
+        next[existingIndex] = tool;
+        return next;
+      }
+      return [...prev, tool];
+    });
+  }, []);
+
+  const handleConfirm = useCallback(() => {
+    updateTools(draftTools);
+    onCloseDialog();
+  }, [draftTools, updateTools, onCloseDialog]);
+
   return (
     <>
       <AddResourceDrawer
+        width={768}
+        bodyClassName={cn(styles.drawer, styles.tool)}
         title={
-          <div className="flex items-center gap-2 pr-8">
-            <Wrench className="size-4" />
-            <span className="flex-1">{t("toolPool.selectTools")}</span>
+          <div className="flex min-w-0 items-center gap-2">
+            <span className="min-w-0 flex-1 truncate">
+              {t("resourcePicker.addTool", "添加工具")}
+            </span>
             {onOpenManageLabels ? (
               <Button
                 type="text"
@@ -519,8 +542,8 @@ export function AddToolDrawer({
         activeTab={activeTab}
         total={total}
         page={page}
-        showConfirm={false}
         onClose={onCloseDialog}
+        onConfirm={handleConfirm}
         onSearch={setSearch}
         onTagChange={(value) => setActiveTag(value ?? "")}
         onTabChange={setActiveTab}
@@ -556,7 +579,7 @@ export function AddToolDrawer({
                   role="button"
                   tabIndex={disabled ? -1 : 0}
                   className={cn(
-                    "flex shrink-0 items-center gap-3 rounded-[2px] px-5 py-[9px] transition-colors",
+                    "flex h-[59px] shrink-0 items-center justify-between gap-3 rounded-[4px] py-[9px] pl-5 pr-7 transition-colors",
                     isSelected ? "bg-[#E6F2FD]" : "bg-transparent",
                     disabled
                       ? "cursor-not-allowed opacity-50"
@@ -573,11 +596,11 @@ export function AddToolDrawer({
                     }
                   }}
                 >
-                  <div className="flex min-w-0 flex-1 flex-col gap-0.5">
+                  <div className="flex min-w-0 flex-1 flex-col">
                     <div className="flex items-center gap-2">
                       <span
                         className={cn(
-                          "truncate text-[14px] leading-[20px]",
+                          "truncate text-[14px] leading-[22px]",
                           isSelected
                             ? "font-medium text-[#0067D1]"
                             : "font-medium text-[#191919]"
@@ -597,7 +620,7 @@ export function AddToolDrawer({
                         ))}
                     </div>
                     {tool.description ? (
-                      <p className="truncate text-[14px] leading-[20px] text-[#737373]">
+                      <p className="m-0 truncate text-[14px] font-normal leading-[22px] text-[#777777]">
                         {getToolDescription(tool)}
                       </p>
                     ) : null}
@@ -623,7 +646,10 @@ export function AddToolDrawer({
               return (
                 <div key={tool.id}>
                   {disabledTooltipKey ? (
-                    <Tooltip title={t(disabledTooltipKey)} mouseEnterDelay={0.2}>
+                    <Tooltip
+                      title={t(disabledTooltipKey)}
+                      mouseEnterDelay={0.2}
+                    >
                       {row}
                     </Tooltip>
                   ) : (
@@ -651,6 +677,8 @@ export function AddToolDrawer({
         initialParams={configParams}
         selectedTool={configTool}
         currentAgentId={currentAgentId}
+        localOnly
+        onSaveTool={saveToolConfig}
       />
     </>
   );
