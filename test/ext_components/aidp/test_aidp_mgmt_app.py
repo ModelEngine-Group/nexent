@@ -1893,7 +1893,7 @@ class TestKnowledgeFilesEndpoint:
             SERVER_URL, API_KEY, "kb-1", 2, 1, "制度"
         )
 
-    def test_file_list_suppresses_phantom_next_link_on_short_page(self):
+    def test_file_list_keeps_upstream_next_link_on_short_page(self):
         client = _client()
         from ext_components.aidp.apps import aidp_mgmt_app
         from ext_components.aidp.services import aidp_permission_service
@@ -1913,8 +1913,10 @@ class TestKnowledgeFilesEndpoint:
 
         assert response.status_code == HTTPStatus.OK
         body = response.json()
-        # A short page is the last page no matter what next_link claims.
-        assert body["has_more"] is False
+        # An explicit next_link is authoritative even on a short page, matching
+        # the /documents contract: suppressing it would strand the remaining
+        # keyword matches on pages the user can no longer reach.
+        assert body["has_more"] is True
         assert body["total_reliable"] is False
 
     def test_unfiltered_file_list_uses_cached_count(self):
@@ -2021,9 +2023,11 @@ class TestUploadTasksEndpoint:
         assert response.status_code == HTTPStatus.OK
         body = response.json()
         assert body["value"] == history["value"]
-        # total_count now reflects the global total (total_record_count),
-        # not the page-local total_count from AIDP History.
-        assert body["total_count"] == 31
+        # Keyword/status filters make the pre-filter total_record_count
+        # unusable as a pagination total: filtered queries keep the
+        # page-local fallback and follow the upstream next_link instead.
+        assert body["total_count"] == 8  # (page - 1) * page_size + rows
+        assert body["total_reliable"] is False
         assert body["has_more"] is True
         assert body["stats"] == {
             "total": 31,
@@ -2036,6 +2040,78 @@ class TestUploadTasksEndpoint:
         list_history.assert_called_once_with(
             SERVER_URL, API_KEY, "fs-1", "/aidp/knowledge/kb-1", "kb-1", None,
             2, 7, 4, "制度",
+        )
+
+    def test_filtered_upload_task_query_with_no_next_link_disables_next_page(self):
+        client = _client()
+        from ext_components.aidp.apps import aidp_mgmt_app
+        from ext_components.aidp.services import aidp_permission_service
+
+        # total_record_count is a pre-filter global statistic: 317 records in
+        # total but a single keyword match and no next_link. Treating the
+        # global value as a reliable filtered total would render ~32 mostly
+        # empty pages with Next enabled (AidpPagination trusts total_count
+        # when total_reliable is true), so the filtered query must fall back
+        # to the upstream paging signal and leave Next disabled.
+        history = {
+            "value": [{"file_uuid": "f-1", "file_name": "制度手册.pdf", "status": 1}],
+            "total_count": 1,
+            "next_link": None,
+            "total_record_count": 317,
+        }
+        with patch.object(aidp_permission_service, "require_permission",
+                          return_value=MagicMock(permission="READ_ONLY")), \
+             patch.object(aidp_mgmt_app, "_resolve_doc_history_channel",
+                          return_value={"fs_id": "fs-1", "src_dir": "/aidp/knowledge/kb-1"}), \
+             patch.object(aidp_mgmt_app, "list_aidp_doc_history_impl",
+                          return_value=history):
+            response = client.get(
+                "/aidp-mgmt/knowledge-bases/kb-1/upload-tasks?page=1&page_size=10&keyword=%E5%88%B6%E5%BA%A6",
+                headers=_bearer(),
+            )
+
+        assert response.status_code == HTTPStatus.OK
+        body = response.json()
+        assert body["total_reliable"] is False
+        assert body["has_more"] is False
+        assert body["total_count"] == 1
+        # The global statistic survives in the summary stats.
+        assert body["stats"]["total"] == 317
+
+    def test_unfiltered_upload_task_query_trusts_global_total(self):
+        client = _client()
+        from ext_components.aidp.apps import aidp_mgmt_app
+        from ext_components.aidp.services import aidp_permission_service
+
+        # Without keyword/status filters total_record_count matches the listed
+        # set, so the unfiltered list keeps the reliable global total and the
+        # page-jump pagination it enables.
+        history = {
+            "value": [{"file_uuid": "f-1", "file_name": "制度手册.pdf", "status": 1}],
+            "total_count": 1,
+            "next_link": "/next-page",
+            "total_record_count": 31,
+        }
+        with patch.object(aidp_permission_service, "require_permission",
+                          return_value=MagicMock(permission="READ_ONLY")), \
+             patch.object(aidp_mgmt_app, "_resolve_doc_history_channel",
+                          return_value={"fs_id": "fs-1", "src_dir": "/aidp/knowledge/kb-1"}), \
+             patch.object(aidp_mgmt_app, "list_aidp_doc_history_impl",
+                          return_value=history) as list_history:
+            response = client.get(
+                "/aidp-mgmt/knowledge-bases/kb-1/upload-tasks?page=1&page_size=10&status=0",
+                headers=_bearer(),
+            )
+
+        assert response.status_code == HTTPStatus.OK
+        body = response.json()
+        assert body["total_count"] == 31
+        assert body["total_reliable"] is True
+        assert body["has_more"] is True
+        assert body["stats"]["total"] == 31
+        list_history.assert_called_once_with(
+            SERVER_URL, API_KEY, "fs-1", "/aidp/knowledge/kb-1", "kb-1", None,
+            1, 10, 0, None,
         )
 
     def test_upload_task_listing_survives_unresolvable_channel(self):

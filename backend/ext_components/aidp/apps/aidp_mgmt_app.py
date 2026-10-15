@@ -1185,17 +1185,15 @@ async def list_ingested_files(
     total_reliable = isinstance(count_result, int) and not isinstance(count_result, bool)
     total = int(count_result) if total_reliable else (page - 1) * page_size + len(rows)
     reported_more = _history_reports_more(result)
+    # An explicit next_link/has_more is authoritative even when the page is
+    # short; the row count only infers the last page when AIDP provides no
+    # paging signal at all, matching the /documents paging contract.
     has_more = (
         total > page * page_size
         if total_reliable
         else bool(reported_more) if reported_more is not None
         else len(rows) >= page_size
     )
-    # Upstream pagers can return next_link even when the current page is
-    # incomplete (fewer rows than page_size), which would create phantom
-    # pagination pages. Suppress has_more when the returned page is not full.
-    if len(rows) < page_size:
-        has_more = False
     result.update({
         "total_count": total,
         "has_more": has_more,
@@ -1218,6 +1216,7 @@ async def list_upload_tasks(
     user_id, tenant_id = await _auth(request)
     perms.require_permission(kds_id, user_id, tenant_id, required="READ")
     server_url, api_key = _credentials()
+    normalized_keyword = (keyword or "").strip()
     channel = await run_blocking(
         "aidp-upload-task-channel",
         _resolve_doc_history_channel,
@@ -1241,19 +1240,25 @@ async def list_upload_tasks(
             page,
             page_size,
             status,
-            (keyword or "").strip() or None,
+            normalized_keyword or None,
             lane="control-io",
             owner="config",
         )
     raw_items = history.get("value") if isinstance(history, dict) else None
     rows = [item for item in raw_items if isinstance(item, dict)] if isinstance(raw_items, list) else []
-    # AIDP History returns ``total_count`` as the current-page count, not the
-    # global total (``total_record_count`` is global). Treating the page-local
-    # value as reliable would make AidpPagination disable next-page navigation
-    # even when ``next_link`` is present, so pagination is driven by
-    # ``next_link`` and the global count is exposed separately
+    # AIDP History returns ``total_count`` as the current-page count, while
+    # ``total_record_count`` is a global statistic computed before the
+    # keyword/status filters are applied. It can therefore drive pagination
+    # only for the unfiltered list; filtered queries keep
+    # ``total_reliable=false`` and follow the upstream paging signal, while
+    # the global count stays available in the summary statistics.
+    filtered = bool(normalized_keyword) or status != 0
     raw_global_total = history.get("total_record_count") if isinstance(history, dict) else None
-    total_reliable = isinstance(raw_global_total, int) and not isinstance(raw_global_total, bool)
+    total_reliable = (
+        not filtered
+        and isinstance(raw_global_total, int)
+        and not isinstance(raw_global_total, bool)
+    )
     total = int(raw_global_total) if total_reliable else (page - 1) * page_size + len(rows)
     reported_more = _history_reports_more(history) if isinstance(history, dict) else None
     has_more = (
