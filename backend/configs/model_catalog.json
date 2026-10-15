@@ -802,6 +802,29 @@
           }
         }
       }
+    },
+    "atlascloud": {
+      "display_name": "Atlas Cloud",
+      "base_url": "https://api.atlascloud.ai/v1/",
+      "model_factory": "atlascloud",
+      "models": {
+        "openai/gpt-4.1-mini": {
+          "model_type": "llm",
+          "display_name": "GPT-4.1 Mini (Atlas Cloud)",
+          "context_window_tokens": 1047576,
+          "max_output_tokens": 32768,
+          "tokenizer_family": "openai",
+          "capability_profile_version": "atlascloud/openai-gpt-4.1-mini@1"
+        },
+        "deepseek-ai/DeepSeek-V3.1-Terminus": {
+          "model_type": "llm",
+          "display_name": "DeepSeek V3.1 Terminus (Atlas Cloud)",
+          "context_window_tokens": 131072,
+          "max_output_tokens": 65536,
+          "tokenizer_family": "deepseek",
+          "capability_profile_version": "atlascloud/deepseek-v3.1-terminus@1"
+        }
+      }
     }
   }
 }

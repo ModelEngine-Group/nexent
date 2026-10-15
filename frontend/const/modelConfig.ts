@@ -34,6 +34,7 @@ export const MODEL_SOURCES = {
   GOOGLE: "google",
   MISTRAL: "mistral",
   XAI: "xai",
+  ATLASCLOUD: "atlascloud",
 } as const;
 
 // Providers exposed by the "Import from provider" flow.
@@ -45,6 +46,7 @@ export const MODEL_IMPORT_PROVIDER_KEYS: readonly string[] = [
   "volcengine",
   "modelengine",
   "deepseek",
+  "atlascloud",
 ];
 
 // Model status constants
@@ -80,6 +82,7 @@ export const MODEL_PROVIDER_KEYS = [
   "google",
   "mistral",
   "xai",
+  "atlascloud",
 ] as const;
 
 export type ModelProviderKey = (typeof MODEL_PROVIDER_KEYS)[number];
@@ -101,6 +104,7 @@ export const PROVIDER_HINTS: Record<ModelProviderKey, string> = {
   google: "generativelanguage.googleapis.com",
   mistral: "mistral.ai",
   xai: "api.x.ai",
+  atlascloud: "atlascloud",
 };
 
 // Icon filenames for providers
@@ -120,6 +124,7 @@ export const PROVIDER_ICON_MAP: Record<ModelProviderKey, string> = {
   google: publicAsset("/default-icon.png"),
   mistral: publicAsset("/default-icon.png"),
   xai: publicAsset("/default-icon.png"),
+  atlascloud: publicAsset("/default-icon.png"),
 };
 
 export const OFFICIAL_PROVIDER_ICON = publicAsset("/modelengine-logo.png");
@@ -143,6 +148,7 @@ export const PROVIDER_LINKS: Record<string, string> = {
   google: "https://ai.google.dev/gemini-api/docs/openai",
   mistral: "https://docs.mistral.ai/",
   xai: "https://docs.x.ai/",
+  atlascloud: "https://www.atlascloud.ai/",
 };
 
 // User role constants
