@@ -27,6 +27,7 @@ import { useAuthorizationContext } from "@/components/providers/AuthorizationPro
 import { useDeployment } from "@/components/providers/deploymentProvider";
 import { USER_ROLES } from "@/const/auth";
 import { APP_VERSION, languageOptions } from "@/const/constants";
+import { useUserDisplayName } from "@/hooks/auth/useUserDisplayName";
 import { useAccountMonitoring } from "@/hooks/useAccountMonitoring";
 import { useConfirmModal } from "@/hooks/useConfirmModal";
 import { useLanguageSwitch } from "@/lib/language";
@@ -60,6 +61,7 @@ export function AvatarDropdown({
   onOpenChange,
 }: AvatarDropdownProps) {
   const { user } = useAuthorizationContext();
+  const displayName = useUserDisplayName();
   const { isLoading, logout, openLoginModal, openRegisterModal } =
     useAuthenticationContext();
   const { appVersion } = useDeployment();
@@ -101,7 +103,10 @@ export function AvatarDropdown({
     );
   }
 
-  const identity = user?.username?.trim() || user?.email?.trim() || "-";
+  const identity = displayName(
+    user?.username,
+    user?.username?.trim() || user?.email?.trim() || "-"
+  );
   const profileLocale = currentLanguage.split("-")[0] === "en" ? "en" : "zh";
   const accountItems: ItemType[] = user
     ? [

@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """AIDP Management App Layer (v7.1).
 
 FastAPI endpoints for AIDP knowledge base CRUD with permission enforcement.
@@ -482,6 +484,12 @@ async def list_knowledge_bases(
         sum(1 for row in page_rows if not _has_kb_card_metadata(row)),
     )
 
+    from services.user_identity_service import enrich_cas_usernames
+
+    await run_blocking(
+        "aidp-list-creator-names", enrich_cas_usernames,
+        items, {"creator_cas_username": "created_by"}, lane="control-io", owner="config",
+    )
     has_more = page * page_size < total_count
     return JSONResponse(
         status_code=HTTPStatus.OK,
@@ -668,6 +676,12 @@ async def get_knowledge_base(
     detail["group_ids"] = permission_record.get("group_ids") or []
     detail["created_by"] = permission_record.get("owner_user_id")
     detail["creator_name"] = permission_record.get("creator_name")
+    from services.user_identity_service import enrich_cas_usernames
+
+    await run_blocking(
+        "aidp-detail-creator-name", enrich_cas_usernames,
+        [detail], {"creator_cas_username": "created_by"}, lane="control-io", owner="config",
+    )
     return JSONResponse(status_code=HTTPStatus.OK, content=detail)
 
 

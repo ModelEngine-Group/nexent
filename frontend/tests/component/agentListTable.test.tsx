@@ -1,3 +1,4 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 import { fireEvent, render, screen, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
@@ -5,6 +6,10 @@ import AgentListTable, {
   formatAgentUpdateTime,
 } from "../../app/[locale]/agents/components/agent-list-table";
 import type { Agent } from "@/types/agentConfig";
+
+vi.mock("@/components/providers/AuthorizationProvider", () => ({
+  useAuthorizationContext: () => ({ user: { authProvider: "local" } }),
+}));
 
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({
