@@ -3,6 +3,7 @@
 "use client";
 
 import {
+  createElement,
   useCallback,
   useEffect,
   useRef,
@@ -24,7 +25,8 @@ import {
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 
 import AgentConfig from "./agent-config";
-import { DefaultAgentAvatar } from "./components/DefaultAgentAvatar";
+import AgentAvatar from "../components/agent-avatar";
+import { getAgentIcon } from "@/lib/chat/agentIconUtils";
 import { AgentCreationGuide } from "./components/agent-creation-guide";
 import {
   agentCreationGuideKey,
@@ -184,6 +186,7 @@ function AgentSetupContent({
     setIsDebugVisible(false);
   };
   const currentAgentId = useAgentStore((state) => state.currentAgentId);
+  const draftIconUrl = useAgentStore((state) => state.editedAgent?.icon_url);
   const resetAgentStore = useAgentStore((state) => state.reset);
   const { user } = useAuthorizationContext();
   const tenantId = user?.tenantId ?? null;
@@ -453,7 +456,22 @@ function AgentSetupContent({
           <PanelCard
             frameless
             headerTestId="agent-config-page-tabs"
-            icon={<DefaultAgentAvatar size={16} />}
+            icon={
+              agentInfo ? (
+                <AgentAvatar
+                  agent={{
+                    ...agentInfo,
+                    icon_url: draftIconUrl ?? agentInfo.icon_url,
+                  }}
+                  size={16}
+                  iconSize={12}
+                />
+              ) : (
+                createElement(getAgentIcon({ agent_id: currentAgentId ?? 0 }), {
+                  size: 16,
+                })
+              )
+            }
             title={t("agent.highFidelity.pageTab", {
               name:
                 agentInfo?.display_name ||

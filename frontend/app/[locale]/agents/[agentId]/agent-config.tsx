@@ -76,13 +76,13 @@ type ConfigSectionKey =
 const DEFAULT_OPEN_SECTIONS: Record<ConfigSectionKey, boolean> = {
   display_info: true,
   role_model: true,
-  tools: true,
-  skills: true,
-  run_strategy: true,
-  publish_attributes: true,
-  collaborative_agents: true,
-  knowledge_base: true,
-  conversation_guide: true,
+  tools: false,
+  skills: false,
+  run_strategy: false,
+  publish_attributes: false,
+  collaborative_agents: false,
+  knowledge_base: false,
+  conversation_guide: false,
   guardrail: false,
 };
 
@@ -163,11 +163,7 @@ function ConfigSection({
   return card ? (
     <StandardCard
       data-testid={testId}
-      className={
-        basic
-          ? "shrink-0 ![box-shadow:none] !rounded-lg !px-6 !py-[18px]"
-          : "shrink-0 ![box-shadow:none] !rounded-lg !px-6 !py-4"
-      }
+      className={`shrink-0 ![box-shadow:none] !rounded-lg !px-6 transition-colors duration-150 ${basic ? "!py-[18px]" : "!py-4"} ${open ? "!bg-white" : "hover:!bg-[#E6F2FD]"}`}
       styles={{ body: { padding: 0 } }}
       style={
         open && referenceMinHeight
@@ -511,6 +507,10 @@ export default function AgentConfig({
         >
           <div
             data-testid="agent-config-scroll-region"
+            style={{
+              containerType: "inline-size",
+              containerName: "agent-config",
+            }}
             className={
               debugExpanded && debugVisible
                 ? "hidden"
@@ -582,28 +582,15 @@ export default function AgentConfig({
                 <AgentPrmopt highFidelity onOptimizePrompt={onOptimizePrompt} />
               </ConfigSection>
             </div>
-            <StandardCard
-              data-testid="agent-config-card-resources"
-              className="relative shrink-0 ![box-shadow:none] !rounded-lg !px-6 !py-4"
-              styles={{
-                body: {
-                  padding: 0,
-                  display: "flex",
-                  flexDirection: "column",
-                  gap: 16,
-                },
-              }}
+            <div
+              data-agent-guide="resources"
+              className="flex shrink-0 flex-col gap-3"
             >
-              <span
-                aria-hidden
-                data-agent-guide="resources"
-                className="pointer-events-none absolute inset-x-0 -top-[4.5px] bottom-[4.5px]"
-              />
               <KnowledgeBaseConfig
                 highFidelity
                 renderSection={(content, actions) => (
                   <ConfigSection
-                    card={false}
+                    testId="agent-config-card-knowledge"
                     title={t("agent.highFidelity.knowledgeTitle")}
                     description={t("agent.highFidelity.knowledgeDescription")}
                     icon={<BookOpen className="size-6 shrink-0" />}
@@ -618,24 +605,12 @@ export default function AgentConfig({
                   </ConfigSection>
                 )}
               />
-              <ConfigSection
-                card={false}
-                title={t("agent.highFidelity.guideTitle")}
-                description={t("agent.highFidelity.guideDescription")}
-                icon={<ScrollText className="size-6 shrink-0" />}
-                open={openSections.conversation_guide}
-                onOpenChange={(open) =>
-                  handleSectionOpenChange("conversation_guide", open)
-                }
-                containerRef={conversationGuideSectionRef}
-              >
-                <AgentGuide highFidelity />
-              </ConfigSection>
+
               <AgentSkillCapability
                 highFidelity
                 renderSection={(content, actions) => (
                   <ConfigSection
-                    card={false}
+                    testId="agent-config-card-skills"
                     title={t("agent.highFidelity.skillTitle")}
                     description={t("agent.highFidelity.skillDescription")}
                     icon={<GraduationCap className="size-6 shrink-0" />}
@@ -654,7 +629,7 @@ export default function AgentConfig({
                 highFidelity
                 renderSection={(content, actions) => (
                   <ConfigSection
-                    card={false}
+                    testId="agent-config-card-tools"
                     title={t("agent.highFidelity.toolTitle")}
                     description={t("agent.highFidelity.toolDescription")}
                     icon={<Puzzle className="size-6 shrink-0" />}
@@ -673,7 +648,7 @@ export default function AgentConfig({
                 highFidelity
                 renderSection={(content, actions) => (
                   <ConfigSection
-                    card={false}
+                    testId="agent-config-card-child-agents"
                     title={t("agent.highFidelity.childTitle")}
                     description={t("agent.highFidelity.childDescription")}
                     icon={<BlocksIcon className="size-6 shrink-0" />}
@@ -688,56 +663,56 @@ export default function AgentConfig({
                   </ConfigSection>
                 )}
               />
-            </StandardCard>
-            <StandardCard
-              data-testid="agent-config-card-advanced"
-              className="shrink-0 ![box-shadow:none] !rounded-lg !px-6 !py-4"
-              styles={{
-                body: {
-                  padding: 0,
-                  display: "flex",
-                  flexDirection: "column",
-                  gap: 16,
-                },
-              }}
+              <ConfigSection
+                testId="agent-config-card-welcome"
+                title={t("agent.highFidelity.guideTitle")}
+                description={t("agent.highFidelity.guideDescription")}
+                icon={<ScrollText className="size-6 shrink-0" />}
+                open={openSections.conversation_guide}
+                onOpenChange={(open) =>
+                  handleSectionOpenChange("conversation_guide", open)
+                }
+                containerRef={conversationGuideSectionRef}
+              >
+                <AgentGuide highFidelity />
+              </ConfigSection>
+            </div>
+            <ConfigSection
+              testId="agent-config-card-permissions"
+              title={t("agent.highFidelity.permissionTitle")}
+              description={t("agent.highFidelity.permissionDescription")}
+              icon={<CircleCheck className="size-6 shrink-0" />}
+              open={openSections.publish_attributes}
+              onOpenChange={(open) =>
+                handleSectionOpenChange("publish_attributes", open)
+              }
+              containerRef={publishAttributesSectionRef}
             >
-              <ConfigSection
-                card={false}
-                title={t("agent.highFidelity.permissionTitle")}
-                description={t("agent.highFidelity.permissionDescription")}
-                icon={<CircleCheck className="size-6 shrink-0" />}
-                open={openSections.publish_attributes}
-                onOpenChange={(open) =>
-                  handleSectionOpenChange("publish_attributes", open)
-                }
-                containerRef={publishAttributesSectionRef}
-              >
-                <AgentDeployment highFidelity />
-              </ConfigSection>
-              <ConfigSection
-                card={false}
-                title={t("agent.highFidelity.advancedTitle")}
-                description=""
-                icon={<Settings2 className="size-6 shrink-0" />}
-                open={openSections.run_strategy}
-                onOpenChange={(open) =>
-                  handleSectionOpenChange("run_strategy", open)
-                }
-                containerRef={runStrategySectionRef}
-                headerActions={
-                  <Button
-                    type="text"
-                    size="small"
-                    aria-label={t("agent.highFidelity.moreSettings")}
-                    icon={<Settings2 size={16} />}
-                    onClick={() => handleSectionOpenChange("guardrail", true)}
-                    className="!size-6 !p-0"
-                  />
-                }
-              >
-                <AgentRunPolicy highFidelity />
-              </ConfigSection>
-            </StandardCard>
+              <AgentDeployment highFidelity />
+            </ConfigSection>
+            <ConfigSection
+              testId="agent-config-card-advanced"
+              title={t("agent.highFidelity.advancedTitle")}
+              description=""
+              icon={<Settings2 className="size-6 shrink-0" />}
+              open={openSections.run_strategy}
+              onOpenChange={(open) =>
+                handleSectionOpenChange("run_strategy", open)
+              }
+              containerRef={runStrategySectionRef}
+              headerActions={
+                <Button
+                  type="text"
+                  size="small"
+                  aria-label={t("agent.highFidelity.moreSettings")}
+                  icon={<Settings2 size={16} />}
+                  onClick={() => handleSectionOpenChange("guardrail", true)}
+                  className="!size-6 !p-0"
+                />
+              }
+            >
+              <AgentRunPolicy highFidelity />
+            </ConfigSection>
             <Modal
               title={t("agent.highFidelity.moreSettings")}
               open={openSections.guardrail}

@@ -398,7 +398,7 @@ export default function KnowledgeBaseConfig({
     const selectedKnowledgeBases = state?.selectedKnowledgeBases ?? [];
     const content = (
       <div className="flex flex-col gap-2">
-        <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+        <div className="grid grid-cols-1 gap-2 @min-[640px]/agent-config:grid-cols-2">
           {selectedKnowledgeBases.map((selectedKnowledgeBase) => {
             const knowledgeBase = selectedKnowledgeBase.knowledgeBase;
             const metadata = knowledgeBase

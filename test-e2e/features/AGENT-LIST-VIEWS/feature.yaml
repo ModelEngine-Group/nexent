@@ -2,51 +2,49 @@ schema_version: '1.0'
 module:
   id: AGENT-LIST
   name: Agent list views
-  description: Measured guide, card and table presentations for the existing agent
-    list.
+  description: Measured guide, card and table presentations for the existing agent list.
 feature:
   feature_id: AGENT-LIST-VIEWS
   name: Agent list grid and table views
   status: active
-  description: Render the inspected guide and agent cards, and switch to a data-backed
-    table while preserving the existing agent data and operations.
+  description: Render the inspected guide and agent cards, and switch to a data-backed table
+    while preserving the existing agent data and operations.
   business_rules:
   - rule_id: AGENT-LIST-RULE-001
-    description: Switching list presentation changes only the view and preserves the
-      existing agent data, search, pagination, and actions.
+    description: Switching list presentation changes only the view and preserves the existing
+      agent data, search, pagination, and actions.
   - rule_id: AGENT-LIST-RULE-002
-    description: The table shows name, type, description, status, creator, update
-      time, and row actions in the specified order.
+    description: The table shows name, type, description, status, creator, update time, and
+      row actions in the specified order.
   - rule_id: AGENT-LIST-RULE-003
-    description: The table update time is sourced only from update_time and is not
-      inferred from create_time.
+    description: The table update time is sourced only from update_time and is not inferred
+      from create_time.
   - rule_id: AGENT-LIST-RULE-004
-    description: The table uses Ant Design Table through StandardTable with the inspected
-      typography, background and 40px row height.
+    description: The native Ant Design table has a subdued 44px header, 14px text, 52px rows,
+      minimum-width protected resizable columns and a fixed actions column. Column widths remain
+      selected during pagination, search and presentation switches within the list page.
   - rule_id: AGENT-LIST-RULE-005
-    description: The table height follows its rendered header and rows up to 500px;
-      it shrinks to the available list area when needed, and overflow scrolls inside
-      the table while pagination remains below it.
+    description: The table adapts to the available list area, keeping the header fixed and scrolling
+      its body internally while existing pagination remains below it.
   - rule_id: AGENT-LIST-RULE-006
-    description: At 1920x1080 in the Chinese reference locale the content is 1856px
-      wide with 24px padding and a 48px header; the expanded guide is 1808x378px for
-      populated and empty data, with 24px padding, 16px radius and the inspected gradient.
-      Its 1760x330px inner area contains a 114px introduction, 24px gap and 192px
-      process with a 24px title, 12px gap and five 339.2x156px steps separated by
-      16px. Introduction title is 16/24px/500/#191919, body 14/22px/400/#191919, points
-      14/22px/400/#777777; step title is 18/26px/500/#191919 and description 14/22px/400/#777777.
-      The visible 72x22px header tutorial toggle uses text before an 8px arrow with
-      6px gap, while the transparent guide-internal toggle is absent. Longer translated
-      step copy may grow naturally above its 156px minimum while retaining readable
-      text and usable controls.
+    description: At 1920x1080 in the Chinese reference locale the content is 1856px wide with
+      24px padding and a 48px header; the expanded guide is 1808x378px for populated and empty
+      data, with 24px padding, 16px radius and the inspected gradient. Its 1760x330px inner
+      area contains a 114px introduction, 24px gap and 192px process with a 24px title, 12px
+      gap and five 339.2x156px steps separated by 16px. Introduction title is 16/24px/500/#191919,
+      body 14/22px/400/#191919, points 14/22px/400/#777777; step title is 18/26px/500/#191919
+      and description 14/22px/400/#777777. The visible 72x22px header tutorial toggle uses text
+      before an 8px arrow with 6px gap, while the transparent guide-internal toggle is absent.
+      Longer translated step copy may grow naturally above its 156px minimum while retaining
+      readable text and usable controls.
   - rule_id: AGENT-LIST-RULE-007
-    description: Desktop cards are 440x148px with 24px horizontal and 16px vertical
-      padding, a 12px radius, white background and 1px outside
+    description: Desktop cards are 440x148px with 24px horizontal and 16px vertical padding,
+      a 12px radius, white background and 1px outside
   - rule_id: AGENT-LIST-RULE-008
-    description: Visual refinement preserves real list metadata and existing search,
-      pagination, creation, details, configuration, publication, import and more-menu
-      actions; guide/card presentation never fabricates update dates, status or import
-      provenance and never causes a business write by itself.
+    description: Visual refinement preserves real list metadata and existing search, pagination,
+      creation, details, configuration, publication, import and more-menu actions; guide/card
+      presentation never fabricates update dates, status or import provenance and never causes
+      a business write by itself.
   required_test_stages:
   - D1
   - D4

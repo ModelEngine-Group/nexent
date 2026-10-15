@@ -2,7 +2,7 @@
 
 "use client";
 
-import { createElement, useState, type ChangeEvent } from "react";
+import { createElement, useRef, useState, type ChangeEvent } from "react";
 import { useTranslation } from "react-i18next";
 import { useQueryClient } from "@tanstack/react-query";
 import {
@@ -31,7 +31,9 @@ import {
 import { API_ENDPOINTS } from "@/services/api";
 import { fetchWithAuth } from "@/lib/auth";
 import {
+  DEFAULT_AGENT_ICONS,
   getAgentIcon,
+  type DefaultAgentIconKey,
   getAgentUploadedIconRevision,
 } from "@/lib/chat/agentIconUtils";
 import { useAgentReadOnly } from "@/hooks/agent/useAgentReadOnly";
@@ -40,11 +42,8 @@ import ResourceTagChips from "@/components/tag/ResourceTagChips";
 import TagDefinitionManagementModal from "@/components/tag/TagDefinitionManagementModal";
 import { useTagDefinitions, useTagLibraries } from "@/hooks/useTagManagement";
 import HighFidelityTextArea from "./HighFidelityTextArea";
-import {
-  DefaultAgentAvatar,
-  DEFAULT_AGENT_AVATAR_COLORS,
-  getDefaultAgentAvatarSvg,
-} from "./DefaultAgentAvatar";
+import AgentAvatarOptions from "./agent-avatar-options";
+import { createAgentIconFile } from "@/lib/chat/agentIconImage";
 
 const HIGH_FIDELITY_DESCRIPTION_LIMIT = 200;
 
@@ -87,6 +86,12 @@ export default function AgentInfo({ highFidelity = false }: AgentInfoProps) {
   }
   const isReadOnly = useAgentReadOnly();
   const [uploading, setUploading] = useState(false);
+  const uploadInProgress = useRef(false);
+  const [avatarSelection, setAvatarSelection] = useState<{
+    agentId: number;
+    iconUrl: string;
+    key: DefaultAgentIconKey;
+  } | null>(null);
   const [iconLoadError, setIconLoadError] = useState(false);
   const [assignTagsOpen, setAssignTagsOpen] = useState(false);
   const [tagManagementOpen, setTagManagementOpen] = useState(false);
@@ -115,61 +120,70 @@ export default function AgentInfo({ highFidelity = false }: AgentInfoProps) {
         )
       : undefined;
 
-  const uploadIcon = async (file: File) => {
-    if (isReadOnly || uploading) return;
-    if (
-      !["image/png", "image/jpeg", "image/gif", "image/webp"].includes(
-        file.type
-      ) ||
-      file.size >= 2 * 1024 * 1024
-    ) {
-      message.error(t("agent.highFidelity.invalidAvatar"));
-      return;
-    }
+  const selectedIconKey = editedAgent.icon_url
+    ? avatarSelection?.agentId === agentId &&
+      avatarSelection.iconUrl === editedAgent.icon_url
+      ? avatarSelection.key
+      : null
+    : DEFAULT_AGENT_ICONS.find(
+        (option) => option.icon === getAgentIcon({ agent_id: agentId ?? 0 })
+      )?.key;
+
+  const uploadIcon = async (
+    source: File | (() => Promise<File>),
+    presetKey?: DefaultAgentIconKey
+  ) => {
+    if (isReadOnly || uploadInProgress.current) return;
     const currentAgentId = agentId;
     if (currentAgentId === null) {
       message.error(t("agent.iconUploadRequiresSavedAgent"));
       return;
     }
+    uploadInProgress.current = true;
     setUploading(true);
     try {
+      const file = typeof source === "function" ? await source() : source;
+      if (
+        !["image/png", "image/jpeg", "image/gif", "image/webp"].includes(
+          file.type
+        ) ||
+        file.size >= 2 * 1024 * 1024
+      ) {
+        message.error(t("agent.highFidelity.invalidAvatar"));
+        return;
+      }
+      if (useAgentStore.getState().agentId !== currentAgentId) return;
       const formData = new FormData();
       formData.append("file", file);
       const response = await fetchWithAuth(
         API_ENDPOINTS.agent.icon(currentAgentId),
-        { method: "POST", body: formData }
+        {
+          method: "POST",
+          body: formData,
+        }
       );
       if (!response.ok) throw new Error("Agent icon upload failed");
       const data = await response.json();
+      if (typeof data.icon_url !== "string" || !data.icon_url.trim()) {
+        throw new Error("Agent icon upload returned no image URL");
+      }
       if (useAgentStore.getState().agentId !== currentAgentId) return;
       setIconLoadError(false);
       updateDraft({ icon_url: data.icon_url });
+      setAvatarSelection(
+        presetKey
+          ? { agentId: currentAgentId, iconUrl: data.icon_url, key: presetKey }
+          : null
+      );
       void queryClient.invalidateQueries({ queryKey: ["agents"] });
       message.success(t("agent.iconUploadSuccess"));
     } catch {
       message.error(t("agent.iconUploadFailed"));
     } finally {
+      uploadInProgress.current = false;
       setUploading(false);
     }
   };
-  const selectDefaultAvatar = async (colors: string[]) => {
-    const canvas = document.createElement("canvas");
-    canvas.width = canvas.height = 200;
-    const context = canvas.getContext("2d");
-    if (!context) return;
-    const image = new Image();
-    image.src = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(getDefaultAgentAvatarSvg(colors))}`;
-    await image.decode();
-    context.drawImage(image, 0, 0, 200, 200);
-    const blob = await new Promise<Blob | null>((resolve) =>
-      canvas.toBlob(resolve, "image/png")
-    );
-    if (blob)
-      await uploadIcon(
-        new File([blob], "default-avatar.png", { type: "image/png" })
-      );
-  };
-
   const uploadProps: UploadProps = {
     accept: "image/png,image/jpeg,image/gif,image/webp",
     showUploadList: false,
@@ -183,7 +197,15 @@ export default function AgentInfo({ highFidelity = false }: AgentInfoProps) {
   const identityFields = (
     <>
       <Row gutter={[12, 0]}>
-        <Col xs={24} sm={12}>
+        <Col
+          xs={24}
+          sm={12}
+          className={
+            highFidelity
+              ? "!max-w-full !flex-[0_0_100%] @min-[640px]/agent-config:!max-w-1/2 @min-[640px]/agent-config:!flex-[0_0_50%]"
+              : undefined
+          }
+        >
           <Form.Item
             label={t("agent.displayName")}
             className="mb-3"
@@ -221,7 +243,15 @@ export default function AgentInfo({ highFidelity = false }: AgentInfoProps) {
             />
           </Form.Item>
         </Col>
-        <Col xs={24} sm={12}>
+        <Col
+          xs={24}
+          sm={12}
+          className={
+            highFidelity
+              ? "!max-w-full !flex-[0_0_100%] @min-[640px]/agent-config:!max-w-1/2 @min-[640px]/agent-config:!flex-[0_0_50%]"
+              : undefined
+          }
+        >
           <Form.Item
             label={t("agent.name")}
             className="mb-3"
@@ -345,7 +375,7 @@ export default function AgentInfo({ highFidelity = false }: AgentInfoProps) {
       className="mb-0 mt-3"
     >
       <div className="flex min-w-0 items-center gap-2">
-        <div className="min-w-0 flex-1 overflow-hidden whitespace-nowrap">
+        <div className="min-w-0 flex-1 overflow-hidden whitespace-nowrap [&>span]:gap-2 [&_.ant-tag]:!m-0 [&_.ant-tag]:!h-[26px] [&_.ant-tag]:!rounded-full [&_.ant-tag]:!border-0 [&_.ant-tag]:!bg-[#E6F2FD] [&_.ant-tag]:!px-2.5 [&_.ant-tag]:!text-[12px] [&_.ant-tag]:!leading-[26px] [&_.ant-tag]:!text-[#0067D1]">
           {agentId !== null ? (
             <ResourceTagChips
               resourceType="agent"
@@ -375,7 +405,7 @@ export default function AgentInfo({ highFidelity = false }: AgentInfoProps) {
     <Flex
       vertical
       align={highFidelity ? "flex-start" : "center"}
-      className={highFidelity ? "h-[130px] items-start gap-2" : "h-full"}
+      className={highFidelity ? "min-h-[130px] items-start gap-2" : "h-full"}
     >
       <Tooltip title={highFidelity ? t("agent.iconHint") : undefined}>
         <div
@@ -401,12 +431,12 @@ export default function AgentInfo({ highFidelity = false }: AgentInfoProps) {
               size={highFidelity ? 100 : 72}
               shape={highFidelity ? "square" : "circle"}
               src={iconSource}
-              icon={highFidelity ? <DefaultAgentAvatar /> : defaultIcon}
+              icon={defaultIcon}
               onError={() => {
                 setIconLoadError(true);
                 return false;
               }}
-              className={`${highFidelity ? "!flex !items-center !justify-center !rounded-lg !bg-white !border !border-solid !border-[#c9c9c9]" : "border-2 border-dashed border-gray-300"} ${iconSource || highFidelity ? "" : "!bg-primary/10 !text-primary"}`}
+              className={`${highFidelity ? "!flex !items-center !justify-center !rounded-lg !border !border-solid !border-[#c9c9c9]" : "border-2 border-dashed border-gray-300"} ${iconSource ? "!bg-white" : "!bg-primary/10 !text-primary"}`}
             />
             <div
               className={`absolute inset-0 flex items-center justify-center ${highFidelity ? "rounded-lg" : "rounded-full"} bg-black/40 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 transition-opacity`}
@@ -420,29 +450,17 @@ export default function AgentInfo({ highFidelity = false }: AgentInfoProps) {
           </div>
         </AntdUpload>
         {highFidelity && (
-          <div className="flex h-[100px] min-w-0 flex-col justify-between">
+          <div className="flex min-w-0 flex-1 flex-col gap-3">
             <span className="text-xs leading-[22px] text-[#808080]">
               {t("agent.highFidelity.avatarHint")}
             </span>
-            <div className="flex flex-col gap-1">
-              <span className="text-xs leading-[22px] text-[#808080]">
-                {t("agent.highFidelity.defaultAvatars")}
-              </span>
-              <div className="flex gap-2">
-                {DEFAULT_AGENT_AVATAR_COLORS.map((colors, index) => (
-                  <Button
-                    key={index}
-                    type="text"
-                    aria-label={`${t("agent.highFidelity.defaultAvatars")} ${index + 1}`}
-                    disabled={isReadOnly || uploading || agentId === null}
-                    onClick={() => void selectDefaultAvatar(colors)}
-                    className="!h-9 !w-[35px] !rounded-[8px] !p-0"
-                  >
-                    <DefaultAgentAvatar size={35} colors={colors} />
-                  </Button>
-                ))}
-              </div>
-            </div>
+            <AgentAvatarOptions
+              disabled={agentId === null || isReadOnly || uploading}
+              selectedKey={selectedIconKey}
+              onSelect={(key, svg) =>
+                void uploadIcon(() => createAgentIconFile(svg), key)
+              }
+            />
           </div>
         )}
       </div>
@@ -459,7 +477,7 @@ export default function AgentInfo({ highFidelity = false }: AgentInfoProps) {
     <div className="w-full">
       {highFidelity ? (
         <>
-          <div className="grid min-w-0 grid-cols-1 gap-4 sm:grid-cols-2">
+          <div className="grid min-w-0 grid-cols-1 gap-4 @min-[640px]/agent-config:grid-cols-2">
             <div className="min-w-0">{descriptionField}</div>
             <div className="min-w-0">{avatarField}</div>
           </div>
@@ -476,6 +494,7 @@ export default function AgentInfo({ highFidelity = false }: AgentInfoProps) {
           </Col>
         </Row>
       )}
+      {tagFields}
       <ResourceTagAssignmentModal
         open={assignTagsOpen}
         onClose={() => {

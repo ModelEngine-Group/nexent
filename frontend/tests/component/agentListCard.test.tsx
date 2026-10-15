@@ -1,3 +1,5 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
@@ -14,6 +16,8 @@ vi.mock("react-i18next", () => ({
         "agentConfig.list.publish": "发布",
         "agentConfig.list.online": "已上线",
         "agentConfig.list.offline": "未上线",
+        "agentRepository.tag.marketing": "营销",
+        "agentRepository.tag.customerService": "客服",
         "agentRepository.card.noDescription": "暂无描述",
       };
       if (key === "agentConfig.list.updatedAt") return `更新于${options?.date}`;
@@ -53,7 +57,7 @@ describe("AgentListCard", () => {
     );
 
     expect(container.querySelector("article")).toHaveClass(
-      "h-[148px]",
+      "h-[180px]",
       "rounded-[12px]",
       "px-6",
       "py-4"
@@ -62,7 +66,10 @@ describe("AgentListCard", () => {
       "text-[16px]",
       "leading-6"
     );
-    expect(screen.getByText("医疗")).toHaveClass("h-[22px]", "rounded-[4px]");
+    expect(screen.getByText("医疗").closest(".ant-tag")).toHaveClass(
+      "!h-[22px]",
+      "!rounded-full"
+    );
     expect(screen.getByText("一个专业、全面的健康咨询智能体")).toHaveClass(
       "text-[12px]",
       "leading-5",
@@ -70,6 +77,28 @@ describe("AgentListCard", () => {
     );
     expect(screen.getByText("创建于2026-01-23")).toBeInTheDocument();
     expect(screen.getByText("未上线")).toBeInTheDocument();
+  });
+
+  it.each([
+    ["marketing", "营销"],
+    ["customer_service", "客服"],
+    ["database", "database"],
+  ])("renders tag %s using its display label %s", (rawTag, displayLabel) => {
+    render(
+      <AgentListCard
+        agent={{ ...agent, tags: [rawTag] }}
+        onOpen={vi.fn()}
+        onConfigure={vi.fn()}
+        onPublish={vi.fn()}
+        onManageVersions={vi.fn()}
+      />
+    );
+    expect(screen.getByText(displayLabel)).toBeInTheDocument();
+    if (rawTag !== displayLabel) {
+      expect(
+        screen.queryByText(rawTag, { exact: true })
+      ).not.toBeInTheDocument();
+    }
   });
 
   it("keeps detail, configuration, and publish navigation distinct", () => {

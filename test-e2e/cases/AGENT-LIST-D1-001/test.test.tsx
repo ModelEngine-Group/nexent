@@ -1,4 +1,8 @@
-vi.mock("@/app/i18n", () => ({ default: { t: (key: string) => key, language: "zh" } }));
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
+vi.mock("@/app/i18n", () => ({
+  default: { t: (key: string) => key, language: "zh" },
+}));
 import { fireEvent, render, screen, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
@@ -64,39 +68,36 @@ describe("[AGENT-LIST-D1-001] AgentListTable", () => {
         onConfigure={vi.fn()}
         onPublish={vi.fn()}
         onManageVersions={vi.fn()}
-      />
+      />,
     );
 
     expect(
-      screen.getAllByRole("columnheader").map((header) => header.textContent)
+      screen
+        .getAllByRole("columnheader")
+        .map((header) => header.textContent)
+        .filter(Boolean),
     ).toEqual(["名称", "类型", "描述", "状态", "创建人", "更新时间", "操作"]);
-    const table = screen.getByRole("table");
+    const table = screen.getAllByRole("table")[0];
     expect(table).toBeInTheDocument();
-    expect(table.closest(".nexent-standard-table")).toBeInTheDocument();
+    expect(table.closest(".agent-list-table")).toBeInTheDocument();
 
-    const rows = screen.getAllByRole("row").slice(1);
+    const rows = [firstAgent, secondAgent].map((agent) =>
+      screen.getByRole("button", { name: agent.display_name }).closest("tr")!,
+    );
     expect(within(rows[0]).getByText("刘晨")).toBeInTheDocument();
     expect(within(rows[0]).getByText("2026-09-18")).toBeInTheDocument();
     expect(within(rows[0]).queryByText("2026-09-17")).not.toBeInTheDocument();
     expect(within(rows[1]).getAllByText("-")).toHaveLength(2);
     expect(getByTestId("agent-list-table-scroll")).toHaveClass(
-      "h-auto",
-      "max-h-[500px]",
-      "overflow-auto"
+      "flex-1",
+      "min-h-0",
     );
-    expect(getByTestId("agent-list-table-scroll")).not.toHaveClass("flex-1");
-    expect(table.closest(".nexent-standard-table")?.className).toContain(
-      "[&_.ant-table-thead>tr>th:not(:last-child):not([colspan])::before]:!h-[14px]"
-    );
-    expect(table.closest(".nexent-standard-table")?.className).toContain(
-      "[&_.ant-table-thead>tr>th:not(:last-child):not([colspan])::before]:!bg-[#c9c9c9]"
-    );
-    expect(table.closest(".nexent-standard-table")?.className).toContain(
-      "[&_.ant-table-thead>tr>th:not(:last-child):not([colspan])::before]:![transform:translateY(-50%)]"
-    );
-    expect(table.closest(".nexent-standard-table")?.className).not.toContain(
-      "-translate-y-1/2"
-    );
+    expect(
+      table.closest(".agent-list-table")?.querySelector(".ant-pagination"),
+    ).toBeNull();
+    expect(
+      screen.getByRole("columnheader", { name: "\u64cd\u4f5c" }),
+    ).toHaveClass("ant-table-cell-fix-end");
   });
 
   it("keeps row detail, configure, and publish actions connected", () => {
@@ -110,7 +111,7 @@ describe("[AGENT-LIST-D1-001] AgentListTable", () => {
         onConfigure={onConfigure}
         onPublish={onPublish}
         onManageVersions={vi.fn()}
-      />
+      />,
     );
 
     fireEvent.click(screen.getByRole("button", { name: "健康小助手" }));
@@ -119,6 +120,30 @@ describe("[AGENT-LIST-D1-001] AgentListTable", () => {
     expect(onOpen).toHaveBeenCalledWith(firstAgent);
     expect(onConfigure).toHaveBeenCalledWith(1);
     expect(onPublish).toHaveBeenCalledWith(2);
+  });
+
+  it("resizes real header cells while preserving row actions", () => {
+    const onConfigure = vi.fn();
+    render(
+      <AgentListTable
+        agents={[firstAgent]}
+        onOpen={vi.fn()}
+        onConfigure={onConfigure}
+        onPublish={vi.fn()}
+        onManageVersions={vi.fn()}
+      />,
+    );
+    const handles = screen.getAllByRole("separator");
+    expect(handles).toHaveLength(7);
+    expect(handles[0]).toHaveAttribute("aria-valuenow", "240");
+    fireEvent.keyDown(handles[0], { key: "ArrowRight" });
+    expect(handles[0]).toHaveAttribute("aria-valuenow", "256");
+    for (let index = 0; index < 12; index += 1) {
+      fireEvent.keyDown(handles[0], { key: "ArrowLeft" });
+    }
+    expect(handles[0]).toHaveAttribute("aria-valuenow", "180");
+    fireEvent.click(screen.getByRole("button", { name: "\u914d\u7f6e" }));
+    expect(onConfigure).toHaveBeenCalledWith(1);
   });
 
   it("formats only valid update timestamps", () => {
