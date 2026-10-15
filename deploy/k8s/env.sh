@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 # Render trusted shell-compatible env files without dumping the host environment.
 
 k8s_env_file_data() {

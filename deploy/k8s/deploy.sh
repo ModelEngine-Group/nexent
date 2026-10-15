@@ -1,4 +1,6 @@
 #!/bin/bash
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 # Helm Deployment Script for Nexent
 # Usage: ./deploy.sh [apply] [options]
 #
