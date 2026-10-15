@@ -1,0 +1,10 @@
+---
+alwaysApply: true
+description: Enforce the copyright header on new and modified source files
+---
+
+# Shared project rules
+
+Read [AGENTS.md](mdc:AGENTS.md) before working in this rule scope.
+
+Paths are relative to the repository root. If linked context is unavailable, read the file directly. Load only applicable references. Maintain the linked Markdown source instead of duplicating rules here.
