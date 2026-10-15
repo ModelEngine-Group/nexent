@@ -9,7 +9,6 @@ from nexent.core.concurrency import run_blocking
 from starlette.responses import JSONResponse, Response, StreamingResponse
 
 from consts.const import ASSET_OWNER_TENANT_ID, ENABLE_AGENT_WORKBENCH
-from consts.streaming import SSE_STREAM_HEADERS
 from consts.model import (
     AgentRequest,
     AgentInfoRequest,
@@ -372,16 +371,9 @@ async def nl2agent_run_api(
             return StreamingResponse(
                 stream,
                 media_type="text/event-stream",
-                headers={
-                    **SSE_STREAM_HEADERS,
-                    "conversation_id": str(conversation_id),
-                },
+                headers={"conversation_id": str(conversation_id)},
             )
-        return StreamingResponse(
-            stream,
-            media_type="text/event-stream",
-            headers=SSE_STREAM_HEADERS,
-        )
+        return StreamingResponse(stream, media_type="text/event-stream")
     except UnauthorizedError as exc:
         raise HTTPException(
             status_code=HTTPStatus.UNAUTHORIZED,
