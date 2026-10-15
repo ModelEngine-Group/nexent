@@ -1,3 +1,5 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 "use client";
 
 import {
@@ -216,6 +218,9 @@ const HomeContent: FC<{
   const knowledgePreviewsRef = useRef<
     Map<string, KnowledgeScopeEffectivePreview | null>
   >(new Map());
+  // True while a scope save is in flight, so a concurrent resync cannot
+  // overwrite the freshly saved selection with a stale read.
+  const knowledgeScopeSavingRef = useRef(false);
 
   // All hooks must be called before any early returns
   const runtimeMainThreadId = useAuiState((s) => s.threads.mainThreadId);
@@ -416,6 +421,45 @@ const HomeContent: FC<{
     };
   }, [activeConversationId, activeThreadId]);
 
+  // Resync the conversation's saved knowledge selection whenever the page
+  // becomes visible again. Deletion cascades on the server, so a knowledge
+  // base removed from another page or browser is already gone from the stored
+  // scope; this read makes it disappear from the composer without a refresh.
+  useEffect(() => {
+    let cancelled = false;
+    const resyncKnowledgeScope = () => {
+      if (document.visibilityState !== "visible") return;
+      if (knowledgeScopeSavingRef.current) return;
+      const numericConversationId = Number(activeConversationId);
+      if (
+        !Number.isInteger(numericConversationId) ||
+        numericConversationId <= 0
+      ) {
+        return;
+      }
+      void conversationService
+        .getById(String(numericConversationId))
+        .then((conversation) => {
+          if (cancelled || knowledgeScopeSavingRef.current) return;
+          const serverScope = conversation.knowledge_scope ?? null;
+          if (activeThreadId) {
+            knowledgeScopesRef.current.set(activeThreadId, serverScope);
+            knowledgePreviewsRef.current.set(activeThreadId, null);
+          }
+          setKnowledgeScope(serverScope);
+          setKnowledgePreview(null);
+        })
+        .catch((error) => {
+          log.warn("[HomeContent] Failed to resync knowledge scope:", error);
+        });
+    };
+    document.addEventListener("visibilitychange", resyncKnowledgeScope);
+    return () => {
+      cancelled = true;
+      document.removeEventListener("visibilitychange", resyncKnowledgeScope);
+    };
+  }, [activeConversationId, activeThreadId]);
+
   useEffect(() => {
     const numericConversationId = Number(activeConversationId);
     setRuntimeMetadata({});
@@ -501,6 +545,7 @@ const HomeContent: FC<{
     ) => {
       const numericConversationId = Number(activeConversationId);
       let nextPreview = preview ?? null;
+      knowledgeScopeSavingRef.current = true;
       try {
         if (
           Number.isInteger(numericConversationId) &&
@@ -523,6 +568,8 @@ const HomeContent: FC<{
         log.error("[HomeContent] Failed to update knowledge scope:", error);
         message.error(t("chat.knowledgeScope.saveFailed"));
         throw error;
+      } finally {
+        knowledgeScopeSavingRef.current = false;
       }
     },
     [activeConversationId, activeThreadId, showKnowledgeScopeWarnings, t]
