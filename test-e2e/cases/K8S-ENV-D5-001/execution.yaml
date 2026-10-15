@@ -1,0 +1,17 @@
+schema_version: '1.0'
+case_id: K8S-ENV-D5-001
+implementations:
+  - framework: pytest
+    file: test.py
+    selector: K8S-ENV-D5-001
+acceptance_bindings:
+  AC-001: [test_k8s_env_files_runtime]
+  AC-002: [test_k8s_env_files_runtime]
+  AC-003: [test_k8s_env_files_runtime]
+  AC-004: [test_k8s_env_files_runtime]
+preparation:
+  families: []
+  anchors: false
+  special_assets: false
+  d4_groups: []
+notes: Requires explicit D5 mutation/isolation gates, NEXENT_D5_K8S_CONTEXT and NEXENT_D5_K8S_PROBE_IMAGE. Missing prerequisites raise a dependency blocker before any cluster command; never use the implicit current context.

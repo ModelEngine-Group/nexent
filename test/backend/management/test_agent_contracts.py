@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """Shared Agent values retain their existing fields and frozen behavior."""
 
 from dataclasses import FrozenInstanceError, asdict

@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """D5 bounded performance and concurrency checks with configurable thresholds."""
 
 from __future__ import annotations
@@ -11,7 +13,9 @@ import pytest
 from d3.assets import temporary_conversation, get_test_asset
 from d5.assets import Stopwatch, asset_path, threshold_ms
 from shared.cases import special_case_params
-from shared.config import controlled_asset_url
+import httpx
+
+from shared.ext_knowledge import runner_url as ext_runner_url
 from shared.http import MODEL_TIMEOUT, assert_status, client
 from shared.sse import assert_terminal_event, read_sse
 from shared.factories.files import register_uploaded_files
@@ -186,15 +190,14 @@ async def _mcp_listing(identity) -> None:
 
 
 async def _markdown_page() -> None:
-    url = controlled_asset_url(str(get_test_asset("performance", "large_markdown_page_path")))
+    # Runner-side measurement: the fetch happens in the test process, so the
+    # runner address is the correct side. The seeded large asset (32 KiB of
+    # deterministic content) keeps the original content scale; size and
+    # latency are the contract here, not markdown semantics.
+    url = f"{ext_runner_url()}/assets/large.txt"
     with Stopwatch() as timer:
-        async with client("runtime", timeout=MODEL_TIMEOUT) as api:
-            response = await api.get(url) if url.startswith("/") else None
-    if response is None:
-        import httpx
-        with Stopwatch() as timer:
-            async with httpx.AsyncClient(timeout=MODEL_TIMEOUT) as web:
-                response = await web.get(url)
+        async with httpx.AsyncClient(timeout=MODEL_TIMEOUT) as web:
+            response = await web.get(url)
     assert_status(response, 200)
     assert timer.elapsed_ms <= threshold_ms("large_markdown_page_ms", 10_000)
     assert len(response.content) > 1000

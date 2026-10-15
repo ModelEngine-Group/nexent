@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """Knowledge-base list result normalization and composition."""
 
 from typing import Any, Dict, List, Optional

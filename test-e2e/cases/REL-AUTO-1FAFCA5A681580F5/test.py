@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """D5 special-case reliability test.
 
 Case ID: REL-AUTO-1FAFCA5A681580F5

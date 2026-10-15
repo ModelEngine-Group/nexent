@@ -1,4 +1,6 @@
 # -*- coding: utf-8 -*-
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """
 Shared utilities for building and running nexent agents in benchmarks.
 

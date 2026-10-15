@@ -52,8 +52,11 @@ spec:
             - configMapRef:
                 name: nexent-config
             - secretRef:
+                name: nexent-env
+            - secretRef:
                 name: nexent-secrets
           env:
+{{ include "nexent.backendPlatformEnv" . | indent 12 }}
             - name: NEXENT_SQL_STARTUP_MODE
               value: "off"
             - name: DEPLOYMENT_VERSION

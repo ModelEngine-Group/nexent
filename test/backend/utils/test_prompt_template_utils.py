@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import pytest
 from jinja2 import Environment, meta
 from nexent.core.prompts import load_prompt

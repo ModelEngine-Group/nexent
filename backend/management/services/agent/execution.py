@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """Agent execution, message persistence and process-local task ownership."""
 
 import asyncio

@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """Exercise the active factories instead of an unused adapter registry."""
 
 import json

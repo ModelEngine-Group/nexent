@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """Agent image rules delegate object I/O to the attachment data layer."""
 
 import io

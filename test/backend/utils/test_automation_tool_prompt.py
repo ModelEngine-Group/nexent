@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 from management.services.agent.prompt import (
     should_enable_automation_tool_policy,
 )

@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """Unit tests for ``services.evaluator_service``.
 
 The module is loaded with ``spec_from_file_location`` while the

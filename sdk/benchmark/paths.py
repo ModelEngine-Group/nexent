@@ -1,4 +1,6 @@
 # -*- coding: utf-8 -*-
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """Robust path resolution for benchmark scripts.
 
 Finds the project root by searching upward for a .git entry (directory

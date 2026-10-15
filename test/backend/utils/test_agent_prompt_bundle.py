@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """D1 contracts for Management-owned Agent prompt templates."""
 
 from pathlib import Path

@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """Unit tests for the ``agent_evaluation_service`` pure-logic helpers.
 
 Targets

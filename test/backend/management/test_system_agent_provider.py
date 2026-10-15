@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """Unit tests for the protected intelligent-workbench system Agent."""
 
 from dataclasses import FrozenInstanceError

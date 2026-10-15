@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import backend.management.services.agent.artifacts as agent_artifacts_backend
 """Unit tests for agent stream skill-file helpers."""
 

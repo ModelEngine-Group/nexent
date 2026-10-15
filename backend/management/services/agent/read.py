@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """Shared Agent read projections and availability rules."""
 
 from typing import Dict, Optional

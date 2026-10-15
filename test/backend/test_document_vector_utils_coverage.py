@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """
 Supplementary test module for document_vector_utils to improve code coverage
 

@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """Agent request preparation and streaming execution orchestration."""
 
 import asyncio

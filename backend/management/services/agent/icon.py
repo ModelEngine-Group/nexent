@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """Image rules and storage orchestration for agent and repository icons."""
 
 ICON_MAX_BYTES = 2 * 1024 * 1024

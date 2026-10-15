@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """
 Background scheduler that periodically checks knowledge bases with
 auto-summary enabled and regenerates summaries as needed.

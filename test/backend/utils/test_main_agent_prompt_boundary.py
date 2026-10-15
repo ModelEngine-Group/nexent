@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """Static boundary checks for the main-Agent production prompt path."""
 
 from pathlib import Path

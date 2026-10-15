@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """Unit tests for agent_evaluation_service focusing on the new
 delete-only-creator behavior and the failed-cases-only Excel report."""
 

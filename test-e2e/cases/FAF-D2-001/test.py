@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """FAF-D2-001 real stream-generator contract with SDK events."""
 import asyncio
 import json

@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """Resolve Workbench declarations into immutable, request-scoped runtime overlays."""
 
 from __future__ import annotations

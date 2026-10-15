@@ -1,3 +1,5 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 "use client";
 
 import { Filter } from "lucide-react";
@@ -58,9 +60,9 @@ export default function AgentListTable({
         return (
           <button
             type="button"
+            onClick={() => onOpen(agent)}
             className="block max-w-full truncate text-left text-[#191919] hover:text-[#0067d1]"
             title={title}
-            onClick={() => onOpen(agent)}
           >
             {title}
           </button>

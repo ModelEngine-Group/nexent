@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """Skill visibility, editing and access-change policy."""
 
 from typing import Any, Dict, Optional

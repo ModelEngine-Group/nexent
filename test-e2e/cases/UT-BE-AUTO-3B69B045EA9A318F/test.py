@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """D1 unit test for system-prompt header identity (UT-BE-AUTO-3B69B045EA9A318F)."""
 
 import inspect

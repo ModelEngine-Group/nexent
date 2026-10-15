@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """D2 Agent icon contract at the real service/storage boundary."""
 import io
 from urllib.parse import parse_qs, urlsplit

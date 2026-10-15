@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """UT-BE-FPS-016: auxiliary model entry points delegate prompt assembly to SDK."""
 
 import ast

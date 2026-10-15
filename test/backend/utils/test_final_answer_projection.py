@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """Unit regressions for final-answer ownership and persisted step cleanup."""
 
 from copy import deepcopy

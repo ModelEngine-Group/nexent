@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """Agent listing, deletion, relationships and sandbox policy."""
 
 import logging

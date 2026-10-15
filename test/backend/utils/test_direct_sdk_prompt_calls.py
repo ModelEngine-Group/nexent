@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """D1 checks that Backend resolves SDK resources without type aliases."""
 
 import ast

@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import sys
 from types import ModuleType, SimpleNamespace
 from unittest.mock import MagicMock

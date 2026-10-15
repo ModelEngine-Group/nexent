@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """Skill archive entries, safe paths, text previews and local storage."""
 
 import io

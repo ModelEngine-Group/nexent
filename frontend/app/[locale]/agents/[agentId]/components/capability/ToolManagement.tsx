@@ -1,3 +1,5 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 "use client";
 
 import { useState, useCallback, useMemo, type ReactNode } from "react";
@@ -217,6 +219,7 @@ export default function ToolManagement({
                 key={tool.id}
                 data-testid={`agent-selected-tool-${tool.id}`}
                 name={tool.name}
+                className="shadow-none"
                 icon={
                   <span
                     aria-hidden="true"

@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """Formal D2 SSE contract for model-attempt streams."""
 
 import asyncio

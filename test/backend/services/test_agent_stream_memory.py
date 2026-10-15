@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """Acceptance-driven tests for Agent stream memory helpers."""
 
 from management.services.agent.stream import finalize_buffered_unit_fragments as _finalize_buffered_unit_fragments

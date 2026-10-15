@@ -8,3 +8,7 @@ timeout_seconds: 300
 acceptance_bindings:
   AC-01:
   - NAV-MENU-D4-001
+  AC-02:
+  - NAV-MENU-D4-001
+  AC-03:
+  - NAV-MENU-D4-001

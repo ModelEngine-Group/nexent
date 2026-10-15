@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """Pure Skill parameter storage normalization."""
 
 from __future__ import annotations

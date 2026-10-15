@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 from management.services.agent.policy import (
     portable_tool_params,
     validate_import_tool_params,
