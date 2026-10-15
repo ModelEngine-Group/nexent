@@ -5,6 +5,7 @@ import {
   PanelLeftIcon,
   PlusIcon,
   SearchIcon,
+  SquarePenIcon,
   XIcon,
 } from "lucide-react";
 import { useState } from "react";
@@ -139,7 +140,7 @@ export function ThreadListSidebar({
               className={cn(props.className, "!h-full !w-full min-w-0")}
               style={{ backgroundColor: sidebarBackground, ...props.style }}
             >
-              <SidebarHeader>
+              <SidebarHeader className="pb-0">
                 <div className="flex flex-col gap-2 px-1">
                   {newChatDesign ? (
                     <div className="flex items-center gap-1">
@@ -195,9 +196,26 @@ export function ThreadListSidebar({
                       <SidebarTrigger className="size-8 shrink-0" />
                     </div>
                   )}
+                  {newChatDesign && onNewConversation && (
+                    // Prominent pill per the design reference: white fill on
+                    // the gray rail, compose glyph, centered label. Starts a
+                    // blank conversation via the page's new-thread handler.
+                    <button
+                      type="button"
+                      className="flex h-9 w-full cursor-pointer items-center justify-center gap-2 truncate rounded-lg bg-white text-[14px] font-medium text-[#191919] transition-colors hover:bg-[#e8e8e8]"
+                      onClick={onNewConversation}
+                    >
+                      <SquarePenIcon className="size-4 shrink-0 text-primary" />
+                      {t("chat.sidebar.newConversation")}
+                    </button>
+                  )}
                   {newChatDesign && searchOpen && (
+                    // Toggled search field mirrors the pill's box (h-9,
+                    // rounded-lg) and sits below it so the header reads as
+                    // one evenly spaced stack.
                     <StandardInput
                       autoFocus
+                      className="!h-9 !rounded-lg"
                       value={conversationSearch}
                       onChange={(event) =>
                         setConversationSearch(event.target.value)

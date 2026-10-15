@@ -1,3 +1,5 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 "use client";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
@@ -479,7 +481,7 @@ export const ThreadList: FC<ThreadListProps> = ({
 const ThreadListEmpty: FC = () => {
   const { t } = useTranslation();
   return (
-    <div className="space-y-1 px-2 py-4">
+    <div className="space-y-1 px-2 pb-4">
       <p className="px-2 text-sm font-medium text-muted-foreground">
         {t("chat.threadList.recentConversations")}
       </p>
@@ -634,7 +636,7 @@ const ThreadListItems: FC<ThreadListItemsProps> = ({
   // every conversation. Expanding a group reveals all of its conversations.
   return (
     <div className="flex flex-col">
-      <div className="px-3 pb-1 pt-2 text-[14px] text-[#808080]">
+      <div className="px-3 pb-1 text-[14px] text-[#808080]">
         {t("chat.threadList.recentConversations")}
       </div>
       {agentGroups.map((group) => {
