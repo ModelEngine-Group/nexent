@@ -94,8 +94,7 @@ _ACTION_PREAMBLE_RE = re.compile(
     r"[ \t]*(?:[Cc]ode|代码)[ \t]*[:：])\s*(?P<action><code>[\s\S]*|```<run>[\s\S]*)\Z",
 )
 _CODE_LABEL_RE = re.compile(r"(?m)^[ \t]*(?:Code|代码)[ \t]*[:：]", re.IGNORECASE)
-
-_FINAL_ENVELOPE_RE = re.compile(r"\A<final_answer>(?P<body>[\s\S]*)</final_answer>\Z")
+_FINAL_ENVELOPE_RE = re.compile(r"\A<FINAL_ANSWER>(?P<body>[\s\S]*)</FINAL_ANSWER>\Z", re.IGNORECASE)
 _TAG_RE = re.compile(r"</?[A-Za-z][^<>]{0,255}>")
 _MODEL_CONTROL_TOKEN_RE = re.compile(r"<\|[^<>]{1,255}\|>")
 _CODE_MARKER_RE = re.compile(r"</?code>")
@@ -373,11 +372,7 @@ def _classify_final_envelope(
     logger: Any,
 ) -> ExplicitFinalAnswer:
     envelope_match = _FINAL_ENVELOPE_RE.fullmatch(text)
-    if (
-        envelope_match
-        and text.count("<final_answer>") == 1
-        and text.count("</final_answer>") == 1
-    ):
+    if envelope_match and text.lower().count("<final_answer>") == 1 and text.lower().count("</final_answer>") == 1:
         answer = envelope_match.group("body")
         if has_meaningful_visible_content(answer):
             return ExplicitFinalAnswer(answer=answer)
@@ -409,11 +404,10 @@ def classify_model_output(
     if protocol == "final_envelope":
         return _classify_final_envelope(text, protocol=protocol, logger=logger)
     if "<code>" not in text and (
-        text.startswith("<final_answer>")
-        or "<final_answer>" in text
-        or "</final_answer>" in text
+        "<final_answer>" in text.lower()
+        or "</final_answer>" in text.lower()
     ):
-        final_start = text.find("<final_answer>")
+        final_start = text.lower().find("<final_answer>")
         if final_start >= 0:
             _validate_reasoning_prefix(text[:final_start], protocol=protocol, logger=logger)
             text = text[final_start:]

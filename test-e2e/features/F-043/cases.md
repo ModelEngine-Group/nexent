@@ -4,3 +4,4 @@
 
 - D3 [API-057](../../cases/API-057/case.yaml) · active
 - D3 [API-058](../../cases/API-058/case.yaml) · active
+- D4 [PW-AGENT-COPY-01](../../cases/PW-AGENT-COPY-01/case.yaml) · active

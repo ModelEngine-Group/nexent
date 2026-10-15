@@ -26,6 +26,7 @@ import { a2aClientService } from "@/services/a2aService";
 import {
   deleteAgent,
   exportAgent,
+  generateUniqueCopyName,
   searchAgentInfo,
   updateAgentInfo,
   updateToolConfig,
@@ -34,11 +35,13 @@ import { useAgentStore } from "@/stores/agentStore";
 
 export default function AgentConfigActions({
   agentId: agentIdProp,
+  agentName: agentNameProp,
   readOnly,
   variant = "buttons",
   onManageVersions,
 }: {
   agentId?: number | null;
+  agentName?: string;
   readOnly?: boolean;
   variant?: "buttons" | "menu" | "table";
   onManageVersions?: (agentId: number) => void;
@@ -56,7 +59,8 @@ export default function AgentConfigActions({
   const storeIsReadOnly = useAgentStore((state) => state.isReadOnly);
   const isReadOnly = readOnly ?? storeIsReadOnly;
   const reset = useAgentStore((state) => state.reset);
-  const agentName = editedAgent?.display_name || editedAgent?.name || "agent";
+  const agentName =
+    agentNameProp || editedAgent?.display_name || editedAgent?.name || "agent";
   const { agentInfo } = useAgentInfo(variant === "buttons" ? agentId : null);
   const [isRelationshipVisible, setIsRelationshipVisible] = useState(false);
   const [isA2ASettingsVisible, setIsA2ASettingsVisible] = useState(false);
@@ -143,12 +147,19 @@ export default function AgentConfigActions({
         return legacySingleId ? [legacySingleId] : undefined;
       })();
 
+      const baseCopyName = `${detail.name || "agent"}_copy`;
+      const baseCopyDisplayName = `${
+        detail.display_name || t("agentConfig.agents.defaultDisplayName")
+      }${t("agent.copySuffix")}`;
+      const copyNames = await generateUniqueCopyName(
+        baseCopyName,
+        baseCopyDisplayName
+      );
+
       const createResult = await updateAgentMutation.mutateAsync({
         agent_id: undefined,
-        name: `${detail.name || "agent"}_copy`,
-        display_name: `${
-          detail.display_name || t("agentConfig.agents.defaultDisplayName")
-        }${t("agent.copySuffix")}`,
+        name: copyNames.name,
+        display_name: copyNames.display_name,
         description: detail.description,
         author: detail.author,
         model_ids: modelIdsForCopy,

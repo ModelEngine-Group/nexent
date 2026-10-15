@@ -1,0 +1,25 @@
+schema_version: '1.0'
+change:
+  change_id: TFP-CHANGE-002
+  change_type: requirement
+  requirement_id: TFP-001
+  title: Add official AIDP search to the default local fast path
+  description: Register exact AidpSearchTool in the SDK and deployment defaults without changing knowledge permissions, provider
+    transport or event behavior.
+  affected_features:
+    existing:
+    - TFP-001
+    added: []
+    modified:
+    - TFP-001
+    retired: []
+  affected_cases:
+    existing: &id001
+    - TFP-D1-001
+    - TFP-D1-002
+    - TFP-D1-004
+    - TFP-D1-005
+    - TFP-D1-006
+    added: []
+    modified: *id001
+    retired: []

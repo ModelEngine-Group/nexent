@@ -61,6 +61,7 @@ def is_stream_unit_continuation(
         and current_unit.get("type") == chunk_type
         and current_unit.get("_attempt_id") == data.get("attempt_id")
         and current_unit.get("invocation_id") == data.get("invocation_id")
+        and current_unit.get("_step_id") == data.get("step_id")
     )
 
 

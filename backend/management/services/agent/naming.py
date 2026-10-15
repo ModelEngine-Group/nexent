@@ -6,7 +6,7 @@ from typing import Optional
 
 from consts.const import LANGUAGE
 from database.agent_db import query_all_agent_info_by_tenant_id
-from utils.llm_utils import call_llm_for_system_prompt
+from management.services.model.invocation import call_llm_for_system_prompt
 from nexent.core.agents.prompt.meta import (
     compose_name_regeneration, load_generation_template,
     render_name_template as _render_prompt_template,

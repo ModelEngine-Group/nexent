@@ -5,6 +5,7 @@ from types import SimpleNamespace
 from unittest.mock import Mock
 
 import pytest
+
 from nexent.core.agents import sandbox
 from nexent.core.agents.nexent_agent import NexentAgent
 from nexent.core.concurrency.cancellation import RunCancellationScope, RunTerminated
@@ -19,6 +20,7 @@ def owner():
     value.agent = None
     value._sandbox_executors = []
     value._sandbox_skill_runners = []
+    value._tool_fastpath_executors = []
     value._sandbox_skill_cleanup_owner = value
     value.sandbox_config = None
     value.workspace_path = "shared-workspace"

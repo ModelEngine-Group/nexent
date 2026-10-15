@@ -66,9 +66,11 @@ def test_valid_third_action_is_not_replayed(monkeypatch, legacy):
     outputs = list(agent._run_stream('task', max_steps=2))
     assert outputs[-1].output == 'Checked.'
     agent.python_executor.assert_called_once_with(CODE)
-    agent.observer.commit_model_attempt.assert_called_once_with('attempt-2', 1)
+    assert agent.observer.commit_model_attempt.call_args_list == [
+        call('attempt-2', 1), call('attempt-3', 1),
+    ]
     assert agent.observer.rollback_model_attempt.call_args_list == [
-        call('attempt-0', 1), call('attempt-1', 1), call('attempt-3', 1),
+        call('attempt-0', 1), call('attempt-1', 1),
     ]
     assert agent.model.call_count == 4
     assert len(agent.memory.steps) == 2
