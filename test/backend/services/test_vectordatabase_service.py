@@ -365,7 +365,7 @@ _knowledge_reference_service_module.acquire_lock_keys = _noop_resource_lock
 # The delete flow strips draft bindings through a real database session; these
 # mocked tests do not own a database, so stub the cleanup out. Its behavior is
 # covered by the dedicated integration checks.
-_knowledge_reference_service_module.remove_draft_knowledge_references = (
+_knowledge_reference_service_module.remove_knowledge_references = (
     lambda *args, **kwargs: {"tool_instances": 0, "skill_instances": 0}
 )
 

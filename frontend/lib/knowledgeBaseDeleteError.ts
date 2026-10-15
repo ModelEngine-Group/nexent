@@ -1,7 +1,6 @@
 // Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
 import { ErrorCode } from "@/const/errorCode";
-import type { KnowledgeReferenceConflictDetails } from "@/types/knowledgeResource";
 
 type Translate = (key: string, options?: Record<string, unknown>) => string;
 
@@ -36,10 +35,6 @@ export function formatKnowledgeBaseDeleteError(
       : t("knowledgeBase.message.deleteBlocked");
   }
 
-  if (isErrorCode(error, ErrorCode.KNOWLEDGE_REFERENCED_BY_AGENT)) {
-    return t("knowledgeBase.message.deleteBlockedByAgents");
-  }
-
   if (isErrorCode(error, ErrorCode.KNOWLEDGE_RESOURCE_BUSY)) {
     return t("knowledgeBase.message.deleteBusy");
   }
@@ -48,28 +43,6 @@ export function formatKnowledgeBaseDeleteError(
     return error.message;
   }
   return t(fallbackKey);
-}
-
-/** Return whether the error is the agent-reference deletion conflict. */
-export function isKnowledgeReferenceConflict(error: unknown): boolean {
-  return isErrorCode(error, ErrorCode.KNOWLEDGE_REFERENCED_BY_AGENT);
-}
-
-/** Extract the typed reference details from a deletion conflict error. */
-export function getKnowledgeReferenceDetails(
-  error: unknown
-): KnowledgeReferenceConflictDetails | null {
-  const details = getDetails(error);
-  if (!details || !Array.isArray(details.visible_agents)) {
-    return null;
-  }
-  return {
-    reason: "agent_references",
-    visible_agents:
-      details.visible_agents as KnowledgeReferenceConflictDetails["visible_agents"],
-    hidden_agent_count: Number(details.hidden_agent_count ?? 0),
-    total_agent_count: Number(details.total_agent_count ?? 0),
-  };
 }
 
 function isErrorCode(error: unknown, expectedCode: string): boolean {

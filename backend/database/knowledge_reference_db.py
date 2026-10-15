@@ -18,9 +18,10 @@ import json
 import logging
 import time
 from contextlib import contextmanager
+from copy import deepcopy
 from typing import Any, Dict, Iterable, Iterator, List, Optional, Sequence, Set, Tuple
 
-from sqlalchemy import text
+from sqlalchemy import String, cast, or_, text
 from sqlalchemy.orm import Session
 
 from consts.error_code import ErrorCode
@@ -29,6 +30,7 @@ from database.client import as_dict, get_db_session
 from database.db_models import (
     AgentInfo,
     AgentVersion,
+    ConversationRecord,
     KnowledgeRecord,
     SkillInfo,
     SkillInstance,
@@ -38,6 +40,7 @@ from database.db_models import (
 )
 from utils.knowledge_reference import (
     KNOWLEDGE_RANGE_PARAM_BY_TOOL_NAME,
+    PROVIDER_AIDP,
     REFERENCE_ORIGIN_SKILL,
     REFERENCE_ORIGIN_TOOL,
     KnowledgeResourceRef,
@@ -238,17 +241,45 @@ def query_live_agent_reference_rows(
     return live_rows
 
 
-def strip_deleted_resource_from_draft_bindings(
+def _strip_scope_ids(scope: Any, provider: str, target_ids: Set[str]) -> Tuple[Any, bool]:
+    """Remove target ids from a conversation scope payload; report whether it changed.
+
+    An override scope that loses its last item falls back to ``inherit``: the
+    persisted model rejects an override with an empty list, and "inherit" is
+    the honest meaning of "no conversation-scoped selection anymore".
+    """
+    if not isinstance(scope, dict):
+        return scope, False
+    branch_name = "aidp" if provider == PROVIDER_AIDP else "local"
+    list_key = "kds_ids" if provider == PROVIDER_AIDP else "knowledge_ids"
+    branch = scope.get(branch_name)
+    if not isinstance(branch, dict):
+        return scope, False
+    values = branch.get(list_key)
+    if not isinstance(values, list):
+        return scope, False
+    kept = [item for item in values if str(item) not in target_ids]
+    if len(kept) == len(values):
+        return scope, False
+    updated = deepcopy(scope)
+    updated[branch_name][list_key] = kept
+    if not kept and updated[branch_name].get("mode") == "override":
+        updated[branch_name]["mode"] = "inherit"
+    return updated, True
+
+
+def strip_deleted_resource_from_bindings(
     session: Session, ref: KnowledgeResourceRef
 ) -> Dict[str, int]:
-    """Remove a deleted resource from the draft bindings that still list it.
+    """Remove a deleted resource from every binding that still lists it.
 
-    Drafts (``version_no == 0``) are working copies: they do not block the
-    deletion anymore, so once the resource is gone this keeps every draft free
-    of a reference to something that no longer exists. Skill *template* configs
-    are shared with published versions and are deliberately left untouched.
+    The deletion cascades: agent tool instances (draft and published versions),
+    skill instances, and conversation scopes all stop referencing the resource
+    once it is gone. Skill *template* configs stay untouched on purpose — they
+    are shared configuration, and their knowledge references are cleaned where
+    an instance actually carries them.
     """
-    counts = {"tool_instances": 0, "skill_instances": 0}
+    counts = {"tool_instances": 0, "skill_instances": 0, "conversations": 0}
     tool_ids = _knowledge_tool_ids(session, ref.range_param)
     if tool_ids:
         instances = (
@@ -261,8 +292,6 @@ def strip_deleted_resource_from_draft_bindings(
         )
         for instance in instances:
             data = as_dict(instance) or {}
-            if int(data.get("version_no") or 0) != 0:
-                continue
             params = data.get("params") or {}
             if not isinstance(params, dict):
                 continue
@@ -296,8 +325,6 @@ def strip_deleted_resource_from_draft_bindings(
         .all()
     ):
         data = as_dict(instance) or {}
-        if int(data.get("version_no") or 0) != 0:
-            continue
         config_values = data.get("config_values") or {}
         if not isinstance(config_values, dict):
             continue
@@ -313,9 +340,72 @@ def strip_deleted_resource_from_draft_bindings(
         instance.config_values = updated
         counts["skill_instances"] += 1
 
-    if counts["tool_instances"] or counts["skill_instances"]:
+    counts["conversations"] = _strip_deleted_resource_from_conversation_scopes(
+        session, ref
+    )
+
+    if any(counts.values()):
         session.commit()
     return counts
+
+
+def _strip_deleted_resource_from_conversation_scopes(
+    session: Session, ref: KnowledgeResourceRef
+) -> int:
+    """Strip one deleted resource from conversation knowledge scopes.
+
+    Local conversation scopes persist the numeric ``knowledge_id`` while AIDP
+    scopes persist the ``kds_id``; both spellings of the target are removed.
+    The scope lives on the conversation row twice — as the projected
+    ``knowledge_scope`` and inside ``workbench_config`` — and both copies are
+    updated so the next workbench save cannot resurrect the stale reference.
+    """
+    target_ids = {str(ref.resource_id)}
+    if ref.provider != PROVIDER_AIDP:
+        record = (
+            session.query(KnowledgeRecord)
+            .filter(KnowledgeRecord.index_name == ref.resource_id)
+            .first()
+        )
+        knowledge_id = getattr(record, "knowledge_id", None) if record else None
+        if knowledge_id is not None:
+            target_ids.add(str(knowledge_id))
+
+    patterns = [f"%{item}%" for item in target_ids]
+    filters = []
+    for pattern in patterns:
+        filters.append(cast(ConversationRecord.knowledge_scope, String).like(pattern))
+        filters.append(cast(ConversationRecord.workbench_config, String).like(pattern))
+    rows = (
+        session.query(ConversationRecord)
+        .filter(
+            ConversationRecord.delete_flag == "N",
+            or_(*filters),
+        )
+        .all()
+    )
+
+    changed = 0
+    for record in rows:
+        row_changed = False
+        scope, scope_changed = _strip_scope_ids(
+            deepcopy(record.knowledge_scope), ref.provider, target_ids
+        )
+        if scope_changed:
+            record.knowledge_scope = scope
+            row_changed = True
+        workbench = deepcopy(record.workbench_config)
+        if isinstance(workbench, dict):
+            inner_scope, inner_changed = _strip_scope_ids(
+                workbench.get("knowledge_scope"), ref.provider, target_ids
+            )
+            if inner_changed:
+                workbench["knowledge_scope"] = inner_scope
+                record.workbench_config = workbench
+                row_changed = True
+        if row_changed:
+            changed += 1
+    return changed
 
 
 def query_agent_reference_metadata(
@@ -340,28 +430,6 @@ def query_agent_reference_metadata(
         data = as_dict(row) or {}
         metadata[int(data["agent_id"])] = data
     return metadata
-
-
-def query_agent_version_names(
-    session: Session,
-    keys: Iterable[Tuple[int, int]],
-) -> Dict[Tuple[int, int], Optional[str]]:
-    """Return version names for non-deleted version rows keyed by (agent_id, version_no)."""
-    pairs = sorted({(int(agent_id), int(version_no)) for agent_id, version_no in keys})
-    if not pairs:
-        return {}
-    agent_ids = {agent_id for agent_id, _ in pairs}
-    names: Dict[Tuple[int, int], Optional[str]] = {}
-    for agent_id, version_no, version_name in (
-        session.query(AgentVersion.agent_id, AgentVersion.version_no, AgentVersion.version_name)
-        .filter(
-            AgentVersion.agent_id.in_(tuple(agent_ids)),
-            AgentVersion.delete_flag != "Y",
-        )
-        .all()
-    ):
-        names[(int(agent_id), int(version_no))] = version_name
-    return {key: names.get(key) for key in pairs}
 
 
 def query_local_knowledge_records(

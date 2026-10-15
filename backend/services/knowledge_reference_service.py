@@ -2,19 +2,21 @@
 
 """Shared knowledge-resource guard: references, visibility, statuses, locks.
 
-Four behaviors live here so the HTTP layer, the deletion services, and the
-reference-writing services all share one implementation:
+Deletion cascades: bindings never block a delete. The pieces here let the HTTP
+layer, the deletion services, and the reference-writing services share one
+implementation:
 
-* ``assert_knowledge_base_deletable`` blocks deletion while any non-deleted
-  agent configuration references the resource, returning a permission-filtered
-  summary.
+* ``collect_agent_reference_preview`` lists the (permission-filtered) agents
+  bound to a resource, feeding the browser's second confirmation dialog.
 * ``knowledge_deletion_guard`` serializes deletion against reference writes.
+* ``remove_knowledge_references`` strips a deleted resource out of every
+  remaining binding (agent tool instances, skill instances, conversation
+  scopes) once the resource is gone.
 * ``resolve_item_statuses`` powers the batch status API behind the per-item
   warning markers.
 * ``require_available_knowledge_references`` validates newly added bindings.
 
-The service never writes business data and never returns names of agents the
-caller cannot view.
+The service never returns names of agents the caller cannot view.
 """
 
 from __future__ import annotations
@@ -27,7 +29,6 @@ from typing import Any, Dict, Iterable, List, Optional, Sequence, Set, Tuple
 from consts.const import (
     ASSET_OWNER_TENANT_ID,
     CAN_EDIT_ALL_USER_ROLES,
-    PERMISSION_EDIT,
     PERMISSION_PRIVATE,
 )
 from consts.error_code import ErrorCode
@@ -37,19 +38,17 @@ from database.group_db import query_group_ids_by_user
 from database.knowledge_reference_db import (
     acquire_lock_keys,
     query_agent_reference_metadata,
-    query_agent_version_names,
     query_deleted_aidp_kb_ids,
     query_deleted_local_knowledge_ids,
     query_live_agent_reference_rows,
     query_local_knowledge_records,
     query_local_knowledge_records_by_ids,
-    strip_deleted_resource_from_draft_bindings,
+    strip_deleted_resource_from_bindings,
 )
 from database.user_tenant_db import get_user_tenant_by_user_id
 from utils.knowledge_reference import (
     PROVIDER_AIDP,
     PROVIDER_LOCAL,
-    REFERENCE_ORIGIN_TOOL,
     KnowledgeResourceRef,
     dedupe_ids,
     resource_lock_key,
@@ -70,8 +69,6 @@ REASON_UNAVAILABLE_OR_INACCESSIBLE = "KNOWLEDGE_UNAVAILABLE_OR_INACCESSIBLE"
 REASON_UPSTREAM_TIMEOUT = "KNOWLEDGE_UPSTREAM_TIMEOUT"
 REASON_CONNECTION_FAILED = "KNOWLEDGE_CONNECTION_FAILED"
 REASON_INVALID_RESPONSE = "KNOWLEDGE_INVALID_RESPONSE"
-
-REASON_AGENT_REFERENCES = "agent_references"
 
 _LOOKUP_FAILED_REASON_CODES = frozenset({
     REASON_UNAVAILABLE_OR_INACCESSIBLE,
@@ -134,91 +131,57 @@ def is_agent_visible(context: VisibilityContext, agent: Dict[str, Any]) -> bool:
     return agent.get("ingroup_permission") != PERMISSION_PRIVATE
 
 
-def can_edit_agent_draft(context: VisibilityContext, agent: Dict[str, Any]) -> bool:
-    """Return whether the caller may edit this agent's draft."""
-    from services.asset_owner_visibility import resolve_agent_list_permission
-
-    label = resolve_agent_list_permission(
-        context.user_role, agent, context.user_id, context.can_edit_all
-    )
-    return label == PERMISSION_EDIT
-
-
-def collect_agent_reference_summary(
+def collect_agent_reference_preview(
     ref: KnowledgeResourceRef,
     *,
     user_id: str,
     tenant_id: Optional[str] = None,
 ) -> Dict[str, Any]:
-    """Return the permission-filtered reference summary for one resource.
+    """Return the permission-filtered agent list bound to one resource.
 
-    Only published versions (``version_no > 0``) are reported. Drafts are
-    working copies that no longer block deletion — the deletion cleans them up
-    instead — and the conflict dialog must stay consistent with version
-    management, which lists published versions only.
+    Deletion cascades, so this only feeds the second confirmation dialog: one
+    row per agent (draft and every published version collapse into the single
+    agent name), with hidden references reported as an aggregate count.
     """
     with get_db_session() as session:
         rows = query_live_agent_reference_rows(session, ref)
-        rows = [row for row in rows if int(row.get("version_no") or 0) > 0]
         if not rows:
             return {
-                "reason": REASON_AGENT_REFERENCES,
-                "visible_agents": [],
+                "agents": [],
                 "hidden_agent_count": 0,
                 "total_agent_count": 0,
             }
         metadata = query_agent_reference_metadata(
             session, [row["agent_id"] for row in rows]
         )
-        version_names = query_agent_version_names(
-            session,
-            [(row["agent_id"], row["version_no"]) for row in rows],
-        )
 
     context = build_visibility_context(user_id, tenant_id)
     aggregated: Dict[int, Dict[str, Any]] = {}
     for row in rows:
         agent_id = int(row["agent_id"])
-        version_no = int(row.get("version_no") or 0)
         agent = metadata.get(agent_id)
         if not agent:
             continue
-        entry = aggregated.setdefault(
-            agent_id,
-            {"agent": agent, "versions": {}},
-        )
-        key = (version_no, str(row.get("reference_origin") or REFERENCE_ORIGIN_TOOL))
-        entry["versions"][key] = {
-            "version_no": version_no,
-            "version_name": version_names.get((agent_id, version_no)),
-            "is_draft": version_no == 0,
-            "reference_origin": key[1],
-        }
+        aggregated.setdefault(agent_id, agent)
 
     visible_agents: List[Dict[str, Any]] = []
     hidden_agent_count = 0
-    for agent_id, entry in aggregated.items():
-        agent = entry["agent"]
+    for agent_id, agent in aggregated.items():
         if not is_agent_visible(context, agent):
             hidden_agent_count += 1
             continue
-        versions = sorted(
-            entry["versions"].values(),
-            key=lambda item: (item["version_no"], item["reference_origin"]),
-        )
         visible_agents.append(
             {
                 "agent_id": agent_id,
-                "display_name": agent.get("display_name") or agent.get("name") or str(agent_id),
-                "can_edit_draft": can_edit_agent_draft(context, agent),
-                "versions": versions,
+                "display_name": agent.get("display_name")
+                or agent.get("name")
+                or str(agent_id),
             }
         )
 
     visible_agents.sort(key=lambda item: (str(item["display_name"]), item["agent_id"]))
     return {
-        "reason": REASON_AGENT_REFERENCES,
-        "visible_agents": visible_agents,
+        "agents": visible_agents,
         "hidden_agent_count": hidden_agent_count,
         "total_agent_count": len(aggregated),
     }
@@ -247,53 +210,18 @@ def assert_agent_context_visible(
         )
 
 
-def assert_knowledge_base_deletable(    ref: KnowledgeResourceRef,
-    *,
-    user_id: str,
-    tenant_id: Optional[str] = None,
-) -> None:
-    """Raise a 409 conflict while a published agent version still references the resource.
+def remove_knowledge_references(ref: KnowledgeResourceRef) -> Dict[str, int]:
+    """Strip one deleted resource out of every binding that still lists it.
 
-    Drafts are excluded on purpose: they are working copies the user cannot
-    manage from version management, so the deletion strips them itself (see
-    :func:`remove_draft_knowledge_references`) instead of blocking on them.
-    """
-    try:
-        summary = collect_agent_reference_summary(ref, user_id=user_id, tenant_id=tenant_id)
-    except AppException:
-        raise
-    except Exception as exc:
-        logger.exception(
-            "Knowledge reference check failed for %s:%s", ref.provider, ref.resource_id
-        )
-        raise AppException(
-            ErrorCode.SYSTEM_DATABASE_ERROR,
-            details={
-                "operation": "knowledge_reference_check",
-                "provider": ref.provider,
-                "resource_id": ref.resource_id,
-            },
-        ) from exc
-    if summary["total_agent_count"] > 0:
-        raise AppException(
-            ErrorCode.KNOWLEDGE_REFERENCED_BY_AGENT,
-            "Knowledge base is referenced by agents",
-            details=summary,
-        )
-
-
-def remove_draft_knowledge_references(ref: KnowledgeResourceRef) -> Dict[str, int]:
-    """Strip one deleted resource out of every agent draft binding.
-
-    Called by the deletion flows after the resource is actually gone, so the
-    working copies (agent tool instances and skill instances with
-    ``version_no == 0``) never keep a reference to a deleted resource.
+    Deletion cascades, so this runs once the resource is actually gone: agent
+    tool instances (draft and published versions), skill instances, and
+    conversation knowledge scopes all stop referencing it.
     """
     with get_db_session() as session:
-        counts = strip_deleted_resource_from_draft_bindings(session, ref)
-    if counts.get("tool_instances") or counts.get("skill_instances"):
+        counts = strip_deleted_resource_from_bindings(session, ref)
+    if any(counts.values()):
         logger.info(
-            "Deleted resource cleaned from draft bindings %s:%s -> %s",
+            "Deleted resource cleaned from bindings %s:%s -> %s",
             ref.provider,
             ref.resource_id,
             counts,
@@ -325,14 +253,13 @@ def knowledge_deletion_guard(
     user_id: str,
     tenant_id: Optional[str] = None,
 ):
-    """Exclude reference writes while the reference check and deletion run.
+    """Exclude reference writes while the deletion cascades over the resource.
 
-    The lock is acquired before the shared reference query, so a binding that
-    committed first is always observed, and a binding arriving later cannot
-    succeed because the resource no longer passes existence validation.
+    A binding arriving after the deletion cannot succeed because the resource
+    no longer passes existence validation, and the lock closes the window
+    where one could commit between the cascade cleanup and the deletion.
     """
     with acquire_lock_keys(resource_lock_keys_for([ref])):
-        assert_knowledge_base_deletable(ref, user_id=user_id, tenant_id=tenant_id)
         yield
 
 

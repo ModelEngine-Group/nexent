@@ -39,13 +39,9 @@ import PersonalKnowledgeBaseCapacity from "./PersonalKnowledgeBaseCapacity";
 import { QuotaSettingsModal } from "./QuotaSettingsModal";
 import { SuQuotaModal } from "./SuQuotaModal";
 import { formatDateTime as formatDateTimeUtil } from "@/lib/date";
-import {
-  formatKnowledgeBaseDeleteError,
-  getKnowledgeReferenceDetails,
-  isKnowledgeReferenceConflict,
-} from "@/lib/knowledgeBaseDeleteError";
-import KnowledgeReferenceConflictModal from "@/components/knowledge-base/KnowledgeReferenceConflictModal";
-import type { KnowledgeReferenceConflictDetails } from "@/types/knowledgeResource";
+import { formatKnowledgeBaseDeleteError } from "@/lib/knowledgeBaseDeleteError";
+import KnowledgeReferenceDeleteNotice from "@/components/knowledge-base/KnowledgeReferenceDeleteNotice";
+import { previewKnowledgeReferences } from "@/services/knowledgeResourceService";
 
 // Color constants for progress bars
 const STROKE_COLORS = {
@@ -119,9 +115,6 @@ export default function KnowledgeList({
   const [summaryModalVisible, setSummaryModalVisible] = useState(false);
   const [summaryLoading, setSummaryLoading] = useState(false);
   const [summaryContent, setSummaryContent] = useState<string>("");
-  const [referenceConflictOpen, setReferenceConflictOpen] = useState(false);
-  const [referenceConflictDetails, setReferenceConflictDetails] =
-    useState<KnowledgeReferenceConflictDetails | null>(null);
 
   // Fetch quota usage
   const fetchQuotaUsage = useCallback(async () => {
@@ -203,11 +196,6 @@ export default function KnowledgeList({
       message.success(t("tenantResources.knowledgeBase.deleted"));
       handleRefetch();
     } catch (error: any) {
-      if (isKnowledgeReferenceConflict(error)) {
-        setReferenceConflictDetails(getKnowledgeReferenceDetails(error));
-        setReferenceConflictOpen(true);
-        return;
-      }
       message.error(
         formatKnowledgeBaseDeleteError(
           error,
@@ -569,15 +557,26 @@ export default function KnowledgeList({
                 danger
                 icon={<Trash2 className="h-4 w-4" />}
                 size="small"
-                onClick={() =>
+                onClick={async () => {
+                  // Deletion cascades: the dialog lists the agents that lose
+                  // their binding, plus a fixed notice for conversations.
+                  const preview = await previewKnowledgeReferences(
+                    "local",
+                    record.id
+                  );
                   confirm({
                     title: t("knowledgeBase.modal.deleteConfirm.title"),
-                    content: t("common.cannotBeUndone"),
+                    content: (
+                      <div>
+                        <div>{t("common.cannotBeUndone")}</div>
+                        <KnowledgeReferenceDeleteNotice preview={preview} />
+                      </div>
+                    ),
                     okText: t("common.confirm"),
                     cancelText: t("common.cancel"),
                     onOk: () => handleDelete(record.id),
-                  })
-                }
+                  });
+                }}
               />
             </Tooltip>
           </div>
@@ -766,11 +765,6 @@ export default function KnowledgeList({
           </Modal>
         </>
       )}
-      <KnowledgeReferenceConflictModal
-        open={referenceConflictOpen}
-        details={referenceConflictDetails}
-        onClose={() => setReferenceConflictOpen(false)}
-      />
     </div>
   );
 }

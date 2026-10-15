@@ -312,6 +312,7 @@ database_db_models_mock.KnowledgeStorageObject = MagicMock()
 for _reference_model_name in (
     'AgentInfo',
     'AgentVersion',
+    'ConversationRecord',
     'SkillInstance',
     'SkillToolRelation',
     'ToolInfo',

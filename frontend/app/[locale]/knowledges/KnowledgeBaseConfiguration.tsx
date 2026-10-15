@@ -29,11 +29,7 @@ import { ErrorCode } from "@/const/errorCode";
 import { getKnowledgeResourceLimitMessage } from "@/const/errorMessageI18n";
 import { useConfirmModal } from "@/hooks/useConfirmModal";
 import log from "@/lib/logger";
-import {
-  formatKnowledgeBaseDeleteError,
-  getKnowledgeReferenceDetails,
-  isKnowledgeReferenceConflict,
-} from "@/lib/knowledgeBaseDeleteError";
+import { formatKnowledgeBaseDeleteError } from "@/lib/knowledgeBaseDeleteError";
 import { createKnowledgeBaseFilterKey } from "@/lib/knowledgeBaseViewport";
 import knowledgeBaseService from "@/services/knowledgeBaseService";
 import knowledgeBasePollingService from "@/services/knowledgeBasePollingService";
@@ -49,8 +45,8 @@ import type { KBQuotaStatus, QuotaUsageResponse } from "@/types/quota";
 
 import KnowledgeBaseList from "./components/knowledge/KnowledgeBaseList";
 import DocumentList from "./components/document/DocumentList";
-import KnowledgeReferenceConflictModal from "@/components/knowledge-base/KnowledgeReferenceConflictModal";
-import type { KnowledgeReferenceConflictDetails } from "@/types/knowledgeResource";
+import KnowledgeReferenceDeleteNotice from "@/components/knowledge-base/KnowledgeReferenceDeleteNotice";
+import { previewKnowledgeReferences } from "@/services/knowledgeResourceService";
 import {
   useKnowledgeBaseContext,
   KnowledgeBaseProvider,
@@ -299,7 +295,16 @@ function DataConfig({ isActive }: DataConfigProps) {
   const [newKbEmbeddingModel, setNewKbEmbeddingModel] = useState<string>(""); // Selected embedding model for new KB
   // v2.6.0: per-KB embedding model params override
   const [newKbEmbeddingParamsOverride, setNewKbEmbeddingParamsOverride] =
-    useState<Record<string, { temperature?: number | null; top_p?: number | null; extra_params?: Record<string, unknown> | null }>>({});
+    useState<
+      Record<
+        string,
+        {
+          temperature?: number | null;
+          top_p?: number | null;
+          extra_params?: Record<string, unknown> | null;
+        }
+      >
+    >({});
   const [uploadFiles, setUploadFiles] = useState<File[]>([]);
   const [hasClickedUpload, setHasClickedUpload] = useState(false);
   const [showEmbeddingWarning, setShowEmbeddingWarning] = useState(false);
@@ -309,9 +314,6 @@ function DataConfig({ isActive }: DataConfigProps) {
   // Search and filter state
   const [searchQuery, setSearchQuery] = useState("");
   const [sourceFilter, setSourceFilter] = useState<string[]>([]);
-  const [referenceConflictOpen, setReferenceConflictOpen] = useState(false);
-  const [referenceConflictDetails, setReferenceConflictDetails] =
-    useState<KnowledgeReferenceConflictDetails | null>(null);
   const [modelFilter, setModelFilter] = useState<string[]>([]);
   const lastRequestedFilterKeyRef = useRef(
     createKnowledgeBaseFilterKey(searchQuery, sourceFilter, modelFilter)
@@ -619,7 +621,7 @@ function DataConfig({ isActive }: DataConfigProps) {
   };
 
   // Handle knowledge base deletion
-  const handleDelete = (id: string) => {
+  const handleDelete = async (id: string) => {
     // Find the knowledge base to check its source
     const kb = kbState.knowledgeBases.find((kb) => kb.id === id);
 
@@ -634,10 +636,19 @@ function DataConfig({ isActive }: DataConfigProps) {
       return;
     }
 
+    // Deletion cascades: the dialog lists the agents that lose their binding,
+    // plus a fixed notice for conversations.
+    const preview = await previewKnowledgeReferences("local", id);
+
     // Normal delete confirmation for local knowledge bases
     confirm({
       title: t("knowledgeBase.modal.deleteConfirm.title"),
-      content: t("knowledgeBase.modal.deleteConfirm.content"),
+      content: (
+        <div>
+          <div>{t("knowledgeBase.modal.deleteConfirm.content")}</div>
+          <KnowledgeReferenceDeleteNotice preview={preview} />
+        </div>
+      ),
       okText: t("common.confirm"),
       cancelText: t("common.cancel"),
       danger: true,
@@ -654,11 +665,6 @@ function DataConfig({ isActive }: DataConfigProps) {
             message.success(t("knowledgeBase.message.deleteSuccess"));
           }, 1000);
         } catch (error) {
-          if (isKnowledgeReferenceConflict(error)) {
-            setReferenceConflictDetails(getKnowledgeReferenceDetails(error));
-            setReferenceConflictOpen(true);
-            return;
-          }
           message.error(
             formatKnowledgeBaseDeleteError(
               error,
@@ -1472,11 +1478,6 @@ function DataConfig({ isActive }: DataConfigProps) {
           </div>
         </div>
       </Modal>
-      <KnowledgeReferenceConflictModal
-        open={referenceConflictOpen}
-        details={referenceConflictDetails}
-        onClose={() => setReferenceConflictOpen(false)}
-      />
     </>
   );
 }

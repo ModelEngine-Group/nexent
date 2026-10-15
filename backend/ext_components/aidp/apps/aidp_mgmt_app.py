@@ -67,7 +67,7 @@ from ext_components.aidp.services.aidp_service import (
 )
 from services.knowledge_reference_service import (
     knowledge_deletion_guard,
-    remove_draft_knowledge_references,
+    remove_knowledge_references,
 )
 from utils import auth_utils as auth_utils_module
 from utils.knowledge_reference import PROVIDER_AIDP, KnowledgeResourceRef
@@ -739,7 +739,7 @@ async def delete_knowledge_base(
             invalidate_aidp_kb_detail_cache(server_url, api_key, kds_id)
             invalidate_aidp_doc_count_cache(server_url, api_key, kds_id)
             _cleanup_document_assignments_for_deleted_knowledge_base(tenant_id, kds_id, user_id)
-            remove_draft_knowledge_references(ref)
+            remove_knowledge_references(ref)
     return JSONResponse(status_code=HTTPStatus.OK, content={"success": success})
 
 

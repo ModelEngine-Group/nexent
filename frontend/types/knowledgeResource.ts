@@ -2,7 +2,8 @@
 
 /**
  * Shared types for the knowledge resource status API used by the per-item
- * warning markers in the agent configuration and conversation selectors.
+ * warning markers in the agent configuration and conversation selectors, and
+ * for the deletion reference preview used by the delete confirmation dialog.
  */
 
 export type KnowledgeResourceProvider = "local" | "aidp";
@@ -23,23 +24,14 @@ export type KnowledgeResourceContext =
   | { type: "conversation"; conversation_id: number }
   | { type: "selection" };
 
-export interface KnowledgeReferenceVersion {
-  version_no: number;
-  version_name?: string | null;
-  is_draft: boolean;
-  reference_origin: "tool" | "skill";
-}
-
-export interface KnowledgeReferenceVisibleAgent {
+export interface KnowledgeReferencePreviewAgent {
   agent_id: number;
   display_name: string;
-  can_edit_draft: boolean;
-  versions: KnowledgeReferenceVersion[];
 }
 
-export interface KnowledgeReferenceConflictDetails {
-  reason: "agent_references";
-  visible_agents: KnowledgeReferenceVisibleAgent[];
+export interface KnowledgeReferencePreview {
+  /** One entry per agent; draft and published versions collapse into it. */
+  agents: KnowledgeReferencePreviewAgent[];
   hidden_agent_count: number;
   total_agent_count: number;
 }

@@ -8,12 +8,8 @@ import { useParams, useRouter, useSearchParams } from "next/navigation";
 
 import { App, Modal } from "antd";
 
-import KnowledgeReferenceConflictModal from "@/components/knowledge-base/KnowledgeReferenceConflictModal";
-import {
-  getKnowledgeReferenceDetails,
-  isKnowledgeReferenceConflict,
-} from "@/lib/knowledgeBaseDeleteError";
-import type { KnowledgeReferenceConflictDetails } from "@/types/knowledgeResource";
+import KnowledgeReferenceDeleteNotice from "@/components/knowledge-base/KnowledgeReferenceDeleteNotice";
+import { previewKnowledgeReferences } from "@/services/knowledgeResourceService";
 
 import { KB_SEARCH_DEBOUNCE_MS } from "./pages/knowledge-list/constants";
 import type { AidpKnowledgeBaseItem } from "@/ext_components/aidp/shared/types/knowledge";
@@ -48,8 +44,6 @@ const AidpKnowledgeConfiguration: React.FC = () => {
   const { refreshLists, updateKnowledgeBase, fetchKnowledgeBase } =
     useAidpKnowledgeCache();
   const deleteMutation = useDeleteAidpKnowledgeBase();
-  const [referenceConflict, setReferenceConflict] =
-    useState<KnowledgeReferenceConflictDetails | null>(null);
   const [viewMode, setViewMode] = useState<AidpKbViewMode>("cards");
   const [visibleColumns, setVisibleColumns] = useState<AidpKbColumnKey[]>([
     ...AIDP_KB_DEFAULT_COLUMNS,
@@ -231,11 +225,22 @@ const AidpKnowledgeConfiguration: React.FC = () => {
   }, [locale, requestedKbId]);
 
   const handleDeleteKb = useCallback(
-    (kb: AidpKnowledgeBaseItem) => {
+    async (kb: AidpKnowledgeBaseItem) => {
+      // Deletion cascades: the dialog tells the user which agents (and, via a
+      // fixed notice, conversations) lose their binding. A failed preview only
+      // drops that extra notice; the deletion itself still cascades.
+      const preview = await previewKnowledgeReferences("aidp", kb.kds_id);
       setDeleteConfirmOpen(true);
       Modal.confirm({
         title: t("aidpKnowledge.confirmDeleteTitle"),
-        content: t("aidpKnowledge.confirmDeleteContent", { name: kb.kds_name }),
+        content: (
+          <div>
+            <div>
+              {t("aidpKnowledge.confirmDeleteContent", { name: kb.kds_name })}
+            </div>
+            <KnowledgeReferenceDeleteNotice preview={preview} />
+          </div>
+        ),
         okText: t("common.confirm"),
         cancelText: t("common.cancel"),
         centered: true,
@@ -246,12 +251,6 @@ const AidpKnowledgeConfiguration: React.FC = () => {
             message.success(t("aidpKnowledge.deleteKbSuccess"));
             handleBackToList();
           } catch (error) {
-            // A knowledge base that agents still reference is refused by the
-            // backend with a 409 conflict; show which agents block it.
-            if (isKnowledgeReferenceConflict(error)) {
-              setReferenceConflict(getKnowledgeReferenceDetails(error));
-              return;
-            }
             handleError(error, {
               showMessage: false,
               handleSession: false,
@@ -292,11 +291,6 @@ const AidpKnowledgeConfiguration: React.FC = () => {
             pollingPaused={deleteConfirmOpen}
           />
         </div>
-        <KnowledgeReferenceConflictModal
-          open={referenceConflict !== null}
-          details={referenceConflict}
-          onClose={() => setReferenceConflict(null)}
-        />
       </div>
     );
   }
@@ -346,12 +340,6 @@ const AidpKnowledgeConfiguration: React.FC = () => {
           }}
         />
       )}
-
-      <KnowledgeReferenceConflictModal
-        open={referenceConflict !== null}
-        details={referenceConflict}
-        onClose={() => setReferenceConflict(null)}
-      />
     </div>
   );
 };

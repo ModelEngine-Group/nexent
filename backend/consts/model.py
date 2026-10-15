@@ -1412,6 +1412,13 @@ class KnowledgeResourceStatusRequest(BaseModel):
     context: Optional[Dict[str, Any]] = None
 
 
+class KnowledgeReferencePreviewRequest(BaseModel):
+    """Preview of the agents bound to one resource, for the delete dialog."""
+
+    provider: str
+    resource_id: str
+
+
 class SkillInstanceInfoRequest(BaseModel):
     """Request model for skill instance update.
 

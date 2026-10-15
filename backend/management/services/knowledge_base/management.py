@@ -89,7 +89,7 @@ from management.services.knowledge_base.permission import (
 )
 from services.knowledge_reference_service import (
     knowledge_deletion_guard,
-    remove_draft_knowledge_references,
+    remove_knowledge_references,
 )
 from utils.knowledge_reference import PROVIDER_LOCAL, KnowledgeResourceRef
 
@@ -128,7 +128,7 @@ class KnowledgeBaseManagementService:
             result = await KnowledgeBaseManagementService._full_delete_knowledge_base_locked(
                 index_name, vdb_core, user_id
             )
-            remove_draft_knowledge_references(ref)
+            remove_knowledge_references(ref)
             return result
 
     @staticmethod

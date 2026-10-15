@@ -323,6 +323,8 @@ export const API_ENDPOINTS = {
     checkName: `${API_BASE_URL}/indices/check_exist`,
     // Batch availability status for selected knowledge resources
     statuses: `${API_BASE_URL}/knowledge-bases/statuses`,
+    // Agents bound to one resource, for the delete confirmation dialog
+    referencePreview: `${API_BASE_URL}/knowledge-bases/reference-preview`,
     listFiles: (indexName: string) =>
       `${API_BASE_URL}/indices/${indexName}/files`,
     indexDetail: (indexName: string) => `${API_BASE_URL}/indices/${indexName}`,
