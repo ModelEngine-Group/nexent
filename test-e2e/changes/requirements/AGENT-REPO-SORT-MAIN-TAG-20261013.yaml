@@ -25,7 +25,7 @@ change:
     behaviors:
       - Repository listing summaries carry the publish time, and latest-first ordering sorts dated records by time descending with a repository-id tie-break while undated records stay last; the default order is unchanged.
       - The listing route forwards the sort flag to the implementation, and each listing summary and detail exposes is_main_agent, defaulting to true when the agent is unknown or absent.
-      - The agent management page produces tag search predicates, filters by one or more tags including the stringified-array case, and resolves combined query and tag matching, while tag normalization recovers tags from JSON and Python-repr stringified arrays and returns an empty list for unrecoverable input.
+      - Tag normalization recovers tags from JSON and Python-repr stringified arrays and returns an empty list for unrecoverable input, and the list card renders the recovered tag instead of the raw stringified value.
       - The my-agents tab sends sort_by_update_time only when the latest-published order is selected and renders the main-agent badge for a main agent while leaving an ordinary agent unbadged.
     reason: >-
       The sort ordering, the main-agent annotation and the tag matching each have isolated unit and component contracts proved
@@ -52,4 +52,10 @@ change:
     contracts already proved by traditional UT. No live-deployment, tenant-data or Agent-execution acceptance is claimed:
     the journey fulfils every HTTP response with deterministic fixtures inside the browser boundary and needs no seeded
     server data.
+
+    Proof gap recorded after the product code was complete: the tag filter's predicate production, its intersection with the
+    text query, the clear action and the first-page reset on a sort change had no traditional UT, so they are proved at the
+    browser boundary by steps 5-7 of AGENT-REPO-SORT-MAIN-TAG-D4-001 and are recorded as journey evidence rather than UT
+    obligations. Multi-tag OR filtering and the English locale strings still have no automated assertion and are recorded
+    here as deferred coverage rather than claimed as proved.
 
