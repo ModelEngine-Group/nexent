@@ -734,6 +734,7 @@ def agent_list_info_columns(monkeypatch):
         "ingroup_permission": String,
         "description": String,
         "version_no": Integer,
+        "current_version_no": Integer,
         "delete_flag": String,
         "enabled": Boolean,
         "agent_origin": String,
@@ -773,7 +774,7 @@ def test_query_agent_list_candidates_by_tenant_id(
 
     expected_columns = [
         "agent_id", "tenant_id", "name", "display_name", "created_by",
-        "create_time", "group_ids", "ingroup_permission",
+        "create_time", "group_ids", "ingroup_permission", "current_version_no",
     ]
     if include_description:
         expected_columns.append("description")
@@ -806,6 +807,7 @@ def test_agent_list_candidates_exclude_system_agents_before_page_slicing(monkeyp
         Column("create_time", Integer),
         Column("group_ids", String),
         Column("ingroup_permission", String),
+        Column("current_version_no", Integer),
         Column("description", String),
         Column("version_no", Integer),
         Column("delete_flag", String),
