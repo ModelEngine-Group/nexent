@@ -472,7 +472,7 @@ function AgentSetupContent({
               />
             }
             rightAction={
-              <div className="ml-auto flex min-w-0 max-w-full items-center gap-2">
+              <div className="flex min-w-0 max-w-full grow items-center gap-2">
                 <Button
                   type="text"
                   icon={<GitBranch size={16} />}
@@ -481,7 +481,7 @@ function AgentSetupContent({
                   onClick={onManageVersions}
                 />
                 {agentInfo?.current_version_no && total > 0 ? (
-                  <div className="flex min-w-0 flex-1 items-center gap-1">
+                  <div className="flex min-w-0 items-center gap-1">
                     <History size={16} className="shrink-0" />
                     <span className="shrink-0 whitespace-nowrap">
                       {t("agent.version.current")}:
