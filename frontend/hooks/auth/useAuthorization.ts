@@ -1,3 +1,5 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 "use client";
 
 import { useState, useEffect, useLayoutEffect, useCallback, useMemo } from "react";
@@ -188,6 +190,7 @@ export function useAuthorization(): AuthorizationContextType {
   const hasAccess =
     isSharePage ||
     accessibleRoutes.includes(cleanPath) ||
+    (cleanPath === "/workbench" && accessibleRoutes.includes("/chat")) ||
     isWithinAccessiblePrefix;
 
   // Route guard

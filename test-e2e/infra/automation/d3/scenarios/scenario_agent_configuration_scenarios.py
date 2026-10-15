@@ -1,9 +1,12 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """D3 Agent configuration, NL2Agent, prompt, tool, skill and import scenarios."""
 
 from __future__ import annotations
 from shared.factories.agent import _llm_id, _draft_agent
 from shared.resource_ids import absent_numeric_id
 
+import httpx
 import json
 import os
 import uuid
@@ -15,6 +18,7 @@ import pytest
 from d3.assets import model_id as configured_model_id, model_request
 from shared.cases import case_params
 from shared.asset_registry import register_asset, register_asset_failure, resolve_asset, mark_asset_state
+from shared.ext_knowledge import fault_model_base_url
 from shared.factories.ownership import register_owned_http
 from shared.http import MODEL_TIMEOUT, assert_status, client, redacted_response_body
 from shared.http import config_save_payload
@@ -53,13 +57,14 @@ def _find_nested_int(data, keys: set[str]) -> int | None:
 
 @asynccontextmanager
 async def _controlled_regeneration_model(identity, *, force_failure: bool):
-    """Install a batch-scoped LLM whose responses are served by test-assets."""
-    controlled_url = (
-        os.getenv("NEXENT_TEST_ASSETS_URL")
-        or os.getenv("NEXENT_TEST_ASSETS_CONTAINER_URL")
-    )
-    if not controlled_url:
-        pytest.skip("NEXENT_TEST_ASSETS_URL is required for regenerate_name fault injection")
+    """Install a batch-scoped LLM served by the ext-knowledge fault provider.
+
+    Both cases point the model at the same provider API base (product root
+    plus /v1, so real wire traffic lands on /v1/chat/completions); the
+    force_failure case drives the 503 path through the marker in the task
+    description, never through a different URL.
+    """
+    api_base = fault_model_base_url()
 
     display_name = f"d3-regenerate-name-{uuid.uuid4().hex[:8]}"
     async with client("config", token=identity.access_token, timeout=MODEL_TIMEOUT) as api:
@@ -70,7 +75,7 @@ async def _controlled_regeneration_model(identity, *, force_failure: bool):
         payload.update({
             "model_name": "controlled-fault-model",
             "api_key": "controlled-test-key",
-            "base_url": f"{controlled_url.rstrip('/')}/{'unavailable' if force_failure else 'fault'}/v1",
+            "base_url": api_base,
         })
         created = await api.post("/model/create", json=payload)
         assert_status(created, 200)
@@ -237,7 +242,12 @@ async def _regenerate_name(identity, model_admin, *, force_failure: bool) -> Non
                 if force_failure
                 else "Generate a unique concise financial-summary agent name"
             )
-            async with client("config", token=identity.access_token, timeout=MODEL_TIMEOUT) as api:
+            # The forced-failure path drives the product's full five-attempt
+            # retry budget (each attempt spends the adapter's own backoff
+            # against the controlled 503s), which exceeds the default model
+            # timeout on a slow lane. Waiting longer observes the CURRENT
+            # adapter strategy without changing it; #3428 would shorten it.
+            async with client("config", token=identity.access_token, timeout=httpx.Timeout(900, connect=15)) as api:
                 response = await api.post(
                     "/agent/regenerate_name",
                     json={"items": [{

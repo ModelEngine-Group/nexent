@@ -1,0 +1,6 @@
+# Keep in sync with the pinned versions in the Dockerfile (the image builds
+# from the inline pins; this file documents the same set for local installs).
+fastapi==0.139.0
+uvicorn==0.51.0
+python-multipart==0.0.32
+httpx==0.28.1
