@@ -1,3 +1,5 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 // @ts-nocheck
 /**
  * D4 browser acceptance for three merged but independently observable

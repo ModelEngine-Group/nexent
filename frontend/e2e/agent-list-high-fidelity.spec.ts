@@ -1,3 +1,5 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import { expect, test, type Page, type Route } from "@playwright/test";
 
 const baseUrl = process.env.NEXENT_E2E_BASE_URL ?? "http://127.0.0.1:3000";

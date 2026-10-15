@@ -1,3 +1,5 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import { describe, expect, it } from "vitest";
 
 import { normalizeTags } from "@/services/agentConfigService";

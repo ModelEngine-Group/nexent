@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 from typing import Any, Collection, Dict, List, Optional
 
 from sqlalchemy import and_, case, false, func, or_, true, update
