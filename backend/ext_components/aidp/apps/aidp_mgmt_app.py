@@ -65,7 +65,10 @@ from ext_components.aidp.services.aidp_service import (
     update_aidp_kb_impl,
     upload_aidp_docs_impl,
 )
-from services.knowledge_reference_service import knowledge_deletion_guard
+from services.knowledge_reference_service import (
+    knowledge_deletion_guard,
+    remove_draft_knowledge_references,
+)
 from utils import auth_utils as auth_utils_module
 from utils.knowledge_reference import PROVIDER_AIDP, KnowledgeResourceRef
 
@@ -720,9 +723,10 @@ async def delete_knowledge_base(
     user_id, tenant_id = await _auth(request)
     perms.require_permission(kds_id, user_id, tenant_id, required="EDIT")
 
-    # Refuse deletion while any non-deleted agent configuration references this
+    # Refuse deletion while any published agent version references this
     # knowledge base, and exclude concurrent reference writes for the whole
-    # deletion so a binding cannot succeed after the reference check.
+    # deletion so a binding cannot succeed after the reference check. Draft
+    # bindings do not block: they are stripped below once the KB is gone.
     ref = KnowledgeResourceRef(provider=PROVIDER_AIDP, resource_id=kds_id)
     with knowledge_deletion_guard(ref, user_id=user_id, tenant_id=tenant_id):
         server_url, api_key = _credentials()
@@ -735,6 +739,7 @@ async def delete_knowledge_base(
             invalidate_aidp_kb_detail_cache(server_url, api_key, kds_id)
             invalidate_aidp_doc_count_cache(server_url, api_key, kds_id)
             _cleanup_document_assignments_for_deleted_knowledge_base(tenant_id, kds_id, user_id)
+            remove_draft_knowledge_references(ref)
     return JSONResponse(status_code=HTTPStatus.OK, content={"success": success})
 
 

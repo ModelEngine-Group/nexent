@@ -14,6 +14,7 @@ of a substring search.
 
 from __future__ import annotations
 
+import json
 import logging
 import time
 from contextlib import contextmanager
@@ -235,6 +236,86 @@ def query_live_agent_reference_rows(
             continue
         live_rows.append(row)
     return live_rows
+
+
+def strip_deleted_resource_from_draft_bindings(
+    session: Session, ref: KnowledgeResourceRef
+) -> Dict[str, int]:
+    """Remove a deleted resource from the draft bindings that still list it.
+
+    Drafts (``version_no == 0``) are working copies: they do not block the
+    deletion anymore, so once the resource is gone this keeps every draft free
+    of a reference to something that no longer exists. Skill *template* configs
+    are shared with published versions and are deliberately left untouched.
+    """
+    counts = {"tool_instances": 0, "skill_instances": 0}
+    tool_ids = _knowledge_tool_ids(session, ref.range_param)
+    if tool_ids:
+        instances = (
+            session.query(ToolInstance)
+            .filter(
+                ToolInstance.tool_id.in_(tuple(tool_ids)),
+                ToolInstance.delete_flag != "Y",
+            )
+            .all()
+        )
+        for instance in instances:
+            data = as_dict(instance) or {}
+            if int(data.get("version_no") or 0) != 0:
+                continue
+            params = data.get("params") or {}
+            if not isinstance(params, dict):
+                continue
+            current = params.get(ref.range_param)
+            ids = parse_knowledge_id_list(current)
+            if ref.resource_id not in ids:
+                continue
+            names = params.get("display_names")
+            aligned_names = (
+                list(names)
+                if isinstance(names, list) and len(names) == len(ids)
+                else None
+            )
+            kept_ids = [item for item in ids if item != ref.resource_id]
+            updated = dict(params)
+            updated[ref.range_param] = (
+                json.dumps(kept_ids) if isinstance(current, str) else kept_ids
+            )
+            if aligned_names is not None:
+                updated["display_names"] = [
+                    name
+                    for item, name in zip(ids, aligned_names)
+                    if item != ref.resource_id
+                ]
+            instance.params = updated
+            counts["tool_instances"] += 1
+
+    for instance in (
+        session.query(SkillInstance)
+        .filter(SkillInstance.delete_flag != "Y")
+        .all()
+    ):
+        data = as_dict(instance) or {}
+        if int(data.get("version_no") or 0) != 0:
+            continue
+        config_values = data.get("config_values") or {}
+        if not isinstance(config_values, dict):
+            continue
+        current = config_values.get(ref.range_param)
+        ids = parse_knowledge_id_list(current)
+        if ref.resource_id not in ids:
+            continue
+        kept_ids = [item for item in ids if item != ref.resource_id]
+        updated = dict(config_values)
+        updated[ref.range_param] = (
+            json.dumps(kept_ids) if isinstance(current, str) else kept_ids
+        )
+        instance.config_values = updated
+        counts["skill_instances"] += 1
+
+    if counts["tool_instances"] or counts["skill_instances"]:
+        session.commit()
+    return counts
 
 
 def query_agent_reference_metadata(

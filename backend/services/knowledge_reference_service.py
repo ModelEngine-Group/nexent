@@ -43,6 +43,7 @@ from database.knowledge_reference_db import (
     query_live_agent_reference_rows,
     query_local_knowledge_records,
     query_local_knowledge_records_by_ids,
+    strip_deleted_resource_from_draft_bindings,
 )
 from database.user_tenant_db import get_user_tenant_by_user_id
 from utils.knowledge_reference import (
@@ -149,9 +150,16 @@ def collect_agent_reference_summary(
     user_id: str,
     tenant_id: Optional[str] = None,
 ) -> Dict[str, Any]:
-    """Return the permission-filtered reference summary for one resource."""
+    """Return the permission-filtered reference summary for one resource.
+
+    Only published versions (``version_no > 0``) are reported. Drafts are
+    working copies that no longer block deletion — the deletion cleans them up
+    instead — and the conflict dialog must stay consistent with version
+    management, which lists published versions only.
+    """
     with get_db_session() as session:
         rows = query_live_agent_reference_rows(session, ref)
+        rows = [row for row in rows if int(row.get("version_no") or 0) > 0]
         if not rows:
             return {
                 "reason": REASON_AGENT_REFERENCES,
@@ -244,7 +252,12 @@ def assert_knowledge_base_deletable(    ref: KnowledgeResourceRef,
     user_id: str,
     tenant_id: Optional[str] = None,
 ) -> None:
-    """Raise a 409 conflict while any non-deleted agent references the resource."""
+    """Raise a 409 conflict while a published agent version still references the resource.
+
+    Drafts are excluded on purpose: they are working copies the user cannot
+    manage from version management, so the deletion strips them itself (see
+    :func:`remove_draft_knowledge_references`) instead of blocking on them.
+    """
     try:
         summary = collect_agent_reference_summary(ref, user_id=user_id, tenant_id=tenant_id)
     except AppException:
@@ -267,6 +280,25 @@ def assert_knowledge_base_deletable(    ref: KnowledgeResourceRef,
             "Knowledge base is referenced by agents",
             details=summary,
         )
+
+
+def remove_draft_knowledge_references(ref: KnowledgeResourceRef) -> Dict[str, int]:
+    """Strip one deleted resource out of every agent draft binding.
+
+    Called by the deletion flows after the resource is actually gone, so the
+    working copies (agent tool instances and skill instances with
+    ``version_no == 0``) never keep a reference to a deleted resource.
+    """
+    with get_db_session() as session:
+        counts = strip_deleted_resource_from_draft_bindings(session, ref)
+    if counts.get("tool_instances") or counts.get("skill_instances"):
+        logger.info(
+            "Deleted resource cleaned from draft bindings %s:%s -> %s",
+            ref.provider,
+            ref.resource_id,
+            counts,
+        )
+    return counts
 
 
 def lock_namespace_for(ref: KnowledgeResourceRef) -> str:

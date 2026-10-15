@@ -87,7 +87,10 @@ from management.services.knowledge_base.permission import (
     require_knowledge_base_read_permission,
     resolve_knowledge_base_permission,
 )
-from services.knowledge_reference_service import knowledge_deletion_guard
+from services.knowledge_reference_service import (
+    knowledge_deletion_guard,
+    remove_draft_knowledge_references,
+)
 from utils.knowledge_reference import PROVIDER_LOCAL, KnowledgeResourceRef
 
 
@@ -114,16 +117,19 @@ class KnowledgeBaseManagementService:
         Completely delete a knowledge base, including its index, associated files in MinIO,
         and all related records in Redis and PostgreSQL.
 
-        Deletion is refused with a 409 conflict while any non-deleted agent
-        configuration (draft or published version) still references the index.
-        The resource lock excludes concurrent reference writes for the whole
-        deletion so a binding cannot slip in after the reference check.
+        Deletion is refused with a 409 conflict while a published agent version
+        still references the index. Draft bindings do not block; they are
+        stripped once the index is gone. The resource lock excludes concurrent
+        reference writes for the whole deletion so a binding cannot slip in
+        after the reference check.
         """
         ref = KnowledgeResourceRef(provider=PROVIDER_LOCAL, resource_id=index_name)
         with knowledge_deletion_guard(ref, user_id=user_id):
-            return await KnowledgeBaseManagementService._full_delete_knowledge_base_locked(
+            result = await KnowledgeBaseManagementService._full_delete_knowledge_base_locked(
                 index_name, vdb_core, user_id
             )
+            remove_draft_knowledge_references(ref)
+            return result
 
     @staticmethod
     async def _full_delete_knowledge_base_locked(index_name: str, vdb_core: VectorDatabaseCore, user_id: str):

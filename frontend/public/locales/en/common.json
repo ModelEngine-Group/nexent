@@ -1022,7 +1022,7 @@
   "knowledgeResource.reason.KNOWLEDGE_CONNECTION_FAILED": "The knowledge base service is unreachable. Retry later or remove it.",
   "knowledgeResource.reason.KNOWLEDGE_INVALID_RESPONSE": "The knowledge base service returned an unexpected response. Retry later or remove it.",
   "knowledgeResource.conflict.title": "Knowledge base is still referenced by agents",
-  "knowledgeResource.conflict.description": "The following agents still bind this knowledge base. Remove the reference in those agents first, then delete it.",
+  "knowledgeResource.conflict.description": "Published versions of the following agents still bind this knowledge base. Delete the listed versions in Version Management; if a version must be kept, remove the knowledge base from the agent configuration, publish a new version, then delete the old one.",
   "knowledgeResource.conflict.draftVersion": "Draft",
   "knowledgeResource.conflict.versionNo": "Version {{no}}",
   "knowledgeResource.conflict.noEditPermission": "No edit permission",

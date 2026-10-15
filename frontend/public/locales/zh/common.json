@@ -991,7 +991,7 @@
   "knowledgeResource.reason.KNOWLEDGE_CONNECTION_FAILED": "无法连接知识库服务，请稍后重试或移除该项",
   "knowledgeResource.reason.KNOWLEDGE_INVALID_RESPONSE": "知识库服务返回异常结果，请稍后重试或移除该项",
   "knowledgeResource.conflict.title": "知识库仍被智能体引用",
-  "knowledgeResource.conflict.description": "以下智能体仍绑定该知识库，请先在这些智能体中移除引用，然后再删除知识库。",
+  "knowledgeResource.conflict.description": "以下智能体的已发布版本仍绑定该知识库。请在「版本管理」中删除对应版本；若该版本需要保留，请先在智能体配置中移除该知识库并发布新版本，然后删除旧版本。",
   "knowledgeResource.conflict.draftVersion": "草稿",
   "knowledgeResource.conflict.versionNo": "版本 {{no}}",
   "knowledgeResource.conflict.noEditPermission": "无编辑权限",
