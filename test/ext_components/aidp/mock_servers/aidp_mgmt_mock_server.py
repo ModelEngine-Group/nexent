@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """
 Standalone mock AIDP server for Nexent AIDP management endpoint testing.
 
@@ -747,6 +749,8 @@ class UpdateKbBody(BaseModel):
     topk: Optional[int] = None
     caption_enable: Optional[int] = None
     vlm_model: Optional[str] = None
+    is_exist_graph: Optional[bool] = None
+    graph_config: Optional[str] = None
 
 
 class DocHistoryBody(BaseModel):
@@ -1193,6 +1197,34 @@ def update_knowledge_base(
         kb["caption_enable"] = body.caption_enable
     if body.vlm_model is not None:
         kb["vlm_model"] = body.vlm_model
+    if body.is_exist_graph is not None:
+        # Disabling is permanent: a disabled graph can never be re-enabled.
+        if body.is_exist_graph and not kb.get("is_exist_graph"):
+            raise HTTPException(400, "Knowledge graph cannot be re-enabled once disabled")
+        kb["is_exist_graph"] = body.is_exist_graph
+    if body.graph_config is not None:
+        # Partial update: the backend already validated the edited fields, so
+        # only the key names are checked here. Untouched legacy values (seeded
+        # booleans, non-template languages) must survive the merge untouched.
+        try:
+            graph_update = json.loads(body.graph_config)
+        except ValueError as exc:
+            raise HTTPException(400, "graph_config must be a JSON string") from exc
+        allowed = {p["param_key"] for p in _graph_template("chinese")["value"]} | {"llm_model_name"}
+        if not isinstance(graph_update, dict) or set(graph_update) - allowed:
+            raise HTTPException(400, "Unrecognized graph configuration parameter")
+        current = kb.get("graph_config")
+        if isinstance(current, str):
+            try:
+                current = json.loads(current)
+            except ValueError:
+                current = {}
+        if not isinstance(current, dict):
+            current = {}
+        current.update(graph_update)
+        kb["graph_config"] = current
+        if isinstance(current.get("llm_model_name"), str):
+            kb["llm_model_name"] = current["llm_model_name"]
     kb["update_time"] = int(time.time())
 
     logger.info("UPDATE  kds_id=%s name=%r description=%r", kds_id, body.name, body.description)

@@ -1,8 +1,10 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 "use client";
 
 import React from "react";
 import { useTranslation } from "react-i18next";
-import { Button, Tag, Tooltip } from "antd";
+import { Button, Switch, Tag, Tooltip } from "antd";
 import { EditOutlined } from "@ant-design/icons";
 
 import type { AidpKbDetail } from "@/ext_components/aidp/shared/types/management";
@@ -26,14 +28,27 @@ export const AidpDetailField = ({
   </div>
 );
 
+/** Editable detail settings owned by the information tab's edit modals. */
+export type AidpDetailSetting =
+  | "chunk_mode"
+  | "topk"
+  | "vlm"
+  | "graph_llm"
+  | "graph_hop"
+  | "graph_thinking"
+  | "graph_synonym"
+  | "graph_disambiguation";
+
 interface AidpKnowledgeDetailInformationProps {
   detail: AidpKbDetail;
   graphConfig: Record<string, unknown>;
   groupNames: string[];
   canConfigureGroupPermissions: boolean;
   formatDateTime: (value: unknown) => string;
-  onEditSetting: (setting: "chunk_mode" | "topk" | "vlm") => void;
+  onEditSetting: (setting: AidpDetailSetting) => void;
   onEditPermissions: () => void;
+  /** Opens the permanent-disable confirmation for the knowledge graph. */
+  onDisableGraph: () => void;
 }
 
 const FIELD_GRID =
@@ -47,6 +62,7 @@ const AidpKnowledgeDetailInformation = ({
   formatDateTime,
   onEditSetting,
   onEditPermissions,
+  onDisableGraph,
 }: AidpKnowledgeDetailInformationProps) => {
   const { t } = useTranslation();
   const canEdit = detail.permission === "EDIT";
@@ -60,7 +76,7 @@ const AidpKnowledgeDetailInformation = ({
       return value ? t("common.yes") : t("common.no");
     return String(value);
   };
-  const editButton = (setting: "chunk_mode" | "topk" | "vlm", label: string) =>
+  const editButton = (setting: AidpDetailSetting, label: string) =>
     canEdit && (
       <Tooltip title={label}>
         <Button
@@ -141,9 +157,21 @@ const AidpKnowledgeDetailInformation = ({
       </section>
 
       <section className="py-6">
-        <h2 className="mb-5 text-lg font-semibold leading-7 text-gray-800">
-          {t("aidpKnowledge.detailGraph")}
-        </h2>
+        <div className="mb-5 flex items-center gap-3">
+          <h2 className="text-lg font-semibold leading-7 text-gray-800">
+            {t("aidpKnowledge.detailGraph")}
+          </h2>
+          {detail.is_exist_graph === true && (
+            <Switch
+              checked
+              disabled={!canEdit}
+              aria-label={t("aidpKnowledge.detailGraph")}
+              onChange={(checked) => {
+                if (!checked) onDisableGraph();
+              }}
+            />
+          )}
+        </div>
         {detail.is_exist_graph !== true ? (
           <p className="text-sm text-gray-500">
             {t("aidpKnowledge.detailGraphDisabled")}
@@ -151,10 +179,12 @@ const AidpKnowledgeDetailInformation = ({
         ) : (
           <dl className={FIELD_GRID}>
             <AidpDetailField label={t("aidpKnowledge.detailGraphModel")}>
-              {detail.llm_model_name || AIDP_UNKNOWN_VALUE}
+              <span>{detail.llm_model_name || AIDP_UNKNOWN_VALUE}</span>
+              {editButton("graph_llm", t("aidpKnowledge.detailEditGraphModel"))}
             </AidpDetailField>
             <AidpDetailField label={t("aidpKnowledge.detailGraphHops")}>
-              {displayValue(graphConfig.retrieve_subgraph_hop)}
+              <span>{displayValue(graphConfig.retrieve_subgraph_hop)}</span>
+              {editButton("graph_hop", t("aidpKnowledge.detailEditGraphHop"))}
             </AidpDetailField>
             <AidpDetailField label={t("aidpKnowledge.detailGraphDomain")}>
               {displayValue(graphConfig.domain)}
@@ -163,19 +193,33 @@ const AidpKnowledgeDetailInformation = ({
               {displayValue(graphConfig.retrieve_default_topk)}
             </AidpDetailField>
             <AidpDetailField label={t("aidpKnowledge.detailGraphThinking")}>
-              {displayValue(
-                graphConfig.no_think_mode === undefined
-                  ? undefined
-                  : !graphConfig.no_think_mode
+              <span>
+                {displayValue(
+                  graphConfig.no_think_mode === undefined
+                    ? undefined
+                    : !graphConfig.no_think_mode
+                )}
+              </span>
+              {editButton(
+                "graph_thinking",
+                t("aidpKnowledge.detailEditGraphThinking")
               )}
             </AidpDetailField>
             <AidpDetailField label={t("aidpKnowledge.detailGraphSynonym")}>
-              {displayValue(graphConfig.synonym_merge_enable)}
+              <span>{displayValue(graphConfig.synonym_merge_enable)}</span>
+              {editButton(
+                "graph_synonym",
+                t("aidpKnowledge.detailEditGraphSynonym")
+              )}
             </AidpDetailField>
             <AidpDetailField
               label={t("aidpKnowledge.detailGraphDisambiguation")}
             >
-              {displayValue(graphConfig.disambiguation_enable)}
+              <span>{displayValue(graphConfig.disambiguation_enable)}</span>
+              {editButton(
+                "graph_disambiguation",
+                t("aidpKnowledge.detailEditGraphDisambiguation")
+              )}
             </AidpDetailField>
             <AidpDetailField
               label={t("aidpKnowledge.detailGraphPromptLanguage")}

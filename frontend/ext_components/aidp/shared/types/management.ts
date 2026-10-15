@@ -1,3 +1,5 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 export interface AidpKbDetail {
   kds_id: string;
   kds_name: string;
@@ -207,6 +209,24 @@ export interface AidpCreateKbPayload {
   group_ids?: number[];
 }
 
+/**
+ * Partial knowledge graph configuration update. Carries native-typed values
+ * for any subset of the editable fields; the backend merges them into the
+ * stored AIDP `graph_config` string.
+ */
+export interface AidpGraphConfigUpdate {
+  /** Graph extraction LLM model; nested in AIDP graph_config. */
+  llm_model_name?: string;
+  /** Sub-graph expansion hop count (1-3). */
+  retrieve_subgraph_hop?: number;
+  /** Inverse of the "enable model thinking" switch. */
+  no_think_mode?: boolean;
+  /** Whether synonym merging is enabled. */
+  synonym_merge_enable?: boolean;
+  /** Whether semantic disambiguation is enabled. */
+  disambiguation_enable?: boolean;
+}
+
 /** Body for PUT /aidp-mgmt/knowledge-bases/{kds_id} (partial update, omit unchanged). */
 export interface AidpUpdateKbPayload {
   name?: string;
@@ -217,6 +237,10 @@ export interface AidpUpdateKbPayload {
   caption_enable?: number;
   /** VLM model identifier; required when caption_enable is 1. */
   vlm_model?: string;
+  /** Disable the knowledge graph; permanent, cannot be re-enabled. */
+  is_exist_graph?: boolean;
+  /** Partial structured graph configuration update; merged into the stored AIDP config. */
+  graph_config?: AidpGraphConfigUpdate;
 }
 
 /** Body for PATCH /aidp-mgmt/aidp-permissions/{kds_id}. */

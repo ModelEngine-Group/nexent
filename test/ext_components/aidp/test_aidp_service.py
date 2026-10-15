@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import importlib.util
 import json
 import logging
@@ -1096,6 +1098,71 @@ class TestGraphConfigValidation:
         }
         with pytest.raises(AppException) as exc_info:
             aidp_service_module._serialize_graph_config(config)
+        assert exc_info.value.error_code == ErrorCode.COMMON_PARAMETER_INVALID
+
+
+class TestMergeGraphConfigUpdate:
+    """Partial graph-config edits merge into the stored AIDP configuration."""
+
+    def test_merges_edited_fields_and_keeps_untouched_ones(self, aidp_service_module):
+        current = {
+            "domain": "常规",
+            "prompt_language": "中文",
+            "prompt_text": "提取实体关系。",
+            "llm_model_name": "qwen3_8b",
+            "retrieve_subgraph_hop": "2",
+            "no_think_mode": "是",
+            "synonym_merge_enable": "否",
+            "disambiguation_enable": "否",
+        }
+        result = aidp_service_module.merge_graph_config_update(
+            current,
+            {
+                "llm_model_name": "gpt-4o",
+                "retrieve_subgraph_hop": 3,
+                "no_think_mode": False,
+                "synonym_merge_enable": True,
+            },
+        )
+        merged = json.loads(result)
+        assert merged["llm_model_name"] == "gpt-4o"
+        assert merged["retrieve_subgraph_hop"] == "3"
+        assert merged["no_think_mode"] == "否"
+        assert merged["synonym_merge_enable"] == "是"
+        # Untouched fields keep their stored representation verbatim.
+        assert merged["domain"] == "常规"
+        assert merged["prompt_text"] == "提取实体关系。"
+        assert merged["disambiguation_enable"] == "否"
+
+    def test_preserves_legacy_values_outside_the_edit(self, aidp_service_module):
+        """Stored values that predate the AIDP template (seeded booleans,
+        non-template languages) survive a partial update round-trip."""
+        current = {"prompt_language": "chinese", "retrieve_subgraph_hop": True}
+        result = aidp_service_module.merge_graph_config_update(
+            current, {"llm_model_name": "gpt-4o"}
+        )
+        merged = json.loads(result)
+        assert merged["prompt_language"] == "chinese"
+        assert merged["retrieve_subgraph_hop"] is True
+        assert merged["llm_model_name"] == "gpt-4o"
+
+    @pytest.mark.parametrize(
+        "updates",
+        [
+            {"retrieve_subgraph_hop": 4},
+            {"retrieve_subgraph_hop": "2"},
+            {"retrieve_subgraph_hop": True},
+            {"llm_model_name": "   "},
+            {"llm_model_name": 7},
+            {"no_think_mode": "是"},
+            {"synonym_merge_enable": 1},
+            {"disambiguation_enable": None},
+            {"domain": "常规"},
+        ],
+    )
+    def test_rejects_invalid_updates(self, aidp_service_module, updates):
+        with pytest.raises(AppException) as exc_info:
+            aidp_service_module.merge_graph_config_update({}, updates)
         assert exc_info.value.error_code == ErrorCode.COMMON_PARAMETER_INVALID
 
 

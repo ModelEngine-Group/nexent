@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """Unit tests for the v7.1 AIDP management endpoints.
 
 These tests exercise the FastAPI router in ``backend/ext_components/aidp/apps/aidp_mgmt_app.py``
@@ -13,6 +15,7 @@ CRUD so we can validate request/response semantics without a real Postgres.
 from __future__ import annotations
 
 import io
+import json
 import os
 import sys
 import threading
@@ -2218,6 +2221,156 @@ class TestUpdateKbConfigurationFields:
             )
         assert response.status_code == HTTPStatus.UNPROCESSABLE_ENTITY
 
+    # ---- Knowledge graph settings (detail information tab) ----
+
+    def test_update_merges_graph_config_into_current(self):
+        """A partial graph_config update is merged with the stored AIDP
+        configuration and forwarded as the complete AIDP-format string."""
+        client = _client()
+        from ext_components.aidp.apps import aidp_mgmt_app
+        from ext_components.aidp.services import aidp_permission_service
+
+        current_graph = {
+            "domain": "通用",
+            "prompt_language": "中文",
+            "prompt_text": "default prompt",
+            "llm_model_name": "qwen-max",
+            "retrieve_subgraph_hop": "2",
+            "no_think_mode": "是",
+            "synonym_merge_enable": "否",
+            "disambiguation_enable": "是",
+        }
+        current = {
+            "kds_id": "kb-1",
+            "is_exist_graph": True,
+            "graph_config": json.dumps(current_graph, ensure_ascii=False),
+        }
+        with patch.object(aidp_permission_service, "require_permission",
+                          return_value=MagicMock(permission="EDIT")), \
+             patch.object(aidp_mgmt_app, "_load_cached_kb_detail",
+                          return_value=current), \
+             patch.object(aidp_mgmt_app, "update_aidp_kb_impl",
+                          return_value={"ok": True}) as mock_update:
+            response = client.put(
+                "/aidp-mgmt/knowledge-bases/kb-1",
+                headers=_bearer(),
+                json={"graph_config": {
+                    "llm_model_name": "gpt-4o",
+                    "retrieve_subgraph_hop": 3,
+                    "no_think_mode": False,
+                }},
+            )
+
+        assert response.status_code == HTTPStatus.OK
+        mock_update.assert_called_once()
+        payload = mock_update.call_args.args[3]
+        # Edited fields adopt the AIDP string format; untouched fields keep
+        # their stored representation so a partial update round-trips safely.
+        merged = dict(current_graph)
+        merged.update({
+            "llm_model_name": "gpt-4o",
+            "retrieve_subgraph_hop": "3",
+            "no_think_mode": "否",
+        })
+        assert payload["graph_config"] == json.dumps(merged, ensure_ascii=False)
+
+    def test_update_forwards_graph_disable(self):
+        client = _client()
+        from ext_components.aidp.apps import aidp_mgmt_app
+        from ext_components.aidp.services import aidp_permission_service
+
+        current = {"kds_id": "kb-1", "is_exist_graph": True}
+        with patch.object(aidp_permission_service, "require_permission",
+                          return_value=MagicMock(permission="EDIT")), \
+             patch.object(aidp_mgmt_app, "_load_cached_kb_detail",
+                          return_value=current), \
+             patch.object(aidp_mgmt_app, "update_aidp_kb_impl",
+                          return_value={"ok": True}) as mock_update:
+            response = client.put(
+                "/aidp-mgmt/knowledge-bases/kb-1",
+                headers=_bearer(),
+                json={"is_exist_graph": False},
+            )
+
+        assert response.status_code == HTTPStatus.OK
+        mock_update.assert_called_once()
+        assert mock_update.call_args.args[3] == {"is_exist_graph": False}
+
+    def test_update_rejects_graph_reenable(self):
+        """The graph switch is one-way: re-enabling is permanently rejected."""
+        client = _client()
+        from ext_components.aidp.apps import aidp_mgmt_app
+        from ext_components.aidp.services import aidp_permission_service
+
+        current = {"kds_id": "kb-1", "is_exist_graph": True}
+        with patch.object(aidp_permission_service, "require_permission",
+                          return_value=MagicMock(permission="EDIT")), \
+             patch.object(aidp_mgmt_app, "_load_cached_kb_detail",
+                          return_value=current), \
+             patch.object(aidp_mgmt_app, "update_aidp_kb_impl",
+                          return_value={"ok": True}) as mock_update:
+            response = client.put(
+                "/aidp-mgmt/knowledge-bases/kb-1",
+                headers=_bearer(),
+                json={"is_exist_graph": True},
+            )
+
+        assert response.status_code == HTTPStatus.BAD_REQUEST
+        assert "cannot be re-enabled" in response.json()["message"]
+        mock_update.assert_not_called()
+
+    def test_update_rejects_graph_config_when_graph_disabled(self):
+        """Once the graph is off its configuration is locked for updates."""
+        client = _client()
+        from ext_components.aidp.apps import aidp_mgmt_app
+        from ext_components.aidp.services import aidp_permission_service
+
+        current = {"kds_id": "kb-1", "is_exist_graph": False}
+        with patch.object(aidp_permission_service, "require_permission",
+                          return_value=MagicMock(permission="EDIT")), \
+             patch.object(aidp_mgmt_app, "_load_cached_kb_detail",
+                          return_value=current), \
+             patch.object(aidp_mgmt_app, "update_aidp_kb_impl",
+                          return_value={"ok": True}) as mock_update:
+            response = client.put(
+                "/aidp-mgmt/knowledge-bases/kb-1",
+                headers=_bearer(),
+                json={"graph_config": {"llm_model_name": "gpt-4o"}},
+            )
+
+        assert response.status_code == HTTPStatus.BAD_REQUEST
+        assert "graph settings are locked" in response.json()["message"]
+        mock_update.assert_not_called()
+
+    @pytest.mark.parametrize("graph_updates", [
+        {"retrieve_subgraph_hop": 4},      # out of range
+        {"retrieve_subgraph_hop": "2"},    # string instead of int
+        {"retrieve_subgraph_hop": True},   # bool is an int subclass
+        {"llm_model_name": "   "},         # blank model name
+        {"no_think_mode": "是"},           # string instead of bool
+        {"domain": "通用"},                # non-editable graph field
+    ])
+    def test_update_rejects_invalid_graph_values(self, graph_updates):
+        client = _client()
+        from ext_components.aidp.apps import aidp_mgmt_app
+        from ext_components.aidp.services import aidp_permission_service
+
+        current = {"kds_id": "kb-1", "is_exist_graph": True, "graph_config": "{}"}
+        with patch.object(aidp_permission_service, "require_permission",
+                          return_value=MagicMock(permission="EDIT")), \
+             patch.object(aidp_mgmt_app, "_load_cached_kb_detail",
+                          return_value=current), \
+             patch.object(aidp_mgmt_app, "update_aidp_kb_impl",
+                          return_value={"ok": True}) as mock_update:
+            response = client.put(
+                "/aidp-mgmt/knowledge-bases/kb-1",
+                headers=_bearer(),
+                json={"graph_config": graph_updates},
+            )
+
+        assert response.status_code == HTTPStatus.BAD_REQUEST
+        mock_update.assert_not_called()
+
 
 class TestNormalizeKbConfigFields:
     """_normalize_kb_config_fields - kms_config_str merge and alias mapping."""
@@ -2259,3 +2412,47 @@ class TestNormalizeKbConfigFields:
 
         assert aidp_mgmt_app._normalize_kb_config_fields(None) is None
         assert aidp_mgmt_app._normalize_kb_config_fields("x") == "x"
+
+    def test_normalizes_graph_config_flags_and_lifts_llm_model(self):
+        """AIDP serializes graph toggles as 是/否 and the hop as a string; the
+        detail view expects native booleans, an int hop and a top-level LLM."""
+        from ext_components.aidp.apps import aidp_mgmt_app
+
+        detail = {
+            "graph_config": json.dumps({
+                "llm_model_name": "qwen-max",
+                "retrieve_subgraph_hop": "2",
+                "no_think_mode": "是",
+                "synonym_merge_enable": "否",
+                "disambiguation_enable": "是",
+            }, ensure_ascii=False),
+        }
+        out = aidp_mgmt_app._normalize_kb_config_fields(detail)
+        graph = out["graph_config"]
+        assert isinstance(graph, dict)
+        assert graph["retrieve_subgraph_hop"] == 2
+        assert graph["no_think_mode"] is True
+        assert graph["synonym_merge_enable"] is False
+        assert graph["disambiguation_enable"] is True
+        assert out["llm_model_name"] == "qwen-max"
+
+    def test_top_level_llm_model_wins_over_graph_config(self):
+        from ext_components.aidp.apps import aidp_mgmt_app
+
+        detail = {
+            "llm_model_name": "top-model",
+            "graph_config": json.dumps(
+                {"llm_model_name": "nested-model"}, ensure_ascii=False
+            ),
+        }
+        out = aidp_mgmt_app._normalize_kb_config_fields(detail)
+        assert out["llm_model_name"] == "top-model"
+        assert out["graph_config"]["llm_model_name"] == "nested-model"
+
+    def test_bad_graph_config_string_is_tolerated(self):
+        from ext_components.aidp.apps import aidp_mgmt_app
+
+        detail = {"graph_config": "not valid json"}
+        out = aidp_mgmt_app._normalize_kb_config_fields(detail)
+        assert out["graph_config"] == "not valid json"
+        assert "llm_model_name" not in out

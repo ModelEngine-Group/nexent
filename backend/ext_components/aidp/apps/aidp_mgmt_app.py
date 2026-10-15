@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """AIDP Management App Layer (v7.1).
 
 FastAPI endpoints for AIDP knowledge base CRUD with permission enforcement.
@@ -63,6 +65,7 @@ from ext_components.aidp.services.aidp_service import (
     list_aidp_doc_history_impl,
     list_aidp_docs_impl,
     list_aidp_models_impl,
+    merge_graph_config_update,
     remove_aidp_docs_impl,
     retry_aidp_docs_impl,
     select_aidp_channel,
@@ -224,6 +227,23 @@ class UpdateKbRequest(BaseModel):
         None, ge=0, le=1, description="Caption (VLM) generation toggle, int 0 or 1"
     )
     vlm_model: Optional[str] = Field(None, description="VLM model identifier for caption generation")
+    is_exist_graph: Optional[bool] = Field(
+        None,
+        description=(
+            "Disable the knowledge graph. Permanent: once disabled the graph "
+            "cannot be re-enabled and its configuration is locked."
+        ),
+    )
+    graph_config: Optional[dict] = Field(
+        None,
+        description=(
+            "Partial graph configuration update with native-typed values for any "
+            "subset of the editable fields (llm_model_name str, "
+            "retrieve_subgraph_hop int 1-3, no_think_mode / synonym_merge_enable "
+            "/ disambiguation_enable bool). Merged into the stored AIDP "
+            "graph_config string; requires the graph to be enabled."
+        ),
+    )
 
 
 class SetPermissionRequest(BaseModel):
@@ -338,6 +358,37 @@ def _normalize_kb_config_fields(detail: dict) -> dict:
     # Derive is_multimodal from caption_enable when not already present.
     if "is_multimodal" not in detail or detail["is_multimodal"] is None:
         detail["is_multimodal"] = _infer_is_multimodal(detail)
+
+    # Normalize the graph configuration for the frontend. AIDP serializes the
+    # three graph toggles as "是"/"否" and the hop count as a string, while the
+    # detail view and its inline editors expect native booleans and numbers.
+    graph = detail.get("graph_config")
+    if isinstance(graph, str) and graph.strip():
+        try:
+            graph = json.loads(graph)
+        except (json.JSONDecodeError, ValueError):
+            graph = None
+    if isinstance(graph, dict):
+        for key in (
+            "no_think_mode",
+            "synonym_merge_enable",
+            "disambiguation_enable",
+        ):
+            if graph.get(key) == "是":
+                graph[key] = True
+            elif graph.get(key) == "否":
+                graph[key] = False
+        hop = graph.get("retrieve_subgraph_hop")
+        if isinstance(hop, str) and hop.strip().isdigit():
+            graph["retrieve_subgraph_hop"] = int(hop.strip())
+        detail["graph_config"] = graph
+        # AIDP nests the graph LLM model inside graph_config; lift it to the
+        # top-level field the detail view renders when the top level has none.
+        top_model = detail.get("llm_model_name")
+        if not (isinstance(top_model, str) and top_model.strip()):
+            nested_model = graph.get("llm_model_name")
+            if isinstance(nested_model, str) and nested_model.strip():
+                detail["llm_model_name"] = nested_model
 
     return detail
 
@@ -830,6 +881,44 @@ async def update_knowledge_base(
             detail="At least one supported knowledge base field must be provided for update",
         )
     server_url, api_key = _credentials()
+
+    if "is_exist_graph" in payload or "graph_config" in payload:
+        # The graph switch is one-way: disabling keeps the stored graph data
+        # but the flag can never return to enabled, and the configuration is
+        # locked once the graph is off. Validate against the current AIDP
+        # state so direct API callers cannot bypass the UI rules.
+        current = await run_blocking(
+            "aidp-update-graph-detail", _load_cached_kb_detail,
+            server_url, api_key, kds_id,
+            lane="control-io", owner="config",
+        )
+        if payload.get("is_exist_graph") is True:
+            raise HTTPException(
+                status_code=HTTPStatus.BAD_REQUEST,
+                detail="Knowledge graph cannot be re-enabled once disabled",
+            )
+        if not current.get("is_exist_graph"):
+            raise HTTPException(
+                status_code=HTTPStatus.BAD_REQUEST,
+                detail=(
+                    "Knowledge graph is disabled for this knowledge base; "
+                    "graph settings are locked"
+                ),
+            )
+        graph_updates = payload.pop("graph_config", None)
+        if graph_updates is not None:
+            current_config = current.get("graph_config")
+            if isinstance(current_config, str):
+                try:
+                    current_config = json.loads(current_config)
+                except (json.JSONDecodeError, ValueError):
+                    current_config = {}
+            if not isinstance(current_config, dict):
+                current_config = {}
+            payload["graph_config"] = merge_graph_config_update(
+                current_config, graph_updates
+            )
+
     result = update_aidp_kb_impl(server_url, api_key, kds_id, payload)
 
     # Sync kds_name to permission table so the LLM name-to-id map stays current.

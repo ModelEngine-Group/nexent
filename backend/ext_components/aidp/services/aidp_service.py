@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """
 AIDP Service Layer
 Handles API calls to AIDP for paginated knowledge base listing.
@@ -870,6 +872,15 @@ _GRAPH_CONFIG_FIELDS = frozenset(
     }
 )
 _GRAPH_PROMPT_MAX_CHARS = 4096
+_GRAPH_EDITABLE_FIELDS = frozenset(
+    {
+        "llm_model_name",
+        "retrieve_subgraph_hop",
+        "no_think_mode",
+        "synonym_merge_enable",
+        "disambiguation_enable",
+    }
+)
 
 
 
@@ -946,6 +957,60 @@ def _serialize_graph_config(config: Dict[str, Any]) -> str:
         raise AppException(ErrorCode.COMMON_PARAMETER_INVALID, "Graph LLM model name must be a non-empty string")
     payload["llm_model_name"] = llm_model_name
     return json.dumps(payload, ensure_ascii=False)
+
+
+def merge_graph_config_update(current: Dict[str, Any], updates: Dict[str, Any]) -> str:
+    """Merge a partial graph-config update into the stored AIDP configuration.
+
+    ``updates`` carries native-typed values for the five editable fields
+    (bool toggles, int hop count, str model name). Each edited field is
+    converted to the AIDP string format ("是"/"否" toggles, string hop) and
+    merged into ``current``; untouched keys keep their existing
+    representation so stored legacy values (seeded booleans, non-template
+    languages) survive a partial update round-trip. Returns the complete
+    JSON string AIDP expects in ``graph_config``.
+    """
+    unsupported_fields = set(updates).difference(_GRAPH_EDITABLE_FIELDS)
+    if unsupported_fields:
+        names = ", ".join(sorted(unsupported_fields))
+        raise AppException(
+            ErrorCode.COMMON_PARAMETER_INVALID,
+            f"Unsupported graph configuration fields: {names}",
+        )
+
+    merged = dict(current) if isinstance(current, dict) else {}
+
+    if "llm_model_name" in updates:
+        llm_model_name = updates["llm_model_name"]
+        if not isinstance(llm_model_name, str) or not llm_model_name.strip():
+            raise AppException(
+                ErrorCode.COMMON_PARAMETER_INVALID,
+                "Graph LLM model name must be a non-empty string",
+            )
+        merged["llm_model_name"] = llm_model_name.strip()
+
+    if "retrieve_subgraph_hop" in updates:
+        hop = updates["retrieve_subgraph_hop"]
+        # bool is an int subclass; reject it explicitly so True/False never
+        # serialize as "True"/"False" hop strings.
+        if isinstance(hop, bool) or not isinstance(hop, int) or hop not in (1, 2, 3):
+            raise AppException(
+                ErrorCode.COMMON_PARAMETER_INVALID,
+                "Graph retrieve_subgraph_hop must be 1, 2 or 3",
+            )
+        merged["retrieve_subgraph_hop"] = str(hop)
+
+    for key in ("no_think_mode", "synonym_merge_enable", "disambiguation_enable"):
+        if key in updates:
+            value = updates[key]
+            if not isinstance(value, bool):
+                raise AppException(
+                    ErrorCode.COMMON_PARAMETER_INVALID,
+                    f"Graph parameter {key} must be a boolean",
+                )
+            merged[key] = "是" if value else "否"
+
+    return json.dumps(merged, ensure_ascii=False)
 
 
 def _prepare_create_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
