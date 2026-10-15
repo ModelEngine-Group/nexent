@@ -1,3 +1,5 @@
+# Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 import asyncio
 from copy import deepcopy
 from http import HTTPStatus
@@ -693,6 +695,12 @@ async def _stream_agent_chunks(
                                         "source_title": result.get("title", ""),
                                         "source_location": result.get("url", ""),
                                         "source_content": result.get("text", ""),
+                                        "aidp_metadata": result.get("score_details", {}).get("metadata"),
+                                        "aidp_source_reference": {
+                                            key: value
+                                            for key, value in result.get("score_details", {}).items()
+                                            if key != "metadata"
+                                        },
                                         "score_overall": float(result.get("score"))
                                         if result.get("score") not in (None, "")
                                         else None,
