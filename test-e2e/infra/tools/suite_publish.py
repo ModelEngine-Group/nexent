@@ -209,9 +209,6 @@ def publish_latest(batch, home, env=None, *, ownership_file=None):
     if destination.is_symlink():
         raise ValueError("Publication directory cannot be a symlink")
     destination.mkdir(parents=True, exist_ok=True)
-    for path in destination.iterdir():
-        if path.name not in (*MANAGED_FILES, ".stfolder", ".stignore") or path.is_symlink():
-            raise ValueError("Unexpected existing publication files; refusing to delete or overwrite them")
     staging_root = home / "state/report-publish-staging"
     if (home / "state").is_symlink() or staging_root.is_symlink():
         raise ValueError("Publication staging directory cannot be a symlink")
@@ -219,6 +216,11 @@ def publish_latest(batch, home, env=None, *, ownership_file=None):
     if destination.stat().st_dev != staging_root.stat().st_dev:
         raise ValueError("Publication staging and destination must share a filesystem")
     with BatchLock(home / "state/report-publish.lock"), tempfile.TemporaryDirectory(dir=staging_root) as temporary:
+        # Only these fixed paths are managed; never inspect or remove unrelated entries.
+        for name in MANAGED_FILES:
+            target = destination / name
+            if target.is_symlink() or (target.exists() and not target.is_file()):
+                raise ValueError("Managed publication targets must be regular files, not symlinks or directories")
         staging = Path(temporary)
         sharing = {"status": "PUBLISHED", "batch_id": batch.name,
                    "excluded_binary_count": len(excluded), "published_at": now()}
