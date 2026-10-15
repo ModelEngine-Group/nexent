@@ -88,8 +88,10 @@ test("collapsed icons retain accessible names and hover displays inline labels",
   const item = screen.getByRole("button", { name: "sidebar.agentConfig" });
   expect(item).toHaveTextContent("");
   expect(rail).toHaveAttribute("data-sidebar-expanded", "false");
+  expect(rail.querySelector("[data-sidebar-divider]")).not.toBeNull();
   fireEvent.mouseEnter(rail);
   expect(rail).toHaveAttribute("data-sidebar-expanded", "true");
+  expect(rail.querySelector("[data-sidebar-divider]")).toBeNull();
   expect(item).toHaveTextContent("sidebar.agentConfig");
   fireEvent.click(item);
   expect(state.push).toHaveBeenCalledWith("/zh/agents");
@@ -106,6 +108,7 @@ test("exit is delayed and pointer re-entry cancels pending collapse", () => {
   fireEvent.mouseLeave(rail);
   act(() => vi.advanceTimersByTime(160));
   expect(rail).toHaveAttribute("data-sidebar-expanded", "false");
+  expect(rail.querySelector("[data-sidebar-divider]")).not.toBeNull();
 });
 test.each(["account", "notifications"])(
   "open %s popup holds expansion outside the rail",

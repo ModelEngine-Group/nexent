@@ -174,7 +174,7 @@ const ROUTE_CONFIG: RouteConfig[] = [
 ];
 
 const RAIL_ITEM_CLASS =
-  "flex h-11 w-full shrink-0 items-center overflow-hidden rounded-lg border-0 bg-transparent p-0 pr-2 text-left text-[#191919] hover:bg-[rgba(25,25,25,0.08)]";
+  "flex h-11 w-full shrink-0 cursor-pointer items-center overflow-hidden rounded-lg border-0 bg-transparent p-0 pr-2 text-left text-[#191919] hover:bg-[rgba(25,25,25,0.08)]";
 const RAIL_ICON_CLASS = "h-5 w-5 shrink-0";
 const SELECTED_ITEM_CLASS = "!bg-[rgba(25,25,25,0.08)]";
 
@@ -357,11 +357,13 @@ export function SideNavigation() {
           collapseLater();
       }}
     >
-      <span
-        aria-hidden="true"
-        data-sidebar-divider
-        className="pointer-events-none absolute inset-y-0 right-0 w-[0.5px] bg-[rgba(25,25,25,0.15)]"
-      />
+      {!expanded && (
+        <span
+          aria-hidden="true"
+          data-sidebar-divider
+          className="pointer-events-none absolute inset-y-0 right-0 w-[0.5px] bg-[rgba(25,25,25,0.15)]"
+        />
+      )}
       <Link
         href="/"
         aria-label={t("sidebar.homePage")}

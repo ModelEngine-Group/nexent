@@ -4,7 +4,7 @@ change:
   change_type: requirement
   requirement_id: NAV-MENU-REQ-004
   title: Refine the sidebar brand title and overflow
-  description: Apply the documented Title 2 typography to the logo name with constrained single-line ellipsis and a full-name tooltip; retain the inspected 0.5px vertical divider in both sidebar states.
+  description: Apply the documented Title 2 typography to the logo name with constrained single-line ellipsis and a full-name tooltip; show the inspected 0.5px vertical divider only while collapsed, use a pointer cursor for interactive items and remove the extra8px label margin throughout the expanded sidebar without changing icon or font sizes.
   affected_features:
     existing: []
     added: []
@@ -16,8 +16,8 @@ change:
     modified: [NAV-MENU-D4-001]
     retired: []
   traditional_ut:
-    decision: reuse
-    behaviors: [collapsed title hidden, hover displays labels, navigation and popup state preserved]
-    reason: Existing sidebar state tests cover retained behavior; computed typography and actual long-name truncation need real browser layout proof in existing D4. No Python behavior changes.
+    decision: strengthen
+    behaviors: [divider visible only when collapsed, collapsed title hidden, hover displays labels, navigation and popup state preserved]
+    reason: Sidebar state regression verifies divider removal on expansion and restoration on collapse; existing D4 proves actual line geometry and title truncation. No Python behavior changes.
     test_selectors:
     - frontend/tests/component/sidebarHover.test.tsx

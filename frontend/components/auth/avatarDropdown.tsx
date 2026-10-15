@@ -297,7 +297,7 @@ export function AvatarDropdown({
             <button
               type="button"
               aria-label={t("accountMenu.open")}
-              className="flex h-11 w-full items-center overflow-hidden rounded-lg border-0 bg-transparent p-0 pr-2 text-[#191919] hover:bg-[rgba(25,25,25,0.08)]"
+              className="flex h-11 w-full cursor-pointer items-center overflow-hidden rounded-lg border-0 bg-transparent p-0 pr-2 text-[#191919] hover:bg-[rgba(25,25,25,0.08)]"
             >
               <span className="flex h-11 w-12 shrink-0 items-center justify-center">
                 <Avatar

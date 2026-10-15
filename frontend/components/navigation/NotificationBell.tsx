@@ -155,7 +155,7 @@ export function NotificationBell({
     <Button
       type="text"
       aria-label={t("notifications.bell.label")}
-      className="!flex !h-11 !w-full !justify-start !gap-0 overflow-hidden rounded-lg !p-0 !pr-2 text-[#191919]"
+      className="!flex !h-11 !w-full cursor-pointer !justify-start !gap-0 overflow-hidden rounded-lg !p-0 !pr-2 text-[#191919]"
     >
       <span className="flex h-11 w-12 shrink-0 items-center justify-center">
         <Badge
