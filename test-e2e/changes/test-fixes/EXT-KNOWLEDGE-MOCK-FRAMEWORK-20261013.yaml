@@ -79,4 +79,11 @@ change:
     runner_url/product_url; the fidelity conftest clears the wire log per
     test and restores the identity environment variables; the control plane
     validates the whole /_reset service list first and checks AIDP sub-app
-    response codes on fail-next/fail-reset.
+    response codes on fail-next/fail-reset. Second review pass
+    (jeffwu-1999): the _attach_locked exception path now rewrites the
+    released state while the lock is still held (the release() rule was
+    not fully ported); resolve_profile_selection blocks loudly with a
+    dependency receipt when the case contract is unreadable or has no
+    execution.profiles entry for the selected profile, instead of
+    silently attaching an empty dependency set; four regression tests
+    cover both orderings of the failure state and both blocking paths.

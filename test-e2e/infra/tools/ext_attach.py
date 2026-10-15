@@ -340,11 +340,29 @@ def resolve_profile_selection(repo: Path, home: Path, record: dict) -> dict | No
     case_path = repo / "test-e2e/cases" / case_id / "case.yaml"
     try:
         case_document = yaml.safe_load(case_path.read_text(encoding="utf-8"))
-    except (OSError, yaml.YAMLError):
-        case_document = {}
+    except (OSError, yaml.YAMLError) as exc:
+        # A declared profile selection must be backed by a readable case
+        # contract: a silent empty fallback would skip the mock dependency
+        # (identity, lock, reset) while the batch report still looks clean.
+        raise _dependency_failure(
+            case_id,
+            f"cannot read the case contract test-e2e/cases/{case_id}/case.yaml "
+            f"to resolve profile {selected!r}: {exc}",
+        ) from None
     entries = ((case_document or {}).get("case", {}).get("execution") or {}).get("profiles") or []
-    entry = next((item for item in entries if item.get("name") == selected), None)
-    required = list(entry.get("required_services") or []) if entry else []
+    entry = next(
+        (item for item in entries if isinstance(item, dict) and item.get("name") == selected),
+        None,
+    )
+    if entry is None:
+        declared_entries = [str(item.get("name")) for item in entries if isinstance(item, dict)]
+        raise _dependency_failure(
+            case_id,
+            f"the case contract declares no execution.profiles entry for profile {selected!r} "
+            f"(entries: {sorted(declared_entries) or 'none'}); refusing to attach with an "
+            "empty dependency set",
+        )
+    required = list(entry.get("required_services") or [])
     return {
         "selection_key": str(key),
         "selected_profile": str(selected),
@@ -495,10 +513,18 @@ class ExtKnowledgeAttach:
                 raise AttachError(f"per-case reset failed with HTTP {status}")
             status, _ = _request(f"{config['runner_url']}/_wire-log/clear", method="POST", payload={})
         except AttachError:
-            self._release_lock()
-            if not self._instance_mutations and self._lock_state_path is not None:
-                _write_state(self._lock_state_path, str(config["owner_run_id"]),
-                             self.case_id, released=True)
+            # Decide the final instance state BEFORE dropping the lock (same
+            # rule as release()): an attach failure before any mutation left
+            # the instance untouched, so the state file is rewritten to
+            # released while the lock is still held — a concurrent attacher
+            # must never observe the pre-failure released=False between the
+            # unlock and the rewrite. A failed reset keeps the unknown state.
+            try:
+                if not self._instance_mutations and self._lock_state_path is not None:
+                    _write_state(self._lock_state_path, str(config["owner_run_id"]),
+                                 self.case_id, released=True)
+            finally:
+                self._release_lock()
             raise
 
         self.env["NEXENT_EXT_KNOWLEDGE_RUNNER_URL"] = str(config["runner_url"])

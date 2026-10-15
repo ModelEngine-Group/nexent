@@ -242,6 +242,46 @@ class AttachLifecycleTests(AttachTestCase):
         _, state_path = self._lock_paths()
         self.assertTrue(json.loads(state_path.read_text(encoding="utf-8"))["released"])
 
+    def _state_at_lock_release(self, attach_callable):
+        """Run a failing attach and snapshot the state file at unlock time."""
+        _, state_path = self._lock_paths()
+        observed = {}
+        original_release = ext_attach._FileLock.release
+
+        def release_with_snapshot(lock):
+            observed["state"] = json.loads(state_path.read_text(encoding="utf-8"))
+            return original_release(lock)
+
+        with patch.object(ext_attach._FileLock, "release", release_with_snapshot):
+            with self.assertRaises(RuntimeError):
+                attach_callable()
+        self.assertIn("state", observed)
+        return observed["state"]
+
+    def test_failure_before_mutations_marks_released_before_unlock(self):
+        attach, _ = self._attach()
+        degraded = _healthy()[1]
+        degraded["services"]["fault"] = "error"
+        fake = _FakeControl({"/_mock/identity": _identity(), "/health": (200, degraded)})
+        with REACHABLE, patch.object(ext_attach, "_request", fake):
+            state = self._state_at_lock_release(attach.attach)
+        # The rewrite must land while the lock is still held: a concurrent
+        # attacher can then never read the pre-failure released=False
+        # between the unlock and the rewrite.
+        self.assertTrue(state["released"])
+        self.assertEqual(self._receipt()["result"], "BLOCKED_BY_DEPENDENCY")
+
+    def test_failure_after_mutations_keeps_unknown_state_before_unlock(self):
+        attach, _ = self._attach()
+        fake = _FakeControl(_attach_routes(**{"/_reset": (500, {"detail": "boom"})}))
+        with REACHABLE, patch.object(ext_attach, "_request", fake):
+            state = self._state_at_lock_release(attach.attach)
+        # A failed reset means the instance state is unknown: the next
+        # runner must be blocked by the state file, never by a phantom
+        # clean state.
+        self.assertFalse(state["released"])
+        self.assertEqual(self._receipt()["result"], "BLOCKED_BY_DEPENDENCY")
+
     def test_unreachable_product_stack_blocks(self):
         attach, _ = self._attach()
         routes = {
@@ -421,6 +461,45 @@ class ProfileSelectionTests(AttachTestCase):
             with self.assertRaises(RuntimeError) as ctx:
                 attach.attach()
         self.assertIn("aidp-journey.yaml is missing", str(ctx.exception))
+
+    def test_case_contract_without_profile_entry_blocks(self):
+        # CTR-046 is single-profile (no case.execution.profiles block): a
+        # declared profile selection against it must fail loudly instead of
+        # silently attaching nothing with an empty dependency set.
+        self._write_journey("mock")
+        record = {
+            "case_id": "CTR-046",
+            "execution": {
+                "profile_selection": "aidp-journey",
+                "required_mock_services": [],
+                "implementations": [{"framework": "playwright", "file": "test.spec.ts",
+                                     "selector": "CTR-046", "profiles": ["mock", "real_smoke"]}],
+            },
+        }
+        attach, _ = self._attach(required=[], case_id="CTR-046", record=record)
+        with REACHABLE, patch.object(ext_attach, "_request", _FakeControl()):
+            with self.assertRaises(RuntimeError) as ctx:
+                attach.attach()
+        self.assertIn("no execution.profiles entry", str(ctx.exception))
+        self.assertEqual(self._receipt()["result"], "BLOCKED_BY_DEPENDENCY")
+
+    def test_unreadable_case_contract_blocks(self):
+        self._write_journey("mock")
+        record = {
+            "case_id": "NO-SUCH-CASE-000",
+            "execution": {
+                "profile_selection": "aidp-journey",
+                "required_mock_services": [],
+                "implementations": [{"framework": "playwright", "file": "test.spec.ts",
+                                     "selector": "NO-SUCH-CASE-000", "profiles": ["mock", "real_smoke"]}],
+            },
+        }
+        attach, _ = self._attach(required=[], case_id="NO-SUCH-CASE-000", record=record)
+        with REACHABLE, patch.object(ext_attach, "_request", _FakeControl()):
+            with self.assertRaises(RuntimeError) as ctx:
+                attach.attach()
+        self.assertIn("cannot read the case contract", str(ctx.exception))
+        self.assertEqual(self._receipt()["result"], "BLOCKED_BY_DEPENDENCY")
 
 
 class EndpointLockTests(unittest.TestCase):
