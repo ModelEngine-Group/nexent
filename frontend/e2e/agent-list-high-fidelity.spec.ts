@@ -120,7 +120,7 @@ test("agent list matches the measured desktop card layout and keeps controls fun
   const second = await page.locator("article").nth(1).boundingBox();
   const fifth = await page.locator("article").nth(4).boundingBox();
   const search = await page
-    .getByPlaceholder("按名称或描述搜索")
+    .getByPlaceholder("按名称、描述或标签搜索")
     .locator("..")
     .boundingBox();
   expect(first).not.toBeNull();
@@ -251,7 +251,7 @@ test("agent list matches the measured desktop card layout and keeps controls fun
     .boundingBox();
   const tableContent = await table.boundingBox();
   const tableSearch = await page
-    .getByPlaceholder("按名称或描述搜索")
+    .getByPlaceholder("按名称、描述或标签搜索")
     .locator("..")
     .boundingBox();
   expect(tableBody?.width).toBeCloseTo(1808, 0);
@@ -270,7 +270,7 @@ test("agent list matches the measured desktop card layout and keeps controls fun
     fullPage: true,
   });
 
-  await page.getByPlaceholder("按名称或描述搜索").fill("健康小助手");
+  await page.getByPlaceholder("按名称、描述或标签搜索").fill("健康小助手");
   await expect(table.locator("tbody tr")).toHaveCount(1);
   const filteredTableBody = await page
     .getByTestId("agent-list-table-scroll")

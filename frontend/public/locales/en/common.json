@@ -2133,7 +2133,7 @@
   "chatStreamMain.retry": "Retry",
   "agentSelector.loading": "Loading...",
   "agentSelector.selectAgent": "Select Agent",
-  "agentSelector.searchPlaceholder": "Search by name or description",
+  "agentSelector.searchPlaceholder": "Search by name, description, or tags",
   "agentSelector.noSearchResults": "No agents match your search",
   "agentSelector.noAvailableAgents": "No available Agents",
   "agentSelector.agentUnavailable": "This Agent is currently unavailable, please check the tool configuration information or contact the administrator",

@@ -2026,7 +2026,7 @@
   "chatStreamMain.retry": "重试",
   "agentSelector.loading": "加载中...",
   "agentSelector.selectAgent": "请选择智能体",
-  "agentSelector.searchPlaceholder": "按名称或描述搜索",
+  "agentSelector.searchPlaceholder": "按名称、描述或标签搜索",
   "agentSelector.noSearchResults": "没有匹配的智能体",
   "agentSelector.noAvailableAgents": "暂无可用智能体",
   "agentSelector.agentUnavailable": "此智能体当前不可用，请检查工具配置信息或通知管理员。",
