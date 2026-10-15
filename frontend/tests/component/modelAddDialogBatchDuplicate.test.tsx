@@ -10,13 +10,29 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 // literal relative path is the only form that resolves in both places.
 import { ModelAddDialog } from "../../app/[locale]/models/components/model/ModelAddDialog";
 import { modelService, ModelError } from "@/services/modelService";
+import zh from "@/public/locales/zh/common.json";
 
-// Match production fallback behavior: a missing translation key renders
-// its defaultValue, so the assertions below cover the user-visible text.
+// Resolve keys against the real zh bundle with {{var}} interpolation so a
+// key/variable mismatch fails here instead of leaking a raw placeholder into
+// the UI; missing keys still fall back to defaultValue.
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({
-    t: (key: string, options?: { defaultValue?: string }) =>
-      options?.defaultValue ?? key,
+    t: (
+      key: string,
+      options?: { defaultValue?: string } & Record<string, unknown>
+    ) => {
+      const template =
+        (zh as unknown as Record<string, string>)[key] ??
+        options?.defaultValue ??
+        key;
+      return String(template).replace(
+        /\{\{(\w+)\}\}/g,
+        (placeholder: string, name: string) =>
+          options && options[name] !== undefined
+            ? String(options[name])
+            : placeholder
+      );
+    },
   }),
 }));
 
@@ -173,5 +189,15 @@ describe("ModelAddDialog batch duplicate handling", () => {
     ).toBeInTheDocument();
     expect(screen.queryByText(/已存在/)).not.toBeInTheDocument();
     expect(onSuccess).not.toHaveBeenCalled();
+  });
+
+  it("interpolates the selected count instead of leaking the i18n placeholder", async () => {
+    renderBatchDialog();
+    await prepareSelection([DUP_MODEL, OK_MODEL]);
+
+    // Regression: the footer used to render "已选 {{selectedCount}} 个模型"
+    // because the t() call passed `count` while the locale template expects
+    // the `selectedCount` variable.
+    expect(screen.getByText("已选 2 个模型")).toBeInTheDocument();
   });
 });

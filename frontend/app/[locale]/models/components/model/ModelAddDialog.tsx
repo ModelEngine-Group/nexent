@@ -1457,7 +1457,7 @@ function BatchAddForm({
             {selectedCount > 0
               ? t("modelConfig.addDialog.selectedCount", {
                   defaultValue: `已选 ${selectedCount} 个模型`,
-                  count: selectedCount,
+                  selectedCount,
                 })
               : ""}
           </span>
