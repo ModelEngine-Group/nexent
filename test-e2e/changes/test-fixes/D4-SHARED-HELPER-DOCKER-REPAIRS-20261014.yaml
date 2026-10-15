@@ -1,0 +1,70 @@
+schema_version: '1.0'
+change:
+  change_id: D4-SHARED-HELPER-DOCKER-REPAIRS-20261014
+  change_type: test-fix
+  title: Repair shared D4 agent/chat helper drift found while executing the affected cases against the dockerized product
+  description: >-
+    Executing the knowledge-domain cases against the local-latest dockerized
+    deployment surfaced further shared-helper drift that the offline asset
+    checks cannot see. AgentPage.bindKnowledgeBase now waits for the real
+    knowledge autosave: the binding persists through POST /api/tool/update
+    (the tool's own params index_names/kds_list) after the agent/update
+    call, so the helper captures that tool-config request and proves the
+    numeric tool id against GET /api/tool/list instead of guessing a tool
+    name inside the request body. The new toolIdBySemanticName and
+    publishDraft helpers give the AIDP journey its tool-identity proof and
+    its release step, because draft edits (including knowledge bindings)
+    only reach a brand-new conversation after the real 发布 action. The
+    conversation-guide helper follows the high-fidelity rendering: the
+    greeting field is located by its stable aria-label 开场白, the
+    preset-question button accepts 添加问题 and the legacy 添加示例问题, and
+    PW-AGENT-02's refresh assertion uses the same aria-label instead of the
+    retired legacy placeholder. The collaborator drawer's source tabs are
+    plain buttons (not role=tab), the close action is the footer button
+    (the header icon shares the 关闭 name), and the collaborator's released
+    version is verified through the chip's hover card (名称：<version>)
+    because the chip itself only exposes 名称 and V<number>. The guardrail
+    helper scopes the enable switch to the 安全护栏 title row (the modal
+    also carries the protocol-repair switch) and closes the 更多配置 modal
+    afterwards so it cannot intercept the header debug toggle. PW-KB-AIDP-01
+    additionally aligns its citation assertion with the rendered
+    [data-citation-marker] chips and documents the mock-profile environment
+    requirement that the controlled KB must be registered in the product
+    tenant; those findings live in its own change record. No product code
+    changed.
+  affected_features:
+    existing: [V5-PW-AGENT-02, V5-PW-KB-AIDP-01, V5-PW-KB-LOCAL-01, V5-PW-FILE-01]
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing: []
+    added: []
+    modified: [PW-AGENT-02, PW-KB-AIDP-01, PW-KB-LOCAL-01, PW-FILE-01]
+    retired: []
+  notes: >-
+    Executed against the one-off dockerized deployment (local-latest images
+    of 39ed74b52, fresh data root, ext-knowledge mock attached): PW-AGENT-02
+    PASS (10 steps, 3 assertions), PW-KB-LOCAL-01 PASS, PW-KB-AIDP-01 PASS
+    (mock profile, 4 preconditions, 7 steps, 4 assertions) and PW-FILE-01
+    PASS. PW-KB-LOCAL-01 and PW-AGENT-02 are the minimum regression set for
+    the changed bindKnowledgeBase/setConversationGuide helpers; PW-FILE-01
+    consumes the unchanged chat helpers in the same batch. The high-fidelity
+    locators are bound to the current product build; the legacy placeholder
+    variants remaining in PW-CHAT-02/PW-MEDIA-STT-01 and the tab-based
+    bindTool/bindSkill helpers are still known drift outside this change.
+    Review re-verification (2026-10-14, fresh one-off deployment, review-fix
+    code): the design's minimum regression set was executed. PW-TASK-01 and
+    AGT-001 passed; PW-KB-AIDP-01 passed its full mock-profile journey. The
+    repaired helpers were exercised successfully wherever reached —
+    PW-CHAT-01 step 1 (openAgent/selectAgent), PW-CHAT-05 steps 1-3,
+    PW-PROMPT-02 preconditions (select), PW-AGENT-01 precondition 3 (open).
+    The remaining five cases fail on their own pre-existing post-#4058 drift,
+    each attributed: PW-AGENT-01 and PW-VERSION-01 in the unchanged
+    AgentPage.create() flow (old 创建智能体 dialog / 新建 entry), PW-PROMPT-01
+    on the retired 请输入智能体描述 placeholder, PW-PROMPT-02 on the retired
+    智能体角色 tab, PW-CHAT-01 on the retired 执行 mode button, PW-CHAT-05 on
+    the retired 知识库： scope button. Those locators are outside this PR's
+    changed surface and stay recorded as known drift (without running them
+    green, the batch report states them as executed-and-failing for
+    pre-existing reasons, not as verified).
