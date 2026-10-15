@@ -72,7 +72,7 @@ export function AgentConfigHeader({
         data-agent-guide="workflow"
         className="pointer-events-none absolute inset-y-0 left-0 right-0 2xl:left-[31.2%]"
       />
-      <div className="flex min-w-0 items-center gap-3">
+      <div className="flex min-w-0 max-w-full items-center gap-3">
         <Avatar
           size={50}
           shape="square"
@@ -84,9 +84,12 @@ export function AgentConfigHeader({
             return false;
           }}
         />
-        <div className="flex min-w-0 flex-col gap-1">
+        <div className="flex min-w-0 flex-1 flex-col gap-1">
           <div className="flex min-w-0 items-center gap-2">
-            <span className="max-w-[240px] truncate text-xl font-medium leading-7 text-[#191919] [font-family:'HarmonyOS_Sans_SC',sans-serif]">
+            <span
+              title={agent.display_name || agent.name}
+              className="min-w-0 truncate text-xl font-medium leading-7 text-[#191919] [font-family:'HarmonyOS_Sans_SC',sans-serif]"
+            >
               {agent.display_name || agent.name}
             </span>
           </div>

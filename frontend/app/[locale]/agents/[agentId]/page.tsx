@@ -49,6 +49,7 @@ import { useAgentVersionList } from "@/hooks/agent/useAgentVersionList";
 import { searchAgentInfo } from "@/services/agentConfigService";
 import { buildAgentUsageGuidePath } from "@/lib/agentUsageGuide";
 import log from "@/lib/logger";
+import { canReturnToAgentEditorReferrer } from "@/lib/agentEditorNavigation";
 import type {
   Nl2AgentDraftField,
   Nl2AgentStateEvent,
@@ -118,13 +119,16 @@ function PanelCard({
           <div
             className={
               headerTestId === "agent-config-page-tabs"
-                ? "flex h-10 items-center gap-1 rounded-lg bg-white px-3 [font-family:'HarmonyOS_Sans_SC',sans-serif]"
-                : "flex items-center gap-2"
+                ? "flex h-10 min-w-[140px] max-w-full items-center gap-1 rounded-lg bg-white px-3 [font-family:'HarmonyOS_Sans_SC',sans-serif]"
+                : "flex min-w-0 items-center gap-2"
             }
           >
             {headerTestId === "agent-config-page-tabs" && leftAction}
             {icon}
-            <h3 className="max-w-[280px] truncate text-sm font-normal leading-[22px] text-[#191919]">
+            <h3
+              title={title}
+              className="min-w-0 truncate text-sm font-normal leading-[22px] text-[#191919]"
+            >
               {title}
             </h3>
             {headerTestId !== "agent-config-page-tabs" && leftAction}
@@ -457,7 +461,7 @@ function AgentSetupContent({
                 t("agent.page.panel.config"),
             })}
             className={"flex-1"}
-            headerClassName="h-16 min-h-16 border-[#dfdfdf] pl-4 pr-[18px] py-3"
+            headerClassName="min-h-16 flex-wrap gap-x-3 gap-y-2 border-[#dfdfdf] pl-4 pr-[18px] py-3"
             leftAction={
               <Button
                 type="text"
@@ -660,7 +664,13 @@ export default function AgentEditor() {
             onBack={() => {
               isReturningRef.current = true;
               reset();
-              if (window.history.length > 1) {
+              if (
+                canReturnToAgentEditorReferrer(
+                  window.history.length,
+                  document.referrer,
+                  window.location.origin
+                )
+              ) {
                 router.back();
               } else {
                 router.replace(`/${locale}/agents`);

@@ -57,12 +57,20 @@ export default function AgentListCard({
         type="button"
         onClick={() => onOpen(agent)}
         data-testid="agent-card-body"
-        className="flex h-[86px] min-w-0 shrink-0 cursor-pointer flex-col text-left"
+        className="flex h-[86px] w-full min-w-0 shrink-0 cursor-pointer flex-col text-left"
         aria-label={title}
       >
-        <div className="flex h-10 min-w-0 items-center gap-3 pr-7">
-          <AgentAvatar agent={agent} size={40} iconSize={20} />
-          <span className="min-w-0 truncate text-[16px] font-medium leading-6 ![letter-spacing:0px] text-[#191919]">
+        <div className="flex h-10 w-full min-w-0 items-center gap-3 pr-7">
+          <AgentAvatar
+            agent={agent}
+            size={40}
+            iconSize={20}
+            className="shrink-0"
+          />
+          <span
+            title={title}
+            className="min-w-0 flex-1 truncate text-[16px] font-medium leading-6 ![letter-spacing:0px] text-[#191919]"
+          >
             {title}
           </span>
           {category ? (

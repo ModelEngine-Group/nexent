@@ -2,7 +2,7 @@
 
 "use client";
 
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { App, Empty, Spin } from "antd";
 import { Bot, Clock, Globe } from "lucide-react";
@@ -325,35 +325,41 @@ export function AddAgentDrawer({ open, onClose }: AddAgentDrawerProps) {
     }
   };
 
+  const confirmingRef = useRef(false);
   const handleConfirm = async () => {
-    // Commit internal sub-agent ids and their version relations.
-    updateSubAgentIds(draftInternalIds);
-    updateSubAgentRelations(computeInternalRelations(draftInternalIds));
-
-    // Commit external sub-agent ids and their A2A relations.
-    const added = draftExternalIds.filter(
-      (id) => !selectedExternalIds.includes(id)
-    );
-    const removed = selectedExternalIds.filter(
-      (id) => !draftExternalIds.includes(id)
-    );
-    if (currentAgentId && (added.length || removed.length)) {
-      const results = await Promise.all([
-        ...added.map((id) =>
-          a2aClientService.addRelation(Number(currentAgentId), id)
-        ),
-        ...removed.map((id) =>
-          a2aClientService.removeRelation(Number(currentAgentId), id)
-        ),
-      ]);
-      if (results.some((result) => !result.success)) {
-        messageApi.error(t("a2a.service.addRelationFailed"));
-        return;
+    if (confirmingRef.current) return;
+    confirmingRef.current = true;
+    try {
+      // Complete external relations before committing any local selections.
+      const added = draftExternalIds.filter(
+        (id) => !selectedExternalIds.includes(id)
+      );
+      const removed = selectedExternalIds.filter(
+        (id) => !draftExternalIds.includes(id)
+      );
+      if (currentAgentId && (added.length || removed.length)) {
+        const results = await Promise.all([
+          ...added.map((id) =>
+            a2aClientService.addRelation(Number(currentAgentId), id)
+          ),
+          ...removed.map((id) =>
+            a2aClientService.removeRelation(Number(currentAgentId), id)
+          ),
+        ]);
+        if (results.some((result) => !result.success)) {
+          messageApi.error(t("a2a.service.addRelationFailed"));
+          return;
+        }
       }
+      updateSubAgentIds(draftInternalIds);
+      updateSubAgentRelations(computeInternalRelations(draftInternalIds));
+      updateExternalSubAgentIds(draftExternalIds);
+      onClose();
+    } catch {
+      messageApi.error(t("a2a.service.addRelationFailed"));
+    } finally {
+      confirmingRef.current = false;
     }
-    updateExternalSubAgentIds(draftExternalIds);
-
-    onClose();
   };
 
   useEffect(() => {
