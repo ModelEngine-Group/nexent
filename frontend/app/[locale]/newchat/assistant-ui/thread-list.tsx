@@ -658,7 +658,7 @@ const ThreadListItems: FC<ThreadListItemsProps> = ({
             <button
               type="button"
               data-slot="aui_thread-list-group-label"
-              className="flex h-10 items-center gap-3 rounded-lg px-3 text-left text-[14px] text-[#191919] hover:bg-white/70"
+              className="group flex h-10 items-center gap-3 rounded-lg px-3 text-left text-[14px] text-[#191919] hover:bg-white/70"
               onClick={() => onToggleAgentExpanded(groupKey)}
               aria-expanded={isExpanded}
             >
@@ -668,7 +668,7 @@ const ThreadListItems: FC<ThreadListItemsProps> = ({
               />
               <span className="min-w-0 truncate">{group.agentName}</span>
               <ChevronRight
-                className={`size-3.5 shrink-0 text-[#808080]${isExpanded ? " rotate-90" : ""}`}
+                className={`h-3.5 w-0 shrink-0 overflow-hidden text-[#808080] opacity-0 transition-all duration-200 group-hover:w-3.5 group-hover:opacity-100 group-focus-visible:w-3.5 group-focus-visible:opacity-100${isExpanded ? " rotate-90" : ""}`}
                 aria-hidden
               />
             </button>
