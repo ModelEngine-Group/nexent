@@ -1500,7 +1500,7 @@ def retry_aidp_docs_impl(
             lambda: client.post(
                 retry_url,
                 headers=headers,
-                json={"file_uuids": file_uuids},
+                json={"retry_file_info": [{"file_uuid": uuid} for uuid in file_uuids]},
             ),
             context=f"retry-docs:{kds_id}",
         )

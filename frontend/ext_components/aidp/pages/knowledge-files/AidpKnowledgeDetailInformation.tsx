@@ -8,7 +8,7 @@ import { Button, Switch, Tag, Tooltip } from "antd";
 import { EditOutlined } from "@ant-design/icons";
 
 import type { AidpKbDetail } from "@/ext_components/aidp/shared/types/management";
-import { AIDP_UNKNOWN_VALUE } from "@/ext_components/aidp/shared/utils/aidpKnowledgeDisplay";
+import { AIDP_UNKNOWN_VALUE, formatAidpCreator } from "@/ext_components/aidp/shared/utils/aidpKnowledgeDisplay";
 import AidpGroupNamesDisplay from "@/ext_components/aidp/shared/components/AidpGroupNamesDisplay";
 
 export const AidpDetailField = ({
@@ -107,7 +107,7 @@ const AidpKnowledgeDetailInformation = ({
             {formatDateTime(detail.updated_at)}
           </AidpDetailField>
           <AidpDetailField label={t("aidpKnowledge.detailCreator")}>
-            {detail.created_by || detail.user_name || AIDP_UNKNOWN_VALUE}
+            {formatAidpCreator(detail.creator_name) || AIDP_UNKNOWN_VALUE}
           </AidpDetailField>
         </dl>
       </section>

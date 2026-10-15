@@ -765,7 +765,7 @@ class DocHistoryBody(BaseModel):
 
 
 class RetryDocumentsBody(BaseModel):
-    file_uuids: List[str] = Field(..., min_length=1)
+    retry_file_info: List[Dict[str, str]] = Field(..., min_length=1)
 
 
 class DocStatusBody(BaseModel):
@@ -1564,7 +1564,7 @@ def knowledge_file_history(
         "success_record_count": sum(1 for item in all_recent_items if item["status"] == 1),
         "processing_record_count": sum(1 for item in all_recent_items if item["status"] == 2),
         "failed_record_count": sum(1 for item in all_recent_items if item["status"] in (3, 5)),
-        "queued_record_count": sum(1 for item in all_recent_items if item["status"] == 4),
+        "waiting_record_count": sum(1 for item in all_recent_items if item["status"] == 4),
     }
     items = list(all_recent_items)
     if body.status not in (None, 0):
@@ -1624,7 +1624,8 @@ def retry_documents(
     success_list: List[Dict[str, str]] = []
     failed_list: List[Dict[str, str]] = []
     retryable = {3, 5, "3", "5", STATUS_FAILED, "VECTOR_INGESTION_FAILED", "GRAPH_INGESTION_FAILED"}
-    for file_uuid in dict.fromkeys(body.file_uuids):
+    file_uuids = [entry.get("file_uuid") for entry in body.retry_file_info if isinstance(entry, dict)]
+    for file_uuid in dict.fromkeys(file_uuids):
         doc = _find_document(kds_id, file_uuid)
         if doc is None or doc.get("status") not in retryable:
             failed_list.append({"file_uuid": file_uuid, "reason": "File is not in a retryable failed state"})

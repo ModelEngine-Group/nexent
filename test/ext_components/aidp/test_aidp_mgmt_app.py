@@ -1959,12 +1959,10 @@ class TestKnowledgeFilesEndpoint:
                 headers=_bearer(),
             )
 
-        assert response.status_code == HTTPStatus.OK
-        body = response.json()
-        # The listing survives a Count outage: totals degrade to simple paging.
-        assert body["total_reliable"] is False
-        assert body["total_count"] == 1
-        assert body["has_more"] is False
+        # Count failures propagate - the /files endpoint no longer swallows
+        # them with return_exceptions=True, matching the /documents contract.
+        assert response.status_code == AppException(ErrorCode.AIDP_SERVICE_ERROR).http_status
+        assert response.json()["code"] == ErrorCode.AIDP_SERVICE_ERROR.value
 
     def test_file_list_propagates_upstream_list_failure(self):
         client = _client()
@@ -2007,7 +2005,7 @@ class TestUploadTasksEndpoint:
             "processing_record_count": 3,
             "failed_record_count": 2,
             "success_record_count": 24,
-            "queued_record_count": 2,
+            "waiting_record_count": 2,
         }
         with patch.object(aidp_permission_service, "require_permission",
                           return_value=MagicMock(permission="READ_ONLY")), \
@@ -2023,7 +2021,9 @@ class TestUploadTasksEndpoint:
         assert response.status_code == HTTPStatus.OK
         body = response.json()
         assert body["value"] == history["value"]
-        assert body["total_count"] == 12
+        # total_count now reflects the global total (total_record_count),
+        # not the page-local total_count from AIDP History.
+        assert body["total_count"] == 31
         assert body["has_more"] is True
         assert body["stats"] == {
             "total": 31,
@@ -2034,7 +2034,7 @@ class TestUploadTasksEndpoint:
         }
         assert body["retention_days"] == 30
         list_history.assert_called_once_with(
-            SERVER_URL, API_KEY, "fs-1", "/kb-1", "kb-1", None,
+            SERVER_URL, API_KEY, "fs-1", "/aidp/knowledge/kb-1", "kb-1", None,
             2, 7, 4, "制度",
         )
 

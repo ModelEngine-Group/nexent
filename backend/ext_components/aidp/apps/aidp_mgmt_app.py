@@ -847,10 +847,15 @@ async def get_knowledge_base(
 
     detail = dict(detail)
     detail = _normalize_kb_config_fields(detail)
-    detail["document_count"] = await run_blocking(
-        "aidp-detail-document-count", count_aidp_docs_impl, server_url, api_key, kds_id,
-        lane="control-io", owner="config",
-    )
+    # Skip the Count call when the KB is already marked UNAVAILABLE - the
+    # detail fetch failed, so AIDP is likely down and Count would fail too.
+    # Escalating a second failure into a 5xx would prevent the UI from
+    # showing the degraded detail view with the UNAVAILABLE status.
+    if resource_status == "ACTIVE":
+        detail["document_count"] = await run_blocking(
+            "aidp-detail-document-count", count_aidp_docs_impl, server_url, api_key, kds_id,
+            lane="control-io", owner="config",
+        )
     detail["kds_id"] = kds_id
     detail["permission"] = decision.permission
     detail["resource_status"] = resource_status
@@ -1150,7 +1155,7 @@ async def list_ingested_files(
             lane="control-io",
             owner="config",
         )
-        count_result: int | BaseException | None = None
+        count_result = None
     else:
         list_result, count_result = await asyncio.gather(
             run_blocking(
@@ -1174,10 +1179,7 @@ async def list_ingested_files(
                 lane="control-io",
                 owner="config",
             ),
-            return_exceptions=True,
         )
-    if isinstance(list_result, BaseException):
-        raise list_result
     result = dict(list_result or {})
     rows = result.get("value") if isinstance(result.get("value"), list) else []
     total_reliable = isinstance(count_result, int) and not isinstance(count_result, bool)
@@ -1233,7 +1235,7 @@ async def list_upload_tasks(
             server_url,
             api_key,
             channel["fs_id"],
-            f"/{kds_id}",
+            channel["src_dir"],
             kds_id,
             None,
             page,
@@ -1245,9 +1247,14 @@ async def list_upload_tasks(
         )
     raw_items = history.get("value") if isinstance(history, dict) else None
     rows = [item for item in raw_items if isinstance(item, dict)] if isinstance(raw_items, list) else []
-    raw_total = history.get("total_count") if isinstance(history, dict) else None
-    total_reliable = isinstance(raw_total, int) and not isinstance(raw_total, bool)
-    total = int(raw_total) if total_reliable else (page - 1) * page_size + len(rows)
+    # AIDP History returns ``total_count`` as the current-page count, not the
+    # global total (``total_record_count`` is global). Treating the page-local
+    # value as reliable would make AidpPagination disable next-page navigation
+    # even when ``next_link`` is present, so pagination is driven by
+    # ``next_link`` and the global count is exposed separately
+    raw_global_total = history.get("total_record_count") if isinstance(history, dict) else None
+    total_reliable = isinstance(raw_global_total, int) and not isinstance(raw_global_total, bool)
+    total = int(raw_global_total) if total_reliable else (page - 1) * page_size + len(rows)
     reported_more = _history_reports_more(history) if isinstance(history, dict) else None
     has_more = (
         bool(reported_more)
@@ -1264,7 +1271,7 @@ async def list_upload_tasks(
         "extracting": _history_count("processing_record_count"),
         "failed": _history_count("failed_record_count"),
         "success": _history_count("success_record_count"),
-        "queued": _history_count("queued_record_count"),
+        "queued": _history_count("waiting_record_count"),
     }
     return JSONResponse(status_code=HTTPStatus.OK, content={
         "value": rows,
