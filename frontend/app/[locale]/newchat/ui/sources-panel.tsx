@@ -138,6 +138,9 @@ export const SourcesPanel: FC<SourcesPanelProps> = ({
 
   const showSources = activeTab === "sources";
   const currentItems = showSources ? sources : images;
+  const title = showSources
+    ? t("chat.sources.referenceTitle", { count: sources.length })
+    : t("chat.sources.imageTitle", { count: images.length });
 
   return (
     <aside
@@ -149,7 +152,7 @@ export const SourcesPanel: FC<SourcesPanelProps> = ({
       aria-label={t("chat.sources.panel")}
     >
       <header className="flex items-center justify-between gap-2 border-b border-slate-200 px-4 py-2">
-        <h2 className="text-base font-medium text-foreground">{t("chat.sources.referenceTitle", { count: sources.length })}</h2>
+        <h2 className="text-base font-medium text-foreground">{title}</h2>
         <Button
           variant="ghost"
           size="icon"

@@ -282,6 +282,7 @@
   "chat.sources.untitled": "未命名来源",
   "chat.sources.downloadError": "下载失败，请重试。",
   "chat.sources.referenceTitle": "参考来源（{{count}}）",
+  "chat.sources.imageTitle": "图片（{{count}}）",
   "chat.sources.attributes": "来源属性",
   "chat.sources.properties": "属性",
   "chat.sources.rawJson": "原始 JSON",

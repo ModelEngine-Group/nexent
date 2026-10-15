@@ -282,6 +282,7 @@
   "chat.sources.untitled": "Untitled source",
   "chat.sources.downloadError": "Download failed. Please try again.",
   "chat.sources.referenceTitle": "References ({{count}})",
+  "chat.sources.imageTitle": "Images ({{count}})",
   "chat.sources.attributes": "Source attributes",
   "chat.sources.properties": "Properties",
   "chat.sources.rawJson": "Raw JSON",

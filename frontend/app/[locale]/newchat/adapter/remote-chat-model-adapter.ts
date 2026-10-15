@@ -2158,6 +2158,7 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
     // Preserves cite_index for [[b1]] → source registry linkage.
     const searchSourcesAccumulator: SearchSource[] = [];
     const searchImagesAccumulator: SearchSource[] = [];
+    const consumedImageMetadata = new Set<SearchSource>();
     let skillFileAttachments: CompleteAttachment[] = [];
     let nl2a: Nl2aMessage | undefined;
     const acceptNl2aBoundary = (chunk: SseChunk): boolean => {
@@ -2223,10 +2224,9 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
         const metadata = imageMetadata.find(
           (source) =>
             source.url === imageUrl &&
-            !searchImagesAccumulator.some(
-              (image) => image.imageKey === source.imageKey
-            )
+            !consumedImageMetadata.has(source)
         );
+        if (metadata) consumedImageMetadata.add(metadata);
         const imageSource: SearchSource = {
           ...metadata,
           url: imageUrl,
