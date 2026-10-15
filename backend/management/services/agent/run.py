@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import asyncio
 from copy import deepcopy
 from http import HTTPStatus
@@ -2351,11 +2353,7 @@ async def run_agent_stream(
                 reservation_token,
             )
 
-    headers = {
-        "Cache-Control": "no-cache",
-        "Connection": "keep-alive",
-        "X-Accel-Buffering": "no",
-    }
+    headers = {"Cache-Control": "no-cache", "Connection": "keep-alive", "X-Accel-Buffering": "no"}
     debug_run_id = getattr(agent_request, "_debug_run_id", None)
     if debug_run_id is not None:
         headers["run_id"] = debug_run_id
