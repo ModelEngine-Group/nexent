@@ -1,19 +1,25 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """Skill instance and skill info database operations."""
 
 import json
 import logging
 from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Sequence, Set
 
-from sqlalchemy import or_, update as sa_update
+from sqlalchemy import or_
+from sqlalchemy import update as sa_update
+from sqlalchemy.orm import Session
 
-from database.client import get_db_session, filter_property, as_dict
-from database.db_models import SkillInfo, SkillToolRelation, SkillInstance, ToolInfo
 from consts.const import MAX_SKILLS_PER_TENANT
 from consts.error_code import ErrorCode
 from consts.exceptions import AppException
+from database.client import as_dict, filter_property, get_db_session
+from database.db_models import SkillInfo, SkillInstance, SkillToolRelation, ToolInfo
+from database.tool_db import parse_knowledge_selection, query_knowledge_tool_ids
 from utils.skill_params_utils import strip_params_comments_for_db
 from utils.str_utils import convert_list_to_string, convert_string_to_list
+
 
 logger = logging.getLogger(__name__)
 
@@ -483,11 +489,6 @@ def list_global_official_skills() -> List[Dict[str, Any]]:
             SkillInfo.source == 'official'
         ).all()
         return [_to_dict(s) for s in skills]
-        if skill:
-            result = _to_dict(skill)
-            result["tool_ids"] = _get_tool_ids(session, skill.skill_id)
-            return result
-        return None
 
 
 def create_skill(skill_data: Dict[str, Any], tenant_id: str) -> Dict[str, Any]:
@@ -875,3 +876,103 @@ def upsert_scanned_skills(skills: List[Dict[str, Any]], user_id: str, tenant_id:
                     update_time=datetime.now(),
                 )
                 session.add(new_skill)
+
+
+def query_skill_knowledge_bindings(
+    session: Session,
+    param_name: str,
+    resource_ids: Set[str],
+) -> List[Dict[str, Any]]:
+    """Return bindings injected through skill configurations.
+
+    Mirrors ``_resolve_runtime_tool_records``: the skill template values are
+    overridden by the per-agent skill instance values before the merged config
+    is applied to every tool listed on the skill.
+    """
+    knowledge_tool_ids = query_knowledge_tool_ids(session, param_name)
+    if not knowledge_tool_ids:
+        return []
+    instances = (
+        session.query(SkillInstance)
+        .filter(SkillInstance.delete_flag != "Y")
+        .all()
+    )
+    if not instances:
+        return []
+    skill_ids = {int(inst.skill_id) for inst in instances if inst.skill_id is not None}
+    if not skill_ids:
+        return []
+    skills: Dict[int, Dict[str, Any]] = {}
+    for skill in (
+        session.query(SkillInfo)
+        .filter(
+            SkillInfo.skill_id.in_(tuple(skill_ids)),
+            SkillInfo.delete_flag != "Y",
+        )
+        .all()
+    ):
+        skills[int(skill.skill_id)] = as_dict(skill) or {}
+    tool_ids_by_skill: Dict[int, Set[int]] = {}
+    for skill_id, tool_id in (
+        session.query(SkillToolRelation.skill_id, SkillToolRelation.tool_id)
+        .filter(SkillToolRelation.skill_id.in_(tuple(skill_ids)))
+        .all()
+    ):
+        tool_ids_by_skill.setdefault(int(skill_id), set()).add(int(tool_id))
+
+    rows: List[Dict[str, Any]] = []
+    for instance in instances:
+        data = as_dict(instance) or {}
+        skill_id = data.get("skill_id")
+        if skill_id is None:
+            continue
+        skill = skills.get(int(skill_id))
+        if not skill:
+            continue
+        if not (tool_ids_by_skill.get(int(skill_id), set()) & knowledge_tool_ids):
+            continue
+        effective_config: Dict[str, Any] = dict(skill.get("config_values") or {})
+        effective_config.update(data.get("config_values") or {})
+        if not resource_ids.intersection(parse_knowledge_selection(effective_config.get(param_name))):
+            continue
+        rows.append(
+            {
+                "agent_id": data.get("agent_id"),
+                "version_no": int(data.get("version_no") or 0),
+            }
+        )
+    return rows
+
+
+def remove_skill_knowledge_bindings(
+    session: Session, *, index_names: Sequence[str] = (), kds_ids: Sequence[str] = (),
+) -> int:
+    """Remove deleted knowledge selections from skill instance configurations."""
+    targets_by_param = {name: set(ids) for name, ids in (
+        ("index_names", index_names), ("kds_list", kds_ids),
+    ) if ids}
+    if not targets_by_param:
+        return 0
+    changed = 0
+    for instance in (
+        session.query(SkillInstance)
+        .filter(SkillInstance.delete_flag != "Y")
+        .all()
+    ):
+        data = as_dict(instance) or {}
+        config_values = data.get("config_values") or {}
+        if not isinstance(config_values, dict):
+            continue
+        updated = dict(config_values)
+        for param_name, target_ids in targets_by_param.items():
+            current = config_values.get(param_name)
+            ids = parse_knowledge_selection(current)
+            if not target_ids.intersection(ids):
+                continue
+            kept_ids = [item for item in ids if item not in target_ids]
+            updated[param_name] = json.dumps(kept_ids) if isinstance(current, str) else kept_ids
+        if updated != config_values:
+            instance.config_values = updated
+            changed += 1
+
+    return changed

@@ -1,13 +1,21 @@
-import logging
-from typing import List, Optional
-from sqlalchemy import or_, text, update
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
-from database.client import get_db_session, as_dict, filter_property
-from database.db_models import AgentInfo, ToolInstance, AgentRelation
-from database.agent_version_db import query_current_version_no
+
+import logging
+from typing import Any, Dict, Iterable, List, Optional, Sequence, Set, Tuple
+
+from sqlalchemy import or_, text, update
+from sqlalchemy.orm import Session
+
 from consts.const import ASSET_OWNER_TENANT_ID, MAX_AGENTS_PER_TENANT
 from consts.exceptions import AgentNotFoundError, TenantResourceLimitError
+from database.agent_version_db import query_current_version_no
+from database.client import as_dict, filter_property, get_db_session
+from database.db_models import AgentInfo, AgentRelation, AgentVersion, ToolInstance
+from database.skill_db import query_skill_knowledge_bindings
+from database.tool_db import query_tool_knowledge_bindings
 from utils.str_utils import convert_list_to_string
+
 
 logger = logging.getLogger("agent_db")
 
@@ -144,7 +152,7 @@ def search_blank_sub_agent_by_main_agent_id(tenant_id: str, version_no: int = 0)
             AgentInfo.tenant_id == tenant_id,
             AgentInfo.version_no == version_no,
             AgentInfo.delete_flag != 'Y',
-            AgentInfo.enabled == False
+            AgentInfo.enabled.is_(False)
         ).first()
         if sub_agent:
             return sub_agent.agent_id
@@ -829,3 +837,92 @@ def delete_agent_relationship(
             AgentRelation.version_no == version_no
         ).update(
             {AgentRelation.delete_flag: 'Y', 'updated_by': user_id})
+
+
+def _query_knowledge_binding_rows(session: Session, index_names, kds_ids):
+    rows = []
+    for param_name, ids in (("index_names", index_names), ("kds_list", kds_ids)):
+        if ids:
+            rows.extend(query_tool_knowledge_bindings(session, param_name, set(ids)))
+            rows.extend(query_skill_knowledge_bindings(session, param_name, set(ids)))
+    return list({
+        (int(row["agent_id"]), int(row.get("version_no") or 0)): row
+        for row in rows if row.get("agent_id") is not None
+    }.values())
+
+
+def query_live_knowledge_bindings(
+    session: Session,
+    *, index_names: Sequence[str] = (), kds_ids: Sequence[str] = (),
+) -> List[Dict[str, Any]]:
+    """Return reference rows whose agent and version still exist undeleted.
+
+    Agent and tool ``enabled`` flags are intentionally ignored: a disabled
+    agent or a disabled tool keeps its bindings and therefore still appears
+    in the deletion preview.
+    """
+    rows = _query_knowledge_binding_rows(session, index_names, kds_ids)
+    if not rows:
+        return []
+    agent_ids = {int(row["agent_id"]) for row in rows}
+    live_agent_keys: Set[Tuple[int, int]] = set()
+    for agent_id, version_no in (
+        session.query(AgentInfo.agent_id, AgentInfo.version_no)
+        .filter(
+            AgentInfo.agent_id.in_(tuple(agent_ids)),
+            AgentInfo.delete_flag != "Y",
+        )
+        .all()
+    ):
+        live_agent_keys.add((int(agent_id), int(version_no or 0)))
+
+    version_pairs = {(aid, vno) for (aid, vno) in live_agent_keys if vno > 0}
+    live_version_keys: Set[Tuple[int, int]] = set()
+    if version_pairs:
+        version_agent_ids = {aid for aid, _ in version_pairs}
+        for agent_id, version_no in (
+            session.query(AgentVersion.agent_id, AgentVersion.version_no)
+            .filter(
+                AgentVersion.agent_id.in_(tuple(version_agent_ids)),
+                AgentVersion.delete_flag != "Y",
+            )
+            .all()
+        ):
+            live_version_keys.add((int(agent_id), int(version_no)))
+
+    live_rows: List[Dict[str, Any]] = []
+    for row in rows:
+        key = (int(row["agent_id"]), int(row.get("version_no") or 0))
+        if key not in live_agent_keys:
+            continue
+        if key[1] > 0 and key not in live_version_keys:
+            continue
+        live_rows.append(row)
+    return live_rows
+
+
+def query_binding_agent_metadata(
+    session: Session,
+    agent_ids: Iterable[int],
+    *,
+    tenant_id: str,
+) -> Dict[int, Dict[str, Any]]:
+    """Return draft metadata within the caller's tenant and shared assets."""
+    ids = sorted({int(agent_id) for agent_id in agent_ids})
+    if not ids:
+        return {}
+    rows = (
+        session.query(AgentInfo)
+        .filter(
+            AgentInfo.agent_id.in_(tuple(ids)),
+            AgentInfo.tenant_id.in_((tenant_id, ASSET_OWNER_TENANT_ID)),
+            AgentInfo.version_no == 0,
+            AgentInfo.delete_flag != "Y",
+        )
+        .all()
+    )
+    metadata: Dict[int, Dict[str, Any]] = {}
+    for row in rows:
+        data = as_dict(row) or {}
+        metadata[int(data["agent_id"])] = data
+    return metadata

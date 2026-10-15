@@ -61,7 +61,9 @@ def aidp_service_module():
 
     # Remote API tests isolate binding persistence, covered by cascade tests.
     module.get_db_session = MagicMock()
-    module.strip_deleted_resource_from_bindings = MagicMock()
+    module.remove_tool_knowledge_bindings = MagicMock()
+    module.remove_skill_knowledge_bindings = MagicMock()
+    module.remove_conversation_knowledge_bindings = MagicMock()
 
     try:
         yield module

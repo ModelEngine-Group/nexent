@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import sys
 import types
 import pytest
@@ -126,6 +128,14 @@ sys.modules['database.db_models'] = db_models_mock
 sys.modules['backend.database.db_models'] = db_models_mock
 
 # 现在可以安全地导入被测试的模块
+for module_name, function_name in (
+    ("database.tool_db", "query_tool_knowledge_bindings"),
+    ("database.skill_db", "query_skill_knowledge_bindings"),
+):
+    collaborator = types.ModuleType(module_name)
+    setattr(collaborator, function_name, MagicMock())
+    sys.modules[module_name] = collaborator
+
 from backend.database.agent_db import (
     search_agent_info_by_agent_id,
     search_agent_id_by_agent_name,

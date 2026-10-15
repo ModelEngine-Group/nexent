@@ -2,6 +2,8 @@
 
 "use client";
 
+import knowledgeBaseService from "@/services/knowledgeBaseService";
+
 import React, { useMemo, useState, useEffect, useCallback } from "react";
 import { useTranslation } from "react-i18next";
 import {
@@ -30,7 +32,6 @@ import { useKnowledgeList } from "@/hooks/knowledge/useKnowledgeList";
 import { useGroupList } from "@/hooks/group/useGroupList";
 import { useAuthorization } from "@/hooks/auth/useAuthorization";
 import { useConfirmModal } from "@/hooks/useConfirmModal";
-import knowledgeBaseService from "@/services/knowledgeBaseService";
 import quotaService from "@/services/quotaService";
 import { type KnowledgeBase } from "@/types/knowledgeBase";
 import type { QuotaUsageResponse, KBQuotaStatus } from "@/types/quota";
@@ -40,8 +41,7 @@ import { QuotaSettingsModal } from "./QuotaSettingsModal";
 import { SuQuotaModal } from "./SuQuotaModal";
 import { formatDateTime as formatDateTimeUtil } from "@/lib/date";
 import { formatKnowledgeBaseDeleteError } from "@/lib/knowledgeBaseDeleteError";
-import KnowledgeReferenceDeleteNotice from "@/components/knowledge-base/KnowledgeReferenceDeleteNotice";
-import { previewKnowledgeReferences } from "@/services/knowledgeResourceService";
+import KnowledgeBaseDeleteNotice from "@/components/knowledge-base/KnowledgeBaseDeleteNotice";
 
 // Color constants for progress bars
 const STROKE_COLORS = {
@@ -560,8 +560,7 @@ export default function KnowledgeList({
                 onClick={async () => {
                   // Deletion cascades: the dialog lists the agents that lose
                   // their binding, plus a fixed notice for conversations.
-                  const preview = await previewKnowledgeReferences(
-                    "local",
+                  const preview = await knowledgeBaseService.previewBoundAgents(
                     record.id
                   );
                   confirm({
@@ -569,7 +568,7 @@ export default function KnowledgeList({
                     content: (
                       <div>
                         <div>{t("common.cannotBeUndone")}</div>
-                        <KnowledgeReferenceDeleteNotice preview={preview} />
+                        <KnowledgeBaseDeleteNotice preview={preview} />
                       </div>
                     ),
                     okText: t("common.confirm"),

@@ -1392,18 +1392,6 @@ class ToolInstanceInfoRequest(BaseModel):
     params: Dict[str, Any]
     enabled: bool
     version_no: int = 0
-    # Optional explicit removal intent for managed knowledge tools. Every id
-    # must already be persisted on the draft tool instance and must not appear
-    # in the submitted params. Not persisted and never forwarded to the SDK.
-
-
-class KnowledgeReferencePreviewRequest(BaseModel):
-    """Preview of the agents bound to one resource, for the delete dialog."""
-
-    model_config = ConfigDict(str_strip_whitespace=True)
-
-    provider: Literal["local", "aidp"]
-    resource_id: str = Field(min_length=1)
 
 
 class SkillInstanceInfoRequest(BaseModel):

@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """Unit tests for backend.database.skill_db module."""
 import sys
 import os
@@ -92,6 +94,11 @@ sys.modules['utils.str_utils'] = utils_str_utils_mock
 sys.modules['backend.utils'] = MagicMock()
 sys.modules['backend.utils.skill_params_utils'] = utils_skill_params_mock
 sys.modules['backend.utils.str_utils'] = utils_str_utils_mock
+
+tool_db_mock = types.ModuleType("database.tool_db")
+tool_db_mock.parse_knowledge_selection = MagicMock()
+tool_db_mock.query_knowledge_tool_ids = MagicMock()
+sys.modules["database.tool_db"] = tool_db_mock
 
 from backend.database.skill_db import (
     _params_value_for_db,

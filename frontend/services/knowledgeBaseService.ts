@@ -1,10 +1,11 @@
 // Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
+import type { KnowledgeBaseDeletionPreview } from "@/types/knowledgeBase";
 // Unified encapsulation of knowledge base related API calls
 
 import i18n from "i18next";
 
-import { API_ENDPOINTS, ApiError } from "./api";
+import { API_ENDPOINTS, ApiError, fetchWithErrorHandling } from "./api";
 
 import { NAME_CHECK_STATUS } from "@/const/agentConfig";
 import { ErrorCode } from "@/const/errorCode";
@@ -50,6 +51,24 @@ const resolveIsMultimodal = (indexInfo: any, stats: any): boolean =>
 
 // Knowledge base service class
 class KnowledgeBaseService {
+  async previewBoundAgents(
+    indexName: string
+  ): Promise<KnowledgeBaseDeletionPreview | null> {
+    try {
+      const response = await fetchWithErrorHandling(
+        API_ENDPOINTS.knowledgeBase.boundAgents(indexName),
+        {
+          method: "GET",
+          headers: getAuthHeaders(),
+        }
+      );
+      return await response.json();
+    } catch (error) {
+      log.warn("Knowledge base deletion preview unavailable:", error);
+      return null;
+    }
+  }
+
   // Check Elasticsearch health (force refresh, no caching for setup page)
   async checkHealth(): Promise<boolean> {
     try {

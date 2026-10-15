@@ -4,7 +4,7 @@
 
 import { useTranslation } from "react-i18next";
 
-import type { KnowledgeReferencePreview } from "@/types/knowledgeResource";
+import type { KnowledgeBaseDeletionPreview } from "@/types/knowledgeBase";
 
 /**
  * Extra content for the knowledge-base delete confirmation dialog.
@@ -14,10 +14,10 @@ import type { KnowledgeReferencePreview } from "@/types/knowledgeResource";
  * knowledge base. Agents are listed by name, one row per agent; conversations
  * are covered by a fixed notice instead of being enumerated.
  */
-export default function KnowledgeReferenceDeleteNotice({
+export default function KnowledgeBaseDeleteNotice({
   preview,
 }: {
-  preview: KnowledgeReferencePreview | null;
+  preview: KnowledgeBaseDeletionPreview | null;
 }) {
   const { t } = useTranslation("common");
   if (!preview) return null;
@@ -27,7 +27,7 @@ export default function KnowledgeReferenceDeleteNotice({
   if (agents.length === 0 && hiddenCount === 0) {
     return (
       <div className="mt-2 text-sm text-gray-600">
-        {t("knowledgeResource.deleteNotice.conversationsNotice")}
+        {t("knowledgeBase.deleteNotice.conversationsNotice")}
       </div>
     );
   }
@@ -36,7 +36,7 @@ export default function KnowledgeReferenceDeleteNotice({
     <div className="mt-2 space-y-1 text-sm text-gray-600">
       {agents.length > 0 && (
         <>
-          <div>{t("knowledgeResource.deleteNotice.agentsIntro")}</div>
+          <div>{t("knowledgeBase.deleteNotice.agentsIntro")}</div>
           <ul
             className="max-h-40 list-inside list-disc overflow-y-auto"
             data-testid="knowledge-reference-delete-agents"
@@ -51,12 +51,12 @@ export default function KnowledgeReferenceDeleteNotice({
       )}
       {hiddenCount > 0 && (
         <div>
-          {t("knowledgeResource.deleteNotice.hiddenAgents", {
+          {t("knowledgeBase.deleteNotice.hiddenAgents", {
             count: hiddenCount,
           })}
         </div>
       )}
-      <div>{t("knowledgeResource.deleteNotice.conversationsNotice")}</div>
+      <div>{t("knowledgeBase.deleteNotice.conversationsNotice")}</div>
     </div>
   );
 }

@@ -1,9 +1,13 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
+
 import json
 from copy import deepcopy
 from datetime import datetime
-from typing import Any, Dict, List, Optional, TypedDict
+from typing import Any, Dict, List, Optional, Sequence, Set, Tuple, TypedDict
 
-from sqlalchemy import asc, desc, func, insert, select, text, update
+from sqlalchemy import String, asc, cast, desc, func, insert, or_, select, text, update
+from sqlalchemy.orm import Session
 
 from consts.const import (
     MAX_CONVERSATION_TURNS,
@@ -18,6 +22,7 @@ from consts.exceptions import (
     WorkbenchConfigVersionConflict,
     WorkbenchError,
 )
+from database.db_models import KnowledgeRecord
 
 from .client import as_dict, db_client, get_db_session
 from .db_models import (
@@ -2555,3 +2560,92 @@ def get_historical_context(
                 **summary_payload,
             }
         return {"history_summary": summary_result, "conversation_turns": turns}
+
+
+def _strip_scope_ids(scope: Any, provider: str, target_ids: Set[str]) -> Tuple[Any, bool]:
+    """Remove target ids from a conversation scope payload; report whether it changed.
+
+    An override scope that loses its last item falls back to ``inherit``: the
+    persisted model rejects an override with an empty list, and "inherit" is
+    the honest meaning of "no conversation-scoped selection anymore".
+    """
+    if not isinstance(scope, dict):
+        return scope, False
+    branch_name = "aidp" if provider == "aidp" else "local"
+    list_key = "kds_ids" if provider == "aidp" else "knowledge_ids"
+    branch = scope.get(branch_name)
+    if not isinstance(branch, dict):
+        return scope, False
+    values = branch.get(list_key)
+    if not isinstance(values, list):
+        return scope, False
+    kept = [item for item in values if str(item) not in target_ids]
+    if len(kept) == len(values):
+        return scope, False
+    updated = deepcopy(scope)
+    updated[branch_name][list_key] = kept
+    if not kept and updated[branch_name].get("mode") == "override":
+        updated[branch_name]["mode"] = "inherit"
+    return updated, True
+
+
+def remove_conversation_knowledge_bindings(
+    session: Session, *, index_names: Sequence[str] = (), kds_ids: Sequence[str] = ()
+) -> int:
+    """Strip deleted resources from both persisted conversation scope copies.
+
+    Local conversation scopes persist the numeric ``knowledge_id`` while AIDP
+    scopes persist the ``kds_id``; both spellings of the target are removed.
+    The scope lives on the conversation row twice — as the projected
+    ``knowledge_scope`` and inside ``workbench_config`` — and both copies are
+    updated so the next workbench save cannot resurrect the stale reference.
+    """
+    targets_by_provider = {source: set(ids) for source, ids in (
+        ("local", index_names), ("aidp", kds_ids),
+    ) if ids}
+    if not targets_by_provider:
+        return 0
+    if "local" in targets_by_provider:
+        records = (
+            session.query(KnowledgeRecord)
+            .filter(KnowledgeRecord.index_name.in_(tuple(targets_by_provider["local"])))
+            .all()
+        )
+        targets_by_provider["local"].update(
+            str(record.knowledge_id) for record in records if record.knowledge_id is not None
+        )
+
+    patterns = {f"%{item}%" for ids in targets_by_provider.values() for item in ids}
+    filters = []
+    for pattern in patterns:
+        filters.append(cast(ConversationRecord.knowledge_scope, String).like(pattern))
+        filters.append(cast(ConversationRecord.workbench_config, String).like(pattern))
+    rows = (
+        session.query(ConversationRecord)
+        .filter(
+            ConversationRecord.delete_flag == "N",
+            or_(*filters),
+        )
+        .all()
+    )
+
+    changed = 0
+    for record in rows:
+        row_changed = False
+        scope = record.knowledge_scope
+        workbench = deepcopy(record.workbench_config)
+        for provider, target_ids in targets_by_provider.items():
+            scope, scope_changed = _strip_scope_ids(scope, provider, target_ids)
+            row_changed |= scope_changed
+            if isinstance(workbench, dict):
+                inner_scope, inner_changed = _strip_scope_ids(
+                    workbench.get("knowledge_scope"), provider, target_ids
+                )
+                if inner_changed:
+                    workbench["knowledge_scope"] = inner_scope
+                    row_changed = True
+        if row_changed:
+            record.knowledge_scope = scope
+            record.workbench_config = workbench
+            changed += 1
+    return changed

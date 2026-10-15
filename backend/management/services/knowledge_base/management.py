@@ -11,6 +11,7 @@ Main features include:
 3. Support for multiple search methods: exact search, semantic search, and hybrid search
 4. Health check interface
 """
+
 import os
 import time
 from datetime import datetime, timezone
@@ -28,8 +29,10 @@ from consts.const import (
 )
 from consts.error_code import ErrorCode
 from consts.exceptions import AppException, DuplicateError
+from database.agent_db import query_binding_agent_metadata, query_live_knowledge_bindings
 from database.attachment_db import delete_file, file_exists, get_file_stream
 from database.client import get_db_session
+from database.conversation_db import remove_conversation_knowledge_bindings
 from database.group_db import query_group_ids_by_user
 from database.knowledge_db import (
     create_knowledge_record,
@@ -45,9 +48,10 @@ from database.knowledge_file_lifecycle_db import (
     delete_file_records_for_knowledge_base,
     list_file_records,
 )
-from database.knowledge_reference_db import strip_deleted_resource_from_bindings
 from database.knowledge_storage_object_db import list_committed_storage_objects
 from database.model_management_db import get_model_by_model_id
+from database.skill_db import remove_skill_knowledge_bindings
+from database.tool_db import remove_tool_knowledge_bindings
 from database.user_tenant_db import get_user_tenant_by_user_id
 from management.services.knowledge_base.common import (
     _QUOTA_LIMIT_UNSET,
@@ -76,7 +80,7 @@ from management.services.model.resolver import (
 )
 from permissions.dac import ResourceAccessControl
 from permissions.models import Resource
-from services.asset_owner_visibility import postprocess_knowledge_visibility
+from services.asset_owner_visibility import get_visible_agent_names, postprocess_knowledge_visibility
 from services.group_service import get_tenant_default_group_id
 from services.knowledge_storage_service import (
     release_storage_charge,
@@ -105,6 +109,21 @@ class KnowledgeBaseManagementService:
     require_knowledge_base_edit_permission = staticmethod(require_knowledge_base_edit_permission)
     require_knowledge_base_read_permission = staticmethod(require_knowledge_base_read_permission)
     filter_accessible_indices = staticmethod(filter_accessible_indices)
+
+    @staticmethod
+    def get_bound_agents(index_names: list[str], *, user_id: str, tenant_id: str) -> dict:
+        """Preview agents affected by deleting the selected knowledge bases."""
+        with get_db_session() as session:
+            rows = query_live_knowledge_bindings(session, index_names=index_names)
+            metadata = query_binding_agent_metadata(
+                session, [row["agent_id"] for row in rows], tenant_id=tenant_id,
+            )
+        agents = get_visible_agent_names(metadata, user_id=user_id)
+        return {
+            "agents": agents,
+            "hidden_agent_count": len(metadata) - len(agents),
+            "total_agent_count": len(metadata),
+        }
 
     @staticmethod
     async def full_delete_knowledge_base(index_name: str, vdb_core: VectorDatabaseCore, user_id: str):
@@ -222,7 +241,9 @@ class KnowledgeBaseManagementService:
                 result["redis_warnings"] = redis_cleanup_result["errors"]
 
             with get_db_session() as session:
-                strip_deleted_resource_from_bindings(session, [("local", index_name)])
+                remove_tool_knowledge_bindings(session, index_names=[index_name])
+                remove_skill_knowledge_bindings(session, index_names=[index_name])
+                remove_conversation_knowledge_bindings(session, index_names=[index_name])
             logger.info(
                 f"Successfully completed full deletion process for knowledge base '{index_name}'.")
             return result

@@ -6,16 +6,10 @@ from dataclasses import dataclass
 from typing import Dict, Optional
 
 from consts.agent_unavailable_reasons import AgentUnavailableReason
-from consts.const import ASSET_OWNER_TENANT_ID, CAN_EDIT_ALL_USER_ROLES, PERMISSION_PRIVATE
 from database.agent_db import search_agent_info_by_agent_id
-from database.client import get_db_session
-from database.group_db import query_group_ids_by_user
-from database.knowledge_reference_db import query_agent_reference_metadata, query_live_agent_reference_rows
 from database.model_management_db import get_model_by_model_id_ignore_delete, get_valid_model_ids
 from database.tool_db import check_tool_is_available, search_tools_for_sub_agent
-from database.user_tenant_db import get_user_tenant_by_user_id
 from management.services.model.resolver import is_model_available, resolve_model_record
-from utils.str_utils import convert_string_to_list
 
 
 @dataclass(frozen=True)
@@ -156,42 +150,3 @@ def apply_duplicate_name_availability_rules(enriched_agents: list[dict]) -> None
     _mark_duplicates(name_groups, AgentUnavailableReason.DUPLICATE_NAME)
     _mark_duplicates(display_name_groups,
                      AgentUnavailableReason.DUPLICATE_DISPLAY_NAME)
-
-
-def collect_agent_reference_preview(
-    resources: list[tuple[str, str]], *, user_id: str, tenant_id: str,
-) -> dict:
-    """List bound agents for deletion confirmation, respecting agent visibility."""
-    with get_db_session() as session:
-        rows = query_live_agent_reference_rows(session, resources)
-        metadata = query_agent_reference_metadata(
-            session, [row["agent_id"] for row in rows], tenant_id=tenant_id,
-        )
-    if not metadata:
-        return {"agents": [], "hidden_agent_count": 0, "total_agent_count": 0}
-
-    role = str((get_user_tenant_by_user_id(user_id) or {}).get("user_role") or "").upper()
-    can_edit_all = role in CAN_EDIT_ALL_USER_ROLES
-    user_groups = set(query_group_ids_by_user(user_id) or []) if not can_edit_all else set()
-    agents = []
-    for agent_id, agent in metadata.items():
-        visible = (
-            can_edit_all
-            or str(agent.get("created_by")) == str(user_id)
-            or agent.get("tenant_id") == ASSET_OWNER_TENANT_ID
-            or (
-                bool(user_groups.intersection(convert_string_to_list(agent.get("group_ids"))))
-                and agent.get("ingroup_permission") != PERMISSION_PRIVATE
-            )
-        )
-        if visible:
-            agents.append({
-                "agent_id": agent_id,
-                "display_name": agent.get("display_name") or agent.get("name") or str(agent_id),
-            })
-    agents.sort(key=lambda item: (item["display_name"], item["agent_id"]))
-    return {
-        "agents": agents,
-        "hidden_agent_count": len(metadata) - len(agents),
-        "total_agent_count": len(metadata),
-    }

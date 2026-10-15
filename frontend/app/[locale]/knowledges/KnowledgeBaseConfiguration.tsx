@@ -2,6 +2,8 @@
 
 "use client";
 
+import knowledgeBaseService from "@/services/knowledgeBaseService";
+
 import type React from "react";
 import type { TFunction } from "i18next";
 import {
@@ -31,7 +33,6 @@ import { useConfirmModal } from "@/hooks/useConfirmModal";
 import log from "@/lib/logger";
 import { formatKnowledgeBaseDeleteError } from "@/lib/knowledgeBaseDeleteError";
 import { createKnowledgeBaseFilterKey } from "@/lib/knowledgeBaseViewport";
-import knowledgeBaseService from "@/services/knowledgeBaseService";
 import knowledgeBasePollingService from "@/services/knowledgeBasePollingService";
 import { isKnowledgeBaseFileSizeValid } from "@/services/uploadService";
 import { KnowledgeBase } from "@/types/knowledgeBase";
@@ -45,8 +46,7 @@ import type { KBQuotaStatus, QuotaUsageResponse } from "@/types/quota";
 
 import KnowledgeBaseList from "./components/knowledge/KnowledgeBaseList";
 import DocumentList from "./components/document/DocumentList";
-import KnowledgeReferenceDeleteNotice from "@/components/knowledge-base/KnowledgeReferenceDeleteNotice";
-import { previewKnowledgeReferences } from "@/services/knowledgeResourceService";
+import KnowledgeBaseDeleteNotice from "@/components/knowledge-base/KnowledgeBaseDeleteNotice";
 import {
   useKnowledgeBaseContext,
   KnowledgeBaseProvider,
@@ -638,7 +638,7 @@ function DataConfig({ isActive }: DataConfigProps) {
 
     // Deletion cascades: the dialog lists the agents that lose their binding,
     // plus a fixed notice for conversations.
-    const preview = await previewKnowledgeReferences("local", id);
+    const preview = await knowledgeBaseService.previewBoundAgents(id);
 
     // Normal delete confirmation for local knowledge bases
     confirm({
@@ -646,7 +646,7 @@ function DataConfig({ isActive }: DataConfigProps) {
       content: (
         <div>
           <div>{t("knowledgeBase.modal.deleteConfirm.content")}</div>
-          <KnowledgeReferenceDeleteNotice preview={preview} />
+          <KnowledgeBaseDeleteNotice preview={preview} />
         </div>
       ),
       okText: t("common.confirm"),

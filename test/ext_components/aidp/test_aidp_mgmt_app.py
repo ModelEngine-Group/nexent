@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """Unit tests for the v7.1 AIDP management endpoints.
 
 These tests exercise the FastAPI router in ``backend/ext_components/aidp/apps/aidp_mgmt_app.py``
@@ -76,6 +78,8 @@ _db_client.MinioClient = MagicMock()
 _db_client.PostgresClient = MagicMock()
 _db_client.as_dict = lambda obj: dict(obj) if isinstance(obj, dict) else {}
 _db_client.get_db_session = MagicMock()
+_db_client.filter_property = MagicMock()
+_db_client.db_client = MagicMock()
 for mod in (_db_pkg, _db_client):
     sys.modules.setdefault(mod.__name__, mod)
 
@@ -1797,6 +1801,8 @@ class TestAIDPServerSideKnowledgeFileQueries:
 
         async def run_blocking(name, _function, *args, **kwargs):
             calls.append((name, args, kwargs))
+            if name == "authenticate-aidp-request":
+                return _function(*args)
             if name == "aidp-list-documents":
                 return {"value": [{"file_uuid": "f-1", "file_name": "policy.pdf"}], "next_link": "/next"}
             if name == "aidp-document-count":
@@ -1815,7 +1821,7 @@ class TestAIDPServerSideKnowledgeFileQueries:
         assert body["total_reliable"] is True
         assert body["has_more"] is True
         assert {call[0] for call in calls} == {
-            "aidp-list-documents", "aidp-document-count"
+            "authenticate-aidp-request", "aidp-list-documents", "aidp-document-count"
         }
 
     def test_unfiltered_ingested_file_list_propagates_list_failure(self, monkeypatch):
@@ -1829,6 +1835,8 @@ class TestAIDPServerSideKnowledgeFileQueries:
         )
 
         async def run_blocking(name, _function, *args, **kwargs):
+            if name == "authenticate-aidp-request":
+                return _function(*args)
             if name == "aidp-list-documents":
                 raise list_error
             if name == "aidp-document-count":
