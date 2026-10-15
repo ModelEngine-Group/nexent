@@ -1,0 +1,104 @@
+schema_version: '1.0'
+stage: D5
+module: V5-BASELINE
+case:
+  case_id: REL-AUTO-AF6CA560E762D682
+  feature_id: V5-REL-AUTO-AF6CA560E762D682
+  business_rule_ids:
+  - V5-REL-AUTO-AF6CA560E762D682-RULE-01
+  title: config_lifespan 启动恢复顺序与失败容错及关闭优雅停止
+  type: RELIABILITY
+  priority: P1
+  status: active
+  automation: automated
+  objective: 配置服务启动时 recover_config_tasks、evaluation_maintenance.start、schedule_interrupted_upload_cleanup 若顺序错乱或异常被吞，将导致运行中任务恢复缺失、评估维护未启动、中断上传清理遗漏；关闭时未按序停止
+    dreaming/eval maintenance 且未清理 config_thread_manager，会使线程残留、调度器泄漏并令 /health/ready 返回错误健康态。
+  preconditions:
+  - '- ${NEXENT_TEST_HOME}/config/secrets.env
+
+    - ${NEXENT_TEST_HOME}/config/environment.yaml（本地测试环境参数，含 RUNTIME_THREAD_SHUTDOWN_GRACE_SECONDS）
+
+    - 进程级 config_thread_manager（backend/services/thread_lifecycle_service.py:79-115）
+
+    - consts.task_recovery.CONFIG_SERVICE_NAME'
+  test_data:
+    legacy_asset_declaration: '- ${NEXENT_TEST_HOME}/config/secrets.env
+
+      - ${NEXENT_TEST_HOME}/config/environment.yaml（本地测试环境参数，含 RUNTIME_THREAD_SHUTDOWN_GRACE_SECONDS）
+
+      - 进程级 config_thread_manager（backend/services/thread_lifecycle_service.py:79-115）
+
+      - consts.task_recovery.CONFIG_SERVICE_NAME'
+  steps:
+  - order: 1
+    action: 在本地后端测试环境导入 backend/apps/config_app.py 的 config_lifespan 与 recover_config_tasks_on_startup，令 config_thread_manager
+      处于 ManagerState.CREATED，monkeypatch services.startup_recovery_service.recover_config_tasks / schedule_interrupted_upload_cleanup
+      与 services.evaluation_maintenance.start，记录各调用时间戳以还原顺序。
+    expected: 启动顺序与源码一致：recover_config_tasks 经 control-io lane 执行在前，接着 evaluation_maintenance.start(config_thread_manager)，最后
+      schedule_interrupted_upload_cleanup(CONFIG_SERVICE_NAME)，顺序不可颠倒。
+  - order: 2
+    action: 通过 async with config_lifespan(app) 进入启动路径，断言启动顺序：先执行 recover_config_tasks（经 config_thread_manager.run 的 control-io
+      lane，task_name=recover-config-tasks），随后 evaluation_maintenance.start(config_thread_manager)，最后 schedule_interrupted_upload_cleanup(CONFIG_SERVICE_NAME)。
+    expected: 就绪态下 /health/ready 返回 200 且 manager_state=running、stuck_count=0；当 recover_config_tasks 或 schedule_interrupted_upload_cleanup
+      抛异常时进程不进入可用状态。
+  - order: 3
+    action: 断言 config_thread_manager.state 已由 CREATED 转为 running，并通过 set_default_thread_manager(config_thread_manager) 设为进程默认线程管理器；随后调用
+      GET /health/ready，断言 HTTP 200 且响应体 manager_state=running、stuck_count=0。
+    expected: 默认 prompt 模板同步失败被捕获、记录 error 日志但不阻断启动；关闭按序执行 stop_dreaming_scheduler、evaluation_maintenance.stop、config_thread_manager.shutdown
+      并最终 clear_default_thread_manager，退出后 /health/ready 返回 503。
+  - order: 4
+    action: 失败容错：分别令 recover_config_tasks、schedule_interrupted_upload_cleanup 抛出异常，断言异常自启动阶段向上传播、应用不进入 yield（启动失败），且不留下 manager
+      状态为 running 的虚假可用态。
+    expected: 全程无吞异常后伪成功，日志不输出明文 API Key/Token/密码/模型密钥。
+  - order: 5
+    action: 令 sync_system_default_prompt_template 抛异常，验证 sync_default_prompt_template_on_startup 内 try/except 捕获并记录 error
+      日志，不阻断后续 start_dreaming_scheduler 与 yield。
+    expected: 全程无吞异常后伪成功，日志不输出明文 API Key/Token/密码/模型密钥。
+  - order: 6
+    action: 正常退出异步上下文，断言 finally 块按 stop_dreaming_scheduler → evaluation_maintenance.stop → config_thread_manager.shutdown(timeout=RUNTIME_THREAD_SHUTDOWN_GRACE_SECONDS)
+      → clear_default_thread_manager(config_thread_manager) 顺序执行；退出后再调 GET /health/ready 断言返回 503（manager_state 非 running）。
+    expected: 全程无吞异常后伪成功，日志不输出明文 API Key/Token/密码/模型密钥。
+  expected_results:
+  - 启动顺序与源码一致：recover_config_tasks 经 control-io lane 执行在前，接着 evaluation_maintenance.start(config_thread_manager)，最后 schedule_interrupted_upload_cleanup(CONFIG_SERVICE_NAME)，顺序不可颠倒。
+  - 就绪态下 /health/ready 返回 200 且 manager_state=running、stuck_count=0；当 recover_config_tasks 或 schedule_interrupted_upload_cleanup
+    抛异常时进程不进入可用状态。
+  - 默认 prompt 模板同步失败被捕获、记录 error 日志但不阻断启动；关闭按序执行 stop_dreaming_scheduler、evaluation_maintenance.stop、config_thread_manager.shutdown
+    并最终 clear_default_thread_manager，退出后 /health/ready 返回 503。
+  - 全程无吞异常后伪成功，日志不输出明文 API Key/Token/密码/模型密钥。
+  forbidden_side_effects: []
+  source:
+    legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
+    legacy_sheet: 04_安全性能可靠性
+    legacy_row: 57
+  risk_type: RELIABILITY
+  risk: 配置服务启动时 recover_config_tasks、evaluation_maintenance.start、schedule_interrupted_upload_cleanup 若顺序错乱或异常被吞，将导致运行中任务恢复缺失、评估维护未启动、中断上传清理遗漏；关闭时未按序停止
+    dreaming/eval maintenance 且未清理 config_thread_manager，会使线程残留、调度器泄漏并令 /health/ready 返回错误健康态。
+  condition:
+  - '- ${NEXENT_TEST_HOME}/config/secrets.env
+
+    - ${NEXENT_TEST_HOME}/config/environment.yaml（本地测试环境参数，含 RUNTIME_THREAD_SHUTDOWN_GRACE_SECONDS）
+
+    - 进程级 config_thread_manager（backend/services/thread_lifecycle_service.py:79-115）
+
+    - consts.task_recovery.CONFIG_SERVICE_NAME'
+  metrics:
+  - 启动顺序与源码一致：recover_config_tasks 经 control-io lane 执行在前，接着 evaluation_maintenance.start(config_thread_manager)，最后 schedule_interrupted_upload_cleanup(CONFIG_SERVICE_NAME)，顺序不可颠倒。
+  - 就绪态下 /health/ready 返回 200 且 manager_state=running、stuck_count=0；当 recover_config_tasks 或 schedule_interrupted_upload_cleanup
+    抛异常时进程不进入可用状态。
+  - 默认 prompt 模板同步失败被捕获、记录 error 日志但不阻断启动；关闭按序执行 stop_dreaming_scheduler、evaluation_maintenance.stop、config_thread_manager.shutdown
+    并最终 clear_default_thread_manager，退出后 /health/ready 返回 503。
+  - 全程无吞异常后伪成功，日志不输出明文 API Key/Token/密码/模型密钥。
+  thresholds:
+  - 启动顺序与源码一致：recover_config_tasks 经 control-io lane 执行在前，接着 evaluation_maintenance.start(config_thread_manager)，最后 schedule_interrupted_upload_cleanup(CONFIG_SERVICE_NAME)，顺序不可颠倒。
+  - 就绪态下 /health/ready 返回 200 且 manager_state=running、stuck_count=0；当 recover_config_tasks 或 schedule_interrupted_upload_cleanup
+    抛异常时进程不进入可用状态。
+  - 默认 prompt 模板同步失败被捕获、记录 error 日志但不阻断启动；关闭按序执行 stop_dreaming_scheduler、evaluation_maintenance.stop、config_thread_manager.shutdown
+    并最终 clear_default_thread_manager，退出后 /health/ready 返回 503。
+  - 全程无吞异常后伪成功，日志不输出明文 API Key/Token/密码/模型密钥。
+  recovery_expectations:
+  - 启动顺序与源码一致：recover_config_tasks 经 control-io lane 执行在前，接着 evaluation_maintenance.start(config_thread_manager)，最后 schedule_interrupted_upload_cleanup(CONFIG_SERVICE_NAME)，顺序不可颠倒。
+  - 就绪态下 /health/ready 返回 200 且 manager_state=running、stuck_count=0；当 recover_config_tasks 或 schedule_interrupted_upload_cleanup
+    抛异常时进程不进入可用状态。
+  - 默认 prompt 模板同步失败被捕获、记录 error 日志但不阻断启动；关闭按序执行 stop_dreaming_scheduler、evaluation_maintenance.stop、config_thread_manager.shutdown
+    并最终 clear_default_thread_manager，退出后 /health/ready 返回 503。
+  - 全程无吞异常后伪成功，日志不输出明文 API Key/Token/密码/模型密钥。

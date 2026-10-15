@@ -1,0 +1,94 @@
+schema_version: '1.0'
+stage: D5
+module: V5-BASELINE
+case:
+  case_id: REL-AUTO-3CE643378A04EF53
+  feature_id: V5-REL-AUTO-3CE643378A04EF53
+  business_rule_ids:
+  - V5-REL-AUTO-3CE643378A04EF53-RULE-01
+  title: data-process 重启后 fail_interrupted_file_tasks 将 PROCESSING/带 forward_task_id 的 FORWARDING 置 FAILED 并取消 redis 任务标记，无
+    forward_task_id 的 FORWARDING 保留给既有链
+  type: RELIABILITY
+  priority: P1
+  status: active
+  automation: automated
+  objective: worker 重启后 PROCESSING 与已转发（带 forward_task_id）的 FORWARDING 任务悬挂，用户文件永久停留在中间态无法重试，且 redis 中残留未取消的任务标记造成幽灵任务；本用例验证重启恢复逻辑正确收尾，同时不误伤仍排队等待既有
+    Celery 链的 FORWARDING（无 forward_task_id）记录。
+  preconditions:
+  - 测试环境后端容器（可运行 startup_recovery_service）、knowledge_file_lifecycle_t 表、Redis（mark_task_cancelled）、MinIO；测试使用本地固定 fixture，不读取生产凭据。
+  test_data:
+    legacy_asset_declaration: 测试环境后端容器（可运行 startup_recovery_service）、knowledge_file_lifecycle_t 表、Redis（mark_task_cancelled）、MinIO；测试使用本地固定
+      fixture，不读取生产凭据。
+  steps:
+  - order: 1
+    action: 在本地测试环境直接导入 backend/services/startup_recovery_service.py 的 recover_data_process_tasks 与 backend/database/knowledge_file_lifecycle_db.py
+      的 fail_interrupted_file_tasks，构造测试数据库并预置 knowledge_file_lifecycle_t 记录；测试代码不得读取生产凭据。
+    expected: PROCESSING 记录与带 forward_task_id 的 FORWARDING 记录被置为 FAILED，error_code 为 CONTAINER_RESTARTED，error_stage 为原 stage（PROCESS
+      或 FORWARD）。
+  - order: 2
+    action: 预置记录：A=status PROCESSING（含 process_task_id）；B=status FORWARDING 且 forward_task_id 非空（含 forward_task_id）；C=status
+      FORWARDING 且 forward_task_id 为空；D=status UPLOADED（已完成，不应被触碰）；所有记录 delete_flag='N'。
+    expected: 无 forward_task_id 的 FORWARDING 记录状态保持 FORWARDING，未被误置 FAILED。
+  - order: 3
+    action: 调用 recover_data_process_tasks()，记录返回的 knowledge_files 与 cancel_markers 计数。
+    expected: UPLOADED 等其他状态记录未被恢复逻辑改动。
+  - order: 4
+    action: 回查数据库断言 A 与 B 状态变为 FAILED，error_code='CONTAINER_RESTARTED'，error_message 为 'Data-process service restarted before
+      the task completed'，error_stage 为原 stage（PROCESS 或 FORWARD）且 failed_at 已写入，version 自增 1。
+    expected: 对每条被置 FAILED 记录关联的 process_task_id/forward_task_id/parent_task_id 均调用 redis mark_task_cancelled，recover_data_process_tasks
+      返回的 cancel_markers 与去重后的 task_id 数量一致。
+  - order: 5
+    action: 断言 C（FORWARDING 且无 forward_task_id）状态保持 FORWARDING 未变，仍保留给既有 Celery 链。
+    expected: 测试全程无未处理异常，日志不输出明文密钥/Token。
+  - order: 6
+    action: 断言 D（UPLOADED）状态未变，未被恢复逻辑改动。
+    expected: 测试全程无未处理异常，日志不输出明文密钥/Token。
+  - order: 7
+    action: 断言对 A.process_task_id、B.forward_task_id 及记录上的 parent_task_id 均调用 redis mark_task_cancelled，且 cancel_markers 计数与去重后的应取消
+      task_id 数量一致。
+    expected: 测试全程无未处理异常，日志不输出明文密钥/Token。
+  - order: 8
+    action: 清理测试记录与 redis 任务标记，确保可重复执行。
+    expected: 测试全程无未处理异常，日志不输出明文密钥/Token。
+  expected_results:
+  - PROCESSING 记录与带 forward_task_id 的 FORWARDING 记录被置为 FAILED，error_code 为 CONTAINER_RESTARTED，error_stage 为原 stage（PROCESS
+    或 FORWARD）。
+  - 无 forward_task_id 的 FORWARDING 记录状态保持 FORWARDING，未被误置 FAILED。
+  - UPLOADED 等其他状态记录未被恢复逻辑改动。
+  - 对每条被置 FAILED 记录关联的 process_task_id/forward_task_id/parent_task_id 均调用 redis mark_task_cancelled，recover_data_process_tasks
+    返回的 cancel_markers 与去重后的 task_id 数量一致。
+  - 测试全程无未处理异常，日志不输出明文密钥/Token。
+  forbidden_side_effects: []
+  source:
+    legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
+    legacy_sheet: 04_安全性能可靠性
+    legacy_row: 51
+  risk_type: RELIABILITY
+  risk: worker 重启后 PROCESSING 与已转发（带 forward_task_id）的 FORWARDING 任务悬挂，用户文件永久停留在中间态无法重试，且 redis 中残留未取消的任务标记造成幽灵任务；本用例验证重启恢复逻辑正确收尾，同时不误伤仍排队等待既有
+    Celery 链的 FORWARDING（无 forward_task_id）记录。
+  condition:
+  - 测试环境后端容器（可运行 startup_recovery_service）、knowledge_file_lifecycle_t 表、Redis（mark_task_cancelled）、MinIO；测试使用本地固定 fixture，不读取生产凭据。
+  metrics:
+  - PROCESSING 记录与带 forward_task_id 的 FORWARDING 记录被置为 FAILED，error_code 为 CONTAINER_RESTARTED，error_stage 为原 stage（PROCESS
+    或 FORWARD）。
+  - 无 forward_task_id 的 FORWARDING 记录状态保持 FORWARDING，未被误置 FAILED。
+  - UPLOADED 等其他状态记录未被恢复逻辑改动。
+  - 对每条被置 FAILED 记录关联的 process_task_id/forward_task_id/parent_task_id 均调用 redis mark_task_cancelled，recover_data_process_tasks
+    返回的 cancel_markers 与去重后的 task_id 数量一致。
+  - 测试全程无未处理异常，日志不输出明文密钥/Token。
+  thresholds:
+  - PROCESSING 记录与带 forward_task_id 的 FORWARDING 记录被置为 FAILED，error_code 为 CONTAINER_RESTARTED，error_stage 为原 stage（PROCESS
+    或 FORWARD）。
+  - 无 forward_task_id 的 FORWARDING 记录状态保持 FORWARDING，未被误置 FAILED。
+  - UPLOADED 等其他状态记录未被恢复逻辑改动。
+  - 对每条被置 FAILED 记录关联的 process_task_id/forward_task_id/parent_task_id 均调用 redis mark_task_cancelled，recover_data_process_tasks
+    返回的 cancel_markers 与去重后的 task_id 数量一致。
+  - 测试全程无未处理异常，日志不输出明文密钥/Token。
+  recovery_expectations:
+  - PROCESSING 记录与带 forward_task_id 的 FORWARDING 记录被置为 FAILED，error_code 为 CONTAINER_RESTARTED，error_stage 为原 stage（PROCESS
+    或 FORWARD）。
+  - 无 forward_task_id 的 FORWARDING 记录状态保持 FORWARDING，未被误置 FAILED。
+  - UPLOADED 等其他状态记录未被恢复逻辑改动。
+  - 对每条被置 FAILED 记录关联的 process_task_id/forward_task_id/parent_task_id 均调用 redis mark_task_cancelled，recover_data_process_tasks
+    返回的 cancel_markers 与去重后的 task_id 数量一致。
+  - 测试全程无未处理异常，日志不输出明文密钥/Token。

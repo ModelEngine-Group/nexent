@@ -1,0 +1,37 @@
+schema_version: '1.0'
+change:
+  change_id: MSRF-REFACTOR-001
+  change_type: refactor
+  title: Relocate model services into Management
+  description: Preserve business and HTTP behavior while splitting model ownership
+    and relocating public contracts.
+  affected_features:
+    existing:
+    - CMSR-005
+    added:
+    - MSRF-001
+    modified: []
+    retired: []
+  affected_cases:
+    existing:
+    - CMSR-D2-001
+    added:
+    - MSRF-D1-001
+    - MSRF-D1-002
+    modified: []
+    retired: []
+  feature_contract_changed: false
+  notes: Preserve model relocation contracts while adopting develop's case-local test-e2e
+    layout; existing Case IDs and assertions are retained.
+  traditional_ut:
+    decision: strengthen
+    behaviors:
+    - Preserve provider status and response detail from current develop
+    - Preserve create-scoped default model slot selection
+    - Update prompt and model mock lookup sites
+    reason: Reuse the model and caller suites, adding domain-error HTTP assertions
+      for the merged upstream contract.
+    test_selectors:
+    - test/backend/services/test_model_management_service.py
+    - test/backend/app/test_model_management_app.py
+    - test/backend/services/test_core_service_slimming.py

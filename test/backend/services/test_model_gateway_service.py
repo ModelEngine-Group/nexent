@@ -1,4 +1,4 @@
-"""Unit tests for backend.services.model_gateway_service.
+"""Unit tests for management.services.model.adapter.
 
 Covers factory normalization, context construction, adapter resolution and
 the VLM config-fetch helpers. Heavy database / utils / consts modules
@@ -36,7 +36,7 @@ sys.modules['consts.const'] = consts_const_module
 from nexent import MessageObserver
 from nexent.core.gateway import ModelContext, VLMContext
 
-from backend.services import model_gateway_service as mgs
+from management.services.model import adapter as mgs
 
 # _normalize_factory
 

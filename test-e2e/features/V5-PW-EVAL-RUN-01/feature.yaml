@@ -1,0 +1,16 @@
+schema_version: '1.0'
+module:
+  id: V5-BASELINE
+  name: Migrated V5 baseline
+feature:
+  feature_id: V5-PW-EVAL-RUN-01
+  name: Create Evaluation→Agent/Version/Judge/Evaluator/Set→Try it out→Run→结果
+  status: active
+  description: 按/evaluation当前Runs真实字段验证评估全链。
+  business_rules:
+  - rule_id: V5-PW-EVAL-RUN-01-RULE-01
+    description: Create Evaluation→Agent/Version/Judge/Evaluator/Set→Try it out→Run→结果
+  required_test_stages:
+  - D4
+  source:
+    notes: 'Provisional migration owner: the V5 row has no stable Feature ID. Do not infer an F-ID.'

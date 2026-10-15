@@ -305,6 +305,18 @@ class NotFoundException(Exception):
     pass
 
 
+class AgentRelationValidationError(ValueError):
+    """Raised when submitted Agent relationships violate the graph contract."""
+
+    pass
+
+
+class AgentNotFoundError(NotFoundException, ValueError):
+    """Raised when an Agent is absent from the caller's visible query scope."""
+
+    pass
+
+
 class MEConnectionException(Exception):
     """Raised when ME connection fails."""
 
@@ -484,7 +496,6 @@ InvalidCredentialsError = UnauthorizedError
 TenantNotFoundError = NotFoundException
 TenantDisabledError = Exception  # Generic fallback
 
-AgentNotFoundError = NotFoundException
 AgentDisabledError = Exception  # Generic fallback
 
 ToolNotFoundError = NotFoundException
@@ -512,6 +523,15 @@ OAuthAccountNotFoundError = NotFoundException
 
 # Signature aliases
 # SignatureValidationError already defined above
+
+
+class ModelProviderError(Exception):
+    """A classified provider discovery failure with its upstream status."""
+
+    def __init__(self, upstream_status: int, message: str):
+        self.upstream_status = upstream_status
+        self.message = message
+        super().__init__(f"{upstream_status}: {message}")
 
 
 class RuntimeCapacityExceededError(RuntimeError):

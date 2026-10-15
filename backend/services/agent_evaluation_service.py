@@ -68,7 +68,7 @@ from services.thread_lifecycle_service import (
     config_thread_manager,
     runtime_thread_manager,
 )
-from utils.llm_utils import call_llm_for_system_prompt
+from management.services.model.invocation import call_llm_for_system_prompt
 from nexent.core.agents.prompt.auxiliary import AuxiliaryPrompt, compose_auxiliary_prompt
 from nexent.core.agents.prompt.evaluation import (
     compose_analysis_report,

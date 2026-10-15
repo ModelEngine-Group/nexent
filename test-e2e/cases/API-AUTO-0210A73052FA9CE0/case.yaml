@@ -1,0 +1,94 @@
+schema_version: '1.0'
+stage: D2
+module: V5-BASELINE
+case:
+  case_id: API-AUTO-0210A73052FA9CE0
+  feature_id: F-111
+  business_rule_ids:
+  - F-111-RULE-01
+  title: AIDP 知识库列表/计数：目录∩权限交集分页、元数据惰性加载、is_multimodal 反推与详情降级｜核心流程
+  type: API-IT
+  priority: P1
+  status: active
+  automation: automated
+  objective: AIDP 知识库列表/计数：目录∩权限交集分页、元数据惰性加载、is_multimodal 反推与详情降级｜核心流程
+  preconditions:
+  - Nexent 本地测试全栈已启动，health check 通过，AIDP 上游（AIDP_SERVER_URL/AIDP_API_KEY）指向本地测试桩且可返回目录/详情/计数。
+  - 设置 NEXENT_TEST_HOME，目录不位于 Nexent Git 仓库内。
+  - 当次 run_id 已生成，所有新建资源名称带 run_id；测试基线固定为 develop 当前批次锁定的产品提交；执行时另记录实际被测commit。
+  - 所需本地资产存在且校验通过：${NEXENT_TEST_HOME}/config/users.yaml；${NEXENT_TEST_HOME}/config/secrets.env。
+  - users.yaml 中 SU/Admin/UserA/UserB 等隔离账号可登录；测试租户 aidp_kb_permission_t 中已预置多种权限记录（owner EDIT、共享 READ_ONLY 授权组、PRIVATE、其他租户条目），测试数据可被清理。
+  test_data:
+    legacy_asset_declaration: '- ${NEXENT_TEST_HOME}/config/users.yaml
+
+      - ${NEXENT_TEST_HOME}/config/secrets.env'
+  steps:
+  - order: 1
+    action: 从 config/users.yaml 读取隔离测试账号（SU/Admin/UserA/UserB）及租户、用户组关系；密码/Token 仅从 secrets.env 注入，AIDP 凭据从部署配置读取。
+    expected: 功能结果与代码契约一致，测试过程无未处理异常。
+  - order: 2
+    action: 在测试租户内预置多个知识库权限记录，并在本地 AIDP 测试桩中返回覆盖这些 kb_id 的目录列表（含缺少卡片元数据 name/description/created_at/caption_enable 的条目）。
+    expected: 列表响应结构稳定含 value/total_count/has_more/total_reliable；total_count 为目录∩权限交集数量，分页 value 无重复 kds_id 且长度不超过 page_size。
+  - order: 3
+    action: 以 UserA 的 Authorization 调用 GET /aidp-mgmt/knowledge-bases?page=1&page_size=2，记录 HTTP 状态与 JSON 结构。
+    expected: 详情失败仅该项降级为 resource_status=UNAVAILABLE，整页仍返回 200，其余项为 ACTIVE；is_multimodal 由 caption_enable 反推正确。
+  - order: 4
+    action: 校验响应含 value/total_count/has_more/total_reliable 字段；total_count 等于目录与本地权限交集后的知识库数（不含 PRIVATE、非授权组及其他租户条目），value
+      长度不超过 page_size。
+    expected: /knowledge-bases/count 的 total_count 与列表交集 total_count 一致，反映过滤后的可见集合而非租户总数。
+  - order: 5
+    action: 调用 page=2 校验交集分页：value 为交集剩余条目，无重复 kds_id；has_more 满足 page*page_size<total_count，越界页返回空 value 不报错。
+    expected: 越权/未授权返回 401/403/404 且不泄露其他租户资源；失败路径不出现半写入、重复副作用或跨租户泄露。
+  - order: 6
+    action: 对 page_size=1、page_size=100 及 illegal page=0 发起请求，确认参数校验（page ge=1、page_size ge=1/le=100）返回 422 且不进入业务过滤。
+    expected: 日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。
+  - order: 7
+    action: 对目录中缺少卡片元数据的 kb_id，断言列表项通过惰性加载详情补齐 kds_name/description/created_at；caption_enable=1 时 is_multimodal=true，caption_enable
+      为 0/"0" 时 is_multimodal=false。
+    expected: 日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。
+  - order: 8
+    action: 使本地 AIDP 测试桩对某一 kb_id 的详情返回失败：断言该项 resource_status="UNAVAILABLE" 且仍保留在 value 中，其余项 resource_status="ACTIVE"，整页返回
+      200 不中断。
+    expected: 日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。
+  - order: 9
+    action: 调用 GET /aidp-mgmt/knowledge-bases/count，断言返回 total_count 与步骤 4 的交集 total_count 一致，反映过滤后可见集合而非租户总数。
+    expected: 日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。
+  - order: 10
+    action: 使用不在任何授权组且非 owner 的用户调用列表与计数，断言交集为空（total_count=0 且 value=[]）；缺失/非法 Authorization 返回 401；日志与错误响应不含明文密码/token/API
+      key；清理本次预置记录。
+    expected: 日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。
+  expected_results:
+  - 功能结果与代码契约一致，测试过程无未处理异常。
+  - 列表响应结构稳定含 value/total_count/has_more/total_reliable；total_count 为目录∩权限交集数量，分页 value 无重复 kds_id 且长度不超过 page_size。
+  - 详情失败仅该项降级为 resource_status=UNAVAILABLE，整页仍返回 200，其余项为 ACTIVE；is_multimodal 由 caption_enable 反推正确。
+  - /knowledge-bases/count 的 total_count 与列表交集 total_count 一致，反映过滤后的可见集合而非租户总数。
+  - 越权/未授权返回 401/403/404 且不泄露其他租户资源；失败路径不出现半写入、重复副作用或跨租户泄露。
+  - 日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。
+  forbidden_side_effects: []
+  source:
+    legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
+    legacy_sheet: 02_测试用例基线
+    legacy_row: 485
+  contract:
+    protocol: HTTP API
+    request_expectations:
+    - 从 config/users.yaml 读取隔离测试账号（SU/Admin/UserA/UserB）及租户、用户组关系；密码/Token 仅从 secrets.env 注入，AIDP 凭据从部署配置读取。
+    - 在测试租户内预置多个知识库权限记录，并在本地 AIDP 测试桩中返回覆盖这些 kb_id 的目录列表（含缺少卡片元数据 name/description/created_at/caption_enable 的条目）。
+    - 以 UserA 的 Authorization 调用 GET /aidp-mgmt/knowledge-bases?page=1&page_size=2，记录 HTTP 状态与 JSON 结构。
+    - 校验响应含 value/total_count/has_more/total_reliable 字段；total_count 等于目录与本地权限交集后的知识库数（不含 PRIVATE、非授权组及其他租户条目），value 长度不超过
+      page_size。
+    - 调用 page=2 校验交集分页：value 为交集剩余条目，无重复 kds_id；has_more 满足 page*page_size<total_count，越界页返回空 value 不报错。
+    - 对 page_size=1、page_size=100 及 illegal page=0 发起请求，确认参数校验（page ge=1、page_size ge=1/le=100）返回 422 且不进入业务过滤。
+    - 对目录中缺少卡片元数据的 kb_id，断言列表项通过惰性加载详情补齐 kds_name/description/created_at；caption_enable=1 时 is_multimodal=true，caption_enable
+      为 0/"0" 时 is_multimodal=false。
+    - 使本地 AIDP 测试桩对某一 kb_id 的详情返回失败：断言该项 resource_status="UNAVAILABLE" 且仍保留在 value 中，其余项 resource_status="ACTIVE"，整页返回 200
+      不中断。
+    - 调用 GET /aidp-mgmt/knowledge-bases/count，断言返回 total_count 与步骤 4 的交集 total_count 一致，反映过滤后可见集合而非租户总数。
+    - 使用不在任何授权组且非 owner 的用户调用列表与计数，断言交集为空（total_count=0 且 value=[]）；缺失/非法 Authorization 返回 401；日志与错误响应不含明文密码/token/API key；清理本次预置记录。
+    response_expectations:
+    - 功能结果与代码契约一致，测试过程无未处理异常。
+    - 列表响应结构稳定含 value/total_count/has_more/total_reliable；total_count 为目录∩权限交集数量，分页 value 无重复 kds_id 且长度不超过 page_size。
+    - 详情失败仅该项降级为 resource_status=UNAVAILABLE，整页仍返回 200，其余项为 ACTIVE；is_multimodal 由 caption_enable 反推正确。
+    - /knowledge-bases/count 的 total_count 与列表交集 total_count 一致，反映过滤后的可见集合而非租户总数。
+    - 越权/未授权返回 401/403/404 且不泄露其他租户资源；失败路径不出现半写入、重复副作用或跨租户泄露。
+    - 日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。

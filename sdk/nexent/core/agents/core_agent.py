@@ -63,6 +63,7 @@ from .output_protocol import (
     RuntimeFinalAnswer,
     classify_model_output,
     has_meaningful_visible_content,
+    is_raw_final_answer_candidate,
     unicode_category_summary,
 )
 from .context.budget import message_role
@@ -79,23 +80,26 @@ from .output_protocol import extract_clarification_form
 logger = logging.getLogger("model_call.core_agent")
 
 
+def _extract_final_answer_body(output: Any) -> str | None:
+    """Use the same visible-body boundary as the streaming observer."""
+    text = str(output)
+    opening = re.search(r"<final_answer>", text, re.IGNORECASE)
+    return re.sub(r"</?final_answer>", "", text[opening.end():], flags=re.IGNORECASE) if opening else None
+
+
 class NonterminalThoughtTurn(Exception):
     """A model turn produced visible text without an executable action."""
 
 
 _ACTION_FORMAT_REMINDER = (
     "For tool use, return a complete <code>...</code> Python action. "
-    "When the task is complete, call final_answer(...) as the last top-level statement "
-    "in the final code block. Never return a bare-text final answer."
+    "When the task is complete, return <final_answer>...</final_answer>. "
+    "Keep the answer outside executable code blocks."
 )
 _ACTION_FORMAT_REMINDER_ZH = (
     "使用工具时，请输出完整的 <code>...</code> Python 动作。"
-    "任务完成时，在最后一个代码块的最后一条顶层语句调用 final_answer(...)。"
+    "任务完成时，输出 <final_answer>...</final_answer>，回答内容放在代码块外。"
     "不要直接输出裸文本最终答案。"
-)
-_STRICT_PLATFORM_FINAL_SENTENCES = (
-    "在思考结束后，当你认为可以回答用户问题，必须在最后一个 `<code>...</code>` 代码块的最后一条顶层语句中调用 `final_answer(...)`；禁止输出裸文本最终回答或在其后继续执行动作。",
-    "After thinking, when you can answer the user, call `final_answer(...)` as the last top-level statement in the final `<code>...</code>` block. Never return a bare-text final answer or execute another action afterward.",
 )
 
 RUNTIME_METADATA_BLOCK_RE = re.compile(
@@ -437,7 +441,7 @@ def _scan_code_for_tool_calls(
 
     Returns a list of dicts ``{name, arguments, line}`` preserving source order.
     Tools not exposed via ``self.tools``/``self.managed_agents`` (e.g. builtin
-    Python helpers such as ``print`` or ``final_answer``) are ignored to keep
+    Python helpers such as ``print``) are ignored to keep
     the emitted `tool` chunks accurate and aligned with the user's intent of
     surfacing MCP / managed-agent invocations only.
     """
@@ -573,7 +577,7 @@ class CoreAgent(CodeAgent):
         context_runtime = kwargs.pop("context_runtime", None)
         super().__init__(prompt_templates=prompt_templates, *args, **kwargs)
         self.tools.pop("final_answer", None)
-        for container_name in ("functions", "tools"):
+        for container_name in ("functions", "tools", "static_tools"):
             container = getattr(self.python_executor, container_name, None)
             if hasattr(container, "pop"):
                 container.pop("final_answer", None)
@@ -1013,6 +1017,13 @@ Additional Args:
         if not model_output or not str(model_output).strip():
             raise RuntimeFinalAnswer(self._empty_model_response_hint(), "empty_model_output")
         direct_answer = convert_code_format(model_output)
+        envelope = _extract_final_answer_body(model_output)
+        if envelope is not None:
+            direct_answer = envelope
+        else:
+            mark_final = getattr(self.observer, "mark_direct_final_answer", None)
+            if callable(mark_final):
+                mark_final()
         memory_step.action_output = direct_answer
         memory_step._final_answer_source = "direct_model_output"
         getattr(self, "_protocol_repair_messages", []).clear()
@@ -1028,7 +1039,7 @@ Additional Args:
             or getattr(self, "_consecutive_protocol_errors", 0) < 2
             or self.stop_event.is_set()
             or getattr(memory_step, "tool_calls", None)
-            or not has_meaningful_visible_content(model_output)
+            or not is_raw_final_answer_candidate(model_output)
         ):
             return False
         diagnostics = getattr(self.model, "last_response_diagnostics", None) or {}
@@ -1041,6 +1052,9 @@ Additional Args:
         self._consecutive_protocol_errors = 0
         memory_step.action_output = model_output
         memory_step._final_answer_source = "protocol_exhausted_raw_output"
+        mark_final = getattr(self.observer, "mark_direct_final_answer", None)
+        if callable(mark_final):
+            mark_final()
         self._record_output_protocol(
             "protocol_exhausted_raw_final_answer",
             final_answer_source="protocol_exhausted_raw_output",
@@ -1175,54 +1189,21 @@ Additional Args:
             ),
         ]
 
-    def _legacy_request_messages(self, messages: list[Any]) -> list[Any]:
-        """Remove the post-baseline platform termination sentence for this request only."""
-
-        result = []
-        for message in messages:
-            if message_role(message) != "system":
-                result.append(message)
-                continue
-            content = message.get("content") if isinstance(message, dict) else getattr(message, "content", None)
-            if not isinstance(content, (str, list)) or not any(
-                sentence in str(content) for sentence in _STRICT_PLATFORM_FINAL_SENTENCES
-            ):
-                result.append(message)
-                continue
-            filtered = deepcopy(message)
-            parts = content if isinstance(content, list) else [{"type": "text", "text": content}]
-            filtered_parts = []
-            for part in parts:
-                if not isinstance(part, dict) or not isinstance(part.get("text"), str):
-                    filtered_parts.append(part)
-                    continue
-                text = part["text"]
-                for sentence in _STRICT_PLATFORM_FINAL_SENTENCES:
-                    text = text.replace(sentence, "")
-                filtered_parts.append({**part, "text": text})
-            new_content = filtered_parts if isinstance(content, list) else filtered_parts[0]["text"]
-            if isinstance(filtered, dict):
-                filtered["content"] = new_content
-            else:
-                filtered.content = new_content
-            result.append(filtered)
-        return result
-
     def _thought_continuation_message(self) -> ChatMessage:
         """Build one request-only nudge from the current optional plan state."""
 
         chinese = str(getattr(self, "lang", "en")).lower().startswith("zh")
         instruction = (
-            "上一次生成只有文本：没有执行动作，也没有调用 final_answer。"
+            "上一次生成只有文本：没有执行动作，也没有输出最终回答标签。"
             "如果还有工作，请用完整的 <code>...</code> 动作调用工具；"
             "如果缺少必要信息，请使用已配置的独立 HITL ask 动作；"
-            "如果任务已经完成，请在完整代码块中调用 final_answer(...)。"
+            "如果任务已经完成，请输出 <final_answer>...</final_answer>。"
             "不要再次只输出文本。"
         ) if chinese else (
-            "The previous generation contained only text: no action ran and no final answer was called. "
+            "The previous generation contained only text: no action ran and no final-answer envelope was returned. "
             "If work remains, return a complete <code>...</code> action to use a tool. "
             "If essential information is missing, use the configured standalone HITL ask action. "
-            "If the task is complete, call final_answer(...) inside a complete code block. "
+            "If the task is complete, return <final_answer>...</final_answer>. "
             "Do not return only text again."
         )
         plan = getattr(self, "current_plan", None)
@@ -1244,7 +1225,6 @@ Additional Args:
         Perform one step in the ReAct framework: the agent thinks, acts, and observes the result.
         Returns None if the step is not final.
         """
-        suppress_repair_generation_stream = False
         strict_code_action = (
             getattr(self, "output_protocol", "code_action") == "code_action"
             and getattr(self, "enable_protocol_repair_retry", False)
@@ -1314,12 +1294,11 @@ Additional Args:
                 additional_args["_retry_empty_response"] = False
 
         repair_messages = getattr(self, "_protocol_repair_messages", [])
-        if repair_messages:
-            suppress_repair_generation_stream = True
+        # Code actions retain their accepted raw stream; final envelopes keep
+        # the existing presentation policy that hides the protocol wrapper.
+        if repair_messages and getattr(self, "output_protocol", "code_action") == "final_envelope":
             if getattr(self.model, "supports_suppressed_attempt_stream", False) is True:
                 additional_args["_suppress_attempt_stream"] = True
-        if legacy_code_action:
-            input_messages = self._legacy_request_messages(input_messages)
         input_messages = self._ensure_open_model_turn(input_messages)
         if not request_kwargs:
             memory_step.model_input_messages = input_messages
@@ -1366,8 +1345,6 @@ Additional Args:
                     if rebuilt.memory_messages is not None else rebuilt.messages
                 )
                 self._emit_history_summary_event()
-                if legacy_code_action:
-                    rebuilt.messages[:] = self._legacy_request_messages(rebuilt.messages)
                 return rebuilt
 
             chat_message: ChatMessage = self.model(
@@ -1437,6 +1414,9 @@ Additional Args:
                     diagnostics = getattr(self.model, "last_response_diagnostics", None) or {}
                     finish_reason = diagnostics.get("finish_reason")
                 try:
+                    if re.search(r"<final_answer>", str(model_output), re.IGNORECASE):
+                        yield self._legacy_parse_fallback(memory_step, model_output, finish_reason)
+                        return
                     if self._use_structured_outputs_internally:
                         code_action = json.loads(model_output)["code"]
                         code_action = extract_code_from_text(code_action, self.code_block_tags) or code_action
@@ -1482,7 +1462,7 @@ Additional Args:
             if isinstance(classified_output, ExplicitFinalAnswer):
                 self._resolve_deferred_model_attempt(
                     memory_step.model_output_message,
-                    accepted=False,
+                    accepted=not additional_args.get("_suppress_attempt_stream", False),
                 )
                 self._log_protocol_repair_accepted(memory_step.model_output_message)
                 getattr(self, "_protocol_repair_messages", []).clear()
@@ -1512,7 +1492,7 @@ Additional Args:
                     raise RunTerminated()
                 self._resolve_deferred_model_attempt(
                     memory_step.model_output_message,
-                    accepted=not suppress_repair_generation_stream,
+                    accepted=True,
                 )
                 self._log_protocol_repair_accepted(memory_step.model_output_message)
                 getattr(self, "_protocol_repair_messages", []).clear()
@@ -1527,7 +1507,7 @@ Additional Args:
             memory_step.code_action = code_action
             self._resolve_deferred_model_attempt(
                 memory_step.model_output_message,
-                accepted=not suppress_repair_generation_stream,
+                accepted=True,
             )
 
             self._log_protocol_repair_accepted(memory_step.model_output_message)
@@ -1556,7 +1536,7 @@ Additional Args:
 
         except NonterminalThoughtTurn:
             if self._accept_exhausted_raw_output(memory_step, model_output):
-                yield ActionOutput(output=model_output, is_final_answer=True)
+                yield ActionOutput(output=memory_step.action_output, is_final_answer=True)
                 return
             self._resolve_deferred_model_attempt(memory_step.model_output_message, accepted=False)
             raise
@@ -1580,7 +1560,7 @@ Additional Args:
                     self.logger,
                 ) from protocol_error
             if self._accept_exhausted_raw_output(memory_step, model_output):
-                yield ActionOutput(output=model_output, is_final_answer=True)
+                yield ActionOutput(output=memory_step.action_output, is_final_answer=True)
                 return
             self._resolve_deferred_model_attempt(memory_step.model_output_message, accepted=False)
             raise
@@ -1921,11 +1901,11 @@ Additional Args:
         else:
             report = result
 
-        # When a sub-agent finishes running, return a marker
+        # The accepted result finalizes the same answer slot as visible deltas.
+        # agent_finish is a lifecycle marker, not a second copy of the result.
         try:
-            self.observer.add_message(
-                self.name, ProcessType.AGENT_FINISH, str(report))
-        except Exception:
+            self.observer.complete_final_answer(self.name, str(report))
+        finally:
             self.observer.add_message(self.name, ProcessType.AGENT_FINISH, "")
 
         return composer.render_delegated_report(str(report), name=self.name)
@@ -1977,11 +1957,7 @@ Additional Args:
                 if isinstance(output, ActionOutput) and output.is_final_answer:
                     candidate_answer = output.output
                     direct_answer_source = getattr(action_step, "_final_answer_source", None)
-                    final_answer_source = direct_answer_source or (
-                        "final_envelope"
-                        if getattr(self, "output_protocol", "code_action") == "final_envelope"
-                        else "final_answer_tool"
-                    )
+                    final_answer_source = direct_answer_source or "final_envelope"
                     final_answer_classification = (
                         "protocol_exhausted_raw_final_answer"
                         if direct_answer_source == "protocol_exhausted_raw_output"
@@ -2001,7 +1977,7 @@ Additional Args:
                             and getattr(self, "output_protocol", "code_action") == "code_action"
                         ):
                             raise AgentExecutionError(
-                                "The final_answer tool returned empty content. Call final_answer again "
+                                "The final-answer envelope was empty. Return a complete envelope again "
                                 "with a non-empty user-facing response.",
                                 self.logger,
                             )

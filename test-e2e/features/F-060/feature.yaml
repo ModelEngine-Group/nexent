@@ -1,0 +1,16 @@
+schema_version: '1.0'
+module:
+  id: V5-BASELINE
+  name: Migrated V5 baseline
+feature:
+  feature_id: F-060
+  name: 上下文传递、嵌套、空结果/错误、顺序
+  status: active
+  description: '智能体运行时与对话 / 串行多Agent: 上下文传递、嵌套、空结果/错误、顺序'
+  business_rules:
+  - rule_id: F-060-RULE-01
+    description: 上下文传递、嵌套、空结果/错误、顺序
+  required_test_stages:
+  - D3
+  source:
+    notes: Migrated from V5 01_代码功能清单 without changing the functional description.

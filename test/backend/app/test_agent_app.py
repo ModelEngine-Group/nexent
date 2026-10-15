@@ -1131,8 +1131,10 @@ def test_get_agent_by_name_api_with_explicit_tenant_id(mocker, mock_auth_header)
 def test_get_agent_by_name_api_exception(mocker, mock_auth_header):
     """Test get_agent_by_name_api exception handling."""
     mock_get_user_id = mocker.patch("apps.agent_app.get_current_user_id")
-    mock_get_agent_info = mocker.patch(
-        "apps.agent_app.get_agent_info_impl", new_callable=AsyncMock)
+    mocker.patch(
+        "apps.agent_app.get_agent_by_name_impl",
+        side_effect=RuntimeError("database unavailable"),
+    )
     mock_get_user_id.return_value = ("user_id", "auth_tenant_id")
 
     response = config_client.get(
@@ -1141,7 +1143,7 @@ def test_get_agent_by_name_api_exception(mocker, mock_auth_header):
     )
 
     assert response.status_code == 500
-    assert "Agent not found" in response.json()["detail"]
+    assert response.json() == {"detail": "Agent by name lookup error."}
 
 
 # Legacy creating-sub-agent endpoint removal
@@ -1377,7 +1379,7 @@ def test_export_agent_api_success_with_zip(mocker, mock_auth_header):
 
     assert response.status_code == 200
     assert response.headers["content-type"] == "application/zip"
-    assert "attachment; filename=\"agent_export.zip\"" in response.headers["content-disposition"]
+    assert "attachment; filename*=UTF-8''agent_export.zip" in response.headers["content-disposition"]
     assert response.content == b"PK\x03\x04test zip content"
 
 
@@ -1398,7 +1400,31 @@ def test_export_agent_api_success_with_zip_default_filename(mocker, mock_auth_he
 
     assert response.status_code == 200
     assert response.headers["content-type"] == "application/zip"
-    assert "attachment; filename=\"agent_export.zip\"" in response.headers["content-disposition"]
+    assert "attachment; filename*=UTF-8''agent_export.zip" in response.headers["content-disposition"]
+
+
+def test_export_agent_api_success_with_zip_non_ascii_filename(mocker, mock_auth_header):
+    """Test export_agent_api ZIP response with a non-ASCII agent display name."""
+    from urllib.parse import quote
+
+    mock_export_agent = mocker.patch(
+        "apps.agent_app.export_agent_with_skills_impl", new_callable=AsyncMock)
+    mock_export_agent.return_value = {
+        "_zip": True,
+        "data": b"PK\x03\x04zip content",
+        "filename": "\u667a\u80fd\u4f53\u5bfc\u51fa.zip"
+    }
+
+    response = config_client.post(
+        "/agent/export",
+        json={"agent_id": 789},
+        headers=mock_auth_header
+    )
+
+    assert response.status_code == 200
+    assert response.headers["content-type"] == "application/zip"
+    expected = "attachment; filename*=UTF-8''" + quote("\u667a\u80fd\u4f53\u5bfc\u51fa.zip")
+    assert response.headers["content-disposition"] == expected
 
 
 def test_export_agent_api_exception(mocker, mock_auth_header):

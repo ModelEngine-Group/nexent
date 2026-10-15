@@ -67,6 +67,7 @@ def _create_mock_smolagents():
             self.step_number = 1
             self.monitor = _MagicMock()
             self.python_executor = _MagicMock()
+            self.python_executor.static_tools = {"final_answer": object(), "print": print}
             self.system_prompt = ""
             self._use_structured_outputs_internally = False
             self.name = "agent"
@@ -362,6 +363,8 @@ def test_ut_sdk_cftp_003_core_agent_removes_framework_final_answer_tool():
 
     assert "final_answer" not in agent.tools
     assert "final_answer" not in agent._verification_tool_names()
+    assert "final_answer" not in agent.python_executor.static_tools
+    assert agent.python_executor.static_tools["print"] is print
 
 
 def test_context_evidence_marks_an_early_closed_stream_as_cancelled():
@@ -3316,7 +3319,6 @@ class TestRunStreamRealExecution:
 
     @pytest.mark.parametrize("content", [
         "A complete plain answer.",
-        "<code>final_answer(",
     ])
     def test_oc_028_strict_third_visible_output_becomes_answer(self, monkeypatch, content):
         """OC-028: the last complete strict output is committed without execution."""
@@ -3346,6 +3348,8 @@ class TestRunStreamRealExecution:
         ("   ", "stop"),
         ("\u200b\u200b", "stop"),
         ("A truncated answer", "length"),
+        ("<code>final_answer(", "stop"),
+        ("<think>Only reasoning.</think>", "stop"),
     ])
     def test_oc_029_strict_third_invalid_output_still_fails(self, content, finish_reason):
         """OC-029: empty, invisible and truncated responses cannot use raw fallback."""

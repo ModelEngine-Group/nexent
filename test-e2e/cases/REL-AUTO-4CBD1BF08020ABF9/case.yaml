@@ -1,0 +1,81 @@
+schema_version: '1.0'
+stage: D5
+module: V5-BASELINE
+case:
+  case_id: REL-AUTO-4CBD1BF08020ABF9
+  feature_id: V5-REL-AUTO-4CBD1BF08020ABF9
+  business_rule_ids:
+  - V5-REL-AUTO-4CBD1BF08020ABF9-RULE-01
+  title: 中断上传恢复的服务归属隔离（仅清理重启服务自身记录，排除其他归属与NULL归属）
+  type: RELIABILITY
+  priority: P1
+  status: active
+  automation: automated
+  objective: 恢复流程将非本服务归属（其他upload_owner_service或历史NULL归属）或宽限期内的UPLOADING记录误标为FAILED并删除其MinIO对象，造成跨服务/跨租户上传数据丢失与状态误判；或本服务归属的过期UPLOADING记录未被清理，遗留悬挂对象。
+  preconditions:
+  - 本地测试数据库需已应用 deploy/sql/migrations/v2.5.1_upload_owner_service.sql（存在 upload_owner_service 列与 idx_knowledge_file_lifecycle_upload_recovery
+    部分索引）；预置 knowledge_file_lifecycle_t 测试记录：A(upload_owner_service=CONFIG_SERVICE_NAME, create_time<cutoff, status=UPLOADING)、B(其他服务归属,
+    create_time<cutoff, UPLOADING)、C(upload_owner_service=NULL 历史归属, create_time<cutoff, UPLOADING)、D(CONFIG_SERVICE_NAME,
+    create_time>=cutoff, UPLOADING)；记录A 在 MinIO 有对应 object_name 测试对象。
+  test_data:
+    legacy_asset_declaration: 本地测试数据库需已应用 deploy/sql/migrations/v2.5.1_upload_owner_service.sql（存在 upload_owner_service 列与
+      idx_knowledge_file_lifecycle_upload_recovery 部分索引）；预置 knowledge_file_lifecycle_t 测试记录：A(upload_owner_service=CONFIG_SERVICE_NAME,
+      create_time<cutoff, status=UPLOADING)、B(其他服务归属, create_time<cutoff, UPLOADING)、C(upload_owner_service=NULL 历史归属, create_time<cutoff,
+      UPLOADING)、D(CONFIG_SERVICE_NAME, create_time>=cutoff, UPLOADING)；记录A 在 MinIO 有对应 object_name 测试对象。
+  steps:
+  - order: 1
+    action: 应用 v2.5.1 迁移，确认 knowledge_file_lifecycle_t 存在 upload_owner_service 列及部分索引 idx_knowledge_file_lifecycle_upload_recovery。
+    expected: 记录 A：status=FAILED，error_code=CONTAINER_RESTARTED，stage=UPLOAD，且对应 MinIO 对象被删除。
+  - order: 2
+    action: 通过 create_file_record 预置记录 A/B/C/D（status=UPLOADING, stage=UPLOAD, delete_flag=N，create_time 分别位于 cutoff 前后），并为记录
+      A 写入对应 MinIO 对象。
+    expected: 记录 B：status 仍为 UPLOADING，未被标 FAILED，对象未受影响。
+  - order: 3
+    action: 调用 fail_interrupted_uploads(cutoff, CONFIG_SERVICE_NAME)（backend/services/startup_recovery_service.py:106）。
+    expected: 记录 C（NULL 归属）：status 仍为 UPLOADING，未被误标 FAILED。
+  - order: 4
+    action: 重新查询记录 A/B/C/D 的 status/error_code/stage/version，并核对记录 A 的 MinIO 对象存在性。
+    expected: 记录 D（宽限期内）：status 仍为 UPLOADING，未被提前清理。
+  - order: 5
+    action: 单独断言 list_uploading_files_created_before 的过滤边界：精确归属+create_time<cutoff 命中，其他归属/NULL归属/宽限期内不命中，空 upload_owner_service
+      抛 ValueError。
+    expected: list_uploading_files_created_before 仅返回 upload_owner_service 精确匹配且 create_time<cutoff 的记录；传入空归属时抛出 ValueError。
+  - order: 6
+    action: 清理测试记录与 MinIO 对象，确保可重复执行。
+    expected: list_uploading_files_created_before 仅返回 upload_owner_service 精确匹配且 create_time<cutoff 的记录；传入空归属时抛出 ValueError。
+  expected_results:
+  - 记录 A：status=FAILED，error_code=CONTAINER_RESTARTED，stage=UPLOAD，且对应 MinIO 对象被删除。
+  - 记录 B：status 仍为 UPLOADING，未被标 FAILED，对象未受影响。
+  - 记录 C（NULL 归属）：status 仍为 UPLOADING，未被误标 FAILED。
+  - 记录 D（宽限期内）：status 仍为 UPLOADING，未被提前清理。
+  - list_uploading_files_created_before 仅返回 upload_owner_service 精确匹配且 create_time<cutoff 的记录；传入空归属时抛出 ValueError。
+  forbidden_side_effects: []
+  source:
+    legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
+    legacy_sheet: 04_安全性能可靠性
+    legacy_row: 53
+  risk_type: RELIABILITY
+  risk: 恢复流程将非本服务归属（其他upload_owner_service或历史NULL归属）或宽限期内的UPLOADING记录误标为FAILED并删除其MinIO对象，造成跨服务/跨租户上传数据丢失与状态误判；或本服务归属的过期UPLOADING记录未被清理，遗留悬挂对象。
+  condition:
+  - 本地测试数据库需已应用 deploy/sql/migrations/v2.5.1_upload_owner_service.sql（存在 upload_owner_service 列与 idx_knowledge_file_lifecycle_upload_recovery
+    部分索引）；预置 knowledge_file_lifecycle_t 测试记录：A(upload_owner_service=CONFIG_SERVICE_NAME, create_time<cutoff, status=UPLOADING)、B(其他服务归属,
+    create_time<cutoff, UPLOADING)、C(upload_owner_service=NULL 历史归属, create_time<cutoff, UPLOADING)、D(CONFIG_SERVICE_NAME,
+    create_time>=cutoff, UPLOADING)；记录A 在 MinIO 有对应 object_name 测试对象。
+  metrics:
+  - 记录 A：status=FAILED，error_code=CONTAINER_RESTARTED，stage=UPLOAD，且对应 MinIO 对象被删除。
+  - 记录 B：status 仍为 UPLOADING，未被标 FAILED，对象未受影响。
+  - 记录 C（NULL 归属）：status 仍为 UPLOADING，未被误标 FAILED。
+  - 记录 D（宽限期内）：status 仍为 UPLOADING，未被提前清理。
+  - list_uploading_files_created_before 仅返回 upload_owner_service 精确匹配且 create_time<cutoff 的记录；传入空归属时抛出 ValueError。
+  thresholds:
+  - 记录 A：status=FAILED，error_code=CONTAINER_RESTARTED，stage=UPLOAD，且对应 MinIO 对象被删除。
+  - 记录 B：status 仍为 UPLOADING，未被标 FAILED，对象未受影响。
+  - 记录 C（NULL 归属）：status 仍为 UPLOADING，未被误标 FAILED。
+  - 记录 D（宽限期内）：status 仍为 UPLOADING，未被提前清理。
+  - list_uploading_files_created_before 仅返回 upload_owner_service 精确匹配且 create_time<cutoff 的记录；传入空归属时抛出 ValueError。
+  recovery_expectations:
+  - 记录 A：status=FAILED，error_code=CONTAINER_RESTARTED，stage=UPLOAD，且对应 MinIO 对象被删除。
+  - 记录 B：status 仍为 UPLOADING，未被标 FAILED，对象未受影响。
+  - 记录 C（NULL 归属）：status 仍为 UPLOADING，未被误标 FAILED。
+  - 记录 D（宽限期内）：status 仍为 UPLOADING，未被提前清理。
+  - list_uploading_files_created_before 仅返回 upload_owner_service 精确匹配且 create_time<cutoff 的记录；传入空归属时抛出 ValueError。

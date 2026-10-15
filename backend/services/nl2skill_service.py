@@ -20,7 +20,8 @@ from agents.nl2skill_agent import create_nl2skill_agent_config
 from consts.const import LANGUAGE, MODEL_CONFIG_MAPPING
 from consts.model import HistoryItem, NL2SkillRunRequest
 from database.model_management_db import get_model_by_model_id
-from utils.config_utils import tenant_config_manager, get_model_name_from_config
+from utils.config_utils import tenant_config_manager
+from management.services.model.names import get_model_name_from_config
 from utils.content_classifier_utils import ContentClassifier
 from utils.prompt_template_utils import get_nl2skill_prompt_template
 from services.thread_lifecycle_service import runtime_thread_manager

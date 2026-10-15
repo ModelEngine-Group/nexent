@@ -1,0 +1,82 @@
+schema_version: '1.0'
+stage: D2
+module: V5-BASELINE
+case:
+  case_id: API-142
+  feature_id: F-141
+  business_rule_ids:
+  - F-141-RULE-01
+  title: Bearer/API key 上下文解析、tenant/user、requestId、rate limit｜核心流程
+  type: API-IT
+  priority: P0
+  status: active
+  automation: automated
+  objective: Bearer/API key 上下文解析、tenant/user、requestId、rate limit｜核心流程
+  preconditions:
+  - Nexent 本地测试全栈已启动，health check 通过。
+  - 设置 NEXENT_TEST_HOME，目录不位于 Nexent Git 仓库内。
+  - 当次 run_id 已生成，所有新建资源名称带 run_id；测试基线固定为 develop 当前批次锁定的产品提交；执行时另记录实际被测commit。
+  - 所需本地资产存在且校验通过：${NEXENT_TEST_HOME}/config/models.yaml；${NEXENT_TEST_HOME}/config/secrets.env；${NEXENT_TEST_HOME}/assets/documents/；${NEXENT_TEST_HOME}/config/northbound.yaml
+  test_data:
+    legacy_asset_declaration: '- ${NEXENT_TEST_HOME}/config/models.yaml
+
+      - ${NEXENT_TEST_HOME}/config/secrets.env
+
+      - ${NEXENT_TEST_HOME}/assets/documents/
+
+      - ${NEXENT_TEST_HOME}/config/northbound.yaml'
+  steps:
+  - order: 1
+    action: 从 config/northbound.yaml 读取测试 API user/API Key、默认 agent_id/knowledge_base_id；Key 通过 secrets.env 注入。
+    expected: 功能结果与代码契约一致，测试过程无未处理异常。
+  - order: 2
+    action: 先调用 Northbound health/鉴权入口确认本地服务与测试身份有效，并记录 base_url 与当前 git commit。
+    expected: 关键状态在 API 返回、数据库/存储和后续读取中保持一致。
+  - order: 3
+    action: 根据“Bearer/API key 上下文解析、tenant/user、requestId、rate limit｜核心流程”构造真实 /nb/v1 请求，显式填写 metadata、meta_data、tool_params、attachments、model
+      override 或 Idempotency-Key 等相关字段。
+    expected: 失败路径返回明确错误，不出现半写入、重复副作用或跨租户泄露。
+  - order: 4
+    action: 发起真实 HTTP 请求并保存状态码、响应头、request_id/run_id 与脱敏响应体。
+    expected: 日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。
+  - order: 5
+    action: Chat Run 类等待流式/异步执行结束，检查实际 Agent/模型/KB/工具调用结果，而不是只断言 200。
+    expected: API Key 鉴权、metadata/tool_params/idempotency 等契约按实际请求生效。
+  - order: 6
+    action: 幂等类重复发送同一 Idempotency-Key，确认不会产生重复会话/任务/资源；不同 key 应产生独立执行。
+    expected: API Key 鉴权、metadata/tool_params/idempotency 等契约按实际请求生效。
+  - order: 7
+    action: 权限/参数类使用无权限 key、未知 tool 参数、非法附件等请求，确认明确 4xx/429 且无半写入。
+    expected: API Key 鉴权、metadata/tool_params/idempotency 等契约按实际请求生效。
+  - order: 8
+    action: 查询数据库/会话/运行记录验证 metadata 与审计字段作用域正确，且 API Key 不出现在日志和响应中。
+    expected: API Key 鉴权、metadata/tool_params/idempotency 等契约按实际请求生效。
+  expected_results:
+  - 功能结果与代码契约一致，测试过程无未处理异常。
+  - 关键状态在 API 返回、数据库/存储和后续读取中保持一致。
+  - 失败路径返回明确错误，不出现半写入、重复副作用或跨租户泄露。
+  - 日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。
+  - API Key 鉴权、metadata/tool_params/idempotency 等契约按实际请求生效。
+  forbidden_side_effects: []
+  source:
+    legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
+    legacy_sheet: 02_测试用例基线
+    legacy_row: 272
+  contract:
+    protocol: HTTP API
+    request_expectations:
+    - 从 config/northbound.yaml 读取测试 API user/API Key、默认 agent_id/knowledge_base_id；Key 通过 secrets.env 注入。
+    - 先调用 Northbound health/鉴权入口确认本地服务与测试身份有效，并记录 base_url 与当前 git commit。
+    - 根据“Bearer/API key 上下文解析、tenant/user、requestId、rate limit｜核心流程”构造真实 /nb/v1 请求，显式填写 metadata、meta_data、tool_params、attachments、model
+      override 或 Idempotency-Key 等相关字段。
+    - 发起真实 HTTP 请求并保存状态码、响应头、request_id/run_id 与脱敏响应体。
+    - Chat Run 类等待流式/异步执行结束，检查实际 Agent/模型/KB/工具调用结果，而不是只断言 200。
+    - 幂等类重复发送同一 Idempotency-Key，确认不会产生重复会话/任务/资源；不同 key 应产生独立执行。
+    - 权限/参数类使用无权限 key、未知 tool 参数、非法附件等请求，确认明确 4xx/429 且无半写入。
+    - 查询数据库/会话/运行记录验证 metadata 与审计字段作用域正确，且 API Key 不出现在日志和响应中。
+    response_expectations:
+    - 功能结果与代码契约一致，测试过程无未处理异常。
+    - 关键状态在 API 返回、数据库/存储和后续读取中保持一致。
+    - 失败路径返回明确错误，不出现半写入、重复副作用或跨租户泄露。
+    - 日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。
+    - API Key 鉴权、metadata/tool_params/idempotency 等契约按实际请求生效。

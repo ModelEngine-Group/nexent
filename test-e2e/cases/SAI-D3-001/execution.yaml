@@ -1,0 +1,12 @@
+schema_version: '1.0'
+case_id: SAI-D3-001
+implementations:
+- framework: pytest
+  file: test.py
+  selector: test_SAI_D3_001_real_kernel_isolation
+  profiles:
+  - mock
+timeout_seconds: 600
+acceptance_bindings:
+  AC-01:
+  - test_SAI_D3_001_real_kernel_isolation

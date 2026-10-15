@@ -1,0 +1,84 @@
+schema_version: '1.0'
+stage: D4
+module: V5-BASELINE
+case:
+  case_id: PW-NL2AGENT-01
+  feature_id: V5-PW-NL2AGENT-01
+  business_rule_ids:
+  - V5-PW-NL2AGENT-01-RULE-01
+  title: 先创建/选中Draft→NL2Agent澄清→配置回填→Debug
+  type: E2E
+  priority: P0
+  status: active
+  automation: automated
+  objective: 修正v4“从零生成Agent”错误语义：NL2Agent作用于已选中的可编辑Agent。
+  preconditions:
+  - 先创建run_id Draft
+  - 真实生成模型可用
+  - 固定需求可触发澄清
+  test_data:
+    legacy_asset_declaration: config/models.yaml；expected/nl2agent_expected.json
+  steps:
+  - order: 1
+    action: 未选择Agent的仓库列表确认无可执行NL2Agent入口，创建/选择可编辑Agent后方可进入生成面板。
+    expected: 无可编辑Agent时NL2Agent不可用。
+  - order: 2
+    action: 创建/选中可编辑Draft，确认composer启用。
+    expected: 生成完成后Config真实刷新服务端snapshot。
+  - order: 3
+    action: 输入固定目标需求并发送。
+    expected: 生成配置可Debug运行。
+  - order: 4
+    action: 按oracle回答澄清问题。
+    expected: 生成配置可Debug运行。
+  - order: 5
+    action: 若出现资源推荐，按当前UI选择受控测试资源。
+    expected: 生成配置可Debug运行。
+  - order: 6
+    action: 等待agent_generation_completed，观察Config自动刷新/聚焦更新字段。
+    expected: 生成配置可Debug运行。
+  - order: 7
+    action: 检查description、prompt、conversation guide等被更新字段结构。
+    expected: 生成配置可Debug运行。
+  - order: 8
+    action: 如出现同步失败告警，点击【Retry】验证恢复；正常路径不得出现。
+    expected: 生成配置可Debug运行。
+  - order: 9
+    action: 点击Debug执行固定问题。
+    expected: 生成配置可Debug运行。
+  - order: 10
+    action: 刷新重新选择Agent，确认生成配置持久化。
+    expected: 生成配置可Debug运行。
+  expected_results:
+  - 无可编辑Agent时NL2Agent不可用。
+  - 生成完成后Config真实刷新服务端snapshot。
+  - 生成配置可Debug运行。
+  forbidden_side_effects: []
+  source:
+    legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
+    legacy_sheet: 03_Playwright_Journey
+    legacy_row: 18
+  actor: Nexent browser user
+  journey:
+  - 未选择Agent的仓库列表确认无可执行NL2Agent入口，创建/选择可编辑Agent后方可进入生成面板。
+  - 创建/选中可编辑Draft，确认composer启用。
+  - 输入固定目标需求并发送。
+  - 按oracle回答澄清问题。
+  - 若出现资源推荐，按当前UI选择受控测试资源。
+  - 等待agent_generation_completed，观察Config自动刷新/聚焦更新字段。
+  - 检查description、prompt、conversation guide等被更新字段结构。
+  - 如出现同步失败告警，点击【Retry】验证恢复；正常路径不得出现。
+  - 点击Debug执行固定问题。
+  - 刷新重新选择Agent，确认生成配置持久化。
+  final_business_result:
+  - 无可编辑Agent时NL2Agent不可用。
+  - 生成完成后Config真实刷新服务端snapshot。
+  - 生成配置可Debug运行。
+  failure_evidence:
+  - '${NEXENT_TEST_HOME}/runs/{run_id}/playwright/PW-NL2AGENT-01/
+
+    - screenshot.png / trace.zip / video.webm
+
+    - console.log / network.har / failure.json
+
+    - 涉及协议时关联 wire/*.jsonl；涉及下载时保留 downloads/'

@@ -48,7 +48,7 @@ from database.conversation_db import (
     update_message_unit_status,
 )
 from database.model_management_db import get_model_by_model_id
-from services.model_gateway_service import get_llm_adapter_from_config
+from management.services.model.adapter import get_llm_adapter_from_config
 from utils.config_utils import tenant_config_manager
 from nexent.core.agents.prompt.auxiliary import compose_auxiliary_prompt
 from utils.str_utils import remove_think_blocks
@@ -375,7 +375,8 @@ def call_llm_for_title(question: str, tenant_id: str, language: str = LANGUAGE["
     return title
 
 
-def update_conversation_title(conversation_id: int, title: str, user_id: str = None) -> bool:
+def update_conversation_title(conversation_id: int, title: str, user_id: str = None,
+                              *, expected_snapshot: Optional[Dict[str, Any]] = None) -> bool:
     """
     Update conversation title
 
@@ -386,8 +387,9 @@ def update_conversation_title(conversation_id: int, title: str, user_id: str = N
     Returns:
         bool: Whether the update was successful
     """
-    success = rename_conversation(conversation_id, title, user_id)
-    if not success:
+    kwargs = {"expected_snapshot": expected_snapshot} if expected_snapshot is not None else {}
+    success = rename_conversation(conversation_id, title, user_id, **kwargs)
+    if not success and expected_snapshot is None:
         raise ConversationNotFoundError(
             f"Conversation {conversation_id} does not exist or has been deleted"
         )
@@ -647,7 +649,8 @@ def update_conversation_knowledge_scope_service(
     }
 
 
-def rename_conversation_service(conversation_id: int, name: str, user_id: str) -> bool:
+def rename_conversation_service(conversation_id: int, name: str, user_id: str,
+                                *, only_if_default_title: bool = False) -> bool:
     """
     Rename a conversation
 
@@ -660,6 +663,15 @@ def rename_conversation_service(conversation_id: int, name: str, user_id: str) -
         bool: Whether the rename was successful
     """
     try:
+        if only_if_default_title:
+            initial = get_conversation(conversation_id, user_id=user_id)
+            if initial is None:
+                raise ConversationNotFoundError("Conversation does not exist or has been deleted")
+            if initial["conversation_title"] not in {DEFAULT_EN_TITLE, DEFAULT_ZH_TITLE}:
+                return False
+            snapshot = {"conversation_title": initial["conversation_title"],
+                        "update_time": initial["update_time"]}
+            return rename_conversation(conversation_id, name, user_id, expected_snapshot=snapshot)
         success = rename_conversation(conversation_id, name, user_id)
         if not success:
             raise Exception(f"Conversation {conversation_id} does not exist or has been deleted")
@@ -1142,6 +1154,11 @@ async def generate_conversation_title_service(conversation_id: int, question: st
         attributes={"langfuse.trace.name": "生成会话标题", "tenant.id": tenant_id},
     ))
     try:
+        initial = get_conversation(conversation_id, user_id=user_id, tenant_id=tenant_id)
+        if initial is None:
+            raise ConversationNotFoundError("Conversation does not exist or has been deleted")
+        snapshot = {"conversation_title": initial["conversation_title"],
+                    "update_time": initial["update_time"]}
         # Call LLM to generate title from question in a separate thread to avoid blocking
         title = await run_blocking(
             "conversation-title",
@@ -1154,13 +1171,19 @@ async def generate_conversation_title_service(conversation_id: int, question: st
             owner="runtime",
         )
 
-        # Update conversation title
-        update_conversation_title(conversation_id, title, user_id)
+        # A manual rename during the model call wins. No database lock is held
+        # while waiting for the external model, and the response returns the
+        # effective stored title rather than the rejected generated candidate.
+        if not update_conversation_title(conversation_id, title, user_id, expected_snapshot=snapshot):
+            current = get_conversation(conversation_id, user_id=user_id, tenant_id=tenant_id)
+            if current is None:
+                raise ConversationNotFoundError("Conversation does not exist or has been deleted")
+            title = current["conversation_title"]
         monitoring_manager.set_openinference_output(title)
 
         return title
 
-    except ValidationError:
+    except (ValidationError, ConversationNotFoundError):
         raise
     except Exception as e:
         logging.error(f"Failed to generate conversation title: {str(e)}")
@@ -1178,20 +1201,16 @@ def update_message_opinion_service(message_id: int, opinion: Optional[str]) -> b
     Returns:
         bool: Whether the update was successful
     """
-    try:
-        success = update_message_opinion(message_id, opinion)
-        if not success:
-            raise Exception("Message does not exist or has been deleted")
-        return True
-    except Exception as e:
-        logging.error(f"Failed to update message like/dislike: {str(e)}")
-        raise Exception(str(e))
+    success = update_message_opinion(message_id, opinion)
+    if not success:
+        raise ConversationNotFoundError("Message does not exist or has been deleted")
+    return True
 
 
 async def get_message_id_by_index_impl(conversation_id: int, message_index: int) -> Optional[int]:
     message_id = get_message_id_by_index(conversation_id, message_index)
     if message_id is None:
-        raise Exception("Message not found.")
+        raise ConversationNotFoundError("Message not found.")
     return message_id
 
 

@@ -3,20 +3,26 @@
 import { createElement } from "react";
 import { Avatar } from "antd";
 
-import { getAgentIcon, getAgentUploadedIconRevision } from "@/lib/chat/agentIconUtils";
+import {
+  getAgentIcon,
+  getAgentUploadedIconRevision,
+} from "@/lib/chat/agentIconUtils";
 import { API_ENDPOINTS } from "@/services/api";
+import { cn } from "@/lib/utils";
 import type { Agent } from "@/types/agentConfig";
 
 interface AgentAvatarProps {
   agent: Agent;
   size: number;
   iconSize: number;
+  className?: string;
 }
 
 export default function AgentAvatar({
   agent,
   size,
   iconSize,
+  className,
 }: AgentAvatarProps) {
   const defaultIcon = createElement(getAgentIcon(agent), {
     size: iconSize,
@@ -37,7 +43,7 @@ export default function AgentAvatar({
       size={size}
       src={iconSource}
       icon={defaultIcon}
-      className="!rounded-xl !bg-primary/10 !text-primary"
+      className={cn("!rounded-xl !bg-primary/10 !text-primary", className)}
     />
   );
 }

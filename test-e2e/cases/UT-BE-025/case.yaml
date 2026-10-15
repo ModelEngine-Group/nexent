@@ -1,0 +1,87 @@
+schema_version: '1.0'
+stage: D1
+module: V5-BASELINE
+case:
+  case_id: UT-BE-025
+  feature_id: V5-UT-BE-025
+  business_rule_ids:
+  - V5-UT-BE-025-RULE-01
+  title: memory scope/filter/token budget policy；external_search_hook 透明代理、内容 SHA-256 去重与 MMR 候选池上限
+  type: BE-UT
+  priority: P0
+  status: active
+  automation: automated
+  objective: memory scope/filter/token budget policy；external_search_hook 透明代理、内容 SHA-256 去重与 MMR 候选池上限
+  preconditions:
+  - 本地依赖/组件测试环境可运行；不要求外部模型服务在线。
+  - 设置 NEXENT_TEST_HOME，目录不位于 Nexent Git 仓库内。
+  - 当次 run_id 已生成，所有新建资源名称带 run_id；测试基线固定为 develop 当前批次锁定的产品提交；执行时另记录实际被测commit。
+  - 所需本地资产存在且校验通过：${NEXENT_TEST_HOME}/config/users.yaml；${NEXENT_TEST_HOME}/config/models.yaml
+  test_data:
+    legacy_asset_declaration: '- ${NEXENT_TEST_HOME}/config/users.yaml
+
+      - ${NEXENT_TEST_HOME}/config/models.yaml'
+  steps:
+  - order: 1
+    action: 在本地工作区准备固定 fixture/配置，测试代码不得读取生产凭据；NEXENT_TEST_HOME 指向仓库外目录。
+    expected: build_context 正常路径与代码契约一致，tenant/user/agent/external 分桶正确，无未处理异常。
+  - order: 2
+    action: 导入 backend/services/memory_context_service.py 的 MemoryContextService，注入 fake retrieval_service，pipeline_enabled=True。
+    expected: 未显式传 external_results 且 hook 存在时，hook 被调用一次，外部结果并入 Phase4 管线 final 结果。
+  - order: 3
+    action: 正常路径：构造 MemorySearchResult 列表调用 build_context，断言返回 MemorySearchContext 且 tenant/user/agent/external 分桶正确。
+    expected: 显式传 external_results 时 hook 不被调用。
+  - order: 4
+    action: external_search_hook 分支（启用）：注入异步 hook 且不传 external_results，断言 hook 被调用一次、入参含 query/tenant_id/user_id/agent_id/conversation_id，返回的
+      ExternalMemoryItem 进入 Phase4 管线并入最终结果。
+    expected: hook 异常被捕获，build_context 仍返回本地检索结果，不抛异常、无半写入副作用。
+  - order: 5
+    action: external_search_hook 分支（跳过）：显式传入 external_results 时，断言 hook 不被调用，避免重复外部查询。
+    expected: normalize 对内容相同的候选按 SHA-256 去重，同 hash 仅保留首条，去重后 total 数相应减少。
+  - order: 6
+    action: external_search_hook 分支（异常）：hook 抛异常时，断言 build_context 不抛出，异常被捕获并记 warning，本地检索结果仍正常返回。
+    expected: MMR 候选超过 mmr_candidate_max(200) 时仅前 200 条进入候选池，最终输出条数不超过 mmr_final_k。
+  - order: 7
+    action: 内容去重：对 sdk/nexent/memory/retrieval/normalizer.py 的 Normalizer.normalize 传入内容完全相同的多条候选，断言按 SHA-256 去重后仅保留首条。
+    expected: 非法参数（mmr_lambda 越界/mmr_final_k<=0/mmr_duplicate_threshold 越界）抛 ValueError，不允许吞异常返回伪成功。
+  - order: 8
+    action: 候选池上限：对 sdk/nexent/memory/retrieval/mmr.py 的 MMRDeduplicator 传入超过 mmr_candidate_max（默认 200）的候选，断言仅前 200 条进入候选池参与
+      MMR 选择，最终输出不超过 mmr_final_k。
+    expected: 失败路径返回明确错误，无跨租户泄露；日志/报告不含明文 API Key/Token/Password/模型密钥。
+  - order: 9
+    action: 非法参数：MMRDeduplicator 在 mmr_lambda 越界、mmr_final_k<=0、mmr_duplicate_threshold 越界时抛出 ValueError。
+    expected: 失败路径返回明确错误，无跨租户泄露；日志/报告不含明文 API Key/Token/Password/模型密钥。
+  - order: 10
+    action: 确认日志不输出 API Key/Token/用户密码/模型密钥。
+    expected: 失败路径返回明确错误，无跨租户泄露；日志/报告不含明文 API Key/Token/Password/模型密钥。
+  - order: 11
+    action: 测试结束释放临时对象，确保可重复执行。
+    expected: 失败路径返回明确错误，无跨租户泄露；日志/报告不含明文 API Key/Token/Password/模型密钥。
+  expected_results:
+  - build_context 正常路径与代码契约一致，tenant/user/agent/external 分桶正确，无未处理异常。
+  - 未显式传 external_results 且 hook 存在时，hook 被调用一次，外部结果并入 Phase4 管线 final 结果。
+  - 显式传 external_results 时 hook 不被调用。
+  - hook 异常被捕获，build_context 仍返回本地检索结果，不抛异常、无半写入副作用。
+  - normalize 对内容相同的候选按 SHA-256 去重，同 hash 仅保留首条，去重后 total 数相应减少。
+  - MMR 候选超过 mmr_candidate_max(200) 时仅前 200 条进入候选池，最终输出条数不超过 mmr_final_k。
+  - 非法参数（mmr_lambda 越界/mmr_final_k<=0/mmr_duplicate_threshold 越界）抛 ValueError，不允许吞异常返回伪成功。
+  - 失败路径返回明确错误，无跨租户泄露；日志/报告不含明文 API Key/Token/Password/模型密钥。
+  forbidden_side_effects: []
+  source:
+    legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
+    legacy_sheet: 02_测试用例基线
+    legacy_row: 372
+  unit_boundary: 策略
+  inputs:
+  - '- ${NEXENT_TEST_HOME}/config/users.yaml
+
+    - ${NEXENT_TEST_HOME}/config/models.yaml'
+  assertions:
+  - build_context 正常路径与代码契约一致，tenant/user/agent/external 分桶正确，无未处理异常。
+  - 未显式传 external_results 且 hook 存在时，hook 被调用一次，外部结果并入 Phase4 管线 final 结果。
+  - 显式传 external_results 时 hook 不被调用。
+  - hook 异常被捕获，build_context 仍返回本地检索结果，不抛异常、无半写入副作用。
+  - normalize 对内容相同的候选按 SHA-256 去重，同 hash 仅保留首条，去重后 total 数相应减少。
+  - MMR 候选超过 mmr_candidate_max(200) 时仅前 200 条进入候选池，最终输出条数不超过 mmr_final_k。
+  - 非法参数（mmr_lambda 越界/mmr_final_k<=0/mmr_duplicate_threshold 越界）抛 ValueError，不允许吞异常返回伪成功。
+  - 失败路径返回明确错误，无跨租户泄露；日志/报告不含明文 API Key/Token/Password/模型密钥。

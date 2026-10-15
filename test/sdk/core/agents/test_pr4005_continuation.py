@@ -113,8 +113,9 @@ def test_oc_027_bare_generation_routes_by_switch(strict, monkeypatch):
         assert "no action ran" in _text(second[-1])
         assert all("The answer is ready" not in _text(message) for message in second)
         assert agent.observer.rollback_model_attempt.call_args_list == [
-            call("attempt-0", 1), call("attempt-1", 1),
+            call("attempt-0", 1),
         ]
+        agent.observer.commit_model_attempt.assert_called_once_with("attempt-1", 1)
     else:
         assert all(
             core_agent_module._ACTION_FORMAT_REMINDER != _text(message)
@@ -145,7 +146,7 @@ def test_oc_028_three_bare_generations_use_last_answer(monkeypatch):
     agent._handle_max_steps_reached.assert_not_called()
 
 
-def test_oc_028_alternating_malformed_and_bare_use_last_answer(monkeypatch):
+def test_oc_028_alternating_malformed_and_bare_rejects_marked_final(monkeypatch):
     agent, _, _ = _agent_with_responses(
         ["<code>final_answer(", "just thinking", "<code>final_answer("],
         strict=True,
@@ -153,13 +154,12 @@ def test_oc_028_alternating_malformed_and_bare_use_last_answer(monkeypatch):
     )
     agent._handle_max_steps_reached = MagicMock()
 
-    outputs = list(agent._run_stream("task", max_steps=2))
-
-    assert outputs[-1].output == "<code>final_answer("
+    with pytest.raises(core_agent_module.ModelOutputProtocolExhaustedError):
+        list(agent._run_stream("task", max_steps=2))
     assert agent.model.call_count == 3
-    assert len(agent.memory.steps) == 1
-    assert agent.observer.rollback_model_attempt.call_count == 2
-    agent.observer.commit_model_attempt.assert_called_once_with("attempt-2", 1)
+    assert len(agent.memory.steps) == 0
+    assert agent.observer.rollback_model_attempt.call_count == 3
+    agent.observer.commit_model_attempt.assert_not_called()
     agent.python_executor.assert_not_called()
     agent._handle_max_steps_reached.assert_not_called()
 
@@ -219,19 +219,19 @@ def test_oc_023_continuation_mentions_only_existing_unfinished_steps(monkeypatch
     assert "Done step" not in _text(message)
 
 
-def test_oc_027_disabled_request_omits_post_baseline_platform_sentence(monkeypatch):
-    """OC-027: remove only the strict platform sentence from the off-mode request."""
+def test_oc_027_disabled_request_preserves_final_envelope_instruction(monkeypatch):
+    """OC-027: off-mode requests retain the supported envelope instruction."""
     agent, _, base = _agent_with_responses(
         ["complete answer"], strict=False, monkeypatch=monkeypatch,
     )
-    sentence = core_agent_module._STRICT_PLATFORM_FINAL_SENTENCES[1]
+    sentence = "When complete, return <final_answer>...</final_answer>."
     base[0].content[0]["text"] = f"Original platform instructions.\n{sentence}\nKeep this sentence."
 
     outputs = list(agent._run_stream("task", max_steps=2))
 
     assert outputs[-1].output == "complete answer"
     sent_system = agent.model.call_args.args[0][0]
-    assert sentence not in _text(sent_system)
+    assert sentence in _text(sent_system)
     assert "Original platform instructions." in _text(sent_system)
     assert "Keep this sentence." in _text(sent_system)
     assert sentence in _text(base[0])

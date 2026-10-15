@@ -1,0 +1,90 @@
+schema_version: '1.0'
+stage: D1
+module: V5-BASELINE
+case:
+  case_id: UT-BE-AUTO-4E549AE901758D36
+  feature_id: F-123
+  business_rule_ids:
+  - F-123-RULE-01
+  title: FaMemoryExtractor 从最终回答抽取 items 写 agent 短时记忆｜核心流程/异常/边界/截断
+  type: BE-UT
+  priority: P1
+  status: active
+  automation: automated
+  objective: FaMemoryExtractor 从最终回答抽取 items 写 agent 短时记忆｜核心流程/异常/边界/截断
+  preconditions:
+  - 本地依赖/组件测试环境可运行；不要求外部模型服务在线。
+  - 设置 NEXENT_TEST_HOME，目录不位于 Nexent Git 仓库内。
+  - 当次 run_id 已生成，所有新建资源名称带 run_id；测试基线固定为 develop 当前批次锁定的产品提交；执行时另记录实际被测commit。
+  - 所需本地资产存在且校验通过：backend/prompts/fa_memory_extraction_en.yaml（提示词模板，供 _load_prompt/_build_messages 读取）。
+  - model_client 与 memory_service 均使用测试替身（mock/fake），不访问真实 LLM 与外部存储。
+  test_data:
+    legacy_asset_declaration: '- backend/prompts/fa_memory_extraction_en.yaml'
+  steps:
+  - order: 1
+    action: 在本地工作区读取与 fa_memory_extractor 相关的固定 fixture/配置；测试代码不得读取生产凭据。
+    expected: 功能结果与代码契约一致，测试过程无未处理异常。
+  - order: 2
+    action: 直接导入 backend/services/fa_memory_extractor.py 的 FaMemoryExtractor、ExtractionResult，构造 tenant_id/user_id/agent_id/conversation_id
+      及 mock model_client、mock memory_service。
+    expected: 正常路径返回 ExtractionResult(reason=="ok")，items 的 content/memory_id 与 store_memory 返回值一致，store_memory 以 layer=MemoryLayer.AGENT、memory_type=MemoryType.SHORT_TERM
+      调用。
+  - order: 3
+    action: 正常路径：令 mock model_client.chat 返回两条 <memory-item>...</memory-item>，mock memory_service.store_memory 返回带 memory_id/event
+      的结果；调用 extract_and_store(final_answer_text, user_query)，断言 reason=="ok"，且返回 items 数量、content、memory_id 与 store_memory
+      调用参数（content/tenant_id/user_id/agent_id/conversation_id/layer=MemoryLayer.AGENT/memory_type=MemoryType.SHORT_TERM）一致。
+    expected: 空/无LLM/LLM异常/<no-memory/> 各分支返回对应 reason（empty_final_answer/no_llm_configured/llm_error/no_items）且 items 为空。
+  - order: 4
+    action: 空与仅空白 final_answer：分别传入 "" 与 "   "，断言返回 items 为空、reason=="empty_final_answer"，且 model_client.chat 未被调用。
+    expected: 截断分支：送入 chat 的 final_answer 不超过 8000 字符。
+  - order: 5
+    action: 无 model_client：构造 FaMemoryExtractor(model_client=None)，断言 reason=="no_llm_configured"、items 为空，且不调用 chat。
+    expected: 逐条失败仅记录 warning，不中断整体抽取，也不丢弃成功条目的返回。
+  - order: 6
+    action: LLM 异常：令 mock model_client.chat 抛出异常，断言 reason=="llm_error"、items 为空、不调用 store_memory，且异常被捕获不向上抛出。
+    expected: 失败路径返回明确，不出现半写入、重复副作用或跨租户泄露。
+  - order: 7
+    action: <no-memory/>：令 chat 返回 "<no-memory/>"，断言 _parse_items 返回空、reason=="no_items"、不调用 store_memory。
+    expected: 日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。
+  - order: 8
+    action: 8000 字符截断：传入长度大于 MAX_INPUT_CHARS(8000) 的 final_answer，断言送入 _build_messages/chat 的 final_answer 被截断为前 8000 字符。
+    expected: 日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。
+  - order: 9
+    action: 逐条失败仅告警：令 items 中一条 store_memory 抛异常、另一条成功，断言返回仅含成功条目、reason=="ok"，异常被捕获并记录 warning 且不中断后续写入。
+    expected: 日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。
+  - order: 10
+    action: 提示词解析：调用 _build_messages，断言 messages 含 system 与 user 两条，user 内容含 final_answer 与 user_query 的填充结果；对 <no-memory/>、多条
+      memory-item、无匹配文本分别断言 _parse_items 返回期望结果。
+    expected: 日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。
+  - order: 11
+    action: 确认日志中不输出 API Key、Token、用户密码或模型密钥。
+    expected: 日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。
+  - order: 12
+    action: 测试结束后释放 mock/fixture，确保可重复执行。
+    expected: 日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。
+  expected_results:
+  - 功能结果与代码契约一致，测试过程无未处理异常。
+  - 正常路径返回 ExtractionResult(reason=="ok")，items 的 content/memory_id 与 store_memory 返回值一致，store_memory 以 layer=MemoryLayer.AGENT、memory_type=MemoryType.SHORT_TERM
+    调用。
+  - 空/无LLM/LLM异常/<no-memory/> 各分支返回对应 reason（empty_final_answer/no_llm_configured/llm_error/no_items）且 items 为空。
+  - 截断分支：送入 chat 的 final_answer 不超过 8000 字符。
+  - 逐条失败仅记录 warning，不中断整体抽取，也不丢弃成功条目的返回。
+  - 失败路径返回明确，不出现半写入、重复副作用或跨租户泄露。
+  - 日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。
+  forbidden_side_effects: []
+  source:
+    legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
+    legacy_sheet: 02_测试用例基线
+    legacy_row: 399
+  unit_boundary: FA记忆抽取
+  inputs:
+  - '- backend/prompts/fa_memory_extraction_en.yaml'
+  assertions:
+  - 功能结果与代码契约一致，测试过程无未处理异常。
+  - 正常路径返回 ExtractionResult(reason=="ok")，items 的 content/memory_id 与 store_memory 返回值一致，store_memory 以 layer=MemoryLayer.AGENT、memory_type=MemoryType.SHORT_TERM
+    调用。
+  - 空/无LLM/LLM异常/<no-memory/> 各分支返回对应 reason（empty_final_answer/no_llm_configured/llm_error/no_items）且 items 为空。
+  - 截断分支：送入 chat 的 final_answer 不超过 8000 字符。
+  - 逐条失败仅记录 warning，不中断整体抽取，也不丢弃成功条目的返回。
+  - 失败路径返回明确，不出现半写入、重复副作用或跨租户泄露。
+  - 日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。

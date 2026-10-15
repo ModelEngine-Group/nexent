@@ -5,6 +5,7 @@ import {
   AssistantRuntimeProvider,
   useLocalRuntime,
   type ChatModelAdapter,
+  useAuiState,
 } from "@assistant-ui/react";
 import { useTranslation } from "react-i18next";
 import {
@@ -25,6 +26,8 @@ import {
 } from "../adapter/remote-chat-model-adapter";
 import { Chat } from "./chat";
 import type { WelcomeSuggestion } from "./thread";
+import { Thread } from "./thread";
+import { AgentConfigurationWelcome } from "./agent-configuration-welcome";
 
 const NL2AGENT_DISPLAY_BASE: Agent = {
   id: "__nl2agent_runtime__",
@@ -40,6 +43,7 @@ export interface Nl2AgentChatPanelProps {
   agentId?: number | null;
   disabled?: boolean;
   showOptimizationSuggestions?: boolean;
+  configurationLayout?: boolean;
   onStateEvent?: (event: Nl2AgentStateEvent) => void;
   onStopped?: (agentId: number) => void;
   onRunStart?: (agentId: number) => void;
@@ -48,6 +52,39 @@ export interface Nl2AgentChatPanelProps {
 
 export interface Nl2AgentChatPanelHandle {
   cancelRun: () => void;
+  sendPrompt: (prompt: string) => void;
+}
+
+function ConfigurationThread({
+  agent,
+  disabled,
+  dictationConfigured,
+}: {
+  agent: Agent;
+  disabled: boolean;
+  dictationConfigured: boolean;
+}) {
+  const hasMessages = useAuiState((state) => state.thread.messages.length > 0);
+  return (
+    <Thread
+      agent={agent}
+      chatMode="execution"
+      onChatModeChange={() => undefined}
+      showConversationTitle={false}
+      showModelSelector={false}
+      variant="embedded"
+      readOnly={disabled}
+      configurationLayout
+      showComposer={hasMessages}
+      isDictationConfigured={dictationConfigured}
+      welcomeContent={
+        <AgentConfigurationWelcome
+          disabled={disabled}
+          dictationConfigured={dictationConfigured}
+        />
+      }
+    />
+  );
 }
 
 export const Nl2AgentChatPanel = forwardRef<
@@ -58,6 +95,7 @@ export const Nl2AgentChatPanel = forwardRef<
     agentId = null,
     disabled = false,
     showOptimizationSuggestions = false,
+    configurationLayout = false,
     onStateEvent,
     onStopped,
     onRunStart,
@@ -108,8 +146,21 @@ export const Nl2AgentChatPanel = forwardRef<
     ref,
     () => ({
       cancelRun: () => runtime.thread.cancelRun(),
+      sendPrompt: (prompt) => {
+        if (
+          disabled ||
+          agentId === null ||
+          !prompt.trim() ||
+          runtime.thread.getState().isRunning
+        )
+          return;
+        runtime.thread.append({
+          role: "user",
+          content: [{ type: "text", text: prompt.trim() }],
+        });
+      },
     }),
-    [runtime]
+    [agentId, disabled, runtime]
   );
 
   const assistantTitle = t("agentConfig.button.generationAssistant");
@@ -147,9 +198,7 @@ export const Nl2AgentChatPanel = forwardRef<
               id: "optimize-conversation-guide",
               icon: MessageSquareIcon,
               title: t("nl2agent.optimization.conversation.title"),
-              description: t(
-                "nl2agent.optimization.conversation.description"
-              ),
+              description: t("nl2agent.optimization.conversation.description"),
               prompt: t("nl2agent.optimization.conversation.input"),
             },
           ]
@@ -160,17 +209,31 @@ export const Nl2AgentChatPanel = forwardRef<
   return (
     <AssistantRuntimeProvider runtime={runtime}>
       <TooltipProvider>
-        <div className="h-full w-full">
-          <Chat
-            selectedAgent={nl2AgentDisplay}
-            generatedTitle={assistantTitle}
-            welcomeSuggestions={welcomeSuggestions}
-            isLoadingAgents={false}
-            showModelSelector={false}
-            showConversationTitle={false}
-            readOnly={disabled}
-            variant="embedded"
-          />
+        <div
+          className={
+            configurationLayout
+              ? "h-full w-full bg-[radial-gradient(ellipse_at_20%_48%,rgba(222,248,251,0.45),transparent_48%),radial-gradient(ellipse_at_85%_52%,rgba(234,224,251,0.4),transparent_50%)] [font-family:'HarmonyOS_Sans_SC',sans-serif]"
+              : "h-full w-full"
+          }
+        >
+          {configurationLayout ? (
+            <ConfigurationThread
+              agent={nl2AgentDisplay}
+              disabled={disabled}
+              dictationConfigured={Boolean(modelConfig?.stt)}
+            />
+          ) : (
+            <Chat
+              selectedAgent={nl2AgentDisplay}
+              generatedTitle={assistantTitle}
+              welcomeSuggestions={welcomeSuggestions}
+              isLoadingAgents={false}
+              showModelSelector={false}
+              showConversationTitle={false}
+              readOnly={disabled}
+              variant="embedded"
+            />
+          )}
         </div>
       </TooltipProvider>
     </AssistantRuntimeProvider>

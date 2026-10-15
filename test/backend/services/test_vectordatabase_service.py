@@ -379,13 +379,13 @@ setattr(
     storage_service_mock,
 )
 
-# Mock services.model_gateway_service so vectordatabase_service can import
+# Mock management.services.model.adapter so vectordatabase_service can import
 # ``build_adapter_fresh`` (the gateway bridge). Tests that exercise the
 # embedding/rerank paths patch the bound name on vectordatabase_service
 # directly, so this mock only needs to satisfy the import.
-model_gateway_service_mock = types.ModuleType('services.model_gateway_service')
+model_gateway_service_mock = types.ModuleType('management.services.model.adapter')
 model_gateway_service_mock.build_adapter_fresh = MagicMock()
-sys.modules['services.model_gateway_service'] = model_gateway_service_mock
+sys.modules['management.services.model.adapter'] = model_gateway_service_mock
 setattr(
     sys.modules['services'],
     'model_gateway_service',

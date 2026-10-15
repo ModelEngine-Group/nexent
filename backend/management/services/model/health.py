@@ -1,0 +1,521 @@
+import logging
+from typing import Optional
+
+import httpx
+from consts.const import DOCKER_INTERNAL_HOST, LOCALHOST_IP, LOCALHOST_NAME
+from consts.model import ModelConnectStatusEnum
+from database.model_management_db import get_model_by_display_name, update_model_record
+from management.services.model.adapter import build_adapter_fresh
+from management.services.model.probe import (
+    _embedding_url_candidates,
+    _infer_model_factory,
+)
+from nexent.core import MessageObserver
+from nexent.monitor import set_monitoring_context, set_monitoring_operation
+from services.voice_service import get_voice_service
+
+logger = logging.getLogger("model_health_service")
+
+DASHSCOPE_MODEL_FACTORY = "dashscope"
+TOKENPONY_MODEL_FACTORY = "tokenpony"
+SILICONFLOW_MODEL_FACTORY = "silicon"
+PROVIDER_CATALOG_HEALTHCHECK_FACTORIES = {
+    DASHSCOPE_MODEL_FACTORY,
+    TOKENPONY_MODEL_FACTORY,
+}
+
+EMBEDDING_TYPES = {"embedding", "multi_embedding"}
+
+
+async def _provider_catalog_connectivity_check(
+    model_name: str,
+    model_type: str,
+    model_api_key: str,
+    model_factory: Optional[str],
+) -> bool:
+    """Validate provider-managed multimodal models through their model catalog."""
+    provider = (model_factory or "").lower()
+    if provider not in PROVIDER_CATALOG_HEALTHCHECK_FACTORIES:
+        return False
+
+    from management.services.model.provider import get_provider_models
+
+    model_list = await get_provider_models(
+        {
+            "provider": provider,
+            "model_type": model_type,
+            "api_key": model_api_key,
+        }
+    )
+    if not model_list or any(model.get("_error") for model in model_list):
+        return False
+
+    expected_model_id = model_name.lower()
+    return any(
+        str(model.get("id", "")).lower() == expected_model_id for model in model_list
+    )
+
+
+async def _image_generation_connectivity_check(
+    model_name: str,
+    base_url: str,
+    api_key: str,
+    ssl_verify: bool = True,
+    timeout_seconds: Optional[float] = None,
+) -> bool:
+    """Probe an image-generation (vlm2) model via /images/generations.
+
+    Image-generation models are not served on the chat-completions endpoint,
+    so the shared VLM chat probe reports them as "model does not exist". A
+    minimal real generation is the only reliable probe; each call produces
+    one billable image, so the payload is kept as small as possible.
+    """
+    url = (base_url or "").rstrip("/")
+    if not url.endswith("/images/generations"):
+        url = f"{url}/images/generations"
+    # Image generation is slower than chat; default well above the 5s used
+    # by the chat-style probes.
+    timeout = timeout_seconds if timeout_seconds else 60.0
+    try:
+        async with httpx.AsyncClient(verify=ssl_verify, timeout=timeout) as client:
+            response = await client.post(
+                url,
+                json={"model": model_name, "prompt": "connectivity check"},
+                headers={"Authorization": f"Bearer {api_key}"},
+            )
+        return response.status_code == 200
+    except Exception:
+        return False
+
+
+async def _perform_connectivity_check(
+    model_name: str,
+    model_type: str,
+    model_base_url: str,
+    model_api_key: str,
+    ssl_verify: bool = True,
+    model_factory: Optional[str] = None,
+    model_appid: Optional[str] = None,
+    access_token: Optional[str] = None,
+    display_name: Optional[str] = None,
+    timeout_seconds: Optional[float] = None,
+    temperature: Optional[float] = None,
+    top_p: Optional[float] = None,
+    extra_params: Optional[dict] = None,
+) -> bool:
+    """
+    Perform specific model connectivity check
+    Args:
+        model_name: Model name
+        model_type: Model type
+        model_base_url: Model base URL
+        model_api_key: API key
+        ssl_verify: Whether to verify SSL certificates (default: True)
+        display_name: Optional display name for monitoring
+        timeout_seconds: Optional request timeout in seconds
+    Returns:
+        bool: Connectivity check result
+    """
+    if LOCALHOST_NAME in model_base_url or LOCALHOST_IP in model_base_url:
+        model_base_url = model_base_url.replace(
+            LOCALHOST_NAME, DOCKER_INTERNAL_HOST
+        ).replace(LOCALHOST_IP, DOCKER_INTERNAL_HOST)
+
+    effective_timeout = timeout_seconds if timeout_seconds else 5.0
+    connectivity: bool
+
+    if model_type in EMBEDDING_TYPES:
+        is_multimodal = model_type == "multi_embedding"
+        slot = "multiEmbedding" if is_multimodal else "embedding"
+        adapter_config = {
+            "api_key": model_api_key,
+            "ssl_verify": ssl_verify,
+            "model_type": model_type,
+        }
+        if is_multimodal:
+            adapter_config["model_factory"] = model_factory
+        # Try the normalized /embeddings endpoint first, then the URL as the
+        # user gave it — aggregator URL quirks don't fail the probe on the
+        # first candidate.
+        for candidate_url in _embedding_url_candidates(model_base_url):
+            emb = await build_adapter_fresh(
+                {**adapter_config, "base_url": candidate_url},
+                model_type,
+                slot,
+                None,
+                model_name=model_name,
+            ).dimension_check(timeout=effective_timeout)
+            if len(emb) > 0 and len(emb[0]) > 0:
+                return True
+        return False
+    elif model_type == "llm":
+        observer = MessageObserver()
+        set_monitoring_operation("connectivity_check", display_name=display_name)
+        connectivity = await build_adapter_fresh(
+            {
+                "base_url": model_base_url,
+                "api_key": model_api_key,
+                "ssl_verify": ssl_verify,
+                "timeout_seconds": timeout_seconds,
+                "display_name": display_name,
+                "temperature": temperature,
+                "top_p": top_p,
+                "extra_params": extra_params,
+            },
+            "llm",
+            "llm",
+            None,
+            observer=observer,
+            model_name=model_name,
+            timeout_seconds=timeout_seconds,
+            display_name=display_name,
+        ).health_check()
+    elif model_type == "rerank":
+        # Normalize the probe URL to the rerank endpoint — the form/base_url
+        # passed in at verify time is usually the bare provider root (e.g.
+        # https://api.siliconflow.cn/v1/), while the rerank adapter POSTs the
+        # URL as-is, so a bare root would 404. Mirrors the URL munging that
+        # prepare_model_dict applies when the model is SAVED, so probe-time
+        # and save-time URLs agree:
+        #   dashscope: compatible-mode/v1 -> api/v1 .../services/rerank/text-rerank/text-rerank
+        #   others:    {root}/rerank
+        # Already-normalized URLs (ending in /rerank or the dashscope path)
+        # pass through untouched.
+        rerank_url = (model_base_url or "").rstrip("/")
+        if "dashscope" in rerank_url.lower() and "text-rerank" not in rerank_url:
+            rerank_url = (
+                rerank_url.replace("compatible-mode/v1", "api/v1").rstrip("/")
+                + "/services/rerank/text-rerank/text-rerank"
+            )
+        elif (
+            not rerank_url.lower().endswith("/rerank")
+            and "text-rerank" not in rerank_url
+        ):
+            rerank_url = f"{rerank_url}/rerank"
+        rerank_config = {
+            "base_url": rerank_url,
+            "api_key": model_api_key,
+            "ssl_verify": ssl_verify,
+        }
+        if extra_params is not None:
+            rerank_config["extra_params"] = extra_params
+        connectivity = await build_adapter_fresh(
+            rerank_config,
+            "rerank",
+            "rerank",
+            None,
+            model_name=model_name,
+        ).health_check()
+    elif model_type == "vlm2":
+        # Image-generation models are served on /images/generations, not on
+        # chat/completions — the shared VLM chat probe reports them as
+        # "model does not exist". Try the free provider-catalog check first,
+        # then probe the generation endpoint directly.
+        if await _provider_catalog_connectivity_check(
+            model_name=model_name,
+            model_type=model_type,
+            model_api_key=model_api_key,
+            model_factory=model_factory,
+        ):
+            return True
+        connectivity = await _image_generation_connectivity_check(
+            model_name=model_name,
+            base_url=model_base_url,
+            api_key=model_api_key,
+            ssl_verify=ssl_verify,
+            timeout_seconds=timeout_seconds,
+        )
+    elif model_type in ("vlm", "vlm3", "vlm4"):
+        if await _provider_catalog_connectivity_check(
+            model_name=model_name,
+            model_type=model_type,
+            model_api_key=model_api_key,
+            model_factory=model_factory,
+        ):
+            return True
+
+        observer = MessageObserver()
+        set_monitoring_operation("connectivity_check", display_name=display_name)
+        vlm_config = {
+            "base_url": model_base_url,
+            "api_key": model_api_key,
+            "ssl_verify": ssl_verify,
+            "model_factory": model_factory,
+        }
+        if temperature is not None:
+            vlm_config["temperature"] = temperature
+        if top_p is not None:
+            vlm_config["top_p"] = top_p
+        if extra_params is not None:
+            vlm_config["extra_params"] = extra_params
+        connectivity = await build_adapter_fresh(
+            vlm_config,
+            "vlm",
+            model_type,
+            None,
+            model_name=model_name,
+            observer=observer,
+            display_name=display_name,
+        ).health_check()
+    elif model_type == "stt":
+        voice_service = get_voice_service()
+
+        # Determine STT provider based on model_factory
+        use_volc = model_factory and model_factory.lower() in [
+            "volcengine",
+            "volcano",
+            "volcengine",
+            "火山引擎",
+        ]
+
+        if use_volc:
+            # Use Volcano STT with appid and access_token
+            connectivity = await voice_service.check_voice_connectivity(
+                model_type="stt",
+                stt_config={
+                    "model_factory": model_factory,
+                    "model_appid": model_appid,
+                    "access_token": access_token,
+                    "base_url": model_base_url,
+                },
+            )
+        else:
+            # Use Ali STT (default) with api_key and model name
+            connectivity = await voice_service.check_voice_connectivity(
+                model_type="stt",
+                stt_config={
+                    "api_key": model_api_key,
+                    "base_url": model_base_url,
+                    "model": model_name,
+                },
+            )
+    elif model_type == "tts":
+        voice_service = get_voice_service()
+
+        # Determine TTS provider based on model_factory
+        use_volc = model_factory and model_factory.lower() in [
+            "volcengine",
+            "volcano",
+            "volcengine",
+            "火山引擎",
+        ]
+
+        if use_volc:
+            # Use Volcano TTS with appid and access_token
+            connectivity = await voice_service.check_voice_connectivity(
+                model_type="tts",
+                stt_config={
+                    "model_factory": model_factory,
+                    "model_appid": model_appid,
+                    "access_token": access_token,
+                    "base_url": model_base_url,
+                },
+            )
+        else:
+            # Use Ali TTS (default) with api_key and model name
+            connectivity = await voice_service.check_voice_connectivity(
+                model_type="tts",
+                stt_config={
+                    "api_key": model_api_key,
+                    "base_url": model_base_url,
+                    "model": model_name,
+                },
+            )
+    else:
+        raise ValueError(f"Unsupported model type: {model_type}")
+
+    return connectivity
+
+
+async def check_model_connectivity(
+    display_name: str, tenant_id: str, model_type: str = None
+) -> dict:
+    try:
+        # Query the database using display_name and tenant context from app layer
+        model = get_model_by_display_name(
+            display_name, tenant_id=tenant_id, model_type=model_type
+        )
+        if not model:
+            raise LookupError(f"Model configuration not found for {display_name}")
+
+        repo, name = model.get("model_repo", ""), model.get("model_name", "")
+        model_name = f"{repo}/{name}" if repo else name
+
+        update_data = {"connect_status": ModelConnectStatusEnum.DETECTING.value}
+        update_model_record(model["model_id"], update_data)
+
+        model_type = model["model_type"]
+        model_base_url = model["base_url"]
+        model_api_key = model["api_key"]
+        # Default to True if not present
+        ssl_verify = model.get("ssl_verify", True)
+        model_factory = model.get("model_factory")
+        model_appid = model.get("model_appid")
+        access_token = model.get("access_token")
+        timeout_seconds = model.get("timeout_seconds")
+        temperature = model.get("temperature")
+        top_p = model.get("top_p")
+        extra_params = model.get("extra_params")
+
+        try:
+            set_monitoring_context(tenant_id=tenant_id)
+
+            ssl_verify_fallback = False
+            connectivity_kwargs = {}
+            if temperature is not None:
+                connectivity_kwargs["temperature"] = temperature
+            if top_p is not None:
+                connectivity_kwargs["top_p"] = top_p
+            if extra_params is not None:
+                connectivity_kwargs["extra_params"] = extra_params
+            connectivity = await _perform_connectivity_check(
+                model_name,
+                model_type,
+                model_base_url,
+                model_api_key,
+                ssl_verify,
+                model_factory,
+                model_appid,
+                access_token,
+                display_name,
+                timeout_seconds,
+                **connectivity_kwargs,
+            )
+            if not connectivity and ssl_verify:
+                ssl_verify_fallback = True
+                connectivity = await _perform_connectivity_check(
+                    model_name,
+                    model_type,
+                    model_base_url,
+                    model_api_key,
+                    False,
+                    model_factory,
+                    model_appid,
+                    access_token,
+                    display_name,
+                    timeout_seconds,
+                    **connectivity_kwargs,
+                )
+        except Exception as e:
+            update_data = {"connect_status": ModelConnectStatusEnum.UNAVAILABLE.value}
+            logger.error(f"Error checking model connectivity: {str(e)}")
+            update_model_record(model["model_id"], update_data)
+            if isinstance(e, ValueError):
+                raise e
+            return {
+                "connectivity": False,
+                "model_name": model_name,
+                "error": str(e),
+            }
+
+        if connectivity:
+            logger.info(f"CONNECTED: {model_name}")
+        else:
+            logger.warning(f"UNCONNECTED: {model_name}")
+        connect_status = (
+            ModelConnectStatusEnum.AVAILABLE.value
+            if connectivity
+            else ModelConnectStatusEnum.UNAVAILABLE.value
+        )
+        update_data = {"connect_status": connect_status}
+        if ssl_verify_fallback:
+            update_data["ssl_verify"] = False
+        update_model_record(model["model_id"], update_data)
+        result = {
+            "connectivity": connectivity,
+            "model_name": model_name,
+        }
+        return result
+    except Exception as e:
+        logger.error(f"Error checking model connectivity: {str(e)}")
+        if "model" in locals() and model:
+            update_data = {"connect_status": ModelConnectStatusEnum.UNAVAILABLE.value}
+            update_model_record(model["model_id"], update_data)
+        raise e
+
+
+async def verify_model_config_connectivity(model_config: dict):
+    """
+    Verify the connectivity of the model configuration, do not save to the database.
+    """
+    try:
+        model_name = model_config.get("model_name", "")
+        model_type = model_config["model_type"]
+        model_base_url = model_config.get("base_url", "")
+        model_api_key = model_config["api_key"]
+        # Default to True if not present
+        ssl_verify = model_config.get("ssl_verify", True)
+        model_factory = model_config.get("model_factory")
+        model_appid = model_config.get("model_appid")
+        access_token = model_config.get("access_token")
+        # Get timeout from model config if present
+        timeout_seconds = model_config.get("timeout_seconds")
+        # v2.6.0 inference params (temperature / top_p / extra_params incl.
+        # __custom__) — carried into the connectivity probe so that an invalid
+        # custom param surfaces here as a 400, instead of failing at runtime.
+        temperature = model_config.get("temperature")
+        top_p = model_config.get("top_p")
+        extra_params = model_config.get("extra_params")
+
+        # Infer model_factory from base_url when not provided
+        model_factory = _infer_model_factory(
+            model_type, model_base_url, model_config.get("model_factory")
+        )
+
+        try:
+            connectivity = await _perform_connectivity_check(
+                model_name,
+                model_type,
+                model_base_url,
+                model_api_key,
+                ssl_verify,
+                model_factory,
+                model_appid,
+                access_token,
+                None,
+                timeout_seconds,
+                temperature=temperature,
+                top_p=top_p,
+                extra_params=extra_params,
+            )
+            if not connectivity and ssl_verify:
+                connectivity = await _perform_connectivity_check(
+                    model_name,
+                    model_type,
+                    model_base_url,
+                    model_api_key,
+                    False,
+                    model_factory,
+                    model_appid,
+                    access_token,
+                    None,
+                    timeout_seconds,
+                    temperature=temperature,
+                    top_p=top_p,
+                    extra_params=extra_params,
+                )
+            if not connectivity:
+                error_msg = f"Failed to connect to model '{model_name}' at {model_base_url}. Please verify the URL, API key, and network connection."
+                return {
+                    "connectivity": False,
+                    "model_name": model_name,
+                    "error": f"Failed to connect to model '{model_name}'. Please verify the URL, API key, and network connection.",
+                }
+
+            return {
+                "connectivity": True,
+                "model_name": model_name,
+            }
+        except ValueError as e:
+            error_msg = str(e)
+            logger.warning(f"UNCONNECTED: {model_name}; Error: {error_msg}")
+            return {"connectivity": False, "model_name": model_name, "error": error_msg}
+
+    except Exception as e:
+        error_msg = str(e)
+        logger.error(f"Failed to check connectivity of models: {error_msg}")
+        return {
+            "connectivity": False,
+            "model_name": model_config.get("model_name", "UNKNOWN_MODEL"),
+            "error": f"Connection verification failed: {error_msg}",
+        }

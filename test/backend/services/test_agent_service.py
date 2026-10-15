@@ -313,9 +313,9 @@ sys.modules["services.prompt_template_service"] = prompt_template_service_mock
 sys.modules["services.file_management_service"] = MagicMock()
 sys.modules["services.streaming_channel"] = MagicMock()
 
-model_gateway_service_mock = types.ModuleType("services.model_gateway_service")
+model_gateway_service_mock = types.ModuleType("management.services.model.adapter")
 model_gateway_service_mock.build_adapter_fresh = MagicMock()
-sys.modules["services.model_gateway_service"] = model_gateway_service_mock
+sys.modules["management.services.model.adapter"] = model_gateway_service_mock
 setattr(services_module, "model_gateway_service", model_gateway_service_mock)
 
 
@@ -524,6 +524,9 @@ sys.modules["nexent.core.utils"] = MagicMock()
 
 # Mock ProcessType enum for observer module
 class MockProcessType:
+    class FINAL_ANSWER:
+        value = "final_answer"
+
     class MODEL_OUTPUT_CODE:
         value = "model_output_code"
 
@@ -578,7 +581,7 @@ sys.modules["utils.str_utils"].convert_string_to_list = lambda s: (
 
 sys.modules["utils.config_utils"] = MagicMock()
 sys.modules["utils.prompt_template_utils"] = MagicMock()
-sys.modules["utils.llm_utils"] = MagicMock()
+sys.modules["management.services.model.invocation"] = MagicMock()
 sys.modules["utils.monitoring"] = MagicMock()
 
 # =============================================================================
@@ -723,8 +726,10 @@ from consts.model import (
 
 
 @pytest.fixture(autouse=True)
-def reset_mocks():
+def reset_mocks(mocker, request):
     """Reset all mocks before each test to ensure a clean test environment."""
+    if request.node.name.startswith(("test_update_agent_info", "test_cmsr_006")):
+        mocker.patch.object(agent_service, "resolve_agent_list_permission", return_value="EDIT")
     agent_run_service.agent_run_manager._agent_capacity_counts.clear()
     agent_run_service.agent_run_manager._agent_capacity_tokens.clear()
     agent_run_service.get_conversation_service.reset_mock(
@@ -1852,6 +1857,55 @@ async def test_update_agent_info_impl_create_agent_auto_group_ids(
     # Should be comma-separated string
     assert call_args["group_ids"] == "1,2,3"
 
+
+@patch("management.services.agent.service.query_all_agent_info_by_tenant_id")
+@patch("management.services.agent.management.query_group_ids_by_user")
+@patch("management.services.agent.service.create_agent")
+@patch("management.services.agent.service.get_current_user_info")
+@pytest.mark.asyncio
+async def test_update_agent_info_impl_create_agent_resolves_duplicate_names(
+    mock_get_current_user_info,
+    mock_create_agent,
+    mock_get_group_ids,
+    mock_query_all_agents,
+):
+    """
+    Creating an agent through update_agent_info_impl with a duplicate
+    name/display_name must fall back to a unique numeric suffix so the new
+    agent stays publishable (same rule as the repository import link).
+    """
+    mock_get_current_user_info.return_value = ("test_user", "test_tenant", "en")
+    mock_get_group_ids.return_value = []
+    mock_create_agent.return_value = {"agent_id": 457}
+    # Existing tenant agents already own the requested names
+    mock_query_all_agents.return_value = [
+        {"agent_id": 1, "name": "javis_copy", "display_name": "Javis副本"},
+    ]
+
+    request = MagicMock()
+    request.agent_id = None  # create mode
+    request.name = "javis_copy"
+    request.display_name = "Javis副本"
+    request.business_description = "copy"
+    request.author = "test_author"
+    request.model_id = 1
+    request.model_name = "test-model"
+    request.business_logic_model_id = None
+    request.business_logic_model_name = None
+    request.max_steps = 10
+    request.provide_run_summary = True
+    request.enabled = True
+    request.enabled_tool_ids = None
+    request.related_agent_ids = None
+    request.group_ids = None
+    apply_default_prompt_template_request_fields(request)
+
+    result = await update_agent_info_impl(request, authorization="Bearer token")
+
+    assert result["agent_id"] == 457
+    call_args = mock_create_agent.call_args[1]["agent_info"]
+    assert call_args["name"] == "javis_copy_1"
+    assert call_args["display_name"] == "Javis副本_1"
 
 @patch("management.services.agent.management.get_mcp_server_by_name_and_tenant")
 @patch("management.services.agent.management.ExportAndImportDataFormat")
@@ -11374,11 +11428,16 @@ def test_get_agent_by_name_impl_success(mock_search, mock_query_versions):
 @patch("management.services.agent.management.query_version_list")
 @patch("management.services.agent.management.search_agent_id_by_agent_name")
 def test_get_agent_by_name_impl_not_found(mock_search, mock_query_versions):
-    """Test that agent not found raises Exception."""
-    mock_search.side_effect = Exception("Agent not found")
+    """An expected Agent lookup miss retains its domain exception."""
+    from consts.exceptions import AgentNotFoundError
 
-    with pytest.raises(Exception, match="agent not found"):
+    lookup_error = AgentNotFoundError("agent not found")
+    mock_search.side_effect = lookup_error
+
+    with pytest.raises(AgentNotFoundError, match="agent not found") as excinfo:
         get_agent_by_name_impl("nonexistent_agent", "tenant_1")
+    assert excinfo.value is lookup_error
+    mock_query_versions.assert_not_called()
 
 
 @patch("management.services.agent.management.query_version_list")
@@ -11389,15 +11448,29 @@ def test_get_agent_by_name_impl_empty_name_service(mock_search, mock_query_versi
         get_agent_by_name_impl("", "tenant_1")
 
 
-# Tests for get_agent_by_name_impl (different path)
+# Unexpected lookup failures must remain distinct from an Agent lookup miss.
+@pytest.mark.parametrize("failure_stage", ["lookup", "versions"])
 @patch("management.services.agent.management.query_version_list")
 @patch("management.services.agent.management.search_agent_id_by_agent_name")
-def test_get_agent_by_impl_agent_not_found(mock_search, mock_query_versions):
-    """Test agent not found error in get_agent_by_name_impl."""
-    mock_search.side_effect = Exception("Not found")
+def test_get_agent_by_name_impl_preserves_internal_errors(
+    mock_search, mock_query_versions, failure_stage
+):
+    """Internal failures must not be reclassified as missing resources."""
+    lookup_error = RuntimeError("database unavailable")
+    mock_search.return_value = 123
+    if failure_stage == "lookup":
+        mock_search.side_effect = lookup_error
+    else:
+        mock_query_versions.side_effect = lookup_error
 
-    with pytest.raises(Exception, match="agent not found"):
+    with pytest.raises(RuntimeError, match="database unavailable") as excinfo:
         get_agent_by_name_impl("missing_agent", "tenant_1")
+    assert excinfo.value is lookup_error
+    mock_search.assert_called_once_with("missing_agent", "tenant_1")
+    if failure_stage == "lookup":
+        mock_query_versions.assert_not_called()
+    else:
+        mock_query_versions.assert_called_once_with(123, "tenant_1")
 
 
 # Tests for delete_related_agent_impl
@@ -11519,6 +11592,7 @@ async def test_update_agent_info_impl_skill_update_exception(
     mock_request.enabled_tool_ids = None
     mock_request.enabled_skill_ids = [1, 2]
     mock_request.related_agent_ids = None
+    mock_request.related_agents = None
     mock_request.group_ids = None
     mock_request.ingroup_permission = None
     mock_request.prompt_template_id = None
@@ -11759,7 +11833,7 @@ async def test_export_agent_with_skills_impl_with_zip(
     import zipfile
 
     mock_get_user_info.return_value = ("user_123", "tenant_abc", "en")
-    mock_search_info.return_value = {"name": "my_agent"}
+    mock_search_info.return_value = {"name": "my_agent", "display_name": "My Agent"}
     mock_collect_skills.return_value = [
         SkillZipEntry(skill_name="TestSkill", skill_zip_base64="SGVsbG8gV29ybGQ=")
     ]
@@ -11771,7 +11845,7 @@ async def test_export_agent_with_skills_impl_with_zip(
 
     assert result["_zip"] is True
     assert "data" in result
-    assert result["filename"] == "my_agent.zip"
+    assert result["filename"] == "My Agent.zip"
     zip_data = io.BytesIO(result["data"])
     with zipfile.ZipFile(zip_data, "r") as zf:
         assert "agent.json" in zf.namelist()
@@ -12142,6 +12216,7 @@ async def test_update_agent_info_impl_related_agent_query_error(
     mock_request.enabled_tool_ids = None
     mock_request.enabled_skill_ids = None
     mock_request.related_agent_ids = [2, 3]
+    mock_request.related_agents = None
     mock_request.group_ids = None
     mock_request.ingroup_permission = None
     mock_request.prompt_template_id = None
@@ -12150,9 +12225,9 @@ async def test_update_agent_info_impl_related_agent_query_error(
     mock_request.greeting_message = None
 
     # Make query_sub_agents_id_list raise exception during circular check
-    mock_query_sub.side_effect = Exception("Query error")
+    mock_query_sub.side_effect = RuntimeError("Query error")
 
-    with pytest.raises(ValueError, match="Failed to update related agents"):
+    with pytest.raises(RuntimeError, match="Query error"):
         await update_agent_info_impl(mock_request, authorization="Bearer token")
 
 
@@ -12192,6 +12267,7 @@ async def test_update_agent_info_impl_related_external_agents(
     mock_request.enabled_tool_ids = None
     mock_request.enabled_skill_ids = None
     mock_request.related_agent_ids = None
+    mock_request.related_agents = None
     mock_request.related_external_agent_ids = [100, 200]
     mock_request.group_ids = None
     mock_request.ingroup_permission = None
@@ -12250,6 +12326,7 @@ async def test_update_agent_info_impl_external_agent_remove_relation(
     mock_request.enabled_tool_ids = None
     mock_request.enabled_skill_ids = None
     mock_request.related_agent_ids = None
+    mock_request.related_agents = None
     mock_request.related_external_agent_ids = []  # Remove existing relation
     mock_request.group_ids = None
     mock_request.ingroup_permission = None
@@ -12310,6 +12387,7 @@ async def test_update_agent_info_impl_external_agent_relation_exists(
     mock_request.enabled_tool_ids = None
     mock_request.enabled_skill_ids = None
     mock_request.related_agent_ids = None
+    mock_request.related_agents = None
     mock_request.related_external_agent_ids = [100]
     mock_request.group_ids = None
     mock_request.ingroup_permission = None
@@ -12437,6 +12515,7 @@ async def test_update_agent_info_impl_skill_unselected(
     mock_request.enabled_tool_ids = None
     mock_request.enabled_skill_ids = [2]  # Only want skill 2
     mock_request.related_agent_ids = None
+    mock_request.related_agents = None
     mock_request.related_external_agent_ids = None  # Add this field
     mock_request.group_ids = None
     mock_request.ingroup_permission = None
@@ -12501,6 +12580,7 @@ async def test_update_agent_info_impl_persists_structured_skill_config(
         )
     ]
     request.related_agent_ids = None
+    request.related_agents = None
     request.related_external_agent_ids = None
     request.group_ids = None
     request.ingroup_permission = None
@@ -12527,6 +12607,50 @@ async def test_update_agent_info_impl_persists_structured_skill_config(
         "max_results": 5,
     }
     assert enabled_call.kwargs["version_no"] == 4
+
+
+@pytest.mark.asyncio
+@patch("management.services.agent.service.skill_db.get_valid_skill_ids")
+@patch("management.services.agent.service.skill_db.query_skill_instances_by_agent_id")
+@patch("management.services.agent.service.get_current_user_info")
+async def test_update_agent_info_impl_rejects_unavailable_skill_id(
+    mock_get_user,
+    mock_query_skills,
+    mock_get_valid_skill_ids,
+):
+    """Updating with a skill id that does not exist must raise a domain error, not 500."""
+    from backend.consts.model import AgentInfoRequest, AgentSkillInstanceRequest
+    from consts.exceptions import AppException
+    from management.services.agent.service import update_agent_info_impl
+
+    mock_get_user.return_value = ("user_1", "tenant_1", "en")
+    mock_get_valid_skill_ids.return_value = set()
+    mock_query_skills.return_value = []
+
+    request = AgentInfoRequest(
+        agent_id=1,
+        name="Test",
+        display_name="Test Display",
+        description="Desc",
+        business_description="Biz Desc",
+        author="Author",
+        model_ids=[],
+        max_steps=5,
+        provide_run_summary=True,
+        duty_prompt="Duty",
+        constraint_prompt="Constraint",
+        few_shots_prompt="Few shots",
+        enabled=True,
+        enabled_skill_ids=[9999],
+        skill_instances=[AgentSkillInstanceRequest(skill_id=9999, enabled=True)],
+        version_no=1,
+    )
+    assert request.related_agents is None
+
+    with pytest.raises(AppException, match="invalid or unavailable skill IDs: \\[9999\\]"):
+        await update_agent_info_impl(request, authorization="Bearer token")
+    mock_get_valid_skill_ids.assert_called_once_with(tenant_id="tenant_1", skill_ids=[9999])
+    mock_query_skills.assert_not_called()
 
 
 # Test for generate_stream unexpected exception (lines 1889-1896)
@@ -12881,6 +13005,7 @@ async def test_update_agent_info_impl_external_agent_list_error(mock_get_user):
     mock_request.enabled_tool_ids = None
     mock_request.enabled_skill_ids = None
     mock_request.related_agent_ids = None
+    mock_request.related_agents = None
     mock_request.related_external_agent_ids = [100]
     mock_request.group_ids = None
     mock_request.ingroup_permission = None
@@ -16737,8 +16862,9 @@ async def test_stream_agent_chunks_marks_stopped_when_stop_event_set(monkeypatch
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("version_no", [None, 1])
 async def test_stream_agent_chunks_debug_run_skips_conversation_persistence(
-    monkeypatch,
+    monkeypatch, version_no,
 ):
     """Debug runs stream normally without creating or finalizing chat rows."""
     from management.services.agent import service as agent_service
@@ -16747,6 +16873,7 @@ async def test_stream_agent_chunks_debug_run_skips_conversation_persistence(
         agent_id=1,
         conversation_id=999,
         query="debug",
+        version_no=version_no,
         history=[],
         minio_files=[],
         is_debug=True,

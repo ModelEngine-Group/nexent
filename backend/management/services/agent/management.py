@@ -1271,15 +1271,10 @@ def get_agent_by_name_impl(agent_name: str, tenant_id: str) -> dict:
     """
     if not agent_name:
         raise Exception("agent_name required")
-    try:
-        agent_id = search_agent_id_by_agent_name(agent_name, tenant_id)
-        versions = query_version_list(agent_id, tenant_id)
-        latest_version = versions[0]["version_no"] if versions else None
-        return {"agent_id": agent_id, "latest_version_no": latest_version}
-    except Exception as _:
-        logger.error(
-            f"Failed to find agent '{agent_name}' in tenant {tenant_id}")
-        raise Exception("agent not found")
+    agent_id = search_agent_id_by_agent_name(agent_name, tenant_id)
+    versions = query_version_list(agent_id, tenant_id)
+    latest_version = versions[0]["version_no"] if versions else None
+    return {"agent_id": agent_id, "latest_version_no": latest_version}
 
 
 def delete_related_agent_impl(parent_agent_id: int, child_agent_id: int, tenant_id: str):
@@ -1448,8 +1443,9 @@ async def export_agent_with_skills_impl(
     agent_info = search_agent_info_by_agent_id(
         agent_id=agent_id, tenant_id=tenant_id, version_no=version_no
     )
-    agent_name = agent_info.get(
-        "name", "anonymous") if agent_info else "anonymous"
+    agent_name = "anonymous"
+    if agent_info:
+        agent_name = agent_info.get("display_name") or agent_info.get("name") or "anonymous"
 
     filename = f"{agent_name}.zip"
 

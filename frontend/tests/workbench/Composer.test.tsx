@@ -1,14 +1,61 @@
 import { cloneElement, type ReactElement, type ReactNode } from "react";
-import { expect, it, vi } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { beforeEach, expect, it, vi } from "vitest";
+import {
+  render as renderComponent,
+  screen,
+  within,
+} from "@testing-library/react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import userEvent from "@testing-library/user-event";
 import { Composer } from "@/app/newchat/assistant-ui/composer";
 
+vi.mock("next/navigation", () => ({
+  useRouter: () => ({ push: vi.fn() }),
+  useParams: () => ({ locale: "zh" }),
+}));
+vi.mock("@/components/providers/deploymentProvider", () => ({
+  useDeployment: () => ({
+    enableAidpKnowledge: false,
+    isDeploymentReady: true,
+  }),
+}));
+vi.mock("@/hooks/chat/useComposerResources", () => ({
+  useComposerKnowledgeBases: () => ({ data: [], isLoading: false }),
+  useComposerSkills: () => ({ data: [], isLoading: false }),
+}));
+vi.mock("@/hooks/agent/useToolList", () => ({
+  useToolList: () => ({
+    isLoading: false,
+    availableTools: [
+      {
+        name: "knowledge_base_search",
+        initParams: [{ name: "top_k", type: "number", value: 5 }],
+      },
+    ],
+  }),
+}));
+
+function render(ui: ReactElement) {
+  const queryClient = new QueryClient({
+    defaultOptions: { queries: { retry: false } },
+  });
+  return renderComponent(ui, {
+    wrapper: ({ children }) => (
+      <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
+    ),
+  });
+}
+
 const runtime = vi.hoisted(() => ({
   thread: { isRunning: false, messages: [] },
-  composer: { text: "question", dictation: false },
+  composer: { text: "question", dictation: false, attachments: [] },
   cancel: vi.fn(),
 }));
+beforeEach(() => {
+  runtime.thread.isRunning = false;
+  runtime.composer.text = "question";
+  runtime.cancel.mockReset();
+});
 vi.mock("@assistant-ui/react", () => {
   const Wrapper = ({ children }: { children: ReactNode }) => <>{children}</>;
   return {
@@ -28,6 +75,7 @@ vi.mock("@assistant-ui/react", () => {
     ComposerPrimitive: {
       Root: Wrapper,
       Unstable_TriggerPopoverRoot: Wrapper,
+      AddAttachment: Wrapper,
       Input: () => (
         <textarea aria-label="正文" defaultValue={runtime.composer.text} />
       ),
@@ -120,11 +168,14 @@ it.each(["skill_create", "agent_create"] as const)(
     runtime.composer.text = "question";
   }
 );
-it("UT-FE-WB-014 composer keeps resources between text and ordered toolbar", () => {
+it("UT-FE-WB-014 composer keeps resources between text and ordered toolbar", async () => {
   runtime.thread.isRunning = false;
+  const onChatModeChange = vi.fn();
+  const onSelectAgent = vi.fn();
   render(
     <Composer
       {...base}
+      onChatModeChange={onChatModeChange}
       workbenchPresentation={{
         mode: "generic_chat",
         onExitCreation: vi.fn(),
@@ -132,7 +183,7 @@ it("UT-FE-WB-014 composer keeps resources between text and ordered toolbar", () 
       }}
       workbenchResources={{
         agentName: "Agent A",
-        onSelectAgent: vi.fn(),
+        onSelectAgent,
         onRemoveAgent: vi.fn(),
         skills: [{ id: 2, name: "Skill B" }],
       }}
@@ -147,21 +198,20 @@ it("UT-FE-WB-014 composer keeps resources between text and ordered toolbar", () 
     expect(
       left.compareDocumentPosition(right) & Node.DOCUMENT_POSITION_FOLLOWING
     ).toBeTruthy();
-  const planning = screen.getByRole("button", {
-    name: "chat.composer.planning",
+  const mode = screen.getByRole("button", {
+    name: "chat.composer.executionMode",
   });
-  expect(
-    screen.getByRole("button", { name: "chat.composer.execution" })
-  ).toBeInTheDocument();
-  expect(planning.parentElement?.parentElement).toHaveClass("border-b");
-  const creationAction = screen.getByRole("button", { name: "Skill 创建" });
-  expect(creationAction.closest("fieldset")).toBeNull();
-  before(creationAction, planning);
-  before(planning, screen.getByRole("textbox"));
+  expect(screen.queryByRole("button", { name: "Skill 创建" })).toBeNull();
   const chips = screen.getByLabelText("当前挂载资源");
   before(screen.getByRole("textbox"), chips);
-  before(chips, screen.getByRole("button", { name: "模型" }));
-  const labels = ["模型", "Agent", "Skills", "知识库"];
+  before(chips, mode);
+  const labels = [
+    "chat.composer.executionMode",
+    "chat.composer.skills",
+    "chat.composer.knowledgeBase",
+    "附件",
+    "模型",
+  ];
   for (let index = 1; index < labels.length; index++) {
     before(
       screen.getByRole("button", { name: labels[index - 1] }),
@@ -172,6 +222,20 @@ it("UT-FE-WB-014 composer keeps resources between text and ordered toolbar", () 
   expect(
     screen.getByRole("button", { name: "chat.composer.send" })
   ).toBeEnabled();
+  await userEvent.click(
+    screen.getByRole("button", { name: "Agent · Agent A" })
+  );
+  expect(onSelectAgent).toHaveBeenCalledOnce();
+  await userEvent.click(mode);
+  const choices = within(screen.getByRole("dialog"));
+  expect(
+    choices.getByRole("button", { name: "chat.composer.executionMode" })
+  ).toBeEnabled();
+  await userEvent.click(
+    choices.getByRole("button", { name: "chat.composer.planningMode" })
+  );
+  expect(onChatModeChange).toHaveBeenCalledExactlyOnceWith("planning");
+  expect(screen.queryByRole("dialog")).toBeNull();
 });
 
 it("UT-FE-WB-015 creation composer excludes resources and keeps the draft editable when its adapter is unavailable", () => {
@@ -223,4 +287,87 @@ it("UT-FE-WB-004 stop remains reachable while running and input recovers when id
   expect(
     screen.getByRole("button", { name: "chat.composer.send" })
   ).toBeEnabled();
+});
+
+it("retrieval configuration stays a draft until the composer confirms it", async () => {
+  const scope = {
+    schema_version: 1 as const,
+    local: { mode: "override" as const, knowledge_ids: ["1", "2"] },
+    aidp: { mode: "disabled" as const, kds_ids: [] },
+    retrieval_config: { top_k: 6 },
+  };
+  const save = vi.fn().mockResolvedValue(undefined);
+  render(
+    <Composer
+      {...base}
+      newChatDesign
+      knowledgeScope={scope}
+      onKnowledgeScopeChange={save}
+    />
+  );
+  await userEvent.click(
+    screen.getByRole("button", { name: "chat.composer.plus" })
+  );
+  await userEvent.click(
+    screen.getByRole("button", { name: "chat.composer.knowledge" })
+  );
+  await userEvent.click(
+    screen.getByRole("button", { name: "agent.knowledge.button.configure" })
+  );
+  const dialog = within(
+    screen.getByRole("dialog", { name: "agent.knowledge.configModal.title" })
+  );
+  const input = dialog.getByRole("spinbutton");
+  expect(input).toHaveValue("6");
+  await userEvent.tripleClick(input);
+  await userEvent.keyboard("8");
+  expect(save).not.toHaveBeenCalled();
+  expect(scope.retrieval_config).toEqual({ top_k: 6 });
+  await userEvent.click(dialog.getByRole("button", { name: "common.confirm" }));
+  expect(save).toHaveBeenCalledExactlyOnceWith({
+    ...scope,
+    retrieval_config: { top_k: 8 },
+  });
+  expect(scope.retrieval_config).toEqual({ top_k: 6 });
+});
+
+it("canceling retrieval configuration discards edits before reopening", async () => {
+  const scope = {
+    schema_version: 1 as const,
+    local: { mode: "override" as const, knowledge_ids: ["1"] },
+    aidp: { mode: "disabled" as const, kds_ids: [] },
+    retrieval_config: { top_k: 6 },
+  };
+  const save = vi.fn();
+  render(
+    <Composer
+      {...base}
+      newChatDesign
+      knowledgeScope={scope}
+      onKnowledgeScopeChange={save}
+    />
+  );
+  const openConfig = async () => {
+    await userEvent.click(
+      screen.getByRole("button", { name: "chat.composer.plus" })
+    );
+    await userEvent.click(
+      screen.getByRole("button", { name: "chat.composer.knowledge" })
+    );
+    await userEvent.click(
+      screen.getByRole("button", { name: "agent.knowledge.button.configure" })
+    );
+    return within(
+      screen.getByRole("dialog", { name: "agent.knowledge.configModal.title" })
+    );
+  };
+  const dialog = await openConfig();
+  await userEvent.tripleClick(dialog.getByRole("spinbutton"));
+  await userEvent.keyboard("8");
+  await userEvent.click(dialog.getByRole("button", { name: "common.cancel" }));
+  expect(save).not.toHaveBeenCalled();
+  expect(scope.retrieval_config).toEqual({ top_k: 6 });
+  const reopened = await openConfig();
+  expect(reopened.getByRole("spinbutton")).toHaveValue("6");
+  expect(save).not.toHaveBeenCalled();
 });
