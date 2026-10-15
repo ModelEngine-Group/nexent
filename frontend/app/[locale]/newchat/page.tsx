@@ -18,6 +18,7 @@ import {
 import { Chat } from "./assistant-ui/chat";
 import type { ChatMode } from "./assistant-ui/composer";
 import { ThreadListSidebar } from "./assistant-ui/threadlist-sidebar";
+import { useRecentAgentIds } from "./assistant-ui/use-recent-agent-ids";
 import {
   cacheHistoricalChatMode,
   conversationThreadListAdapter,
@@ -769,15 +770,37 @@ const HomeContent: FC<{
     onBack();
   }, [onBack]);
 
+  const recentAgentIds = useRecentAgentIds();
+  const { availableMainAgents } = usePublishedAgentList();
+
   const handleNewConversation = useCallback(async () => {
     shouldRestoreAgentRef.current = false;
     try {
+      if (!selectedAgent) {
+        // On the landing there is no active conversation: enter a blank
+        // conversation of the agent the top-bar selector displays (the most
+        // recently used one).
+        const lastUsed = recentAgentIds
+          .map((id) =>
+            availableMainAgents.find((agent) => Number(agent.id) === id)
+          )
+          .find((agent) => agent !== undefined);
+        if (lastUsed) {
+          setSelectedAgent(lastUsed);
+        }
+      }
       await runtime.threads.switchToNewThread();
       await runtime.threads.reload();
     } catch (error) {
       log.error("[HomeContent] Failed to start a new conversation:", error);
     }
-  }, [runtime]);
+  }, [
+    runtime,
+    selectedAgent,
+    recentAgentIds,
+    availableMainAgents,
+    setSelectedAgent,
+  ]);
 
   const handleAgentSelectedFromLanding = useCallback(
     async (agent: Agent) => {
