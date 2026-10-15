@@ -82,16 +82,16 @@ def _install_stubs():
     )
 
     _utils = _register_package("utils")
-    _utils.agent_profile_utils = _mk_mod(
-        "utils.agent_profile_utils",
+    _mk_mod(
+        "management.services.agent.profile",
         fetch_agent_profile=MagicMock(name="fetch_agent_profile"),
         format_agent_profile_context=MagicMock(name="format_agent_profile_context"),
     )
     _mk_mod(
         "management.services.model.invocation", call_llm_for_system_prompt=MagicMock(name="call_llm_for_system_prompt")
     )
-    _utils.prompt_template_utils = _mk_mod(
-        "utils.prompt_template_utils", get_prompt_template=MagicMock(name="get_prompt_template")
+    _mk_mod(
+        "management.services.agent.prompt", get_prompt_template=MagicMock(name="get_prompt_template")
     )
     sdk_root = _REPO_ROOT / "sdk/nexent"
     for package_name, package_path in (
@@ -136,10 +136,10 @@ def bundle():
     for n, m in db_impls.items():
         setattr(sys.modules["database.evaluator_db"], n, m)
     sys.modules["services.agent_evaluation_service"].validate_code_evaluator = code_val
-    sys.modules["utils.agent_profile_utils"].fetch_agent_profile = profile
-    sys.modules["utils.agent_profile_utils"].format_agent_profile_context = fmt_profile
+    sys.modules["management.services.agent.profile"].fetch_agent_profile = profile
+    sys.modules["management.services.agent.profile"].format_agent_profile_context = fmt_profile
     sys.modules["management.services.model.invocation"].call_llm_for_system_prompt = llm
-    sys.modules["utils.prompt_template_utils"].get_prompt_template = tmpl
+    sys.modules["management.services.agent.prompt"].get_prompt_template = tmpl
 
     if MODULE_UNDER_TEST in sys.modules:
         del sys.modules[MODULE_UNDER_TEST]

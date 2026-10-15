@@ -1,11 +1,13 @@
 import pytest
 from jinja2 import Environment, meta
 from nexent.core.prompts import load_prompt
-from utils.prompt_template_utils import (
+from management.services.agent.prompt import (
     get_prompt_generate_template_keys,
-    get_nl2skill_prompt_template,
     merge_prompt_generate_templates,
     normalize_prompt_generate_template_content,
+)
+from management.services.skill.prompt import (
+    get_nl2skill_prompt_template,
 )
 
 

@@ -11,10 +11,8 @@ def test_ut_be_fps_015_main_agent_backend_does_not_load_prompt_fragments():
         for relative in (
             "backend/agents/create_agent_info.py",
             "backend/services/knowledge_scope_service.py",
-            "backend/utils/context_utils.py",
-            "backend/utils/memory_tool_prompt.py",
-            "backend/utils/automation_tool_prompt.py",
-            "backend/management/services/agent/prompt_template_loader.py",
+            "backend/management/services/agent/context.py",
+            "backend/management/services/agent/prompt.py",
         )
     }
     assert all("load_prompt(" not in source for source in sources.values())

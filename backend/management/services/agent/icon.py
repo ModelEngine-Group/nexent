@@ -1,6 +1,4 @@
-"""Image validation and object storage shared by agent and repository icons."""
-
-import io
+"""Image rules and storage orchestration for agent and repository icons."""
 
 ICON_MAX_BYTES = 2 * 1024 * 1024
 
@@ -23,10 +21,10 @@ def validate_icon_image(content: bytes) -> str:
 
 
 def upload_icon_image(content: bytes, object_name: str) -> str:
-    from database.client import minio_client
+    from database.attachment_db import upload_file_bytes
 
     content_type = validate_icon_image(content)
-    success, error = minio_client.upload_fileobj(io.BytesIO(content), object_name)
+    success, error = upload_file_bytes(content, object_name)
     if not success:
         raise ValueError(f"Failed to upload icon: {error}")
     return content_type

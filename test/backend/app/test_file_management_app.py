@@ -180,12 +180,12 @@ sys.modules["utils.auth_utils"] = auth_utils_stub
 setattr(utils_pkg, "auth_utils", auth_utils_stub)
 
 
-# Stub utils.file_management_utils.trigger_data_process
-fmu_stub = types.ModuleType("utils.file_management_utils")
+# Stub management.services.knowledge_base.ingestion.trigger_data_process
+fmu_stub = types.ModuleType("management.services.knowledge_base.ingestion")
 async def _stub_trigger_data_process(files: List[dict], params: Any):
     return [{"task_id": 1}]
 fmu_stub.trigger_data_process = _stub_trigger_data_process
-sys.modules["utils.file_management_utils"] = fmu_stub
+sys.modules["management.services.knowledge_base.ingestion"] = fmu_stub
 setattr(utils_pkg, "file_management_utils", fmu_stub)
 
 

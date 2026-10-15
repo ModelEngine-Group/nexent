@@ -6,10 +6,12 @@ import pytest
 from nexent.core.agents.prompt import AgentPromptComposer
 from nexent.core.prompts import load_prompt
 
-from backend.management.services.agent.prompt_template_loader import (
+from backend.management.services.agent.prompt import (
     load_agent_prompt_bundle,
 )
-from backend.utils.context_utils import build_context_inputs
+from backend.management.services.agent.context import (
+    build_context_inputs,
+)
 
 
 @pytest.mark.parametrize("language", ["zh", "en"])
@@ -333,7 +335,7 @@ def test_ut_be_dpr_009_management_loader_is_a_thin_template_provider():
     loader_source = (
         Path(__file__).parents[3]
         / "backend" / "management" / "services" / "agent"
-        / "prompt_template_loader.py"
+        / "prompt.py"
     ).read_text(encoding="utf-8")
 
     assert "_REQUIRED_SECTIONS" not in loader_source
@@ -345,10 +347,10 @@ def test_ut_be_dpr_009_management_loader_is_a_thin_template_provider():
 def test_ut_be_dpr_009_context_adapter_requires_an_explicit_bundle():
     """UT-BE-DPR-009: Backend cannot reload Management templates implicitly."""
     context_source = (
-        Path(__file__).parents[3] / "backend" / "utils" / "context_utils.py"
+        Path(__file__).parents[3] / "backend" / "management" / "services" / "agent" / "context.py"
     ).read_text(encoding="utf-8")
 
-    assert "management.services.agent.prompt_template_loader" not in context_source
+    assert "management.services.agent.prompt" not in context_source
     with pytest.raises(TypeError, match="prompt_bundle"):
         build_context_inputs()
 

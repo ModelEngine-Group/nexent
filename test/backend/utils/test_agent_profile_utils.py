@@ -1,4 +1,4 @@
-"""Unit tests for ``backend.utils.agent_profile_utils``.
+"""Unit tests for ``backend.management.services.agent.profile``.
 
 Targets
 -------
@@ -174,7 +174,7 @@ def profile_mod():
     if MODULE_UNDER_TEST in sys.modules:
         del sys.modules[MODULE_UNDER_TEST]
 
-    _src = _BACKEND_DIR / "utils" / "agent_profile_utils.py"
+    _src = _BACKEND_DIR / "management" / "services" / "agent" / "profile.py"
     _spec = _ilu.spec_from_file_location(MODULE_UNDER_TEST, str(_src))
     assert _spec is not None, f"cannot locate agent_profile_utils.py at {_src}"
     assert _spec.loader is not None, f"cannot locate agent_profile_utils.py at {_src}"

@@ -9,7 +9,9 @@ from __future__ import annotations
 
 import asyncio
 
-from utils.time_context_utils import strip_current_time_prefix
+from management.services.agent.context import (
+    strip_current_time_prefix,
+)
 import json
 import logging
 from dataclasses import dataclass

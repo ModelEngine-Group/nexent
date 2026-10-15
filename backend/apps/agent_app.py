@@ -78,7 +78,9 @@ from services.workbench_service import (
     build_workbench_capability_preview,
     build_workbench_main_profile,
 )
-from management.services.agent.system_agent_provider import ensure_workbench_main_agent
+from management.services.agent.system import (
+    ensure_workbench_main_agent,
+)
 from services.agent_draft_permission_service import AgentDraftEditError
 from services.nl2agent_service import Nl2AgentDraftSaveError, create_nl2agent_stream
 from services.workbench_creation_history_service import (

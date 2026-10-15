@@ -23,6 +23,7 @@ import time
 import pytest
 
 from shared.cases import special_case_params
+import management.services.agent.execution as agent_execution
 
 CASE_ID = "REL-AUTO-1FAFCA5A681580F5"
 
@@ -88,7 +89,7 @@ def _install_shutdown_collaborators(monkeypatch, *, raise_thread_shutdown: bool)
     monkeypatch.setattr(runtime_state_service, "set_thread_manager", lambda manager: None)
     monkeypatch.setattr(runtime_thread_manager, "start", lambda: None)
     monkeypatch.setattr(runtime_thread_manager, "shutdown", shutdown_thread_manager)
-    monkeypatch.setattr(agent_run, "shutdown_agent_stream_tasks", shutdown_stream_tasks)
+    monkeypatch.setattr(agent_execution, "shutdown_agent_stream_tasks", shutdown_stream_tasks)
     monkeypatch.setattr(sandbox_mod.SandboxPoolManager, "_instance", _FakeSandboxPool())
 
     return runtime_app, events

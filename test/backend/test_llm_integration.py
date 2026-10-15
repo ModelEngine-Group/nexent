@@ -51,7 +51,7 @@ if "database.tenant_config_db" not in sys.modules:
     sys.modules["database.tenant_config_db"] = tenant_config_db_mod
     setattr(sys.modules["database"], "tenant_config_db", tenant_config_db_mod)
 
-from utils.document_vector_utils import summarize_document, summarize_cluster
+from management.services.knowledge_base.summary import summarize_document, summarize_cluster
 
 
 class TestLLMIntegration:

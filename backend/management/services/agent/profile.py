@@ -1,8 +1,4 @@
-"""Shared helpers for building agent profile context for LLM prompts.
-
-Extracted from evaluator_service, agent_evaluation_service, and
-evaluation_set_service to eliminate ~300 lines of duplicated code.
-"""
+"""Agent profile queries and evaluation prompt adapters."""
 
 import logging
 from typing import Any, Dict, List, Optional, Tuple
@@ -12,21 +8,39 @@ from database.tool_db import search_tools_for_sub_agent
 from management.services.skill.service import SkillService
 from nexent.core.agents.prompt.evaluation import (
     format_agent_profile_context as compose_agent_profile_context,
+)
+from nexent.core.agents.prompt.evaluation import (
     format_profile_list_section,
     format_profile_tool_section,
 )
 
-
 logger = logging.getLogger(__name__)
 
+
 _MAX_TOOLS = 30
+
+
 _MAX_SKILLS = 20
+
+
 _MAX_SUB_AGENTS = 5
+
+
 _DESC_TOOL_MAX = 200
+
+
 _DESC_SKILL_MAX = 150
+
+
 _DESC_SUB_AGENT_MAX = 150
+
+
 _DESC_KB_MAX = 300
+
+
 _DESC_AGENT_MAX = 2000
+
+
 _DUTY_PROMPT_MAX = 3000
 
 
@@ -50,11 +64,13 @@ def _fetch_agent_tools(
             if not name:
                 continue
             desc = t.get("description") or t.get("description_zh") or ""
-            tools_list.append({
-                "name": name,
-                "description": desc[:_DESC_TOOL_MAX],
-                "source": t.get("source", ""),
-            })
+            tools_list.append(
+                {
+                    "name": name,
+                    "description": desc[:_DESC_TOOL_MAX],
+                    "source": t.get("source", ""),
+                }
+            )
             if name in ("search_knowledge", "knowledge_base_search"):
                 kb_index_names.extend(_extract_kb_index_names(t))
     except Exception:
@@ -95,15 +111,19 @@ def _fetch_knowledge_bases(
 
         name_map = get_knowledge_name_map_by_index_names(kb_index_names, tenant_id)
         with get_db_session() as session:
-            rows = session.query(
-                KnowledgeRecord.index_name,
-                KnowledgeRecord.knowledge_name,
-                KnowledgeRecord.knowledge_describe,
-            ).filter(
-                KnowledgeRecord.index_name.in_(kb_index_names),
-                KnowledgeRecord.tenant_id == tenant_id,
-                KnowledgeRecord.delete_flag != "Y",
-            ).all()
+            rows = (
+                session.query(
+                    KnowledgeRecord.index_name,
+                    KnowledgeRecord.knowledge_name,
+                    KnowledgeRecord.knowledge_describe,
+                )
+                .filter(
+                    KnowledgeRecord.index_name.in_(kb_index_names),
+                    KnowledgeRecord.tenant_id == tenant_id,
+                    KnowledgeRecord.delete_flag != "Y",
+                )
+                .all()
+            )
         return [
             {
                 "name": kb_name or name_map.get(idx_name, idx_name),
@@ -121,7 +141,8 @@ def _fetch_agent_skills(agent_id: int, tenant_id: str) -> List[Dict[str, Any]]:
     try:
         skill_service = SkillService()
         skills = skill_service.get_enabled_skills_for_agent(
-            agent_id=agent_id, tenant_id=tenant_id,
+            agent_id=agent_id,
+            tenant_id=tenant_id,
         )
         if not skills:
             return []
@@ -141,14 +162,16 @@ def _fetch_sub_agents(agent_id: int, tenant_id: str) -> List[Dict[str, Any]]:
     """Load sub-agent info for an agent."""
     try:
         sub_relations = query_sub_agent_relations(
-            main_agent_id=agent_id, tenant_id=tenant_id,
+            main_agent_id=agent_id,
+            tenant_id=tenant_id,
         )
         if not sub_relations:
             return []
         result: List[Dict[str, Any]] = []
         for rel in sub_relations[:_MAX_SUB_AGENTS]:
             sub_agent = search_agent_info_by_agent_id(
-                agent_id=rel["selected_agent_id"], tenant_id=tenant_id,
+                agent_id=rel["selected_agent_id"],
+                tenant_id=tenant_id,
             )
             if not sub_agent:
                 continue
@@ -158,7 +181,9 @@ def _fetch_sub_agents(agent_id: int, tenant_id: str) -> List[Dict[str, Any]]:
                 result.append({"name": name, "description": desc})
         return result
     except Exception:
-        logger.warning("Failed to load sub-agents for agent %d", agent_id, exc_info=True)
+        logger.warning(
+            "Failed to load sub-agents for agent %d", agent_id, exc_info=True
+        )
         return []
 
 
@@ -178,7 +203,9 @@ def fetch_agent_profile(agent_id: int, tenant_id: str) -> Optional[Dict[str, Any
         "description": (agent.get("description") or "")[:_DESC_AGENT_MAX],
         "duty_prompt": (agent.get("duty_prompt") or "")[:_DUTY_PROMPT_MAX],
         "constraint_prompt": (agent.get("constraint_prompt") or "")[:_DESC_AGENT_MAX],
-        "business_description": (agent.get("business_description") or "")[:_DESC_AGENT_MAX],
+        "business_description": (agent.get("business_description") or "")[
+            :_DESC_AGENT_MAX
+        ],
         "tools": tools,
         "skills": _fetch_agent_skills(agent_id, tenant_id),
         "sub_agents": _fetch_sub_agents(agent_id, tenant_id),
@@ -186,9 +213,7 @@ def fetch_agent_profile(agent_id: int, tenant_id: str) -> Optional[Dict[str, Any
     }
 
 
-def _format_list_section(
-    items: List[Dict[str, Any]], label: str
-) -> str:
+def _format_list_section(items: List[Dict[str, Any]], label: str) -> str:
     """Format a list of ``{name, description}`` dicts as a labeled line.
 
     Returns ``""`` when ``items`` is empty.

@@ -72,10 +72,7 @@ patch('nexent.storage.storage_client_factory.create_storage_client_from_config',
 patch('nexent.storage.minio_config.MinIOStorageConfig.validate', lambda self: None).start()
 patch('backend.database.client.MinioClient', return_value=minio_client_mock).start()
 
-from backend.utils.document_vector_utils import (
-    summarize_cluster,
-    merge_cluster_summaries
-)
+from backend.management.services.knowledge_base.summary import summarize_cluster, merge_cluster_summaries
 
 
 class TestClusterSummarization:

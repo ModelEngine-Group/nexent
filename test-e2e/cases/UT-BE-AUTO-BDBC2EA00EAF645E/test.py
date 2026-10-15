@@ -11,6 +11,7 @@ from management.services.knowledge_base.management import (
     KNOWLEDGE_BASE_DELETE_BLOCKING_STATUSES,
     KnowledgeBaseManagementService,
 )
+import management.services.knowledge_base.files as knowledge_base_files
 
 INDEX_NAME = 'kb-delete-guard-test-index'
 
@@ -49,7 +50,7 @@ def test_knowledge_base_delete_guard(monkeypatch, caplog):
         recorder = _Recorder([
             _row(status=status, file_id='file-1', original_filename=status.lower() + '.txt')
         ])
-        monkeypatch.setattr(kb_management, 'list_file_records', recorder)
+        monkeypatch.setattr(knowledge_base_files, 'list_file_records', recorder)
         with pytest.raises(AppException) as excinfo:
             KnowledgeBaseManagementService._assert_knowledge_base_delete_allowed(INDEX_NAME)
         assert excinfo.value.error_code == ErrorCode.KNOWLEDGE_DELETE_BLOCKED
@@ -72,7 +73,7 @@ def test_knowledge_base_delete_guard(monkeypatch, caplog):
         _row(status='COMPLETED', file_id='c1', original_filename='completed.txt'),
         _row(status='FAILED', file_id='f1', original_filename='failed.txt'),
     ]
-    monkeypatch.setattr(kb_management, 'list_file_records', _Recorder(mixed_rows))
+    monkeypatch.setattr(knowledge_base_files, 'list_file_records', _Recorder(mixed_rows))
     with pytest.raises(AppException) as excinfo:
         KnowledgeBaseManagementService._assert_knowledge_base_delete_allowed(INDEX_NAME)
     assert excinfo.value.error_code == ErrorCode.KNOWLEDGE_DELETE_BLOCKED
@@ -87,7 +88,7 @@ def test_knowledge_base_delete_guard(monkeypatch, caplog):
     ]
     for fields, expected_name in file_name_cases:
         monkeypatch.setattr(
-            kb_management,
+            knowledge_base_files,
             'list_file_records',
             _Recorder([_row(status='FORWARDING', **fields)]),
         )
@@ -103,14 +104,14 @@ def test_knowledge_base_delete_guard(monkeypatch, caplog):
         [],
     ]
     for batch in non_blocking_batches:
-        monkeypatch.setattr(kb_management, 'list_file_records', _Recorder(batch))
+        monkeypatch.setattr(knowledge_base_files, 'list_file_records', _Recorder(batch))
         result = KnowledgeBaseManagementService._assert_knowledge_base_delete_allowed(INDEX_NAME)
         assert result == batch
 
     def _explode(*, index_name=None, tenant_id=None, include_hidden=False):
         raise RuntimeError('lifecycle-read-boom')
 
-    monkeypatch.setattr(kb_management, 'list_file_records', _explode)
+    monkeypatch.setattr(knowledge_base_files, 'list_file_records', _explode)
     with pytest.raises(AppException) as excinfo:
         KnowledgeBaseManagementService._assert_knowledge_base_delete_allowed(INDEX_NAME)
     assert excinfo.value.error_code == ErrorCode.SYSTEM_DATABASE_ERROR
@@ -121,7 +122,7 @@ def test_knowledge_base_delete_guard(monkeypatch, caplog):
     secret_file_id = 'password=super-secret-42'
     caplog.clear()
     monkeypatch.setattr(
-        kb_management,
+        knowledge_base_files,
         'list_file_records',
         _Recorder([_row(status='UPLOADING', file_id=secret_file_id, original_filename=secret_filename)]),
     )

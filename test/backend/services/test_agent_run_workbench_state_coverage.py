@@ -7,7 +7,7 @@ import pytest
 from test.backend.services import test_agent_run_workbench_coverage as base
 
 
-agent_run = base.agent_run
+agent_run = base.agent_subscription
 _request = base._request
 
 

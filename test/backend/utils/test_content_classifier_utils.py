@@ -2,7 +2,9 @@
 
 import pytest
 
-from utils.content_classifier_utils import ContentClassifier
+from management.services.skill.classifier import (
+    ContentClassifier,
+)
 
 
 class TestContentClassifier:

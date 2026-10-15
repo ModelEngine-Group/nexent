@@ -71,20 +71,8 @@ patch('nexent.storage.storage_client_factory.create_storage_client_from_config',
 patch('nexent.storage.minio_config.MinIOStorageConfig.validate', lambda self: None).start()
 patch('backend.database.client.MinioClient', return_value=minio_client_mock).start()
 
-from backend.utils.document_vector_utils import (
-    get_documents_from_es,
-    process_documents_for_clustering,
-    extract_representative_chunks_smart,
-    analyze_cluster_coherence,
-    summarize_document,
-    summarize_cluster,
-    summarize_clusters_map_reduce,
-    merge_cluster_summaries,
-    calculate_document_embedding,
-    auto_determine_k,
-    kmeans_cluster_documents,
-    merge_duplicate_documents_in_clusters
-)
+from backend.management.services.knowledge_base.summary import get_documents_from_es, process_documents_for_clustering, extract_representative_chunks_smart, summarize_document, summarize_cluster, summarize_clusters_map_reduce, merge_cluster_summaries
+from backend.management.services.knowledge_base.clustering import analyze_cluster_coherence, calculate_document_embedding, auto_determine_k, kmeans_cluster_documents, merge_duplicate_documents_in_clusters
 
 
 class TestGetDocumentsFromES:
@@ -146,8 +134,8 @@ class TestGetDocumentsFromES:
 class TestProcessDocumentsForClustering:
     """Test document processing for clustering"""
     
-    @patch('backend.utils.document_vector_utils.get_documents_from_es')
-    @patch('backend.utils.document_vector_utils.calculate_document_embedding')
+    @patch('backend.management.services.knowledge_base.summary.get_documents_from_es')
+    @patch('backend.management.services.knowledge_base.summary.calculate_document_embedding')
     def test_process_documents_success(self, mock_calc_emb, mock_get_docs):
         """Test successful document processing"""
         mock_get_docs.return_value = {
@@ -166,7 +154,7 @@ class TestProcessDocumentsForClustering:
         assert 'doc1' in docs
         assert 'doc1' in embeddings
     
-    @patch('backend.utils.document_vector_utils.get_documents_from_es')
+    @patch('backend.management.services.knowledge_base.summary.get_documents_from_es')
     def test_process_documents_empty(self, mock_get_docs):
         """Test processing with no documents"""
         mock_get_docs.return_value = {}
@@ -274,8 +262,8 @@ class TestSummarizeCluster:
 class TestSummarizeClustersMapReduce:
     """Test Map-Reduce cluster summarization"""
     
-    @patch('backend.utils.document_vector_utils.summarize_document')
-    @patch('backend.utils.document_vector_utils.summarize_cluster')
+    @patch('backend.management.services.knowledge_base.summary.summarize_document')
+    @patch('backend.management.services.knowledge_base.summary.summarize_cluster')
     def test_summarize_clusters_map_reduce(self, mock_sum_cluster, mock_sum_doc):
         """Test Map-Reduce summarization"""
         document_samples = {
@@ -449,7 +437,7 @@ class TestAdditionalCoverage:
         }
         
         # Mock auto_determine_k to raise exception
-        with patch('backend.utils.document_vector_utils.auto_determine_k') as mock_auto_k:
+        with patch('backend.management.services.knowledge_base.clustering.auto_determine_k') as mock_auto_k:
             mock_auto_k.side_effect = Exception("Auto K error")
             
             with pytest.raises(Exception, match="Failed to cluster documents"):
@@ -489,7 +477,7 @@ class TestAdditionalCoverage:
         }
         
         # Mock calculate_document_embedding to return None
-        with patch('backend.utils.document_vector_utils.calculate_document_embedding') as mock_calc:
+        with patch('backend.management.services.knowledge_base.summary.calculate_document_embedding') as mock_calc:
             mock_calc.return_value = None
             
             docs, embeddings = process_documents_for_clustering('test_index', mock_vdb_core)
@@ -569,10 +557,10 @@ class TestAdditionalCoverage:
         }
         clusters = {0: ['doc1', 'missing_doc']}
         
-        with patch('backend.utils.document_vector_utils.summarize_document') as mock_sum_doc:
+        with patch('backend.management.services.knowledge_base.summary.summarize_document') as mock_sum_doc:
             mock_sum_doc.return_value = "Doc summary"
             
-            with patch('backend.utils.document_vector_utils.summarize_cluster') as mock_sum_cluster:
+            with patch('backend.management.services.knowledge_base.summary.summarize_cluster') as mock_sum_cluster:
                 mock_sum_cluster.return_value = "Cluster summary"
                 
                 result = summarize_clusters_map_reduce(document_samples, clusters)
@@ -592,10 +580,10 @@ class TestAdditionalCoverage:
         }
         clusters = {0: ['doc1']}
         
-        with patch('backend.utils.document_vector_utils.summarize_document') as mock_sum_doc:
+        with patch('backend.management.services.knowledge_base.summary.summarize_document') as mock_sum_doc:
             mock_sum_doc.return_value = "Doc summary"
             
-            with patch('backend.utils.document_vector_utils.summarize_cluster') as mock_sum_cluster:
+            with patch('backend.management.services.knowledge_base.summary.summarize_cluster') as mock_sum_cluster:
                 mock_sum_cluster.return_value = "Cluster summary"
                 
                 result = summarize_clusters_map_reduce(document_samples, clusters)
@@ -615,10 +603,10 @@ class TestAdditionalCoverage:
         }
         clusters = {0: ['doc1']}
         
-        with patch('backend.utils.document_vector_utils.summarize_document') as mock_sum_doc:
+        with patch('backend.management.services.knowledge_base.summary.summarize_document') as mock_sum_doc:
             mock_sum_doc.return_value = "Doc summary"
             
-            with patch('backend.utils.document_vector_utils.summarize_cluster') as mock_sum_cluster:
+            with patch('backend.management.services.knowledge_base.summary.summarize_cluster') as mock_sum_cluster:
                 mock_sum_cluster.return_value = "Cluster summary"
                 
                 result = summarize_clusters_map_reduce(document_samples, clusters)
@@ -635,10 +623,10 @@ class TestAdditionalCoverage:
         }
         clusters = {0: ['doc1']}
         
-        with patch('backend.utils.document_vector_utils.summarize_document') as mock_sum_doc:
+        with patch('backend.management.services.knowledge_base.summary.summarize_document') as mock_sum_doc:
             mock_sum_doc.return_value = ""  # Empty summary
             
-            with patch('backend.utils.document_vector_utils.summarize_cluster') as mock_sum_cluster:
+            with patch('backend.management.services.knowledge_base.summary.summarize_cluster') as mock_sum_cluster:
                 mock_sum_cluster.return_value = "Cluster summary"
                 
                 result = summarize_clusters_map_reduce(document_samples, clusters)

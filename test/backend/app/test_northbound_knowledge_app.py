@@ -183,9 +183,9 @@ utils_auth_module = types.ModuleType("utils.auth_utils")
 utils_auth_module.generate_session_jwt = MagicMock(return_value="jwt-token")
 sys.modules["utils.auth_utils"] = utils_auth_module
 
-utils_fm_module = types.ModuleType("utils.file_management_utils")
+utils_fm_module = types.ModuleType("management.services.knowledge_base.ingestion")
 utils_fm_module.trigger_data_process = AsyncMock(return_value={"status": "ok"})
-sys.modules["utils.file_management_utils"] = utils_fm_module
+sys.modules["management.services.knowledge_base.ingestion"] = utils_fm_module
 
 northbound_app_module = types.ModuleType("apps.northbound_app")
 northbound_app_module._get_northbound_context = AsyncMock()

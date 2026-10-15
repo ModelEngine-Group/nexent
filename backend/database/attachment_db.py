@@ -12,6 +12,11 @@ from urllib.parse import quote
 from utils.knowledge_telemetry import set_span_attributes, trace_knowledge_operation
 
 
+def upload_file_bytes(content: bytes, object_name: str) -> Tuple[bool, str]:
+    """Upload bytes to an exact object key without generating attachment metadata."""
+    return minio_client.upload_fileobj(io.BytesIO(content), object_name)
+
+
 def _normalize_object_and_bucket(object_name: str, bucket: Optional[str] = None) -> Tuple[str, Optional[str]]:
     """
     Normalize object_name + bucket from supported URL styles.

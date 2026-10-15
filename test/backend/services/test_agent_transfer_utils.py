@@ -7,11 +7,10 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "backend"))
 
-from utils.agent_transfer_utils import (
+from consts.exceptions import (
     AgentToolImportError,
-    portable_tool_params,
-    validate_import_tool_params,
 )
+from management.services.agent.policy import portable_tool_params, validate_import_tool_params
 
 
 def test_aidp_runtime_fields_are_removed_without_mutating_snapshot():

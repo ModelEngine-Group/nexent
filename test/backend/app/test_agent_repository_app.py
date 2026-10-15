@@ -63,6 +63,7 @@ consts_exceptions_mock.NotFoundException = type('NotFoundException', (Exception,
 consts_exceptions_mock.ValidationError = type('ValidationError', (Exception,), {})
 consts_exceptions_mock.AppException = type('AppException', (Exception,), {})
 consts_exceptions_mock.ForbiddenError = type('ForbiddenError', (Exception,), {})
+consts_exceptions_mock.AgentToolImportError = type("AgentToolImportError", (ValueError,), {})
 sys.modules["consts.exceptions"] = consts_exceptions_mock
 
 consts_pkg = sys.modules.get("consts")
@@ -1041,7 +1042,9 @@ def test_import_agent_from_repository_api_passes_tenant_id(
 
 
 def test_import_tool_parameter_error_returns_400(mocker, mock_auth_header):
-    from utils.agent_transfer_utils import AgentToolImportError
+    from consts.exceptions import (
+        AgentToolImportError,
+    )
 
     mocker.patch("apps.agent_repository_app.get_current_user_id", return_value=("user", "test_tenant_id"))
     mocker.patch(

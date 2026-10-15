@@ -1,4 +1,4 @@
-﻿"""Utility helpers for skill import naming conventions."""
+"""Utility helpers for skill import naming conventions."""
 
 _MAX_SKILL_NAME_LENGTH = 100
 

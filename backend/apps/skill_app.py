@@ -30,13 +30,8 @@ from services.workbench_creation_history_service import (
     prepare_creation_history,
     persist_creation_stream,
 )
-from management.services.skill.service import (
-    SkillService,
-    UnsupportedSkillFilePreview,
-    get_official_skills_with_status,
-    install_skills_from_zip_for_tenant,
-    update_skill_list,
-)
+from management.services.skill.service import SkillService, UnsupportedSkillFilePreview
+from management.services.skill.transfer import get_official_skills_with_status, install_skills_from_zip_for_tenant, update_skill_list
 from utils.auth_utils import get_current_user_id, get_current_user_info
 
 ASSET_OWNER_SKILL_VIEW_DENIED = {"content": "您无权限查看"}

@@ -1,7 +1,9 @@
 import json
 import logging
 
-from utils.time_context_utils import strip_current_time_prefix
+from management.services.agent.context import (
+    strip_current_time_prefix,
+)
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 

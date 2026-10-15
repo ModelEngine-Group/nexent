@@ -160,10 +160,10 @@ class _DummySessionCM:
 db_client_stub.get_db_session = lambda *a, **k: _DummySessionCM()
 sys.modules["database.client"] = db_client_stub
 
-# Stub utils.prompt_template_utils to avoid requiring PyYAML
-prompt_mod = types.ModuleType("utils.prompt_template_utils")
+# Stub management.services.agent.prompt to avoid requiring PyYAML
+prompt_mod = types.ModuleType("management.services.agent.prompt")
 prompt_mod.load_prompt = lambda language="zh": {"USER_PROMPT":"{{question}}", "SYSTEM_PROMPT":"SYS"}
-sys.modules["utils.prompt_template_utils"] = prompt_mod
+sys.modules["management.services.agent.prompt"] = prompt_mod
 
 # Stub storage components
 storage_factory_mod = types.ModuleType("nexent.storage.storage_client_factory")

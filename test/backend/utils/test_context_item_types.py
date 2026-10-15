@@ -7,10 +7,10 @@ from nexent.core.agents.context import ContextItemRenderer, ContextItemType
 from nexent.core.agents.context import ContextManager as RealContextManager
 from nexent.core.agents.context.models import normalize_context_inputs
 
-from backend.management.services.agent.prompt_template_loader import (
+from backend.management.services.agent.prompt import (
     load_agent_prompt_bundle,
 )
-from backend.utils.context_utils import (
+from backend.management.services.agent.context import (
     build_context_inputs as _runtime_build_context_inputs,
 )
 

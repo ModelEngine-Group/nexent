@@ -432,13 +432,13 @@ _utils_llm_module.call_llm_for_system_prompt = MagicMock()
 sys.modules["management.services.model.invocation"] = _utils_llm_module
 _utils_pkg.llm_utils = _utils_llm_module
 
-# utils.agent_profile_utils is imported lazily inside _generate_test_queries.
-sys.modules["utils.agent_profile_utils"] = MagicMock()
-_utils_pkg.agent_profile_utils = sys.modules["utils.agent_profile_utils"]
+# management.services.agent.profile is imported lazily inside _generate_test_queries.
+sys.modules["management.services.agent.profile"] = MagicMock()
+_utils_pkg.agent_profile_utils = sys.modules["management.services.agent.profile"]
 
 _utils_prompt_template_module = MagicMock()
 _utils_prompt_template_module.get_prompt_template = MagicMock()
-sys.modules["utils.prompt_template_utils"] = _utils_prompt_template_module
+sys.modules["management.services.agent.prompt"] = _utils_prompt_template_module
 _utils_pkg.prompt_template_utils = _utils_prompt_template_module
 
 _nexent_core_models_module = types.ModuleType("nexent.core.models")
@@ -2211,7 +2211,7 @@ class TestGenerateTestQueries:
 
     def test_profile_missing_raises(self, service_module, monkeypatch):
         from consts.exceptions import AppException
-        profile_utils = sys.modules["utils.agent_profile_utils"]
+        profile_utils = sys.modules["management.services.agent.profile"]
         monkeypatch.setattr(profile_utils, "fetch_agent_profile", MagicMock(return_value=None))
         with pytest.raises(AppException) as excinfo:
             service_module._generate_test_queries(1, "t1", 99)
@@ -2219,7 +2219,7 @@ class TestGenerateTestQueries:
 
     def test_llm_failure_raises(self, service_module, monkeypatch):
         from consts.exceptions import AppException
-        profile_utils = sys.modules["utils.agent_profile_utils"]
+        profile_utils = sys.modules["management.services.agent.profile"]
         monkeypatch.setattr(profile_utils, "fetch_agent_profile", MagicMock(return_value=self._profile()))
         monkeypatch.setattr(
             service_module,
@@ -2235,7 +2235,7 @@ class TestGenerateTestQueries:
 
     def test_no_valid_queries_raises(self, service_module, monkeypatch):
         from consts.exceptions import AppException
-        profile_utils = sys.modules["utils.agent_profile_utils"]
+        profile_utils = sys.modules["management.services.agent.profile"]
         monkeypatch.setattr(profile_utils, "fetch_agent_profile", MagicMock(return_value=self._profile()))
         # Non-empty list whose queries are all blank -> filtered to nothing -> EMPTY.
         monkeypatch.setattr(
@@ -2255,7 +2255,7 @@ class TestGenerateTestQueries:
         )
 
     def test_generates_queries(self, service_module, monkeypatch):
-        profile_utils = sys.modules["utils.agent_profile_utils"]
+        profile_utils = sys.modules["management.services.agent.profile"]
         monkeypatch.setattr(profile_utils, "fetch_agent_profile", MagicMock(return_value=self._profile()))
         response = json.dumps(
             [

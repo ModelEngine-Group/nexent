@@ -10,12 +10,12 @@ ROOT = Path(__file__).parents[3]
 
 def test_ut_be_fps_005_backend_has_no_generic_template_type_adapter():
     """UT-BE-FPS-005: Backend call sites name actual SDK resources."""
-    source = (ROOT / "backend/utils/prompt_template_utils.py").read_text(encoding="utf-8")
+    source = (ROOT / "backend/management/services/agent/prompt.py").read_text(encoding="utf-8")
     assert "def get_prompt_template(" not in source
     assert "load_prompt_template" not in source
 
     for file in iter_project_python_files(ROOT / "backend"):
-        if file == ROOT / "backend/utils/prompt_template_utils.py":
+        if file == ROOT / "backend/management/services/agent/prompt.py":
             continue
         text = file.read_text(encoding="utf-8")
         assert "get_prompt_template(" not in text, file
@@ -23,7 +23,9 @@ def test_ut_be_fps_005_backend_has_no_generic_template_type_adapter():
 
 def test_ut_be_fps_005_business_helpers_keep_field_merging():
     """UT-BE-FPS-005: template-field merging remains Backend business logic."""
-    from utils.prompt_template_utils import merge_prompt_generate_templates
+    from management.services.agent.prompt import (
+        merge_prompt_generate_templates,
+    )
 
     assert merge_prompt_generate_templates(
         {"duty_system_prompt": "custom"}, {"duty_system_prompt": "default", "user_prompt": "user"},

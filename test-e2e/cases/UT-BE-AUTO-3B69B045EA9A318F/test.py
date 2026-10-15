@@ -7,7 +7,9 @@ import pytest
 
 from nexent.core.agents.context import ContextItemType
 from nexent.core.agents.prompt import AgentPromptBundle
-from utils.context_utils import build_context_inputs
+from management.services.agent.context import (
+    build_context_inputs,
+)
 
 
 CASE_ID = "UT-BE-AUTO-3B69B045EA9A318F"

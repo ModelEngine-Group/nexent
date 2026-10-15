@@ -4,7 +4,7 @@ import pytest
 from sqlalchemy.exc import IntegrityError
 
 from consts.exceptions import WorkbenchAgentError
-from management.services.agent import system_agent_provider as module
+from management.services.agent import system as module
 
 
 def _provider():

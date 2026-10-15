@@ -87,10 +87,10 @@ utils_str_utils_mock.convert_string_to_list = (
 )
 sys.modules['utils'] = MagicMock()
 sys.modules['utils.auth_utils'] = MagicMock()
-sys.modules['utils.skill_params_utils'] = utils_skill_params_mock
+sys.modules['management.services.skill.params'] = utils_skill_params_mock
 sys.modules['utils.str_utils'] = utils_str_utils_mock
 sys.modules['backend.utils'] = MagicMock()
-sys.modules['backend.utils.skill_params_utils'] = utils_skill_params_mock
+sys.modules['backend.management.services.skill.params'] = utils_skill_params_mock
 sys.modules['backend.utils.str_utils'] = utils_str_utils_mock
 
 from backend.database.skill_db import (

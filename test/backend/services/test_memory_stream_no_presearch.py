@@ -5,6 +5,8 @@ import pytest
 
 from backend.consts.model import AgentRequest
 from management.services.agent import run as agent_service
+import management.services.agent.execution as agent_execution
+import management.services.agent.service as agent_service
 
 
 @pytest.mark.asyncio
@@ -97,9 +99,9 @@ async def test_fixed_search_is_streamed_and_persisted_as_structured_tool(monkeyp
     async def run_inline(_lane, _spec, func, *args, **kwargs):
         return func(*args, **kwargs)
 
-    monkeypatch.setattr(agent_service, "agent_run", fake_agent_run)
-    monkeypatch.setattr(agent_service.runtime_thread_manager, "run", run_inline)
-    monkeypatch.setattr(agent_service, "save_message", lambda *args, **kwargs: 42)
+    monkeypatch.setattr(agent_execution, "agent_run", fake_agent_run)
+    monkeypatch.setattr(agent_execution.runtime_thread_manager, "run", run_inline)
+    monkeypatch.setattr(agent_execution, "save_message", lambda *args, **kwargs: 42)
     monkeypatch.setattr(
         agent_service.agent_run_manager,
         "unregister_agent_run",
@@ -112,16 +114,16 @@ async def test_fixed_search_is_streamed_and_persisted_as_structured_tool(monkeyp
     )
     persisted_batches = []
     monkeypatch.setattr(
-        agent_service,
+        agent_execution,
         "persist_assistant_run_batch",
         lambda **kwargs: persisted_batches.append(kwargs),
     )
     monkeypatch.setattr(
-        agent_service.streaming_channel_manager,
+        agent_execution.streaming_channel_manager,
         "complete_channel",
         AsyncMock(),
     )
-    monkeypatch.setattr(agent_service, "_cleanup_channel_later", AsyncMock())
+    monkeypatch.setattr(agent_execution, "_cleanup_channel_later", AsyncMock())
     channel = AsyncMock()
 
     chunks = [

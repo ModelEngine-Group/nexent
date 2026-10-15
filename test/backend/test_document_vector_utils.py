@@ -72,20 +72,8 @@ patch('nexent.storage.storage_client_factory.create_storage_client_from_config',
 patch('nexent.storage.minio_config.MinIOStorageConfig.validate', lambda self: None).start()
 patch('backend.database.client.MinioClient', return_value=minio_client_mock).start()
 
-from backend.utils.document_vector_utils import (
-    calculate_document_embedding,
-    auto_determine_k,
-    kmeans_cluster_documents,
-    extract_representative_chunks_smart,
-    summarize_document,
-    summarize_cluster,
-    summarize_clusters_map_reduce,
-    merge_cluster_summaries,
-    get_documents_from_es,
-    process_documents_for_clustering,
-    analyze_cluster_coherence,
-    merge_duplicate_documents_in_clusters
-)
+from backend.management.services.knowledge_base.clustering import calculate_document_embedding, auto_determine_k, kmeans_cluster_documents, analyze_cluster_coherence, merge_duplicate_documents_in_clusters
+from backend.management.services.knowledge_base.summary import extract_representative_chunks_smart, summarize_document, summarize_cluster, summarize_clusters_map_reduce, merge_cluster_summaries, get_documents_from_es, process_documents_for_clustering
 
 
 class TestDocumentEmbedding:
@@ -284,8 +272,8 @@ class TestSummarizeDocument:
 
     def test_summarize_document_with_model_success(self):
         """Test document summarization when model config exists and LLM returns value"""
-        with patch('backend.utils.document_vector_utils.get_model_by_model_id') as mock_get_model, \
-             patch('backend.utils.document_vector_utils.call_llm_for_system_prompt') as mock_llm:
+        with patch('backend.management.services.knowledge_base.summary.get_model_by_model_id') as mock_get_model, \
+             patch('backend.management.services.knowledge_base.summary.call_llm_for_system_prompt') as mock_llm:
             mock_get_model.return_value = {"id": 1}
             mock_llm.return_value = "Generated summary\n"
 
@@ -330,8 +318,8 @@ class TestSummarizeCluster:
 
     def test_summarize_cluster_with_model_success(self):
         """Test cluster summarization when model config exists and LLM returns value"""
-        with patch('backend.utils.document_vector_utils.get_model_by_model_id') as mock_get_model, \
-             patch('backend.utils.document_vector_utils.call_llm_for_system_prompt') as mock_llm:
+        with patch('backend.management.services.knowledge_base.summary.get_model_by_model_id') as mock_get_model, \
+             patch('backend.management.services.knowledge_base.summary.call_llm_for_system_prompt') as mock_llm:
             mock_get_model.return_value = {"id": 1}
             mock_llm.return_value = "Cluster summary text  "
 
@@ -369,8 +357,8 @@ class TestSummarizeClustersMapReduce:
         }
         clusters = {0: ['doc1', 'doc2']}
 
-        with patch('backend.utils.document_vector_utils.summarize_document') as mock_summarize_doc, \
-             patch('backend.utils.document_vector_utils.summarize_cluster') as mock_summarize_cluster:
+        with patch('backend.management.services.knowledge_base.summary.summarize_document') as mock_summarize_doc, \
+             patch('backend.management.services.knowledge_base.summary.summarize_cluster') as mock_summarize_cluster:
 
             mock_summarize_doc.return_value = "Document summary"
             mock_summarize_cluster.return_value = "Cluster summary"
@@ -396,8 +384,8 @@ class TestSummarizeClustersMapReduce:
         }
         clusters = {0: ['doc1']}
 
-        with patch('backend.utils.document_vector_utils.summarize_document') as mock_summarize_doc, \
-             patch('backend.utils.document_vector_utils.summarize_cluster') as mock_summarize_cluster:
+        with patch('backend.management.services.knowledge_base.summary.summarize_document') as mock_summarize_doc, \
+             patch('backend.management.services.knowledge_base.summary.summarize_cluster') as mock_summarize_cluster:
 
             mock_summarize_doc.return_value = ""
             mock_summarize_cluster.return_value = "Mock cluster summary"
@@ -517,7 +505,7 @@ class TestProcessDocumentsForClustering:
             }
         }
 
-        with patch('backend.utils.document_vector_utils.calculate_document_embedding') as mock_calc_embedding:
+        with patch('backend.management.services.knowledge_base.summary.calculate_document_embedding') as mock_calc_embedding:
             mock_calc_embedding.return_value = np.array([1.0, 2.0, 3.0])
 
             documents, embeddings = process_documents_for_clustering(

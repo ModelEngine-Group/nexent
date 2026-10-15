@@ -29,7 +29,7 @@ from management.services.knowledge_base.service import (
     get_vector_db_core,
 )
 from utils.auth_utils import generate_session_jwt
-from utils.file_management_utils import trigger_data_process
+from management.services.knowledge_base.ingestion import trigger_data_process
 
 from .file_management_app import build_content_disposition_header
 from .northbound_app import _get_northbound_context

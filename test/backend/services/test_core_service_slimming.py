@@ -40,7 +40,7 @@ def dependency(monkeypatch, name, **attributes):
      "hello\n\n[Current time: 2026-08-31 00:00:00]\n\nRun workspace: /run/1"),
 ])
 def test_ac002_append_runtime_time(monkeypatch, query, zone, expected):
-    module = load_source(monkeypatch, "backend/utils/time_context_utils.py", "slimming_time")
+    module = load_source(monkeypatch, "backend/management/services/agent/context.py", "slimming_time")
     assert module.prepend_current_time(
         query, zone, now=datetime(2026, 8, 31, tzinfo=timezone.utc)
     ) == expected
@@ -52,7 +52,7 @@ def test_ac002_append_runtime_time(monkeypatch, query, zone, expected):
     ("hello\n\n[当前时间: now]\n\nRun workspace: /run/1", "hello\n\nRun workspace: /run/1"),
 ])
 def test_ac002_strip_runtime_time(monkeypatch, query, expected):
-    module = load_source(monkeypatch, "backend/utils/time_context_utils.py", "slimming_time")
+    module = load_source(monkeypatch, "backend/management/services/agent/context.py", "slimming_time")
     assert module.strip_current_time_prefix(query) == expected
 
 
@@ -86,7 +86,7 @@ def naming(monkeypatch):
     dependency(monkeypatch, "database.agent_db", query_all_agent_info_by_tenant_id=lambda tenant: [])
     dependency(monkeypatch, "management.services.model.invocation", call_llm_for_system_prompt=lambda **kw: "fresh")
     dependency(
-        monkeypatch, "utils.prompt_template_utils",
+        monkeypatch, "management.services.agent.prompt",
         get_prompt_generate_prompt_template=lambda language: {},
         normalize_prompt_generate_template_content=lambda value: value,
     )
@@ -206,7 +206,7 @@ def test_ac008_shared_run_preparation(monkeypatch, enabled, debug):
     dependency(monkeypatch, "services.memory_config_service", build_memory_context=memory)
     dependency(monkeypatch, "utils.monitoring", monitoring_manager=types.SimpleNamespace(bind_agent_context=lambda value: value))
     dependency(monkeypatch, "utils.monitoring_identity", resolve_monitoring_user_email=lambda user, tenant: "person@example.com")
-    module = load_source(monkeypatch, "backend/management/services/agent/run_context.py", "slimming_run_context")
+    module = load_source(monkeypatch, "backend/management/services/agent/context.py", "slimming_run_context")
     request = types.SimpleNamespace(
         agent_id=3, conversation_id=4, query="hello", is_debug=debug, history=[1, 2], minio_files=[]
     )

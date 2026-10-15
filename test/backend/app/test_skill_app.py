@@ -217,6 +217,7 @@ services_asset_owner_visibility_mock = types.ModuleType('services.asset_owner_vi
 services_agent_draft_permission_mock = types.ModuleType('services.agent_draft_permission_service')
 sys.modules['services'] = services_mock
 sys.modules['management.services.skill.service'] = services_skill_service_mock
+sys.modules['management.services.skill.transfer'] = services_skill_service_mock
 sys.modules['services.nl2skill_service'] = services_nl2skill_service_mock
 sys.modules['services.workbench_creation_history_service'] = services_creation_history_mock
 sys.modules['services.asset_owner_visibility'] = services_asset_owner_visibility_mock
@@ -262,6 +263,7 @@ def setup_function():
     """Restore module-level service stubs after tests that isolate imports."""
     sys.modules['services'] = services_mock
     sys.modules['management.services.skill.service'] = services_skill_service_mock
+    sys.modules['management.services.skill.transfer'] = services_skill_service_mock
     sys.modules['services.nl2skill_service'] = services_nl2skill_service_mock
     sys.modules['services.workbench_creation_history_service'] = services_creation_history_mock
     sys.modules['services.asset_owner_visibility'] = services_asset_owner_visibility_mock
@@ -283,9 +285,9 @@ utils_config_utils_mock.get_model_name_from_config = MagicMock(return_value="gpt
 # Set utils.config_utils as attribute for attribute-based imports
 setattr(utils_mock, 'config_utils', utils_config_utils_mock)
 
-# Mock utils.prompt_template_utils
-utils_prompt_template_utils_mock = types.ModuleType('utils.prompt_template_utils')
-sys.modules['utils.prompt_template_utils'] = utils_prompt_template_utils_mock
+# Mock management.services.agent.prompt
+utils_prompt_template_utils_mock = types.ModuleType('management.services.agent.prompt')
+sys.modules['management.services.agent.prompt'] = utils_prompt_template_utils_mock
 utils_prompt_template_utils_mock.get_nl2skill_prompt_template = MagicMock(return_value={
     "system_prompt": "You are a skill creator",
     "user_prompt": "Create a skill"
@@ -2598,7 +2600,7 @@ class TestScanSkillEndpoint:
         """Test scanning skills with error."""
         with patch('backend.apps.skill_app.get_current_user_id') as mock_auth:
             mock_auth.return_value = ("user123", "tenant123")
-            with patch('management.services.skill.service.update_skill_list', new_callable=AsyncMock) as mock_update:
+            with patch('management.services.skill.transfer.update_skill_list', new_callable=AsyncMock) as mock_update:
                 mock_update.side_effect = Exception("Scan failed")
 
                 app = FastAPI()

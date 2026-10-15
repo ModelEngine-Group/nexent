@@ -1,4 +1,6 @@
-from utils.automation_tool_prompt import should_enable_automation_tool_policy
+from management.services.agent.prompt import (
+    should_enable_automation_tool_policy,
+)
 
 
 def test_automation_tool_policy_is_empty_when_tool_is_unavailable():

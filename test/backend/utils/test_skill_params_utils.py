@@ -1,6 +1,6 @@
 """Unit tests for skill params helper functions."""
 
-from backend.utils.skill_params_utils import split_string_inline_comment
+from backend.management.db.skill_params import split_string_inline_comment
 
 
 def test_split_string_inline_comment_strips_display_and_comment():

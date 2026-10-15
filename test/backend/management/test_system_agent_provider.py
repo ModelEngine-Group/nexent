@@ -6,12 +6,15 @@ import pytest
 from sqlalchemy.exc import IntegrityError
 
 from consts.model import AgentInfoRequest
-from management.services.agent.system_agent_provider import (
+from contracts.agent import WORKBENCH_OFFICIAL_SKILL_NAMES
+
+from management.services.agent.system import (
     WORKBENCH_MAIN_SYSTEM_KEY,
-    WORKBENCH_OFFICIAL_SKILL_NAMES,
     SystemAgentProvider,
-    SystemAgentRef,
     WorkbenchAgentError,
+)
+from contracts.agent import (
+    SystemAgentRef,
 )
 
 
@@ -59,7 +62,7 @@ def test_wma_002_get_ref_is_tenant_scoped(mocker):
     provider = SystemAgentProvider(app_version="2.5.1", aidp_enabled=False)
     draft = _agent(provider)
     search = mocker.patch(
-        "management.services.agent.system_agent_provider.search_system_agent",
+        "management.services.agent.system.search_system_agent",
         side_effect=[draft, _published(provider)],
     )
 
@@ -148,11 +151,11 @@ def test_wma_015_release_installs_exact_official_skills(mocker):
     """UT-BE-WMA-015."""
     provider = SystemAgentProvider(app_version="2.5.1", aidp_enabled=False)
     installer = mocker.patch(
-        "management.services.agent.system_agent_provider.install_skills_from_zip_for_tenant",
+        "management.services.agent.system.install_skills_from_zip_for_tenant",
         return_value=list(WORKBENCH_OFFICIAL_SKILL_NAMES),
     )
     mocker.patch(
-        "management.services.agent.system_agent_provider.skill_db.get_skill_by_name",
+        "management.services.agent.system.skill_db.get_skill_by_name",
         side_effect=lambda name, tenant_id: {
             "skill_id": WORKBENCH_OFFICIAL_SKILL_NAMES.index(name) + 1,
             "skill_name": name,
@@ -176,11 +179,11 @@ def test_wma_016_release_preserves_custom_skill_and_binds_official_alias(mocker)
     """UT-BE-WMA-016 and UT-BE-WMA-017."""
     provider = SystemAgentProvider(app_version="2.5.1", aidp_enabled=False)
     mocker.patch(
-        "management.services.agent.system_agent_provider.install_skills_from_zip_for_tenant",
+        "management.services.agent.system.install_skills_from_zip_for_tenant",
         return_value=["docx_1", *WORKBENCH_OFFICIAL_SKILL_NAMES[1:]],
     )
     mocker.patch(
-        "management.services.agent.system_agent_provider.skill_db.get_skill_by_name",
+        "management.services.agent.system.skill_db.get_skill_by_name",
         side_effect=lambda name, tenant_id: {
             "skill_id": 101 if name == "docx_1" else 1,
             "skill_name": name,
@@ -201,7 +204,7 @@ def test_wma_006_016_replace_binds_exact_tool_and_six_skills(mocker):
     """UT-BE-WMA-003, UT-BE-WMA-006, UT-BE-WMA-008, UT-BE-WMA-016."""
     provider = SystemAgentProvider(app_version="2.5.1", aidp_enabled=True)
     mocker.patch(
-        "management.services.agent.system_agent_provider.query_all_tools",
+        "management.services.agent.system.query_all_tools",
         return_value=[
             {"tool_id": 11, "name": "aidp_search", "is_available": True},
             {
@@ -213,16 +216,16 @@ def test_wma_006_016_replace_binds_exact_tool_and_six_skills(mocker):
         ],
     )
     delete_tools = mocker.patch(
-        "management.services.agent.system_agent_provider.delete_tools_by_agent_id"
+        "management.services.agent.system.delete_tools_by_agent_id"
     )
     bind_tool = mocker.patch(
-        "management.services.agent.system_agent_provider.create_or_update_tool_by_tool_info"
+        "management.services.agent.system.create_or_update_tool_by_tool_info"
     )
     delete_skills = mocker.patch(
-        "management.services.agent.system_agent_provider.delete_skills_by_agent_id"
+        "management.services.agent.system.delete_skills_by_agent_id"
     )
     bind_skill = mocker.patch(
-        "management.services.agent.system_agent_provider.skill_db.create_or_update_skill_by_skill_info"
+        "management.services.agent.system.skill_db.create_or_update_skill_by_skill_info"
     )
     skills = [
         {"skill_id": index + 1, "skill_name": name, "source": "official"}
@@ -261,13 +264,13 @@ def test_wma_017_missing_official_package_does_not_block_release(mocker):
     """UT-BE-WMA-017."""
     provider = SystemAgentProvider(app_version="2.5.1", aidp_enabled=False)
     mocker.patch(
-        "management.services.agent.system_agent_provider.install_skills_from_zip_for_tenant",
+        "management.services.agent.system.install_skills_from_zip_for_tenant",
         return_value=[
             name for name in WORKBENCH_OFFICIAL_SKILL_NAMES if name != "pdf"
         ],
     )
     mocker.patch(
-        "management.services.agent.system_agent_provider.skill_db.get_skill_by_name",
+        "management.services.agent.system.skill_db.get_skill_by_name",
         side_effect=lambda name, tenant_id: None if name == "pdf" else {
             "skill_id": WORKBENCH_OFFICIAL_SKILL_NAMES.index(name) + 1,
             "skill_name": name,
@@ -286,20 +289,20 @@ def test_wma_017_missing_knowledge_tool_does_not_block_other_capabilities(mocker
     """UT-BE-WMA-017: an unavailable optional Tool must not block bootstrap."""
     provider = SystemAgentProvider(app_version="2.5.1", aidp_enabled=False)
     mocker.patch(
-        "management.services.agent.system_agent_provider.query_all_tools",
+        "management.services.agent.system.query_all_tools",
         return_value=[],
     )
     delete_tools = mocker.patch(
-        "management.services.agent.system_agent_provider.delete_tools_by_agent_id"
+        "management.services.agent.system.delete_tools_by_agent_id"
     )
     bind_tool = mocker.patch(
-        "management.services.agent.system_agent_provider.create_or_update_tool_by_tool_info"
+        "management.services.agent.system.create_or_update_tool_by_tool_info"
     )
     mocker.patch(
-        "management.services.agent.system_agent_provider.delete_skills_by_agent_id"
+        "management.services.agent.system.delete_skills_by_agent_id"
     )
     bind_skill = mocker.patch(
-        "management.services.agent.system_agent_provider.skill_db.create_or_update_skill_by_skill_info"
+        "management.services.agent.system.skill_db.create_or_update_skill_by_skill_info"
     )
 
     provider._replace_release_capabilities(
@@ -321,19 +324,19 @@ def test_wma_017_degraded_release_state_accepts_missing_optional_capabilities(mo
     provider = SystemAgentProvider(app_version="2.5.1", aidp_enabled=False)
     existing = _agent(provider)
     mocker.patch(
-        "management.services.agent.system_agent_provider.query_all_tools",
+        "management.services.agent.system.query_all_tools",
         return_value=[],
     )
     mocker.patch(
-        "management.services.agent.system_agent_provider.query_tool_instances_by_agent_id",
+        "management.services.agent.system.query_tool_instances_by_agent_id",
         return_value=[],
     )
     mocker.patch(
-        "management.services.agent.system_agent_provider.skill_db.query_skill_instances_by_agent_id",
+        "management.services.agent.system.skill_db.query_skill_instances_by_agent_id",
         return_value=[{"skill_id": 2, "enabled": True}],
     )
     mocker.patch(
-        "management.services.agent.system_agent_provider.skill_db.get_skill_by_id",
+        "management.services.agent.system.skill_db.get_skill_by_id",
         return_value={"skill_id": 2, "name": "pdf", "source": "official"},
     )
 
@@ -349,14 +352,14 @@ def test_sal_004_initializes_release_and_returns_published_ref(mocker):
         system_revision=None,
     )
     search = mocker.patch(
-        "management.services.agent.system_agent_provider.search_system_agent",
+        "management.services.agent.system.search_system_agent",
         side_effect=[None, created, {**created, "current_version_no": 1}, _published(provider, 1)],
     )
     create = mocker.patch(
-        "management.services.agent.system_agent_provider.create_agent",
+        "management.services.agent.system.create_agent",
         return_value=created,
     )
-    mocker.patch("management.services.agent.system_agent_provider.clear_agent_new_mark")
+    mocker.patch("management.services.agent.system.clear_agent_new_mark")
     prepare = mocker.patch.object(
         provider,
         "_prepare_official_skills",
@@ -366,12 +369,12 @@ def test_sal_004_initializes_release_and_returns_published_ref(mocker):
         ],
     )
     sync = mocker.patch.object(provider, "_replace_release_capabilities")
-    mocker.patch("management.services.agent.system_agent_provider.update_agent")
+    mocker.patch("management.services.agent.system.update_agent")
     publish = mocker.patch(
-        "management.services.agent.system_agent_provider.publish_version_impl",
+        "management.services.agent.system.publish_version_impl",
         return_value={"version_no": 1},
     )
-    mark = mocker.patch("management.services.agent.system_agent_provider.update_system_agent_revision")
+    mark = mocker.patch("management.services.agent.system.update_system_agent_revision")
 
     ref = provider.ensure_workbench_main("tenant-a", "user-a", locale="zh")
 
@@ -395,14 +398,14 @@ def test_sal_003_unique_conflict_reuses_concurrent_system_agent(mocker):
     provider = SystemAgentProvider(app_version="2.5.1", aidp_enabled=False)
     concurrent = _agent(provider)
     mocker.patch(
-        "management.services.agent.system_agent_provider.create_agent",
+        "management.services.agent.system.create_agent",
         side_effect=IntegrityError("insert", {}, RuntimeError("unique")),
     )
     search = mocker.patch(
-        "management.services.agent.system_agent_provider.search_system_agent",
+        "management.services.agent.system.search_system_agent",
         return_value=concurrent,
     )
-    clear = mocker.patch("management.services.agent.system_agent_provider.clear_agent_new_mark")
+    clear = mocker.patch("management.services.agent.system.clear_agent_new_mark")
 
     result = provider._create_draft("tenant-a", "system")
 
@@ -420,15 +423,15 @@ def test_sal_005_same_revision_ready_ensure_is_read_only(mocker):
     provider = SystemAgentProvider(app_version="2.5.1", aidp_enabled=False)
     existing = _agent(provider)
     mocker.patch(
-        "management.services.agent.system_agent_provider.search_system_agent",
+        "management.services.agent.system.search_system_agent",
         side_effect=[existing, _published(provider)],
     )
     mocker.patch.object(provider, "_release_state_matches", return_value=True)
     prepare = mocker.patch.object(provider, "_prepare_official_skills")
     replace = mocker.patch.object(provider, "_replace_release_capabilities")
-    update = mocker.patch("management.services.agent.system_agent_provider.update_agent")
-    publish = mocker.patch("management.services.agent.system_agent_provider.publish_version_impl")
-    mark = mocker.patch("management.services.agent.system_agent_provider.update_system_agent_revision")
+    update = mocker.patch("management.services.agent.system.update_agent")
+    publish = mocker.patch("management.services.agent.system.publish_version_impl")
+    mark = mocker.patch("management.services.agent.system.update_system_agent_revision")
 
     ref = provider.ensure_workbench_main("tenant-a")
 
@@ -444,13 +447,13 @@ def test_sal_007_same_revision_drift_does_not_mutate(mocker):
     """UT-BE-SAL-007."""
     provider = SystemAgentProvider(app_version="2.5.1", aidp_enabled=False)
     mocker.patch(
-        "management.services.agent.system_agent_provider.search_system_agent",
+        "management.services.agent.system.search_system_agent",
         return_value=_agent(provider, duty_prompt="drift"),
     )
     mocker.patch.object(provider, "_release_state_matches", return_value=False)
     prepare = mocker.patch.object(provider, "_prepare_official_skills")
-    update = mocker.patch("management.services.agent.system_agent_provider.update_agent")
-    publish = mocker.patch("management.services.agent.system_agent_provider.publish_version_impl")
+    update = mocker.patch("management.services.agent.system.update_agent")
+    publish = mocker.patch("management.services.agent.system.publish_version_impl")
 
     with pytest.raises(WorkbenchAgentError) as exc_info:
         provider.ensure_workbench_main("tenant-a")
@@ -467,7 +470,7 @@ def test_sal_008_new_revision_upgrades_once(mocker):
     old = _agent(provider, system_revision="2.5.0", current_version_no=2)
     upgraded = _agent(provider, system_revision="2.5.1", current_version_no=3)
     mocker.patch(
-        "management.services.agent.system_agent_provider.search_system_agent",
+        "management.services.agent.system.search_system_agent",
         side_effect=[old, upgraded, _published(provider, 3)],
     )
     mocker.patch.object(
@@ -479,12 +482,12 @@ def test_sal_008_new_revision_upgrades_once(mocker):
         ],
     )
     replace = mocker.patch.object(provider, "_replace_release_capabilities")
-    update = mocker.patch("management.services.agent.system_agent_provider.update_agent")
+    update = mocker.patch("management.services.agent.system.update_agent")
     publish = mocker.patch(
-        "management.services.agent.system_agent_provider.publish_version_impl",
+        "management.services.agent.system.publish_version_impl",
         return_value={"version_no": 3},
     )
-    mark = mocker.patch("management.services.agent.system_agent_provider.update_system_agent_revision")
+    mark = mocker.patch("management.services.agent.system.update_system_agent_revision")
 
     ref = provider.ensure_workbench_main("tenant-a", "system")
 
@@ -504,11 +507,11 @@ def test_sal_008_older_runtime_cannot_downgrade_system_agent(mocker):
         current_version_no=3,
     )
     mocker.patch(
-        "management.services.agent.system_agent_provider.search_system_agent",
+        "management.services.agent.system.search_system_agent",
         return_value=existing,
     )
     prepare = mocker.patch.object(provider, "_prepare_official_skills")
-    publish = mocker.patch("management.services.agent.system_agent_provider.publish_version_impl")
+    publish = mocker.patch("management.services.agent.system.publish_version_impl")
 
     with pytest.raises(WorkbenchAgentError) as exc_info:
         provider.ensure_workbench_main("tenant-a")
@@ -523,7 +526,7 @@ def test_sal_016_publish_failure_does_not_advance_revision(mocker):
     provider = SystemAgentProvider(app_version="2.5.1", aidp_enabled=False)
     old = _agent(provider, system_revision="2.5.0", current_version_no=2)
     mocker.patch(
-        "management.services.agent.system_agent_provider.search_system_agent",
+        "management.services.agent.system.search_system_agent",
         return_value=old,
     )
     mocker.patch.object(
@@ -535,12 +538,12 @@ def test_sal_016_publish_failure_does_not_advance_revision(mocker):
         ],
     )
     mocker.patch.object(provider, "_replace_release_capabilities")
-    mocker.patch("management.services.agent.system_agent_provider.update_agent")
+    mocker.patch("management.services.agent.system.update_agent")
     mocker.patch(
-        "management.services.agent.system_agent_provider.publish_version_impl",
+        "management.services.agent.system.publish_version_impl",
         side_effect=RuntimeError("publish failed"),
     )
-    mark = mocker.patch("management.services.agent.system_agent_provider.update_system_agent_revision")
+    mark = mocker.patch("management.services.agent.system.update_system_agent_revision")
 
     with pytest.raises(WorkbenchAgentError) as exc_info:
         provider.ensure_workbench_main("tenant-a")

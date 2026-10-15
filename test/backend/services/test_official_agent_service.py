@@ -1378,7 +1378,7 @@ async def test_create_knowledge_bases_uploads_binary_docs(tmp_path):
     fake_file_svc.upload_files_impl = AsyncMock(
         return_value=([], ["minio/a.docx"], ["a.docx"])
     )
-    fake_utils = types.ModuleType("utils.file_management_utils")
+    fake_utils = types.ModuleType("management.services.knowledge_base.ingestion")
     fake_utils.trigger_data_process = AsyncMock()
 
     with patch.dict(
@@ -1391,7 +1391,7 @@ async def test_create_knowledge_bases_uploads_binary_docs(tmp_path):
             "management.services.model.resolver": fake_model_resolver,
             "database.group_db": fake_group_db,
             "services.file_management_service": fake_file_svc,
-            "utils.file_management_utils": fake_utils,
+            "management.services.knowledge_base.ingestion": fake_utils,
         },
     ):
         mapping = await official_agent_service._create_knowledge_bases(
@@ -1690,7 +1690,7 @@ async def test_index_binary_docs_skips_processing_when_upload_returns_no_path(tm
     binary_file.write_bytes(b"pdf")
     fake_file_svc = types.ModuleType("services.file_management_service")
     fake_file_svc.upload_files_impl = AsyncMock(return_value=([], [], []))
-    fake_utils = types.ModuleType("utils.file_management_utils")
+    fake_utils = types.ModuleType("management.services.knowledge_base.ingestion")
     fake_utils.trigger_data_process = AsyncMock()
     doc = _KnowledgeBaseSeedDoc(file_name="guide.pdf", file_path=str(binary_file))
 
@@ -1698,7 +1698,7 @@ async def test_index_binary_docs_skips_processing_when_upload_returns_no_path(tm
         sys.modules,
         {
             "services.file_management_service": fake_file_svc,
-            "utils.file_management_utils": fake_utils,
+            "management.services.knowledge_base.ingestion": fake_utils,
         },
     ):
         await official_agent_service._index_binary_docs(

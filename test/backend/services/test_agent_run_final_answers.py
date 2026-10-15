@@ -14,7 +14,7 @@ from . import test_agent_service as service_tests
 
 @pytest.fixture
 def stream_capture(monkeypatch):
-    service = service_tests.agent_run_service
+    service = service_tests.agent_execution
     batches = []
     monkeypatch.setattr(service, "save_message", MagicMock(return_value=42))
     monkeypatch.setattr(service, "persist_assistant_run_batch", lambda **kwargs: batches.append(kwargs))

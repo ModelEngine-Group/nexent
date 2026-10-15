@@ -67,9 +67,15 @@ def stub_project_modules(monkeypatch, tmp_path):
 
 
 @pytest.fixture()
-def fmu(monkeypatch):
+def fmu(monkeypatch, request):
     # Import after stubbing collaborators
-    from backend.utils import file_management_utils as fmu
+    names = request.function.__code__.co_names
+    if "trigger_data_process" in names or "_data_process_error_result" in names:
+        from backend.management.services.knowledge_base import ingestion as fmu
+    elif "get_all_files_status" in names or "_convert_to_custom_state_local" in names:
+        from backend.management.services.knowledge_base import status as fmu
+    else:
+        from backend.utils import file_management_utils as fmu
     return fmu
 
 

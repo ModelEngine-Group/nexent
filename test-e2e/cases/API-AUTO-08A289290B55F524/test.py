@@ -6,7 +6,7 @@ from uuid import UUID
 import pytest
 
 from consts.exceptions import ForbiddenError
-from database import attachment_db, client as database_client
+from database import attachment_db
 from management.services.agent import service as agent_service
 
 PNG = b"\x89PNG\r\n\x1a\n" + b"\x00" * 16
@@ -48,7 +48,7 @@ async def test_agent_icon_upload_read_contract(monkeypatch):
     monkeypatch.setattr(agent_service, "is_system_agent", lambda *args: False)
     monkeypatch.setattr(agent_service, "update_agent_icon", write_icon)
     # Keep real upload/read/validation functions, replacing only object storage.
-    monkeypatch.setattr(database_client, "minio_client", storage)
+    monkeypatch.setattr(attachment_db, "minio_client", storage)
     monkeypatch.setattr(attachment_db, "get_file_stream",
                         lambda name: io.BytesIO(storage.content) if storage.content is not None else None)
 

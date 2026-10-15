@@ -44,8 +44,10 @@ from consts.exceptions import (
     UserRegistrationException,
     ValidationError,
 )
-from management.services.skill.service import install_skills_from_zip_for_tenant
-from management.services.agent.system_agent_provider import ensure_workbench_main_agent
+from management.services.skill.transfer import install_skills_from_zip_for_tenant
+from management.services.agent.system import (
+    ensure_workbench_main_agent,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -325,7 +327,7 @@ def create_tenant(
                     f"Failed to install skills from ZIP for tenant {tenant_id}: {e}")
         elif skill_ids:
             try:
-                from management.services.skill.service import install_skills_for_tenant as install_by_ids
+                from management.services.skill.transfer import install_skills_for_tenant as install_by_ids
                 installed_by_ids = install_by_ids(
                     skill_ids=skill_ids,
                     tenant_id=tenant_id,

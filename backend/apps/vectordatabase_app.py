@@ -29,7 +29,7 @@ from services.file_management_service import check_file_access
 from services.quota_service import QuotaService
 from services.redis_service import get_redis_service
 from utils.auth_utils import get_current_user_context, get_current_user_id
-from utils.file_management_utils import get_all_files_status
+from management.services.knowledge_base.status import get_all_files_status
 from database.knowledge_db import get_index_name_by_knowledge_name, get_knowledge_record
 from database.model_management_db import get_model_by_model_id
 from apps.permission_utils import (

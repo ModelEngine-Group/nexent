@@ -251,13 +251,13 @@ sys.modules['backend.utils'] = sys.modules['utils']
 sys.modules['utils'].__path__ = [os.path.abspath(os.path.join(os.path.dirname(__file__), '../../../backend/utils'))]
 
 # Create document_vector_utils mock
-document_vector_utils_mock = types.ModuleType('backend.utils.document_vector_utils')
+document_vector_utils_mock = types.ModuleType('backend.management.services.knowledge_base.summary')
 document_vector_utils_mock.process_documents_for_clustering = MagicMock(return_value=([], []))
 document_vector_utils_mock.kmeans_cluster_documents = MagicMock(return_value=[])
 document_vector_utils_mock.summarize_clusters_map_reduce = MagicMock(return_value="test summary")
 document_vector_utils_mock.merge_cluster_summaries = MagicMock(return_value="merged summary")
-sys.modules['backend.utils.document_vector_utils'] = document_vector_utils_mock
-sys.modules['utils.document_vector_utils'] = document_vector_utils_mock
+sys.modules['backend.management.services.knowledge_base.summary'] = document_vector_utils_mock
+sys.modules['management.services.knowledge_base.summary'] = document_vector_utils_mock
 setattr(sys.modules['utils'], 'document_vector_utils', document_vector_utils_mock)
 
 str_utils_mock = types.ModuleType('utils.str_utils')
@@ -457,10 +457,10 @@ class TestRunAutoSummaryForKb:
 
         with patch('backend.services.auto_summary_scheduler.get_vector_db_core', return_value=mock_vdb), \
              patch('backend.services.auto_summary_scheduler.ElasticSearchService', return_value=mock_service), \
-             patch('utils.document_vector_utils.process_documents_for_clustering', return_value=(["doc1"], [[0.1]])), \
-             patch('utils.document_vector_utils.kmeans_cluster_documents', return_value=[0]), \
-             patch('utils.document_vector_utils.summarize_clusters_map_reduce', return_value=["summary"]), \
-             patch('utils.document_vector_utils.merge_cluster_summaries', return_value="final summary"), \
+             patch('management.services.knowledge_base.summary.process_documents_for_clustering', return_value=(["doc1"], [[0.1]])), \
+             patch('management.services.knowledge_base.clustering.kmeans_cluster_documents', return_value=[0]), \
+             patch('management.services.knowledge_base.summary.summarize_clusters_map_reduce', return_value=["summary"]), \
+             patch('management.services.knowledge_base.summary.merge_cluster_summaries', return_value="final summary"), \
              patch('backend.services.auto_summary_scheduler.tenant_config_manager.load_config', return_value={"LLM_ID": "1"}), \
              patch('backend.database.knowledge_db.update_last_summary_time'):
 
@@ -486,7 +486,7 @@ class TestRunAutoSummaryForKb:
 
         with patch('backend.services.auto_summary_scheduler.get_vector_db_core', return_value=mock_vdb), \
              patch('backend.services.auto_summary_scheduler.ElasticSearchService', return_value=mock_service), \
-             patch('utils.document_vector_utils.process_documents_for_clustering', return_value=([], [])):
+             patch('management.services.knowledge_base.summary.process_documents_for_clustering', return_value=([], [])):
 
             _run_auto_summary_for_kb("test_index", "tenant_id")
 
@@ -499,10 +499,10 @@ class TestRunAutoSummaryForKb:
 
         with patch('backend.services.auto_summary_scheduler.get_vector_db_core', return_value=mock_vdb), \
              patch('backend.services.auto_summary_scheduler.ElasticSearchService', return_value=mock_service), \
-             patch('utils.document_vector_utils.process_documents_for_clustering', return_value=(["doc"], [[0.1]])), \
-             patch('utils.document_vector_utils.kmeans_cluster_documents', return_value=[0]), \
-             patch('utils.document_vector_utils.summarize_clusters_map_reduce', return_value=["summary"]) as mock_summarize, \
-             patch('utils.document_vector_utils.merge_cluster_summaries', return_value="final"), \
+             patch('management.services.knowledge_base.summary.process_documents_for_clustering', return_value=(["doc"], [[0.1]])), \
+             patch('management.services.knowledge_base.clustering.kmeans_cluster_documents', return_value=[0]), \
+             patch('management.services.knowledge_base.summary.summarize_clusters_map_reduce', return_value=["summary"]) as mock_summarize, \
+             patch('management.services.knowledge_base.summary.merge_cluster_summaries', return_value="final"), \
              patch('backend.services.auto_summary_scheduler.tenant_config_manager.load_config', return_value={"LLM_ID": "8"}), \
              patch('backend.database.knowledge_db.update_last_summary_time'):
 
@@ -519,10 +519,10 @@ class TestRunAutoSummaryForKb:
 
         with patch('backend.services.auto_summary_scheduler.get_vector_db_core', return_value=mock_vdb), \
              patch('backend.services.auto_summary_scheduler.ElasticSearchService', return_value=mock_service), \
-             patch('utils.document_vector_utils.process_documents_for_clustering', return_value=(["doc"], [[0.1]])), \
-             patch('utils.document_vector_utils.kmeans_cluster_documents', return_value=[0]), \
-             patch('utils.document_vector_utils.summarize_clusters_map_reduce', return_value=["summary"]) as mock_summarize, \
-             patch('utils.document_vector_utils.merge_cluster_summaries', return_value="final"), \
+             patch('management.services.knowledge_base.summary.process_documents_for_clustering', return_value=(["doc"], [[0.1]])), \
+             patch('management.services.knowledge_base.clustering.kmeans_cluster_documents', return_value=[0]), \
+             patch('management.services.knowledge_base.summary.summarize_clusters_map_reduce', return_value=["summary"]) as mock_summarize, \
+             patch('management.services.knowledge_base.summary.merge_cluster_summaries', return_value="final"), \
              patch('backend.services.auto_summary_scheduler.tenant_config_manager.load_config', side_effect=Exception("No config")):
 
             _run_auto_summary_for_kb("test_index", "")
@@ -537,10 +537,10 @@ class TestRunAutoSummaryForKb:
 
         with patch('backend.services.auto_summary_scheduler.get_vector_db_core', return_value=mock_vdb), \
              patch('backend.services.auto_summary_scheduler.ElasticSearchService', return_value=mock_service), \
-             patch('utils.document_vector_utils.process_documents_for_clustering', return_value=(["doc"], [[0.1]])), \
-             patch('utils.document_vector_utils.kmeans_cluster_documents', return_value=[0]), \
-             patch('utils.document_vector_utils.summarize_clusters_map_reduce', return_value=["summary"]) as mock_summarize, \
-             patch('utils.document_vector_utils.merge_cluster_summaries', return_value="final"), \
+             patch('management.services.knowledge_base.summary.process_documents_for_clustering', return_value=(["doc"], [[0.1]])), \
+             patch('management.services.knowledge_base.clustering.kmeans_cluster_documents', return_value=[0]), \
+             patch('management.services.knowledge_base.summary.summarize_clusters_map_reduce', return_value=["summary"]) as mock_summarize, \
+             patch('management.services.knowledge_base.summary.merge_cluster_summaries', return_value="final"), \
              patch('backend.services.auto_summary_scheduler.tenant_config_manager.load_config', side_effect=Exception("No config")):
 
             _run_auto_summary_for_kb("test_index", None)
@@ -555,10 +555,10 @@ class TestRunAutoSummaryForKb:
 
         with patch('backend.services.auto_summary_scheduler.get_vector_db_core', return_value=mock_vdb), \
              patch('backend.services.auto_summary_scheduler.ElasticSearchService', return_value=mock_service), \
-             patch('utils.document_vector_utils.process_documents_for_clustering', return_value=(["doc"], [[0.1]])), \
-             patch('utils.document_vector_utils.kmeans_cluster_documents', return_value=[0]), \
-             patch('utils.document_vector_utils.summarize_clusters_map_reduce', return_value=["summary"]) as mock_summarize, \
-             patch('utils.document_vector_utils.merge_cluster_summaries', return_value="final"), \
+             patch('management.services.knowledge_base.summary.process_documents_for_clustering', return_value=(["doc"], [[0.1]])), \
+             patch('management.services.knowledge_base.clustering.kmeans_cluster_documents', return_value=[0]), \
+             patch('management.services.knowledge_base.summary.summarize_clusters_map_reduce', return_value=["summary"]) as mock_summarize, \
+             patch('management.services.knowledge_base.summary.merge_cluster_summaries', return_value="final"), \
              patch('backend.services.auto_summary_scheduler.tenant_config_manager.load_config', return_value={}):
 
             _run_auto_summary_for_kb("test_index", "tenant_id")
@@ -573,10 +573,10 @@ class TestRunAutoSummaryForKb:
 
         with patch('backend.services.auto_summary_scheduler.get_vector_db_core', return_value=mock_vdb), \
              patch('backend.services.auto_summary_scheduler.ElasticSearchService', return_value=mock_service), \
-             patch('utils.document_vector_utils.process_documents_for_clustering', return_value=(["doc"], [[0.1]])), \
-             patch('utils.document_vector_utils.kmeans_cluster_documents', return_value=[0]), \
-             patch('utils.document_vector_utils.summarize_clusters_map_reduce', return_value=["summary"]) as mock_summarize, \
-             patch('utils.document_vector_utils.merge_cluster_summaries', return_value="final"), \
+             patch('management.services.knowledge_base.summary.process_documents_for_clustering', return_value=(["doc"], [[0.1]])), \
+             patch('management.services.knowledge_base.clustering.kmeans_cluster_documents', return_value=[0]), \
+             patch('management.services.knowledge_base.summary.summarize_clusters_map_reduce', return_value=["summary"]) as mock_summarize, \
+             patch('management.services.knowledge_base.summary.merge_cluster_summaries', return_value="final"), \
              patch('backend.services.auto_summary_scheduler.tenant_config_manager.load_config', side_effect=Exception("Config error")):
 
             _run_auto_summary_for_kb("test_index", "tenant_id")
@@ -602,7 +602,7 @@ class TestRunAutoSummaryForKb:
 
         with patch('backend.services.auto_summary_scheduler.get_vector_db_core', return_value=mock_vdb), \
              patch('backend.services.auto_summary_scheduler.ElasticSearchService', return_value=mock_service), \
-             patch('utils.document_vector_utils.process_documents_for_clustering', side_effect=Exception("Clustering error")):
+             patch('management.services.knowledge_base.summary.process_documents_for_clustering', side_effect=Exception("Clustering error")):
 
             _run_auto_summary_for_kb("test_index", "tenant_id")
 
@@ -905,10 +905,10 @@ class TestAutoSummaryIntegration:
 
         with patch('backend.services.auto_summary_scheduler.get_vector_db_core', return_value=mock_vdb), \
              patch('backend.services.auto_summary_scheduler.ElasticSearchService', return_value=mock_service), \
-             patch('utils.document_vector_utils.process_documents_for_clustering') as mock_process, \
-             patch('utils.document_vector_utils.kmeans_cluster_documents') as mock_kmeans, \
-             patch('utils.document_vector_utils.summarize_clusters_map_reduce') as mock_summarize, \
-             patch('utils.document_vector_utils.merge_cluster_summaries') as mock_merge, \
+             patch('management.services.knowledge_base.summary.process_documents_for_clustering') as mock_process, \
+             patch('management.services.knowledge_base.clustering.kmeans_cluster_documents') as mock_kmeans, \
+             patch('management.services.knowledge_base.summary.summarize_clusters_map_reduce') as mock_summarize, \
+             patch('management.services.knowledge_base.summary.merge_cluster_summaries') as mock_merge, \
              patch('backend.services.auto_summary_scheduler.tenant_config_manager.load_config', return_value={"LLM_ID": "3"}):
 
             mock_process.return_value = (
@@ -943,10 +943,10 @@ class TestAutoSummaryIntegration:
 
         with patch('backend.services.auto_summary_scheduler.get_vector_db_core', return_value=mock_vdb), \
              patch('backend.services.auto_summary_scheduler.ElasticSearchService', return_value=mock_service), \
-             patch('utils.document_vector_utils.process_documents_for_clustering', return_value=(["doc"], [[0.1]])), \
-             patch('utils.document_vector_utils.kmeans_cluster_documents', return_value=[0]), \
-             patch('utils.document_vector_utils.summarize_clusters_map_reduce', return_value=["summary"]), \
-             patch('utils.document_vector_utils.merge_cluster_summaries', return_value="final"), \
+             patch('management.services.knowledge_base.summary.process_documents_for_clustering', return_value=(["doc"], [[0.1]])), \
+             patch('management.services.knowledge_base.clustering.kmeans_cluster_documents', return_value=[0]), \
+             patch('management.services.knowledge_base.summary.summarize_clusters_map_reduce', return_value=["summary"]), \
+             patch('management.services.knowledge_base.summary.merge_cluster_summaries', return_value="final"), \
              patch('backend.services.auto_summary_scheduler.tenant_config_manager.load_config', return_value={"LLM_ID": "1"}):
 
             _run_auto_summary_for_kb("kb_1", "tenant_1")
