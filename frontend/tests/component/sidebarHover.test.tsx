@@ -78,8 +78,8 @@ beforeEach(() => {
 afterEach(() => {
   vi.useRealTimers();
 });
-function setup() {
-  const result = render(<SideNavigation />);
+function setup(onPinnedChange?: (pinned: boolean) => void) {
+  const result = render(<SideNavigation onPinnedChange={onPinnedChange} />);
   const rail = result.container.querySelector("[data-sidebar-expanded]")!;
   return { ...result, rail };
 }
@@ -140,4 +140,45 @@ test("unmount clears the pending collapse timer", () => {
   fireEvent.mouseLeave(rail);
   unmount();
   expect(vi.getTimerCount()).toBe(0);
+});
+
+test("pin control is expanded-only, cancels collapse and holds layout until explicitly unpinned", () => {
+  const onPinnedChange = vi.fn();
+  const { rail } = setup(onPinnedChange);
+  expect(screen.queryByRole("button", { name: "sidebar.pin" })).toBeNull();
+  fireEvent.mouseEnter(rail);
+  fireEvent.mouseLeave(rail);
+  fireEvent.click(screen.getByRole("button", { name: "sidebar.pin" }));
+  act(() => vi.advanceTimersByTime(500));
+  expect(rail).toHaveAttribute("data-sidebar-pinned", "true");
+  expect(rail.querySelector("[data-sidebar-divider]")).not.toBeNull();
+  expect(rail).toHaveAttribute("data-sidebar-expanded", "true");
+  expect(onPinnedChange).toHaveBeenLastCalledWith(true);
+  const unpin = screen.getByRole("button", { name: "sidebar.unpin" });
+  expect(unpin).toHaveAttribute("aria-pressed", "true");
+  fireEvent.focus(unpin);
+  fireEvent.blur(unpin, { relatedTarget: document.body });
+  act(() => vi.advanceTimersByTime(500));
+  expect(rail).toHaveAttribute("data-sidebar-expanded", "true");
+  fireEvent.mouseEnter(rail);
+  fireEvent.click(unpin);
+  expect(rail).toHaveAttribute("data-sidebar-expanded", "false");
+  expect(onPinnedChange.mock.calls).toEqual([[true], [false]]);
+  fireEvent.focus(screen.getByRole("button", { name: "sidebar.agentConfig" }));
+  act(() => vi.advanceTimersByTime(500));
+  expect(rail).toHaveAttribute("data-sidebar-expanded", "false");
+  fireEvent.mouseLeave(rail);
+  fireEvent.mouseEnter(rail);
+  expect(rail).toHaveAttribute("data-sidebar-expanded", "true");
+  expect(rail).toHaveAttribute("data-sidebar-pinned", "false");
+});
+
+test("unmount releases the pinned layout reservation for standalone pages", () => {
+  const onPinnedChange = vi.fn();
+  const { rail, unmount } = setup(onPinnedChange);
+  fireEvent.mouseEnter(rail);
+  fireEvent.click(screen.getByRole("button", { name: "sidebar.pin" }));
+  expect(onPinnedChange).toHaveBeenLastCalledWith(true);
+  unmount();
+  expect(onPinnedChange).toHaveBeenLastCalledWith(false);
 });

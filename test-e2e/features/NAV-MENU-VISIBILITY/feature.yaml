@@ -21,7 +21,9 @@ feature:
   - rule_id: NAV-MENU-RULE-004
     description: Shared pages omit global top and bottom bars; account menu retains their information, visibility policies and language switching without appearance settings.
   - rule_id: NAV-MENU-RULE-005
-    description: 'Collapsed sidebar shows icons only; hover expands to240px over content with inline labels, truncation and popup-safe collapse. Brand text uses the 16px bold title style and truncates with a full-name tooltip. Interactive sidebar items show a pointer cursor. Only the collapsed state displays the 0.5px right divider in #191919 at15% opacity.'
+    description: 'Collapsed sidebar shows icons only; hover expands to240px over content with inline labels, truncation and popup-safe collapse. Brand text uses the 16px bold title style and truncates with a full-name tooltip. Interactive sidebar items show a pointer cursor. Collapsed and pinned states display the 0.5px right divider in #191919 at15% opacity.'
+  - rule_id: NAV-MENU-RULE-006
+    description: An expanded-only header control pins sidebar at240px and resizes content; toggling again collapses to64px. Unpinned hover remains an overlay.
   required_test_stages:
   - D1
   - D4
@@ -31,4 +33,5 @@ feature:
     - NAV-MENU-REQ-002
     - NAV-MENU-REQ-003
     - NAV-MENU-REQ-004
+    - NAV-MENU-REQ-005
     spec_path: ../nexent-doc/docs/Developing/nav-sidebar-menu-visibility/proposal.md

@@ -2,7 +2,7 @@
 
 "use client";
 
-import { type CSSProperties, type ReactNode } from "react";
+import { useState, type CSSProperties, type ReactNode } from "react";
 import { usePathname } from "next/navigation";
 import { Layout, Spin } from "antd";
 import { SideNavigation } from "@/components/navigation/SideNavigation";
@@ -20,6 +20,8 @@ export function ClientLayout({ children }: { children: ReactNode }) {
   const pathname = usePathname();
   const { isAuthorized } = useAuthorizationContext();
   const { isSpeedMode } = useDeployment();
+  const [sidebarPinned, setSidebarPinned] = useState(false);
+  const sidebarWidth = sidebarPinned ? 240 : SIDER_CONFIG.WIDTH;
 
   const effectivePath = getEffectiveRoutePath(pathname);
   const isHomePage = effectivePath === "/";
@@ -43,7 +45,7 @@ export function ClientLayout({ children }: { children: ReactNode }) {
     top: 0,
     bottom: 0,
     left: 0,
-    width: SIDER_CONFIG.WIDTH,
+    width: sidebarWidth,
     backgroundColor: "#f0f0f0",
     overflow: "visible",
     zIndex: 30,
@@ -82,18 +84,19 @@ export function ClientLayout({ children }: { children: ReactNode }) {
 
       <Sider
         style={siderStyle}
-        width={SIDER_CONFIG.WIDTH}
+        width={sidebarWidth}
         collapsedWidth={SIDER_CONFIG.WIDTH}
         trigger={null}
-        className="!bg-[#f0f0f0] border-r border-[#c9c9c9]"
+        className="!bg-[#f0f0f0]"
       >
-        <SideNavigation />
+        <SideNavigation onPinnedChange={setSidebarPinned} />
       </Sider>
 
       <Layout
+        className="transition-[margin-left] duration-[180ms] motion-reduce:transition-none"
         style={{
           minHeight: "100vh",
-          marginLeft: `${SIDER_CONFIG.WIDTH}px`,
+          marginLeft: `${sidebarWidth}px`,
         }}
       >
         <Content style={contentStyle}>

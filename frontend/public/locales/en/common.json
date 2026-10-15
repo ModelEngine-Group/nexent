@@ -5977,5 +5977,7 @@
   "accountMenu.language": "Language settings",
   "accountMenu.version": "Current version",
   "accountMenu.github": "Go to GitHub",
-  "accountMenu.selectedLanguage": "Current language"
+  "accountMenu.selectedLanguage": "Current language",
+  "sidebar.pin": "Keep sidebar expanded",
+  "sidebar.unpin": "Collapse sidebar"
 }

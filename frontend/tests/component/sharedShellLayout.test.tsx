@@ -1,6 +1,6 @@
 // Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import { beforeEach, expect, test, vi } from "vitest";
 
 import { ClientLayout } from "../../app/[locale]/layout.client";
@@ -18,7 +18,17 @@ vi.mock("@/components/providers/deploymentProvider", () => ({
   useDeployment: () => ({ isSpeedMode: state.speed }),
 }));
 vi.mock("@/components/navigation/SideNavigation", () => ({
-  SideNavigation: () => <nav>sidebar</nav>,
+  SideNavigation: ({
+    onPinnedChange,
+  }: {
+    onPinnedChange: (pinned: boolean) => void;
+  }) => (
+    <nav>
+      sidebar
+      <button onClick={() => onPinnedChange(true)}>pin</button>
+      <button onClick={() => onPinnedChange(false)}>unpin</button>
+    </nav>
+  ),
 }));
 vi.mock("@/components/auth/AuthDialogs", () => ({
   AuthDialogs: () => <div>auth dialogs</div>,
@@ -99,4 +109,26 @@ test("share stays standalone and speed mode hides auth dialogs", () => {
     </ClientLayout>
   );
   expect(screen.queryByText("auth dialogs")).toBeNull();
+});
+
+test("pin state reserves240px and unpin restores64px without losing page content", () => {
+  state.pathname = "/zh/models";
+  const { container } = render(
+    <ClientLayout>
+      <main>page content</main>
+    </ClientLayout>
+  );
+  const sider = container.querySelector(".ant-layout-sider")!;
+  const contentLayout = container.querySelector(
+    ".ant-layout-content"
+  )!.parentElement!;
+  expect(sider).toHaveStyle({ width: "64px" });
+  expect(contentLayout).toHaveStyle({ marginLeft: "64px" });
+  fireEvent.click(screen.getByRole("button", { name: "pin" }));
+  expect(sider).toHaveStyle({ width: "240px" });
+  expect(contentLayout).toHaveStyle({ marginLeft: "240px" });
+  expect(screen.getByText("page content")).toBeVisible();
+  fireEvent.click(screen.getByRole("button", { name: "unpin" }));
+  expect(sider).toHaveStyle({ width: "64px" });
+  expect(contentLayout).toHaveStyle({ marginLeft: "64px" });
 });

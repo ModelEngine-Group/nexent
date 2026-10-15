@@ -12,6 +12,7 @@ import {
 import { useTranslation } from "react-i18next";
 import { useParams, usePathname, useRouter } from "next/navigation";
 import Link from "next/link";
+import { Button, Tooltip } from "antd";
 import {
   Bell,
   BookOpen,
@@ -25,6 +26,8 @@ import {
   Home,
   LineChart,
   Puzzle,
+  PanelLeftClose,
+  PanelLeftOpen,
   Settings,
   Zap,
 } from "lucide-react";
@@ -190,7 +193,11 @@ function isRouteAccessible(
   return accessibleRoutes.includes(route.path);
 }
 
-export function SideNavigation() {
+interface SideNavigationProps {
+  onPinnedChange?: (pinned: boolean) => void;
+}
+
+export function SideNavigation({ onPinnedChange }: SideNavigationProps = {}) {
   const { t } = useTranslation("common");
   const { accessibleRoutes } = useAuthorizationContext();
   const { isAuthenticated, openAuthPromptModal } = useAuthenticationContext();
@@ -201,16 +208,19 @@ export function SideNavigation() {
   const locale = params.locale === "en" ? "en" : "zh";
   const { config } = useGlobalConfigStore();
   const [expanded, setExpanded] = useState(false);
+  const [pinned, setPinned] = useState(false);
+  const suppressExpansion = useRef(false);
   const hovered = useRef(false);
   const popups = useRef({ account: false, notification: false });
   const closeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const expand = () => {
     if (closeTimer.current) clearTimeout(closeTimer.current);
+    if (suppressExpansion.current) return;
     setExpanded(true);
   };
   const collapseLater = () => {
     if (closeTimer.current) clearTimeout(closeTimer.current);
-    if (popups.current.account || popups.current.notification) return;
+    if (pinned || popups.current.account || popups.current.notification) return;
     closeTimer.current = setTimeout(() => setExpanded(false), 160);
   };
   const handlePopupChange = (
@@ -218,14 +228,25 @@ export function SideNavigation() {
     open: boolean
   ) => {
     popups.current[key] = open;
-    if (open) expand();
-    else if (!hovered.current) collapseLater();
+    if (open) {
+      suppressExpansion.current = false;
+      expand();
+    } else if (!hovered.current) collapseLater();
+  };
+  const togglePinned = () => {
+    if (closeTimer.current) clearTimeout(closeTimer.current);
+    const nextPinned = !pinned;
+    suppressExpansion.current = !nextPinned;
+    setPinned(nextPinned);
+    setExpanded(nextPinned);
+    onPinnedChange?.(nextPinned);
   };
   useEffect(
     () => () => {
       if (closeTimer.current) clearTimeout(closeTimer.current);
+      onPinnedChange?.(false);
     },
-    []
+    [onPinnedChange]
   );
 
   const [pendingNavigationPath, setPendingNavigationPath] = useState<
@@ -339,13 +360,15 @@ export function SideNavigation() {
   return (
     <div
       data-sidebar-expanded={expanded}
-      className={`relative flex h-full flex-col bg-[#f0f0f0] p-2 transition-[width,box-shadow] duration-[180ms] ease-out motion-reduce:transition-none ${expanded ? "w-[240px] shadow-[8px_0_24px_rgba(0,0,0,0.16)]" : "w-16"}`}
+      data-sidebar-pinned={pinned}
+      className={`relative flex h-full flex-col bg-[#f0f0f0] p-2 transition-[width,box-shadow] duration-[180ms] ease-out motion-reduce:transition-none ${expanded ? "w-[240px]" : "w-16"} ${expanded && !pinned ? "shadow-[8px_0_24px_rgba(0,0,0,0.16)]" : ""}`}
       onMouseEnter={() => {
         hovered.current = true;
         expand();
       }}
       onMouseLeave={() => {
         hovered.current = false;
+        suppressExpansion.current = false;
         collapseLater();
       }}
       onFocusCapture={expand}
@@ -353,35 +376,57 @@ export function SideNavigation() {
         if (
           !event.currentTarget.contains(event.relatedTarget) &&
           !hovered.current
-        )
+        ) {
+          suppressExpansion.current = false;
           collapseLater();
+        }
       }}
     >
-      {!expanded && (
+      {(!expanded || pinned) && (
         <span
           aria-hidden="true"
           data-sidebar-divider
           className="pointer-events-none absolute inset-y-0 right-0 w-[0.5px] bg-[rgba(25,25,25,0.15)]"
         />
       )}
-      <Link
-        href="/"
-        aria-label={t("sidebar.homePage")}
-        className="mb-4 flex h-12 min-w-0 w-full shrink-0 items-center overflow-hidden rounded-[4px] pr-2"
-      >
-        <span className="flex h-12 w-12 shrink-0 items-center justify-center">
-          <img
-            src={publicAsset("/modelengine-logo.png")}
-            alt="logo"
-            className="h-8 w-8 object-contain"
+      <div className="mb-4 flex h-12 w-full shrink-0 items-center">
+        <Link
+          href="/"
+          aria-label={t("sidebar.homePage")}
+          className="flex h-12 min-w-0 flex-1 items-center overflow-hidden rounded-[4px] pr-2"
+        >
+          <span className="flex h-12 w-12 shrink-0 items-center justify-center">
+            <img
+              src={publicAsset("/modelengine-logo.png")}
+              alt="logo"
+              className="h-8 w-8 object-contain"
+            />
+          </span>
+          <NavigationRailLabel
+            expanded={expanded}
+            label={config.productName || "Nexent"}
+            variant="title"
           />
-        </span>
-        <NavigationRailLabel
-          expanded={expanded}
-          label={config.productName || "Nexent"}
-          variant="title"
-        />
-      </Link>
+        </Link>
+        {expanded && (
+          <Tooltip title={t(pinned ? "sidebar.unpin" : "sidebar.pin")}>
+            <Button
+              type="text"
+              aria-label={t(pinned ? "sidebar.unpin" : "sidebar.pin")}
+              aria-pressed={pinned}
+              onClick={togglePinned}
+              className={`!h-8 !w-8 shrink-0 !p-0 text-[#191919] ${pinned ? "!bg-[rgba(25,25,25,0.08)]" : ""}`}
+              icon={
+                pinned ? (
+                  <PanelLeftClose size={20} />
+                ) : (
+                  <PanelLeftOpen size={20} />
+                )
+              }
+            />
+          </Tooltip>
+        )}
+      </div>
 
       <nav className="min-h-0 w-full flex-1 overflow-y-auto overflow-x-hidden">
         <div className="flex flex-col gap-2">
