@@ -1,10 +1,12 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import React from "react";
 import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import { beforeEach, expect, test, vi } from "vitest";
 import { SideNavigation } from "@/components/navigation/SideNavigation";
 
 const state = vi.hoisted(() => ({
-  routes: ["/", "/chat", "/agents", "/agent-space"],
+  routes: ["/", "/newchat", "/agents", "/agent-space", "/workbench"],
   speed: true,
   workbench: false,
   authenticated: true,
@@ -36,7 +38,7 @@ vi.mock("@/hooks/useNotifications", () => ({
 vi.mock("@/components/navigation/NotificationBell", () => ({ NotificationBell: ({ onMarkRead, onMarkAllRead }: { onMarkRead: (id: number) => void; onMarkAllRead: () => void }) => <><button onClick={() => onMarkRead(17)}>read notification</button><button onClick={onMarkAllRead}>read all</button></> }));
 
 beforeEach(() => {
-  state.routes = ["/", "/chat", "/agents", "/agent-space"];
+  state.routes = ["/", "/newchat", "/agents", "/agent-space", "/workbench"];
   state.speed = true;
   state.workbench = false;
   state.authenticated = true;
@@ -67,6 +69,7 @@ test("[NAV-MENU-D1-001] English chat alias and workbench feature gate remain fun
   expect(screen.queryByRole("button", { name: "sidebar.agentWorkbench" })).toBeNull();
   state.workbench = true;
   rerender(<SideNavigation />);
+  fireEvent.mouseEnter(screen.getByRole("navigation").parentElement!);
   expect(within(screen.getByRole("navigation")).getAllByRole("button").slice(0, 3).map((button) => button.textContent)).toEqual([
     "sidebar.homePage", "sidebar.agentWorkbench", "sidebar.startChat",
   ]);
