@@ -2,19 +2,16 @@
 
 """Diff-coverage companions for the knowledge-reference feature.
 
-Covers the HTTP handlers of the status/preview API, the skill-side reference
-resolution, the conversation scope merge helpers, and the configured-scope
+Covers skill-side reference resolution, conversation scope merge helpers,
+and the configured-scope
 baseline. Everything is exercised through module-level patches, matching the
 style of the neighboring suites.
 """
 
 import asyncio
-import json
 import sys
 from pathlib import Path
 from types import SimpleNamespace
-
-import pytest
 
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -22,182 +19,15 @@ BACKEND_DIR = REPO_ROOT / "backend"
 if str(BACKEND_DIR) not in sys.path:
     sys.path.insert(0, str(BACKEND_DIR))
 
-import apps.knowledge_reference_app as ref_app  # noqa: E402
-import consts.error_code as error_code_module  # noqa: E402
 import database.client as db_client  # noqa: E402
 import database.knowledge_reference_db as reference_db  # noqa: E402
 import management.services.skill.service as skill_service_module  # noqa: E402
 import services.conversation_management_service as conversation_service  # noqa: E402
 import services.knowledge_scope_service as scope_service  # noqa: E402
-from consts.model import (  # noqa: E402
-    KnowledgeReferencePreviewRequest,
-    KnowledgeResourceStatusItem,
-    KnowledgeResourceStatusRequest,
-)
 
 
 def _run(coro):
     return asyncio.run(coro)
-
-
-def _body(response):
-    return json.loads(response.body.decode("utf-8"))
-
-
-# ---------------------------------------------------------------------------
-# HTTP handlers
-# ---------------------------------------------------------------------------
-
-
-@pytest.fixture()
-def _app_patches(monkeypatch):
-    monkeypatch.setattr(ref_app, "get_current_user_id", lambda auth: ("u1", "t1"))
-    monkeypatch.setattr(
-        ref_app,
-        "resolve_item_statuses",
-        lambda refs, user_id, tenant_id, vdb_core=None: [
-            {"provider": ref[0], "resource_id": ref[1], "status": "available"}
-            for ref in refs
-        ],
-    )
-    monkeypatch.setattr(
-        ref_app,
-        "collect_agent_reference_preview",
-        lambda ref, user_id, tenant_id=None: {
-            "agents": [{"agent_id": 7, "display_name": "Alpha"}],
-            "hidden_agent_count": 0,
-            "total_agent_count": 1,
-        },
-    )
-    monkeypatch.setattr(ref_app, "assert_agent_context_visible", lambda *a, **k: None)
-    monkeypatch.setattr(ref_app, "get_conversation", lambda *a, **k: {"conversation_id": 5})
-    monkeypatch.setattr(ref_app, "get_vector_db_core", lambda: SimpleNamespace())
-
-
-def _status_request(items, context=None):
-    return KnowledgeResourceStatusRequest(
-        items=[KnowledgeResourceStatusItem(provider=p, resource_id=r) for p, r in items],
-        context=context,
-    )
-
-
-def test_status_endpoint_returns_items(_app_patches):
-    response = _run(
-        ref_app.query_knowledge_resource_statuses(
-            _status_request([("aidp", "kds-1"), ("local", "idx-1")]), authorization="Bearer x"
-        )
-    )
-    assert response.status_code == 200
-    payload = _body(response)
-    assert [item["resource_id"] for item in payload["items"]] == ["kds-1", "idx-1"]
-
-
-def test_status_endpoint_validates_inputs(_app_patches):
-    with pytest.raises(Exception) as excinfo:
-        _run(
-            ref_app.query_knowledge_resource_statuses(
-                _status_request([("aidp", "x")] * 101), authorization=None
-            )
-        )
-    assert excinfo.value.error_code == error_code_module.ErrorCode.COMMON_VALIDATION_ERROR
-
-    with pytest.raises(Exception) as excinfo:
-        _run(
-            ref_app.query_knowledge_resource_statuses(
-                _status_request([("weird", "x")]), authorization=None
-            )
-        )
-    assert excinfo.value.error_code == error_code_module.ErrorCode.COMMON_VALIDATION_ERROR
-
-    with pytest.raises(Exception) as excinfo:
-        _run(
-            ref_app.query_knowledge_resource_statuses(
-                _status_request([("aidp", "x")], context={"type": "agent"}), authorization=None
-            )
-        )
-    assert excinfo.value.error_code == error_code_module.ErrorCode.COMMON_VALIDATION_ERROR
-
-    with pytest.raises(Exception) as excinfo:
-        _run(
-            ref_app.query_knowledge_resource_statuses(
-                _status_request([("aidp", "x")], context={"type": "conversation"}),
-                authorization=None,
-            )
-        )
-    assert excinfo.value.error_code == error_code_module.ErrorCode.COMMON_VALIDATION_ERROR
-
-    with pytest.raises(Exception) as excinfo:
-        _run(
-            ref_app.query_knowledge_resource_statuses(
-                _status_request([("aidp", "x")], context={"type": "bogus"}),
-                authorization=None,
-            )
-        )
-    assert excinfo.value.error_code == error_code_module.ErrorCode.COMMON_VALIDATION_ERROR
-
-
-def test_status_endpoint_checks_context_visibility(_app_patches, monkeypatch):
-    monkeypatch.setattr(ref_app, "get_conversation", lambda *a, **k: None)
-    with pytest.raises(Exception) as excinfo:
-        _run(
-            ref_app.query_knowledge_resource_statuses(
-                _status_request([("aidp", "x")], context={"type": "conversation", "conversation_id": 5}),
-                authorization=None,
-            )
-        )
-    assert excinfo.value.error_code == error_code_module.ErrorCode.COMMON_RESOURCE_NOT_FOUND
-
-
-def test_status_endpoint_survives_missing_vector_core(_app_patches, monkeypatch):
-    def _broken():
-        raise RuntimeError("es unavailable")
-
-    monkeypatch.setattr(ref_app, "get_vector_db_core", _broken)
-    response = _run(
-        ref_app.query_knowledge_resource_statuses(
-            _status_request([("local", "idx-1")], context={"type": "agent", "agent_id": 7}),
-            authorization=None,
-        )
-    )
-    assert response.status_code == 200
-
-
-def test_preview_endpoint_returns_agents(_app_patches):
-    response = _run(
-        ref_app.query_knowledge_reference_preview(
-            KnowledgeReferencePreviewRequest(provider="aidp", resource_id="kds-1"),
-            authorization="Bearer x",
-        )
-    )
-    assert response.status_code == 200
-    assert _body(response)["agents"] == [{"agent_id": 7, "display_name": "Alpha"}]
-
-
-def test_preview_endpoint_validates_and_checks_access(_app_patches, monkeypatch):
-    with pytest.raises(Exception) as excinfo:
-        _run(
-            ref_app.query_knowledge_reference_preview(
-                KnowledgeReferencePreviewRequest(provider="weird", resource_id="x"),
-                authorization=None,
-            )
-        )
-    assert excinfo.value.error_code == error_code_module.ErrorCode.COMMON_VALIDATION_ERROR
-
-    monkeypatch.setattr(
-        ref_app,
-        "resolve_item_statuses",
-        lambda refs, user_id, tenant_id, vdb_core=None: [
-            {"provider": "aidp", "resource_id": "kds-1", "status": "not_found"}
-        ],
-    )
-    with pytest.raises(Exception) as excinfo:
-        _run(
-            ref_app.query_knowledge_reference_preview(
-                KnowledgeReferencePreviewRequest(provider="aidp", resource_id="kds-1"),
-                authorization=None,
-            )
-        )
-    assert excinfo.value.error_code == error_code_module.ErrorCode.COMMON_FORBIDDEN
 
 
 # ---------------------------------------------------------------------------

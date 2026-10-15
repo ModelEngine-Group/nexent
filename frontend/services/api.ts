@@ -321,8 +321,6 @@ export const API_ENDPOINTS = {
     summaryFrequencyOptions: `${API_BASE_URL}/indices/summary_frequency_options`,
     indices: `${API_BASE_URL}/indices`,
     checkName: `${API_BASE_URL}/indices/check_exist`,
-    // Batch availability status for selected knowledge resources
-    statuses: `${API_BASE_URL}/knowledge-bases/statuses`,
     // Agents bound to one resource, for the delete confirmation dialog
     referencePreview: `${API_BASE_URL}/knowledge-bases/reference-preview`,
     listFiles: (indexName: string) =>

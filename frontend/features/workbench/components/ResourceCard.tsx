@@ -19,7 +19,7 @@ export function ResourceCard({
   actions,
   resourceType = "agent",
 }: {
-  title: ReactNode;
+  title: string;
   description?: string;
   tags?: readonly string[];
   badges?: readonly string[];

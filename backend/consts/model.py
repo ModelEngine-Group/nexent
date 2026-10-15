@@ -3,8 +3,9 @@
 import math
 from datetime import datetime
 from enum import Enum
-from typing import Optional, Any, List, Dict, Literal
+from typing import Any, Dict, List, Literal, Optional
 
+from nexent.core.agents.agent_model import AgentVerificationConfig, ToolConfig
 from pydantic import (
     BaseModel,
     ConfigDict,
@@ -13,7 +14,6 @@ from pydantic import (
     field_validator,
     model_validator,
 )
-from nexent.core.agents.agent_model import AgentVerificationConfig, ToolConfig
 
 from consts.prompt_template import PROMPT_GENERATE_TEMPLATE_FIELD_ALIAS_MAP
 
@@ -1398,25 +1398,13 @@ class ToolInstanceInfoRequest(BaseModel):
     removed_knowledge_ids: Optional[List[str]] = None
 
 
-class KnowledgeResourceStatusItem(BaseModel):
-    """One knowledge resource identity used by the batch status API."""
-
-    provider: str
-    resource_id: str
-
-
-class KnowledgeResourceStatusRequest(BaseModel):
-    """Batch status query for the currently selected knowledge resources."""
-
-    items: List[KnowledgeResourceStatusItem] = []
-    context: Optional[Dict[str, Any]] = None
-
-
 class KnowledgeReferencePreviewRequest(BaseModel):
     """Preview of the agents bound to one resource, for the delete dialog."""
 
-    provider: str
-    resource_id: str
+    model_config = ConfigDict(str_strip_whitespace=True)
+
+    provider: Literal["local", "aidp"]
+    resource_id: str = Field(min_length=1)
 
 
 class SkillInstanceInfoRequest(BaseModel):

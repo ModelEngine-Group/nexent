@@ -24,13 +24,6 @@ import { useAuthorizationContext } from "@/components/providers/AuthorizationPro
 import { useDeployment } from "@/components/providers/deploymentProvider";
 import knowledgeBaseService from "@/services/knowledgeBaseService";
 import { useGroupList } from "@/hooks/group/useGroupList";
-import { useKnowledgeResourceStatuses } from "@/hooks/useKnowledgeResourceStatuses";
-import KnowledgeResourceWarning from "@/components/knowledge-base/KnowledgeResourceWarning";
-import {
-  isWarningStatus,
-  knowledgeResourceKey,
-  type KnowledgeResourceProvider,
-} from "@/types/knowledgeResource";
 import type { KnowledgeBase } from "@/types/knowledgeBase";
 import type {
   ConversationKnowledgeScope,
@@ -291,28 +284,6 @@ export const ConversationKnowledgeScopeModal: FC<
       knowledgeBase.embeddingModelId ?? knowledgeBase.embeddingModel ?? ""
     );
 
-  // Availability markers for the current conversation selection. Selection
-  // context returns only statuses for the current account, never names.
-  const statusRefs = useMemo(() => {
-    const refs: { provider: KnowledgeResourceProvider; resourceId: string }[] =
-      [];
-    if (configuredSource === "local") {
-      draft.local.knowledge_ids.forEach((id) =>
-        refs.push({ provider: "local", resourceId: String(id) })
-      );
-    } else if (configuredSource === "aidp") {
-      draft.aidp.kds_ids.forEach((id) =>
-        refs.push({ provider: "aidp", resourceId: String(id) })
-      );
-    }
-    return refs;
-  }, [configuredSource, draft]);
-  const resourceStatuses = useKnowledgeResourceStatuses(
-    statusRefs,
-    open ? { type: "selection" } : null,
-    true
-  );
-
   const updateSelectedValues = (source: "local" | "aidp", values: string[]) => {
     setSelectionTouched(true);
     setRestoreDefaultClicked(false);
@@ -515,12 +486,6 @@ export const ConversationKnowledgeScopeModal: FC<
       )
     );
     const selectedSet = new Set(values);
-    const knowledgeResourceProvider: KnowledgeResourceProvider =
-      source === "local" ? "local" : "aidp";
-    const statusEntryFor = (id: string) =>
-      resourceStatuses.statusByKey[
-        knowledgeResourceKey(knowledgeResourceProvider, id)
-      ];
     const loadedSelected = allKnowledgeBases.filter((knowledgeBase) =>
       selectedSet.has(getKnowledgeBaseId(source, knowledgeBase))
     );
@@ -608,13 +573,9 @@ export const ConversationKnowledgeScopeModal: FC<
             <SelectedResourceTags
               items={selectedKnowledgeBases.map((kb) => {
                 const id = getKnowledgeBaseId(source, kb);
-                const statusEntry = statusEntryFor(id);
                 return {
                   id,
                   name: kb.display_name || kb.name,
-                  warning: isWarningStatus(statusEntry?.status) ? (
-                    <KnowledgeResourceWarning entry={statusEntry!} />
-                  ) : undefined,
                 };
               })}
               onRemove={(id) => toggleKnowledgeBase(source, id)}
@@ -652,7 +613,6 @@ export const ConversationKnowledgeScopeModal: FC<
                 Boolean(modelIdentity) &&
                 modelIdentity !== selectedLocalModel;
               const name = knowledgeBase.display_name || knowledgeBase.name;
-              const statusEntry = statusEntryFor(id);
               const groupNames = (knowledgeBase.group_ids ?? [])
                 .map((groupId) => groupNameById.get(groupId))
                 .filter((groupName): groupName is string => Boolean(groupName));
@@ -660,19 +620,7 @@ export const ConversationKnowledgeScopeModal: FC<
                 <ResourceCard
                   resourceType="knowledge"
                   key={id}
-                  title={
-                    isWarningStatus(statusEntry?.status) ? (
-                      <span className="flex min-w-0 items-center gap-1">
-                        <KnowledgeResourceWarning
-                          entry={statusEntry!}
-                          className="pointer-events-auto"
-                        />
-                        <span className="truncate">{name}</span>
-                      </span>
-                    ) : (
-                      name
-                    )
-                  }
+                  title={name}
                   tags={knowledgeBase.tags || []}
                   description={knowledgeBase.description || undefined}
                   subtitle={`${knowledgeBase.documentCount ?? 0} ${t("knowledgeBase.document", "篇文档")}`}

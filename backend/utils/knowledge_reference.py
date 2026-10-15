@@ -36,8 +36,6 @@ PROVIDER_BY_RANGE_PARAM = {
 REFERENCE_ORIGIN_TOOL = "tool"
 REFERENCE_ORIGIN_SKILL = "skill"
 
-MAX_STATUS_ITEMS = 100
-
 
 def normalize_resource_id(value: Any) -> str:
     """Trim string IDs and stringify integer IDs; ignore other value types."""

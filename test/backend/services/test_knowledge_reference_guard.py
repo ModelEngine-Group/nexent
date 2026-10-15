@@ -23,11 +23,11 @@ BACKEND_DIR = REPO_ROOT / "backend"
 if str(BACKEND_DIR) not in sys.path:
     sys.path.insert(0, str(BACKEND_DIR))
 
-import consts.error_code as error_code_module  # noqa: E402
 import backend.database.knowledge_reference_db as reference_db  # noqa: E402
 import backend.services.knowledge_reference_service as service  # noqa: E402
 import backend.utils.knowledge_reference as reference_utils  # noqa: E402
 import consts.const as const_module  # noqa: E402
+import consts.error_code as error_code_module  # noqa: E402
 
 
 AIDP_REF = ("aidp", "kds-1")
@@ -336,9 +336,9 @@ def test_agent_reference_metadata_and_local_record_queries(monkeypatch):
         [SimpleNamespace(agent_id=7, display_name="A", created_by="u1")],
     )
     _use_session(monkeypatch, session)
-    metadata = reference_db.query_agent_reference_metadata(session, [7, 7])
+    metadata = reference_db.query_agent_reference_metadata(session, [7, 7], tenant_id="t1")
     assert metadata[7]["display_name"] == "A"
-    assert reference_db.query_agent_reference_metadata(session, []) == {}
+    assert reference_db.query_agent_reference_metadata(session, [], tenant_id="t1") == {}
 
     records_session = _SequencedSession(
         [SimpleNamespace(index_name="idx-1", knowledge_id=213), SimpleNamespace(index_name=None)],
@@ -358,21 +358,6 @@ def test_agent_reference_metadata_and_local_record_queries(monkeypatch):
         )
         == {}
     )
-
-
-def test_local_record_lookup_by_numeric_ids_filters_invalid(monkeypatch):
-    session = _SequencedSession(
-        [SimpleNamespace(knowledge_id=213), SimpleNamespace(knowledge_id=None)],
-    )
-    _use_session(monkeypatch, session)
-    records = reference_db.query_local_knowledge_records_by_ids(
-        session, ["213", "²", ""]
-    )
-    assert set(records) == {"213"}
-
-    no_query_session = _SequencedSession([])
-    _use_session(monkeypatch, no_query_session)
-    assert reference_db.query_local_knowledge_records_by_ids(no_query_session, ["²"]) == {}
 
 
 def test_deleted_id_queries_and_tool_param_map(monkeypatch):
@@ -522,7 +507,7 @@ def test_collect_agent_reference_preview_dedupes_and_counts_hidden(monkeypatch):
     monkeypatch.setattr(
         service_module,
         "query_agent_reference_metadata",
-        lambda session, ids: {
+        lambda session, ids, tenant_id: {
             7: {"agent_id": 7, "display_name": "Alpha"},
             8: {"agent_id": 8, "name": "Beta"},
         },
@@ -556,185 +541,6 @@ def test_collect_agent_reference_preview_dedupes_and_counts_hidden(monkeypatch):
         [AIDP_REF], user_id="u1", tenant_id="t1"
     )
     assert empty == {"agents": [], "hidden_agent_count": 0, "total_agent_count": 0}
-
-
-def test_assert_agent_context_visible_paths(monkeypatch):
-    monkeypatch.setattr(
-        service, "query_agent_reference_metadata", lambda session, ids: {}
-    )
-    monkeypatch.setattr(service, "get_db_session", lambda: _session_ctx(object()))
-    with pytest.raises(Exception) as excinfo:
-        service.assert_agent_context_visible(99, user_id="u1", tenant_id="t1")
-    assert excinfo.value.error_code == error_code_module.ErrorCode.COMMON_RESOURCE_NOT_FOUND
-
-    monkeypatch.setattr(
-        service,
-        "query_agent_reference_metadata",
-        lambda session, ids: {7: {"agent_id": 7, "created_by": "other"}},
-    )
-    monkeypatch.setattr(
-        service,
-        "build_visibility_context",
-        lambda user_id, tenant_id=None: SimpleNamespace(
-            can_edit_all=False, user_id="u1", tenant_id="t1", user_role="DEV", user_group_ids=set()
-        ),
-    )
-    monkeypatch.setattr(service, "is_agent_visible", lambda context, agent: False)
-    with pytest.raises(Exception) as excinfo:
-        service.assert_agent_context_visible(7, user_id="u1", tenant_id="t1")
-    assert excinfo.value.error_code == error_code_module.ErrorCode.COMMON_FORBIDDEN
-
-    monkeypatch.setattr(service, "is_agent_visible", lambda context, agent: True)
-    service.assert_agent_context_visible(7, user_id="u1", tenant_id="t1")
-
-
-def test_local_status_branches(monkeypatch):
-    import management.services.knowledge_base.permission as kb_permission
-
-    monkeypatch.setattr(service, "get_db_session", lambda: _session_ctx(object()))
-    monkeypatch.setattr(
-        service,
-        "query_local_knowledge_records",
-        lambda session, names: {},
-    )
-    monkeypatch.setattr(
-        service, "query_local_knowledge_records_by_ids", lambda session, ids: {}
-    )
-    payload = service.resolve_local_reference_access(
-        ["missing"], user_id="u1", tenant_id="t1"
-    )
-    assert payload["missing"]["status"] == service.STATUS_NOT_FOUND
-    assert service.resolve_local_reference_access([], user_id="u1") == {}
-
-    record = {"knowledge_id": 213, "index_name": "idx-1"}
-    monkeypatch.setattr(
-        service,
-        "query_local_knowledge_records",
-        lambda session, names: {"idx-1": record},
-    )
-
-    def _value_error(index_name, user_id, tenant_id=None):
-        raise ValueError("gone")
-
-    monkeypatch.setattr(
-        kb_permission, "resolve_knowledge_base_permission", _value_error
-    )
-    payload = service.resolve_local_reference_access(
-        ["idx-1"], user_id="u1", tenant_id="t1"
-    )
-    assert payload["idx-1"]["status"] == service.STATUS_NOT_FOUND
-
-    def _boom(index_name, user_id, tenant_id=None):
-        raise RuntimeError("permission backend down")
-
-    monkeypatch.setattr(kb_permission, "resolve_knowledge_base_permission", _boom)
-    payload = service.resolve_local_reference_access(
-        ["idx-1"], user_id="u1", tenant_id="t1"
-    )
-    assert payload["idx-1"]["status"] == service.STATUS_LOOKUP_FAILED
-    assert payload["idx-1"]["reason_code"] == service.REASON_UNAVAILABLE_OR_INACCESSIBLE
-
-    monkeypatch.setattr(
-        kb_permission, "resolve_knowledge_base_permission", lambda *args, **kwargs: "EDIT"
-    )
-    payload = service.resolve_local_reference_access(
-        ["idx-1"], user_id="u1", tenant_id="t1"
-    )
-    assert payload["idx-1"]["status"] == service.STATUS_AVAILABLE
-
-
-def test_status_resolution_aidp_branches_and_failure_classification(monkeypatch):
-    snapshot = SimpleNamespace(
-        accessible_id_set={"kds-1"}, remote_ids={"kds-1", "kds-2"}
-    )
-    monkeypatch.setattr(service, "_resolve_aidp_snapshot", lambda user_id, tenant_id: snapshot)
-    statuses = service.resolve_item_statuses(
-        [
-            AIDP_REF,
-            ("aidp", "kds-2"),
-            ("aidp", "kds-3"),
-            AIDP_REF,  # duplicate input collapses
-        ],
-        user_id="u1",
-        tenant_id="t1",
-    )
-    by_id = {item["resource_id"]: item for item in statuses}
-    assert len(statuses) == 3
-    assert by_id["kds-1"]["status"] == service.STATUS_AVAILABLE
-    assert by_id["kds-2"]["status"] == service.STATUS_INACCESSIBLE
-    assert by_id["kds-2"]["reason_code"] == service.REASON_PERMISSION_DENIED
-    assert by_id["kds-3"]["status"] == service.STATUS_NOT_FOUND
-
-    def _timeout(user_id, tenant_id):
-        raise TimeoutError("upstream timed out")
-
-    monkeypatch.setattr(service, "_resolve_aidp_snapshot", _timeout)
-    statuses = service.resolve_item_statuses([AIDP_REF], user_id="u1", tenant_id="t1")
-    assert statuses[0]["status"] == service.STATUS_LOOKUP_FAILED
-    assert statuses[0]["reason_code"] == service.REASON_UPSTREAM_TIMEOUT
-    assert statuses[0]["retryable"] is True
-
-    assert service._classify_upstream_failure(TimeoutError()) == service.REASON_UPSTREAM_TIMEOUT
-    assert (
-        service._classify_upstream_failure(RuntimeError("connection refused"))
-        == service.REASON_CONNECTION_FAILED
-    )
-    assert (
-        service._classify_upstream_failure(RuntimeError("odd"))
-        == service.REASON_UNAVAILABLE_OR_INACCESSIBLE
-    )
-
-
-def test_require_available_knowledge_references_paths(monkeypatch):
-    monkeypatch.setattr(
-        service,
-        "resolve_local_reference_access",
-        lambda names, user_id, tenant_id=None: {
-            "idx-1": {"status": service.STATUS_NOT_FOUND}
-        },
-    )
-    with pytest.raises(Exception) as excinfo:
-        service.require_available_knowledge_references(
-            [LOCAL_REF], user_id="u1", tenant_id="t1"
-        )
-    assert "index_names" in str(excinfo.value)
-
-    monkeypatch.setattr(
-        service,
-        "resolve_local_reference_access",
-        lambda names, user_id, tenant_id=None: {
-            "idx-1": {"status": service.STATUS_AVAILABLE}
-        },
-    )
-    monkeypatch.setattr(
-        service,
-        "_resolve_aidp_snapshot",
-        lambda user_id, tenant_id: SimpleNamespace(accessible_id_set=set()),
-    )
-    with pytest.raises(Exception) as excinfo:
-        service.require_available_knowledge_references(
-            [AIDP_REF], user_id="u1", tenant_id="t1"
-        )
-    assert "kds_list" in str(excinfo.value)
-
-    def _down(user_id, tenant_id):
-        raise RuntimeError("aidp down")
-
-    monkeypatch.setattr(service, "_resolve_aidp_snapshot", _down)
-    with pytest.raises(Exception) as excinfo:
-        service.require_available_knowledge_references(
-            [AIDP_REF], user_id="u1", tenant_id="t1"
-        )
-    assert "AIDP is unavailable" in str(excinfo.value)
-
-    monkeypatch.setattr(
-        service,
-        "_resolve_aidp_snapshot",
-        lambda user_id, tenant_id: SimpleNamespace(accessible_id_set={"kds-1"}),
-    )
-    service.require_available_knowledge_references(
-        [LOCAL_REF, AIDP_REF], user_id="u1", tenant_id="t1"
-    )
 
 
 def test_reject_confirmed_deleted_references(monkeypatch):
@@ -967,7 +773,7 @@ def test_preview_skips_rows_without_agent_metadata(monkeypatch):
     monkeypatch.setattr(
         service_module,
         "query_agent_reference_metadata",
-        lambda session, ids: {7: {"agent_id": 7, "display_name": "Alpha"}},
+        lambda session, ids, tenant_id: {7: {"agent_id": 7, "display_name": "Alpha"}},
     )
     monkeypatch.setattr(
         service_module,
@@ -1002,82 +808,3 @@ def test_remove_knowledge_references_without_changes_skips_logging(monkeypatch):
     )
     counts = service.remove_knowledge_references([AIDP_REF])
     assert all(value == 0 for value in counts.values())
-
-
-def test_aidp_snapshot_uses_deployment_credentials(monkeypatch):
-    import ext_components.aidp.services.aidp_access_service as access_service
-
-    monkeypatch.setattr(const_module, "AIDP_SERVER_URL", "http://mock:30081")
-    monkeypatch.setattr(const_module, "AIDP_API_KEY", "key-1")
-    monkeypatch.setattr(const_module, "AIDP_TENANT_ID", "aidp")
-    calls = []
-
-    def _resolve(**kwargs):
-        calls.append(kwargs)
-        return SimpleNamespace(accessible_id_set={"kds-1"}, remote_ids={"kds-1"})
-
-    monkeypatch.setattr(access_service, "resolve_current_aidp_access", _resolve)
-    snapshot = service._resolve_aidp_snapshot("u1", "t1")
-    assert snapshot.accessible_id_set == {"kds-1"}
-    assert calls == [
-        {
-            "server_url": "http://mock:30081",
-            "api_key": "key-1",
-            "user_id": "u1",
-            "tenant_id": "t1",
-            "aidp_tenant_id": "aidp",
-        }
-    ]
-
-
-def test_item_statuses_with_empty_input_and_unreachable_index_listing(monkeypatch):
-    assert service.resolve_item_statuses([], user_id="u1", tenant_id="t1") == []
-
-    monkeypatch.setattr(
-        service,
-        "query_local_knowledge_records",
-        lambda session, names: {"idx-1": {"index_name": "idx-1", "knowledge_id": 1}},
-    )
-    _use_service_session(monkeypatch, _SequencedSession())
-    import management.services.knowledge_base.permission as kb_permission
-
-    monkeypatch.setattr(
-        kb_permission, "resolve_knowledge_base_permission", lambda *a, **k: "EDIT"
-    )
-
-    class _BrokenVdb:
-        @staticmethod
-        def get_user_indices(pattern):
-            raise RuntimeError("es down")
-
-    statuses = service.resolve_item_statuses(
-        [LOCAL_REF], user_id="u1", tenant_id="t1", vdb_core=_BrokenVdb()
-    )
-    # The listing failure degrades the check, it does not fail the request.
-    assert statuses[0]["status"] == service.STATUS_AVAILABLE
-
-
-def test_classify_upstream_failure_by_message():
-    assert (
-        service._classify_upstream_failure(RuntimeError("request timed out"))
-        == service.REASON_UPSTREAM_TIMEOUT
-    )
-
-
-def test_require_available_local_only_valid_call(monkeypatch):
-    monkeypatch.setattr(
-        service,
-        "resolve_local_reference_access",
-        lambda names, user_id, tenant_id=None: {
-            "idx-1": {"status": service.STATUS_AVAILABLE}
-        },
-    )
-    service.require_available_knowledge_references(
-        [LOCAL_REF], user_id="u1", tenant_id="t1"
-    )
-
-
-def test_resolve_local_records_without_requested_ids(monkeypatch):
-    session = _SequencedSession()
-    _use_session(monkeypatch, session)
-    assert service._resolve_local_records(session, []) == {}

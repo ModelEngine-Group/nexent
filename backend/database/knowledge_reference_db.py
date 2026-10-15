@@ -24,6 +24,7 @@ from typing import Any, Dict, Iterable, Iterator, List, Optional, Sequence, Set,
 from sqlalchemy import String, cast, or_, text
 from sqlalchemy.orm import Session
 
+from consts.const import ASSET_OWNER_TENANT_ID
 from consts.error_code import ErrorCode
 from consts.exceptions import AppException
 from database.client import as_dict, get_db_session
@@ -426,8 +427,10 @@ def _strip_deleted_resource_from_conversation_scopes(
 def query_agent_reference_metadata(
     session: Session,
     agent_ids: Iterable[int],
+    *,
+    tenant_id: str,
 ) -> Dict[int, Dict[str, Any]]:
-    """Return draft agent rows (version 0) for the given agent ids."""
+    """Return draft metadata within the caller's tenant and shared assets."""
     ids = sorted({int(agent_id) for agent_id in agent_ids})
     if not ids:
         return {}
@@ -435,6 +438,7 @@ def query_agent_reference_metadata(
         session.query(AgentInfo)
         .filter(
             AgentInfo.agent_id.in_(tuple(ids)),
+            AgentInfo.tenant_id.in_((tenant_id, ASSET_OWNER_TENANT_ID)),
             AgentInfo.version_no == 0,
             AgentInfo.delete_flag != "Y",
         )
@@ -467,62 +471,6 @@ def query_local_knowledge_records(
         if not index_name:
             continue
         records[str(index_name)] = data
-    return records
-
-
-def _safe_knowledge_id(value: Any) -> Optional[int]:
-    """Return the integer knowledge id of a candidate, or None when invalid.
-
-    ``str.isdigit`` accepts Unicode digits such as "²" that ``int`` rejects,
-    and arbitrarily long digit strings exceed Python's conversion limit, so
-    candidates are checked with ASCII digits and the database BigInteger range
-    before parsing. Invalid candidates keep their per-item not_found result
-    instead of failing the whole batch.
-    """
-    text = str(value).strip()
-    if not text or not text.isascii() or not text.isdigit():
-        return None
-    try:
-        parsed = int(text)
-    except ValueError:
-        return None
-    if parsed <= 0 or parsed > 2**63 - 1:
-        return None
-    return parsed
-
-
-def query_local_knowledge_records_by_ids(
-    session: Session,
-    knowledge_ids: Sequence[Any],
-) -> Dict[str, Dict[str, Any]]:
-    """Return knowledge records keyed by their numeric knowledge id.
-
-    Conversation scopes persist numeric knowledge ids while agent tool params
-    persist index names; both must resolve to the same record.
-    """
-    ids = sorted(
-        {
-            parsed
-            for parsed in (_safe_knowledge_id(value) for value in knowledge_ids)
-            if parsed is not None
-        }
-    )
-    if not ids:
-        return {}
-    records: Dict[str, Dict[str, Any]] = {}
-    for record in (
-        session.query(KnowledgeRecord)
-        .filter(
-            KnowledgeRecord.knowledge_id.in_(tuple(ids)),
-            KnowledgeRecord.delete_flag != "Y",
-        )
-        .all()
-    ):
-        data = as_dict(record) or {}
-        knowledge_id = data.get("knowledge_id")
-        if knowledge_id is None:
-            continue
-        records[str(knowledge_id)] = data
     return records
 
 

@@ -69,10 +69,8 @@ from management.services.model.adapter import get_llm_adapter, get_vlm_adapter
 from management.services.model.resolver import get_rerank_model
 from services.file_management_service import validate_urls_access
 from services.knowledge_reference_service import (
-    STATUS_AVAILABLE,
-    STATUS_LOOKUP_FAILED,
+    get_accessible_local_indices,
     knowledge_reference_write_guard,
-    resolve_local_reference_access,
 )
 from utils.http_client_utils import create_httpx_client
 from utils.knowledge_reference import (
@@ -672,19 +670,11 @@ def _merge_managed_knowledge_scope(
                 # dropped from the submitted list keeps the legacy semantics
                 # (removed by omission), while genuinely unavailable stored ids
                 # are preserved unless the caller removes them explicitly.
-                access = resolve_local_reference_access(
-                    dedupe_ids([*existing_ids, *submitted_ids, *new_ids]),
+                available = get_accessible_local_indices(
+                    dedupe_ids([*existing_ids, *submitted_ids]),
                     user_id=user_id,
                     tenant_id=tenant_id,
                 )
-                if any(payload["status"] == STATUS_LOOKUP_FAILED for payload in access.values()):
-                    lookup_error = RuntimeError("local knowledge status lookup failed")
-                else:
-                    available = {
-                        item
-                        for item, payload in access.items()
-                        if payload["status"] == STATUS_AVAILABLE
-                    }
             except Exception as exc:
                 lookup_error = exc
 

@@ -5529,17 +5529,13 @@ class TestUpdateToolInfoImplAidpPermission:
 
     @patch("backend.services.tool_configuration_service.create_or_update_tool_by_tool_info")
     @patch("backend.services.tool_configuration_service.query_tool_instances_by_id")
-    @patch("backend.services.tool_configuration_service.resolve_local_reference_access")
+    @patch("backend.services.tool_configuration_service.get_accessible_local_indices")
     def test_local_merge_keeps_hidden_and_accepts_visible(
         self, mock_access, mock_existing, mock_create_update
     ):
         mock_existing.return_value = {"params": {"index_names": ["idx-1", "idx-hidden"]}}
         mock_create_update.return_value = {"id": 7}
-        mock_access.return_value = {
-            "idx-1": {"status": "available"},
-            "idx-hidden": {"status": "not_found"},
-            "idx-2": {"status": "available"},
-        }
+        mock_access.return_value = {"idx-1", "idx-2"}
         tool_info = self._local_request(["idx-2"])
 
         from backend.services.tool_configuration_service import update_tool_info_impl
@@ -5551,14 +5547,14 @@ class TestUpdateToolInfoImplAidpPermission:
 
     @patch("backend.services.tool_configuration_service.create_or_update_tool_by_tool_info")
     @patch("backend.services.tool_configuration_service.query_tool_instances_by_id")
-    @patch("backend.services.tool_configuration_service.resolve_local_reference_access")
+    @patch("backend.services.tool_configuration_service.get_accessible_local_indices")
     def test_local_new_unavailable_id_is_rejected(
         self, mock_access, mock_existing, mock_create_update
     ):
         from consts.exceptions import ValidationError
 
         mock_existing.return_value = {"params": {"index_names": []}}
-        mock_access.return_value = {"idx-2": {"status": "not_found"}}
+        mock_access.return_value = set()
         tool_info = self._local_request(["idx-2"])
 
         from backend.services.tool_configuration_service import update_tool_info_impl
@@ -5568,7 +5564,7 @@ class TestUpdateToolInfoImplAidpPermission:
 
     @patch("backend.services.tool_configuration_service.create_or_update_tool_by_tool_info")
     @patch("backend.services.tool_configuration_service.query_tool_instances_by_id")
-    @patch("backend.services.tool_configuration_service.resolve_local_reference_access")
+    @patch("backend.services.tool_configuration_service.get_accessible_local_indices")
     def test_local_lookup_failure_blocks_new_ids_but_keeps_removals(
         self, mock_access, mock_existing, mock_create_update
     ):
@@ -5576,7 +5572,7 @@ class TestUpdateToolInfoImplAidpPermission:
 
         mock_existing.return_value = {"params": {"index_names": ["idx-1"]}}
         mock_create_update.return_value = {"id": 9}
-        mock_access.return_value = {"idx-1": {"status": "lookup_failed"}}
+        mock_access.side_effect = RuntimeError("permission backend unavailable")
         tool_info = self._local_request(["idx-2"])
 
         from backend.services.tool_configuration_service import update_tool_info_impl
@@ -5584,7 +5580,7 @@ class TestUpdateToolInfoImplAidpPermission:
             update_tool_info_impl(tool_info, "tenant1", "user1")
 
         # Removal-only saves still go through while the lookup is degraded.
-        mock_access.return_value = {"idx-1": {"status": "lookup_failed"}}
+        mock_access.side_effect = RuntimeError("permission backend unavailable")
         tool_info = self._local_request([], removed=["idx-1"])
         update_tool_info_impl(tool_info, "tenant1", "user1")
         assert tool_info.params["index_names"] == []

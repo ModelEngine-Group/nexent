@@ -10,10 +10,8 @@ import { Button, Modal, Spin, Tag, Tooltip } from "antd";
 import { Database, ChevronRight, Settings, Trash2, Plus } from "lucide-react";
 
 import { AddKnowledgeDrawer } from "@/components/resource-picker/AddKnowledgeDrawer";
-import KnowledgeResourceWarning from "@/components/knowledge-base/KnowledgeResourceWarning";
 import { useDeployment } from "@/components/providers/deploymentProvider";
 import { useKnowledgeBasesForToolConfig } from "@/hooks/useKnowledgeBaseSelector";
-import { useKnowledgeResourceStatuses } from "@/hooks/useKnowledgeResourceStatuses";
 import { useToolList } from "@/hooks/agent/useToolList";
 import { useAgentStore } from "@/stores/agentStore";
 import { useAgentReadOnly } from "@/hooks/agent/useAgentReadOnly";
@@ -25,11 +23,6 @@ import {
 } from "@/lib/managedKnowledgeTools";
 import type { Tool, ToolParam } from "@/types/agentConfig";
 import type { KnowledgeBase } from "@/types/knowledgeBase";
-import {
-  isWarningStatus,
-  knowledgeResourceKey,
-  type KnowledgeResourceProvider,
-} from "@/types/knowledgeResource";
 import { formatDate } from "@/lib/date";
 import { ResourceAddButton } from "@/components/common/ResourceAddButton";
 import type { ResourceSectionProps } from "./resource-section.types";
@@ -155,9 +148,6 @@ interface KnowledgeBaseConfigState {
   isLoading: boolean;
   isError: boolean;
   refetch: () => Promise<unknown>;
-  statusProvider: KnowledgeResourceProvider;
-  statusByKey: ReturnType<typeof useKnowledgeResourceStatuses>["statusByKey"];
-  refreshStatuses: () => void;
   onKnowledgeBaseConfirm: (knowledgeBaseList: KnowledgeBase[]) => void;
   onKnowledgeBaseRemove: (knowledgeBaseId: string) => void;
   onParamChange: (param: ToolParam, value: unknown) => void;
@@ -168,7 +158,6 @@ function useKnowledgeBaseConfigState(): KnowledgeBaseConfigState | null {
     (state) => state.editedAgent?.tools ?? []
   );
   const updateTools = useAgentStore((state) => state.updateTools);
-  const agentId = useAgentStore((state) => state.agentId);
   const isReadOnly = useAgentReadOnly();
   const { aidpEnabled, isDeploymentReady } = useDeployment();
   const profile = aidpEnabled
@@ -242,16 +231,6 @@ function useKnowledgeBaseConfigState(): KnowledgeBaseConfigState | null {
         isManagedKnowledgeTool(tool) &&
         getSemanticToolName(tool) !== profile.toolName
     );
-
-  // Per-item availability markers. Unavailable or unreachable knowledge bases
-  // stay selected and keep their remove button; the marker only explains why.
-  const statusProvider: KnowledgeResourceProvider =
-    profile.toolName === "aidp_search" ? "aidp" : "local";
-  const resourceStatuses = useKnowledgeResourceStatuses(
-    selectedIds.map((id) => ({ provider: statusProvider, resourceId: id })),
-    agentId != null ? { type: "agent", agent_id: agentId } : null,
-    isDeploymentReady
-  );
 
   const replaceManagedKnowledgeTool = (updatedTool?: Tool) => {
     const otherTools = selectedTools.filter(
@@ -329,9 +308,6 @@ function useKnowledgeBaseConfigState(): KnowledgeBaseConfigState | null {
     isLoading,
     isError,
     refetch,
-    statusProvider,
-    statusByKey: resourceStatuses.statusByKey,
-    refreshStatuses: resourceStatuses.refresh,
     onKnowledgeBaseConfirm,
     onKnowledgeBaseRemove,
     onParamChange,
@@ -443,15 +419,6 @@ export default function KnowledgeBaseConfig({
                     : undefined,
                 ].filter((value): value is string => Boolean(value))
               : [];
-            const statusEntry = state
-              ? state.statusByKey[
-                  knowledgeResourceKey(
-                    state.statusProvider,
-                    selectedKnowledgeBase.id
-                  )
-                ]
-              : undefined;
-
             return (
               <div
                 key={selectedKnowledgeBase.id}
@@ -466,9 +433,6 @@ export default function KnowledgeBaseConfig({
                   <Database size={16} strokeWidth={2} className="text-white" />
                 </span>
                 <div className="ml-2 flex min-w-0 flex-1 items-center gap-2 overflow-hidden">
-                  {isWarningStatus(statusEntry?.status) && (
-                    <KnowledgeResourceWarning entry={statusEntry!} />
-                  )}
                   <Tooltip title={selectedKnowledgeBase.displayName}>
                     <span
                       data-testid="agent-selected-knowledge-base-name"
@@ -653,10 +617,6 @@ export default function KnowledgeBaseConfig({
       ) : state.selectedKnowledgeBases.length > 0 ? (
         <div className="flex flex-wrap gap-2">
           {state.selectedKnowledgeBases.map((knowledgeBase) => {
-            const statusEntry =
-              state.statusByKey[
-                knowledgeResourceKey(state.statusProvider, knowledgeBase.id)
-              ];
             return (
               <Tag
                 key={knowledgeBase.id}
@@ -666,15 +626,8 @@ export default function KnowledgeBaseConfig({
                     ? () => state.onKnowledgeBaseRemove(knowledgeBase.id)
                     : undefined
                 }
-                className={`!inline-flex !items-center !gap-1 !whitespace-nowrap !px-2.5 !py-1 !text-sm !text-foreground !rounded-full transition-colors hover:!shadow-sm ${
-                  isWarningStatus(statusEntry?.status)
-                    ? "!bg-red-50 !border !border-red-300 hover:!border-red-400"
-                    : "!bg-primary/5 !border !border-primary/20 hover:!border-primary/40"
-                }`}
+                className="!inline-flex !items-center !gap-1 !whitespace-nowrap !px-2.5 !py-1 !text-sm !text-foreground !rounded-full transition-colors hover:!shadow-sm !bg-primary/5 !border !border-primary/20 hover:!border-primary/40"
               >
-                {isWarningStatus(statusEntry?.status) && (
-                  <KnowledgeResourceWarning entry={statusEntry!} />
-                )}
                 <span className="max-w-full truncate">
                   {knowledgeBase.displayName}
                 </span>
