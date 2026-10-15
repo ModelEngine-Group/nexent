@@ -291,3 +291,59 @@ def test_symlinked_evidence_is_rejected_when_supported(tmp_path):
     except OSError: pytest.skip("Host does not permit creation of symlinks")
     with pytest.raises(ValueError, match="Symlinked publication"):
         suite_publish.publish_latest(batch, tmp_path)
+
+
+def test_ext_knowledge_evidence_is_shared_sanitized_and_scoped(tmp_path):
+    """Exact ext-evidence basenames are shared; the runtime dir stays closed.
+
+    The ext-knowledge wire log carries HTTP error bodies verbatim, so the
+    publisher must sanitize it like every other text artifact; the attach /
+    control / release JSON files are small structured evidence. Arbitrary
+    runtime files under the same directory (resolved-assets, env exports)
+    are never opened.
+    """
+    batch = make_batch(tmp_path)
+    case = batch / "cases" / "CASE-0" / "runtime"
+    case.mkdir(parents=True)
+    secret = "sk-very-secret-ext-key-0123456789"
+    (case / "ext-knowledge-wire.jsonl").write_text(
+        json.dumps({"service": "dify", "method": "GET", "path": "/v1/datasets",
+                    "status_code": 401, "duration_ms": 3.0,
+                    "request_body": '{"api_key": "' + secret + '"}'}) + "\n",
+        encoding="utf-8",
+    )
+    (case / "ext-knowledge-control.json").write_text(
+        json.dumps({"faults": {"fail_remaining": {}}, "identity": {
+            "service": "ext-knowledge", "run_id": "run-1",
+            "source_revision": "b" * 40, "build_manifest_sha256": "c" * 64}}),
+        encoding="utf-8",
+    )
+    (case / "ext-knowledge-attach.json").write_text(
+        json.dumps({"case_id": "CASE-0", "attached": True, "selected_profile": None,
+                    "runner_url": "http://127.0.0.1:30090",
+                    "product_url": "http://ext-knowledge:30090"}), encoding="utf-8",
+    )
+    (case / "ext-knowledge-release.json").write_text(
+        json.dumps({"problems": []}), encoding="utf-8",
+    )
+    (case / "resolved-assets.yaml").write_text("agents:\n  basic_id: 41\n", encoding="utf-8")
+    (case / "not-whitelisted.json").write_text("{}\n", encoding="utf-8")
+
+    receipt = suite_publish.publish_latest(batch, tmp_path)
+    assert receipt["status"] == "PUBLISHED"
+    with zipfile.ZipFile(tmp_path / "runs-ubuntu/latest-batch.zip") as package:
+        names = package.namelist()
+        for basename in ("ext-knowledge-wire.jsonl", "ext-knowledge-control.json",
+                         "ext-knowledge-attach.json", "ext-knowledge-release.json"):
+            assert f"cases/CASE-0/runtime/{basename}" in names
+        wire = package.read("cases/CASE-0/runtime/ext-knowledge-wire.jsonl").decode()
+        assert secret not in wire
+        assert "ext-knowledge" in package.read("cases/CASE-0/runtime/ext-knowledge-attach.json").decode()
+        # The runtime directory itself is not opened: anything not on the
+        # exact basename whitelist stays on the execution host.
+        assert "cases/CASE-0/runtime/resolved-assets.yaml" not in names
+        assert "cases/CASE-0/runtime/not-whitelisted.json" not in names
+        # Case identity and results survive sanitization untouched.
+        manifest = json.loads(package.read("manifest.json"))
+        assert manifest["counts"]["FAIL"] == 1
+        assert json.loads(package.read("cases/CASE-0/receipt.json"))["case_id"] == "CASE-0"

@@ -23,7 +23,12 @@ SECRET_KEY = re.compile(r"password|passwd|secret|token|api[_-]?key|authorization
 CASE_FILES = frozenset({"receipt.json", "status.json", "acceptance-execution.json", "junit.xml",
                         "results.jsonl", "failure.json", "assertions.json", "events.jsonl",
                         "failure-network.jsonl", "cleanup-results.jsonl", "asset-journal.jsonl",
-                        "test-assets-wire.jsonl", "error-context.md"})
+                        "test-assets-wire.jsonl", "error-context.md",
+                        # ext-knowledge mock evidence (text only; the whitelist
+                        # stays exact per basename — no runtime directory is
+                        # opened and no binary evidence is shared).
+                        "ext-knowledge-wire.jsonl", "ext-knowledge-control.json",
+                        "ext-knowledge-attach.json", "ext-knowledge-release.json"})
 TERMINAL_RESULTS = frozenset({"PASS", "FAIL", "BLOCKED", "AUTOMATION_ERROR", "RETIRED",
                               "SKIPPED_BY_POLICY", "CLEANUP_FAILED", "BLOCKED_BY_DEPENDENCY",
                               "EXECUTION_FAILED", "TIMEOUT"})
