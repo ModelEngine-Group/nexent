@@ -1,4 +1,12 @@
+// Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 "use client";
+
+import type { SourceAttributes } from "@/types/source";
+import {
+  buildCitationDisplayIndexMap,
+  withCitationDisplayIndices,
+} from "@/lib/citationDisplay";
 
 import {
   useCallback,
@@ -995,6 +1003,7 @@ const ThreadView: FC<ThreadViewProps> = ({
         open={selection !== null}
         selectedCitationKey={selection?.selectedCitationKey}
         citationContext={selection?.citationContext}
+        selectionToken={selection ?? undefined}
         onClose={onPanelClose}
       />
     </ThreadPrimitive.Root>
@@ -1048,6 +1057,7 @@ export const ReadOnlyConversation: FC<{
           open={selection !== null}
           selectedCitationKey={selection?.selectedCitationKey}
           citationContext={selection?.citationContext}
+          selectionToken={selection ?? undefined}
           onClose={close}
         />
       </ThreadPrimitive.Root>
@@ -2064,7 +2074,7 @@ const UserActionBar: FC = () => {
  * detect the synthetic `isImage` flag on picture_web entries. The base shape
  * stays compatible with `@assistant-ui/react`'s `SourceMessagePartComponent`.
  */
-interface SourcePartLike {
+interface SourcePartLike extends SourceAttributes {
   type: "source";
   sourceType?: "url" | "document";
   url?: string;
@@ -2323,9 +2333,17 @@ const SourceGroupButton: FC<SourceGroupButtonProps> = ({ indices }) => {
           isImage: source.isImage,
           citeIndex: source.citeIndex,
           toolSign: source.toolSign,
+          searchType: source.searchType,
+          sourceMetadata: source.sourceMetadata,
+          sourceReference: source.sourceReference,
+          retrievalHighlightTerms: source.retrievalHighlightTerms,
         }))
       : groupedSources;
-    for (const item of displaySources) {
+    const numberedSources = withCitationDisplayIndices(
+      displaySources,
+      buildCitationDisplayIndexMap(content, displaySources)
+    );
+    for (const item of numberedSources) {
       if (item.isImage) {
         imgs.push(item);
       } else {
