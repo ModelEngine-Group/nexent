@@ -7,6 +7,7 @@ metadata:
   annotations:
     "helm.sh/hook-weight": "-3"
 data:
+  TZ: {{ .Values.config.timezone | quote }}
   # Deployment version
   DEPLOYMENT_VERSION: {{ .Values.global.deploymentVersion | quote }}
 

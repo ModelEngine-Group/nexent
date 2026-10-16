@@ -1,3 +1,5 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 "use client";
 
 import {
@@ -11,10 +13,18 @@ import {
 import { useTranslation } from "react-i18next";
 import { useQueryClient } from "@tanstack/react-query";
 import { App, Button, Modal, Spin, Tag } from "antd";
-import { GitBranch, History, RefreshCw, Sparkles, X } from "lucide-react";
+import {
+  GitBranch,
+  History,
+  RefreshCw,
+  Sparkles,
+  ArrowLeft,
+  X,
+} from "lucide-react";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 
 import AgentConfig from "./agent-config";
+import { DefaultAgentAvatar } from "./components/DefaultAgentAvatar";
 import { AgentCreationGuide } from "./components/agent-creation-guide";
 import {
   agentCreationGuideKey,
@@ -39,6 +49,7 @@ import { useAgentVersionList } from "@/hooks/agent/useAgentVersionList";
 import { searchAgentInfo } from "@/services/agentConfigService";
 import { buildAgentUsageGuidePath } from "@/lib/agentUsageGuide";
 import log from "@/lib/logger";
+import { canReturnToAgentEditorReferrer } from "@/lib/agentEditorNavigation";
 import type {
   Nl2AgentDraftField,
   Nl2AgentStateEvent,
@@ -105,12 +116,22 @@ function PanelCard({
           data-testid={headerTestId}
           className={`flex min-h-12 shrink-0 items-center justify-between border-b border-gray-200 px-4 ${headerClassName}`}
         >
-          <div className="flex items-center gap-2">
+          <div
+            className={
+              headerTestId === "agent-config-page-tabs"
+                ? "flex h-10 min-w-[140px] max-w-full items-center gap-1 rounded-lg bg-white px-3 [font-family:'HarmonyOS_Sans_SC',sans-serif]"
+                : "flex min-w-0 items-center gap-2"
+            }
+          >
+            {headerTestId === "agent-config-page-tabs" && leftAction}
             {icon}
-            <h3 className="max-w-[280px] truncate text-sm font-normal leading-[22px] text-[#191919]">
+            <h3
+              title={title}
+              className="min-w-0 truncate text-sm font-normal leading-[22px] text-[#191919]"
+            >
               {title}
             </h3>
-            {leftAction}
+            {headerTestId !== "agent-config-page-tabs" && leftAction}
           </div>
           {rightAction}
         </div>
@@ -131,7 +152,6 @@ function AgentSetupContent({
   const router = useRouter();
   const searchParams = useSearchParams();
   const workspaceRef = useRef<HTMLDivElement>(null);
-  const [creationGuideActive, setCreationGuideActive] = useState(false);
   const { agentId, locale: routeLocale } = useParams<{
     agentId: string;
     locale: string;
@@ -354,7 +374,6 @@ function AgentSetupContent({
           key={`${agentCreationGuideKey(tenantId, user.id)}/${requestedAgentId}`}
           preferenceKey={agentCreationGuideKey(tenantId, user.id)}
           workspaceRef={workspaceRef}
-          onOpenChange={setCreationGuideActive}
         />
       )}
       <main
@@ -417,7 +436,6 @@ function AgentSetupContent({
                 key={`${currentAgentId ?? "unselected"}-${sessionGeneration}`}
                 agentId={currentAgentId}
                 showOptimizationSuggestions={showOptimizationSuggestions}
-                configurationLayout
                 disabled={
                   isComposerDisabled ||
                   isRequestedAgentLoading ||
@@ -434,6 +452,7 @@ function AgentSetupContent({
           <PanelCard
             frameless
             headerTestId="agent-config-page-tabs"
+            icon={<DefaultAgentAvatar size={16} />}
             title={t("agent.highFidelity.pageTab", {
               name:
                 agentInfo?.display_name ||
@@ -441,38 +460,45 @@ function AgentSetupContent({
                 t("agent.page.panel.config"),
             })}
             className={"flex-1"}
-            headerClassName="h-16 min-h-16 border-[#dfdfdf] pl-4 pr-[18px] py-3"
+            headerClassName="min-h-16 flex-wrap gap-x-3 gap-y-2 border-[#dfdfdf] pl-4 pr-[18px] py-3"
             leftAction={
               <Button
                 type="text"
                 aria-label={t("common.back")}
-                icon={<X size={14} />}
+                icon={<ArrowLeft size={14} />}
                 onClick={onBack}
-                className="!size-6 !p-0"
+                className="!size-[14px] !p-0 !text-[#191919]"
               />
             }
             rightAction={
-              <div className="flex items-center gap-2">
+              <div className="flex min-w-0 max-w-full grow items-center gap-2">
                 <Button
                   type="text"
                   icon={<GitBranch size={16} />}
                   aria-label={t("agent.version.manage")}
+                  className="shrink-0"
                   onClick={onManageVersions}
                 />
                 {agentInfo?.current_version_no && total > 0 ? (
-                  <div className="flex items-center gap-1">
-                    <History size={16} />
-                    {t("agent.version.current")}:
+                  <div className="flex min-w-0 items-center gap-1">
+                    <History size={16} className="shrink-0" />
+                    <span className="shrink-0 whitespace-nowrap">
+                      {t("agent.version.current")}:
+                    </span>
                     <Tag
                       color="cyan"
                       variant="outlined"
-                      className="cursor-pointer rounded-md font-mono text-sm"
+                      title={
+                        agentVersionDetail?.version.version_name ||
+                        `V${agentInfo.current_version_no}`
+                      }
+                      className="!m-0 min-w-0 cursor-pointer truncate rounded-md font-mono text-sm"
                       onClick={() => setIsShowVersionManagePanel(true)}
                     >
                       {agentVersionDetail?.version.version_name ||
                         `V${agentInfo.current_version_no}`}
                     </Tag>
-                    <span className="text-xs text-gray-500">
+                    <span className="shrink-0 whitespace-nowrap text-xs text-gray-500">
                       / {t("agent.version.totalVersions", { count: total })}
                     </span>
                   </div>
@@ -482,20 +508,25 @@ function AgentSetupContent({
                   onClick={() => setIsGenerationVisible((visible) => !visible)}
                   type="text"
                   aria-label={t("agent.page.panel.nl2agent")}
+                  className="ml-auto shrink-0"
                 ></Button>
               </div>
             }
           >
             <div className="min-h-0 flex-1 overflow-hidden">
               <AgentConfig
-                creationGuideActive={showCreationGuide && creationGuideActive}
                 published={Boolean(agentInfo?.current_version_no)}
                 actionAreaRef={actionAreaRef}
                 canManualUnlock={canManualUnlock}
                 onManualUnlock={handleManualUnlock}
-                onToggleDebug={() =>
-                  isDebugVisible ? closeDebug() : setIsDebugVisible(true)
-                }
+                onToggleDebug={() => {
+                  if (isDebugVisible) {
+                    closeDebug();
+                  } else {
+                    setIsDebugVisible(true);
+                    setIsGenerationVisible(false);
+                  }
+                }}
                 debugVisible={isDebugVisible}
                 debugExpanded={isDebugFullscreen || isCompareMode}
                 debugPanel={
@@ -531,7 +562,10 @@ function AgentSetupContent({
                     />
                   </div>
                 }
-                onConfigure={closeDebug}
+                onConfigure={() => {
+                  closeDebug();
+                  setIsGenerationVisible(true);
+                }}
                 onOptimizePrompt={() => {
                   setIsGenerationVisible(true);
                   nl2AgentChatPanelRef.current?.sendPrompt(
@@ -585,7 +619,7 @@ export default function AgentEditor() {
   const { t } = useTranslation("common");
   const { message } = App.useApp();
   const router = useRouter();
-  const { agentId } = useParams<{ agentId: string }>();
+  const { agentId, locale } = useParams<{ agentId: string; locale: string }>();
   const requestedAgentId = Number(agentId);
   const isValidAgentId =
     Number.isInteger(requestedAgentId) && requestedAgentId > 0;
@@ -600,7 +634,7 @@ export default function AgentEditor() {
     if (isReturningRef.current) return;
 
     if (!isValidAgentId) {
-      router.replace("/agents");
+      router.replace(`/${locale}/agents`);
       return;
     }
     if (currentAgentId === requestedAgentId) return;
@@ -611,7 +645,7 @@ export default function AgentEditor() {
         message.error(
           result.message || t("agentConfig.agents.detailsLoadFailed")
         );
-        router.replace("/agents");
+        router.replace(`/${locale}/agents`);
         return;
       }
       initialize(result.data);
@@ -620,6 +654,7 @@ export default function AgentEditor() {
     currentAgentId,
     initialize,
     isValidAgentId,
+    locale,
     message,
     requestedAgentId,
     router,
@@ -636,7 +671,17 @@ export default function AgentEditor() {
             onBack={() => {
               isReturningRef.current = true;
               reset();
-              router.push("/agents");
+              if (
+                canReturnToAgentEditorReferrer(
+                  window.history.length,
+                  document.referrer,
+                  window.location.origin
+                )
+              ) {
+                router.back();
+              } else {
+                router.replace(`/${locale}/agents`);
+              }
             }}
             onManageVersions={() => setIsVersionManageOpen(true)}
           />

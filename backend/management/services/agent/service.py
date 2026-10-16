@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import asyncio
 import logging
 from collections import deque
@@ -80,6 +82,7 @@ from services.prompt_template_service import (
     SYSTEM_PROMPT_TEMPLATE_NAME,
     get_prompt_template_summary,
 )
+from services.user_identity_service import enrich_cas_usernames
 from utils.str_utils import convert_list_to_string, convert_string_to_list
 from services.conversation_management_service import (
     generate_conversation_title_service,  # noqa: F401 - compatibility patch point
@@ -600,6 +603,10 @@ async def get_agent_info_impl(
         draft_version_no = query_current_version_no(agent_id, tenant_id)
         agent_info["current_version_no"] = draft_version_no
 
+    enrich_cas_usernames(
+        [agent_info], {"author_cas_username": "created_by"},
+        email_fields={"author_cas_username": "author"},
+    )
     return agent_info
 
 

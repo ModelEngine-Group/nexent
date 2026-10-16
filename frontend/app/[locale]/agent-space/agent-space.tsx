@@ -1,3 +1,5 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -11,6 +13,7 @@ import {
   Search,
   ShieldCheck,
 } from "lucide-react";
+import { useUserDisplayName } from "@/hooks/auth/useUserDisplayName";
 import { useTranslation } from "react-i18next";
 import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
 import { USER_ROLES } from "@/const/auth";
@@ -38,6 +41,7 @@ const PAGINATION_HEIGHT = 60;
 
 export function AgentSpace({ active }: { active: boolean }) {
   const { t } = useTranslation("common");
+  const displayName = useUserDisplayName();
   const { message } = App.useApp();
   const { user } = useAuthorizationContext();
   const showAdminMenu = user?.role === USER_ROLES.ADMIN;
@@ -195,7 +199,10 @@ export function AgentSpace({ active }: { active: boolean }) {
       listing.display_name?.trim() ||
       listing.name?.trim() ||
       t("agentRepository.card.untitled");
-    const author = listing.author?.trim();
+    const author = displayName(
+      listing.author_cas_username,
+      listing.author?.trim() || ""
+    );
     const tags = listing.tags?.filter((tag) => tag.trim()) ?? [];
     const toolCount = listing.tool_count ?? 0;
     const downloads = listing.downloads ?? 0;

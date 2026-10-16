@@ -1,8 +1,11 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import {
+  ChevronLeftIcon,
   PanelLeftIcon,
   SquarePen,
   SearchIcon,
-  Sparkle,
+  SquarePenIcon,
   XIcon,
 } from "lucide-react";
 import { useState } from "react";
@@ -57,20 +60,6 @@ interface ThreadListSidebarProps extends SidebarProps {
   showLegacySwitch?: boolean;
   /** Workbench uses user-scoped server IDs; undefined retains Agent-chat pins. */
   pinStorageKey?: string | null;
-}
-
-// "Discover agents" glyph: a magnifier with a sparkle at its top-right,
-// matching the design's AI-discovery icon.
-function DiscoverAgentsIcon({ className }: { className?: string }) {
-  return (
-    <span className={cn("relative inline-flex shrink-0", className)}>
-      <SearchIcon className="size-4" aria-hidden />
-      <Sparkle
-        className="absolute -right-1 -top-1 size-2 fill-current"
-        aria-hidden
-      />
-    </span>
-  );
 }
 
 export function ThreadListSidebar({
@@ -166,10 +155,25 @@ export function ThreadListSidebar({
               className={cn(props.className, "!h-full !w-full min-w-0")}
               style={{ backgroundColor: sidebarBackground, ...props.style }}
             >
-              <SidebarHeader>
+              <SidebarHeader className="pb-0">
                 <div className="flex flex-col gap-2 px-1">
                   {newChatDesign ? (
                     <div className="flex items-center gap-1">
+                      {/* Back chevron: returns to the discover-agents landing
+                          page (same handler the old filled button used).
+                          -mr-3 pulls the dropdown trigger over the button's
+                          inner padding so the title sits close to the glyph. */}
+                      {onPrepareNewConversation && (
+                        <TooltipIconButton
+                          tooltip={t("chat.sidebar.discoverAgents")}
+                          variant="ghost"
+                          size="icon"
+                          className="size-8 shrink-0 -mr-3"
+                          onClick={onPrepareNewConversation}
+                        >
+                          <ChevronLeftIcon className="size-4" />
+                        </TooltipIconButton>
+                      )}
                       {onAgentSelected && (
                         <div className="min-w-0 flex-1">
                           <AgentSelectorDropdown
@@ -271,9 +275,26 @@ export function ThreadListSidebar({
                       )}
                     </>
                   )}
+                  {newChatDesign && onNewConversation && (
+                    // Prominent pill per the design reference: white fill on
+                    // the gray rail, compose glyph, centered label. Starts a
+                    // blank conversation via the page's new-thread handler.
+                    <button
+                      type="button"
+                      className="flex h-9 w-full cursor-pointer items-center justify-center gap-2 truncate rounded-lg bg-white text-[14px] font-medium text-[#191919] transition-colors hover:bg-[#e8e8e8]"
+                      onClick={onNewConversation}
+                    >
+                      <SquarePenIcon className="size-4 shrink-0 text-primary" />
+                      {t("chat.sidebar.newConversation")}
+                    </button>
+                  )}
                   {newChatDesign && searchOpen && (
+                    // Toggled search field mirrors the pill's box (h-9,
+                    // rounded-lg) and sits below it so the header reads as
+                    // one evenly spaced stack.
                     <StandardInput
                       autoFocus
+                      className="!h-9 !rounded-lg"
                       value={conversationSearch}
                       onChange={(event) =>
                         setConversationSearch(event.target.value)
@@ -294,15 +315,6 @@ export function ThreadListSidebar({
                       }
                     />
                   )}
-                  {newChatDesign ? (
-                    <ThreadListPrimitive.New
-                      className="flex h-9 w-full items-center gap-2 rounded-lg border px-3 text-sm hover:bg-muted truncate bg-[#e4e4e4] border-[#e4e4e4]"
-                      onClick={onPrepareNewConversation}
-                    >
-                      <DiscoverAgentsIcon className="size-4" />
-                      {t("chat.sidebar.discoverAgents")}
-                    </ThreadListPrimitive.New>
-                  ) : null}
                 </div>
               </SidebarHeader>
               <SidebarContent className="focus:outline-none">

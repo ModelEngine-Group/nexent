@@ -1,3 +1,5 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 "use client";
 
 import { Fragment, useMemo, useState } from "react";
@@ -5,7 +7,7 @@ import { useRouter } from "next/navigation";
 import { KnowledgeRetrievalParamsForm } from "@/components/tool-config/KnowledgeRetrievalParamsForm";
 import { useTranslation } from "react-i18next";
 import { Button, Modal, Spin, Tag, Tooltip } from "antd";
-import { Database, ChevronRight, Settings, Trash2, Plus } from "lucide-react";
+import { Database, ExternalLink, Settings, Trash2, Plus } from "lucide-react";
 
 import { AddKnowledgeDrawer } from "@/components/resource-picker/AddKnowledgeDrawer";
 import { useDeployment } from "@/components/providers/deploymentProvider";
@@ -351,7 +353,6 @@ export function KnowledgeBaseConfigActions() {
         isAidpSearch={state.profile.selectorType === "aidp_search"}
         knowledgeBases={state.knowledgeBases}
         isLoading={state.isLoading}
-        title={t("agent.knowledge.selectModal.title")}
         onRefresh={() => {
           void state.refetch();
         }}
@@ -525,7 +526,7 @@ export default function KnowledgeBaseConfig({
         >
           <span className="inline-flex items-center gap-1">
             {t("agentConfig.layout.newKnowledgeBase")}
-            <ChevronRight size={14} />
+            <ExternalLink size={14} />
           </span>
         </Button>
         <Button
@@ -563,7 +564,6 @@ export default function KnowledgeBaseConfig({
               isAidpSearch={state.profile.selectorType === "aidp_search"}
               knowledgeBases={state.knowledgeBases}
               isLoading={state.isLoading}
-              title={t("agent.knowledge.selectModal.title")}
               onRefresh={() => {
                 void state.refetch();
               }}

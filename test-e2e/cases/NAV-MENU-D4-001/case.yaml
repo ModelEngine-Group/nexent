@@ -7,10 +7,16 @@ case:
   requirement_ids:
   - NAV-MENU-REQ-001
   - NAV-MENU-REQ-002
+  - NAV-MENU-REQ-003
+  - NAV-MENU-REQ-004
+  - NAV-MENU-REQ-005
   business_rule_ids:
   - NAV-MENU-RULE-001
   - NAV-MENU-RULE-002
   - NAV-MENU-RULE-003
+  - NAV-MENU-RULE-004
+  - NAV-MENU-RULE-005
+  - NAV-MENU-RULE-006
   title: Preserve functional navigation while hiding inert controls
   type: E2E
   priority: P1
@@ -25,7 +31,8 @@ case:
     profile: mock
     routes:
     - /agents
-    - /chat
+    - /newchat
+    - /workbench
     - /agent-space
     locales:
     - zh
@@ -47,6 +54,12 @@ case:
       and click Workbench. Locale: en'
     expected: Workbench appears immediately after Home with the requested localized
       label and opens the same localized /workbench route.
+  - order: 4
+    action: Open a shared page outside agents/newchat, click account, inspect transferred entries, hover language and select English.
+    expected: Global header/footer are absent; identity, version, copyright, gated links and selected-language submenu match design and English preserves the route.
+  - order: 5
+    action: Inspect collapsed icons, hover sidebar, compare content position, inspect inline/truncated labels, pin and unpin the header control, leave and reopen account popup.
+    expected: 'Unpinned rail expands64 to240px without content movement; header toggle appears only when expanded, pins at240px with content shrink, and unpins to64px without immediate hover reopening; a0.5px solid right divider with #191919 at15% opacity is visible when collapsed or pinned and hidden during hover-only expansion; interactive sidebar items show a pointer cursor and all sidebar icons and labels have an8px visual gap while preserving icon and font sizes; collapsed text is absent, long brand title is16px bold and clipped with a full-name tooltip, long menu text tooltip works, exit collapses and account popup holds expansion without profile-route prefetch requests.'
   expected_results:
   - Both inert section buttons are absent; authorized children remain and denied routes
     stay hidden. Chat navigates to localized newchat and child pages remain usable.
@@ -55,6 +68,8 @@ case:
     is 工作台 / Workbench.
   - Enabled permitted workbench follows Home and precedes Start Chat; localized label
     is 工作台 / Workbench.
+  - Shared shell has no global header/footer; account menu matches 280px/40px geometry, retains gated links/version/copyright and changes locale on the same route without appearance settings.
+  - Hover expansion overlays content; the expanded-only header control pins and shrinks content, unpins and collapses without immediate hover reopening; localized navigation, popup usability and zero unsolicited profile-route requests are preserved.
   forbidden_side_effects:
   - No unrequested business writes or agent/provider execution.
   execution:
@@ -85,3 +100,13 @@ case:
     - 3
     forbidden_side_effects:
     - 1
+  - id: AC-02
+    description: Account menu replaces global bars while retaining visibility policies, information and real language navigation.
+    steps: [4]
+    expected_results: [4]
+    forbidden_side_effects: [1]
+  - id: AC-03
+    description: Hover overlays content, pinning resizes content, and unpinning collapses while preserving navigation and popup access.
+    steps: [5]
+    expected_results: [5]
+    forbidden_side_effects: [1]

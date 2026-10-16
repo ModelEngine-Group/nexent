@@ -1,3 +1,5 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import { expect } from "playwright/test";
 import { journey } from "../../infra/automation/d4/runner/journey";
 import { prepareWorkbench } from "../../infra/automation/d4/fixtures/workbench-controls";
@@ -77,6 +79,13 @@ journey("CHAT-SIDEBAR-D4-001", async ({ page, contract }) => {
     await page.reload();
     await pinned("Older deck");
     await expectRowTimes();
+    await page
+      .locator("[data-workbench-header-actions]")
+      .getByRole("button", {
+        name: "搜索",
+        exact: true,
+      })
+      .click();
     const search = page.getByPlaceholder("搜索历史对话");
     await search.fill("Older");
     await expect(page.getByText("Older deck", { exact: true })).toBeVisible();

@@ -1,3 +1,5 @@
+# Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 from sqlalchemy import (
     JSON,
     TIMESTAMP,
@@ -367,6 +369,14 @@ class ConversationSourceSearch(TableBase):
     retrieval_highlight_terms = Column(
         JSONB,
         doc="Exact lexical terms returned by the retrieval engine for source highlighting",
+    )
+    aidp_metadata = Column(
+        JSONB, nullable=True,
+        comment="Opaque AIDP metadata snapshot returned for this retrieval hit",
+    )
+    aidp_source_reference = Column(
+        JSONB, nullable=True,
+        comment="AIDP source reference attributes for this retrieval hit, excluding metadata",
     )
     published_date = Column(TIMESTAMP(
         timezone=False), doc="Upload date of local files or network search date")

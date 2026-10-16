@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """Shared business logic for tenant API user and API key management."""
 
 import uuid
@@ -177,4 +179,10 @@ def list_tenant_api_keys(
     _require_tenant_admin(actor_tenant_id, actor_role)
     if tenant_id != actor_tenant_id:
         raise NotFoundException("Tenant not found")
-    return list_active_tokens_by_tenant(tenant_id, page, page_size, sort_order)
+    result = list_active_tokens_by_tenant(tenant_id, page, page_size, sort_order)
+    from services.user_identity_service import enrich_cas_usernames
+
+    enrich_cas_usernames(result.get("items", []), {
+        "owner_cas_username": "user_id", "creator_cas_username": "created_by",
+    })
+    return result

@@ -1,3 +1,5 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 "use client";
 
 import { useConversationModelControls } from "@/features/model-controls/useConversationModelControls";
@@ -5,7 +7,14 @@ import { useAuthorizationContext } from "@/components/providers/AuthorizationPro
 import type { ReasoningEffort } from "@/types/modelConfig";
 import type { ModelParameterSettingsControl } from "@/types/modelParameterSettings";
 
+import type { SourceAttributes } from "@/types/source";
 import {
+  buildCitationDisplayIndexMap,
+  withCitationDisplayIndices,
+} from "@/lib/citationDisplay";
+
+import {
+  createElement,
   useCallback,
   useEffect,
   useMemo,
@@ -24,6 +33,9 @@ import { ExecutionCodeBlock } from "../ui/execution-code-block";
 import { SubAgentContainer } from "../ui/subagent";
 import { TooltipIconButton } from "../ui/tooltip-icon-button";
 import { Composer, type ChatMode } from "./composer";
+import { AgentWelcome } from "@/components/agent/agent-welcome";
+import { TextSuggestion } from "@/components/agent/agent-suggestion";
+import type { AgentSuggestionItem } from "@/types/agentSuggestion";
 import { NewChatWelcomeBackdrop } from "./newchat-welcome-backdrop";
 import newChatStyles from "./newchat-design.module.css";
 import { Button } from "@/components/ui/button";
@@ -66,8 +78,6 @@ import {
   ArrowDownIcon,
   AlertTriangleIcon,
   SparklesIcon,
-  Lightbulb,
-  type LucideIcon,
   PencilIcon,
   Share2Icon,
   XCircleIcon,
@@ -177,13 +187,7 @@ import type {
 import { SkillFileCard } from "../ui/skill-file-card";
 import type { SkillFileContent } from "@/types/skill";
 
-export interface WelcomeSuggestion {
-  id: string;
-  title: string;
-  description: string;
-  prompt: string;
-  icon: LucideIcon;
-}
+export type WelcomeSuggestion = AgentSuggestionItem;
 
 export interface ThreadProps {
   agent: Agent | PublishedAgent;
@@ -784,6 +788,14 @@ const ThreadView: FC<ThreadViewProps> = ({
   const workbenchLanding = Boolean(
     workbenchPresentation && !hasMessages && !isShareMode
   );
+  const aui = useAui();
+  const suggestions = welcomeSuggestions?.length
+    ? welcomeSuggestions.slice(0, 4)
+    : (agent.example_questions || []).slice(0, 4).map((question, index) => ({
+        id: `question-${index}`,
+        title: question,
+        prompt: question,
+      }));
 
   return (
     <ThreadPrimitive.Root
@@ -914,6 +926,10 @@ const ThreadView: FC<ThreadViewProps> = ({
             variant === "embedded" ? "px-4 py-4" : "px-8 py-6",
             newChatDesign && "relative !max-w-[922px] !px-4 !py-0",
             newChatDesign && !hasMessages && "!max-w-none",
+            !hasMessages &&
+              !workbenchLanding &&
+              !debugLayout &&
+              "!overflow-y-hidden",
             debugLayout && "!max-w-none !p-0",
             configurationLayout &&
               !hasMessages &&
@@ -946,12 +962,24 @@ const ThreadView: FC<ThreadViewProps> = ({
             />
           ) : (
             (welcomeContent ?? (
-              <ThreadWelcomeContent
-                agent={agent}
-                newChatDesign={newChatDesign}
-                title={welcomeTitle}
-                suggestions={welcomeSuggestions}
-              />
+              <AgentWelcome
+                title={welcomeTitle || agent.display_name || agent.name}
+                greeting={agent.greeting_message || agent.description}
+                icon={
+                  <span className="flex size-14 shrink-0 items-center justify-center rounded-full bg-gradient-to-r from-[#FFA654] to-[#F056A0]">
+                    {createElement(getAgentIcon(agent), {
+                      className: "size-7 text-white",
+                      "aria-hidden": true,
+                    })}
+                  </span>
+                }
+              >
+                <TextSuggestion
+                  suggestions={suggestions}
+                  disabled={readOnly || isRunning}
+                  onSelect={(prompt) => aui.composer().setText(prompt)}
+                />
+              </AgentWelcome>
             ))
           )}
           {interactionContent}
@@ -1027,6 +1055,7 @@ const ThreadView: FC<ThreadViewProps> = ({
         open={selection !== null}
         selectedCitationKey={selection?.selectedCitationKey}
         citationContext={selection?.citationContext}
+        selectionToken={selection ?? undefined}
         onClose={onPanelClose}
       />
     </ThreadPrimitive.Root>
@@ -1080,148 +1109,11 @@ export const ReadOnlyConversation: FC<{
           open={selection !== null}
           selectedCitationKey={selection?.selectedCitationKey}
           citationContext={selection?.citationContext}
+          selectionToken={selection ?? undefined}
           onClose={close}
         />
       </ThreadPrimitive.Root>
     </SourcesPanelProvider>
-  );
-};
-
-interface ThreadWelcomeContentProps {
-  agent: Agent | PublishedAgent;
-  newChatDesign?: boolean;
-  title?: string;
-  suggestions?: readonly WelcomeSuggestion[];
-}
-
-const ThreadWelcomeContent: FC<ThreadWelcomeContentProps> = ({
-  agent,
-  newChatDesign = false,
-  suggestions = [],
-}) => {
-  const aui = useAui();
-  const { t } = useTranslation();
-  const Icon = getAgentIcon(agent);
-  const displayName = agent.display_name || agent.name;
-  const sampleQuestions = (agent.example_questions || []).slice(0, 4);
-  const displayedSuggestions = suggestions.slice(0, 4);
-
-  const handleSampleQuestionClick = useCallback(
-    (question: string) => {
-      aui.composer().setText(question);
-    },
-    [aui]
-  );
-
-  const suggestionRows =
-    displayedSuggestions.length > 0
-      ? displayedSuggestions.map((suggestion) => ({
-          id: suggestion.id,
-          text: suggestion.title,
-          prompt: suggestion.prompt,
-        }))
-      : sampleQuestions.map((question, index) => ({
-          id: `question-${index}`,
-          text: question,
-          prompt: question,
-        }));
-
-  return (
-    <div
-      className={cn(
-        "flex h-full min-h-0 flex-col overflow-y-auto px-8 py-6",
-        newChatDesign &&
-          "!px-0 !pb-6 !pt-[min(30.5556cqh,max(32px,calc(100cqh-694px)))] [font-family:'HarmonyOS_Sans_SC',sans-serif]"
-      )}
-    >
-      {/* elastic space above the welcome block, per design */}
-      {!newChatDesign && <div className="min-h-6 flex-[3]" aria-hidden />}
-
-      {/* The design uses a 72px heading row and a 24px greeting gap. */}
-      <div
-        className={cn(
-          "mx-auto flex w-full max-w-[890px] shrink-0 flex-col items-center gap-6 pb-6",
-          newChatDesign && "!pb-0"
-        )}
-      >
-        <div
-          className={cn(
-            "flex items-center justify-center gap-4",
-            newChatDesign && "min-h-[72px] px-2"
-          )}
-        >
-          <span
-            className={cn(
-              "flex size-14 shrink-0 items-center justify-center",
-              newChatDesign && "size-[72px]"
-            )}
-          >
-            <span className="flex size-14 items-center justify-center rounded-full bg-gradient-to-r from-[#FFA654] to-[#F056A0]">
-              <Icon className="size-7 text-white" aria-hidden />
-            </span>
-          </span>
-          <h1 className="text-[36px] font-bold leading-[54px] text-[#191919]">
-            {displayName}
-          </h1>
-        </div>
-        <p
-          className={cn(
-            "text-center text-[14px] leading-[22px] text-[#191919]",
-            newChatDesign && "text-[16px] font-medium leading-6"
-          )}
-        >
-          {agent.greeting_message || agent.description}
-        </p>
-      </div>
-
-      {!newChatDesign && <div className="min-h-6 flex-1" aria-hidden />}
-
-      {suggestionRows.length > 0 && (
-        <div
-          className={cn(
-            "mx-auto w-full max-w-[890px] shrink-0",
-            newChatDesign && "mt-[120px] px-4"
-          )}
-        >
-          <p
-            className={cn(
-              "text-[14px] font-bold leading-[22px] text-[#191919]",
-              newChatDesign && "text-[16px] font-medium text-black"
-            )}
-          >
-            {t("chat.thread.tryQuestions")}
-          </p>
-          <div
-            className={cn("mt-2 flex flex-col", newChatDesign && "mt-3 gap-2")}
-          >
-            {suggestionRows.map((row) => (
-              <button
-                key={row.id}
-                type="button"
-                onClick={() => handleSampleQuestionClick(row.prompt)}
-                className={cn(
-                  "flex h-12 items-center gap-3 rounded-[4px] px-1 text-left transition-colors hover:bg-white/70",
-                  newChatDesign && "h-[46px] gap-1 px-0 py-3"
-                )}
-              >
-                <Lightbulb
-                  className={cn(
-                    "size-4 shrink-0 text-[#191919]",
-                    newChatDesign && "size-[18px]"
-                  )}
-                  aria-hidden
-                />
-                <span className="min-w-0 truncate text-[14px] leading-[22px] text-[#191919]">
-                  {row.text}
-                </span>
-              </button>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {!newChatDesign && <div className="min-h-10 flex-[2]" aria-hidden />}
-    </div>
   );
 };
 
@@ -1516,7 +1408,6 @@ const AssistantMessage: FC<{
   const ACTION_BAR_PT = "pt-1 pb-1 mb-1";
   const ACTION_BAR_HEIGHT = `-mb-7.5 min-h-7.5 ${ACTION_BAR_PT}`;
 
-  const AgentIcon = getAgentIcon(agent);
   const agentName = agent.display_name || agent.name;
 
   const nl2a = useAuiState(
@@ -1567,7 +1458,9 @@ const AssistantMessage: FC<{
               className="flex size-7 shrink-0 items-center justify-center rounded-full bg-primary/10 ring-1 ring-primary/10"
               aria-hidden
             >
-              <AgentIcon className="size-4 text-primary" />
+              {createElement(getAgentIcon(agent), {
+                className: "size-4 text-primary",
+              })}
             </div>
             <span className="text-sm font-medium text-foreground">
               {agentName}
@@ -2098,7 +1991,7 @@ const UserActionBar: FC = () => {
  * detect the synthetic `isImage` flag on picture_web entries. The base shape
  * stays compatible with `@assistant-ui/react`'s `SourceMessagePartComponent`.
  */
-interface SourcePartLike {
+interface SourcePartLike extends SourceAttributes {
   type: "source";
   sourceType?: "url" | "document";
   url?: string;
@@ -2357,9 +2250,17 @@ const SourceGroupButton: FC<SourceGroupButtonProps> = ({ indices }) => {
           isImage: source.isImage,
           citeIndex: source.citeIndex,
           toolSign: source.toolSign,
+          searchType: source.searchType,
+          sourceMetadata: source.sourceMetadata,
+          sourceReference: source.sourceReference,
+          retrievalHighlightTerms: source.retrievalHighlightTerms,
         }))
       : groupedSources;
-    for (const item of displaySources) {
+    const numberedSources = withCitationDisplayIndices(
+      displaySources,
+      buildCitationDisplayIndexMap(content, displaySources)
+    );
+    for (const item of numberedSources) {
       if (item.isImage) {
         imgs.push(item);
       } else {

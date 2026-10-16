@@ -1,7 +1,10 @@
+// Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 "use client";
 
 import type { FC, MutableRefObject, PropsWithChildren } from "react";
 import { useMemo } from "react";
+import { getSourceAttributes } from "@/lib/source";
 import {
   ExportedMessageRepository,
   RuntimeAdapterProvider,
@@ -187,7 +190,7 @@ const toToolSearchItem = (value: unknown) => {
   const toolSign =
     typeof item.tool_sign === "string" ? item.tool_sign : undefined;
 
-  return resolvedUrl || sourceFile
+  return resolvedUrl || sourceFile || filename || title
     ? {
         url: resolvedUrl,
         title,
@@ -199,6 +202,8 @@ const toToolSearchItem = (value: unknown) => {
         sourceType:
           typeof item.source_type === "string" ? item.source_type : undefined,
         filename: filename || undefined,
+        publishedDate: typeof item.published_date === "string" ? item.published_date : undefined,
+        downloadUrl: typeof item.download_url === "string" ? item.download_url : undefined,
         sourceFile: sourceFile || imageMetadata?.source_file || undefined,
         objectName:
           typeof item.object_name === "string" ? item.object_name : undefined,
@@ -206,6 +211,7 @@ const toToolSearchItem = (value: unknown) => {
         toolSign,
         isImage: Boolean(imageMetadata),
         retrievalHighlightTerms: getRetrievalHighlightTerms(item.score_details),
+                ...getSourceAttributes(item.search_type, item.score_details),
       }
     : null;
 };
@@ -423,23 +429,35 @@ export class RemoteConversationHistoryAdapter implements ThreadHistoryAdapter {
             const item = searchItem as Record<string, unknown>;
             const url = (item.url as string | undefined) ?? "";
             const filename = (item.filename as string | undefined) ?? "";
-            const title = (item.title as string | undefined) || filename || url;
+            const imageMetadata = parseImageMetadata(item.text);
+            const resolvedUrl = imageMetadata?.image_url || url;
+            const title =
+              (item.title as string | undefined) ||
+              filename ||
+              imageMetadata?.source_file ||
+              resolvedUrl;
             if (url || filename || title) {
               const derivedImageKey = `${item.tool_sign ?? ""}${item.cite_index ?? ""}`;
               const isImage =
                 (item.score_details as Record<string, unknown> | undefined)
                   ?.chunk_type === "image" ||
+                Boolean(imageMetadata) ||
                 persistedAnswerImageKeys.includes(derivedImageKey);
               sources.push({
                 citeIndex: (item.cite_index as number | undefined) ?? 0,
-                url,
+                url: resolvedUrl,
                 title,
-                text: item.text as string | undefined,
+                text: imageMetadata
+                  ? undefined
+                  : (item.text as string | undefined),
                 publishedDate: item.published_date as string | undefined,
                 sourceType: item.source_type as string | undefined,
                 searchType: item.search_type as string | undefined,
                 toolSign: item.tool_sign as string | undefined,
                 filename,
+                sourceFile:
+                  (item.source_file as string | undefined) ||
+                  imageMetadata?.source_file,
                 downloadUrl: item.download_url as string | undefined,
                 objectName: item.object_name as string | undefined,
                 isImage,
@@ -449,6 +467,7 @@ export class RemoteConversationHistoryAdapter implements ThreadHistoryAdapter {
                 retrievalHighlightTerms: getRetrievalHighlightTerms(
                   item.score_details
                 ),
+                ...getSourceAttributes(item.search_type, item.score_details),
               });
             }
           }
@@ -588,6 +607,7 @@ export class RemoteConversationHistoryAdapter implements ThreadHistoryAdapter {
             )
           : [];
         const restoredImageUrls = new Set<string>();
+        const restoredImageKeys = new Set<string>();
         const restoredImages: any[] = [];
         const historicalSkillFiles = new Map<string, string>();
         let historicalSkillSummaryPart: { type: "text"; text: string } | null =
@@ -597,37 +617,69 @@ export class RemoteConversationHistoryAdapter implements ThreadHistoryAdapter {
           { files: Map<string, string>; summary: string | null }
         >();
         const appendHistoricalImage = (imageUrl: string) => {
-          if (!imageUrl || restoredImageUrls.has(imageUrl)) return;
+          if (!imageUrl || restoredImageUrls.has(imageUrl)) return [];
           const imageIndex = restoredImageUrls.size;
           const imageKey = answerImageKeys[imageIndex];
-          const metadata = persistedImageSources.find((searchItem) => {
+          const matchingSources = persistedImageSources.filter((searchItem) => {
+            const item = searchItem as Record<string, unknown>;
+            const metadata = parseImageMetadata(item.text);
+            return (metadata?.image_url || item.url) === imageUrl;
+          }) as Record<string, unknown>[];
+          const fallbackMetadata = persistedImageSources.find((searchItem) => {
             const item = searchItem as Record<string, unknown>;
             return (
               imageKey === `${item.tool_sign ?? ""}${item.cite_index ?? ""}`
             );
           }) as Record<string, unknown> | undefined;
-          const title = (metadata?.title as string | undefined) || imageUrl;
-          const imagePart: any = {
-            type: "source",
-            sourceType: "url",
-            url: imageUrl,
-            title,
-            text: metadata?.text as string | undefined,
-            citeIndex:
-              (metadata?.cite_index as number | undefined) ?? undefined,
-            isImage: true,
-            imageKey:
+          const appendedImages = [];
+          for (const metadata of matchingSources.length
+            ? matchingSources
+            : [fallbackMetadata]) {
+            const imageMetadata = metadata
+              ? parseImageMetadata(metadata.text)
+              : null;
+            const sourceImageKey =
               (metadata?.image_key as string | undefined) ||
               (metadata?.tool_sign && metadata?.cite_index !== undefined
                 ? `${metadata.tool_sign}${metadata.cite_index}`
                 : undefined) ||
-              imageKey,
-          };
-          const meta = buildMetadata();
-          if (meta) imagePart.metadata = meta;
+              imageKey;
+            if (sourceImageKey && restoredImageKeys.has(sourceImageKey))
+              continue;
+            const title =
+              (metadata?.title as string | undefined) ||
+              imageMetadata?.source_file ||
+              imageUrl;
+            const imagePart: any = {
+              ...getSourceAttributes(
+                metadata?.search_type,
+                metadata?.score_details
+              ),
+              type: "source",
+              sourceType: "url",
+              url: imageUrl,
+              title,
+              text: imageMetadata
+                ? undefined
+                : (metadata?.text as string | undefined),
+              filename: metadata?.filename as string | undefined,
+              sourceFile:
+                (metadata?.source_file as string | undefined) ||
+                imageMetadata?.source_file,
+              toolSign: metadata?.tool_sign as string | undefined,
+              citeIndex:
+                (metadata?.cite_index as number | undefined) ?? undefined,
+              isImage: true,
+              imageKey: sourceImageKey,
+            };
+            const meta = buildMetadata();
+            if (meta) imagePart.metadata = meta;
+            if (sourceImageKey) restoredImageKeys.add(sourceImageKey);
+            restoredImages.push(imagePart);
+            appendedImages.push(imagePart);
+          }
           restoredImageUrls.add(imageUrl);
-          restoredImages.push(imagePart);
-          return imagePart;
+          return appendedImages;
         };
 
         for (const [partIndex, part] of messageParts.entries()) {
@@ -783,8 +835,7 @@ export class RemoteConversationHistoryAdapter implements ThreadHistoryAdapter {
 
           if (part.type === "picture_web") {
             for (const imageUrl of parseSearchImageUrls(part.content)) {
-              const imagePart = appendHistoricalImage(imageUrl);
-              if (imagePart) {
+              for (const imagePart of appendHistoricalImage(imageUrl)) {
                 attachSearchContentToTool(
                   content,
                   {
@@ -793,6 +844,11 @@ export class RemoteConversationHistoryAdapter implements ThreadHistoryAdapter {
                     text: imagePart.text,
                     isImage: true,
                     imageKey: imagePart.imageKey,
+                    searchType: imagePart.searchType,
+                    sourceMetadata: imagePart.sourceMetadata,
+                    sourceReference: imagePart.sourceReference,
+                    toolSign: imagePart.toolSign,
+                    citeIndex: imagePart.citeIndex,
                   },
                   part.tool_call_id
                 );
@@ -1242,8 +1298,10 @@ export class RemoteConversationHistoryAdapter implements ThreadHistoryAdapter {
               const scoreDetails = item.score_details as
                 Record<string, unknown> | undefined;
               const searchImageKey = `${item.tool_sign ?? ""}${item.cite_index ?? ""}`;
+              const imageMetadata = parseImageMetadata(item.text);
               if (
                 scoreDetails?.chunk_type === "image" ||
+                imageMetadata ||
                 answerImageKeys.includes(searchImageKey)
               )
                 continue;
@@ -1260,6 +1318,7 @@ export class RemoteConversationHistoryAdapter implements ThreadHistoryAdapter {
                 title,
                 text: item.text as string | undefined,
                 filename,
+                publishedDate: item.published_date as string | undefined,
                 downloadUrl: item.download_url as string | undefined,
                 objectName: item.object_name as string | undefined,
                 citeIndex,
@@ -1267,6 +1326,7 @@ export class RemoteConversationHistoryAdapter implements ThreadHistoryAdapter {
                 retrievalHighlightTerms: getRetrievalHighlightTerms(
                   item.score_details
                 ),
+                ...getSourceAttributes(item.search_type, item.score_details),
                 messageId,
               });
             }

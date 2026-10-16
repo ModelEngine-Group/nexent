@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """
 User service layer - handles user-related business logic
 """
@@ -16,6 +18,7 @@ from database.oauth_account_db import soft_delete_all_oauth_accounts_by_user_id
 from consts.const import IS_SPEED_MODE
 from consts.exceptions import ForbiddenError, NotFoundException
 from utils.auth_utils import get_supabase_admin_client
+from services.user_identity_service import enrich_cas_usernames
 
 logger = logging.getLogger(__name__)
 
@@ -66,6 +69,8 @@ def get_users(tenant_id: str, page: Optional[int] = 1, page_size: Optional[int] 
         }
         for r in result["users"]
     ]
+
+    enrich_cas_usernames(users, {"cas_username": "id"})
 
     # Calculate pagination info only if pagination is used
     if page is not None and page_size is not None:
@@ -155,6 +160,7 @@ async def update_user(user_id: str, update_data: Dict[str, Any], updated_by: str
             "role": user_tenant_data["user_role"]
         }
 
+        enrich_cas_usernames([user_info], {"cas_username": "id"})
         logger.info(f"Updated user {user_id} role to {update_data.get('role')} by user {updated_by}")
         return user_info
 
