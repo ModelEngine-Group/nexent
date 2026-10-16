@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 from __future__ import annotations
 
 from copy import deepcopy
@@ -7,6 +9,7 @@ from typing import TYPE_CHECKING, Any, Dict, List, Literal, Optional, Union
 
 from pydantic import BaseModel, Field, model_validator
 
+from ..model_service.profiles.resolved_profile import ResolvedModelProfile
 from ..models.capacity_budget import ContextBudgetSnapshot
 from ..utils.observer import MessageObserver
 from .context.models import ContextItemInput
@@ -50,6 +53,7 @@ PROTOCOL_GRPC = "GRPC"
 
 
 class ModelConfig(BaseModel):
+    resolved_profile: Optional[ResolvedModelProfile] = Field(default=None, repr=False)
     cite_name: str = Field(description="Model alias")
     api_key: str = Field(description="API key", default="")
     model_name: str = Field(description="Model call name")
