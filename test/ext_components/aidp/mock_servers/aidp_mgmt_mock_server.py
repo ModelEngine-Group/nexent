@@ -1,4 +1,4 @@
-# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+# Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
 
 """
 Standalone mock AIDP server for Nexent AIDP management endpoint testing.
@@ -1227,10 +1227,21 @@ _CHUNKS_BY_KB: Dict[str, List[Dict[str, Any]]] = {
             "score": 0.96,
             "title": "AIDP产品介绍.pdf",
             "text": "AIDP Search provides low-latency retrieval across selected enterprise knowledge bases.",
-            "metadata": {"knowledge_base_id": "aidp-kb-product", "section": "overview"},
+            "metadata": {
+                "knowledge_base_id": "aidp-kb-product", "section": "overview",
+                "source": "产品资料", "count": 0, "enabled": False,
+                "tags": ["知识库", "问答"],
+                "standards": {"TEST_STANDARD": {"level_id": "TEST_E", "level_name": "E", "authority": "mock"}},
+            },
             "chunk_type": "text",
             "file_url": "",
             "pages": [1],
+        },
+        {
+            "id": 10002, "score": 0.94, "title": "AIDP产品介绍.pdf",
+            "text": "AIDP Search keeps each retrieval chunk independent so citations can identify their own metadata snapshot.",
+            "metadata": {"knowledge_base_id": "aidp-kb-product", "section": "citations", "count": 1, "enabled": True},
+            "chunk_type": "text", "file_url": "", "pages": [2],
         },
     ],
     "aidp-kb-faq": [

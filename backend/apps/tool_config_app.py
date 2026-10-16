@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import logging
 from http import HTTPStatus
 from typing import Optional, Dict, Any, List
@@ -382,6 +384,9 @@ async def update_tool_labels_api(
                 detail="Tool not found or access denied"
             )
         updated_by_name = get_user_email_map([user_id]).get(user_id, "")
+        from services.user_identity_service import load_cas_identities
+
+        cas_identity = load_cas_identities([user_id]).get(user_id, {})
         return JSONResponse(
             status_code=HTTPStatus.OK,
             content={
@@ -389,6 +394,7 @@ async def update_tool_labels_api(
                 "status": "success",
                 "labels": labels,
                 "updated_by_name": updated_by_name,
+                "updated_by_cas_username": cas_identity.get("cas_username"),
             },
         )
     except HTTPException:

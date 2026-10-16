@@ -1,14 +1,29 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 export const DEFAULT_AGENT_AVATAR_COLORS = [
-  ["#ffbe59", "#ec71c5"],
-  ["#fa91cc", "#875af1"],
-  ["#9986fb", "#5acbe3"],
-  ["#59c4f4", "#63d68d"],
+  ["#ffb746", "#e06edc", "#b386ee"],
+  ["#ff71c6", "#b06cf2", "#55bcd9"],
+  ["#9b68fb", "#6b96f3", "#6fe4a9"],
+  ["#4ccafa", "#54d5d3", "#8bdf51"],
 ];
 
-// Outlined HarmonyOS Sans SC bold n, italicized and centered in a 100x100 box.
-// Font attribution and license: public/fonts/harmonyos-sans-sc/LICENSE.txt.
-export const DEFAULT_AGENT_AVATAR_GLYPH_PATH =
-  "M69.224 46.815 64.787 69H54.84L58.633 50.036Q60.665 39.874 53.938 39.874Q50.36 39.874 47.626 42.629Q44.893 45.384 43.891 50.394L40.169 69H30.222L37.636 31.93H46.367Q45.852 36.296 45.823 37.87Q50.775 31 59.076 31Q65.231 31 68 35.043Q70.77 39.087 69.224 46.815Z";
+/** Shared vector artwork for previews and the uploaded default avatar. */
+export function getDefaultAgentAvatarSvg(
+  colors = DEFAULT_AGENT_AVATAR_COLORS[0]
+) {
+  const [top, middle, bottom = middle] = colors;
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="200" height="200" viewBox="0 0 200 200">
+    <defs>
+      <linearGradient id="base" x1=".2" y1=".1" x2=".75" y2="1"><stop stop-color="${top}"/><stop offset=".55" stop-color="${middle}"/><stop offset="1" stop-color="${bottom}"/></linearGradient>
+      <radialGradient id="warm" cx=".36" cy=".38" r=".65"><stop stop-color="${top}" stop-opacity=".95"/><stop offset="1" stop-color="${top}" stop-opacity="0"/></radialGradient>
+      <radialGradient id="glass" cx=".4" cy=".32" r=".68"><stop offset=".5" stop-color="white" stop-opacity="0"/><stop offset=".88" stop-color="white" stop-opacity=".12"/><stop offset="1" stop-color="white" stop-opacity=".85"/></radialGradient>
+      <filter id="soft"><feGaussianBlur stdDeviation="3"/></filter>
+      <filter id="glow"><feGaussianBlur stdDeviation="2"/></filter>
+    </defs>
+    <g filter="url(#soft)"><circle cx="100" cy="100" r="86" fill="url(#base)"/><circle cx="100" cy="100" r="86" fill="url(#warm)"/><circle cx="100" cy="100" r="86" fill="url(#glass)"/></g>
+    <g fill="none" stroke="white" stroke-width="12" stroke-linecap="round"><path d="M81 83 Q76 95 77 111" filter="url(#glow)"/><path d="M116 83 Q111 95 112 111" filter="url(#glow)"/><path d="M81 83 Q76 95 77 111"/><path d="M116 83 Q111 95 112 111"/></g>
+  </svg>`;
+}
 
 export function DefaultAgentAvatar({
   size = 72,
@@ -18,24 +33,13 @@ export function DefaultAgentAvatar({
   colors?: string[];
 }) {
   return (
-    <span
+    <img
+      alt=""
       aria-hidden="true"
-      className="inline-flex shrink-0 items-center justify-center rounded-full"
-      style={{
-        width: size,
-        height: size,
-        lineHeight: 1,
-        background: `linear-gradient(135deg, ${colors.join(",")})`,
-      }}
-    >
-      <svg
-        viewBox="0 0 100 100"
-        width={size}
-        height={size}
-        style={{ display: "block", flexShrink: 0 }}
-      >
-        <path d={DEFAULT_AGENT_AVATAR_GLYPH_PATH} fill="white" />
-      </svg>
-    </span>
+      width={size}
+      height={size}
+      className="inline-block shrink-0"
+      src={`data:image/svg+xml;charset=utf-8,${encodeURIComponent(getDefaultAgentAvatarSvg(colors))}`}
+    />
   );
 }

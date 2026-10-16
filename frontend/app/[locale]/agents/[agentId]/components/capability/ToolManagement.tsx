@@ -1,3 +1,5 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 "use client";
 
 import { useState, useCallback, useMemo, type ReactNode } from "react";
@@ -195,7 +197,7 @@ export default function ToolManagement({
       <>
         <div
           data-testid="agent-selected-tool-grid"
-          className="grid grid-cols-1 gap-2 sm:grid-cols-2"
+          className="grid grid-cols-1 gap-2 @min-[640px]/agent-config:grid-cols-2"
         >
           {visibleSelectedTools.map((selectedTool) => {
             const tool = mergeCanonicalTool(selectedTool, availableTools);
@@ -217,6 +219,7 @@ export default function ToolManagement({
                 key={tool.id}
                 data-testid={`agent-selected-tool-${tool.id}`}
                 name={tool.name}
+                className="shadow-none"
                 icon={
                   <span
                     aria-hidden="true"

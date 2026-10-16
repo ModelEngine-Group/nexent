@@ -7,7 +7,7 @@ import { useRouter } from "next/navigation";
 import { KnowledgeRetrievalParamsForm } from "@/components/tool-config/KnowledgeRetrievalParamsForm";
 import { useTranslation } from "react-i18next";
 import { Button, Modal, Spin, Tag, Tooltip } from "antd";
-import { Database, ChevronRight, Settings, Trash2, Plus } from "lucide-react";
+import { Database, ExternalLink, Settings, Trash2, Plus } from "lucide-react";
 
 import { AddKnowledgeDrawer } from "@/components/resource-picker/AddKnowledgeDrawer";
 import { useDeployment } from "@/components/providers/deploymentProvider";
@@ -353,7 +353,6 @@ export function KnowledgeBaseConfigActions() {
         isAidpSearch={state.profile.selectorType === "aidp_search"}
         knowledgeBases={state.knowledgeBases}
         isLoading={state.isLoading}
-        title={t("agent.knowledge.selectModal.title")}
         onRefresh={() => {
           void state.refetch();
         }}
@@ -399,7 +398,7 @@ export default function KnowledgeBaseConfig({
     const selectedKnowledgeBases = state?.selectedKnowledgeBases ?? [];
     const content = (
       <div className="flex flex-col gap-2">
-        <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+        <div className="grid grid-cols-1 gap-2 @min-[640px]/agent-config:grid-cols-2">
           {selectedKnowledgeBases.map((selectedKnowledgeBase) => {
             const knowledgeBase = selectedKnowledgeBase.knowledgeBase;
             const metadata = knowledgeBase
@@ -519,17 +518,6 @@ export default function KnowledgeBaseConfig({
     const actions = (
       <div className="flex h-6 items-center gap-2">
         <Button
-          type="link"
-          disabled={isReadOnly}
-          onClick={() => router.push("/knowledges")}
-          className="!h-[22px] !p-0 !text-sm !font-normal !leading-[22px] !tracking-[0px] !text-[#2673e5]"
-        >
-          <span className="inline-flex items-center gap-1">
-            {t("agentConfig.layout.newKnowledgeBase")}
-            <ChevronRight size={14} />
-          </span>
-        </Button>
-        <Button
           type="text"
           size="small"
           icon={<Settings size={14} />}
@@ -538,6 +526,17 @@ export default function KnowledgeBaseConfig({
           onClick={() => setConfigOpen(true)}
           className="!size-6 !p-0 !text-[#191919]"
         />
+        <Button
+          type="link"
+          disabled={isReadOnly}
+          onClick={() => router.push("/knowledges")}
+          className="!h-[22px] !p-0 !text-sm !font-normal !leading-[22px] !tracking-[0px] !text-[#2673e5]"
+        >
+          <span className="inline-flex items-center gap-1">
+            {t("agentConfig.layout.newKnowledgeBase")}
+            <ExternalLink size={14} />
+          </span>
+        </Button>
       </div>
     );
     return (
@@ -564,7 +563,6 @@ export default function KnowledgeBaseConfig({
               isAidpSearch={state.profile.selectorType === "aidp_search"}
               knowledgeBases={state.knowledgeBases}
               isLoading={state.isLoading}
-              title={t("agent.knowledge.selectModal.title")}
               onRefresh={() => {
                 void state.refetch();
               }}

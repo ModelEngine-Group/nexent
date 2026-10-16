@@ -1,18 +1,14 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 "use client";
 
 import { useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Select, Tooltip } from "antd";
-import {
-  InfoCircleOutlined,
-  QuestionCircleOutlined,
-} from "@ant-design/icons";
+import { InfoCircleOutlined, QuestionCircleOutlined } from "@ant-design/icons";
 import { Minus, Plus, Trash2 } from "lucide-react";
 
-import type {
-  ReasoningCapability,
-  ReasoningEffort,
-} from "@/types/modelConfig";
+import type { ReasoningCapability, ReasoningEffort } from "@/types/modelConfig";
 import {
   type ModelAdvancedSettingsValue,
   clampReasoningBudget,
@@ -102,7 +98,7 @@ function SliderStepper({
   const handlePointerUp = () => setDragging(false);
 
   return (
-    <div className="flex items-center gap-3">
+    <div className="flex items-center gap-4">
       {/* Segmented slider */}
       <div className="flex-1 select-none">
         <div className="relative pt-2">
@@ -111,7 +107,7 @@ function SliderStepper({
             {TICK_POSITIONS.map((pos) => (
               <span
                 key={pos}
-                className="absolute top-0 h-[6px] w-[2px] -translate-x-1/2 rounded-full bg-[#2196F3] opacity-60"
+                className="absolute top-0 h-[6px] w-[2px] -translate-x-1/2 rounded-full bg-[#0067D1] opacity-60"
                 style={{ left: `${pos}%` }}
               />
             ))}
@@ -126,13 +122,15 @@ function SliderStepper({
             onPointerCancel={handlePointerUp}
           >
             <div
-              className="absolute left-0 top-0 h-full rounded-full bg-[#2196F3]"
+              className="absolute left-0 top-0 h-full rounded-full bg-[#0067D1]"
               style={{ width: `${pct}%` }}
             />
             <div
-              className="absolute top-1/2 h-[10px] w-[10px] -translate-x-1/2 -translate-y-1/2 rounded-full border border-[#E0E0E0] bg-white shadow-[0_1px_3px_rgba(0,0,0,0.15)]"
-              style={{ left: `${pct}%` }}
-            />
+              className="absolute top-1/2 flex h-6 w-6 -translate-x-1/2 -translate-y-1/2 items-center justify-center"
+              style={{ left: `clamp(12px, ${pct}%, calc(100% - 12px))` }}
+            >
+              <span className="h-4 w-4 rounded-full border border-[#E0E0E0] bg-white shadow-[0_1px_3px_rgba(0,0,0,0.15)]" />
+            </div>
           </div>
         </div>
       </div>
@@ -311,6 +309,7 @@ export function ModelParamsModal({
 
   return (
     <ParamDialog
+      variant="model"
       open={open}
       title={title || t("modelParams.title", { defaultValue: "模型配置参数" })}
       onClose={onClose}
@@ -332,7 +331,11 @@ export function ModelParamsModal({
 
       {/* Deep thinking toggle */}
       {reasoningControlVisible && (
-        <ParamField label={t("modelParams.thinking", { defaultValue: "深度思考" })} info size="md">
+        <ParamField
+          label={t("modelParams.thinking", { defaultValue: "深度思考" })}
+          info
+          size="md"
+        >
           <ParamSwitch
             checked={thinkingEnabled}
             onChange={(checked) =>
@@ -353,7 +356,7 @@ export function ModelParamsModal({
       )}
 
       {/* Token capacity grid */}
-      <div className="grid grid-cols-2 gap-x-4 gap-y-3">
+      <div className="grid grid-cols-2 gap-4">
         {tokenFields.map((field) => (
           <ParamField
             key={field.key}
@@ -377,13 +380,10 @@ export function ModelParamsModal({
               }
               onChange={(e) => {
                 const raw = e.target.value;
-                setNumberField(
-                  field.key,
-                  raw === "" ? undefined : Number(raw)
-                );
+                setNumberField(field.key, raw === "" ? undefined : Number(raw));
               }}
             />
-            <span className="flex items-center gap-1 text-[11px] leading-4 text-[#8C8C8C]">
+            <span className="flex items-center gap-1 text-[12px] leading-[18px] text-[#8C8C8C]">
               <InfoCircleOutlined style={{ color: "#1677FF" }} />
               {field.hint}
             </span>
@@ -485,7 +485,7 @@ export function ModelParamsModal({
                 }
               }}
             />
-            <span className="text-[11px] leading-4 text-[#999]">
+            <span className="text-[12px] leading-[18px] text-[#999]">
               {`${budgetControl.min} ~ ${budgetControl.max}`}
             </span>
           </ParamField>
@@ -529,8 +529,7 @@ export function ModelParamsModal({
           <div className="space-y-2">
             {customEntries.map(([k, v], idx) => {
               const isDuplicate =
-                k !== "" &&
-                customEntries.filter(([ek]) => ek === k).length > 1;
+                k !== "" && customEntries.filter(([ek]) => ek === k).length > 1;
               return (
                 <div
                   key={`custom-param-${idx}`}
@@ -547,9 +546,10 @@ export function ModelParamsModal({
                     onChange={(e) => {
                       const next = customEntries.map(
                         (entry, i) =>
-                          (i === idx
-                            ? [e.target.value, entry[1]]
-                            : entry) as [string, string]
+                          (i === idx ? [e.target.value, entry[1]] : entry) as [
+                            string,
+                            string,
+                          ]
                       );
                       setCustoms(next);
                     }}
@@ -565,9 +565,10 @@ export function ModelParamsModal({
                     onChange={(e) => {
                       const next = customEntries.map(
                         (entry, i) =>
-                          (i === idx
-                            ? [entry[0], e.target.value]
-                            : entry) as [string, string]
+                          (i === idx ? [entry[0], e.target.value] : entry) as [
+                            string,
+                            string,
+                          ]
                       );
                       setCustoms(next);
                     }}
