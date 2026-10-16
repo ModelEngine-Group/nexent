@@ -1,3 +1,5 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import path from "node:path";
 import { defineConfig } from "vitest/config";
 
@@ -10,6 +12,10 @@ export default defineConfig({
       {
         find: "@/app/i18n",
         replacement: path.resolve(__dirname, "tests/component/i18nStub.ts"),
+      },
+      {
+        find: "@/app",
+        replacement: path.resolve(__dirname, "app/[locale]"),
       },
       { find: "@", replacement: path.resolve(__dirname) },
     ],

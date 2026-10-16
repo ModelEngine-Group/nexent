@@ -363,7 +363,7 @@ export function SideNavigation({ onPinnedChange }: SideNavigationProps = {}) {
     <div
       data-sidebar-expanded={expanded}
       data-sidebar-pinned={pinned}
-      className={`relative flex h-full flex-col bg-[lab(97.0939%_-0.108689_-0.749958)] [--navigation-hover:color-mix(in_oklab,lab(92.4476%_-0.214785_-1.49835)_70%,transparent)] [--navigation-selected:lab(92.4476%_-0.214785_-1.49835)] [--navigation-muted:lab(47.7049%_-1.02875_-9.20491)] [--navigation-foreground:lab(11.6682%_-0.113927_-10.842)] p-2 transition-[width,box-shadow] duration-[180ms] ease-out motion-reduce:transition-none ${expanded ? "w-[240px]" : "w-16"} ${expanded && !pinned ? "shadow-[8px_0_24px_rgba(0,0,0,0.16)]" : ""}`}
+      className={`relative flex h-full flex-col bg-[var(--navigation-surface)] [--navigation-hover:color-mix(in_oklab,lab(92.4476%_-0.214785_-1.49835)_70%,transparent)] [--navigation-selected:lab(92.4476%_-0.214785_-1.49835)] [--navigation-muted:lab(47.7049%_-1.02875_-9.20491)] [--navigation-foreground:lab(11.6682%_-0.113927_-10.842)] p-2 transition-[width,box-shadow] duration-[180ms] ease-out motion-reduce:transition-none ${expanded ? "w-[240px]" : "w-16"} ${expanded && !pinned ? "shadow-[8px_0_24px_rgba(0,0,0,0.16)]" : ""}`}
       onMouseEnter={() => {
         hovered.current = true;
         expand();

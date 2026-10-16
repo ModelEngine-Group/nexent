@@ -111,7 +111,7 @@ function PanelCard({
   return (
     <section
       ref={panelRef}
-      className={`flex min-h-0 min-w-0 flex-col overflow-hidden ${frameless ? "bg-[#f3f3f3]" : "border-l border-[#dfdfdf] bg-white"} ${className}`}
+      className={`flex min-h-0 min-w-0 flex-col overflow-hidden ${frameless ? "bg-[var(--navigation-surface)]" : "border-l border-[#dfdfdf] bg-white"} ${className}`}
     >
       {showHeader && (
         <div
@@ -121,7 +121,7 @@ function PanelCard({
           <div
             className={
               headerTestId === "agent-config-page-tabs"
-                ? "flex h-10 min-w-[140px] max-w-full items-center gap-1 rounded-lg bg-white px-3 [font-family:'HarmonyOS_Sans_SC',sans-serif]"
+                ? "flex h-10 min-w-[140px] max-w-full items-center gap-2 rounded-lg bg-white px-3 [font-family:'HarmonyOS_Sans_SC',sans-serif]"
                 : "flex min-w-0 items-center gap-2"
             }
           >
@@ -370,7 +370,7 @@ function AgentSetupContent({
   return (
     <div
       ref={workspaceRef}
-      className="flex h-full w-full min-h-0 flex-col bg-[#f3f3f3]"
+      className="flex h-full w-full min-h-0 flex-col bg-[var(--navigation-surface)]"
     >
       {showCreationGuide && user?.id && tenantId && (
         <AgentCreationGuide
@@ -477,8 +477,8 @@ function AgentSetupContent({
                 agentInfo?.name ||
                 t("agent.page.panel.config"),
             })}
-            className={"flex-1"}
-            headerClassName="min-h-16 flex-wrap gap-x-3 gap-y-2 border-[#dfdfdf] pl-4 pr-[18px] py-3"
+            className="ml-2 flex-1 xl:ml-3"
+            headerClassName="min-h-16 flex-wrap gap-x-3 gap-y-2 border-[#dfdfdf] px-4 py-3"
             leftAction={
               <Button
                 type="text"
@@ -682,7 +682,7 @@ export default function AgentEditor() {
   if (!isValidAgentId) return null;
 
   return (
-    <div className="flex h-full min-h-0 flex-col bg-[#f3f3f3]">
+    <div className="flex h-full min-h-0 flex-col bg-[var(--navigation-surface)]">
       <div className="min-h-0 flex-1">
         <Nl2AgentFlowProvider>
           <AgentSetupContent

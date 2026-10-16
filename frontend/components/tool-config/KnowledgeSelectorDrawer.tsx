@@ -1,3 +1,5 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 "use client";
 
 import React, { useState, useMemo, useCallback, useEffect } from "react";
@@ -5,15 +7,7 @@ import { useTranslation } from "react-i18next";
 import { useEmbeddingModelDialog } from "@/hooks/knowledge/useEmbeddingModelDialog";
 import { KnowledgeModelMismatchModal } from "@/components/tool-config/KnowledgeModelMismatchModal";
 
-import {
-  Modal,
-  Button,
-  Input,
-  Select,
-  Spin,
-  Checkbox,
-  ConfigProvider,
-} from "antd";
+import { Button, Input, Select, Spin, Checkbox, ConfigProvider } from "antd";
 import { SearchOutlined, SyncOutlined } from "@ant-design/icons";
 
 import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
@@ -31,11 +25,10 @@ import { useModelList } from "@/hooks/model/useModelList";
 import knowledgeBaseService from "@/services/knowledgeBaseService";
 import log from "@/lib/logger";
 import EmbeddingModelConfigDialog from "./EmbeddingModelConfigDialog";
-import { AddResourceDrawer } from "@/components/resource-picker/AddResourceDrawer";
+import { ResourceDrawer } from "@/components/resource-picker/ResourceDrawer";
 import { formatDateOrFallback } from "@/lib/date";
 
 interface KnowledgeBaseSelectorProps {
-  presentation?: "modal" | "drawer";
   isOpen: boolean;
   onClose: () => void;
   onConfirm: (selectedKnowledgeBases: KnowledgeBase[]) => void;
@@ -55,7 +48,7 @@ interface KnowledgeBaseSelectorProps {
   };
 }
 
-interface KnowledgeBaseSelectorModalProps extends KnowledgeBaseSelectorProps {
+interface KnowledgeSelectorDrawerProps extends KnowledgeBaseSelectorProps {
   knowledgeBases: KnowledgeBase[];
   isLoading?: boolean;
   getModelDisplayName?: (modelId: string) => string;
@@ -82,42 +75,7 @@ interface KnowledgeBaseSelectorModalProps extends KnowledgeBaseSelectorProps {
   };
 }
 
-function KnowledgeSelectorContainer({
-  presentation,
-  children,
-  onDrawerClose,
-  onDrawerConfirm,
-  ...props
-}: React.ComponentProps<typeof Modal> & {
-  presentation: "modal" | "drawer";
-  onDrawerClose: () => void;
-  onDrawerConfirm: () => void | Promise<void>;
-}) {
-  if (presentation === "modal") return <Modal {...props}>{children}</Modal>;
-  return (
-    <AddResourceDrawer
-      open={Boolean(props.open)}
-      title={props.title}
-      onClose={onDrawerClose}
-      onConfirm={() => {
-        void onDrawerConfirm();
-      }}
-      searchPlaceholder=""
-      listTitle=""
-      selected={[]}
-      total={0}
-      searchContent={null}
-      showSelection={false}
-      showListHeader={false}
-      showPagination={false}
-    >
-      {children}
-    </AddResourceDrawer>
-  );
-}
-
-export default function KnowledgeBaseSelectorModal({
-  presentation = "modal",
+export default function KnowledgeSelectorDrawer({
   isOpen,
   onClose,
   onConfirm,
@@ -139,7 +97,7 @@ export default function KnowledgeBaseSelectorModal({
   currentMultiEmbeddingModelId = null,
   toolMultimodal = null,
   difyConfig,
-}: KnowledgeBaseSelectorModalProps) {
+}: KnowledgeSelectorDrawerProps) {
   const { t } = useTranslation("common");
   const isAidpSearch = toolType === "aidp_search";
   const { data: allModels = [] } = useModelList({ enabled: !isAidpSearch });
@@ -727,27 +685,16 @@ export default function KnowledgeBaseSelectorModal({
   }, [toolType, t]);
 
   return (
-    <KnowledgeSelectorContainer
-      presentation={presentation}
-      onDrawerClose={handleCancel}
-      onDrawerConfirm={handleConfirm}
-      title={title || defaultTitle}
+    <ResourceDrawer
       open={isOpen}
-      onCancel={handleCancel}
-      onOk={handleConfirm}
-      okText={t("common.confirm")}
-      cancelText={t("common.cancel")}
-      width={800}
-      className="knowledge-base-selector-modal"
-      styles={{
-        body: {
-          maxHeight: "70vh",
-          overflow: "hidden",
-          display: "flex",
-          flexDirection: "column",
-          padding: 0,
-        },
+      title={title || defaultTitle}
+      onClose={handleCancel}
+      onConfirm={() => {
+        void handleConfirm();
       }}
+      confirmText={t("common.confirm")}
+      closeText={t("common.cancel")}
+      width="min(800px, 100vw)"
     >
       {/* Fixed header area - consistent with KnowledgeBaseList */}
       <div
@@ -1259,6 +1206,6 @@ export default function KnowledgeBaseSelectorModal({
         {...embeddingModelDialogProps}
         onConfigComplete={handleEmbeddingModelConfigComplete}
       />
-    </KnowledgeSelectorContainer>
+    </ResourceDrawer>
   );
 }
