@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """
 Test summary formatting and display
 """
@@ -67,7 +69,7 @@ patch('nexent.storage.storage_client_factory.create_storage_client_from_config',
 patch('nexent.storage.minio_config.MinIOStorageConfig.validate', lambda self: None).start()
 patch('backend.database.client.MinioClient', return_value=minio_client_mock).start()
 
-from utils.document_vector_utils import merge_cluster_summaries
+from management.services.knowledge_base.summary import merge_cluster_summaries
 
 
 class TestSummaryFormatting:

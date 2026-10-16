@@ -1,4 +1,6 @@
-﻿"""Utility helpers for skill import naming conventions."""
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
+"""Utility helpers for skill import naming conventions."""
 
 _MAX_SKILL_NAME_LENGTH = 100
 

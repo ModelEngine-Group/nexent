@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import json
 import logging
 import os
@@ -51,7 +53,7 @@ from services.oauth_service import (
     create_or_update_oauth_account,
     find_supabase_user_id_by_email,
 )
-from management.services.skill.service import init_skill_list_for_tenant
+from management.services.skill.transfer import init_skill_list_for_tenant
 from services.tool_configuration_service import init_tool_list_for_tenant
 from utils.auth_utils import calculate_expires_at, generate_session_jwt, get_supabase_admin_client
 
