@@ -4697,6 +4697,7 @@
   "tenantResources.skills.searchPlaceholder": "Search skill name",
   "tenantResources.skills.filterSource": "Filter by source",
   "tenantResources.users.searchPlaceholder": "Search email",
+  "tenantResources.users.searchUsernameOrEmail": "Search username",
   "tenantResources.users.filterRole": "Filter by type",
   "tenantResources.users.filterGroup": "Filter by group",
   "tenantResources.users.clearFilters": "Clear filters",
