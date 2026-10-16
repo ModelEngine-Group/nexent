@@ -197,7 +197,7 @@ export default function ToolManagement({
       <>
         <div
           data-testid="agent-selected-tool-grid"
-          className="grid grid-cols-1 gap-2 sm:grid-cols-2"
+          className="grid grid-cols-1 gap-2 @min-[640px]/agent-config:grid-cols-2"
         >
           {visibleSelectedTools.map((selectedTool) => {
             const tool = mergeCanonicalTool(selectedTool, availableTools);

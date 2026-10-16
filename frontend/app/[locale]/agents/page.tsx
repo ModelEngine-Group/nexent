@@ -26,16 +26,15 @@ import {
   type ImportAgentData,
 } from "@/lib/agentImportUtils";
 import log from "@/lib/logger";
-import { AgentDetail } from "@/components/agent/agent-detail";
-import { mapAgentInfoDetail } from "@/lib/myAgentDetail";
-import AgentAvatar from "./components/agent-avatar";
 import { searchAgentInfo } from "@/services/agentConfigService";
 import { useAgentStore } from "@/stores/agentStore";
 import type { Agent } from "@/types/agentConfig";
 
 import AgentConfigurationGuide from "./components/agent-configuration-guide";
 import AgentListCard from "./components/agent-list-card";
-import AgentListTable from "./components/agent-list-table";
+import AgentListTable, {
+  DEFAULT_AGENT_COLUMN_WIDTHS,
+} from "./components/agent-list-table";
 import AgentVersion from "./agent-version";
 import "./agent-list.css";
 
@@ -47,10 +46,12 @@ export default function AgentsPage() {
   const initialize = useAgentStore((state) => state.initialize);
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(1);
-  const [pageSize, setPageSize] = useState(10);
+  const [pageSize, setPageSize] = useState(12);
   const [jumpPage, setJumpPage] = useState<number | null>(null);
+  const [tableColumnWidths, setTableColumnWidths] = useState(
+    DEFAULT_AGENT_COLUMN_WIDTHS
+  );
   const [view, setView] = useState<"grid" | "list">("grid");
-  const [detailOpen, setDetailOpen] = useState(false);
   const [selectedAgent, setSelectedAgent] = useState<Agent | null>(null);
   const [isVersionManageOpen, setIsVersionManageOpen] = useState(false);
   const [isCreateOpen, setIsCreateOpen] = useState(false);
@@ -128,14 +129,9 @@ export default function AgentsPage() {
     [pathname, router]
   );
 
-  const handleOpenDetail = useCallback(
-    async (agent: Agent) => {
-      const loadedAgent = await loadAgent(Number(agent.id));
-      if (!loadedAgent) return;
-      setSelectedAgent(loadedAgent);
-      setDetailOpen(true);
-    },
-    [loadAgent]
+  const handleOpenAgent = useCallback(
+    (agent: Agent) => updateUrl(Number(agent.id)),
+    [updateUrl]
   );
 
   const handleManageVersions = useCallback(
@@ -360,7 +356,9 @@ export default function AgentsPage() {
                       view === "list" ? (
                         <AgentListTable
                           agents={agents}
-                          onOpen={(agent) => void handleOpenDetail(agent)}
+                          columnWidths={tableColumnWidths}
+                          onColumnWidthsChange={setTableColumnWidths}
+                          onOpen={handleOpenAgent}
                           onConfigure={updateUrl}
                           onPublish={openPublishFlow}
                           onManageVersions={handleManageVersions}
@@ -371,7 +369,7 @@ export default function AgentsPage() {
                             <AgentListCard
                               key={agent.id}
                               agent={agent}
-                              onOpen={(agent) => void handleOpenDetail(agent)}
+                              onOpen={handleOpenAgent}
                               onConfigure={updateUrl}
                               onPublish={openPublishFlow}
                               onManageVersions={handleManageVersions}
@@ -392,7 +390,7 @@ export default function AgentsPage() {
                         <Select
                           aria-label={t("agentConfig.list.pageSize")}
                           value={pageSize}
-                          options={[10, 20, 50].map((size) => ({
+                          options={[10, 12, 20, 50].map((size) => ({
                             value: size,
                             label: t("agentConfig.list.perPage", {
                               count: size,
@@ -454,18 +452,6 @@ export default function AgentsPage() {
         </div>
       </section>
 
-      <AgentDetail
-        detail={selectedAgent ? mapAgentInfoDetail(selectedAgent) : null}
-        agentIcon={
-          selectedAgent ? (
-            <AgentAvatar agent={selectedAgent} size={48} iconSize={24} />
-          ) : undefined
-        }
-        open={detailOpen}
-        onClose={() => setDetailOpen(false)}
-        onEdit={() => selectedAgent && updateUrl(Number(selectedAgent.id))}
-        published={Boolean(selectedAgent?.current_version_no)}
-      />
       <Modal
         centered
         width={900}

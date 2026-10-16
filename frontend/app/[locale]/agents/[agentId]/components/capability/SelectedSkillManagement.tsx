@@ -1,3 +1,5 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 "use client";
 
 import { useMemo, useState, type ReactNode } from "react";
@@ -167,7 +169,7 @@ export default function SelectedSkillManagement({
   if (highFidelity) {
     return (
       <>
-        <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+        <div className="grid grid-cols-1 gap-2 @min-[640px]/agent-config:grid-cols-2">
           {groupedSkills.flatMap((group) =>
             group.skills.map((skill) => {
               const canEditSkill =
