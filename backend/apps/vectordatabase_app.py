@@ -40,6 +40,7 @@ from services.quota_service import QuotaService
 from services.redis_service import get_redis_service
 from utils.auth_utils import get_current_user_context, get_current_user_id
 
+
 router = APIRouter(prefix="/indices")
 service = ElasticSearchService()
 logger = logging.getLogger("vectordatabase_app")
@@ -168,12 +169,21 @@ async def get_knowledge_base_bound_agents(
 ):
     """List agents bound to this knowledge base for deletion confirmation."""
     try:
-        _, auth_tenant_id = get_current_user_id(authorization)
+        user_id, auth_tenant_id, role = get_current_user_context(authorization)
     except TokenExpiredError as exc:
         raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(exc)) from exc
+    target_tenant_id = tenant_id or auth_tenant_id
+    if target_tenant_id != auth_tenant_id and role != "SU":
+        raise HTTPException(status_code=HTTPStatus.FORBIDDEN, detail="Not authorized to access this tenant")
+    try:
+        require_knowledge_base_read_permission(index_name, user_id, target_tenant_id)
+    except HTTPException as exc:
+        if exc.status_code != HTTPStatus.NOT_FOUND:
+            raise
+        return JSONResponse(status_code=HTTPStatus.OK, content={"agents": []})
     preview = await run_blocking(
         "preview-kb-deletion", ElasticSearchService.get_bound_agents, [index_name],
-        tenant_id=tenant_id or auth_tenant_id,
+        tenant_id=target_tenant_id,
         lane="control-io", owner="apps.vectordatabase_app",
     )
     return JSONResponse(status_code=HTTPStatus.OK, content=preview)

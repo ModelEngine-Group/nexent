@@ -36,6 +36,7 @@ from consts.exceptions import AppException, UnauthorizedError
 from database.user_tenant_db import get_user_role_by_tenant
 from ext_components.aidp.consts.aidp_exceptions import (
     AidpGroupValidationError,
+    AidpKbNotFoundError,
 )
 from ext_components.aidp.database import aidp_permission_db
 from ext_components.aidp.services import aidp_permission_service as perms
@@ -961,7 +962,11 @@ async def get_knowledge_base_bound_agents(
     kds_id: Annotated[str, Path(min_length=1, pattern=r".*\S.*")],
 ) -> JSONResponse:
     """List agents bound to this AIDP knowledge base for deletion confirmation."""
-    _, tenant_id = await _auth(request)
+    user_id, tenant_id = await _auth(request)
+    try:
+        perms.require_permission(kds_id, user_id, tenant_id, required="READ")
+    except AidpKbNotFoundError:
+        return JSONResponse(status_code=HTTPStatus.OK, content={"agents": []})
     preview = await run_blocking(
         "preview-aidp-kb-deletion", get_bound_agents, [kds_id],
         tenant_id=tenant_id,
