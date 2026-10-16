@@ -6,6 +6,7 @@ import logging
 import os
 import sys
 from types import ModuleType
+from typing import ClassVar
 from unittest.mock import AsyncMock, MagicMock
 
 import httpx
@@ -882,6 +883,34 @@ class TestNormalizeAidpDoc:
         assert result["created_at"] == "2024-06-10T06:20:00Z"
         assert result["status"] == "UPLOADING"
 
+    def test_history_item_keeps_an_integer_status(self, aidp_service_module):
+        """Regression: AIDP deployments also report the numeric 1-5 contract as
+        plain integers; the integer used to be dropped during normalization,
+        which left every upload-task row without a status and rendered the
+        status column as "unknown" with an empty actions column."""
+        result = aidp_service_module._normalize_history_doc({
+            "file_uuid": "uuid-2",
+            "file_name": "政策手册.pdf",
+            "status": 4,
+        })
+        assert result["status"] == "4"
+
+    def test_history_item_reads_status_from_alias_keys(self, aidp_service_module):
+        """A renamed status field still maps to the canonical ``status`` key."""
+        result = aidp_service_module._normalize_history_doc({
+            "file_uuid": "uuid-3",
+            "file_state": 5,
+        })
+        assert result["status"] == "5"
+
+    def test_history_item_drops_a_boolean_status(self, aidp_service_module):
+        """A boolean is not a status token; it must not stringify to "True"."""
+        result = aidp_service_module._normalize_history_doc({
+            "file_uuid": "uuid-4",
+            "status": True,
+        })
+        assert "status" not in result
+
     def test_empty_create_time_does_not_hide_a_reported_created_at(self, normalize):
         """A blank ``create_time`` means "not reported", not a value to keep."""
         result = normalize({
@@ -1078,6 +1107,68 @@ class TestGraphConfigValidation:
         assert exc_info.value.error_code == ErrorCode.COMMON_PARAMETER_INVALID
 
 
+class TestMergeGraphConfigUpdate:
+    """Partial graph-config edits serialize only the edited fields for PATCH."""
+
+    def test_returns_only_edited_fields_in_aidp_format(self, aidp_service_module):
+        current = {
+            "domain": "常规",
+            "prompt_language": "中文",
+            "prompt_text": "提取实体关系。",
+            "llm_model_name": "qwen3_8b",
+            "retrieve_subgraph_hop": "2",
+            "no_think_mode": "是",
+            "synonym_merge_enable": "否",
+            "disambiguation_enable": "否",
+        }
+        result = aidp_service_module.merge_graph_config_update(
+            current,
+            {
+                "llm_model_name": "gpt-4o",
+                "retrieve_subgraph_hop": 3,
+                "no_think_mode": False,
+                "synonym_merge_enable": True,
+            },
+        )
+        merged = json.loads(result)
+        assert merged == {
+            "llm_model_name": "gpt-4o",
+            "retrieve_subgraph_hop": "3",
+            "no_think_mode": "否",
+            "synonym_merge_enable": "是",
+        }
+
+    def test_ignores_current_for_signature_compatibility(self, aidp_service_module):
+        """AIDP's PATCH merges graph_config server-side, so unedited stored
+        fields (even legacy ones) must not be echoed back - resending them
+        can make AIDP reject the update."""
+        current = {"prompt_language": "chinese", "retrieve_subgraph_hop": True}
+        result = aidp_service_module.merge_graph_config_update(
+            current, {"llm_model_name": "gpt-4o"}
+        )
+        merged = json.loads(result)
+        assert merged == {"llm_model_name": "gpt-4o"}
+
+    @pytest.mark.parametrize(
+        "updates",
+        [
+            {"retrieve_subgraph_hop": 4},
+            {"retrieve_subgraph_hop": "2"},
+            {"retrieve_subgraph_hop": True},
+            {"llm_model_name": "   "},
+            {"llm_model_name": 7},
+            {"no_think_mode": "是"},
+            {"synonym_merge_enable": 1},
+            {"disambiguation_enable": None},
+            {"domain": "常规"},
+        ],
+    )
+    def test_rejects_invalid_updates(self, aidp_service_module, updates):
+        with pytest.raises(AppException) as exc_info:
+            aidp_service_module.merge_graph_config_update({}, updates)
+        assert exc_info.value.error_code == ErrorCode.COMMON_PARAMETER_INVALID
+
+
 class TestGetAidpGraphTemplateImpl:
     """The graph-template client validates language and maps upstream failures."""
 
@@ -1101,6 +1192,20 @@ class TestGetAidpGraphTemplateImpl:
             )
 
         assert exc_info.value.error_code == ErrorCode.AIDP_RESPONSE_ERROR
+
+    def test_success_returns_the_template_payload(self, aidp_service_module):
+        template = {"value": [{"param_key": "domain"}]}
+        response = MagicMock(status_code=200)
+        response.raise_for_status.return_value = None
+        response.json.return_value = template
+        self._configure_client(aidp_service_module, response)
+
+        result = aidp_service_module.get_aidp_graph_template_impl(
+            "http://aidp.example.test", "api-key", language="english"
+        )
+
+        assert result == template
+        assert response.raise_for_status.called
 
     def test_maps_connection_error(self, aidp_service_module):
         request = httpx.Request("GET", "http://aidp.example.test")
@@ -3081,8 +3186,11 @@ class TestListAidpDocHistoryImpl:
 
         assert result["value"][0]["status"] == "COMPLETED"
 
-    def test_non_string_status_values_are_ignored(self, aidp_service_module):
-        """Numeric state vocabularies must not be mistaken for a file status."""
+    def test_integer_status_from_alias_keys_is_kept(self, aidp_service_module):
+        """AIDP deployments also report the numeric 1-5 contract as plain
+        integers; dropping them left upload-task rows without a status and
+        rendered "unknown" status with an empty actions column. A blank canonical
+        ``status`` still defers to the alias keys."""
         mock_resp = _make_success_response({
             "value": [{"file_ino_no": "f-1", "file_state": 4, "status": None}],
         })
@@ -3096,7 +3204,7 @@ class TestListAidpDocHistoryImpl:
             kds_id=self._KB,
         )
 
-        assert "status" not in result["value"][0]
+        assert result["value"][0]["status"] == "4"
 
 
 
@@ -3241,3 +3349,593 @@ class TestListAidpDocHistoryImpl:
                 kds_id=self._KB,
             )
         assert exc_info.value.error_code == ErrorCode.AIDP_RESPONSE_ERROR
+
+
+# ---------------------------------------------------------------------------
+# Coverage completion: upstream-error helpers, graph serialization success,
+# create payload, delete 404, retry endpoint, stream lifecycle, channel
+# reference helpers and fusion retrieval
+# ---------------------------------------------------------------------------
+
+
+class TestNormalizeUpstreamError:
+    """List-shaped upstream errors are joined into one readable reason."""
+
+    def test_list_of_strings_is_joined_with_semicolons(self, aidp_service_module):
+        assert aidp_service_module._normalize_upstream_error(["a b", "c"]) == "a b; c"
+
+    def test_list_skips_items_without_a_reason(self, aidp_service_module):
+        assert aidp_service_module._normalize_upstream_error(["ok", 7, None]) == "ok"
+
+    def test_list_of_dicts_reads_known_keys(self, aidp_service_module):
+        value = [{"message": "first"}, {"reason_en": "second"}]
+        assert aidp_service_module._normalize_upstream_error(value) == "first; second"
+
+    def test_empty_list_returns_none(self, aidp_service_module):
+        assert aidp_service_module._normalize_upstream_error([]) is None
+
+    def test_whitespace_only_string_returns_none(self, aidp_service_module):
+        assert aidp_service_module._normalize_upstream_error("   ") is None
+
+    def test_dict_without_known_keys_returns_none(self, aidp_service_module):
+        assert aidp_service_module._normalize_upstream_error({"foo": "bar"}) is None
+
+
+class TestExtractUploadFailuresEdgeCases:
+    """Per-file failure extraction tolerates malformed upstream bodies."""
+
+    @staticmethod
+    def _response(payload):
+        return httpx.Response(
+            400, json=payload, request=httpx.Request("POST", "http://127.0.0.1:30081")
+        )
+
+    def test_unparseable_body_returns_no_failures(self, aidp_service_module):
+        response = httpx.Response(
+            400,
+            content=b"<not-json>",
+            request=httpx.Request("POST", "http://127.0.0.1:30081"),
+        )
+        assert aidp_service_module._extract_upload_failures(response) == []
+
+    @pytest.mark.parametrize(
+        "payload",
+        [
+            [1, 2],
+            {"error": "plain string"},
+            {"error": {"details": "not-a-list"}},
+        ],
+    )
+    def test_malformed_payload_shapes_return_no_failures(
+        self, aidp_service_module, payload
+    ):
+        assert (
+            aidp_service_module._extract_upload_failures(self._response(payload)) == []
+        )
+
+    def test_non_dict_detail_items_are_skipped(self, aidp_service_module):
+        response = self._response(
+            {"error": {"details": ["junk", {"file_name": "a.pdf", "reason_en": "r"}]}}
+        )
+        failures = aidp_service_module._extract_upload_failures(response)
+        assert failures == [{"file_name": "a.pdf", "reason_zh": "r", "reason_en": "r"}]
+
+    @pytest.mark.parametrize(
+        "item",
+        [
+            {"reason_en": "no file name"},
+            {"file_name": "a.pdf"},
+            {"file_name": "   ", "reason_en": "r"},
+        ],
+    )
+    def test_items_without_file_name_or_reason_are_skipped(
+        self, aidp_service_module, item
+    ):
+        response = self._response({"error": {"details": [item]}})
+        assert aidp_service_module._extract_upload_failures(response) == []
+
+    def test_filename_alias_and_reason_fallback_are_normalized(
+        self, aidp_service_module
+    ):
+        response = self._response(
+            {
+                "error": {
+                    "message": "upload rejected",
+                    "details": [{"filename": "  a.pdf  ", "reason_zh": "解析失败"}],
+                }
+            }
+        )
+        failures = aidp_service_module._extract_upload_failures(response)
+        assert failures == [
+            {"file_name": "a.pdf", "reason_zh": "解析失败", "reason_en": "解析失败"}
+        ]
+
+
+class TestTimestampOrIsoEdgeCases:
+    """Blank strings drop out; ISO strings survive verbatim."""
+
+    def test_blank_string_returns_none(self, aidp_service_module):
+        assert aidp_service_module._timestamp_or_iso("   ") is None
+
+    def test_iso_string_is_kept_verbatim(self, aidp_service_module):
+        assert (
+            aidp_service_module._timestamp_or_iso("2026-10-16T08:00:00Z")
+            == "2026-10-16T08:00:00Z"
+        )
+
+    def test_numeric_string_is_parsed_as_a_timestamp(self, aidp_service_module):
+        result = aidp_service_module._timestamp_or_iso("1718000000")
+        assert result is not None
+        assert result != "1718000000"
+        assert result.startswith("2024-")
+
+
+class TestFetchAllAidpKnowledgeBasesImplEdgeCases:
+    """Catalogue guards beyond the happy-path pagination tests."""
+
+    @pytest.fixture(autouse=True)
+    def mock_count(self, aidp_service_module, monkeypatch):
+        monkeypatch.setattr(
+            aidp_service_module, "count_aidp_kbs_impl", MagicMock(return_value=1)
+        )
+
+    def test_rejects_catalogues_beyond_the_pagination_limit(self, aidp_service_module):
+        aidp_service_module.count_aidp_kbs_impl.return_value = 100_001
+        mock_client = _setup_mock_client(aidp_service_module)
+
+        with pytest.raises(AppException) as exc_info:
+            aidp_service_module.fetch_all_aidp_knowledge_bases_impl(
+                server_url="http://127.0.0.1:30081",
+                api_key="jwt-token",
+            )
+        assert exc_info.value.error_code == ErrorCode.AIDP_RESPONSE_ERROR
+        mock_client.get.assert_not_called()
+
+    def test_keeps_items_without_a_usable_kds_id(self, aidp_service_module):
+        page = _make_success_response(
+            {"value": ["raw-item", {"name": "no-id-here"}, {"kds_id": "kb-1"}]}
+        )
+        _setup_mock_client(aidp_service_module, response=page)
+
+        result = aidp_service_module.fetch_all_aidp_knowledge_bases_impl(
+            server_url="http://127.0.0.1:30081",
+            api_key="jwt-token",
+        )
+
+        assert result["value"] == [
+            "raw-item",
+            {"name": "no-id-here"},
+            {"kds_id": "kb-1"},
+        ]
+
+
+class TestSerializeGraphConfigSuccess:
+    """A documented configuration round-trips into the AIDP JSON string."""
+
+    BASE: ClassVar[dict] = {
+        "domain": "常规",
+        "retrieve_subgraph_hop": "2",
+        "no_think_mode": "是",
+        "prompt_language": "中文",
+        "prompt_text": "提取实体关系。",
+        "synonym_merge_enable": "否",
+        "disambiguation_enable": "是",
+        "llm_model_name": "qwen3_8b",
+    }
+
+    def test_success_serializes_every_documented_field(self, aidp_service_module):
+        serialized = aidp_service_module._serialize_graph_config(dict(self.BASE))
+        assert json.loads(serialized) == self.BASE
+
+    def test_prompt_text_at_the_character_limit_is_accepted(self, aidp_service_module):
+        config = dict(self.BASE, prompt_text="x" * 4096)
+        serialized = aidp_service_module._serialize_graph_config(config)
+        assert json.loads(serialized)["prompt_text"] == "x" * 4096
+
+    @pytest.mark.parametrize(
+        "override",
+        [
+            {"unexpected_field": 1},
+            {"domain": "   "},
+            {"prompt_language": "english"},
+            {"prompt_text": ""},
+            {"prompt_text": "x" * 4097},
+            {"retrieve_subgraph_hop": "4"},
+            {"no_think_mode": "yes"},
+            {"synonym_merge_enable": "true"},
+            {"disambiguation_enable": True},
+            {"llm_model_name": "   "},
+        ],
+    )
+    def test_rejects_out_of_contract_values(self, aidp_service_module, override):
+        config = dict(self.BASE, **override)
+        with pytest.raises(AppException) as exc_info:
+            aidp_service_module._serialize_graph_config(config)
+        assert exc_info.value.error_code == ErrorCode.COMMON_PARAMETER_INVALID
+
+
+class TestPrepareCreatePayload:
+    """Creation settings are converted into the AIDP request format."""
+
+    GRAPH_CONFIG: ClassVar[dict] = {
+        "domain": "常规",
+        "retrieve_subgraph_hop": "2",
+        "no_think_mode": "是",
+        "prompt_language": "中文",
+        "prompt_text": "提取实体关系。",
+        "synonym_merge_enable": "否",
+        "disambiguation_enable": "是",
+        "llm_model_name": "qwen3_8b",
+    }
+
+    def test_graph_enabled_serializes_config_and_keeps_vlm_model(
+        self, aidp_service_module
+    ):
+        payload = {
+            "caption_enable": True,
+            "vlm_model": "qwen-vlm",
+            "is_exist_graph": True,
+            "graph_config": dict(self.GRAPH_CONFIG),
+            "name": "kb",
+        }
+        result = aidp_service_module._prepare_create_payload(payload)
+        assert result["graph_config"] == aidp_service_module._serialize_graph_config(
+            self.GRAPH_CONFIG
+        )
+        assert result["vlm_model"] == "qwen-vlm"
+        assert result["name"] == "kb"
+
+    def test_caption_disabled_clears_vlm_model(self, aidp_service_module):
+        payload = {
+            "caption_enable": False,
+            "vlm_model": "qwen-vlm",
+            "is_exist_graph": False,
+        }
+        result = aidp_service_module._prepare_create_payload(payload)
+        assert result["vlm_model"] == ""
+
+    def test_graph_enabled_without_a_dict_config_raises(self, aidp_service_module):
+        payload = {
+            "caption_enable": False,
+            "vlm_model": "",
+            "is_exist_graph": True,
+            "graph_config": "not-a-dict",
+        }
+        with pytest.raises(AppException) as exc_info:
+            aidp_service_module._prepare_create_payload(payload)
+        assert exc_info.value.error_code == ErrorCode.COMMON_PARAMETER_INVALID
+
+    def test_graph_disabled_drops_the_config_key(self, aidp_service_module):
+        payload = {
+            "caption_enable": False,
+            "vlm_model": "",
+            "is_exist_graph": False,
+            "graph_config": {"domain": "常规"},
+        }
+        result = aidp_service_module._prepare_create_payload(payload)
+        assert "graph_config" not in result
+
+
+class TestDeleteAidpKbImplMissingUpstream:
+    """A KB already absent upstream is a successful delete."""
+
+    def test_404_is_treated_as_success(self, aidp_service_module):
+        response = httpx.Response(
+            404, request=httpx.Request("DELETE", "http://127.0.0.1:30081")
+        )
+        _setup_mock_client(aidp_service_module, method="delete", response=response)
+
+        result = aidp_service_module.delete_aidp_kb_impl(
+            server_url="http://127.0.0.1:30081",
+            api_key="jwt-token",
+            kds_id="kb-1",
+        )
+
+        assert result is True
+
+
+class TestRetryAidpDocsImpl:
+    """Retry failed knowledge files through the documented array body."""
+
+    def _call(self, module, **overrides):
+        kwargs = {
+            "server_url": "http://127.0.0.1:30081",
+            "api_key": "jwt-token",
+            "kds_id": "kb-1",
+            "file_uuids": ["u-1"],
+        }
+        kwargs.update(overrides)
+        return module.retry_aidp_docs_impl(**kwargs)
+
+    def test_success_posts_documented_array_body(self, aidp_service_module):
+        mock_resp = _make_success_response({"value": []})
+        mock_client = _setup_mock_client(
+            aidp_service_module, method="post", response=mock_resp
+        )
+
+        result = self._call(aidp_service_module, file_uuids=["u-1", "u-2"])
+
+        assert result == {"value": []}
+        call_args = mock_client.post.call_args
+        assert call_args[0][0] == (
+            "http://127.0.0.1:30081/KnowledgeBase/Tenants/aidp"
+            "/KnowledgeBases/kb-1/KnowledgeFiles/Retry"
+        )
+        assert call_args.kwargs["json"] == {
+            "retry_file_info": [{"file_uuid": "u-1"}, {"file_uuid": "u-2"}]
+        }
+        assert call_args.kwargs["headers"]["Authorization"] == "Bearer jwt-token"
+
+    @pytest.mark.parametrize(
+        "server_url,api_key",
+        [("", "jwt-token"), ("http://127.0.0.1:30081", ""), ("ftp://x", "jwt-token")],
+    )
+    def test_invalid_config_raises_without_request(
+        self, aidp_service_module, server_url, api_key
+    ):
+        mock_client = _setup_mock_client(aidp_service_module, method="post")
+
+        with pytest.raises(AppException) as exc_info:
+            self._call(aidp_service_module, server_url=server_url, api_key=api_key)
+
+        assert exc_info.value.error_code == ErrorCode.AIDP_CONFIG_INVALID
+        mock_client.post.assert_not_called()
+
+    def test_non_dict_response_raises(self, aidp_service_module):
+        mock_resp = _make_success_response([1, 2])
+        _setup_mock_client(aidp_service_module, method="post", response=mock_resp)
+
+        with pytest.raises(AppException) as exc_info:
+            self._call(aidp_service_module)
+
+        assert exc_info.value.error_code == ErrorCode.AIDP_RESPONSE_ERROR
+
+    @pytest.mark.parametrize(
+        "status_code,expected",
+        [
+            (401, ErrorCode.AIDP_AUTH_ERROR),
+            (403, ErrorCode.AIDP_AUTH_ERROR),
+            (429, ErrorCode.AIDP_RATE_LIMIT),
+            (500, ErrorCode.AIDP_SERVICE_ERROR),
+        ],
+    )
+    def test_http_errors_are_mapped(self, aidp_service_module, status_code, expected):
+        _setup_mock_client(
+            aidp_service_module,
+            method="post",
+            side_effect=_make_http_error(status_code, method="POST"),
+        )
+
+        with pytest.raises(AppException) as exc_info:
+            self._call(aidp_service_module)
+
+        assert exc_info.value.error_code == expected
+
+    def test_connection_error(self, aidp_service_module):
+        request = httpx.Request("POST", "http://127.0.0.1:30081")
+        _setup_mock_client(
+            aidp_service_module,
+            method="post",
+            side_effect=httpx.RequestError("network down", request=request),
+        )
+
+        with pytest.raises(AppException) as exc_info:
+            self._call(aidp_service_module)
+
+        assert exc_info.value.error_code == ErrorCode.AIDP_CONNECTION_ERROR
+
+    def test_json_parse_value_error(self, aidp_service_module):
+        mock_resp = _make_success_response({})
+        mock_resp.json.side_effect = ValueError("bad json")
+        _setup_mock_client(aidp_service_module, method="post", response=mock_resp)
+
+        with pytest.raises(AppException) as exc_info:
+            self._call(aidp_service_module)
+
+        assert exc_info.value.error_code == ErrorCode.AIDP_RESPONSE_ERROR
+
+
+class TestStreamAidpDocImplLifecycle:
+    """A failure while draining an error body still closes the stream."""
+
+    @pytest.mark.asyncio
+    async def test_error_body_read_failure_closes_response(self, aidp_service_module):
+        response = MagicMock(status_code=500)
+        response.aread = AsyncMock(side_effect=httpx.RequestError("read failed"))
+        response.aclose = AsyncMock()
+        _setup_mock_async_client(aidp_service_module, response=response)
+
+        with pytest.raises(AppException) as exc_info:
+            await aidp_service_module.stream_aidp_doc_impl(
+                "http://127.0.0.1:30081", "jwt-token", "kb-1", "uuid-1"
+            )
+
+        assert exc_info.value.error_code == ErrorCode.AIDP_CONNECTION_ERROR
+        response.aread.assert_awaited_once()
+        response.aclose.assert_awaited_once()
+
+
+class TestChannelReferenceHelpers:
+    """Channel-to-KB reference matching tolerates exotic field values."""
+
+    @pytest.mark.parametrize("value", [123, 12.5, True, None, {"kds_id": "kb-1"}])
+    def test_values_that_are_neither_string_nor_list_do_not_match(
+        self, aidp_service_module, value
+    ):
+        assert aidp_service_module._references_kb_id(value, "kb-1") is False
+
+    def test_lookup_channel_field_ignores_nested_dict_without_known_keys(
+        self, aidp_service_module
+    ):
+        item = {"meta": {"foo": "bar"}}
+        assert (
+            aidp_service_module._lookup_channel_field(
+                item, aidp_service_module._CHANNEL_FS_ID_KEYS
+            )
+            is None
+        )
+
+
+class TestFusionSearchImpl:
+    """Server-side FusionSearch retrieval mirrors the SDK wire contract."""
+
+    RECORDS: ClassVar[list] = [{"title": "a", "text": "x"}, {"title": "b", "text": "y"}]
+
+    def _call(self, module, **overrides):
+        kwargs = {
+            "server_url": "http://127.0.0.1:30081",
+            "api_key": "jwt-token",
+            "query": "q1",
+            "kds_list": ["k1"],
+        }
+        kwargs.update(overrides)
+        return module.fusion_search_impl(**kwargs)
+
+    def test_posts_documented_payload_and_returns_records(self, aidp_service_module):
+        mock_resp = _make_success_response({"result": self.RECORDS})
+        mock_client = _setup_mock_client(
+            aidp_service_module, method="post", response=mock_resp
+        )
+
+        result = self._call(
+            aidp_service_module,
+            tenant_id="custom",
+            kds_list=["k1", 2],
+            top_k=5,
+            score_threshold=0.3,
+            reranking_enable=False,
+            rewrite_enable=True,
+            related_search_enable=True,
+            multi_modal=True,
+        )
+
+        assert result == self.RECORDS
+        call_args = mock_client.post.call_args
+        assert call_args[0][0] == (
+            "http://127.0.0.1:30081/KnowledgeBase/Tenants/custom"
+            "/Retrieval/FusionSearch"
+        )
+        assert call_args.kwargs["json"] == {
+            "query": "q1",
+            "kds_list": ["k1", "2"],
+            "search_method": "hybrid_search",
+            "reranking_enable": False,
+            "rewrite_enable": True,
+            "related_search_enable": True,
+            "score_threshold": 0.3,
+            "top_k": 5,
+            "multi_modal": True,
+        }
+        assert call_args.kwargs["headers"]["Authorization"] == "Bearer jwt-token"
+
+    def test_default_tenant_is_used_when_not_overridden(self, aidp_service_module):
+        mock_resp = _make_success_response({"result": []})
+        mock_client = _setup_mock_client(
+            aidp_service_module, method="post", response=mock_resp
+        )
+
+        self._call(aidp_service_module)
+
+        assert (
+            "/KnowledgeBase/Tenants/aidp/Retrieval/FusionSearch"
+            in mock_client.post.call_args[0][0]
+        )
+
+    def test_missing_result_field_returns_empty_list(self, aidp_service_module):
+        mock_resp = _make_success_response({"value": []})
+        _setup_mock_client(aidp_service_module, method="post", response=mock_resp)
+
+        assert self._call(aidp_service_module) == []
+
+    def test_non_list_result_field_returns_empty_list(self, aidp_service_module):
+        mock_resp = _make_success_response({"result": "junk"})
+        _setup_mock_client(aidp_service_module, method="post", response=mock_resp)
+
+        assert self._call(aidp_service_module) == []
+
+    def test_non_dict_response_returns_empty_list(self, aidp_service_module):
+        mock_resp = _make_success_response([1, 2, 3])
+        _setup_mock_client(aidp_service_module, method="post", response=mock_resp)
+
+        assert self._call(aidp_service_module) == []
+
+    @pytest.mark.parametrize(
+        "status_code,expected",
+        [
+            (401, ErrorCode.AIDP_AUTH_ERROR),
+            (403, ErrorCode.AIDP_AUTH_ERROR),
+            (429, ErrorCode.AIDP_RATE_LIMIT),
+            (500, ErrorCode.AIDP_SERVICE_ERROR),
+        ],
+    )
+    def test_http_errors_are_mapped(self, aidp_service_module, status_code, expected):
+        _setup_mock_client(
+            aidp_service_module,
+            method="post",
+            side_effect=_make_http_error(status_code, method="POST"),
+        )
+
+        with pytest.raises(AppException) as exc_info:
+            self._call(aidp_service_module)
+
+        assert exc_info.value.error_code == expected
+
+    def test_connection_error(self, aidp_service_module):
+        request = httpx.Request("POST", "http://127.0.0.1:30081")
+        _setup_mock_client(
+            aidp_service_module,
+            method="post",
+            side_effect=httpx.RequestError("network down", request=request),
+        )
+
+        with pytest.raises(AppException) as exc_info:
+            self._call(aidp_service_module)
+
+        assert exc_info.value.error_code == ErrorCode.AIDP_CONNECTION_ERROR
+
+    def test_json_parse_value_error(self, aidp_service_module):
+        mock_resp = _make_success_response({})
+        mock_resp.json.side_effect = ValueError("bad json")
+        _setup_mock_client(aidp_service_module, method="post", response=mock_resp)
+
+        with pytest.raises(AppException) as exc_info:
+            self._call(aidp_service_module)
+
+        assert exc_info.value.error_code == ErrorCode.AIDP_RESPONSE_ERROR
+
+
+class TestListAidpModelsImplEmptyService:
+    """An empty service query asks for every category."""
+
+    def test_empty_service_omits_the_service_parameter(self, aidp_service_module):
+        mock_resp = _make_success_response({"models": []})
+        mock_client = _setup_mock_client(
+            aidp_service_module, method="get", response=mock_resp
+        )
+
+        aidp_service_module.list_aidp_models_impl(
+            server_url="http://127.0.0.1:30081", api_key="jwt-token", service=""
+        )
+
+        requested_url = mock_client.get.call_args[0][0]
+        assert "service=" not in requested_url
+        assert "app=KnowledgeBase" in requested_url
+
+
+class TestStreamAidpDocImplSendError:
+    """An HTTP error raised by send itself reports without a response to close."""
+
+    @pytest.mark.asyncio
+    async def test_http_error_without_response_still_maps_the_status(
+        self, aidp_service_module
+    ):
+        _setup_mock_async_client(
+            aidp_service_module, side_effect=_make_http_error(500, method="POST")
+        )
+
+        with pytest.raises(AppException) as exc_info:
+            await aidp_service_module.stream_aidp_doc_impl(
+                "http://127.0.0.1:30081", "jwt-token", "kb-1", "uuid-1"
+            )
+
+        assert exc_info.value.error_code == ErrorCode.AIDP_SERVICE_ERROR

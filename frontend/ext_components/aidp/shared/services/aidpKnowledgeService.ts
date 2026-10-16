@@ -26,10 +26,12 @@ import type {
   AidpDocumentListResponse,
   AidpUploadResponse,
   AidpDocumentRemoveResponse,
+  AidpUploadTaskListResponse,
   AidpModelListResponse,
   AidpCreateKbPayload,
   AidpSetPermissionPayload,
   AidpSaveSettingsResult,
+  AidpUpdateKbPayload,
 } from "../types/management";
 
 function buildUrl(
@@ -272,6 +274,29 @@ class AidpKnowledgeService {
   }
 
   /**
+   * Update a knowledge base via the partial-update endpoint.
+   * Omitted fields are left unchanged on the AIDP side.
+   */
+  async updateKb(
+    id: string,
+    payload: AidpUpdateKbPayload
+  ): Promise<AidpKbDetail> {
+    const url = buildUrl(API_ENDPOINTS.aidpMgmt.kbDetail(id), {});
+
+    const response = await fetchWithErrorHandling(url, {
+      method: "PUT",
+      headers: {
+        ...getAuthHeaders(),
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(payload),
+    });
+    const result = await response.json();
+
+    return result as AidpKbDetail;
+  }
+
+  /**
    * List documents for a knowledge base.
    */
   async listDocs(
@@ -295,12 +320,113 @@ class AidpKnowledgeService {
   }
 
   /**
+   * List only files AIDP confirms as ingested; upload history stays separate.
+   * Backed by the /files endpoint (not the legacy /documents view).
+   */
+  async listIngestedFiles(
+    id: string,
+    page: number = 1,
+    pageSize: number = 10,
+    keyword: string = "",
+    signal?: AbortSignal
+  ): Promise<AidpDocumentListResponse> {
+    const url = buildUrl(API_ENDPOINTS.aidpMgmt.kbFiles(id), {
+      page,
+      page_size: pageSize,
+      keyword,
+    });
+    const response = await fetchWithErrorHandling(url, {
+      method: "GET",
+      headers: getAuthHeaders(),
+      signal,
+    });
+    const result = await response.json();
+    return {
+      value: Array.isArray(result.value) ? result.value : [],
+      total_count:
+        typeof result.total_count === "number" ? result.total_count : 0,
+      has_more:
+        typeof result.has_more === "boolean" ? result.has_more : undefined,
+      total_reliable: result.total_reliable !== false,
+    };
+  }
+
+  /**
+   * Read the recent AIDP upload history, separate from the ingested file list.
+   */
+  async listUploadTasks(
+    id: string,
+    page: number = 1,
+    pageSize: number = 10,
+    keyword: string = "",
+    status: number = 0,
+    signal?: AbortSignal
+  ): Promise<AidpUploadTaskListResponse> {
+    const url = buildUrl(API_ENDPOINTS.aidpMgmt.kbUploadTasks(id), {
+      page,
+      page_size: pageSize,
+      keyword,
+      status,
+    });
+    const response = await fetchWithErrorHandling(url, {
+      method: "GET",
+      headers: getAuthHeaders(),
+      signal,
+    });
+    const result = await response.json();
+    return {
+      value: Array.isArray(result.value) ? result.value : [],
+      total_count: Number(result.total_count) || 0,
+      has_more: result.has_more === true,
+      total_reliable: result.total_reliable !== false,
+      stats: {
+        total: Number(result.stats?.total) || 0,
+        extracting: Number(result.stats?.extracting) || 0,
+        failed: Number(result.stats?.failed) || 0,
+        success: Number(result.stats?.success) || 0,
+        queued: Number(result.stats?.queued) || 0,
+      },
+      retention_days: Number(result.retention_days) || 30,
+    };
+  }
+
+  /**
+   * Retry selected failed upload tasks in one request.
+   */
+  async retryUploadTasks(
+    id: string,
+    fileUuids: string[]
+  ): Promise<AidpDocumentRemoveResponse> {
+    const url = buildUrl(API_ENDPOINTS.aidpMgmt.retryKbUploadTasks(id), {});
+    const response = await fetchWithErrorHandling(url, {
+      method: "POST",
+      headers: {
+        ...getAuthHeaders(),
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ file_uuids: fileUuids }),
+    });
+    return response.json();
+  }
+
+  /**
    * Remove one document from an AIDP knowledge base.
    * The AIDP API accepts an array, so the single-document UI sends one item.
    */
   async removeDoc(
     id: string,
     fileUuid: string
+  ): Promise<AidpDocumentRemoveResponse> {
+    return this.removeDocs(id, [fileUuid]);
+  }
+
+  /**
+   * Remove multiple documents from an AIDP knowledge base in one request.
+   * AIDP reports per-file outcomes via summary/success_list/failed_list.
+   */
+  async removeDocs(
+    id: string,
+    fileUuids: string[]
   ): Promise<AidpDocumentRemoveResponse> {
     const url = buildUrl(API_ENDPOINTS.aidpMgmt.removeKbDocuments(id), {});
     const response = await fetchWithErrorHandling(url, {
@@ -309,7 +435,7 @@ class AidpKnowledgeService {
         ...getAuthHeaders(),
         "Content-Type": "application/json",
       },
-      body: JSON.stringify({ file_uuids: [fileUuid] }),
+      body: JSON.stringify({ file_uuids: fileUuids }),
     });
     return response.json();
   }
