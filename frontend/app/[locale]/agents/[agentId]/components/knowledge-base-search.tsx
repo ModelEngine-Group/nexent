@@ -7,7 +7,14 @@ import { useRouter } from "next/navigation";
 import { KnowledgeRetrievalParamsForm } from "@/components/tool-config/KnowledgeRetrievalParamsForm";
 import { useTranslation } from "react-i18next";
 import { Button, Modal, Spin, Tag, Tooltip } from "antd";
-import { Database, ExternalLink, Settings, Trash2, Plus } from "lucide-react";
+import {
+  AlertTriangle,
+  Database,
+  ExternalLink,
+  Settings,
+  Trash2,
+  Plus,
+} from "lucide-react";
 
 import { AddKnowledgeDrawer } from "@/components/resource-picker/AddKnowledgeDrawer";
 import { useDeployment } from "@/components/providers/deploymentProvider";
@@ -133,6 +140,7 @@ interface SelectedKnowledgeBase {
   id: string;
   displayName: string;
   knowledgeBase?: KnowledgeBase;
+  isUnavailable: boolean;
 }
 
 interface KnowledgeBaseConfigState {
@@ -222,6 +230,7 @@ function useKnowledgeBaseConfigState(): KnowledgeBaseConfigState | null {
         selectedDisplayNames[index] ||
         id,
       knowledgeBase,
+      isUnavailable: !isLoading && !isError && !knowledgeBase,
     };
   });
   const requiresReselection =
@@ -312,6 +321,20 @@ function useKnowledgeBaseConfigState(): KnowledgeBaseConfigState | null {
     onKnowledgeBaseRemove,
     onParamChange,
   };
+}
+
+function KnowledgeBaseUnavailableWarning({ message }: { message: string }) {
+  return (
+    <Tooltip title={message}>
+      <span
+        role="img"
+        aria-label={message}
+        className="inline-flex shrink-0 cursor-help text-amber-600"
+      >
+        <AlertTriangle size={14} aria-hidden="true" />
+      </span>
+    </Tooltip>
+  );
 }
 
 export function KnowledgeBaseConfigActions() {
@@ -441,6 +464,11 @@ export default function KnowledgeBaseConfig({
                       {selectedKnowledgeBase.displayName}
                     </span>
                   </Tooltip>
+                  {selectedKnowledgeBase.isUnavailable ? (
+                    <KnowledgeBaseUnavailableWarning
+                      message={t("agent.knowledge.unavailableHint")}
+                    />
+                  ) : null}
                   {metadata.length > 0 ? (
                     <Tooltip title={metadata.join(" | ")}>
                       <span
@@ -626,8 +654,15 @@ export default function KnowledgeBaseConfig({
               }
               className="!inline-flex !items-center !gap-1 !whitespace-nowrap !px-2.5 !py-1 !text-sm !text-foreground !bg-primary/5 !border !border-primary/20 !rounded-full transition-colors hover:!border-primary/40 hover:!shadow-sm"
             >
-              <span className="max-w-full truncate">
-                {knowledgeBase.displayName}
+              <span className="inline-flex min-w-0 max-w-full items-center gap-1">
+                <span className="max-w-full truncate">
+                  {knowledgeBase.displayName}
+                </span>
+                {knowledgeBase.isUnavailable ? (
+                  <KnowledgeBaseUnavailableWarning
+                    message={t("agent.knowledge.unavailableHint")}
+                  />
+                ) : null}
               </span>
             </Tag>
           ))}

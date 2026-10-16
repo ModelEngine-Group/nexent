@@ -324,6 +324,8 @@ export const API_ENDPOINTS = {
     summaryFrequencyOptions: `${API_BASE_URL}/indices/summary_frequency_options`,
     indices: `${API_BASE_URL}/indices`,
     checkName: `${API_BASE_URL}/indices/check_exist`,
+    boundAgents: (indexName: string) =>
+      `${API_BASE_URL}/indices/${encodeURIComponent(indexName)}/bound_agents`,
     listFiles: (indexName: string) =>
       `${API_BASE_URL}/indices/${indexName}/files`,
     indexDetail: (indexName: string) => `${API_BASE_URL}/indices/${indexName}`,
@@ -386,6 +388,8 @@ export const API_ENDPOINTS = {
     knowledgeBases: `${API_BASE_URL}/ind-aidp/knowledge-bases/list`,
   },
   aidpMgmt: {
+    boundAgents: (id: string) =>
+      `${API_BASE_URL}/aidp-mgmt/knowledge-bases/${encodeURIComponent(id)}/bound_agents`,
     knowledgeBases: `${API_BASE_URL}/aidp-mgmt/knowledge-bases`,
     kbCount: `${API_BASE_URL}/aidp-mgmt/knowledge-bases/count`,
     kbDetail: (id: string) => `${API_BASE_URL}/aidp-mgmt/knowledge-bases/${id}`,

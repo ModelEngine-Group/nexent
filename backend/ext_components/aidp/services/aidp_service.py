@@ -17,6 +17,10 @@ from nexent.utils.http_client_manager import http_client_manager
 from consts.const import AIDP_TENANT_ID
 from consts.error_code import ErrorCode
 from consts.exceptions import AppException
+from database.agent_db import query_knowledge_binding_agents
+from database.client import get_db_session
+from database.conversation_db import remove_conversation_knowledge_bindings
+from database.tool_db import remove_tool_knowledge_references
 
 
 logger = logging.getLogger("aidp_service")
@@ -1261,6 +1265,11 @@ def update_aidp_kb_impl(
         )
 
 
+def get_bound_agents(kds_ids: list[str], *, tenant_id: str) -> dict:
+    """Preview agents affected by deleting the selected knowledge bases."""
+    return {"agents": query_knowledge_binding_agents(kds_ids=kds_ids, tenant_id=tenant_id)}
+
+
 def delete_aidp_kb_impl(
     server_url: str,
     api_key: str,
@@ -1291,7 +1300,6 @@ def delete_aidp_kb_impl(
         )
         response = client.delete(delete_url, headers=headers)
         response.raise_for_status()
-        return True
     except httpx.RequestError as e:
         logger.exception("AIDP request failed: %s", e)
         raise AppException(
@@ -1320,11 +1328,19 @@ def delete_aidp_kb_impl(
                 "treating delete as success",
                 kds_id,
             )
-            return True
-        raise AppException(
-            ErrorCode.AIDP_SERVICE_ERROR,
-            f"AIDP API HTTP error {e.response.status_code}: {str(e)}",
-        )
+        else:
+            raise AppException(
+                ErrorCode.AIDP_SERVICE_ERROR,
+                f"AIDP API HTTP error {e.response.status_code}: {str(e)}",
+            )
+
+    try:
+        with get_db_session() as session:
+            remove_tool_knowledge_references(session, kds_ids=[kds_id])
+            remove_conversation_knowledge_bindings(session, kds_ids=[kds_id])
+    except Exception as exc:  # noqa: BLE001 - Binding cleanup must not fail knowledge-base deletion.
+        logger.warning("Failed to clean up bindings for deleted AIDP knowledge base '%s': %s", kds_id, exc)
+    return True
 
 
 def upload_aidp_docs_impl(

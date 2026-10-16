@@ -1,3 +1,5 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 "use client";
 
 import type React from "react";
@@ -43,6 +45,7 @@ import type { KBQuotaStatus, QuotaUsageResponse } from "@/types/quota";
 
 import KnowledgeBaseList from "./components/knowledge/KnowledgeBaseList";
 import DocumentList from "./components/document/DocumentList";
+import KnowledgeBaseDeleteNotice from "@/components/knowledge-base/KnowledgeBaseDeleteNotice";
 import {
   useKnowledgeBaseContext,
   KnowledgeBaseProvider,
@@ -608,7 +611,7 @@ function DataConfig({ isActive }: DataConfigProps) {
   };
 
   // Handle knowledge base deletion
-  const handleDelete = (id: string) => {
+  const handleDelete = async (id: string) => {
     // Find the knowledge base to check its source
     const kb = kbState.knowledgeBases.find((kb) => kb.id === id);
 
@@ -623,11 +626,20 @@ function DataConfig({ isActive }: DataConfigProps) {
       return;
     }
 
+    // Deletion cascades: the dialog lists the agents that lose their binding,
+    // plus a fixed notice for conversations.
+    const preview = await knowledgeBaseService.previewBoundAgents(id);
+
     // Normal delete confirmation for local knowledge bases
     confirm({
-      title: t("knowledgeBase.modal.deleteConfirm.title"),
-      content: t("knowledgeBase.modal.deleteConfirm.content"),
-      okText: t("common.confirm"),
+      title: t("knowledgeBase.modal.deleteConfirm.title", { name: kb?.name ?? id }),
+      content: (
+        <div>
+          <div>{t("knowledgeBase.modal.deleteConfirm.content")}</div>
+          <KnowledgeBaseDeleteNotice preview={preview} />
+        </div>
+      ),
+      okText: t("knowledgeBase.modal.deleteConfirm.confirm"),
       cancelText: t("common.cancel"),
       danger: true,
       onOk: async () => {

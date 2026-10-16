@@ -1,5 +1,6 @@
 // Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
+import type { KnowledgeBaseDeletionPreview } from "@/types/knowledgeBase";
 /**
  * AIDP Knowledge Base Management Service
  *
@@ -49,6 +50,24 @@ function buildUrl(
 // ---------- Service class ----------
 
 class AidpKnowledgeService {
+  async previewBoundAgents(
+    id: string
+  ): Promise<KnowledgeBaseDeletionPreview | null> {
+    try {
+      const response = await fetchWithErrorHandling(
+        API_ENDPOINTS.aidpMgmt.boundAgents(id),
+        {
+          method: "GET",
+          headers: getAuthHeaders(),
+        }
+      );
+      return await response.json();
+    } catch (error) {
+      log.warn("Knowledge base deletion preview unavailable:", error);
+      return null;
+    }
+  }
+
   /**
    * List knowledge bases (paginated), optionally filtered by name.
    *

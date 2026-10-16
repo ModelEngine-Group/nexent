@@ -44,6 +44,8 @@ import log from "@/lib/logger";
 import { ConversationTitleGuard } from "@/lib/conversationTitle";
 import { resolveAgentDeepLinkAction } from "@/lib/agentUsageGuide";
 import { usePublishedAgentList } from "@/hooks/agent/usePublishedAgentList";
+import { useComposerKnowledgeBases } from "@/hooks/chat/useComposerResources";
+import { useDeployment } from "@/components/providers/deploymentProvider";
 import { useConfig } from "@/hooks/useConfig";
 import { ServerDictationAdapter } from "./adapter/server-dictation-adapter";
 import type { STTModelConfig } from "@/types/modelConfig";
@@ -206,6 +208,10 @@ const HomeContent: FC<{
     useState<KnowledgeScopeEffectivePreview | null>(null);
   const [knowledgeCapabilities, setKnowledgeCapabilities] =
     useState<KnowledgeCapabilities | null>(null);
+  const { enableAidpKnowledge } = useDeployment();
+  // Observe the composer's catalog updates without starting another list request.
+  const { dataUpdatedAt: knowledgeCatalogUpdatedAt } =
+    useComposerKnowledgeBases(false, enableAidpKnowledge);
   const [runtimeMetadata, setRuntimeMetadata] = useState<
     Record<string, unknown>
   >({});
@@ -218,6 +224,9 @@ const HomeContent: FC<{
   const knowledgePreviewsRef = useRef<
     Map<string, KnowledgeScopeEffectivePreview | null>
   >(new Map());
+  // Skip resync during saves and discard reads started before a newer read or save.
+  const knowledgeScopeSavingRef = useRef(false);
+  const knowledgeScopeSyncRevisionRef = useRef(0);
 
   // All hooks must be called before any early returns
   const runtimeMainThreadId = useAuiState((s) => s.threads.mainThreadId);
@@ -365,7 +374,7 @@ const HomeContent: FC<{
     return () => {
       cancelled = true;
     };
-  }, [selectedAgent]);
+  }, [selectedAgent, knowledgeCatalogUpdatedAt]);
 
   useEffect(() => {
     if (!activeThreadId) {
@@ -415,6 +424,52 @@ const HomeContent: FC<{
 
     return () => {
       cancelled = true;
+    };
+  }, [activeConversationId, activeThreadId]);
+
+  // Resync the conversation's saved knowledge selection whenever the page
+  // becomes visible again. Deletion cascades on the server, so a knowledge
+  // base removed from another page or browser is already gone from the stored
+  // scope; this read makes it disappear from the composer without a refresh.
+  useEffect(() => {
+    let cancelled = false;
+    const resyncKnowledgeScope = () => {
+      if (document.visibilityState !== "visible") return;
+      if (knowledgeScopeSavingRef.current) return;
+      const numericConversationId = Number(activeConversationId);
+      if (
+        !Number.isInteger(numericConversationId) ||
+        numericConversationId <= 0
+      ) {
+        return;
+      }
+      const revision = ++knowledgeScopeSyncRevisionRef.current;
+      void conversationService
+        .getById(String(numericConversationId))
+        .then((conversation) => {
+          if (
+            cancelled ||
+            knowledgeScopeSavingRef.current ||
+            revision !== knowledgeScopeSyncRevisionRef.current
+          ) {
+            return;
+          }
+          const serverScope = conversation.knowledge_scope ?? null;
+          if (activeThreadId) {
+            knowledgeScopesRef.current.set(activeThreadId, serverScope);
+            knowledgePreviewsRef.current.set(activeThreadId, null);
+          }
+          setKnowledgeScope(serverScope);
+          setKnowledgePreview(null);
+        })
+        .catch((error) => {
+          log.warn("[HomeContent] Failed to resync knowledge scope:", error);
+        });
+    };
+    document.addEventListener("visibilitychange", resyncKnowledgeScope);
+    return () => {
+      cancelled = true;
+      document.removeEventListener("visibilitychange", resyncKnowledgeScope);
     };
   }, [activeConversationId, activeThreadId]);
 
@@ -503,6 +558,8 @@ const HomeContent: FC<{
     ) => {
       const numericConversationId = Number(activeConversationId);
       let nextPreview = preview ?? null;
+      knowledgeScopeSyncRevisionRef.current += 1;
+      knowledgeScopeSavingRef.current = true;
       try {
         if (
           Number.isInteger(numericConversationId) &&
@@ -525,6 +582,8 @@ const HomeContent: FC<{
         log.error("[HomeContent] Failed to update knowledge scope:", error);
         message.error(t("chat.knowledgeScope.saveFailed"));
         throw error;
+      } finally {
+        knowledgeScopeSavingRef.current = false;
       }
     },
     [activeConversationId, activeThreadId, showKnowledgeScopeWarnings, t]
