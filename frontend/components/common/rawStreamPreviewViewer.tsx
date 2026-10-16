@@ -3,7 +3,7 @@
 "use client";
 
 import dynamic from "next/dynamic";
-import { useEffect, useRef, useState } from "react";
+import { Fragment, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Spin } from "antd";
 import type { Fill, Slide as PptxSlide, TableCell } from "pptxtojson";
@@ -17,10 +17,18 @@ import {
 import {
   neutralizeUnsafeLinks,
   officeHtmlToText,
+  percentageOf,
+  pptxGroupRotationStyle,
   resolveStreamPreviewKind,
   sanitizeOfficeHtml,
   type StreamPreviewKind,
 } from "@/lib/officePreview";
+import {
+  buildSheetGrid,
+  columnIndexToLetters,
+  XLSX_MAX_ROWS_PER_SHEET,
+  type SheetGrid,
+} from "@/lib/spreadsheetGrid";
 import log from "@/lib/logger";
 
 const PdfViewer = dynamic(
@@ -38,23 +46,7 @@ const PdfViewer = dynamic(
   }
 );
 
-/** Rows/columns rendered per sheet before the preview is truncated. */
-const XLSX_MAX_ROWS_PER_SHEET = 300;
-const XLSX_MAX_COLUMNS_PER_SHEET = 40;
-
 type PreviewStatus = "loading" | "ready" | "error";
-
-interface SheetCell {
-  text: string;
-  colSpan: number;
-  rowSpan: number;
-}
-
-interface SheetGrid {
-  name: string;
-  rows: (SheetCell | null)[][];
-  truncated: boolean;
-}
 
 /** Parsed pptx backing the slide renderer. */
 type PptxPresentation = {
@@ -83,123 +75,6 @@ export interface RawStreamPreviewViewerProps {
    */
   onAccessError?: (reason: PreviewAccessReason) => boolean;
 }
-
-const columnIndexFromLetters = (letters: string): number => {
-  let index = 0;
-  for (const letter of letters.toUpperCase()) {
-    index = index * 26 + (letter.charCodeAt(0) - 64);
-  }
-  return index - 1;
-};
-
-/** Build the spreadsheet column label for a zero-based index: 0 -> A, 26 -> AA. */
-const columnIndexToLetters = (index: number): string => {
-  let label = "";
-  let remaining = index;
-  do {
-    label = String.fromCharCode(65 + (remaining % 26)) + label;
-    remaining = Math.floor(remaining / 26) - 1;
-  } while (remaining >= 0);
-  return label;
-};
-
-/** Expand an `A1:C3` reference into zero-based bounds. */
-const parseRange = (
-  reference: string
-): { top: number; left: number; bottom: number; right: number } | null => {
-  const match = /^([A-Z]+)(\d+)(?::([A-Z]+)(\d+))?$/i.exec(reference.trim());
-  if (!match) {
-    return null;
-  }
-  const [, startColumn, startRow, endColumn, endRow] = match;
-  return {
-    left: columnIndexFromLetters(startColumn),
-    top: Number.parseInt(startRow, 10) - 1,
-    right: columnIndexFromLetters(endColumn ?? startColumn),
-    bottom: Number.parseInt(endRow ?? startRow, 10) - 1,
-  };
-};
-
-/** Build a display grid for one worksheet, collapsing merged ranges. */
-const buildSheetGrid = (worksheet: import("exceljs").Worksheet): SheetGrid => {
-  const rowCount = Math.min(
-    worksheet.actualRowCount || worksheet.rowCount || 0,
-    XLSX_MAX_ROWS_PER_SHEET
-  );
-  const columnCount = Math.min(
-    worksheet.columnCount || 0,
-    XLSX_MAX_COLUMNS_PER_SHEET
-  );
-
-  const rows: (SheetCell | null)[][] = [];
-  for (let row = 0; row < rowCount; row += 1) {
-    rows.push(new Array<SheetCell | null>(columnCount).fill(null));
-  }
-
-  const merges = (worksheet.model?.merges ?? [])
-    .map((range) => parseRange(range))
-    .filter((range): range is NonNullable<typeof range> => range !== null);
-
-  for (const range of merges) {
-    if (range.top >= rowCount || range.left >= columnCount) {
-      continue;
-    }
-    // Merged ranges outside the rendered window are clipped so the table never
-    // claims a span the viewport does not contain.
-    rows[range.top][range.left] = {
-      // `cell.text` applies the number/date format the document declares.
-      text: worksheet.getCell(range.top + 1, range.left + 1).text,
-      rowSpan: Math.min(range.bottom, rowCount - 1) - range.top + 1,
-      colSpan: Math.min(range.right, columnCount - 1) - range.left + 1,
-    };
-    for (
-      let row = range.top;
-      row <= Math.min(range.bottom, rowCount - 1);
-      row += 1
-    ) {
-      for (
-        let column = range.left;
-        column <= Math.min(range.right, columnCount - 1);
-        column += 1
-      ) {
-        if (row !== range.top || column !== range.left) {
-          rows[row][column] = null;
-        }
-      }
-    }
-  }
-
-  for (let row = 0; row < rowCount; row += 1) {
-    for (let column = 0; column < columnCount; column += 1) {
-      if (rows[row][column] !== null) {
-        continue;
-      }
-      const cell = worksheet.getCell(row + 1, column + 1);
-      if (
-        cell.isMerged &&
-        cell.master &&
-        cell.master.address !== cell.address
-      ) {
-        // Continuation of a merge whose anchor sits outside the window.
-        rows[row][column] = null;
-        continue;
-      }
-      rows[row][column] = {
-        text: cell.text,
-        colSpan: 1,
-        rowSpan: 1,
-      };
-    }
-  }
-
-  return {
-    name: worksheet.name,
-    rows,
-    truncated:
-      (worksheet.actualRowCount || worksheet.rowCount || 0) > rowCount ||
-      (worksheet.columnCount || 0) > columnCount,
-  };
-};
 
 const fillStyle = (fill: Fill | undefined): React.CSSProperties | undefined => {
   if (!fill) {
@@ -232,14 +107,12 @@ const elementPositionStyle = (
   element: PptxSlide["elements"][number],
   size: { width: number; height: number }
 ): React.CSSProperties => {
-  const widthRatio = size.width > 0 ? 100 / size.width : 0;
-  const heightRatio = size.height > 0 ? 100 / size.height : 0;
   const rotate = "rotate" in element ? element.rotate : 0;
   return {
-    left: `${element.left * widthRatio}%`,
-    top: `${element.top * heightRatio}%`,
-    width: `${element.width * widthRatio}%`,
-    height: `${element.height * heightRatio}%`,
+    left: `${percentageOf(element.left, size.width)}%`,
+    top: `${percentageOf(element.top, size.height)}%`,
+    width: `${percentageOf(element.width, size.width)}%`,
+    height: `${percentageOf(element.height, size.height)}%`,
     transform: rotate ? `rotate(${rotate}deg)` : undefined,
   };
 };
@@ -306,6 +179,23 @@ const renderPptxElement = (
           </tbody>
         </table>
       );
+    case "group": {
+      // A group's children already carry absolute slide coordinates - the
+      // parser folds the group offset and scale into them - so they render like
+      // any other element; only a rotation needs a container to carry it.
+      const children = element.elements.map((child, index) =>
+        renderPptxElement(child, size, `${key}-${index}`)
+      );
+      const rotationStyle = pptxGroupRotationStyle(element, size);
+      if (!rotationStyle) {
+        return <Fragment key={key}>{children}</Fragment>;
+      }
+      return (
+        <div key={key} className="absolute inset-0" style={rotationStyle}>
+          {children}
+        </div>
+      );
+    }
     default:
       // Charts, media, diagrams and equations are not rendered by this viewer.
       return null;
@@ -463,6 +353,12 @@ export function RawStreamPreviewViewer(
             ignoreLastRenderedPageBreak: true,
             renderHeaders: true,
             renderFooters: true,
+            // An altChunk embeds raw HTML in the document, and docx-preview
+            // writes it into a srcdoc iframe with no sandbox - script inside the
+            // embedded markup would then run in the preview origin. The
+            // sanitizer and the link pass below only cover the document body,
+            // so embedded chunks stay out of the preview entirely.
+            renderAltChunks: false,
           }
         );
         // docx-preview copies hyperlink targets straight out of the document

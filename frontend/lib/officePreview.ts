@@ -409,3 +409,37 @@ function stripMarkup(markup: string): string {
   }
   return text;
 }
+
+/** Share of a slide one coordinate covers, in percent. */
+export const percentageOf = (value: number, total: number): number =>
+  total > 0 ? (value * 100) / total : 0;
+
+/**
+ * Rotation for a group of shapes, anchored so its children keep their layout.
+ *
+ * `pptxtojson` writes a group's children with absolute slide coordinates - it
+ * folds the group offset and scale into them - so rotating the group means
+ * rotating a full-slide container around the group centre, not around the
+ * centre of the container itself. A group without rotation needs no container
+ * at all and returns `undefined`.
+ */
+export const pptxGroupRotationStyle = (
+  group: {
+    left: number;
+    top: number;
+    width: number;
+    height: number;
+    rotate?: number;
+  },
+  size: { width: number; height: number }
+): { transform: string; transformOrigin: string } | undefined => {
+  if (!group.rotate) {
+    return undefined;
+  }
+  const centerX = percentageOf(group.left + group.width / 2, size.width);
+  const centerY = percentageOf(group.top + group.height / 2, size.height);
+  return {
+    transform: `rotate(${group.rotate}deg)`,
+    transformOrigin: `${centerX}% ${centerY}%`,
+  };
+};
