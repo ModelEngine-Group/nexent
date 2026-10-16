@@ -1,0 +1,19 @@
+schema_version: '1.0'
+case_id: AIDP-FE-GRAPH-01
+implementations:
+- framework: vitest
+  file: test.test.tsx
+  selector: AIDP-FE-GRAPH-01
+acceptance_bindings:
+  AC-01:
+      - AIDP-FE-GRAPH-01 > disabled graph renders the disabled hint without a switch
+  AC-02:
+  - AIDP-FE-GRAPH-01 > graph setting edits send single-field native payloads and
+    refresh
+  AC-03:
+  - AIDP-FE-GRAPH-01 > disabling requires the exact confirmation and locks the graph
+    display
+  AC-04:
+  - AIDP-FE-GRAPH-01 > disable failure keeps the confirmation open for retry
+  AC-05:
+  - AIDP-FE-GRAPH-01 > read-only viewers get a disabled switch and no edit buttons

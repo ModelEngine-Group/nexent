@@ -1,23 +1,18 @@
-"""Shared Agent read projections and availability rules."""
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
-from dataclasses import dataclass
+"""Shared Agent read projections and availability rules."""
 
 from typing import Dict, Optional
 
 from consts.agent_unavailable_reasons import AgentUnavailableReason
+from contracts.agent import AgentModelProjection
 from database.agent_db import search_agent_info_by_agent_id
-from database.model_management_db import get_model_by_model_id_ignore_delete, get_valid_model_ids
+from database.model_management_db import (
+    get_model_by_model_id_ignore_delete,
+    get_valid_model_ids,
+)
 from database.tool_db import check_tool_is_available, search_tools_for_sub_agent
 from management.services.model.resolver import is_model_available, resolve_model_record
-
-
-@dataclass(frozen=True)
-class AgentModelProjection:
-    """Public model fields plus private availability metadata."""
-
-    fields: dict
-    deleted_model_ids: frozenset[int]
-    availability_model_ids: list[int]
 
 
 def project_agent_models(
@@ -51,7 +46,11 @@ def project_agent_models(
             else None
         )
     return AgentModelProjection(
-        fields={"model_ids": available_model_ids, "model_names": names, "model_name": legacy_name},
+        fields={
+            "model_ids": available_model_ids,
+            "model_names": names,
+            "model_name": legacy_name,
+        },
         deleted_model_ids=frozenset(configured_model_ids) - frozenset(model_ids),
         availability_model_ids=model_ids,
     )
@@ -63,7 +62,10 @@ def apply_deleted_model_reason(
     deleted_model_ids: frozenset[int],
 ) -> tuple[bool, list[str]]:
     """Merge the configured-model deletion reason without duplicates."""
-    if deleted_model_ids and AgentUnavailableReason.MODEL_DELETED not in unavailable_reasons:
+    if (
+        deleted_model_ids
+        and AgentUnavailableReason.MODEL_DELETED not in unavailable_reasons
+    ):
         unavailable_reasons.append(AgentUnavailableReason.MODEL_DELETED)
     return not unavailable_reasons and is_available, unavailable_reasons
 
@@ -75,7 +77,11 @@ def tool_has_deleted_model(tool: dict, tenant_id: str) -> bool:
         for param in params:
             if isinstance(param, dict) and param.get("name") == "selected_model_id":
                 model_id = param.get("default")
-                record = get_model_by_model_id_ignore_delete(model_id, tenant_id) if model_id is not None else None
+                record = (
+                    get_model_by_model_id_ignore_delete(model_id, tenant_id)
+                    if model_id is not None
+                    else None
+                )
                 return record is not None and record.get("delete_flag") == "Y"
     return False
 
@@ -98,13 +104,17 @@ def check_agent_availability(
     if tool_ids and not all(check_tool_is_available(tool_ids)):
         reasons.append(AgentUnavailableReason.TOOL_UNAVAILABLE)
     reasons.extend(
-        AgentUnavailableReason.TOOL_UNAVAILABLE for tool in tools if tool_has_deleted_model(tool, tenant_id)
+        AgentUnavailableReason.TOOL_UNAVAILABLE
+        for tool in tools
+        if tool_has_deleted_model(tool, tenant_id)
     )
     model_ids = agent_info.get("model_ids") or []
     if not model_ids:
         reasons.append(AgentUnavailableReason.MODEL_NOT_CONFIGURED)
     else:
-        model_records = [resolve_model_record(mid, tenant_id, cache) for mid in model_ids if mid]
+        model_records = [
+            resolve_model_record(mid, tenant_id, cache) for mid in model_ids if mid
+        ]
         if not any(is_model_available(record) for record in model_records):
             reasons.append(AgentUnavailableReason.MODEL_UNAVAILABLE)
     return not reasons, reasons
@@ -147,5 +157,4 @@ def apply_duplicate_name_availability_rules(enriched_agents: list[dict]) -> None
                 duplicate_entry["unavailable_reasons"].append(reason_key)
 
     _mark_duplicates(name_groups, AgentUnavailableReason.DUPLICATE_NAME)
-    _mark_duplicates(display_name_groups,
-                     AgentUnavailableReason.DUPLICATE_DISPLAY_NAME)
+    _mark_duplicates(display_name_groups, AgentUnavailableReason.DUPLICATE_DISPLAY_NAME)

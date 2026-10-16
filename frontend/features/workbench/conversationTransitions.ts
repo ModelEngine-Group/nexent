@@ -1,3 +1,5 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import type { AssistantRuntime } from "@assistant-ui/react";
 
 const pendingTransitions = new WeakSet<AssistantRuntime>();
@@ -12,8 +14,44 @@ export async function changeCreationThread(
   try {
     if (runtime.thread.getState().isRunning)
       throw new Error("请等待当前回复完成后再切换会话");
+    if (
+      runtime.thread.composer
+        .getState()
+        .attachments.some((attachment) => attachment.status.type === "running")
+    )
+      throw new Error("请等待附件上传完成后再切换会话");
+    const threads = runtime.threads.getState();
+    if (threads.newThreadId) {
+      // Nexent initializes locally; reserving the draft prevents assistant-ui
+      // from reusing the same empty thread for a different creation mode.
+      await runtime.threads.getItemById(threads.newThreadId).initialize();
+    }
     await runtime.threads.switchToNewThread();
     applyMode();
+  } finally {
+    pendingTransitions.delete(runtime);
+  }
+}
+
+/** Returning from creation uses the same serialized transition boundary. */
+export async function returnFromCreation(
+  runtime: AssistantRuntime,
+  threadId: string,
+  restore: () => void
+): Promise<void> {
+  if (pendingTransitions.has(runtime)) throw new Error("会话正在切换，请稍候");
+  pendingTransitions.add(runtime);
+  try {
+    if (runtime.thread.getState().isRunning)
+      throw new Error("请等待当前回复完成后再切换会话");
+    if (
+      runtime.thread.composer
+        .getState()
+        .attachments.some((attachment) => attachment.status.type === "running")
+    )
+      throw new Error("请等待附件上传完成后再切换会话");
+    await runtime.threads.switchToThread(threadId);
+    restore();
   } finally {
     pendingTransitions.delete(runtime);
   }

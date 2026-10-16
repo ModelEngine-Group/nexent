@@ -9,6 +9,7 @@ export interface AidpKbDetail {
   is_multimodal?: boolean;
   caption_enable?: number | null;
   created_at?: string;
+  updated_at?: string | null;
   permission?: "EDIT" | "READ_ONLY" | null;
   ingroup_permission?: "EDIT" | "READ_ONLY" | "PRIVATE";
   group_ids?: number[];
@@ -37,6 +38,14 @@ export interface AidpDocumentItem {
   file_type?: string;
   created_at?: string;
   updated_at?: string;
+  /** Numeric code or uppercase stage name (history rows only). */
+  status?: string | number | null;
+  /** Terminal failure code reported by the history endpoint. */
+  error_code?: string | number | null;
+  /** Failure explanation fields reported by the history endpoint. */
+  extraction_failure_reason?: string | null;
+  reason?: string | null;
+  first_upload_time?: number | null;
   [key: string]: unknown;
 }
 
@@ -46,6 +55,25 @@ export interface AidpDocumentListResponse {
   has_more: boolean;
   /** False for search pagination, whose filtered global total is unavailable. */
   total_reliable: boolean;
+}
+
+export interface AidpUploadTaskStats {
+  total: number;
+  extracting: number;
+  failed: number;
+  success: number;
+  queued: number;
+}
+
+export interface AidpUploadTaskListResponse {
+  value: AidpDocumentItem[];
+  total_count: number;
+  has_more: boolean;
+  /** Whether `total_count` is an exact upstream total; when false the
+   * frontend should treat it as a lower bound and rely on `has_more`. */
+  total_reliable: boolean;
+  stats: AidpUploadTaskStats;
+  retention_days: number;
 }
 
 export interface AidpUploadSuccessItem {
@@ -178,6 +206,40 @@ export interface AidpCreateKbPayload {
   ingroup_permission?: "EDIT" | "READ_ONLY" | "PRIVATE";
   /** Group IDs granted the in-group permission. */
   group_ids?: number[];
+}
+
+/**
+ * Partial knowledge graph configuration update. Carries native-typed values
+ * for any subset of the editable fields; the backend merges them into the
+ * stored AIDP `graph_config` string.
+ */
+export interface AidpGraphConfigUpdate {
+  /** Graph extraction LLM model; nested in AIDP graph_config. */
+  llm_model_name?: string;
+  /** Sub-graph expansion hop count (1-3). */
+  retrieve_subgraph_hop?: number;
+  /** Inverse of the "enable model thinking" switch. */
+  no_think_mode?: boolean;
+  /** Whether synonym merging is enabled. */
+  synonym_merge_enable?: boolean;
+  /** Whether semantic disambiguation is enabled. */
+  disambiguation_enable?: boolean;
+}
+
+/** Body for PUT /aidp-mgmt/knowledge-bases/{kds_id} (partial update, omit unchanged). */
+export interface AidpUpdateKbPayload {
+  name?: string;
+  description?: string;
+  chunk_mode?: number;
+  topk?: number;
+  /** Caption (VLM) generation toggle; 1 enabled, 0 disabled. */
+  caption_enable?: number;
+  /** VLM model identifier; required when caption_enable is 1. */
+  vlm_model?: string;
+  /** Disable the knowledge graph; permanent, cannot be re-enabled. */
+  is_exist_graph?: boolean;
+  /** Partial structured graph configuration update; merged into the stored AIDP config. */
+  graph_config?: AidpGraphConfigUpdate;
 }
 
 /** Body for PATCH /aidp-mgmt/aidp-permissions/{kds_id}. */

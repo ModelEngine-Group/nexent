@@ -1,0 +1,9 @@
+schema_version: '1.0'
+case_id: CHAT-MODEL-CONTROLS-D2-002
+implementations:
+  - framework: pytest
+    file: test_api.py
+    selector: test_model_permission_and_tenant_preflight
+acceptance_bindings:
+  AC-01: [test_model_permission_and_tenant_preflight]
+timeout_seconds: 120

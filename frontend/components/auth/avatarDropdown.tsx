@@ -7,18 +7,15 @@ import { useTranslation } from "react-i18next";
 import { Dropdown, Avatar, Spin, Button, Tag, ConfigProvider } from "antd";
 import {
   Activity,
-  BookMarked,
   Check,
   ChevronRight,
-  Copyright,
-  ExternalLink,
+  ArrowUpRight,
   Globe,
   LogOut,
   LogIn,
   UserRound,
   UserRoundPlus,
 } from "lucide-react";
-import { GithubOutlined } from "@ant-design/icons";
 import type { ItemType } from "antd/es/menu/interface";
 import Link from "next/link";
 
@@ -41,19 +38,27 @@ interface AvatarDropdownProps {
 }
 
 const MENU_POPUP_CLASS =
-  "[&_.ant-dropdown-menu]:!flex [&_.ant-dropdown-menu]:!flex-col [&_.ant-dropdown-menu]:!gap-1 " +
-  "[&_.ant-dropdown-menu]:!p-1 [&_.ant-dropdown-menu]:!rounded-[12px] [&_.ant-dropdown-menu]:!bg-white " +
-  "[&_.ant-dropdown-menu]:!shadow-[0_8px_24px_rgba(0,0,0,0.16)] " +
+  "[&_.ant-dropdown-menu]:!flex [&_.ant-dropdown-menu]:!flex-col [&_.ant-dropdown-menu]:!gap-0 " +
+  "[&_.ant-dropdown-menu]:!p-1.5 [&_.ant-dropdown-menu]:!rounded-lg [&_.ant-dropdown-menu]:!bg-white " +
+  "[&_.ant-dropdown-menu]:!shadow-[0_4px_6px_-1px_rgb(0_0_0/0.1),0_2px_4px_-2px_rgb(0_0_0/0.1)] " +
   "[&_.ant-dropdown-menu]:!max-h-[calc(100dvh-16px)] [&_.ant-dropdown-menu]:!overflow-y-auto " +
-  "[&_.ant-dropdown-menu-item:not(.account-menu-identity)]:!h-10 [&_.ant-dropdown-menu-item]:!rounded-lg [&_.ant-dropdown-menu-item]:!p-2 " +
-  "[&_.ant-dropdown-menu-submenu-title]:!h-10 [&_.ant-dropdown-menu-submenu-title]:!rounded-lg [&_.ant-dropdown-menu-submenu-title]:!p-2 " +
-  "[&_.ant-dropdown-menu-title-content]:!min-w-0 [&_.ant-dropdown-menu-title-content]:!text-base " +
-  "[&_.ant-dropdown-menu-title-content]:!leading-6 [&_.ant-dropdown-menu-title-content]:!font-normal " +
-  "[&_.ant-dropdown-menu-item-icon]:!me-2 [&_.ant-dropdown-menu-item-icon]:!text-[20px] " +
-  "[&_.ant-dropdown-menu-item-divider]:!my-0 [&_.ant-dropdown-menu-item-divider]:!bg-[#f0f0f0] " +
-  "[&_.ant-dropdown-menu-item:not(.account-menu-readonly):hover]:!bg-[rgba(25,25,25,0.08)] " +
-  "[&_.ant-dropdown-menu-submenu-title:hover]:!bg-[rgba(25,25,25,0.08)] " +
-  "[&_.ant-dropdown-menu]:!text-[#191919] [&_.ant-dropdown-menu]:!tracking-[0px]";
+  "[&_:where(.ant-dropdown-menu-item)]:!rounded-md [&_:where(.ant-dropdown-menu-item)]:!px-1.5 [&_:where(.ant-dropdown-menu-item)]:!py-1 " +
+  "[&_.ant-dropdown-menu-item:not(.account-menu-identity):not(.account-menu-secondary)]:!h-7 " +
+  "[&_.ant-dropdown-menu-submenu-title]:!flex [&_.ant-dropdown-menu-submenu-title]:!items-center [&_.ant-dropdown-menu-submenu-title]:!h-7 " +
+  "[&_.ant-dropdown-menu-submenu-title]:!rounded-md [&_.ant-dropdown-menu-submenu-title]:!px-1.5 [&_.ant-dropdown-menu-submenu-title]:!py-1 " +
+  "[&_.ant-dropdown-menu-title-content]:!min-w-0 " +
+  "[&_.ant-dropdown-menu-item-icon]:!me-1.5 [&_.ant-dropdown-menu-item-icon]:!text-base [&_.ant-dropdown-menu-item-icon]:!w-4 [&_.ant-dropdown-menu-item-icon]:!h-4 [&_.ant-dropdown-menu-item-icon]:!shrink-0 " +
+  "[&_.ant-dropdown-menu-item-divider]:!my-1 [&_.ant-dropdown-menu-item-divider]:!-mx-1 [&_.ant-dropdown-menu-item-divider]:!bg-[lab(90.6808%_-1.40554_-6.57337)] " +
+  "[&_.ant-dropdown-menu-item:not(.account-menu-readonly):not(.account-menu-logout):hover]:!bg-[lab(94.1288%_-2.23359_-10.9012)] [&_.ant-dropdown-menu-submenu-title:hover]:!bg-[lab(94.1288%_-2.23359_-10.9012)] " +
+  "[&_.ant-dropdown-menu-item:not(.account-menu-readonly):not(.account-menu-logout):focus-visible]:!bg-[lab(94.1288%_-2.23359_-10.9012)] [&_.ant-dropdown-menu-submenu-title:focus-visible]:!bg-[lab(94.1288%_-2.23359_-10.9012)] " +
+  "[&_.account-menu-secondary:not(.account-menu-readonly):hover]:!text-[lab(11.6682%_-0.113927_-10.842)] " +
+  "[&_.ant-dropdown-menu-item.account-menu-secondary:not(.account-menu-version)]:!h-6 [&_.account-menu-secondary]:!py-0.5 " +
+  "[&_.account-menu-secondary:not(.account-menu-version)]:!text-[lab(47.7049%_-1.02875_-9.20491)] " +
+  "[&_.account-menu-secondary_.ant-dropdown-menu-title-content]:!text-[11px] [&_.account-menu-secondary_.ant-dropdown-menu-title-content]:!leading-[16.5px] " +
+  "[&_.ant-dropdown-menu-item.account-menu-version]:!h-[22.5px] [&_.account-menu-version]:!px-2 [&_.account-menu-version]:!pt-1 [&_.account-menu-version]:!pb-0.5 " +
+  "[&_.account-menu-version]:!text-[color-mix(in_oklab,lab(47.7049%_-1.02875_-9.20491)_60%,transparent)] " +
+  "[&_.account-menu-identity]:!px-2 [&_.account-menu-identity]:!pt-1.5 [&_.account-menu-identity]:!pb-2.5 " +
+  "[&_.account-menu-secondary_a]:!text-inherit [&_.ant-dropdown-menu]:!text-[lab(11.6682%_-0.113927_-10.842)] [&_.ant-dropdown-menu]:!tracking-[0px]";
 
 export function AvatarDropdown({
   rail = false,
@@ -113,17 +118,25 @@ export function AvatarDropdown({
         {
           key: "user-info",
           label: (
-            <div className="flex h-[52px] min-w-0 flex-col justify-center gap-1">
-              <div className="truncate" title={identity}>
-                {identity}
+            <div className="flex h-11 min-w-0 items-center gap-3">
+              <Avatar
+                src={user.avatarUrl}
+                size={36}
+                icon={<UserRound size={18} />}
+                className="shrink-0 !bg-[color-mix(in_oklab,lab(47.7049%_-1.02875_-9.20491)_15%,transparent)] !text-[lab(47.7049%_-1.02875_-9.20491)]"
+              />
+              <div className="flex h-11 min-w-0 flex-col gap-1">
+                <div className="truncate" title={identity}>
+                  {identity}
+                </div>
+                <Tag className="!m-0 !h-[15px] w-fit !border-0 !bg-[color-mix(in_oklab,lab(46.9268%_13.7028_-69.7937)_10%,transparent)] !px-1.5 !py-0.5 !text-[11px] !leading-[11px] !text-[lab(46.9268%_13.7028_-69.7937)]">
+                  {getRoleDisplayName(user.role)}
+                </Tag>
               </div>
-              <Tag className="!m-0 h-6 w-fit !border-0 !bg-[rgba(208,216,253,0.5)] !px-2 !text-xs !leading-6 !text-[#1f55b5]">
-                {getRoleDisplayName(user.role)}
-              </Tag>
             </div>
           ),
           className:
-            "account-menu-identity account-menu-readonly !h-[68px] !cursor-default hover:!bg-transparent",
+            "account-menu-identity account-menu-readonly !h-[60px] !cursor-default hover:!bg-transparent",
         },
         { type: "divider" },
         {
@@ -163,7 +176,18 @@ export function AvatarDropdown({
     {
       key: "language",
       icon: <Globe size={20} />,
-      label: t("accountMenu.language"),
+      label: (
+        <span className="flex min-w-0 flex-1 items-center justify-between gap-2">
+          <span>{t("accountMenu.language")}</span>
+          <span className="text-xs leading-4 text-[lab(47.7049%_-1.02875_-9.20491)]">
+            {
+              languageOptions.find(
+                (option) => option.value === currentLanguage.split("-")[0]
+              )?.label
+            }
+          </span>
+        </span>
+      ),
       expandIcon: <ChevronRight size={16} />,
       popupClassName: `${MENU_POPUP_CLASS} [&_.ant-dropdown-menu]:!w-[225px]`,
       children: languageOptions.map((option) => ({
@@ -179,23 +203,25 @@ export function AvatarDropdown({
         onClick: () => handleLanguageChange(option.value),
       })),
     },
+    { type: "divider" },
     {
       key: "version",
-      icon: <BookMarked size={20} />,
       label: (
-        <span className="flex min-w-0 items-center justify-between gap-2">
-          <span className="shrink-0">{t("accountMenu.version")}</span>
-          <span className="truncate" title={version}>
+        <span className="flex min-w-0 flex-1 items-center justify-between gap-2">
+          <span className="shrink-0">{t("accountMenu.about")}</span>
+          <span className="truncate font-mono" title={version}>
             {version}
           </span>
         </span>
       ),
-      className: "account-menu-readonly !cursor-default hover:!bg-transparent",
+      className:
+        "account-menu-secondary account-menu-version account-menu-readonly !cursor-default hover:!bg-transparent",
     },
     ...(monitoringUrl
       ? [
           {
             key: "monitoring",
+            className: "account-menu-secondary",
             icon: <Activity size={20} />,
             label: (
               <a href={monitoringUrl} target="_blank" rel="noopener noreferrer">
@@ -209,7 +235,7 @@ export function AvatarDropdown({
       ? [
           {
             key: "github",
-            icon: <GithubOutlined />,
+            className: "account-menu-secondary",
             label: (
               <a
                 href="https://github.com/ModelEngine-Group/nexent"
@@ -217,17 +243,29 @@ export function AvatarDropdown({
                 rel="noopener noreferrer"
               >
                 {t("accountMenu.github")}
+                <ArrowUpRight
+                  size={12}
+                  className="ml-0.5 inline-block align-middle opacity-60"
+                />
               </a>
             ),
           },
           {
             key: "modelengine",
-            icon: <ExternalLink size={20} />,
-            label: <a href="http://modelengine-ai.net">ModelEngine</a>,
+            className: "account-menu-secondary",
+            label: (
+              <a href="http://modelengine-ai.net">
+                ModelEngine
+                <ArrowUpRight
+                  size={12}
+                  className="ml-0.5 inline-block align-middle opacity-60"
+                />
+              </a>
+            ),
           },
           {
             key: "terms",
-            icon: <BookMarked size={20} />,
+            className: "account-menu-secondary",
             label: (
               <a href="https://github.com/nexent-hub/nexent?tab=License-1-ov-file#readme">
                 {t("page.termsOfUse")}
@@ -236,16 +274,6 @@ export function AvatarDropdown({
           },
         ]
       : []),
-    {
-      key: "copyright",
-      icon: <Copyright size={20} />,
-      label: (
-        <span className="block truncate">
-          {t("page.copyright", { year: new Date().getFullYear() })}
-        </span>
-      ),
-      className: "account-menu-readonly !cursor-default hover:!bg-transparent",
-    },
   ];
 
   const menuItems: ItemType[] = [
@@ -256,6 +284,9 @@ export function AvatarDropdown({
           { type: "divider" as const },
           {
             key: "logout",
+            danger: true,
+            className:
+              "account-menu-logout !text-[lab(48.4493%_77.4328_61.5452)] hover:!bg-[color-mix(in_oklab,lab(48.4493%_77.4328_61.5452)_10%,transparent)]",
             icon: <LogOut size={20} />,
             label: t("auth.logout"),
             onClick: () => {
@@ -278,11 +309,7 @@ export function AvatarDropdown({
         menu={{
           items: menuItems,
           onClick: ({ key }) => {
-            if (
-              !["user-info", "not-logged-in", "version", "copyright"].includes(
-                key
-              )
-            )
+            if (!["user-info", "not-logged-in", "version"].includes(key))
               changeOpen(false);
           },
         }}
@@ -293,7 +320,7 @@ export function AvatarDropdown({
           if (info.source === "trigger") changeOpen(open);
         }}
         classNames={{
-          root: `${MENU_POPUP_CLASS} [&_.ant-dropdown-menu]:!w-[280px] [&_.ant-dropdown-menu]:!max-w-[calc(100vw-16px)]`,
+          root: `${MENU_POPUP_CLASS} [&_.ant-dropdown-menu]:!w-[256px] [&_.ant-dropdown-menu]:!max-w-[calc(100vw-16px)]`,
         }}
         getPopupContainer={() => document.body}
       >
@@ -302,7 +329,7 @@ export function AvatarDropdown({
             <button
               type="button"
               aria-label={t("accountMenu.open")}
-              className="flex h-11 w-full cursor-pointer items-center overflow-hidden rounded-lg border-0 bg-transparent p-0 pr-2 text-[#191919] hover:bg-[rgba(25,25,25,0.08)]"
+              className={`flex h-11 w-full cursor-pointer items-center overflow-hidden rounded-lg border-0 bg-transparent p-0 pr-2 text-[#191919] hover:bg-[var(--navigation-hover)] ${dropdownOpen ? "!bg-[var(--navigation-selected)]" : ""}`}
             >
               <span className="flex h-11 w-12 shrink-0 items-center justify-center">
                 <Avatar
@@ -331,7 +358,7 @@ export function AvatarDropdown({
             shape={rail ? undefined : "circle"}
             className={
               rail
-                ? "!flex !h-11 !w-full !justify-start !gap-0 overflow-hidden rounded-lg !p-0 !pr-2 text-[#191919]"
+                ? `!flex !h-11 !w-full !justify-start !gap-0 overflow-hidden rounded-lg !p-0 !pr-2 text-[#191919] hover:!bg-[var(--navigation-hover)] ${dropdownOpen ? "!bg-[var(--navigation-selected)]" : ""}`
                 : undefined
             }
           >

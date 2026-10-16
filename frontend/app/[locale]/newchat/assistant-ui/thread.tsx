@@ -2,6 +2,11 @@
 
 "use client";
 
+import { useConversationModelControls } from "@/features/model-controls/useConversationModelControls";
+import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
+import type { ReasoningEffort } from "@/types/modelConfig";
+import type { ModelParameterSettingsControl } from "@/types/modelParameterSettings";
+
 import type { SourceAttributes } from "@/types/source";
 import {
   buildCitationDisplayIndexMap,
@@ -106,7 +111,6 @@ import { ToolFallback } from "../ui/tool-fallback";
 import { ToolRecommendations } from "../ui/tool-recommendations";
 import { AgentDraftCard } from "../ui/agent-draft-card";
 import { AgentCreationResultCard } from "@/features/workbench/components/CreationResultCards";
-import { WorkbenchLandingExamples } from "@/features/workbench/components/WorkbenchLandingExamples";
 import { RequirementClarificationCard } from "../ui/requirement-clarification-card";
 import { InstalledResourceBindingCard } from "../ui/installed-resource-binding-card";
 import { SuggestedResourceInstallationCard } from "../ui/suggested-resource-installation-card";
@@ -199,11 +203,14 @@ export interface ThreadProps {
   onModelChange?: (modelId: string) => void;
   deepThinking?: boolean;
   onDeepThinkingChange?: (enabled: boolean) => void;
-  thinkingEffort?: "low" | "medium" | "high";
-  onThinkingEffortChange?: (effort: "low" | "medium" | "high") => void;
+  thinkingEffort?: ReasoningEffort;
+  onThinkingEffortChange?: (effort: ReasoningEffort) => void;
+  reasoningBudgetTokens?: number;
+  onReasoningBudgetTokensChange?: (budget: number) => void;
   chatMode: ChatMode;
   onChatModeChange: (mode: ChatMode) => void;
   showModelSelector?: boolean;
+  modelParameterSettings?: ModelParameterSettingsControl;
   modelSelectionScope?: ModelSelectionScope;
   showConversationTitle?: boolean;
   isDictationConfigured?: boolean;
@@ -266,9 +273,12 @@ export const Thread: FC<ThreadProps> = ({
   onDeepThinkingChange,
   thinkingEffort,
   onThinkingEffortChange,
+  reasoningBudgetTokens,
+  onReasoningBudgetTokensChange,
   chatMode,
   onChatModeChange,
   showModelSelector = true,
+  modelParameterSettings,
   modelSelectionScope = "agent",
   showConversationTitle = true,
   isDictationConfigured = false,
@@ -298,30 +308,24 @@ export const Thread: FC<ThreadProps> = ({
 }) => {
   const { t } = useTranslation();
   const models = useAgentModels(agent, modelSelectionScope);
-  const [localSelectedModelId, setLocalSelectedModelId] = useState<string>();
-  const selectedModelIsValid = Boolean(
-    selectedModelId && models.some((model) => model.id === selectedModelId)
+  const threadKey = useAuiState((state) => state.threads.mainThreadId);
+  const { user } = useAuthorizationContext();
+  const controls = useConversationModelControls(
+    models,
+    `${user?.tenantId ?? ""}:${user?.id ?? ""}:${agent.id}:${threadKey ?? "new"}`,
+    selectedModelId,
+    onModelChange ? (selectedModelId ?? "") : undefined
   );
-  const fallbackModelId = models[0]?.id;
-  const effectiveSelectedModelId = selectedModelIsValid
-    ? selectedModelId
-    : onModelChange
-      ? ""
-      : localSelectedModelId &&
-          models.some((model) => model.id === localSelectedModelId)
-        ? localSelectedModelId
-        : fallbackModelId;
-  const handleModelChange = useCallback(
-    (modelId: string) => {
-      if (!models.some((model) => model.id === modelId)) return;
-      if (onModelChange) {
-        onModelChange(modelId);
-      } else {
-        setLocalSelectedModelId(modelId);
-      }
-    },
-    [models, onModelChange]
-  );
+  const effectiveSelectedModelId = onModelChange
+    ? (selectedModelId ?? "")
+    : controls.selectedModelId;
+  const modelIsValid =
+    models.some((model) => model.id === effectiveSelectedModelId) &&
+    controls.canSend;
+  const handleModelChange = (id: string) => {
+    controls.onModelChange(id);
+    onModelChange?.(id);
+  };
 
   const messages = useAuiState((s) => s.thread.messages);
   const currentThreadTitle = useAuiState((s) => {
@@ -525,13 +529,27 @@ export const Thread: FC<ThreadProps> = ({
         models={models}
         selectedModelId={effectiveSelectedModelId}
         onModelChange={handleModelChange}
-        deepThinking={deepThinking}
-        onDeepThinkingChange={onDeepThinkingChange}
-        thinkingEffort={thinkingEffort}
-        onThinkingEffortChange={onThinkingEffortChange}
+        deepThinking={deepThinking ?? controls.deepThinking}
+        onDeepThinkingChange={
+          onDeepThinkingChange ?? controls.onDeepThinkingChange
+        }
+        thinkingEffort={thinkingEffort ?? controls.thinkingEffort}
+        onThinkingEffortChange={
+          onThinkingEffortChange ?? controls.onThinkingEffortChange
+        }
+        reasoningBudgetTokens={
+          reasoningBudgetTokens ?? controls.reasoningBudgetTokens
+        }
+        onReasoningBudgetTokensChange={
+          onReasoningBudgetTokensChange ??
+          controls.onReasoningBudgetTokensChange
+        }
         chatMode={chatMode}
         onChatModeChange={onChatModeChange}
         showModelSelector={showModelSelector}
+        modelParameterSettings={
+          modelParameterSettings ?? controls.modelParameterSettings
+        }
         showConversationTitle={showConversationTitle}
         isDictationConfigured={isDictationConfigured}
         knowledgeScope={knowledgeScope}
@@ -543,8 +561,14 @@ export const Thread: FC<ThreadProps> = ({
         onSkillFileSelect={onSkillFileSelect}
         runtimeMetadata={runtimeMetadata}
         onRuntimeMetadataChange={onRuntimeMetadataChange}
-        readOnly={readOnly}
-        readOnlyReason={readOnlyReason}
+        readOnly={readOnly || (showModelSelector && !modelIsValid)}
+        modelSelectionDisabled={readOnly}
+        readOnlyReason={
+          readOnlyReason ??
+          (showModelSelector && !modelIsValid
+            ? t("chat.modelSelector.invalidSelection")
+            : undefined)
+        }
         showComposer={showComposer}
         configurationLayout={configurationLayout}
         debugLayout={debugLayout}
@@ -642,11 +666,14 @@ interface ThreadViewProps {
   onModelChange?: (modelId: string) => void;
   deepThinking?: boolean;
   onDeepThinkingChange?: (enabled: boolean) => void;
-  thinkingEffort?: "low" | "medium" | "high";
-  onThinkingEffortChange?: (effort: "low" | "medium" | "high") => void;
+  thinkingEffort?: ReasoningEffort;
+  onThinkingEffortChange?: (effort: ReasoningEffort) => void;
+  reasoningBudgetTokens?: number;
+  onReasoningBudgetTokensChange?: (budget: number) => void;
   chatMode: ChatMode;
   onChatModeChange: (mode: ChatMode) => void;
   showModelSelector: boolean;
+  modelParameterSettings?: ModelParameterSettingsControl;
   showConversationTitle: boolean;
   isDictationConfigured: boolean;
   knowledgeScope: ConversationKnowledgeScope | null;
@@ -679,6 +706,7 @@ interface ThreadViewProps {
   runtimeMetadata: Record<string, unknown>;
   onRuntimeMetadataChange?: (value: Record<string, unknown>) => void;
   readOnly: boolean;
+  modelSelectionDisabled?: boolean;
   readOnlyReason?: string;
   showComposer: boolean;
   configurationLayout: boolean;
@@ -707,9 +735,12 @@ const ThreadView: FC<ThreadViewProps> = ({
   onDeepThinkingChange,
   thinkingEffort,
   onThinkingEffortChange,
+  reasoningBudgetTokens,
+  onReasoningBudgetTokensChange,
   chatMode,
   onChatModeChange,
   showModelSelector,
+  modelParameterSettings,
   showConversationTitle,
   isDictationConfigured,
   knowledgeScope,
@@ -739,6 +770,7 @@ const ThreadView: FC<ThreadViewProps> = ({
   runtimeMetadata,
   onRuntimeMetadataChange,
   readOnly,
+  modelSelectionDisabled,
   readOnlyReason,
   showComposer,
   configurationLayout,
@@ -781,7 +813,7 @@ const ThreadView: FC<ThreadViewProps> = ({
         className={cn(
           "flex h-full min-w-0 flex-1 flex-col",
           newChatDesign && "relative [container-type:size]",
-          workbenchLanding && "overflow-y-auto pb-[10vh]"
+          workbenchLanding && "overflow-y-auto pb-[10vh] [container-type:size]"
         )}
       >
         {newChatDesign && !hasMessages && <NewChatWelcomeBackdrop />}
@@ -904,7 +936,7 @@ const ThreadView: FC<ThreadViewProps> = ({
               !hasMessages &&
               "!max-w-none !overflow-hidden !p-0",
             workbenchLanding &&
-              "relative mt-auto flex-none max-w-[890px] overflow-visible px-4 pb-0 pt-6 sm:px-8"
+              "relative mt-[max(24px,calc(50cqh-220px))] flex-none max-w-[890px] overflow-visible px-4 pb-0 pt-6 sm:px-8"
           )}
         >
           {workbenchLanding && (
@@ -962,7 +994,7 @@ const ThreadView: FC<ThreadViewProps> = ({
               newChatDesign && "!max-w-[922px] shrink-0 !gap-0 !px-4 !pb-6",
               debugLayout && "!max-w-none !shrink-0 !gap-4 !px-0 !pb-0",
               workbenchLanding &&
-                "static mb-auto max-w-[890px] gap-4 px-4 pb-6 pt-8 sm:px-8"
+                "static shrink-0 max-w-[890px] gap-4 px-4 pb-6 pt-8 sm:px-8"
             )}
           >
             {!newChatDesign && (!debugLayout || hasMessages) && (
@@ -987,9 +1019,12 @@ const ThreadView: FC<ThreadViewProps> = ({
               onDeepThinkingChange={onDeepThinkingChange}
               thinkingEffort={thinkingEffort}
               onThinkingEffortChange={onThinkingEffortChange}
+              reasoningBudgetTokens={reasoningBudgetTokens}
+              onReasoningBudgetTokensChange={onReasoningBudgetTokensChange}
               chatMode={chatMode}
               onChatModeChange={onChatModeChange}
               showModelSelector={showModelSelector}
+              modelParameterSettings={modelParameterSettings}
               isDictationConfigured={isDictationConfigured}
               knowledgeScope={knowledgeScope}
               knowledgePreview={knowledgePreview}
@@ -1001,6 +1036,7 @@ const ThreadView: FC<ThreadViewProps> = ({
               onRuntimeMetadataChange={onRuntimeMetadataChange}
               allowRuntimeMetadata={agent.allow_chat_metadata === true}
               disabled={readOnly}
+              modelSelectionDisabled={modelSelectionDisabled}
               disabledReason={readOnlyReason}
               workbenchPresentation={workbenchPresentation}
               workbenchResources={workbenchResources}
@@ -1009,10 +1045,6 @@ const ThreadView: FC<ThreadViewProps> = ({
               workbenchSkillPopover={workbenchSkillPopover}
               workbenchKnowledgePopover={workbenchKnowledgePopover}
             />
-            {workbenchLanding &&
-              workbenchPresentation?.mode === "generic_chat" && (
-                <WorkbenchLandingExamples />
-              )}
             {footerContent}
           </ThreadPrimitive.ViewportFooter>
         )}
@@ -1089,6 +1121,7 @@ export const ReadOnlyConversation: FC<{
 export const ThreadMessages: FC<{
   agent: Agent | PublishedAgent;
   readOnly?: boolean;
+  modelSelectionDisabled?: boolean;
   shareMode?: boolean;
   selectedShareMessageIds?: Set<number>;
   backendMessageIdsByAuiId?: Map<string, number>;
@@ -1098,6 +1131,7 @@ export const ThreadMessages: FC<{
 }> = ({
   agent,
   readOnly = false,
+  modelSelectionDisabled,
   shareMode = false,
   selectedShareMessageIds,
   backendMessageIdsByAuiId,
@@ -1352,7 +1386,6 @@ const AssistantMessage: FC<{
   const ACTION_BAR_PT = "pt-1 pb-1 mb-1";
   const ACTION_BAR_HEIGHT = `-mb-7.5 min-h-7.5 ${ACTION_BAR_PT}`;
 
-  const AgentIcon = getAgentIcon(agent);
   const agentName = agent.display_name || agent.name;
 
   const nl2a = useAuiState(
@@ -1403,7 +1436,9 @@ const AssistantMessage: FC<{
               className="flex size-7 shrink-0 items-center justify-center rounded-full bg-primary/10 ring-1 ring-primary/10"
               aria-hidden
             >
-              <AgentIcon className="size-4 text-primary" />
+              {createElement(getAgentIcon(agent), {
+                className: "size-4 text-primary",
+              })}
             </div>
             <span className="text-sm font-medium text-foreground">
               {agentName}

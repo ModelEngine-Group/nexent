@@ -6,6 +6,7 @@ import { UserIdentity } from "@/components/auth/UserIdentity";
 import { UserIdentityLabel } from "@/components/auth/UserIdentityLabel";
 import { UserIdentityInput } from "@/components/auth/UserIdentityInput";
 import { useUserDisplayName } from "@/hooks/auth/useUserDisplayName";
+import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
 
 import React, { useMemo, useState, useEffect, useRef } from "react";
 import { useTranslation } from "react-i18next";
@@ -50,6 +51,7 @@ export default function UserList({
   const { confirm } = useConfirmModal();
   const { t } = useTranslation("common");
   const displayName = useUserDisplayName();
+  const { user } = useAuthorizationContext();
 
   // Pagination state
   const [page, setPage] = useState(1);
@@ -330,7 +332,11 @@ export default function UserList({
             setPage(1);
             setKeyword(event.target.value);
           }}
-          placeholder={t("tenantResources.users.searchPlaceholder")}
+          placeholder={t(
+            user?.authProvider === "cas"
+              ? "tenantResources.users.searchUsernameOrEmail"
+              : "tenantResources.users.searchPlaceholder"
+          )}
           className="w-56"
         />
         <Select

@@ -1,0 +1,112 @@
+schema_version: '1.0'
+stage: D4
+module: CHAT-SIDEBAR
+case:
+  case_id: CHAT-SIDEBAR-D4-001
+  feature_id: CHAT-SIDEBAR
+  requirement_ids:
+  - WB-HISTORY-PINS-20261014
+  - WB-PIN-ORDER-20261014
+  - WB-HISTORY-ROW-TIME-20261014
+  - WB-SERVER-PINS-20261014
+  - WB-HISTORY-TIME-RESTORE-20261014
+  business_rule_ids:
+  - CHAT-SIDEBAR-RULE-003
+  title: Workbench backend pins synchronize across devices with retained history operations
+  type: E2E
+  priority: P1
+  status: active
+  automation: automated
+  objective: Verify real Workbench UI reads and writes controlled authenticated server
+    pin state across browser contexts.
+  preconditions:
+  - Local frontend with authorized mock user, three persisted histories and no running
+    generation.
+  test_data:
+    profile: mock
+  steps:
+  - order: 1
+    action: Pin an older saved history through its conversation menu.
+    expected: The history appears in the top pinned group with a pin marker; its menu
+      changes to Unpin. Workbench history rows show localized relative-time text when
+      timestamps are available while keeping titles and action menus. Pin state is
+      saved through the backend API.
+  - order: 2
+    action: Reload and search for matching and nonmatching histories, then clear search.
+    expected: Server pinning survives reload without localStorage; search includes
+      matching pinned histories and excludes nonmatching ones.
+  - order: 3
+    action: Rename the pinned history, cancel its pin and reload.
+    expected: Rename preserves the pin; unpin restores ordinary recency grouping and
+      remains unpinned after reload.
+  - order: 4
+    action: Pin again, reload as another user and tenant, then restore the original
+      identity.
+    expected: Other users and tenants do not inherit the pin; the original identity
+      retains it.
+  - order: 5
+    action: Reload saved histories without usable timestamps, then cancel the pin.
+    expected: The pinned group still appears first; unpin returns the history to the
+      recent group. Missing timestamps do not fabricate time labels.
+  - order: 6
+    action: Pin a saved history beyond the initial thirty-row page and reload.
+    expected: The history appears in the pinned top group immediately; the authorized
+      pin list supplies its metadata without changing pagination offsets or duplicating
+      it after loading more.
+  - order: 7
+    action: Pin two more histories in sequence, reload, then unpin and repin an earlier
+      pin.
+    expected: Latest pin appears first regardless of conversation age; repinning moves
+      the history to first position, reload retains order and ordinary histories retain
+      recency.
+  - order: 8
+    action: Open an independent browser context for the same account, read pins, unpin
+      there and reload the first device; reject a save on the first device.
+    expected: Fresh browser receives identical order without localStorage; unpin synchronizes
+      after reload; rejected save leaves confirmed state unchanged and displays an
+      error.
+  expected_results:
+  - User can pin and unpin saved Workbench histories with backend user/tenant persistence,
+    cross-device order, search and rename support.
+  forbidden_side_effects:
+  - No generation or deletion requests; Agent-chat pin storage remains untouched;
+    failed pin writes never appear successful.
+  actor: Authorized mock Workbench user
+  journey:
+  - Open history menu
+  - Pin
+  - Reload
+  - Search
+  - Rename
+  - Unpin
+  - Switch identity
+  - Restore identity
+  - Open second browser
+  - Unpin on second device
+  - Reject save
+  final_business_result:
+  - Frequently used histories stay accessible above ordinary history on devices logged
+    into the same user/tenant.
+  failure_evidence:
+  - Browser trace and assertion screenshot.
+  execution:
+    profiles:
+    - name: mock
+      required_services: []
+  acceptance:
+  - id: AC-01
+    description: Complete Workbench history pin interaction, persistence and retained
+      operation boundaries.
+    steps:
+    - 1
+    - 2
+    - 3
+    - 4
+    - 5
+    - 6
+    - 7
+    - 8
+    expected_results:
+    - 1
+    forbidden_side_effects:
+    - 1

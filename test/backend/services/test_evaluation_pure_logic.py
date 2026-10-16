@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """Unit tests for the ``agent_evaluation_service`` pure-logic helpers.
 
 Targets
@@ -392,7 +394,7 @@ def _install_sys_modules_stubs() -> None:
     _utils_pkg = _register_package("utils")
     _lu_mod = _mk_mod("management.services.model.invocation", call_llm_for_system_prompt=MagicMock())
     _utils_pkg.llm_utils = _lu_mod
-    _ptu_mod = _mk_mod("utils.prompt_template_utils", get_prompt_template=MagicMock())
+    _ptu_mod = _mk_mod("management.services.agent.prompt", get_prompt_template=MagicMock())
     _utils_pkg.prompt_template_utils = _ptu_mod
     _tu_mod = _mk_mod("utils.thread_utils", pool=MagicMock())
     _utils_pkg.thread_utils = _tu_mod

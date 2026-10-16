@@ -1,0 +1,82 @@
+schema_version: '1.0'
+stage: D4
+module: CHAT-WORKBENCH
+case:
+  case_id: WB-CONTROLS-D4-003
+  feature_id: WB-CONTROLS
+  requirement_ids:
+  - WB-REASONING-CAPABILITY-20261014
+  - WB-EFFORT-LAYOUT-20261014
+  - CHAT-WORKBENCH-REFINEMENTS-20261015
+  - CHAT-WORKBENCH-HEADER-DEFAULTS-20261015
+  - WB-RESOURCE-LISTS-20261015
+  business_rule_ids:
+  - WB-CONTROLS-RULE-004
+  title: Capability-driven reasoning controls and complete run parameters
+  type: E2E
+  priority: P1
+  status: active
+  automation: automated
+  objective: Verify identical capability-derived effort choices and actual frontend run request parameters for Workbench and
+    Agent chat.
+  preconditions:
+  - Local frontend with authorized mock tenant, saved Agent thinking disabled and mocked run endpoints.
+  test_data:
+    profile: mock
+  steps:
+  - order: 1
+    action: Open Workbench and enable thinking for a model supporting all effort enum values; select each concrete level and
+      explicitly send a message.
+    expected: Localized options match capability values; each request retains its selected raw Workbench thinking_effort.
+      Sampling edits never enter run requests. Selected option text and checkmark do not overlap; the model panel and effort
+      popup remain anchored when switching among different-length levels. Effort trigger fits its current label and chevron
+      without fixed-width blank space. Shared reasoning and advanced-setting text rows remain compact, with at most 16px between
+      the effort label bottom and advanced label top.
+  - order: 2
+    action: Open Agent chat with the same model and disabled saved thinking; enable thinking and select each concrete effort
+      before an explicit send.
+    expected: Options match Workbench despite disabled saved configuration; each selected concrete value reaches reasoning_effort
+      and generation_config.thinking_effort unchanged. Selected option text and checkmark do not overlap; the model panel
+      and effort popup remain anchored when switching among different-length levels. Effort trigger fits its current label
+      and chevron without fixed-width blank space.
+  - order: 3
+    action: Choose automatic effort and explicitly send, then disable thinking and explicitly send in both routes. Switch
+      to a model without supported effort controls.
+    expected: Automatic retains its documented inherit behavior, disabled runs have no active reasoning override, and unsupported
+      controls never show invented low/medium/high choices. Model selection and existing request fields are retained. Effort/budget
+      rows collapse while thinking is off. Enabling again restores the selected Agent effort override, or model effort when
+      that field is absent, rather than the previous temporary effort. With no saved Agent/model effort, off/on restores auto
+      even when capability default is high; saved explicit Agent and model defaults still win.
+  expected_results:
+  - Users can select the same model-supported effort levels and send their actual values from both routes.
+  forbidden_side_effects:
+  - No real model calls or database mutations; no temperature or top_p submission from frontend-only settings; no unsupported
+    effort submission.
+  actor: Authorized mock tenant user
+  journey:
+  - Open Workbench
+  - Enable thinking
+  - Select levels
+  - Explicitly send
+  - Open Agent chat
+  - Repeat
+  - Disable thinking
+  final_business_result:
+  - Both entry points honor actual capability values and preserve non-reasoning parameters.
+  failure_evidence:
+  - Browser trace and assertion screenshot.
+  execution:
+    profiles:
+    - name: mock
+      required_services: []
+  acceptance:
+  - id: AC-01
+    description: Capability parity and exact supported effort forwarding across both frontend run paths with safe mocked boundaries.
+    steps:
+    - 1
+    - 2
+    - 3
+    expected_results:
+    - 1
+    forbidden_side_effects:
+    - 1

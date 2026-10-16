@@ -143,8 +143,14 @@ describe("resource identity operations", () => {
     fireEvent.click(within(row).getAllByRole("button")[1]);
     expect(fixtures.confirm.mock.calls[0][0].title).toContain("同名用户");
     const search = screen.getByPlaceholderText(
-      "tenantResources.users.searchPlaceholder"
+      "tenantResources.users.searchUsernameOrEmail"
     );
+    fireEvent.change(search, { target: { value: "同名用户" } });
+    expect(fixtures.userList).toHaveBeenLastCalledWith("tenant", 1, 10, {
+      search: "同名用户",
+      roles: [],
+      groupIds: [],
+    });
     fireEvent.change(search, { target: { value: "a@test" } });
     expect(fixtures.userList).toHaveBeenLastCalledWith("tenant", 1, 10, {
       search: "a@test",
@@ -160,6 +166,9 @@ describe("resource identity operations", () => {
     ).toBeInTheDocument();
     expect(screen.getByText("a@test")).toBeInTheDocument();
     expect(screen.queryByText("同名用户")).not.toBeInTheDocument();
+    expect(
+      screen.getByPlaceholderText("tenantResources.users.searchPlaceholder")
+    ).toBeInTheDocument();
   });
   it.each(["cas", "local"])(
     "matches API-key owner and creator headers to the %s viewer",

@@ -132,7 +132,7 @@ export function CollaborativeAgentActions({
 
   const content = (
     <div
-      className="grid grid-cols-1 gap-2 sm:grid-cols-2"
+      className={`grid grid-cols-1 gap-2 ${highFidelity ? "@min-[640px]/agent-config:grid-cols-2" : "sm:grid-cols-2"}`}
       data-testid="agent-selected-child-grid"
     >
       {children}
