@@ -27,6 +27,9 @@ const json = (route: Route, body: unknown) =>
 
 async function mockAgentListApis(page: Page, listItems = agents) {
   await page.route("**/api/**", (route) => json(route, {}));
+  // The agent management page resolves the default resource tag library before
+  // it renders the list, so the catch-all stub above must be narrowed here.
+  await page.route("**/api/tag-libraries**", (route) => json(route, []));
   await page.route("**/api/tenant_config/deployment_version", (route) =>
     json(route, {
       deployment_version: "speed",
@@ -133,7 +136,8 @@ test("agent list matches the measured desktop card layout and keeps controls fun
   expect(first!.height).toBe(148);
   expect(second!.x - first!.x - first!.width).toBeCloseTo(16, 0);
   expect(fifth!.y - first!.y - first!.height).toBeCloseTo(12, 0);
-  expect(search!.width).toBeCloseTo(360, 0);
+  // The tag filter button now shares the 360px toolbar slot with the search box.
+  expect(search!.width).toBeCloseTo(242, 0);
   expect(search!.height).toBeCloseTo(32, 0);
 
   await page.screenshot({
@@ -263,7 +267,8 @@ test("agent list matches the measured desktop card layout and keeps controls fun
   expect(
     Math.abs((tableBody?.height ?? 0) - (tableContent?.height ?? 0))
   ).toBeLessThanOrEqual(2);
-  expect(tableSearch?.width).toBeCloseTo(296, 0);
+  // The tag filter button now shares the 296px list toolbar slot with the search box.
+  expect(tableSearch?.width).toBeCloseTo(178, 0);
   await expect(
     table.getByRole("button", { name: "删除" }).first()
   ).toBeVisible();
