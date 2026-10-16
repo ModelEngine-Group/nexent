@@ -36,6 +36,13 @@ import {
 } from "./adapter/thread-agent-registry";
 import { remoteChatModelAdapter } from "./adapter/remote-chat-model-adapter";
 import { createNewChatAttachmentAdapter } from "./adapter/attachment-adapter";
+import {
+  clearLastChatView,
+  readLastChatViewState,
+  writeLastChatViewAgent,
+  writeLastChatViewConversation,
+  type LastChatViewState,
+} from "./last-chat-view";
 import { SidebarProvider } from "@/components/ui/sidebar";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { message } from "antd";
@@ -93,6 +100,12 @@ const PersistentChatHome: FC = () => {
     null
   );
   const consumedDeepLinkRef = useRef(false);
+  // Read once at mount: what (if anything) should this refresh restore? Deep
+  // links win, so this is null whenever the URL carries linking parameters.
+  const [lastChatView] = useState<LastChatViewState | null>(
+    readLastChatViewState
+  );
+  const didRestoreLastAgentRef = useRef(false);
   const { modelConfig } = useConfig();
   const dictationAdapter = useMemo(
     () => new ServerDictationAdapter(() => modelConfig?.stt),
@@ -118,6 +131,11 @@ const PersistentChatHome: FC = () => {
     },
     adapter: conversationThreadListAdapter,
     threadId: requestedThreadId,
+    // Return to the conversation the user was viewing before the refresh.
+    // The runtime switches to it once the adapter is ready; when the stored
+    // conversation no longer exists the switch fails silently and the page
+    // shows the default landing view.
+    initialThreadId: lastChatView?.conversationId,
   });
 
   const { isLoading: isLoadingAgents, agents } = usePublishedAgentList();
@@ -151,6 +169,22 @@ const PersistentChatHome: FC = () => {
       handleAgentSelected(action.agent);
     }
   }, [agents, deepLinkedAgentId, handleAgentSelected, isLoadingAgents]);
+
+  // A refresh in a brand-new conversation has no server-side conversation to
+  // restore; bring back a blank conversation of the same agent instead so the
+  // composer state (selected agent) survives the reload.
+  useEffect(() => {
+    if (didRestoreLastAgentRef.current || isLoadingAgents) return;
+    didRestoreLastAgentRef.current = true;
+    // A saved conversation owns the restore; its metadata selects the agent.
+    if (!lastChatView || lastChatView.conversationId) return;
+    const agent = agents.find(
+      (candidate) => Number(candidate.id) === Number(lastChatView.agentId)
+    );
+    if (agent) {
+      void handleAgentSelected(agent);
+    }
+  }, [agents, isLoadingAgents, handleAgentSelected, lastChatView]);
 
   const handleBack = useCallback(() => {
     setSelectedAgent(null);
@@ -584,6 +618,24 @@ const HomeContent: FC<{
     selectedAgent?.id,
     setSelectedAgent,
   ]);
+
+  // Keep the "return here after a refresh" marker in sync with what the user
+  // is actually viewing: a saved conversation (restorable by id), the agent
+  // of an unsent blank conversation, or nothing on the landing page.
+  useEffect(() => {
+    if (!selectedAgent) {
+      clearLastChatView();
+      return;
+    }
+    const numericConversationId = Number(activeConversationId);
+    if (Number.isInteger(numericConversationId) && numericConversationId > 0) {
+      writeLastChatViewConversation(String(numericConversationId));
+      return;
+    }
+    // No server-side conversation yet: remember the agent so the refresh can
+    // reopen a blank conversation with the same selection.
+    writeLastChatViewAgent(String(selectedAgent.id));
+  }, [selectedAgent, activeConversationId]);
 
   // Sync selected agent and active thread into composer's runConfig so the
   // ChatModelAdapter can forward both agent_id and conversation_id reliably.
