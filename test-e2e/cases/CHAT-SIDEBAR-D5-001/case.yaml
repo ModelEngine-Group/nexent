@@ -7,7 +7,7 @@ case:
   requirement_ids:
   - WB-PIN-SYNC-20261016
   business_rule_ids:
-  - CHAT-SIDEBAR-RULE-002
+  - CHAT-SIDEBAR-RULE-003
   title: Personal conversation pin migration preserves valid legacy pins and safely repeats
   type: RELIABILITY
   priority: P1

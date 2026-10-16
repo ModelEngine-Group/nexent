@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """
 Unit tests for northbound_base_app module.
 
@@ -321,10 +323,10 @@ auth_utils_module.generate_session_jwt = MagicMock(return_value="jwt-token")
 auth_utils_module.get_current_user_id = MagicMock(return_value=("test", "test"))
 sys.modules['utils.auth_utils'] = auth_utils_module
 
-# Mock utils.file_management_utils to avoid database/storage imports
-file_management_utils_module = types.ModuleType("utils.file_management_utils")
+# Mock management.services.knowledge_base.ingestion to avoid database/storage imports
+file_management_utils_module = types.ModuleType("management.services.knowledge_base.ingestion")
 file_management_utils_module.trigger_data_process = AsyncMock(return_value=[])
-sys.modules["utils.file_management_utils"] = file_management_utils_module
+sys.modules["management.services.knowledge_base.ingestion"] = file_management_utils_module
 
 # ---------------------------------------------------------------------------
 # Helper to build async iterators without passing keyword args through mock

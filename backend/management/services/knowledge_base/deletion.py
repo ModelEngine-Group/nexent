@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """
 Elasticsearch Application Interface Module
 
@@ -9,20 +11,16 @@ Main features include:
 3. Support for multiple search methods: exact search, semantic search, and hybrid search
 4. Health check interface
 """
+
 import asyncio
 import json
 import time
 from typing import Any, Dict, Optional
 
-from fastapi import Depends, Path, Query
-from nexent.vector_database.base import VectorDatabaseCore
-from nexent.core.concurrency import run_blocking
-
 from consts.const import (
     DOCUMENT_DELETE_DRAIN_TIMEOUT_S,
     DOCUMENT_DELETE_RETRY_INTERVAL_S,
 )
-
 from database.attachment_db import delete_file
 from database.knowledge_db import (
     get_knowledge_record,
@@ -34,15 +32,7 @@ from database.knowledge_file_lifecycle_db import (
     get_file_record,
     transition_file_record,
 )
-from services.knowledge_storage_service import (
-    release_storage_charge,
-    resolve_storage_reference,
-)
-from services.redis_service import get_redis_service
-from utils.file_management_utils import get_all_files_status
-
-
-
+from fastapi import Depends, Path, Query
 from management.services.knowledge_base.common import (
     get_vector_db_core,
     logger,
@@ -51,18 +41,23 @@ from management.services.knowledge_base.management import (
     KNOWLEDGE_BASE_DELETE_BLOCKING_STATUSES,
     KnowledgeBaseManagementService,
 )
-
+from management.services.knowledge_base.status import get_all_files_status
+from nexent.core.concurrency import run_blocking
+from nexent.vector_database.base import VectorDatabaseCore
+from services.knowledge_storage_service import (
+    release_storage_charge,
+    resolve_storage_reference,
+)
+from services.redis_service import get_redis_service
 
 _document_delete_tasks: Dict[str, asyncio.Task] = {}
 
 
-
 class KnowledgeBaseDocumentDeletionService(KnowledgeBaseManagementService):
     DOCUMENT_DELETE_SCOPES = ("source_only", "full")
+
     @staticmethod
-    async def _assert_source_only_deletable(
-            index_name: str, path_or_url: str
-    ) -> None:
+    async def _assert_source_only_deletable(index_name: str, path_or_url: str) -> None:
         celery_task_files = await get_all_files_status(index_name)
         status_info = celery_task_files.get(path_or_url)
         if not status_info or not isinstance(status_info, dict):
@@ -76,10 +71,10 @@ class KnowledgeBaseDocumentDeletionService(KnowledgeBaseManagementService):
 
     @staticmethod
     def _mark_file_delete_requested(
-            index_name: str,
-            path_or_url: str,
-            requested_by: Optional[str] = None,
-            file_id: Optional[str] = None,
+        index_name: str,
+        path_or_url: str,
+        requested_by: Optional[str] = None,
+        file_id: Optional[str] = None,
     ) -> Optional[Dict[str, Any]]:
         """Install the durable PG/Redis deletion fence before cleanup."""
         try:
@@ -96,16 +91,27 @@ class KnowledgeBaseDocumentDeletionService(KnowledgeBaseManagementService):
                 include_hidden=True,
             )
             if record:
-                if str(record.get("status") or "").upper() not in {"DELETE_REQUESTED", "DELETED"}:
-                    record = transition_file_record(
-                        record["file_id"],
-                        status="DELETE_REQUESTED",
-                        stage="DELETE",
-                        expected_statuses=(
-                            "UPLOADING", "UPLOADED", "PROCESSING", "FORWARDING", "FAILED", "COMPLETED"
-                        ),
-                        updated_by=requested_by,
-                    ) or record
+                if str(record.get("status") or "").upper() not in {
+                    "DELETE_REQUESTED",
+                    "DELETED",
+                }:
+                    record = (
+                        transition_file_record(
+                            record["file_id"],
+                            status="DELETE_REQUESTED",
+                            stage="DELETE",
+                            expected_statuses=(
+                                "UPLOADING",
+                                "UPLOADED",
+                                "PROCESSING",
+                                "FORWARDING",
+                                "FAILED",
+                                "COMPLETED",
+                            ),
+                            updated_by=requested_by,
+                        )
+                        or record
+                    )
             elif tenant_id is not None and knowledge_id is not None:
                 record = create_delete_tombstone(
                     tenant_id=str(tenant_id),
@@ -140,10 +146,10 @@ class KnowledgeBaseDocumentDeletionService(KnowledgeBaseManagementService):
 
     @staticmethod
     def _mark_file_deleted(
-            index_name: str,
-            path_or_url: str,
-            file_id: Optional[str] = None,
-            updated_by: Optional[str] = None,
+        index_name: str,
+        path_or_url: str,
+        file_id: Optional[str] = None,
+        updated_by: Optional[str] = None,
     ) -> None:
         try:
             knowledge = get_knowledge_record({"index_name": index_name}) or {}
@@ -168,7 +174,9 @@ class KnowledgeBaseDocumentDeletionService(KnowledgeBaseManagementService):
             )
 
     @staticmethod
-    def _cancel_document_tasks(*, lifecycle_record: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    def _cancel_document_tasks(
+        *, lifecycle_record: Optional[Dict[str, Any]] = None
+    ) -> Dict[str, Any]:
         """Revoke Celery tasks recorded for one lifecycle file."""
         task_ids = {
             lifecycle_record.get(field)
@@ -184,7 +192,11 @@ class KnowledgeBaseDocumentDeletionService(KnowledgeBaseManagementService):
                 try:
                     workers = getattr(inspector, method_name)() or {}
                 except Exception as inspect_exc:
-                    logger.debug("Unable to inspect %s Celery tasks: %s", method_name, inspect_exc)
+                    logger.debug(
+                        "Unable to inspect %s Celery tasks: %s",
+                        method_name,
+                        inspect_exc,
+                    )
                     continue
                 for worker_tasks in workers.values():
                     for task in worker_tasks or []:
@@ -194,10 +206,18 @@ class KnowledgeBaseDocumentDeletionService(KnowledgeBaseManagementService):
                                 kwargs = json.loads(kwargs)
                             except Exception:
                                 kwargs = {}
-                        if file_id and isinstance(kwargs, dict) and kwargs.get("file_id") == file_id and task.get("id"):
+                        if (
+                            file_id
+                            and isinstance(kwargs, dict)
+                            and kwargs.get("file_id") == file_id
+                            and task.get("id")
+                        ):
                             task_ids.add(task["id"])
         except Exception as inspect_exc:
-            logger.debug("Celery task inspection unavailable during document deletion: %s", inspect_exc)
+            logger.debug(
+                "Celery task inspection unavailable during document deletion: %s",
+                inspect_exc,
+            )
 
         cancelled = []
         try:
@@ -213,7 +233,9 @@ class KnowledgeBaseDocumentDeletionService(KnowledgeBaseManagementService):
                 try:
                     redis_service.mark_task_cancelled(task_id)
                 except Exception as cancel_exc:
-                    logger.debug("Unable to mark task %s cancelled: %s", task_id, cancel_exc)
+                    logger.debug(
+                        "Unable to mark task %s cancelled: %s", task_id, cancel_exc
+                    )
             if celery_app:
                 try:
                     celery_app.control.revoke(task_id, terminate=False)
@@ -224,8 +246,12 @@ class KnowledgeBaseDocumentDeletionService(KnowledgeBaseManagementService):
 
     @staticmethod
     def _wait_for_document_tasks(
-            *, index_name: str, path_or_url: str, lifecycle_record: Dict[str, Any],
-            timeout_seconds: float, poll_interval_seconds: float = 0.2,
+        *,
+        index_name: str,
+        path_or_url: str,
+        lifecycle_record: Dict[str, Any],
+        timeout_seconds: float,
+        poll_interval_seconds: float = 0.2,
     ) -> bool:
         """Wait for the recorded parent chain to reach a terminal state."""
         deadline = time.monotonic() + max(0.0, float(timeout_seconds))
@@ -235,29 +261,46 @@ class KnowledgeBaseDocumentDeletionService(KnowledgeBaseManagementService):
             return status not in KNOWLEDGE_BASE_DELETE_BLOCKING_STATUSES
         while True:
             try:
-                task_data = get_redis_service().backend_client.get(f"celery-task-meta-{task_id}")
+                task_data = get_redis_service().backend_client.get(
+                    f"celery-task-meta-{task_id}"
+                )
                 if task_data:
                     if isinstance(task_data, bytes):
                         task_data = task_data.decode("utf-8")
                     task_meta = json.loads(task_data)
-                    state = str(task_meta.get("status") or task_meta.get("state") or "").upper()
+                    state = str(
+                        task_meta.get("status") or task_meta.get("state") or ""
+                    ).upper()
                     if state in {"SUCCESS", "FAILURE", "REVOKED"}:
                         return True
             except (TypeError, ValueError, json.JSONDecodeError) as result_exc:
-                logger.warning("Unable to parse Celery task result task_id=%s: %s", task_id, result_exc)
+                logger.warning(
+                    "Unable to parse Celery task result task_id=%s: %s",
+                    task_id,
+                    result_exc,
+                )
                 return False
             except Exception as result_exc:
-                logger.warning("Unable to read Celery task result task_id=%s: %s", task_id, result_exc)
+                logger.warning(
+                    "Unable to read Celery task result task_id=%s: %s",
+                    task_id,
+                    result_exc,
+                )
                 return False
             if time.monotonic() >= deadline:
-                logger.warning("Timed out waiting for Celery task chain index=%s path=%s task_id=%s", index_name, path_or_url, task_id)
+                logger.warning(
+                    "Timed out waiting for Celery task chain index=%s path=%s task_id=%s",
+                    index_name,
+                    path_or_url,
+                    task_id,
+                )
                 return False
             time.sleep(max(0.01, float(poll_interval_seconds)))
 
     @staticmethod
     def delete_lifecycle_record_without_object(
-            lifecycle_record: Dict[str, Any],
-            requested_by: Optional[str] = None,
+        lifecycle_record: Dict[str, Any],
+        requested_by: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Delete a lifecycle row when no storage object was ever created."""
         file_id = lifecycle_record.get("file_id") if lifecycle_record else None
@@ -274,13 +317,21 @@ class KnowledgeBaseDocumentDeletionService(KnowledgeBaseManagementService):
                 requested_by=requested_by,
             )
         except Exception as fence_exc:
-            logger.debug("Unable to install no-object deletion fence for %s: %s", file_id, fence_exc)
+            logger.debug(
+                "Unable to install no-object deletion fence for %s: %s",
+                file_id,
+                fence_exc,
+            )
         try:
             KnowledgeBaseDocumentDeletionService._cancel_document_tasks(
                 lifecycle_record=lifecycle_record,
             )
         except Exception as cancel_exc:
-            logger.debug("Unable to cancel no-object deletion tasks for %s: %s", file_id, cancel_exc)
+            logger.debug(
+                "Unable to cancel no-object deletion tasks for %s: %s",
+                file_id,
+                cancel_exc,
+            )
         deleteable_statuses = (
             "UPLOADING",
             "UPLOADED",
@@ -291,7 +342,9 @@ class KnowledgeBaseDocumentDeletionService(KnowledgeBaseManagementService):
         )
 
         if current_status == "DELETED":
-            delete_file_record(file_id, expected_statuses=("DELETE_REQUESTED", "DELETED"))
+            delete_file_record(
+                file_id, expected_statuses=("DELETE_REQUESTED", "DELETED")
+            )
             try:
                 get_redis_service().clear_document_delete_fence(file_id=file_id)
             except Exception:
@@ -323,7 +376,10 @@ class KnowledgeBaseDocumentDeletionService(KnowledgeBaseManagementService):
                 )
                 if latest and str(latest.get("status") or "").upper() == "DELETED":
                     current_status = "DELETED"
-                elif latest and str(latest.get("status") or "").upper() == "DELETE_REQUESTED":
+                elif (
+                    latest
+                    and str(latest.get("status") or "").upper() == "DELETE_REQUESTED"
+                ):
                     current_status = "DELETE_REQUESTED"
                 else:
                     raise ValueError("Lifecycle file record could not be deleted")
@@ -359,10 +415,13 @@ class KnowledgeBaseDocumentDeletionService(KnowledgeBaseManagementService):
 
     @staticmethod
     async def _finalize_document_delete(
-            *, index_name: str, path_or_url: str, scope: str,
-            vdb_core: VectorDatabaseCore,
-            lifecycle_record: Optional[Dict[str, Any]],
-            requested_by: Optional[str] = None,
+        *,
+        index_name: str,
+        path_or_url: str,
+        scope: str,
+        vdb_core: VectorDatabaseCore,
+        lifecycle_record: Optional[Dict[str, Any]],
+        requested_by: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Finish a document deletion after its parent chain has stopped."""
         # Resolve the concrete service lazily to avoid the management ->
@@ -372,7 +431,9 @@ class KnowledgeBaseDocumentDeletionService(KnowledgeBaseManagementService):
 
         service_cls = ElasticSearchService
         file_id = (lifecycle_record or {}).get("file_id")
-        legacy_mode = lifecycle_record is None or not lifecycle_record.get("object_name")
+        legacy_mode = lifecycle_record is None or not lifecycle_record.get(
+            "object_name"
+        )
         if lifecycle_record and lifecycle_record.get("object_name"):
             drained = await run_blocking(
                 "knowledge-document-drain",
@@ -416,7 +477,12 @@ class KnowledgeBaseDocumentDeletionService(KnowledgeBaseManagementService):
             try:
                 result = service_cls.delete_documents(index_name, path_or_url, vdb_core)
             except Exception as external_exc:
-                logger.warning("External document cleanup failed index=%s path=%s: %s", index_name, path_or_url, external_exc)
+                logger.warning(
+                    "External document cleanup failed index=%s path=%s: %s",
+                    index_name,
+                    path_or_url,
+                    external_exc,
+                )
                 return {
                     "status": "pending",
                     "scope": scope,
@@ -431,7 +497,9 @@ class KnowledgeBaseDocumentDeletionService(KnowledgeBaseManagementService):
 
         if scope == "full":
             try:
-                redis_cleanup = get_redis_service().delete_document_records(index_name, path_or_url)
+                redis_cleanup = get_redis_service().delete_document_records(
+                    index_name, path_or_url
+                )
                 result["redis_cleanup"] = redis_cleanup
                 if redis_cleanup.get("errors") and not legacy_mode:
                     return {
@@ -443,7 +511,12 @@ class KnowledgeBaseDocumentDeletionService(KnowledgeBaseManagementService):
                         "message": "External data deleted; waiting for Redis task cleanup.",
                     }
             except Exception as redis_exc:
-                logger.warning("Redis document cleanup failed index=%s path=%s: %s", index_name, path_or_url, redis_exc)
+                logger.warning(
+                    "Redis document cleanup failed index=%s path=%s: %s",
+                    index_name,
+                    path_or_url,
+                    redis_exc,
+                )
                 if not legacy_mode:
                     return {
                         **result,
@@ -456,7 +529,9 @@ class KnowledgeBaseDocumentDeletionService(KnowledgeBaseManagementService):
 
         try:
             if file_id and not legacy_mode:
-                delete_file_record(file_id, expected_statuses=("DELETE_REQUESTED", "DELETED"))
+                delete_file_record(
+                    file_id, expected_statuses=("DELETE_REQUESTED", "DELETED")
+                )
             else:
                 if requested_by is None:
                     service_cls._mark_file_deleted(index_name, path_or_url)
@@ -465,7 +540,13 @@ class KnowledgeBaseDocumentDeletionService(KnowledgeBaseManagementService):
                         index_name, path_or_url, updated_by=requested_by
                     )
         except Exception as lifecycle_exc:
-            logger.warning("Lifecycle hard delete failed index=%s path=%s file_id=%s: %s", index_name, path_or_url, file_id, lifecycle_exc)
+            logger.warning(
+                "Lifecycle hard delete failed index=%s path=%s file_id=%s: %s",
+                index_name,
+                path_or_url,
+                file_id,
+                lifecycle_exc,
+            )
             return {
                 **result,
                 "status": "pending",
@@ -478,7 +559,11 @@ class KnowledgeBaseDocumentDeletionService(KnowledgeBaseManagementService):
         try:
             fence_service = get_redis_service()
             fence_service.clear_document_delete_fence(file_id=file_id)
-            if file_id and not legacy_mode and fence_service.is_document_delete_requested(file_id=file_id):
+            if (
+                file_id
+                and not legacy_mode
+                and fence_service.is_document_delete_requested(file_id=file_id)
+            ):
                 return {
                     **result,
                     "status": "pending",
@@ -487,7 +572,12 @@ class KnowledgeBaseDocumentDeletionService(KnowledgeBaseManagementService):
                     "message": "External data deleted; waiting for deletion fence cleanup.",
                 }
         except Exception as fence_exc:
-            logger.warning("Failed to clear deletion fence index=%s path=%s: %s", index_name, path_or_url, fence_exc)
+            logger.warning(
+                "Failed to clear deletion fence index=%s path=%s: %s",
+                index_name,
+                path_or_url,
+                fence_exc,
+            )
             if not legacy_mode:
                 return {
                     **result,
@@ -502,10 +592,13 @@ class KnowledgeBaseDocumentDeletionService(KnowledgeBaseManagementService):
 
     @staticmethod
     async def _retry_document_delete(
-            *, index_name: str, path_or_url: str, scope: str,
-            vdb_core: VectorDatabaseCore,
-            lifecycle_record: Optional[Dict[str, Any]],
-            requested_by: Optional[str] = None,
+        *,
+        index_name: str,
+        path_or_url: str,
+        scope: str,
+        vdb_core: VectorDatabaseCore,
+        lifecycle_record: Optional[Dict[str, Any]],
+        requested_by: Optional[str] = None,
     ) -> None:
         from management.services.knowledge_base.service import ElasticSearchService
 
@@ -524,7 +617,12 @@ class KnowledgeBaseDocumentDeletionService(KnowledgeBaseManagementService):
                     if result.get("status") != "pending":
                         return
                 except Exception as exc:
-                    logger.warning("Background deletion finalizer failed index=%s path=%s: %s", index_name, path_or_url, exc)
+                    logger.warning(
+                        "Background deletion finalizer failed index=%s path=%s: %s",
+                        index_name,
+                        path_or_url,
+                        exc,
+                    )
                 await asyncio.sleep(max(0.2, DOCUMENT_DELETE_RETRY_INTERVAL_S))
         except asyncio.CancelledError:
             raise
@@ -533,10 +631,13 @@ class KnowledgeBaseDocumentDeletionService(KnowledgeBaseManagementService):
 
     @staticmethod
     def _schedule_document_delete_retry(
-            *, index_name: str, path_or_url: str, scope: str,
-            vdb_core: VectorDatabaseCore,
-            lifecycle_record: Optional[Dict[str, Any]],
-            requested_by: Optional[str] = None,
+        *,
+        index_name: str,
+        path_or_url: str,
+        scope: str,
+        vdb_core: VectorDatabaseCore,
+        lifecycle_record: Optional[Dict[str, Any]],
+        requested_by: Optional[str] = None,
     ) -> None:
         from management.services.knowledge_base.service import ElasticSearchService
 
@@ -557,12 +658,12 @@ class KnowledgeBaseDocumentDeletionService(KnowledgeBaseManagementService):
 
     @staticmethod
     async def delete_document_by_scope(
-            index_name: str,
-            path_or_url: str,
-            scope: str,
-            vdb_core: VectorDatabaseCore,
-            file_id: Optional[str] = None,
-            requested_by: Optional[str] = None,
+        index_name: str,
+        path_or_url: str,
+        scope: str,
+        vdb_core: VectorDatabaseCore,
+        file_id: Optional[str] = None,
+        requested_by: Optional[str] = None,
     ) -> Dict[str, Any]:
         from management.services.knowledge_base.service import ElasticSearchService
 
@@ -574,9 +675,7 @@ class KnowledgeBaseDocumentDeletionService(KnowledgeBaseManagementService):
             )
 
         if scope == "source_only":
-            await service_cls._assert_source_only_deletable(
-                index_name, path_or_url
-            )
+            await service_cls._assert_source_only_deletable(index_name, path_or_url)
         if file_id is None and requested_by is None:
             lifecycle_record = service_cls._mark_file_delete_requested(
                 index_name, path_or_url
@@ -613,14 +712,12 @@ class KnowledgeBaseDocumentDeletionService(KnowledgeBaseManagementService):
 
     @staticmethod
     def delete_documents(
-            index_name: str = Path(..., description="Name of the index"),
-            path_or_url: str = Query(...,
-                                     description="Path or URL of documents to delete"),
-            vdb_core: VectorDatabaseCore = Depends(get_vector_db_core)
+        index_name: str = Path(..., description="Name of the index"),
+        path_or_url: str = Query(..., description="Path or URL of documents to delete"),
+        vdb_core: VectorDatabaseCore = Depends(get_vector_db_core),
     ):
         # 1. Delete ES documents
-        deleted_count = vdb_core.delete_documents(
-            index_name, path_or_url)
+        deleted_count = vdb_core.delete_documents(index_name, path_or_url)
         # 2. Delete MinIO file
         minio_result = delete_file(path_or_url)
         if minio_result.get("success"):
@@ -643,4 +740,8 @@ class KnowledgeBaseDocumentDeletionService(KnowledgeBaseManagementService):
         # Update last_doc_update_time for auto-summary tracking
         update_last_doc_update_time(index_name)
 
-        return {"status": "success", "deleted_es_count": deleted_count, "deleted_minio": minio_result.get("success")}
+        return {
+            "status": "success",
+            "deleted_es_count": deleted_count,
+            "deleted_minio": minio_result.get("success"),
+        }

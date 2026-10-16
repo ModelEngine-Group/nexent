@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """Resolve Workbench declarations into immutable, request-scoped runtime overlays."""
 
 from __future__ import annotations
@@ -18,10 +20,12 @@ from database import skill_db
 from database.tool_db import query_tools_by_ids
 from database.agent_db import search_agent_info_by_agent_id
 from database.model_management_db import get_model_by_model_id
-from management.services.agent.system_agent_provider import system_agent_provider
+from management.services.agent.system import (
+    system_agent_provider,
+)
 from management.services.model.resolver import is_model_available
 from management.services.skill.service import SkillService
-from management.services.skill.support import can_view_skill, _get_user_role, _to_group_id_set
+from management.services.skill.permission import can_view_skill, _get_user_role, _to_group_id_set
 from database.group_db import query_group_ids_by_user
 from utils.runtime_config_utils import clone_runtime_config
 from services.knowledge_scope_service import (

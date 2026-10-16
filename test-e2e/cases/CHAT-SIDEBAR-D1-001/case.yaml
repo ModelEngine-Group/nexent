@@ -8,7 +8,7 @@ case:
   - CHAT-SIDEBAR-REQ-001
   business_rule_ids:
   - CHAT-SIDEBAR-RULE-001
-  - CHAT-SIDEBAR-RULE-003
+  - CHAT-SIDEBAR-RULE-002
   title: Preserve conversation sidebar and agent batch selection interactions
   type: FE-COMP
   priority: P1

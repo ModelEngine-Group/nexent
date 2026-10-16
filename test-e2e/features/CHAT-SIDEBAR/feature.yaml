@@ -9,7 +9,7 @@ feature:
   description: Persisted visibility, normalized rename, agent-group batch selection
     and server-ID batch deletion preserve sidebar state.
   business_rules:
-  - rule_id: CHAT-SIDEBAR-RULE-002
+  - rule_id: CHAT-SIDEBAR-RULE-003
     description: Workbench pin/unpin persists on the owning personal conversation for the authenticated user,
       using persisted conversation IDs. Tenant changes retain that personal preference. Focus/reconnect refresh hydrates missing pinned histories beyond the loaded page. Pins are newest first across devices;
       repinning moves first. Workbench rows show localized relative times when timestamps
@@ -20,7 +20,7 @@ feature:
     description: Persisted conversations remain visible; unsent drafts stay hidden;
       rename propagates normalized title and remote identity; batch deletion resolves
       server IDs and resets deleted active threads.
-  - rule_id: CHAT-SIDEBAR-RULE-003
+  - rule_id: CHAT-SIDEBAR-RULE-002
     description: In agent-chat batch mode, selecting an agent selects or clears every
       persisted conversation for that agent across paginated list results, updates the
       selected/total state, and leaves conversations from other agents unchanged.

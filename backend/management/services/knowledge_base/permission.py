@@ -1,11 +1,13 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """Knowledge-base permission resolution and reusable permission requirements."""
 
 import logging
 from typing import List, Optional
 
 from consts.const import ASSET_OWNER_TENANT_ID, IS_SPEED_MODE, PERMISSION_EDIT
-from database.knowledge_db import get_knowledge_record
 from database.group_db import query_group_ids_by_user
+from database.knowledge_db import get_knowledge_record
 from database.user_tenant_db import get_user_tenant_by_user_id
 from permissions.dac import ResourceAccessControl
 from permissions.models import Resource
@@ -114,7 +116,9 @@ def filter_accessible_indices(
     accessible = []
     for index_name in index_names:
         try:
-            permission = resolve_knowledge_base_permission(index_name, user_id, tenant_id)
+            permission = resolve_knowledge_base_permission(
+                index_name, user_id, tenant_id
+            )
         except ValueError:
             logger.warning(
                 "Knowledge base '%s' not found during permission check, skipping",

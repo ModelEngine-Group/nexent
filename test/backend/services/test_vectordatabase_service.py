@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import asyncio
 import importlib
 import io
@@ -403,13 +405,13 @@ backend_utils_mock.__path__ = []  # Empty __path__ makes it a namespace package
 sys.modules['backend.utils'] = backend_utils_mock
 
 # Create a mock document_vector_utils module with required functions
-document_vector_utils_mock = types.ModuleType('backend.utils.document_vector_utils')
+document_vector_utils_mock = types.ModuleType('backend.management.services.knowledge_base.summary')
 document_vector_utils_mock.process_documents_for_clustering = MagicMock(return_value=([], []))
 document_vector_utils_mock.kmeans_cluster_documents = MagicMock(return_value=[])
 document_vector_utils_mock.summarize_clusters_map_reduce = MagicMock(return_value="test summary")
 document_vector_utils_mock.merge_cluster_summaries = MagicMock(return_value="merged summary")
-sys.modules['backend.utils.document_vector_utils'] = document_vector_utils_mock
-sys.modules['utils.document_vector_utils'] = document_vector_utils_mock
+sys.modules['backend.management.services.knowledge_base.summary'] = document_vector_utils_mock
+sys.modules['management.services.knowledge_base.summary'] = document_vector_utils_mock
 setattr(sys.modules['utils'], 'document_vector_utils', document_vector_utils_mock)
 setattr(sys.modules['backend.utils'], 'document_vector_utils', document_vector_utils_mock)
 
@@ -478,7 +480,7 @@ sys.modules['backend.database.client'] = backend_database_client_module
 with patch('botocore.client.BaseClient._make_api_call'), \
         patch('elasticsearch.Elasticsearch', return_value=MagicMock()):
     # Import utils.document_vector_utils to ensure it's available for patching
-    import utils.document_vector_utils
+    import management.services.knowledge_base.summary
     from management.services.knowledge_base.deletion import KnowledgeBaseDocumentDeletionService
     from management.services.knowledge_base.management import KnowledgeBaseManagementService
     from management.services.knowledge_base.service import ElasticSearchService, check_knowledge_base_exist_impl, KnowledgeBaseNeedsModelConfigError
@@ -2372,7 +2374,7 @@ class TestElasticSearchService(unittest.TestCase):
         self.assertEqual(kwargs.get("embedding_batch_size"), 8)
         self.assertTrue(callable(kwargs.get("progress_callback")))
 
-    @patch('management.services.knowledge_base.management.get_all_files_status')
+    @patch('management.services.knowledge_base.files.get_all_files_status')
     def test_list_files_without_chunks(self, mock_get_files_status):
         """
         Test listing files without including document chunks.
@@ -2412,11 +2414,11 @@ class TestElasticSearchService(unittest.TestCase):
         self.mock_vdb_core.get_documents_detail.assert_called_once_with(
             "test_index")
 
-    @patch('management.services.knowledge_base.common.get_redis_service')
-    @patch('management.services.knowledge_base.management.get_file_size', return_value=12)
-    @patch('management.services.knowledge_base.management.list_file_records')
-    @patch('management.services.knowledge_base.management.get_knowledge_record')
-    @patch('management.services.knowledge_base.management.get_all_files_status', new_callable=AsyncMock)
+    @patch('management.services.knowledge_base.files.get_redis_service')
+    @patch('management.services.knowledge_base.files.get_file_size', return_value=12)
+    @patch('management.services.knowledge_base.files.list_file_records')
+    @patch('management.services.knowledge_base.files.get_knowledge_record')
+    @patch('management.services.knowledge_base.files.get_all_files_status', new_callable=AsyncMock)
     def test_list_files_merges_lifecycle_rows_and_hides_tombstones(
         self, mock_get_files_status, mock_get_knowledge, mock_list_lifecycle, mock_get_size, mock_redis
     ):
@@ -2469,10 +2471,10 @@ class TestElasticSearchService(unittest.TestCase):
         assert by_path["uploading.txt"]["status"] == "WAIT_FOR_PROCESSING"
         assert by_path["legacy-ms"]["create_time"] == 1700000000000
 
-    @patch('management.services.knowledge_base.common.get_redis_service')
-    @patch('management.services.knowledge_base.management.list_file_records')
-    @patch('management.services.knowledge_base.management.get_knowledge_record')
-    @patch('management.services.knowledge_base.management.get_all_files_status', new_callable=AsyncMock)
+    @patch('management.services.knowledge_base.files.get_redis_service')
+    @patch('management.services.knowledge_base.files.list_file_records')
+    @patch('management.services.knowledge_base.files.get_knowledge_record')
+    @patch('management.services.knowledge_base.files.get_all_files_status', new_callable=AsyncMock)
     def test_list_files_keeps_legacy_effective_filename_over_lifecycle_name(
         self, mock_get_files_status, mock_get_knowledge, mock_list_lifecycle, mock_redis
     ):
@@ -2719,7 +2721,7 @@ class TestElasticSearchService(unittest.TestCase):
                 }
             )
 
-    @patch('management.services.knowledge_base.deletion.get_all_files_status')
+    @patch('management.services.knowledge_base.files.get_all_files_status')
     def test_list_files_with_chunks(self, mock_get_files_status):
         """
         Test listing files with document chunks included.
@@ -2780,7 +2782,7 @@ class TestElasticSearchService(unittest.TestCase):
         self.assertEqual(result["files"][0]["chunk_count"], 1)
         self.mock_vdb_core.multi_search.assert_called_once()
 
-    @patch('management.services.knowledge_base.deletion.get_all_files_status')
+    @patch('management.services.knowledge_base.files.get_all_files_status')
     def test_list_files_msearch_error(self, mock_get_files_status):
         """
         Test listing files when msearch encounters an error.
@@ -2854,8 +2856,8 @@ class TestElasticSearchService(unittest.TestCase):
         # Verify that delete_file was called with the correct path
         mock_delete_file.assert_called_once_with("test_path")
 
-    @patch('management.services.knowledge_base.management.delete_file')
-    @patch('management.services.knowledge_base.management.file_exists', return_value=False)
+    @patch('management.services.knowledge_base.files.delete_file')
+    @patch('management.services.knowledge_base.files.file_exists', return_value=False)
     def test_delete_source_file(self, mock_file_exists, mock_delete_file):
         mock_delete_file.return_value = {"success": True}
         result = ElasticSearchService.delete_source_file(
@@ -2864,10 +2866,10 @@ class TestElasticSearchService(unittest.TestCase):
         self.assertTrue(result["deleted_minio"])
         mock_delete_file.assert_called()
 
-    @patch('management.services.knowledge_base.management.release_storage_charge')
-    @patch('management.services.knowledge_base.management.resolve_storage_reference')
-    @patch('management.services.knowledge_base.management.file_exists', return_value=False)
-    @patch('management.services.knowledge_base.management.delete_file')
+    @patch('management.services.knowledge_base.files.release_storage_charge')
+    @patch('management.services.knowledge_base.files.resolve_storage_reference')
+    @patch('management.services.knowledge_base.files.file_exists', return_value=False)
+    @patch('management.services.knowledge_base.files.delete_file')
     def test_delete_source_file_releases_charge_only_after_minio_success(
         self, mock_delete_file, _mock_exists, mock_resolve, mock_release
     ):
@@ -2899,7 +2901,7 @@ class TestElasticSearchService(unittest.TestCase):
         'management.services.knowledge_base.deletion.get_all_files_status',
         new_callable=AsyncMock,
     )
-    @patch('management.services.knowledge_base.management.delete_file')
+    @patch('management.services.knowledge_base.files.delete_file')
     def test_delete_document_by_scope_source_only(
         self, mock_delete_file, mock_get_status
     ):
@@ -3055,7 +3057,7 @@ class TestElasticSearchService(unittest.TestCase):
 
     @patch('management.services.knowledge_base.deletion.release_storage_charge')
     @patch('management.services.knowledge_base.deletion.resolve_storage_reference')
-    @patch('management.services.knowledge_base.management.get_knowledge_record')
+    @patch('management.services.knowledge_base.deletion.get_knowledge_record')
     @patch('management.services.knowledge_base.deletion.delete_file')
     def test_full_document_delete_keeps_charge_when_minio_fails(
         self, mock_delete_file, mock_get_knowledge, mock_resolve, mock_release
@@ -3078,11 +3080,11 @@ class TestElasticSearchService(unittest.TestCase):
         self.assertFalse(result["deleted_minio"])
         mock_release.assert_not_called()
 
-    @patch('management.services.knowledge_base.management.release_storage_charge')
-    @patch('management.services.knowledge_base.management.resolve_storage_reference')
-    @patch('management.services.knowledge_base.management.delete_file')
-    @patch('management.services.knowledge_base.management.list_committed_storage_objects')
-    @patch('management.services.knowledge_base.management.get_knowledge_record')
+    @patch('management.services.knowledge_base.files.release_storage_charge')
+    @patch('management.services.knowledge_base.files.resolve_storage_reference')
+    @patch('management.services.knowledge_base.files.delete_file')
+    @patch('management.services.knowledge_base.files.list_committed_storage_objects')
+    @patch('management.services.knowledge_base.files.get_knowledge_record')
     def test_kb_source_cleanup_uses_canonical_union_and_preserves_failed_charge(
         self,
         mock_get_knowledge,
@@ -3139,11 +3141,11 @@ class TestElasticSearchService(unittest.TestCase):
             updated_by="user-1",
         )
 
-    @patch('management.services.knowledge_base.management.release_storage_charge')
-    @patch('management.services.knowledge_base.management.resolve_storage_reference')
-    @patch('management.services.knowledge_base.management.delete_file')
-    @patch('management.services.knowledge_base.management.list_committed_storage_objects')
-    @patch('management.services.knowledge_base.management.get_knowledge_record')
+    @patch('management.services.knowledge_base.files.release_storage_charge')
+    @patch('management.services.knowledge_base.files.resolve_storage_reference')
+    @patch('management.services.knowledge_base.files.delete_file')
+    @patch('management.services.knowledge_base.files.list_committed_storage_objects')
+    @patch('management.services.knowledge_base.files.get_knowledge_record')
     def test_kb_source_cleanup_skips_non_canonical_es_reference(
         self,
         mock_get_knowledge,
@@ -3201,7 +3203,7 @@ class TestElasticSearchService(unittest.TestCase):
         self.assertEqual(result["status"], "success")
         cleanup.assert_not_awaited()
 
-    @patch('management.services.knowledge_base.management.file_exists', return_value=False)
+    @patch('management.services.knowledge_base.files.file_exists', return_value=False)
     def test_compute_source_available_completed_missing_minio(self, _mock_exists):
         available = ElasticSearchService._compute_source_available({
             "path_or_url": "knowledge_base/doc.pdf",
@@ -3721,10 +3723,10 @@ class TestElasticSearchService(unittest.TestCase):
         }
 
         # Mock the new Map-Reduce functions
-        with patch('backend.utils.document_vector_utils.process_documents_for_clustering') as mock_process_docs, \
-                patch('backend.utils.document_vector_utils.kmeans_cluster_documents') as mock_cluster, \
-                patch('backend.utils.document_vector_utils.summarize_clusters_map_reduce') as mock_summarize, \
-                patch('backend.utils.document_vector_utils.merge_cluster_summaries') as mock_merge, \
+        with patch('backend.management.services.knowledge_base.summary.process_documents_for_clustering') as mock_process_docs, \
+                patch('backend.management.services.knowledge_base.clustering.kmeans_cluster_documents') as mock_cluster, \
+                patch('backend.management.services.knowledge_base.summary.summarize_clusters_map_reduce') as mock_summarize, \
+                patch('backend.management.services.knowledge_base.summary.merge_cluster_summaries') as mock_merge, \
                 patch('database.model_management_db.get_model_by_model_id') as mock_get_model_internal:
 
             # Mock return values
@@ -3805,10 +3807,10 @@ class TestElasticSearchService(unittest.TestCase):
         2. The exception message contains "No documents found in index"
         """
         # Mock the new Map-Reduce functions
-        with patch('backend.utils.document_vector_utils.process_documents_for_clustering') as mock_process_docs, \
-                patch('backend.utils.document_vector_utils.kmeans_cluster_documents'), \
-                patch('backend.utils.document_vector_utils.summarize_clusters_map_reduce'), \
-                patch('backend.utils.document_vector_utils.merge_cluster_summaries'):
+        with patch('backend.management.services.knowledge_base.summary.process_documents_for_clustering') as mock_process_docs, \
+                patch('backend.management.services.knowledge_base.clustering.kmeans_cluster_documents'), \
+                patch('backend.management.services.knowledge_base.summary.summarize_clusters_map_reduce'), \
+                patch('backend.management.services.knowledge_base.summary.merge_cluster_summaries'):
             # Mock return empty document_samples
             mock_process_docs.return_value = (
                 {},  # Empty document_samples
@@ -3845,10 +3847,10 @@ class TestElasticSearchService(unittest.TestCase):
         2. The summary generation still works correctly
         """
         # Mock the new Map-Reduce functions
-        with patch('backend.utils.document_vector_utils.process_documents_for_clustering') as mock_process_docs, \
-                patch('backend.utils.document_vector_utils.kmeans_cluster_documents') as mock_cluster, \
-                patch('backend.utils.document_vector_utils.summarize_clusters_map_reduce') as mock_summarize, \
-                patch('backend.utils.document_vector_utils.merge_cluster_summaries') as mock_merge:
+        with patch('backend.management.services.knowledge_base.summary.process_documents_for_clustering') as mock_process_docs, \
+                patch('backend.management.services.knowledge_base.clustering.kmeans_cluster_documents') as mock_cluster, \
+                patch('backend.management.services.knowledge_base.summary.summarize_clusters_map_reduce') as mock_summarize, \
+                patch('backend.management.services.knowledge_base.summary.merge_cluster_summaries') as mock_merge:
 
             # Mock return values
             mock_process_docs.return_value = (
@@ -3909,10 +3911,10 @@ class TestElasticSearchService(unittest.TestCase):
         2. The error status is properly formatted
         """
         # Mock the new Map-Reduce functions
-        with patch('backend.utils.document_vector_utils.process_documents_for_clustering') as mock_process_docs, \
-                patch('backend.utils.document_vector_utils.kmeans_cluster_documents') as mock_cluster, \
-                patch('backend.utils.document_vector_utils.summarize_clusters_map_reduce') as mock_summarize, \
-                patch('backend.utils.document_vector_utils.merge_cluster_summaries') as mock_merge:
+        with patch('backend.management.services.knowledge_base.summary.process_documents_for_clustering') as mock_process_docs, \
+                patch('backend.management.services.knowledge_base.clustering.kmeans_cluster_documents') as mock_cluster, \
+                patch('backend.management.services.knowledge_base.summary.summarize_clusters_map_reduce') as mock_summarize, \
+                patch('backend.management.services.knowledge_base.summary.merge_cluster_summaries') as mock_merge:
 
             # Mock return values
             mock_process_docs.return_value = (
@@ -3963,10 +3965,10 @@ class TestElasticSearchService(unittest.TestCase):
         2. The sample_doc_count parameter is passed correctly to process_documents_for_clustering
         """
         # Test with batch_size=1000 -> sample_count should be min(200, 200) = 200
-        with patch('backend.utils.document_vector_utils.process_documents_for_clustering') as mock_process_docs, \
-                patch('backend.utils.document_vector_utils.kmeans_cluster_documents') as mock_cluster, \
-                patch('backend.utils.document_vector_utils.summarize_clusters_map_reduce') as mock_summarize, \
-                patch('backend.utils.document_vector_utils.merge_cluster_summaries') as mock_merge:
+        with patch('backend.management.services.knowledge_base.summary.process_documents_for_clustering') as mock_process_docs, \
+                patch('backend.management.services.knowledge_base.clustering.kmeans_cluster_documents') as mock_cluster, \
+                patch('backend.management.services.knowledge_base.summary.summarize_clusters_map_reduce') as mock_summarize, \
+                patch('backend.management.services.knowledge_base.summary.merge_cluster_summaries') as mock_merge:
 
             # Mock return values
             mock_process_docs.return_value = (
@@ -4008,10 +4010,10 @@ class TestElasticSearchService(unittest.TestCase):
             self.assertEqual(call_args.kwargs['sample_doc_count'], 200)
 
         # Test with batch_size=50 -> sample_count should be min(10, 200) = 10
-        with patch('backend.utils.document_vector_utils.process_documents_for_clustering') as mock_process_docs, \
-                patch('backend.utils.document_vector_utils.kmeans_cluster_documents') as mock_cluster, \
-                patch('backend.utils.document_vector_utils.summarize_clusters_map_reduce') as mock_summarize, \
-                patch('backend.utils.document_vector_utils.merge_cluster_summaries') as mock_merge:
+        with patch('backend.management.services.knowledge_base.summary.process_documents_for_clustering') as mock_process_docs, \
+                patch('backend.management.services.knowledge_base.clustering.kmeans_cluster_documents') as mock_cluster, \
+                patch('backend.management.services.knowledge_base.summary.summarize_clusters_map_reduce') as mock_summarize, \
+                patch('backend.management.services.knowledge_base.summary.merge_cluster_summaries') as mock_merge:
 
             # Mock return values
             mock_process_docs.return_value = (
@@ -4644,7 +4646,7 @@ class TestElasticSearchService(unittest.TestCase):
         self.assertNotIn("embedding", payload)
 
     @patch('management.services.knowledge_base.service.get_knowledge_record')
-    @patch('management.services.knowledge_base.common.get_embedding_model_by_id')
+    @patch('management.services.knowledge_base.service.get_embedding_model_by_id')
     def test_create_chunk_handles_embedding_failure_gracefully(self, mock_get_embedding_model_by_id,
                                                                mock_get_knowledge_record):
         """
@@ -4685,7 +4687,7 @@ class TestElasticSearchService(unittest.TestCase):
         self.assertNotIn("embedding", payload)
 
     @patch('management.services.knowledge_base.service.get_knowledge_record')
-    @patch('management.services.knowledge_base.common.get_embedding_model_by_id')
+    @patch('management.services.knowledge_base.service.get_embedding_model_by_id')
     def test_create_chunk_handles_empty_embedding_result(self, mock_get_embedding_model_by_id, mock_get_knowledge_record):
         """
         Test create_chunk handles empty embedding result gracefully.
@@ -4730,7 +4732,7 @@ class TestElasticSearchService(unittest.TestCase):
         self.assertNotIn("embedding", payload)
 
     @patch('management.services.knowledge_base.service.get_knowledge_record')
-    @patch('management.services.knowledge_base.common.get_embedding_model_by_id')
+    @patch('management.services.knowledge_base.service.get_embedding_model_by_id')
     def test_create_chunk_with_unknown_model_name_still_calls_embedding_model(self, mock_get_embedding_model_by_id,
                                                                               mock_get_knowledge_record):
         """
@@ -5412,7 +5414,7 @@ class TestRethrowOrPlain(unittest.TestCase):
         # Should re-raise the original string, not the JSON
         self.assertEqual(str(exc.exception), json_message)
 
-    @patch('management.services.knowledge_base.management.list_file_records', return_value=[])
+    @patch('management.services.knowledge_base.files.list_file_records', return_value=[])
     @patch('management.services.knowledge_base.management.get_redis_service')
     def test_full_delete_knowledge_base_no_files_redis_warning(self, mock_get_redis, mock_list_file_records):
         """full_delete_knowledge_base handles empty file list and surfaces Redis warnings."""
@@ -5444,7 +5446,7 @@ class TestRethrowOrPlain(unittest.TestCase):
         mock_list_files.assert_awaited_once()
         mock_delete_index.assert_awaited_once()
 
-    @patch('management.services.knowledge_base.management.list_file_records', return_value=[])
+    @patch('management.services.knowledge_base.files.list_file_records', return_value=[])
     @patch('management.services.knowledge_base.management.get_redis_service')
     def test_full_delete_knowledge_base_minio_and_redis_error(self, mock_get_redis, mock_list_file_records):
         """full_delete_knowledge_base logs minio summary and handles redis cleanup errors."""
@@ -5465,11 +5467,11 @@ class TestRethrowOrPlain(unittest.TestCase):
         # delete_file returns success for first, failure for second
         with patch('management.services.knowledge_base.management.KnowledgeBaseManagementService.list_files',
                    new_callable=AsyncMock, return_value=files_payload) as mock_list_files, \
-                patch('management.services.knowledge_base.management.resolve_storage_reference',
+                patch('management.services.knowledge_base.files.resolve_storage_reference',
                       side_effect=lambda value: SimpleNamespace(
                           bucket_name="nexent", object_name=value
                       )), \
-                patch('management.services.knowledge_base.management.delete_file') as mock_delete_file, \
+                patch('management.services.knowledge_base.files.delete_file') as mock_delete_file, \
                 patch('management.services.knowledge_base.management.KnowledgeBaseManagementService.delete_index',
                       new_callable=AsyncMock, return_value={"status": "success"}) as mock_delete_index:
             mock_delete_file.side_effect = [
@@ -5645,7 +5647,7 @@ class TestRethrowOrPlain(unittest.TestCase):
         # two attempts to save progress (init and final)
         self.assertEqual(mock_redis.save_progress_info.call_count, 2)
 
-    @patch('management.services.knowledge_base.management.get_all_files_status')
+    @patch('management.services.knowledge_base.files.get_all_files_status')
     def test_list_files_handles_invalid_create_time_and_failed_tasks(self, mock_get_files_status):
         """list_files handles invalid timestamps, progress from get_all_files_status, and error info."""
         # ES file with invalid timestamp and chunk_count from aggregation
@@ -5691,7 +5693,7 @@ class TestRethrowOrPlain(unittest.TestCase):
         self.assertEqual(file_info["total_chunk_num"], 5)
         self.assertIsInstance(file_info["create_time"], int)
 
-    @patch('management.services.knowledge_base.management.get_all_files_status')
+    @patch('management.services.knowledge_base.files.get_all_files_status')
     def test_list_files_warning_and_progress_error_branches(self, mock_get_files_status):
         """list_files: chunk_count from aggregation, progress from get_all_files_status, error handling."""
         # ES file - chunk_count from aggregation (no longer uses count())
@@ -5748,7 +5750,7 @@ class TestRethrowOrPlain(unittest.TestCase):
             f for f in result["files"] if f["path_or_url"] == "file-es")
         self.assertEqual(es_file["chunk_count"], 1)
 
-    @patch('management.services.knowledge_base.management.get_all_files_status', return_value={})
+    @patch('management.services.knowledge_base.files.get_all_files_status', return_value={})
     def test_list_files_with_chunks_updates_chunk_count(self, mock_get_files_status):
         """list_files include_chunks: chunk_count from aggregation, no extra count() calls."""
         self.mock_vdb_core.get_documents_detail.return_value = [
@@ -5797,10 +5799,10 @@ class TestRethrowOrPlain(unittest.TestCase):
             def __iter__(self):
                 raise RuntimeError("stream failure")
 
-        with patch('backend.utils.document_vector_utils.process_documents_for_clustering') as mock_process_docs, \
-                patch('backend.utils.document_vector_utils.kmeans_cluster_documents') as mock_cluster, \
-                patch('backend.utils.document_vector_utils.summarize_clusters_map_reduce') as mock_summarize, \
-                patch('backend.utils.document_vector_utils.merge_cluster_summaries', return_value=BadIterable()):
+        with patch('backend.management.services.knowledge_base.summary.process_documents_for_clustering') as mock_process_docs, \
+                patch('backend.management.services.knowledge_base.clustering.kmeans_cluster_documents') as mock_cluster, \
+                patch('backend.management.services.knowledge_base.summary.summarize_clusters_map_reduce') as mock_summarize, \
+                patch('backend.management.services.knowledge_base.summary.merge_cluster_summaries', return_value=BadIterable()):
             mock_process_docs.return_value = (
                 {"doc1": {"chunks": [{"content": "x"}]}},
                 {"doc1": MagicMock()}
@@ -6859,7 +6861,7 @@ class TestCoverageImprovement(unittest.TestCase):
         # Should not raise, just logs warning
         _update_progress("task-1", 5, 10)
 
-    @patch('management.services.knowledge_base.management.list_file_records', return_value=[])
+    @patch('management.services.knowledge_base.files.list_file_records', return_value=[])
     @patch('services.redis_service.get_redis_service')
     def test_full_delete_knowledge_base_list_files_exception(self, mock_get_redis, mock_list_file_records):
         """Test full_delete_knowledge_base when list_files raises (lines 453-457)."""
@@ -6889,7 +6891,7 @@ class TestCoverageImprovement(unittest.TestCase):
         mock_delete_index.assert_awaited_once()
 
     # Tests for full_delete_knowledge_base - minio deletion exception (lines 487-489)
-    @patch('management.services.knowledge_base.management.list_file_records', return_value=[])
+    @patch('management.services.knowledge_base.files.list_file_records', return_value=[])
     @patch('services.redis_service.get_redis_service')
     def test_full_delete_knowledge_base_minio_deletion_exception(self, mock_get_redis, mock_list_file_records):
         """Test full_delete_knowledge_base when delete_file raises (lines 487-489)."""
@@ -6904,7 +6906,7 @@ class TestCoverageImprovement(unittest.TestCase):
 
         with patch('management.services.knowledge_base.management.KnowledgeBaseManagementService.list_files',
                    new_callable=AsyncMock, return_value=files_payload) as mock_list_files, \
-                patch('management.services.knowledge_base.management.delete_file',
+                patch('management.services.knowledge_base.files.delete_file',
                       side_effect=Exception("MinIO connection failed")) as mock_delete_file, \
                 patch('management.services.knowledge_base.management.KnowledgeBaseManagementService.delete_index',
                       new_callable=AsyncMock, return_value={"status": "success"}) as mock_delete_index:
@@ -6926,7 +6928,7 @@ class TestCoverageImprovement(unittest.TestCase):
     # The actual code path for skipping is covered by the document transformation logic.
 
     # Tests for index_documents - progress save returns False (lines 1169-1170)
-    @patch('management.services.knowledge_base.common.get_redis_service')
+    @patch('management.services.knowledge_base.management.get_redis_service')
     @patch('management.services.knowledge_base.management.get_knowledge_record')
     @patch('management.services.knowledge_base.management.update_last_doc_update_time')
     def test_index_documents_progress_init_save_failure(self, mock_update, mock_get_record, mock_get_redis):
@@ -6961,7 +6963,7 @@ class TestCoverageImprovement(unittest.TestCase):
         ]
         mock_vdb_core.client.count.side_effect = Exception("Count query failed")
         # Return a file that's still being processed (not in ES yet)
-        with patch('management.services.knowledge_base.management.get_all_files_status',
+        with patch('management.services.knowledge_base.files.get_all_files_status',
                    new_callable=AsyncMock, return_value={}):
             result = await ElasticSearchService.list_files(
                 index_name="test-index",
@@ -6983,7 +6985,7 @@ class TestCoverageImprovement(unittest.TestCase):
         ]
         mock_vdb_core.client.count.return_value = {"count": 1}
         mock_vdb_core.multi_search.side_effect = Exception("Msearch failed")
-        with patch('management.services.knowledge_base.management.get_all_files_status',
+        with patch('management.services.knowledge_base.files.get_all_files_status',
                    new_callable=AsyncMock, return_value={}):
             result = await ElasticSearchService.list_files(
                 index_name="test-index",
@@ -7016,7 +7018,7 @@ class TestCoverageImprovement(unittest.TestCase):
                 {"hits": {"hits": [{"_source": {"id": "1", "title": "t", "content": "c"}}]}}
             ]
         }
-        with patch('management.services.knowledge_base.management.get_all_files_status',
+        with patch('management.services.knowledge_base.files.get_all_files_status',
                    new_callable=AsyncMock, return_value={}):
             result = await ElasticSearchService.list_files(
                 index_name="test-index",
@@ -7036,7 +7038,7 @@ class TestCoverageImprovement(unittest.TestCase):
              "create_time": "2024-01-01T00:00:00", "status": "COMPLETED", "chunk_count": 5}
         ]
         mock_vdb_core.client.count.side_effect = Exception("Count failed")
-        with patch('management.services.knowledge_base.management.get_all_files_status',
+        with patch('management.services.knowledge_base.files.get_all_files_status',
                    new_callable=AsyncMock, return_value={}):
             result = await ElasticSearchService.list_files(
                 index_name="test-index",
@@ -7171,7 +7173,7 @@ class TestCoverageImprovement(unittest.TestCase):
         self.assertIn("Hybrid search failed", str(ctx.exception))
 
     # Tests for full_delete_knowledge_base - file without path_or_url (lines 467-471)
-    @patch('management.services.knowledge_base.management.list_file_records', return_value=[])
+    @patch('management.services.knowledge_base.files.list_file_records', return_value=[])
     @patch('services.redis_service.get_redis_service')
     def test_full_delete_knowledge_base_file_without_path_or_url(self, mock_get_redis, mock_list_file_records):
         """Test full_delete_knowledge_base skips file when path_or_url is missing (lines 467-471)."""
@@ -7186,7 +7188,7 @@ class TestCoverageImprovement(unittest.TestCase):
 
         with patch('management.services.knowledge_base.management.KnowledgeBaseManagementService.list_files',
                    new_callable=AsyncMock, return_value=files_payload) as mock_list_files, \
-                patch('management.services.knowledge_base.management.delete_file') as mock_delete_file, \
+                patch('management.services.knowledge_base.files.delete_file') as mock_delete_file, \
                 patch('management.services.knowledge_base.management.KnowledgeBaseManagementService.delete_index',
                       new_callable=AsyncMock, return_value={"status": "success"}) as mock_delete_index:
             async def run_test():
@@ -7204,7 +7206,7 @@ class TestCoverageImprovement(unittest.TestCase):
         mock_delete_file.assert_not_called()
 
     # Tests for full_delete_knowledge_base - outer exception (lines 545-548)
-    @patch('management.services.knowledge_base.management.list_file_records', return_value=[])
+    @patch('management.services.knowledge_base.files.list_file_records', return_value=[])
     @patch('services.redis_service.get_redis_service')
     def test_full_delete_knowledge_base_outer_exception(self, mock_get_redis, mock_list_file_records):
         """Test full_delete_knowledge_base raises outer exception (lines 545-548)."""
@@ -7385,7 +7387,7 @@ class TestCoverageImprovement(unittest.TestCase):
         mock_vdb_core.multi_search.return_value = {
             "responses": [{"error": "Search failed"}]
         }
-        with patch('management.services.knowledge_base.management.get_all_files_status',
+        with patch('management.services.knowledge_base.files.get_all_files_status',
                    new_callable=AsyncMock, return_value={}):
             result = await ElasticSearchService.list_files(
                 index_name="test-index",
@@ -7416,7 +7418,7 @@ class TestCoverageImprovement(unittest.TestCase):
         mock_get_record.side_effect = Exception("DB error")
         self.mock_vdb_core.create_chunk.return_value = {"id": "chunk-1"}
         from consts.model import ChunkCreateRequest
-        with patch('management.services.knowledge_base.common.get_embedding_model_by_id',
+        with patch('management.services.knowledge_base.service.get_embedding_model_by_id',
                    return_value=(MagicMock(), 1)):
             result = ElasticSearchService.create_chunk(
                 index_name="test-index",
@@ -7432,7 +7434,7 @@ class TestCoverageImprovement(unittest.TestCase):
 
     # Tests for create_chunk - embedding generation exception (lines 1829-1830)
     @patch('management.services.knowledge_base.service.get_knowledge_record')
-    @patch('management.services.knowledge_base.common.get_embedding_model_by_id')
+    @patch('management.services.knowledge_base.service.get_embedding_model_by_id')
     def test_create_chunk_embedding_exception(self, mock_get_model, mock_get_record):
         """Test create_chunk handles exception when generating embedding (lines 1829-1830)."""
         mock_get_record.return_value = {"embedding_model_id": 1, "tenant_id": "tenant-1"}
@@ -7633,7 +7635,7 @@ class TestCoverageImprovement(unittest.TestCase):
         }
         with patch('management.services.knowledge_base.management.KnowledgeBaseManagementService.list_files',
                    new_callable=AsyncMock, return_value=files_payload), \
-                patch('management.services.knowledge_base.management.delete_file', mock_delete_file), \
+                patch('management.services.knowledge_base.files.delete_file', mock_delete_file), \
                 patch('management.services.knowledge_base.management.delete_knowledge_record', return_value=True):
             result = await ElasticSearchService.delete_index(
                 index_name="test-index",
@@ -7651,7 +7653,7 @@ class TestCoverageImprovement(unittest.TestCase):
         files_payload = {"files": [{"path_or_url": "bucket/bad.txt", "source_type": "minio"}]}
         with patch('management.services.knowledge_base.management.KnowledgeBaseManagementService.list_files',
                    new_callable=AsyncMock, return_value=files_payload), \
-                patch('management.services.knowledge_base.management.delete_file',
+                patch('management.services.knowledge_base.files.delete_file',
                       side_effect=Exception("MinIO error")), \
                 patch('management.services.knowledge_base.management.delete_knowledge_record', return_value=True), \
                 patch('management.services.knowledge_base.management.logger') as mock_logger:
@@ -7962,8 +7964,8 @@ class TestCoverageImprovement(unittest.TestCase):
         async def mock_get_files(index_name):
             return {"file1.txt": {"state": "COMPLETED", "source_type": "minio"}}
 
-        with patch('management.services.knowledge_base.management.get_all_files_status', mock_get_files), \
-                patch('management.services.knowledge_base.management.get_file_size',
+        with patch('management.services.knowledge_base.files.get_all_files_status', mock_get_files), \
+                patch('management.services.knowledge_base.files.get_file_size',
                       side_effect=Exception("Storage error")):
             result = await ElasticSearchService.list_files(
                 index_name="test-index",
@@ -7986,8 +7988,8 @@ class TestCoverageImprovement(unittest.TestCase):
         async def mock_get_files(index_name):
             return {"failed_file.txt": {"state": "PROCESS_FAILED", "latest_task_id": "task-42", "source_type": "minio"}}
 
-        with patch('management.services.knowledge_base.management.get_all_files_status', mock_get_files), \
-                patch('management.services.knowledge_base.common.get_redis_service') as mock_get_redis:
+        with patch('management.services.knowledge_base.files.get_all_files_status', mock_get_files), \
+                patch('management.services.knowledge_base.files.get_redis_service') as mock_get_redis:
             mock_redis_instance = MagicMock()
             mock_redis_instance.get_error_info.side_effect = Exception("Redis error")
             mock_get_redis.return_value = mock_redis_instance
@@ -8015,7 +8017,7 @@ class TestCoverageImprovement(unittest.TestCase):
         async def mock_get_files(index_name):
             return {"file1.txt": {"state": "COMPLETED", "source_type": "minio"}}
 
-        with patch('management.services.knowledge_base.management.get_all_files_status', mock_get_files):
+        with patch('management.services.knowledge_base.files.get_all_files_status', mock_get_files):
             result = await ElasticSearchService.list_files(
                 index_name="test-index",
                 include_chunks=True,
@@ -8032,7 +8034,7 @@ class TestCoverageImprovement(unittest.TestCase):
         mock_vdb_core = MagicMock()
         mock_vdb_core.get_documents_detail.side_effect = Exception("Elasticsearch unavailable")
 
-        with patch('management.services.knowledge_base.management.get_all_files_status',
+        with patch('management.services.knowledge_base.files.get_all_files_status',
                    new_callable=AsyncMock, return_value={}):
             with self.assertRaises(Exception) as ctx:
                 await ElasticSearchService.list_files(
@@ -9490,7 +9492,7 @@ def test_knowledge_base_delete_guard_returns_non_ingesting_rows(monkeypatch):
     ]
     list_records = MagicMock(return_value=rows)
     monkeypatch.setattr(
-        "management.services.knowledge_base.management.list_file_records", list_records
+        'management.services.knowledge_base.files.list_file_records', list_records
     )
 
     result = KnowledgeBaseManagementService._assert_knowledge_base_delete_allowed("kb")
@@ -9502,7 +9504,7 @@ def test_knowledge_base_delete_guard_returns_non_ingesting_rows(monkeypatch):
 def test_knowledge_base_delete_guard_reports_blocking_files(monkeypatch):
     """An active ingestion lifecycle row rejects knowledge-base deletion with file details."""
     monkeypatch.setattr(
-        "management.services.knowledge_base.management.list_file_records",
+        'management.services.knowledge_base.files.list_file_records',
         lambda **_: [{"file_id": "fid-1", "status": "processing", "object_name": "obj.txt"}],
     )
 
@@ -9520,7 +9522,7 @@ def test_knowledge_base_delete_guard_reports_blocking_files(monkeypatch):
 def test_knowledge_base_delete_guard_wraps_lifecycle_read_error(monkeypatch):
     """A lifecycle database error is mapped to the service database error."""
     monkeypatch.setattr(
-        "management.services.knowledge_base.management.list_file_records",
+        'management.services.knowledge_base.files.list_file_records',
         MagicMock(side_effect=RuntimeError("database unavailable")),
     )
 
@@ -9544,7 +9546,7 @@ async def test_full_delete_knowledge_base_cleans_lifecycle_rows_and_fences(monke
         {"status": "DELETED"},
     ]
     monkeypatch.setattr(
-        "management.services.knowledge_base.management.list_file_records",
+        'management.services.knowledge_base.files.list_file_records',
         MagicMock(return_value=rows),
     )
     lifecycle_delete = MagicMock(return_value=2)
@@ -9588,7 +9590,7 @@ async def test_full_delete_knowledge_base_reports_lifecycle_cleanup_errors(monke
     """External deletion still returns a result when lifecycle cleanup or fence clearing fails."""
     rows = [{"file_id": "fid-1", "status": "DELETED"}]
     monkeypatch.setattr(
-        "management.services.knowledge_base.management.list_file_records",
+        'management.services.knowledge_base.files.list_file_records',
         MagicMock(return_value=rows),
     )
     monkeypatch.setattr(

@@ -8,7 +8,7 @@ case:
   - WB-SERVER-PINS-20261014
   - WB-PIN-SYNC-20261016
   business_rule_ids:
-  - CHAT-SIDEBAR-RULE-002
+  - CHAT-SIDEBAR-RULE-003
   title: Authenticated Workbench pin API persists ordered state in PostgreSQL
   type: INTEGRATION
   priority: P1

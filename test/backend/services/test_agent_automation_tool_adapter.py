@@ -1,7 +1,11 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import json
 
 import pytest
-from utils.time_context_utils import strip_current_time_prefix
+from management.services.agent.context import (
+    strip_current_time_prefix,
+)
 
 from services.agent_automation import tool_adapter as adapter_module
 from services.agent_automation.tool_adapter import (

@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import base64
 import logging
 import re
@@ -37,7 +39,7 @@ from services.file_management_service import (
 )
 from services.audit_service import AUDIT_DETAIL_LIST_LIMIT, record_security_event
 from utils.auth_utils import get_current_user_id
-from utils.file_management_utils import trigger_data_process
+from management.services.knowledge_base.ingestion import trigger_data_process
 from utils.knowledge_ingestion_errors import classify_ingestion_exception
 
 
