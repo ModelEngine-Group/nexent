@@ -120,7 +120,7 @@ test.each([
   }
 );
 
-test("account menu retains identity, profile, all former bar links and no appearance entry", async () => {
+test("account menu retains identity, profile and external links without copyright or appearance entries", async () => {
   state.monitoring = "https://monitoring.nexent.test";
   render(<AvatarDropdown rail />);
   await openMenu();
@@ -130,8 +130,10 @@ test("account menu retains identity, profile, all former bar links and no appear
     "href",
     "/zh/users"
   );
+  expect(screen.getByText("accountMenu.about")).toBeVisible();
+  expect(screen.queryByText("accountMenu.version")).toBeNull();
   expect(screen.getByText("v2.6.0")).toBeVisible();
-  expect(screen.getByText("page.copyright")).toBeVisible();
+  expect(screen.queryByText("page.copyright")).toBeNull();
   expect(
     screen.getByRole("link", { name: "accountMenu.github" })
   ).toHaveAttribute("href", "https://github.com/ModelEngine-Group/nexent");
@@ -213,6 +215,9 @@ test("language submenu checks current locale and delegates selected language", a
 test("logout retains confirmation and does not logout before acceptance", async () => {
   render(<AvatarDropdown rail />);
   await openMenu();
+  expect(screen.getByText("auth.logout").closest("li")).toHaveClass(
+    "ant-dropdown-menu-item-danger"
+  );
   fireEvent.click(screen.getByText("auth.logout"));
   expect(state.logout).not.toHaveBeenCalled();
   expect(state.confirm).toHaveBeenCalledWith(
