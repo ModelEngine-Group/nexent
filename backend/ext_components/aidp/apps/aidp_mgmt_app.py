@@ -24,9 +24,9 @@ from typing import Annotated, List, Literal, Optional
 from urllib.parse import quote
 from uuid import UUID
 
+import httpx
 from fastapi import APIRouter, File, HTTPException, Path, Query, Request, UploadFile
 from fastapi.responses import JSONResponse, StreamingResponse
-import httpx
 from nexent.core.concurrency import run_blocking
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 from sqlalchemy.exc import IntegrityError
@@ -1176,10 +1176,6 @@ def _stream_aidp_preview(aidp_response: httpx.Response) -> StreamingResponse:
         )
     else:
         response_headers["Content-Disposition"] = "inline"
-
-    file_size = aidp_response.headers.get("X-File-Size")
-    if file_size:
-        response_headers["X-File-Size"] = file_size
 
     return StreamingResponse(
         aidp_response.aiter_bytes(),

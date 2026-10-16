@@ -15,6 +15,7 @@ import {
   type PreviewAccessReason,
 } from "@/lib/filePreviewUtils";
 import {
+  neutralizeUnsafeLinks,
   officeHtmlToText,
   resolveStreamPreviewKind,
   sanitizeOfficeHtml,
@@ -464,6 +465,10 @@ export function RawStreamPreviewViewer(
             renderFooters: true,
           }
         );
+        // docx-preview copies hyperlink targets straight out of the document
+        // with no scheme filter, so the anchors it produced are disarmed before
+        // a reader can click them.
+        neutralizeUnsafeLinks(body);
       } else if (kind === "xlsx") {
         const excelModule = await import("exceljs");
         const ExcelJS = (excelModule.default ??

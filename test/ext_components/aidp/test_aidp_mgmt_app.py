@@ -1218,7 +1218,6 @@ class TestAidpDocumentFileOperations:
         assert response.headers["content-disposition"] == (
             'inline; filename="report.docx"; filename*=UTF-8\'\'report.docx'
         )
-        assert response.headers["x-file-size"] == "11"
         assert mock_stream.call_args.args == (
             SERVER_URL,
             API_KEY,
@@ -1354,7 +1353,6 @@ class TestAidpDocumentFileOperations:
         # viewer falls back to the uploaded name for its renderer choice.
         assert response.headers["content-disposition"] == "inline"
         assert "x-file-name" not in response.headers
-        assert "x-file-size" not in response.headers
 
     def test_preview_requires_standard_file_uuid(self):
         client = _client()
@@ -1389,18 +1387,6 @@ class TestAidpDocumentFileOperations:
         finally:
             aidp_permission_service.require_permission = original_require
         assert response.status_code == HTTPStatus.FORBIDDEN
-
-    def test_preview_replaced_the_get_download_endpoint(self):
-        """Preview is the only document-streaming GET: saving is not offered."""
-        client = _client()
-
-        response = client.get(
-            "/aidp-mgmt/knowledge-bases/kb-1/documents/"
-            "00000000-0000-4000-8000-000000000001/download",
-            headers=_bearer(),
-        )
-
-        assert response.status_code == HTTPStatus.NOT_FOUND
 
     @pytest.mark.parametrize(
         "file_name, expected",

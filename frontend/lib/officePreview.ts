@@ -322,6 +322,49 @@ export function sanitizeOfficeHtml(html: string): string {
   return container.innerHTML;
 }
 
+/** Link schemes a rendered document may keep. */
+const SAFE_LINK_SCHEMES = new Set(["http:", "https:", "mailto:", "tel:"]);
+
+/**
+ * Whether a hyperlink found in a rendered document can be followed.
+ *
+ * Fragments and relative paths stay usable; anything carrying a scheme has to
+ * use one that opens a document rather than running code. Spaces and control
+ * characters are ignored because browsers strip them while parsing a URL, so
+ * they must not be allowed to hide a scheme from this check.
+ */
+export function isSafeLinkTarget(href: string | null): boolean {
+  const target = (href ?? "").replace(/[\u0000-\u0020]/g, "");
+  if (!target || target.startsWith("#")) {
+    return true;
+  }
+  const scheme = /^([a-z][a-z0-9+.-]*):/i.exec(target);
+  return (
+    scheme === null || SAFE_LINK_SCHEMES.has(`${scheme[1].toLowerCase()}:`)
+  );
+}
+
+/**
+ * Drop the target of every link a rendered document must not follow.
+ *
+ * `docx-preview` copies a hyperlink target from the document relationship
+ * without filtering its scheme, and previews render in the application origin,
+ * so a crafted docx could otherwise carry a `javascript:` target that runs
+ * when the reader clicks it. Only the navigation is removed, so the link text
+ * still shows. Neutralizing the parsed attributes (instead of the source
+ * markup) has to happen after rendering: entity-encoded schemes are already
+ * decoded by then.
+ */
+export function neutralizeUnsafeLinks(container: ParentNode): void {
+  for (const anchor of Array.from(
+    container.querySelectorAll<HTMLAnchorElement>("a[href]")
+  )) {
+    if (!isSafeLinkTarget(anchor.getAttribute("href"))) {
+      anchor.removeAttribute("href");
+    }
+  }
+}
+
 /**
  * Convert Office HTML to plain text, keeping paragraph boundaries.
  *
