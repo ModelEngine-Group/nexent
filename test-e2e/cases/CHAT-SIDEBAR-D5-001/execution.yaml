@@ -7,6 +7,7 @@ implementations:
 timeout_seconds: 120
 acceptance_bindings:
   AC-01:
-  - test_legacy_backfill_and_rerun_preserve_personal_pins_and_activity
-  - test_ambiguous_legacy_tenants_abort_atomically_without_losing_state
-  - test_fresh_install_without_legacy_table_is_repeatable
+  - test_direct_pin_field_and_index_preserve_existing_conversations
+  AC-02:
+  - test_repeat_deployment_preserves_current_pin_and_activity
+  - test_catalog_does_not_create_a_separate_pin_table_or_retain_compatibility_sql

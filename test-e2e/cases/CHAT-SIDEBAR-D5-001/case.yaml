@@ -8,53 +8,63 @@ case:
   - WB-PIN-SYNC-20261016
   business_rule_ids:
   - CHAT-SIDEBAR-RULE-003
-  title: Personal conversation pin migration preserves valid legacy pins and safely repeats
+  title: Workbench personal pin schema uses only the existing conversation table
   type: RELIABILITY
   priority: P1
   status: active
   automation: automated
-  objective: Execute additive migration against disposable PostgreSQL schemas and prove safe legacy transition.
+  objective: Execute direct column/index SQL against disposable PostgreSQL schemas and prove repeatability
+    without separate-table creation.
   preconditions:
   - Reachable PostgreSQL configured by backend; disposable schemas only.
   test_data:
     profile: mock
   steps:
   - order: 1
-    action: Migrate valid active pins, cancelled scopes, invalid references and legacy duplicate rows.
-    expected: Only latest valid active owned Workbench pins are copied, preserving pin time and conversation
-      audit/content; the old table remains.
+    action: Apply the personal pin SQL to an existing conversation table with active, deleted and Agent-chat
+      rows.
+    expected: A nullable timezone-aware pin timestamp, column comment and ordered partial index are added;
+      existing conversation data is unchanged and no separate pin table is created.
   - order: 2
-    action: Unpin a migrated conversation and rerun the migration.
-    expected: Rerun preserves the unpinned value and creates no duplicate index or data.
+    action: Set a current personal pin timestamp and repeat the same SQL.
+    expected: Current pin values and conversation activity/content remain unchanged; the field and index
+      are not duplicated.
   - order: 3
-    action: Migrate a conversation pinned independently in multiple tenants.
-    expected: Migration raises an actionable ambiguity error atomically; the new column is absent and
-      legacy data is unchanged.
+    action: Inspect the versioned migration catalog used by deployment.
+    expected: The old separate-table SQL is absent, no remaining migration creates that table, and the
+      new SQL contains no compatibility/backfill/drop sequence.
   expected_results:
-  - Valid legacy pins persist in the new field and reruns cannot resurrect cancelled pins.
-  - Ambiguous migration fails atomically without data loss.
+  - Personal pin schema is added directly to the existing conversation table without creating a separate
+    table or changing existing conversation data.
+  - Repeat execution preserves current pin values and keeps exactly one field and index.
   forbidden_side_effects:
-  - No changes outside disposable schemas, no legacy table deletion and no conversation activity/content
-    mutation.
+  - No changes outside disposable schemas; no separate pin table creation, legacy backfill or deletion
+    SQL; no conversation activity/content mutation.
   risk_type: RELIABILITY
-  risk: Schema simplification could lose tenant preferences, resurrect cancelled pins or change activity.
+  risk: Unnecessary legacy migrations could create obsolete tables or overwrite current personal pin values.
   condition:
-  - Upgrade from legacy pin table, including duplicate and ambiguous rows.
+  - The feature has not shipped to production; deployment uses the simplified migration catalog.
   metrics:
-  - Migrated field values, schema columns/indexes and original row snapshots.
+  - Column type/nullability/comment, index definition, migration catalog and conversation snapshots.
   thresholds:
-  - All migration and unchanged-data assertions pass.
+  - All direct schema and repeatability assertions pass.
   recovery_expectations:
-  - Failed ambiguity migration rolls back; legacy table remains for inspection.
+  - Repeated deployment does not reset pin values or modify conversation data.
   acceptance:
   - id: AC-01
-    description: Safe migration, rerun and rollback over real PostgreSQL.
+    description: Direct field/index creation on the existing conversation table with no data changes.
     steps:
     - 1
+    expected_results:
+    - 1
+    forbidden_side_effects:
+    - 1
+  - id: AC-02
+    description: Repeatability preserves pins and the catalog excludes the superseded separate-table sequence.
+    steps:
     - 2
     - 3
     expected_results:
-    - 1
     - 2
     forbidden_side_effects:
     - 1
