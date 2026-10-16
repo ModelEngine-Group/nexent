@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import io
 import json
+import logging
 import os
 import sys
 import threading
@@ -105,6 +106,7 @@ def test_knowledge_base_api_models_do_not_expose_safety_guard():
 @pytest.mark.parametrize("settings", [
     {"description": "   "},
     {"embedding_model": ""},
+    {"embedding_model": "   "},
     {"chunk_token_num": True},
     {"chunk_token_num": 255},
     {"chunk_token_num": 4097},
@@ -2532,3 +2534,279 @@ class TestNormalizeKbConfigFields:
         out = aidp_mgmt_app._normalize_kb_config_fields(detail)
         assert out["graph_config"] == "not valid json"
         assert "llm_model_name" not in out
+
+
+# ---------------------------------------------------------------------------
+# Coverage completion: tag cleanup delegation, doc-history channel helpers,
+# graph-config degraded storage, response-shape guards and normalization
+# edge branches
+# ---------------------------------------------------------------------------
+
+
+def test_cleanup_document_assignments_delegates_to_tag_management(monkeypatch):
+    """The delete flow keeps document assignment usage in sync."""
+    import services.tag_management_service as tag_service
+    from ext_components.aidp.apps import aidp_mgmt_app
+
+    sentinel = MagicMock()
+    monkeypatch.setattr(tag_service, "TagManagementService", sentinel)
+
+    aidp_mgmt_app._cleanup_document_assignments_for_deleted_knowledge_base(
+        "tenant-1", "kb-9", "user-1"
+    )
+
+    sentinel.cleanup_document_assignments_for_knowledge_base.assert_called_once_with(
+        "tenant-1", "aidp", "kb-9", "user-1"
+    )
+
+
+class TestHistoryFallbackLogging:
+    """The history fallback is reported once per knowledge base."""
+
+    def test_warns_once_then_degrades_to_debug(self, caplog):
+        from ext_components.aidp.apps import aidp_mgmt_app
+
+        caplog.set_level(logging.DEBUG)
+        aidp_mgmt_app._HISTORY_FALLBACK_REPORTED.discard("kb-fb")
+        try:
+            aidp_mgmt_app._log_history_fallback("kb-fb", "reason-one")
+            aidp_mgmt_app._log_history_fallback("kb-fb", "reason-two")
+        finally:
+            aidp_mgmt_app._HISTORY_FALLBACK_REPORTED.discard("kb-fb")
+
+        warnings = [r for r in caplog.records if r.levelno == logging.WARNING]
+        debugs = [r for r in caplog.records if r.levelno == logging.DEBUG]
+        assert len(warnings) == 1
+        assert "kb-fb" in warnings[0].getMessage()
+        assert "reason-one" in warnings[0].getMessage()
+        assert len(debugs) == 1
+        assert "reason-two" in debugs[0].getMessage()
+
+
+class TestResolveDocHistoryChannel:
+    """Channel resolution feeds the upload-task history endpoint."""
+
+    def test_returns_the_channel_selected_for_the_knowledge_base(self):
+        from ext_components.aidp.apps import aidp_mgmt_app
+
+        channels = [{"fs_id": "fs-1", "src_dir": "/aidp/knowledge/kb-1"}]
+        with patch.object(aidp_mgmt_app, "get_cached_aidp_channels",
+                          return_value=channels) as mock_cache, \
+             patch.object(aidp_mgmt_app, "select_aidp_channel",
+                          return_value=channels[0]) as mock_select:
+            channel = aidp_mgmt_app._resolve_doc_history_channel(
+                SERVER_URL, API_KEY, "kb-1"
+            )
+
+        assert channel == channels[0]
+        assert mock_cache.call_args.kwargs["kds_id"] == "kb-1"
+        assert mock_select.call_args.args == (channels, "kb-1")
+
+    def test_returns_none_and_reports_channel_shape_when_no_channel_matches(
+        self, caplog
+    ):
+        from ext_components.aidp.apps import aidp_mgmt_app
+
+        caplog.set_level(logging.WARNING)
+        aidp_mgmt_app._HISTORY_FALLBACK_REPORTED.discard("kb-noch")
+        try:
+            with patch.object(aidp_mgmt_app, "get_cached_aidp_channels",
+                              return_value=[{"name": "channel-a"}]), \
+                 patch.object(aidp_mgmt_app, "select_aidp_channel",
+                              return_value=None):
+                channel = aidp_mgmt_app._resolve_doc_history_channel(
+                    SERVER_URL, API_KEY, "kb-noch"
+                )
+        finally:
+            aidp_mgmt_app._HISTORY_FALLBACK_REPORTED.discard("kb-noch")
+
+        assert channel is None
+        message = caplog.records[-1].getMessage()
+        assert "kb-noch" in message
+        # The reported reason must make the channel payload shape visible.
+        assert "'name'" in message
+
+
+class TestHistoryReportsMore:
+    """Only unambiguous pagination signals are trusted."""
+
+    @pytest.mark.parametrize("payload,expected", [
+        ({"has_more": True}, True),
+        ({"has_more": False}, False),
+        ({"next_link": "/next"}, True),
+        ({"next_link": None}, False),
+        ({"has_more": "yes", "next_link": "/next"}, True),
+        ({"has_more": "yes"}, None),
+        ({}, None),
+    ])
+    def test_only_unambiguous_signals_are_trusted(self, payload, expected):
+        from ext_components.aidp.apps import aidp_mgmt_app
+
+        assert aidp_mgmt_app._history_reports_more(payload) == expected
+
+
+class TestUpdateGraphConfigDegradedStorage:
+    """Stored graph configs that cannot be parsed merge from an empty base."""
+
+    @pytest.mark.parametrize(
+        "stored,base",
+        [
+            ("not valid json", {}),
+            ("[1, 2]", {}),
+            (None, {}),
+            ({"domain": "通用"}, {"domain": "通用"}),
+        ],
+    )
+    def test_degraded_stored_config_merges_from_a_safe_base(self, stored, base):
+        client = _client()
+        from ext_components.aidp.apps import aidp_mgmt_app
+        from ext_components.aidp.services import aidp_permission_service
+
+        current = {"kds_id": "kb-1", "is_exist_graph": True}
+        if stored is not None:
+            current["graph_config"] = stored
+        with patch.object(aidp_permission_service, "require_permission",
+                          return_value=MagicMock(permission="EDIT")), \
+             patch.object(aidp_mgmt_app, "_load_cached_kb_detail",
+                          return_value=current), \
+             patch.object(aidp_mgmt_app, "update_aidp_kb_impl",
+                          return_value={"ok": True}) as mock_update:
+            response = client.put(
+                "/aidp-mgmt/knowledge-bases/kb-1",
+                headers=_bearer(),
+                json={"graph_config": {"llm_model_name": "gpt-4o"}},
+            )
+
+        assert response.status_code == HTTPStatus.OK
+        payload = mock_update.call_args.args[3]
+        expected = dict(base, llm_model_name="gpt-4o")
+        assert payload["graph_config"] == json.dumps(expected, ensure_ascii=False)
+
+
+class TestListDocumentsResponseShape:
+    """A malformed document list is reported, never rendered as empty."""
+
+    def test_unexpected_list_response_shape_is_reported(self):
+        client = _client()
+        from consts.error_code import ErrorCode
+        from consts.exceptions import AppException
+        from ext_components.aidp.apps import aidp_mgmt_app
+        from ext_components.aidp.services import aidp_permission_service
+
+        with patch.object(aidp_permission_service, "require_permission",
+                          return_value=MagicMock(permission="READ_ONLY")), \
+             patch.object(aidp_mgmt_app, "list_aidp_docs_impl",
+                          return_value={"unexpected": True}), \
+             patch.object(aidp_mgmt_app, "count_aidp_docs_impl", return_value=1):
+            response = client.get(
+                "/aidp-mgmt/knowledge-bases/kb-1/documents",
+                headers=_bearer(),
+            )
+
+        assert response.status_code == AppException(
+            ErrorCode.AIDP_RESPONSE_ERROR
+        ).http_status
+        assert response.json()["code"] == ErrorCode.AIDP_RESPONSE_ERROR.value
+
+
+class TestSetPermissionBlankName:
+    def test_set_permission_rejects_blank_name(self):
+        client = _client()
+        from ext_components.aidp.apps import aidp_mgmt_app
+        from ext_components.aidp.services import aidp_permission_service
+
+        with patch.object(aidp_permission_service, "require_permission",
+                          return_value=MagicMock(permission="EDIT")), \
+             patch.object(aidp_mgmt_app, "save_kb_settings") as mock_save:
+            response = client.patch(
+                "/aidp-mgmt/aidp-permissions/kb-1",
+                headers=_bearer(),
+                json={"ingroup_permission": "PRIVATE", "name": "   "},
+            )
+
+        assert response.status_code == HTTPStatus.BAD_REQUEST
+        assert "blank" in response.json()["message"]
+        mock_save.assert_not_called()
+
+
+class TestNormalizeKbConfigFieldsEdgeCases:
+    """Merge precedence and graph normalization edge branches."""
+
+    def test_blank_or_non_string_kms_config_str_is_ignored(self):
+        from ext_components.aidp.apps import aidp_mgmt_app
+
+        for raw in ("   ", 123, None):
+            detail = {"kms_config_str": raw, "kds_id": "kb-1"}
+            out = aidp_mgmt_app._normalize_kb_config_fields(detail)
+            assert "chunk_mode" not in out
+
+    def test_top_level_value_wins_over_kms_config_str(self):
+        from ext_components.aidp.apps import aidp_mgmt_app
+
+        detail = {
+            "kms_config_str": '{"embedding_model": "nested"}',
+            "embedding_model": "top-level",
+        }
+        out = aidp_mgmt_app._normalize_kb_config_fields(detail)
+        assert out["embedding_model"] == "top-level"
+
+    def test_kms_config_str_fills_none_valued_top_level_keys(self):
+        from ext_components.aidp.apps import aidp_mgmt_app
+
+        detail = {
+            "kms_config_str": '{"embedding_model": "nested"}',
+            "embedding_model": None,
+        }
+        out = aidp_mgmt_app._normalize_kb_config_fields(detail)
+        assert out["embedding_model"] == "nested"
+
+    def test_non_digit_hop_is_kept_verbatim(self):
+        from ext_components.aidp.apps import aidp_mgmt_app
+
+        detail = {
+            "graph_config": json.dumps({"retrieve_subgraph_hop": "auto"}),
+        }
+        out = aidp_mgmt_app._normalize_kb_config_fields(detail)
+        assert out["graph_config"]["retrieve_subgraph_hop"] == "auto"
+
+    def test_blank_nested_llm_model_is_not_lifted(self):
+        from ext_components.aidp.apps import aidp_mgmt_app
+
+        detail = {
+            "graph_config": json.dumps(
+                {"llm_model_name": "   ", "no_think_mode": "是"}, ensure_ascii=False
+            ),
+        }
+        out = aidp_mgmt_app._normalize_kb_config_fields(detail)
+        assert "llm_model_name" not in out
+        assert out["graph_config"]["no_think_mode"] is True
+
+    def test_kms_config_str_with_non_dict_json_is_ignored(self):
+        from ext_components.aidp.apps import aidp_mgmt_app
+
+        detail = {"kms_config_str": "[1, 2]"}
+        out = aidp_mgmt_app._normalize_kb_config_fields(detail)
+        assert "chunk_mode" not in out
+
+
+class TestDeleteKnowledgeBaseFailure:
+    """An upstream delete failure leaves local permission state untouched."""
+
+    def test_delete_reports_failure_and_skips_local_cleanup(self):
+        client = _client()
+        from ext_components.aidp.apps import aidp_mgmt_app
+        from ext_components.aidp.services import aidp_permission_service
+
+        with patch.object(aidp_permission_service, "require_permission",
+                          return_value=MagicMock(permission="EDIT")), \
+             patch.object(aidp_mgmt_app, "delete_aidp_kb_impl",
+                          return_value=False), \
+             patch.object(aidp_permission_service, "soft_delete_permission") as mock_soft:
+            response = client.delete(
+                "/aidp-mgmt/knowledge-bases/kb-1",
+                headers=_bearer(),
+            )
+
+        assert response.status_code == HTTPStatus.OK
+        assert response.json() == {"success": False}
+        mock_soft.assert_not_called()
