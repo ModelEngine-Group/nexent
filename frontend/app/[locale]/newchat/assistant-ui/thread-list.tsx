@@ -490,9 +490,6 @@ const ThreadListEmpty: FC = () => {
   const { t } = useTranslation();
   return (
     <div className="space-y-1 px-2 pb-4">
-      <p className="px-2 text-sm font-medium text-muted-foreground">
-        {t("chat.threadList.recentConversations")}
-      </p>
       <div className="flex items-center px-3 py-2 text-left text-muted-foreground">
         <Clock className="mr-2 h-5 w-5" />
         {t("chat.threadList.noHistory")}
@@ -646,9 +643,6 @@ const ThreadListItems: FC<ThreadListItemsProps> = ({
   // every conversation. Expanding a group reveals all of its conversations.
   return (
     <div className="flex flex-col">
-      <div className="px-3 pb-1 text-[14px] text-[#808080]">
-        {t("chat.threadList.recentConversations")}
-      </div>
       {agentGroups.map((group) => {
         const groupKey = String(group.agentId ?? "none");
         const entries = pinned
