@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """Skill instance and skill info database operations."""
 
 import json
@@ -12,7 +14,7 @@ from database.db_models import SkillInfo, SkillToolRelation, SkillInstance, Tool
 from consts.const import MAX_SKILLS_PER_TENANT
 from consts.error_code import ErrorCode
 from consts.exceptions import AppException
-from utils.skill_params_utils import strip_params_comments_for_db
+from management.db.skill_params import strip_params_comments_for_db
 from utils.str_utils import convert_list_to_string, convert_string_to_list
 
 logger = logging.getLogger(__name__)

@@ -11,7 +11,7 @@ case:
   - WB-SERVER-PINS-20261014
   - WB-HISTORY-TIME-RESTORE-20261014
   business_rule_ids:
-  - CHAT-SIDEBAR-RULE-002
+  - CHAT-SIDEBAR-RULE-003
   title: Workbench backend pins synchronize across devices with retained history operations
   type: E2E
   priority: P1

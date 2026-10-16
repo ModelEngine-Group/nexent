@@ -9,7 +9,7 @@ feature:
   description: Persisted visibility, normalized rename, agent-group batch selection
     and server-ID batch deletion preserve sidebar state.
   business_rules:
-  - rule_id: CHAT-SIDEBAR-RULE-002
+  - rule_id: CHAT-SIDEBAR-RULE-003
     description: Workbench pin/unpin persists on the backend per authenticated user
       and tenant, using persisted conversation IDs. Pins are newest first across devices;
       repinning moves first. Workbench rows show localized relative times when timestamps

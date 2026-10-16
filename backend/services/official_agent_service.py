@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """Official agent bundle discovery, installation-status listing and install.
 
 Official agents mirror the official-skills mechanism: platform bundles live in
@@ -736,7 +738,7 @@ async def _index_binary_docs(
 
     from consts.model import ProcessParams
     from services.file_management_service import upload_files_impl
-    from utils.file_management_utils import trigger_data_process
+    from management.services.knowledge_base.ingestion import trigger_data_process
 
     files_to_process: List[Dict[str, str]] = []
     for doc in docs:

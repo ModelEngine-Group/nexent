@@ -65,7 +65,9 @@ from database.model_management_db import get_model_records, get_model_by_model_i
 from database.knowledge_db import get_knowledge_name_map_by_index_names
 from database.client import minio_client
 from management.services.model.names import add_repo_to_name
-from management.services.agent.prompt_template_loader import load_agent_prompt_bundle
+from management.services.agent.prompt import (
+    load_agent_prompt_bundle,
+)
 from nexent.core.agents.prompt import AgentPromptComposer, get_builtin_tool_descriptions
 from utils.config_utils import (
     tenant_config_manager,
@@ -73,9 +75,15 @@ from utils.config_utils import (
 from management.services.model.names import (
     get_model_name_from_config,
 )
-from utils.memory_tool_prompt import should_enable_memory_tool_policy
-from utils.automation_tool_prompt import should_enable_automation_tool_policy
-from utils.context_utils import build_context_inputs
+from management.services.agent.prompt import (
+    should_enable_memory_tool_policy,
+)
+from management.services.agent.prompt import (
+    should_enable_automation_tool_policy,
+)
+from management.services.agent.context import (
+    build_context_inputs,
+)
 from utils.http_client_utils import create_httpx_client
 from utils.mcp_url_utils import get_tenant_local_mcp_server
 from utils.redis_utils import get_redis_client

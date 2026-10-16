@@ -118,7 +118,7 @@ def runtime_fixture(monkeypatch):
             monkeypatch.setattr(nl2agent_service, "get_tenant_local_mcp_server", lambda _: mcp_url)
             monkeypatch.setattr(agent_app, "ENABLE_AGENT_WORKBENCH", True)
             monkeypatch.setattr(skill_app, "ENABLE_AGENT_WORKBENCH", True)
-            from management.services.agent import run as ordinary
+            from management.services.agent import execution as ordinary
             runs = []
             for module in (nl2agent_service, nl2skill_service, ordinary):
                 original = module.agent_run

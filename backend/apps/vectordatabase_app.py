@@ -1,6 +1,5 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
-
 import json
 import logging
 import re
@@ -33,14 +32,13 @@ from management.services.knowledge_base.service import (
     check_knowledge_base_exist_impl,
     get_vector_db_core,
 )
+from management.services.knowledge_base.status import get_all_files_status
 from management.services.model.resolver import get_embedding_model_by_id
 from services.audit_service import record_security_event
 from services.file_management_service import check_file_access
 from services.quota_service import QuotaService
 from services.redis_service import get_redis_service
 from utils.auth_utils import get_current_user_context, get_current_user_id
-from utils.file_management_utils import get_all_files_status
-
 
 router = APIRouter(prefix="/indices")
 service = ElasticSearchService()

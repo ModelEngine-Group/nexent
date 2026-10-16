@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import ast
 import asyncio
 import json
@@ -1321,7 +1323,9 @@ def _generate_test_queries(
 
     Uses the same template as case generation; extracts only the query strings.
     """
-    from utils.agent_profile_utils import fetch_agent_profile
+    from management.services.agent.profile import (
+        fetch_agent_profile,
+    )
 
     profile = fetch_agent_profile(agent_id, tenant_id)
     if not profile:

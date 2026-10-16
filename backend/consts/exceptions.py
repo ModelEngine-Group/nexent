@@ -415,21 +415,6 @@ class WorkbenchAgentError(Exception):
         self.resource_type = "agent"
 
 
-class RuntimeSubAgentError(ValueError):
-    """Stable validation and authorization error for runtime adapters."""
-
-    def __init__(
-        self,
-        code: str,
-        *,
-        retryable: bool = False,
-        message: Optional[str] = None,
-    ):
-        super().__init__(message or code)
-        self.code = code
-        self.message_key = code
-        self.retryable = retryable
-        self.resource_type = "runtime_sub_agent"
 
 
 class QuotaExceededError(Exception):
@@ -557,3 +542,7 @@ class RuntimeQueueTimeoutError(RuntimeError):
         self.timeout_seconds = timeout_seconds
         self.retry_after_seconds = max(1, int(timeout_seconds + 0.999))
         super().__init__("Agent runtime queue wait timed out")
+
+
+class AgentToolImportError(ValueError):
+    """An exported tool is incompatible with the destination catalog."""

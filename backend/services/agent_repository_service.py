@@ -48,7 +48,7 @@ from management.services.agent.service import (
     import_agent_with_skills_impl,
     list_all_agent_info_impl,
 )
-from management.services.agent.icon_storage import (
+from management.services.agent.icon import (
     read_icon_image,
     upload_icon_image,
 )
