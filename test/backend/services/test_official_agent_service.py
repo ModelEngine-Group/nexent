@@ -26,6 +26,13 @@ class _ModelConnectStatusEnum(Enum):
     AVAILABLE = "available"
 
 
+class _ToolSourceEnum(Enum):
+    LOCAL = "local"
+    MCP = "mcp"
+    LANGCHAIN = "langchain"
+    BUILTIN = "builtin"
+
+
 class _KnowledgeBaseSeedDoc(BaseModel):
     file_name: str
     content: Optional[str] = None
@@ -172,6 +179,7 @@ class _ToolInstanceInfoRequest(BaseModel):
 
 
 consts_model.ModelConnectStatusEnum = _ModelConnectStatusEnum
+consts_model.ToolSourceEnum = _ToolSourceEnum
 consts_model.OfficialAgentBundle = _OfficialAgentBundle
 consts_model.OfficialAgentListItem = _OfficialAgentListItem
 consts_model.OfficialAgentAgentInfo = _OfficialAgentAgentInfo

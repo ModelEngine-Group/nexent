@@ -581,8 +581,6 @@ def test_update_agent_success(monkeypatch, mock_session):
 
 def test_cmsr_006_update_preserves_explicitly_disabled_protocol_repair(monkeypatch, mock_session):
     """A partial update must not reset a disabled protocol repair policy."""
-    from backend.consts.model import AgentInfoRequest
-
     session, query = mock_session
     mock_agent = MockAgent()
     query.filter.return_value.first.return_value = mock_agent
@@ -591,10 +589,10 @@ def test_cmsr_006_update_preserves_explicitly_disabled_protocol_repair(monkeypat
     monkeypatch.setattr("backend.database.agent_db.get_db_session", lambda: mock_ctx)
     monkeypatch.setattr("backend.database.agent_db.filter_property", lambda data, model: data)
 
-    update_agent(1, AgentInfoRequest(enable_protocol_repair_retry=False), "user1")
+    update_agent(1, SimpleNamespace(enable_protocol_repair_retry=False), "user1")
     assert mock_agent.enable_protocol_repair_retry is False
 
-    update_agent(1, AgentInfoRequest(description="updated"), "user1")
+    update_agent(1, SimpleNamespace(description="updated"), "user1")
     assert mock_agent.enable_protocol_repair_retry is False
 
 def test_update_agent_skips_none_and_converts_group_ids(monkeypatch, mock_session):
