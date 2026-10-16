@@ -73,6 +73,7 @@ from management.services.agent.read import (
 from services.asset_owner_visibility import (
     resolve_agent_list_permission,
 )
+from services.user_identity_service import enrich_cas_usernames
 from utils.str_utils import (
     convert_string_to_list,
 )
@@ -242,6 +243,11 @@ async def list_all_agent_info_impl(
                 logger.warning("Failed to load agent tags: %s", error)
 
         simple_agent_list: list[dict] = []
+        enrich_cas_usernames(
+            [entry["raw_agent"] for entry in enriched_agents],
+            {"author_cas_username": "created_by"},
+            email_fields={"author_cas_username": "author"},
+        )
         for entry in enriched_agents:
             agent = entry["raw_agent"]
             unavailable_reasons = list(dict.fromkeys(entry["unavailable_reasons"]))
@@ -268,6 +274,11 @@ async def list_all_agent_info_impl(
                     "description": agent["description"],
                     "icon_url": agent.get("icon_url"),
                     "author": agent.get("author"),
+                    **(
+                        {"author_cas_username": agent["author_cas_username"]}
+                        if agent.get("author_cas_username")
+                        else {}
+                    ),
                     "created_by": agent.get("created_by"),
                     "create_time": agent.get("create_time"),
                     "tags": agent_tag_values.get(str(agent["agent_id"]), []),

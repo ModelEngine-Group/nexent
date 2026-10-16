@@ -1052,7 +1052,9 @@ class TestConversationManagementService(unittest.TestCase):
                 "score_semantic": 0.8,
                 "cite_index": 1,
                 "search_type": "web_search",
-                "tool_sign": "web_search"
+                "tool_sign": "web_search",
+                "aidp_metadata": {"count": 0, "enabled": False, "nested": {"values": [0, False]}},
+                "aidp_source_reference": {"chunk_id": "chunk-source", "retrieval_source": "vector"},
             }
         ]
         mock_get_searches.return_value = mock_searches
@@ -1076,6 +1078,10 @@ class TestConversationManagementService(unittest.TestCase):
         self.assertEqual(search["published_date"], "2023-01-15")
         self.assertEqual(search["score"], 0.95)
         self.assertEqual(search["score_details"]["accuracy"], 0.9)
+        self.assertEqual(search["score_details"]["metadata"], {"count": 0, "enabled": False, "nested": {"values": [0, False]}})
+        self.assertEqual(search["score_details"]["chunk_id"], "chunk-source")
+        self.assertEqual(search["cite_index"], 1)
+        self.assertEqual(search["search_type"], "web_search")
         # Check images
         self.assertEqual(len(result["data"]["images"]), 1)
         self.assertEqual(result["data"]["images"][0],
@@ -1730,7 +1736,15 @@ class TestGetConversationHistoryServiceEdgeCases(unittest.TestCase):
                  "source_type": "web", "source_location": "http://x.com", "published_date": "2023-01-01",
                  "score_overall": 0.9, "score_accuracy": 0.8, "score_semantic": 0.7,
                  "retrieval_highlight_terms": ["Content"],
-                 "cite_index": 1, "search_type": "web", "tool_sign": "search"}
+                 "cite_index": 1, "search_type": "aidp_search", "tool_sign": "j",
+                 "aidp_metadata": {"section": 0, "enabled": False, "tags": [0, False]},
+                 "aidp_source_reference": {"chunk_id": "chunk-first"}},
+                {"unit_id": 10, "message_id": 2, "source_title": "Doc 1", "source_content": "Second content",
+                 "source_type": "file", "source_location": "", "published_date": None,
+                 "score_overall": 0.8, "score_accuracy": None, "score_semantic": None,
+                 "cite_index": 2, "search_type": "aidp_search", "tool_sign": "j",
+                 "aidp_metadata": {"section": 1, "standards": {"code": {"level": "E"}}},
+                 "aidp_source_reference": {"chunk_id": "chunk-second"}},
             ],
             "image_records": []
         }
@@ -1740,8 +1754,11 @@ class TestGetConversationHistoryServiceEdgeCases(unittest.TestCase):
         # Check search is grouped by message
         msg = result[0]["message"][0]
         self.assertIn("search", msg)
-        self.assertEqual(len(msg["search"]), 1)
+        self.assertEqual(len(msg["search"]), 2)
         self.assertEqual(msg["search"][0]["title"], "Doc 1")
+        self.assertEqual(msg["search"][0]["score_details"]["metadata"], {"section": 0, "enabled": False, "tags": [0, False]})
+        self.assertEqual(msg["search"][1]["score_details"]["metadata"], {"section": 1, "standards": {"code": {"level": "E"}}})
+        self.assertEqual([source["score_details"]["chunk_id"] for source in msg["search"]], ["chunk-first", "chunk-second"])
         self.assertEqual(
             msg["search"][0]["score_details"]["retrieval_highlight_terms"],
             ["Content"],

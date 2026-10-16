@@ -1,3 +1,5 @@
+// Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 "use client";
 
 import type {
@@ -14,6 +16,8 @@ import { ApiError } from "@/services/api";
 import { notifyWorkbenchConfigResolved } from "@/features/workbench/runtimeEvents";
 import log from "@/lib/logger";
 import { completeTrailingToolCalls } from "@/lib/toolCallStatus";
+import type { SourceAttributes } from "@/types/source";
+import { getSourceAttributes } from "@/lib/source";
 import {
   appendClarificationPart,
   isClarificationFallback,
@@ -953,7 +957,7 @@ export function attachExecutionLogsToTool(
  */
 export function attachSearchContentToTool(
   contentParts: any[],
-  item: {
+  item: SourceAttributes & {
     url: string;
     title: string;
     text?: string;
@@ -982,7 +986,7 @@ export function attachSearchContentToTool(
   if (!targetToolCall.searchContent) {
     targetToolCall.searchContent = [];
   }
-  if (item.url || item.sourceFile) {
+  if (item.url || item.sourceFile || item.filename || item.title) {
     targetToolCall.searchContent.push(item);
   }
   return true;
@@ -1013,7 +1017,7 @@ function findMostRecentToolCall(
 
 // Global registry for search sources by message ID (used by MarkdownText for [[b1]] rendering)
 // Keyed by messageId (from message.id in the stream), value is SearchSource[]
-export interface SearchSource {
+export interface SearchSource extends SourceAttributes {
   citeIndex: number;
   url: string;
   title: string;
@@ -2154,6 +2158,7 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
     // Preserves cite_index for [[b1]] → source registry linkage.
     const searchSourcesAccumulator: SearchSource[] = [];
     const searchImagesAccumulator: SearchSource[] = [];
+    const consumedImageMetadata = new Set<SearchSource>();
     let skillFileAttachments: CompleteAttachment[] = [];
     let nl2a: Nl2aMessage | undefined;
     const acceptNl2aBoundary = (chunk: SseChunk): boolean => {
@@ -2216,12 +2221,19 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
       for (const imageUrl of imageUrls) {
         if (!imageUrl) continue;
 
-        const metadata = imageMetadata[searchImagesAccumulator.length];
+        const metadata = imageMetadata.find(
+          (source) =>
+            source.url === imageUrl &&
+            !consumedImageMetadata.has(source)
+        );
+        if (metadata) consumedImageMetadata.add(metadata);
         const imageSource: SearchSource = {
           ...metadata,
           url: imageUrl,
           title: metadata?.title || imageUrl,
           text: metadata?.text,
+          citeIndex: metadata?.citeIndex ?? 0,
+          toolSign: metadata?.toolSign ?? "",
           sourceType: "url",
           isImage: true,
           imageKey:
@@ -2802,6 +2814,10 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
                     isImage,
                     imageKey: result.image_key,
                     retrievalHighlightTerms,
+                    ...getSourceAttributes(
+                      result.search_type,
+                      result.score_details
+                    ),
                   });
                 }
                 attachSearchContentToTool(
@@ -2822,6 +2838,10 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
                     isImage,
                     imageKey: result.image_key,
                     retrievalHighlightTerms,
+                    ...getSourceAttributes(
+                      result.search_type,
+                      result.score_details
+                    ),
                   },
                   chunk.tool_call_id
                 );
@@ -3129,6 +3149,10 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
                       isImage,
                       imageKey: result.image_key,
                       retrievalHighlightTerms,
+                      ...getSourceAttributes(
+                        result.search_type,
+                        result.score_details
+                      ),
                     });
                   }
                   attachSearchContentToTool(
@@ -3149,6 +3173,10 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
                       isImage,
                       imageKey: result.image_key,
                       retrievalHighlightTerms,
+                      ...getSourceAttributes(
+                        result.search_type,
+                        result.score_details
+                      ),
                     },
                     chunk.tool_call_id
                   );
@@ -3200,13 +3228,14 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
       const imageMetadata = searchSourcesAccumulator.filter(
         (source) => source.isImage
       );
+      const matchedImageSources = new Set<SearchSource>();
       for (const [index, image] of searchImagesAccumulator.entries()) {
-        const metadata =
-          imageMetadata.find((source) => {
-            if (!source.url) return false;
-            const relativeUrl = source.url.replace(/^\/+/, "");
-            return image.url.endsWith(relativeUrl);
-          }) ?? imageMetadata[index];
+        const metadata = imageMetadata.find((source) => {
+          if (!source.url || matchedImageSources.has(source)) return false;
+          const relativeUrl = source.url.replace(/^\/+/, "");
+          return image.url.endsWith(relativeUrl);
+        });
+        if (metadata) matchedImageSources.add(metadata);
         const imageKey =
           metadata?.imageKey ||
           (metadata?.toolSign && metadata.citeIndex !== undefined
@@ -3274,6 +3303,10 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
             citeIndex: source.citeIndex,
             toolSign: source.toolSign,
             retrievalHighlightTerms: source.retrievalHighlightTerms,
+            searchType: source.searchType,
+            sourceMetadata: source.sourceMetadata,
+            sourceReference: source.sourceReference,
+            publishedDate: source.publishedDate,
             messageId, // used by thread.tsx / MarkdownText to look up from registry
           });
         }
@@ -3290,6 +3323,9 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
           toolSign: image.toolSign,
           isImage: true,
           imageKey: image.imageKey,
+          searchType: image.searchType,
+          sourceMetadata: image.sourceMetadata,
+          sourceReference: image.sourceReference,
           messageId,
         });
       }

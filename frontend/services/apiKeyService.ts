@@ -1,3 +1,5 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import { fetchWithAuth } from "@/lib/auth";
 import { API_ENDPOINTS, ApiError } from "./api";
 
@@ -7,6 +9,8 @@ export interface TenantApiKey {
   user_id: string;
   created_by?: string | null;
   creator_email?: string | null;
+  creator_cas_username?: string | null;
+  owner_cas_username?: string | null;
   owner_email?: string | null;
   owner_role?: string | null;
   create_time?: string | null;

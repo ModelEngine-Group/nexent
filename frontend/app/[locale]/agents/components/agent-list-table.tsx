@@ -4,6 +4,7 @@
 
 import { Filter } from "lucide-react";
 import type { ColumnsType } from "antd/es/table";
+import { UserIdentity } from "@/components/auth/UserIdentity";
 import { useTranslation } from "react-i18next";
 
 import { StandardTable } from "@/components/common/StandardTable";
@@ -129,7 +130,12 @@ export default function AgentListTable({
       key: "creator",
       width: "4.4%",
       ellipsis: true,
-      render: (author: string | undefined) => author?.trim() || "-",
+      render: (author: string | undefined, agent: Agent) => (
+        <UserIdentity
+          casUsername={agent.author_cas_username}
+          fallback={author?.trim() || "-"}
+        />
+      ),
     },
     {
       title: (

@@ -1,6 +1,12 @@
 // Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import {
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+  within,
+} from "@testing-library/react";
 import { beforeEach, expect, test, vi } from "vitest";
 
 import { AvatarDropdown } from "@/components/auth/avatarDropdown";
@@ -17,6 +23,7 @@ const state = vi.hoisted(() => ({
     email: string;
     role: string;
     avatarUrl: string;
+    authProvider?: string;
   },
   loading: false,
   about: "open",
@@ -94,6 +101,24 @@ async function openMenu() {
   await screen.findByRole("menu");
   await waitFor(() => expect(screen.getByRole("menu")).toBeVisible());
 }
+
+test.each([
+  ["cas", "  CAS User  ", "CAS User"],
+  ["cas", " \t", "admin@nexent.test"],
+  ["local", "Local User", "Local User"],
+  ["local", "", "admin@nexent.test"],
+])(
+  "%s account menu preserves identity display and its raw username",
+  async (authProvider, username, expected) => {
+    Object.assign(state.user!, { authProvider, username });
+    render(<AvatarDropdown rail />);
+    await openMenu();
+    const menu = within(screen.getByRole("menu"));
+    expect(menu.getByText(expected)).toBeVisible();
+    expect(menu.getByTitle(expected)).toHaveTextContent(expected);
+    expect(state.user!.username).toBe(username);
+  }
+);
 
 test("account menu retains identity, profile, all former bar links and no appearance entry", async () => {
   state.monitoring = "https://monitoring.nexent.test";

@@ -5695,6 +5695,7 @@ async def test_run_agent_stream_rejects_concurrent_run_with_sse_error(
     )
 
     assert response.headers["x-stream-status"] == "conflict"
+    assert response.headers["x-accel-buffering"] == "no"
     assert '"type": "error"' in body
     assert "已有智能体任务正在运行" in body
     save_user_message.assert_not_called()
@@ -17352,6 +17353,7 @@ async def test_run_agent_stream_resume_remote_running_uses_runtime_stream(monkey
 
     assert result.status_code == 200
     assert result.headers["X-Stream-Status"] == "resumed"
+    assert result.headers["X-Accel-Buffering"] == "no"
     assert result.headers["X-Last-Unit-Index"] == "5"
     assert chunks[0] == agent_subscription.STREAM_STATUS_EVENT
     assert '"replay_chunk_count": 2' in chunks[1]

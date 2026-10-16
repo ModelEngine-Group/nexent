@@ -46,6 +46,8 @@ from services.notification_service import (
 from management.services.skill.service import SkillService
 from management.services.skill.naming import generate_available_copy_skill_name
 
+from services.user_identity_service import enrich_repository_identities, repository_identity_fields
+
 logger = logging.getLogger("skill_repository_service")
 _REPOSITORY_LISTING_NOT_FOUND = "Repository listing not found"
 
@@ -119,6 +121,7 @@ def _to_summary_item(
         "skill_repository_id": record.get("skill_repository_id"),
         "skill_id": record.get("skill_id"),
         "submitted_by": record.get("submitted_by"),
+        **repository_identity_fields(record),
         "name": record.get("name"),
         "description": record.get("description"),
         "source": record.get("source"),
@@ -146,6 +149,8 @@ def _to_detail_item(
     creator_id = str(snapshot.get("created_by") or "").strip()
     creator = get_user_tenant_by_user_id(creator_id) if creator_id else None
     author = str((creator or {}).get("user_email") or "").strip() or None
+    record = {**record, "author": author}
+    enrich_repository_identities([record], "skill")
     detail = {
         "skill_repository_id": record.get("skill_repository_id"),
         "skill_id": record.get("skill_id"),
@@ -154,6 +159,7 @@ def _to_detail_item(
         "source": record.get("source"),
         "author": author,
         "submitted_by": record.get("submitted_by"),
+        **repository_identity_fields(record),
         "icon": record.get("icon"),
         "status": record.get("status"),
         "category_id": record.get("category_id"),
@@ -753,6 +759,7 @@ def update_skill_repository_status_impl(
         content=content,
     )
 
+    enrich_repository_identities([updated], "skill")
     return _to_summary_item(updated)
 
 
@@ -1139,6 +1146,7 @@ def list_skill_repository_listings_impl(
         sort_by_update_time=sort_by_update_time,
     )
     user_role = _get_user_role(user_id)
+    enrich_repository_identities(result.get("items", []), "skill")
     return {
         "items": [
             _to_summary_item(
