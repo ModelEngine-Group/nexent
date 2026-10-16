@@ -9,6 +9,7 @@ case:
   - WB-PIN-ORDER-20261014
   - WB-HISTORY-ROW-TIME-20261014
   - WB-SERVER-PINS-20261014
+  - WB-PIN-SYNC-20261016
   - WB-HISTORY-TIME-RESTORE-20261014
   business_rule_ids:
   - CHAT-SIDEBAR-RULE-003
@@ -42,7 +43,7 @@ case:
   - order: 4
     action: Pin again, reload as another user and tenant, then restore the original
       identity.
-    expected: Other users and tenants do not inherit the pin; the original identity
+    expected: Other users do not inherit the pin; the same owner retains it after tenant changes; the original identity
       retains it.
   - order: 5
     action: Reload saved histories without usable timestamps, then cancel the pin.
@@ -61,12 +62,12 @@ case:
       recency.
   - order: 8
     action: Open an independent browser context for the same account, read pins, unpin
-      there and reload the first device; reject a save on the first device.
+      there and reload the first device; reject a save on the first device. Then pin a history outside the first device loaded page on the second device and refocus the first device without reloading, including a visible embedded page that receives a composer click without visibilitychange.
     expected: Fresh browser receives identical order without localStorage; unpin synchronizes
       after reload; rejected save leaves confirmed state unchanged and displays an
-      error.
+      error. The newly pinned unloaded history immediately appears with its title, while the first device composer draft and active conversation remain unchanged; later pages contain no duplicates.
   expected_results:
-  - User can pin and unpin saved Workbench histories with backend user/tenant persistence,
+  - User can pin and unpin saved Workbench histories with backend personal-conversation persistence,
     cross-device order, search and rename support.
   forbidden_side_effects:
   - No generation or deletion requests; Agent-chat pin storage remains untouched;
@@ -86,7 +87,7 @@ case:
   - Reject save
   final_business_result:
   - Frequently used histories stay accessible above ordinary history on devices logged
-    into the same user/tenant.
+    into the same account.
   failure_evidence:
   - Browser trace and assertion screenshot.
   execution:

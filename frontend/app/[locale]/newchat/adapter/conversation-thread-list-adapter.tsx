@@ -25,6 +25,7 @@ import {
   CONVERSATION_PAGE_SIZE,
   conversationService,
 } from "@/services/conversationService";
+import type { WorkbenchPins } from "@/types/conversation";
 import { getConversationDateBoundaries } from "@/lib/conversationViewport";
 import { toMessageCreatedAt } from "@/lib/messageDate";
 import { buildHistoricalMessageTiming } from "@/lib/messageTiming";
@@ -1713,7 +1714,8 @@ const waitForServerConversationId = async (
 
 export const createConversationThreadListAdapter = (
   conversationType: "agent_chat" | "workbench",
-  pinStorageKey?: string
+  pinStorageKey?: string,
+  loadPins: () => Promise<WorkbenchPins> = () => conversationService.getWorkbenchPins()
 ): RemoteThreadListAdapter => {
   const prefetchedConversationIds = new Set<string>();
   return {
@@ -1741,7 +1743,7 @@ export const createConversationThreadListAdapter = (
             data.items.map((item) => String(item.conversation_id))
           );
           try {
-            const pins = await conversationService.getWorkbenchPins();
+            const pins = await loadPins();
             pinnedMetadata = pins.items
               .filter((item) => !loadedIds.has(String(item.conversation_id)))
               .map(toRemoteThreadMetadata);

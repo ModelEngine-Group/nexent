@@ -1,4 +1,4 @@
-# Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
 """
 Standalone mock AIDP server for Nexent AIDP management endpoint testing.
@@ -1206,7 +1206,7 @@ def update_knowledge_base(
         # Partial update: the backend already validated the edited fields, so
         # only the key names are checked here. The graph_config JSON string
         # contains only modifiable fields (non-modifiable template fields like
-        # domain/prompt_language/prompt_text are stripped by the backend).      
+        # domain/prompt_language/prompt_text are stripped by the backend).
         try:
             graph_update = json.loads(body.graph_config)
         except ValueError as exc:
