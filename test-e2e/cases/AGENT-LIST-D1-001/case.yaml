@@ -18,12 +18,11 @@ case:
   priority: P1
   status: active
   automation: automated
-  objective: Verify Ant Design table rendering, including header separators and content-based
-    sizing constraints, plus columns, row data, update-time source, and action callbacks
-    without changing the card view contract.
+  objective: Verify native Ant Design Table rendering with adaptive scrolling and fixed row
+    actions while preserving all seven columns, metadata, update-time source, callbacks and
+    the card view contract.
   preconditions:
-  - Render the table with agents containing author, tags, status, and update_time
-    values.
+  - Render the table with agents containing author, tags, status, and update_time values.
   - Render a second agent without update_time but with create_time.
   test_data:
     profile: mock
@@ -39,25 +38,31 @@ case:
   steps:
   - order: 1
     action: Render the table with the mocked agent rows.
-    expected: The seven columns appear in the specified order in StandardTable backed
-      by Ant Design Table; internal header columns have 1px
+    expected: The seven columns appear in the specified order in native Ant Design Table; the
+      actions column remains fixed at the end.
   - order: 2
     action: Render a row whose update_time is absent and whose create_time is present.
-    expected: The update-time cell shows the missing-value placeholder rather than
-      the creation date.
+    expected: The update-time cell shows the missing-value placeholder rather than the creation
+      date.
   - order: 3
     action: Trigger the row's detail, configure, and publish actions.
     expected: Each callback receives the corresponding agent or numeric agent ID.
+  - order: 4
+    action: Resize a real header cell with keyboard controls and trigger a row action.
+    expected: All seven headers expose resize handles; widths change and respect their minimum,
+      and the original configure callback still receives the numeric agent ID.
   expected_results:
   - The table labels include 更新时间 and do not label agents as knowledge bases.
-  - The table is rendered through StandardTable with the documented typography, backgrounds,
-    40px rows,
-  - The table wrapper uses content-based height up to 500px and internal overflow
-    scrolling; it is not forced to fill unused space.
-  - Update time is formatted from update_time only; missing or invalid timestamps
-    do not fall back to create_time.
+  - The native Ant Design table uses a subdued 44px header, readable 14px text and 52px body
+    rows.
+  - The table fills the available list area, keeps the header fixed, and scrolls its body independently
+    while existing pagination remains below it.
+  - Update time is formatted from update_time only; missing or invalid timestamps do not fall
+    back to create_time.
   - Creator uses author when present and a placeholder when absent.
   - The card component and its data behavior remain unchanged.
+  - All seven columns can be resized with pointer or keyboard controls; minimum widths protect
+    content and the fixed action column remains available.
   forbidden_side_effects:
   - Do not modify page title, guide area, tabs, or card-mode content.
   - Do not add or change backend requests or response contracts.
@@ -72,14 +77,13 @@ case:
   - Update time never falls back to create_time.
   - Missing creator and timestamp values render placeholders.
   - Action callbacks receive the correct row data.
-  - Header separators are 14px high, vertically centered, and
-  - The scroll wrapper is content-sized with a 500px maximum rather than flex-growing
-    to fill unused space.
+  - The actions column is fixed at the end, and the table does not create duplicate pagination.
+  - The wrapper can shrink and fill available height so the native table body can scroll.
   acceptance:
   - id: AC-01
-    description: Verify Ant Design table rendering, including header separators and
-      content-based sizing constraints, plus columns, row data, update-time source,
-      and action callbacks without changing the card view contract.
+    description: Verify native Ant Design Table rendering with adaptive scrolling and fixed
+      row actions while preserving all seven columns, metadata, update-time source, callbacks
+      and the card view contract.
     steps:
     - 1
     - 2
@@ -91,6 +95,17 @@ case:
     - 4
     - 5
     - 6
+    forbidden_side_effects:
+    - 1
+    - 2
+    - 3
+  - id: AC-02
+    description: Real header cells update table widths with minimum-width protection while row
+      actions remain connected.
+    steps:
+    - 4
+    expected_results:
+    - 7
     forbidden_side_effects:
     - 1
     - 2
