@@ -17,6 +17,7 @@ Simulates the AIDP native API endpoints consumed by backend/services/aidp_servic
   - GET    /KnowledgeBase/Tenants/{tenant}/KnowledgeBases/{id}/Channels               (ingestion channels)
   - POST   /KnowledgeBase/Tenants/{tenant}/KnowledgeBases/{id}/KnowledgeFiles/History (all-status file history)
   - POST   /KnowledgeBase/Tenants/{tenant}/KnowledgeBases/{id}/KnowledgeFiles/Remove  (remove docs)
+  - POST   /KnowledgeBase/Tenants/{tenant}/KnowledgeBases/{id}/KnowledgeFiles/Retry  (retry failed docs)
   - POST   /KnowledgeBase/Tenants/{tenant}/KnowledgeBases/{id}/KnowledgeFiles/Download (download doc)
   - GET    /KnowledgeBase/Tenants/{tenant}/KnowledgeBases/{id}/OcrAnnotate/{file_uuid}  (preview doc)
   - POST   /KnowledgeBase/Tenants/{tenant}/Retrieval/FusionSearch  (search - preserved from reference)
@@ -32,10 +33,9 @@ Document status simulation (drives the "processing status" UI):
     non-terminal ``UPLOADING`` / ``EXTRACTING`` stages.
   * ``GET .../KnowledgeFiles`` keeps returning COMPLETED documents only (mirrors
     real AIDP), while ``POST .../KnowledgeFiles/History`` returns every status.
-  * ``POST .../KnowledgeFiles/History`` is paginated (body ``page``, ten entries
-    per page) and lists files that are still being processed first, so a burst of
-    simultaneous uploads spills onto the next page and the caller has to walk the
-    pages. Tune the page size with ``POST /_mock/history-page-size?size=N``.
+  * ``POST .../KnowledgeFiles/History`` returns records from the last 30 days
+    and supports page, page_size, file-name keyword, and numeric status filters.
+    Tune the default page size with ``POST /_mock/history-page-size?size=N``.
   * ``GET .../OcrAnnotate/{file_uuid}`` serves docx/xlsx/pptx/pdf/txt unchanged
     and answers every other format with a synthetic PDF - which is what real AIDP
     does - reporting the name it served in the ``X-File-Name`` header, so a
@@ -46,7 +46,9 @@ Knowledge base + document state is persisted to ``_state/knowledge_bases.json``
 tests or frontend sessions survive across restarts without re-creation
 (which was otherwise the cause of spurious 404s in list endpoints against
 stale Nexent permission rows). ``POST /_reset`` clears the file and
-rebuilds the seed data. Run with:
+rebuilds the seed data. On startup, the mock upgrades the existing FAQ
+seed to a fully populated Chinese knowledge base with recent file and
+upload-task examples without clearing other persisted state. Run with:
     python aidp_mgmt_mock_server.py --port 30081
 """
 import argparse
@@ -58,6 +60,7 @@ import os
 import re
 import time
 import uuid
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Literal, Optional
 from urllib.parse import quote
@@ -95,7 +98,7 @@ _MODELS_PREFIX = f"/ModelService/Tenants/{TENANT}/Service"
 STATUS_PROCESSING = "PROCESSING"
 STATUS_COMPLETED = "COMPLETED"
 STATUS_FAILED = "FAILED"
-_TERMINAL_STATUSES = {STATUS_COMPLETED, STATUS_FAILED}
+_TERMINAL_STATUSES = {STATUS_COMPLETED, STATUS_FAILED, 1, 3, 5, "1", "3", "5"}
 
 # One ingestion channel per knowledge base, exposed at the KB-scoped path the
 # real AIDP uses (``.../KnowledgeBases/{kds_id}/Channels``). ``src_dir`` embeds
@@ -184,7 +187,8 @@ def _seed_initial_data() -> None:
         _KNOWLEDGE_BASES[kb["kds_id"]] = kb
         _DOCUMENTS_BY_KB[kb["kds_id"]] = []
 
-    # Seed some documents for the FAQ KB so list_docs is non-empty by default.
+    # Seed completed files and recent tasks for both detail-page tabs.
+    now = int(time.time())
     _DOCUMENTS_BY_KB["aidp-kb-faq"] = [
         {
             "file_uuid": "00000000-0000-4000-8000-000000000001",
@@ -202,7 +206,73 @@ def _seed_initial_data() -> None:
             "file_type": "md",
             "create_time": 1718000500,
         },
+        {
+            "file_uuid": "00000000-0000-4000-8000-000000000003",
+            "file_ino_no": 1003,
+            "file_name": "向量入库失败示例.docx",
+            "file_size": 3072,
+            "file_type": "docx",
+            "first_upload_time": now - 3600,
+            "update_time": now - 1800,
+            "status": 3,
+            "error_code": "VEC101",
+            "extraction_failure_reason": "向量服务暂时不可用，任务未能完成向量入库。",
+        },
+        {
+            "file_uuid": "00000000-0000-4000-8000-000000000004",
+            "file_ino_no": 1004,
+            "file_name": "排队中的制度说明.pdf",
+            "file_size": 5120,
+            "file_type": "pdf",
+            "first_upload_time": now - 900,
+            "update_time": now - 600,
+            "status": 4,
+        },
+        {
+            "file_uuid": "00000000-0000-4000-8000-000000000005",
+            "file_ino_no": 1005,
+            "file_name": "图谱入库失败示例.pdf",
+            "file_size": 8192,
+            "file_type": "pdf",
+            "first_upload_time": now - 7200,
+            "update_time": now - 5400,
+            "status": 5,
+            "error_code": "GRAPH201",
+            "extraction_failure_reason": "图谱任务处理失败，请检查知识图谱配置后重试。",
+        },
+        {
+            "file_uuid": "00000000-0000-4000-8000-000000000006",
+            "file_ino_no": 1006,
+            "file_name": "正在提取的服务手册.txt",
+            "file_size": 4096,
+            "file_type": "txt",
+            "first_upload_time": now - 300,
+            "update_time": now - 120,
+            "status": 2,
+        },
     ]
+    _KNOWLEDGE_BASES["aidp-kb-faq"].update({
+        "embedding_model": "bge-m3",
+        "vlm_model": "Qwen3-VL-8B-Instruct",
+        "rerank_model": "bge-reranker-v2-m3",
+        "chunk_mode": 0,
+        "chunk_token_num": 512,
+        "chunk_overlap_num": 10,
+        "topk": 10,
+        "similarity": 0.6,
+        "is_exist_graph": True,
+        "llm_model_name": "Qwen3-8B-Instruct",
+        "graph_config": {
+            "domain": "general",
+            "retrieve_default_topk": 10,
+            "retrieve_subgraph_hop": 2,
+            "no_think_mode": True,
+            "prompt_language": "chinese",
+            "prompt_text": "作为专业知识图谱构建引擎，仅提取文本实体、关系、属性三元组，输出固定 JSON 数组。",
+            "synonym_merge_enable": False,
+            "disambiguation_enable": False,
+        },
+    })
 
 
 def _save_state() -> None:
@@ -245,6 +315,9 @@ def _load_state() -> None:
                 raise ValueError("state file payload is not {dict, dict}")
             _KNOWLEDGE_BASES.update(kb_data)
             _DOCUMENTS_BY_KB.update(doc_data)
+            for kb in _KNOWLEDGE_BASES.values():
+                if isinstance(kb, dict):
+                    kb.pop("sensitive_intercept_enalbe", None)
             logger.info(
                 "STATE LOAD  restored %d KBs from %s",
                 len(_KNOWLEDGE_BASES), _STATE_FILE,
@@ -280,40 +353,266 @@ def _ensure_document_uuids() -> None:
 _load_state()
 
 
-def _ensure_chinese_file_demo() -> None:
-    """Backfill one Chinese catalog/file sample without task or detail fixtures."""
-    kb_id = "aidp-kb-faq"
-    kb = _KNOWLEDGE_BASES.get(kb_id)
+def _ensure_detail_demo_tasks() -> None:
+    """Retain the legacy opt-in task fixture for existing local test workflows."""
+    if os.environ.get("AIDP_MOCK_ENABLE_DETAIL_FIXTURES") != "1":
+        return
+    kds_id = "aidp-kb-faq"
+    if kds_id not in _KNOWLEDGE_BASES:
+        return
+    docs = _DOCUMENTS_BY_KB.setdefault(kds_id, [])
+    known_uuids = {str(doc.get("file_uuid")) for doc in docs if doc.get("file_uuid")}
+    now = int(time.time())
+    fixtures = [
+        {
+            "file_uuid": "00000000-0000-4000-8000-000000000003",
+            "file_ino_no": 1003,
+            "file_name": "向量入库失败示例.docx",
+            "file_size": 3072,
+            "file_type": "docx",
+            "first_upload_time": now - 3600,
+            "update_time": now - 1800,
+            "status": 3,
+            "error_code": "VEC101",
+            "extraction_failure_reason": "向量服务暂时不可用，任务未能完成向量入库。",
+        },
+        {
+            "file_uuid": "00000000-0000-4000-8000-000000000004",
+            "file_ino_no": 1004,
+            "file_name": "排队中的制度说明.pdf",
+            "file_size": 5120,
+            "file_type": "pdf",
+            "first_upload_time": now - 900,
+            "update_time": now - 600,
+            "status": 4,
+        },
+        {
+            "file_uuid": "00000000-0000-4000-8000-000000000005",
+            "file_ino_no": 1005,
+            "file_name": "图谱入库失败示例.pdf",
+            "file_size": 8192,
+            "file_type": "pdf",
+            "first_upload_time": now - 7200,
+            "update_time": now - 5400,
+            "status": 5,
+            "error_code": "GRAPH201",
+            "extraction_failure_reason": "图谱任务处理失败，请检查知识图谱配置后重试。",
+        },
+        {
+            "file_uuid": "00000000-0000-4000-8000-000000000006",
+            "file_ino_no": 1006,
+            "file_name": "正在提取的服务手册.txt",
+            "file_size": 4096,
+            "file_type": "txt",
+            "first_upload_time": now - 300,
+            "update_time": now - 120,
+            "status": 2,
+        },
+    ]
+    additions = [fixture for fixture in fixtures if fixture["file_uuid"] not in known_uuids]
+    if additions:
+        docs.extend(additions)
+        logger.info("DETAIL FIXTURES  added %d sample upload tasks to %s", len(additions), kds_id)
+        _save_state()
+
+
+def _ensure_chinese_demo_data() -> None:
+    """Keep one persisted AIDP sample fully populated for Chinese UI review."""
+    kds_id = "aidp-kb-faq"
+    kb = _KNOWLEDGE_BASES.get(kds_id)
     if kb is None:
         return
-    if kb.get("kds_name") in (None, "", "AIDP FAQ"):
-        kb["kds_name"] = "政务服务与城市治理知识库"
-    if kb.get("description") in (None, "", "Frequently asked questions and troubleshooting notes."):
-        kb["description"] = "汇集政务办事指南、公共服务事项和城市运行制度，供工作人员快速检索与答疑。"
-    docs = _DOCUMENTS_BY_KB.setdefault(kb_id, [])
-    known = {str(doc.get("file_uuid")) for doc in docs}
+
     now = int(time.time())
-    for number, (name, extension, size) in enumerate([
-        ("政务办事指南.pdf", "pdf", 1048576),
-        ("城市运行管理制度.docx", "docx", 3276800),
-        ("公共服务事项清单.xlsx", "xlsx", 917504),
-        ("热线常见问题.md", "md", 58368),
-        ("基层治理工作周报.csv", "csv", 393216),
-        ("应急预案与值班流程.pptx", "pptx", 6815744),
-        ("市民服务大厅导览.png", "png", 2752512),
-        ("城市运行平台使用说明.txt", "txt", 44032),
-    ], 1):
-        fixture_number = (1, 2, 7, 8, 9, 10, 11, 12)[number - 1]
-        file_uuid = f"00000000-0000-4000-8000-{fixture_number:012d}"
-        if file_uuid not in known:
-            docs.append({"file_uuid": file_uuid, "file_ino_no": 1000 + fixture_number,
-                         "file_name": name, "file_type": extension, "file_size": size,
-                         "create_time": now - number * 3600, "update_time": now - number * 1800,
-                         "status": STATUS_COMPLETED})
+    name = "政务服务与城市治理知识库"
+    description = "汇集政务办事指南、公共服务事项、城市运行制度和应急处置资料，供工作人员快速检索与答疑。"
+    if not kb.get("kds_name") or kb.get("kds_name") == "AIDP FAQ":
+        kb["kds_name"] = name
+    if not kb.get("description") or kb.get("description") == "Frequently asked questions and troubleshooting notes.":
+        kb["description"] = description
+
+    defaults = {
+        "state": 4,
+        "create_time": now - 45 * 24 * 60 * 60,
+        "update_time": now - 24 * 60 * 60,
+        "created_by": "王晓明",
+        "user_name": "王晓明",
+        "is_private": 0,
+        "current_cap": 0.84,
+        "document_count": 8,
+        "chunk_count": 286,
+        "embedding_model": "bge-m3",
+        "is_multimodal": True,
+        "caption_enable": 1,
+        "vlm_model": "Qwen3-VL-8B-Instruct",
+        "rerank_model": "bge-reranker-v2-m3",
+        "chunk_mode": 0,
+        "chunk_token_num": 1024,
+        "chunk_overlap_num": 128,
+        "topk": 10,
+        "similarity": 0.62,
+        "is_exist_graph": True,
+        "llm_model_name": "Qwen3-8B-Instruct",
+    }
+    if kb.get("create_time") == 1718000300:
+        kb["create_time"] = now - 45 * 24 * 60 * 60
+    if kb.get("update_time") == 1718000300:
+        kb["update_time"] = now - 24 * 60 * 60
+    for key, value in defaults.items():
+        current = kb.get(key)
+        if current is None or (isinstance(current, str) and not current.strip()):
+            kb[key] = value
+
+    graph_defaults = {
+        "domain": "general",
+        "retrieve_default_topk": 10,
+        "retrieve_subgraph_hop": 2,
+        "no_think_mode": False,
+        "prompt_language": "chinese",
+        "prompt_text": (
+            "你是政务服务与城市治理领域的知识图谱构建助手。请从材料中识别办事事项、办理部门、"
+            "申请条件、所需材料、办理流程、办理时限、服务地点、政策依据、城市设施、责任单位和应急事件。"
+            "仅根据原文建立准确的实体与关系；实体名称保持原文，合并明确指向同一对象的别名，"
+            "对简称或同名实体结合上下文消歧。不要补充材料中没有的信息，按接口要求输出结构化 JSON。"
+        ),
+        "synonym_merge_enable": True,
+        "disambiguation_enable": True,
+    }
+    graph_config = kb.get("graph_config")
+    if isinstance(graph_config, str):
+        try:
+            graph_config = json.loads(graph_config)
+        except json.JSONDecodeError:
+            graph_config = {}
+    if not isinstance(graph_config, dict):
+        graph_config = {}
+    for key, value in graph_defaults.items():
+        current = graph_config.get(key)
+        if current is None or (isinstance(current, str) and not current.strip()):
+            graph_config[key] = value
+    kb["graph_config"] = graph_config
+
+    def demo_file(
+        number: int,
+        file_name: str,
+        file_type: str,
+        file_size: int,
+        days_ago: int,
+        status: int,
+        *,
+        hours_since_update: int = 2,
+        error_code: str | None = None,
+        failure_reason: str | None = None,
+    ) -> dict[str, Any]:
+        uploaded_at = now - days_ago * 24 * 60 * 60
+        updated_at = now - hours_since_update * 60 * 60
+        item: dict[str, Any] = {
+            "file_uuid": f"00000000-0000-4000-8000-{number:012d}",
+            "file_ino_no": 1000 + number,
+            "file_name": file_name,
+            "file_size": file_size,
+            "file_type": file_type,
+            "import_mode": "本地上传",
+            "first_upload_time": uploaded_at,
+            "update_time": updated_at,
+            "status": status,
+        }
+        if error_code:
+            item["error_code"] = error_code
+        if failure_reason:
+            item["extraction_failure_reason"] = failure_reason
+            item["reason"] = failure_reason
+        return item
+
+    vector_failure = (
+        "文档解析和分片已完成，但向量索引服务暂时不可用，未能写入向量库。请稍后重新提取。"
+    )
+    graph_failure = (
+        "文件已完成向量化，但实体关系抽取未能完成，图谱数据没有写入。请检查知识图谱配置后重试。"
+    )
+    fixtures = [
+        demo_file(1, "政务服务办事指南.pdf", "pdf", 1_835_008, 18, 1, hours_since_update=24),
+        demo_file(2, "城市运行管理制度汇编.docx", "docx", 3_276_800, 16, 1, hours_since_update=12),
+        demo_file(
+            3, "公共服务目录更新.docx", "docx", 482_304, 2, 3,
+            hours_since_update=1, error_code="VEC101", failure_reason=vector_failure,
+        ),
+        demo_file(4, "新市民服务政策手册.pdf", "pdf", 2_146_304, 0, 4, hours_since_update=0),
+        demo_file(
+            5, "城市设施关联关系数据.xlsx", "xlsx", 786_432, 1, 5,
+            hours_since_update=3, error_code="GRAPH201", failure_reason=graph_failure,
+        ),
+        demo_file(6, "医保异地办理流程说明.txt", "txt", 36_864, 0, 2, hours_since_update=0),
+        demo_file(7, "公共服务事项清单.xlsx", "xlsx", 917_504, 14, 1, hours_since_update=48),
+        demo_file(8, "12345热线常见问题与答复.md", "md", 58_368, 12, 1, hours_since_update=30),
+        demo_file(9, "基层治理工作周报.csv", "csv", 393_216, 10, 1, hours_since_update=20),
+        demo_file(10, "应急预案与值班流程.pptx", "pptx", 6_815_744, 8, 1, hours_since_update=16),
+        demo_file(11, "市民服务大厅导览.png", "png", 2_752_512, 6, 1, hours_since_update=8),
+        demo_file(12, "城市运行平台使用说明.txt", "txt", 44_032, 4, 1, hours_since_update=4),
+    ]
+
+    documents = _DOCUMENTS_BY_KB.setdefault(kds_id, [])
+    documents_by_uuid = {
+        str(document.get("file_uuid")): document
+        for document in documents
+        if isinstance(document, dict) and document.get("file_uuid")
+    }
+    legacy_names = {
+        "00000000-0000-4000-8000-000000000001": {"常见问题汇总.txt"},
+        "00000000-0000-4000-8000-000000000002": {"troubleshooting.md"},
+        "00000000-0000-4000-8000-000000000003": {"向量入库失败示例.docx"},
+        "00000000-0000-4000-8000-000000000004": {"排队中的制度说明.pdf"},
+        "00000000-0000-4000-8000-000000000005": {"图谱入库失败示例.pdf"},
+        "00000000-0000-4000-8000-000000000006": {"正在提取的服务手册.txt"},
+    }
+    for fixture in fixtures:
+        existing = documents_by_uuid.get(fixture["file_uuid"])
+        if existing is None:
+            documents.append(fixture)
+            documents_by_uuid[fixture["file_uuid"]] = fixture
+        else:
+            if not existing.get("file_name") or existing.get("file_name") in legacy_names.get(
+                fixture["file_uuid"], set()
+            ):
+                existing["file_name"] = fixture["file_name"]
+            if existing.get("status") is None or existing.get("status") == "":
+                existing["status"] = fixture["status"]
+            raw_status = str(existing.get("status", "")).strip().upper()
+            status_aliases = {
+                "COMPLETED": "1",
+                "SUCCESS": "1",
+                "PROCESSING": "2",
+                "EXTRACTING": "2",
+                "FAILED": "3",
+                "VECTOR_INGESTION_FAILED": "3",
+                "UPLOADING": "4",
+                "QUEUED": "4",
+                "GRAPH_INGESTION_FAILED": "5",
+            }
+            status_matches_fixture = (
+                status_aliases.get(raw_status, raw_status) == str(fixture["status"])
+            )
+            for key, value in fixture.items():
+                if key in {"file_name", "status"}:
+                    continue
+                if key in {"error_code", "extraction_failure_reason", "reason"}:
+                    if status_matches_fixture and not existing.get(key):
+                        existing[key] = value
+                    continue
+                current = existing.get(key)
+                if current is None or (isinstance(current, str) and not current.strip()):
+                    existing[key] = value
+
+    logger.info(
+        "DEMO FIXTURE  ensured Chinese knowledge base %s with %d files",
+        kds_id,
+        len(documents),
+    )
     _save_state()
 
 
-_ensure_chinese_file_demo()
+_ensure_detail_demo_tasks()
+_ensure_chinese_demo_data()
 _ensure_document_uuids()
 _save_state()
 
@@ -492,6 +791,28 @@ def _visible_in_completed_listing(doc: Dict[str, Any]) -> bool:
     return _doc_effective_status(doc) == 1
 
 
+def _document_timestamp(document: Dict[str, Any]) -> float | None:
+    """Return the best available upload timestamp in epoch seconds."""
+    value = (
+        document.get("first_upload_time")
+        or document.get("create_time")
+        or document.get("created_at")
+        or document.get("update_time")
+        or document.get("updated_at")
+    )
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        return float(value)
+    if isinstance(value, str) and value.strip():
+        try:
+            parsed = datetime.fromisoformat(value.strip().replace("Z", "+00:00"))
+            if parsed.tzinfo is None:
+                parsed = parsed.replace(tzinfo=timezone.utc)
+            return parsed.timestamp()
+        except ValueError:
+            return None
+    return None
+
+
 # =============================================================================
 # Request Models
 # =============================================================================
@@ -516,6 +837,12 @@ class CreateKbBody(BaseModel):
 class UpdateKbBody(BaseModel):
     name: Optional[str] = None
     description: Optional[str] = None
+    chunk_mode: Optional[int] = None
+    topk: Optional[int] = None
+    caption_enable: Optional[int] = None
+    vlm_model: Optional[str] = None
+    is_exist_graph: Optional[bool] = None
+    graph_config: Optional[str] = None
 
 
 class DocHistoryBody(BaseModel):
@@ -524,6 +851,13 @@ class DocHistoryBody(BaseModel):
     fs_id: Optional[str] = None
     dir_path: Optional[str] = None
     page: int = 1
+    page_size: Optional[int] = Field(default=None, ge=1, le=100)
+    status: Optional[int] = Field(default=None, ge=0, le=5)
+    keyword: Optional[str] = Field(default=None, max_length=200)
+
+
+class RetryDocumentsBody(BaseModel):
+    retry_file_info: List[Dict[str, str]] = Field(..., min_length=1)
 
 
 class DocStatusBody(BaseModel):
@@ -947,6 +1281,43 @@ def update_knowledge_base(
         kb["kds_name"] = body.name
     if body.description is not None:
         kb["description"] = body.description
+    if body.chunk_mode is not None:
+        kb["chunk_mode"] = body.chunk_mode
+    if body.topk is not None:
+        kb["topk"] = body.topk
+    if body.caption_enable is not None:
+        kb["caption_enable"] = body.caption_enable
+    if body.vlm_model is not None:
+        kb["vlm_model"] = body.vlm_model
+    if body.is_exist_graph is not None:
+        # Disabling is permanent: a disabled graph can never be re-enabled.
+        if body.is_exist_graph and not kb.get("is_exist_graph"):
+            raise HTTPException(400, "Knowledge graph cannot be re-enabled once disabled")
+        kb["is_exist_graph"] = body.is_exist_graph
+    if body.graph_config is not None:
+        # Partial update: the backend already validated the edited fields, so
+        # only the key names are checked here. The graph_config JSON string
+        # contains only modifiable fields (non-modifiable template fields like
+        # domain/prompt_language/prompt_text are stripped by the backend).      
+        try:
+            graph_update = json.loads(body.graph_config)
+        except ValueError as exc:
+            raise HTTPException(400, "graph_config must be a JSON string") from exc
+        allowed = {p["param_key"] for p in _graph_template("chinese")["value"] if p.get("is_modifiable")} | {"llm_model_name"}
+        if not isinstance(graph_update, dict) or set(graph_update) - allowed:
+            raise HTTPException(400, "Unrecognized graph configuration parameter")
+        current = kb.get("graph_config")
+        if isinstance(current, str):
+            try:
+                current = json.loads(current)
+            except ValueError:
+                current = {}
+        if not isinstance(current, dict):
+            current = {}
+        current.update(graph_update)
+        kb["graph_config"] = current
+        if isinstance(current.get("llm_model_name"), str):
+            kb["llm_model_name"] = current["llm_model_name"]
     kb["update_time"] = int(time.time())
 
     logger.info("UPDATE  kds_id=%s name=%r description=%r", kds_id, body.name, body.description)
@@ -1284,12 +1655,12 @@ def knowledge_file_history(
     body: DocHistoryBody,
     authorization: Optional[str] = Header(default=None),
 ) -> JSONResponse:
-    """List every file in a channel directory, whatever its processing status.
+    """Return one filtered page of this channel's recent file history.
 
     The endpoint is knowledge-base scoped, like the channel catalog and the
     document list; the body still addresses the request to one channel directory
-    of that KB. Documents that are still PROCESSING are included with their live
-    status, and a directory pointing outside the KB answers with an empty list.
+    of that KB. AIDP retains the last 30 days of history, supports status and
+    file-name filtering, and includes summary counts independent of the filters.
     """
     _check_auth(authorization)
 
@@ -1308,29 +1679,62 @@ def knowledge_file_history(
         )
         return JSONResponse(content={"value": []})
 
-    items = [
+    cutoff = time.time() - 30 * 24 * 60 * 60
+    all_recent_items = [
         {
             **doc,
             "dir_path": _channel_src_dir(kds_id),
             "status": _doc_effective_status(doc),
         }
         for doc in _DOCUMENTS_BY_KB.get(kds_id, [])
+        if (_document_timestamp(doc) is not None
+            and _document_timestamp(doc) >= cutoff)
     ]
     # Real AIDP lists files that are still being processed first and pages the
     # directory, which is what lets more simultaneous uploads than fit in one
     # page spill onto the next. Mirrored here, so a caller that reads only the
     # first page is caught locally instead of in production. The sort is stable,
     # so documents keep their insertion order inside each group.
-    items.sort(key=lambda item: item["status"] in _TERMINAL_STATUSES)
+    all_recent_items.sort(key=lambda item: item["status"] in _TERMINAL_STATUSES)
+    stats = {
+        "total_record_count": len(all_recent_items),
+        "success_record_count": sum(1 for item in all_recent_items if item["status"] == 1),
+        "processing_record_count": sum(1 for item in all_recent_items if item["status"] == 2),
+        "failed_record_count": sum(1 for item in all_recent_items if item["status"] in (3, 5)),
+        "waiting_record_count": sum(1 for item in all_recent_items if item["status"] == 4),
+    }
+    items = list(all_recent_items)
+    if body.status not in (None, 0):
+        status_aliases = {
+            1: {1, "1", STATUS_COMPLETED, "SUCCESS"},
+            2: {2, "2", "PROCESSING", "EXTRACTING"},
+            3: {3, "3", STATUS_FAILED, "VECTOR_INGESTION_FAILED"},
+            4: {4, "4", "UPLOADING", "QUEUED"},
+            5: {5, "5", "GRAPH_INGESTION_FAILED"},
+        }
+        accepted = status_aliases.get(body.status, set())
+        items = [item for item in items if item["status"] in accepted]
+    normalized_keyword = body.keyword.strip().casefold() if isinstance(body.keyword, str) else ""
+    if normalized_keyword:
+        items = [
+            item for item in items
+            if normalized_keyword in str(item.get("file_name") or "").casefold()
+        ]
     page = body.page if isinstance(body.page, int) and body.page > 0 else 1
-    start = (page - 1) * _HISTORY_PAGE_SIZE
-    end = start + _HISTORY_PAGE_SIZE
+    page_size = body.page_size or _HISTORY_PAGE_SIZE
+    start = (page - 1) * page_size
+    end = start + page_size
     page_items = items[start:end]
     next_link = (
         f"{_KB_PREFIX}/{kds_id}/KnowledgeFiles/History?page={page + 1}"
+        f"&page_size={page_size}"
         if end < len(items)
         else None
     )
+    if next_link and body.status not in (None, 0):
+        next_link += f"&status={body.status}"
+    if next_link and normalized_keyword:
+        next_link += f"&keyword={quote(body.keyword.strip(), safe='')}"
     logger.info(
         "FILE HISTORY  kds_id=%s fs_id=%s dir_path=%s page=%d returned=%d total=%d",
         kds_id, body.fs_id, body.dir_path, page, len(page_items), len(items),
@@ -1339,6 +1743,46 @@ def knowledge_file_history(
         "value": page_items,
         "total_count": len(items),
         "next_link": next_link,
+        **stats,
+    })
+
+
+@app.post(f"{_KB_PREFIX}/{{kds_id}}/KnowledgeFiles/Retry")
+def retry_documents(
+    kds_id: str,
+    body: RetryDocumentsBody,
+    authorization: Optional[str] = Header(default=None),
+) -> JSONResponse:
+    """Queue one or more failed files using the AIDP array request shape."""
+    _check_auth(authorization)
+    if kds_id not in _KNOWLEDGE_BASES:
+        raise HTTPException(status_code=404, detail=f"Knowledge base {kds_id} not found")
+
+    success_list: List[Dict[str, str]] = []
+    failed_list: List[Dict[str, str]] = []
+    retryable = {3, 5, "3", "5", STATUS_FAILED, "VECTOR_INGESTION_FAILED", "GRAPH_INGESTION_FAILED"}
+    file_uuids = [entry.get("file_uuid") for entry in body.retry_file_info if isinstance(entry, dict)]
+    for file_uuid in dict.fromkeys(file_uuids):
+        doc = _find_document(kds_id, file_uuid)
+        if doc is None or doc.get("status") not in retryable:
+            failed_list.append({"file_uuid": file_uuid, "reason": "File is not in a retryable failed state"})
+            continue
+        doc["status"] = 4
+        doc["update_time"] = int(time.time())
+        doc.pop("error_code", None)
+        doc.pop("extraction_failure_reason", None)
+        doc.pop("reason", None)
+        success_list.append({"file_uuid": file_uuid})
+
+    _save_state()
+    return JSONResponse(content={
+        "summary": {
+            "total": len(success_list) + len(failed_list),
+            "success": len(success_list),
+            "failed": len(failed_list),
+        },
+        "success_list": success_list,
+        "failed_list": failed_list,
     })
 
 
