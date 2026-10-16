@@ -4643,6 +4643,7 @@
   "tenantResources.skills.searchPlaceholder": "搜索技能名称",
   "tenantResources.skills.filterSource": "按来源筛选",
   "tenantResources.users.searchPlaceholder": "搜索邮箱",
+  "tenantResources.users.searchUsernameOrEmail": "搜索用户名",
   "tenantResources.users.filterRole": "按类型筛选",
   "tenantResources.users.filterGroup": "按用户组筛选",
   "tenantResources.users.clearFilters": "清空筛选",
