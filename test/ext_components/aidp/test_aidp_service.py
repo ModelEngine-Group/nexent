@@ -1103,9 +1103,9 @@ class TestGraphConfigValidation:
 
 
 class TestMergeGraphConfigUpdate:
-    """Partial graph-config edits merge into the stored AIDP configuration."""
+    """Partial graph-config edits serialize only the edited fields for PATCH."""
 
-    def test_merges_edited_fields_and_keeps_untouched_ones(self, aidp_service_module):
+    def test_returns_only_edited_fields_in_aidp_format(self, aidp_service_module):
         current = {
             "domain": "常规",
             "prompt_language": "中文",
@@ -1126,26 +1126,23 @@ class TestMergeGraphConfigUpdate:
             },
         )
         merged = json.loads(result)
-        assert merged["llm_model_name"] == "gpt-4o"
-        assert merged["retrieve_subgraph_hop"] == "3"
-        assert merged["no_think_mode"] == "否"
-        assert merged["synonym_merge_enable"] == "是"
-        # Untouched fields keep their stored representation verbatim.
-        assert merged["domain"] == "常规"
-        assert merged["prompt_text"] == "提取实体关系。"
-        assert merged["disambiguation_enable"] == "否"
+        assert merged == {
+            "llm_model_name": "gpt-4o",
+            "retrieve_subgraph_hop": "3",
+            "no_think_mode": "否",
+            "synonym_merge_enable": "是",
+        }
 
-    def test_preserves_legacy_values_outside_the_edit(self, aidp_service_module):
-        """Stored values that predate the AIDP template (seeded booleans,
-        non-template languages) survive a partial update round-trip."""
+    def test_ignores_current_for_signature_compatibility(self, aidp_service_module):
+        """AIDP's PATCH merges graph_config server-side, so unedited stored
+        fields (even legacy ones) must not be echoed back - resending them
+        can make AIDP reject the update."""
         current = {"prompt_language": "chinese", "retrieve_subgraph_hop": True}
         result = aidp_service_module.merge_graph_config_update(
             current, {"llm_model_name": "gpt-4o"}
         )
         merged = json.loads(result)
-        assert merged["prompt_language"] == "chinese"
-        assert merged["retrieve_subgraph_hop"] is True
-        assert merged["llm_model_name"] == "gpt-4o"
+        assert merged == {"llm_model_name": "gpt-4o"}
 
     @pytest.mark.parametrize(
         "updates",

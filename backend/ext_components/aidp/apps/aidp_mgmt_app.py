@@ -912,17 +912,14 @@ async def update_knowledge_base(
             )
         graph_updates = payload.pop("graph_config", None)
         if graph_updates is not None:
-            current_config = current.get("graph_config")
-            if isinstance(current_config, str):
-                try:
-                    current_config = json.loads(current_config)
-                except (json.JSONDecodeError, ValueError):
-                    current_config = {}
-            if not isinstance(current_config, dict):
-                current_config = {}
             payload["graph_config"] = merge_graph_config_update(
-                current_config, graph_updates
+                {}, graph_updates
             )
+            # AIDP require is_exist_graph=true alongside any graph_config
+            # edit; without it the PATCH returns HTTP 500. The graph is
+            # confirmed enabled above, so echoing the flag is
+            # safe and is not a re-enable attempt.
+            payload["is_exist_graph"] = True
 
     result = update_aidp_kb_impl(server_url, api_key, kds_id, payload)
 

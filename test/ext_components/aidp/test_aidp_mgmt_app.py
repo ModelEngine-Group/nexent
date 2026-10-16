@@ -2301,9 +2301,10 @@ class TestUpdateKbConfigurationFields:
 
     # ---- Knowledge graph settings (detail information tab) ----
 
-    def test_update_merges_graph_config_into_current(self):
-        """A partial graph_config update is merged with the stored AIDP
-        configuration and forwarded as the complete AIDP-format string."""
+    def test_update_sends_only_edited_graph_fields_with_enabled_flag(self):
+        """A partial graph_config edit forwards only the edited fields in
+        AIDP string format, and echoes is_exist_graph=true which AIDP
+        requires alongside any graph_config PATCH."""
         client = _client()
         from ext_components.aidp.apps import aidp_mgmt_app
         from ext_components.aidp.services import aidp_permission_service
@@ -2342,15 +2343,18 @@ class TestUpdateKbConfigurationFields:
         assert response.status_code == HTTPStatus.OK
         mock_update.assert_called_once()
         payload = mock_update.call_args.args[3]
-        # Edited fields adopt the AIDP string format; untouched fields keep
-        # their stored representation so a partial update round-trips safely.
-        merged = dict(current_graph)
-        merged.update({
-            "llm_model_name": "gpt-4o",
-            "retrieve_subgraph_hop": "3",
-            "no_think_mode": "否",
-        })
-        assert payload["graph_config"] == json.dumps(merged, ensure_ascii=False)
+        # AIDP merges graph_config server-side, so only the edited fields are
+        # sent; resending stored ones can make AIDP reject the PATCH.
+        assert payload["graph_config"] == json.dumps(
+            {
+                "llm_model_name": "gpt-4o",
+                "retrieve_subgraph_hop": "3",
+                "no_think_mode": "否",
+            },
+            ensure_ascii=False,
+        )
+        # AIDP requires is_exist_graph=true alongside any graph_config edit.
+        assert payload["is_exist_graph"] is True
 
     def test_update_forwards_graph_disable(self):
         client = _client()
@@ -2646,18 +2650,15 @@ class TestHistoryReportsMore:
 
 
 class TestUpdateGraphConfigDegradedStorage:
-    """Stored graph configs that cannot be parsed merge from an empty base."""
+    """The stored graph_config shape never leaks into the PATCH payload."""
 
     @pytest.mark.parametrize(
-        "stored,base",
-        [
-            ("not valid json", {}),
-            ("[1, 2]", {}),
-            (None, {}),
-            ({"domain": "通用"}, {"domain": "通用"}),
-        ],
+        "stored",
+        ["not valid json", "[1, 2]", None, {"domain": "通用"}],
     )
-    def test_degraded_stored_config_merges_from_a_safe_base(self, stored, base):
+    def test_stored_config_shape_does_not_affect_patch_payload(self, stored):
+        """Only edited fields are sent, so unparseable or legacy stored
+        configs cannot break or pollute the update."""
         client = _client()
         from ext_components.aidp.apps import aidp_mgmt_app
         from ext_components.aidp.services import aidp_permission_service
@@ -2679,8 +2680,10 @@ class TestUpdateGraphConfigDegradedStorage:
 
         assert response.status_code == HTTPStatus.OK
         payload = mock_update.call_args.args[3]
-        expected = dict(base, llm_model_name="gpt-4o")
-        assert payload["graph_config"] == json.dumps(expected, ensure_ascii=False)
+        assert payload["graph_config"] == json.dumps(
+            {"llm_model_name": "gpt-4o"}, ensure_ascii=False
+        )
+        assert payload["is_exist_graph"] is True
 
 
 class TestListDocumentsResponseShape:

@@ -1204,13 +1204,14 @@ def update_knowledge_base(
         kb["is_exist_graph"] = body.is_exist_graph
     if body.graph_config is not None:
         # Partial update: the backend already validated the edited fields, so
-        # only the key names are checked here. Untouched legacy values (seeded
-        # booleans, non-template languages) must survive the merge untouched.
+        # only the key names are checked here. The graph_config JSON string
+        # contains only modifiable fields (non-modifiable template fields like
+        # domain/prompt_language/prompt_text are stripped by the backend).      
         try:
             graph_update = json.loads(body.graph_config)
         except ValueError as exc:
             raise HTTPException(400, "graph_config must be a JSON string") from exc
-        allowed = {p["param_key"] for p in _graph_template("chinese")["value"]} | {"llm_model_name"}
+        allowed = {p["param_key"] for p in _graph_template("chinese")["value"] if p.get("is_modifiable")} | {"llm_model_name"}
         if not isinstance(graph_update, dict) or set(graph_update) - allowed:
             raise HTTPException(400, "Unrecognized graph configuration parameter")
         current = kb.get("graph_config")

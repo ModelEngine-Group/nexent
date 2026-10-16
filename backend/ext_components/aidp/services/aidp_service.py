@@ -960,15 +960,17 @@ def _serialize_graph_config(config: Dict[str, Any]) -> str:
 
 
 def merge_graph_config_update(current: Dict[str, Any], updates: Dict[str, Any]) -> str:
-    """Merge a partial graph-config update into the stored AIDP configuration.
+    """Serialize a partial graph-config edit for the AIDP PATCH endpoint.
 
     ``updates`` carries native-typed values for the five editable fields
-    (bool toggles, int hop count, str model name). Each edited field is
-    converted to the AIDP string format ("是"/"否" toggles, string hop) and
-    merged into ``current``; untouched keys keep their existing
-    representation so stored legacy values (seeded booleans, non-template
-    languages) survive a partial update round-trip. Returns the complete
-    JSON string AIDP expects in ``graph_config``.
+    (bool toggles, int hop count, str model name). Only the **edited** fields
+    are converted to AIDP string format ("是"/"否" toggles, string hop) and
+    placed in the returned JSON string - AIDP's PATCH performs a partial
+    merge on ``graph_config``, so sending only the changed field(s) is the
+    correct and safe approach. Sending unedited fields (even modifiable ones)
+    can cause AIDP to reject the update with HTTP 500. The ``current``
+    parameter is accepted for signature compatibility but intentionally not
+    merged into the result.
     """
     unsupported_fields = set(updates).difference(_GRAPH_EDITABLE_FIELDS)
     if unsupported_fields:
@@ -978,7 +980,7 @@ def merge_graph_config_update(current: Dict[str, Any], updates: Dict[str, Any]) 
             f"Unsupported graph configuration fields: {names}",
         )
 
-    merged = dict(current) if isinstance(current, dict) else {}
+    result: Dict[str, str] = {}
 
     if "llm_model_name" in updates:
         llm_model_name = updates["llm_model_name"]
@@ -987,7 +989,7 @@ def merge_graph_config_update(current: Dict[str, Any], updates: Dict[str, Any]) 
                 ErrorCode.COMMON_PARAMETER_INVALID,
                 "Graph LLM model name must be a non-empty string",
             )
-        merged["llm_model_name"] = llm_model_name.strip()
+        result["llm_model_name"] = llm_model_name.strip()
 
     if "retrieve_subgraph_hop" in updates:
         hop = updates["retrieve_subgraph_hop"]
@@ -998,7 +1000,7 @@ def merge_graph_config_update(current: Dict[str, Any], updates: Dict[str, Any]) 
                 ErrorCode.COMMON_PARAMETER_INVALID,
                 "Graph retrieve_subgraph_hop must be 1, 2 or 3",
             )
-        merged["retrieve_subgraph_hop"] = str(hop)
+        result["retrieve_subgraph_hop"] = str(hop)
 
     for key in ("no_think_mode", "synonym_merge_enable", "disambiguation_enable"):
         if key in updates:
@@ -1008,9 +1010,9 @@ def merge_graph_config_update(current: Dict[str, Any], updates: Dict[str, Any]) 
                     ErrorCode.COMMON_PARAMETER_INVALID,
                     f"Graph parameter {key} must be a boolean",
                 )
-            merged[key] = "是" if value else "否"
+            result[key] = "是" if value else "否"
 
-    return json.dumps(merged, ensure_ascii=False)
+    return json.dumps(result, ensure_ascii=False)
 
 
 def _prepare_create_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
