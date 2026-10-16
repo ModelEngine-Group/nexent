@@ -18,7 +18,6 @@ import {
   useAuiState,
 } from "@assistant-ui/react";
 import {
-  CheckIcon,
   Clock,
   MoreHorizontalIcon,
   PencilIcon,
@@ -32,6 +31,7 @@ import {
   Loader2Icon,
   CircleAlertIcon,
   LoaderCircle,
+  ListChecks,
 } from "lucide-react";
 import {
   Fragment,
@@ -308,62 +308,64 @@ export const BatchSelectionProvider: FC<{
   );
 };
 
-export const BatchSidebarFooter: FC = () => {
+const BatchManageButton: FC = () => {
   const { t } = useTranslation();
-  const {
-    batchMode,
-    selectedIds,
-    enter,
-    exit,
-    selectAllVisible,
-    deleteSelected,
-  } = useBatchSelection()!;
+  const batchSelection = useBatchSelection();
 
-  if (batchMode) {
-    return (
-      <div className="flex flex-col gap-2">
-        <div className="flex items-center justify-between px-1 text-xs text-muted-foreground">
-          <span>
-            {t("chat.threadList.selectedCount", { count: selectedIds.size })}
-          </span>
-          <button
-            type="button"
-            className="text-xs text-muted-foreground hover:text-foreground"
-            onClick={exit}
-          >
-            {t("chat.threadList.cancel")}
-          </button>
-        </div>
-        <div className="flex gap-2">
-          <button
-            type="button"
-            className="flex h-9 flex-1 items-center justify-center rounded-lg border px-3 text-sm hover:bg-muted"
-            onClick={selectAllVisible}
-          >
-            {t("chat.threadList.selectAll")}
-          </button>
-          <button
-            type="button"
-            className="flex h-9 flex-1 items-center justify-center rounded-lg border border-destructive/30 px-3 text-sm text-destructive hover:bg-destructive/10 disabled:opacity-50"
-            disabled={selectedIds.size === 0}
-            onClick={deleteSelected}
-          >
-            {t("chat.threadList.delete")}
-          </button>
-        </div>
-      </div>
-    );
-  }
+  if (!batchSelection || batchSelection.batchMode) return null;
 
   return (
     <button
       type="button"
-      className="flex h-9 w-full items-center justify-center gap-2 rounded-lg border px-3 text-sm hover:bg-muted bg-white"
-      onClick={enter}
+      className="flex h-8 items-center gap-1.5 rounded-md px-2 text-sm text-[#808080] hover:bg-white/70 hover:text-[#191919]"
+      onClick={batchSelection.enter}
     >
-      <CheckIcon className="size-4 shrink-0" />
+      <ListChecks className="size-4 shrink-0" aria-hidden />
       <span>{t("chat.threadList.batchManage")}</span>
     </button>
+  );
+};
+
+export const BatchSidebarFooter: FC = () => {
+  const { t } = useTranslation();
+  const batchSelection = useBatchSelection()!;
+  const { batchMode, selectedIds, exit, selectAllVisible, deleteSelected } =
+    batchSelection;
+
+  if (!batchMode) return null;
+
+  return (
+    <div className="flex flex-col gap-2">
+      <div className="flex items-center justify-between px-1 text-xs text-muted-foreground">
+        <span>
+          {t("chat.threadList.selectedCount", { count: selectedIds.size })}
+        </span>
+        <button
+          type="button"
+          className="text-xs text-muted-foreground hover:text-foreground"
+          onClick={exit}
+        >
+          {t("chat.threadList.cancel")}
+        </button>
+      </div>
+      <div className="flex gap-2">
+        <button
+          type="button"
+          className="flex h-9 flex-1 items-center justify-center rounded-lg border px-3 text-sm hover:bg-muted"
+          onClick={selectAllVisible}
+        >
+          {t("chat.threadList.selectAll")}
+        </button>
+        <button
+          type="button"
+          className="flex h-9 flex-1 items-center justify-center rounded-lg border border-destructive/30 px-3 text-sm text-destructive hover:bg-destructive/10 disabled:opacity-50"
+          disabled={selectedIds.size === 0}
+          onClick={deleteSelected}
+        >
+          {t("chat.threadList.delete")}
+        </button>
+      </div>
+    </div>
   );
 };
 
@@ -438,6 +440,12 @@ export const ThreadList: FC<ThreadListProps> = ({
 
   return (
     <div className="flex flex-col p-2">
+      <div className="mb-1 flex h-8 items-center justify-between px-3 pt-1">
+        <p className="text-sm text-muted-foreground">
+          {t("chat.threadList.recentConversations")}
+        </p>
+        <BatchManageButton />
+      </div>
       <AuiIf condition={(s) => s.threads.isLoading}>
         <ThreadListSkeleton />
       </AuiIf>
@@ -481,10 +489,7 @@ export const ThreadList: FC<ThreadListProps> = ({
 const ThreadListEmpty: FC = () => {
   const { t } = useTranslation();
   return (
-    <div className="space-y-1 px-2 py-4">
-      <p className="px-2 text-sm font-medium text-muted-foreground">
-        {t("chat.threadList.recentConversations")}
-      </p>
+    <div className="space-y-1 px-2 py-2">
       <div className="flex items-center px-3 py-2 text-left text-muted-foreground">
         <Clock className="mr-2 h-5 w-5" />
         {t("chat.threadList.noHistory")}
@@ -588,12 +593,14 @@ const ThreadListItems: FC<ThreadListItemsProps> = ({
       <div className="flex flex-col">
         {timeGroups.map((group) => (
           <Fragment key={group.label}>
-            <div
-              data-slot="aui_thread-list-group-label"
-              className="px-3 pt-3 pb-1 text-sm text-muted-foreground"
-            >
-              {t(group.label)}
-            </div>
+            {group.label !== "chat.threadList.recentConversations" && (
+              <div
+                data-slot="aui_thread-list-group-label"
+                className="px-3 pt-3 pb-1 text-sm text-muted-foreground"
+              >
+                {t(group.label)}
+              </div>
+            )}
             {group.entries.map(({ id, index }) => (
               <ThreadListPrimitive.ItemByIndex
                 key={id}
@@ -636,9 +643,6 @@ const ThreadListItems: FC<ThreadListItemsProps> = ({
   // every conversation. Expanding a group reveals all of its conversations.
   return (
     <div className="flex flex-col">
-      <div className="px-3 pb-1 pt-2 text-[14px] text-[#808080]">
-        {t("chat.threadList.recentConversations")}
-      </div>
       {agentGroups.map((group) => {
         const groupKey = String(group.agentId ?? "none");
         const entries = pinned

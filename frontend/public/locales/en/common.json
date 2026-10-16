@@ -4534,7 +4534,7 @@
   "chat.threadList.loadingMore": "Loading",
   "chat.threadList.loadMore": "Load more",
   "chat.threadList.allLoaded": "All conversations loaded",
-  "chat.threadList.batchManage": "Batch manage",
+  "chat.threadList.batchManage": "Manage",
   "chat.threadList.selectAll": "Select all",
   "chat.threadList.selectedCount": "{{count}} selected",
   "chat.threadList.cancel": "Cancel",

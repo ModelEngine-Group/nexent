@@ -4458,7 +4458,7 @@
   "chat.threadList.loadingMore": "加载中",
   "chat.threadList.loadMore": "加载更多",
   "chat.threadList.allLoaded": "已加载全部会话",
-  "chat.threadList.batchManage": "批量管理",
+  "chat.threadList.batchManage": "管理",
   "chat.threadList.selectAll": "全选",
   "chat.threadList.selectedCount": "已选 {{count}} 项",
   "chat.threadList.cancel": "取消",
