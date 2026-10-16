@@ -6,13 +6,17 @@ feature:
   feature_id: CHAT-SIDEBAR
   name: Conversation sidebar preserved after merge
   status: active
-  description: Persisted visibility, normalized rename and server-ID batch deletion
-    preserve sidebar state.
+  description: Persisted visibility, normalized rename, agent-group batch selection
+    and server-ID batch deletion preserve sidebar state.
   business_rules:
   - rule_id: CHAT-SIDEBAR-RULE-001
     description: Persisted conversations remain visible; unsent drafts stay hidden;
       rename propagates normalized title and remote identity; batch deletion resolves
       server IDs and resets deleted active threads.
+  - rule_id: CHAT-SIDEBAR-RULE-002
+    description: In agent-chat batch mode, selecting an agent selects or clears every
+      persisted conversation for that agent across paginated list results, updates the
+      selected/total state, and leaves conversations from other agents unchanged.
   required_test_stages:
   - D1
   source:
