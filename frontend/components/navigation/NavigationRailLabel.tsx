@@ -19,7 +19,7 @@ export function NavigationRailLabel({
   return (
     <Typography.Text
       ellipsis={{ tooltip: label }}
-      className={`!my-0 !block min-w-0 max-w-full flex-1 !text-left !tracking-[0px] ${variant === "title" ? "!ml-0 !text-base !font-bold !leading-6 !text-[#1a1a1a]" : "!ml-[-6px] !text-sm !font-normal !leading-[22px] !text-[#191919]"}`}
+      className={`!my-0 !block min-w-0 max-w-full flex-1 !text-left !tracking-[0px] ${variant === "title" ? "!ml-0 !text-lg !font-bold !leading-6 !text-[#191919]" : "!ml-[-6px] !text-sm !font-normal !leading-[22px] !text-[#191919]"}`}
     >
       {label}
     </Typography.Text>

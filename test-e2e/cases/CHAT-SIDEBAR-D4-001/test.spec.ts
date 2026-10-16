@@ -159,8 +159,10 @@ journey("CHAT-SIDEBAR-D4-001", async ({ page, contract }) => {
     await expect(page.getByText(/^(刚刚|\d+(分钟|小时|天)前)$/)).toHaveCount(0);
     await menu("Pinned presentation");
     await page.getByRole("menuitem", { name: "取消置顶", exact: true }).click();
-    await expect(labels()).toHaveCount(1);
-    await expect(labels().first()).toHaveText("最近对话");
+    // The sidebar header owns the fallback label; do not duplicate it inside the list.
+    await expect(labels()).toHaveCount(0);
+    await expect(page.getByText("最近对话", { exact: true })).toHaveCount(1);
+    await expect(page.getByText("最近对话", { exact: true })).toBeVisible();
     await expect(
       page.getByText("Pinned presentation", { exact: true }),
     ).toBeVisible();

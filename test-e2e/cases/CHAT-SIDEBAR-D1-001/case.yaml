@@ -8,16 +8,18 @@ case:
   - CHAT-SIDEBAR-REQ-001
   business_rule_ids:
   - CHAT-SIDEBAR-RULE-001
-  title: Preserve merged conversation sidebar interactions
+  - CHAT-SIDEBAR-RULE-003
+  title: Preserve conversation sidebar and agent batch selection interactions
   type: FE-COMP
   priority: P1
   status: active
   automation: automated
   objective: Verify ThreadList and batch footer collaborate with persisted metadata,
-    rename and deletion boundaries.
+    rename, paginated agent selection and deletion boundaries.
   preconditions:
   - Render actual ThreadList and BatchSidebarFooter with a controlled assistant runtime
     and conversation service.
+  - Agent conversations for the selected group are returned across multiple list pages.
   test_data:
     profile: mock
   steps:
@@ -32,20 +34,43 @@ case:
     action: Select and confirm batch deletion with server-ID mapping.
     expected: Deletion receives server ID and deleting the active thread invokes the
       reset callback.
-  expected_results: &id001
+  - order: 4
+    action: In agent-chat batch mode, select one agent group whose conversations span
+      multiple list pages while another agent is present.
+    expected: The selection includes every persisted conversation for the selected
+      agent, updates the selected/total count, and leaves the other agent unselected.
+  - order: 5
+    action: Confirm deletion of the selected agent group.
+    expected: The existing batch-delete service receives only that agent's server IDs.
+  - order: 6
+    action: Make a later conversation-list page fail while selecting an agent group.
+    expected: No partial group selection is applied and no deletion is submitted.
+  expected_results:
   - Only persisted conversation and its server title are visible.
   - Runtime receives normalized title; parent callback receives local ID, remote ID
     and normalized title.
   - Deletion receives server ID and deleting the active thread invokes the reset callback.
+  - Agent selection includes conversations from all list pages and excludes other agents.
+  - The existing batch-delete service receives only the selected agent's server IDs.
+  - A pagination failure leaves the selection unchanged and does not submit a deletion.
   forbidden_side_effects:
   - No unsent draft displayed and no deletion of an unrelated conversation.
+  - No partial selection or deletion when an agent-list page fails to load.
   unit_boundary: Actual sidebar components with mocked external assistant runtime
     and conversation service.
   inputs:
   - persisted metadata
   - remote-ID map
+  - paginated agent conversation results
   - callback spies
-  assertions: *id001
+  assertions:
+  - Only persisted conversation and its server title are visible.
+  - Runtime receives normalized title; parent callback receives local ID, remote ID
+    and normalized title.
+  - Deletion receives server ID and deleting the active thread invokes the reset callback.
+  - Agent selection includes conversations from all list pages and excludes other agents.
+  - The existing batch-delete service receives only the selected agent's server IDs.
+  - A failed page load does not commit partial group selection or call batch deletion.
   acceptance:
   - id: AC-01
     description: Visibility, rename and batch deletion preserve the existing contracts.
@@ -59,3 +84,21 @@ case:
     - 3
     forbidden_side_effects:
     - 1
+  - id: AC-02
+    description: Agent-group selection covers all paginated conversations for only that agent.
+    steps:
+    - 4
+    - 5
+    expected_results:
+    - 4
+    - 5
+    forbidden_side_effects:
+    - 1
+  - id: AC-03
+    description: A failed page load cannot apply or delete a partial agent selection.
+    steps:
+    - 6
+    expected_results:
+    - 6
+    forbidden_side_effects:
+    - 2

@@ -149,6 +149,7 @@ export function ThreadListSidebar({
           <BatchSelectionProvider
             onNewConversation={onNewConversation}
             serverConversationIds={serverConversationIds}
+            conversationType={newChatDesign ? "agent_chat" : "workbench"}
           >
             <Sidebar
               {...props}

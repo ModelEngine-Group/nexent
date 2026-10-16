@@ -1,13 +1,19 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """CAS-DISPLAY-D2-001: existing HTTP contracts with optional CAS metadata."""
 
+from contextlib import contextmanager
 from unittest.mock import Mock
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 import pytest
 
+from sqlalchemy import Column, Integer, MetaData, String, Table, create_engine
+from sqlalchemy.orm import Session, registry
+from sqlalchemy.pool import StaticPool
+
 from apps import group_app, user_app
+from database import user_tenant_db, user_identity_db
 from services import group_service, user_identity_service, user_service
 
 pytestmark = [pytest.mark.case_id("CAS-DISPLAY-D2-001"), pytest.mark.stage("D2")]
@@ -68,3 +74,75 @@ def test_cas_display_d2_001(monkeypatch, lookup_failed):
     assert all(call.args[0] == {"display-user"} for call in lookup.call_args_list)
     write_user.assert_not_called()
     write_members.assert_not_called()
+
+
+@pytest.mark.parametrize("cas_session", [False, True])
+def test_cas_username_search(monkeypatch, cas_session):
+    """Exercise HTTP, service and SQL matching before count and pagination."""
+    metadata = MetaData()
+    users = Table("users", metadata,
+        Column("user_id", String, primary_key=True), Column("tenant_id", String),
+        Column("user_email", String), Column("user_role", String),
+        Column("create_time", Integer), Column("delete_flag", String))
+    bindings = Table("bindings", metadata,
+        Column("oauth_account_id", Integer, primary_key=True), Column("user_id", String),
+        Column("provider", String), Column("provider_username", String), Column("delete_flag", String))
+    mapper = registry()
+    user_model, binding_model = type("User", (), {}), type("Binding", (), {})
+    mapper.map_imperatively(user_model, users)
+    mapper.map_imperatively(binding_model, bindings)
+    engine = create_engine("sqlite://", poolclass=StaticPool, connect_args={"check_same_thread": False})
+    metadata.create_all(engine)
+    with engine.begin() as connection:
+        connection.execute(users.insert(), [
+            {"user_id": key, "tenant_id": "other" if key == "foreign" else "tenant",
+             "user_email": email, "user_role": "USER", "create_time": i,
+             "delete_flag": "Y" if key == "deleted" else "N"}
+            for i, (key, email) in enumerate([
+                ("a", "alpha@test"), ("b", "beta@test"), ("mail", "bob@test"),
+                ("foreign", "foreign@test"), ("deleted", "deleted@test"), ("removed", "removed@test"),
+            ])
+        ])
+        connection.execute(bindings.insert(), [
+            {"oauth_account_id": i, "user_id": key, "provider": "cas",
+             "provider_username": "Bob", "delete_flag": "Y" if key == "removed" else "N"}
+            for i, key in enumerate(["a", "a", "b", "foreign", "deleted", "removed"], 1)
+        ])
+    @contextmanager
+    def db_session():
+        with Session(engine) as session:
+            yield session
+            assert not session.new and not session.dirty and not session.deleted
+    for module in (user_tenant_db, user_identity_db):
+        monkeypatch.setattr(module, "get_db_session", db_session)
+        monkeypatch.setattr(module, "UserTenant", user_model)
+        monkeypatch.setattr(module, "UserOAuthAccount", binding_model, raising=False)
+    monkeypatch.setattr(user_tenant_db, "as_dict", lambda row: {
+        column.name: getattr(row, column.name) for column in users.columns
+    })
+    monkeypatch.setattr(user_service, "query_groups_by_users", lambda _: {})
+    monkeypatch.setattr(user_app, "get_current_user_context", lambda _: ("admin", "tenant", "ADMIN"))
+    monkeypatch.setattr(user_app, "extract_session_id_from_authorization", lambda _: "cas-session" if cas_session else None)
+    app = FastAPI()
+    app.include_router(user_app.router)
+    with TestClient(app) as client:
+        def search(text, page=1):
+            response = client.post("/users/list", json={
+                "tenant_id": "tenant", "search": text, "page": page, "page_size": 1,
+                "sort_by": "created_at", "sort_order": "asc",
+            })
+            assert response.status_code == 200, response.text
+            return response.json()
+        first = search(" BoB ")
+        assert first["total"] == (3 if cas_session else 1)
+        assert first["pagination"]["total_pages"] == first["total"]
+        assert first["data"][0]["id"] == ("a" if cas_session else "mail")
+        assert first["data"][0]["username"] == ("alpha@test" if cas_session else "bob@test")
+        second = search("bob", 2)
+        assert [row["id"] for row in second["data"]] == (["b"] if cas_session else [])
+        assert second["total"] == first["total"]
+        email = search("alpha@")
+        assert email["total"] == 1 and email["data"][0]["username"] == "alpha@test"
+        assert search("no-such-user")["total"] == 0
+        assert search("   ")["total"] == 4
+    engine.dispose()
