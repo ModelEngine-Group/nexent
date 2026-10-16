@@ -8,6 +8,7 @@ import json
 import io
 import types
 from contextlib import contextmanager
+from datetime import datetime
 from unittest.mock import ANY, patch, MagicMock, mock_open, call, Mock, AsyncMock
 import os
 
@@ -3772,6 +3773,57 @@ async def test_list_agent_page_default_order_unchanged_without_sort(monkeypatch)
     )
 
     assert [item["agent_id"] for item in result["items"]] == [1, 2, 3, 4]
+
+
+def test_publish_time_sort_value_normalizes_supported_inputs():
+    """Datetimes and ISO strings sort by epoch; anything else collapses to 0.0."""
+    assert agent_management._publish_time_sort_value(
+        datetime(2026, 1, 1)
+    ) == datetime(2026, 1, 1).timestamp()
+    assert agent_management._publish_time_sort_value(
+        "2026-01-01T00:00:00"
+    ) == datetime(2026, 1, 1).timestamp()
+    assert agent_management._publish_time_sort_value("not-a-date") == 0.0
+    assert agent_management._publish_time_sort_value(None) == 0.0
+
+
+def test_order_agents_by_publish_time_skips_scopes_without_versions(monkeypatch):
+    """A scope tenant without a published version is skipped, not queried."""
+    queried_scopes = []
+
+    def versions(agent_ids, tenant_id, version_nos):
+        queried_scopes.append((tenant_id, list(agent_ids)))
+        return []
+
+    monkeypatch.setattr(agent_management, "batch_search_version_names", versions)
+    agents = [
+        {"agent_id": 1, "tenant_id": "tenant_123", "current_version_no": 0},
+        {"agent_id": 2, "tenant_id": "tenant_other", "current_version_no": 1},
+    ]
+
+    ordered = agent_management._order_agents_by_publish_time(
+        agents, ["tenant_123", "tenant_other"]
+    )
+
+    assert queried_scopes == [("tenant_other", [2])]
+    assert [agent["agent_id"] for agent in ordered] == [2, 1]
+
+
+def test_order_agents_by_publish_time_degrades_when_version_lookup_fails(monkeypatch):
+    """A failing publish-time lookup keeps every agent in the undated tail."""
+
+    def boom(*_args, **_kwargs):
+        raise RuntimeError("version store unavailable")
+
+    monkeypatch.setattr(agent_management, "batch_search_version_names", boom)
+    agents = [
+        {"agent_id": 1, "tenant_id": "tenant_123", "current_version_no": 1},
+        {"agent_id": 2, "tenant_id": "tenant_123", "current_version_no": 1},
+    ]
+
+    ordered = agent_management._order_agents_by_publish_time(agents, ["tenant_123"])
+
+    assert [agent["agent_id"] for agent in ordered] == [2, 1]
 
 
 @pytest.mark.asyncio

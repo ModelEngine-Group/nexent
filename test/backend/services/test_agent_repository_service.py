@@ -583,6 +583,24 @@ def test_get_agent_main_flags_degrades_to_empty_on_lookup_error():
     assert ars._get_agent_main_flags([]) == {}
 
 
+def test_repository_id_sort_key_defaults_unusable_ids_to_minus_one():
+    """A missing or non-numeric repository id sorts below every real id."""
+    assert ars._repository_id_sort_key({"agent_repository_id": 7}) == 7
+    assert ars._repository_id_sort_key({"agent_repository_id": "abc"}) == -1
+    assert ars._repository_id_sort_key({"agent_repository_id": None}) == -1
+    assert ars._repository_id_sort_key({}) == -1
+
+
+def test_publish_time_sort_key_parses_strings_and_collapses_unusable_values():
+    """ISO strings sort by epoch; junk strings and non-times collapse to 0.0."""
+    assert ars._publish_time_sort_key(
+        {"create_time": "2024-05-01T00:00:00"}
+    ) == datetime(2024, 5, 1).timestamp()
+    assert ars._publish_time_sort_key({"create_time": "not-a-date"}) == 0.0
+    assert ars._publish_time_sort_key({"create_time": 20240501}) == 0.0
+    assert ars._publish_time_sort_key({}) == 0.0
+
+
 def test_normalize_listing_tags_trims_dedupes_and_limits():
     assert ars._normalize_listing_tags([" 营销 ", "营销", "数据"]) == ["营销", "数据"]
 
