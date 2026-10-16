@@ -25,6 +25,7 @@ export interface WorkbenchSessionConfig {
   generation_config: {
     deep_thinking: boolean;
     thinking_effort?: ReasoningEffort;
+    reasoning_budget_tokens?: number;
     temperature?: number;
     top_p?: number;
     requested_output_tokens?: number;

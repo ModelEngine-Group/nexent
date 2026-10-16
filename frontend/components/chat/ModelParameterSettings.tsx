@@ -116,6 +116,7 @@ export function ModelParameterSettings(control: ModelParameterSettingsControl) {
       }}
       trigger={["hover", "click"]}
       placement="rightTop"
+      zIndex={1130}
       mouseEnterDelay={0.15}
       mouseLeaveDelay={0.25}
       content={
@@ -174,7 +175,7 @@ export function ModelParameterSettings(control: ModelParameterSettingsControl) {
           }
           if (event.key === "Escape") setOpen(false);
         }}
-        className="flex w-full items-center justify-between gap-3 border-b px-3 py-3 text-sm font-normal hover:bg-accent"
+        className="flex w-full items-center justify-between gap-3 border-b px-3 py-2 text-sm font-normal hover:bg-accent"
       >
         <span>{t("workbench.controls.advanced", "高级设置")}</span>
         <ChevronRight className="ml-auto size-4" />

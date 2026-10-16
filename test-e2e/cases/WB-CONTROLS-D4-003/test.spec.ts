@@ -4,7 +4,7 @@ import { prepareWorkbench } from "../../infra/automation/d4/fixtures/workbench-c
 
 journey("WB-CONTROLS-D4-003", async ({ page, contract }) => {
   await page.setViewportSize({ width: 1441, height: 1244 });
-  await prepareWorkbench(page, 1, { reasoning: true });
+  await prepareWorkbench(page, 1, { reasoning: true, modelEffort: "medium", agentEffort: "high" });
   const requests: Array<Record<string, any>> = [];
   await page.route("**/api/agent/run", async (route) => {
     requests.push(route.request().postDataJSON());
@@ -145,7 +145,7 @@ journey("WB-CONTROLS-D4-003", async ({ page, contract }) => {
     }
     await popup.getByRole("option", { name: label, exact: true }).click();
   };
-  const send = async (input: Locator) => {
+  const send = async (input: Locator, modelId = 1) => {
     if (await settings.isVisible()) await trigger.click();
     await expect(settings).not.toBeVisible();
     const index = requests.length;
@@ -156,7 +156,7 @@ journey("WB-CONTROLS-D4-003", async ({ page, contract }) => {
       page.getByRole("button", { name: "发送", exact: true }),
     ).toBeVisible();
     const body = requests[index];
-    expect(body.model_id).toBe(1);
+    expect(body.model_id).toBe(modelId);
     expect(body.query).toContain("Reasoning fixture");
     expect(body.minio_files).toBeNull();
     expect(body.is_debug).toBe(false);
@@ -197,11 +197,17 @@ journey("WB-CONTROLS-D4-003", async ({ page, contract }) => {
         "aria-checked",
         "false",
       );
-      await expect(settings.getByRole("combobox")).toBeDisabled();
+      await expect(settings.getByRole("combobox")).toHaveCount(0);
     },
   );
   await contract.step(contract.expectedIds("steps")[0], async () => {
     await setThinking(true);
+    await expect(settings.getByRole("combobox")).toHaveText("中");
+    await expect.poll(async () => {
+      const effort = await settings.getByText("思考强度",{exact:true}).boundingBox();
+      const advanced = await settings.getByRole("button",{name:"高级设置",exact:true}).getByText("高级设置",{exact:true}).boundingBox();
+      return advanced!.y-effort!.y-effort!.height;
+    }).toBeLessThanOrEqual(16);
     workbenchLabels = await assertOptions();
     await settings
       .getByRole("button", { name: "高级设置", exact: true })
@@ -228,8 +234,9 @@ journey("WB-CONTROLS-D4-003", async ({ page, contract }) => {
       .first()
       .click();
     await open();
-    await expect(settings.getByRole("combobox")).toBeDisabled();
+    await expect(settings.getByRole("combobox")).toHaveCount(0);
     await setThinking(true);
+    await expect(settings.getByRole("combobox")).toHaveText("高");
     expect(await assertOptions()).toEqual(workbenchLabels);
     for (const [value, label] of options) {
       await choose(label);
@@ -269,12 +276,27 @@ journey("WB-CONTROLS-D4-003", async ({ page, contract }) => {
           if (route === "newchat")
             expect(off.generation_config).not.toHaveProperty("thinking_effort");
           await open();
+          await expect(settings.getByRole("combobox")).toHaveCount(0);
+          await setThinking(true);
+          await expect(settings.getByRole("combobox")).toHaveText(route === "newchat" ? "高" : "中");
+          await choose("极高");
+          await setThinking(false);
+          await setThinking(true);
+          await expect(settings.getByRole("combobox")).toHaveText(route === "newchat" ? "高" : "中");
           await settings.getByText("Plain Model", { exact: true }).click();
           await open();
-          await expect(settings.getByRole("combobox")).toBeDisabled();
-          await expect(settings.getByRole("combobox")).not.toContainText(
-            /低|中|高/,
-          );
+          await expect(settings.getByRole("combobox")).toHaveCount(0);
+          await settings.getByText("Automatic Model", {exact:true}).click();
+          await expect(trigger).toContainText("Automatic Model");
+          await setThinking(true);
+          await expect(settings.getByRole("combobox")).toHaveText("自动");
+          await choose("高");
+          await setThinking(false);
+          await setThinking(true);
+          await expect(settings.getByRole("combobox")).toHaveText("自动");
+          const unconfigured = await send(input, 3);
+          expect((unconfigured.workbench ?? unconfigured).generation_config).toMatchObject({deep_thinking:true,thinking_effort:"auto"});
+          expect(unconfigured).not.toHaveProperty("reasoning_effort");
         }
       },
     );

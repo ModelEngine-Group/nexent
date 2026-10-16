@@ -174,6 +174,8 @@ export interface ComposerProps {
   onDeepThinkingChange?: (enabled: boolean) => void;
   thinkingEffort?: ReasoningEffort;
   onThinkingEffortChange?: (effort: ReasoningEffort) => void;
+  reasoningBudgetTokens?: number;
+  onReasoningBudgetTokensChange?: (budget: number) => void;
   chatMode: ChatMode;
   onChatModeChange: (mode: ChatMode) => void;
   showModelSelector?: boolean;
@@ -193,6 +195,7 @@ export interface ComposerProps {
   allowRuntimeMetadata?: boolean;
   disabled?: boolean;
   disabledReason?: string;
+  modelSelectionDisabled?: boolean;
   configurationLayout?: boolean;
   debugLayout?: boolean;
   workbenchPresentation?: import("@/features/workbench/types").WorkbenchComposerPresentation;
@@ -366,6 +369,8 @@ export const Composer: FC<ComposerProps> = ({
   onDeepThinkingChange,
   thinkingEffort,
   onThinkingEffortChange,
+  reasoningBudgetTokens,
+  onReasoningBudgetTokensChange,
   chatMode,
   onChatModeChange,
   showModelSelector = true,
@@ -382,6 +387,7 @@ export const Composer: FC<ComposerProps> = ({
   allowRuntimeMetadata = false,
   disabled = false,
   disabledReason,
+  modelSelectionDisabled,
   configurationLayout = false,
   debugLayout = false,
   workbenchPresentation,
@@ -1528,10 +1534,13 @@ export const Composer: FC<ComposerProps> = ({
                 {showModelSelector && (
                   <ModelSelector
                     models={models}
+                    disabled={(modelSelectionDisabled ?? disabled) || isRunning}
+                    budgetTokens={reasoningBudgetTokens}
+                    onBudgetTokensChange={onReasoningBudgetTokensChange}
                     parameterSettings={modelParameterSettings}
                     parameterSettingsScopeKey={modelParameterScope}
                     parameterSettingsDisabled={disabled || isRunning}
-                    showEffort={newChatDesign || Boolean(workbenchPresentation)}
+                    showEffort
                     value={selectedModelId}
                     onValueChange={onModelChange}
                     deepThinking={deepThinking}

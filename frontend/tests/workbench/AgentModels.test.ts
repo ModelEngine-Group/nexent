@@ -9,6 +9,42 @@ import {
 } from "@/features/workbench/modelOptions";
 import type { Agent } from "@/types/agentConfig";
 import type { ModelOption } from "@/types/modelConfig";
+import { selectWorkbenchModel } from "@/features/model-controls/modelOptions";
+
+it("switches models without dropping existing sampling and output overrides", () => {
+  const config = {
+    ...initialWorkbenchState.config,
+    model_id: 11,
+    generation_config: {
+      deep_thinking: true,
+      thinking_effort: "xhigh" as const,
+      temperature: 0.43,
+      top_p: 0.78,
+      requested_output_tokens: 2048,
+    },
+  };
+  const model: ModelOption = {
+    ...reasoningModelFixture,
+    id: 12,
+    name: "B",
+    enableThinking: false,
+    reasoningCapability: {
+      status: "supported",
+      control: "effort",
+      levels: ["low", "xhigh"],
+      source: "catalog",
+    },
+  };
+  const next = selectWorkbenchModel(config, [model], 12);
+  expect(next.generation_config).toMatchObject({
+    deep_thinking: false,
+    temperature: 0.43,
+    top_p: 0.78,
+    requested_output_tokens: 2048,
+  });
+  expect(next.generation_config.thinking_effort).toBe("auto");
+  expect(config.model_id).toBe(11);
+});
 
 const reasoningAgentFixture: Agent = {
   id: "7",
@@ -95,7 +131,7 @@ it("resolves stale defaults while retaining valid overrides and other Workbench 
   };
   expect(withDefaultWorkbenchModel(config, [model]).generation_config).toEqual({
     ...config.generation_config,
-    thinking_effort: "low",
+    thinking_effort: "auto",
   });
   const valid = {
     ...config,
@@ -116,7 +152,7 @@ it("resolves stale defaults while retaining valid overrides and other Workbench 
       },
     },
   };
-  expect(deriveModelOptions(agent, [model])[0].defaultEffort).toBe("low");
+  expect(deriveModelOptions(agent, [model])[0].defaultEffort).toBe("auto");
   agent.model_params_override = {
     "11": {
       extra_params: { enable_thinking: false, reasoning_effort: "xhigh" },
@@ -279,8 +315,18 @@ it("lists every available tenant LLM for the generic workbench agent", () => {
   ] as ModelOption[];
 
   expect(deriveModelOptions(agent, catalog, "tenant")).toEqual([
-    { id: "11", name: "Model A", reasoningCapability: undefined },
-    { id: "12", name: "Model B", reasoningCapability: undefined },
+    {
+      id: "11",
+      name: "Model A",
+      reasoningCapability: undefined,
+      defaultDeepThinking: false,
+    },
+    {
+      id: "12",
+      name: "Model B",
+      reasoningCapability: undefined,
+      defaultDeepThinking: false,
+    },
   ]);
 });
 
@@ -308,7 +354,12 @@ it("keeps single-agent model selection restricted to configured models", () => {
   ] as ModelOption[];
 
   expect(deriveModelOptions(agent, catalog, "agent")).toEqual([
-    { id: "11", name: "Configured Model" },
+    {
+      id: "11",
+      name: "Configured Model",
+      reasoningCapability: undefined,
+      defaultDeepThinking: false,
+    },
   ]);
 });
 
@@ -340,7 +391,7 @@ it("preserves catalog reasoning capabilities for the shared model selector", () 
   expect(deriveModelOptions(agent, catalog, "agent")[0]).toMatchObject({
     reasoningCapability: capability,
     efforts: [{ id: "auto" }, { id: "low" }, { id: "high" }],
-    defaultEffort: "low",
+    defaultEffort: "auto",
   });
   expect(deriveModelOptions(agent, catalog, "tenant")[0]).toMatchObject({
     reasoningCapability: capability,
@@ -377,7 +428,7 @@ it("keeps an explicitly configured model reasoning default", () => {
   );
 });
 
-it("defaults an enabled Agent reasoning override without an effort to low", () => {
+it("defaults an enabled Agent reasoning override without a configured effort to auto", () => {
   const catalog = [
     {
       id: 11,
@@ -411,6 +462,135 @@ it("defaults an enabled Agent reasoning override without an effort to low", () =
   };
 
   expect(deriveModelOptions(agent, catalog, "agent")[0].defaultEffort).toBe(
-    "low"
+    "auto"
   );
+});
+
+it("inherits model effort when Agent only overrides the toggle, and prefers an explicit Agent effort", () => {
+  const model: ModelOption = {
+    ...reasoningModelFixture,
+    enableThinking: true,
+    defaultReasoningEffort: "medium",
+    reasoningCapability: {
+      status: "supported",
+      control: "effort",
+      source: "catalog",
+      levels: ["low", "medium", "xhigh"],
+    },
+  };
+  const agent: Agent = {
+    ...reasoningAgentFixture,
+    model_ids: [11],
+    model_names: ["qwen"],
+    model_params_override: {
+      "11": { extra_params: { enable_thinking: false } },
+    },
+  };
+  expect(deriveModelOptions(agent, [model])[0]).toMatchObject({
+    defaultDeepThinking: false,
+    defaultEffort: "medium",
+  });
+  agent.model_params_override!["11"].extra_params!.reasoning_effort = "xhigh";
+  expect(deriveModelOptions(agent, [model])[0].defaultEffort).toBe("xhigh");
+  expect(deriveModelOptions(agent, [model], "tenant")[0].defaultEffort).toBe(
+    "medium"
+  );
+  expect(
+    withDefaultWorkbenchModel(initialWorkbenchState.config, [model])
+      .generation_config
+  ).toMatchObject({ deep_thinking: true, thinking_effort: "medium" });
+});
+
+it("preserves automatic defaults when no persisted model effort exists", () => {
+  const model: ModelOption = {
+    ...reasoningModelFixture,
+    enableThinking: true,
+    reasoningCapability: {
+      status: "supported",
+      control: "effort",
+      source: "catalog",
+      levels: ["low", "medium"],
+      default: "medium",
+    },
+  };
+  expect(
+    deriveModelOptions(reasoningAgentFixture, [model], "tenant")[0]
+      .defaultEffort
+  ).toBe("auto");
+  expect(
+    withDefaultWorkbenchModel(initialWorkbenchState.config, [model])
+      .generation_config.thinking_effort
+  ).toBe("auto");
+  expect(
+    selectWorkbenchModel(
+      { ...initialWorkbenchState.config, model_id: 12 },
+      [model],
+      11
+    ).generation_config.thinking_effort
+  ).toBe("auto");
+});
+
+it("keeps unconfigured reasoning automatic instead of substituting a capability default", () => {
+  const model: ModelOption = {
+    ...reasoningModelFixture,
+    enableThinking: false,
+    reasoningCapability: {
+      status: "supported",
+      control: "effort",
+      source: "catalog",
+      default: "high",
+      levels: ["low", "high", "xhigh"],
+    },
+  };
+  const agent: Agent = {
+    ...reasoningAgentFixture,
+    model_ids: [11],
+    model_names: ["qwen"],
+    model_params_override: {
+      "11": { extra_params: { enable_thinking: true } },
+    },
+  };
+  for (const scope of ["agent", "tenant"] as const) {
+    expect(deriveModelOptions(agent, [model], scope)[0].defaultEffort).toBe(
+      "auto"
+    );
+  }
+  const config = {
+    ...initialWorkbenchState.config,
+    model_id: 11,
+    generation_config: {
+      deep_thinking: false,
+      thinking_effort: "xhigh" as const,
+      temperature: 0.43,
+      top_p: 0.78,
+      requested_output_tokens: 2048,
+    },
+  };
+  expect(
+    selectWorkbenchModel(config, [model], 11).generation_config
+  ).toMatchObject({
+    thinking_effort: "auto",
+    temperature: 0.43,
+    top_p: 0.78,
+    requested_output_tokens: 2048,
+  });
+  expect(
+    withDefaultWorkbenchModel(initialWorkbenchState.config, [model])
+      .generation_config.thinking_effort
+  ).toBe("auto");
+  expect(
+    deriveModelOptions(
+      agent,
+      [{ ...model, defaultReasoningEffort: "low" }],
+      "agent"
+    )[0].defaultEffort
+  ).toBe("low");
+  agent.model_params_override!["11"].extra_params!.reasoning_effort = "xhigh";
+  expect(
+    deriveModelOptions(
+      agent,
+      [{ ...model, defaultReasoningEffort: "low" }],
+      "agent"
+    )[0].defaultEffort
+  ).toBe("xhigh");
 });

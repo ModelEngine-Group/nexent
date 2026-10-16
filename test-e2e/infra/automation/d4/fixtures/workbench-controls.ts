@@ -6,12 +6,12 @@ export interface WorkbenchPinServer {
 }
 
 /** Controlled tenant APIs; no runtime generation or persistent writes are needed. */
-export async function prepareWorkbench(page: Page, resourceCount = 1, options: { histories?: Array<Record<string, any>>; reasoning?: boolean; pinServer?: WorkbenchPinServer } = {}) {
+export async function prepareWorkbench(page: Page, resourceCount = 1, options: { histories?: Array<Record<string, any>>; reasoning?: boolean; longDescriptions?: boolean; modelEffort?: string; agentEffort?: string; pinServer?: WorkbenchPinServer } = {}) {
   const pinServer = options.pinServer ?? { scopes: new Map<string, number[]>(), rejectSave: false };
   const authorization = { permissions: ["agent:create", "skill:create"], userId: "workbench-fixture", tenantId: "workbench-tenant" };
   const writes: string[] = [];
   const filters: Array<Record<string, any>> = [];
-  const agent = { id: "7", agent_id: 7, name: "Internal Analyst", display_name: "Internal Analyst", description: "Internal tenant agent", current_version_no: 3, is_available: true, model_ids: options.reasoning ? [1, 2] : [1], model_names: options.reasoning ? ["Fixture Model", "Plain Model"] : ["Fixture Model"], model_params_override: options.reasoning ? { "1": { extra_params: { enable_thinking: false } } } : undefined };
+  const agent = { id: "7", agent_id: 7, name: "Internal Analyst", display_name: "Internal Analyst", description: options.longDescriptions ? "Long resource description ".repeat(80) : "Internal tenant agent", current_version_no: 3, is_available: true, model_ids: options.reasoning ? [1, 2, 3] : [1], model_names: options.reasoning ? ["Fixture Model", "Plain Model", "Automatic Model"] : ["Fixture Model"], model_params_override: options.reasoning ? { "1": { extra_params: { enable_thinking: false, ...(options.agentEffort ? { reasoning_effort: options.agentEffort } : {}) } } } : undefined };
   const capabilities = { agent_id: 1, version_no: 1, sources: {
     local: { enabled: true, max_select: 20, requires_same_embedding_model: false, default_summary: "", default_knowledge_ids: [], default_range_values: [] },
     aidp: { enabled: false, max_select: 20, default_summary: "", default_knowledge_ids: [], default_range_values: [] },
@@ -31,13 +31,14 @@ export async function prepareWorkbench(page: Page, resourceCount = 1, options: {
     else if (pathname === "/api/agent/workbench/capabilities/preview") result = { data: { agent_id: 7, version_no: 3, default_skill_mounts: [], default_skill_resources: [], knowledge: capabilities } };
     else if (pathname === "/api/model/list") result = { data: [
       { model_id: 1, model_name: "fixture-model", display_name: "Fixture Model", model_type: "llm", model_factory: "openai", connect_status: "available",
-        ...(options.reasoning ? { extra_params: { enable_thinking: false }, reasoning_capability: { status: "supported", control: "effort", levels: ["none", "minimal", "low", "medium", "high", "xhigh", "max"], controls: [{ type: "effort", values: ["none", "minimal", "low", "medium", "high", "xhigh", "max"] }], source: "catalog" } } : {}) },
+        ...(options.reasoning ? { extra_params: { enable_thinking: false, ...(options.modelEffort ? { reasoning_effort: options.modelEffort } : {}) }, reasoning_capability: { status: "supported", control: "effort", levels: ["none", "minimal", "low", "medium", "high", "xhigh", "max"], controls: [{ type: "effort", values: ["none", "minimal", "low", "medium", "high", "xhigh", "max"] }], source: "catalog" } } : {}) },
       ...(options.reasoning ? [{ model_id: 2, model_name: "plain-model", display_name: "Plain Model", model_type: "llm", model_factory: "openai", connect_status: "available", reasoning_capability: { status: "unsupported", control: "effort", levels: [], source: "catalog" } }] : []),
+      ...(options.reasoning ? [{model_id: 3, model_name: "automatic-model", display_name:"Automatic Model", model_type:"llm", model_factory:"openai", connect_status:"available", extra_params:{enable_thinking:false}, reasoning_capability:{status:"supported", control:"effort", levels:["low","high"], default:"high", controls:[{type:"effort",values:["low","high"]}],source:"catalog"}}] : []),
     ] };
-    else if (pathname === "/api/skills") result = { skills: Array.from({ length: resourceCount }, (_, i) => ({ skill_id: 11 + i, name: i ? `Invoice Skill ${i}` : "Invoice Skill", description: "Invoice extraction", source: "local", config_schemas: [], config_values: {} })) };
+    else if (pathname === "/api/skills") result = { skills: Array.from({ length: resourceCount }, (_, i) => ({ skill_id: 11 + i, name: i ? `Invoice Skill ${i}` : "Invoice Skill", description: options.longDescriptions ? "Long resource description ".repeat(80) : "Invoice extraction", source: "local", config_schemas: [], config_values: {} })) };
     else if (pathname.includes("repository") || pathname === "/api/groups/list") result = { items: [], data: [], total: 0, pagination: { total: 0 } };
     else if (pathname === "/api/indices/health") result = { status: "healthy", elasticsearch: "connected" };
-    else if (pathname === "/api/indices") result = { indices: Array.from({ length: resourceCount }, (_, i) => i ? `company-docs-${i}` : "company-docs"), count: resourceCount, indices_info: Array.from({ length: resourceCount }, (_, i) => ({ name: i ? `company-docs-${i}` : "company-docs", display_name: i ? `Company Docs ${i}` : "Company Docs", knowledge_id: String(21 + i), embedding_model_id: 1 })) };
+    else if (pathname === "/api/indices") result = { indices: Array.from({ length: resourceCount }, (_, i) => i ? `company-docs-${i}` : "company-docs"), count: resourceCount, indices_info: Array.from({ length: resourceCount }, (_, i) => ({ name: i ? `company-docs-${i}` : "company-docs", display_name: i ? `Company Docs ${i}` : "Company Docs", knowledge_id: String(21 + i), description: options.longDescriptions ? "Long resource description ".repeat(80) : undefined, embedding_model_id: 1 })) };
     else if (pathname === "/api/tag-libraries") result = [{ bucket_id: 1, status: "active", resource_types: ["agent", "skill", "knowledge_base"] }];
     else if (pathname === "/api/tag-libraries/1/definitions") result = [{ definition_id: 1, bucket_id: 1, definition_key: "domain", definition_name: "Business", selection_mode: "multi_select", status: "active", values: [{ value_id: 1, display_value: "Finance", normalized_value: "finance", status: "active" }] }];
     else if (pathname.endsWith("/filter")) result = { matched_resource_ids: body?.resource_ids ?? [] };

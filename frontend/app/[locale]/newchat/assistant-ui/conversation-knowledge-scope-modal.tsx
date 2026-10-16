@@ -33,6 +33,7 @@ import type {
 } from "@/types/knowledgeScope";
 import { DEFAULT_CONVERSATION_KNOWLEDGE_SCOPE } from "@/types/knowledgeScope";
 import { ResourceCard } from "@/features/workbench";
+import { ResourceSelectionRow } from "@/features/workbench/components/ResourceSelectionRow";
 import { useToolList } from "@/hooks/agent/useToolList";
 import { KnowledgeRetrievalParamsForm } from "@/components/tool-config/KnowledgeRetrievalParamsForm";
 import {
@@ -678,6 +679,8 @@ export const ConversationKnowledgeScopeModal: FC<
             </div>
           ) : (
             <ResourceSelectionGrid
+              layout={presentation === "drawer" ? "list" : "grid"}
+              aria-label={t("chat.knowledgeScope.title")}
               fillAvailable={section === "list"}
               columns={presentation === "drawer" ? 2 : 3}
               className="p-1"
@@ -693,6 +696,24 @@ export const ConversationKnowledgeScopeModal: FC<
                   Boolean(modelIdentity) &&
                   modelIdentity !== selectedLocalModel;
                 const name = knowledgeBase.display_name || knowledgeBase.name;
+                if (presentation === "drawer") {
+                  return (
+                    <ResourceSelectionRow
+                      key={id}
+                      title={name}
+                      description={knowledgeBase.description || undefined}
+                      tags={knowledgeBase.tags || []}
+                      selected={isSelected}
+                      disabled={disabledByModel}
+                      disabledReason={
+                        disabledByModel
+                          ? t("chat.knowledgeScope.embeddingMismatch")
+                          : undefined
+                      }
+                      onClick={() => toggleKnowledgeBase(source, id)}
+                    />
+                  );
+                }
                 const groupNames = (knowledgeBase.group_ids ?? [])
                   .map((groupId) => groupNameById.get(groupId))
                   .filter((groupName): groupName is string =>

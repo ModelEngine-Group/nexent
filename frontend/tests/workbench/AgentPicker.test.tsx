@@ -53,20 +53,29 @@ beforeEach(() => {
   });
   vi.mocked(importAgentFromRepository).mockResolvedValue({ agent_id: 99 });
 });
-it("opens the selected Agent's configuration route from the picker", async () => {
+it("selects an Agent from read-only rows without a configuration edit action", async () => {
   render(
     <QueryClientProvider client={new QueryClient()}>
       <AgentPicker
         open
-        agents={[agent]}
+        agents={[{ ...agent, description: "Agent details", tags: ["Finance"] }]}
         onSelect={vi.fn()}
         onCancel={vi.fn()}
       />
     </QueryClientProvider>
   );
 
-  await userEvent.click(screen.getByRole("button", { name: "编辑" }));
-  expect(routerPush).toHaveBeenCalledWith("/zh/agents/8");
+  expect(
+    screen.queryByRole("button", { name: "编辑" })
+  ).not.toBeInTheDocument();
+  const option = screen.getByRole("option", { name: "Agent A" });
+  expect(option).toHaveTextContent("Agent details");
+  expect(option).toHaveTextContent("Finance");
+  expect(option.querySelector("svg")).toBeNull();
+  expect(screen.queryByText("v3")).not.toBeInTheDocument();
+  await userEvent.click(option);
+  expect(option).toHaveAttribute("aria-selected", "true");
+  expect(routerPush).not.toHaveBeenCalled();
 });
 it("paginates six agents and resets the page on search", async () => {
   render(
@@ -229,10 +238,17 @@ it("internal agent selection caps mounts at eight across pages", async () => {
   await userEvent.click(screen.getByRole("button", { name: "确认选择" }));
   expect(confirm.mock.calls[0][0]).toHaveLength(8);
 });
-it("opens the selected Agent's editor from the edit button", async () => {
+it("keeps the multiple selection picker free of edit navigation", async () => {
   mount();
-  await userEvent.click(screen.getByRole("button", { name: "编辑" }));
-  expect(routerPush).toHaveBeenCalledWith("/zh/agents/8");
+  expect(
+    screen.queryByRole("button", { name: "编辑" })
+  ).not.toBeInTheDocument();
+  await userEvent.click(screen.getByRole("option", { name: "Agent A" }));
+  expect(screen.getByRole("option", { name: "Agent A" })).toHaveAttribute(
+    "aria-selected",
+    "true"
+  );
+  expect(routerPush).not.toHaveBeenCalled();
 });
 it("shows the backend unavailable reason and only one published version badge", async () => {
   const select = vi.fn();
@@ -255,7 +271,7 @@ it("shows the backend unavailable reason and only one published version badge", 
   const card = screen.getByRole("option", { name: "Agent A" });
   expect(card).toBeDisabled();
   expect(card).toHaveAccessibleDescription("Missing model dependency");
-  expect(screen.getAllByText("v3")).toHaveLength(1);
+  expect(screen.queryByText("v3")).not.toBeInTheDocument();
   await userEvent.click(card);
   expect(select).not.toHaveBeenCalled();
 });

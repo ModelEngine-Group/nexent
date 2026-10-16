@@ -38,6 +38,8 @@ export interface ChatProps {
   onDeepThinkingChange?: (enabled: boolean) => void;
   thinkingEffort?: ReasoningEffort;
   onThinkingEffortChange?: (effort: ReasoningEffort) => void;
+  reasoningBudgetTokens?: number;
+  onReasoningBudgetTokensChange?: (budget: number) => void;
   showConversationTitle?: boolean;
   isDictationConfigured?: boolean;
   knowledgeScope?: ConversationKnowledgeScope | null;
@@ -102,6 +104,8 @@ export const Chat: FC<ChatProps> = ({
   onDeepThinkingChange,
   thinkingEffort,
   onThinkingEffortChange,
+  reasoningBudgetTokens,
+  onReasoningBudgetTokensChange,
   showConversationTitle = true,
   isDictationConfigured = false,
   knowledgeScope = null,
@@ -163,6 +167,8 @@ export const Chat: FC<ChatProps> = ({
           onDeepThinkingChange={onDeepThinkingChange}
           thinkingEffort={thinkingEffort}
           onThinkingEffortChange={onThinkingEffortChange}
+          reasoningBudgetTokens={reasoningBudgetTokens}
+          onReasoningBudgetTokensChange={onReasoningBudgetTokensChange}
           showModelSelector={showModelSelector}
           modelParameterSettings={modelParameterSettings}
           modelSelectionScope={modelSelectionScope}
@@ -214,6 +220,8 @@ export const Chat: FC<ChatProps> = ({
       onDeepThinkingChange={onDeepThinkingChange}
       thinkingEffort={thinkingEffort}
       onThinkingEffortChange={onThinkingEffortChange}
+      reasoningBudgetTokens={reasoningBudgetTokens}
+      onReasoningBudgetTokensChange={onReasoningBudgetTokensChange}
       showConversationTitle={showConversationTitle}
       isDictationConfigured={isDictationConfigured}
       knowledgeScope={knowledgeScope}

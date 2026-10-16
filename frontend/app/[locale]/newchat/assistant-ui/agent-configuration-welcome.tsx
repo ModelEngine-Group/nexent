@@ -4,16 +4,30 @@ import { useAui, useAuiState } from "@assistant-ui/react";
 import { useTranslation } from "react-i18next";
 import { Lightbulb } from "lucide-react";
 
-import { Composer } from "./composer";
+import { Composer, type ComposerProps } from "./composer";
 
 interface AgentConfigurationWelcomeProps {
   disabled: boolean;
   dictationConfigured: boolean;
+  modelControls?: Pick<
+    ComposerProps,
+    | "models"
+    | "selectedModelId"
+    | "onModelChange"
+    | "deepThinking"
+    | "onDeepThinkingChange"
+    | "thinkingEffort"
+    | "onThinkingEffortChange"
+    | "reasoningBudgetTokens"
+    | "onReasoningBudgetTokensChange"
+    | "modelParameterSettings"
+  > & { canSend?: boolean };
 }
 
 export function AgentConfigurationWelcome({
   disabled,
   dictationConfigured,
+  modelControls,
 }: AgentConfigurationWelcomeProps) {
   const { t } = useTranslation("common");
   const aui = useAui();
@@ -39,11 +53,22 @@ export function AgentConfigurationWelcome({
           </div>
           <Composer
             models={[]}
+            {...modelControls}
             chatMode="execution"
             onChatModeChange={() => undefined}
-            showModelSelector={false}
+            showModelSelector={Boolean(modelControls)}
+            modelSelectionDisabled={disabled}
             isDictationConfigured={dictationConfigured}
-            disabled={disabled}
+            disabled={
+              disabled ||
+              modelControls?.canSend === false ||
+              Boolean(
+                modelControls &&
+                !modelControls.models.some(
+                  (m) => m.id === modelControls.selectedModelId
+                )
+              )
+            }
             configurationLayout
           />
         </div>

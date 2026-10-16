@@ -1,6 +1,7 @@
 import { Children, type HTMLAttributes } from "react";
 import ResourceCardGrid from "@/components/resource/ResourceCardGrid";
 import { cn } from "@/lib/utils";
+import { Empty } from "antd";
 
 export const RESOURCE_SELECTION_AREA_CLASS = "min-h-[460px]";
 
@@ -9,11 +10,31 @@ export function ResourceSelectionGrid({
   className,
   columns = 3,
   fillAvailable = false,
+  layout = "grid",
   ...props
 }: HTMLAttributes<HTMLDivElement> & {
   columns?: number;
   fillAvailable?: boolean;
+  layout?: "grid" | "list";
 }) {
+  if (layout === "list") {
+    return (
+      <div
+        role="listbox"
+        {...props}
+        className={cn(
+          fillAvailable ? "min-h-full" : RESOURCE_SELECTION_AREA_CLASS,
+          className
+        )}
+      >
+        {Children.count(children) > 0 ? (
+          children
+        ) : (
+          <Empty className="py-12" image={Empty.PRESENTED_IMAGE_SIMPLE} />
+        )}
+      </div>
+    );
+  }
   return (
     <div
       {...props}

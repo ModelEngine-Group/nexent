@@ -1,5 +1,7 @@
 "use client";
 
+import { useConversationModelControls } from "@/features/model-controls/useConversationModelControls";
+import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
 import type { ReasoningEffort } from "@/types/modelConfig";
 import type { ModelParameterSettingsControl } from "@/types/modelParameterSettings";
 
@@ -198,6 +200,8 @@ export interface ThreadProps {
   onDeepThinkingChange?: (enabled: boolean) => void;
   thinkingEffort?: ReasoningEffort;
   onThinkingEffortChange?: (effort: ReasoningEffort) => void;
+  reasoningBudgetTokens?: number;
+  onReasoningBudgetTokensChange?: (budget: number) => void;
   chatMode: ChatMode;
   onChatModeChange: (mode: ChatMode) => void;
   showModelSelector?: boolean;
@@ -264,6 +268,8 @@ export const Thread: FC<ThreadProps> = ({
   onDeepThinkingChange,
   thinkingEffort,
   onThinkingEffortChange,
+  reasoningBudgetTokens,
+  onReasoningBudgetTokensChange,
   chatMode,
   onChatModeChange,
   showModelSelector = true,
@@ -297,30 +303,24 @@ export const Thread: FC<ThreadProps> = ({
 }) => {
   const { t } = useTranslation();
   const models = useAgentModels(agent, modelSelectionScope);
-  const [localSelectedModelId, setLocalSelectedModelId] = useState<string>();
-  const selectedModelIsValid = Boolean(
-    selectedModelId && models.some((model) => model.id === selectedModelId)
+  const threadKey = useAuiState((state) => state.threads.mainThreadId);
+  const { user } = useAuthorizationContext();
+  const controls = useConversationModelControls(
+    models,
+    `${user?.tenantId ?? ""}:${user?.id ?? ""}:${agent.id}:${threadKey ?? "new"}`,
+    selectedModelId,
+    onModelChange ? (selectedModelId ?? "") : undefined
   );
-  const fallbackModelId = models[0]?.id;
-  const effectiveSelectedModelId = selectedModelIsValid
-    ? selectedModelId
-    : onModelChange
-      ? ""
-      : localSelectedModelId &&
-          models.some((model) => model.id === localSelectedModelId)
-        ? localSelectedModelId
-        : fallbackModelId;
-  const handleModelChange = useCallback(
-    (modelId: string) => {
-      if (!models.some((model) => model.id === modelId)) return;
-      if (onModelChange) {
-        onModelChange(modelId);
-      } else {
-        setLocalSelectedModelId(modelId);
-      }
-    },
-    [models, onModelChange]
-  );
+  const effectiveSelectedModelId = onModelChange
+    ? (selectedModelId ?? "")
+    : controls.selectedModelId;
+  const modelIsValid =
+    models.some((model) => model.id === effectiveSelectedModelId) &&
+    controls.canSend;
+  const handleModelChange = (id: string) => {
+    controls.onModelChange(id);
+    onModelChange?.(id);
+  };
 
   const messages = useAuiState((s) => s.thread.messages);
   const currentThreadTitle = useAuiState((s) => {
@@ -524,14 +524,27 @@ export const Thread: FC<ThreadProps> = ({
         models={models}
         selectedModelId={effectiveSelectedModelId}
         onModelChange={handleModelChange}
-        deepThinking={deepThinking}
-        onDeepThinkingChange={onDeepThinkingChange}
-        thinkingEffort={thinkingEffort}
-        onThinkingEffortChange={onThinkingEffortChange}
+        deepThinking={deepThinking ?? controls.deepThinking}
+        onDeepThinkingChange={
+          onDeepThinkingChange ?? controls.onDeepThinkingChange
+        }
+        thinkingEffort={thinkingEffort ?? controls.thinkingEffort}
+        onThinkingEffortChange={
+          onThinkingEffortChange ?? controls.onThinkingEffortChange
+        }
+        reasoningBudgetTokens={
+          reasoningBudgetTokens ?? controls.reasoningBudgetTokens
+        }
+        onReasoningBudgetTokensChange={
+          onReasoningBudgetTokensChange ??
+          controls.onReasoningBudgetTokensChange
+        }
         chatMode={chatMode}
         onChatModeChange={onChatModeChange}
         showModelSelector={showModelSelector}
-        modelParameterSettings={modelParameterSettings}
+        modelParameterSettings={
+          modelParameterSettings ?? controls.modelParameterSettings
+        }
         showConversationTitle={showConversationTitle}
         isDictationConfigured={isDictationConfigured}
         knowledgeScope={knowledgeScope}
@@ -543,8 +556,14 @@ export const Thread: FC<ThreadProps> = ({
         onSkillFileSelect={onSkillFileSelect}
         runtimeMetadata={runtimeMetadata}
         onRuntimeMetadataChange={onRuntimeMetadataChange}
-        readOnly={readOnly}
-        readOnlyReason={readOnlyReason}
+        readOnly={readOnly || (showModelSelector && !modelIsValid)}
+        modelSelectionDisabled={readOnly}
+        readOnlyReason={
+          readOnlyReason ??
+          (showModelSelector && !modelIsValid
+            ? t("chat.modelSelector.invalidSelection")
+            : undefined)
+        }
         showComposer={showComposer}
         configurationLayout={configurationLayout}
         debugLayout={debugLayout}
@@ -644,6 +663,8 @@ interface ThreadViewProps {
   onDeepThinkingChange?: (enabled: boolean) => void;
   thinkingEffort?: ReasoningEffort;
   onThinkingEffortChange?: (effort: ReasoningEffort) => void;
+  reasoningBudgetTokens?: number;
+  onReasoningBudgetTokensChange?: (budget: number) => void;
   chatMode: ChatMode;
   onChatModeChange: (mode: ChatMode) => void;
   showModelSelector: boolean;
@@ -680,6 +701,7 @@ interface ThreadViewProps {
   runtimeMetadata: Record<string, unknown>;
   onRuntimeMetadataChange?: (value: Record<string, unknown>) => void;
   readOnly: boolean;
+  modelSelectionDisabled?: boolean;
   readOnlyReason?: string;
   showComposer: boolean;
   configurationLayout: boolean;
@@ -708,6 +730,8 @@ const ThreadView: FC<ThreadViewProps> = ({
   onDeepThinkingChange,
   thinkingEffort,
   onThinkingEffortChange,
+  reasoningBudgetTokens,
+  onReasoningBudgetTokensChange,
   chatMode,
   onChatModeChange,
   showModelSelector,
@@ -741,6 +765,7 @@ const ThreadView: FC<ThreadViewProps> = ({
   runtimeMetadata,
   onRuntimeMetadataChange,
   readOnly,
+  modelSelectionDisabled,
   readOnlyReason,
   showComposer,
   configurationLayout,
@@ -965,6 +990,8 @@ const ThreadView: FC<ThreadViewProps> = ({
               onDeepThinkingChange={onDeepThinkingChange}
               thinkingEffort={thinkingEffort}
               onThinkingEffortChange={onThinkingEffortChange}
+              reasoningBudgetTokens={reasoningBudgetTokens}
+              onReasoningBudgetTokensChange={onReasoningBudgetTokensChange}
               chatMode={chatMode}
               onChatModeChange={onChatModeChange}
               showModelSelector={showModelSelector}
@@ -980,6 +1007,7 @@ const ThreadView: FC<ThreadViewProps> = ({
               onRuntimeMetadataChange={onRuntimeMetadataChange}
               allowRuntimeMetadata={agent.allow_chat_metadata === true}
               disabled={readOnly}
+              modelSelectionDisabled={modelSelectionDisabled}
               disabledReason={readOnlyReason}
               workbenchPresentation={workbenchPresentation}
               workbenchResources={workbenchResources}
@@ -1200,6 +1228,7 @@ const ThreadWelcomeContent: FC<ThreadWelcomeContentProps> = ({
 export const ThreadMessages: FC<{
   agent: Agent | PublishedAgent;
   readOnly?: boolean;
+  modelSelectionDisabled?: boolean;
   shareMode?: boolean;
   selectedShareMessageIds?: Set<number>;
   backendMessageIdsByAuiId?: Map<string, number>;
@@ -1209,6 +1238,7 @@ export const ThreadMessages: FC<{
 }> = ({
   agent,
   readOnly = false,
+  modelSelectionDisabled,
   shareMode = false,
   selectedShareMessageIds,
   backendMessageIdsByAuiId,

@@ -8,6 +8,8 @@ from pydantic import (
     ConfigDict,
     EmailStr,
     Field,
+    StrictBool,
+    StrictInt,
     field_validator,
     model_validator,
 )
@@ -893,6 +895,7 @@ class WorkbenchGenerationConfig(BaseModel):
 
     deep_thinking: bool = False
     thinking_effort: Literal["auto", "none", "minimal", "low", "medium", "high", "xhigh", "max"] = "low"
+    reasoning_budget_tokens: Optional[StrictInt] = Field(default=None, ge=0)
     temperature: Optional[float] = Field(default=None, ge=0, le=2)
     top_p: Optional[float] = Field(default=None, gt=0, le=1)
     requested_output_tokens: Optional[int] = Field(default=None, gt=0)
@@ -1033,7 +1036,69 @@ class AgentRequest(BaseModel):
     )
 
 
-class NL2AgentRunRequest(BaseModel):
+class RuntimeGenerationOverrides(BaseModel):
+    """Partial reasoning intent; absent fields never materialize defaults."""
+
+    model_config = ConfigDict(extra="forbid")
+    deep_thinking: Optional[StrictBool] = None
+    thinking_effort: Optional[Literal["auto", "none", "minimal", "low", "medium", "high", "xhigh", "max"]] = None
+    reasoning_budget_tokens: Optional[StrictInt] = Field(default=None, ge=0)
+
+    @field_validator("deep_thinking", "thinking_effort", "reasoning_budget_tokens", mode="before")
+    @classmethod
+    def reject_explicit_null(cls, value):
+        if value is None:
+            raise ValueError("A reasoning override cannot be null; omit it to inherit")
+        return value
+
+
+class NL2ModelControlsRequest(BaseModel):
+    """Shared optional controls for direct and Workbench creator turns."""
+
+    model_id: Optional[StrictInt] = Field(default=None, gt=0)
+    generation_config: Optional[RuntimeGenerationOverrides] = None
+    reasoning_effort: Optional[Literal["auto", "none", "minimal", "low", "medium", "high", "xhigh", "max"]] = None
+    reasoning_budget_tokens: Optional[StrictInt] = Field(default=None, ge=0)
+
+    @model_validator(mode="before")
+    @classmethod
+    def reconcile_model_controls(cls, value):
+        if not isinstance(value, dict):
+            return value
+        value = dict(value)
+        overlay = value.get("generation_config")
+        if isinstance(overlay, BaseModel):
+            overlay = overlay.model_dump(exclude_unset=True)
+        if overlay is not None and not isinstance(overlay, dict):
+            return value
+        overlay = dict(overlay or {})
+        snapshot = value.get("workbench_config")
+        if isinstance(snapshot, dict):
+            snapshot_model = snapshot.get("model_id")
+            if snapshot_model is not None:
+                if value.get("model_id") is not None and value["model_id"] != snapshot_model:
+                    raise ValueError("model_controls_invalid: conflicting model snapshot")
+                value["model_id"] = snapshot_model
+            saved = snapshot.get("generation_config")
+            if isinstance(saved, dict):
+                for key in ("deep_thinking", "thinking_effort", "reasoning_budget_tokens"):
+                    if key not in saved or saved[key] is None:
+                        continue
+                    if key in overlay and overlay[key] != saved[key]:
+                        raise ValueError("model_controls_invalid: conflicting generation snapshot")
+                    overlay[key] = saved[key]
+        for legacy, canonical in (("reasoning_effort", "thinking_effort"),
+                                  ("reasoning_budget_tokens", "reasoning_budget_tokens")):
+            if value.get(legacy) is not None:
+                if canonical in overlay and overlay[canonical] != value[legacy]:
+                    raise ValueError("model_controls_invalid: conflicting reasoning override")
+                overlay[canonical] = value[legacy]
+        if overlay or value.get("generation_config") is not None:
+            value["generation_config"] = overlay
+        return value
+
+
+class NL2AgentRunRequest(NL2ModelControlsRequest):
     """Request payload for an NL2Agent turn, optionally persisted by Workbench."""
 
     query: str = Field(min_length=1)
@@ -1047,7 +1112,7 @@ class NL2AgentRunRequest(BaseModel):
     workbench_config: Optional[Dict[str, Any]] = None
 
 
-class NL2SkillRunRequest(BaseModel):
+class NL2SkillRunRequest(NL2ModelControlsRequest):
     """Request payload for an NL2Skill turn, optionally persisted by Workbench."""
 
     query: str = Field(min_length=1)
@@ -1060,10 +1125,6 @@ class NL2SkillRunRequest(BaseModel):
     workbench_config: Optional[Dict[str, Any]] = None
     draft_snapshot: Optional[Dict[str, Any]] = None
     language: Optional[Literal["zh", "en"]] = None
-    model_id: Optional[int] = Field(
-        default=None,
-        description="Optional model ID override. When not specified, uses the tenant's configured LLM model.",
-    )
 
 
 class MessageUnit(BaseModel):

@@ -28,6 +28,7 @@ import { Chat } from "./chat";
 import type { WelcomeSuggestion } from "./thread";
 import { Thread } from "./thread";
 import { AgentConfigurationWelcome } from "./agent-configuration-welcome";
+import { useCreatorModelControls } from "@/features/model-controls/useCreatorModelControls";
 
 const NL2AGENT_DISPLAY_BASE: Agent = {
   id: "__nl2agent_runtime__",
@@ -59,10 +60,12 @@ function ConfigurationThread({
   agent,
   disabled,
   dictationConfigured,
+  modelControls,
 }: {
   agent: Agent;
   disabled: boolean;
   dictationConfigured: boolean;
+  modelControls: ReturnType<typeof useCreatorModelControls>;
 }) {
   const hasMessages = useAuiState((state) => state.thread.messages.length > 0);
   return (
@@ -71,7 +74,9 @@ function ConfigurationThread({
       chatMode="execution"
       onChatModeChange={() => undefined}
       showConversationTitle={false}
-      showModelSelector={false}
+      {...modelControls}
+      modelSelectionScope="tenant"
+      showModelSelector
       variant="embedded"
       readOnly={disabled}
       configurationLayout
@@ -81,6 +86,7 @@ function ConfigurationThread({
         <AgentConfigurationWelcome
           disabled={disabled}
           dictationConfigured={dictationConfigured}
+          modelControls={modelControls}
         />
       }
     />
@@ -105,6 +111,11 @@ export const Nl2AgentChatPanel = forwardRef<
 ) {
   const { t } = useTranslation("common");
   const { modelConfig } = useConfig();
+  const modelControls = useCreatorModelControls(
+    NL2AGENT_DISPLAY_BASE,
+    `nl2agent:${agentId ?? "new"}`,
+    "agent:create"
+  );
   const adapters = useMemo(
     () => ({
       attachments: compositeAttachmentAdapter,
@@ -115,6 +126,7 @@ export const Nl2AgentChatPanel = forwardRef<
   const chatModelAdapter = useMemo<ChatModelAdapter>(
     () => ({
       async *run(options) {
+        if (!modelControls.canSend) return;
         if (agentId !== null) onRunStart?.(agentId);
         try {
           const runResult = remoteChatModelAdapter.run({
@@ -124,6 +136,7 @@ export const Nl2AgentChatPanel = forwardRef<
                 ...options.runConfig?.custom,
                 runtimeMode: "nl2agent",
                 agentId,
+                turnModelControls: modelControls.snapshot,
                 onNl2AgentState: onStateEvent,
                 onNl2AgentStopped: onStopped,
               },
@@ -139,7 +152,15 @@ export const Nl2AgentChatPanel = forwardRef<
         }
       },
     }),
-    [agentId, onRunEnd, onRunStart, onStateEvent, onStopped]
+    [
+      agentId,
+      onRunEnd,
+      onRunStart,
+      onStateEvent,
+      onStopped,
+      modelControls.snapshot,
+      modelControls.canSend,
+    ]
   );
   const runtime = useLocalRuntime(chatModelAdapter, { adapters });
   useImperativeHandle(
@@ -151,6 +172,7 @@ export const Nl2AgentChatPanel = forwardRef<
           disabled ||
           agentId === null ||
           !prompt.trim() ||
+          !modelControls.canSend ||
           runtime.thread.getState().isRunning
         )
           return;
@@ -160,7 +182,7 @@ export const Nl2AgentChatPanel = forwardRef<
         });
       },
     }),
-    [agentId, disabled, runtime]
+    [agentId, disabled, runtime, modelControls.canSend]
   );
 
   const assistantTitle = t("agentConfig.button.generationAssistant");
@@ -219,8 +241,9 @@ export const Nl2AgentChatPanel = forwardRef<
           {configurationLayout ? (
             <ConfigurationThread
               agent={nl2AgentDisplay}
-              disabled={disabled}
+              disabled={disabled || !modelControls.canCreate}
               dictationConfigured={Boolean(modelConfig?.stt)}
+              modelControls={modelControls}
             />
           ) : (
             <Chat
@@ -228,9 +251,11 @@ export const Nl2AgentChatPanel = forwardRef<
               generatedTitle={assistantTitle}
               welcomeSuggestions={welcomeSuggestions}
               isLoadingAgents={false}
-              showModelSelector={false}
+              {...modelControls}
+              modelSelectionScope="tenant"
+              showModelSelector
               showConversationTitle={false}
-              readOnly={disabled}
+              readOnly={disabled || !modelControls.canCreate}
               variant="embedded"
             />
           )}

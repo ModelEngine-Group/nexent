@@ -81,6 +81,7 @@ export type ModelOption = {
   efforts?: boolean | readonly ModelSelectorEffortOption[];
   /** Default effort from the model capability profile. */
   defaultEffort?: string;
+  defaultDeepThinking?: boolean;
   /** Token budget range for models whose reasoning control is numeric. */
   budgetTokens?: { min: number; max: number };
   /** Persisted model/agent budget, when one was explicitly configured. */
@@ -304,10 +305,13 @@ function ModelSelectorRoot({
   const activeEffort =
     resolveEffort(efforts, effort) ?? resolvedDefaultEffort ?? efforts?.[0]?.id;
   const budgetRange = selectedModel?.budgetTokens;
-  const activeBudgetTokens =
-    budgetRange && budgetTokens !== undefined
+  const activeBudgetTokens = !budgetRange
+    ? undefined
+    : budgetTokens !== undefined && budgetTokens > 0
       ? Math.min(budgetRange.max, Math.max(budgetRange.min, budgetTokens))
-      : selectedModel?.defaultBudgetTokens;
+      : budgetTokens === 0
+        ? 0
+        : selectedModel?.defaultBudgetTokens;
   const contextValue = useMemo(
     () => ({
       models,
@@ -423,7 +427,8 @@ function ModelSelectorValue({
   className,
 }: ModelSelectorValueProps) {
   const { t } = useTranslation();
-  const { selectedModel, efforts, effort } = useModelSelectorContext();
+  const { selectedModel, efforts, effort, deepThinking } =
+    useModelSelectorContext();
   const resolvedPlaceholder =
     placeholder ?? t("chat.modelSelector.selectModel");
 
@@ -440,6 +445,7 @@ function ModelSelectorValue({
 
   const effortName =
     showEffort &&
+    deepThinking &&
     selectedModel.budgetTokens === undefined &&
     effort !== undefined
       ? (() => {
@@ -477,6 +483,7 @@ function ModelSelectorContent({
   sideOffset = 6,
   children,
   onInteractOutside,
+  onEscapeKeyDown,
   ...props
 }: ModelSelectorContentProps) {
   const { value } = useModelSelectorContext();
@@ -487,10 +494,14 @@ function ModelSelectorContent({
       align={align}
       sideOffset={sideOffset}
       className={cn(
-        "bg-popover/95 w-72 min-w-(--radix-popover-trigger-width) overflow-hidden rounded-xl p-0 shadow-lg backdrop-blur-sm",
+        "z-[1100] bg-popover/95 w-72 min-w-(--radix-popover-trigger-width) overflow-hidden rounded-xl p-0 shadow-lg backdrop-blur-sm",
         className
       )}
       {...props}
+      onEscapeKeyDown={(event) => {
+        event.stopPropagation();
+        onEscapeKeyDown?.(event);
+      }}
       onInteractOutside={(event) => {
         if (
           event.target instanceof Element &&
@@ -682,7 +693,7 @@ function ModelSelectorEffort({
   return (
     <div
       data-slot="model-selector-effort"
-      className={cn("border-b px-3 py-2", className)}
+      className={cn("border-b px-3 pt-1 pb-0", className)}
       onKeyDown={(e: KeyboardEvent<HTMLDivElement>) => {
         // cmdk must not turn Enter on a focused setting into model selection.
         if (e.key === "Enter") e.stopPropagation();
@@ -697,6 +708,12 @@ function ModelSelectorEffort({
           role="switch"
           aria-label={t("chat.modelSelector.deepThinking")}
           aria-checked={deepThinking}
+          disabled={
+            !selectedModel ||
+            (!efforts?.length &&
+              !budgetRange &&
+              selectedModel.reasoningCapability?.control !== "toggle")
+          }
           onClick={() => setDeepThinking(!deepThinking)}
           className={cn(
             "relative h-5 w-9 rounded-full transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary",
@@ -711,68 +728,82 @@ function ModelSelectorEffort({
           />
         </button>
       </div>
-      <div className="flex items-center justify-between gap-3 py-1">
-        <span className="text-sm">
-          {budgetRange
-            ? t("model.advanced.reasoningBudget", {
-                defaultValue: "Budget tokens",
-              })
-            : resolvedLabel}
-        </span>
-        {budgetRange ? (
-          <div className="flex min-w-0 flex-1 items-center gap-2">
-            <input
-              type="range"
-              min={budgetRange.min}
-              max={budgetRange.max}
-              value={budgetTokens ?? budgetRange.min}
-              disabled={!deepThinking}
-              aria-label={t("model.advanced.reasoningBudget", {
-                defaultValue: "Budget tokens",
-              })}
-              onChange={(event) => setBudgetTokens(Number(event.target.value))}
-              className="min-w-0 flex-1"
-            />
-            <span className="w-14 text-right text-xs text-muted-foreground">
-              {budgetTokens ?? "auto"}
-            </span>
-          </div>
-        ) : (
-          <Select
-            value={effort}
-            disabled={!deepThinking || displayedEfforts.length === 0}
-            onValueChange={setEffort}
-          >
-            <SelectTrigger
-              aria-label={t("chat.modelSelector.reasoningEffort")}
-              size="sm"
-              className="h-7 w-fit border-0 bg-transparent px-1.5 py-0 text-sm shadow-none hover:bg-accent/50 focus-visible:ring-0"
+      {deepThinking && (
+        <div className="flex items-center justify-between gap-3 py-1">
+          <span className="text-sm">
+            {budgetRange
+              ? t("model.advanced.reasoningBudget", {
+                  defaultValue: "Budget tokens",
+                })
+              : resolvedLabel}
+          </span>
+          {budgetRange ? (
+            <div className="flex min-w-0 flex-1 items-center gap-2">
+              <input
+                type="range"
+                min={budgetRange.min}
+                max={budgetRange.max}
+                value={budgetTokens ?? budgetRange.min}
+                disabled={!deepThinking}
+                aria-label={t("model.advanced.reasoningBudget", {
+                  defaultValue: "Budget tokens",
+                })}
+                onChange={(event) =>
+                  setBudgetTokens(Number(event.target.value))
+                }
+                className="min-w-0 flex-1"
+              />
+              <span className="w-14 text-right text-xs text-muted-foreground">
+                {budgetTokens || t("chat.modelSelector.effort.auto")}
+              </span>
+              <button
+                type="button"
+                disabled={!deepThinking}
+                onClick={() => setBudgetTokens(0)}
+                className="text-xs text-muted-foreground hover:text-foreground"
+              >
+                {t("chat.modelSelector.effort.auto")}
+              </button>
+            </div>
+          ) : (
+            <Select
+              value={effort}
+              disabled={!deepThinking || displayedEfforts.length === 0}
+              onValueChange={setEffort}
             >
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent
-              data-model-effort-popup
-              align="end"
-              className="w-max min-w-32 p-0"
-            >
-              {displayedEfforts.map((option) => (
-                <SelectItem
-                  key={option.id}
-                  value={option.id}
-                  className="h-7 pl-2 pr-8 text-sm"
-                >
-                  {t(`chat.modelSelector.effort.${option.id}`, option.name)}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        )}
-      </div>
+              <SelectTrigger
+                aria-label={t("chat.modelSelector.reasoningEffort")}
+                size="sm"
+                className="h-7 w-fit border-0 bg-transparent px-1.5 py-0 text-sm shadow-none hover:bg-accent/50 focus-visible:ring-0"
+              >
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent
+                data-model-effort-popup
+                align="end"
+                className="z-[1120] w-max min-w-20 p-0"
+                onEscapeKeyDown={(event) => event.stopPropagation()}
+              >
+                {displayedEfforts.map((option) => (
+                  <SelectItem
+                    key={option.id}
+                    value={option.id}
+                    className="h-7 pl-2 pr-8 text-sm"
+                  >
+                    {t(`chat.modelSelector.effort.${option.id}`, option.name)}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          )}
+        </div>
+      )}
     </div>
   );
 }
 
 export type ModelSelectorProps = {
+  disabled?: boolean;
   parameterSettings?: ModelParameterSettingsControl;
   parameterSettingsScopeKey?: string;
   parameterSettingsDisabled?: boolean;
@@ -872,6 +903,7 @@ function ModelSelectorAdvancedSettings({
 }
 
 const ModelSelectorImpl = ({
+  disabled = false,
   parameterSettings,
   parameterSettingsScopeKey,
   parameterSettingsDisabled,
@@ -884,9 +916,14 @@ const ModelSelectorImpl = ({
   ...rootProps
 }: ModelSelectorProps) => {
   return (
-    <ModelSelectorRoot {...rootProps}>
+    <ModelSelectorRoot {...rootProps} open={disabled ? false : rootProps.open}>
       <ModelSelectorModelContext />
-      <ModelSelectorTrigger variant={variant} size={size} className={className}>
+      <ModelSelectorTrigger
+        disabled={disabled}
+        variant={variant}
+        size={size}
+        className={className}
+      >
         <ModelSelectorValue showEffort={showEffort} />
       </ModelSelectorTrigger>
       <ModelSelectorContent align="end" className={contentClassName}>
@@ -895,7 +932,7 @@ const ModelSelectorImpl = ({
         <ModelSelectorAdvancedSettings
           control={parameterSettings}
           scopeKey={parameterSettingsScopeKey}
-          disabled={parameterSettingsDisabled}
+          disabled={disabled || parameterSettingsDisabled}
         />
         <ModelSelectorList />
       </ModelSelectorContent>

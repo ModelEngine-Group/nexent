@@ -1,6 +1,6 @@
 import {
   PanelLeftIcon,
-  PlusIcon,
+  SquarePen,
   SearchIcon,
   Sparkle,
   XIcon,
@@ -8,6 +8,7 @@ import {
 import { useState } from "react";
 import { message } from "antd";
 import { StandardInput } from "@/components/common/StandardInput";
+import { StandardButton } from "@/components/common/StandardButton";
 import {
   Sidebar,
   SidebarContent,
@@ -119,14 +120,14 @@ export function ThreadListSidebar({
               </TooltipIconButton>
               {!newChatDesign && (
                 <TooltipIconButton
-                  tooltip={t("chat.sidebar.newConversation")}
+                  tooltip={t("workbench.sidebar.newConversation")}
                   side="right"
                   variant="ghost"
                   size="icon"
                   className="size-8"
                   onClick={onNewConversation}
                 >
-                  <PlusIcon className="size-4" />
+                  <SquarePen className="size-4" aria-hidden />
                 </TooltipIconButton>
               )}
             </div>
@@ -192,19 +193,83 @@ export function ThreadListSidebar({
                       <SidebarTrigger className="size-8 shrink-0" />
                     </div>
                   ) : (
-                    <div className="flex h-9 items-center gap-2 rounded-lg border border-border bg-white px-2">
-                      <SearchIcon className="size-4 shrink-0 text-muted-foreground" />
-                      <input
-                        value={legacySearchQuery}
-                        onChange={(event) =>
-                          setLegacySearchQuery(event.target.value)
-                        }
-                        placeholder={t("chat.sidebar.searchHistory")}
-                        aria-label={t("chat.sidebar.searchHistory")}
-                        className="h-full min-w-0 flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground"
-                      />
-                      <SidebarTrigger className="size-8 shrink-0" />
-                    </div>
+                    <>
+                      <div
+                        data-workbench-header-actions
+                        className="flex h-8 items-center gap-2"
+                      >
+                        {onNewConversation ? (
+                          <StandardButton
+                            variant="default"
+                            className="!bg-white flex !h-8 min-w-0 flex-1 !w-auto items-center justify-center gap-2 !rounded-lg font-medium hover:brightness-95"
+                            onClick={onNewConversation}
+                          >
+                            <SquarePen
+                              className="size-4 shrink-0"
+                              aria-hidden
+                            />
+                            {t("workbench.sidebar.newConversation")}
+                          </StandardButton>
+                        ) : (
+                          <ThreadListPrimitive.New
+                            className="flex h-8 min-w-0 flex-1 items-center justify-center gap-2 rounded-lg border border-border bg-white px-3 text-sm text-[#191919]"
+                            onClick={onPrepareNewConversation}
+                          >
+                            <SquarePen
+                              className="size-4 shrink-0"
+                              aria-hidden
+                            />
+                            {t("workbench.sidebar.newConversation")}
+                          </ThreadListPrimitive.New>
+                        )}
+                        <TooltipIconButton
+                          tooltip={t("chat.sidebar.search")}
+                          variant="ghost"
+                          size="icon"
+                          className="size-8 shrink-0"
+                          aria-expanded={searchOpen}
+                          onClick={() => {
+                            setSearchOpen((open) => !open);
+                            setLegacySearchQuery("");
+                          }}
+                        >
+                          <SearchIcon className="size-4" />
+                        </TooltipIconButton>
+                        <SidebarTrigger className="size-8 shrink-0" />
+                      </div>
+                      {searchOpen && (
+                        <div data-workbench-history-search>
+                          <StandardInput
+                            autoFocus
+                            value={legacySearchQuery}
+                            onChange={(event) =>
+                              setLegacySearchQuery(event.target.value)
+                            }
+                            placeholder={t("chat.sidebar.searchHistory")}
+                            aria-label={t("chat.sidebar.searchHistory")}
+                            onKeyDown={(event) => {
+                              if (event.key === "Escape") {
+                                setSearchOpen(false);
+                                setLegacySearchQuery("");
+                              }
+                            }}
+                            suffix={
+                              <button
+                                type="button"
+                                aria-label={t("chat.threadList.cancel")}
+                                className="flex cursor-pointer items-center text-muted-foreground hover:text-foreground"
+                                onClick={() => {
+                                  setSearchOpen(false);
+                                  setLegacySearchQuery("");
+                                }}
+                              >
+                                <XIcon className="size-3.5" aria-hidden />
+                              </button>
+                            }
+                          />
+                        </div>
+                      )}
+                    </>
                   )}
                   {newChatDesign && searchOpen && (
                     <StandardInput
@@ -237,24 +302,7 @@ export function ThreadListSidebar({
                       <DiscoverAgentsIcon className="size-4" />
                       {t("chat.sidebar.discoverAgents")}
                     </ThreadListPrimitive.New>
-                  ) : onNewConversation ? (
-                    <button
-                      type="button"
-                      className="flex h-9 flex-1 items-center gap-2 rounded-lg px-3 text-sm hover:bg-muted truncate"
-                      onClick={onNewConversation}
-                    >
-                      <PlusIcon className="size-4 shrink-0" />
-                      {t("chat.sidebar.newConversation")}
-                    </button>
-                  ) : (
-                    <ThreadListPrimitive.New
-                      className="flex h-9 flex-1 items-center gap-2 rounded-lg px-3 text-sm hover:bg-muted truncate"
-                      onClick={onPrepareNewConversation}
-                    >
-                      <PlusIcon className="size-4 shrink-0" />
-                      {t("chat.sidebar.newConversation")}
-                    </ThreadListPrimitive.New>
-                  )}
+                  ) : null}
                 </div>
               </SidebarHeader>
               <SidebarContent className="focus:outline-none">

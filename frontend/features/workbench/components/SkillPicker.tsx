@@ -3,7 +3,6 @@ import { useTranslation } from "react-i18next";
 import { WorkbenchResourceDrawer } from "./WorkbenchResourceDrawer";
 import { ResourceTagFilter } from "./ResourceTagFilter";
 import { useResourceTags } from "../hooks/useResourceTags";
-import { useRouter } from "next/navigation";
 
 import { ResourceSelectionActions } from "@/features/workbench/components/ResourceSelectionActions";
 
@@ -30,7 +29,7 @@ import {
 import type { SkillRepositoryListingItem } from "@/types/skillRepository";
 import { fetchSkillsList, type SkillListItem } from "@/services/skillService";
 import type { WorkbenchSkillMount } from "../types";
-import { ResourceCard } from "./ResourceCard";
+import { ResourceSelectionRow } from "./ResourceSelectionRow";
 import {
   ResourcePagination,
   RESOURCE_PAGE_SIZE,
@@ -69,7 +68,6 @@ export function SkillPicker({
     skills: SkillListItem[]
   ) => Promise<void> | void;
 }) {
-  const router = useRouter();
   const { t } = useTranslation();
   const [skills, setSkills] = useState<SkillListItem[]>([]);
   const [selectedIds, setSelectedIds] = useState<Set<number>>(
@@ -377,13 +375,13 @@ export function SkillPicker({
                 className="h-full [&>.ant-spin-container]:min-h-full"
               >
                 <ResourceSelectionGrid
-                  columns={2}
+                  layout="list"
+                  aria-label={t("workbench.controls.skills", "技能")}
                   fillAvailable
                   className="p-1"
                 >
                   {repository.map((item) => (
-                    <ResourceCard
-                      resourceType="skill"
+                    <ResourceSelectionRow
                       key={item.skill_repository_id}
                       title={item.name}
                       description={item.description ?? undefined}
@@ -464,7 +462,12 @@ export function SkillPicker({
               <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} />
             </div>
           ) : (
-            <ResourceSelectionGrid columns={2} fillAvailable className="p-1">
+            <ResourceSelectionGrid
+              layout="list"
+              aria-label={t("workbench.controls.skills", "技能")}
+              fillAvailable
+              className="p-1"
+            >
               {skills
                 .filter(
                   (skill) =>
@@ -481,27 +484,12 @@ export function SkillPicker({
                   return (
                     <div key={skillId} className="contents">
                       {resourcePage(filtered, minePage).includes(skill) && (
-                        <ResourceCard
-                          resourceType="skill"
+                        <ResourceSelectionRow
                           key={skillId}
                           title={skill.name}
                           description={skill.description}
                           tags={skill.tags || []}
-                          badges={[skill.source].filter(Boolean)}
                           selected={selectedNow}
-                          actions={
-                            <Button
-                              size="small"
-                              aria-label="编辑"
-                              onClick={() =>
-                                router.push(
-                                  `/skill-space?tab=mine&edit_skill_id=${skillId}`
-                                )
-                              }
-                            >
-                              编辑
-                            </Button>
-                          }
                           onClick={() => {
                             if (selectedNow) {
                               setSelectedIds((current) => {
@@ -527,12 +515,8 @@ export function SkillPicker({
                                 (current) => new Set([...current, skillId])
                               );
                           }}
-                          footer={
-                            invalid
-                              ? "需要填写必填配置"
-                              : selectedNow
-                                ? "已选择"
-                                : "选择"
+                          disabledReason={
+                            invalid ? "需要填写必填配置" : undefined
                           }
                         />
                       )}

@@ -10,6 +10,8 @@ from agents.create_agent_info import (
 from consts.model import WorkbenchGenerationConfig
 from nexent.core.agents.agent_model import AgentConfig, ModelConfig
 
+EFFORT_CAPABILITY = {"status": "supported", "control": "effort", "levels": ["none", "minimal", "low", "medium", "high", "xhigh", "max"]}
+
 
 def test_workbench_generation_schema_defaults_effort_to_low():
     assert WorkbenchGenerationConfig().thinking_effort == "low"
@@ -23,11 +25,11 @@ def test_complete_workbench_effort_schema_and_root_overlay(effort):
     )
     assert WorkbenchGenerationConfig.model_validate(config.model_dump()) == config
     root = AgentConfig(name="root", description="", tools=[], model_name="shared")
-    original = ModelConfig(cite_name="shared", model_name="provider/model", url="https://example.invalid",
+    original = ModelConfig(cite_name="shared", model_name="provider/model", url="https://example.invalid", reasoning_capability=EFFORT_CAPABILITY,
                            temperature=0.2, top_p=0.9, reasoning_effort="high")
     models = [original]
     apply_root_generation_overlay(models, root, config.model_dump())
-    assert models[-1].reasoning_effort == effort
+    assert models[-1].reasoning_effort == ("high" if effort == "auto" else effort)
     assert models[-1].temperature == 0.6
     assert models[-1].top_p == 0.83
     assert original.reasoning_effort == "high"
@@ -60,7 +62,7 @@ def test_neutral_generation_overlay_changes_only_root_alias():
     shared = ModelConfig(
         cite_name="shared_model",
         model_name="provider/model",
-        url="https://example.invalid",
+        url="https://example.invalid", reasoning_capability=EFFORT_CAPABILITY,
         temperature=0.1,
         top_p=0.95,
     )
@@ -85,7 +87,7 @@ def test_thinking_settings_apply_to_root_without_mutating_child_model():
     shared = ModelConfig(
         cite_name="shared_model",
         model_name="provider/model",
-        url="https://example.invalid",
+        url="https://example.invalid", reasoning_capability=EFFORT_CAPABILITY,
         extra_body={"existing": "value"},
         reasoning_effort="high",
         reasoning_budget_tokens=2048,
@@ -108,17 +110,17 @@ def test_thinking_settings_apply_to_root_without_mutating_child_model():
     assert models[-1].reasoning_budget_tokens is None
 
 
-def test_enabling_thinking_without_explicit_effort_defaults_to_low():
+def test_enabling_thinking_without_explicit_effort_inherits_provider_default():
     root = AgentConfig(name="root", description="", tools=[], model_name="shared_model")
     models = [ModelConfig(
         cite_name="shared_model",
         model_name="provider/model",
-        url="https://example.invalid",
+        url="https://example.invalid", reasoning_capability=EFFORT_CAPABILITY,
     )]
 
     apply_root_generation_overlay(models, root, {"deep_thinking": True})
 
-    assert models[-1].reasoning_effort == "low"
+    assert models[-1].reasoning_effort is None
     assert models[-1].extra_body == {"enable_thinking": True}
 
 
@@ -127,7 +129,7 @@ def test_disabling_thinking_drops_stale_effort_from_root_only():
     shared = ModelConfig(
         cite_name="shared_model",
         model_name="provider/model",
-        url="https://example.invalid",
+        url="https://example.invalid", reasoning_capability=EFFORT_CAPABILITY,
         extra_body={"enable_thinking": True, "reasoning_effort": "high"},
         reasoning_effort="high",
         reasoning_budget_tokens=2048,

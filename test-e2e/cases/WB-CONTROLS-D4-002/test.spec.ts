@@ -26,18 +26,13 @@ journey("WB-CONTROLS-D4-002", async ({ page, contract }) => {
       await button.click();
       await expect(button).toHaveAttribute("aria-pressed", "true");
       await expect(input).toHaveValue("");
-      const exit = page.getByRole("button", { name: "返回普通对话", exact: true });
-      await expect(exit).toHaveCSS("border-top-width", "1px");
-      await expect(exit).toHaveCSS("border-top-style", "solid");
-      const creationRadius = await button.evaluate(el => getComputedStyle(el).borderRadius);
-      await expect(exit).toHaveCSS("border-radius", creationRadius);
-      expect(Math.abs((await exit.boundingBox())!.height - (await button.boundingBox())!.height)).toBeLessThanOrEqual(1);
+      await expect(page.getByRole("button", { name: "返回普通对话", exact: true })).toHaveCount(0);
       await expectPosition();
       await page.getByRole("button", { name: new RegExp(example) }).click();
       await expect(input).not.toHaveValue("");
       await expectPosition();
       await expect(page.locator("[data-workbench-composer]")).toBeVisible();
-      await page.getByRole("button", { name: "返回普通对话", exact: true }).click();
+      await button.click();
       await expect(input).toHaveValue("Ordinary conversation draft");
       await expectPosition();
     }
@@ -54,7 +49,8 @@ journey("WB-CONTROLS-D4-002", async ({ page, contract }) => {
         return Math.abs(advancedLabel!.x - thinkingLabel!.x);
       }).toBeLessThanOrEqual(1);
       const effort = page.getByText("思考强度", { exact: true });
-      expect((await advanced.boundingBox())!.y).toBeGreaterThan((await effort.boundingBox())!.y);
+      await expect(effort).toHaveCount(0);
+      expect((await advanced.boundingBox())!.y).toBeGreaterThan((await page.getByText("深度思考", {exact:true}).boundingBox())!.y);
       await advanced.hover();
       const panel = page.getByRole("region", { name: "高级设置", exact: true });
       const temperature = panel.getByRole("spinbutton", { name: "温度", exact: true });
@@ -87,7 +83,7 @@ journey("WB-CONTROLS-D4-002", async ({ page, contract }) => {
       const sharedAdvanced = page.getByRole("button", { name: "高级设置", exact: true });
       await expect(sharedAdvanced).toBeVisible();
       await expect(page.getByText("深度思考", { exact: true })).toBeVisible();
-      await expect(page.getByText("思考强度", { exact: true })).toBeVisible();
+      await expect(page.getByText("思考强度", { exact: true })).toHaveCount(0);
       await sharedAdvanced.hover();
       const sharedPanel = page.getByRole("region", { name: "高级设置", exact: true });
       const sharedTemperature = sharedPanel.getByRole("spinbutton", { name: "温度", exact: true });
@@ -116,7 +112,7 @@ journey("WB-CONTROLS-D4-002", async ({ page, contract }) => {
           await expect(button).toBeVisible();
           await button.click();
           await expect(button).toHaveAttribute("aria-pressed", "true");
-          await page.getByRole("button", { name: "返回普通对话", exact: true }).click();
+          await button.click();
           await expect(button).toHaveAttribute("aria-pressed", "false");
         } else {
           await expect(button).toHaveCount(0);

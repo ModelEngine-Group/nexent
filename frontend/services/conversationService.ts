@@ -1,4 +1,4 @@
-import type { ReasoningEffort } from "@/types/modelConfig";
+import type { RuntimeGenerationOverrides } from "@/features/model-controls/turnControls";
 import { API_ENDPOINTS, ApiError } from "./api";
 
 import { chatConfig } from "@/const/chatConfig";
@@ -1087,10 +1087,7 @@ export const conversationService = {
       }>;
       agent_id?: number; // Add agent_id parameter
       model_id?: number; // Optional model override
-      generation_config?: {
-        deep_thinking: boolean;
-        thinking_effort?: ReasoningEffort;
-      };
+      generation_config?: RuntimeGenerationOverrides;
       reasoning_effort?:
         | "auto"
         | "none"

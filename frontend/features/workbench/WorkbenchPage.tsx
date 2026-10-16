@@ -35,6 +35,7 @@ import { message } from "antd";
 import type { Agent } from "@/types/agentConfig";
 import { useModelList } from "@/hooks/model/useModelList";
 import { withDefaultWorkbenchModel } from "./modelOptions";
+import { selectWorkbenchModel } from "@/features/model-controls/modelOptions";
 import log from "@/lib/logger";
 import { ConversationTitleGuard } from "@/lib/conversationTitle";
 import { conversationService } from "@/services/conversationService";
@@ -145,6 +146,9 @@ const HomeContent: FC = () => {
   const [skillPickerOpen, setSkillPickerOpen] = useState(false);
   const [agentPickerOpen, setAgentPickerOpen] = useState(false);
   const [isSavingModel, setIsSavingModel] = useState(false);
+  const rememberedModelControls = useRef(
+    new Map<string, typeof workbenchState.config.generation_config>()
+  );
   const [creationAgentsByThread, setCreationAgentsByThread] = useState<
     Record<string, CreatedAgentResult>
   >({});
@@ -807,9 +811,26 @@ const HomeContent: FC = () => {
     const id = Number(modelId);
     if (!Number.isInteger(id) || id <= 0) return;
     if (workbenchState.config.model_id === id) return;
-    const config = withDefaultWorkbenchModel(
-      { ...workbenchState.config, model_id: id },
-      availableLlmModels
+    const scope = `${user?.tenantId ?? ""}:${user?.id ?? ""}:${activeThreadId ?? "new"}`;
+    if (effectiveWorkbenchConfig.model_id != null) {
+      rememberedModelControls.current.set(
+        `${scope}:${effectiveWorkbenchConfig.model_id}`,
+        {
+          deep_thinking:
+            effectiveWorkbenchConfig.generation_config.deep_thinking,
+          thinking_effort:
+            effectiveWorkbenchConfig.generation_config.thinking_effort,
+          reasoning_budget_tokens:
+            effectiveWorkbenchConfig.generation_config.reasoning_budget_tokens,
+        }
+      );
+    }
+    const remembered = rememberedModelControls.current.get(`${scope}:${id}`);
+    const config = selectWorkbenchModel(
+      workbenchState.config,
+      availableLlmModels,
+      id,
+      remembered
     );
     const conversationId = Number(activeConversationId);
     const isExistingConversation =
@@ -839,10 +860,20 @@ const HomeContent: FC = () => {
       import("@/features/workbench").WorkbenchSessionConfig["generation_config"]
     >
   ) => {
+    const base =
+      patch.deep_thinking === true &&
+      !effectiveWorkbenchConfig.generation_config.deep_thinking &&
+      effectiveWorkbenchConfig.model_id != null
+        ? selectWorkbenchModel(
+            effectiveWorkbenchConfig,
+            availableLlmModels,
+            effectiveWorkbenchConfig.model_id
+          )
+        : effectiveWorkbenchConfig;
     const config = {
-      ...effectiveWorkbenchConfig,
+      ...base,
       generation_config: {
-        ...effectiveWorkbenchConfig.generation_config,
+        ...base.generation_config,
         ...patch,
       },
     };
@@ -961,7 +992,7 @@ const HomeContent: FC = () => {
           ? {
               runtimeMode: "nl2agent" as const,
               persistCreationHistory: true,
-              creationWorkbenchConfig: workbenchState.config,
+              creationWorkbenchConfig: effectiveWorkbenchConfig,
               autoCreateAgentDraft: shouldAutoCreateAgentDraft(
                 activeConversationId,
                 activeThreadId != null &&
@@ -990,12 +1021,12 @@ const HomeContent: FC = () => {
             ? {
                 runtimeMode: "nl2skill" as const,
                 persistCreationHistory: true,
-                creationWorkbenchConfig: workbenchState.config,
+                creationWorkbenchConfig: effectiveWorkbenchConfig,
                 complexity: "complicated" as const,
                 language: i18n.language?.startsWith("en")
                   ? ("en" as const)
                   : ("zh" as const),
-                modelId: workbenchState.config.model_id,
+                modelId: effectiveWorkbenchConfig.model_id,
                 draftSnapshot: {
                   ...(buildSkillSavePayload(skillDraftRef.current) ?? {}),
                   files: Object.entries(skillDraftRef.current.files).map(
@@ -1329,7 +1360,9 @@ const HomeContent: FC = () => {
               </div>
             }
             selectedModelId={effectiveWorkbenchConfig.model_id?.toString()}
-            deepThinking={workbenchState.config.generation_config.deep_thinking}
+            deepThinking={
+              effectiveWorkbenchConfig.generation_config.deep_thinking
+            }
             onDeepThinkingChange={(enabled) =>
               void handleThinkingChange({ deep_thinking: enabled })
             }
@@ -1340,18 +1373,28 @@ const HomeContent: FC = () => {
               void handleThinkingChange({ thinking_effort: effort })
             }
             showModelSelector={true}
+            reasoningBudgetTokens={
+              effectiveWorkbenchConfig.generation_config
+                .reasoning_budget_tokens ?? 0
+            }
+            onReasoningBudgetTokensChange={(budget) =>
+              void handleThinkingChange({
+                reasoning_budget_tokens: budget,
+                thinking_effort: "auto",
+              })
+            }
             modelParameterSettings={{
-              scopeKey: `${activeThreadId ?? "new"}:${effectiveWorkbenchConfig.model_id ?? "default"}`,
+              scopeKey: `${user?.tenantId ?? ""}:${user?.id ?? ""}:${activeThreadId ?? "new"}:${effectiveWorkbenchConfig.model_id ?? "default"}`,
               value:
                 localModelParameters[
-                  `${activeThreadId ?? "new"}:${effectiveWorkbenchConfig.model_id ?? "default"}`
+                  `${user?.tenantId ?? ""}:${user?.id ?? ""}:${activeThreadId ?? "new"}:${effectiveWorkbenchConfig.model_id ?? "default"}`
                 ] ?? DEFAULT_MODEL_PARAMETER_VALUES,
               defaultValue: DEFAULT_MODEL_PARAMETER_VALUES,
               disabled: isThreadRunning,
               onChange: (value) =>
                 setLocalModelParameters((current) => ({
                   ...current,
-                  [`${activeThreadId ?? "new"}:${effectiveWorkbenchConfig.model_id ?? "default"}`]:
+                  [`${user?.tenantId ?? ""}:${user?.id ?? ""}:${activeThreadId ?? "new"}:${effectiveWorkbenchConfig.model_id ?? "default"}`]:
                     value,
                 })),
             }}
@@ -1370,7 +1413,6 @@ const HomeContent: FC = () => {
             onRuntimeMetadataChange={handleRuntimeMetadataChange}
             readOnly={
               !workbenchSendability.canSend ||
-              (!isCreating && effectiveWorkbenchConfig.model_id == null) ||
               isSavingModel ||
               (workbenchState.config.mode === "agent_create" &&
                 isAgentCreationAwaitingDraft(

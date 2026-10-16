@@ -88,21 +88,46 @@ it("keeps the current selection when loading defaults fails", async () => {
   );
   expect(confirm).not.toHaveBeenCalled();
 });
-it("editing navigates without selecting the skill", async () => {
+it("shows text-only Skill rows in both tabs without an edit route", async () => {
   const confirm = vi.fn();
+  vi.mocked(fetchSkillsList).mockResolvedValue([
+    { ...base, description: "Skill details", tags: ["Finance"] },
+  ]);
+  vi.mocked(fetchSkillRepositoryListings).mockResolvedValue({
+    items: [
+      {
+        skill_repository_id: 5,
+        name: "Repository Skill",
+        description: "Repository details",
+        tags: ["Shared"],
+        status: "shared",
+      },
+    ],
+  } as Awaited<ReturnType<typeof fetchSkillRepositoryListings>>);
   render(
     <SkillPicker open selected={[]} onCancel={vi.fn()} onConfirm={confirm} />
   );
-  const card = (await screen.findByRole("option", { name: /Default Skill/ }))
-    .parentElement!;
-  await userEvent.click(within(card).getByRole("button", { name: "编辑" }));
-  expect(push).toHaveBeenCalledWith("/skill-space?tab=mine&edit_skill_id=1");
-  expect(screen.getByRole("option", { name: /Default Skill/ })).toHaveAttribute(
-    "aria-selected",
-    "false"
-  );
+  const row = await screen.findByRole("option", { name: "Default Skill" });
+  expect(row).toHaveTextContent("Skill details");
+  expect(row).toHaveTextContent("Finance");
+  expect(row.querySelector("svg")).toBeNull();
+  expect(
+    screen.queryByRole("button", { name: "编辑" })
+  ).not.toBeInTheDocument();
+  await userEvent.click(row);
+  expect(row).toHaveAttribute("aria-selected", "true");
   expect(confirm).not.toHaveBeenCalled();
+  await userEvent.click(screen.getByRole("tab", { name: "仓库" }));
+  const repositoryRow = await screen.findByRole("option", {
+    name: "Repository Skill",
+  });
+  expect(repositoryRow).toHaveTextContent("Repository details");
+  expect(repositoryRow).toHaveTextContent("Shared");
+  expect(repositoryRow.querySelector("svg")).toBeNull();
+  expect(screen.getByRole("button", { name: "安装并选择" })).toBeEnabled();
+  expect(push).not.toHaveBeenCalled();
 });
+
 beforeEach(() => {
   vi.clearAllMocks();
   vi.mocked(fetchSkillsList).mockResolvedValue([

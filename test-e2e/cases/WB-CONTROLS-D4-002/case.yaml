@@ -4,37 +4,67 @@ module: CHAT-WORKBENCH
 case:
   case_id: WB-CONTROLS-D4-002
   feature_id: WB-CONTROLS
-  requirement_ids: [WB-CONTROLS-20261013, WB-SHARED-PARAMS-20261014]
-  business_rule_ids: [WB-CONTROLS-RULE-002, WB-CONTROLS-RULE-003]
+  requirement_ids:
+  - WB-CONTROLS-20261013
+  - WB-SHARED-PARAMS-20261014
+  - WB-CREATION-TOGGLE-EXIT-20261015
+  business_rule_ids:
+  - WB-CONTROLS-RULE-002
+  - WB-CONTROLS-RULE-003
   title: Creation recommendations and local advanced settings
   type: E2E
   priority: P1
   status: active
   automation: automated
   objective: Verify true creation modes and local-only parameter editing with real pointer and keyboard input.
-  preconditions: ['Local frontend available with authorized mock user, newchat page access, selectable model and memory disabled.']
-  test_data: {profile: mock}
+  preconditions:
+  - Local frontend available with authorized mock user, newchat page access, selectable model and memory disabled.
+  test_data:
+    profile: mock
   steps:
-    - order: 1
-      action: Enter each creation mode using above-composer buttons and fill a mode-specific recommendation.
-      expected: Matching examples fill input without sending; return restores ordinary conversation using a rounded bordered button matching the adjacent creation buttons. Chinese Skill button reads 技能创建; composer and textarea keep their top positions during mode entry, recommendation fill and return.
-    - order: 2
-      action: Hover Advanced settings below effort, drag and type integer values, test invalid input and restore defaults.
-      expected: Advanced settings has no gear and its label aligns with the other setting rows. Controls synchronize within 1-100, remain open during editing, and only local state changes. New Agent chat also exposes shared Advanced settings with frontend-only numeric editing while real model/thinking controls remain available.
-    - order: 3
-      action: Reload with no creation permission, Agent only, Skill only and both permissions while retaining resource page access; enter each allowed mode.
-      expected: Only agent:create and skill:create independently enable their matching creation buttons; allowed buttons enter the matching mode without generation.
-  expected_results: [Mode-specific recommendations and local parameter controls are usable through the browser.]
-  forbidden_side_effects: [No automatic generation or parameter API requests.]
+  - order: 1
+    action: Enter each creation mode using above-composer buttons and fill a mode-specific recommendation.
+    expected: Matching examples fill input without sending; no standalone return-to-chat button is displayed. Clicking the
+      active creation button restores the ordinary draft. Chinese Skill button reads 技能创建; composer and textarea keep their
+      top positions during mode entry, recommendation fill and return.
+  - order: 2
+    action: Hover Advanced settings below effort, drag and type integer values, test invalid input and restore defaults.
+    expected: Advanced settings has no gear and its label aligns with the other setting rows. Controls synchronize within
+      1-100, remain open during editing, and only local state changes. New Agent chat also exposes shared Advanced settings
+      with frontend-only numeric editing while real model/thinking controls remain available.
+  - order: 3
+    action: Reload with no creation permission, Agent only, Skill only and both permissions while retaining resource page
+      access; enter each allowed mode.
+    expected: Only agent:create and skill:create independently enable their matching creation buttons; allowed buttons enter
+      the matching mode without generation.
+  expected_results:
+  - Mode-specific recommendations and local parameter controls are usable through the browser.
+  forbidden_side_effects:
+  - No automatic generation or parameter API requests.
   actor: Authorized mock tenant user
-  journey: [Open Workbench, Switch creation modes, Fill recommendation, Return, Open advanced settings, Edit local values]
-  final_business_result: [User can prepare creation input and model settings without unintended backend writes.]
-  failure_evidence: [Browser trace and assertion screenshot.]
+  journey:
+  - Open Workbench
+  - Switch creation modes
+  - Fill recommendation
+  - Return
+  - Open advanced settings
+  - Edit local values
+  final_business_result:
+  - User can prepare creation input and model settings without unintended backend writes.
+  failure_evidence:
+  - Browser trace and assertion screenshot.
   execution:
-    profiles: [{name: mock, required_services: []}]
+    profiles:
+    - name: mock
+      required_services: []
   acceptance:
-    - id: AC-01
-      description: Creation permissions, mode entry and advanced-settings browser journey including no-write assertions.
-      steps: [1, 2, 3]
-      expected_results: [1]
-      forbidden_side_effects: [1]
+  - id: AC-01
+    description: Creation permissions, mode entry and advanced-settings browser journey including no-write assertions.
+    steps:
+    - 1
+    - 2
+    - 3
+    expected_results:
+    - 1
+    forbidden_side_effects:
+    - 1

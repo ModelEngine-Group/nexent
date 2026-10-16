@@ -69,10 +69,10 @@ it("does not fabricate options when the selected model has no supported effort c
   );
   const user = userEvent.setup();
   await user.click(screen.getByRole("switch"));
-  expect(screen.getByRole("combobox")).toBeDisabled();
+  expect(screen.queryByRole("combobox")).not.toBeInTheDocument();
   expect(screen.queryByText("High")).toBeNull();
   expect(register.mock.lastCall?.[0].getModelContext()).toMatchObject({
-    config: { modelName: "12", deepThinking: true },
+    config: { modelName: "12", deepThinking: false },
   });
   const config = register.mock.lastCall?.[0].getModelContext() as {
     config: Record<string, unknown>;
@@ -206,7 +206,7 @@ it("shared advanced settings remains available with and without controlled value
   const advanced = screen.getByRole("button", { name: "高级设置" });
   expect(advanced.querySelector(".lucide-settings")).toBeNull();
   expect(
-    screen.getByRole("combobox").compareDocumentPosition(advanced) &
+    screen.getByRole("switch").compareDocumentPosition(advanced) &
       Node.DOCUMENT_POSITION_FOLLOWING
   ).toBeTruthy();
   const config = register.mock.lastCall?.[0].getModelContext() as {
@@ -243,7 +243,7 @@ it("shows settings even without a selected model and forwards the first selectio
     container.querySelector('[data-slot="model-selector-value"]')
   ).not.toHaveTextContent("Qwen");
   expect(screen.getByRole("switch")).toBeInTheDocument();
-  expect(screen.getByRole("combobox")).toBeInTheDocument();
+  expect(screen.queryByRole("combobox")).not.toBeInTheDocument();
   await user.click(screen.getByRole("button", { name: "Qwen" }));
   expect(onValueChange).toHaveBeenCalledExactlyOnceWith("12");
 });
@@ -410,4 +410,24 @@ it("shared parameter editing honors disabled state and controlled callers", asyn
     "aria-disabled",
     "true"
   );
+});
+
+it("collapses reasoning while off and restores the controls without changing supported options", async () => {
+  const view = (enabled: boolean) => (
+    <ModelSelector
+      models={models}
+      value="12"
+      deepThinking={enabled}
+      showEffort
+      effort="high"
+    />
+  );
+  const { rerender } = render(view(false));
+  expect(screen.getByRole("switch")).toHaveAttribute("aria-checked", "false");
+  expect(screen.queryByRole("combobox")).not.toBeInTheDocument();
+  expect(screen.queryByText("思考强度")).not.toBeInTheDocument();
+  rerender(view(true));
+  expect(screen.getByRole("combobox")).toBeEnabled();
+  await userEvent.click(screen.getByRole("combobox"));
+  expect(screen.getByRole("option", { name: "High" })).toBeVisible();
 });

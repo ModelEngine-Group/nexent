@@ -6,17 +6,30 @@ feature:
   feature_id: WB-CONTROLS
   name: Workbench resource and creation controls
   status: active
-  description: Direct internal resource drawers, explicit creation modes and shared local model settings for Workbench and Agent chat.
+  description: Direct internal resource drawers, explicit creation modes and shared local model settings for Workbench and
+    Agent chat.
   business_rules:
-    - rule_id: WB-CONTROLS-RULE-001
-      description: Direct controls open draft resource drawers with Mine/Repository and structured filtering; cancel never mounts resources.
-    - rule_id: WB-CONTROLS-RULE-002
-      description: Above-composer creation actions select isolated modes with matching fill-only recommendations.
-    - rule_id: WB-CONTROLS-RULE-003
-      description: Shared model selector exposes Advanced settings by default below reasoning effort in Workbench and Agent chat, synchronizing local 1-100 levels without backend mutations.
-    - rule_id: WB-CONTROLS-RULE-004
-      description: Both entry points derive available reasoning controls from model capability regardless of saved enablement, forwarding supported effort enum values through existing generation paths while preserving other model parameters.
-  required_test_stages: [D4]
+  - rule_id: WB-CONTROLS-RULE-001
+    description: Direct controls open draft resource drawers with Mine/Repository and structured filtering; cancel never mounts
+      resources.
+  - rule_id: WB-CONTROLS-RULE-002
+    description: Above-composer creation actions select isolated modes with matching fill-only recommendations.
+  - rule_id: WB-CONTROLS-RULE-003
+    description: Shared model selector exposes Advanced settings by default below reasoning effort in Workbench and Agent
+      chat, synchronizing local 1-100 levels without backend mutations.
+  - rule_id: WB-CONTROLS-RULE-004
+    description: Both entry points derive available reasoning controls from model capability regardless of saved enablement,
+      forwarding supported effort enum values through existing generation paths while preserving other model parameters.
+  required_test_stages:
+  - D4
   source:
-    requirement_ids: [WB-CONTROLS-20261013, WB-SHARED-PARAMS-20261014, WB-REASONING-CAPABILITY-20261014]
+    requirement_ids:
+    - WB-CONTROLS-20261013
+    - WB-SHARED-PARAMS-20261014
+    - WB-REASONING-CAPABILITY-20261014
+    - CHAT-WORKBENCH-REFINEMENTS-20261015
+    - CHAT-WORKBENCH-HEADER-DEFAULTS-20261015
+    - WB-CREATION-TOGGLE-EXIT-20261015
+    - WB-NEW-CONVERSATION-STYLE-20261015
+    - WB-RESOURCE-LISTS-20261015
     spec_path: ../nexent-doc/nexent/agent-workbench/changes/chat-workbench-resource-controls/proposal.md

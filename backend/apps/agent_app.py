@@ -81,6 +81,7 @@ from services.workbench_service import (
 from management.services.agent.system_agent_provider import ensure_workbench_main_agent
 from services.agent_draft_permission_service import AgentDraftEditError
 from services.nl2agent_service import Nl2AgentDraftSaveError, create_nl2agent_stream
+from consts.exceptions import RunModelControlsError
 from services.workbench_creation_history_service import (
     prepare_creation_history,
     persist_creation_stream,
@@ -258,6 +259,9 @@ async def agent_run_api(
         raise HTTPException(status_code=HTTPStatus.FORBIDDEN, detail=str(e)) from e
     except WorkbenchError as e:
         raise HTTPException(status_code=e.status_code, detail={"code": e.code}) from e
+    except RunModelControlsError as e:
+        status = {"model_not_available": 404, "model_unavailable": 409, "model_type_invalid": 400}.get(e.code, 422)
+        raise HTTPException(status_code=status, detail={"code": e.code}) from e
     except ValidationError as e:
         raise HTTPException(
             status_code=HTTPStatus.UNPROCESSABLE_ENTITY,
@@ -313,6 +317,9 @@ async def northbound_agent_run_api(
             status_code=HTTPStatus.FORBIDDEN,
             detail=str(exc),
         ) from exc
+    except RunModelControlsError as exc:
+        status = {"model_not_available": 404, "model_unavailable": 409, "model_type_invalid": 400}.get(exc.code, 422)
+        raise HTTPException(status_code=status, detail={"code": exc.code}) from exc
     except ValidationError as exc:
         raise HTTPException(
             status_code=HTTPStatus.UNPROCESSABLE_ENTITY,
@@ -395,6 +402,9 @@ async def nl2agent_run_api(
             status_code=status_code,
             detail={"code": exc.code, "message": "Agent draft cannot be reused."},
         ) from exc
+    except RunModelControlsError as exc:
+        status = {"model_not_available": 404, "model_unavailable": 409, "model_type_invalid": 400}.get(exc.code, 422)
+        raise HTTPException(status_code=status, detail={"code": exc.code}) from exc
     except Nl2AgentDraftSaveError as exc:
         raise HTTPException(
             status_code=HTTPStatus.BAD_REQUEST,

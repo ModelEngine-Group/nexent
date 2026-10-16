@@ -370,3 +370,46 @@ it("reopening knowledge selection ignores the unfinished catalog from the previo
     screen.getByRole("button", { name: "chat.knowledgeScope.confirm" })
   ).toBeEnabled();
 });
+
+it("uses text-only knowledge rows in the Workbench drawer and preserves cancellation", async () => {
+  const cancel = vi.fn(),
+    confirm = vi.fn();
+  vi.mocked(knowledgeBaseService.getKnowledgeBasesInfo).mockResolvedValue({
+    knowledgeBases: [
+      {
+        id: "index-a",
+        knowledge_id: 1,
+        name: "Alpha",
+        description: "Knowledge details",
+        tags: ["Finance"],
+        embeddingModel: "model-a",
+        permission: "READ_ONLY",
+        documentCount: 2,
+      },
+    ] as KnowledgeBase[],
+  });
+  render(
+    <ConversationKnowledgeScopeModal
+      open
+      presentation="drawer"
+      value={selection}
+      capabilities={capabilities}
+      onCancel={cancel}
+      onConfirm={confirm}
+    />
+  );
+  const row = await screen.findByRole("option", { name: "Alpha" });
+  expect(row).toHaveTextContent("Knowledge details");
+  expect(row).toHaveTextContent("Finance");
+  expect(row.querySelector(".lucide-book-open")).toBeNull();
+  expect(row).not.toHaveTextContent("READ_ONLY");
+  expect(row).not.toHaveTextContent("model-a");
+  expect(
+    screen.queryByRole("button", { name: "编辑" })
+  ).not.toBeInTheDocument();
+  await userEvent.click(row);
+  expect(row).toHaveAttribute("aria-selected", "false");
+  await userEvent.click(screen.getByRole("button", { name: "common.cancel" }));
+  expect(cancel).toHaveBeenCalledOnce();
+  expect(confirm).not.toHaveBeenCalled();
+});

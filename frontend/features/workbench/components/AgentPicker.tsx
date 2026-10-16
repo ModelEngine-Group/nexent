@@ -3,14 +3,12 @@
 import { WorkbenchResourceDrawer } from "./WorkbenchResourceDrawer";
 import { ResourceTagFilter } from "./ResourceTagFilter";
 import { useResourceTags } from "../hooks/useResourceTags";
-import { ResourceSelectionGrid } from "@/features/workbench/components/ResourceSelectionGrid";
 import { ResourceSelectionActions } from "./ResourceSelectionActions";
 import { SelectedResourceTags } from "./SelectedResourceTags";
-import { useRouter } from "next/navigation";
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import { Alert, Button, Input, Modal, Spin, Tabs, message } from "antd";
+import { Alert, Button, Empty, Input, Modal, Spin, Tabs, message } from "antd";
 import type {
   AgentRepositoryListingItem,
   RepositoryImportPrecheckResponse,
@@ -22,7 +20,7 @@ import {
 } from "@/services/agentRepositoryService";
 import { fetchPublishedAgentList } from "@/services/agentConfigService";
 import type { Agent } from "@/types/agentConfig";
-import { ResourceCard } from "./ResourceCard";
+import { ResourceSelectionRow } from "./ResourceSelectionRow";
 import {
   ResourcePagination,
   RESOURCE_PAGE_SIZE,
@@ -52,7 +50,6 @@ export function AgentPicker({
   multiple?: boolean;
   disabled?: boolean;
 }) {
-  const router = useRouter();
   const [draft, setDraft] = useState<Agent[]>(() => {
     const ids = selectedIds ?? (selectedId ? [selectedId] : []);
     return open
@@ -85,10 +82,7 @@ export function AgentPicker({
   };
   const [search, setSearch] = useState("");
   const queryClient = useQueryClient();
-  const { t, i18n } = useTranslation();
-  const locale = (i18n.resolvedLanguage || i18n.language).startsWith("en")
-    ? "en"
-    : "zh";
+  const { t } = useTranslation();
   const [tab, setTab] = useState("mine");
   const [page, setPage] = useState(1);
   const [total, setTotal] = useState(0);
@@ -290,16 +284,13 @@ export function AgentPicker({
           spinning={loading}
           className="h-full [&>.ant-spin-container]:min-h-full"
         >
-          <ResourceSelectionGrid
-            columns={2}
-            fillAvailable
-            role="listbox"
-            aria-label="智能体资源"
-            className="p-1"
-          >
+          <div role="listbox" aria-label="智能体资源" className="min-h-full">
+            {(tab === "mine" ? visible.length : repository.length) === 0 && (
+              <Empty className="py-12" image={Empty.PRESENTED_IMAGE_SIMPLE} />
+            )}
             {tab === "mine"
               ? resourcePage(visible, page).map((agent) => (
-                  <ResourceCard
+                  <ResourceSelectionRow
                     key={agent.id}
                     title={agent.display_name || agent.name}
                     description={agent.description}
@@ -314,28 +305,15 @@ export function AgentPicker({
                           ).join("；") || "智能体不可用，服务端未提供具体原因"
                         : undefined
                     }
-                    badges={[`v${agent.current_version_no ?? "-"}`]}
                     onClick={() => toggle(agent)}
-                    actions={
-                      <Button
-                        size="small"
-                        aria-label="编辑"
-                        onClick={() =>
-                          router.push(`/${locale}/agents/${agent.id}`)
-                        }
-                      >
-                        编辑
-                      </Button>
-                    }
                   />
                 ))
               : repository.map((item) => (
-                  <ResourceCard
+                  <ResourceSelectionRow
                     key={item.agent_repository_id}
                     title={item.display_name || item.name}
                     description={item.description ?? undefined}
                     tags={item.tags}
-                    badges={[item.version_label ?? "仓库"]}
                     disabled={loading || importing}
                     actions={
                       <Button
@@ -349,7 +327,7 @@ export function AgentPicker({
                     onClick={() => void check(item)}
                   />
                 ))}
-          </ResourceSelectionGrid>
+          </div>
         </Spin>
       }
       pagination={
