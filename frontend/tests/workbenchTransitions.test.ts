@@ -1,3 +1,5 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { AssistantRuntime } from "@assistant-ui/react";

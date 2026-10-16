@@ -1,3 +1,5 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
 import { modelService } from "@/services/modelService";

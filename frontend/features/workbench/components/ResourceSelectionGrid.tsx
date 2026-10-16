@@ -1,3 +1,5 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import { Children, type HTMLAttributes } from "react";
 import ResourceCardGrid from "@/components/resource/ResourceCardGrid";
 import { cn } from "@/lib/utils";

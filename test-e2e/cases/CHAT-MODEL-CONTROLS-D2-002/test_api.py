@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """CHAT-MODEL-CONTROLS-D2-002: actual API permissions and safe model errors."""
 
 import pytest

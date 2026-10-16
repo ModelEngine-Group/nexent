@@ -1,3 +1,5 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 export interface ConversationListItem {
   conversation_id: number;
   conversation_title: string;

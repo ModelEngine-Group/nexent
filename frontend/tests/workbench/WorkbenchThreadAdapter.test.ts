@@ -1,3 +1,5 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import { expect, it, vi } from "vitest";
 import { createConversationThreadListAdapter } from "@/app/newchat/adapter/conversation-thread-list-adapter";
 import { conversationService } from "@/services/conversationService";

@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """A case-owned HTTP provider whose wire is captured without credentials."""
 
 import json

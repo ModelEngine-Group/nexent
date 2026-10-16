@@ -1,3 +1,5 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import type { RuntimeGenerationOverrides } from "@/features/model-controls/turnControls";
 import { API_ENDPOINTS, ApiError } from "./api";
 

@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """CHAT-MODEL-CONTROLS-D2-001: actual HTTP DTO and compatibility contract."""
 
 import json

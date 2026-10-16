@@ -1,3 +1,5 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import { expect, type Page } from "playwright/test";
 import { prepareWorkbench } from "./workbench-controls";
 import { makeDraft, fulfillEditorReadFixture } from "./agent-editor-reads.mjs";

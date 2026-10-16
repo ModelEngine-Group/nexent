@@ -1,3 +1,5 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 const listeners = new Set<(modelId: number) => void>();
 
 /** Notify mounted controllers only; no persistent model configuration changes. */

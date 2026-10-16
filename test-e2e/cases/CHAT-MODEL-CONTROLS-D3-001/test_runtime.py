@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """CHAT-MODEL-CONTROLS-D3-001: provider wire and capacity on real runtime paths."""
 
 import json

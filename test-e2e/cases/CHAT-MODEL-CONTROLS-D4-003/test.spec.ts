@@ -1,3 +1,5 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import { expect } from "playwright/test";
 import { journey } from "../../infra/automation/d4/runner/journey";
 import { creatorEntries, prepareControls, enter, chooseModel, send, openControls, settings, input } from "../../infra/automation/d4/fixtures/model-controls";

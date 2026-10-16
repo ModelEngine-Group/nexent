@@ -1,3 +1,5 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import type { WorkbenchMode } from "../types";
 import { Lightbulb, Bot } from "lucide-react";
 import { useTranslation } from "react-i18next";

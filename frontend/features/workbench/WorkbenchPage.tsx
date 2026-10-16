@@ -1,3 +1,5 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 "use client";
 
 import { DEFAULT_MODEL_PARAMETER_VALUES } from "@/const/modelParameterSettings";

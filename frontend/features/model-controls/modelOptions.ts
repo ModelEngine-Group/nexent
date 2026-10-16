@@ -1,3 +1,5 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import type { Agent, PublishedAgent } from "@/types/agentConfig";
 import type {
   ModelOption as CatalogModelOption,

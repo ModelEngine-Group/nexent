@@ -1,3 +1,5 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import { act, renderHook } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import { useConversationModelControls } from "@/features/model-controls/useConversationModelControls";

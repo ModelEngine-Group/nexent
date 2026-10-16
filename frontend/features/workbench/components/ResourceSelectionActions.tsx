@@ -1,3 +1,5 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import { Button } from "antd";
 import { useTranslation } from "react-i18next";
 

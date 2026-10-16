@@ -1,3 +1,5 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import { fileURLToPath } from "node:url";
 import { createServer } from "node:http";
 import fs from "node:fs";

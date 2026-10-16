@@ -1,3 +1,5 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import type { ReasoningEffort } from "@/types/modelConfig";
 import { isReasoningEffort } from "@/lib/modelReasoning";
 

@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """HTTP input/error mappings with controlled service boundaries."""
 
 import pytest

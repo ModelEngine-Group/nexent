@@ -1,3 +1,5 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import type { ModelParameterValue } from "@/types/modelParameterSettings";
 
 /** UI levels only; backend/provider conversion belongs to a future adapter. */

@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """Stopping a consumer must not wait for an unresponsive provider worker."""
 
 import asyncio

@@ -1,3 +1,5 @@
+-- Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 -- Account-scoped Workbench preferences; all writers serialize scope uniqueness.
 CREATE TABLE IF NOT EXISTS nexent.conversation_workbench_pin_t (
     pin_id SERIAL PRIMARY KEY,
