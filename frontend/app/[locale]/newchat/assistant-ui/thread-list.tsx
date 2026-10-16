@@ -709,7 +709,7 @@ const ThreadListItems: FC<ThreadListItemsProps> = ({
     }
     return (
       <div className="flex flex-col">
-        {timeGroups.map((group) => (
+        {timeGroups.map((group, groupIndex) => (
           <Fragment key={group.label}>
             {group.label !== "chat.threadList.recentConversations" && (
               <div
@@ -726,6 +726,13 @@ const ThreadListItems: FC<ThreadListItemsProps> = ({
                 components={{ ThreadListItem: TimeGroupThreadListItem }}
               />
             ))}
+            {group.label === "chat.threadList.pinned" &&
+              groupIndex < timeGroups.length - 1 && (
+                <div
+                  role="separator"
+                  className="mx-3 my-2 border-t border-dashed border-gray-400/60 dark:border-gray-500/70"
+                />
+              )}
           </Fragment>
         ))}
       </div>
@@ -850,12 +857,21 @@ const ThreadListItems: FC<ThreadListItemsProps> = ({
                 {groupLabel}
               </button>
             )}
-            {visibleEntries.map(({ id, index }) => (
-              <ThreadListPrimitive.ItemByIndex
-                key={id}
-                index={index}
-                components={{ ThreadListItem: GroupedThreadListItem }}
-              />
+            {visibleEntries.map(({ id, index }, entryIndex) => (
+              <Fragment key={id}>
+                {entryIndex > 0 &&
+                  pinned?.pinnedIds.has(visibleEntries[entryIndex - 1].id) &&
+                  !pinned.pinnedIds.has(id) && (
+                    <div
+                      role="separator"
+                      className="ml-8 mr-3 my-2 border-t border-dashed border-gray-400/60 dark:border-gray-500/70"
+                    />
+                  )}
+                <ThreadListPrimitive.ItemByIndex
+                  index={index}
+                  components={{ ThreadListItem: GroupedThreadListItem }}
+                />
+              </Fragment>
             ))}
           </Fragment>
         );
@@ -1184,13 +1200,20 @@ const ThreadListItem: FC<
   newChatDesign = false,
   variant = "agent",
 }) => {
+  const thread = useAuiState((s) => s.threadListItem);
+  const pinned = usePinnedThreads();
+  const isPinned = pinned?.isPinned(thread) ?? false;
+
   return (
     <ThreadListItemPrimitive.Root
-      className={
+      data-pinned={isPinned || undefined}
+      className={cn(
         variant === "time"
           ? "group/item flex h-10 items-center gap-2 rounded-lg px-2 py-2 hover:bg-white data-[active=true]:bg-white"
-          : "group/item flex h-10 items-center rounded-lg hover:bg-white/70 data-[active=true]:bg-white"
-      }
+          : "group/item flex h-10 items-center rounded-lg hover:bg-white/70 data-[active=true]:bg-white",
+        isPinned &&
+          "bg-blue-50 hover:bg-blue-100/70 data-[active=true]:bg-blue-100 dark:bg-blue-950/30 dark:hover:bg-blue-950/50 dark:data-[active=true]:bg-blue-950/60"
+      )}
     >
       <ThreadListItemContent
         completedConversations={completedConversations}
@@ -1326,19 +1349,20 @@ const ThreadListItemContent: FC<ThreadListItemContentProps> = ({
     }
     return (
       <ThreadListItemPrimitive.Trigger
-        className={
+        className={cn(
           variant === "time"
             ? "flex h-10 min-w-0 flex-1 items-center gap-2 text-left text-base leading-6 text-[#191919]"
-            : "flex h-10 min-w-0 flex-1 items-center gap-3 pl-8 pr-3 text-left text-[14px] text-[#595959]"
-        }
+            : "flex h-10 min-w-0 flex-1 items-center gap-3 pl-8 pr-3 text-left text-[14px] text-[#595959]",
+          isPinned && variant === "agent" && "gap-2 pl-3"
+        )}
       >
-        <div className="flex min-w-0 flex-1 items-center gap-1.5 text-left">
-          {variant === "time" && isPinned && (
-            <PinIcon
-              aria-label={t("chat.threadList.pinned")}
-              className="size-3.5 shrink-0 text-muted-foreground"
-            />
-          )}
+        {isPinned && (
+          <PinIcon
+            className="size-3 shrink-0 text-blue-500"
+            aria-label={t("chat.threadList.pinned")}
+          />
+        )}
+        <div className="flex min-w-0 flex-1 items-center text-left">
           <Tooltip>
             <TooltipTrigger asChild>
               <span className="min-w-0 flex-1 truncate text-left">{title}</span>

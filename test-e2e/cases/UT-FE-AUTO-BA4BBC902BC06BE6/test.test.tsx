@@ -1,3 +1,5 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import React from "react";
 import { act, fireEvent, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
@@ -111,7 +113,7 @@ describe("UT-FE-AUTO-BA4BBC902BC06BE6", () => {
     );
     await waitFor(() =>
       expect(identity.push).toHaveBeenCalledWith(
-        "/zh/knowledges?kb=created-kb",
+        "/zh/knowledges/detail?kb=created-kb",
       ),
     );
   });

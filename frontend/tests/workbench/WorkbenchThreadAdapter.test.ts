@@ -121,3 +121,37 @@ it("ordinary Agent conversation initialization retains its existing contract", a
     await createConversationThreadListAdapter("agent_chat").initialize("draft")
   ).toEqual({ remoteId: "", externalId: "" });
 });
+
+it("uses an injected refreshed pin snapshot when reloading history and deduplicates the next page", async () => {
+  const list = vi
+    .spyOn(conversationService, "getList")
+    .mockResolvedValueOnce({ items: [listed], metadata })
+    .mockResolvedValueOnce({
+      items: [
+        { ...listed, conversation_id: 42 },
+        { ...listed, conversation_id: 2 },
+      ],
+      metadata,
+    });
+  const network = vi.spyOn(conversationService, "getWorkbenchPins");
+  const load = vi
+    .fn()
+    .mockResolvedValue({
+      items: [
+        { ...listed, conversation_id: 42, pinned_at: new Date().toISOString() },
+      ],
+    });
+  const adapter = createConversationThreadListAdapter(
+    "workbench",
+    pinKey,
+    load
+  );
+  const first = await adapter.list({});
+  expect(first.threads.map((item) => item.remoteId)).toEqual(["1", "42"]);
+  const next = await adapter.list({ after: first.nextCursor });
+  expect(next.threads.map((item) => item.remoteId)).toEqual(["2"]);
+  expect(next.nextCursor).toBe("3");
+  expect(load).toHaveBeenCalledTimes(1);
+  expect(network).not.toHaveBeenCalled();
+  expect(list).toHaveBeenCalledTimes(2);
+});

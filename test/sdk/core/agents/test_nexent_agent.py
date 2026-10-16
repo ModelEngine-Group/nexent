@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import importlib
 import json
 import os
@@ -220,7 +222,7 @@ mock_sdk_nexent_core_utils_module.__path__ = [
 mock_sdk_nexent_core_utils_observer_module.__path__ = []
 
 mock_prompt_template_utils_module = types.ModuleType(
-    "nexent.core.utils.prompt_template_utils"
+    "nexent.core.management.services.agent.prompt"
 )
 mock_prompt_template_utils_module.get_prompt_template = MagicMock(
     return_value="")
@@ -331,7 +333,7 @@ module_mocks = {
     "sdk.nexent.core.utils.observer": mock_sdk_nexent_core_utils_observer_module,
     "sdk.nexent.monitor": mock_sdk_nexent_monitor_module,
     "sdk.nexent.monitor.monitoring": mock_sdk_nexent_monitor_monitoring_module,
-    "nexent.core.utils.prompt_template_utils": mock_prompt_template_utils_module,
+    "nexent.core.management.services.agent.prompt": mock_prompt_template_utils_module,
     "nexent.core.utils.tools_common_message": mock_tools_common_message_module,
     "nexent.core.models": mock_nexent_core_models_module,
     "nexent.storage": mock_nexent_storage_module,

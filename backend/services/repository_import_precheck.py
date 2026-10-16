@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """Extract and validate repository import dependencies against the target tenant."""
 
 from __future__ import annotations
@@ -22,8 +24,11 @@ from database.model_management_db import (
 )
 from database.remote_mcp_db import get_mcp_server_by_name_and_tenant
 from database.tool_db import query_all_tools
-from utils.skill_import_utils import generate_available_copy_skill_name
-from utils.agent_transfer_utils import AgentToolImportError, validate_import_tool_params
+from management.services.skill.naming import generate_available_copy_skill_name
+from consts.exceptions import (
+    AgentToolImportError,
+)
+from management.services.agent.policy import validate_import_tool_params
 
 _KB_TOOL_CLASS_NAMES = frozenset({
     "KnowledgeBaseSearchTool",

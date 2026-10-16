@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 from __future__ import annotations
 
 import logging
@@ -5,7 +7,8 @@ import re
 
 import pytest
 
-from management.services.agent import management as agent_management
+from management.services.agent import transfer as agent_management
+import management.services.agent.transfer as agent_transfer
 
 
 CASE_ID = 'UT-BE-AUTO-93D927CF4107FF6F'
@@ -35,7 +38,7 @@ def _patch_resolvers(monkeypatch, *, valid_ids=None, names_to_ids=None, quick_co
             return quick_config
 
     monkeypatch.setattr(agent_management, 'get_model_by_model_id', _get_model_by_model_id)
-    monkeypatch.setattr(agent_management, 'get_model_id_by_display_name', _get_model_id_by_display_name)
+    monkeypatch.setattr(agent_transfer, 'get_model_id_by_display_name', _get_model_id_by_display_name)
     monkeypatch.setattr(agent_management, 'tenant_config_manager', _TenantConfig())
     return calls
 

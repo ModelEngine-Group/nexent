@@ -1,0 +1,13 @@
+schema_version: '1.0'
+case_id: CHAT-SIDEBAR-D5-001
+implementations:
+- framework: pytest
+  file: test_pin_migration.py
+  selector: test_
+timeout_seconds: 120
+acceptance_bindings:
+  AC-01:
+  - test_direct_pin_field_and_index_preserve_existing_conversations
+  AC-02:
+  - test_repeat_deployment_preserves_current_pin_and_activity
+  - test_catalog_does_not_create_a_separate_pin_table_or_retain_compatibility_sql

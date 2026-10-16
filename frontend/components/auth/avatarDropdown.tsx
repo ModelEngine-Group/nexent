@@ -329,7 +329,7 @@ export function AvatarDropdown({
             <button
               type="button"
               aria-label={t("accountMenu.open")}
-              className={`flex h-11 w-full cursor-pointer items-center overflow-hidden rounded-lg border-0 bg-transparent p-0 pr-2 text-[#191919] hover:bg-[var(--navigation-hover)] ${dropdownOpen ? "!bg-[var(--navigation-selected)]" : ""}`}
+              className={`group flex h-11 w-full cursor-pointer items-center overflow-hidden rounded-lg border-0 bg-transparent p-0 pr-2 text-[var(--navigation-muted)] transition-colors duration-150 ease-out hover:bg-[var(--navigation-hover)] hover:text-[var(--navigation-foreground)] focus-visible:text-[var(--navigation-foreground)] ${dropdownOpen ? "!bg-[var(--navigation-selected)] !text-[var(--navigation-foreground)]" : ""}`}
             >
               <span className="flex h-11 w-12 shrink-0 items-center justify-center">
                 <Avatar
@@ -338,7 +338,11 @@ export function AvatarDropdown({
                   icon={<UserRound size={20} />}
                 />
               </span>
-              <NavigationRailLabel expanded={expanded} label={identity} />
+              <NavigationRailLabel
+                expanded={expanded}
+                label={identity}
+                selected={dropdownOpen}
+              />
             </button>
           ) : (
             <Button
@@ -358,7 +362,7 @@ export function AvatarDropdown({
             shape={rail ? undefined : "circle"}
             className={
               rail
-                ? `!flex !h-11 !w-full !justify-start !gap-0 overflow-hidden rounded-lg !p-0 !pr-2 text-[#191919] hover:!bg-[var(--navigation-hover)] ${dropdownOpen ? "!bg-[var(--navigation-selected)]" : ""}`
+                ? `group !flex !h-11 !w-full !justify-start !gap-0 overflow-hidden rounded-lg !p-0 !pr-2 !text-[var(--navigation-muted)] transition-colors duration-150 ease-out hover:!bg-[var(--navigation-hover)] hover:!text-[var(--navigation-foreground)] focus-visible:!text-[var(--navigation-foreground)] ${dropdownOpen ? "!bg-[var(--navigation-selected)] !text-[var(--navigation-foreground)]" : ""}`
                 : undefined
             }
           >
@@ -370,6 +374,7 @@ export function AvatarDropdown({
                 <NavigationRailLabel
                   expanded={expanded}
                   label={t("auth.notLoggedIn")}
+                  selected={dropdownOpen}
                 />
               </>
             )}

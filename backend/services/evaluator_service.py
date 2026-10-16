@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """Evaluator service — CRUD + LLM generation."""
 
 import json
@@ -18,7 +20,10 @@ from database.evaluator_db import (
     restore_evaluator_version,
     update_evaluator,
 )
-from utils.agent_profile_utils import fetch_agent_profile, format_agent_profile_context
+from management.services.agent.profile import (
+    fetch_agent_profile,
+    format_agent_profile_context,
+)
 from management.services.model.invocation import call_llm_for_system_prompt
 from nexent.core.agents.prompt.evaluation import compose_evaluator_generation
 

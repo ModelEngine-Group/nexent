@@ -17,7 +17,7 @@ from sqlalchemy.schema import CreateSchema, DropSchema
 from apps import workbench_pins_app as routes
 from database import workbench_pin_db
 from database.client import db_client
-from database.db_models import ConversationRecord, ConversationWorkbenchPin
+from database.db_models import ConversationRecord
 
 
 @pytest.fixture
@@ -27,7 +27,6 @@ def persistence(monkeypatch):
     with engine.begin() as connection:
         connection.execute(CreateSchema(schema))
         ConversationRecord.__table__.create(connection)
-        ConversationWorkbenchPin.__table__.create(connection)
     try:
         with Session(engine) as session, session.begin():
             for id, owner, config, deleted in [
@@ -98,14 +97,15 @@ def test_authenticated_postgres_pin_persistence(persistence):
     assert len(state) == 2
     assert state[0]["pinned_at"] > state[1]["pinned_at"]
     with Session(engine) as session:
-        pins = session.scalars(select(ConversationWorkbenchPin)).all()
-        assert len(pins) == 2
-        assert all(pin.delete_flag == "N" and pin.created_by == "owner" and pin.updated_by == "owner" for pin in pins)
+        pins = session.scalars(select(ConversationRecord).where(ConversationRecord.workbench_pinned_at.is_not(None))).all()
+        assert {pin.conversation_id for pin in pins} == {1, 2}
+        assert all(pin.created_by == "owner" and pin.updated_by == "owner" for pin in pins)
         conversations = session.scalars(select(ConversationRecord)).all()
         assert all(c.conversation_title == f"History {c.conversation_id}" for c in conversations)
         assert all(c.create_time == datetime(2026, 1, 1) and c.update_time == datetime(2026, 1, 2) for c in conversations)
 
-    for token in ["Bearer other", "Bearer other-tenant"]:
+    assert read(TestClient(app, headers={"Authorization": "Bearer other-tenant"})) == state
+    for token in ["Bearer other"]:
         client = TestClient(app, headers={"Authorization": token})
         assert read(client) == []
     for id in [3, 4, 5, 999]:
