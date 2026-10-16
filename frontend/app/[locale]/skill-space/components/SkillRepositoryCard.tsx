@@ -1,9 +1,12 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 "use client";
 
 import type { ReactNode } from "react";
 import type { MenuProps } from "antd";
 import { Button, Dropdown, Tag } from "antd";
 import { Bot, Download, MoreHorizontal, PackageX } from "lucide-react";
+import { useUserDisplayName } from "@/hooks/auth/useUserDisplayName";
 import { useTranslation } from "react-i18next";
 
 import ResourceCard from "@/components/resource/ResourceCard";
@@ -45,8 +48,14 @@ export function SkillRepositoryCard({
   onTakeDown?: () => void;
 }) {
   const { t } = useTranslation("common");
+  const displayName = useUserDisplayName();
   const tags = listing.tags?.filter((tag) => tag.trim()) ?? [];
-  const author = listing.author?.trim() || listing.submitted_by?.trim();
+  const author = listing.author?.trim()
+    ? displayName(listing.author_cas_username, listing.author.trim())
+    : displayName(
+        listing.submitted_by_cas_username,
+        listing.submitted_by?.trim() || ""
+      );
   const menuItems: MenuProps["items"] =
     showAdminMenu && onTakeDown != null
       ? [

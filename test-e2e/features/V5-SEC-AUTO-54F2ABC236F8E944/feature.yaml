@@ -1,0 +1,18 @@
+schema_version: '1.0'
+module:
+  id: V5-BASELINE
+  name: Migrated V5 baseline
+feature:
+  feature_id: V5-SEC-AUTO-54F2ABC236F8E944
+  name: 外部记忆提供者 EAV 秘密参数掩码与明文泄露防护：list/get/create/update 响应掩码、日志/Trace 无明文凭据、前端编辑回显掩码占位且未改动不回传明文
+  status: active
+  description: 威胁/风险：外部记忆提供者 EAV 参数中，键以 api_key 结尾或 config_schema type=secret 的凭据（如 mem0、AIDP_Memorybank 插件的 api_key）若在 list/get/create/update
+    响应、后端日志或 OTel Trace 中以明文返回/记录，会造成 API 凭据外泄，被越权调用外部记忆服务或横向渗透。风险目标：所有秘密参数在 API 响应一律掩码（长度≤8 显示 ***，长度>8 显示 前3字符***后4字符），日志/Trace
+    不出现明文凭据，前端编辑仅回显掩码占位且未修改时不回传明文/占位。
+  business_rules:
+  - rule_id: V5-SEC-AUTO-54F2ABC236F8E944-RULE-01
+    description: 外部记忆提供者 EAV 秘密参数掩码与明文泄露防护：list/get/create/update 响应掩码、日志/Trace 无明文凭据、前端编辑回显掩码占位且未改动不回传明文
+  required_test_stages:
+  - D5
+  source:
+    notes: 'Provisional migration owner: the V5 row has no stable Feature ID. Do not infer an F-ID.'

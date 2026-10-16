@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import asyncio
 import logging
 from collections import deque
@@ -14,6 +16,8 @@ from management.services.agent.naming import (
 
 from consts.const import LANGUAGE, MODEL_CONFIG_MAPPING, CAN_EDIT_ALL_USER_ROLES
 from consts.exceptions import (
+    AgentNotFoundError,
+    AgentRelationValidationError,
     AppException,
     ForbiddenError,
     TenantResourceLimitError,
@@ -78,6 +82,7 @@ from services.prompt_template_service import (
     SYSTEM_PROMPT_TEMPLATE_NAME,
     get_prompt_template_summary,
 )
+from services.user_identity_service import enrich_cas_usernames
 from utils.str_utils import convert_list_to_string, convert_string_to_list
 from services.conversation_management_service import (
     generate_conversation_title_service,  # noqa: F401 - compatibility patch point
@@ -382,7 +387,7 @@ async def get_agent_info_impl(
         record_tenant_id = agent_info.get("tenant_id")
         if record_tenant_id:
             tenant_id = record_tenant_id
-    except ForbiddenError:
+    except (AgentNotFoundError, ForbiddenError):
         raise
     except Exception as e:
         logger.error(f"Failed to get agent info: {str(e)}")
@@ -598,6 +603,10 @@ async def get_agent_info_impl(
         draft_version_no = query_current_version_no(agent_id, tenant_id)
         agent_info["current_version_no"] = draft_version_no
 
+    enrich_cas_usernames(
+        [agent_info], {"author_cas_username": "created_by"},
+        email_fields={"author_cas_username": "author"},
+    )
     return agent_info
 
 
@@ -648,6 +657,63 @@ def _validate_requested_output_tokens_for_agent(
             )
 
 
+def _validate_agent_relationships(request: AgentInfoRequest, tenant_id: str):
+    """Validate and normalize relationship selections before any update writes."""
+    if isinstance(request.related_agents, list):
+        relations = [
+            {"agent_id": relation.agent_id, "version_no": relation.version_no}
+            for relation in request.related_agents
+        ]
+        if request.related_agent_ids is not None and set(request.related_agent_ids) != {
+            relation["agent_id"] for relation in relations
+        }:
+            raise AgentRelationValidationError(
+                "related_agent_ids and related_agents must select the same Agents"
+            )
+    elif request.related_agent_ids is not None:
+        relations = [
+            {"agent_id": agent_id, "version_no": None}
+            for agent_id in request.related_agent_ids
+        ]
+    else:
+        return None
+
+    selected_ids = [relation["agent_id"] for relation in relations]
+    if request.agent_id is not None and request.agent_id in selected_ids:
+        raise AgentRelationValidationError(
+            "Circular dependency detected: Agent cannot be related to itself"
+        )
+    if len(selected_ids) != len(set(selected_ids)) or (
+        request.related_agent_ids is not None
+        and len(request.related_agent_ids) != len(set(request.related_agent_ids))
+    ):
+        raise AgentRelationValidationError("Related Agent IDs must not contain duplicates")
+
+    for relation in relations:
+        search_agent_info_by_agent_id(
+            relation["agent_id"], tenant_id, version_no=relation["version_no"] or 0
+        )
+
+    search_list = deque(
+        (relation["agent_id"], relation["version_no"] or 0) for relation in relations
+    )
+    visited = set()
+    while search_list:
+        current_id, version_no = search_list.popleft()
+        if request.agent_id is not None and current_id == request.agent_id:
+            raise AgentRelationValidationError(
+                "Circular dependency detected: Agent cannot create circular calls"
+            )
+        if (current_id, version_no) in visited:
+            continue
+        visited.add((current_id, version_no))
+        sub_ids = query_sub_agents_id_list(
+            main_agent_id=current_id, tenant_id=tenant_id, version_no=version_no
+        )
+        search_list.extend((sub_id, 0) for sub_id in sub_ids)
+    return relations
+
+
 async def update_agent_info_impl(
     request: AgentInfoRequest, authorization: str = Header(None)
 ):
@@ -658,6 +724,13 @@ async def update_agent_info_impl(
         and is_system_agent(request.agent_id, tenant_id) is True
     ):
         raise ForbiddenError("System Agent is managed by the platform")
+
+    related_agents_dicts = _validate_agent_relationships(request, tenant_id)
+
+    # Validate external selections before any Agent or relationship mutation.
+    for external_agent_id in getattr(request, "related_external_agent_ids", None) or []:
+        if a2a_agent_db.get_external_agent_by_id(external_agent_id, tenant_id) is None:
+            raise AgentNotFoundError("External agent not found")
 
     if request.example_questions is not None and len(request.example_questions) > 6:
         raise AppException(
@@ -700,7 +773,7 @@ async def update_agent_info_impl(
 
     # If agent_id is None, create a new agent; otherwise, update existing
     agent_id: Optional[int] = request.agent_id
-    if agent_id is not None and isinstance(getattr(request, "enable_protocol_repair_retry", None), bool):
+    if agent_id is not None:
         agent_record = search_agent_info_by_agent_id(agent_id, tenant_id)
         user_tenant_record = get_user_tenant_by_user_id(user_id) or {}
         user_role = str(user_tenant_record.get("user_role") or "").upper()
@@ -715,6 +788,21 @@ async def update_agent_info_impl(
     try:
         if agent_id is None:
             # Create agent - automatically set group_ids to current user's groups
+            # Guard against duplicate name/display_name regardless of the caller
+            # (dev-page copy, direct API, ...) so new agents stay publishable.
+            agents_cache = query_all_agent_info_by_tenant_id(tenant_id)
+            for field_key in ("name", "display_name"):
+                value = getattr(request, field_key, None)
+                if value and check_agent_value_duplicate(
+                    field_key, value, tenant_id, agents_cache=agents_cache
+                ):
+                    setattr(
+                        request,
+                        field_key,
+                        generate_unique_agent_value(
+                            field_key, value, tenant_id, agents_cache=agents_cache
+                        ),
+                    )
             user_group_ids = _get_user_group_ids(user_id, tenant_id)
             created = create_agent(
                 agent_info={
@@ -863,8 +951,12 @@ async def update_agent_info_impl(
                 )
                 missing_skill_ids = enabled_set - valid_skill_ids
                 if missing_skill_ids:
-                    raise ValueError(
-                        f"Invalid or unavailable skill IDs: {sorted(missing_skill_ids)}"
+                    raise AppException(
+                        ErrorCode.COMMON_PARAMETER_INVALID,
+                        (
+                            "skill_instances contains invalid or unavailable "
+                            f"skill IDs: {sorted(missing_skill_ids)}"
+                        ),
                     )
 
             # Query existing skill instances for this agent
@@ -915,44 +1007,15 @@ async def update_agent_info_impl(
                     user_id=user_id,
                     version_no=request_version_no,
                 )
+    except AppException:
+        raise
     except Exception as e:
         logger.error(f"Failed to update agent skills: {str(e)}")
         raise ValueError(f"Failed to update agent skills: {str(e)}")
 
     # Handle related agents saving when provided
     try:
-        if request.related_agent_ids is not None and agent_id is not None:
-            related_agent_ids = request.related_agent_ids
-            # Check for circular dependencies using BFS
-            search_list = deque(related_agent_ids)
-            agent_id_set = set()
-
-            while len(search_list):
-                left_ele = search_list.popleft()
-                if left_ele == agent_id:
-                    raise ValueError(
-                        "Circular dependency detected: Agent cannot be related to itself or create circular calls"
-                    )
-                if left_ele in agent_id_set:
-                    continue
-                else:
-                    agent_id_set.add(left_ele)
-                sub_ids = query_sub_agents_id_list(
-                    main_agent_id=left_ele, tenant_id=tenant_id
-                )
-                search_list.extend(sub_ids)
-
-            # Update related agents - use related_agents if provided, otherwise build from IDs
-            if request.related_agents:
-                related_agents_dicts = [
-                    {"agent_id": ra.agent_id, "version_no": ra.version_no}
-                    for ra in request.related_agents
-                ]
-            else:
-                related_agents_dicts = [
-                    {"agent_id": aid, "version_no": None} for aid in related_agent_ids
-                ]
-
+        if related_agents_dicts is not None and agent_id is not None:
             update_related_agents(
                 parent_agent_id=agent_id,
                 tenant_id=tenant_id,
@@ -960,7 +1023,7 @@ async def update_agent_info_impl(
                 related_agents=related_agents_dicts,
             )
     except ValueError:
-        # Re-raise ValueError (circular dependency) as-is
+        # Preserve explicitly classified persistence errors.
         raise
     except Exception as e:
         logger.error(f"Failed to update related agents: {str(e)}")
@@ -1003,9 +1066,13 @@ async def update_agent_info_impl(
                         tenant_id=tenant_id,
                         user_id=user_id,
                     )
+                except AgentNotFoundError:
+                    raise
                 except ValueError:
                     # Relation already exists, skip
                     pass
+    except AgentNotFoundError:
+        raise
     except Exception as e:
         logger.error(f"Failed to update related external agents: {str(e)}")
         raise ValueError(f"Failed to update related external agents: {str(e)}")

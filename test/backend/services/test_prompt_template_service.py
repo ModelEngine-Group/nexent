@@ -131,7 +131,7 @@ def test_build_system_default_prompt_template_payload(
 ):
     mocker.patch.object(
         prompt_template_service_module,
-        "get_prompt_generate_prompt_template",
+        "load_generation_template",
         side_effect=[
             template_content_factory("zh"),
             template_content_factory("en"),

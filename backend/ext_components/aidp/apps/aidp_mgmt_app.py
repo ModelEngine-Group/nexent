@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """AIDP Management App Layer (v7.1).
 
 FastAPI endpoints for AIDP knowledge base CRUD with permission enforcement.
@@ -17,13 +19,13 @@ import asyncio
 import logging
 import time
 from http import HTTPStatus
-from typing import Annotated, List, Optional
+from typing import Annotated, List, Literal, Optional
 from uuid import UUID
 
 from fastapi import APIRouter, File, HTTPException, Path, Query, Request, UploadFile
 from fastapi.responses import JSONResponse, StreamingResponse
 from nexent.core.concurrency import run_blocking
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 from sqlalchemy.exc import IntegrityError
 from starlette.background import BackgroundTask
 
@@ -33,13 +35,10 @@ from consts.exceptions import AppException, UnauthorizedError
 from database.user_tenant_db import get_user_role_by_tenant
 from ext_components.aidp.consts.aidp_exceptions import (
     AidpGroupValidationError,
-    AidpKbConflictError,
 )
 from ext_components.aidp.database import aidp_permission_db
 from ext_components.aidp.services import aidp_permission_service as perms
 from ext_components.aidp.services.aidp_access_service import (
-    get_cached_aidp_channels,
-    get_cached_aidp_doc_count,
     get_cached_aidp_kb_detail,
     invalidate_aidp_catalog_cache,
     invalidate_aidp_doc_count_cache,
@@ -51,20 +50,17 @@ from ext_components.aidp.services.aidp_permission_service import (
     EDIT,
     PRIVATE,
     READ_ONLY,
-    _validate_group_ids_strict,  # noqa: F401 - retained as a module-level compatibility symbol
 )
 from ext_components.aidp.services.aidp_service import (
     _timestamp_to_iso,
     count_aidp_docs_impl,
     create_aidp_kb_impl,
     delete_aidp_kb_impl,
+    get_aidp_graph_template_impl,
     get_aidp_kb_impl,
-    list_aidp_channels_impl,
-    list_aidp_doc_history_impl,
     list_aidp_docs_impl,
     list_aidp_models_impl,
     remove_aidp_docs_impl,
-    select_aidp_channel,
     stream_aidp_doc_impl,
     update_aidp_kb_impl,
     upload_aidp_docs_impl,
@@ -78,17 +74,7 @@ logger = logging.getLogger("aidp_mgmt_app")
 AIDP_MAX_UPLOAD_FILE_COUNT = 50
 AIDP_SMALL_FILE_MAX_SIZE_BYTES = 20 * 1024 * 1024
 AIDP_OTHER_FILE_MAX_SIZE_BYTES = 1024 * 1024 * 1024
-AIDP_SMALL_FILE_EXTENSIONS = {"txt", "xls", "xlsx", "csv"}
-
-# AIDP document statuses (mirrors the file-history vocabulary): UPLOADING,
-# PROCESSING and EXTRACTING are the stages a file walks through, COMPLETED and
-# FAILED are the two terminal outcomes. Only the terminal ones end the wait, so
-# every other reported status is counted as work in progress: `processing_count`
-# is what keeps the frontend polling, and a build that reports a stage we do not
-# know yet must not stop it early either.
-_DOC_STATUS_COMPLETED = "COMPLETED"
-_DOC_STATUS_FAILED = "FAILED"
-_TERMINAL_DOC_STATUSES = (_DOC_STATUS_COMPLETED, _DOC_STATUS_FAILED)
+AIDP_SMALL_FILE_EXTENSIONS = {"txt", "json", "md", "html", "xls", "xlsx", "csv"}
 
 
 def _upload_failure(file_name: str, reason_zh: str, reason_en: str) -> dict:
@@ -160,19 +146,36 @@ def _cleanup_document_assignments_for_deleted_knowledge_base(
 class CreateKbRequest(BaseModel):
     """Request body for creating a knowledge base."""
 
+    model_config = ConfigDict(extra="forbid")
+
     name: str = Field(..., description="Knowledge base name (required)")
-    description: Optional[str] = Field(None, description="Knowledge base description")
-    embedding_model: Optional[str] = Field(None, description="Embedding model identifier")
-    is_multimodal: Optional[bool] = Field(None, description="Whether KB supports multimodal content")
-    vision_model: Optional[str] = Field(None, description="Vision model identifier for multimodal KBs")
-    chunk_token_num: Optional[int] = Field(None, description="Chunk size in tokens (> 0)")
-    chunk_overlap_num: Optional[int] = Field(None, description="Chunk overlap in tokens (>= 0)")
-    vlm_model: Optional[str] = Field(None, description="VLM model identifier for caption generation")
-    is_personal: Optional[int] = Field(None, ge=0, le=1, description="Personal KB flag, int 0 or 1")
-    topk: Optional[int] = Field(None, description="Top-K retrieval count")
-    similarity: Optional[float] = Field(None, description="Similarity score threshold")
-    smartsplit: Optional[int] = Field(None, ge=0, le=1, description="Smart chunking mode, int 0 or 1")
-    caption_enable: Optional[int] = Field(None, ge=0, le=1, description="Caption generation toggle, int 0 or 1")
+    description: str = Field(
+        ...,
+        min_length=1,
+        max_length=255,
+        description="Knowledge base description (required)",
+    )
+    embedding_model: str = Field(..., min_length=1, description="Embedding model identifier")
+    chunk_token_num: int = Field(1024, ge=256, le=4096, strict=True, description="Chunk size in tokens")
+    chunk_overlap_num: int = Field(128, ge=0, strict=True, description="Chunk overlap in tokens")
+    vlm_model: str = Field("", description="VLM model identifier for caption generation")
+    is_personal: int = Field(0, ge=0, le=1, description="Personal KB flag, int 0 or 1")
+    topk: int = Field(10, ge=1, le=100, strict=True, description="Top-K retrieval count")
+    similarity: float = Field(0.6, ge=0, le=1, description="Similarity score threshold")
+    caption_enable: int = Field(0, ge=0, le=1, strict=True, description="Caption generation toggle, int 0 or 1")
+    chunk_mode: int = Field(
+        0, ge=0, le=1, strict=True, description="Chunking mode: 0 smart splitting, 1 legal clauses"
+    )
+    is_exist_graph: bool = Field(
+        False, description="Whether knowledge graph extraction is enabled for this KB"
+    )
+    graph_config: Optional[dict] = Field(
+        None,
+        description=(
+            "Structured graph configuration. The service validates it and serializes it into the "
+            "AIDP graph_config string; it is omitted entirely when the graph is disabled."
+        ),
+    )
     # Nexent-side permission payload. Never forwarded to AIDP.
     ingroup_permission: Optional[str] = Field(
         "READ_ONLY",
@@ -182,6 +185,27 @@ class CreateKbRequest(BaseModel):
         None,
         description="Group IDs granted the in-group permission. Empty/ignored when PRIVATE.",
     )
+
+
+    @field_validator("description", mode="before")
+    @classmethod
+    def trim_description(cls, value):
+        return value.strip() if isinstance(value, str) else value
+
+    @field_validator("embedding_model")
+    @classmethod
+    def require_embedding_model(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("Embedding model is required")
+        return value
+
+    @model_validator(mode="after")
+    def validate_creation_settings(self):
+        if self.chunk_overlap_num > self.chunk_token_num / 2:
+            raise ValueError("chunk_overlap_num must not exceed half of chunk_token_num")
+        if self.caption_enable and not self.vlm_model.strip():
+            raise ValueError("VLM model is required when caption generation is enabled")
+        return self
 
 
 class UpdateKbRequest(BaseModel):
@@ -312,14 +336,6 @@ def _current_accessible_rows(
 # ---------------------------------------------------------------------------
 
 
-def _serialize_permission(decision) -> dict:
-    return {
-        "permission": decision.permission,
-        "matched_group_ids": list(decision.matched_group_ids),
-        "is_management_role": decision.is_management_role,
-    }
-
-
 def _has_kb_card_metadata(row: dict) -> bool:
     """Return whether the catalog row already contains every card field."""
     has_name = bool(row.get("kds_name") or row.get("name"))
@@ -338,470 +354,18 @@ def _load_cached_kb_detail(server_url: str, api_key: str, kb_id: str) -> dict:
     )
 
 
-def _load_cached_doc_count(server_url: str, api_key: str, kb_id: str) -> int:
-    return get_cached_aidp_doc_count(
-        server_url=server_url,
-        api_key=api_key,
-        kds_id=kb_id,
-        loader=lambda: count_aidp_docs_impl(server_url, api_key, kb_id),
+@aidp_mgmt_router.get("/knowledge-bases/graph-template")
+async def get_graph_template(
+    request: Request,
+    language: Literal["chinese", "english"] = "chinese",
+) -> JSONResponse:
+    await _auth(request)
+    server_url, api_key = _credentials()
+    result = await run_blocking(
+        "aidp-graph-template", get_aidp_graph_template_impl, server_url, api_key, language,
+        lane="control-io", owner="config",
     )
-
-
-# Knowledge bases whose all-status history has already been reported as
-# unavailable. Documents are polled every few seconds while they process, so the
-# fallback is reported once per KB instead of once per poll.
-_HISTORY_FALLBACK_REPORTED: set[str] = set()
-
-
-def _log_history_fallback(kds_id: str, reason: str) -> None:
-    """Report (once per KB) that the document list fell back to ingested files.
-
-    The status column can only be filled from the history payload, so a silent
-    fallback shows up as a column of dashes. Logging the concrete reason keeps
-    the cause traceable: an AIDP build without the endpoint, a channel list whose
-    fields we cannot read, and a failing history request all land here.
-    """
-    if kds_id in _HISTORY_FALLBACK_REPORTED:
-        logger.debug(
-            "AIDP file history still unavailable for KB %s (%s)",
-            kds_id,
-            reason,
-        )
-        return
-    _HISTORY_FALLBACK_REPORTED.add(kds_id)
-    logger.warning(
-        "AIDP all-status file history unavailable for KB %s (%s); the document list falls "
-        "back to ingested files only, so files under processing stay invisible and the "
-        "status column stays empty",
-        kds_id,
-        reason,
-    )
-
-
-def _resolve_doc_history_channel(
-    server_url: str,
-    api_key: str,
-    kds_id: str,
-) -> dict | None:
-    """Resolve the ingestion channel whose directory feeds ``kds_id``.
-
-    Returns ``None`` when AIDP exposes no channel carrying both ``fs_id`` and a
-    source directory, in which case the caller keeps using the completed-files
-    listing. The channel payload shape is reported when resolution fails, so an
-    unreadable field name is visible instead of silently degrading.
-    """
-    channels = get_cached_aidp_channels(
-        server_url=server_url,
-        api_key=api_key,
-        kds_id=kds_id,
-        loader=lambda: list_aidp_channels_impl(server_url, api_key, kds_id),
-    )
-    channel = select_aidp_channel(channels, kds_id)
-    if channel is None:
-        _log_history_fallback(
-            kds_id,
-            "no channel exposes fs_id + a source dir (channels=%d, sample keys=%s)"
-            % (len(channels), sorted(channels[0].keys()) if channels else []),
-        )
-    return channel
-
-
-# How many history pages one document-list request may read. The endpoint is
-# paginated and puts files that are still being processed in front, so a burst
-# of simultaneous uploads can spill past the first page.
-_HISTORY_PAGE_LIMIT = 20
-
-
-def _history_reports_more(payload: dict) -> bool | None:
-    """Whether the payload explicitly says another history page exists.
-
-    Only unambiguous signals are trusted: this endpoint family reports
-    ``total_count`` as the size of the current page elsewhere, so it cannot be
-    read as a grand total. ``None`` means the payload does not say, and the
-    caller has to ask for the next page to find out.
-    """
-    has_more = payload.get("has_more")
-    if isinstance(has_more, bool):
-        return has_more
-    if "next_link" in payload:
-        return bool(payload.get("next_link"))
-    return None
-
-
-async def _load_doc_history_items(
-    server_url: str,
-    api_key: str,
-    kds_id: str,
-    fs_id: str,
-    dir_path: str,
-) -> list[dict]:
-    """Read the channel directory's all-status history across its pages.
-
-    Reading only the first page would drop precisely the files this listing
-    exists to show: the endpoint sorts files that are still being processed to
-    the front, so more simultaneous uploads than fit in a page push the rest out
-    of view.
-
-    The walk stops at an empty page, stops when the payload says there is no
-    further page, and stops when a page adds nothing new — the last one keeps a
-    build that ignores ``page`` from looping over the same files. It is capped
-    at ``_HISTORY_PAGE_LIMIT`` so one list request cannot turn into an unbounded
-    number of upstream calls; reaching the cap is logged because the files
-    beyond it are then unknown.
-    """
-    collected: list[dict] = []
-    seen: set[str] = set()
-    for page in range(1, _HISTORY_PAGE_LIMIT + 1):
-        payload = await run_blocking(
-            "aidp-doc-history",
-            list_aidp_doc_history_impl,
-            server_url,
-            api_key,
-            fs_id,
-            dir_path,
-            kds_id,
-            None,
-            page,
-            lane="control-io",
-            owner="config",
-        )
-        raw_items = payload.get("value") if isinstance(payload, dict) else None
-        page_items = (
-            [item for item in raw_items if isinstance(item, dict)]
-            if isinstance(raw_items, list)
-            else []
-        )
-        if not page_items:
-            return collected
-
-        added = 0
-        for item in page_items:
-            identities = _document_identities(item)
-            key = identities[0] if identities else f"anonymous-{page}-{len(collected)}"
-            if key in seen:
-                continue
-            seen.add(key)
-            collected.append(item)
-            added += 1
-
-        reported_more = (
-            _history_reports_more(payload) if isinstance(payload, dict) else None
-        )
-        if reported_more is False:
-            return collected
-        if added == 0:
-            # The same page came back again, so this build does not honour
-            # `page`: stop instead of looping over the same files, but say so,
-            # because everything beyond the first page stays invisible.
-            logger.warning(
-                "AIDP file history for KB %s answered page %d without new items (%d read); "
-                "the endpoint appears to ignore `page`, so files beyond the first page stay "
-                "invisible",
-                kds_id,
-                page,
-                len(collected),
-            )
-            return collected
-    logger.warning(
-        "AIDP file history for KB %s reached %d pages (%d files); the statuses of further "
-        "files are not read",
-        kds_id,
-        _HISTORY_PAGE_LIMIT,
-        len(collected),
-    )
-    return collected
-
-
-async def _load_doc_history(
-    server_url: str,
-    api_key: str,
-    kds_id: str,
-) -> dict | None:
-    """Fetch the all-status document history for ``kds_id`` when available.
-
-    Any failure degrades to the legacy completed-files listing rather than
-    failing the request: the channel/history endpoints are newer than the
-    document list and may be missing on older AIDP builds, and a knowledge base
-    with no matching channel must still render its ingested files. Every
-    degraded case is logged with the offending KB so the cause stays traceable.
-    """
-    try:
-        channel = await run_blocking(
-            "aidp-doc-history-channel",
-            _resolve_doc_history_channel,
-            server_url,
-            api_key,
-            kds_id,
-            lane="control-io",
-            owner="config",
-        )
-        if not channel:
-            # The reason is reported by ``_resolve_doc_history_channel``.
-            return None
-        items = await _load_doc_history_items(
-            server_url,
-            api_key,
-            kds_id,
-            channel["fs_id"],
-            channel["src_dir"],
-        )
-        if not items:
-            # A resolved channel directory holding no file would blank the table
-            # and hide the KB's ingested files — the directory may simply not be
-            # where this KB's uploads live. The KB-scoped listing is always safe
-            # to show, so an empty history is treated as unusable rather than
-            # authoritative (an empty KB still renders an empty list either way).
-            _log_history_fallback(
-                kds_id,
-                "history returned no files for the resolved directory "
-                f"(fs_id={channel['fs_id']}, dir_path={channel['src_dir']})",
-            )
-            return None
-        return {"value": items}
-    except AppException as exc:
-        _log_history_fallback(kds_id, f"history request failed: {exc}")
-        return None
-    except Exception as exc:  # noqa: BLE001 - history is an optional enhancement
-        _log_history_fallback(kds_id, f"unexpected history error: {exc!r}")
-        return None
-
-
-def _is_processing_status(status: object) -> bool:
-    """Whether a reported status still walks the ingestion stages.
-
-    ``UPLOADING``, ``PROCESSING`` and ``EXTRACTING`` are the open stages and
-    ``COMPLETED``/``FAILED`` the terminal ones. An unrecognised stage counts as
-    open as well: a build reporting a status this module does not know yet must
-    not be mistaken for a finished file, which would both stop the polling and
-    drop the row behind the ingested ones.
-    """
-    return (
-        isinstance(status, str)
-        and status.strip().upper() not in _TERMINAL_DOC_STATUSES
-    )
-
-
-def _history_sort_key(item: dict) -> tuple:
-    """Sort key placing files still being processed above finished ones.
-
-    A freshly accepted upload reports ``UPLOADING``/``EXTRACTING``/``PROCESSING``
-    before it is ingested, and that row is what the user is looking for right
-    after an upload because it carries the progress of the file they just added.
-    Those files therefore sort above the finished ones whatever their timestamps
-    say. Inside each group files are ordered newest first, with numeric upload
-    timestamps above entries that only expose an ISO ``created_at`` string and
-    entries with neither sinking to the bottom.
-    """
-    in_progress = 1 if _is_processing_status(item.get("status")) else 0
-    raw = item.get("first_upload_time")
-    if raw is None:
-        raw = item.get("create_time")
-    try:
-        return (in_progress, 1, float(raw))
-    except (TypeError, ValueError):
-        created_at = item.get("created_at")
-        if isinstance(created_at, str):
-            return (in_progress, 0, created_at)
-        return (in_progress, 0, "")
-
-
-def _paginate_history_documents(result: dict, page: int, page_size: int) -> dict:
-    """Slice an all-status history payload into one page.
-
-    The history API returns the whole channel directory in one response, so the
-    total is exact and the document Count endpoint is not needed. Files that are
-    still uploading or extracting come first, because the user has to see the
-    progress of the file they just added; the finished files follow, newest
-    first, so a completed upload stays near the top of its own group.
-
-    ``processing_count`` covers the WHOLE directory, not just the returned page:
-    the frontend keeps polling while it is non-zero, so a file still being
-    processed on another page also keeps the status column live.
-    """
-    raw_items = result.get("value")
-    items = (
-        [item for item in raw_items if isinstance(item, dict)]
-        if isinstance(raw_items, list)
-        else []
-    )
-    ordered = sorted(items, key=_history_sort_key, reverse=True)
-    start = (page - 1) * page_size
-    end = start + page_size
-    # Count every non-terminal status, so a file that is uploading or extracting
-    # keeps the frontend polling exactly like one that is being chunked.
-    processing_count = sum(
-        1 for item in ordered if _is_processing_status(item.get("status"))
-    )
-    return {
-        "value": ordered[start:end],
-        "total_count": len(ordered),
-        "has_more": end < len(ordered),
-        "total_reliable": True,
-        "processing_count": processing_count,
-    }
-
-
-# The all-status history is directory-scoped while the document listing is
-# knowledge-base scoped, so the two sources disagree on membership. The listing
-# is read in pages of at most this size, and capped so one list request cannot
-# turn into an unbounded number of upstream calls on a very large knowledge base.
-_INGESTED_PAGE_SIZE = 100
-_INGESTED_MAX_PAGES = 20
-
-
-def _document_identities(item: dict) -> list[str]:
-    """Return every identity a history entry / listed file exposes.
-
-    Both payloads describe the same file through ``file_uuid`` and
-    ``file_ino_no``, but a payload may carry only one of them, so the merge
-    matches on either value instead of picking a single preferred field.
-    """
-    identities: list[str] = []
-    for field in ("file_uuid", "file_ino_no"):
-        value = item.get(field)
-        if value is None or value == "":
-            continue
-        identities.append(str(value))
-    return identities
-
-
-def _matching_key(identities: list[str], known_ids: dict[str, str]) -> str:
-    """Return the key an item already occupies, or its first identity.
-
-    The same file can be described with a uuid by one payload and with an ino
-    number by the other, so an item is matched through every identity it exposes
-    before it is treated as a new row.
-    """
-    for value in identities:
-        known = known_ids.get(value)
-        if known is not None:
-            return known
-    return identities[0]
-
-
-def _merge_document_sources(
-    history_items: list[dict],
-    listed_items: list[dict],
-) -> list[dict]:
-    """Union the channel history with the knowledge-base document listing.
-
-    The two sources disagree on membership: the history covers the resolved
-    channel directory, while the listing covers every ingested file of the
-    knowledge base. Reading only the history hides files that were ingested
-    into another directory — a knowledge base migrated from an older release, or
-    one fed by a second channel — which looks like files disappearing from the
-    list as soon as the resolved directory stops being empty. Reading only the
-    listing hides uploads that are still being processed, which is what the
-    history is there for.
-
-    Merging keeps both visible: the listing guarantees membership and carries
-    the file metadata, the history supplies the live statuses, and a file only
-    the history knows about (still uploading, or failed before ingestion) is
-    kept exactly as reported. A file present in both is combined field by field,
-    so a history build whose payload omits the metadata fields cannot blank out
-    the name, size or creation time the listing already describes. Items are
-    matched through every identity they expose, so a file that one payload
-    describes with a uuid and the other with an ino number is still one row.
-    """
-    merged: dict[str, dict] = {}
-    # Any identity -> the key its item is stored under, so a later payload can
-    # find the row even when it only carries the other id field.
-    known_ids: dict[str, str] = {}
-    for item in listed_items:
-        identities = _document_identities(item)
-        if not identities:
-            continue
-        key = _matching_key(identities, known_ids)
-        # The completed-files listing only ever returns ingested files, so a
-        # file taken from it is finished by definition.
-        merged[key] = {**item, "status": _DOC_STATUS_COMPLETED}
-        for value in identities:
-            known_ids[value] = key
-    for item in history_items:
-        identities = _document_identities(item)
-        if not identities:
-            continue
-        key = _matching_key(identities, known_ids)
-        listed = merged.get(key)
-        if listed is None:
-            # The file is not ingested yet (or was ingested into another
-            # directory), so the history entry is all there is to show.
-            merged[key] = item
-        else:
-            # The history reports the status of the file right now, but its
-            # payload may be minimal: replacing the listing row wholesale would
-            # blank out every metadata field the history does not carry, which
-            # the user sees as an empty name or creation time. Only the fields
-            # the history actually reports win, the rest stays as listed.
-            reported = {
-                field: value
-                for field, value in item.items()
-                if value is not None and value != ""
-            }
-            merged[key] = {**listed, **reported}
-        for value in identities:
-            known_ids[value] = key
-    return list(merged.values())
-
-
-async def _load_ingested_documents(
-    server_url: str,
-    api_key: str,
-    kds_id: str,
-) -> list[dict]:
-    """Read every ingested file of ``kds_id`` across the listing's pages.
-
-    A knowledge base can hold files the channel history does not cover, so the
-    listing is what guarantees membership. The walk stops at the first short
-    page and is capped at ``_INGESTED_MAX_PAGES``; reaching the cap is logged,
-    because the union would then be incomplete. A failing listing degrades to
-    whatever was already read instead of failing the request.
-    """
-    collected: list[dict] = []
-    for index in range(_INGESTED_MAX_PAGES):
-        try:
-            payload = await run_blocking(
-                "aidp-list-documents",
-                list_aidp_docs_impl,
-                server_url,
-                api_key,
-                kds_id,
-                index + 1,
-                _INGESTED_PAGE_SIZE,
-                lane="control-io",
-                owner="config",
-            )
-        except Exception as exc:  # noqa: BLE001 - the history can stand alone
-            logger.warning(
-                "AIDP document listing page %d failed for KB %s (%r); the document list "
-                "keeps the files read so far",
-                index + 1,
-                kds_id,
-                exc,
-            )
-            return collected
-        raw_items = payload.get("value") if isinstance(payload, dict) else None
-        page_items = (
-            [item for item in raw_items if isinstance(item, dict)]
-            if isinstance(raw_items, list)
-            else []
-        )
-        collected.extend(page_items)
-        if len(page_items) < _INGESTED_PAGE_SIZE:
-            return collected
-    logger.warning(
-        "AIDP document listing for KB %s reached %d pages (%d files); files beyond that "
-        "are not merged into the document list",
-        kds_id,
-        _INGESTED_MAX_PAGES,
-        len(collected),
-    )
-    return collected
-
-
-# ---------------------------------------------------------------------------
-# Handlers
-# ---------------------------------------------------------------------------
+    return JSONResponse(status_code=HTTPStatus.OK, content=result)
 
 
 @aidp_mgmt_router.get("/knowledge-bases")
@@ -889,8 +453,6 @@ async def list_knowledge_bases(
                 or ""
             ),
             "description": detail.get("description") or row.get("description") or "",
-            "document_count": detail.get("document_count", row.get("document_count", 0)),
-            "chunk_count": detail.get("chunk_count", row.get("chunk_count", 0)),
             "embedding_model": detail.get("embedding_model") or row.get("embedding_model") or "",
             # ``is_multimodal`` is a Nexent-side concept (frontend sends it
             # when creating a KB; the SDK mapper converts it to
@@ -901,15 +463,12 @@ async def list_knowledge_bases(
             "is_multimodal": _infer_is_multimodal(detail or row),
             "vlm_model": detail.get("vlm_model") or row.get("vlm_model") or "",
             "caption_enable": detail.get("caption_enable", row.get("caption_enable", 0)),
-            "created_at": (
-                detail.get("created_at")
-                or row.get("created_at")
-                or _timestamp_to_iso(row.get("create_time"))
-            ),
+            "created_at": _timestamp_to_iso(row.get("create_time")),
             "permission": row.get("permission"),
             "ingroup_permission": row.get("ingroup_permission"),
             "group_ids": row.get("group_ids"),
             "created_by": row.get("owner_user_id"),
+            "creator_name": row.get("creator_name"),
             "resource_status": resource_status,
         })
 
@@ -925,6 +484,12 @@ async def list_knowledge_bases(
         sum(1 for row in page_rows if not _has_kb_card_metadata(row)),
     )
 
+    from services.user_identity_service import enrich_cas_usernames
+
+    await run_blocking(
+        "aidp-list-creator-names", enrich_cas_usernames,
+        items, {"creator_cas_username": "created_by"}, lane="control-io", owner="config",
+    )
     has_more = page * page_size < total_count
     return JSONResponse(
         status_code=HTTPStatus.OK,
@@ -993,7 +558,10 @@ async def create_knowledge_base(
         exclude_none=True,
     )
     try:
-        aidp_result = create_aidp_kb_impl(server_url, api_key, aidp_payload)
+        aidp_result = await run_blocking(
+            "aidp-create-kb", create_aidp_kb_impl, server_url, api_key, aidp_payload,
+            lane="control-io", owner="config",
+        )
     except AppException:
         raise
     except Exception as exc:
@@ -1017,9 +585,7 @@ async def create_knowledge_base(
     kds_id = str(kds_id)
 
     if aidp_permission_db.get_permission_by_kb_id(kds_id, tenant_id):
-        raise AidpKbConflictError(kds_id, tenant_id).__class__(
-            kds_id=kds_id, tenant_id=tenant_id
-        ) if False else HTTPException(  # construct HTTPException directly to keep mapping simple
+        raise HTTPException(
             status_code=HTTPStatus.CONFLICT,
             detail=f"Knowledge base {kds_id} already exists in this tenant",
         )
@@ -1095,9 +661,27 @@ async def get_knowledge_base(
         resource_status = "UNAVAILABLE"
 
     detail = dict(detail)
+    detail["document_count"] = await run_blocking(
+        "aidp-detail-document-count", count_aidp_docs_impl, server_url, api_key, kds_id,
+        lane="control-io", owner="config",
+    )
     detail["kds_id"] = kds_id
     detail["permission"] = decision.permission
     detail["resource_status"] = resource_status
+    permission_record = await run_blocking(
+        "aidp-detail-permission", aidp_permission_db.get_permission_by_kb_id,
+        kds_id, tenant_id, lane="control-io", owner="config",
+    ) or {}
+    detail["ingroup_permission"] = permission_record.get("ingroup_permission")
+    detail["group_ids"] = permission_record.get("group_ids") or []
+    detail["created_by"] = permission_record.get("owner_user_id")
+    detail["creator_name"] = permission_record.get("creator_name")
+    from services.user_identity_service import enrich_cas_usernames
+
+    await run_blocking(
+        "aidp-detail-creator-name", enrich_cas_usernames,
+        [detail], {"creator_cas_username": "created_by"}, lane="control-io", owner="config",
+    )
     return JSONResponse(status_code=HTTPStatus.OK, content=detail)
 
 
@@ -1211,114 +795,50 @@ async def list_documents(
     kds_id: Annotated[str, Path(description="Knowledge base ID")],
     page: Annotated[int, Query(ge=1, description="Page number starting from 1")] = 1,
     page_size: Annotated[int, Query(ge=1, le=100, description="Page size from 1 to 100")] = 10,
+    keyword: Annotated[str | None, Query(max_length=200)] = None,
 ) -> JSONResponse:
+    """List ingested files; Count provides the unfiltered pagination total."""
     user_id, tenant_id = await _auth(request)
     perms.require_permission(kds_id, user_id, tenant_id, required="READ")
-
     server_url, api_key = _credentials()
     started_at = time.perf_counter()
+    normalized_keyword = (keyword or "").strip()
 
-    # Preferred source: the all-status history, so files appear in the list
-    # while they are still being chunked/embedded (and when they failed). The
-    # history is scoped to the resolved channel directory though, so it is
-    # merged with the knowledge-base scoped listing instead of replacing it:
-    # reading the history alone hides every file that was ingested somewhere
-    # else, which shows up as those files vanishing from the list.
-    history_result = await _load_doc_history(server_url, api_key, kds_id)
-    if history_result is not None:
-        raw_history_items = history_result.get("value")
-        history_items = (
-            [item for item in raw_history_items if isinstance(item, dict)]
-            if isinstance(raw_history_items, list)
-            else []
+    if normalized_keyword:
+        result = await run_blocking(
+            "aidp-list-documents", list_aidp_docs_impl, server_url, api_key,
+            kds_id, page, page_size, normalized_keyword,
+            lane="control-io", owner="config",
         )
-        listed_items = await _load_ingested_documents(server_url, api_key, kds_id)
-        merged_items = _merge_document_sources(history_items, listed_items)
-        # The merged set is complete in one response, so this branch paginates
-        # in-process and reports an exact total.
-        result = _paginate_history_documents({"value": merged_items}, page, page_size)
-        logger.info(
-            "AIDP document list timing: total_ms=%.1f kb_id=%s page=%d page_size=%d "
-            "page_count=%d total_count=%d total_reliable=True source=history+listing "
-            "history_items=%d listed_items=%d merged_items=%d",
-            (time.perf_counter() - started_at) * 1000,
-            kds_id,
-            page,
-            page_size,
-            len(result["value"]),
-            result["total_count"],
-            len(history_items),
-            len(listed_items),
-            len(merged_items),
-        )
-        return JSONResponse(status_code=HTTPStatus.OK, content=result)
-
-    # Fallback: the completed-files listing (historical behaviour), used when
-    # AIDP has no channel/history support for this knowledge base.
-    list_result, count_result = await asyncio.gather(
-        run_blocking(
-            "aidp-list-documents",
-            list_aidp_docs_impl,
-            server_url,
-            api_key,
-            kds_id,
-            page,
-            page_size,
-            lane="control-io",
-            owner="config",
-        ),
-        run_blocking(
-            "aidp-document-count",
-            _load_cached_doc_count,
-            server_url,
-            api_key,
-            kds_id,
-            lane="control-io",
-            owner="config",
-        ),
-        return_exceptions=True,
-    )
-
-    if isinstance(list_result, BaseException):
-        raise list_result
-
-    result = list_result
-    page_items = result.get("value", []) if isinstance(result, dict) else []
-    page_count = len(page_items) if isinstance(page_items, list) else 0
-
-    if not isinstance(count_result, BaseException):
-        total_count = count_result
-        count_reliable = True
+        total_count = None
     else:
-        logger.warning(
-            "AIDP doc Count API failed for KB %s: %s", kds_id, count_result,
+        result, total_count = await asyncio.gather(
+            run_blocking(
+                "aidp-list-documents", list_aidp_docs_impl, server_url, api_key,
+                kds_id, page, page_size,
+                lane="control-io", owner="config",
+            ),
+            run_blocking(
+                "aidp-document-count", count_aidp_docs_impl, server_url, api_key, kds_id,
+                lane="control-io", owner="config",
+            ),
         )
-        total_count = page_count
-        count_reliable = False
 
-    has_more = (
-        total_count > page * page_size
-        if count_reliable
-        else bool(result.get("next_link")) or page_count >= page_size
-    )
-
-    result["total_count"] = int(total_count)
-    result["has_more"] = has_more
-    # The completed-files listing carries no processing statuses, so nothing
-    # keeps the frontend polling for this knowledge base.
-    result["processing_count"] = 0
-    if not count_reliable:
-        result["total_reliable"] = False
+    if not isinstance(result, dict) or not isinstance(result.get("value"), list):
+        raise AppException(ErrorCode.AIDP_RESPONSE_ERROR, "Unexpected AIDP document list response format")
+    has_more = bool(result.get("next_link"))
+    # Count is queried fresh, never from the 30-second cache. Search has no
+    # filtered Count endpoint, so next_link drives its simple pagination.
+    result.update({
+        "total_count": total_count if total_count is not None else (page - 1) * page_size + len(result["value"]),
+        "has_more": has_more,
+        "total_reliable": total_count is not None,
+    })
     logger.info(
         "AIDP document list timing: total_ms=%.1f kb_id=%s page=%d page_size=%d "
-        "page_count=%d total_count=%d total_reliable=%s source=completed",
-        (time.perf_counter() - started_at) * 1000,
-        kds_id,
-        page,
-        page_size,
-        page_count,
-        int(total_count),
-        count_reliable,
+        "page_count=%d total_count=%s has_more=%s",
+        (time.perf_counter() - started_at) * 1000, kds_id, page, page_size,
+        len(result["value"]), total_count, has_more,
     )
     return JSONResponse(status_code=HTTPStatus.OK, content=result)
 
@@ -1448,5 +968,8 @@ async def list_models(
     """List available models from AIDP ModelService. Auth required; no per-KB permission."""
     await _auth(request)
     server_url, api_key = _credentials()
-    result = list_aidp_models_impl(server_url, api_key, service=service, app=app)
+    result = await run_blocking(
+        "aidp-models", list_aidp_models_impl, server_url, api_key, service, app,
+        lane="control-io", owner="config",
+    )
     return JSONResponse(status_code=HTTPStatus.OK, content=result)

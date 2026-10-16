@@ -1032,13 +1032,13 @@ const convertLatexDelimiters = (content: string): string => {
  * Handles both complete and incomplete tags (for streaming scenarios)
  * - <code>...</code> → ```python ... ```
  * - <code>... (incomplete) → ```python\n (open code fence)
- * - <DISPLAY:language>...</DISPLAY> → ```language ... ```
- * - <DISPLAY:language>... (incomplete) → ```language\n (open code fence)
+ * - <display:language>...</display> → ```language ... ```
+ * - <display:language>... (incomplete) → ```language\n (open code fence)
  */
 const convertCustomCodeTags = (content: string): string => {
-  // Step 1: Handle complete <DISPLAY:language>...</DISPLAY> blocks
+  // Step 1: Handle complete <display:language>...</display> blocks
   content = content.replace(
-    /<DISPLAY:(\w+)>([\s\S]*?)<\/DISPLAY>/g,
+    /<display:(\w+)>([\s\S]*?)<\/display>/g,
     (_match, language, code) => {
       return `\`\`\`${language}\n${code.trim()}\n\`\`\``;
     }
@@ -1050,9 +1050,9 @@ const convertCustomCodeTags = (content: string): string => {
   });
 
   // Step 3: Handle incomplete tags during streaming
-  // <DISPLAY:language> without closing </DISPLAY> → ```language\n
+  // <display:language> without closing </display> → ```language\n
   content = content.replace(
-    /<DISPLAY:(\w+)>(?![\s\S]*<\/DISPLAY>)/g,
+    /<display:(\w+)>(?![\s\S]*<\/display>)/g,
     (_match, language) => {
       return `\`\`\`${language}\n`;
     }

@@ -1,52 +1,22 @@
 # 提示词开发指南
 
-本指南说明 `backend/prompts/` 下提示词模板的组织方式，以及如何为新智能体扩展模板。
+Nexent 将内置提示词 YAML 放在 `sdk/nexent/core/prompts/`。Backend 收集业务数据并选择模板，SDK 加载资源和渲染带参数的字段。
 
-## 📂 文件布局与命名
+## 文件与接口
 
-- 核心模板位于 `backend/prompts/`，统一按语言拆分为 `{name}_zh.yaml` 与 `{name}_en.yaml` 成对文件（如 `manager_system_prompt_template_zh.yaml` / `manager_system_prompt_template_en.yaml`）。模板类型到文件的映射集中在 `backend/utils/prompt_template_utils.py`。
-- 工具类/辅助模板位于 `backend/prompts/utils/`，用于元提示生成（如标题、提示词生成、问候语、正则护栏）。
-- 评测相关模板位于 `backend/prompts/evaluation/`（评测器生成、用例生成、判分、报告分析等）。
+- 语言资源位于 `zh/` 和 `en/`，下一层按 `agent`、`meta`、`evaluation`、`tool` 等用途分类。两种语言的相对路径一一对应，文件名不重复语言后缀。`meta/` 保存用于生成提示词、Agent 和技能草稿的元提示词。
+- Agent 模板位于 `zh/agent/` 和 `en/agent/`，主、子角色分别使用 `agent_manager.yaml`、`agent_worker.yaml`。聊天标题生成使用 `agent/generate_chat_title.yaml`。主、子角色模板的顶层字段为 `system_sections`、对应角色的阶段字段和 `final_answer`。
+- 人在回路、上下文摘要和答案校验策略分别保存在两种语言的 `agent/human_interaction.yaml`、`agent/context_summary.yaml`、`agent/answer_verifier.yaml`。中文摘要和校验策略是对原英文资源的简译。
+- `load_prompt(language, relative_path)` 根据语言目录下的相对路径加载独立的模板映射，例如 `load_prompt("zh", "agent/human_interaction")`。路径也可写为 `agent/human_interaction.yaml`。`render_prompt_text(source, parameters)` 渲染带参数的 Jinja 文本。
+- Backend 服务按语言、用途和文件名直接调用 SDK。用户自定义提示词生成模板仍由数据库管理，内置默认值来自 SDK YAML。
 
-## 🧩 模板结构
+## 参数
 
-智能体模板（manager/managed）常见顶层字段：
-- `managed_agent`：子智能体的 `task` 与 `report` 提示。
-- `planning`：`initial_plan`、`update_plan_pre_messages`、`update_plan_post_messages`。
-- `final_answer`：`pre_messages` / `post_messages`（达到最大步数时的总结提示）。
-- `verification`：答案校验的 `pre_messages` / `post_messages`。
+调用方将本轮实际值传给 SDK 渲染接口。Agent 运行时的 `duty`、`constraint`、`few_shots` 和角色任务等值由配置或会话提供。NL2Agent、技能创建及其他工作流也按当前任务传入工具名、技能草稿或文档内容。缺少必需的 Jinja 参数会报错，避免把未渲染的模板占位符原样发给模型。
 
-智能体的角色/约束/少样本内容（`duty`、`constraint`、`few_shots`）由后端在渲染时作为变量注入模板，不单独成文件（见 `backend/agents/create_agent_info.py` 中的 `render_kwargs`）。
+## 扩展模板
 
-## 🔄 变量占位
-
-模板中常用占位符：
-- `{{name}}`、`{{task}}`、`{{final_answer}}`
-- 渲染变量：`tools`、`managed_agents`、`skills`、`external_a2a_agents`
-- 渲染变量：`duty`、`constraint`、`few_shots`
-- 渲染变量：`memory_list`、`knowledge_base_summary`、`APP_NAME`、`APP_DESCRIPTION`、`user_id`
-
-## 📑 关键模板
-
-- 管理器智能体：`manager_system_prompt_template_zh.yaml`、`manager_system_prompt_template_en.yaml`
-- 被管理智能体：`managed_system_prompt_template_zh.yaml`、`managed_system_prompt_template_en.yaml`
-- 文档总结：`document_summary_agent_zh.yaml`、`document_summary_agent_en.yaml`
-- 聚类归并：`cluster_summary_reduce_zh.yaml`、`cluster_summary_reduce_en.yaml`
-- NL2Agent：`nl2agent_zh.yaml`、`nl2agent_en.yaml`
-- 智能体自动化：`agent_automation_zh.yaml`、`agent_automation_en.yaml`
-- 技能创建：`skill_creation_simple_*.yaml`、`skill_creation_complicate_*.yaml`
-- 工具/生成辅助（`utils/`）：`prompt_generate*.yaml`、`prompt_optimize*.yaml`、`generate_title*.yaml`、`greeting_generate*.yaml`、`guardrail_regex*.yaml`
-- 评测（`evaluation/`）：`generate_evaluator*.yaml`、`generate_cases_system*.yaml`、`judge_system*.yaml`、`error_explain*.yaml`、`analyze_report*.yaml`、`plan_kb_queries*.yaml`
-
-## 🚀 如何扩展
-
-1. 选取最相近模板复制，按 `{name}_zh.yaml` / `{name}_en.yaml` 成对创建，并在 `backend/utils/prompt_template_utils.py` 的 `template_paths` 中注册映射。
-2. 保留必要占位符，除非明确不需要。
-3. 工具列表需与实际可用工具一致。
-4. 用小任务验证"思考 → 代码 → 观察 → 重复"流程是否符合预期。
-
-## ✅ 规范与提示
-
-- 可执行代码块使用 ````py````，仅展示代码用 ````code:语言````。
-- 工具调用尽量用关键字参数，单轮避免过多工具调用。
-- 注释/文档保持英文，遵守仓库规则。
+1. 在 SDK 提示词目录的语言和功能子目录添加 YAML，例如 `zh/evaluation/judge.yaml`。保留该工作流现有字段名和占位符。
+2. 在调用处使用资源的语言和相对路径；已有 Agent 模板继续通过 SDK 的 bundle 校验。元提示词使用 `meta/nl2agent.yaml` 和 `meta/nl2skill.yaml`。
+3. 为动态字段增加参数渲染测试，为资源增加包内加载测试。SDK 的 `pyproject.toml` 声明了两级子目录内的 YAML package data。
+4. 用对应 Backend 服务的测试核对最终消息内容、语言选择和用户模板覆盖顺序。

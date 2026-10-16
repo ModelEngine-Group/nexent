@@ -1,6 +1,15 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 "use client";
 
+import type { SourceAttributes } from "@/types/source";
 import {
+  buildCitationDisplayIndexMap,
+  withCitationDisplayIndices,
+} from "@/lib/citationDisplay";
+
+import {
+  createElement,
   useCallback,
   useEffect,
   useMemo,
@@ -19,6 +28,11 @@ import { ExecutionCodeBlock } from "../ui/execution-code-block";
 import { SubAgentContainer } from "../ui/subagent";
 import { TooltipIconButton } from "../ui/tooltip-icon-button";
 import { Composer, type ChatMode } from "./composer";
+import { AgentWelcome } from "@/components/agent/agent-welcome";
+import { TextSuggestion } from "@/components/agent/agent-suggestion";
+import type { AgentSuggestionItem } from "@/types/agentSuggestion";
+import { NewChatWelcomeBackdrop } from "./newchat-welcome-backdrop";
+import newChatStyles from "./newchat-design.module.css";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -47,7 +61,6 @@ import {
   type SourcesPanelSelection,
 } from "../ui/sources-panel-context";
 import {
-  ArrowDownIcon,
   CheckIcon,
   CopyIcon,
   DownloadIcon,
@@ -57,9 +70,9 @@ import {
   MoreHorizontalIcon,
   RefreshCwIcon,
   ArrowLeft,
+  ArrowDownIcon,
   AlertTriangleIcon,
   SparklesIcon,
-  type LucideIcon,
   PencilIcon,
   Share2Icon,
   XCircleIcon,
@@ -92,6 +105,7 @@ import { ToolFallback } from "../ui/tool-fallback";
 import { ToolRecommendations } from "../ui/tool-recommendations";
 import { AgentDraftCard } from "../ui/agent-draft-card";
 import { AgentCreationResultCard } from "@/features/workbench/components/CreationResultCards";
+import { WorkbenchLandingExamples } from "@/features/workbench/components/WorkbenchLandingExamples";
 import { RequirementClarificationCard } from "../ui/requirement-clarification-card";
 import { InstalledResourceBindingCard } from "../ui/installed-resource-binding-card";
 import { SuggestedResourceInstallationCard } from "../ui/suggested-resource-installation-card";
@@ -169,13 +183,7 @@ import type {
 import { SkillFileCard } from "../ui/skill-file-card";
 import type { SkillFileContent } from "@/types/skill";
 
-export interface WelcomeSuggestion {
-  id: string;
-  title: string;
-  description: string;
-  prompt: string;
-  icon: LucideIcon;
-}
+export type WelcomeSuggestion = AgentSuggestionItem;
 
 export interface ThreadProps {
   agent: Agent | PublishedAgent;
@@ -184,6 +192,7 @@ export interface ThreadProps {
   welcomeSuggestions?: readonly WelcomeSuggestion[];
   welcomeContent?: ReactNode;
   conversationId?: number;
+  newChatDesign?: boolean;
   onBack?: () => void;
   selectedModelId?: string;
   onModelChange?: (modelId: string) => void;
@@ -212,11 +221,17 @@ export interface ThreadProps {
   readOnly?: boolean;
   readOnlyReason?: string;
   showComposer?: boolean;
+  configurationLayout?: boolean;
+  debugLayout?: boolean;
+  emptyFooterContent?: ReactNode;
+  footerContent?: ReactNode;
   interactionContent?: ReactNode;
   workbenchPresentation?: import("@/features/workbench/types").WorkbenchComposerPresentation;
   workbenchResources?: import("@/features/workbench/types").WorkbenchResourceControls;
   onRemoveWorkbenchSkill?: (skillId: number) => void;
   onOpenWorkbenchSkillPicker?: () => void;
+  workbenchSkillPopover?: ReactNode;
+  workbenchKnowledgePopover?: ReactNode;
 }
 
 /**
@@ -242,6 +257,7 @@ export const Thread: FC<ThreadProps> = ({
   welcomeSuggestions,
   welcomeContent,
   conversationId,
+  newChatDesign = false,
   onBack,
   selectedModelId,
   onModelChange,
@@ -267,11 +283,17 @@ export const Thread: FC<ThreadProps> = ({
   readOnly = false,
   readOnlyReason,
   showComposer = true,
+  configurationLayout = false,
+  debugLayout = false,
+  emptyFooterContent,
+  footerContent,
   interactionContent,
   workbenchPresentation,
   workbenchResources,
   onRemoveWorkbenchSkill,
   onOpenWorkbenchSkillPicker,
+  workbenchSkillPopover,
+  workbenchKnowledgePopover,
 }) => {
   const { t } = useTranslation();
   const models = useAgentModels(agent, modelSelectionScope);
@@ -523,15 +545,22 @@ export const Thread: FC<ThreadProps> = ({
         readOnly={readOnly}
         readOnlyReason={readOnlyReason}
         showComposer={showComposer}
+        configurationLayout={configurationLayout}
+        debugLayout={debugLayout}
+        emptyFooterContent={emptyFooterContent}
+        footerContent={footerContent}
         interactionContent={interactionContent}
         workbenchPresentation={workbenchPresentation}
         workbenchResources={workbenchResources}
         onRemoveWorkbenchSkill={onRemoveWorkbenchSkill}
         onOpenWorkbenchSkillPicker={onOpenWorkbenchSkillPicker}
+        workbenchSkillPopover={workbenchSkillPopover}
+        workbenchKnowledgePopover={workbenchKnowledgePopover}
         hasMessages={hasMessages}
         displayName={displayName}
         conversationTitle={conversationTitle}
         conversationId={conversationId}
+        newChatDesign={newChatDesign}
         isRunning={isRunning}
         isShareMode={isShareMode}
         selectedShareMessageIds={selectedShareMessageIds}
@@ -630,6 +659,7 @@ interface ThreadViewProps {
   displayName: string;
   conversationTitle: string;
   conversationId?: number;
+  newChatDesign?: boolean;
   isRunning: boolean;
   isShareMode: boolean;
   selectedShareMessageIds: Set<number>;
@@ -650,11 +680,17 @@ interface ThreadViewProps {
   readOnly: boolean;
   readOnlyReason?: string;
   showComposer: boolean;
+  configurationLayout: boolean;
+  debugLayout: boolean;
+  emptyFooterContent?: ReactNode;
+  footerContent?: ReactNode;
   interactionContent?: ReactNode;
   workbenchPresentation?: import("@/features/workbench/types").WorkbenchComposerPresentation;
   workbenchResources?: import("@/features/workbench/types").WorkbenchResourceControls;
   onRemoveWorkbenchSkill?: (skillId: number) => void;
   onOpenWorkbenchSkillPicker?: () => void;
+  workbenchSkillPopover?: ReactNode;
+  workbenchKnowledgePopover?: ReactNode;
 }
 
 const ThreadView: FC<ThreadViewProps> = ({
@@ -683,6 +719,7 @@ const ThreadView: FC<ThreadViewProps> = ({
   displayName,
   conversationTitle,
   conversationId,
+  newChatDesign = false,
   isRunning,
   isShareMode,
   selectedShareMessageIds,
@@ -703,21 +740,38 @@ const ThreadView: FC<ThreadViewProps> = ({
   readOnly,
   readOnlyReason,
   showComposer,
+  configurationLayout,
+  debugLayout,
+  emptyFooterContent,
+  footerContent,
   interactionContent,
   workbenchPresentation,
   workbenchResources,
   onRemoveWorkbenchSkill,
   onOpenWorkbenchSkillPicker,
+  workbenchSkillPopover,
+  workbenchKnowledgePopover,
 }) => {
   const { t } = useTranslation();
   const workbenchLanding = Boolean(
     workbenchPresentation && !hasMessages && !isShareMode
   );
+  const aui = useAui();
+  const suggestions = welcomeSuggestions?.length
+    ? welcomeSuggestions.slice(0, 4)
+    : (agent.example_questions || []).slice(0, 4).map((question, index) => ({
+        id: `question-${index}`,
+        title: question,
+        prompt: question,
+      }));
 
   return (
     <ThreadPrimitive.Root
       className={cn(
         "flex h-full flex-row bg-background",
+        newChatDesign && newChatStyles.font,
+        configurationLayout && "!bg-transparent",
+        debugLayout && "!bg-transparent",
         variant === "embedded" &&
           "[&_.aui-assistant-action-bar-root]:hidden [&_.aui-user-action-bar-root]:hidden"
       )}
@@ -725,69 +779,72 @@ const ThreadView: FC<ThreadViewProps> = ({
       <div
         className={cn(
           "flex h-full min-w-0 flex-1 flex-col",
+          newChatDesign && "relative [container-type:size]",
           workbenchLanding && "overflow-y-auto pb-[10vh]"
         )}
       >
-        {showConversationTitle && (
-          <header className="flex items-center gap-2 border-b px-3 py-2">
-            {isShareMode ? (
-              <>
-                <div className="flex min-w-0 flex-1 justify-center text-sm font-medium text-foreground">
-                  {conversationTitle}
-                </div>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  onClick={onLeaveShareMode}
-                  aria-label={t("common.close", "关闭")}
-                >
-                  <XIcon className="size-4" />
-                </Button>
-              </>
-            ) : (
-              <>
-                {onBack && (
-                  <Button variant="ghost" size="icon" onClick={onBack}>
-                    <ArrowLeft className="size-4" />
+        {newChatDesign && !hasMessages && <NewChatWelcomeBackdrop />}
+        {showConversationTitle &&
+          (isShareMode || (!newChatDesign && workbenchPresentation)) && (
+            <header className="flex items-center gap-2 border-b px-3 py-2">
+              {isShareMode ? (
+                <>
+                  <div className="flex min-w-0 flex-1 justify-center text-sm font-medium text-foreground">
+                    {conversationTitle}
+                  </div>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    onClick={onLeaveShareMode}
+                    aria-label={t("common.close", "关闭")}
+                  >
+                    <XIcon className="size-4" />
                   </Button>
-                )}
-                <div className="flex min-w-0 flex-1 flex-col">
-                  <span className="text-sm font-medium text-foreground">
-                    {workbenchPresentation || hasMessages
-                      ? conversationTitle
-                      : displayName}
-                  </span>
-                  {hasMessages && variant !== "embedded" && (
-                    <span className="text-xs text-muted-foreground">
-                      {displayName}
-                    </span>
+                </>
+              ) : (
+                <>
+                  {onBack && (
+                    <Button variant="ghost" size="icon" onClick={onBack}>
+                      <ArrowLeft className="size-4" />
+                    </Button>
                   )}
-                  {!hasMessages &&
-                    workbenchPresentation &&
-                    variant !== "embedded" && (
+                  <div className="flex min-w-0 flex-1 flex-col">
+                    <span className="text-sm font-medium text-foreground">
+                      {workbenchPresentation || hasMessages
+                        ? conversationTitle
+                        : displayName}
+                    </span>
+                    {hasMessages && variant !== "embedded" && (
                       <span className="text-xs text-muted-foreground">
                         {displayName}
                       </span>
                     )}
-                </div>
-                {hasMessages && conversationId && (
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    aria-label={t(
-                      "chatInterface.shareConversation",
-                      "分享对话"
-                    )}
-                    disabled={isRunning}
-                    onClick={onEnterShareMode}
-                  >
-                    <Share2Icon className="size-4" />
-                  </Button>
-                )}
-              </>
-            )}
-          </header>
-        )}
+                    {!hasMessages &&
+                      workbenchPresentation &&
+                      variant !== "embedded" && (
+                        <span className="text-xs text-muted-foreground">
+                          {displayName}
+                        </span>
+                      )}
+                  </div>
+                  {hasMessages && conversationId && (
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      aria-label={t(
+                        "chatInterface.shareConversation",
+                        "分享对话"
+                      )}
+                      disabled={isRunning}
+                      onClick={onEnterShareMode}
+                    >
+                      <Share2Icon className="size-4" />
+                    </Button>
+                  )}
+                </>
+              )}
+            </header>
+          )}
 
         {isShareMode && (
           <div className="flex items-center justify-between border-b bg-muted/30 px-4 py-2">
@@ -835,10 +892,31 @@ const ThreadView: FC<ThreadViewProps> = ({
           className={cn(
             "mx-auto flex min-h-0 min-w-0 w-full max-w-4xl flex-1 flex-col overflow-x-hidden overflow-y-auto",
             variant === "embedded" ? "px-4 py-4" : "px-8 py-6",
+            newChatDesign && "relative !max-w-[922px] !px-4 !py-0",
+            newChatDesign && !hasMessages && "!max-w-none",
+            !hasMessages &&
+              !workbenchLanding &&
+              !debugLayout &&
+              "!overflow-y-hidden",
+            debugLayout && "!max-w-none !p-0",
+            configurationLayout &&
+              !hasMessages &&
+              "!max-w-none !overflow-hidden !p-0",
             workbenchLanding &&
-              "mt-auto flex-none overflow-visible px-4 pb-0 pt-6 sm:px-8"
+              "relative mt-auto flex-none max-w-[890px] overflow-visible px-4 pb-0 pt-6 sm:px-8"
           )}
         >
+          {workbenchLanding && (
+            <div
+              aria-hidden
+              className="pointer-events-none absolute left-1/2 top-full z-0 h-[437px] w-[682px] -translate-x-1/2 -translate-y-1/2"
+              style={{
+                marginTop: 73,
+                background:
+                  "radial-gradient(50% 50% at 50% 50%, rgba(148,181,255,0.42) 0%, rgba(187,161,255,0.24) 48%, rgba(255,255,255,0) 100%)",
+              }}
+            />
+          )}
           {hasMessages ? (
             <ThreadMessages
               agent={agent}
@@ -852,11 +930,24 @@ const ThreadView: FC<ThreadViewProps> = ({
             />
           ) : (
             (welcomeContent ?? (
-              <ThreadWelcomeContent
-                agent={agent}
-                title={welcomeTitle}
-                suggestions={welcomeSuggestions}
-              />
+              <AgentWelcome
+                title={welcomeTitle || agent.display_name || agent.name}
+                greeting={agent.greeting_message || agent.description}
+                icon={
+                  <span className="flex size-14 shrink-0 items-center justify-center rounded-full bg-gradient-to-r from-[#FFA654] to-[#F056A0]">
+                    {createElement(getAgentIcon(agent), {
+                      className: "size-7 text-white",
+                      "aria-hidden": true,
+                    })}
+                  </span>
+                }
+              >
+                <TextSuggestion
+                  suggestions={suggestions}
+                  disabled={readOnly || isRunning}
+                  onSelect={(prompt) => aui.composer().setText(prompt)}
+                />
+              </AgentWelcome>
             ))
           )}
           {interactionContent}
@@ -867,11 +958,27 @@ const ThreadView: FC<ThreadViewProps> = ({
             className={cn(
               "sticky bottom-0 mx-auto flex w-full max-w-4xl flex-col",
               variant === "embedded" ? "gap-2 px-4 pb-4" : "gap-4 px-8 pb-8",
-              workbenchLanding && "static mb-auto gap-4 px-4 pb-6 pt-8 sm:px-8"
+              newChatDesign && "!max-w-[922px] shrink-0 !gap-0 !px-4 !pb-6",
+              debugLayout && "!max-w-none !shrink-0 !gap-4 !px-0 !pb-0",
+              workbenchLanding &&
+                "static mb-auto max-w-[890px] gap-4 px-4 pb-6 pt-8 sm:px-8"
             )}
           >
-            <ThreadScrollToBottom />
+            {!newChatDesign && (!debugLayout || hasMessages) && (
+              <ThreadScrollToBottom />
+            )}
+            {!hasMessages &&
+              emptyFooterContent &&
+              (debugLayout ? (
+                <div className="agent-debug-question-scroll">
+                  {emptyFooterContent}
+                </div>
+              ) : (
+                emptyFooterContent
+              ))}
             <Composer
+              newChatDesign={newChatDesign}
+              debugLayout={debugLayout}
               models={models}
               selectedModelId={selectedModelId}
               onModelChange={onModelChange}
@@ -898,7 +1005,14 @@ const ThreadView: FC<ThreadViewProps> = ({
               workbenchResources={workbenchResources}
               onRemoveWorkbenchSkill={onRemoveWorkbenchSkill}
               onOpenWorkbenchSkillPicker={onOpenWorkbenchSkillPicker}
+              workbenchSkillPopover={workbenchSkillPopover}
+              workbenchKnowledgePopover={workbenchKnowledgePopover}
             />
+            {workbenchLanding &&
+              workbenchPresentation?.mode === "generic_chat" && (
+                <WorkbenchLandingExamples />
+              )}
+            {footerContent}
           </ThreadPrimitive.ViewportFooter>
         )}
       </div>
@@ -909,6 +1023,7 @@ const ThreadView: FC<ThreadViewProps> = ({
         open={selection !== null}
         selectedCitationKey={selection?.selectedCitationKey}
         citationContext={selection?.citationContext}
+        selectionToken={selection ?? undefined}
         onClose={onPanelClose}
       />
     </ThreadPrimitive.Root>
@@ -962,104 +1077,11 @@ export const ReadOnlyConversation: FC<{
           open={selection !== null}
           selectedCitationKey={selection?.selectedCitationKey}
           citationContext={selection?.citationContext}
+          selectionToken={selection ?? undefined}
           onClose={close}
         />
       </ThreadPrimitive.Root>
     </SourcesPanelProvider>
-  );
-};
-
-interface ThreadWelcomeContentProps {
-  agent: Agent | PublishedAgent;
-  title?: string;
-  suggestions?: readonly WelcomeSuggestion[];
-}
-
-const ThreadWelcomeContent: FC<ThreadWelcomeContentProps> = ({
-  agent,
-  title,
-  suggestions = [],
-}) => {
-  const aui = useAui();
-  const { t } = useTranslation();
-  const Icon = getAgentIcon(agent);
-  const displayName = agent.display_name || agent.name;
-  const sampleQuestions = (agent.example_questions || []).slice(0, 4);
-  const displayedSuggestions = suggestions.slice(0, 4);
-
-  const handleSampleQuestionClick = useCallback(
-    (question: string) => {
-      aui.composer().setText(question);
-    },
-    [aui]
-  );
-
-  return (
-    <div className="flex h-full flex-col overflow-y-auto px-8 py-8">
-      <div className="flex flex-1 items-center justify-center">
-        <div className="flex w-full max-w-2xl flex-col items-center gap-6">
-          <div className="flex size-16 items-center justify-center rounded-full bg-primary/10 ring-4 ring-primary/10">
-            <Icon className="size-8 text-primary" />
-          </div>
-
-          <div className="text-center">
-            <h1 className="text-balance text-2xl font-bold text-foreground md:text-3xl">
-              {title ?? t("chat.thread.helloAgent", { agent: displayName })}
-            </h1>
-            <p className="mx-auto mt-3 max-w-xl text-pretty text-sm leading-relaxed text-muted-foreground">
-              {agent.greeting_message || agent.description}
-            </p>
-          </div>
-
-          {displayedSuggestions.length > 0 ? (
-            <div className="grid w-full auto-rows-fr grid-cols-1 gap-2 sm:grid-cols-2">
-              {displayedSuggestions.map((suggestion) => {
-                const SuggestionIcon = suggestion.icon;
-                return (
-                  <button
-                    key={suggestion.id}
-                    type="button"
-                    onClick={() => handleSampleQuestionClick(suggestion.prompt)}
-                    className="flex h-full min-h-20 items-center gap-3 rounded-lg border border-border bg-card px-4 py-3 text-left transition-colors hover:border-primary/40 hover:bg-accent/50"
-                  >
-                    <span className="flex size-9 shrink-0 items-center justify-center rounded-md bg-primary/10 text-primary">
-                      <SuggestionIcon className="size-5" />
-                    </span>
-                    <span className="min-w-0">
-                      <span className="block text-sm font-medium leading-5 text-foreground">
-                        {suggestion.title}
-                      </span>
-                      <span className="mt-1 block text-xs leading-5 text-muted-foreground">
-                        {suggestion.description}
-                      </span>
-                    </span>
-                  </button>
-                );
-              })}
-            </div>
-          ) : sampleQuestions.length > 0 ? (
-            <div className="w-full">
-              <p className="mb-4 flex items-center justify-center gap-1.5 text-xs font-medium text-muted-foreground">
-                <SparklesIcon className="size-3.5 text-primary" />
-                {t("chat.thread.tryQuestions")}
-              </p>
-              <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-                {sampleQuestions.map((q, index) => (
-                  <button
-                    key={index}
-                    type="button"
-                    onClick={() => handleSampleQuestionClick(q)}
-                    className="truncate rounded-xl border border-border bg-card px-4 py-3 text-left text-sm text-foreground transition-colors hover:border-primary/40 hover:bg-accent/50"
-                  >
-                    {q}
-                  </button>
-                ))}
-              </div>
-            </div>
-          ) : null}
-        </div>
-      </div>
-    </div>
   );
 };
 
@@ -1934,7 +1956,7 @@ const UserActionBar: FC = () => {
  * detect the synthetic `isImage` flag on picture_web entries. The base shape
  * stays compatible with `@assistant-ui/react`'s `SourceMessagePartComponent`.
  */
-interface SourcePartLike {
+interface SourcePartLike extends SourceAttributes {
   type: "source";
   sourceType?: "url" | "document";
   url?: string;
@@ -2193,9 +2215,17 @@ const SourceGroupButton: FC<SourceGroupButtonProps> = ({ indices }) => {
           isImage: source.isImage,
           citeIndex: source.citeIndex,
           toolSign: source.toolSign,
+          searchType: source.searchType,
+          sourceMetadata: source.sourceMetadata,
+          sourceReference: source.sourceReference,
+          retrievalHighlightTerms: source.retrievalHighlightTerms,
         }))
       : groupedSources;
-    for (const item of displaySources) {
+    const numberedSources = withCitationDisplayIndices(
+      displaySources,
+      buildCitationDisplayIndexMap(content, displaySources)
+    );
+    for (const item of numberedSources) {
       if (item.isImage) {
         imgs.push(item);
       } else {

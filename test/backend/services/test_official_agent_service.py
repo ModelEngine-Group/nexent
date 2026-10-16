@@ -439,14 +439,14 @@ def test_is_agent_installed_when_agent_missing():
 
 
 async def test_has_available_embedding_model_true():
-    fake = types.ModuleType("services.model_management_service")
+    fake = types.ModuleType("management.services.model.management")
     fake.list_models_for_tenant = AsyncMock(
         return_value=[
             {"model_id": 1, "model_type": "llm", "connect_status": "available"},
             {"model_id": 2, "model_type": "embedding", "connect_status": "available"},
         ]
     )
-    with patch.dict(sys.modules, {"services.model_management_service": fake}):
+    with patch.dict(sys.modules, {"management.services.model.management": fake}):
         assert (
             await official_agent_service._has_available_embedding_model("tenant-1")
             is True
@@ -454,7 +454,7 @@ async def test_has_available_embedding_model_true():
 
 
 async def test_first_available_embedding_model_id_returns_id():
-    fake = types.ModuleType("services.model_management_service")
+    fake = types.ModuleType("management.services.model.management")
     fake.list_models_for_tenant = AsyncMock(
         return_value=[
             {"model_id": 1, "model_type": "llm", "connect_status": "available"},
@@ -462,7 +462,7 @@ async def test_first_available_embedding_model_id_returns_id():
             {"model_id": 3, "model_type": "multi_embedding", "connect_status": "available"},
         ]
     )
-    with patch.dict(sys.modules, {"services.model_management_service": fake}):
+    with patch.dict(sys.modules, {"management.services.model.management": fake}):
         model_id = await official_agent_service._first_available_embedding_model_id(
             "tenant-1"
         )
@@ -470,14 +470,14 @@ async def test_first_available_embedding_model_id_returns_id():
 
 
 async def test_has_available_embedding_model_false_when_unavailable():
-    fake = types.ModuleType("services.model_management_service")
+    fake = types.ModuleType("management.services.model.management")
     fake.list_models_for_tenant = AsyncMock(
         return_value=[
             {"model_id": 1, "model_type": "embedding", "connect_status": "unavailable"},
             {"model_id": 2, "model_type": "llm", "connect_status": "available"},
         ]
     )
-    with patch.dict(sys.modules, {"services.model_management_service": fake}):
+    with patch.dict(sys.modules, {"management.services.model.management": fake}):
         assert (
             await official_agent_service._has_available_embedding_model("tenant-1")
             is False
@@ -486,9 +486,9 @@ async def test_has_available_embedding_model_false_when_unavailable():
 
 async def test_missing_model_types_reports_all_missing():
     bundle = _make_bundle(name="research", has_knowledge=True)
-    fake = types.ModuleType("services.model_management_service")
+    fake = types.ModuleType("management.services.model.management")
     fake.list_models_for_tenant = AsyncMock(return_value=[])
-    with patch.dict(sys.modules, {"services.model_management_service": fake}):
+    with patch.dict(sys.modules, {"management.services.model.management": fake}):
         missing = await official_agent_service._missing_model_types(bundle, "tenant-1")
     assert missing == ["llm", "embedding"]
 
@@ -502,28 +502,28 @@ async def test_missing_model_types_reports_rerank_when_enabled():
             params={"index_names": ["kb-1"], "rerank": True},
         )
     ]
-    fake = types.ModuleType("services.model_management_service")
+    fake = types.ModuleType("management.services.model.management")
     fake.list_models_for_tenant = AsyncMock(
         return_value=[
             {"model_id": 1, "model_type": "llm", "connect_status": "available"},
             {"model_id": 2, "model_type": "embedding", "connect_status": "available"},
         ]
     )
-    with patch.dict(sys.modules, {"services.model_management_service": fake}):
+    with patch.dict(sys.modules, {"management.services.model.management": fake}):
         missing = await official_agent_service._missing_model_types(bundle, "tenant-1")
     assert missing == ["rerank"]
 
 
 async def test_missing_model_types_empty_when_all_present():
     bundle = _make_bundle(name="research", has_knowledge=True)
-    fake = types.ModuleType("services.model_management_service")
+    fake = types.ModuleType("management.services.model.management")
     fake.list_models_for_tenant = AsyncMock(
         return_value=[
             {"model_id": 1, "model_type": "llm", "connect_status": "available"},
             {"model_id": 2, "model_type": "multi_embedding", "connect_status": "available"},
         ]
     )
-    with patch.dict(sys.modules, {"services.model_management_service": fake}):
+    with patch.dict(sys.modules, {"management.services.model.management": fake}):
         missing = await official_agent_service._missing_model_types(bundle, "tenant-1")
     assert missing == []
 

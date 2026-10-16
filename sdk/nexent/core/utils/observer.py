@@ -1,3 +1,5 @@
+# Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 import json
 import re
 import threading
@@ -138,6 +140,7 @@ class MessageObserver:
         # Unified output queue consumed by the agent streaming bridge.
         self.message_query = []
         self._message_query_lock = threading.Lock()
+        self._citation_indexes: dict[str, int] = {}
 
         # Control output language
         self.lang = lang
@@ -182,6 +185,37 @@ class MessageObserver:
         )
         self._model_attempt_id: ContextVar[str | None] = ContextVar(
             "model_attempt_id", default=None
+        )
+        self._step_outputs: dict[str | None, dict[str, Any]] = {}
+
+    def reserve_citations(self, tool_sign: str, count: int) -> int:
+        """Reserve unique citation indexes across tools sharing this run observer."""
+        with self._message_query_lock:
+            start = self._citation_indexes.get(tool_sign, 1)
+            self._citation_indexes[tool_sign] = start + count
+            return start
+
+    def _step_output(self) -> dict[str, Any]:
+        active = self._active_subagent()
+        key = active[0] if active else None
+        return self._step_outputs.setdefault(key, {})
+
+    def mark_direct_final_answer(self) -> None:
+        """Identify an untagged body as final after runtime classification."""
+        self._step_output()["reclassify_step"] = True
+
+    def complete_final_answer(self, agent_name: str, answer: str) -> None:
+        """Finalize the existing answer slot without appending its body twice."""
+        state = self._step_output()
+        streamed = "".join(state.get("answer", []))
+        if state.get("reclassify_step"):
+            streamed = "".join(state.get("body", []))
+        state["accepted_answer"] = answer
+        self._emit(
+            ProcessType.FINAL_ANSWER,
+            "" if streamed and streamed.strip() == answer.strip() else answer,
+            agent_name=agent_name,
+            metadata={"answer_phase": "complete", "reclassify_step": state.get("reclassify_step", False)},
         )
 
     @property
@@ -311,6 +345,13 @@ class MessageObserver:
             agent_id if explicit_agent_id else (agent_id or active_agent_id)
         )
         resolved_depth = depth if depth is not None else self._current_depth.get()
+        if process_type in {ProcessType.MODEL_OUTPUT_THINKING, ProcessType.MODEL_OUTPUT_CODE}:
+            state = self._step_output()
+            state.setdefault("body", []).append(str(content))
+        metadata = dict(metadata or {})
+        step_id = self._step_output().get("step_id")
+        if step_id:
+            metadata.setdefault("step_id", step_id)
         self._append_message(
             Message(
                 process_type,
@@ -328,6 +369,7 @@ class MessageObserver:
                         ProcessType.MODEL_OUTPUT_THINKING,
                         ProcessType.MODEL_OUTPUT_DEEP_THINKING,
                         ProcessType.MODEL_OUTPUT_CODE,
+                        ProcessType.FINAL_ANSWER,
                     }
                     else None
                 ),
@@ -341,6 +383,11 @@ class MessageObserver:
         self.current_mode = ProcessType.MODEL_OUTPUT_THINKING
         self.in_think_mode = False
         self.legacy_code_fence_pending = False
+        self._stream_state.in_final_answer = False
+        self._step_output().pop("answer", None)
+        self._step_output().pop("body", None)
+        self._step_output().pop("accepted_answer", None)
+        self._step_output().pop("reclassify_step", None)
 
     def begin_model_attempt(self, attempt_id: str, attempt: int) -> None:
         self._reset_model_stream_state()
@@ -375,28 +422,49 @@ class MessageObserver:
         pending = "".join(self.think_buffer) + str(new_token)
         self.think_buffer.clear()
         while pending:
-            marker = "</think>" if self.in_think_mode else "<think>"
-            marker_index = pending.find(marker)
+            think_marker = "</think>" if self.in_think_mode else "<think>"
+            markers = ("<final_answer>", "</final_answer>")
+            if not getattr(self._stream_state, "in_final_answer", False):
+                markers += (think_marker,)
+            lower = pending.lower()
+            found = [(lower.find(marker), marker) for marker in markers if lower.find(marker) >= 0]
+            marker_index, marker = min(found) if found else (-1, "")
             if marker_index >= 0:
                 before, pending = pending[:marker_index], pending[marker_index + len(marker):]
                 if before:
-                    if self.in_think_mode:
+                    if getattr(self._stream_state, "in_final_answer", False):
+                        self._emit_answer_delta(before)
+                    elif self.in_think_mode:
                         self._emit(ProcessType.MODEL_OUTPUT_DEEP_THINKING, before)
                     else:
                         self._process_normal_content(before)
-                self.in_think_mode = not self.in_think_mode
+                if marker == "<final_answer>":
+                    if self.token_buffer:
+                        self._emit(self.current_mode, "".join(self.token_buffer))
+                        self.token_buffer.clear()
+                    self._stream_state.in_final_answer = True
+                elif marker != "</final_answer>":
+                    self.in_think_mode = not self.in_think_mode
                 continue
 
-            suffix_length = self._marker_suffix_length(pending, marker)
+            suffix_length = max(self._marker_suffix_length(lower, item) for item in markers)
             safe_text = pending[:-suffix_length] if suffix_length else pending
             if safe_text:
-                if self.in_think_mode:
+                if getattr(self._stream_state, "in_final_answer", False):
+                    self._emit_answer_delta(safe_text)
+                elif self.in_think_mode:
                     self._emit(ProcessType.MODEL_OUTPUT_DEEP_THINKING, safe_text)
                 else:
                     self._process_normal_content(safe_text)
             if suffix_length:
                 self.think_buffer.append(pending[-suffix_length:])
             break
+
+    def _emit_answer_delta(self, content: str) -> None:
+        """Publish answer fragments in the same invocation and model attempt."""
+        state = self._step_output()
+        state.setdefault("answer", []).append(content)
+        self._emit(ProcessType.FINAL_ANSWER, content, metadata={"answer_phase": "delta"})
 
     @staticmethod
     def _marker_suffix_length(content: str, marker: str) -> int:
@@ -472,7 +540,9 @@ class MessageObserver:
         # Process the incomplete think marker as literal content at EOF.
         if self.think_buffer:
             think_buffer_text = ''.join(self.think_buffer)
-            if self.in_think_mode:
+            if getattr(self._stream_state, "in_final_answer", False):
+                self._emit_answer_delta(think_buffer_text)
+            elif self.in_think_mode:
                 self._emit(ProcessType.MODEL_OUTPUT_DEEP_THINKING, think_buffer_text)
             else:
                 self._process_normal_content(think_buffer_text)
@@ -575,7 +645,12 @@ class MessageObserver:
         return json.dumps(payload, ensure_ascii=False), visible_content
 
     def add_message(self, agent_name, process_type, content, **kwargs):
-        """add message to the queue"""
+        """Add a typed message to the queue."""
+        if process_type == ProcessType.STEP_COUNT:
+            state = self._step_output()
+            state.clear()
+            state["step_id"] = uuid.uuid4().hex
+            self._reset_model_stream_state()
         transformer = self.transformers.get(
             process_type, self.transformers[ProcessType.OTHER])
         formatted_content = transformer.transform(
@@ -783,6 +858,8 @@ class MessageObserver:
         Handle reasoning content from the model with type MODEL_OUTPUT_DEEP_THINKING
         """
         if reasoning_content:
+            # Provider reasoning is explicitly typed and may quote the output
+            # protocol. Only the visible model body can enter the answer role.
             self._emit(
                 ProcessType.MODEL_OUTPUT_DEEP_THINKING, reasoning_content)
 
@@ -800,6 +877,9 @@ class MessageObserver:
                 except json.JSONDecodeError:
                     continue
                 if data.get("type") == ProcessType.FINAL_ANSWER.value:
+                    if data.get("answer_phase"):
+                        state = self._step_outputs.get(data.get("invocation_id"), {})
+                        return state.get("accepted_answer") or "".join(state.get("answer", [])) or data.get("content")
                     return data.get("content")
 
         return None

@@ -11,32 +11,35 @@ import shutil
 import tarfile
 import time
 from concurrent.futures import CancelledError
-from copy import deepcopy
+from contextlib import contextmanager
+from copy import copy, deepcopy
 from dataclasses import replace
 from pathlib import Path
-from threading import Event
+from threading import Event, Lock, RLock
 from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Sequence
 
 from smolagents import ActionStep, AgentText, TaskStep, Timing
 from smolagents.tools import Tool
 
+from ...consts.mcp_errors import is_mcp_timeout_error
 from ...monitor import AgentRunMetadata, get_agent_monitoring_context, get_monitoring_manager
-from ..models.openai_llm import OpenAIModel
 from ..model_errors import ModelInvocationTerminalError
+from ..models.openai_llm import OpenAIModel
 from ..tools import *  # Used for tool creation, do not delete!!!
 from ..utils.constants import THINK_PREFIX_PATTERN, THINK_TAG_PATTERN
 from ..utils.observer import MessageObserver, ProcessType
 from .agent_model import AgentConfig, AgentHistory, ModelConfig, ToolConfig
-from .core_agent import CoreAgent, convert_code_format
-from .sandbox_workspace import SandboxWorkspace, probe_workspace
 from .clarification import choose_clarification_tool_name, clarification_policy
 from .core_agent import CoreAgent, convert_code_format
-from ...consts.mcp_errors import is_mcp_timeout_error
 from .output_protocol import ModelOutputProtocolExhaustedError
+from .prompt.user_context import render_user_context
+from .sandbox_workspace import SandboxWorkspace, probe_workspace
+from .tool_parameters import apply_mcp_tool_parameters
 from .tool_user_context import (
     apply_model_visible_tool_schemas_to_context_items,
     apply_user_context_to_mcp_tool,
 )
+
 
 if TYPE_CHECKING:
     from .context import ContextItemInput
@@ -243,7 +246,9 @@ class NexentAgent:
                  workspace_run_id=None,
                  minio_files=None,
                  cancellation_scope=None,
-                 user_context=None):
+                 user_context=None,
+                 tool_fastpath_enabled=True,
+                 tool_fastpath_allowed_tools=None):
         """
         Initialize the NexentAgent factory.
 
@@ -266,6 +271,8 @@ class NexentAgent:
             cancellation_scope: Optional run-scoped cancellation registry.
             user_context: Optional caller user context (tenant/user/groups)
                 passed through to tools for tool-side authorization.
+            tool_fastpath_enabled: Enable restricted local actions before Docker initialization.
+            tool_fastpath_allowed_tools: Approved official implementation IDs.
         """
         if not isinstance(observer, MessageObserver):
             raise TypeError("Create Observer Object with MessageObserver")
@@ -273,10 +280,13 @@ class NexentAgent:
         self.observer = observer
         self.model_config_list = model_config_list
         self.stop_event = stop_event
+        self._sandbox_skill_cleanup_owner = self
         self.cancellation_scope = cancellation_scope
         self.mcp_tool_collection = mcp_tool_collection
         self.redis_client = redis_client
         self.sandbox_config = sandbox_config
+        self.tool_fastpath_enabled = tool_fastpath_enabled
+        self.tool_fastpath_allowed_tools = tool_fastpath_allowed_tools
         self.minio_client = minio_client
         self.conversation_id = conversation_id
         self.user_id = user_id
@@ -295,6 +305,10 @@ class NexentAgent:
         self._workspace_uploaded_paths: set[str] = set()
         self._sandbox_executors: List[Any] = []
         self._sandbox_skill_runners: List[Any] = []
+        self._tool_fastpath_executors: List[Any] = []
+        self._subagent_invocations: Dict[Event, Any] = {}
+        self._subagent_invocations_lock = Lock()
+        self._subagent_invocations_closed = False
 
         self.agent = None
 
@@ -549,6 +563,9 @@ class NexentAgent:
         )
         if tool_obj is None:
             raise ValueError(f"{class_name} not found in MCP server")
+        # Collections may be shared by multiple runs; never wrap their template.
+        tool_obj = copy(tool_obj)
+        tool_obj.inputs = deepcopy(tool_obj.inputs)
         return apply_user_context_to_mcp_tool(tool_obj, self.user_context)
 
     def create_builtin_tool(self, tool_config: ToolConfig):
@@ -597,15 +614,6 @@ class NexentAgent:
             if params.get("isolated_skills_root"):
                 kwargs["isolated_skills_root"] = True
             return ReadSkillMdTool(**kwargs)
-        elif class_name == "WriteSkillFileTool":
-            from nexent.core.tools.write_skill_file_tool import WriteSkillFileTool
-            metadata = tool_config.metadata or {}
-            return WriteSkillFileTool(
-                local_skills_dir=params.get("local_skills_dir"),
-                agent_id=metadata.get("agent_id"),
-                tenant_id=metadata.get("tenant_id"),
-                version_no=metadata.get("version_no", 0),
-            )
         elif class_name == "ReadSkillConfigTool":
             from nexent.core.tools.read_skill_config_tool import ReadSkillConfigTool
             metadata = tool_config.metadata or {}
@@ -675,6 +683,7 @@ class NexentAgent:
                 tool_obj = self.create_local_tool(tool_config)
             elif source == "mcp":
                 tool_obj = self.create_mcp_tool(class_name)
+                tool_obj = apply_mcp_tool_parameters(tool_obj, tool_config.params)
             elif source == "langchain":
                 tool_obj = self.create_langchain_tool(tool_config)
             elif source == "builtin":
@@ -702,6 +711,8 @@ class NexentAgent:
         inner_agent: Any,
         sub_agent_config: Any,
         agent_id: Any = None,
+        *,
+        invocation_factory: Optional[Callable] = None,
     ) -> "SubAgentToolWrapper":
         """Wrap a sub-agent ``Tool`` so the observer sees nesting boundaries.
 
@@ -738,7 +749,101 @@ class NexentAgent:
                 or getattr(inner_agent, "name", None)
                 or str(agent_name)
             ),
+            invocation_factory=invocation_factory,
         )
+
+    def _create_subagent_definition(self, config: AgentConfig, tree_context: Dict[str, Any]):
+        """Register a definition; each call builds and owns a separate runtime."""
+        from .subagent_wrapper import SubAgentDefinition
+
+        definition = SubAgentDefinition(config.invocation_name or config.name, config.description)
+        return self._wrap_subagent(
+            definition,
+            config,
+            invocation_factory=lambda: self._subagent_invocation(config, definition, tree_context),
+        )
+
+    @contextmanager
+    def _subagent_invocation(self, config: AgentConfig, definition: Any, tree_context: Dict[str, Any]):
+        """Keep allocation, state, cancellation and cleanup local to one call."""
+        from ..concurrency.cancellation import RunCancellationScope, RunTerminated
+
+        scope = RunCancellationScope(parent_stop_event=self.stop_event)
+        done = Event()
+        with self._subagent_invocations_lock:
+            if self._subagent_invocations_closed or self.stop_event.is_set():
+                raise RunTerminated("Subagent owner has stopped accepting invocations")
+            self._subagent_invocations[done] = scope
+        parent_token = None
+        runtime = None
+        drained = False
+        try:
+            if self.cancellation_scope is not None:
+                parent_token = self.cancellation_scope.register_closer(scope.cancel)
+            if scope.cancelled or self.stop_event.is_set():
+                raise RunTerminated("Subagent invocation cancelled before allocation")
+            runtime = type(self)(
+                observer=self.observer,
+                model_config_list=self.model_config_list,
+                stop_event=scope.stop_event,
+                mcp_tool_collection=self.mcp_tool_collection,
+                redis_client=self.redis_client,
+                sandbox_config=self.sandbox_config,
+                minio_client=self.minio_client,
+                conversation_id=self.conversation_id,
+                user_id=self.user_id,
+                tenant_id=self.tenant_id,
+                workspace_path=self.workspace_path,
+                workspace_run_id=self.workspace_run_id,
+                cancellation_scope=scope,
+                user_context=self.user_context,
+                tool_fastpath_enabled=self.tool_fastpath_enabled,
+                tool_fastpath_allowed_tools=self.tool_fastpath_allowed_tools,
+            )
+            runtime._sandbox_skill_cleanup_owner = self._sandbox_skill_cleanup_owner
+            from .agent_model import copy_invocation_config
+
+            agent = runtime.create_single_agent(
+                copy_invocation_config(config), _managed_context=True, _sandbox_tree_context=tree_context,
+            )
+            runtime.set_agent(agent)
+            runtime._set_runtime_metadata_for_agent_tree(agent, definition.get_runtime_metadata())
+            runtime._initialize_sandbox_workspaces()
+            if scope.cancelled:
+                raise RunTerminated("Subagent invocation cancelled during allocation")
+            yield agent
+        finally:
+            try:
+                if runtime is not None:
+                    runtime._close_subagent_invocations()
+                    drained = True
+                    try:
+                        if runtime.workspace_path:
+                            runtime._pull_file_workspace_from_sandbox()
+                    finally:
+                        runtime._cleanup_sandbox()
+                else:
+                    drained = True
+            finally:
+                if drained:
+                    if parent_token is not None:
+                        self.cancellation_scope.unregister_closer(parent_token)
+                    with self._subagent_invocations_lock:
+                        self._subagent_invocations.pop(done, None)
+                    done.set()
+
+    def _close_subagent_invocations(self, timeout: float = 5.0) -> None:
+        """Cancel and drain owned calls before shared workspace teardown."""
+        with self._subagent_invocations_lock:
+            self._subagent_invocations_closed = True
+            pending = tuple(self._subagent_invocations.items())
+        for _, scope in pending:
+            scope.cancel()
+        deadline = time.monotonic() + timeout
+        for done, _ in pending:
+            if not done.wait(max(0.0, deadline - time.monotonic())):
+                logger.error("Subagent invocation exceeded close grace; retaining owner resources")
+                raise RuntimeError("Subagent invocation did not terminate before owner cleanup")
 
     def _check_sandbox_cancelled(self) -> None:
         """Stop initialization and retries after the owning run is cancelled."""
@@ -767,6 +872,7 @@ class NexentAgent:
             raise TypeError("agent_config must be a AgentConfig object")
         if _sandbox_tree_context is None:
             _sandbox_tree_context = {}
+        _sandbox_tree_context.setdefault("initialization_lock", RLock())
 
         try:
             self._check_sandbox_cancelled()
@@ -783,36 +889,48 @@ class NexentAgent:
             )
             prompt_templates = agent_config.prompt_templates
 
+            prompt_tool_policy = getattr(agent_config, "prompt_tool_policy_snapshot", None)
+            effective_prompt_tools = None
+            tool_configs = agent_config.tools
+            if prompt_tool_policy is not None:
+                from ..tools.prompt_registry import (
+                    PromptToolPolicySnapshot,
+                    filter_effective_prompt_tools,
+                )
+
+                snapshot = PromptToolPolicySnapshot.from_mapping(prompt_tool_policy)
+                registry = {config.name: config for config in agent_config.tools if config.name}
+                if len(registry) != len(agent_config.tools):
+                    raise ValueError("Agent prompt tool registry has duplicate or unnamed entries")
+                effective_prompt_tools = filter_effective_prompt_tools(
+                    registry, enabled=set(snapshot.enabled), allowed=set(snapshot.allowed),
+                    system_default_hidden=set(snapshot.system_default_hidden),
+                    policy_version=snapshot.policy_version,
+                    tool_schema_version=snapshot.tool_schema_version,
+                )
+                tool_configs = list(effective_prompt_tools.execution_tools.values())
+
             try:
                 tool_list = [
                     _wrap_tool_with_monitoring(
                         self.create_tool(tool_config),
                         agent_config.name,
                     )
-                    for tool_config in agent_config.tools
+                    for tool_config in tool_configs
                 ]
             except Exception as e:
                 raise ValueError(f"Error in creating tool: {e}")
 
             try:
-                # Create managed agents recursively. Session-scoped Docker agents
-                # share one container for the tree but retain independent kernels.
-                raw_managed_agents = []
-                for sub_agent_config in agent_config.managed_agents:
-                    inner_agent = self.create_single_agent(
-                        sub_agent_config,
-                        _managed_context=True,
-                        _sandbox_tree_context=_sandbox_tree_context,
-                    )
-                    raw_managed_agents.append((inner_agent, sub_agent_config))
-                managed_agents_list = [
-                    self._wrap_subagent(inner_agent, sub_agent_config)
-                    for inner_agent, sub_agent_config in raw_managed_agents
+                # Definitions are lazy; each invocation owns its runtime and kernel.
+                worker_agents_list = [
+                    self._create_subagent_definition(sub_agent_config, _sandbox_tree_context)
+                    for sub_agent_config in agent_config.worker_agents
                 ]
             except Exception as e:
-                raise ValueError(f"Error in creating managed agent: {e}")
+                raise ValueError(f"Error in creating worker agent: {e}")
 
-            # Create wrapper agents for external A2A agents - add them to managed_agents
+            # Create wrapper agents for external A2A agents in the worker-agent call set.
             # so model can call them like: external_agent_name(task="...")
             if agent_config.external_a2a_agents:
                 try:
@@ -826,7 +944,7 @@ class NexentAgent:
                             cancellation_scope=self.cancellation_scope,
                             user_context=self.user_context,
                         )
-                        managed_agents_list.append(
+                        worker_agents_list.append(
                             self._wrap_subagent(
                                 wrapper,
                                 ext_agent_config,
@@ -862,159 +980,244 @@ class NexentAgent:
                 and getattr(agent_config, "output_protocol", "code_action") == "code_action"
             )
             if enable_clarification and any(item.type == ContextItemType.SYSTEM for item in context_items):
-                tool_name = choose_clarification_tool_name({tool.name for tool in [*tool_list, *managed_agents_list]})
+                tool_name = choose_clarification_tool_name({tool.name for tool in [*tool_list, *worker_agents_list]})
                 context_items.append(ContextItemInput(
                     id="system:clarification_protocol",
                     type=ContextItemType.SYSTEM,
-                    content={"text": clarification_policy(tool_name)},
+                    content={
+                        "text": clarification_policy(
+                            tool_name,
+                            language=getattr(self.observer, "lang", "en"),
+                        )
+                    },
                     source=("runtime:clarification_protocol",),
                     priority=100,
-                    metadata={"authority": "platform"},
+                    metadata={"authority": "platform", "layout_order": 23},
                 ))
+            if effective_prompt_tools is not None:
+                visible_names = set(effective_prompt_tools.tools)
+                context_items = [
+                    item for item in context_items
+                    if getattr(getattr(item, "type", None), "value", getattr(item, "type", None)) != "tool"
+                    or item.id.removeprefix("tool:") in visible_names
+                ]
+                self.observer.add_message(
+                    agent_config.name,
+                    ProcessType.OTHER,
+                    json.dumps({"event": "prompt_tool_registry", **dict(effective_prompt_tools.audit)}),
+                )
             context_runtime = ManagedContextRuntime(
                 context_manager,
                 items=context_items,
             )
 
-            # Build one code executor for this agent. Managed-agent orchestration
+            # Build one code executor for this agent. Worker-agent orchestration
             # is a host-marked tool, so every agent needs its own kernel to avoid
             # nested execution deadlocks; session containers can still be shared.
             python_executor = None
             if self.sandbox_config is not None:
-                from .sandbox import SandboxLevel, build_python_executor
-                has_managed = bool(
-                    agent_config.managed_agents
-                    or getattr(agent_config, "external_a2a_agents", [])
-                )
-                python_executor = build_python_executor(
-                    config=self.sandbox_config,
-                    logger_=logger,
-                    managed_agents_exist=has_managed,
-                    host_tools_exist=_has_host_tools([
-                        *tool_list,
-                        *managed_agents_list,
-                    ]),
-                    session_container_group=_sandbox_tree_context.get(
-                        "session_container_group"
-                    ),
-                    cancellation_scope=self.cancellation_scope,
-                )
-                session_container_group = None
-                if (
-                    self.sandbox_config.level == SandboxLevel.DOCKER
-                    and self.sandbox_config.scope.value == "session"
-                ):
-                    session_container_group = getattr(
-                        python_executor,
-                        "_nexent_session_container_group",
-                        None,
-                    )
-                if session_container_group is not None:
-                    existing_group = _sandbox_tree_context.setdefault(
-                        "session_container_group",
-                        session_container_group,
-                    )
-                    if existing_group is not session_container_group:
-                        raise RuntimeError(
-                            "Agent tree received multiple session sandbox containers"
-                        )
-                self._sandbox_executors.append(python_executor)
-                if self.sandbox_config.level != SandboxLevel.LOCAL:
-                    from .sandbox import SandboxSkillScriptRunner
+                from .sandbox import SandboxLevel
 
-                    configured_timeout = getattr(self.sandbox_config, "timeout_seconds", None)
-                    skill_timeout = (
-                        max(1, int(configured_timeout))
-                        if isinstance(configured_timeout, (int, float))
-                        and not isinstance(configured_timeout, bool)
-                        else 300
-                    )
-                    script_runner = SandboxSkillScriptRunner(
-                        python_executor,
-                        timeout_seconds=skill_timeout,
-                        workspace_path=self.workspace_path,
-                        network_enabled=not self.sandbox_config.network_disabled,
-                        workspace_mapping=getattr(self, "workspace_mapping", None),
-                    )
-                    for tool in tool_list:
-                        bind_backend = getattr(tool, "bind_execution_backend", None)
-                        if callable(bind_backend) and _tool_name(tool) == "run_skill_script":
-                            bind_backend(
-                                script_runner,
-                                on_complete=lambda _result: self._pull_file_workspace_from_sandbox(),
-                            )
-                    self._sandbox_skill_runners.append(script_runner)
-                # Eager warm-up for remote executors (skip for LOCAL which is instant).
-                if self.sandbox_config.level != SandboxLevel.LOCAL:
-                    try:
-                        warm_start = time.time()
-
-                        current_metadata = get_agent_monitoring_context() or AgentRunMetadata()
-                        warmup_metadata = replace(
-                            current_metadata,
-                            agent_id=(
-                                getattr(agent_config, "_sub_agent_id", None)
-                                if _managed_context else current_metadata.agent_id
-                            ),
-                            agent_name=agent_config.name,
-                            agent_display_name=agent_config.display_name,
-                            model_name=agent_config.model_name,
-                        )
-                        with get_monitoring_manager().trace_agent_step(
-                            "agent.sandbox.warmup",
-                            warmup_metadata,
-                            step_type="sandbox_warmup",
-                            **{
-                                "sandbox.level": self.sandbox_config.level.value,
-                                "sandbox.scope": self.sandbox_config.scope.value,
-                                "sandbox.backend": getattr(python_executor, "_nexent_backend", "unknown"),
-                            },
-                        ):
-                            self._check_sandbox_cancelled()
-                            python_executor("[0, None]")
-                            self._check_sandbox_cancelled()
-
-                        warm_dur = time.time() - warm_start
-                        backend = getattr(python_executor, "_nexent_backend", "unknown")
-                        if backend == "local":
-                            if self.sandbox_config.failure_policy == "error":
-                                raise RuntimeError("Docker was requested but the executor is local")
-                            self.workspace_mapping = None
-                            for tool in tool_list:
-                                if getattr(tool, "workspace_mapping", None) is not None:
-                                    tool.workspace_mapping = None
-                            self.observer.add_message(
-                                "", ProcessType.WARNING,
-                                "Docker sandbox unavailable; execution has fallen back to LocalPythonExecutor.",
-                            )
-                            logger.warning(
-                                "Sandbox level '%s' unavailable; using LocalPythonExecutor instead "
-                                "(scope=%s, warm-up %.2fs)",
-                                self.sandbox_config.level.value,
-                                self.sandbox_config.scope.value,
-                                warm_dur,
-                            )
-                        else:
-                            logger.info(
-                                "Sandbox warmed up in %.2fs (backend=%s, level=%s, scope=%s)",
-                                warm_dur,
-                                backend,
-                                self.sandbox_config.level.value,
-                                self.sandbox_config.scope.value,
-                            )
-                    except CancelledError:
-                        raise
-                    except Exception as warm_err:
-                        self._check_sandbox_cancelled()
-                        if self.sandbox_config.failure_policy == "error":
-                            raise RuntimeError("Sandbox FAILED phase=warmup") from warm_err
-                        logger.warning(
-                            "Sandbox warm-up failed (%s): %s",
-                            self.sandbox_config.level.value,
-                            warm_err,
-                        )
-                # Store scope on NexentAgent so _cleanup_sandbox() can read it.
+                deferred = self.tool_fastpath_enabled and self.sandbox_config.level == SandboxLevel.DOCKER
                 self._sandbox_scope = self.sandbox_config.scope.value
+
+                def release_executor(executor):
+                    with _sandbox_tree_context["initialization_lock"]:
+                        self._release_deferred_executor(executor)
+                        group = _sandbox_tree_context.get("session_container_group")
+                        if group is not None and getattr(group, "_closed", False):
+                            _sandbox_tree_context.pop("session_container_group", None)
+
+                def create_executor():
+                    python_executor = None
+                    script_runner = None
+                    with _sandbox_tree_context["initialization_lock"]:
+                        try:
+                            from .sandbox import build_python_executor
+                            self._check_sandbox_cancelled()
+                            if deferred and self.workspace_path:
+                                self._pull_file_workspace_from_sandbox()
+                            has_worker = bool(
+                                agent_config.worker_agents
+                                or getattr(agent_config, "external_a2a_agents", [])
+                            )
+                            python_executor = build_python_executor(
+                                config=self.sandbox_config,
+                                logger_=logger,
+                                worker_agents_exist=has_worker,
+                                host_tools_exist=_has_host_tools([
+                                    *tool_list,
+                                    *worker_agents_list,
+                                ]),
+                                session_container_group=_sandbox_tree_context.get(
+                                    "session_container_group"
+                                ),
+                                cancellation_scope=self.cancellation_scope,
+                            )
+                            self._sandbox_executors.append(python_executor)
+                            self._check_sandbox_cancelled()
+                            session_container_group = None
+                            if (
+                                self.sandbox_config.level == SandboxLevel.DOCKER
+                                and self.sandbox_config.scope.value == "session"
+                            ):
+                                session_container_group = getattr(
+                                    python_executor,
+                                    "_nexent_session_container_group",
+                                    None,
+                                )
+                            if session_container_group is not None:
+                                existing_group = _sandbox_tree_context.setdefault(
+                                    "session_container_group",
+                                    session_container_group,
+                                )
+                                if existing_group is not session_container_group:
+                                    raise RuntimeError(
+                                        "Agent tree received multiple session sandbox containers"
+                                    )
+                            if self.sandbox_config.level != SandboxLevel.LOCAL:
+                                from .sandbox import SandboxSkillScriptRunner
+
+                                configured_timeout = getattr(self.sandbox_config, "timeout_seconds", None)
+                                skill_timeout = (
+                                    max(1, int(configured_timeout))
+                                    if isinstance(configured_timeout, (int, float))
+                                    and not isinstance(configured_timeout, bool)
+                                    else 300
+                                )
+                                script_runner = SandboxSkillScriptRunner(
+                                    python_executor,
+                                    timeout_seconds=skill_timeout,
+                                    workspace_path=self.workspace_path,
+                                    network_enabled=not self.sandbox_config.network_disabled,
+                                    workspace_mapping=getattr(self, "workspace_mapping", None),
+                                )
+                                for tool in tool_list:
+                                    bind_backend = getattr(tool, "bind_execution_backend", None)
+                                    if callable(bind_backend) and _tool_name(tool) == "run_skill_script":
+                                        bind_backend(
+                                            script_runner,
+                                            on_complete=lambda _result: self._pull_file_workspace_from_sandbox(),
+                                        )
+                                self._sandbox_skill_runners.append(script_runner)
+                            self._check_sandbox_cancelled()
+                            # Warm up remote executors when they are acquired.
+                            if self.sandbox_config.level != SandboxLevel.LOCAL:
+                                try:
+                                    warm_start = time.time()
+                                    current_metadata = get_agent_monitoring_context() or AgentRunMetadata()
+                                    warmup_metadata = replace(
+                                        current_metadata,
+                                        agent_id=(
+                                            getattr(agent_config, "_sub_agent_id", None)
+                                            if _managed_context else current_metadata.agent_id
+                                        ),
+                                        agent_name=agent_config.name,
+                                        agent_display_name=agent_config.display_name,
+                                        model_name=agent_config.model_name,
+                                    )
+                                    with get_monitoring_manager().trace_agent_step(
+                                        "agent.sandbox.warmup",
+                                        warmup_metadata,
+                                        step_type="sandbox_warmup",
+                                        **{
+                                            "sandbox.level": self.sandbox_config.level.value,
+                                            "sandbox.scope": self.sandbox_config.scope.value,
+                                            "sandbox.backend": getattr(python_executor, "_nexent_backend", "unknown"),
+                                        },
+                                    ):
+                                        self._check_sandbox_cancelled()
+                                        python_executor("[0, None]")
+                                        self._check_sandbox_cancelled()
+                                    warm_dur = time.time() - warm_start
+                                    backend = getattr(python_executor, "_nexent_backend", "unknown")
+                                    if backend == "local":
+                                        if self.sandbox_config.failure_policy == "error":
+                                            raise RuntimeError("Docker was requested but the executor is local")
+                                        self.workspace_mapping = None
+                                        for tool in tool_list:
+                                            if getattr(tool, "workspace_mapping", None) is not None:
+                                                tool.workspace_mapping = None
+                                        self.observer.add_message(
+                                            "", ProcessType.WARNING,
+                                            "Docker sandbox unavailable; execution has fallen back to LocalPythonExecutor.",
+                                        )
+                                        logger.warning(
+                                            "Sandbox level '%s' unavailable; using LocalPythonExecutor instead "
+                                            "(scope=%s, warm-up %.2fs)",
+                                            self.sandbox_config.level.value,
+                                            self.sandbox_config.scope.value,
+                                            warm_dur,
+                                        )
+                                    else:
+                                        logger.info(
+                                            "Sandbox warmed up in %.2fs (backend=%s, level=%s, scope=%s)",
+                                            warm_dur,
+                                            backend,
+                                            self.sandbox_config.level.value,
+                                            self.sandbox_config.scope.value,
+                                        )
+                                except CancelledError:
+                                    raise
+                                except Exception as warm_err:
+                                    self._check_sandbox_cancelled()
+                                    if self.sandbox_config.failure_policy == "error":
+                                        raise RuntimeError("Sandbox FAILED phase=warmup") from warm_err
+                                    logger.warning(
+                                        "Sandbox warm-up failed (%s): %s",
+                                        self.sandbox_config.level.value,
+                                        warm_err,
+                                    )
+                            # Store scope on NexentAgent so _cleanup_sandbox() can read it.
+                            self._sandbox_scope = self.sandbox_config.scope.value
+
+                            if deferred:
+                                self._check_sandbox_cancelled()
+                                container = getattr(python_executor, "container", None)
+                                if container is not None:
+                                    self._push_file_workspace_to_sandbox(containers=[container])
+                                self._initialize_sandbox_workspaces(executors=[python_executor])
+                            return python_executor
+                        except BaseException:
+                            if deferred and python_executor is not None:
+                                try:
+                                    if script_runner is not None:
+                                        skill_owner = self._sandbox_skill_cleanup_owner
+                                        if skill_owner is self:
+                                            script_runner.cleanup()
+                                        else:
+                                            # A failed child must not remove skills used by sibling invocations.
+                                            with skill_owner._subagent_invocations_lock:
+                                                skill_owner._sandbox_skill_runners.append(script_runner)
+                                        self._sandbox_skill_runners[:] = [
+                                            runner for runner in self._sandbox_skill_runners
+                                            if runner is not script_runner
+                                        ]
+                                finally:
+                                    release_executor(python_executor)
+                            raise
+
+                if deferred:
+                    from .tool_fastpath import (
+                        OFFICIAL_FASTPATH_TOOL_CLASSES,
+                        DeferredToolExecutor,
+                        official_fastpath_tools,
+                    )
+
+                    allowed_classes = (
+                        OFFICIAL_FASTPATH_TOOL_CLASSES
+                        if self.tool_fastpath_allowed_tools is None
+                        else self.tool_fastpath_allowed_tools
+                    )
+                    python_executor = DeferredToolExecutor(
+                        create_executor=create_executor,
+                        release_executor=release_executor,
+                        allowed_tools=official_fastpath_tools(tool_configs, tool_list, allowed_classes),
+                        stop_event=self.stop_event,
+                    )
+                    self._tool_fastpath_executors.append(python_executor)
+                else:
+                    python_executor = create_executor()
 
             # Create the agent
             self._check_sandbox_cancelled()
@@ -1028,7 +1231,7 @@ class NexentAgent:
                 max_steps=agent_config.max_steps,
                 prompt_templates=prompt_templates,
                 provide_run_summary=agent_config.provide_run_summary,
-                managed_agents=managed_agents_list,
+                managed_agents=worker_agents_list,
                 additional_authorized_imports=SAFE_PYTHON_INTERPRETER_IMPORTS,
                 instructions=agent_config.instructions,
                 context_runtime=context_runtime,
@@ -1313,8 +1516,7 @@ class NexentAgent:
                     )
                     final_answer_for_trace = final_answer_str
                     monitoring_manager.set_openinference_output(final_answer_str)
-                    observer.add_message(self.agent.agent_name,
-                                         ProcessType.FINAL_ANSWER, final_answer_str)
+                    observer.complete_final_answer(self.agent.agent_name, final_answer_str)
 
                     # Check if we need to stop from external stop_event
                     if self.agent.stop_event.is_set():
@@ -1346,6 +1548,7 @@ class NexentAgent:
                     raise ValueError(f"Error in interaction: {str(e)}")
 
                 finally:
+                    self._close_subagent_invocations()
                     self._restore_runtime_metadata_for_agent_tree(runtime_state_snapshots)
                     self._log_step_metrics()
                     try:
@@ -1394,31 +1597,12 @@ class NexentAgent:
             result = json.loads(download_tool.forward(source_url, local_filename))
             downloaded.append({"name": filename, "path": result["local_path"]})
 
+        language = getattr(self.observer, "lang", "en")
         mapping = getattr(self, "workspace_mapping", None)
         display_workspace = mapping.container_root if mapping is not None else workspace
-        file_lines = "\n".join(f"- {item['name']}: {item['path']}" for item in downloaded)
-        workspace_note = (
-            f"\n\nRun workspace: {display_workspace}\n"
-            f"Write every generated file under: {display_workspace / 'outputs'}\n"
-            "The code executor already runs in that outputs directory. Use bare relative "
-            "paths such as 'report.pdf', not 'outputs/report.pdf', to avoid creating an "
-            "outputs/outputs directory.\n"
-            "Exception: run_skill_script(source='workspace') resolves script_path from the "
-            "run workspace root. If code writes a generated script as bare 'build.js', call "
-            "run_skill_script with script_path='outputs/build.js'. The generated script itself "
-            "still writes output artifacts with bare filenames because its CWD is outputs.\n"
-            "Direct subprocess, os.system, and shell calls for system commands are blocked by "
-            "the code executor. Use run_skill_script with a skill-bundled wrapper, or use a "
-            "shell-free Python/Node.js API instead. When sandbox networking is enabled, only a "
-            "shell-free argv call to sys.executable -m pip install is permitted for dependency "
-            "installation.\n"
-            "For skill-creator output packages, create the new skill under outputs/<new-skill> "
-            "with normal code-executor file APIs; write_skill_file edits installed tenant skills "
-            "and does not create files in this run workspace.\n"
-            "Files created there are uploaded to MinIO automatically when the run finishes."
-        )
-        if file_lines:
-            workspace_note += f"\nUploaded files are available locally:\n{file_lines}"
+        workspace_note = render_user_context(language, "workspace_note", {
+            "workspace": display_workspace,
+        })
         self._push_file_workspace_to_sandbox()
         self._initialize_sandbox_workspaces()
         return query + workspace_note
@@ -1461,9 +1645,10 @@ class NexentAgent:
             and extra_kwargs.get("workspace_volume_name")
         )
 
-    def _push_file_workspace_to_sandbox(self) -> None:
+    def _push_file_workspace_to_sandbox(self, containers: Optional[List[Any]] = None) -> None:
         """Copy the prepared host workspace into every Docker sandbox."""
-        containers = self._sandbox_containers()
+        if containers is None:
+            containers = self._sandbox_containers()
         if not containers or not self.workspace_path:
             return
         workspace = Path(self.workspace_path).resolve()
@@ -1500,7 +1685,7 @@ class NexentAgent:
                 )
                 raise
 
-    def _initialize_sandbox_workspaces(self) -> None:
+    def _initialize_sandbox_workspaces(self, executors: Optional[List[Any]] = None) -> None:
         """Set every Docker kernel's cwd and workspace environment for this run."""
         if not self.workspace_path:
             return
@@ -1519,7 +1704,7 @@ class NexentAgent:
             "[_nexent_workspace, _nexent_output_dir]"
         )
         seen_executor_ids = set()
-        for executor in self._sandbox_executors:
+        for executor in self._sandbox_executors if executors is None else executors:
             self._check_sandbox_cancelled()
             executor_id = id(executor)
             if executor_id in seen_executor_ids:
@@ -1822,6 +2007,18 @@ class NexentAgent:
         with open("nexent_context_metrics.log", "a", encoding="utf-8") as f:
             f.write("\n".join(lines) + "\n")
 
+    def _release_deferred_executor(self, executor: Any) -> None:
+        """Release a deferred executor through its original lifecycle owner."""
+        self._sandbox_executors[:] = [item for item in self._sandbox_executors if item is not executor]
+        if getattr(self, "_sandbox_scope", None) == "system":
+            from .sandbox import release_python_executor
+
+            release_python_executor(executor, logger)
+        else:
+            from .sandbox import cleanup_executor
+
+            cleanup_executor(executor, logger, timeout=5.0)
+
     def _cleanup_sandbox(self) -> None:
         """
         Clean up the sandbox executor after an agent run.
@@ -1832,24 +2029,34 @@ class NexentAgent:
         Must run AFTER any output-sync logic, because the container filesystem
         is inaccessible after the executor is released / destroyed.
         """
+        from .tool_fastpath import DeferredToolExecutor
+
+        wrappers = list(self._tool_fastpath_executors)
         root_executor = getattr(self.agent, "python_executor", None)
         executors = list(self._sandbox_executors)
-        if root_executor is not None and all(
+        if root_executor is not None and not isinstance(root_executor, DeferredToolExecutor) and all(
             item is not root_executor for item in executors
         ):
             executors.append(root_executor)
-        if not executors:
+        if not executors and not wrappers:
             return
 
         scope = getattr(self, "_sandbox_scope", None)
 
-        for runner in self._sandbox_skill_runners:
-            runner.cleanup()
+        skill_owner = getattr(self, "_sandbox_skill_cleanup_owner", self)
+        if skill_owner is self:
+            for runner in self._sandbox_skill_runners:
+                runner.cleanup()
+        else:
+            # Shared skills remain available until the root drains every child.
+            with skill_owner._subagent_invocations_lock:
+                skill_owner._sandbox_skill_runners.extend(self._sandbox_skill_runners)
         self._sandbox_skill_runners.clear()
 
         # Sync outputs to MinIO before destroying the container.
         if (
-            not self.workspace_path
+            executors
+            and not self.workspace_path
             and self.sandbox_config is not None
             and self.sandbox_config.auto_sync_outputs
             and self.minio_client is not None
@@ -1874,10 +2081,11 @@ class NexentAgent:
                 logger.error("Output sync to MinIO failed: %s", exc)
 
         # Release or destroy the executor.
+        wrapped_executor_ids = {id(wrapper.remote) for wrapper in wrappers if wrapper.remote is not None}
         seen_executor_ids = set()
         for executor in reversed(executors):
             executor_id = id(executor)
-            if executor_id in seen_executor_ids:
+            if executor_id in seen_executor_ids or executor_id in wrapped_executor_ids:
                 continue
             seen_executor_ids.add(executor_id)
             if scope == "system":
@@ -1889,6 +2097,10 @@ class NexentAgent:
                 # agent-tree container is deleted after the final lease closes.
                 from .sandbox import cleanup_executor
                 cleanup_executor(executor, logger, timeout=5.0)
+
+        for wrapper in reversed(wrappers):
+            wrapper.cleanup()
+        self._tool_fastpath_executors.clear()
 
         # Clear the reference so GC can collect the wrapper objects.
         if self.agent is not None:

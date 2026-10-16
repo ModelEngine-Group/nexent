@@ -2,14 +2,14 @@
 
 ## Usage guide
 
-Create or update `proposal.md` according to [SPEC maintenance guidance](spec-maintenance-guide.md). Keep this fixed filename inside a SPEC directory whose name uses a registered level-1 module, an optional registered level-2 module, and a 2-to-5-word feature description. All three feature documents are required in this Nexent workflow; keep small changes concise. Required sections must remain. Include conditional sections whenever their stated condition applies. Optional sections may be removed. Replace placeholders and remove this guide from the generated document.
+Use this template for a full requirement SPEC or when an existing proposal needs a relevant update. Keep this fixed filename inside a SPEC directory whose name uses a registered level-1 module, an optional registered level-2 module, and a 2-to-5-word feature description. Bugs without a usable SPEC use [the lightweight design template](bugfix-design-template.md); no proposal/task set is required. Preserve the required sections when this template applies. Include conditional sections only when their condition applies. Replace placeholders and remove this guide from the generated document.
 
 | Section | Requirement | When / what to write |
 | --- | --- | --- |
 | Why | Required | Confirmed problem and motivation |
 | What Changes | Required | Outcomes and scope of the change |
 | Capabilities and Scenarios | Required | Canonical SPEC name, level-1 module, optional level-2 module, stable feature IDs, document mode, baseline links and in-scope behavior scenarios |
-| Baseline Inventory | Conditional | Reconstructing a missing or materially incomplete owning-feature SPEC |
+| Baseline Inventory | Conditional | Explicit baseline documentation work or context required for this requirement change; not an automatic bugfix obligation |
 | Acceptance Criteria | Required | Stable AC IDs, observable outcomes, proof method and pass conditions |
 | Impact | Required | Affected modules, interfaces and dependencies |
 | Non-Goals | Optional | Exclusions needed to prevent scope ambiguity |
@@ -35,7 +35,7 @@ This is a Nexent adaptation of [OpenSpec's spec-driven schema](https://github.co
 
 ## Baseline Inventory
 
-<Conditional when reconstructing a missing/incomplete SPEC. Describe the whole owning feature, its purpose, boundaries, main capabilities and unchanged end-to-end paths. Cite code/test evidence and distinguish observations, confirmed requirements and inferences. Most uncertain peripheral detail may be omitted. Separate observed defects and the intended fix; resolve material uncertainty. Baseline inventory does not imply all paths were runtime-verified.>
+<Conditional when baseline documentation is explicitly in scope. Describe the coherent capability, its purpose, boundaries, main capabilities and retained paths. Cite evidence and distinguish observations, confirmed requirements and inferences. Keep baseline context separate from current-change acceptance. Missing SPECs in bugfix mode use the lightweight design template instead.>
 
 ## Acceptance Criteria
 

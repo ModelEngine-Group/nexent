@@ -1,0 +1,89 @@
+schema_version: '1.0'
+stage: D5
+module: V5-BASELINE
+case:
+  case_id: REL-AUTO-DD1A9CB3B544F39F
+  feature_id: V5-REL-AUTO-DD1A9CB3B544F39F
+  business_rule_ids:
+  - V5-REL-AUTO-DD1A9CB3B544F39F-RULE-01
+  title: recover_interrupted_generations 中断 AI 生成回滚恢复（基线保留/追加清理/置 FAILED/进度归零）
+  type: RELIABILITY
+  priority: P1
+  status: active
+  automation: automated
+  objective: 线程托管迁移后服务重启时，GENERATING 评测集可能残留追加的 AI 生成 case；恢复逻辑若误删基线 case 或遗漏追加 case 清理，将导致评测集 case_count 与实存 case 数不一致、半生成脏数据残留，影响后续评测执行与展示正确性。
+  preconditions:
+  - 本地测试数据库（测试库/SQLite 会话）与构造的评测集/评测集 case fixture；测试工作区 ${NEXENT_TEST_HOME} 位于非 Git 仓库目录，测试代码不得读取生产凭据。
+  test_data:
+    legacy_asset_declaration: 本地测试数据库（测试库/SQLite 会话）与构造的评测集/评测集 case fixture；测试工作区 ${NEXENT_TEST_HOME} 位于非 Git 仓库目录，测试代码不得读取生产凭据。
+  steps:
+  - order: 1
+    action: 设置 NEXENT_TEST_HOME 于非 Git 仓库目录，准备本地测试数据库会话，导入 backend/database/evaluation_set_db.py 的 recover_interrupted_generations
+      及 EvaluationSet/EvaluationSetCase 模型。
+    expected: recover_interrupted_generations 返回被处理的 GENERATING 评测集数量正确。
+  - order: 2
+    action: 构造 fixture：创建 delete_flag='N'、generation_status='GENERATING' 的评测集 S，case_count=N（持久基线）；按 evaluation_set_case_id
+      升序写入 N 个基线 case 与 M 个追加 case（M>=1），记录全部 case_id。
+    expected: 每个被处理评测集 generation_status 置为 'FAILED'、generation_progress 归零。
+  - order: 3
+    action: 调用 recover_interrupted_generations()，断言返回值等于被处理的 GENERATING 评测集数量。
+    expected: case_count=N 时仅删除第 N 个之后的追加 case，前 N 个基线 case 完整保留，实存 case 数与 case_count 一致。
+  - order: 4
+    action: 重新查询评测集 S，断言 generation_status == 'FAILED' 且 generation_progress == 0。
+    expected: case_count=0 时全部追加 case 被清除，无半生成脏数据残留。
+  - order: 5
+    action: 查询 S 的 case，断言仅保留前 N 个基线 case，追加的 M 个 case 已被删除，实存 case 总数 == N。
+    expected: 单追加、多追加边界均不误删基线、不遗漏追加清理。
+  - order: 6
+    action: 边界 case_count=0：新建 GENERATING、case_count=0 的评测集并写入 K 个 case（全部视为追加），调用后断言所有 case 被删除、status=FAILED、progress=0。
+    expected: 幂等：重复调用无副作用，非 GENERATING 或已删除评测集不受影响。
+  - order: 7
+    action: 边界多追加：case_count=N 且追加 M>=2，验证仅追加部分被删、基线完整保留。
+    expected: 测试过程无未处理异常，日志、Trace、报告中不出现明文密钥。
+  - order: 8
+    action: 幂等与无关数据：再次调用 recover_interrupted_generations() 断言返回 0；确认 generation_status 非 GENERATING 或 delete_flag='Y' 的评测集不被处理。
+    expected: 测试过程无未处理异常，日志、Trace、报告中不出现明文密钥。
+  - order: 9
+    action: 确认日志不输出 API Key/Token/密码/模型密钥；测试结束释放临时数据，保证可重复执行。
+    expected: 测试过程无未处理异常，日志、Trace、报告中不出现明文密钥。
+  expected_results:
+  - recover_interrupted_generations 返回被处理的 GENERATING 评测集数量正确。
+  - 每个被处理评测集 generation_status 置为 'FAILED'、generation_progress 归零。
+  - case_count=N 时仅删除第 N 个之后的追加 case，前 N 个基线 case 完整保留，实存 case 数与 case_count 一致。
+  - case_count=0 时全部追加 case 被清除，无半生成脏数据残留。
+  - 单追加、多追加边界均不误删基线、不遗漏追加清理。
+  - 幂等：重复调用无副作用，非 GENERATING 或已删除评测集不受影响。
+  - 测试过程无未处理异常，日志、Trace、报告中不出现明文密钥。
+  forbidden_side_effects: []
+  source:
+    legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
+    legacy_sheet: 04_安全性能可靠性
+    legacy_row: 66
+  risk_type: RELIABILITY
+  risk: 线程托管迁移后服务重启时，GENERATING 评测集可能残留追加的 AI 生成 case；恢复逻辑若误删基线 case 或遗漏追加 case 清理，将导致评测集 case_count 与实存 case 数不一致、半生成脏数据残留，影响后续评测执行与展示正确性。
+  condition:
+  - 本地测试数据库（测试库/SQLite 会话）与构造的评测集/评测集 case fixture；测试工作区 ${NEXENT_TEST_HOME} 位于非 Git 仓库目录，测试代码不得读取生产凭据。
+  metrics:
+  - recover_interrupted_generations 返回被处理的 GENERATING 评测集数量正确。
+  - 每个被处理评测集 generation_status 置为 'FAILED'、generation_progress 归零。
+  - case_count=N 时仅删除第 N 个之后的追加 case，前 N 个基线 case 完整保留，实存 case 数与 case_count 一致。
+  - case_count=0 时全部追加 case 被清除，无半生成脏数据残留。
+  - 单追加、多追加边界均不误删基线、不遗漏追加清理。
+  - 幂等：重复调用无副作用，非 GENERATING 或已删除评测集不受影响。
+  - 测试过程无未处理异常，日志、Trace、报告中不出现明文密钥。
+  thresholds:
+  - recover_interrupted_generations 返回被处理的 GENERATING 评测集数量正确。
+  - 每个被处理评测集 generation_status 置为 'FAILED'、generation_progress 归零。
+  - case_count=N 时仅删除第 N 个之后的追加 case，前 N 个基线 case 完整保留，实存 case 数与 case_count 一致。
+  - case_count=0 时全部追加 case 被清除，无半生成脏数据残留。
+  - 单追加、多追加边界均不误删基线、不遗漏追加清理。
+  - 幂等：重复调用无副作用，非 GENERATING 或已删除评测集不受影响。
+  - 测试过程无未处理异常，日志、Trace、报告中不出现明文密钥。
+  recovery_expectations:
+  - recover_interrupted_generations 返回被处理的 GENERATING 评测集数量正确。
+  - 每个被处理评测集 generation_status 置为 'FAILED'、generation_progress 归零。
+  - case_count=N 时仅删除第 N 个之后的追加 case，前 N 个基线 case 完整保留，实存 case 数与 case_count 一致。
+  - case_count=0 时全部追加 case 被清除，无半生成脏数据残留。
+  - 单追加、多追加边界均不误删基线、不遗漏追加清理。
+  - 幂等：重复调用无副作用，非 GENERATING 或已删除评测集不受影响。
+  - 测试过程无未处理异常，日志、Trace、报告中不出现明文密钥。

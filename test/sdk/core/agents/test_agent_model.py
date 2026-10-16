@@ -54,7 +54,6 @@ def _create_mock_smolagents():
     setattr(mock_smolagents, "agents", agents_mod)
 
     local_python_mod = ModuleType("smolagents.local_python_executor")
-    setattr(local_python_mod, "fix_final_answer_code", MagicMock(name="fix_final_answer_code"))
     setattr(mock_smolagents, "local_python_executor", local_python_mod)
 
     memory_mod = ModuleType("smolagents.memory")
@@ -1234,7 +1233,7 @@ class TestAgentConfig:
             model_name="gpt-4",
             provide_run_summary=True,
             instructions="Additional instructions",
-            managed_agents=[],
+            worker_agents=[],
             external_a2a_agents=[]
         )
         assert config.name == "test_agent"
@@ -1260,7 +1259,7 @@ class TestAgentConfig:
         assert config.enable_protocol_repair_retry is False
         assert config.provide_run_summary is False
         assert config.instructions is None
-        assert config.managed_agents == []
+        assert config.worker_agents == []
         assert config.external_a2a_agents == []
 
     def test_agent_config_with_tools(self):
@@ -1283,8 +1282,8 @@ class TestAgentConfig:
         assert len(config.tools) == 1
         assert config.tools[0].class_name == "TavilySearchTool"
 
-    def test_agent_config_with_managed_agents(self):
-        """Test AgentConfig with nested managed agents."""
+    def test_agent_config_with_worker_agents(self):
+        """Test AgentConfig with nested worker agents."""
         sub_agent = agent_model_module.AgentConfig(
             name="sub_agent",
             description="A sub agent",
@@ -1296,10 +1295,11 @@ class TestAgentConfig:
             description="Parent agent with sub-agents",
             tools=[],
             model_name="parent-model",
-            managed_agents=[sub_agent]
+            worker_agents=[sub_agent]
         )
-        assert len(config.managed_agents) == 1
-        assert config.managed_agents[0].name == "sub_agent"
+        assert len(config.worker_agents) == 1
+        assert config.worker_agents[0].name == "sub_agent"
+        assert "managed_agents" not in config.model_dump()
 
     def test_agent_config_with_external_a2a_agents(self):
         """Test AgentConfig with external A2A agents."""

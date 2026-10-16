@@ -1,5 +1,5 @@
 import { beforeEach, expect, it, vi } from "vitest";
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { ConversationKnowledgeScopeModal } from "@/app/newchat/assistant-ui/conversation-knowledge-scope-modal";
 import knowledgeBaseService from "@/services/knowledgeBaseService";
@@ -183,32 +183,28 @@ it("waits for deployment settings and uses local catalog without an agent", asyn
   expect(knowledgeBaseService.getAidpKnowledgeBasesAll).not.toHaveBeenCalled();
 });
 
-it("retrieval configuration is a draft until outer confirmation", async () => {
+it("knowledge selection preserves retrieval configuration on confirmation", async () => {
   const confirm = vi.fn();
+  const configuredSelection = { ...selection, retrieval_config: { top_k: 8 } };
   render(
     <ConversationKnowledgeScopeModal
       open
-      value={selection}
+      value={configuredSelection}
       capabilities={capabilities}
       onCancel={vi.fn()}
       onConfirm={confirm}
     />
   );
   await screen.findByRole("option", { name: /Alpha/ });
-  await userEvent.click(screen.getByRole("button", { name: /配.*置/ }));
-  const dialog = (
-    await screen.findByText("agent.knowledge.configModal.title")
-  ).closest<HTMLElement>('[role="dialog"]')!;
-  const input = within(dialog).getByRole("spinbutton");
-  await userEvent.clear(input);
-  await userEvent.type(input, "8");
-  await userEvent.click(within(dialog).getByRole("button", { name: /确.*定/ }));
+  await userEvent.click(screen.getByRole("option", { name: /Alpha/ }));
   expect(confirm).not.toHaveBeenCalled();
   await userEvent.click(
     screen.getByRole("button", { name: "chat.knowledgeScope.confirm" })
   );
   expect(confirm.mock.calls[0][0].retrieval_config).toEqual({ top_k: 8 });
-  expect(selection.retrieval_config).toBeUndefined();
+  expect(confirm.mock.calls[0][0].local.knowledge_ids).toEqual(["2"]);
+  expect(configuredSelection.local.knowledge_ids).toEqual(["1", "2"]);
+  expect(configuredSelection.retrieval_config).toEqual({ top_k: 8 });
 });
 
 it("UT-FE-WB-025 uses one authorized catalog and disables incompatible embeddings", async () => {

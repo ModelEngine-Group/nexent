@@ -21,7 +21,7 @@ from datetime import datetime
 from typing import Any, Optional
 
 from http import HTTPStatus
-from fastapi import APIRouter, Body, Header, Path, HTTPException
+from fastapi import APIRouter, Body, Header, Path, HTTPException, Request
 from fastapi.responses import JSONResponse
 
 from consts.const import (
@@ -49,6 +49,7 @@ from services.memory_record_service import (
     get_tenant_memory_index_name,
     is_tenant_embedding_configured,
 )
+from services.audit_service import record_security_event
 from utils.auth_utils import get_current_user_id
 
 logger = logging.getLogger("memory_config_app")
@@ -97,6 +98,7 @@ def get_embedding_status(authorization: Optional[str] = Header(None)):
 def set_single_config(
     key: str = Body(..., embed=True, description="Configuration key"),
     value: Any = Body(..., embed=True, description="Configuration value"),
+    http_request: Request = None,
     authorization: Optional[str] = Header(None),
 ):
     """Set a single-value configuration item for the current user.
@@ -105,7 +107,7 @@ def set_single_config(
     - `MEMORY_SWITCH_KEY`: Toggle memory system on/off (boolean-like values accepted).
     - `MEMORY_AGENT_SHARE_KEY`: Set agent share mode (`always`/`ask`/`never`).
     """
-    user_id, _ = get_current_user_id(authorization)
+    user_id, tenant_id = get_current_user_id(authorization)
 
     if key == MEMORY_SWITCH_KEY:
         enabled = bool(value) if isinstance(value, bool) else str(
@@ -133,6 +135,11 @@ def set_single_config(
                             detail="Unsupported configuration key")
 
     if ok:
+        # The four supported keys carry bool/enum/int values only; the value
+        # documents what the switch was set to.
+        record_security_event("memory_config_set", request=http_request,
+                              user_id=user_id, tenant_id=tenant_id,
+                              details={"key": key, "value": value})
         return JSONResponse(status_code=HTTPStatus.OK, content={"success": True})
     raise HTTPException(status_code=HTTPStatus.BAD_REQUEST,
                         detail="Failed to update configuration")
@@ -142,6 +149,7 @@ def set_single_config(
 def set_dreaming_config(
     enabled: bool = Body(...),
     delete_history: bool = Body(False),
+    http_request: Request = None,
     authorization: Optional[str] = Header(None),
 ):
     user_id, tenant_id = get_current_user_id(authorization)
@@ -160,18 +168,26 @@ def set_dreaming_config(
             )
         if delete_history:
             memory_dreaming_db.delete_user_dreaming_history(tenant_id, user_id)
+    record_security_event("memory_dreaming_config", request=http_request,
+                          user_id=user_id, tenant_id=tenant_id,
+                          details={"enabled": enabled,
+                                   "delete_history": delete_history})
     return {"success": True}
 
 
 @router.post("/config/disable_agent")
 def add_disable_agent(
     agent_id: str = Body(..., embed=True),
+    http_request: Request = None,
     authorization: Optional[str] = Header(None),
 ):
     """Add an agent id to the user's disabled agent list."""
-    user_id, _ = get_current_user_id(authorization)
+    user_id, tenant_id = get_current_user_id(authorization)
     ok = add_disabled_agent_id(user_id, agent_id)
     if ok:
+        record_security_event("memory_disable_agent_add", request=http_request,
+                              user_id=user_id, tenant_id=tenant_id,
+                              details={"agent_id": agent_id})
         return JSONResponse(status_code=HTTPStatus.OK, content={"success": True})
     raise HTTPException(status_code=HTTPStatus.BAD_REQUEST,
                         detail="Failed to add disable agent id")
@@ -180,12 +196,16 @@ def add_disable_agent(
 @router.delete("/config/disable_agent/{agent_id}")
 def remove_disable_agent(
     agent_id: str = Path(...),
+    http_request: Request = None,
     authorization: Optional[str] = Header(None),
 ):
     """Remove an agent id from the user's disabled agent list."""
-    user_id, _ = get_current_user_id(authorization)
+    user_id, tenant_id = get_current_user_id(authorization)
     ok = remove_disabled_agent_id(user_id, agent_id)
     if ok:
+        record_security_event("memory_disable_agent_remove", request=http_request,
+                              user_id=user_id, tenant_id=tenant_id,
+                              details={"agent_id": agent_id})
         return JSONResponse(status_code=HTTPStatus.OK, content={"success": True})
     raise HTTPException(status_code=HTTPStatus.BAD_REQUEST,
                         detail="Failed to remove disable agent id")
@@ -194,12 +214,16 @@ def remove_disable_agent(
 @router.post("/config/disable_useragent")
 def add_disable_useragent(
     agent_id: str = Body(..., embed=True),
+    http_request: Request = None,
     authorization: Optional[str] = Header(None),
 ):
     """Add a user-agent id to the user's disabled user-agent list."""
-    user_id, _ = get_current_user_id(authorization)
+    user_id, tenant_id = get_current_user_id(authorization)
     ok = add_disabled_useragent_id(user_id, agent_id)
     if ok:
+        record_security_event("memory_disable_useragent_add", request=http_request,
+                              user_id=user_id, tenant_id=tenant_id,
+                              details={"agent_id": agent_id})
         return JSONResponse(status_code=HTTPStatus.OK, content={"success": True})
     raise HTTPException(status_code=HTTPStatus.BAD_REQUEST,
                         detail="Failed to add disable user-agent id")
@@ -208,12 +232,16 @@ def add_disable_useragent(
 @router.delete("/config/disable_useragent/{agent_id}")
 def remove_disable_useragent(
     agent_id: str = Path(...),
+    http_request: Request = None,
     authorization: Optional[str] = Header(None),
 ):
     """Remove a user-agent id from the user's disabled user-agent list."""
-    user_id, _ = get_current_user_id(authorization)
+    user_id, tenant_id = get_current_user_id(authorization)
     ok = remove_disabled_useragent_id(user_id, agent_id)
     if ok:
+        record_security_event("memory_disable_useragent_remove", request=http_request,
+                              user_id=user_id, tenant_id=tenant_id,
+                              details={"agent_id": agent_id})
         return JSONResponse(status_code=HTTPStatus.OK, content={"success": True})
     raise HTTPException(status_code=HTTPStatus.BAD_REQUEST,
                         detail="Failed to remove disable user-agent id")

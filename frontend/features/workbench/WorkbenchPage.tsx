@@ -10,7 +10,6 @@ import {
   type FC,
 } from "react";
 import { useAuiState } from "@assistant-ui/react";
-import { Sparkles } from "lucide-react";
 import { Chat } from "@/app/newchat/assistant-ui/chat";
 import { remoteChatModelAdapter } from "@/app/newchat/adapter/remote-chat-model-adapter";
 import type {
@@ -34,6 +33,7 @@ import type { Agent } from "@/types/agentConfig";
 import { useModelList } from "@/hooks/model/useModelList";
 import { withDefaultWorkbenchModel } from "./modelOptions";
 import log from "@/lib/logger";
+import { ConversationTitleGuard } from "@/lib/conversationTitle";
 import { conversationService } from "@/services/conversationService";
 import { ApiError } from "@/services/api";
 import {
@@ -77,6 +77,9 @@ import {
   previewWorkbenchAgent,
   SkillPicker,
 } from "@/features/workbench";
+import { SkillPopoverContent } from "./components/SkillPopoverContent";
+import { KnowledgePopoverContent } from "./components/KnowledgePopoverContent";
+import type { SkillListItem } from "@/services/skillService";
 
 type CreatedAgentResult = {
   agentId: number;
@@ -192,6 +195,7 @@ const HomeContent: FC = () => {
   //   2. Switching back and forth between threads keeps each thread bound to
   //      its own server-side conversation.
   const serverConversationIdsRef = useRef<Map<string, string>>(new Map());
+  const titleGuard = useRef(new ConversationTitleGuard());
   const [generatedTitles, setGeneratedTitles] = useState<Map<string, string>>(
     new Map()
   );
@@ -215,15 +219,19 @@ const HomeContent: FC = () => {
       }
 
       if (initialQuestion && previous !== numericId) {
+        const revision = titleGuard.current.capture(threadId);
         void generateConversationTitle(numericId, initialQuestion)
           .then((title) => {
             setGeneratedTitles((titles) => {
+              if (!titleGuard.current.isCurrent(threadId, revision))
+                return titles;
               const next = new Map(titles);
               next.set(threadId, title);
               return next;
             });
           })
           .catch((error) => {
+            if (!titleGuard.current.isCurrent(threadId, revision)) return;
             log.error(
               `[HomeContent] Failed to generate title for ${numericId}:`,
               error
@@ -233,9 +241,12 @@ const HomeContent: FC = () => {
             const fallbackTitle = initialQuestion.trim().slice(0, 40);
             if (!fallbackTitle) return;
             void conversationService
-              .rename(Number(numericId), fallbackTitle)
-              .then(() => {
+              .rename(Number(numericId), fallbackTitle, true)
+              .then((renamed) => {
+                if (!renamed) return;
                 setGeneratedTitles((titles) => {
+                  if (!titleGuard.current.isCurrent(threadId, revision))
+                    return titles;
                   const next = new Map(titles);
                   next.set(threadId, fallbackTitle);
                   return next;
@@ -255,6 +266,7 @@ const HomeContent: FC = () => {
 
   const handleConversationRenamed = useCallback(
     (threadId: string, remoteId: string | undefined, title: string) => {
+      titleGuard.current.renamed(threadId);
       setGeneratedTitles((titles) => {
         const next = new Map(titles);
         next.set(threadId, title);
@@ -703,7 +715,9 @@ const HomeContent: FC = () => {
           });
         } catch (error) {
           message.error(
-            error instanceof Error ? error.message : "资源配置保存失败"
+            error instanceof Error
+              ? error.message
+              : t("workbench.resources.saveFailed")
           );
         }
         return;
@@ -713,9 +727,78 @@ const HomeContent: FC = () => {
     [
       activeConversationId,
       saveWorkbenchConfig,
+      t,
       workbenchState.config,
       dispatchWorkbench,
     ]
+  );
+
+  const handleMountWorkbenchSkill = useCallback(
+    async (skill: SkillListItem) => {
+      const skillId = Number(skill.skill_id);
+      const mounts = [
+        ...workbenchState.config.skill_mounts,
+        {
+          skill_id: skillId,
+          config_values: { ...(skill.config_values || {}) },
+        },
+      ];
+      if (mounts.length > 20) {
+        message.warning(t("workbench.skills.limit", { count: 20 }));
+        return;
+      }
+      const nextConfig = { ...workbenchState.config, skill_mounts: mounts };
+      const numericConversationId = Number(activeConversationId);
+      if (
+        Number.isInteger(numericConversationId) &&
+        numericConversationId > 0
+      ) {
+        try {
+          await saveWorkbenchConfig(numericConversationId, nextConfig);
+        } catch (error) {
+          message.error(
+            error instanceof Error
+              ? error.message
+              : t("workbench.resources.saveFailed")
+          );
+          return;
+        }
+      } else {
+        dispatchWorkbench({ type: "replace-skills", mounts });
+      }
+      dispatchWorkbench({
+        type: "set-skill-names",
+        names: { ...workbenchState.skillNames, [skillId]: skill.name },
+      });
+    },
+    [
+      activeConversationId,
+      saveWorkbenchConfig,
+      t,
+      workbenchState.config,
+      workbenchState.skillNames,
+      dispatchWorkbench,
+    ]
+  );
+
+  const workbenchSkillPopover = (
+    <SkillPopoverContent
+      mountedSkillIds={
+        new Set(workbenchState.config.skill_mounts.map((m) => m.skill_id))
+      }
+      onMount={(skill) => void handleMountWorkbenchSkill(skill)}
+      onUnmount={(skillId) => void handleRemoveWorkbenchSkill(skillId)}
+    />
+  );
+
+  const workbenchKnowledgePopover = (
+    <KnowledgePopoverContent
+      value={knowledgeScope}
+      capabilities={knowledgeCapabilities ?? null}
+      onApply={(scope, preview) =>
+        handleKnowledgeScopeChange(scope, preview) as Promise<void> | void
+      }
+    />
   );
 
   const handleReplaceWorkbenchSkills = useCallback(
@@ -1219,15 +1302,14 @@ const HomeContent: FC = () => {
             modelSelectionScope="tenant"
             fallbackAgentName={t("workbench.genericAgentName", "智能体工作台")}
             landingContent={
-              <div className="mx-auto flex w-full max-w-4xl flex-col items-center gap-6 text-center">
-                <div className="flex size-16 items-center justify-center rounded-full bg-primary/10 ring-4 ring-primary/10">
-                  <Sparkles className="size-8 text-primary" />
-                </div>
-                <h1 className="text-balance text-2xl font-semibold text-foreground md:text-3xl">
-                  {t(
-                    "workbench.landingGreeting",
-                    "你好，我是 Nexent，需要我帮你做什么？"
-                  )}
+              <div className="flex w-full flex-col items-center text-center">
+                <h1 className="text-[36px] leading-[54px] text-[#191919]">
+                  <span className="font-bold">
+                    {t("workbench.landingGreetingHi", "你好，我是Nexent")}
+                  </span>{" "}
+                  <span className="font-normal">
+                    {t("workbench.landingGreetingAsk", "需要我帮你做什么")}
+                  </span>
                 </h1>
               </div>
             }
@@ -1324,6 +1406,8 @@ const HomeContent: FC = () => {
             }
             onRemoveWorkbenchSkill={handleRemoveWorkbenchSkill}
             onOpenWorkbenchSkillPicker={() => setSkillPickerOpen(true)}
+            workbenchSkillPopover={workbenchSkillPopover}
+            workbenchKnowledgePopover={workbenchKnowledgePopover}
             workbenchPresentation={{
               mode: workbenchState.config.mode,
               onExitCreation: () => void changeCreationMode("generic_chat"),

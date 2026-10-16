@@ -1,0 +1,14 @@
+schema_version: '1.0'
+case_id: NAV-MENU-D4-001
+implementations:
+- framework: playwright
+  file: test.spec.ts
+  selector: NAV-MENU-D4-001
+timeout_seconds: 300
+acceptance_bindings:
+  AC-01:
+  - NAV-MENU-D4-001
+  AC-02:
+  - NAV-MENU-D4-001
+  AC-03:
+  - NAV-MENU-D4-001

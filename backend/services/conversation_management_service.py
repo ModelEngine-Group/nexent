@@ -1,3 +1,5 @@
+# Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 import json
 import logging
 
@@ -5,7 +7,6 @@ from utils.time_context_utils import strip_current_time_prefix
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
-from jinja2 import StrictUndefined, Template
 from nexent.core.concurrency import run_blocking
 from nexent.monitor import get_monitoring_manager, set_monitoring_context, set_monitoring_operation
 
@@ -49,9 +50,9 @@ from database.conversation_db import (
     update_message_unit_status,
 )
 from database.model_management_db import get_model_by_model_id
-from services.model_gateway_service import get_llm_adapter_from_config
+from management.services.model.adapter import get_llm_adapter_from_config
 from utils.config_utils import tenant_config_manager
-from utils.prompt_template_utils import get_generate_title_prompt_template
+from nexent.core.agents.prompt.auxiliary import compose_auxiliary_prompt
 from utils.str_utils import remove_think_blocks
 
 logger = logging.getLogger("conversation_management_service")
@@ -279,7 +280,7 @@ def save_conversation_user(request: AgentRequest, user_id: str, tenant_id: str) 
     user_role_count = sum(1 for item in getattr(
         request, "history", []) if item.role == MESSAGE_ROLE["USER"])
 
-    # Strip the [Current time: ...] prefix before persisting so historical
+    # Strip the locale-specific current-time prefix before persisting so historical
     # messages do not show the time marker. The prefix is injected by
     # run_agent_stream for the LLM call only.
     raw_query = strip_current_time_prefix(request.query)
@@ -327,7 +328,7 @@ def call_llm_for_title(question: str, tenant_id: str, language: str = LANGUAGE["
     Returns:
         str: Generated title
     """
-    prompt_template = get_generate_title_prompt_template(language=language)
+    prompt = compose_auxiliary_prompt(language, "chat_title", {"question": question})
     set_monitoring_context(tenant_id=tenant_id, user_id=None)
 
     if model_id is not None:
@@ -356,13 +357,10 @@ def call_llm_for_title(question: str, tenant_id: str, language: str = LANGUAGE["
     )
 
     # Build messages - use new template variable 'question' instead of 'content'
-    user_prompt = Template(prompt_template["USER_PROMPT"], undefined=StrictUndefined).render({
-        "question": question
-    })
     messages = [{"role": MESSAGE_ROLE["SYSTEM"],
-                 "content": prompt_template["SYSTEM_PROMPT"]},
+                 "content": prompt.system},
                 {"role": MESSAGE_ROLE["USER"],
-                 "content": user_prompt}]
+                 "content": prompt.user}]
 
     # ModelEngine accepts role/content in a simple structure, ensure flattening before passing
     if model_config.get("model_factory", "").lower() == "modelengine":
@@ -379,7 +377,8 @@ def call_llm_for_title(question: str, tenant_id: str, language: str = LANGUAGE["
     return title
 
 
-def update_conversation_title(conversation_id: int, title: str, user_id: str = None) -> bool:
+def update_conversation_title(conversation_id: int, title: str, user_id: str = None,
+                              *, expected_snapshot: Optional[Dict[str, Any]] = None) -> bool:
     """
     Update conversation title
 
@@ -390,8 +389,9 @@ def update_conversation_title(conversation_id: int, title: str, user_id: str = N
     Returns:
         bool: Whether the update was successful
     """
-    success = rename_conversation(conversation_id, title, user_id)
-    if not success:
+    kwargs = {"expected_snapshot": expected_snapshot} if expected_snapshot is not None else {}
+    success = rename_conversation(conversation_id, title, user_id, **kwargs)
+    if not success and expected_snapshot is None:
         raise ConversationNotFoundError(
             f"Conversation {conversation_id} does not exist or has been deleted"
         )
@@ -651,7 +651,8 @@ def update_conversation_knowledge_scope_service(
     }
 
 
-def rename_conversation_service(conversation_id: int, name: str, user_id: str) -> bool:
+def rename_conversation_service(conversation_id: int, name: str, user_id: str,
+                                *, only_if_default_title: bool = False) -> bool:
     """
     Rename a conversation
 
@@ -664,6 +665,15 @@ def rename_conversation_service(conversation_id: int, name: str, user_id: str) -
         bool: Whether the rename was successful
     """
     try:
+        if only_if_default_title:
+            initial = get_conversation(conversation_id, user_id=user_id)
+            if initial is None:
+                raise ConversationNotFoundError("Conversation does not exist or has been deleted")
+            if initial["conversation_title"] not in {DEFAULT_EN_TITLE, DEFAULT_ZH_TITLE}:
+                return False
+            snapshot = {"conversation_title": initial["conversation_title"],
+                        "update_time": initial["update_time"]}
+            return rename_conversation(conversation_id, name, user_id, expected_snapshot=snapshot)
         success = rename_conversation(conversation_id, name, user_id)
         if not success:
             raise Exception(f"Conversation {conversation_id} does not exist or has been deleted")
@@ -820,6 +830,10 @@ def get_conversation_history_service(conversation_id: int, user_id: str) -> List
                            "published_date": published_date, "score": record["score_overall"],
                            "cite_index": record["cite_index"], "search_type": record["search_type"],
                            "tool_sign": record["tool_sign"], "score_details": {}}
+
+            search_item["score_details"].update(record.get("aidp_source_reference") or {})
+            if record.get("aidp_metadata") is not None:
+                search_item["score_details"]["metadata"] = record["aidp_metadata"]
 
             if record["score_accuracy"] is not None:
                 search_item["score_details"]["accuracy"] = record["score_accuracy"]
@@ -1083,10 +1097,16 @@ def get_sources_service(conversation_id: Optional[int], message_id: Optional[int
                     "filename": record["source_title"] if record["source_type"] == "file" else None,
                     "published_date": record["published_date"].strftime("%Y-%m-%d") if record[
                         "published_date"] else None,
-                    "score": record["score_overall"]
+                    "score": record["score_overall"],
+                    "cite_index": record.get("cite_index"),
+                    "search_type": record.get("search_type"),
+                    "tool_sign": record.get("tool_sign"),
                 }
 
                 search_item["score_details"] = {}
+                search_item["score_details"].update(record.get("aidp_source_reference") or {})
+                if record.get("aidp_metadata") is not None:
+                    search_item["score_details"]["metadata"] = record["aidp_metadata"]
                 if record["score_accuracy"] is not None:
                     search_item["score_details"]["accuracy"] = record["score_accuracy"]
                 if record["score_semantic"] is not None:
@@ -1146,6 +1166,11 @@ async def generate_conversation_title_service(conversation_id: int, question: st
         attributes={"langfuse.trace.name": "生成会话标题", "tenant.id": tenant_id},
     ))
     try:
+        initial = get_conversation(conversation_id, user_id=user_id, tenant_id=tenant_id)
+        if initial is None:
+            raise ConversationNotFoundError("Conversation does not exist or has been deleted")
+        snapshot = {"conversation_title": initial["conversation_title"],
+                    "update_time": initial["update_time"]}
         # Call LLM to generate title from question in a separate thread to avoid blocking
         title = await run_blocking(
             "conversation-title",
@@ -1158,13 +1183,19 @@ async def generate_conversation_title_service(conversation_id: int, question: st
             owner="runtime",
         )
 
-        # Update conversation title
-        update_conversation_title(conversation_id, title, user_id)
+        # A manual rename during the model call wins. No database lock is held
+        # while waiting for the external model, and the response returns the
+        # effective stored title rather than the rejected generated candidate.
+        if not update_conversation_title(conversation_id, title, user_id, expected_snapshot=snapshot):
+            current = get_conversation(conversation_id, user_id=user_id, tenant_id=tenant_id)
+            if current is None:
+                raise ConversationNotFoundError("Conversation does not exist or has been deleted")
+            title = current["conversation_title"]
         monitoring_manager.set_openinference_output(title)
 
         return title
 
-    except ValidationError:
+    except (ValidationError, ConversationNotFoundError):
         raise
     except Exception as e:
         logging.error(f"Failed to generate conversation title: {str(e)}")
@@ -1182,20 +1213,16 @@ def update_message_opinion_service(message_id: int, opinion: Optional[str]) -> b
     Returns:
         bool: Whether the update was successful
     """
-    try:
-        success = update_message_opinion(message_id, opinion)
-        if not success:
-            raise Exception("Message does not exist or has been deleted")
-        return True
-    except Exception as e:
-        logging.error(f"Failed to update message like/dislike: {str(e)}")
-        raise Exception(str(e))
+    success = update_message_opinion(message_id, opinion)
+    if not success:
+        raise ConversationNotFoundError("Message does not exist or has been deleted")
+    return True
 
 
 async def get_message_id_by_index_impl(conversation_id: int, message_index: int) -> Optional[int]:
     message_id = get_message_id_by_index(conversation_id, message_index)
     if message_id is None:
-        raise Exception("Message not found.")
+        raise ConversationNotFoundError("Message not found.")
     return message_id
 
 

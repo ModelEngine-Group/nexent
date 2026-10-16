@@ -1,0 +1,16 @@
+schema_version: '1.0'
+module:
+  id: V5-BASELINE
+  name: Migrated V5 baseline
+feature:
+  feature_id: F-125
+  name: Once/Interval/Cron 解析与 next_fire_time
+  status: active
+  description: '自动任务 / 调度触发: Once/Interval/Cron 解析与 next_fire_time'
+  business_rules:
+  - rule_id: F-125-RULE-01
+    description: Once/Interval/Cron 解析与 next_fire_time
+  required_test_stages:
+  - D1
+  source:
+    notes: Migrated from V5 01_代码功能清单 without changing the functional description.

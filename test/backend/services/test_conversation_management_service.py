@@ -1,3 +1,6 @@
+# Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
+from pathlib import Path
 import sys
 import types
 from unittest.mock import patch
@@ -30,24 +33,15 @@ def _stub_nexent_openai_model():
 
 _stub_nexent_openai_model()
 
-# Stub jinja2 to avoid importing the dependency during tests
-jinja2_mod = types.ModuleType("jinja2")
-class StrictUndefined:
-    pass
-class Template:
-    def __init__(self, text, undefined=None):
-        self.text = text
-    def render(self, ctx):
-        # very small render: replace {{content}} occurrence
-        return self.text.replace("{{content}}", ctx.get("content", ""))
-jinja2_mod.StrictUndefined = StrictUndefined
-jinja2_mod.Template = Template
-sys.modules["jinja2"] = jinja2_mod
+# Exercise the real Jinja renderer used by SDK prompt assembly.
+import jinja2
+
 # Stub nexent.core.agents.agent_model to satisfy imports in consts.model and agent_run_manager
 agent_model_mod = types.ModuleType("nexent.core.agents.agent_model")
 agent_model_mod.ToolConfig = object
 agent_model_mod.AgentRunInfo = object
 sys.modules["nexent.core.agents"] = types.ModuleType("nexent.core.agents")
+sys.modules["nexent.core.agents"].__path__ = [str(Path(__file__).resolve().parents[3] / "sdk/nexent/core/agents")]
 sys.modules["nexent.core.agents.agent_model"] = agent_model_mod
 
 # Stub nexent.core.agents.agent_context for agent_run_manager import
@@ -170,7 +164,7 @@ sys.modules["database.client"] = db_client_stub
 
 # Stub utils.prompt_template_utils to avoid requiring PyYAML
 prompt_mod = types.ModuleType("utils.prompt_template_utils")
-prompt_mod.get_generate_title_prompt_template = lambda language="zh": {"USER_PROMPT":"{{question}}", "SYSTEM_PROMPT":"SYS"}
+prompt_mod.load_prompt = lambda language="zh": {"USER_PROMPT":"{{question}}", "SYSTEM_PROMPT":"SYS"}
 sys.modules["utils.prompt_template_utils"] = prompt_mod
 
 # Stub storage components
@@ -429,12 +423,12 @@ class TestConversationManagementService(unittest.TestCase):
                 agent_request, [], self.user_id, self.tenant_id)
 
     @patch('backend.services.conversation_management_service.save_message')
-    def test_save_conversation_user_strips_current_time_prefix(self, mock_save_message):
-        """When query has [Current time: ...] prefix, it should be stripped before persisting."""
+    def test_save_conversation_user_strips_runtime_time_marker(self, mock_save_message):
+        """Remove the appended runtime time marker before persisting the user request."""
         mock_save_message.return_value = 1001
         agent_request = AgentRequest(
             conversation_id=456,
-            query="[Current time: 2026-01-01 20:00:00]\n\nWhat is the weather?",
+            query="What is the weather?\n\n[Current time: 2026-01-01 20:00:00]",
             minio_files=[],
             history=[]
         )
@@ -497,7 +491,7 @@ class TestConversationManagementService(unittest.TestCase):
         self.assertEqual(request_arg.message[0].content, "[Current time: no closing bracket here")
 
     @patch('backend.services.conversation_management_service.get_llm_adapter_from_config')
-    @patch('backend.services.conversation_management_service.get_generate_title_prompt_template')
+    @patch('backend.services.conversation_management_service.compose_auxiliary_prompt')
     @patch('backend.services.conversation_management_service.tenant_config_manager.get_model_config')
     def test_call_llm_for_title(self, mock_get_model_config, mock_get_prompt_template, mock_openai):
         # Setup
@@ -508,10 +502,9 @@ class TestConversationManagementService(unittest.TestCase):
             "api_key": "fake-key"
         }
 
-        mock_prompt_template = {
-            "SYSTEM_PROMPT": "Generate a short title",
-            "USER_PROMPT": "Generate a title for: {{question}}"
-        }
+        mock_prompt_template = types.SimpleNamespace(
+            system="Generate a short title", user="Generate a title for: What is AI?"
+        )
         mock_get_prompt_template.return_value = mock_prompt_template
 
         mock_llm_instance = mock_openai.return_value
@@ -527,10 +520,12 @@ class TestConversationManagementService(unittest.TestCase):
         self.assertEqual(result, "AI Discussion")
         mock_openai.assert_called_once()
         mock_llm_instance.assert_called_once()
-        mock_get_prompt_template.assert_called_once_with(language='zh')
+        mock_get_prompt_template.assert_called_once_with(
+            'zh', 'chat_title', {'question': 'What is AI? AI stands for Artificial Intelligence.'}
+        )
 
     @patch('backend.services.conversation_management_service.get_llm_adapter_from_config')
-    @patch('backend.services.conversation_management_service.get_generate_title_prompt_template')
+    @patch('backend.services.conversation_management_service.compose_auxiliary_prompt')
     @patch('backend.services.conversation_management_service.tenant_config_manager.get_model_config')
     @patch('backend.services.conversation_management_service.get_model_by_model_id')
     def test_call_llm_for_title_uses_selected_tenant_model(
@@ -542,10 +537,7 @@ class TestConversationManagementService(unittest.TestCase):
             "model_factory": "openai",
         }
         mock_get_model.return_value = selected_config
-        mock_get_prompt.return_value = {
-            "SYSTEM_PROMPT": "Generate a short title",
-            "USER_PROMPT": "{{question}}",
-        }
+        mock_get_prompt.return_value = types.SimpleNamespace(system="Generate a short title", user="Question")
         mock_adapter.return_value.return_value = MagicMock(content="Selected title")
 
         with self.assertLogs("conversation_management_service", level="INFO") as logs:
@@ -1060,7 +1052,9 @@ class TestConversationManagementService(unittest.TestCase):
                 "score_semantic": 0.8,
                 "cite_index": 1,
                 "search_type": "web_search",
-                "tool_sign": "web_search"
+                "tool_sign": "web_search",
+                "aidp_metadata": {"count": 0, "enabled": False, "nested": {"values": [0, False]}},
+                "aidp_source_reference": {"chunk_id": "chunk-source", "retrieval_source": "vector"},
             }
         ]
         mock_get_searches.return_value = mock_searches
@@ -1084,6 +1078,10 @@ class TestConversationManagementService(unittest.TestCase):
         self.assertEqual(search["published_date"], "2023-01-15")
         self.assertEqual(search["score"], 0.95)
         self.assertEqual(search["score_details"]["accuracy"], 0.9)
+        self.assertEqual(search["score_details"]["metadata"], {"count": 0, "enabled": False, "nested": {"values": [0, False]}})
+        self.assertEqual(search["score_details"]["chunk_id"], "chunk-source")
+        self.assertEqual(search["cite_index"], 1)
+        self.assertEqual(search["search_type"], "web_search")
         # Check images
         self.assertEqual(len(result["data"]["images"]), 1)
         self.assertEqual(result["data"]["images"][0],
@@ -1132,9 +1130,10 @@ class TestConversationManagementService(unittest.TestCase):
         mock_get_message.assert_called_once_with(123, 2)
 
     # Tests for generate_conversation_title_service
+    @patch('backend.services.conversation_management_service.get_conversation', return_value={"conversation_title": "New Conversation", "update_time": None})
     @patch('backend.services.conversation_management_service.call_llm_for_title')
     @patch('backend.services.conversation_management_service.update_conversation_title')
-    def test_generate_conversation_title_service(self, mock_update_title, mock_call_llm):
+    def test_generate_conversation_title_service(self, mock_update_title, mock_call_llm, mock_read):
         """Test generate_conversation_title_service generates title from question."""
         # Setup
         mock_call_llm.return_value = "Python Tips"
@@ -1150,13 +1149,15 @@ class TestConversationManagementService(unittest.TestCase):
         mock_call_llm.assert_called_once_with(
             "How to use Python effectively?", self.tenant_id, "en", None)
         mock_update_title.assert_called_once_with(
-            123, "Python Tips", self.user_id)
+            123, "Python Tips", self.user_id, expected_snapshot={"conversation_title": "New Conversation", "update_time": None})
 
+    @patch('backend.services.conversation_management_service.get_conversation', return_value={"conversation_title": "New Conversation", "update_time": None})
     @patch('backend.services.conversation_management_service.call_llm_for_title')
     @patch('backend.services.conversation_management_service.update_conversation_title')
     def test_generate_conversation_title_service_forwards_model_id(
-            self, mock_update_title, mock_call_llm):
+            self, mock_update_title, mock_call_llm, mock_read):
         mock_call_llm.return_value = "Python Tips"
+        mock_update_title.return_value = True
 
         result = asyncio.run(generate_conversation_title_service(
             123, "How to use Python?", self.user_id, self.tenant_id, "en", model_id=7))
@@ -1164,12 +1165,13 @@ class TestConversationManagementService(unittest.TestCase):
         self.assertEqual(result, "Python Tips")
         mock_call_llm.assert_called_once_with(
             "How to use Python?", self.tenant_id, "en", 7)
-        mock_update_title.assert_called_once_with(123, "Python Tips", self.user_id)
+        mock_update_title.assert_called_once_with(123, "Python Tips", self.user_id, expected_snapshot={"conversation_title": "New Conversation", "update_time": None})
 
+    @patch('backend.services.conversation_management_service.get_conversation', return_value={"conversation_title": "New Conversation", "update_time": None})
     @patch('backend.services.conversation_management_service.call_llm_for_title')
     @patch('backend.services.conversation_management_service.update_conversation_title')
     def test_generate_conversation_title_service_does_not_persist_validation_failure(
-            self, mock_update_title, mock_call_llm):
+            self, mock_update_title, mock_call_llm, mock_read):
         mock_call_llm.side_effect = ValidationError("Selected model is unavailable")
 
         with self.assertRaises(ValidationError):
@@ -1323,7 +1325,7 @@ class TestCallLlmForTitleEdgeCases(unittest.TestCase):
     """Test edge cases for call_llm_for_title."""
 
     @patch('backend.services.conversation_management_service.get_llm_adapter_from_config')
-    @patch('backend.services.conversation_management_service.get_generate_title_prompt_template')
+    @patch('backend.services.conversation_management_service.compose_auxiliary_prompt')
     @patch('backend.services.conversation_management_service.tenant_config_manager.get_model_config')
     def test_modelengine_factory_uses_flat_messages(self, mock_get_config, mock_get_prompt, mock_model):
         """Should flatten messages when model_factory is modelengine."""
@@ -1334,10 +1336,7 @@ class TestCallLlmForTitleEdgeCases(unittest.TestCase):
             "base_url": "http://x",
             "api_key": "k"
         }
-        mock_get_prompt.return_value = {
-            "SYSTEM_PROMPT": "SYS",
-            "USER_PROMPT": "{{question}}"
-        }
+        mock_get_prompt.return_value = types.SimpleNamespace(system="SYS", user="test question")
         mock_llm = MagicMock()
         mock_llm.return_value = MagicMock(content="Title")
         mock_model.return_value = mock_llm
@@ -1353,7 +1352,7 @@ class TestCallLlmForTitleEdgeCases(unittest.TestCase):
             self.assertIn("content", msg)
 
     @patch('backend.services.conversation_management_service.get_llm_adapter_from_config')
-    @patch('backend.services.conversation_management_service.get_generate_title_prompt_template')
+    @patch('backend.services.conversation_management_service.compose_auxiliary_prompt')
     @patch('backend.services.conversation_management_service.tenant_config_manager.get_model_config')
     def test_empty_response_returns_default_zh_title(self, mock_get_config, mock_get_prompt, mock_model):
         """Should return default Chinese title when response is empty."""
@@ -1363,10 +1362,7 @@ class TestCallLlmForTitleEdgeCases(unittest.TestCase):
             "base_url": "http://x",
             "api_key": "k"
         }
-        mock_get_prompt.return_value = {
-            "SYSTEM_PROMPT": "SYS",
-            "USER_PROMPT": "{{question}}"
-        }
+        mock_get_prompt.return_value = types.SimpleNamespace(system="SYS", user="test")
         mock_llm = MagicMock()
         mock_llm.return_value = MagicMock(content="  ")  # whitespace only
         mock_model.return_value = mock_llm
@@ -1377,7 +1373,7 @@ class TestCallLlmForTitleEdgeCases(unittest.TestCase):
         self.assertIn("title_generation: unknown -> 新对话", "\n".join(logs.output))
 
     @patch('backend.services.conversation_management_service.get_llm_adapter_from_config')
-    @patch('backend.services.conversation_management_service.get_generate_title_prompt_template')
+    @patch('backend.services.conversation_management_service.compose_auxiliary_prompt')
     @patch('backend.services.conversation_management_service.tenant_config_manager.get_model_config')
     def test_none_response_returns_default_zh_title(self, mock_get_config, mock_get_prompt, mock_model):
         """Should return default Chinese title when response is None."""
@@ -1387,10 +1383,7 @@ class TestCallLlmForTitleEdgeCases(unittest.TestCase):
             "base_url": "http://x",
             "api_key": "k"
         }
-        mock_get_prompt.return_value = {
-            "SYSTEM_PROMPT": "SYS",
-            "USER_PROMPT": "{{question}}"
-        }
+        mock_get_prompt.return_value = types.SimpleNamespace(system="SYS", user="test")
         mock_llm = MagicMock()
         mock_llm.return_value = MagicMock(content=None)
         mock_model.return_value = mock_llm
@@ -1399,7 +1392,7 @@ class TestCallLlmForTitleEdgeCases(unittest.TestCase):
         self.assertEqual(result, "新对话")
 
     @patch('backend.services.conversation_management_service.get_llm_adapter_from_config')
-    @patch('backend.services.conversation_management_service.get_generate_title_prompt_template')
+    @patch('backend.services.conversation_management_service.compose_auxiliary_prompt')
     @patch('backend.services.conversation_management_service.tenant_config_manager.get_model_config')
     def test_english_title_response(self, mock_get_config, mock_get_prompt, mock_model):
         """Should return default English title for English language."""
@@ -1409,10 +1402,7 @@ class TestCallLlmForTitleEdgeCases(unittest.TestCase):
             "base_url": "http://x",
             "api_key": "k"
         }
-        mock_get_prompt.return_value = {
-            "SYSTEM_PROMPT": "SYS",
-            "USER_PROMPT": "{{question}}"
-        }
+        mock_get_prompt.return_value = types.SimpleNamespace(system="SYS", user="test")
         mock_llm = MagicMock()
         mock_llm.return_value = MagicMock(content="  ")
         mock_model.return_value = mock_llm
@@ -1421,7 +1411,7 @@ class TestCallLlmForTitleEdgeCases(unittest.TestCase):
         self.assertEqual(result, "New Conversation")  # DEFAULT_EN_TITLE
 
     @patch('backend.services.conversation_management_service.get_llm_adapter_from_config')
-    @patch('backend.services.conversation_management_service.get_generate_title_prompt_template')
+    @patch('backend.services.conversation_management_service.compose_auxiliary_prompt')
     @patch('backend.services.conversation_management_service.tenant_config_manager.get_model_config')
     def test_remove_think_blocks(self, mock_get_config, mock_get_prompt, mock_model):
         """Should remove think blocks from title."""
@@ -1431,10 +1421,7 @@ class TestCallLlmForTitleEdgeCases(unittest.TestCase):
             "base_url": "http://x",
             "api_key": "k"
         }
-        mock_get_prompt.return_value = {
-            "SYSTEM_PROMPT": "SYS",
-            "USER_PROMPT": "{{question}}"
-        }
+        mock_get_prompt.return_value = types.SimpleNamespace(system="SYS", user="test")
         mock_llm = MagicMock()
         mock_llm.return_value = MagicMock(content="<think>reasoning</think>Actual Title")
         mock_model.return_value = mock_llm
@@ -1443,15 +1430,12 @@ class TestCallLlmForTitleEdgeCases(unittest.TestCase):
         self.assertEqual(result, "Actual Title")
 
     @patch('backend.services.conversation_management_service.get_llm_adapter_from_config')
-    @patch('backend.services.conversation_management_service.get_generate_title_prompt_template')
+    @patch('backend.services.conversation_management_service.compose_auxiliary_prompt')
     @patch('backend.services.conversation_management_service.tenant_config_manager.get_model_config')
     def test_no_model_config_returns_empty_display_name(self, mock_get_config, mock_get_prompt, mock_model):
         """Should handle None model_config gracefully."""
         mock_get_config.return_value = None
-        mock_get_prompt.return_value = {
-            "SYSTEM_PROMPT": "SYS",
-            "USER_PROMPT": "{{question}}"
-        }
+        mock_get_prompt.return_value = types.SimpleNamespace(system="SYS", user="test")
         mock_llm = MagicMock()
         mock_llm.return_value = MagicMock(content="Title")
         mock_model.return_value = mock_llm
@@ -1752,7 +1736,15 @@ class TestGetConversationHistoryServiceEdgeCases(unittest.TestCase):
                  "source_type": "web", "source_location": "http://x.com", "published_date": "2023-01-01",
                  "score_overall": 0.9, "score_accuracy": 0.8, "score_semantic": 0.7,
                  "retrieval_highlight_terms": ["Content"],
-                 "cite_index": 1, "search_type": "web", "tool_sign": "search"}
+                 "cite_index": 1, "search_type": "aidp_search", "tool_sign": "j",
+                 "aidp_metadata": {"section": 0, "enabled": False, "tags": [0, False]},
+                 "aidp_source_reference": {"chunk_id": "chunk-first"}},
+                {"unit_id": 10, "message_id": 2, "source_title": "Doc 1", "source_content": "Second content",
+                 "source_type": "file", "source_location": "", "published_date": None,
+                 "score_overall": 0.8, "score_accuracy": None, "score_semantic": None,
+                 "cite_index": 2, "search_type": "aidp_search", "tool_sign": "j",
+                 "aidp_metadata": {"section": 1, "standards": {"code": {"level": "E"}}},
+                 "aidp_source_reference": {"chunk_id": "chunk-second"}},
             ],
             "image_records": []
         }
@@ -1762,8 +1754,11 @@ class TestGetConversationHistoryServiceEdgeCases(unittest.TestCase):
         # Check search is grouped by message
         msg = result[0]["message"][0]
         self.assertIn("search", msg)
-        self.assertEqual(len(msg["search"]), 1)
+        self.assertEqual(len(msg["search"]), 2)
         self.assertEqual(msg["search"][0]["title"], "Doc 1")
+        self.assertEqual(msg["search"][0]["score_details"]["metadata"], {"section": 0, "enabled": False, "tags": [0, False]})
+        self.assertEqual(msg["search"][1]["score_details"]["metadata"], {"section": 1, "standards": {"code": {"level": "E"}}})
+        self.assertEqual([source["score_details"]["chunk_id"] for source in msg["search"]], ["chunk-first", "chunk-second"])
         self.assertEqual(
             msg["search"][0]["score_details"]["retrieval_highlight_terms"],
             ["Content"],
@@ -1982,9 +1977,10 @@ class TestGetSourcesServiceEdgeCases(unittest.TestCase):
 class TestGenerateConversationTitleServiceEdgeCases(unittest.TestCase):
     """Test edge cases for generate_conversation_title_service."""
 
+    @patch('backend.services.conversation_management_service.get_conversation', return_value={"conversation_title": "New Conversation", "update_time": None})
     @patch('backend.services.conversation_management_service.update_conversation_title')
     @patch('backend.services.conversation_management_service.call_llm_for_title')
-    def test_title_generation_exception(self, mock_call_llm, mock_update_title):
+    def test_title_generation_exception(self, mock_call_llm, mock_update_title, mock_read):
         """Should re-raise exception when title generation fails."""
         mock_call_llm.side_effect = Exception("LLM error")
         from backend.services.conversation_management_service import generate_conversation_title_service
@@ -2034,6 +2030,28 @@ class TestSaveSkillFilesToConversation(unittest.TestCase):
         from backend.services.conversation_management_service import save_skill_files_to_conversation
         result = save_skill_files_to_conversation(123, [{"name": "file.pdf"}], "user-1")
         self.assertFalse(result)
+
+
+def test_missing_message_raises_not_found_domain_error():
+    import pytest
+    from consts.exceptions import ConversationNotFoundError
+
+    with patch('backend.services.conversation_management_service.update_message_opinion', return_value=False):
+        with pytest.raises(ConversationNotFoundError):
+            update_message_opinion_service(123, "Y")
+    with patch('backend.services.conversation_management_service.get_message_id_by_index', return_value=None):
+        with pytest.raises(ConversationNotFoundError):
+            asyncio.run(get_message_id_by_index_impl(123, 0))
+
+
+def test_message_database_failure_preserves_unexpected_error():
+    import pytest
+
+    failure = RuntimeError("database unavailable")
+    with patch('backend.services.conversation_management_service.update_message_opinion', side_effect=failure):
+        with pytest.raises(RuntimeError) as error:
+            update_message_opinion_service(123, "Y")
+    assert error.value is failure
 
 
 if __name__ == '__main__':

@@ -112,10 +112,6 @@ for name in ["CodeAgent", "handle_agent_output_types", "ActionOutput", "RunResul
     setattr(mock_smolagents.agents, name, MagicMock(
         name=f"smolagents.agents.{name}"))
 
-# Populate smolagents.local_python_executor with required attributes
-setattr(mock_smolagents.local_python_executor, "fix_final_answer_code",
-        MagicMock(name="fix_final_answer_code"))
-
 # Populate smolagents.memory with required attributes
 for name in ["ActionStep", "PlanningStep", "FinalAnswerStep", "ToolCall", "TaskStep", "SystemPromptStep"]:
     setattr(mock_smolagents.memory, name, MagicMock(

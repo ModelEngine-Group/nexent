@@ -1,4 +1,4 @@
-# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+# Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
 
 import asyncio
 from copy import deepcopy
@@ -65,6 +65,7 @@ from database.conversation_db import (
     get_units_by_message,
     resolve_conversation_runtime_metadata,
 )
+from utils.final_answer_projection import remove_answer_only_steps, resolve_answer_completion
 from utils.runtime_metadata_utils import (
     validate_runtime_metadata,
 )
@@ -97,7 +98,6 @@ from services.memory_config_service import build_memory_context
 from services.memory_backend_adapter import _build_ingestion_event_service
 from services.thread_lifecycle_service import runtime_thread_manager
 from services.knowledge_scope_service import (
-    build_runtime_knowledge_policy,
     build_runtime_knowledge_resources,
     resolve_knowledge_scope,
 )
@@ -118,7 +118,8 @@ from utils.agent_stream_utils import (
     transform_skill_files_to_standard_format as _transform_skill_files_to_standard_format,
 )
 from utils.context_utils import build_authorized_context_input
-from utils.config_utils import get_model_name_from_config, tenant_config_manager
+from utils.config_utils import tenant_config_manager
+from management.services.model.names import get_model_name_from_config
 
 # Monitoring utilities: bind Agent metadata once at the request boundary.
 from nexent.monitor import agent_monitoring_context
@@ -394,6 +395,7 @@ async def _stream_agent_chunks(
     # Types whose chunks should be merged into the previous unit boundary,
     # matching the legacy batch merge logic.
     _MERGEABLE_TYPES = {
+        ProcessType.FINAL_ANSWER.value,
         ProcessType.MODEL_OUTPUT_CODE.value,
         ProcessType.MODEL_OUTPUT_THINKING.value,
         ProcessType.MODEL_OUTPUT_DEEP_THINKING.value,
@@ -501,6 +503,14 @@ async def _stream_agent_chunks(
                 data = json.loads(chunk)
                 chunk_type = data.get("type")
                 chunk_content = data.get("content", "") or ""
+                if chunk_type == "final_answer":
+                    has_body = resolve_answer_completion(buffered_units, data)
+                    if data.get("answer_phase") == "complete":
+                        current_unit = None
+                    if not has_body:
+                        await channel.publish(f"data: {chunk}\n\n")
+                        yield f"data: {chunk}\n\n"
+                        continue
 
                 # Use the current unit index for continuations and the next index
                 # for new units so the frontend can skip persisted resume chunks.
@@ -685,6 +695,12 @@ async def _stream_agent_chunks(
                                         "source_title": result.get("title", ""),
                                         "source_location": result.get("url", ""),
                                         "source_content": result.get("text", ""),
+                                        "aidp_metadata": result.get("score_details", {}).get("metadata"),
+                                        "aidp_source_reference": {
+                                            key: value
+                                            for key, value in result.get("score_details", {}).items()
+                                            if key != "metadata"
+                                        },
                                         "score_overall": float(result.get("score"))
                                         if result.get("score") not in (None, "")
                                         else None,
@@ -757,6 +773,7 @@ async def _stream_agent_chunks(
                             "tool_call_id": data.get("tool_call_id"),
                             "invocation_id": data.get("invocation_id"),
                             "_attempt_id": data.get("attempt_id"),
+                            "_step_id": data.get("step_id"),
                             "mergeable": mergeable,
                         }
                         if mergeable:
@@ -898,7 +915,10 @@ async def _stream_agent_chunks(
         persistence_failed = False
         if streaming_message_id is not None:
             try:
+                remove_answer_only_steps(buffered_units)
                 persistence_bytes = _finalize_buffered_unit_fragments(buffered_units)
+                final_answer_content = next((unit["content"] for unit in reversed(buffered_units)
+                                             if unit["type"] == "final_answer" and not unit.get("invocation_id")), "")
                 logger.info(
                     "Finalizing assistant persistence conversation=%s units=%s bytes=%s",
                     agent_request.conversation_id,
@@ -1603,6 +1623,7 @@ async def run_agent_stream(
     agent_request.query = prepend_current_time(
         agent_request.query,
         http_request.headers.get("x-user-timezone") if http_request else None,
+        language=language,
     )  # pragma: no cover
 
     conversation = None
@@ -1739,8 +1760,7 @@ async def run_agent_stream(
         )
         agent_request.tool_params = resolved_scope.tool_params
         agent_request.__dict__["_runtime_knowledge_context"] = {
-            "policy": build_runtime_knowledge_policy(language),
-            "resources": build_runtime_knowledge_resources(resolved_scope, language),
+            "scope": build_runtime_knowledge_resources(resolved_scope),
         }
         agent_request.__dict__["_resolved_knowledge_scope_event"] = {
             "effective": {

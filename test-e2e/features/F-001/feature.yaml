@@ -1,0 +1,16 @@
+schema_version: '1.0'
+module:
+  id: V5-BASELINE
+  name: Migrated V5 baseline
+feature:
+  feature_id: F-001
+  name: 注册：邀请码、弱密码、重复邮箱、asset-owner OAuth约束
+  status: active
+  description: '身份认证与账号 / 本地认证: 注册：邀请码、弱密码、重复邮箱、asset-owner OAuth约束'
+  business_rules:
+  - rule_id: F-001-RULE-01
+    description: 注册：邀请码、弱密码、重复邮箱、asset-owner OAuth约束
+  required_test_stages:
+  - D2
+  source:
+    notes: Migrated from V5 01_代码功能清单 without changing the functional description.

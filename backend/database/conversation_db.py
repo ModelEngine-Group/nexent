@@ -1,3 +1,5 @@
+# Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 import json
 from copy import deepcopy
 from datetime import datetime
@@ -63,6 +65,8 @@ class SearchRecord(TypedDict):
     score_accuracy: Optional[float]
     score_semantic: Optional[float]
     retrieval_highlight_terms: Optional[List[str]]
+    aidp_metadata: Optional[Dict[str, Any]]
+    aidp_source_reference: Optional[Dict[str, Any]]
     published_date: Optional[datetime]
     cite_index: Optional[int]
     search_type: Optional[str]
@@ -476,6 +480,9 @@ def persist_assistant_run_batch(
                 "score_overall": record.get("score_overall"),
                 "score_accuracy": record.get("score_accuracy"),
                 "score_semantic": record.get("score_semantic"),
+                "retrieval_highlight_terms": record.get("retrieval_highlight_terms"),
+                "aidp_metadata": record.get("aidp_metadata"),
+                "aidp_source_reference": record.get("aidp_source_reference"),
                 "published_date": record.get("published_date"),
                 "cite_index": record.get("cite_index"),
                 "search_type": record.get("search_type"),
@@ -1287,7 +1294,8 @@ def update_conversation_knowledge_scope(
         return result.rowcount > 0
 
 
-def rename_conversation(conversation_id: int, new_title: str, user_id: Optional[str] = None) -> bool:
+def rename_conversation(conversation_id: int, new_title: str, user_id: Optional[str] = None,
+                        *, expected_snapshot: Optional[Dict[str, Any]] = None) -> bool:
     """
     Rename a conversation
 
@@ -1316,7 +1324,16 @@ def rename_conversation(conversation_id: int, new_title: str, user_id: Optional[
         stmt = update(ConversationRecord).where(
             ConversationRecord.conversation_id == conversation_id,
             ConversationRecord.delete_flag == 'N'
-        ).values(update_data)
+        )
+        if expected_snapshot is not None:
+            # One atomic conditional UPDATE, not a read/check/write race. Audit
+            # time also detects an explicit rename back to the original title.
+            stmt = stmt.where(
+                ConversationRecord.created_by == user_id,
+                ConversationRecord.conversation_title == expected_snapshot["conversation_title"],
+                ConversationRecord.update_time == expected_snapshot["update_time"],
+            )
+        stmt = stmt.values(update_data)
 
         # Execute the update statement
         result = session.execute(stmt)
@@ -1939,6 +1956,10 @@ def create_source_search(search_data: Dict[str, Any], user_id: Optional[str] = N
             ]
         if 'published_date' in search_data:
             data["published_date"] = search_data['published_date']
+        if 'aidp_metadata' in search_data:
+            data["aidp_metadata"] = search_data['aidp_metadata']
+        if 'aidp_source_reference' in search_data:
+            data["aidp_source_reference"] = search_data['aidp_source_reference']
         if user_id:
             data = add_creation_tracking(data, user_id)
 

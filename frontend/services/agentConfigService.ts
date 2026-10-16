@@ -1,3 +1,5 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import {
   API_ENDPOINTS,
   ApiError,
@@ -114,6 +116,7 @@ export const fetchTools = async () => {
           : [],
       updated_by: tool.updated_by || "",
       updated_by_name: tool.updated_by_name || "",
+      updated_by_cas_username: tool.updated_by_cas_username,
       inputs: tool.inputs,
       initParams: tool.params.map((param: any) => {
         return {
@@ -161,8 +164,10 @@ type AgentListApiItem = {
   display_name?: string;
   description: string;
   author?: string;
+  author_cas_username?: string | null;
   created_by?: string | null;
   create_time?: string;
+  update_time?: string;
   tags?: unknown;
   model_ids?: number[];
   model_id?: number;
@@ -192,8 +197,10 @@ const formatAgentListItem = (agent: AgentListApiItem): Agent =>
     display_name: agent.display_name || agent.name,
     description: agent.description,
     author: agent.author,
+    author_cas_username: agent.author_cas_username,
     created_by: agent.created_by,
     create_time: agent.create_time,
+    update_time: agent.update_time,
     tags: normalizeTags(agent.tags),
     model_ids: agent.model_ids || (agent.model_id ? [agent.model_id] : []),
     model_names:
@@ -365,6 +372,7 @@ export const fetchPublishedAgentList = async () => {
       display_name: agent.display_name || agent.name,
       description: agent.description,
       author: agent.author,
+      author_cas_username: agent.author_cas_username,
       model_ids: agent.model_ids || (agent.model_id ? [agent.model_id] : []),
       model_names:
         agent.model_names || (agent.model_name ? [agent.model_name] : []),
@@ -382,6 +390,11 @@ export const fetchPublishedAgentList = async () => {
       model_params_override: agent.model_params_override ?? null,
       enable_protocol_repair_retry: agent.enable_protocol_repair_retry ?? false,
       icon_url: agent.icon_url,
+      tags: Array.isArray(agent.tags)
+        ? agent.tags.filter(
+            (tag: unknown): tag is string => typeof tag === "string"
+          )
+        : [],
     }));
 
     return {
@@ -554,6 +567,7 @@ export interface UpdateAgentInfoPayload {
   display_name?: string;
   description?: string;
   author?: string;
+  author_cas_username?: string | null;
   duty_prompt?: string;
   constraint_prompt?: string;
   few_shots_prompt?: string;
@@ -724,15 +738,26 @@ export const exportAgent = async (agentId: number) => {
 
 /**
  * Extract filename from Content-Disposition header
- * Handles both quoted and unquoted filename values
+ * Handles RFC 5987 filename* (UTF-8 percent-encoded), quoted and unquoted filename values
  * @param contentDisposition The Content-Disposition header value
  * @returns Extracted filename or null if not found
  */
-const extractFilenameFromContentDisposition = (
+export const extractFilenameFromContentDisposition = (
   contentDisposition: string | null
 ): string | null => {
   if (!contentDisposition) {
     return null;
+  }
+
+  // RFC 5987 encoding, e.g. filename*=UTF-8''%E6%99%BA%E8%83%BD%E4%BD%93.zip
+  const utf8Regex = /filename\*=UTF-8''([^;]+)/i;
+  const utf8Match = utf8Regex.exec(contentDisposition);
+  if (utf8Match?.[1]) {
+    try {
+      return decodeURIComponent(utf8Match[1].trim());
+    } catch {
+      // fall back to plain filename parsing on invalid encoding
+    }
   }
 
   const regex = /filename[^;=\n]*=((['"]).*?\2|[^;\n]*)/;
@@ -946,6 +971,36 @@ export const checkAgentNameConflictBatch = async (payload: {
   }
 };
 
+/**
+ * Generate unique copy names by appending a numeric suffix when the base
+ * name/display_name already exists in the tenant. Mirrors the backend
+ * import-link deduplication (base_1, base_2, ...).
+ */
+export const generateUniqueCopyName = async (
+  baseName: string,
+  baseDisplayName: string
+): Promise<{ name: string; display_name: string }> => {
+  let name = baseName;
+  let displayName = baseDisplayName;
+
+  // Probe at most 100 suffix candidates, matching the backend limit.
+  for (let attempt = 0; attempt < 100; attempt++) {
+    const result = await checkAgentNameConflictBatch({
+      items: [{ name, display_name: displayName }],
+    });
+    if (!result.success || !Array.isArray(result.data)) {
+      throw new Error("Failed to check agent name conflict");
+    }
+    const conflict = result.data[0];
+    if (!conflict?.name_conflict && !conflict?.display_name_conflict) {
+      return { name, display_name: displayName };
+    }
+    name = `${baseName}_${attempt + 1}`;
+    displayName = `${baseDisplayName}_${attempt + 1}`;
+  }
+  throw new Error("Failed to generate unique agent name after max attempts");
+};
+
 export const regenerateAgentNameBatch = async (payload: {
   items: Array<{
     name: string;
@@ -1020,6 +1075,7 @@ export const searchAgentInfo = async (
       display_name: data.display_name,
       description: data.description,
       author: data.author,
+      author_cas_username: data.author_cas_username,
       icon_url: data.icon_url,
       model:
         data.model_name ||
@@ -1158,6 +1214,7 @@ export const fetchAllAgents = async () => {
       display_name: agent.display_name || agent.name,
       description: agent.description,
       author: agent.author,
+      author_cas_username: agent.author_cas_username,
       is_available: agent.is_available,
       is_new: agent.is_new || false,
     }));

@@ -1,0 +1,35 @@
+schema_version: '1.0'
+change:
+  change_id: K8S-VERSION-DEFAULT
+  change_type: bugfix
+  bug_id: K8S-VERSION-DEFAULT
+  title: Use the current repository version when restoring Kubernetes deployment preferences
+  description: Ignore saved application versions in both legacy shell and nested Kubernetes options and stop persisting a version that can become stale.
+  observed_behavior: A saved k8s.appVersion or legacy APP_VERSION of v2.5.0 overrides the current VERSION v2.7.0 before the deployment configuration and status output are resolved.
+  expected_behavior: Without an explicit version argument, the deployment uses the current repository VERSION. Explicit --version and --app-version arguments remain authoritative; other saved deployment preferences still reload.
+  escaped_stage: unknown
+  coverage_gap:
+    type: missing_assertion
+    description: deploy/tests/test_common.sh proves that a top-level appVersion cannot override the shared current version, but no test exercises the K8s-specific nested or legacy option loader. Add traditional UT for that unit contract; the unchanged sandbox D5 Case provides adjacent configuration and persistence regression coverage.
+  feature_contract_changed: false
+  affected_features:
+    existing: [F-173, V5-DEP-AUTO-7177AC18CCE799DD]
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing: [DEP-AUTO-7177AC18CCE799DD]
+    added: []
+    modified: []
+    retired: []
+  traditional_ut:
+    decision: add
+    behaviors:
+      - Ignore obsolete nested YAML and legacy shell application versions while retaining saved storage preferences.
+      - Preserve explicit --version and --app-version choices, including the latest image tag.
+      - Use the current repository version with missing or empty saved options.
+      - Persist other deployment options without saving an application version.
+    reason: Version precedence and preference serialization are local shell configuration contracts. Existing formal sandbox coverage is reused for adjacent persistence behavior; this fix changes no Pod, API, browser or provider contract and requires no additional formal Case.
+    test_selectors:
+      - test/backend/deploy/test_k8s_version_selection.py
+  notes: 'Design and acceptance evidence reuse the existing deployment configuration baseline at test-e2e/changes/bugs/K8S-ENV-INJECTION/design.md, section K8S deployment version selection. The external nexent-doc directory is unavailable; preserve this existing design path. The live .env and deploy.options are diagnostic inputs only; do not rewrite them or redeploy the current cluster. Image freshness and the separately observed Supabase JWT expiry mismatch remain outside this version-selection fix.'

@@ -1785,6 +1785,7 @@ async def test_build_run_info_is_ephemeral(mocker):
         minio_files=None,
         query="Build an agent that summarizes weather risks.",
         history=request.history,
+        language="en",
     )
     get_model_config.assert_called_once_with(
         key="LLM_ID",

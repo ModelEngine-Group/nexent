@@ -564,8 +564,7 @@ Benchmark 不经过 `backend/agents/create_agent_info.py`，因此在 benchmark 
 
 - YAML `tools:` 只保存 Agent 显式配置的工具；
 - 运行时额外注入 `parallel_executor`；
-- 运行时额外注入 `run_skill_script`、`read_skill_md`、`read_skill_config`、
-  `write_skill_file`；
+- 当前 Agent 配置技能时，运行时额外注入 `run_skill_script`、`read_skill_md`、`read_skill_config`；
 - builtin skill tools 使用 `agent_id`、`tenant_id`、`version_no` 和 skills path
   标记运行范围，不要求用户把它们写入 YAML；
 - YAML `skills:` 当前尚未实现生产的 Skill 发现、可见性过滤和完整执行链路。非空

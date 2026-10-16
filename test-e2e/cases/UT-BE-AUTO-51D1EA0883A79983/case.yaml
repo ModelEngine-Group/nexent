@@ -1,0 +1,78 @@
+schema_version: '1.0'
+stage: D1
+module: V5-BASELINE
+case:
+  case_id: UT-BE-AUTO-51D1EA0883A79983
+  feature_id: F-036
+  business_rule_ids:
+  - F-036-RULE-01
+  title: 共享模型/embedding/rerank 解析：租户作用域、非法 model_type 报错、非 embedding 返回空、rerank 回退与 model_factory 透传
+  type: BE-UT
+  priority: P1
+  status: active
+  automation: automated
+  objective: 共享模型/embedding/rerank 解析：租户作用域、非法 model_type 报错、非 embedding 返回空、rerank 回退与 model_factory 透传
+  preconditions:
+  - 本地依赖/组件测试环境可运行；不要求外部模型服务在线。
+  - 设置 NEXENT_TEST_HOME，目录不位于 Nexent Git 仓库内。
+  - 当次 run_id 已生成，所有新建资源名称带 run_id；测试基线为 develop 分支本次每日构建，执行时另记录实际被测 commit。
+  - 被测模块为纯逻辑共享解析器；依赖 get_model_by_model_id/get_model_records/tenant_config_manager/build_adapter_fresh 通过 pytest monkeypatch
+    隔离，无需真实模型或数据库。
+  test_data:
+    legacy_asset_declaration: '- 无（测试替身/固定 fixture 在用例内构造并通过 monkeypatch 注入，无需外部资产文件）'
+  steps:
+  - order: 1
+    action: 导入 backend/management/services/model/resolver.py，用 pytest monkeypatch 替换 get_model_by_model_id、get_model_records、tenant_config_manager.get_model_config
+      与 build_adapter_fresh 为测试替身。
+    expected: resolve_model_record 缓存只在本租户请求内生效，跨租户不串数据，参数传递正确。
+  - order: 2
+    action: resolve_model_record：无 cache 且 tenant_id 非空时断言调用 get_model_by_model_id(model_id, tenant_id)；tenant_id 为 None 时调用单参形式；有
+      cache 时首次写入 cache[model_id]，同 model_id 重复调用命中缓存且不再次触发 DB。
+    expected: is_model_available 对 available 与各非 available 状态判定一致于 ModelConnectStatusEnum.AVAILABLE.value。
+  - order: 3
+    action: is_model_available：构造 connect_status='available' 的非空记录断言 True；对 None、空 dict 与 detecting/unavailable/not_detected
+      断言 False。
+    expected: get_model_descriptor 正常返回 display_name 与 is_multimodal，异常/缺失回退默认值不抛错。
+  - order: 4
+    action: get_model_descriptor：记录存在且 model_type='multi_embedding' 时断言 display_name 与 is_multimodal=True；'llm'/'embedding'
+      时 is_multimodal=False；model_id=None、记录为 None 或 DB 抛异常时断言返回默认 ModelDescriptor（display_name=''、is_multimodal=False）。
+    expected: create_embedding_model 按 model_type 选择正确 modality/slot 并透传 model_factory；非法 model_type 抛 ValueError。
+  - order: 5
+    action: _build_model_config / create_embedding_model：断言 embedding 与 multi_embedding 分别映射 (embedding,embedding)/(multi_embedding,multiEmbedding)；model_factory
+      存在时透传到 config 且 build_adapter_fresh 收到该 factory；model_type='llm' 等非法值抛 ValueError 且消息含该 model_type 与 model_name。
+    expected: get_embedding_model_by_id 非 embedding 或缺失返回 (None, None)，无伪成功。
+  - order: 6
+    action: get_embedding_model_by_id：model_type 为 embedding/multi_embedding 时断言返回 (adapter, model['model_id'])；模型缺失或 model_type
+      为 'llm'/'rerank' 时断言返回 (None, None) 且无未处理异常。
+    expected: get_rerank_model 按名匹配与默认 RERANK_ID 回退正确；非 rerank 返回 None。
+  - order: 7
+    action: get_rerank_model：传 model_name 时断言仅在该租户 rerank 列表中按 'model_repo/model_name' 或 'model_name' 精确匹配后调用 build_adapter_fresh(model,'rerank','rerank',tenant_id)；未匹配或不传
+      model_name 时回退 get_model_config('RERANK_ID', tenant_id)，model_type='rerank' 返回 adapter，否则返回 None。
+    expected: 全过程无未处理异常，日志不含 api_key 明文。
+  - order: 8
+    action: 断言日志/记录不含 api_key 明文；结束恢复 monkeypatch，确保可重复执行。
+    expected: 全过程无未处理异常，日志不含 api_key 明文。
+  expected_results:
+  - resolve_model_record 缓存只在本租户请求内生效，跨租户不串数据，参数传递正确。
+  - is_model_available 对 available 与各非 available 状态判定一致于 ModelConnectStatusEnum.AVAILABLE.value。
+  - get_model_descriptor 正常返回 display_name 与 is_multimodal，异常/缺失回退默认值不抛错。
+  - create_embedding_model 按 model_type 选择正确 modality/slot 并透传 model_factory；非法 model_type 抛 ValueError。
+  - get_embedding_model_by_id 非 embedding 或缺失返回 (None, None)，无伪成功。
+  - get_rerank_model 按名匹配与默认 RERANK_ID 回退正确；非 rerank 返回 None。
+  - 全过程无未处理异常，日志不含 api_key 明文。
+  forbidden_side_effects: []
+  source:
+    legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
+    legacy_sheet: 02_测试用例基线
+    legacy_row: 401
+  unit_boundary: 模型解析
+  inputs:
+  - '- 无（测试替身/固定 fixture 在用例内构造并通过 monkeypatch 注入，无需外部资产文件）'
+  assertions:
+  - resolve_model_record 缓存只在本租户请求内生效，跨租户不串数据，参数传递正确。
+  - is_model_available 对 available 与各非 available 状态判定一致于 ModelConnectStatusEnum.AVAILABLE.value。
+  - get_model_descriptor 正常返回 display_name 与 is_multimodal，异常/缺失回退默认值不抛错。
+  - create_embedding_model 按 model_type 选择正确 modality/slot 并透传 model_factory；非法 model_type 抛 ValueError。
+  - get_embedding_model_by_id 非 embedding 或缺失返回 (None, None)，无伪成功。
+  - get_rerank_model 按名匹配与默认 RERANK_ID 回退正确；非 rerank 返回 None。
+  - 全过程无未处理异常，日志不含 api_key 明文。

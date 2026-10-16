@@ -239,7 +239,9 @@ def _install_sys_modules_stubs() -> None:
     # ---- nexent namespace --------------------------------------------------
     _nexent_pkg = _register_package("nexent")
     _nexent_core = _register_package("nexent.core")
+    _nexent_core.__path__ = [str(Path(__file__).resolve().parents[3] / "sdk/nexent/core")]
     _nexent_core_agents = _register_package("nexent.core.agents")
+    sys.modules["nexent.core.agents"].__path__ = [str(Path(__file__).resolve().parents[3] / "sdk/nexent/core/agents")]
     _nexent_core_utils = _register_package("nexent.core.utils")
     _nexent_pkg.core = _nexent_core
     _nexent_core.agents = _nexent_core_agents
@@ -388,7 +390,7 @@ def _install_sys_modules_stubs() -> None:
     _services_pkg.thread_lifecycle_service = _tls_mod
 
     _utils_pkg = _register_package("utils")
-    _lu_mod = _mk_mod("utils.llm_utils", call_llm_for_system_prompt=MagicMock())
+    _lu_mod = _mk_mod("management.services.model.invocation", call_llm_for_system_prompt=MagicMock())
     _utils_pkg.llm_utils = _lu_mod
     _ptu_mod = _mk_mod("utils.prompt_template_utils", get_prompt_template=MagicMock())
     _utils_pkg.prompt_template_utils = _ptu_mod

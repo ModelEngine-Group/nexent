@@ -1,0 +1,94 @@
+schema_version: '1.0'
+stage: D1
+module: V5-BASELINE
+case:
+  case_id: UT-SDK-AUTO-5DD3BD24C1EF4718
+  feature_id: F-183
+  business_rule_ids:
+  - F-183-RULE-01
+  title: ContextBudgetCalculator 上下文预算解析：effective_input_limit 取 min、不确定性预留、compaction 阈值与目标｜核心流程与异常
+  type: SDK-UT
+  priority: P0
+  status: active
+  automation: automated
+  objective: ContextBudgetCalculator 上下文预算解析：effective_input_limit 取 min、不确定性预留、compaction 阈值与目标｜核心流程与异常
+  preconditions:
+  - 本地依赖/组件测试环境可运行；不要求外部模型服务在线。
+  - 设置 NEXENT_TEST_HOME，目录不位于 Nexent Git 仓库内。
+  - 当次 run_id 已生成；测试基线固定为 develop 当前批次锁定的产品提交；执行时另记录实际被测commit。
+  - SDK 依赖可导入，且 sdk/nexent/core/models/capacity_budget.py 与 capacity_resolver.py 中 ModelCapacitySnapshot 字段定义一致。
+  test_data:
+    legacy_asset_declaration: 无本地外部资产；测试内以代码构造 ModelCapacitySnapshot、CapacityReservePolicy、RequestBudgetOverrides。
+  steps:
+  - order: 1
+    action: 导入被测模块 sdk/nexent/core/models/capacity_budget.py 中的 ContextBudgetCalculator、CapacityReservePolicy、RequestBudgetOverrides、validate_context_budget_snapshot，以及
+      capacity_resolver 的 ModelCapacitySnapshot。
+    expected: 正常路径返回的 ContextBudgetSnapshot 各字段与契约一致：effective_input_limit_tokens 为两个可推导上限中的较小值；output_reserve_source、uncertainty_reserve_basis、compaction
+      阈值与目标均符合契约。
+  - order: 2
+    action: 正常路径：构造 capacity_snapshot（max_input_tokens=10000、context_window_tokens=8000、max_output_tokens=4000、requested_output_tokens=2000、provider="openai"、model_name="gpt-x"、fingerprint="w1-fp-0001"、unknown_capabilities=frozenset()）与默认
+      CapacityReservePolicy（compaction_trigger_ratio=0.8、compaction_target_ratio=0.6、approved_profile_reserve_tokens=None），以
+      requested_output_tokens=None 调用 calculate_context_budget。
+    expected: 三种不确定性预留 basis（none/context_window_10pct/approved_profile）分别输出 0、ceil(10%)、approved_profile 值；context_window_10pct
+      场景 warnings 含 "uncertainty_reserve_active"。
+  - order: 3
+    action: 断言返回 ContextBudgetSnapshot：effective_input_limit_tokens == 6000（为 max_input_tokens 与 context_window_tokens-requested_output_tokens
+      的较小值）；requested_output_tokens == 2000；output_reserve_source == "model_default"。
+    expected: compaction_trigger_threshold_tokens 与 compaction_target_tokens 均不小于 1（max(1,floor) 下限成立）。
+  - order: 4
+    action: 断言 uncertainty_reserve_tokens == 0 且 uncertainty_reserve_basis == "none"（未知能力与预留触发集合无交集）；warnings 为空。
+    expected: field_sources 反映各字段来源（derived/code_default/model_default/request 等）；fingerprint 与 validate_context_budget_snapshot
+      校验自洽。
+  - order: 5
+    action: 断言 compaction_trigger_threshold_tokens == 4800、compaction_target_tokens == 3600（floor 后均大于 1，不触发 1 下限）。
+    expected: 五类领域异常（InvalidReservePolicy、RequestedOutputExceedsCapacity、NoSafeInputCapacity、UncertaintyReserveBasisUnknown、ReserveExceedsCapacity）在对应非法输入下被精确抛出，无吞异常或伪成功。
+  - order: 6
+    action: 断言 field_sources：effective_input_limit_tokens=="derived"、compaction_trigger_threshold_tokens=="derived"、compaction_target_tokens=="derived"、compaction_trigger_ratio=="code_default"、compaction_target_ratio=="code_default"、uncertainty_reserve_tokens=="none"、requested_output_tokens=="model_default"。
+    expected: 五类领域异常（InvalidReservePolicy、RequestedOutputExceedsCapacity、NoSafeInputCapacity、UncertaintyReserveBasisUnknown、ReserveExceedsCapacity）在对应非法输入下被精确抛出，无吞异常或伪成功。
+  - order: 7
+    action: 断言 schema_version==2、resolver_version=="2.0.0"；调用 validate_context_budget_snapshot(snapshot) 不抛异常（SHA-256 指纹自洽）。
+    expected: 五类领域异常（InvalidReservePolicy、RequestedOutputExceedsCapacity、NoSafeInputCapacity、UncertaintyReserveBasisUnknown、ReserveExceedsCapacity）在对应非法输入下被精确抛出，无吞异常或伪成功。
+  - order: 8
+    action: context_window_10pct 分支：构造 unknown_capabilities={"tokenizer"}、context_window_tokens=10000、max_input_tokens=20000、requested_output_tokens=2000；断言
+      uncertainty_reserve_tokens==1000（ceil(context_window*10%)）、basis=="context_window_10pct"、warnings 含 "uncertainty_reserve_active"。
+    expected: 五类领域异常（InvalidReservePolicy、RequestedOutputExceedsCapacity、NoSafeInputCapacity、UncertaintyReserveBasisUnknown、ReserveExceedsCapacity）在对应非法输入下被精确抛出，无吞异常或伪成功。
+  - order: 9
+    action: approved_profile 分支：构造 reserve_policy.approved_profile_reserve_tokens=500；断言 uncertainty_reserve_tokens==500、basis=="approved_profile"（不再采用
+      10% 预留）。
+    expected: 五类领域异常（InvalidReservePolicy、RequestedOutputExceedsCapacity、NoSafeInputCapacity、UncertaintyReserveBasisUnknown、ReserveExceedsCapacity）在对应非法输入下被精确抛出，无吞异常或伪成功。
+  - order: 10
+    action: request override：传入 request_overrides=RequestBudgetOverrides(requested_output_tokens=2500)；断言 requested_output_tokens==2500、output_reserve_source=="request"。
+    expected: 五类领域异常（InvalidReservePolicy、RequestedOutputExceedsCapacity、NoSafeInputCapacity、UncertaintyReserveBasisUnknown、ReserveExceedsCapacity）在对应非法输入下被精确抛出，无吞异常或伪成功。
+  - order: 11
+    action: max(1,floor) 下限：构造 max_input_tokens=1、context_window_tokens=1000、requested_output_tokens=999（有效输入上限为 1）；断言 compaction_trigger_threshold_tokens==1、compaction_target_tokens==1。
+    expected: 五类领域异常（InvalidReservePolicy、RequestedOutputExceedsCapacity、NoSafeInputCapacity、UncertaintyReserveBasisUnknown、ReserveExceedsCapacity）在对应非法输入下被精确抛出，无吞异常或伪成功。
+  - order: 12
+    action: 异常路径用 pytest.raises 逐一断言：requested_output_tokens=0 抛 InvalidReservePolicy；requested_output_tokens=5000 且 max_output_tokens=4000
+      抛 RequestedOutputExceedsCapacity；max_input_tokens=None 且 context_window_tokens=None 抛 NoSafeInputCapacity；unknown_capabilities
+      非空且 context_window_tokens=None 且 approved_profile_reserve_tokens=None 抛 UncertaintyReserveBasisUnknown；approved_profile_reserve_tokens
+      大于有效输入上限抛 ReserveExceedsCapacity。不允许吞异常后返回伪成功。
+    expected: 五类领域异常（InvalidReservePolicy、RequestedOutputExceedsCapacity、NoSafeInputCapacity、UncertaintyReserveBasisUnknown、ReserveExceedsCapacity）在对应非法输入下被精确抛出，无吞异常或伪成功。
+  expected_results:
+  - 正常路径返回的 ContextBudgetSnapshot 各字段与契约一致：effective_input_limit_tokens 为两个可推导上限中的较小值；output_reserve_source、uncertainty_reserve_basis、compaction
+    阈值与目标均符合契约。
+  - 三种不确定性预留 basis（none/context_window_10pct/approved_profile）分别输出 0、ceil(10%)、approved_profile 值；context_window_10pct 场景
+    warnings 含 "uncertainty_reserve_active"。
+  - compaction_trigger_threshold_tokens 与 compaction_target_tokens 均不小于 1（max(1,floor) 下限成立）。
+  - field_sources 反映各字段来源（derived/code_default/model_default/request 等）；fingerprint 与 validate_context_budget_snapshot 校验自洽。
+  - 五类领域异常（InvalidReservePolicy、RequestedOutputExceedsCapacity、NoSafeInputCapacity、UncertaintyReserveBasisUnknown、ReserveExceedsCapacity）在对应非法输入下被精确抛出，无吞异常或伪成功。
+  forbidden_side_effects: []
+  source:
+    legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
+    legacy_sheet: 02_测试用例基线
+    legacy_row: 465
+  unit_boundary: 上下文预算
+  inputs:
+  - 无本地外部资产；测试内以代码构造 ModelCapacitySnapshot、CapacityReservePolicy、RequestBudgetOverrides。
+  assertions:
+  - 正常路径返回的 ContextBudgetSnapshot 各字段与契约一致：effective_input_limit_tokens 为两个可推导上限中的较小值；output_reserve_source、uncertainty_reserve_basis、compaction
+    阈值与目标均符合契约。
+  - 三种不确定性预留 basis（none/context_window_10pct/approved_profile）分别输出 0、ceil(10%)、approved_profile 值；context_window_10pct 场景
+    warnings 含 "uncertainty_reserve_active"。
+  - compaction_trigger_threshold_tokens 与 compaction_target_tokens 均不小于 1（max(1,floor) 下限成立）。
+  - field_sources 反映各字段来源（derived/code_default/model_default/request 等）；fingerprint 与 validate_context_budget_snapshot 校验自洽。
+  - 五类领域异常（InvalidReservePolicy、RequestedOutputExceedsCapacity、NoSafeInputCapacity、UncertaintyReserveBasisUnknown、ReserveExceedsCapacity）在对应非法输入下被精确抛出，无吞异常或伪成功。

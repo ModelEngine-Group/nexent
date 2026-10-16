@@ -1,4 +1,9 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 "use client";
+
+import { UserIdentity } from "@/components/auth/UserIdentity";
+import { useUserDisplayName } from "@/hooks/auth/useUserDisplayName";
 
 import React, { useMemo, useState, useEffect } from "react";
 import { useTranslation } from "react-i18next";
@@ -36,6 +41,7 @@ import { getTenantResourceLimitMessage } from "@/const/errorMessageI18n";
 export default function GroupList({ tenantId }: { tenantId: string | null }) {
   const { confirm } = useConfirmModal();
   const { t } = useTranslation("common");
+  const displayName = useUserDisplayName();
   const queryClient = useQueryClient();
 
   // Pagination state
@@ -289,13 +295,17 @@ export default function GroupList({ tenantId }: { tenantId: string | null }) {
                 danger
                 icon={<Trash2 className="h-4 w-4" />}
                 size="small"
-                onClick={() => confirm({
-                  title: t("tenantResources.groups.confirmDelete", { name: record.group_name }),
-                  content: "",
-                  okText: t("common.confirm"),
-                  cancelText: t("common.cancel"),
-                  onOk: () => handleDelete(record.group_id),
-                })}
+                onClick={() =>
+                  confirm({
+                    title: t("tenantResources.groups.confirmDelete", {
+                      name: record.group_name,
+                    }),
+                    content: "",
+                    okText: t("common.confirm"),
+                    cancelText: t("common.cancel"),
+                    onOk: () => handleDelete(record.group_id),
+                  })
+                }
               />
             </Tooltip>
           </div>
@@ -392,8 +402,24 @@ export default function GroupList({ tenantId }: { tenantId: string | null }) {
                 placeholder={t("tenantResources.groups.selectUsers")}
                 options={allUsers.map((user) => ({
                   label: user.username,
+                  title: displayName(user.cas_username, user.username),
                   value: user.id,
+                  cas_username: user.cas_username,
                 }))}
+                optionRender={(option) => (
+                  <UserIdentity
+                    casUsername={option.data.cas_username}
+                    fallback={String(option.data.label || "")}
+                  />
+                )}
+                labelRender={({ value, label }) => (
+                  <UserIdentity
+                    casUsername={
+                      allUsers.find((user) => user.id === value)?.cas_username
+                    }
+                    fallback={String(label || "")}
+                  />
+                )}
                 onChange={(value) => {
                   const selectedUsers = allUsers.filter((u) =>
                     value.includes(u.id)
@@ -450,7 +476,10 @@ export default function GroupList({ tenantId }: { tenantId: string | null }) {
                     backgroundColor: "#fafafa",
                   }}
                 >
-                  {user.username}
+                  <UserIdentity
+                    casUsername={user.cas_username}
+                    fallback={user.username}
+                  />
                 </div>
               ))}
             </div>

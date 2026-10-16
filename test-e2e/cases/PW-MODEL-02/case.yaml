@@ -1,0 +1,76 @@
+schema_version: '1.0'
+stage: D4
+module: V5-BASELINE
+case:
+  case_id: PW-MODEL-02
+  feature_id: V5-PW-MODEL-02
+  business_rule_ids:
+  - V5-PW-MODEL-02-RULE-01
+  title: 真实Embedding/Multi-Embedding→Local KB索引→检索
+  type: E2E
+  priority: P1
+  status: active
+  automation: automated
+  objective: 验证Embedding表单/连通性与Local KB索引。
+  preconditions:
+  - Embedding配置含dimension
+  - Local Knowledge模式
+  - 固定语料含NX-92831
+  test_data:
+    legacy_asset_declaration: config/models.yaml；assets/knowledge/*；expected/kb_expected.json
+  steps:
+  - order: 1
+    action: 在/models新增Embedding或Multi-Embedding。
+    expected: 真实Embedding连通且dimension一致。
+  - order: 2
+    action: 填写model/baseURL/key/dimension并Check Connectivity。
+    expected: 真实索引后Top-K命中目标chunk。
+  - order: 3
+    action: 刷新确认模型存在。
+    expected: 不兼容变更不静默混用索引。
+  - order: 4
+    action: 打开/knowledges创建run_id KB并按真实UI选择目标Embedding（若选择由租户配置决定则先完成对应设置）。
+    expected: 不兼容变更不静默混用索引。
+  - order: 5
+    action: 上传alpha固定文档并等待处理成功。
+    expected: 不兼容变更不静默混用索引。
+  - order: 6
+    action: 在检索入口输入固定问题。
+    expected: 不兼容变更不静默混用索引。
+  - order: 7
+    action: 等待真实向量检索，确认Top-K含alpha/NX-92831。
+    expected: 不兼容变更不静默混用索引。
+  - order: 8
+    action: 回models尝试当前UI允许的编辑，确认不兼容dimension/类型有明确限制/反馈。
+    expected: 不兼容变更不静默混用索引。
+  expected_results:
+  - 真实Embedding连通且dimension一致。
+  - 真实索引后Top-K命中目标chunk。
+  - 不兼容变更不静默混用索引。
+  forbidden_side_effects: []
+  source:
+    legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
+    legacy_sheet: 03_Playwright_Journey
+    legacy_row: 14
+  actor: Nexent browser user
+  journey:
+  - 在/models新增Embedding或Multi-Embedding。
+  - 填写model/baseURL/key/dimension并Check Connectivity。
+  - 刷新确认模型存在。
+  - 打开/knowledges创建run_id KB并按真实UI选择目标Embedding（若选择由租户配置决定则先完成对应设置）。
+  - 上传alpha固定文档并等待处理成功。
+  - 在检索入口输入固定问题。
+  - 等待真实向量检索，确认Top-K含alpha/NX-92831。
+  - 回models尝试当前UI允许的编辑，确认不兼容dimension/类型有明确限制/反馈。
+  final_business_result:
+  - 真实Embedding连通且dimension一致。
+  - 真实索引后Top-K命中目标chunk。
+  - 不兼容变更不静默混用索引。
+  failure_evidence:
+  - '${NEXENT_TEST_HOME}/runs/{run_id}/playwright/PW-MODEL-02/
+
+    - screenshot.png / trace.zip / video.webm
+
+    - console.log / network.har / failure.json
+
+    - 涉及协议时关联 wire/*.jsonl；涉及下载时保留 downloads/'

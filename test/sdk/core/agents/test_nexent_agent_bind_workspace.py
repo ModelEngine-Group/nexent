@@ -7,6 +7,7 @@ from types import SimpleNamespace
 from unittest.mock import Mock
 
 import pytest
+
 from nexent.core.agents.nexent_agent import NexentAgent
 from nexent.core.agents.sandbox import SandboxConfig, SandboxLevel
 from nexent.core.agents.sandbox_workspace import SandboxWorkspace
@@ -214,3 +215,32 @@ def test_posix_bind_access_grants_permissions_before_probe(bind_agent, mocker):
     bind_agent._verify_bind_workspace_access([container], PurePosixPath('/host/run'), bind_agent.workspace_mapping)
     grant.assert_called_once_with(container, bind_agent.workspace_mapping.container_root)
     probe.assert_called_once_with(container, bind_agent.workspace_mapping.container_root)
+
+
+@pytest.mark.parametrize('language', ['en', 'zh'])
+def test_workspace_prompt_uses_container_paths_and_localized_resource(bind_agent, mocker, language):
+    bind_agent.observer = SimpleNamespace(lang=language)
+    bind_agent.minio_files = []
+    bind_agent.agent.tools = {}
+    mocker.patch.object(bind_agent, '_push_file_workspace_to_sandbox')
+    mocker.patch.object(bind_agent, '_initialize_sandbox_workspaces')
+    result = bind_agent._prepare_file_workspace('query')
+    assert result == 'query\n\nRun workspace: /mnt/work/user/run'
+
+
+def test_explicit_workspace_push_targets_only_the_new_container(bind_agent, mocker):
+    target = Mock()
+    discover = mocker.patch.object(bind_agent, '_sandbox_containers')
+    verify = mocker.patch.object(bind_agent, '_verify_bind_workspace_access')
+    bind_agent._push_file_workspace_to_sandbox(containers=[target])
+    discover.assert_not_called()
+    verify.assert_called_once_with([target], Path(bind_agent.workspace_path).resolve(), bind_agent.workspace_mapping)
+    bind_agent._sandbox_executors[0].container.put_archive.assert_not_called()
+
+
+def test_explicit_empty_workspace_targets_do_not_discover_existing_containers(bind_agent, mocker):
+    discover = mocker.patch.object(bind_agent, '_sandbox_containers')
+    verify = mocker.patch.object(bind_agent, '_verify_bind_workspace_access')
+    bind_agent._push_file_workspace_to_sandbox(containers=[])
+    discover.assert_not_called()
+    verify.assert_not_called()

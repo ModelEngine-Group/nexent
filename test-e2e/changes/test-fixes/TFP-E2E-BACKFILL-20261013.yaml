@@ -1,0 +1,40 @@
+schema_version: '1.0'
+change:
+  change_id: TFP-E2E-BACKFILL-20261013
+  change_type: test-fix
+  title: Implement missing deployed fast-path and browser acceptance scripts
+  description: >-
+    Complete the existing TFP-D3-001 and TFP-D4-001 contracts with case-local
+    fixed scripts and acceptance bindings. Exercise running Nexent APIs, the
+    real Agent model loop and official skill tools, JSON state promotion,
+    actual session Docker execution, persistence, artifact access and the
+    Playwright chat journey. Only the HTTP model provider is controlled.
+    Preserve both blocked statuses until the declared deployment prerequisites
+    and execution evidence exist. No product, deployment or CI changes.
+  traditional_ut:
+    decision: reuse
+    reason: Existing UT already proves AST admission, identity checks, JSON restoration and invocation lifecycle; these scripts add missing deployed protocol and browser proof.
+    behaviors:
+    - Whole-step routing, JSON alias migration and single activation remain covered by existing executor UT.
+    - Child fast-path policy inheritance and root-owned skill cleanup remain covered by the merge regression UT.
+    test_selectors:
+    - test/sdk/core/agents/test_tool_fastpath_executor.py
+    - test/sdk/core/agents/test_nexent_agent_tool_fastpath.py
+    - test/sdk/core/agents/test_agent_invocation_config.py
+  affected_features:
+    existing: [TFP-001]
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing: []
+    added: []
+    modified: [TFP-D3-001, TFP-D4-001]
+    retired: []
+  notes: >-
+    Proof-gap review: TFP-D1-001/003/006 and executor/factory UT use controlled
+    executors or isolated SDK construction. They do not prove API SSE versus
+    persisted history, real Docker creation and cleanup, downloadable object
+    bytes, tenant denial, or chat reload. The existing D3/D4 directories had
+    contracts but no execution bindings or scripts at product revision
+    5dc275bc0. Strengthen those Cases; add no duplicate D1 or new Feature.

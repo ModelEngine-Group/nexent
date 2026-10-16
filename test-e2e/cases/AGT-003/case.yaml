@@ -1,0 +1,91 @@
+schema_version: '1.0'
+stage: D3
+module: V5-BASELINE
+case:
+  case_id: AGT-003
+  feature_id: F-045
+  business_rule_ids:
+  - F-045-RULE-01
+  title: 需求澄清对话、变量名初始化、proposal 解析、安装资源绑定、空绑定跳过｜核心流程
+  type: AGENT-IT
+  priority: P1
+  status: active
+  automation: automated
+  objective: 需求澄清对话、变量名初始化、proposal 解析、安装资源绑定、空绑定跳过｜核心流程
+  preconditions:
+  - Nexent 本地测试全栈已启动，health check 通过。
+  - 设置 NEXENT_TEST_HOME，目录不位于 Nexent Git 仓库内。
+  - 当次 run_id 已生成，所有新建资源名称带 run_id；测试基线固定为 develop 当前批次锁定的产品提交；执行时另记录实际被测commit。
+  - 所需本地资产存在且校验通过：${NEXENT_TEST_HOME}/config/models.yaml；${NEXENT_TEST_HOME}/config/secrets.env；${NEXENT_TEST_HOME}/assets/documents/
+  - models.yaml 中本用例所需真实 Provider 已配置，secrets.env 中凭据有效，预检连通性通过。
+  test_data:
+    legacy_asset_declaration: '- ${NEXENT_TEST_HOME}/config/models.yaml
+
+      - ${NEXENT_TEST_HOME}/config/secrets.env
+
+      - ${NEXENT_TEST_HOME}/assets/documents/'
+  steps:
+  - order: 1
+    action: 准备真实测试用户以及 models.yaml 中可用 LLM；若功能涉及 Tool/Skill/子Agent，准备对应本地测试资产。
+    expected: 功能结果与代码契约一致，测试过程无未处理异常。
+  - order: 2
+    action: 通过实际 API 创建一个带唯一 RunID 后缀的临时 Agent 草稿（name 留空），记录 agent_id。
+    expected: 空 name 草稿仅根据 display_name 生成并保存一次变量名，满足正则 ^[a-zA-Z_][a-zA-Z0-9_]*_assistant$ 且不超过 30 字符；重复 name 返回 retryable
+      的 agent_name_duplicate，已设置 name 返回 agent_name_already_set。
+  - order: 3
+    action: 发起 NL2Agent 核心流程（full_generation）：先触发空 name 初始化，断言模型仅按 display_name 生成变量名并保存一次，变量名满足正则 ^[a-zA-Z_][a-zA-Z0-9_]*_assistant$
+      且不超过 30 字符，保存后 draft.name 非空且 display_name 不变。
+    expected: description 与 duty_prompt 为第一人称；无资源需绑定或选中绑定集合为空时返回 binding_required=false，流程跳过绑定卡直接进入 duty_prompt 生成，不出现空的 installed_resource_binding
+      卡。
+  - order: 4
+    action: 按“需求澄清对话、proposal 解析、安装资源绑定｜核心流程”调用对应配置/生成接口，提交与 UI 相同的数据结构；无资源需求或选中绑定集合为空时，断言后端返回 binding_required=false，跳过绑定卡直接进入
+      duty_prompt 生成，不出现空的 installed_resource_binding 卡。
+    expected: 关键状态在 API 返回、数据库/存储和后续读取中保持一致；失败路径返回明确错误，不出现半写入、重复副作用或跨租户泄露。
+  - order: 5
+    action: 读取 Agent 详情再次核对字段：名称、描述、Prompt、模型、max_steps、tools、skills、sub-agents 等与提交值一致；断言 description 与 duty_prompt 生成为第一人称。
+    expected: 日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。
+  - order: 6
+    action: 对需要模型生成的 NL2Agent/Prompt 功能调用真实 LLM，断言返回结构可解析、关键字段非空且能保存为 Agent 配置。
+    expected: 真实模型调用成功，stream/Agent run 正常结束；自然语言只做稳定关键词/结构/工具调用断言。
+  - order: 7
+    action: 导入导出类检查导出文件可重新导入、冲突策略生效、资源引用不会指向其他租户。
+    expected: 真实模型调用成功，stream/Agent run 正常结束；自然语言只做稳定关键词/结构/工具调用断言。
+  - order: 8
+    action: 重复名称/已设置名称场景：提交与既有 Agent 重复的 name，断言返回 retryable 的 agent_name_duplicate；对已设置 name 的草稿再次提交 name，断言返回 agent_name_already_set，均不产生部分覆盖。
+    expected: 真实模型调用成功，stream/Agent run 正常结束；自然语言只做稳定关键词/结构/工具调用断言。
+  - order: 9
+    action: 最少执行一次 Agent Chat Smoke，确认保存后的配置真正进入 Runtime，而不是只验证数据库。
+    expected: 真实模型调用成功，stream/Agent run 正常结束；自然语言只做稳定关键词/结构/工具调用断言。
+  - order: 10
+    action: 异常场景提交缺字段、非法资源ID或无权限资源，确认明确 4xx 且原配置不被部分覆盖。
+    expected: 真实模型调用成功，stream/Agent run 正常结束；自然语言只做稳定关键词/结构/工具调用断言。
+  - order: 11
+    action: 删除临时 Agent 和导出文件。
+    expected: 真实模型调用成功，stream/Agent run 正常结束；自然语言只做稳定关键词/结构/工具调用断言。
+  expected_results:
+  - 功能结果与代码契约一致，测试过程无未处理异常。
+  - 空 name 草稿仅根据 display_name 生成并保存一次变量名，满足正则 ^[a-zA-Z_][a-zA-Z0-9_]*_assistant$ 且不超过 30 字符；重复 name 返回 retryable 的 agent_name_duplicate，已设置
+    name 返回 agent_name_already_set。
+  - description 与 duty_prompt 为第一人称；无资源需绑定或选中绑定集合为空时返回 binding_required=false，流程跳过绑定卡直接进入 duty_prompt 生成，不出现空的 installed_resource_binding
+    卡。
+  - 关键状态在 API 返回、数据库/存储和后续读取中保持一致；失败路径返回明确错误，不出现半写入、重复副作用或跨租户泄露。
+  - 日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。
+  - 真实模型调用成功，stream/Agent run 正常结束；自然语言只做稳定关键词/结构/工具调用断言。
+  forbidden_side_effects: []
+  source:
+    legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
+    legacy_sheet: 02_测试用例基线
+    legacy_row: 84
+  integration_boundary:
+  - REAL_REQUIRED：使用 ${NEXENT_TEST_HOME}/config/models.yaml 中配置的真实模型/向量/Rerank/语音/多模态能力；Mock 仅用于不可稳定制造的 5xx/超时/畸形响应故障注入。
+  observations:
+  - 功能结果与代码契约一致，测试过程无未处理异常。
+  - 空 name 草稿仅根据 display_name 生成并保存一次变量名，满足正则 ^[a-zA-Z_][a-zA-Z0-9_]*_assistant$ 且不超过 30 字符；重复 name 返回 retryable 的 agent_name_duplicate，已设置
+    name 返回 agent_name_already_set。
+  - description 与 duty_prompt 为第一人称；无资源需绑定或选中绑定集合为空时返回 binding_required=false，流程跳过绑定卡直接进入 duty_prompt 生成，不出现空的 installed_resource_binding
+    卡。
+  - 关键状态在 API 返回、数据库/存储和后续读取中保持一致；失败路径返回明确错误，不出现半写入、重复副作用或跨租户泄露。
+  - 日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。
+  - 真实模型调用成功，stream/Agent run 正常结束；自然语言只做稳定关键词/结构/工具调用断言。
+  cleanup:
+  - JUnit/XML、完整Agent run_id、stream事件摘要、tool/retrieval trace、model snapshot、Telemetry span（脱敏）。

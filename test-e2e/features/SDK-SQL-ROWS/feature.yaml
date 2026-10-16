@@ -1,0 +1,18 @@
+schema_version: '1.0'
+module:
+  id: SDK-TOOLS
+  name: SDK tools
+feature:
+  feature_id: SDK-SQL-ROWS
+  name: SQL tool row limits
+  status: active
+  description: MySQL, PostgreSQL and SQL Server tools return unlimited rows unless the caller requests a limit.
+  business_rules:
+    - rule_id: SDK-SQL-ROWS-RULE-01
+      description: Omitted, null, zero and negative max_rows impose no implicit row limit; positive values cap returned rows with cursor.fetchmany without injecting SQL clauses.
+    - rule_id: SDK-SQL-ROWS-RULE-02
+      description: Existing SQL dialect preprocessing, security validation, timeout, error responses and connection cleanup remain unchanged.
+  required_test_stages: []
+  source:
+    requirement_ids: [SQL-UNLIMITED-DEFAULT-20261012]
+    notes: Unit-level argument defaults and driver dispatch are proved by traditional UT; no new database runtime contract is introduced.

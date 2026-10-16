@@ -13,13 +13,9 @@ logger = logging.getLogger("delete_file_tool")
 class DeleteFileTool(Tool):
     """File deletion tool for deleting a single file"""
     name = "delete_file"
-    description = "Delete a single file at the specified path. " \
-                  "Path should be relative to the workspace (e.g., 'documents/file.txt'). " \
-                  "Absolute paths are not allowed for security reasons. " \
-                  "This operation is irreversible and only works on individual files, not directories. " \
-                  "Use with caution as deleted files cannot be recovered."
+    description = "Delete one workspace file. This action is irreversible and does not delete directories."
 
-    description_zh = "删除指定路径的单个文件，路径需为工作区相对路径（例如，'documents/file.txt'），出于安全考虑，不支持绝对路径。该操作仅对单个文件生效，不支持删除目录。删除的文件无法恢复，使用时请谨慎操作。"
+    description_zh = "删除单个工作区文件。此操作不可恢复，也不会删除目录。"
 
     inputs = {
         "file_path": {

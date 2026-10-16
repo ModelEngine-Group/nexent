@@ -202,7 +202,7 @@ class TestParallelExecutorTool:
     def test_configured_default_timeout_and_explicit_override(self):
         tool = ParallelExecutorTool(default_timeout_seconds=240)
         assert tool.inputs["timeout"]["default"] == 240
-        assert "默认240秒" in tool.description_zh
+        assert "默认240" in tool.inputs["timeout"]["description_zh"]
 
         with patch("sdk.nexent.core.tools.parallel_executor._parallel_executor") as execute:
             tool.forward(tasks=[])

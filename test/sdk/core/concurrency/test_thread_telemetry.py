@@ -18,6 +18,8 @@ if "nexent.core" not in sys.modules:
     core_package.__path__ = [str(_SDK_PACKAGE / "core")]
     sys.modules["nexent.core"] = core_package
 
+from nexent.core.concurrency import telemetry as telemetry_module
+
 from nexent.core.concurrency import (
     LanePolicy,
     ManagedTaskSpec,
@@ -95,6 +97,33 @@ def test_tc_tlm_017_emits_current_statistics_for_each_state_change():
     asyncio.run(manager.shutdown(timeout=1))
 
 
+def test_ut_sdk_tlm_041_default_telemetry_has_no_phoenix_side_effects():
+    """UT-SDK-TLM-041: thread state changes must not create Phoenix spans."""
+    telemetry = telemetry_module.get_thread_telemetry()
+    execution = types.SimpleNamespace(
+        execution_id="execution-1",
+        lane="agent-run",
+        state=types.SimpleNamespace(value="queued"),
+        spec=types.SimpleNamespace(
+            task_name="agent-run",
+            owner="sdk-agent",
+            run_id="run-1",
+            attempt_id="attempt-1",
+        ),
+        created_at_monotonic=10.0,
+        started_at_monotonic=11.0,
+        finished_at_monotonic=13.0,
+    )
+
+    telemetry.record_snapshot(
+        "runtime", "thread.started", execution, (3, 0, 3, 0), dedicated=False,
+    )
+
+    source = Path(telemetry_module.__file__).read_text(encoding="utf-8")
+    assert type(telemetry).__name__ == "NoOpThreadTelemetry"
+    assert "thread.manager.snapshot" not in source
+    assert "nexent.thread_manager" not in source
+    assert "opentelemetry" not in source
 @pytest.fixture(scope="module")
 def snapshot_tracing():
     from opentelemetry import trace

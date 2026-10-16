@@ -1,0 +1,16 @@
+schema_version: '1.0'
+module:
+  id: V5-BASELINE
+  name: Migrated V5 baseline
+feature:
+  feature_id: V5-REL-11
+  name: 审批等待期间重启/断线恢复与单次副作用
+  status: active
+  description: 服务或浏览器断开后运行可恢复，审批决定不会丢失或重复执行。
+  business_rules:
+  - rule_id: V5-REL-11-RULE-01
+    description: 审批等待期间重启/断线恢复与单次副作用
+  required_test_stages:
+  - D5
+  source:
+    notes: 'Provisional migration owner: the V5 row has no stable Feature ID. Do not infer an F-ID.'

@@ -266,7 +266,7 @@ utils_skill_params_utils_mock = types.ModuleType('utils.skill_params_utils')
 utils_skill_params_utils_mock.strip_params_comments_for_db = MagicMock(side_effect=lambda x: x)
 utils_skill_params_utils_mock.params_dict_to_roundtrip_yaml_text = MagicMock(return_value="params: {}")
 utils_prompt_template_utils_mock = types.ModuleType('utils.prompt_template_utils')
-utils_prompt_template_utils_mock.get_skill_creation_simple_prompt_template = MagicMock(return_value={"system_prompt": "", "user_prompt": ""})
+utils_prompt_template_utils_mock.get_nl2skill_prompt_template = MagicMock(return_value={"system_prompt": "", "user_prompt": ""})
 utils_content_classifier_utils_mock = types.ModuleType('utils.content_classifier_utils')
 utils_str_utils_mock = types.ModuleType('utils.str_utils')
 utils_str_utils_mock.convert_list_to_string = MagicMock(

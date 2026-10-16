@@ -224,7 +224,7 @@ async def test_run_agent_stream_resolves_and_persists_existing_workbench(monkeyp
         "_resolve_user_tenant_language",
         MagicMock(return_value=("user-a", "tenant-a", "en")),
     )
-    monkeypatch.setattr(agent_run, "prepend_current_time", lambda query, _timezone: query)
+    monkeypatch.setattr(agent_run, "prepend_current_time", lambda query, _timezone, *, language: query)
     monkeypatch.setattr(agent_run, "get_conversation_service", MagicMock(return_value=conversation))
     monkeypatch.setattr(agent_run, "apply_workbench_runtime_plan", apply_plan)
     monkeypatch.setattr(agent_run, "update_conversation_workbench_config_service", update_config)
@@ -310,7 +310,7 @@ async def test_run_agent_stream_rejects_stored_workbench_when_disabled(monkeypat
         "_resolve_user_tenant_language",
         lambda **_kwargs: ("user-a", "tenant-a", "en"),
     )
-    monkeypatch.setattr(agent_run, "prepend_current_time", lambda query, _timezone: query)
+    monkeypatch.setattr(agent_run, "prepend_current_time", lambda query, _timezone, *, language: query)
     monkeypatch.setattr(
         agent_run,
         "get_conversation_service",
@@ -336,7 +336,7 @@ async def test_run_agent_stream_rejects_conversation_entrypoint_mismatch(monkeyp
         "_resolve_user_tenant_language",
         lambda **_kwargs: ("user-a", "tenant-a", "en"),
     )
-    monkeypatch.setattr(agent_run, "prepend_current_time", lambda query, _timezone: query)
+    monkeypatch.setattr(agent_run, "prepend_current_time", lambda query, _timezone, *, language: query)
     monkeypatch.setattr(
         agent_run,
         "get_conversation_service",
@@ -371,7 +371,7 @@ async def test_run_agent_stream_rejects_stale_metadata_version(monkeypatch):
         "_resolve_user_tenant_language",
         lambda **_kwargs: ("user-a", "tenant-a", "en"),
     )
-    monkeypatch.setattr(agent_run, "prepend_current_time", lambda query, _timezone: query)
+    monkeypatch.setattr(agent_run, "prepend_current_time", lambda query, _timezone, *, language: query)
     monkeypatch.setattr(
         agent_run,
         "get_conversation_service",

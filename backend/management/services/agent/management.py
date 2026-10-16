@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import asyncio
 import base64
 import io
@@ -12,6 +14,7 @@ from fastapi import Header
 from fastapi.responses import JSONResponse
 
 from agents.create_agent_info import create_tool_config_list
+from services.user_identity_service import enrich_cas_usernames
 from utils.agent_transfer_utils import portable_tool_params, validate_import_tool_params
 from services.agent_version_service import publish_version_impl
 from consts.agent_repository import STATUS_PENDING_REVIEW, STATUS_REJECTED, STATUS_SHARED
@@ -872,6 +875,11 @@ async def list_all_agent_info_impl(
                 logger.warning("Failed to load agent tags: %s", error)
 
         simple_agent_list: list[dict] = []
+        enrich_cas_usernames(
+            [entry["raw_agent"] for entry in enriched_agents],
+            {"author_cas_username": "created_by"},
+            email_fields={"author_cas_username": "author"},
+        )
         for entry in enriched_agents:
             agent = entry["raw_agent"]
             unavailable_reasons = list(
@@ -896,6 +904,8 @@ async def list_all_agent_info_impl(
                 "description": agent["description"],
                 "icon_url": agent.get("icon_url"),
                 "author": agent.get("author"),
+                **({"author_cas_username": agent["author_cas_username"]}
+                   if agent.get("author_cas_username") else {}),
                 "created_by": agent.get("created_by"),
                 "create_time": agent.get("create_time"),
                 "tags": agent_tag_values.get(str(agent["agent_id"]), []),
@@ -1271,15 +1281,10 @@ def get_agent_by_name_impl(agent_name: str, tenant_id: str) -> dict:
     """
     if not agent_name:
         raise Exception("agent_name required")
-    try:
-        agent_id = search_agent_id_by_agent_name(agent_name, tenant_id)
-        versions = query_version_list(agent_id, tenant_id)
-        latest_version = versions[0]["version_no"] if versions else None
-        return {"agent_id": agent_id, "latest_version_no": latest_version}
-    except Exception as _:
-        logger.error(
-            f"Failed to find agent '{agent_name}' in tenant {tenant_id}")
-        raise Exception("agent not found")
+    agent_id = search_agent_id_by_agent_name(agent_name, tenant_id)
+    versions = query_version_list(agent_id, tenant_id)
+    latest_version = versions[0]["version_no"] if versions else None
+    return {"agent_id": agent_id, "latest_version_no": latest_version}
 
 
 def delete_related_agent_impl(parent_agent_id: int, child_agent_id: int, tenant_id: str):
@@ -1448,8 +1453,9 @@ async def export_agent_with_skills_impl(
     agent_info = search_agent_info_by_agent_id(
         agent_id=agent_id, tenant_id=tenant_id, version_no=version_no
     )
-    agent_name = agent_info.get(
-        "name", "anonymous") if agent_info else "anonymous"
+    agent_name = "anonymous"
+    if agent_info:
+        agent_name = agent_info.get("display_name") or agent_info.get("name") or "anonymous"
 
     filename = f"{agent_name}.zip"
 
