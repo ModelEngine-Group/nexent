@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """Helpers for keeping agent-owned reasoning settings independent from models."""
 
 from copy import deepcopy
@@ -25,6 +27,10 @@ def _resolve_model_reasoning_capability(model_info: Optional[dict]) -> Optional[
     """Resolve capability metadata for an agent snapshot when needed."""
     if not isinstance(model_info, dict):
         return None
+    if model_info.get("profile_schema_version") is not None and model_info.get("model_type") in {"llm", "chat"}:
+        from services.model_outlet_projection import project_saved_outlet
+
+        return (project_saved_outlet(model_info) or {}).get("reasoning_capability")
     capability = model_info.get("reasoning_capability")
     if isinstance(capability, dict):
         return capability
@@ -123,6 +129,17 @@ def snapshot_agent_reasoning_config(
         )
 
         model_info = get_model_by_model_id(model_id, tenant_id=tenant_id)
+        if ((model_info or {}).get("profile_schema_version") is not None
+                and (model_info or {}).get("model_type") in {"llm", "chat"}):
+            # Validate only explicit overrides; omitted values keep inheriting the outlet.
+            from nexent.core.model_service.profiles.outlet_storage import decode_resolved_model_profile
+            from nexent.core.model_service.registry import model_service_references
+            from services.agent_model_parameters import merge_agent_model_parameters
+
+            if entry:
+                profile = decode_resolved_model_profile(model_info, registered_references=model_service_references())
+                merge_agent_model_parameters(profile, entry)
+            continue
         capability = _resolve_model_reasoning_capability(model_info)
         has_reasoning_override = (
             "enable_thinking" in extra_params
