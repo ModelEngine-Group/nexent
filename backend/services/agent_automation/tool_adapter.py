@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """Backend adapter for the SDK scheduled-task proposal tool.
 
 This module is the only bridge between AgentLoop runtime identity and the
@@ -9,7 +11,9 @@ from __future__ import annotations
 
 import asyncio
 
-from utils.time_context_utils import strip_current_time_prefix
+from management.services.agent.context import (
+    strip_current_time_prefix,
+)
 import json
 import logging
 from dataclasses import dataclass

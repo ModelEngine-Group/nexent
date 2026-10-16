@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import json
 import inspect
 import importlib.machinery
@@ -27,7 +29,7 @@ _MODULE_PATCH_NAMES = [
     'database.client',
     'database.db_models',
     'management.services.model.invocation',
-    'utils.prompt_template_utils',
+    'management.services.agent.prompt',
     'management.services.agent.service',
     'services.prompt_template_service',
     'nexent',
@@ -198,7 +200,7 @@ from jinja2 import StrictUndefined
 
 # Mock utils
 sys.modules['management.services.model.invocation'] = MagicMock()
-sys.modules['utils.prompt_template_utils'] = MagicMock()
+sys.modules['management.services.agent.prompt'] = MagicMock()
 
 # Mock services
 sys.modules['management.services.agent.service'] = MagicMock()

@@ -1,318 +1,31 @@
-"""Skill management support service."""
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
+"""Skill input schemas, parameter parsing and YAML comment encoding."""
 
 import ast
 import io
 import json
 import logging
 import os
-import zipfile
 import re
+import zipfile
+from io import StringIO
 from typing import Any, Dict, List, Optional, Tuple
 
 import yaml
-
-from nexent.skills import SkillManager
+from consts.exceptions import SkillException
+from management.db.skill_params import (
+    split_string_inline_comment,
+    strip_params_comments_for_db,
+)
+from management.services.skill.files import (
+    _normalize_zip_entry_path,
+    _read_zip_member,
+    _zip_file_list,
+)
 from nexent.skills.text_codec import decode_skill_text
-from nexent.skills.paths import (
-    InvalidSkillNameError, UnsafeSkillPathError, UnsafeSkillRootError, resolve_skill_path,
-)
-from consts.const import (
-    CAN_EDIT_ALL_USER_ROLES,
-    CONTAINER_SKILLS_PATH,
-    PERMISSION_EDIT,
-    PERMISSION_PRIVATE,
-    PERMISSION_READ,
-)
-from consts.exceptions import ForbiddenError, SkillException
-from database.group_db import query_group_ids_by_user
-from database.user_tenant_db import get_user_tenant_by_user_id
-from utils.str_utils import convert_list_to_string
 
 logger = logging.getLogger(__name__)
-_SKILL_UPDATE_FORBIDDEN_MESSAGE = "Not authorized to update this skill"
-_SKILL_ACCESS_UPDATE_FORBIDDEN_MESSAGE = "Not authorized to update skill access"
-
-
-_UNSUPPORTED_PREVIEW_DIRECTORIES = frozenset({
-    "__macosx",
-    "__pycache__",
-    ".git",
-    ".svn",
-    ".hg",
-})
-_UNSUPPORTED_PREVIEW_EXTENSIONS = frozenset({
-    ".7z", ".a", ".avi", ".bin", ".bmp", ".class", ".dll", ".dylib",
-    ".eot", ".exe", ".gif", ".gz", ".ico", ".jar", ".jpeg", ".jpg",
-    ".mov", ".mp3", ".mp4", ".o", ".obj", ".otf", ".pdf", ".png",
-    ".pyc", ".pyo", ".so", ".tar", ".ttf", ".wav", ".webm", ".webp",
-    ".woff", ".woff2", ".xls", ".xlsx", ".zip",
-})
-_TEXT_PREVIEW_EXTENSIONS = frozenset({
-    "", ".bash", ".c", ".cc", ".cfg", ".conf", ".cpp", ".css", ".csv",
-    ".dockerfile", ".env", ".go", ".h", ".hpp", ".html", ".ini", ".java",
-    ".js", ".json", ".jsx", ".log", ".md", ".mdx", ".php", ".properties",
-    ".py", ".rb", ".rs", ".rst", ".sh", ".sql", ".svg", ".toml", ".ts",
-    ".tsx", ".txt", ".xml", ".yaml", ".yml", ".zsh",
-})
-
-
-class UnsupportedSkillFilePreview(SkillException):
-    """Raised when a skill file is intentionally excluded from text preview."""
-
-
-def _decode_zip_member_name(info: zipfile.ZipInfo) -> str:
-    """Recover legacy ZIP member names written without the UTF-8 flag."""
-    name = info.filename
-    if info.flag_bits & 0x800 or name.isascii():
-        return name
-    try:
-        raw_name = name.encode("cp437")
-    except UnicodeEncodeError:
-        return name
-    for encoding in ("utf-8", "gb18030"):
-        try:
-            candidate = raw_name.decode(encoding)
-        except UnicodeDecodeError:
-            continue
-        if encoding == "utf-8" or any("\u3400" <= char <= "\u9fff" for char in candidate):
-            return candidate
-    return name
-
-
-def _zip_members(zf: zipfile.ZipFile) -> List[Tuple[zipfile.ZipInfo, str]]:
-    """Return ZIP entries paired with their normalized display paths."""
-    members = [(info, _decode_zip_member_name(info)) for info in zf.infolist()]
-    seen: Dict[str, str] = {}
-    for info, decoded_name in members:
-        normalized = _normalize_zip_entry_path(decoded_name)
-        collision_key = normalized.casefold()
-        previous = seen.get(collision_key)
-        if previous is not None and previous != info.filename:
-            raise SkillException(f"ZIP entries resolve to the same path: {decoded_name}")
-        seen[collision_key] = info.filename
-    return members
-
-
-def _zip_file_list(zf: zipfile.ZipFile) -> List[str]:
-    return [decoded_name for _, decoded_name in _zip_members(zf)]
-
-
-def _read_zip_member(zf: zipfile.ZipFile, decoded_name: str) -> bytes:
-    for info, candidate in _zip_members(zf):
-        if candidate == decoded_name:
-            return zf.read(info)
-    raise KeyError(decoded_name)
-
-
-def _is_obviously_binary(raw: bytes) -> bool:
-    if not raw:
-        return False
-    if b"\x00" in raw:
-        even_nuls = raw[0::2].count(0)
-        odd_nuls = raw[1::2].count(0)
-        if max(even_nuls, odd_nuls) > len(raw) / 4:
-            return False
-        return True
-    control_count = sum(byte < 9 or 13 < byte < 32 for byte in raw)
-    return control_count / len(raw) > 0.1
-
-
-def _skill_file_preview_status(
-    local_skills_dir: str,
-    skill_name: str,
-    relative_path: str,
-) -> str:
-    """Classify whether a local skill file may be exposed as editable text."""
-    parts = [part.casefold() for part in relative_path.replace("\\", "/").split("/")]
-    if any(part in _UNSUPPORTED_PREVIEW_DIRECTORIES for part in parts[:-1]):
-        return "unsupported"
-    extension = os.path.splitext(relative_path)[1].casefold()
-    if extension in _UNSUPPORTED_PREVIEW_EXTENSIONS:
-        return "unsupported"
-    if extension in _TEXT_PREVIEW_EXTENSIONS:
-        return "readable"
-
-    local_root = os.path.realpath(local_skills_dir)
-    skill_root = os.path.realpath(
-        _resolve_local_skill_path(local_skills_dir, skill_name)
-    )
-    file_path = os.path.realpath(
-        _resolve_local_skill_path(local_skills_dir, skill_name, relative_path)
-    )
-    if (
-        not file_path.startswith(local_root + os.sep)
-        or not file_path.startswith(skill_root + os.sep)
-    ):
-        raise ForbiddenError("Unsafe local skill path")
-    try:
-        with open(file_path, "rb") as file_obj:
-            return "unsupported" if _is_obviously_binary(file_obj.read(4096)) else "readable"
-    except OSError:
-        return "readable"
-
-
-def _replace_skill_frontmatter_name(content: str, new_name: str) -> str:
-    """Replace only the name value in SKILL.md frontmatter and preserve the body."""
-    match = re.match(
-        r"\A---[ \t]*\r?\n(?P<frontmatter>.*?)(?P<closing>\r?\n---[ \t]*\r?\n)(?P<body>[\s\S]*)\Z",
-        content,
-        re.DOTALL,
-    )
-    if not match:
-        raise SkillException("SKILL.md must have YAML frontmatter")
-
-    frontmatter = match.group("frontmatter")
-    name_match = re.search(r"(?m)^name[ \t]*:[^\r\n]*(?P<line_end>\r?\n|$)", frontmatter)
-    if not name_match:
-        raise SkillException("SKILL.md frontmatter must contain a name field")
-
-    replacement = f"name: {json.dumps(new_name, ensure_ascii=False)}{name_match.group('line_end')}"
-    updated_frontmatter = (
-        frontmatter[:name_match.start()]
-        + replacement
-        + frontmatter[name_match.end():]
-    )
-    return (
-        content[:match.start("frontmatter")]
-        + updated_frontmatter
-        + content[match.end("frontmatter"):]
-    )
-
-
-def _to_group_id_set(group_ids: Any) -> set[int]:
-    if isinstance(group_ids, str):
-        return {
-            int(group_id.strip())
-            for group_id in group_ids.split(",")
-            if group_id.strip().isdigit()
-        }
-    if isinstance(group_ids, list):
-        return {
-            int(group_id)
-            for group_id in group_ids
-            if str(group_id).strip().isdigit()
-        }
-    return set()
-
-
-def can_view_skill(
-    *,
-    skill: Dict[str, Any],
-    user_id: str,
-    user_role: str,
-    user_group_ids: set[int],
-) -> bool:
-    """Return whether a skill is available to the current user."""
-    if skill.get("source") == "official":
-        return True
-    if user_role in CAN_EDIT_ALL_USER_ROLES:
-        return True
-    if str(skill.get("created_by")) == str(user_id):
-        return True
-    if skill.get("ingroup_permission") == PERMISSION_PRIVATE:
-        return False
-    return bool(
-        user_group_ids.intersection(_to_group_id_set(skill.get("group_ids")))
-    )
-
-
-def resolve_skill_permission(
-    *,
-    skill: Dict[str, Any],
-    user_id: str,
-    user_role: str,
-    user_group_ids: set[int],
-) -> str:
-    """Resolve whether the current user can edit or only use a visible skill."""
-    if user_role in CAN_EDIT_ALL_USER_ROLES:
-        return PERMISSION_EDIT
-    if str(skill.get("created_by")) == str(user_id):
-        return PERMISSION_EDIT
-    if skill.get("ingroup_permission") != PERMISSION_EDIT:
-        return PERMISSION_READ
-    return (
-        PERMISSION_EDIT
-        if user_group_ids.intersection(_to_group_id_set(skill.get("group_ids")))
-        else PERMISSION_READ
-    )
-
-
-def _apply_default_skill_permission_fields(
-    skill_data: Dict[str, Any],
-    user_id: Optional[str],
-) -> None:
-    """Default user-created skills to the creator's groups with edit permission."""
-    if not user_id:
-        return
-    if skill_data.get("group_ids") is None:
-        skill_data["group_ids"] = convert_list_to_string(query_group_ids_by_user(user_id))
-    if not skill_data.get("ingroup_permission"):
-        skill_data["ingroup_permission"] = PERMISSION_EDIT
-
-
-def _get_user_role(user_id: Optional[str]) -> str:
-    if not user_id:
-        return "USER"
-    user_tenant = get_user_tenant_by_user_id(user_id)
-    if not user_tenant:
-        return "USER"
-    return str(user_tenant.get("user_role") or "USER")
-
-
-def _can_edit_skill(skill: Dict[str, Any], user_id: Optional[str]) -> bool:
-    if not user_id:
-        return False
-    user_role = _get_user_role(user_id)
-    user_group_ids = set(query_group_ids_by_user(user_id) or [])
-    return resolve_skill_permission(
-        skill=skill,
-        user_id=user_id,
-        user_role=user_role,
-        user_group_ids=user_group_ids,
-    ) == PERMISSION_EDIT
-
-
-def _can_manage_skill_access(skill: Dict[str, Any], user_id: Optional[str]) -> bool:
-    if not user_id:
-        return False
-    return (
-        _get_user_role(user_id) in CAN_EDIT_ALL_USER_ROLES
-        or str(skill.get("created_by")) == str(user_id)
-    )
-
-
-def _has_skill_access_changes(
-    existing: Dict[str, Any], skill_data: Dict[str, Any]
-) -> bool:
-    if (
-        "group_ids" in skill_data
-        and _to_group_id_set(skill_data.get("group_ids"))
-        != _to_group_id_set(existing.get("group_ids"))
-    ):
-        return True
-    return (
-        "ingroup_permission" in skill_data
-        and skill_data.get("ingroup_permission") != existing.get("ingroup_permission")
-    )
-
-
-def _validate_skill_access_update(
-    existing: Dict[str, Any], skill_data: Dict[str, Any], user_id: Optional[str]
-) -> None:
-    if (
-        user_id
-        and _has_skill_access_changes(existing, skill_data)
-        and not _can_manage_skill_access(existing, user_id)
-    ):
-        raise ForbiddenError(_SKILL_ACCESS_UPDATE_FORBIDDEN_MESSAGE)
-
-
-def _normalize_zip_entry_path(name: str) -> str:
-    """Normalize a ZIP member path for comparison (slashes, strip ./)."""
-    norm = name.replace("\\", "/").strip()
-    while norm.startswith("./"):
-        norm = norm[2:]
-    return norm
 
 
 def _find_zip_member_config_yaml(
@@ -424,7 +137,9 @@ def _comment_from_map_block_header(cm: Any) -> Optional[str]:
     return _flatten_ca_comment_to_text(ca.comment)
 
 
-def _tooltip_for_commented_map_key(cm: Any, ordered_keys: List[Any], index: int, key: Any) -> Optional[str]:
+def _tooltip_for_commented_map_key(
+    cm: Any, ordered_keys: List[Any], index: int, key: Any
+) -> Optional[str]:
     """Collect tooltip text: block header, line-above key, and same-line EOL ``#`` for one mapping key."""
     tips: List[str] = []
     if index == 0:
@@ -591,9 +306,7 @@ def _parse_yaml_with_ruamel_merge_eol_comments(text: str) -> Dict[str, Any]:
     try:
         root = y.load(text)
     except Exception as exc:
-        raise SkillException(
-            f"Invalid YAML in config/config.yaml: {exc}"
-        ) from exc
+        raise SkillException(f"Invalid YAML in config/config.yaml: {exc}") from exc
     if root is None:
         return {}
     if isinstance(root, CommentedMap):
@@ -662,12 +375,14 @@ def _get_skill_inputs_from_code(scripts_dir: str) -> List[Dict[str, Any]]:
                 continue
             seen_names.add(param_name)
 
-            inputs.append({
-                "name": param_name,
-                "type": parsed["type"],
-                "required": parsed["required"],
-                "description_en": parsed.get("description_en", ""),
-            })
+            inputs.append(
+                {
+                    "name": param_name,
+                    "type": parsed["type"],
+                    "required": parsed["required"],
+                    "description_en": parsed.get("description_en", ""),
+                }
+            )
 
     return inputs
 
@@ -789,7 +504,11 @@ def _ast_literal_eval(node: ast.AST) -> Any:
     if isinstance(node, ast.BinOp):
         left = _ast_literal_eval(node.left)
         right = _ast_literal_eval(node.right)
-        if isinstance(left, str) and isinstance(right, str) and isinstance(node.op, ast.Add):
+        if (
+            isinstance(left, str)
+            and isinstance(right, str)
+            and isinstance(node.op, ast.Add)
+        ):
             return left + right
     return None
 
@@ -822,7 +541,9 @@ def _parse_skill_params_from_config_bytes(raw: bytes) -> Dict[str, Any]:
         try:
             return _parse_yaml_ruamel_plain(text)
         except ImportError:
-            logger.warning("ruamel.yaml not installed; YAML comments will be dropped on parse")
+            logger.warning(
+                "ruamel.yaml not installed; YAML comments will be dropped on parse"
+            )
             return _parse_yaml_fallback_pyyaml(text)
         except SkillException:
             raise
@@ -881,22 +602,34 @@ def _parse_skill_schema_from_yaml_bytes(raw: bytes) -> List[Dict[str, Any]]:
                 return []
 
     if not isinstance(data, dict):
-        logger.warning("[schema] Parsed data is not a dict (type=%s, parse_method=%s)", type(data).__name__, parse_method)
+        logger.warning(
+            "[schema] Parsed data is not a dict (type=%s, parse_method=%s)",
+            type(data).__name__,
+            parse_method,
+        )
         return []
 
     result: List[Dict[str, Any]] = []
     for param_name, meta in data.items():
         if not isinstance(meta, dict):
-            logger.debug("[schema] Skipping param '%s': meta is not a dict (%s)", param_name, type(meta).__name__)
+            logger.debug(
+                "[schema] Skipping param '%s': meta is not a dict (%s)",
+                param_name,
+                type(meta).__name__,
+            )
             continue
-        result.append({
-            "name": param_name,
-            "type": meta.get("type", "string"),
-            "required": bool(meta.get("required", False)),
-            "description_en": meta.get("description_en", meta.get("description", "")),
-            "description_zh": meta.get("description_zh", ""),
-            "depends_on": meta.get("depends_on"),
-        })
+        result.append(
+            {
+                "name": param_name,
+                "type": meta.get("type", "string"),
+                "required": bool(meta.get("required", False)),
+                "description_en": meta.get(
+                    "description_en", meta.get("description", "")
+                ),
+                "description_zh": meta.get("description_zh", ""),
+                "depends_on": meta.get("depends_on"),
+            }
+        )
     return result
 
 
@@ -931,13 +664,24 @@ def _find_zip_member_schema_yaml(
         # Match .../config/schema.yaml at any depth
         parts = norm.split("/")
         if len(parts) >= 2 and parts[-2] == "config" and parts[-1] == "schema.yaml":
-            logger.debug("[schema] Found schema.yaml via config/ prefix match: %s", entry)
+            logger.debug(
+                "[schema] Found schema.yaml via config/ prefix match: %s", entry
+            )
             return entry
         # Fallback: if preferred_root is given, also check <root>/config/schema.yaml
-        if preferred_skill_root and norm == f"{preferred_skill_root}/config/schema.yaml":
-            logger.debug("[schema] Found schema.yaml via preferred_root match: %s", entry)
+        if (
+            preferred_skill_root
+            and norm == f"{preferred_skill_root}/config/schema.yaml"
+        ):
+            logger.debug(
+                "[schema] Found schema.yaml via preferred_root match: %s", entry
+            )
             return entry
-    logger.debug("[schema] No schema.yaml found in ZIP entries (preferred_root=%s, entry_count=%d)", preferred_skill_root, len(file_list))
+    logger.debug(
+        "[schema] No schema.yaml found in ZIP entries (preferred_root=%s, entry_count=%d)",
+        preferred_skill_root,
+        len(file_list),
+    )
     return None
 
 
@@ -989,7 +733,11 @@ def _get_skill_inputs_from_zip(
 
             for member in file_list:
                 normalized = member.replace("\\", "/").strip()
-                if not normalized.endswith(".py") or "/_" in normalized or normalized.endswith("/_"):
+                if (
+                    not normalized.endswith(".py")
+                    or "/_" in normalized
+                    or normalized.endswith("/_")
+                ):
                     continue
                 if not normalized.startswith(scripts_root + "/scripts/"):
                     if scripts_root:
@@ -1020,80 +768,106 @@ def _get_skill_inputs_from_zip(
                     if param_name in ("help", "h") or param_name in seen_names:
                         continue
                     seen_names.add(param_name)
-                    inputs.append({
-                        "name": param_name,
-                        "type": parsed["type"],
-                        "required": parsed["required"],
-                        "description_en": parsed.get("description_en", ""),
-                    })
+                    inputs.append(
+                        {
+                            "name": param_name,
+                            "type": parsed["type"],
+                            "required": parsed["required"],
+                            "description_en": parsed.get("description_en", ""),
+                        }
+                    )
     except zipfile.BadZipFile:
         return inputs
 
     return inputs
 
 
-def _local_skill_config_yaml_path(skill_name: str, local_skills_dir: str) -> str:
-    """Absolute path to <local_skills_dir>/<skill_name>/config/config.yaml."""
-    return _resolve_local_skill_path(
-        local_skills_dir,
-        skill_name,
-        "config",
-        "config.yaml",
-    )
-
-
-def _local_skill_schema_yaml_path(skill_name: str, local_skills_dir: str) -> str:
-    """Absolute path to <local_skills_dir>/<skill_name>/config/schema.yaml."""
-    return _resolve_local_skill_path(
-        local_skills_dir,
-        skill_name,
-        "config",
-        "schema.yaml",
-    )
-
-
-def _resolve_local_skill_path(local_skills_dir: str, skill_name: str, *parts: str) -> str:
-    """Apply backend storage configuration and translate SDK path errors."""
+def _coerce_scalar_display(display: str) -> Any:
+    """Best-effort restore numbers/bools from merged string form (e.g. after stripping `` # ``)."""
+    s = display.strip()
+    if s == "":
+        return display
     try:
-        return resolve_skill_path(
-            local_skills_dir, str(skill_name or "").strip(),
-            *(str(part or "") for part in parts), allowed_root=CONTAINER_SKILLS_PATH,
+        return json.loads(s)
+    except (json.JSONDecodeError, TypeError, ValueError):
+        pass
+    if re.fullmatch(r"-?\d+", s):
+        return int(s)
+    if re.fullmatch(r"-?\d+\.\d+", s):
+        return float(s)
+    low = s.lower()
+    if low in ("true", "false"):
+        return low == "true"
+    return display
+
+
+def _scalar_to_node_and_tip(v: Any) -> Tuple[Any, Optional[str]]:
+    """Return (typed value, optional comment text) for YAML emission."""
+    if isinstance(v, str):
+        display, tip = split_string_inline_comment(v)
+        return _coerce_scalar_display(display), tip
+    return v, None
+
+
+def _dict_to_commented_map(d: Dict[str, Any]) -> Any:
+    """Build ruamel ``CommentedMap``; only scalar ``value # tip`` strings become YAML block comments above keys."""
+    from ruamel.yaml.comments import CommentedMap
+
+    cm = CommentedMap()
+    for k, v in d.items():
+        if k == "_comment":
+            continue
+        if isinstance(v, dict):
+            inner_clean = {kk: vv for kk, vv in v.items() if kk != "_comment"}
+            cm[k] = _dict_to_commented_map(inner_clean)
+        elif isinstance(v, list):
+            cm[k] = _list_to_commented_seq(v)
+        else:
+            val, tip = _scalar_to_node_and_tip(v)
+            cm[k] = val
+            if tip:
+                cm.yaml_set_comment_before_after_key(k, before=tip + "\n")
+    return cm
+
+
+def _list_to_commented_seq(items: List[Any]) -> Any:
+    from ruamel.yaml.comments import CommentedSeq
+
+    seq = CommentedSeq()
+    for item in items:
+        if isinstance(item, dict):
+            seq.append(_dict_to_commented_map(item))
+        elif isinstance(item, list):
+            seq.append(_list_to_commented_seq(item))
+        else:
+            val, _ = _scalar_to_node_and_tip(item)
+            seq.append(val)
+    return seq
+
+
+def params_dict_to_roundtrip_yaml_text(params: Dict[str, Any]) -> str:
+    """Serialize params to YAML with comments restored (ruamel round-trip). Falls back to PyYAML."""
+    try:
+        from ruamel.yaml import YAML
+
+        cm = _dict_to_commented_map(params)
+        y = YAML(typ="rt")
+        y.indent(mapping=2, sequence=4, offset=2)
+        buf = StringIO()
+        y.dump(cm, buf)
+        return buf.getvalue()
+    except Exception as exc:
+        logger.warning(
+            "ruamel round-trip YAML failed (%s); falling back to plain yaml.dump",
+            exc,
         )
-    except (InvalidSkillNameError, UnsafeSkillRootError) as exc:
-        raise SkillException(str(exc)) from exc
-    except UnsafeSkillPathError as exc:
-        raise ForbiddenError(str(exc)) from exc
+        import yaml as pyyaml
 
-
-def _write_skill_params_to_local_config_yaml(
-    skill_name: str,
-    params: Dict[str, Any],
-    local_skills_dir: str,
-) -> None:
-    """Write params to config/config.yaml; scalar ``value # tip`` strings round-trip as YAML comments above keys."""
-    from utils.skill_params_utils import params_dict_to_roundtrip_yaml_text
-
-    if not local_skills_dir:
-        return
-    path = _local_skill_config_yaml_path(skill_name, local_skills_dir)
-    config_dir = os.path.dirname(path)
-    os.makedirs(config_dir, exist_ok=True)
-    text = params_dict_to_roundtrip_yaml_text(params)
-    with open(path, "w", encoding="utf-8") as f:
-        f.write(text)
-    logger.info("Wrote skill params to %s", path)
-
-
-def _remove_local_skill_config_yaml(skill_name: str, local_skills_dir: str) -> None:
-    """Remove config/config.yaml when params are cleared in the database."""
-    if not local_skills_dir:
-        return
-    path = _local_skill_config_yaml_path(skill_name, local_skills_dir)
-    if os.path.isfile(path):
-        os.remove(path)
-        logger.info("Removed %s (params cleared in DB)", path)
-
-
-def get_skill_manager() -> SkillManager:
-    """Return the process-wide SkillManager."""
-    return SkillManager(base_skills_dir=CONTAINER_SKILLS_PATH)
+        clean = strip_params_comments_for_db(params)
+        return pyyaml.dump(
+            clean,
+            allow_unicode=True,
+            sort_keys=False,
+            default_flow_style=False,
+            width=float("inf"),
+        )

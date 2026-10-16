@@ -12,22 +12,33 @@ BACKEND_ROOT = PROJECT_ROOT / "backend"
 MANAGEMENT_SERVICES = BACKEND_ROOT / "management" / "services"
 
 MIGRATED_MODULES = {
-    "agent/icon_storage.py",
+    "agent/icon.py",
     "agent/management.py",
     "agent/naming.py",
-    "agent/prompt_template_loader.py",
+    "agent/artifacts.py",
+    "agent/context.py",
+    "agent/execution.py",
+    "agent/profile.py",
+    "agent/policy.py",
+    "agent/prompt.py",
     "agent/read.py",
-    "agent/runtime_sub_agent_adapter.py",
-    "agent/run_context.py",
     "agent/run.py",
     "agent/service.py",
-    "agent/system_agent_provider.py",
+    "agent/stream.py",
+    "agent/subscription.py",
+    "agent/system.py",
+    "agent/transfer.py",
     "knowledge_base/common.py",
+    "knowledge_base/clustering.py",
     "knowledge_base/deletion.py",
+    "knowledge_base/files.py",
+    "knowledge_base/ingestion.py",
     "knowledge_base/listing.py",
     "knowledge_base/management.py",
     "knowledge_base/permission.py",
     "knowledge_base/service.py",
+    "knowledge_base/status.py",
+    "knowledge_base/summary.py",
     "model/adapter.py",
     "model/capacity.py",
     "model/health.py",
@@ -46,7 +57,13 @@ MIGRATED_MODULES = {
     "model/resolver.py",
     "model/run_controls.py",
     "skill/service.py",
-    "skill/support.py",
+    "skill/files.py",
+    "skill/naming.py",
+    "skill/params.py",
+    "skill/permission.py",
+    "skill/transfer.py",
+    "skill/prompt.py",
+    "skill/classifier.py",
 }
 
 LEGACY_MODULE_NAMES = {
@@ -77,9 +94,7 @@ LEGACY_MODEL_MODULE_NAMES = {
 
 DEFAULT_MODULE_LINE_LIMIT = 2000
 MODEL_MODULE_LINE_LIMIT = 1500
-MODULE_LINE_LIMITS = {
-    "agent/run.py": 2500,
-}
+MODULE_LINE_LIMITS = {}
 
 
 def _project_python_files(root):
@@ -120,7 +135,7 @@ def test_migrated_management_services_stay_within_line_budgets():
             MODEL_MODULE_LINE_LIMIT
             if (
                 relative_path := path.relative_to(MANAGEMENT_SERVICES).as_posix()
-            ).startswith("model/")
+            ).startswith(("model/", "agent/", "skill/", "knowledge_base/"))
             else MODULE_LINE_LIMITS.get(relative_path, DEFAULT_MODULE_LINE_LIMIT)
         )
     }
@@ -170,3 +185,50 @@ def test_management_services_do_not_import_runtime_implementation_modules():
                     invalid_imports.append(f"{source_file.name}: {imported_module}")
 
     assert invalid_imports == []
+
+
+def test_agent_services_do_not_restore_test_only_entry_points():
+    retired_names = {
+        "load_default_agents_json_file",
+        "insert_related_agent_impl",
+        "get_agent_id_by_name",
+        "delete_related_agent_impl",
+        "get_runtime_sub_agent_adapter",
+        "list_runtime_sub_agent_adapters",
+    }
+    assert not (MANAGEMENT_SERVICES / "agent/runtime_sub_agent_adapter.py").exists()
+    for source_file in (MANAGEMENT_SERVICES / "agent").glob("*.py"):
+        tree = ast.parse(source_file.read_text(encoding="utf-8"))
+        definitions = {
+            node.name for node in ast.walk(tree)
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))
+        }
+        assert not definitions & retired_names, source_file
+
+
+def test_agent_shared_types_and_utilities_have_canonical_locations():
+    shared_types = {
+        "AgentModelProjection", "AgentRunContext", "SystemAgentRef", "WorkbenchReleaseManifest",
+    }
+    contract = ast.parse((BACKEND_ROOT / "contracts/agent.py").read_text(encoding="utf-8"))
+    assert {node.name for node in contract.body if isinstance(node, ast.ClassDef)} == shared_types
+    for source in (MANAGEMENT_SERVICES / "agent").glob("*.py"):
+        tree = ast.parse(source.read_text(encoding="utf-8"))
+        assert not {node.name for node in tree.body if isinstance(node, ast.ClassDef)} & shared_types
+    for name in (
+        "agent_profile_utils", "agent_stream_utils", "agent_transfer_utils", "context_utils",
+        "time_context_utils", "prompt_template_utils", "memory_tool_prompt", "automation_tool_prompt",
+        "final_answer_projection", "content_classifier_utils",
+    ):
+        assert not (BACKEND_ROOT / "utils" / f"{name}.py").exists()
+
+
+def test_skill_knowledge_utilities_have_canonical_locations():
+    for name in ("skill_import_utils", "skill_params_utils", "document_vector_utils", "task_status_utils"):
+        assert not (BACKEND_ROOT / "utils" / f"{name}.py").exists()
+    assert not (MANAGEMENT_SERVICES / "skill/support.py").exists()
+    for source in (BACKEND_ROOT / "management/db").glob("*.py"):
+        tree = ast.parse(source.read_text(encoding="utf-8"))
+        for node in ast.walk(tree):
+            if isinstance(node, ast.ImportFrom):
+                assert not (node.module or "").startswith("management.services"), source

@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import json
 import logging
 import re
@@ -847,7 +849,7 @@ def _build_agent_context_block(agent_id, tenant_id) -> str:
     if not agent_id:
         return ""
     try:
-        from utils.agent_profile_utils import (
+        from management.services.agent.profile import (
             fetch_agent_profile,
             format_agent_profile_context,
         )

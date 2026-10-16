@@ -1,15 +1,17 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """Provision and resolve platform-owned system Agents."""
 
 import logging
-from dataclasses import dataclass
 from typing import Any
-
-from packaging.version import InvalidVersion, Version
-from sqlalchemy.exc import IntegrityError
 
 from consts.const import APP_VERSION, ENABLE_AIDP_KNOWLEDGE, LANGUAGE
 from consts.exceptions import WorkbenchAgentError
 from consts.model import AgentInfoRequest, ToolInstanceInfoRequest
+from contracts.agent import (
+    SystemAgentRef,
+    WorkbenchReleaseManifest,
+)
 from database import skill_db
 from database.agent_db import (
     clear_agent_new_mark,
@@ -25,13 +27,15 @@ from database.tool_db import (
     query_all_tools,
     query_tool_instances_by_agent_id,
 )
+from management.services.skill.transfer import install_skills_from_zip_for_tenant
+from nexent.core.prompts import load_prompt
+from packaging.version import InvalidVersion, Version
 from services.agent_version_service import publish_version_impl
 from services.prompt_template_service import (
     SYSTEM_PROMPT_TEMPLATE_ID,
     SYSTEM_PROMPT_TEMPLATE_NAME,
 )
-from management.services.skill.service import install_skills_from_zip_for_tenant
-from nexent.core.prompts import load_prompt
+from sqlalchemy.exc import IntegrityError
 
 logger = logging.getLogger(__name__)
 
@@ -39,33 +43,6 @@ WORKBENCH_MAIN_SYSTEM_KEY = "workbench_main"
 WORKBENCH_MAIN_NAME = "workbench_main"
 WORKBENCH_MAIN_DISPLAY_NAME = "Nexent Workbench"
 SYSTEM_AGENT_USER_ID = "system"
-WORKBENCH_OFFICIAL_SKILL_NAMES = (
-    "docx",
-    "pdf",
-    "pptx",
-    "xlsx",
-    "canvas-design",
-    "analyze-image",
-)
-
-
-@dataclass(frozen=True)
-class SystemAgentRef:
-    """Immutable reference to one published system Agent snapshot."""
-
-    tenant_id: str
-    system_key: str
-    agent_id: int
-    version_no: int
-
-
-@dataclass(frozen=True)
-class WorkbenchReleaseManifest:
-    """Server-controlled capabilities for one Nexent release."""
-
-    system_revision: str
-    persistent_tool_names: tuple[str, ...]
-    official_skill_names: tuple[str, ...] = WORKBENCH_OFFICIAL_SKILL_NAMES
 
 
 class SystemAgentProvider:
@@ -132,7 +109,10 @@ class SystemAgentProvider:
 
         current_version = existing.get("current_version_no")
         current_revision = existing.get("system_revision")
-        if current_version and current_revision == self.release_manifest.system_revision:
+        if (
+            current_version
+            and current_revision == self.release_manifest.system_revision
+        ):
             if not self._release_state_matches(existing, tenant_id, locale=locale):
                 logger.error(
                     "Detected same-revision workbench Agent drift for tenant %s",
@@ -225,9 +205,7 @@ class SystemAgentProvider:
             clear_agent_new_mark(created["agent_id"], tenant_id, actor)
             return created
         except IntegrityError:
-            concurrent = search_system_agent(
-                tenant_id, self.system_key, version_no=0
-            )
+            concurrent = search_system_agent(tenant_id, self.system_key, version_no=0)
             if concurrent is not None:
                 logger.info(
                     "Reused concurrently provisioned workbench Agent for tenant %s",
@@ -266,9 +244,9 @@ class SystemAgentProvider:
                 (
                     name
                     for name in installed_names
-                    if name.startswith(prefix) and name[len(prefix):].isdigit()
+                    if name.startswith(prefix) and name[len(prefix) :].isdigit()
                 ),
-                key=lambda name: int(name[len(prefix):]),
+                key=lambda name: int(name[len(prefix) :]),
             )
             candidates = [skill_name, *aliases]
             skill = None
@@ -323,9 +301,7 @@ class SystemAgentProvider:
         )
         if selected_tool is not None:
             params = (
-                {"index_names": []}
-                if selected_name == "knowledge_base_search"
-                else {}
+                {"index_names": []} if selected_name == "knowledge_base_search" else {}
             )
             create_or_update_tool_by_tool_info(
                 ToolInstanceInfoRequest(
@@ -423,7 +399,7 @@ class SystemAgentProvider:
             if skill_name == base_name:
                 return base_name
             prefix = f"{base_name}_"
-            if skill_name.startswith(prefix) and skill_name[len(prefix):].isdigit():
+            if skill_name.startswith(prefix) and skill_name[len(prefix) :].isdigit():
                 return base_name
         return None
 

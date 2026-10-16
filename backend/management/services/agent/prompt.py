@@ -1,16 +1,41 @@
-import logging
-from typing import Any, Dict, List, Optional
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
-from consts.const import LANGUAGE
+"""Agent template selection, normalization and visible-tool prompt policy."""
+
+import logging
+from collections.abc import Iterable, Mapping
+from typing import Any, Dict, Optional
+
 from consts.prompt_template import (
     PROMPT_GENERATE_TEMPLATE_FIELD_ALIAS_MAP,
     PROMPT_GENERATE_TEMPLATE_FIELDS,
 )
-from nexent.core.agents.prompt.meta import compose_nl2skill
+from nexent.core.agents.prompt import AgentPromptBundle
+
+
+def load_agent_prompt_bundle(
+    *,
+    is_manager: bool,
+    language: str,
+    template_override: Mapping | None = None,
+) -> AgentPromptBundle:
+    """Select a YAML template and delegate its contract validation to the SDK."""
+    role = "manager" if is_manager else "managed"
+    if language not in {"zh", "en"}:
+        raise ValueError("unsupported Agent prompt language")
+    return AgentPromptBundle.from_resource(
+        role=role,
+        language=language,
+        template_override=template_override,
+    )
+
 
 logger = logging.getLogger("prompt_template_utils")
 
+
 PROMPT_GENERATE_TEMPLATE_KEY_MAP = PROMPT_GENERATE_TEMPLATE_FIELD_ALIAS_MAP
+
+
 PROMPT_GENERATE_TEMPLATE_KEYS = PROMPT_GENERATE_TEMPLATE_FIELDS
 
 
@@ -20,7 +45,7 @@ def get_prompt_generate_template_keys() -> list[str]:
 
 
 def normalize_prompt_generate_template_content(
-    template_content: Optional[Dict[str, Any]]
+    template_content: Optional[Dict[str, Any]],
 ) -> Dict[str, str]:
     """Normalize prompt generation template content and keep non-empty fields only."""
     normalized: Dict[str, str] = {}
@@ -39,7 +64,7 @@ def normalize_prompt_generate_template_content(
 
 
 def merge_prompt_generate_templates(
-    *template_contents: Optional[Dict[str, Any]]
+    *template_contents: Optional[Dict[str, Any]],
 ) -> Dict[str, str]:
     """Merge multiple prompt generation templates with first-non-empty priority."""
     merged: Dict[str, str] = {}
@@ -54,32 +79,14 @@ def merge_prompt_generate_templates(
     return merged
 
 
-def get_nl2skill_prompt_template(
-    language: str = LANGUAGE["ZH"],
-    existing_skill: Optional[Dict[str, Any]] = None,
-    user_request: str = "",
-    target_files: Optional[List[str]] = None,
-) -> Dict[str, str]:
-    """
-    Get skill creation prompt template with Jinja2 rendering.
+def should_enable_memory_tool_policy(tool_names: Iterable[str]) -> bool:
+    """Enable memory guidance only for a final visible store tool."""
+    return "store_memory" in set(tool_names)
 
-    This template is structured YAML with system_prompt and user_prompt sections.
-    Supports Jinja2 template syntax for dynamic content based on existing_skill.
 
-    Args:
-        language: Language code ('zh' or 'en')
-        existing_skill: Optional dict containing existing skill info for update scenarios.
-            Expected keys: name, description, tags, content
-        user_request: Current conversation turn request
-        target_files: Existing skill files explicitly selected for this turn
+AUTOMATION_TOOL_NAME = "create_scheduled_task_proposal"
 
-    Returns:
-        Dict[str, str]: Template with keys 'system_prompt' and 'user_prompt', rendered with variables
-    """
-    template_language = language if language in {LANGUAGE["ZH"], LANGUAGE["EN"]} else LANGUAGE["ZH"]
-    return compose_nl2skill(
-        template_language,
-        existing_skill=existing_skill,
-        user_request=user_request,
-        target_files=target_files or [],
-    )
+
+def should_enable_automation_tool_policy(tool_names: Iterable[str]) -> bool:
+    """Enable proposal guidance only for a final visible proposal tool."""
+    return AUTOMATION_TOOL_NAME in set(tool_names)

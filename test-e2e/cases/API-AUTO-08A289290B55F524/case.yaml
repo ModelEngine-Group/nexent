@@ -13,7 +13,7 @@ case:
   automation: automated
   objective: Agent 图标上传/读取契约：内容类型白名单、2MB上限、EDIT权限约束、非法/缺失图标错误与icon_url写回｜核心流程与异常/边界/越权
   preconditions:
-  - 独立测试运行时可导入实际 Agent service 和 icon_storage。
+  - 独立测试运行时可导入实际 Agent service 和 agent.icon。
   - 内存 Agent/数据库写回及存储边界替身，不连接真实 MinIO/PostgreSQL，也不需要预置 Agent ID。
   - 按内容签名构造图片字节及非法边界；不是图像解码质量验证。
   test_data:

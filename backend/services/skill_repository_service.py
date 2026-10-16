@@ -44,7 +44,7 @@ from services.notification_service import (
     deactivate_notifications,
 )
 from management.services.skill.service import SkillService
-from utils.skill_import_utils import generate_available_copy_skill_name
+from management.services.skill.naming import generate_available_copy_skill_name
 
 from services.user_identity_service import enrich_repository_identities, repository_identity_fields
 

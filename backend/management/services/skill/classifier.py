@@ -1,8 +1,9 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """Content classification utilities for streaming LLM output parsing."""
 
 import re
 from typing import Any, Dict, List, Optional
-
 
 FINAL_ANSWER_OPEN_TAG = "<final_answer>"
 FINAL_ANSWER_CLOSE_TAG = "</final_answer>"
@@ -22,9 +23,9 @@ class ContentClassifier:
     """
 
     MAX_BUFFER_SIZE = 1024 * 1024  # 1MB
-    MAX_TAG_LENGTH = 256           # Single tag max length
-    MAX_PATH_LENGTH = 512          # File path max length
-    MAX_TAG_COUNT = 100            # Max tags before stopping
+    MAX_TAG_LENGTH = 256  # Single tag max length
+    MAX_PATH_LENGTH = 512  # File path max length
+    MAX_TAG_COUNT = 100  # Max tags before stopping
 
     def __init__(self):
         self.state = "others"  # others | skill_body | file | summary
@@ -37,7 +38,6 @@ class ContentClassifier:
         self._known_tags = {
             FINAL_ANSWER_OPEN_TAG,
             FINAL_ANSWER_CLOSE_TAG,
-
             "<skill>",
             "</skill>",
             "<summary>",
@@ -62,8 +62,8 @@ class ContentClassifier:
         self.buffer += chunk
 
         if len(self.buffer) > self.MAX_BUFFER_SIZE:
-            overflow = self.buffer[:-self.MAX_BUFFER_SIZE]
-            self.buffer = self.buffer[-self.MAX_BUFFER_SIZE:]
+            overflow = self.buffer[: -self.MAX_BUFFER_SIZE]
+            self.buffer = self.buffer[-self.MAX_BUFFER_SIZE :]
             event = self._create_event(overflow)
             if event:
                 results.append(event)
@@ -103,18 +103,17 @@ class ContentClassifier:
         """Process buffer when it starts with '<' - extracts and handles tags."""
         results = []
         gt_pos = self.buffer.index(">")
-        potential_tag = self.buffer[:gt_pos + 1]
+        potential_tag = self.buffer[: gt_pos + 1]
         matched = self._match_known_tag_with_buffer(potential_tag)
 
         if matched:
-            content_after_tag = self.buffer[gt_pos + 1:]
+            content_after_tag = self.buffer[gt_pos + 1 :]
             if not content_after_tag and not final:
                 return None
             if (
                 content_after_tag
                 and not content_after_tag.startswith(("\n", "\r\n"))
                 and matched not in {FINAL_ANSWER_OPEN_TAG, FINAL_ANSWER_CLOSE_TAG}
-
             ):
                 return self._emit_potential_tag_start()
             results.extend(self._handle_matched_tag(gt_pos, potential_tag, matched))
@@ -125,11 +124,13 @@ class ContentClassifier:
 
         return results
 
-    def _handle_matched_tag(self, gt_pos: int, potential_tag: str, matched_tag: str) -> List[Dict[str, Any]]:
+    def _handle_matched_tag(
+        self, gt_pos: int, potential_tag: str, matched_tag: str
+    ) -> List[Dict[str, Any]]:
         """Handle a successfully matched tag and process following content."""
         results = []
         if self.tag_count >= self.MAX_TAG_COUNT:
-            remaining = self.buffer[gt_pos + 1:]
+            remaining = self.buffer[gt_pos + 1 :]
             if remaining.startswith("\r\n"):
                 remaining = remaining[2:]
             elif remaining.startswith("\n"):
@@ -138,7 +139,7 @@ class ContentClassifier:
             return results
 
         self.tag_count += 1
-        content_after_tag = self.buffer[gt_pos + 1:]
+        content_after_tag = self.buffer[gt_pos + 1 :]
         if content_after_tag.startswith("\r\n"):
             content_after_tag = content_after_tag[2:]
         elif content_after_tag.startswith("\n"):
@@ -217,7 +218,7 @@ class ContentClassifier:
         if buffer_content.startswith("<file ") and buffer_content.endswith(">"):
             match = re.match(
                 r'<file\s+path="([^"]{1,' + str(self.MAX_PATH_LENGTH) + r'})">$',
-                buffer_content
+                buffer_content,
             )
             if match and self._is_valid_file_path(match.group(1)):
                 self._pending_file_path = match.group(1)
@@ -245,13 +246,14 @@ class ContentClassifier:
         if not content:
             return {}
 
-        metadata = (
-            {"origin_type": self._origin_type}
-            if self._origin_type
-            else {}
-        )
+        metadata = {"origin_type": self._origin_type} if self._origin_type else {}
         if self.state == "skill_body":
-            return {"type": "skill_body", "content": content, "path": "SKILL.md", **metadata}
+            return {
+                "type": "skill_body",
+                "content": content,
+                "path": "SKILL.md",
+                **metadata,
+            }
         elif self.state == "file":
             return {
                 "type": "file_content",
@@ -271,7 +273,6 @@ class ContentClassifier:
     def _handle_tag(self, tag: str) -> Optional[Dict[str, Any]]:
         """Handle matched tag and update state."""
         if tag in {FINAL_ANSWER_OPEN_TAG, FINAL_ANSWER_CLOSE_TAG}:
-
             self.saw_control_tag = True
             return None
 

@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """
 Elasticsearch Application Interface Module
 
@@ -9,16 +11,12 @@ Main features include:
 3. Support for multiple search methods: exact search, semantic search, and hybrid search
 4. Health check interface
 """
+
 import asyncio
 import time
 import uuid
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
-
-from fastapi import Body, Depends, Path, Query
-from fastapi.responses import StreamingResponse
-from nexent.vector_database.base import VectorDatabaseCore
-from nexent.core.concurrency import run_blocking
 
 from consts.const import (
     LANGUAGE,
@@ -29,27 +27,38 @@ from database.knowledge_db import (
     update_knowledge_record,
     update_last_summary_time,
 )
+from fastapi import Body, Depends, Path, Query
+from fastapi.responses import StreamingResponse
+from management.services.knowledge_base.common import (
+    ALLOWED_CHUNK_FIELDS,
+    KnowledgeBaseNeedsModelConfigError,
+    _rethrow_or_plain,
+    _update_progress,
+    check_knowledge_base_exist_impl,
+    get_embedding_model_by_index_name,
+    get_vector_db_core,
+    logger,
+)
+from management.services.knowledge_base.deletion import (
+    KnowledgeBaseDocumentDeletionService,
+)
 from management.services.model.resolver import (
     get_embedding_model_by_id,
 )
+from nexent.core.concurrency import run_blocking
+from nexent.vector_database.base import VectorDatabaseCore
 
-
-
-from management.services.knowledge_base.common import (
-    ALLOWED_CHUNK_FIELDS,
-    _update_progress,
-    KnowledgeBaseNeedsModelConfigError,
-    get_embedding_model_by_index_name,
-    get_vector_db_core,
-    _rethrow_or_plain,
-    check_knowledge_base_exist_impl,
-    logger,
+__all__ = (
+    "ALLOWED_CHUNK_FIELDS",
+    "_update_progress",
+    "KnowledgeBaseNeedsModelConfigError",
+    "get_embedding_model_by_index_name",
+    "get_vector_db_core",
+    "_rethrow_or_plain",
+    "check_knowledge_base_exist_impl",
+    "logger",
 )
 
-
-from management.services.knowledge_base.deletion import KnowledgeBaseDocumentDeletionService
-
-__all__ = ('ALLOWED_CHUNK_FIELDS', '_update_progress', 'KnowledgeBaseNeedsModelConfigError', 'get_embedding_model_by_index_name', 'get_vector_db_core', '_rethrow_or_plain', 'check_knowledge_base_exist_impl', 'logger')
 
 class ElasticSearchService(KnowledgeBaseDocumentDeletionService):
     @staticmethod
@@ -69,25 +78,27 @@ class ElasticSearchService(KnowledgeBaseDocumentDeletionService):
             return {
                 "status": "healthy",
                 "elasticsearch": "connected",
-                "indices_count": len(indices)
+                "indices_count": len(indices),
             }
         except Exception as e:
             raise Exception(f"Health check failed: {str(e)}")
 
-    async def summary_index_name(self,
-                                 index_name: str = Path(
-                                     ..., description="Name of the index to get documents from"),
-                                 batch_size: int = Query(
-                                     1000, description="Number of documents to retrieve per batch"),
-                                 vdb_core: VectorDatabaseCore = Depends(
-                                     get_vector_db_core),
-                                 user_id: Optional[str] = Body(
-                                     None, description="ID of the user delete the knowledge base"),
-                                 tenant_id: Optional[str] = Body(
-                                     None, description="ID of the tenant"),
-                                 language: str = LANGUAGE["ZH"],
-                                 model_id: Optional[int] = None
-                                 ):
+    async def summary_index_name(
+        self,
+        index_name: str = Path(
+            ..., description="Name of the index to get documents from"
+        ),
+        batch_size: int = Query(
+            1000, description="Number of documents to retrieve per batch"
+        ),
+        vdb_core: VectorDatabaseCore = Depends(get_vector_db_core),
+        user_id: Optional[str] = Body(
+            None, description="ID of the user delete the knowledge base"
+        ),
+        tenant_id: Optional[str] = Body(None, description="ID of the tenant"),
+        language: str = LANGUAGE["ZH"],
+        model_id: Optional[int] = None,
+    ):
         """
         Generate a summary for the specified index using advanced Map-Reduce approach
 
@@ -111,15 +122,17 @@ class ElasticSearchService(KnowledgeBaseDocumentDeletionService):
         """
         try:
             if not tenant_id:
-                raise Exception(
-                    "Tenant ID is required for summary generation.")
+                raise Exception("Tenant ID is required for summary generation.")
 
-            from utils.document_vector_utils import (
-                process_documents_for_clustering,
+            from management.services.knowledge_base.clustering import (
                 kmeans_cluster_documents,
-                summarize_clusters_map_reduce,
-                merge_cluster_summaries
             )
+            from management.services.knowledge_base.summary import (
+                merge_cluster_summaries,
+                process_documents_for_clustering,
+                summarize_clusters_map_reduce,
+            )
+
             # Use new Map-Reduce approach
             # Sample reasonable number of documents
             sample_count = min(batch_size // 5, 200)
@@ -131,7 +144,7 @@ class ElasticSearchService(KnowledgeBaseDocumentDeletionService):
                 document_samples, doc_embeddings = process_documents_for_clustering(
                     index_name=index_name,
                     vdb_core=vdb_core,
-                    sample_doc_count=sample_count
+                    sample_doc_count=sample_count,
                 )
 
                 if not document_samples:
@@ -148,7 +161,7 @@ class ElasticSearchService(KnowledgeBaseDocumentDeletionService):
                     doc_max_words=100,
                     cluster_max_words=150,
                     model_id=model_id,
-                    tenant_id=tenant_id
+                    tenant_id=tenant_id,
                 )
 
                 # Step 4: Merge into final summary
@@ -167,29 +180,29 @@ class ElasticSearchService(KnowledgeBaseDocumentDeletionService):
                 try:
                     # Stream the summary character by character
                     for char in final_summary:
-                        yield f"data: {{\"status\": \"success\", \"message\": \"{char}\"}}\n\n"
+                        yield f'data: {{"status": "success", "message": "{char}"}}\n\n'
                         await asyncio.sleep(0.01)
-                    yield "data: {\"status\": \"completed\"}\n\n"
+                    yield 'data: {"status": "completed"}\n\n'
                 except Exception as e:
-                    yield f"data: {{\"status\": \"error\", \"message\": \"{e}\"}}\n\n"
+                    yield f'data: {{"status": "error", "message": "{e}"}}\n\n'
 
-            return StreamingResponse(
-                generate_summary(),
-                media_type="text/event-stream"
-            )
+            return StreamingResponse(generate_summary(), media_type="text/event-stream")
 
         except Exception as e:
             logger.error(
-                f"Knowledge base summary generation failed: {str(e)}", exc_info=True)
+                f"Knowledge base summary generation failed: {str(e)}", exc_info=True
+            )
             raise Exception(f"Failed to generate summary: {str(e)}")
 
     @staticmethod
     def get_random_documents(
-            index_name: str = Path(...,
-                                   description="Name of the index to get documents from"),
-            batch_size: int = Query(
-                1000, description="Maximum number of documents to retrieve"),
-            vdb_core: VectorDatabaseCore = Depends(get_vector_db_core)
+        index_name: str = Path(
+            ..., description="Name of the index to get documents from"
+        ),
+        batch_size: int = Query(
+            1000, description="Maximum number of documents to retrieve"
+        ),
+        vdb_core: VectorDatabaseCore = Depends(get_vector_db_core),
     ):
         """
         Get random sample of documents from the specified index
@@ -215,42 +228,38 @@ class ElasticSearchService(KnowledgeBaseDocumentDeletionService):
                         "random_score": {
                             # Use current time as random seed
                             "seed": int(time.time()),
-                            "field": "_seq_no"
-                        }
+                            "field": "_seq_no",
+                        },
                     }
-                }
+                },
             }
 
             # Execute the query
-            response = vdb_core.search(
-                index_name=index_name,
-                query=query
-            )
+            response = vdb_core.search(index_name=index_name, query=query)
 
             # Extract and process the sampled documents
             sampled_docs = []
-            for hit in response['hits']['hits']:
-                doc = hit['_source']
-                doc['_id'] = hit['_id']  # Add document ID
+            for hit in response["hits"]["hits"]:
+                doc = hit["_source"]
+                doc["_id"] = hit["_id"]  # Add document ID
                 sampled_docs.append(doc)
 
-            return {
-                "total": total_docs,
-                "documents": sampled_docs
-            }
+            return {"total": total_docs, "documents": sampled_docs}
 
         except Exception as e:
             raise Exception(
-                f"Error retrieving random documents from index {index_name}: {str(e)}")
+                f"Error retrieving random documents from index {index_name}: {str(e)}"
+            )
 
     @staticmethod
     def change_summary(
-            index_name: str = Path(...,
-                                   description="Name of the index to get documents from"),
-            summary_result: Optional[str] = Body(
-                description="knowledge base summary"),
-            user_id: Optional[str] = Body(
-                None, description="ID of the user delete the knowledge base")
+        index_name: str = Path(
+            ..., description="Name of the index to get documents from"
+        ),
+        summary_result: Optional[str] = Body(description="knowledge base summary"),
+        user_id: Optional[str] = Body(
+            None, description="ID of the user delete the knowledge base"
+        ),
     ):
         """
         Update the summary for the specified Elasticsearch index
@@ -267,18 +276,25 @@ class ElasticSearchService(KnowledgeBaseDocumentDeletionService):
             update_data = {
                 "knowledge_describe": summary_result,  # Set the new summary
                 "updated_by": user_id,
-                "index_name": index_name
+                "index_name": index_name,
             }
             update_knowledge_record(update_data)
             # Update last_summary_time for auto-summary tracking
             update_last_summary_time(index_name)
-            return {"status": "success", "message": f"Index {index_name} summary updated successfully",
-                    "summary": summary_result}
+            return {
+                "status": "success",
+                "message": f"Index {index_name} summary updated successfully",
+                "summary": summary_result,
+            }
         except Exception as e:
             raise Exception(f"{str(e)}")
 
     @staticmethod
-    def get_summary(index_name: str = Path(..., description="Name of the index to get documents from")):
+    def get_summary(
+        index_name: str = Path(
+            ..., description="Name of the index to get documents from"
+        ),
+    ):
         """
         Get the summary for the specified Elasticsearch index
 
@@ -289,11 +305,15 @@ class ElasticSearchService(KnowledgeBaseDocumentDeletionService):
             Dictionary containing status and summary information
         """
         try:
-            knowledge_record = get_knowledge_record({'index_name': index_name})
+            knowledge_record = get_knowledge_record({"index_name": index_name})
             if knowledge_record:
                 summary_result = knowledge_record["knowledge_describe"]
                 success_msg = f"Index {index_name} summary retrieved successfully"
-                return {"status": "success", "message": success_msg, "summary": summary_result}
+                return {
+                    "status": "success",
+                    "message": success_msg,
+                    "summary": summary_result,
+                }
             error_detail = f"Unable to get summary for index {index_name}"
             raise Exception(error_detail)
         except Exception as e:
@@ -352,7 +372,7 @@ class ElasticSearchService(KnowledgeBaseDocumentDeletionService):
                 "chunks": filtered_chunks,
                 "total": total,
                 "page": result_page,
-                "page_size": result_page_size
+                "page_size": result_page_size,
             }
         except Exception as e:
             error_msg = f"Error retrieving chunks from index {index_name}: {str(e)}"
@@ -376,35 +396,53 @@ class ElasticSearchService(KnowledgeBaseDocumentDeletionService):
             embedding_model_id = None
             if tenant_id:
                 try:
-                    knowledge_record = get_knowledge_record({
-                        "index_name": index_name,
-                        "tenant_id": tenant_id
-                    })
-                    embedding_model_id = knowledge_record.get("embedding_model_id") if knowledge_record else None
+                    knowledge_record = get_knowledge_record(
+                        {"index_name": index_name, "tenant_id": tenant_id}
+                    )
+                    embedding_model_id = (
+                        knowledge_record.get("embedding_model_id")
+                        if knowledge_record
+                        else None
+                    )
                 except Exception as e:
-                    logger.warning(f"Failed to get embedding model id for index {index_name}: {e}")
+                    logger.warning(
+                        f"Failed to get embedding model id for index {index_name}: {e}"
+                    )
 
             # Generate embedding if we have content and can get embedding model
             embedding_vector = None
             if chunk_request.content:
                 try:
-                    embedding_model = get_embedding_model_by_id(tenant_id, embedding_model_id)[0] if tenant_id and embedding_model_id else None
+                    embedding_model = (
+                        get_embedding_model_by_id(tenant_id, embedding_model_id)[0]
+                        if tenant_id and embedding_model_id
+                        else None
+                    )
                     if embedding_model:
-                        embeddings = embedding_model.get_embeddings(chunk_request.content)
+                        embeddings = embedding_model.get_embeddings(
+                            chunk_request.content
+                        )
                         if embeddings and len(embeddings) > 0:
                             embedding_vector = embeddings[0]
-                            logger.debug(f"Generated embedding for chunk in index {index_name}")
+                            logger.debug(
+                                f"Generated embedding for chunk in index {index_name}"
+                            )
                         else:
-                            logger.warning(f"Failed to generate embedding for chunk in index {index_name}")
+                            logger.warning(
+                                f"Failed to generate embedding for chunk in index {index_name}"
+                            )
                     else:
-                        logger.warning(f"No embedding model available for index {index_name}")
+                        logger.warning(
+                            f"No embedding model available for index {index_name}"
+                        )
                 except Exception as e:
                     logger.warning(f"Failed to generate embedding for chunk: {e}")
 
             # Build chunk payload
             chunk_payload = ElasticSearchService._build_chunk_payload(
                 base_fields={
-                    "id": chunk_request.chunk_id or ElasticSearchService._generate_chunk_id(),
+                    "id": chunk_request.chunk_id
+                    or ElasticSearchService._generate_chunk_id(),
                     "title": chunk_request.title,
                     "filename": chunk_request.filename,
                     "path_or_url": chunk_request.path_or_url,
@@ -428,8 +466,9 @@ class ElasticSearchService(KnowledgeBaseDocumentDeletionService):
                 "chunk_id": result.get("id"),
             }
         except Exception as exc:
-            logger.error("Error creating chunk in index %s: %s",
-                         index_name, exc, exc_info=True)
+            logger.error(
+                "Error creating chunk in index %s: %s", index_name, exc, exc_info=True
+            )
             raise Exception(f"Error creating chunk: {exc}")
 
     @staticmethod
@@ -445,15 +484,15 @@ class ElasticSearchService(KnowledgeBaseDocumentDeletionService):
         Update a chunk document.
         """
         try:
-            update_fields = chunk_request.dict(
-                exclude_unset=True, exclude={"metadata"})
+            update_fields = chunk_request.dict(exclude_unset=True, exclude={"metadata"})
             metadata = chunk_request.metadata or {}
             update_payload = ElasticSearchService._build_chunk_payload(
                 base_fields={
                     **update_fields,
                     "updated_by": user_id,
                     "update_time": datetime.now(timezone.utc).strftime(
-                        "%Y-%m-%dT%H:%M:%S"),
+                        "%Y-%m-%dT%H:%M:%S"
+                    ),
                 },
                 metadata=metadata,
                 ensure_create_time=False,
@@ -462,16 +501,20 @@ class ElasticSearchService(KnowledgeBaseDocumentDeletionService):
             if not update_payload:
                 raise ValueError("No update fields supplied.")
 
-            result = vdb_core.update_chunk(
-                index_name, chunk_id, update_payload)
+            result = vdb_core.update_chunk(index_name, chunk_id, update_payload)
             return {
                 "status": "success",
                 "message": f"Chunk {result.get('id')} updated successfully",
                 "chunk_id": result.get("id"),
             }
         except Exception as exc:
-            logger.error("Error updating chunk %s in index %s: %s",
-                         chunk_id, index_name, exc, exc_info=True)
+            logger.error(
+                "Error updating chunk %s in index %s: %s",
+                chunk_id,
+                index_name,
+                exc,
+                exc_info=True,
+            )
             raise Exception(f"Error updating chunk: {exc}")
 
     @staticmethod
@@ -486,28 +529,32 @@ class ElasticSearchService(KnowledgeBaseDocumentDeletionService):
         try:
             deleted = vdb_core.delete_chunk(index_name, chunk_id)
             if not deleted:
-                raise ValueError(
-                    f"Chunk {chunk_id} not found in index {index_name}")
+                raise ValueError(f"Chunk {chunk_id} not found in index {index_name}")
             return {
                 "status": "success",
                 "message": f"Chunk {chunk_id} deleted successfully",
                 "chunk_id": chunk_id,
             }
         except Exception as exc:
-            logger.error("Error deleting chunk %s in index %s: %s",
-                         chunk_id, index_name, exc, exc_info=True)
+            logger.error(
+                "Error deleting chunk %s in index %s: %s",
+                chunk_id,
+                index_name,
+                exc,
+                exc_info=True,
+            )
             raise Exception(f"Error deleting chunk: {exc}")
 
     @staticmethod
     def search_hybrid(
-            *,
-            index_names: List[str],
-            query: str,
-            tenant_id: str,
-            top_k: int = 10,
-            weight_accurate: Optional[float] = None,
-            tag_predicates: Optional[List[Dict[str, Any]]] = None,
-            vdb_core: VectorDatabaseCore = Depends(get_vector_db_core),
+        *,
+        index_names: List[str],
+        query: str,
+        tenant_id: str,
+        top_k: int = 10,
+        weight_accurate: Optional[float] = None,
+        tag_predicates: Optional[List[Dict[str, Any]]] = None,
+        vdb_core: VectorDatabaseCore = Depends(get_vector_db_core),
     ):
         """
         Execute a hybrid search that blends accurate and semantic scoring.
@@ -521,9 +568,7 @@ class ElasticSearchService(KnowledgeBaseDocumentDeletionService):
                 raise ValueError("At least one index name is required")
             if top_k <= 0:
                 raise ValueError("top_k must be greater than 0")
-            if weight_accurate and (
-                weight_accurate < 0 or weight_accurate > 1
-            ):
+            if weight_accurate and (weight_accurate < 0 or weight_accurate > 1):
                 raise ValueError("weight_accurate must be between 0 and 1")
 
             # Preserve the REST API's historical 0.5 default for ordinary
@@ -539,19 +584,22 @@ class ElasticSearchService(KnowledgeBaseDocumentDeletionService):
             if not index_names:
                 raise ValueError("At least one index name is required")
 
-            embedding_model, model_id, meta = get_embedding_model_by_index_name(tenant_id, index_names[0])
+            embedding_model, model_id, meta = get_embedding_model_by_index_name(
+                tenant_id, index_names[0]
+            )
 
             if not embedding_model:
                 if meta.get("status") == "needs_config":
                     # Return a clear error indicating model needs to be configured
                     raise KnowledgeBaseNeedsModelConfigError(
                         index_name=index_names[0],
-                        message=f"Knowledge base '{index_names[0]}' does not have an embedding model configured. Please select a model in the knowledge base settings."
+                        message=f"Knowledge base '{index_names[0]}' does not have an embedding model configured. Please select a model in the knowledge base settings.",
                     )
                 else:
                     raise ValueError(
                         f"No embedding model found for index '{index_names[0]}'. "
-                        f"Please configure an embedding model for this knowledge base.")
+                        f"Please configure an embedding model for this knowledge base."
+                    )
 
             start_time = time.perf_counter()
             raw_results = vdb_core.hybrid_search(
@@ -572,9 +620,7 @@ class ElasticSearchService(KnowledgeBaseDocumentDeletionService):
                 if "scores" in item:
                     score_details.update(item["scores"])
                 if item.get("highlight_terms"):
-                    score_details["retrieval_highlight_terms"] = item[
-                        "highlight_terms"
-                    ]
+                    score_details["retrieval_highlight_terms"] = item["highlight_terms"]
                 if score_details:
                     document["score_details"] = score_details
                 formatted_results.append(document)
@@ -625,8 +671,8 @@ class ElasticSearchService(KnowledgeBaseDocumentDeletionService):
             allowed_paths = set()
             for resource_id in resource_ids:
                 try:
-                    provider, knowledge_base_id, document_id = decode_document_resource_id(
-                        resource_id
+                    provider, knowledge_base_id, document_id = (
+                        decode_document_resource_id(resource_id)
                     )
                 except ValueError:
                     continue
@@ -637,9 +683,8 @@ class ElasticSearchService(KnowledgeBaseDocumentDeletionService):
         return [
             document
             for document in results
-            if document.get("path_or_url") in allowed_paths_by_index.get(
-                document.get("index"), set()
-            )
+            if document.get("path_or_url")
+            in allowed_paths_by_index.get(document.get("index"), set())
         ]
 
     @staticmethod
@@ -657,7 +702,9 @@ class ElasticSearchService(KnowledgeBaseDocumentDeletionService):
         Merge and sanitize chunk payload fields.
         """
         payload = {
-            key: value for key, value in (base_fields or {}).items() if value is not None
+            key: value
+            for key, value in (base_fields or {}).items()
+            if value is not None
         }
         if metadata:
             for key, value in metadata.items():
@@ -666,6 +713,7 @@ class ElasticSearchService(KnowledgeBaseDocumentDeletionService):
 
         if ensure_create_time and "create_time" not in payload:
             payload["create_time"] = datetime.now(timezone.utc).strftime(
-                "%Y-%m-%dT%H:%M:%S")
+                "%Y-%m-%dT%H:%M:%S"
+            )
 
         return payload
