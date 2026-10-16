@@ -46,10 +46,12 @@ const MENU_POPUP_CLASS =
   "[&_.ant-dropdown-menu-item:not(.account-menu-identity):not(.account-menu-secondary)]:!h-7 " +
   "[&_.ant-dropdown-menu-submenu-title]:!flex [&_.ant-dropdown-menu-submenu-title]:!items-center [&_.ant-dropdown-menu-submenu-title]:!h-7 " +
   "[&_.ant-dropdown-menu-submenu-title]:!rounded-md [&_.ant-dropdown-menu-submenu-title]:!px-1.5 [&_.ant-dropdown-menu-submenu-title]:!py-1 " +
-  "[&_.ant-dropdown-menu-title-content]:!min-w-0 [&_.ant-dropdown-menu-title-content]:!text-sm [&_.ant-dropdown-menu-title-content]:!leading-5 [&_.ant-dropdown-menu-title-content]:!font-normal " +
+  "[&_.ant-dropdown-menu-title-content]:!min-w-0 " +
   "[&_.ant-dropdown-menu-item-icon]:!me-1.5 [&_.ant-dropdown-menu-item-icon]:!text-base [&_.ant-dropdown-menu-item-icon]:!w-4 [&_.ant-dropdown-menu-item-icon]:!h-4 [&_.ant-dropdown-menu-item-icon]:!shrink-0 " +
   "[&_.ant-dropdown-menu-item-divider]:!my-1 [&_.ant-dropdown-menu-item-divider]:!-mx-1 [&_.ant-dropdown-menu-item-divider]:!bg-[lab(90.6808%_-1.40554_-6.57337)] " +
-  "[&_.ant-dropdown-menu-item:not(.account-menu-readonly):not(.account-menu-logout):hover]:!bg-[rgba(25,25,25,0.08)] [&_.ant-dropdown-menu-submenu-title:hover]:!bg-[rgba(25,25,25,0.08)] " +
+  "[&_.ant-dropdown-menu-item:not(.account-menu-readonly):not(.account-menu-logout):hover]:!bg-[lab(94.1288%_-2.23359_-10.9012)] [&_.ant-dropdown-menu-submenu-title:hover]:!bg-[lab(94.1288%_-2.23359_-10.9012)] " +
+  "[&_.ant-dropdown-menu-item:not(.account-menu-readonly):not(.account-menu-logout):focus-visible]:!bg-[lab(94.1288%_-2.23359_-10.9012)] [&_.ant-dropdown-menu-submenu-title:focus-visible]:!bg-[lab(94.1288%_-2.23359_-10.9012)] " +
+  "[&_.account-menu-secondary:not(.account-menu-readonly):hover]:!text-[lab(11.6682%_-0.113927_-10.842)] " +
   "[&_.ant-dropdown-menu-item.account-menu-secondary:not(.account-menu-version)]:!h-6 [&_.account-menu-secondary]:!py-0.5 " +
   "[&_.account-menu-secondary:not(.account-menu-version)]:!text-[lab(47.7049%_-1.02875_-9.20491)] " +
   "[&_.account-menu-secondary_.ant-dropdown-menu-title-content]:!text-[11px] [&_.account-menu-secondary_.ant-dropdown-menu-title-content]:!leading-[16.5px] " +
@@ -175,7 +177,7 @@ export function AvatarDropdown({
       key: "language",
       icon: <Globe size={20} />,
       label: (
-        <span className="flex min-w-0 flex-1 items-center justify-between gap-2 text-sm leading-5">
+        <span className="flex min-w-0 flex-1 items-center justify-between gap-2">
           <span>{t("accountMenu.language")}</span>
           <span className="text-xs leading-4 text-[lab(47.7049%_-1.02875_-9.20491)]">
             {
@@ -306,10 +308,6 @@ export function AvatarDropdown({
       <Dropdown
         menu={{
           items: menuItems,
-          style: {
-            fontFamily:
-              'system-ui, -apple-system, "PingFang SC", "Microsoft YaHei", "Noto Sans SC", sans-serif',
-          },
           onClick: ({ key }) => {
             if (!["user-info", "not-logged-in", "version"].includes(key))
               changeOpen(false);
@@ -331,7 +329,7 @@ export function AvatarDropdown({
             <button
               type="button"
               aria-label={t("accountMenu.open")}
-              className="flex h-11 w-full cursor-pointer items-center overflow-hidden rounded-lg border-0 bg-transparent p-0 pr-2 text-[#191919] hover:bg-[rgba(25,25,25,0.08)]"
+              className={`flex h-11 w-full cursor-pointer items-center overflow-hidden rounded-lg border-0 bg-transparent p-0 pr-2 text-[#191919] hover:bg-[var(--navigation-hover)] ${dropdownOpen ? "!bg-[var(--navigation-selected)]" : ""}`}
             >
               <span className="flex h-11 w-12 shrink-0 items-center justify-center">
                 <Avatar
@@ -360,7 +358,7 @@ export function AvatarDropdown({
             shape={rail ? undefined : "circle"}
             className={
               rail
-                ? "!flex !h-11 !w-full !justify-start !gap-0 overflow-hidden rounded-lg !p-0 !pr-2 text-[#191919]"
+                ? `!flex !h-11 !w-full !justify-start !gap-0 overflow-hidden rounded-lg !p-0 !pr-2 text-[#191919] hover:!bg-[var(--navigation-hover)] ${dropdownOpen ? "!bg-[var(--navigation-selected)]" : ""}`
                 : undefined
             }
           >

@@ -38,6 +38,15 @@ feature:
       at60% muted color; version monospace. Language icon/label/locale/chevron centered
       within1px and label aligned with Profile. Copyright absent. Logout uses exact
       destructive color with10% hover and retains confirmation.
+  - rule_id: NAV-MENU-RULE-008
+    description: Sidebar background matches demo lab(97.0939% -.108689 -.749958).
+      Unselected hover uses70% of sidebar accent lab(92.4476% -.214785 -1.49835);
+      selection uses full accent, retained on hover. Rail account/notification controls
+      share these colors; open popup triggers use selection. Account setting hover/focus
+      uses demo accent lab(94.1288% -2.23359 -10.9012), while readonly rows stay transparent
+      and logout preserves danger styling. Profile and language setting inherit default
+      menu typography, without custom font family, size or line height; About and
+      version keep compact secondary typography.
   required_test_stages:
   - D1
   - D4
@@ -49,4 +58,5 @@ feature:
     - NAV-MENU-REQ-004
     - NAV-MENU-REQ-005
     - NAV-MENU-REQ-006
+    - NAV-MENU-REQ-007
     spec_path: ../nexent-doc/docs/Developing/nav-sidebar-menu-visibility/proposal.md

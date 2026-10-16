@@ -120,6 +120,12 @@ scenario("[NAV-MENU-D4-001] account menu replaces bars and switches language on 
   await expect(menu.getByRole("link", { name: text["page.termsOfUse"], exact: true })).toBeVisible();
   await expect(menu.getByText(new RegExp(`©.*${new Date().getFullYear()}`))).toHaveCount(0);
   await expect(menu.getByText("外观设置", { exact: true })).toHaveCount(0);
+  const profile = menu.getByRole('link', { name: text['profile.title'], exact: true });
+  await profile.hover();
+  await expectReferenceColor(profile.locator('xpath=ancestor::li[1]'), 'background-color', 'lab(94.1288% -2.23359 -10.9012)');
+  const aboutRow = menu.locator('.account-menu-version');
+  await aboutRow.hover();
+  await expectReferenceColor(aboutRow, 'background-color', 'transparent');
   const logout = menu.getByRole('menuitem', { name: text['auth.logout'], exact: true });
   await expect(logout).toHaveClass(/ant-dropdown-menu-item-danger/);
   await expect(logout).toHaveCSS('color', 'lab(48.4493 77.4328 61.5452)');
@@ -142,6 +148,12 @@ scenario("[NAV-MENU-D4-001] account menu replaces bars and switches language on 
   });
   expect(languageAlignment).toBeLessThanOrEqual(1);
   const languageRow = menu.locator('.ant-dropdown-menu-submenu-title');
+  const defaultFont = await menu.evaluate(el => ({ family: getComputedStyle(el).fontFamily, size: getComputedStyle(el).fontSize }));
+  for (const item of [profile, languageRow, logout]) {
+    await expect(item).toHaveCSS('font-family', defaultFont.family);
+    await expect(item).toHaveCSS('font-size', defaultFont.size);
+  }
+
   const centered = await languageRow.evaluate(el => {
     const bounds = el.getBoundingClientRect();
     const center = bounds.y + bounds.height / 2;
@@ -162,10 +174,13 @@ scenario("[NAV-MENU-D4-001] account menu replaces bars and switches language on 
   await expect(badge).toHaveCSS("height", "15px");
   await expect(menu.locator(".account-menu-identity .ant-avatar")).toHaveCSS("width", "36px");
   await menu.getByText(text["accountMenu.language"], { exact: true }).hover();
+  await expectReferenceColor(languageRow, 'background-color', 'lab(94.1288% -2.23359 -10.9012)');
   const english = page.getByText("English", { exact: true });
   await expect(english).toBeVisible();
   await expect(page.getByLabel(text["accountMenu.selectedLanguage"])).toBeVisible();
   await expect.poll(() => english.locator("xpath=ancestor::li[1]").evaluate(el => el.getBoundingClientRect().width)).toBe(213);
+  await english.hover();
+  await expectReferenceColor(english.locator('xpath=ancestor::li[1]'), 'background-color', 'lab(94.1288% -2.23359 -10.9012)');
   await english.click();
   await expect(page).toHaveURL(/\/en\/agent-space$/);
   expect((await page.context().cookies()).find(cookie => cookie.name === "NEXT_LOCALE")?.value).toBe("en");
@@ -214,6 +229,7 @@ scenario("[NAV-MENU-D4-001] hover rail overlays content and holds account popup"
     expect(lineBounds.height).toBe(bounds.height);
     expect(lineBounds.x + lineBounds.width).toBe(bounds.x + bounds.width);
   };
+  await expectReferenceColor(rail, 'background-color', 'lab(97.0939% -0.108689 -0.749958)');
   await expect(rail).toHaveAttribute('data-sidebar-expanded', 'false');
   await expect(rail.getByRole('button', { name: text['sidebar.pin'], exact: true })).toHaveCount(0);
   const item = page.getByRole('navigation').getByRole('button', { name: longLabel, exact: true });
@@ -227,6 +243,12 @@ scenario("[NAV-MENU-D4-001] hover rail overlays content and holds account popup"
   await checkDivider();
   expect(await page.locator('.ant-layout-content').evaluate(el => el.getBoundingClientRect().left)).toBe(contentX);
   const brand = rail.getByRole('link', { name: text['sidebar.homePage'], exact: true }).locator('.ant-typography');
+  await item.hover();
+  await expectReferenceColor(item, 'background-color', 'color-mix(in oklab, lab(92.4476% -0.214785 -1.49835) 70%, transparent)');
+  const selectedItem = rail.locator('[aria-current="page"]');
+  await expectReferenceColor(selectedItem, 'background-color', 'lab(92.4476% -0.214785 -1.49835)');
+  await selectedItem.hover();
+  await expectReferenceColor(selectedItem, 'background-color', 'lab(92.4476% -0.214785 -1.49835)');
   await expect(brand).toHaveText(longBrand);
   await expect(brand).toHaveCSS('font-size', '18px');
   await expect(brand.locator('xpath=ancestor::a[1]/..')).toHaveCSS('margin-bottom', '8px');
@@ -309,6 +331,7 @@ scenario("[NAV-MENU-D4-001] hover rail overlays content and holds account popup"
   await page.getByRole('button', { name: text['accountMenu.open'], exact: true }).click();
   await page.mouse.move(650, 200);
   await expect(page.getByRole('menu').first()).toBeVisible();
+  await expectReferenceColor(account, 'background-color', 'lab(92.4476% -0.214785 -1.49835)');
   await expect(page.getByRole('link', { name: text['profile.title'], exact: true })).toHaveAttribute('href', '/en/users');
   const supplemental = page.getByRole('menu').first().locator('.account-menu-secondary');
   expect(await supplemental.count()).toBeGreaterThanOrEqual(4);
