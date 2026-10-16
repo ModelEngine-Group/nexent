@@ -43,7 +43,7 @@ import { CSS } from "@dnd-kit/utilities";
 import Image from "next/image";
 
 import { useAgentStore } from "@/stores/agentStore";
-import { AddModelDrawer } from "@/components/resource-picker/AddModelDrawer";
+import { ModelDrawer } from "@/components/resource-picker/ModelDrawer";
 import { ModelParamsModal } from "@/components/resource-picker/ModelParamsModal";
 import { useModelList } from "@/hooks/model/useModelList";
 import { useInferenceFieldSpecs } from "@/hooks/model/useInferenceFieldSpecs";
@@ -1038,7 +1038,7 @@ export default function AgentPrompt({
           >
             {promptTabs}
           </Modal>
-          <AddModelDrawer
+          <ModelDrawer
             open={isModelSelectionOpen}
             onClose={() => setIsModelSelectionOpen(false)}
             models={availableLlmModels ?? []}

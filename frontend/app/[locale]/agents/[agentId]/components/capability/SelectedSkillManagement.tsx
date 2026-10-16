@@ -20,7 +20,7 @@ import { useSkillList } from "@/hooks/agent/useSkillList";
 import { useAgentStore } from "@/stores/agentStore";
 import type { Skill, SkillParam } from "@/types/agentConfig";
 import SkillDetailModal from "../../../components/capability/SkillDetailModal";
-import SkillConfigModal from "../../../components/capability/skill/SkillConfigModal";
+import SkillConfigModal from "@/components/skill-config/SkillConfigModal";
 
 type SkillSourceKey = "official" | "custom";
 

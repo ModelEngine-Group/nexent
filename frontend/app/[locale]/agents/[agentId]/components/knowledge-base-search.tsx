@@ -10,7 +10,7 @@ import { useTranslation } from "react-i18next";
 import { Button, Modal, Spin, Tag, Tooltip } from "antd";
 import { Database, ExternalLink, Settings, Trash2, Plus } from "lucide-react";
 
-import { AddKnowledgeDrawer } from "@/components/resource-picker/AddKnowledgeDrawer";
+import { KnowledgeDrawer } from "@/components/resource-picker/KnowledgeDrawer";
 import { useDeployment } from "@/components/providers/deploymentProvider";
 import { useKnowledgeBasesForToolConfig } from "@/hooks/useKnowledgeBaseSelector";
 import { useToolList } from "@/hooks/agent/useToolList";
@@ -342,13 +342,14 @@ export function KnowledgeBaseConfigActions() {
         {t("agent.knowledge.button.select")}
       </Button>
 
-      <AddKnowledgeDrawer
+      <KnowledgeDrawer
         open={selectorOpen}
         onClose={() => setSelectorOpen(false)}
         onConfirm={(knowledgeBaseList) => {
           state.onKnowledgeBaseConfirm(knowledgeBaseList);
           setSelectorOpen(false);
         }}
+        enableTagManagement={!state.isReadOnly}
         selectedIds={state.selectedIds}
         maxSelect={state.profile.maxSelect}
         isAidpSearch={state.profile.selectorType === "aidp_search"}
@@ -553,13 +554,14 @@ export default function KnowledgeBaseConfig({
         )}
         {state ? (
           <>
-            <AddKnowledgeDrawer
+            <KnowledgeDrawer
               open={selectorOpen}
               onClose={() => setSelectorOpen(false)}
               onConfirm={(knowledgeBaseList) => {
                 state.onKnowledgeBaseConfirm(knowledgeBaseList);
                 setSelectorOpen(false);
               }}
+              enableTagManagement={!state.isReadOnly}
               selectedIds={state.selectedIds}
               maxSelect={state.profile.maxSelect}
               isAidpSearch={state.profile.selectorType === "aidp_search"}
