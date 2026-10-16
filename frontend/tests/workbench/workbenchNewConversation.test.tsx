@@ -66,6 +66,7 @@ const nl2AgentFlowValue = vi.hoisted(() => ({
 }));
 
 const authorizationValue = vi.hoisted(() => ({
+  hasPermission: () => true,
   canAccessRoute: () => true,
   user: { email: "test@example.com" },
 }));

@@ -1,3 +1,5 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 export interface ConversationListItem {
   conversation_id: number;
   conversation_title: string;
@@ -10,6 +12,15 @@ export interface ConversationListParams {
   offset: number;
   limit: number;
   conversationType?: "agent_chat" | "workbench";
+}
+
+export interface WorkbenchPinItem extends ConversationListItem {
+  pinned_at: string;
+}
+
+export interface WorkbenchPins {
+  /** Server order: newest pin first. */
+  items: WorkbenchPinItem[];
 }
 
 export interface ConversationListResponse {

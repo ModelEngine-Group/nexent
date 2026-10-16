@@ -395,7 +395,7 @@ export function AddAgentDrawer({ open, onClose }: AddAgentDrawerProps) {
       width={768}
       bodyClassName={cn(styles.drawer, styles.agent)}
       open={open}
-      title={t("resourcePicker.addAgent", "添加子智能体")}
+      title={t("resourcePicker.addAgent", "添加协作智能体")}
       searchPlaceholder={t("agent.collaborative.selector.searchPlaceholder")}
       selected={selectedChips}
       tagOptions={activeSource === "internal" ? tagOptions : undefined}

@@ -1,6 +1,8 @@
 // Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
 "use client";
+
+import { DEFAULT_MODEL_PARAMETER_VALUES } from "@/const/modelParameterSettings";
 import { restoreKnowledgeDisplay } from "./knowledgeDisplay";
 
 import {
@@ -20,6 +22,7 @@ import type {
 } from "@/app/newchat/adapter/remote-chat-model-adapter";
 import type { ChatMode } from "@/app/newchat/assistant-ui/composer";
 import { ThreadListSidebar } from "@/app/newchat/assistant-ui/threadlist-sidebar";
+import { getWorkbenchPinStorageKey } from "@/app/newchat/assistant-ui/thread-pins";
 import {
   cacheHistoricalChatMode,
   generateConversationTitle,
@@ -35,6 +38,7 @@ import { message } from "antd";
 import type { Agent } from "@/types/agentConfig";
 import { useModelList } from "@/hooks/model/useModelList";
 import { withDefaultWorkbenchModel } from "./modelOptions";
+import { selectWorkbenchModel } from "@/features/model-controls/modelOptions";
 import log from "@/lib/logger";
 import { ConversationTitleGuard } from "@/lib/conversationTitle";
 import { conversationService } from "@/services/conversationService";
@@ -47,6 +51,7 @@ import { AgentPicker } from "./components/AgentPicker";
 import {
   changeAgentTopology,
   changeCreationThread,
+  returnFromCreation,
 } from "./conversationTransitions";
 import { CreationActions } from "./components/CreationActions";
 import { SkillCreationResultCard } from "./components/CreationResultCards";
@@ -80,9 +85,6 @@ import {
   previewWorkbenchAgent,
   SkillPicker,
 } from "@/features/workbench";
-import { SkillPopoverContent } from "./components/SkillPopoverContent";
-import { KnowledgePopoverContent } from "./components/KnowledgePopoverContent";
-import type { SkillListItem } from "@/services/skillService";
 
 type CreatedAgentResult = {
   agentId: number;
@@ -124,7 +126,7 @@ const HomeContent: FC = () => {
     [workbenchState.config, availableLlmModels]
   );
   const { t, i18n } = useTranslation();
-  const { canAccessRoute, user } = useAuthorizationContext();
+  const { hasPermission, user } = useAuthorizationContext();
   const {
     resetFlow: resetNl2AgentFlow,
     markGenerationCompleted,
@@ -147,6 +149,9 @@ const HomeContent: FC = () => {
   const [skillPickerOpen, setSkillPickerOpen] = useState(false);
   const [agentPickerOpen, setAgentPickerOpen] = useState(false);
   const [isSavingModel, setIsSavingModel] = useState(false);
+  const rememberedModelControls = useRef(
+    new Map<string, typeof workbenchState.config.generation_config>()
+  );
   const [creationAgentsByThread, setCreationAgentsByThread] = useState<
     Record<string, CreatedAgentResult>
   >({});
@@ -156,9 +161,26 @@ const HomeContent: FC = () => {
   const [recoverableCreationThreads, setRecoverableCreationThreads] = useState<
     ReadonlySet<string>
   >(new Set());
+  const [localModelParameters, setLocalModelParameters] = useState<
+    Record<string, import("@/types/modelParameterSettings").ModelParameterValue>
+  >({});
   const skillDraftRef = useRef(initialSkillCreationDraft);
   const [skillDraft, setSkillDraft] = useState(initialSkillCreationDraft);
   const [savedSkillName, setSavedSkillName] = useState<string | null>(null);
+  const creationReturnRef = useRef<string | null>(null);
+  const localThreadSnapshots = useRef(
+    new Map<
+      string,
+      {
+        state: typeof workbenchState;
+        skillDraft: typeof initialSkillCreationDraft;
+        savedSkillName: string | null;
+        selectedAgent: Agent | null;
+        scope: ConversationKnowledgeScope | null;
+        preview: KnowledgeScopeEffectivePreview | null;
+      }
+    >()
+  );
   const resumedConversationIdsRef = useRef(new Set<number>());
   const knowledgeScopesRef = useRef<
     Map<string, ConversationKnowledgeScope | null>
@@ -397,10 +419,24 @@ const HomeContent: FC = () => {
       !Number.isInteger(numericConversationId) ||
       numericConversationId <= 0
     ) {
-      knowledgeScopesRef.current.set(activeThreadId, null);
-      knowledgePreviewsRef.current.set(activeThreadId, null);
-      setKnowledgeScope(null);
-      setKnowledgePreview(null);
+      const cached = localThreadSnapshots.current.get(activeThreadId);
+      if (cached) {
+        dispatchWorkbench({
+          type: "restore",
+          config: cached.state.config,
+          version: cached.state.configVersion,
+        });
+        dispatchWorkbench({
+          type: "set-skill-names",
+          names: cached.state.skillNames,
+        });
+        onRestoreAgent(cached.selectedAgent);
+        skillDraftRef.current = cached.skillDraft;
+        setSkillDraft(cached.skillDraft);
+        setSavedSkillName(cached.savedSkillName);
+      }
+      setKnowledgeScope(cached?.scope ?? null);
+      setKnowledgePreview(cached?.preview ?? null);
       return;
     }
 
@@ -506,6 +542,7 @@ const HomeContent: FC = () => {
     activeThreadId,
     dispatchWorkbench,
     resetNl2AgentFlow,
+    onRestoreAgent,
   ]);
 
   useEffect(() => {
@@ -736,79 +773,15 @@ const HomeContent: FC = () => {
     ]
   );
 
-  const handleMountWorkbenchSkill = useCallback(
-    async (skill: SkillListItem) => {
-      const skillId = Number(skill.skill_id);
-      const mounts = [
-        ...workbenchState.config.skill_mounts,
-        {
-          skill_id: skillId,
-          config_values: { ...(skill.config_values || {}) },
-        },
-      ];
-      if (mounts.length > 20) {
-        message.warning(t("workbench.skills.limit", { count: 20 }));
-        return;
-      }
-      const nextConfig = { ...workbenchState.config, skill_mounts: mounts };
-      const numericConversationId = Number(activeConversationId);
-      if (
-        Number.isInteger(numericConversationId) &&
-        numericConversationId > 0
-      ) {
-        try {
-          await saveWorkbenchConfig(numericConversationId, nextConfig);
-        } catch (error) {
-          message.error(
-            error instanceof Error
-              ? error.message
-              : t("workbench.resources.saveFailed")
-          );
-          return;
-        }
-      } else {
-        dispatchWorkbench({ type: "replace-skills", mounts });
-      }
-      dispatchWorkbench({
-        type: "set-skill-names",
-        names: { ...workbenchState.skillNames, [skillId]: skill.name },
-      });
-    },
-    [
-      activeConversationId,
-      saveWorkbenchConfig,
-      t,
-      workbenchState.config,
-      workbenchState.skillNames,
-      dispatchWorkbench,
-    ]
-  );
-
-  const workbenchSkillPopover = (
-    <SkillPopoverContent
-      mountedSkillIds={
-        new Set(workbenchState.config.skill_mounts.map((m) => m.skill_id))
-      }
-      onMount={(skill) => void handleMountWorkbenchSkill(skill)}
-      onUnmount={(skillId) => void handleRemoveWorkbenchSkill(skillId)}
-    />
-  );
-
-  const workbenchKnowledgePopover = (
-    <KnowledgePopoverContent
-      value={knowledgeScope}
-      capabilities={knowledgeCapabilities ?? null}
-      onApply={(scope, preview) =>
-        handleKnowledgeScopeChange(scope, preview) as Promise<void> | void
-      }
-    />
-  );
-
   const handleReplaceWorkbenchSkills = useCallback(
     async (
       mounts: import("@/features/workbench").WorkbenchSkillMount[],
       skills: Array<{ skill_id: string; name: string }>
     ) => {
+      if (runtime.thread.getState().isRunning)
+        throw new Error(
+          t("workbench.controls.waitForReply", "请等待当前回复完成")
+        );
       const nextConfig = { ...workbenchState.config, skill_mounts: mounts };
       const numericConversationId = Number(activeConversationId);
       if (
@@ -832,6 +805,8 @@ const HomeContent: FC = () => {
       dispatchWorkbench,
       saveWorkbenchConfig,
       workbenchState.config,
+      runtime.thread,
+      t,
     ]
   );
 
@@ -839,7 +814,27 @@ const HomeContent: FC = () => {
     const id = Number(modelId);
     if (!Number.isInteger(id) || id <= 0) return;
     if (workbenchState.config.model_id === id) return;
-    const config = { ...workbenchState.config, model_id: id };
+    const scope = `${user?.tenantId ?? ""}:${user?.id ?? ""}:${activeThreadId ?? "new"}`;
+    if (effectiveWorkbenchConfig.model_id != null) {
+      rememberedModelControls.current.set(
+        `${scope}:${effectiveWorkbenchConfig.model_id}`,
+        {
+          deep_thinking:
+            effectiveWorkbenchConfig.generation_config.deep_thinking,
+          thinking_effort:
+            effectiveWorkbenchConfig.generation_config.thinking_effort,
+          reasoning_budget_tokens:
+            effectiveWorkbenchConfig.generation_config.reasoning_budget_tokens,
+        }
+      );
+    }
+    const remembered = rememberedModelControls.current.get(`${scope}:${id}`);
+    const config = selectWorkbenchModel(
+      workbenchState.config,
+      availableLlmModels,
+      id,
+      remembered
+    );
     const conversationId = Number(activeConversationId);
     const isExistingConversation =
       Number.isInteger(conversationId) && conversationId > 0;
@@ -868,10 +863,20 @@ const HomeContent: FC = () => {
       import("@/features/workbench").WorkbenchSessionConfig["generation_config"]
     >
   ) => {
+    const base =
+      patch.deep_thinking === true &&
+      !effectiveWorkbenchConfig.generation_config.deep_thinking &&
+      effectiveWorkbenchConfig.model_id != null
+        ? selectWorkbenchModel(
+            effectiveWorkbenchConfig,
+            availableLlmModels,
+            effectiveWorkbenchConfig.model_id
+          )
+        : effectiveWorkbenchConfig;
     const config = {
-      ...effectiveWorkbenchConfig,
+      ...base,
       generation_config: {
-        ...effectiveWorkbenchConfig.generation_config,
+        ...base.generation_config,
         ...patch,
       },
     };
@@ -989,7 +994,7 @@ const HomeContent: FC = () => {
         ? {
             runtimeMode: "nl2agent" as const,
             persistCreationHistory: true,
-            creationWorkbenchConfig: workbenchState.config,
+            creationWorkbenchConfig: effectiveWorkbenchConfig,
             autoCreateAgentDraft: shouldAutoCreateAgentDraft(
               activeConversationId,
               activeThreadId != null &&
@@ -1018,12 +1023,12 @@ const HomeContent: FC = () => {
           ? {
               runtimeMode: "nl2skill" as const,
               persistCreationHistory: true,
-              creationWorkbenchConfig: workbenchState.config,
+              creationWorkbenchConfig: effectiveWorkbenchConfig,
               complexity: "complicated" as const,
               language: i18n.language?.startsWith("en")
                 ? ("en" as const)
                 : ("zh" as const),
-              modelId: workbenchState.config.model_id,
+              modelId: effectiveWorkbenchConfig.model_id,
               draftSnapshot: {
                 ...(buildSkillSavePayload(skillDraftRef.current) ?? {}),
                 files: Object.entries(skillDraftRef.current.files).map(
@@ -1219,14 +1224,52 @@ const HomeContent: FC = () => {
     try {
       if (
         mode !== "generic_chat" &&
-        !canAccessRoute(mode === "agent_create" ? "/agents" : "/skill-space")
+        !hasPermission(
+          mode === "agent_create" ? "agent:create" : "skill:create"
+        )
       )
         return false;
       if (runtime.thread.getState().isRunning) {
         message.warning("请等待当前回复完成后再开始创建");
         return false;
       }
+      if (mode === workbenchState.config.mode) return true;
+      const currentId = runtime.threads.getState().mainThreadId;
+      if (currentId)
+        localThreadSnapshots.current.set(currentId, {
+          state: structuredClone(workbenchState),
+          skillDraft: structuredClone(skillDraftRef.current),
+          savedSkillName,
+          selectedAgent,
+          scope: knowledgeScope,
+          preview: knowledgePreview,
+        });
+      if (mode === "generic_chat" && creationReturnRef.current) {
+        const returnId = creationReturnRef.current;
+        await returnFromCreation(runtime, returnId, () => {
+          const cached = localThreadSnapshots.current.get(returnId);
+          if (cached) {
+            dispatchWorkbench({
+              type: "restore",
+              config: cached.state.config,
+              version: cached.state.configVersion,
+            });
+            dispatchWorkbench({
+              type: "set-skill-names",
+              names: cached.state.skillNames,
+            });
+            onRestoreAgent(cached.selectedAgent);
+            setKnowledgeScope(cached.scope);
+            setKnowledgePreview(cached.preview);
+          } else onWorkbenchModeChange("generic_chat");
+        });
+        creationReturnRef.current = null;
+        return true;
+      }
+      if (!isCreating) creationReturnRef.current = currentId ?? null;
       await changeCreationThread(runtime, () => onWorkbenchModeChange(mode));
+      setSkillPickerOpen(false);
+      setAgentPickerOpen(false);
       skillDraftRef.current = initialSkillCreationDraft;
       setSkillDraft(initialSkillCreationDraft);
       setSavedSkillName(null);
@@ -1264,6 +1307,9 @@ const HomeContent: FC = () => {
       <div className="shrink-0 h-full">
         <SidebarProvider className="w-auto h-full">
           <ThreadListSidebar
+            pinStorageKey={
+              user ? getWorkbenchPinStorageKey(user.id, user.tenantId) : null
+            }
             showLegacySwitch={false}
             generatedTitles={generatedTitles}
             serverConversationIds={serverConversationIds}
@@ -1318,17 +1364,44 @@ const HomeContent: FC = () => {
               </div>
             }
             selectedModelId={effectiveWorkbenchConfig.model_id?.toString()}
-            deepThinking={workbenchState.config.generation_config.deep_thinking}
+            deepThinking={
+              effectiveWorkbenchConfig.generation_config.deep_thinking
+            }
             onDeepThinkingChange={(enabled) =>
               void handleThinkingChange({ deep_thinking: enabled })
             }
             thinkingEffort={
-              workbenchState.config.generation_config.thinking_effort
+              effectiveWorkbenchConfig.generation_config.thinking_effort
             }
             onThinkingEffortChange={(effort) =>
               void handleThinkingChange({ thinking_effort: effort })
             }
-            showModelSelector={!isCreating}
+            showModelSelector={true}
+            reasoningBudgetTokens={
+              effectiveWorkbenchConfig.generation_config
+                .reasoning_budget_tokens ?? 0
+            }
+            onReasoningBudgetTokensChange={(budget) =>
+              void handleThinkingChange({
+                reasoning_budget_tokens: budget,
+                thinking_effort: "auto",
+              })
+            }
+            modelParameterSettings={{
+              scopeKey: `${user?.tenantId ?? ""}:${user?.id ?? ""}:${activeThreadId ?? "new"}:${effectiveWorkbenchConfig.model_id ?? "default"}`,
+              value:
+                localModelParameters[
+                  `${user?.tenantId ?? ""}:${user?.id ?? ""}:${activeThreadId ?? "new"}:${effectiveWorkbenchConfig.model_id ?? "default"}`
+                ] ?? DEFAULT_MODEL_PARAMETER_VALUES,
+              defaultValue: DEFAULT_MODEL_PARAMETER_VALUES,
+              disabled: isThreadRunning,
+              onChange: (value) =>
+                setLocalModelParameters((current) => ({
+                  ...current,
+                  [`${user?.tenantId ?? ""}:${user?.id ?? ""}:${activeThreadId ?? "new"}:${effectiveWorkbenchConfig.model_id ?? "default"}`]:
+                    value,
+                })),
+            }}
             onModelChange={(id) => void handleModelChange(id)}
             onAgentSelected={handleAgentSelectedFromLanding}
             chatMode={chatMode}
@@ -1344,7 +1417,6 @@ const HomeContent: FC = () => {
             onRuntimeMetadataChange={handleRuntimeMetadataChange}
             readOnly={
               !workbenchSendability.canSend ||
-              (!isCreating && effectiveWorkbenchConfig.model_id == null) ||
               isSavingModel ||
               (workbenchState.config.mode === "agent_create" &&
                 isAgentCreationAwaitingDraft(
@@ -1410,15 +1482,15 @@ const HomeContent: FC = () => {
             }
             onRemoveWorkbenchSkill={handleRemoveWorkbenchSkill}
             onOpenWorkbenchSkillPicker={() => setSkillPickerOpen(true)}
-            workbenchSkillPopover={workbenchSkillPopover}
-            workbenchKnowledgePopover={workbenchKnowledgePopover}
             workbenchPresentation={{
               mode: workbenchState.config.mode,
               onExitCreation: () => void changeCreationMode("generic_chat"),
               actions: (
                 <CreationActions
-                  canCreateAgent={canAccessRoute("/agents")}
-                  canCreateSkill={canAccessRoute("/skill-space")}
+                  canCreateAgent={hasPermission("agent:create")}
+                  canCreateSkill={hasPermission("skill:create")}
+                  mode={workbenchState.config.mode}
+                  onExit={() => void changeCreationMode("generic_chat")}
                   disabled={isThreadRunning}
                   onSelect={(mode) => void changeCreationMode(mode)}
                 />
@@ -1427,6 +1499,7 @@ const HomeContent: FC = () => {
           />
         </div>
         <SkillPicker
+          disabled={isThreadRunning}
           open={skillPickerOpen}
           selected={workbenchState.config.skill_mounts}
           loadDefaults={async () =>
@@ -1438,6 +1511,7 @@ const HomeContent: FC = () => {
           onConfirm={handleReplaceWorkbenchSkills}
         />
         <AgentPicker
+          disabled={isThreadRunning}
           open={agentPickerOpen}
           agents={agents}
           selectedId={selectedAgent?.id}
@@ -1447,6 +1521,10 @@ const HomeContent: FC = () => {
           onCancel={() => setAgentPickerOpen(false)}
           multiple={true}
           onConfirm={async (selected) => {
+            if (runtime.thread.getState().isRunning)
+              throw new Error(
+                t("workbench.controls.waitForReply", "请等待当前回复完成")
+              );
             const current = workbenchState.config.agent_mounts;
             if (
               current.length === selected.length &&

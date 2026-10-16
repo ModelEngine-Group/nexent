@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import asyncio
 import json
 import logging
@@ -526,6 +528,10 @@ async def agent_run(
     worker_finished = False
     try:
         while not execution.future.done():
+            if agent_run_info.stop_event.is_set():
+                # Stop consuming the old turn even while provider I/O is blocked.
+                # The finally block cancels its managed worker and close hooks.
+                raise asyncio.CancelledError
             cached_message = observer.get_cached_message()
             for message in cached_message:
                 yield message

@@ -2,6 +2,15 @@
 
 "use client";
 
+import type { ReasoningEffort } from "@/types/modelConfig";
+import { isReasoningEffort } from "@/lib/modelReasoning";
+import {
+  snapshotTurnModelControls,
+  type TurnModelControls,
+  type RuntimeGenerationOverrides,
+} from "@/features/model-controls/turnControls";
+import { rejectModelSelection } from "@/features/model-controls/rejectedSelection";
+
 import type {
   ChatModelAdapter,
   ChatModelRunOptions,
@@ -313,6 +322,7 @@ interface NexentRunConfig {
   }) => void | Promise<void>;
   onNl2AgentStopped?: (agentId: number) => void;
   modelId?: number;
+  turnModelControls?: TurnModelControls;
   runtimeMetadata?: Record<string, unknown>;
   runtimeMetadataVersion?: number;
   onRuntimeMetadataSent?: (version?: number) => void;
@@ -1373,6 +1383,18 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
     const onServerConversationId = custom?.onServerConversationId;
     const onRunId = custom?.onRunId;
     const isResume = !isEphemeralRuntime && custom?.resume === true;
+    // Freeze the controls before draft creation or other asynchronous work.
+    const creationConfig = custom?.creationWorkbenchConfig
+      ? structuredClone(custom.creationWorkbenchConfig)
+      : undefined;
+    const creatorTurn = custom?.turnModelControls
+      ? structuredClone(custom.turnModelControls)
+      : creationConfig?.model_id != null
+        ? snapshotTurnModelControls(
+            creationConfig.model_id,
+            creationConfig.generation_config
+          )
+        : undefined;
     let nl2AgentId =
       typeof custom?.agentId === "string"
         ? Number(custom.agentId)
@@ -1574,18 +1596,32 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
       delete requestBody.reasoning_effort;
       delete requestBody.reasoning_budget_tokens;
     }
-    if (!workbenchConfig && !isEphemeralRuntime) {
+    if (!workbenchConfig && (!isEphemeralRuntime || isNl2Agent || isNl2Skill)) {
       const modelContext = context.config as
         { deepThinking?: boolean; reasoningEffort?: string } | undefined;
       if (modelContext?.deepThinking !== undefined) {
         requestBody.generation_config = {
           deep_thinking: modelContext.deepThinking,
+          ...(hasBudgetSelection
+            ? { reasoning_budget_tokens: reasoningBudgetTokens }
+            : {}),
           ...(modelContext.deepThinking &&
-          ["low", "medium", "high"].includes(modelContext.reasoningEffort ?? "")
+          !hasBudgetSelection &&
+          isReasoningEffort(modelContext.reasoningEffort)
             ? { thinking_effort: modelContext.reasoningEffort }
             : {}),
         };
       }
+    }
+    if (isNl2Agent || isNl2Skill) {
+      const turn = creatorTurn;
+      if (turn) {
+        requestBody.model_id = turn.model_id;
+        requestBody.generation_config = { ...turn.generation_config };
+      }
+      // One authority per creator turn; compatibility top-level fields are not duplicated.
+      delete requestBody.reasoning_effort;
+      delete requestBody.reasoning_budget_tokens;
     }
 
     let backendConversationId = hasServerConversationId
@@ -1677,20 +1713,12 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
           retry_user_message_id: isEphemeralRuntime
             ? custom?.retry_user_message_id
             : undefined,
-          workbench_config: isEphemeralRuntime
-            ? custom?.creationWorkbenchConfig
-            : undefined,
+          workbench_config: isEphemeralRuntime ? creationConfig : undefined,
           draft_snapshot: isNl2Skill ? custom?.draftSnapshot : undefined,
           language: isNl2Skill ? custom?.language : undefined,
-          model_id: isNl2Skill
-            ? (custom?.modelId ?? (requestBody.model_id as number | undefined))
-            : (requestBody.model_id as number | undefined),
+          model_id: requestBody.model_id as number | undefined,
           generation_config: requestBody.generation_config as
-            | {
-                deep_thinking: boolean;
-                thinking_effort?: "low" | "medium" | "high";
-              }
-            | undefined,
+            RuntimeGenerationOverrides | undefined,
           metadata: custom?.runtimeMetadata,
           expected_metadata_version: custom?.runtimeMetadataVersion,
           entrypoint: workbenchConfig ? "workbench" : undefined,
@@ -1707,7 +1735,7 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
               void stopBackendRun(numericId);
             }
           }
-          if (numericId > 0 && onServerConversationId) {
+          if (!userAborted && numericId > 0 && onServerConversationId) {
             onServerConversationId(
               String(numericId),
               !isResume && !hasServerConversationId ? query : undefined
@@ -1715,22 +1743,39 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
           }
         },
         (version) => {
-          returnedRuntimeMetadataVersion = version;
+          if (!userAborted) returnedRuntimeMetadataVersion = version;
         },
         (runId) => {
           backendRunId = runId;
-          onRunId?.(runId);
+          if (!userAborted) onRunId?.(runId);
           if (userAborted) {
             void stopBackendRun(runId);
           }
         },
-        (version) => custom?.onWorkbenchConfigVersion?.(version)
+        (version) => {
+          if (!userAborted) custom?.onWorkbenchConfigVersion?.(version);
+        }
       );
+      if (userAborted) {
+        if (!("type" in agentResponse)) await agentResponse.cancel();
+        cleanupAbortHandler();
+        await backendStopPromise;
+        return;
+      }
       if (!("type" in agentResponse)) custom?.onRunStarted?.();
       if (custom?.runtimeMetadata !== undefined) {
         custom.onRuntimeMetadataSent?.(returnedRuntimeMetadataVersion);
       }
     } catch (error: unknown) {
+      if (
+        !userAborted &&
+        error instanceof ApiError &&
+        ["model_not_available", "model_unavailable"].includes(
+          String(error.code)
+        )
+      ) {
+        rejectModelSelection(Number(requestBody.model_id));
+      }
       custom?.onRunRejected?.(error, messages[lastUserIndex]);
       cleanupAbortHandler();
       if (
@@ -2314,6 +2359,7 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
+        if (userAborted || abortSignal.aborted) return;
 
         buffer += decoder.decode(value, { stream: true });
 
