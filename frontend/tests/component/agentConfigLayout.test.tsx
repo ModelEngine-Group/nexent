@@ -220,12 +220,13 @@ describe("configuration resource grouping and preserved workflow gates", () => {
         `agent-config-card-${name}`
       );
       expect(card).toContainElement(screen.getByTestId(contentId));
+      if (index < 6) expect(screen.getByTestId(contentId)).toBeVisible();
       expect(
-        within(card).getByRole("button", { expanded: index < 2 })
-      ).toHaveAttribute("aria-expanded", String(index < 2));
+        within(card).getByRole("button", { expanded: index < 6 })
+      ).toHaveAttribute("aria-expanded", String(index < 6));
       expect(
         screen.getByTestId(contentId).closest("[data-slot=collapsible-content]")
-      ).toHaveAttribute("data-state", index < 2 ? "open" : "closed");
+      ).toHaveAttribute("data-state", index < 6 ? "open" : "closed");
     });
     expect(screen.getByTestId("guardrail-content")).not.toBeVisible();
     fireEvent.click(
@@ -250,27 +251,28 @@ describe("configuration resource grouping and preserved workflow gates", () => {
 
   it("toggles each secondary card independently without saving or fetching agent data", () => {
     render(agentConfigTree());
-    orderedCards.slice(2).forEach(([name, contentId]) => {
+    orderedCards.slice(2).forEach(([name, contentId], index) => {
+      const initiallyOpen = index < 4;
       const card = screen.getByTestId(`agent-config-card-${name}`);
-      const toggle = within(card).getByRole("button", { expanded: false });
+      const toggle = within(card).getByRole("button", {
+        expanded: initiallyOpen,
+      });
       fireEvent.click(toggle);
-      expect(toggle).toHaveAttribute("aria-expanded", "true");
+      expect(toggle).toHaveAttribute("aria-expanded", String(!initiallyOpen));
       expect(
         screen.getByTestId(contentId).closest("[data-slot=collapsible-content]")
-      ).toHaveAttribute("data-state", "open");
-      orderedCards
-        .slice(2)
-        .filter(([other]) => other !== name)
-        .forEach(([other]) => {
-          expect(
-            within(screen.getByTestId(`agent-config-card-${other}`)).getByRole(
-              "button",
-              { expanded: false }
-            )
-          ).toBeInTheDocument();
-        });
+      ).toHaveAttribute("data-state", initiallyOpen ? "closed" : "open");
+      orderedCards.slice(2).forEach(([other], otherIndex) => {
+        if (other === name) return;
+        expect(
+          within(screen.getByTestId(`agent-config-card-${other}`)).getByRole(
+            "button",
+            { expanded: otherIndex < 4 }
+          )
+        ).toBeInTheDocument();
+      });
       fireEvent.click(toggle);
-      expect(toggle).toHaveAttribute("aria-expanded", "false");
+      expect(toggle).toHaveAttribute("aria-expanded", String(initiallyOpen));
     });
     expect(mocks.save).not.toHaveBeenCalled();
     expect(searchAgentInfo).not.toHaveBeenCalled();
@@ -281,7 +283,7 @@ describe("configuration resource grouping and preserved workflow gates", () => {
     fireEvent.click(
       within(screen.getByTestId("agent-config-card-tools")).getByRole(
         "button",
-        { expanded: false }
+        { expanded: true }
       )
     );
     fireEvent.click(
@@ -295,7 +297,7 @@ describe("configuration resource grouping and preserved workflow gates", () => {
       expect(
         within(screen.getByTestId(`agent-config-card-${name}`)).getByRole(
           "button",
-          { expanded: index < 2 }
+          { expanded: index < 6 }
         )
       ).toBeInTheDocument();
     });
@@ -324,6 +326,14 @@ describe("configuration resource grouping and preserved workflow gates", () => {
 
   it("reopens the requested collapsed resource and preserves prompt focus support without a write", async () => {
     const view = render(agentConfigTree());
+    fireEvent.click(
+      within(screen.getByTestId("agent-config-card-tools")).getByRole(
+        "button",
+        {
+          expanded: true,
+        }
+      )
+    );
     expect(
       screen
         .getByTestId("tools-content")

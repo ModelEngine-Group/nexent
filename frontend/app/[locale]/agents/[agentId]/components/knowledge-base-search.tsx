@@ -2,6 +2,7 @@
 
 "use client";
 
+import { SELECTED_RESOURCE_HOVER } from "@/const/selectedResourceStyles";
 import { Fragment, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { KnowledgeRetrievalParamsForm } from "@/components/tool-config/KnowledgeRetrievalParamsForm";
@@ -398,7 +399,7 @@ export default function KnowledgeBaseConfig({
     const selectedKnowledgeBases = state?.selectedKnowledgeBases ?? [];
     const content = (
       <div className="flex flex-col gap-2">
-        <div className="grid grid-cols-1 gap-2 @min-[640px]/agent-config:grid-cols-2">
+        <div className="grid grid-cols-1 gap-4 @min-[640px]/agent-config:grid-cols-2">
           {selectedKnowledgeBases.map((selectedKnowledgeBase) => {
             const knowledgeBase = selectedKnowledgeBase.knowledgeBase;
             const metadata = knowledgeBase
@@ -423,7 +424,7 @@ export default function KnowledgeBaseConfig({
               <div
                 key={selectedKnowledgeBase.id}
                 data-testid={`agent-selected-knowledge-base-${selectedKnowledgeBase.id}`}
-                className="flex h-12 min-w-0 items-center rounded-[4px] border border-solid border-[#dfdfdf] bg-white px-3 py-2 shadow-[0_2px_8px_rgba(0,0,0,0.08)]"
+                className={`flex h-12 min-w-0 items-center rounded-[4px] border border-solid border-[#dfdfdf] bg-white px-3 py-2 shadow-[0_2px_8px_rgba(0,0,0,0.08)] ${SELECTED_RESOURCE_HOVER}`}
               >
                 <span
                   data-testid="agent-knowledge-base-icon"

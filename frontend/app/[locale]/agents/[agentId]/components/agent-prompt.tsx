@@ -2,6 +2,7 @@
 
 "use client";
 
+import { SELECTED_RESOURCE_HOVER } from "@/const/selectedResourceStyles";
 import { useTranslation } from "react-i18next";
 import {
   Button,
@@ -189,7 +190,7 @@ function SelectedModelCard({
     <div
       ref={setNodeRef}
       data-testid={`agent-selected-model-${model.id}`}
-      className={`flex h-12 min-w-0 items-center gap-2 rounded-[4px] border border-[#d9d9d9] bg-white px-2 transition-shadow ${
+      className={`flex h-12 min-w-0 items-center gap-2 rounded-[4px] border border-[#d9d9d9] bg-white px-2 ${SELECTED_RESOURCE_HOVER} ${
         isDragging ? "z-10 opacity-60 shadow-md" : ""
       }`}
       style={{
@@ -334,7 +335,7 @@ function HighFidelityModelGrid({
       onDragEnd={handleDragEnd}
     >
       <SortableContext items={modelIds} strategy={rectSortingStrategy}>
-        <div className="grid grid-cols-1 gap-2 @min-[640px]/agent-config:grid-cols-2">
+        <div className="grid grid-cols-1 gap-4 @min-[640px]/agent-config:grid-cols-2">
           {selectedModels.map((model) => (
             <SelectedModelCard
               key={model.id}
@@ -993,7 +994,7 @@ export default function AgentPrompt({
               sensors={sensors}
             />
           </Form.Item>
-          <div className="-mb-2 flex items-center gap-2 text-sm leading-[22px] tracking-[0px]">
+          <div className="-mb-2 flex items-center justify-between gap-2 text-sm leading-[22px] tracking-[0px]">
             <label htmlFor="agent-primary-prompt" className="text-[#191919]">
               <span className="mr-1 text-[#f5222d]">*</span>
               {t("agent.highFidelity.prompt")}
