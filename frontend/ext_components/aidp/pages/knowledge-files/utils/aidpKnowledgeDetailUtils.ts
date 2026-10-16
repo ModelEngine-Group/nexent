@@ -97,6 +97,23 @@ export const statusCode = (
     : null;
 };
 
+/** Normalize an ingested file's delete status to its numeric contract.
+ *
+ * AIDP reports ``file_status`` as ``0`` (ingested), ``1`` (deleting) or
+ * ``2`` (delete failed); numeric strings are accepted because deployments
+ * have been observed to quote numbers. Any other value, including missing
+ * ones, falls back to ``0`` so the row still reads "ingested".
+ */
+export const fileDeleteStatusCode = (value: unknown): 0 | 1 | 2 => {
+  const code =
+    typeof value === "number"
+      ? value
+      : typeof value === "string" && /^\d+$/.test(value.trim())
+        ? Number(value.trim())
+        : null;
+  return code === 1 || code === 2 ? code : 0;
+};
+
 export const graphConfigOf = (
   detail: AidpKbDetail
 ): Record<string, unknown> => {
@@ -122,6 +139,7 @@ export const FILE_COLUMN_MIN_WIDTHS: Record<string, number> = {
   import_mode: 80,
   created_at: 100,
   updated_at: 100,
+  file_status: 90,
   actions: 120,
 };
 

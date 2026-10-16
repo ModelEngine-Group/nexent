@@ -38,6 +38,8 @@ export interface AidpDocumentItem {
   file_type?: string;
   created_at?: string;
   updated_at?: string;
+  /** Ingested-file delete status: 0 = ingested, 1 = deleting, 2 = delete failed. */
+  file_status?: number | null;
   /** Numeric code or uppercase stage name (history rows only). */
   status?: string | number | null;
   /** Terminal failure code reported by the history endpoint. */
