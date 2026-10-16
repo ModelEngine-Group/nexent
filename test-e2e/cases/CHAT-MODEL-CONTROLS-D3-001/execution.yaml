@@ -1,0 +1,10 @@
+schema_version: '1.0'
+case_id: CHAT-MODEL-CONTROLS-D3-001
+implementations:
+  - framework: pytest
+    file: test_runtime.py
+    selector: test_
+acceptance_bindings:
+  AC-01: [test_selected_creator_runtime_wire]
+  AC-02: [test_selected_creator_runtime_wire, test_reasoning_variants_preserve_independent_configuration]
+timeout_seconds: 240

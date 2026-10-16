@@ -39,6 +39,9 @@ describe("CAS presentation values", () => {
         keySeparator: false,
         interpolation: { escapeValue: false },
       });
+      expect(i18n.t("tenantResources.users.searchUsernameOrEmail")).toBe(
+        locale === "zh" ? "搜索用户名" : "Search username"
+      );
       const view = () => (
         <I18nextProvider i18n={i18n}>
           <table>

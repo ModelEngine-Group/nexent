@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """
 Unit tests for backend.apps.skill_app module.
 """
@@ -140,6 +142,12 @@ class AppException(Exception):
 consts_exceptions_mock.AppException = AppException
 consts_exceptions_mock.SkillException = SkillException
 consts_exceptions_mock.ForbiddenError = type('ForbiddenError', (Exception,), {})
+class RunModelControlsError(ValueError):
+    def __init__(self, code):
+        self.code = code
+        super().__init__(code)
+
+consts_exceptions_mock.RunModelControlsError = RunModelControlsError
 consts_exceptions_mock.UnauthorizedError = type('UnauthorizedError', (Exception,), {})
 
 # Use real Pydantic model for SkillInstanceInfoRequest

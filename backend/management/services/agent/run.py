@@ -1,4 +1,4 @@
-# Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
 import asyncio
 from copy import deepcopy
@@ -1230,7 +1230,7 @@ async def prepare_agent_run(
         create_run_kwargs["runtime_skill_snapshot"] = runtime_skill_snapshot
     runtime_generation_config = getattr(agent_request, "_runtime_generation_config", None)
     if runtime_generation_config is None and agent_request.generation_config is not None:
-        runtime_generation_config = agent_request.generation_config.model_dump(mode="json")
+        runtime_generation_config = agent_request.generation_config.model_dump(mode="json", exclude_unset=True)
     if runtime_generation_config is not None:
         create_run_kwargs["runtime_generation_config"] = runtime_generation_config
     runtime_mount_plan = getattr(agent_request, "_runtime_mount_plan", None)
@@ -1611,6 +1611,10 @@ async def run_agent_stream(
         user_id=user_id,
         tenant_id=tenant_id,
     )
+    if not resume:
+        from management.services.model import run_controls
+
+        run_controls.validate_agent_model_selection(agent_request, resolved_tenant_id, search_agent_info_by_agent_id)
     if agent_request.is_debug and not resume:
         # Debug executions deliberately do not create conversations, so they
         # need a transient identifier for lifecycle operations such as stop.
@@ -1678,6 +1682,9 @@ async def run_agent_stream(
                 conversation,
                 agent_request.expected_workbench_config_version,
             )
+
+    if not resume:
+        run_controls.preflight_agent_turn_controls(agent_request, resolved_tenant_id, search_agent_info_by_agent_id)
 
     metadata_supplied = "metadata" in agent_request.model_fields_set
     metadata_update_requested = metadata_supplied and agent_request.metadata is not None

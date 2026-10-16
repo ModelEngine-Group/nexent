@@ -1,0 +1,39 @@
+schema_version: '1.0'
+change:
+  change_id: WB-RESOURCE-LISTS-20261015
+  change_type: requirement
+  requirement_id: WB-RESOURCE-LISTS-20261015
+  title: 工作台资源选择无图标列表及模型设置紧凑间距
+  description: Use compact name/description/tag rows for all Workbench Agent/Skill tabs and knowledge drawer; preserve selection,
+    imports, config and incompatibility guards. Reduce shared model reasoning-to-advanced spacing.
+  affected_features:
+    existing: []
+    added: []
+    modified:
+    - WB-CONTROLS
+    - CHAT-MODEL-CONTROLS
+    retired: []
+  affected_cases:
+    existing: []
+    added: []
+    modified:
+    - WB-CONTROLS-D4-001
+    - WB-CONTROLS-D4-003
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    test_selectors:
+    - frontend/tests/workbench/AgentPicker.test.tsx
+    - frontend/tests/workbench/SkillPicker.test.tsx
+    - frontend/tests/workbench/KnowledgePicker.test.tsx
+    - frontend/tests/workbench/SharedResourceComponents.test.tsx
+    behaviors:
+    - All resource types retain name, description, tags and selection; no decorative resource icons, version/source badges
+      or resource-edit links in Workbench rows.
+    - Repository precheck/import, Skill install/conflicts/required config and knowledge embedding guards remain; ordinary
+      chat knowledge modal retains its card contract.
+    - Existing search, pagination, defaults, cancellation, limits and error guards remain.
+    reason: Reuse picker unit behavior owners, strengthen drawer-vs-modal and repository rendering variants; D4 checks actual
+      row geometry and spacing. Pure menu spacing needs no CSS mirror UT. No backend/parameter changes or new D1 quota.
+  notes: Workbench knowledge presentation=drawer only; ordinary-chat modal remains unchanged. Functional configuration/precheck/install
+    actions and disabled reasons remain alongside the textual resource fields. Two existing D4 owners, no new Case IDs.

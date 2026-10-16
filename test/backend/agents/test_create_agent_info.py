@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import pytest
 import sys
 import types
@@ -87,6 +89,12 @@ sys.modules["consts.capability_profiles"].CATALOG = {}
 consts_exceptions_module = types.ModuleType("consts.exceptions")
 consts_exceptions_module.ValidationError = ValidationError
 consts_exceptions_module.WorkbenchError = WorkbenchError
+class RunModelControlsError(ValueError):
+    def __init__(self, code):
+        self.code = code
+        super().__init__(code)
+
+consts_exceptions_module.RunModelControlsError = RunModelControlsError
 consts_exceptions_module.MCPConnectionError = MCPConnectionError
 consts_exceptions_module.NotFoundException = NotFoundException
 consts_exceptions_module.ToolExecutionException = ToolExecutionException
@@ -4392,6 +4400,17 @@ class TestFilterMcpServersAndTools:
         assert result == []
 
 
+class RuntimeModelStub(types.SimpleNamespace):
+    """ModelConfig-compatible clone semantics for isolated run-info tests."""
+    def __init__(self, **values):
+        super().__init__(**{"reasoning_budget_tokens": None, "reasoning_effort": None,
+                            "extra_body": None, **values})
+
+    def model_copy(self, *, deep=False):
+        import copy
+        return copy.deepcopy(self) if deep else copy.copy(self)
+
+
 class TestCreateAgentRunInfo:
     """Tests for the create_agent_run_info function"""
 
@@ -4525,7 +4544,7 @@ class TestCreateAgentRunInfo:
 
     @pytest.mark.asyncio
     async def test_create_agent_run_info_validates_request_budget(self):
-        selected = types.SimpleNamespace(
+        selected = RuntimeModelStub(
             cite_name="selected",
             enable_thinking=True,
             reasoning_effort=None,
@@ -4578,7 +4597,8 @@ class TestCreateAgentRunInfo:
                 reasoning_budget_tokens=4096,
             )
 
-        assert selected.reasoning_budget_tokens == 4096
+        assert mock_agent_run_info.call_args.kwargs["model_config_list"][0].reasoning_budget_tokens == 4096
+        assert selected.reasoning_budget_tokens is None
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize(
@@ -4661,12 +4681,8 @@ class TestCreateAgentRunInfo:
         "model_config",
         [
             None,
-            types.SimpleNamespace(
-                cite_name="selected",
-                enable_thinking=False,
-                reasoning_capability={"status": "supported", "levels": ["low", "high"]},
-            ),
-            types.SimpleNamespace(
+            RuntimeModelStub(cite_name="selected", enable_thinking=True, reasoning_capability=None),
+            RuntimeModelStub(
                 cite_name="selected",
                 enable_thinking=True,
                 reasoning_capability={"status": "supported", "levels": ["low"]},
@@ -4690,7 +4706,7 @@ class TestCreateAgentRunInfo:
             "backend.agents.create_agent_info.search_agent_info_by_agent_id",
             return_value={},
         ):
-            with pytest.raises(ValidationError, match="does not support"):
+            with pytest.raises(RunModelControlsError, match="model_"):
                 await create_agent_run_info(
                     agent_id="agent-1",
                     minio_files=[],
@@ -4717,13 +4733,12 @@ class TestCreateAgentRunInfo:
                 None,
                 {"status": "supported", "levels": ["low", "high"]},
             ),
-            ("high", "high", None),
         ],
     )
     async def test_create_agent_run_info_accepts_valid_reasoning_effort(
         self, reasoning_effort, expected_effort, capability
     ):
-        selected = types.SimpleNamespace(
+        selected = RuntimeModelStub(
             cite_name="selected",
             enable_thinking=True,
             reasoning_effort=None,
@@ -4771,7 +4786,8 @@ class TestCreateAgentRunInfo:
                 reasoning_effort=reasoning_effort,
             )
 
-        assert selected.reasoning_effort == expected_effort
+        assert mock_agent_run_info.call_args.kwargs["model_config_list"][0].reasoning_effort == expected_effort
+        assert selected.reasoning_effort is None
 
     @pytest.mark.asyncio
     async def test_create_agent_run_info_success(self):
@@ -4907,7 +4923,7 @@ class TestCreateAgentRunInfo:
         ) as mock_threading, patch(
             'backend.agents.create_agent_info.query_current_version_no',
             return_value=1,
-        ):
+        ), patch('backend.agents.create_agent_info.get_model_by_model_id', return_value={"model_type": "llm", "connect_status": "available"}):
             mock_threading.Event.return_value = "stop_event"
 
             await create_agent_run_info(

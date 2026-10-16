@@ -1,3 +1,5 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 "use client";
 
 import { type FC, type ReactNode, useState, useEffect } from "react";
@@ -406,12 +408,14 @@ const AttachmentPreview: FC<{
 
 interface ComposerAddAttachmentProps {
   label?: string;
+  tooltip?: string;
   icon?: ReactNode;
   className?: string;
 }
 
 export const ComposerAddAttachment: FC<ComposerAddAttachmentProps> = ({
   label,
+  tooltip,
   icon,
   className,
 }) => {
@@ -434,10 +438,10 @@ export const ComposerAddAttachment: FC<ComposerAddAttachmentProps> = ({
         </Button>
       ) : (
         <TooltipIconButton
-          tooltip={t("chat.composer.addAttachment")}
+          tooltip={tooltip ?? t("chat.composer.addAttachment")}
           className={className}
         >
-          <PlusIcon className="size-4" />
+          {icon ?? <PlusIcon className="size-4" />}
         </TooltipIconButton>
       )}
     </ComposerPrimitive.AddAttachment>

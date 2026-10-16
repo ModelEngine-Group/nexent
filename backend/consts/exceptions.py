@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """
 Custom exception classes for the application.
 
@@ -23,6 +25,14 @@ The exception handler automatically maps legacy exception class names to ErrorCo
 from .error_code import ErrorCode, ERROR_CODE_HTTP_STATUS, RuntimeMetadataValidationCode
 from .error_message import ErrorMessage
 from typing import Dict, List, Optional
+
+
+class RunModelControlsError(ValueError):
+    """A safe preflight failure for request-scoped model controls."""
+
+    def __init__(self, code: str):
+        self.code = code
+        super().__init__(code)
 
 
 # ==================== New Framework: AppException with ErrorCode ====================

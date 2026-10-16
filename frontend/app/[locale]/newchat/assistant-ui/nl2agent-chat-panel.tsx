@@ -26,6 +26,7 @@ import {
 } from "../adapter/remote-chat-model-adapter";
 import type { AgentSuggestionItem } from "@/types/agentSuggestion";
 import { Thread } from "./thread";
+import { useCreatorModelControls } from "@/features/model-controls/useCreatorModelControls";
 import { AgentWelcome } from "@/components/agent/agent-welcome";
 import { CardSuggestion } from "@/components/agent/agent-suggestion";
 import { NL2AGENT_DEFAULT_SUGGESTIONS } from "@/const/nl2agent";
@@ -72,6 +73,11 @@ export const Nl2AgentChatPanel = forwardRef<
 ) {
   const { t } = useTranslation("common");
   const { modelConfig } = useConfig();
+  const modelControls = useCreatorModelControls(
+    NL2AGENT_DISPLAY_BASE,
+    `nl2agent:${agentId ?? "new"}`,
+    "agent:create"
+  );
   const adapters = useMemo(
     () => ({
       attachments: compositeAttachmentAdapter,
@@ -82,6 +88,7 @@ export const Nl2AgentChatPanel = forwardRef<
   const chatModelAdapter = useMemo<ChatModelAdapter>(
     () => ({
       async *run(options) {
+        if (!modelControls.canSend) return;
         if (agentId !== null) onRunStart?.(agentId);
         try {
           const runResult = remoteChatModelAdapter.run({
@@ -91,6 +98,7 @@ export const Nl2AgentChatPanel = forwardRef<
                 ...options.runConfig?.custom,
                 runtimeMode: "nl2agent",
                 agentId,
+                turnModelControls: modelControls.snapshot,
                 onNl2AgentState: onStateEvent,
                 onNl2AgentStopped: onStopped,
               },
@@ -106,7 +114,15 @@ export const Nl2AgentChatPanel = forwardRef<
         }
       },
     }),
-    [agentId, onRunEnd, onRunStart, onStateEvent, onStopped]
+    [
+      agentId,
+      onRunEnd,
+      onRunStart,
+      onStateEvent,
+      onStopped,
+      modelControls.snapshot,
+      modelControls.canSend,
+    ]
   );
   const runtime = useLocalRuntime(chatModelAdapter, { adapters });
   const isRunning = useSyncExternalStore(
@@ -123,6 +139,7 @@ export const Nl2AgentChatPanel = forwardRef<
           disabled ||
           agentId === null ||
           !prompt.trim() ||
+          !modelControls.canSend ||
           runtime.thread.getState().isRunning
         )
           return;
@@ -132,7 +149,7 @@ export const Nl2AgentChatPanel = forwardRef<
         });
       },
     }),
-    [agentId, disabled, runtime]
+    [agentId, disabled, runtime, modelControls.canSend]
   );
 
   const assistantTitle = t("agentConfig.button.generationAssistant");
@@ -168,10 +185,12 @@ export const Nl2AgentChatPanel = forwardRef<
             generatedTitle={assistantTitle}
             chatMode="execution"
             onChatModeChange={() => undefined}
-            showModelSelector={false}
+            {...modelControls}
+            modelSelectionScope="tenant"
+            showModelSelector
             showConversationTitle={false}
             isDictationConfigured={Boolean(modelConfig?.stt)}
-            readOnly={disabled}
+            readOnly={disabled || !modelControls.canCreate}
             variant="embedded"
             welcomeContent={
               <AgentWelcome
@@ -179,7 +198,7 @@ export const Nl2AgentChatPanel = forwardRef<
                 greeting={t("nl2agent.configuration.description")}
               >
                 <CardSuggestion
-                  disabled={disabled || isRunning}
+                  disabled={disabled || !modelControls.canCreate || isRunning}
                   suggestions={welcomeSuggestions}
                   onSelect={(prompt) => runtime.thread.composer.setText(prompt)}
                 />
