@@ -4554,6 +4554,8 @@
   "chat.threadList.allLoaded": "All conversations loaded",
   "chat.threadList.batchManage": "Manage",
   "chat.threadList.selectAll": "Select all",
+  "chat.threadList.selectAgentConversations": "Select all conversations for {{agent}}",
+  "chat.threadList.agentSelectionFailed": "Failed to load this agent's conversations. Try again.",
   "chat.threadList.selectedCount": "{{count}} selected",
   "chat.threadList.cancel": "Cancel",
   "chat.threadList.batchConfirmDeletionDescription": "The selected conversations will be deleted. Automation tasks bound to them will be cancelled too. This action cannot be undone.",
