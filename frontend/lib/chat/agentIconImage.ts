@@ -9,8 +9,8 @@ export async function createAgentIconFile(svg: SVGSVGElement): Promise<File> {
 
   const icon = svg.cloneNode(true) as SVGSVGElement;
   icon.setAttribute("xmlns", "http://www.w3.org/2000/svg");
-  icon.setAttribute("width", "96");
-  icon.setAttribute("height", "96");
+  icon.setAttribute("width", "112");
+  icon.setAttribute("height", "112");
   icon.setAttribute("stroke", "#0067d1");
   icon.setAttribute("color", "#0067d1");
   icon.removeAttribute("class");
@@ -25,7 +25,7 @@ export async function createAgentIconFile(svg: SVGSVGElement): Promise<File> {
     await image.decode();
     context.fillStyle = "#e6f2fd";
     context.fillRect(0, 0, 200, 200);
-    context.drawImage(image, 52, 52, 96, 96);
+    context.drawImage(image, 44, 44, 112, 112);
     const blob = await new Promise<Blob | null>((resolve) =>
       canvas.toBlob(resolve, "image/png")
     );

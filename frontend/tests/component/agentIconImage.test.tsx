@@ -65,10 +65,10 @@ describe("createAgentIconFile", () => {
     expect(svg.getAttribute("stroke")).toBe("currentColor");
     expect(context.drawImage).toHaveBeenCalledWith(
       expect.anything(),
-      52,
-      52,
-      96,
-      96
+      44,
+      44,
+      112,
+      112
     );
     expect(revoke).toHaveBeenCalledWith("blob:avatar-test");
   });

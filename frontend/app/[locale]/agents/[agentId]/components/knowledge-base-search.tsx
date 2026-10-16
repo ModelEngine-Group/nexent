@@ -519,6 +519,15 @@ export default function KnowledgeBaseConfig({
     const actions = (
       <div className="flex h-6 items-center gap-2">
         <Button
+          type="text"
+          size="small"
+          icon={<Settings size={14} />}
+          aria-label={t("agent.knowledge.button.configure")}
+          disabled={!state || isReadOnly || !state.hasCurrentTool}
+          onClick={() => setConfigOpen(true)}
+          className="!size-6 !p-0 !text-[#191919]"
+        />
+        <Button
           type="link"
           disabled={isReadOnly}
           onClick={() => router.push("/knowledges")}
@@ -529,15 +538,6 @@ export default function KnowledgeBaseConfig({
             <ExternalLink size={14} />
           </span>
         </Button>
-        <Button
-          type="text"
-          size="small"
-          icon={<Settings size={14} />}
-          aria-label={t("agent.knowledge.button.configure")}
-          disabled={!state || isReadOnly || !state.hasCurrentTool}
-          onClick={() => setConfigOpen(true)}
-          className="!size-6 !p-0 !text-[#191919]"
-        />
       </div>
     );
     return (

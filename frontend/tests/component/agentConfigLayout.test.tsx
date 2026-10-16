@@ -179,7 +179,7 @@ function agentConfigTree() {
   );
 }
 
-describe("AGENT-CONFIG-D1-001 independent configuration cards and preserved workflow gates", () => {
+describe("configuration resource grouping and preserved workflow gates", () => {
   beforeEach(() => {
     mocks.readOnly = false;
     mocks.state.agentId = 42;
@@ -193,14 +193,28 @@ describe("AGENT-CONFIG-D1-001 independent configuration cards and preserved work
     vi.mocked(window.HTMLElement.prototype.scrollIntoView).mockClear();
   });
 
-  it("renders independent cards in order with only basic information and models initially expanded", () => {
+  it("groups only the four resources while preserving section order and initial expansion", () => {
     render(agentConfigTree());
     const scrollRegion = screen.getByTestId("agent-config-scroll-region");
     expect(
       Array.from(
         scrollRegion.querySelectorAll('[data-testid^="agent-config-card-"]')
       ).map((card) => card.getAttribute("data-testid"))
-    ).toEqual(orderedCards.map(([name]) => `agent-config-card-${name}`));
+    ).toEqual([
+      "agent-config-card-info",
+      "agent-config-card-model",
+      "agent-config-card-resources",
+      ...orderedCards.slice(2).map(([name]) => `agent-config-card-${name}`),
+    ]);
+    const resources = screen.getByTestId("agent-config-card-resources");
+    orderedCards.slice(2, 6).forEach(([name]) => {
+      expect(resources).toContainElement(
+        screen.getByTestId(`agent-config-card-${name}`)
+      );
+    });
+    expect(resources).not.toContainElement(
+      screen.getByTestId("agent-config-card-welcome")
+    );
     orderedCards.forEach(([name, contentId], index) => {
       const card = within(scrollRegion).getByTestId(
         `agent-config-card-${name}`

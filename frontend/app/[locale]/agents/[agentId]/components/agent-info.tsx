@@ -110,7 +110,7 @@ export default function AgentInfo({ highFidelity = false }: AgentInfoProps) {
       name: editedAgent.name,
       description: editedAgent.description,
     }),
-    { size: 28 }
+    { size: highFidelity ? 56 : 28 }
   );
   const iconSource =
     agentId !== null && editedAgent.icon_url && !iconLoadError
