@@ -22,6 +22,7 @@ import type { CompleteAttachment } from "@assistant-ui/react";
 import { useTranslation } from "react-i18next";
 import { MarkdownText } from "../ui/markdown-text";
 import { UserMessageBubble } from "@/components/interaction/user-message-bubble";
+import { UserMessageEditComposer } from "../components/user-message-edit-composer";
 import { ClarificationMessageCard } from "../components/clarification-message-card";
 import { Reasoning, GroupReasoningTrigger } from "../ui/reasoning";
 import { ExecutionCodeBlock } from "../ui/execution-code-block";
@@ -1146,8 +1147,9 @@ export const ThreadMessages: FC<{
           onSkillFileSelect={onSkillFileSelect}
         />
       ),
+      EditComposer: readOnly || shareMode ? undefined : UserMessageEditComposer,
     }),
-    [agent, enableSkillDirectives, onSkillFileSelect, readOnly]
+    [agent, enableSkillDirectives, onSkillFileSelect, readOnly, shareMode]
   );
 
   if (shareMode) {
@@ -1195,31 +1197,7 @@ export const ThreadMessages: FC<{
     );
   }
 
-  return (
-    <ThreadPrimitive.Messages>
-      {({ message }) => {
-        if (message.role === "user") {
-          return (
-            <UserMessage
-              readOnly={readOnly}
-              enableSkillDirectives={enableSkillDirectives}
-              shareMode={shareMode}
-              selectedShareMessageIds={selectedShareMessageIds}
-              backendMessageIdsByAuiId={backendMessageIdsByAuiId}
-              onToggleShareMessage={onToggleShareMessage}
-            />
-          );
-        }
-        return (
-          <AssistantMessage
-            agent={agent}
-            readOnly={readOnly}
-            onSkillFileSelect={onSkillFileSelect}
-          />
-        );
-      }}
-    </ThreadPrimitive.Messages>
-  );
+  return <ThreadPrimitive.Messages components={messageComponents} />;
 };
 
 const ThreadScrollToBottom: FC = () => {
