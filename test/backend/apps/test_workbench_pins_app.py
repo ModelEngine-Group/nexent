@@ -7,7 +7,12 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from apps import workbench_pins_app as routes
-from consts.exceptions import ConversationNotFoundError, TokenExpiredError, UnauthorizedError
+from consts.exceptions import (
+    ConversationNotFoundError,
+    TokenExpiredError,
+    UnauthorizedError,
+    ValidationError,
+)
 
 
 @pytest.fixture
@@ -41,7 +46,7 @@ def test_invalid_body_never_calls_service(client, mocker, id, body):
     save.assert_not_called()
 
 
-@pytest.mark.parametrize("error,status", [(ConversationNotFoundError("foreign"), 404), (UnauthorizedError("bad"), 401), (RuntimeError("secret db message"), 500)])
+@pytest.mark.parametrize("error,status", [(ConversationNotFoundError("foreign"), 404), (UnauthorizedError("bad"), 401), (ValidationError("invalid pin scope"), 422), (RuntimeError("secret db message"), 500)])
 def test_service_errors_mapped_without_internal_leak(client, mocker, error, status):
     mocker.patch.object(routes, "update_workbench_pin", side_effect=error)
     response = client.put("/api/conversation/42/workbench_pin", json={"pinned": True})

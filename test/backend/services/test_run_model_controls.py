@@ -194,3 +194,174 @@ def test_preflight_preserves_each_explicit_intent_and_entrypoint_defaults(mocker
     run_controls.preflight_agent_turn_controls(workbench, "tenant", lookup)
     preflight.assert_called_with(workbench, "tenant", None)
     lookup.assert_not_called()
+
+
+@pytest.fixture
+def preflight_models(mocker):
+    """Keep catalog/conversion external while executing the actual overlay policy."""
+    from agents import create_agent_info
+
+    catalog = mocker.patch.object(run_controls, "get_model_by_model_id", return_value={"model_id": 9})
+    converted = []
+    roots = []
+
+    def convert(_record):
+        base = model()
+        converted.append(base)
+        return base
+
+    factory = mocker.patch.object(create_agent_info, "create_model_config_from_record", side_effect=convert)
+    overlay = run_controls.overlay_root_model
+
+    def capture(base, values, alias):
+        root = overlay(base, values, alias)
+        roots.append(root)
+        return root
+
+    mocker.patch.object(run_controls, "overlay_root_model", side_effect=capture)
+    return catalog, factory, converted, roots
+
+
+def test_preflight_uses_agent_default_and_overrides_without_mutating_catalog(preflight_models):
+    catalog, factory, bases, roots = preflight_models
+    request = AgentRequest(agent_id=42, query="fixture", generation_config={"thinking_effort": "auto"})
+    record = {"model_ids": [9, 10], "model_params_override": {"9": {"extra_params": {
+        "enable_thinking": True, "reasoning_effort": "high", "reasoning_budget_tokens": None,
+    }}}}
+    run_controls.preflight_turn_controls(request, "tenant", record)
+    catalog.assert_called_once_with(9, "tenant")
+    factory.assert_called_once_with({"model_id": 9})
+    assert roots[0].reasoning_effort == "high"
+    assert roots[0].cite_name == "preflight_root"
+    assert roots[0].temperature == 0.43 and roots[0].top_p == 0.78
+    assert bases[0].cite_name == "selected"
+    assert record["model_ids"] == [9, 10]
+    assert request.model_id is None
+
+
+@pytest.mark.parametrize("default", [{"model_id": 9}, {}, None])
+def test_preflight_resolves_tenant_default_or_rejects_missing_default(mocker, preflight_models, default):
+    from consts.const import MODEL_CONFIG_MAPPING
+    from utils.config_utils import tenant_config_manager
+
+    catalog, _factory, _bases, roots = preflight_models
+    get_default = mocker.patch.object(tenant_config_manager, "get_model_config", return_value=default)
+    request = AgentRequest(agent_id=42, query="fixture", reasoning_effort="xhigh")
+    if default:
+        run_controls.preflight_turn_controls(request, "tenant")
+        assert roots[0].reasoning_effort == "xhigh"
+        catalog.assert_called_once_with(9, "tenant")
+    else:
+        with pytest.raises(RunModelControlsError, match="model_not_available"):
+            run_controls.preflight_turn_controls(request, "tenant")
+        catalog.assert_not_called()
+    get_default.assert_called_once_with(MODEL_CONFIG_MAPPING["llm"], "tenant")
+
+
+def test_preflight_without_intent_skips_catalog(preflight_models):
+    catalog, factory, _bases, roots = preflight_models
+    run_controls.preflight_turn_controls(AgentRequest(agent_id=42, query="fixture"), "tenant")
+    catalog.assert_not_called()
+    factory.assert_not_called()
+    assert roots == []
+
+
+def test_runtime_snapshot_is_authoritative_and_legacy_conflicts_are_rejected(preflight_models):
+    catalog, _factory, _bases, roots = preflight_models
+    request = AgentRequest(agent_id=42, query="fixture", model_id=9,
+                           generation_config={"thinking_effort": "low"}, reasoning_effort="xhigh")
+    snapshot = {"deep_thinking": True, "thinking_effort": "xhigh"}
+    request.__dict__["_runtime_generation_config"] = snapshot
+    run_controls.preflight_turn_controls(request, "tenant", {"model_params_override": {}})
+    assert roots[0].reasoning_effort == "xhigh"
+    assert snapshot == {"deep_thinking": True, "thinking_effort": "xhigh"}
+    request.__dict__["_runtime_generation_config"] = {"thinking_effort": "high"}
+    with pytest.raises(RunModelControlsError, match="model_controls_invalid"):
+        run_controls.preflight_turn_controls(request, "tenant")
+    assert len(roots) == 1
+    assert catalog.call_count == 2
+
+
+def test_preflight_legacy_budget_reaches_real_overlay(mocker, preflight_models):
+    _catalog, factory, _bases, roots = preflight_models
+    base = model(reasoning_budget_tokens=2048, reasoning_capability={
+        "status": "supported", "controls": [{"type": "budget_tokens", "min": 1024, "max": 8192}],
+    })
+    factory.side_effect = None
+    factory.return_value = base
+    request = AgentRequest(agent_id=42, query="fixture", model_id=9, reasoning_budget_tokens=4096)
+    run_controls.preflight_turn_controls(request, "tenant")
+    assert roots[0].reasoning_budget_tokens == 4096 and roots[0].reasoning_effort is None
+    assert base.reasoning_budget_tokens == 2048
+
+
+def test_sampling_overlays_preserve_base_and_budget_auto_without_explicit_budget():
+    base = model()
+    for intent in ({"temperature": 0.2, "top_p": 0.8},
+                   {"deep_thinking": False, "temperature": 0.2, "top_p": 0.8}):
+        root = run_controls.overlay_root_model(base, intent, "root")
+        assert root.temperature == 0.2 and root.top_p == 0.8
+        assert base.temperature == 0.43 and base.top_p == 0.78
+    budget = model(reasoning_budget_tokens=2048, reasoning_capability={
+        "status": "supported", "controls": [{"type": "budget_tokens", "min": 1024, "max": 8192}],
+    })
+    root = run_controls.overlay_root_model(budget, {"thinking_effort": "auto"}, "root")
+    assert root.reasoning_budget_tokens == 2048 and root.reasoning_effort is None
+
+
+@pytest.mark.parametrize("capability", [
+    {"status": "supported", "controls": [{"type": "budget_tokens", "min": 1024, "max": 8192}]},
+    {"status": "supported", "controls": [{"type": "effort", "values": ["low"]}]},
+])
+def test_concrete_effort_is_rejected_when_model_does_not_offer_it(capability):
+    with pytest.raises(RunModelControlsError, match="model_controls_invalid"):
+        run_controls.overlay_root_model(model(reasoning_capability=capability), {"thinking_effort": "xhigh"}, "root")
+
+
+@pytest.mark.parametrize("intent", [None, {}, {"thinking_effort": "xhigh"}])
+def test_creator_without_explicit_model_uses_configured_root_or_fails(intent):
+    base = model(cite_name="main_model")
+    agent = AgentConfig(name="creator", model_name="main_model", tools=[], description="")
+    models = [base]
+    assert run_controls.resolve_creator_model(models, agent, "tenant", None, intent, None) == {}
+    if intent:
+        assert agent.model_name == "creator_root_model"
+        assert models[-1].reasoning_effort == "xhigh"
+    else:
+        assert models == [base] and agent.model_name == "main_model"
+    with pytest.raises(RunModelControlsError, match="model_not_available"):
+        run_controls.resolve_creator_model([], agent, "tenant", None, intent, None)
+
+
+def test_creator_explicit_model_never_falls_back_on_failed_conversion(mocker, preflight_models):
+    _catalog, factory, _bases, _roots = preflight_models
+    factory.side_effect = None
+    factory.return_value = None
+    agent = AgentConfig(name="creator", model_name="main_model", tools=[], description="")
+    models = [model(cite_name="main_model")]
+    with pytest.raises(RunModelControlsError, match="model_not_available"):
+        run_controls.resolve_creator_model(models, agent, "tenant", 9, {}, None)
+    assert len(models) == 1 and agent.model_name == "main_model"
+
+
+def test_creator_default_record_keeps_alias_when_no_override(preflight_models):
+    _catalog, factory, _bases, _roots = preflight_models
+    agent = AgentConfig(name="creator", model_name="main_model", tools=[], description="")
+    models = [model(cite_name="main_model")]
+    record = {"model_id": 9}
+    assert run_controls.resolve_creator_model(models, agent, "tenant", None, None, record) == record
+    factory.assert_called_once_with(record)
+    assert len(models) == 1 and agent.model_name == "main_model"
+
+
+@pytest.mark.parametrize("value", ["invalid payload", {"query": "create", "generation_config": "invalid"}])
+def test_creator_dto_rejects_invalid_payload_and_overlay_shapes(value):
+    with pytest.raises(ValidationError):
+        NL2SkillRunRequest.model_validate(value)
+
+
+def test_creator_dto_preserves_typed_overlay_presence_and_ignores_empty_snapshot():
+    overlay = RuntimeGenerationOverrides(thinking_effort="xhigh")
+    request = NL2SkillRunRequest(query="create", generation_config=overlay, workbench_config={"model_id": 9})
+    assert request.generation_config.model_dump(exclude_unset=True) == {"thinking_effort": "xhigh"}
+    assert overlay.model_fields_set == {"thinking_effort"}
