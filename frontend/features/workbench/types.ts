@@ -24,6 +24,7 @@ export interface WorkbenchSessionConfig {
   schema_version: 3;
   mode: WorkbenchMode;
   model_id?: number;
+  model_parameters_source?: "legacy_generation" | "outlet_preferences";
   generation_config: {
     deep_thinking: boolean;
     thinking_effort?: ReasoningEffort;

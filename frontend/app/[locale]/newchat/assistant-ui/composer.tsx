@@ -4,6 +4,7 @@
 
 import type { ReasoningEffort } from "@/types/modelConfig";
 import { isReasoningEffort } from "@/lib/modelReasoning";
+import { ConversationModelParameters } from "@/components/model/ConversationModelParameters";
 
 import {
   useMemo,
@@ -168,6 +169,7 @@ const KnowledgeBookIcon: FC<{ className?: string }> = ({ className }) => (
 export type ChatMode = "planning" | "execution";
 
 export interface ComposerProps {
+  conversationId?: number;
   newChatDesign?: boolean;
   models: readonly ModelOption[];
   selectedModelId?: string;
@@ -364,6 +366,7 @@ const ComposerPlusItem: FC<{
 
 export const Composer: FC<ComposerProps> = ({
   newChatDesign = false,
+  conversationId,
   models,
   selectedModelId,
   onModelChange,
@@ -400,6 +403,7 @@ export const Composer: FC<ComposerProps> = ({
   workbenchKnowledgePopover,
 }) => {
   const { t, i18n } = useTranslation();
+  const profileModel = models.find((model) => model.id === selectedModelId && model.profileSchemaVersion);
   const aui = useAui();
   const runtime = aui.threads().__internal_getAssistantRuntime?.();
   const [sendError, setSendError] = useState("");
@@ -1571,6 +1575,7 @@ export const Composer: FC<ComposerProps> = ({
                     className="size-8 text-muted-foreground"
                   />
                 )}
+                {showModelSelector && profileModel && <ConversationModelParameters conversationId={conversationId} modelId={Number(profileModel.id)} agentDefaults={profileModel.agentParameterDefaults} disabled={isRunning} />}
                 {!compact && (
                   <AuiIf condition={(s) => !s.composer.dictation}>
                     <Tooltip>

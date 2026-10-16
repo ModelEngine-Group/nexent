@@ -47,6 +47,13 @@ import {
   buildVoiceCredentialParams,
 } from "./ModelAdvancedSettings";
 import { ModelAdvancedConfig } from "./ModelAdvancedConfig";
+import { ModelOutletAddForm } from "./ModelOutletAddForm";
+import {
+  createModelOutlet,
+  previewModelProfile,
+  validateModelOutlet,
+} from "@/services/modelProfileService";
+import type { ModelProfileDraftRequest } from "@/types/modelProfile";
 import {
   DEFAULT_CHUNKING_BATCH_SIZE,
   DEFAULT_EXPECTED_CHUNK_SIZE,
@@ -59,26 +66,18 @@ import {
   useTypeOptions,
 } from "./modelTypeUi";
 
-/**
- * v2.6.1 redesign (v0 design): the add-model dialog.
- *
- * Two tabs styled after the v0 ModelManagerDialog: 单个添加 (manual form:
- * provider / type / name / display name / base url / key) and 批量添加
- * (fetch the provider's model list and pick what to import). Built on the
- * project's shadcn/ui primitives.
- *
- * Deliberately simple: no per-row capacity or inference-param editing and
- * no pre-submit connectivity gate (the v0 logic) — models land in
- * not_detected state and are checked/edited from the library afterwards.
- * Both tabs reuse the existing single-model create endpoint per row.
- */
+/** LLM outlets use profile-driven forms; other model types retain their existing setup. */
 
 const CUSTOM_PROVIDER_KEY = "__custom__";
 
 export interface ModelAddDialogProps {
   isOpen: boolean;
   onClose: () => void;
-  onSuccess: (newModel?: { name: string; type: ModelType }) => void;
+  onSuccess: (newModel?: {
+    name: string;
+    type: ModelType;
+    connectionChecked?: boolean;
+  }) => void;
   tenantId?: string;
   initialTab?: "single" | "batch";
 }
@@ -91,6 +90,7 @@ export const ModelAddDialog = ({
   initialTab = "single",
 }: ModelAddDialogProps) => {
   const { t } = useTranslation();
+  const [wide, setWide] = useState(true);
   const [tab, setTab] = useState<"single" | "batch">(initialTab);
 
   // Reset the tab whenever the dialog reopens (the sync-ModelEngine button
@@ -101,7 +101,12 @@ export const ModelAddDialog = ({
 
   return (
     <Dialog open={isOpen} onOpenChange={(v) => !v && onClose()}>
-      <DialogContent className="flex max-h-[85vh] w-[calc(100vw-2rem)] flex-col gap-0 overflow-hidden p-0 sm:max-w-2xl">
+      <DialogContent
+        className={cn(
+          "flex max-h-[85vh] w-[calc(100vw-2rem)] flex-col gap-0 overflow-hidden p-0",
+          wide || tab === "batch" ? "sm:max-w-5xl" : "sm:max-w-2xl"
+        )}
+      >
         <DialogHeader className="border-b px-6 py-4">
           <DialogTitle className="text-base">
             {t("modelConfig.addDialog.title", { defaultValue: "添加模型" })}
@@ -114,7 +119,7 @@ export const ModelAddDialog = ({
           </DialogDescription>
         </DialogHeader>
 
-        <div className="px-6 pt-5">
+        <div className="shrink-0 overflow-y-auto px-6 pt-5 [scrollbar-gutter:stable]">
           <div className="grid grid-cols-2 gap-1 rounded-xl bg-muted p-1">
             <TabButton
               active={tab === "single"}
@@ -143,6 +148,7 @@ export const ModelAddDialog = ({
 
         {tab === "single" ? (
           <SingleAddForm
+            onLayoutChange={setWide}
             onDone={onClose}
             onSuccess={onSuccess}
             tenantId={tenantId}
@@ -385,21 +391,32 @@ function capacitySuggestionToSettings(
 }
 
 function SingleAddForm({
+  onLayoutChange,
   onDone,
   onSuccess,
   tenantId,
 }: {
   onDone: () => void;
-  onSuccess: (newModel?: { name: string; type: ModelType }) => void;
+  onSuccess: (newModel?: {
+    name: string;
+    type: ModelType;
+    connectionChecked?: boolean;
+  }) => void;
   tenantId?: string;
+  onLayoutChange: (wide: boolean) => void;
 }) {
   const { t } = useTranslation();
   const { message } = App.useApp();
-  const presets = useProviderPresets(true);
   const typeOptions = useTypeOptions();
 
   const [provider, setProvider] = useState<string>(CUSTOM_PROVIDER_KEY);
   const [type, setType] = useState<ModelType>(MODEL_TYPES.LLM as ModelType);
+  const useOutletForm = type === MODEL_TYPES.LLM && !tenantId;
+  useEffect(
+    () => onLayoutChange(useOutletForm),
+    [useOutletForm, onLayoutChange]
+  );
+  const presets = useProviderPresets(!useOutletForm);
   const [name, setName] = useState("");
   const [displayName, setDisplayName] = useState("");
   const [baseUrl, setBaseUrl] = useState("");
@@ -424,7 +441,7 @@ function SingleAddForm({
   // Auto-detect capacity + reasoning capability whenever name and URL are
   // filled (debounced); user-saved overrides (the gear) win over suggestions.
   useEffect(() => {
-    if (!name.trim() || !baseUrl.trim()) {
+    if (useOutletForm || !name.trim() || !baseUrl.trim()) {
       setSuggestion(undefined);
       setCapability(undefined);
       return;
@@ -453,7 +470,7 @@ function SingleAddForm({
       cancelled = true;
       clearTimeout(timer);
     };
-  }, [name, baseUrl, provider, type]);
+  }, [name, baseUrl, provider, type, useOutletForm]);
 
   function changeProvider(next: string) {
     setProvider(next);
@@ -560,6 +577,44 @@ function SingleAddForm({
       setSubmitting(false);
     }
   }
+
+  if (useOutletForm)
+    return (
+      <ModelOutletAddForm
+        typeControl={
+          <div className="mb-5 flex flex-wrap items-center gap-3 border-b pb-4">
+            <Label htmlFor="outlet-model-type" className="text-sm font-medium">
+              {t("modelConfig.addDialog.modelType", {
+                defaultValue: "模型类型",
+              })}
+            </Label>
+            <Select
+              value={type}
+              disabled={submitting}
+              onValueChange={(value) => setType(value as ModelType)}
+            >
+              <SelectTrigger
+                id="outlet-model-type"
+                size="sm"
+                className="w-auto min-w-44 gap-4"
+              >
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {typeOptions.map((option) => (
+                  <SelectItem key={option.value} value={option.value}>
+                    {option.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+        }
+        onDone={onDone}
+        onSuccess={onSuccess}
+        onPendingChange={setSubmitting}
+      />
+    );
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
@@ -825,6 +880,7 @@ interface FetchedRow {
  *  includes both capacity and inference params (the component renders them
  *  all in override mode), plus an optional custom display name. */
 interface RowOverride {
+  outletDraft?: ModelProfileDraftRequest;
   displayName?: string;
   settings?: ModelAdvancedSettingsValue;
 }
@@ -835,7 +891,11 @@ function BatchAddForm({
   tenantId,
 }: {
   onDone: () => void;
-  onSuccess: (newModel?: { name: string; type: ModelType }) => void;
+  onSuccess: (newModel?: {
+    name: string;
+    type: ModelType;
+    connectionChecked?: boolean;
+  }) => void;
   tenantId?: string;
 }) {
   const { t } = useTranslation();
@@ -1009,9 +1069,40 @@ function BatchAddForm({
     }
   }
 
+  function outletDraft(row: FetchedRow): ModelProfileDraftRequest {
+    const configured = rowOverrides[row.id]?.outletDraft;
+    return {
+      selection_mode: "auto",
+      ...configured,
+      request_model_id: row.model_name,
+      provider_info: {
+        ...configured?.provider_info,
+        base_url: baseUrl.trim(),
+        provider_id: provider === CUSTOM_PROVIDER_KEY ? null : provider,
+      },
+    };
+  }
+
   async function checkRow(row: FetchedRow) {
     setRowCheck((s) => ({ ...s, [row.id]: "checking" }));
     try {
+      if (!tenantId && row.model_type === MODEL_TYPES.LLM) {
+        const draft = outletDraft(row);
+        const result = await validateModelOutlet({
+          draft: {
+            ...draft,
+            api_key:
+              draft.authentication_scheme === "no_auth_v1"
+                ? null
+                : apiKey.trim() || null,
+          },
+        });
+        setRowCheck((previous) => ({
+          ...previous,
+          [row.id]: result.ok ? "available" : "unavailable",
+        }));
+        return;
+      }
       // voice 凭证随探测透传，按当前类型门控防止类型切换后过期值泄漏
       // （只取手动 override——目录建议不携带语音凭证）
       const result = await modelService.verifyModelConfigConnectivity({
@@ -1072,6 +1163,40 @@ function BatchAddForm({
       // reported as a per-row failure instead of silently suffixed.
       const displayName = override?.displayName?.trim() || row.model_name;
       try {
+        if (!tenantId && row.model_type === MODEL_TYPES.LLM) {
+          const draft = outletDraft(row);
+          const preview = await previewModelProfile(draft);
+          // A configured row must be reviewed again if its catalog changed.
+          if (
+            draft.catalog_revision &&
+            draft.catalog_revision !== preview.catalog_revision
+          ) {
+            throw new Error(t("modelProfile.previewRequired"));
+          }
+          const saved = await createModelOutlet({
+            ...draft,
+            catalog_revision: preview.catalog_revision,
+            api_key:
+              draft.authentication_scheme === "no_auth_v1"
+                ? null
+                : apiKey.trim() || null,
+          });
+          createdDisplayNames.push(
+            draft.display_name?.trim() || row.model_name
+          );
+          created++;
+          try {
+            const checked = await validateModelOutlet({
+              outlet_id: saved.model_id,
+              expected_revision: saved.config_revision,
+            });
+            if (!checked.ok)
+              message.warning(t("modelProfile.savedUnavailable"));
+          } catch {
+            message.warning(t("modelProfile.savedCheckFailed"));
+          }
+          continue;
+        }
         const params: Record<string, any> = {
           name: row.model_name,
           type: row.model_type,
@@ -1162,7 +1287,27 @@ function BatchAddForm({
         );
       }
       onSuccess();
-      onDone();
+      if (
+        failed.length > 0 &&
+        !tenantId &&
+        rows.every((row) => row.model_type === MODEL_TYPES.LLM)
+      ) {
+        const remaining = new Set(failed);
+        setFetched((previous) =>
+          previous.filter(
+            (row) => remaining.has(row.model_name) || !selected[row.id]
+          )
+        );
+        setSelected(
+          Object.fromEntries(
+            rows
+              .filter((row) => remaining.has(row.model_name))
+              .map((row) => [row.id, true])
+          )
+        );
+      } else {
+        onDone();
+      }
       return;
     }
     // All creates failed: keep the dialog open so the operator can fix the
@@ -1200,7 +1345,7 @@ function BatchAddForm({
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       <div className="min-h-0 flex-1 overflow-y-auto px-6 py-5">
-        <div className="grid grid-cols-2 gap-x-4 gap-y-5">
+        <div className="grid grid-cols-1 gap-x-5 gap-y-5 md:grid-cols-3">
           <div className="space-y-2">
             <Label>
               {t("modelConfig.addDialog.provider", { defaultValue: "服务商" })}
@@ -1227,7 +1372,7 @@ function BatchAddForm({
               autoComplete="new-password"
             />
           </div>
-          <div className="col-span-2 space-y-2">
+          <div className="space-y-2">
             <Label>
               {t("modelConfig.addDialog.baseUrl", { defaultValue: "Base URL" })}
             </Label>
@@ -1411,6 +1556,7 @@ function BatchAddForm({
                           size="icon"
                           variant="ghost"
                           className="size-7"
+                          aria-label={`${t("modelProfile.checkModel")} ${row.model_name}`}
                           onClick={(e) => {
                             e.stopPropagation();
                             checkRow(row);
@@ -1423,6 +1569,7 @@ function BatchAddForm({
                           size="icon"
                           variant="ghost"
                           className="size-7"
+                          aria-label={`${t("modelProfile.configureModel")} ${row.model_name}`}
                           onClick={(e) => {
                             e.stopPropagation();
                             setSettingsRowId(row.id);
@@ -1499,24 +1646,65 @@ function BatchAddForm({
           suggestions. key forces remount per row so useState picks up the
           correct initial values (otherwise the first open's empty state
           sticks for all subsequent rows). */}
-      {settingsRowId && (
-        <RowSettingsDialog
-          key={settingsRowId}
-          row={fetched.find((r) => r.id === settingsRowId) ?? null}
-          override={
-            rowOverrides[settingsRowId] ?? rowSuggestions[settingsRowId]
-          }
-          reasoningCapability={rowCapabilities[settingsRowId]}
-          onModelTypeChange={(next) => updateRowType(settingsRowId, next)}
-          onSave={(next) => {
-            setRowOverrides((prev) => ({
-              ...prev,
-              [settingsRowId]: next,
-            }));
-            setSettingsRowId(null);
-          }}
-          onClose={() => setSettingsRowId(null)}
-        />
+      {settingsRowId &&
+      !tenantId &&
+      fetched.find((row) => row.id === settingsRowId)?.model_type ===
+        MODEL_TYPES.LLM ? (
+        <Dialog open onOpenChange={(open) => !open && setSettingsRowId(null)}>
+          <DialogContent className="flex max-h-[85vh] w-[calc(100vw-2rem)] flex-col gap-0 overflow-hidden p-0 sm:max-w-5xl">
+            <DialogHeader className="border-b px-6 py-4">
+              <DialogTitle>
+                {fetched.find((row) => row.id === settingsRowId)?.model_name}
+              </DialogTitle>
+              <DialogDescription>
+                {t("modelProfile.batchConfigurationHint")}
+              </DialogDescription>
+            </DialogHeader>
+            <ModelOutletAddForm
+              key={settingsRowId}
+              configuration={{
+                draft: outletDraft(
+                  fetched.find((row) => row.id === settingsRowId)!
+                ),
+                onApply: (draft) => {
+                  setRowOverrides((previous) => ({
+                    ...previous,
+                    [settingsRowId]: { outletDraft: draft },
+                  }));
+                  setRowCheck((previous) => {
+                    const next = { ...previous };
+                    delete next[settingsRowId];
+                    return next;
+                  });
+                  setSettingsRowId(null);
+                },
+              }}
+              onPendingChange={() => {}}
+              onSuccess={() => {}}
+              onDone={() => setSettingsRowId(null)}
+            />
+          </DialogContent>
+        </Dialog>
+      ) : (
+        settingsRowId && (
+          <RowSettingsDialog
+            key={settingsRowId}
+            row={fetched.find((r) => r.id === settingsRowId) ?? null}
+            override={
+              rowOverrides[settingsRowId] ?? rowSuggestions[settingsRowId]
+            }
+            reasoningCapability={rowCapabilities[settingsRowId]}
+            onModelTypeChange={(next) => updateRowType(settingsRowId, next)}
+            onSave={(next) => {
+              setRowOverrides((prev) => ({
+                ...prev,
+                [settingsRowId]: next,
+              }));
+              setSettingsRowId(null);
+            }}
+            onClose={() => setSettingsRowId(null)}
+          />
+        )
       )}
     </div>
   );

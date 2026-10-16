@@ -11,6 +11,13 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 from urllib.parse import urljoin
 
+from nexent.core.model_service.compatibility.legacy_config import (
+    COMMON_REASONING_LEVELS,
+    legacy_extra_body,
+    legacy_reasoning_budget,
+    legacy_reasoning_effort,
+    legacy_thinking_enabled,
+)
 from nexent.core.utils.observer import MessageObserver
 from nexent.core.agents.prompt.user_context import render_user_context
 from nexent.core.concurrency import run_blocking
@@ -52,7 +59,7 @@ from services.memory_external_provider_service import get_memory_external_provid
 from database.a2a_agent_db import PROTOCOL_JSONRPC
 from services.memory_config_service import build_memory_context
 from services.ind_aidp_service import create_ind_aidp_image_url_builder
-from management.services.model.adapter import get_llm_adapter, get_vlm_adapter
+from management.services.model.adapter import get_llm_adapter, get_vlm_adapter, restore_model_snapshot
 from database.agent_db import (
     search_agent_info_by_agent_id,
     query_sub_agent_relations,
@@ -285,40 +292,6 @@ _OPERATOR_OVERRIDE_FIELDS = (
     "tokenizer_family",
 )
 
-COMMON_REASONING_LEVELS = ("low", "medium", "high")
-COMMON_REASONING_DEFAULT = "auto"
-
-def _is_thinking_enabled(extra_params: Optional[Dict[str, Any]]) -> bool:
-    """Return whether the model explicitly or implicitly enables reasoning."""
-    if not isinstance(extra_params, dict):
-        return False
-    if isinstance(extra_params.get("enable_thinking"), bool):
-        return extra_params["enable_thinking"]
-    return (
-        isinstance(extra_params.get("reasoning_effort"), str)
-        or isinstance(extra_params.get("reasoning_budget_tokens"), int)
-    )
-
-
-def _build_extra_body(extra_params: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
-    """Build extra_body for ModelConfig from model_record_t.extra_params.
-
-    Merges __custom__ user-defined params into the top level so they flow
-    into OpenAI chat.completions.create request body. Returns None when
-    there is nothing to pass through so production behaviour is unchanged.
-    """
-    if not extra_params or not isinstance(extra_params, dict):
-        return None
-    extra_body = dict(extra_params)
-    # These are dedicated ModelConfig fields, not provider request-body keys.
-    extra_body.pop("reasoning_effort", None)
-    extra_body.pop("reasoning_budget_tokens", None)
-    custom = extra_body.pop("__custom__", None)
-    if custom and isinstance(custom, dict):
-        extra_body.update(custom)
-    return extra_body if extra_body else None
-
-
 def _resolve_reasoning_capability(
     model_name: str,
     base_url: Optional[str],
@@ -335,56 +308,6 @@ def _resolve_reasoning_capability(
         provider_hint=provider_hint,
     )
 
-
-def _resolve_model_reasoning_effort(
-    extra_params: Optional[Dict[str, Any]],
-    capability: Optional[Dict[str, Any]],
-) -> Optional[str]:
-    """Resolve the enabled model's effort from its supported profile."""
-    if not isinstance(extra_params, dict) or not _is_thinking_enabled(extra_params):
-        return None
-    if extra_params.get("reasoning_effort") == "auto":
-        return None
-    if isinstance(capability, dict) and capability.get("status") == "supported":
-        levels = capability.get("levels") or list(COMMON_REASONING_LEVELS)
-        default = capability.get("default")
-        if default not in levels:
-            default = COMMON_REASONING_DEFAULT
-    else:
-        # Unknown/custom model IDs still use the common generic profile. The
-        # provider remains the source of truth when a concrete value is sent.
-        levels = list(COMMON_REASONING_LEVELS)
-        default = COMMON_REASONING_DEFAULT
-    saved = extra_params.get("reasoning_effort")
-    if saved in levels:
-        return saved
-    # Auto is the universal fallback: omit the provider-specific effort so the
-    # model can choose its own reasoning depth.
-    return None if saved is None or default == COMMON_REASONING_DEFAULT else default
-
-
-def _resolve_model_reasoning_budget(
-    extra_params: Optional[Dict[str, Any]],
-    capability: Optional[Dict[str, Any]],
-) -> Optional[int]:
-    """Resolve a persisted numeric reasoning budget within the source range."""
-    if not isinstance(extra_params, dict) or not _is_thinking_enabled(extra_params):
-        return None
-    value = extra_params.get("reasoning_budget_tokens")
-    if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
-        return None
-    controls = capability.get("controls") if isinstance(capability, dict) else None
-    budget_control = next(
-        (control for control in controls or []
-         if isinstance(control, dict) and control.get("type") == "budget_tokens"),
-        None,
-    )
-    if isinstance(budget_control, dict):
-        minimum = budget_control.get("min")
-        maximum = budget_control.get("max")
-        if isinstance(minimum, int) and isinstance(maximum, int):
-            return min(maximum, max(minimum, value))
-    return value
 
 # Per-process dedup for the "model has no capacity configured" warning.
 # Without this, every agent run logs the same line, drowning real signal.
@@ -442,6 +365,9 @@ def _operator_overrides_from_model_info(model_info: Optional[dict]) -> dict:
         value = model_info.get(field)
         if value is not None:
             overrides[field] = value
+    if (model_info.get("profile_schema_version") is not None
+            and model_info.get("default_max_output_tokens") is not None):
+        overrides["default_output_reserve_tokens"] = model_info["default_max_output_tokens"]
     return overrides
 
 
@@ -492,6 +418,14 @@ def _dominant_capacity_source(field_sources: dict) -> Optional[str]:
         if preferred in values:
             return preferred
     return values[0]
+
+
+def _runtime_capacity_overrides(agent_info, model_id, runtime_output_tokens):
+    """Use the validated root preference as this run's baseline, retaining hard limits."""
+    overrides = _agent_capacity_overrides(agent_info, model_id)
+    if runtime_output_tokens is not None:
+        overrides["default_output_reserve_tokens"] = runtime_output_tokens
+    return overrides
 
 
 def _capacity_snapshot_for_monitoring(snapshot: Any) -> dict:
@@ -600,11 +534,18 @@ def _resolve_input_budget(
         operator_overrides = _operator_overrides_from_model_info(model_info)
         if capacity_overrides:
             operator_overrides.update(capacity_overrides)
+            # A smaller Agent window also bounds inherited service limits in this
+            # run's budget view; the saved outlet and its hard limits stay intact.
+            window = capacity_overrides.get("context_window_tokens")
+            if model_info.get("profile_schema_version") is not None and type(window) is int:
+                for key in ("max_input_tokens", "max_output_tokens"):
+                    if key not in capacity_overrides and type(operator_overrides.get(key)) is int:
+                        operator_overrides[key] = min(operator_overrides[key], window)
         snapshot = resolve_capacity(
             model_id=model_id,
             provider=provider,
             operator_overrides=operator_overrides,
-            capability_profiles=CAPABILITY_CATALOG,
+            capability_profiles={} if model_info.get("profile_schema_version") is not None else CAPABILITY_CATALOG,
         )
         logger.debug(
             "Capacity resolved for (%s, %s): input_limit=%s source=%s profile=%s fingerprint=%s",
@@ -1203,8 +1144,39 @@ def _get_skill_script_tools(
         return []
 
 
+def _resolved_model_config(record, snapshot, cite_name=None):
+    """Map one frozen outlet into the existing Agent configuration contract."""
+    from services.model_outlet_projection import project_saved_outlet
+
+    output_reserve = snapshot.parameter_values.get("max_output_tokens")
+    if output_reserve is None:
+        output_reserve = snapshot.context_configuration.output_reserve_tokens
+    return ModelConfig(
+        cite_name=cite_name if cite_name is not None else record["display_name"], api_key=record.get("api_key") or "",
+        model_name=snapshot.identity.request_model_id, url=snapshot.connection.base_url,
+        resolved_profile=snapshot, model_factory=snapshot.identity.provider_id,
+        reasoning_capability=project_saved_outlet(record)["reasoning_capability"],
+        temperature=snapshot.parameter_values.get("temperature"), top_p=snapshot.parameter_values.get("top_p"),
+        enable_thinking=snapshot.parameter_values.get("enable_thinking") is True,
+        reasoning_effort=(snapshot.parameter_values.get("reasoning_effort")
+                          if snapshot.parameter_values.get("reasoning_effort") in
+                          {"auto", "none", "minimal", "low", "medium", "high", "xhigh", "max"} else None),
+        reasoning_budget_tokens=snapshot.parameter_values.get("reasoning_budget_tokens"),
+        context_window_tokens=snapshot.capabilities.context.combined_window,
+        max_input_tokens=snapshot.capabilities.context.input_limit,
+        max_output_tokens=snapshot.capabilities.context.output_limit,
+        default_output_reserve_tokens=output_reserve,
+        tokenizer_family=snapshot.context_configuration.tokenizer_family,
+        capacity_source=snapshot.context_configuration.capacity_source,
+        capability_profile_version=snapshot.context_configuration.capability_profile_version,
+    )
+
+
 def create_model_config_from_record(record):
     """Build a complete provider binding from one exact tenant model record."""
+    snapshot = restore_model_snapshot(record, record.get("tenant_id"))
+    if snapshot is not None:
+        return _resolved_model_config(record, snapshot)
     model_name = add_repo_to_name(
         model_repo=record["model_repo"],
         model_name=record["model_name"],
@@ -1238,50 +1210,48 @@ def create_model_config_from_record(record):
                         # temperature/top_p/extra_params flow into SDK.
                         temperature=record.get("temperature"),
                         top_p=record.get("top_p"),
-                        enable_thinking=_is_thinking_enabled(record.get("extra_params")),
+                        enable_thinking=legacy_thinking_enabled(record.get("extra_params")),
                         reasoning_capability=reasoning_capability,
-                        reasoning_effort=_resolve_model_reasoning_effort(
+                        reasoning_effort=legacy_reasoning_effort(
                             record.get("extra_params"), reasoning_capability
                         ),
-                        reasoning_budget_tokens=_resolve_model_reasoning_budget(
+                        reasoning_budget_tokens=legacy_reasoning_budget(
                             record.get("extra_params"), reasoning_capability
                         ),
-                        extra_body=_build_extra_body(record.get("extra_params")))
+                        extra_body=legacy_extra_body(record.get("extra_params")))
 
 
 async def create_model_config_list(tenant_id):
     records = get_model_records({"model_type": "llm"}, tenant_id)
-    model_list = [create_model_config_from_record(record) for record in records]
+    model_list = [create_model_config_from_record(record) for record in records if record.get("model_id") is None or record.get("profile_schema_version") is not None]
     extra_body = {"logprobs": True} if LLM_INCLUDE_LOGPROBS else None
     # fit for old version, main_model and sub_model use default model
     main_model_config = tenant_config_manager.get_model_config(
         key=MODEL_CONFIG_MAPPING["llm"], tenant_id=tenant_id)
-    main_prompt_cache = resolve_prompt_cache_profile(
-        main_model_config.get("model_factory"))
-    model_list.append(
-        ModelConfig(cite_name="main_model",
-                    api_key=main_model_config.get("api_key", ""),
-                    model_name=get_model_name_from_config(main_model_config) if main_model_config.get(
-                        "model_name") else "",
-                    url=main_model_config.get("base_url", ""),
-                    ssl_verify=main_model_config.get("ssl_verify", True),
-                    model_factory=main_model_config.get("model_factory"),
-                    timeout_seconds=main_model_config.get("timeout_seconds"),
-                    concurrency_limit=main_model_config.get("concurrency_limit"),
-                    prompt_cache=main_prompt_cache,
-                    extra_body=extra_body))
-    model_list.append(
-        ModelConfig(cite_name="sub_model",
-                    api_key=main_model_config.get("api_key", ""),
-                    model_name=get_model_name_from_config(main_model_config) if main_model_config.get(
-                        "model_name") else "",
-                    url=main_model_config.get("base_url", ""),
-                    ssl_verify=main_model_config.get("ssl_verify", True),
-                    model_factory=main_model_config.get("model_factory"),
-                    timeout_seconds=main_model_config.get("timeout_seconds"),
-                    concurrency_limit=main_model_config.get("concurrency_limit"),
-                    prompt_cache=main_prompt_cache,
-                    extra_body=extra_body))
+    # Reuse the row already captured for this run, including its credential and revision.
+    if main_model_config.get("profile_schema_version") is not None:
+        main_model_config = next((record for record in records
+                                  if record.get("model_id") == main_model_config.get("model_id")), main_model_config)
+    if (main_model_config.get("model_id") is not None
+            and main_model_config.get("profile_schema_version") is None):
+        # A failed default outlet is not an implicit fallback for a selected outlet.
+        return model_list
+    main_snapshot = restore_model_snapshot(main_model_config, tenant_id)
+    if main_snapshot is not None:
+        model_list.extend(_resolved_model_config(main_model_config, main_snapshot, cite_name=alias)
+                          for alias in ("main_model", "sub_model"))
+    else:
+        main_prompt_cache = resolve_prompt_cache_profile(main_model_config.get("model_factory"))
+        for alias in ("main_model", "sub_model"):
+            model_list.append(ModelConfig(
+                cite_name=alias, api_key=main_model_config.get("api_key", ""),
+                model_name=get_model_name_from_config(main_model_config) if main_model_config.get("model_name") else "",
+                url=main_model_config.get("base_url", ""), ssl_verify=main_model_config.get("ssl_verify", True),
+                model_factory=main_model_config.get("model_factory"),
+                timeout_seconds=main_model_config.get("timeout_seconds"),
+                concurrency_limit=main_model_config.get("concurrency_limit"),
+                prompt_cache=main_prompt_cache, extra_body=extra_body,
+            ))
 
     return model_list
 
@@ -1345,6 +1315,8 @@ async def create_agent_config(
     runtime_skill_snapshot: Optional[List[Dict[str, Any]]] = None,
     runtime_knowledge_tools: Optional[List[Dict[str, Any]]] = None,
     runtime_sub_agent_mounts: Optional[List[Dict[str, Any]]] = None,
+    runtime_model_records: Optional[Dict[int, Dict[str, Any]]] = None,
+    runtime_output_tokens: int | None = None,
 ):
     normalized_tool_params = _normalize_tool_params_request(tool_params)
     agent_info = search_agent_info_by_agent_id(
@@ -1392,6 +1364,7 @@ async def create_agent_config(
             runtime_file_context=runtime_file_context,
             # Workbench overlays replace Skills on the effective root only.
             runtime_skill_snapshot=None,
+            runtime_model_records=runtime_model_records,
         )
         # Persisted Agent relations are rendered into the manager prompt by
         # their configured business name. Keep the callable registered in the
@@ -1426,6 +1399,7 @@ async def create_agent_config(
             runtime_knowledge_context=child_knowledge_context,
             runtime_file_context=runtime_file_context,
             runtime_skill_snapshot=None,
+            runtime_model_records=runtime_model_records,
             runtime_knowledge_tools=None,
             runtime_sub_agent_mounts=None,
         )
@@ -1806,7 +1780,10 @@ async def create_agent_config(
     model_id_to_use = _select_agent_model_id(agent_model_ids, override_model_id, tenant_id)
     model_info = None
     if model_id_to_use is not None:
-        model_info = get_model_by_model_id(model_id_to_use, tenant_id=tenant_id)
+        model_info = (runtime_model_records.get(model_id_to_use) if runtime_model_records is not None
+                      else get_model_by_model_id(model_id_to_use, tenant_id=tenant_id))
+        if model_info is None and override_model_id is not None:
+            raise ValidationError("MODEL_OUTLET_NOT_AVAILABLE")
         model_name = model_info["display_name"] if model_info is not None else "main_model"
         # W1 step 6: derive input budget via ModelCapacityResolver instead of
         # treating model_info["max_tokens"] (a deprecated output cap) as a
@@ -1816,8 +1793,8 @@ async def create_agent_config(
         input_budget, capacity_snapshot, resolved_capacity_snapshot = (
             _resolve_input_budget(
                 model_info,
-                capacity_overrides=_agent_capacity_overrides(
-                    agent_info, model_id_to_use),
+                capacity_overrides=_runtime_capacity_overrides(
+                    agent_info, model_id_to_use, runtime_output_tokens),
             )
         )
     else:
@@ -1826,7 +1803,8 @@ async def create_agent_config(
         capacity_snapshot = None
         resolved_capacity_snapshot = None
 
-    requested_output_tokens = agent_info.get("requested_output_tokens")
+    requested_output_tokens = (runtime_output_tokens if runtime_output_tokens is not None
+                               else agent_info.get("requested_output_tokens"))
     context_budget_snapshot = _resolve_context_budget(
         capacity_snapshot=resolved_capacity_snapshot,
         tenant_id=tenant_id,
@@ -2600,6 +2578,35 @@ def apply_root_generation_overlay(
         return
 
 
+def apply_root_model_preferences(model_list, agent_config, preferences, *, outlet_profiles=None, agent_overrides=None):
+    """Give the root a private alias; never change a child Agent's model defaults."""
+    if not preferences:
+        return
+    from services.conversation_model_preferences_service import merge_model_preferences
+
+    for configured in model_list:
+        profile = getattr(configured, "resolved_profile", None)
+        if configured.cite_name != agent_config.model_name or profile is None:
+            continue
+        values = preferences.get(str(profile.outlet_id))
+        if values is None:
+            return
+        original = (outlet_profiles or {}).get(profile.outlet_id)
+        if original is not None:
+            from services.agent_model_parameters import merge_runtime_model_parameters
+
+            resolved = merge_runtime_model_parameters(original, (agent_overrides or {}).get(str(profile.outlet_id), {}), values)
+        else:
+            resolved = merge_model_preferences(profile, values)
+        root = configured.model_copy(deep=True, update={"cite_name": "conversation_root_model_" + uuid.uuid4().hex,
+            "resolved_profile": resolved,
+            "default_output_reserve_tokens": resolved.parameter_values.get("max_output_tokens",
+                configured.default_output_reserve_tokens)})
+        model_list.append(root)
+        agent_config.model_name = root.cite_name
+        return
+
+
 async def create_agent_run_info(
     agent_id,
     minio_files,
@@ -2625,6 +2632,7 @@ async def create_agent_run_info(
     runtime_knowledge_tools: Optional[List[Dict[str, Any]]] = None,
     runtime_generation_config: Optional[Dict[str, Any]] = None,
     runtime_sub_agent_mounts: Optional[List[Dict[str, Any]]] = None,
+    model_parameter_preferences: Optional[Dict[str, Dict[str, Any]]] = None,
 ):
     if override_model_id is not None:
         from management.services.model.run_controls import validate_selected_record
@@ -2708,6 +2716,33 @@ async def create_agent_run_info(
         create_config_kwargs["runtime_knowledge_tools"] = runtime_knowledge_tools
     if runtime_sub_agent_mounts is not None:
         create_config_kwargs["runtime_sub_agent_mounts"] = runtime_sub_agent_mounts
+    from nexent.core.model_service.profiles.outlet_storage import encode_resolved_model_profile
+    from nexent.core.model_service.profiles.resolved_profile import ResolvedModelProfile
+    captured_records = {}
+    outlet_profiles = {}
+    for configured in model_list:
+        if isinstance(getattr(configured, "resolved_profile", None), ResolvedModelProfile):
+            from nexent.core.model_service.registry import model_service_references
+
+            outlet_profiles[configured.resolved_profile.outlet_id] = configured.resolved_profile
+            captured = encode_resolved_model_profile(configured.resolved_profile, registered_references=model_service_references())
+            if captured.get("model_id") is not None:
+                captured_records[captured["model_id"]] = captured
+    if captured_records:
+        create_config_kwargs["runtime_model_records"] = captured_records
+    if model_parameter_preferences:
+        selected_info = search_agent_info_by_agent_id(agent_id=agent_id, tenant_id=tenant_id, version_no=version_no)
+        selected_id = _select_agent_model_id((selected_info or {}).get("model_ids") or [], override_model_id, tenant_id)
+        selected_preferences = model_parameter_preferences.get(str(selected_id), {})
+        if selected_preferences.get("max_output_tokens") is not None:
+            from services.conversation_model_preferences_service import merge_model_preferences
+
+            for configured in model_list:
+                profile = getattr(configured, "resolved_profile", None)
+                if isinstance(profile, ResolvedModelProfile) and profile.outlet_id == selected_id:
+                    validated = merge_model_preferences(profile, selected_preferences)
+                    create_config_kwargs["runtime_output_tokens"] = validated.parameter_values["max_output_tokens"]
+                    break
     agent_config = await create_agent_config(**create_config_kwargs, tool_params=tool_params)
 
     # v2.6.0: Apply per-agent model params override to model_config_list.
@@ -2718,6 +2753,11 @@ async def create_agent_run_info(
     _agent_info_for_override = search_agent_info_by_agent_id(
         agent_id=agent_id, tenant_id=tenant_id, version_no=version_no)
     model_params_override = (_agent_info_for_override or {}).get("model_params_override") or {}
+    from services.agent_model_parameters import bind_agent_model_profiles
+
+    bind_agent_model_profiles(model_list, agent_config, _agent_info_for_override or {},
+        lambda selected_agent_id, selected_version: search_agent_info_by_agent_id(
+            agent_id=selected_agent_id, tenant_id=tenant_id, version_no=selected_version))
     if model_params_override:
         for model_id_str, override_entry in model_params_override.items():
             if not isinstance(override_entry, dict):
@@ -2733,6 +2773,8 @@ async def create_agent_run_info(
             if not display_name:
                 continue
             for mc in model_list:
+                if isinstance(getattr(mc, "resolved_profile", None), ResolvedModelProfile):
+                    continue  # Saved outlets were bound independently for each Agent above.
                 if mc.cite_name == display_name:
                     if override_entry.get("temperature") is not None:
                         mc.temperature = override_entry["temperature"]
@@ -2894,6 +2936,9 @@ async def create_agent_run_info(
                 "workspace_volume_name": NEXENT_SANDBOX_WORKSPACE_VOLUME,
                 "shared_workspace": True,
             })
+
+    apply_root_model_preferences(model_list, agent_config, model_parameter_preferences,
+        outlet_profiles=outlet_profiles, agent_overrides=model_params_override)
 
     agent_run_info = AgentRunInfo(
         query=final_query,

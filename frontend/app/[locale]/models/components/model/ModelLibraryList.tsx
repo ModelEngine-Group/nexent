@@ -1,3 +1,5 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
@@ -33,6 +35,8 @@ import { cn } from "@/lib/utils";
 import { MODEL_SOURCES } from "@/const/modelConfig";
 import { ModelOption, ModelType, ModelSource } from "@/types/modelConfig";
 import { Can } from "@/components/permission/Can";
+import { ModelMigrationBadge } from "./ModelMigrationBadge";
+import { ModelMigrationReviewButton } from "./ModelMigrationReviewButton";
 import {
   STATUS_DOT_CLASS,
   TYPE_BADGE_CLASS,
@@ -68,7 +72,9 @@ export function ModelLibraryList({
   onCheck,
   onEdit,
   onDelete,
+  onReviewed,
 }: {
+  onReviewed?: () => void;
   models: ModelOption[];
   /** displayName -> slot keys this model occupies (drives the 默认 badge). */
   defaultSlotMap: Record<string, string[]>;
@@ -214,6 +220,7 @@ export function ModelLibraryList({
               model={m}
               isDefault={!!(defaultSlotMap[m.displayName] || []).length}
               onCheck={() => onCheck(m.displayName, m.type)}
+              onReviewed={onReviewed}
               onEdit={() => onEdit(m)}
               onDelete={() => onDelete(m)}
             />
@@ -292,7 +299,9 @@ function ModelRow({
   onCheck,
   onEdit,
   onDelete,
+  onReviewed,
 }: {
+  onReviewed?: () => void;
   model: ModelOption;
   isDefault: boolean;
   onCheck: () => void;
@@ -316,6 +325,7 @@ function ModelRow({
             <span className="truncate font-medium text-foreground">
               {model.displayName || model.name}
             </span>
+            <ModelMigrationBadge model={model} />
             {isDefault && (
               <Badge
                 variant="secondary"
@@ -380,6 +390,7 @@ function ModelRow({
         >
           <ShieldCheck className="size-4" />
         </RowAction>
+        <ModelMigrationReviewButton model={model} onReviewed={onReviewed} />
         <Can permission="model:update">
           <RowAction
             label={t("common.edit", { defaultValue: "编辑" })}

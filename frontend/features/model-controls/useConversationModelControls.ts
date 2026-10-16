@@ -78,13 +78,13 @@ export function useConversationModelControls(
   const snapshot = useMemo(
     () =>
       activeModelId
-        ? snapshotTurnModelControls(activeModelId, {
+        ? snapshotTurnModelControls(activeModelId, model?.profileSchemaVersion ? {} : {
             deep_thinking: enabled,
             thinking_effort: hasBudgetControl ? "auto" : effort,
             ...(hasBudgetControl ? { reasoning_budget_tokens: budget } : {}),
           })
         : undefined,
-    [activeModelId, enabled, effort, hasBudgetControl, budget]
+    [activeModelId, model?.profileSchemaVersion, enabled, effort, hasBudgetControl, budget]
   );
   const update = (patch: Partial<ModelState>) => {
     if (!selectedId || !model) return;
