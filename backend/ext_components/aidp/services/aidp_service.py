@@ -4,7 +4,6 @@
 AIDP Service Layer
 Handles API calls to AIDP for paginated knowledge base listing.
 """
-
 import json
 import logging
 import time
@@ -18,12 +17,10 @@ from nexent.utils.http_client_manager import http_client_manager
 from consts.const import AIDP_TENANT_ID
 from consts.error_code import ErrorCode
 from consts.exceptions import AppException
-from database.agent_db import query_binding_agent_metadata, query_live_knowledge_bindings
+from database.agent_db import query_knowledge_binding_agents
 from database.client import get_db_session
 from database.conversation_db import remove_conversation_knowledge_bindings
-from database.skill_db import remove_skill_knowledge_bindings
-from database.tool_db import remove_tool_knowledge_bindings
-from services.asset_owner_visibility import get_visible_agent_names
+from database.tool_db import remove_tool_knowledge_references
 
 
 logger = logging.getLogger("aidp_service")
@@ -1197,19 +1194,9 @@ def update_aidp_kb_impl(
         )
 
 
-def get_bound_agents(kds_ids: list[str], *, user_id: str, tenant_id: str) -> dict:
+def get_bound_agents(kds_ids: list[str], *, tenant_id: str) -> dict:
     """Preview agents affected by deleting the selected knowledge bases."""
-    with get_db_session() as session:
-        rows = query_live_knowledge_bindings(session, kds_ids=kds_ids)
-        metadata = query_binding_agent_metadata(
-            session, [row["agent_id"] for row in rows], tenant_id=tenant_id,
-        )
-    agents = get_visible_agent_names(metadata, user_id=user_id)
-    return {
-        "agents": agents,
-        "hidden_agent_count": len(metadata) - len(agents),
-        "total_agent_count": len(metadata),
-    }
+    return {"agents": query_knowledge_binding_agents(kds_ids=kds_ids, tenant_id=tenant_id)}
 
 
 def delete_aidp_kb_impl(
@@ -1276,10 +1263,12 @@ def delete_aidp_kb_impl(
                 f"AIDP API HTTP error {e.response.status_code}: {str(e)}",
             )
 
-    with get_db_session() as session:
-        remove_tool_knowledge_bindings(session, kds_ids=[kds_id])
-        remove_skill_knowledge_bindings(session, kds_ids=[kds_id])
-        remove_conversation_knowledge_bindings(session, kds_ids=[kds_id])
+    try:
+        with get_db_session() as session:
+            remove_tool_knowledge_references(session, kds_ids=[kds_id])
+            remove_conversation_knowledge_bindings(session, kds_ids=[kds_id])
+    except Exception as exc:  # noqa: BLE001 - Binding cleanup must not fail knowledge-base deletion.
+        logger.warning("Failed to clean up bindings for deleted AIDP knowledge base '%s': %s", kds_id, exc)
     return True
 
 

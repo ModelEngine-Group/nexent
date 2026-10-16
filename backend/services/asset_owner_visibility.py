@@ -1,5 +1,3 @@
-# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
-
 """ASSET_OWNER tenant visibility filters, feature flags, and response post-processing."""
 
 from typing import Any, Dict, List, Optional
@@ -8,16 +6,11 @@ from consts.const import (
     AGENT_PROMPTS_HIDDEN_FLAG,
     ASSET_OWNER_ROLE,
     ASSET_OWNER_TENANT_ID,
-    CAN_EDIT_ALL_USER_ROLES,
     ENABLE_ASSET_OWNER_ROLE,
     PERMISSION_EDIT,
-    PERMISSION_PRIVATE,
     PERMISSION_READ,
 )
 from consts.exceptions import ValidationError
-from database.group_db import query_group_ids_by_user
-from database.user_tenant_db import get_user_tenant_by_user_id
-from utils.str_utils import convert_string_to_list
 
 
 _PROMPT_FIELDS = ("duty_prompt", "constraint_prompt", "few_shots_prompt")
@@ -115,30 +108,3 @@ def postprocess_knowledge_visibility(
     """Return knowledge records after visibility post-processing (no-op for now)."""
     _ = (caller_role, caller_tenant_id)
     return items
-
-
-def get_visible_agent_names(agents_by_id: dict[int, dict], *, user_id: str) -> list[dict]:
-    """Project names of the supplied agents visible to the current user."""
-    if not agents_by_id:
-        return []
-    role = str((get_user_tenant_by_user_id(user_id) or {}).get("user_role") or "").upper()
-    can_edit_all = role in CAN_EDIT_ALL_USER_ROLES
-    user_groups = set(query_group_ids_by_user(user_id) or []) if not can_edit_all else set()
-    agents = []
-    for agent_id, agent in agents_by_id.items():
-        visible = (
-            can_edit_all
-            or str(agent.get("created_by")) == str(user_id)
-            or agent.get("tenant_id") == ASSET_OWNER_TENANT_ID
-            or (
-                bool(user_groups.intersection(convert_string_to_list(agent.get("group_ids"))))
-                and agent.get("ingroup_permission") != PERMISSION_PRIVATE
-            )
-        )
-        if visible:
-            agents.append({
-                "agent_id": agent_id,
-                "display_name": agent.get("display_name") or agent.get("name") or str(agent_id),
-            })
-    agents.sort(key=lambda item: (item["display_name"], item["agent_id"]))
-    return agents

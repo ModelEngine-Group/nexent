@@ -254,10 +254,7 @@ async def _auth(request: Request) -> tuple[str, str]:
     if not auth:
         raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail="Missing Authorization header")
     try:
-        user_id, tenant_id = await run_blocking(
-            "authenticate-aidp-request", auth_utils_module.get_current_user_id, auth,
-            lane="control-io", owner="ext_components.aidp.apps.aidp_mgmt_app",
-        )
+        user_id, tenant_id = auth_utils_module.get_current_user_id(auth)
     except UnauthorizedError as exc:
         raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(exc))
     if not tenant_id:
@@ -720,10 +717,10 @@ async def get_knowledge_base_bound_agents(
     kds_id: Annotated[str, Path(min_length=1, pattern=r".*\S.*")],
 ) -> JSONResponse:
     """List agents bound to this AIDP knowledge base for deletion confirmation."""
-    user_id, tenant_id = await _auth(request)
+    _, tenant_id = await _auth(request)
     preview = await run_blocking(
         "preview-aidp-kb-deletion", get_bound_agents, [kds_id],
-        user_id=user_id, tenant_id=tenant_id,
+        tenant_id=tenant_id,
         lane="control-io", owner="ext_components.aidp.apps.aidp_mgmt_app",
     )
     return JSONResponse(status_code=HTTPStatus.OK, content=preview)

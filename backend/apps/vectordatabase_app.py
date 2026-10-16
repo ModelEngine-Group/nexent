@@ -169,15 +169,12 @@ async def get_knowledge_base_bound_agents(
 ):
     """List agents bound to this knowledge base for deletion confirmation."""
     try:
-        user_id, tenant_id = await run_blocking(
-            "authenticate-kb-delete-preview", get_current_user_id, authorization,
-            lane="control-io", owner="apps.vectordatabase_app",
-        )
+        _, tenant_id = get_current_user_id(authorization)
     except TokenExpiredError as exc:
         raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(exc)) from exc
     preview = await run_blocking(
         "preview-kb-deletion", ElasticSearchService.get_bound_agents, [index_name],
-        user_id=user_id, tenant_id=tenant_id,
+        tenant_id=tenant_id,
         lane="control-io", owner="apps.vectordatabase_app",
     )
     return JSONResponse(status_code=HTTPStatus.OK, content=preview)

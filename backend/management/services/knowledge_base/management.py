@@ -11,7 +11,6 @@ Main features include:
 3. Support for multiple search methods: exact search, semantic search, and hybrid search
 4. Health check interface
 """
-
 import os
 import time
 from datetime import datetime, timezone
@@ -29,36 +28,55 @@ from consts.const import (
 )
 from consts.error_code import ErrorCode
 from consts.exceptions import AppException, DuplicateError
-from database.agent_db import query_binding_agent_metadata, query_live_knowledge_bindings
 from database.attachment_db import delete_file, file_exists, get_file_stream
+from database.agent_db import query_knowledge_binding_agents
 from database.client import get_db_session
 from database.conversation_db import remove_conversation_knowledge_bindings
-from database.group_db import query_group_ids_by_user
+from database.tool_db import remove_tool_knowledge_references
 from database.knowledge_db import (
     create_knowledge_record,
     delete_knowledge_record,
-    get_knowledge_info_by_tenant_id,
     get_knowledge_record,
-    update_embedding_model_by_index_name,
     update_knowledge_record,
-    update_last_doc_update_time,
+    get_knowledge_info_by_tenant_id,
     update_model_name_by_index_name,
+    update_last_doc_update_time,
+    update_embedding_model_by_index_name,
 )
+from database.knowledge_storage_object_db import list_committed_storage_objects
 from database.knowledge_file_lifecycle_db import (
     delete_file_records_for_knowledge_base,
     list_file_records,
 )
-from database.knowledge_storage_object_db import list_committed_storage_objects
-from database.model_management_db import get_model_by_model_id
-from database.skill_db import remove_skill_knowledge_bindings
-from database.tool_db import remove_tool_knowledge_bindings
+from services.knowledge_storage_service import (
+    release_storage_charge,
+    resolve_storage_reference,
+)
+from utils.str_utils import convert_list_to_string
 from database.user_tenant_db import get_user_tenant_by_user_id
+from database.group_db import query_group_ids_by_user
+from database.model_management_db import get_model_by_model_id
+from permissions.dac import ResourceAccessControl
+from permissions.models import Resource
+from services.redis_service import get_redis_service
+from services.group_service import get_tenant_default_group_id
+from services.asset_owner_visibility import postprocess_knowledge_visibility
+from utils.config_utils import tenant_config_manager
+from management.services.model.resolver import (
+    create_embedding_model, get_embedding_model_by_id, get_model_descriptor,
+)
+from utils.file_management_utils import get_all_files_status, get_file_size
+from utils.str_utils import convert_string_to_list
+from utils.storage_key_utils import build_preview_pdf_object_key
+
+
+
 from management.services.knowledge_base.common import (
     _QUOTA_LIMIT_UNSET,
     _SKIP_INDEX_SOURCE_CLEANUP,
-    _rethrow_or_plain,
     _update_progress,
     get_vector_db_core,
+    _rethrow_or_plain,
     logger,
 )
 from management.services.knowledge_base.listing import (
@@ -73,24 +91,6 @@ from management.services.knowledge_base.permission import (
     require_knowledge_base_read_permission,
     resolve_knowledge_base_permission,
 )
-from management.services.model.resolver import (
-    create_embedding_model,
-    get_embedding_model_by_id,
-    get_model_descriptor,
-)
-from permissions.dac import ResourceAccessControl
-from permissions.models import Resource
-from services.asset_owner_visibility import get_visible_agent_names, postprocess_knowledge_visibility
-from services.group_service import get_tenant_default_group_id
-from services.knowledge_storage_service import (
-    release_storage_charge,
-    resolve_storage_reference,
-)
-from services.redis_service import get_redis_service
-from utils.config_utils import tenant_config_manager
-from utils.file_management_utils import get_all_files_status, get_file_size
-from utils.storage_key_utils import build_preview_pdf_object_key
-from utils.str_utils import convert_list_to_string, convert_string_to_list
 
 
 # A knowledge base deletion is rejected while any file is still owned by the
@@ -111,24 +111,15 @@ class KnowledgeBaseManagementService:
     filter_accessible_indices = staticmethod(filter_accessible_indices)
 
     @staticmethod
-    def get_bound_agents(index_names: list[str], *, user_id: str, tenant_id: str) -> dict:
+    def get_bound_agents(index_names: list[str], *, tenant_id: str) -> dict:
         """Preview agents affected by deleting the selected knowledge bases."""
-        with get_db_session() as session:
-            rows = query_live_knowledge_bindings(session, index_names=index_names)
-            metadata = query_binding_agent_metadata(
-                session, [row["agent_id"] for row in rows], tenant_id=tenant_id,
-            )
-        agents = get_visible_agent_names(metadata, user_id=user_id)
-        return {
-            "agents": agents,
-            "hidden_agent_count": len(metadata) - len(agents),
-            "total_agent_count": len(metadata),
-        }
+        return {"agents": query_knowledge_binding_agents(index_names=index_names, tenant_id=tenant_id)}
 
     @staticmethod
     async def full_delete_knowledge_base(index_name: str, vdb_core: VectorDatabaseCore, user_id: str):
         """
-        Delete the knowledge base and clean up its persisted bindings.
+        Completely delete a knowledge base, including its index, associated files in MinIO,
+        and all related records in Redis and PostgreSQL.
         """
         logger.debug(
             f"Starting full deletion process for knowledge base (index): {index_name}")
@@ -240,10 +231,12 @@ class KnowledgeBaseManagementService:
             if "errors" in redis_cleanup_result:
                 result["redis_warnings"] = redis_cleanup_result["errors"]
 
-            with get_db_session() as session:
-                remove_tool_knowledge_bindings(session, index_names=[index_name])
-                remove_skill_knowledge_bindings(session, index_names=[index_name])
-                remove_conversation_knowledge_bindings(session, index_names=[index_name])
+            try:
+                with get_db_session() as session:
+                    remove_tool_knowledge_references(session, index_names=[index_name])
+                    remove_conversation_knowledge_bindings(session, index_names=[index_name])
+            except Exception as exc:  # noqa: BLE001 - Binding cleanup must not fail knowledge-base deletion.
+                logger.warning("Failed to clean up bindings for deleted knowledge base '%s': %s", index_name, exc)
             logger.info(
                 f"Successfully completed full deletion process for knowledge base '{index_name}'.")
             return result
@@ -1199,7 +1192,7 @@ class KnowledgeBaseManagementService:
                     "languages": metadata.get("languages", []),
                     "embedding_model_name": embedding_model_name
                 }
-
+                
                 image_url = metadata.get("image_url", "")
                 if len(image_url) > 0:
                     # Fetch image bytes from MinIO (supports s3://bucket/key or /bucket/key)

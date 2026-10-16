@@ -129,8 +129,7 @@ sys.modules['backend.database.db_models'] = db_models_mock
 
 # 现在可以安全地导入被测试的模块
 for module_name, function_name in (
-    ("database.tool_db", "query_tool_knowledge_bindings"),
-    ("database.skill_db", "query_skill_knowledge_bindings"),
+    ("database.tool_db", "query_tool_knowledge_references"),
 ):
     collaborator = types.ModuleType(module_name)
     setattr(collaborator, function_name, MagicMock())

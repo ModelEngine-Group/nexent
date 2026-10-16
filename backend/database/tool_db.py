@@ -4,8 +4,10 @@
 import json
 import logging
 import re
-from typing import Any, Dict, List, Optional, Sequence, Set
+from typing import Dict, List, Optional, Sequence, Set
 
+from sqlalchemy import cast, or_
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Session
 
 from consts.model import ToolSourceEnum
@@ -413,7 +415,7 @@ def add_tool_field(tool_info):
                 ele["default"] = instance_value
         tool_dict = as_dict(tool)
         tool_dict["params"] = tool_params
-
+        
         # Merge description_zh from SDK for local tools
         tool_name = tool_dict.get("name")
         if tool_dict.get("source") == "local":
@@ -421,7 +423,7 @@ def add_tool_field(tool_info):
             if tool_name in local_tool_descriptions:
                 sdk_info = local_tool_descriptions[tool_name]
                 tool_dict["description_zh"] = sdk_info.get("description_zh")
-
+                
                 # Merge params description_zh from SDK
                 for param in tool_params:
                     if not param.get("description_zh"):
@@ -429,7 +431,7 @@ def add_tool_field(tool_info):
                             if sdk_param.get("name") == param.get("name"):
                                 param["description_zh"] = sdk_param.get("description_zh")
                                 break
-
+                
                 # Merge inputs description_zh from SDK
                 inputs_str = tool_dict.get("inputs", "{}")
                 try:
@@ -443,7 +445,7 @@ def add_tool_field(tool_info):
                         tool_dict["inputs"] = json.dumps(inputs, ensure_ascii=False)
                 except (json.JSONDecodeError, TypeError):
                     pass
-
+        
         # combine tool_info and tool_dict
         tool_info.update(tool_dict)
         return tool_info
@@ -548,122 +550,39 @@ def search_last_tool_instance_by_tool_id(tool_id: int, tenant_id: str, user_id: 
         return as_dict(tool_instance) if tool_instance else None
 
 
-def parse_knowledge_selection(value: Any) -> List[str]:
-    """Read lists or JSON arrays, as produced by the knowledge selectors."""
-    if isinstance(value, str):
-        try:
-            value = json.loads(value)
-        except json.JSONDecodeError:
-            return []
-    if not isinstance(value, list):
-        return []
-    return list(dict.fromkeys(
-        str(item).strip() for item in value
-        if type(item) in (str, int) and str(item).strip()
-    ))
-
-
-def query_knowledge_tool_ids(session: Session, param_name: str) -> Set[int]:
-    """Return ids of managed retrieval tools whose params may carry ``param_name``."""
-    names = [
-        name
-        for name, mapped_param in {"knowledge_base_search": "index_names", "aidp_search": "kds_list"}.items()
-        if mapped_param == param_name
-    ]
-    if not names:
-        return set()
-    rows = (
-        session.query(ToolInfo.tool_id)
-        .filter(
-            ToolInfo.name.in_(tuple(names)),
-            ToolInfo.delete_flag != "Y",
-        )
-        .all()
+def _query_knowledge_tool_instances(session: Session, param_name: str, resource_ids: Set[str]):
+    """Select live tool configurations containing at least one requested ID."""
+    tool_name = {"index_names": "knowledge_base_search", "kds_list": "aidp_search"}[param_name]
+    return session.query(ToolInstance).join(
+        ToolInfo, ToolInfo.tool_id == ToolInstance.tool_id,
+    ).filter(
+        ToolInfo.name == tool_name,
+        ToolInfo.delete_flag != "Y",
+        ToolInstance.delete_flag != "Y",
+        or_(*(cast(ToolInstance.params[param_name], JSONB).contains([resource_id])
+              for resource_id in sorted(resource_ids))),
     )
-    return {int(row[0]) for row in rows if row[0] is not None}
 
 
-def query_tool_knowledge_bindings(
-    session: Session,
-    param_name: str,
-    resource_ids: Set[str],
-) -> List[Dict[str, Any]]:
-    """Return agent/version pairs whose tool selections contain a requested ID."""
-    tool_ids = query_knowledge_tool_ids(session, param_name)
-    if not tool_ids:
-        return []
-    instances = (
-        session.query(ToolInstance)
-        .filter(
-            ToolInstance.tool_id.in_(tuple(tool_ids)),
-            ToolInstance.delete_flag != "Y",
-        )
-        .all()
-    )
-    rows: List[Dict[str, Any]] = []
-    for instance in instances:
-        data = as_dict(instance) or {}
-        params = data.get("params") or {}
-        if not isinstance(params, dict):
-            continue
-        if not resource_ids.intersection(parse_knowledge_selection(params.get(param_name))):
-            continue
-        rows.append(
-            {
-                "agent_id": data.get("agent_id"),
-                "version_no": int(data.get("version_no") or 0),
-            }
-        )
-    return rows
+def query_tool_knowledge_references(
+    session: Session, param_name: str, resource_ids: Set[str],
+) -> List[Dict[str, int]]:
+    """Return agent/version pairs whose tool configurations reference the IDs."""
+    rows = _query_knowledge_tool_instances(session, param_name, resource_ids).with_entities(
+        ToolInstance.agent_id, ToolInstance.version_no,
+    ).distinct().all()
+    return [{"agent_id": row.agent_id, "version_no": row.version_no} for row in rows]
 
 
-def remove_tool_knowledge_bindings(
+def remove_tool_knowledge_references(
     session: Session, *, index_names: Sequence[str] = (), kds_ids: Sequence[str] = (),
-) -> int:
-    """Remove deleted knowledge selections from draft and published tool params."""
-    changed = 0
-    targets_by_param = {name: set(ids) for name, ids in (
-        ("index_names", index_names), ("kds_list", kds_ids),
-    ) if ids}
-    for param_name, target_ids in targets_by_param.items():
-        tool_ids = query_knowledge_tool_ids(session, param_name)
-        if not tool_ids:
+) -> None:
+    """Remove deleted IDs from draft and published tool configurations."""
+    for param_name, ids in (("index_names", index_names), ("kds_list", kds_ids)):
+        if not ids:
             continue
-        instances = (
-            session.query(ToolInstance)
-            .filter(
-                ToolInstance.tool_id.in_(tuple(tool_ids)),
-                ToolInstance.delete_flag != "Y",
-            )
-            .all()
-        )
-        for instance in instances:
-            data = as_dict(instance) or {}
-            params = data.get("params") or {}
-            if not isinstance(params, dict):
-                continue
-            current = params.get(param_name)
-            ids = parse_knowledge_selection(current)
-            if not target_ids.intersection(ids):
-                continue
-            names = params.get("display_names")
-            aligned_names = (
-                list(names)
-                if isinstance(names, list) and len(names) == len(ids)
-                else None
-            )
-            kept_ids = [item for item in ids if item not in target_ids]
-            updated = dict(params)
-            updated[param_name] = (
-                json.dumps(kept_ids) if isinstance(current, str) else kept_ids
-            )
-            if aligned_names is not None:
-                updated["display_names"] = [
-                    name
-                    for item, name in zip(ids, aligned_names)
-                    if item not in target_ids
-                ]
-            instance.params = updated
-            changed += 1
-
-    return changed
+        deleted_ids = set(ids)
+        for instance in _query_knowledge_tool_instances(session, param_name, deleted_ids).all():
+            params = dict(instance.params)
+            params[param_name] = [item for item in params[param_name] if item not in deleted_ids]
+            instance.params = params

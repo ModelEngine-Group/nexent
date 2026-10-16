@@ -983,7 +983,6 @@
   "knowledgeBase.message.deleteBlockedWithFiles": "知识库包含正在处理的文件，暂时无法删除：{{files}}",
   "knowledgeBase.message.deleteBlockedByAgents": "该知识库仍被智能体引用，请先在相关智能体中移除后再删除",
   "knowledgeBase.deleteNotice.agentsIntro": "以下智能体绑定了该知识库，删除后会同步移除它们的绑定：",
-  "knowledgeBase.deleteNotice.hiddenAgents": "另有 {{count}} 个智能体（你无权查看详情）也会被同步移除。",
   "knowledgeBase.deleteNotice.conversationsNotice": "会话中绑定的该知识库也会被同步移除。",
   "knowledgeBase.message.syncSuccess": "同步知识库成功",
   "knowledgeBase.message.syncError": "同步知识库失败",

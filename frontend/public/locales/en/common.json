@@ -1014,7 +1014,6 @@
   "knowledgeBase.message.deleteBlockedWithFiles": "The knowledge base cannot be deleted while files are being processed: {{files}}",
   "knowledgeBase.message.deleteBlockedByAgents": "This knowledge base is still referenced by agents. Remove the references first, then delete it.",
   "knowledgeBase.deleteNotice.agentsIntro": "The following agents are bound to this knowledge base; their bindings will be removed together with it:",
-  "knowledgeBase.deleteNotice.hiddenAgents": "Bindings of {{count}} additional agent(s) you cannot view will also be removed.",
   "knowledgeBase.deleteNotice.conversationsNotice": "Bindings of this knowledge base in conversations will also be removed.",
   "knowledgeBase.message.syncSuccess": "Knowledge base synchronized successfully",
   "knowledgeBase.message.syncError": "Failed to synchronize knowledge base",

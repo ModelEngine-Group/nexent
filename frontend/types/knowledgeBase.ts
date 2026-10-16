@@ -251,6 +251,4 @@ export interface KnowledgeBaseListQuery {
 
 export interface KnowledgeBaseDeletionPreview {
   agents: { agent_id: number; display_name: string }[];
-  hidden_agent_count: number;
-  total_agent_count: number;
 }

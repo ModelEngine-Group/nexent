@@ -1,11 +1,8 @@
-# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
-
 import math
 from datetime import datetime
 from enum import Enum
-from typing import Any, Dict, List, Literal, Optional
+from typing import Optional, Any, List, Dict, Literal
 
-from nexent.core.agents.agent_model import AgentVerificationConfig, ToolConfig
 from pydantic import (
     BaseModel,
     ConfigDict,
@@ -14,6 +11,7 @@ from pydantic import (
     field_validator,
     model_validator,
 )
+from nexent.core.agents.agent_model import AgentVerificationConfig, ToolConfig
 
 from consts.prompt_template import PROMPT_GENERATE_TEMPLATE_FIELD_ALIAS_MAP
 

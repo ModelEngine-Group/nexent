@@ -26,7 +26,7 @@ def isolate_binding_cleanup(monkeypatch):
     """Storage deletion tests isolate binding persistence, tested separately."""
     module = importlib.import_module("management.services.knowledge_base.management")
     monkeypatch.setattr(module, "get_db_session", MagicMock())
-    for name in ("remove_tool_knowledge_bindings", "remove_skill_knowledge_bindings", "remove_conversation_knowledge_bindings"):
+    for name in ("remove_tool_knowledge_references", "remove_conversation_knowledge_bindings"):
         monkeypatch.setattr(module, name, MagicMock())
 
 
@@ -374,7 +374,6 @@ def _mock_postprocess_knowledge_visibility(items, caller_role=None, caller_tenan
 
 asset_owner_visibility_mock = types.ModuleType('services.asset_owner_visibility')
 asset_owner_visibility_mock.postprocess_knowledge_visibility = _mock_postprocess_knowledge_visibility
-asset_owner_visibility_mock.get_visible_agent_names = MagicMock()
 sys.modules['services.asset_owner_visibility'] = asset_owner_visibility_mock
 setattr(sys.modules['services'], 'asset_owner_visibility', asset_owner_visibility_mock)
 
@@ -489,9 +488,8 @@ sys.modules['backend.database.client'] = backend_database_client_module
 # Storage deletion tests isolate Agent previews and binding persistence.
 # Their actual implementations are covered in focused app/database tests.
 for module_name, functions in {
-    "database.agent_db": ("query_binding_agent_metadata", "query_live_knowledge_bindings"),
-    "database.tool_db": ("remove_tool_knowledge_bindings",),
-    "database.skill_db": ("remove_skill_knowledge_bindings",),
+    "database.agent_db": ("query_knowledge_binding_agents",),
+    "database.tool_db": ("remove_tool_knowledge_references",),
     "database.conversation_db": ("remove_conversation_knowledge_bindings",),
 }.items():
     boundary_module = sys.modules.get(module_name) or types.ModuleType(module_name)

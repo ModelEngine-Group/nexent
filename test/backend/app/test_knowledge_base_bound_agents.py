@@ -1,6 +1,6 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
-"""The existing ES/AIDP apps own deletion previews and offload synchronous I/O."""
+"""Deletion previews retain direct authentication and offload binding queries."""
 
 import threading
 from unittest.mock import AsyncMock, MagicMock
@@ -24,7 +24,7 @@ from consts.exceptions import TokenExpiredError
 from middleware.exception_handler import ExceptionHandlerMiddleware
 
 
-EMPTY = {"agents": [], "hidden_agent_count": 0, "total_agent_count": 0}
+EMPTY = {"agents": []}
 
 
 @pytest.fixture(params=["local", "aidp"])
@@ -58,9 +58,10 @@ def test_preview_uses_existing_business_route_and_returns_contract(preview):
     response = client.get(f"{prefix}/missing-kb/bound_agents", headers={"Authorization": "Bearer fixture"})
     assert response.status_code == 200
     assert response.json() == EMPTY
-    collect.assert_called_once_with(["missing-kb"], user_id="u1", tenant_id="t1")
+    collect.assert_called_once_with(["missing-kb"], tenant_id="t1")
     auth.assert_called_once_with("Bearer fixture")
-    assert worker.await_count == 2  # Both authentication and binding reads are managed.
+    worker.assert_awaited_once()
+    assert worker.call_args.args[1] is collect
 
 
 def test_preview_does_not_expose_retired_shared_endpoint(preview):
@@ -95,12 +96,12 @@ def test_database_failure_is_not_returned_as_an_empty_preview(preview):
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("local", [True, False])
-async def test_sync_auth_and_binding_query_both_run_outside_event_loop(monkeypatch, local):
+async def test_auth_runs_directly_and_binding_query_runs_in_managed_worker(monkeypatch, local):
     event_loop_thread = threading.get_ident()
     events = []
 
     def auth(_):
-        assert threading.get_ident() != event_loop_thread
+        assert threading.get_ident() == event_loop_thread
         events.append("auth")
         return "u1", "t1"
 

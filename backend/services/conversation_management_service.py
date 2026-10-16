@@ -1,17 +1,16 @@
-# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
-
 import json
 import logging
+
+from utils.time_context_utils import strip_current_time_prefix
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
-from nexent.core.agents.prompt.auxiliary import compose_auxiliary_prompt
 from nexent.core.concurrency import run_blocking
 from nexent.monitor import get_monitoring_manager, set_monitoring_context, set_monitoring_operation
 
-from consts.const import DEFAULT_EN_TITLE, DEFAULT_ZH_TITLE, LANGUAGE, MESSAGE_ROLE, MODEL_CONFIG_MAPPING
-from consts.exceptions import AppException, ConversationNotFoundError, ValidationError
+from consts.const import LANGUAGE, MODEL_CONFIG_MAPPING, MESSAGE_ROLE, DEFAULT_EN_TITLE, DEFAULT_ZH_TITLE
 from consts.model import AgentRequest, MessageRequest, MessageUnit
+from consts.exceptions import AppException, ConversationNotFoundError, ValidationError
 from database.conversation_db import (
     CHAT_MODE_VALUES,
     create_conversation,
@@ -24,22 +23,23 @@ from database.conversation_db import (
     get_conversation,
     get_conversation_history,
     get_historical_context,
-    get_last_unit_for_message,  # noqa: F401 - service boundary re-export
     get_latest_assistant_message,  # noqa: F401 - service boundary re-export
     get_latest_assistant_message_id,
     get_latest_user_message_id,
+    get_last_unit_for_message,  # noqa: F401 - service boundary re-export
     get_message_id_by_index,
     get_source_images_by_conversation,
     get_source_images_by_message,
     get_source_searches_by_conversation,
     get_source_searches_by_message,
+    persist_assistant_run_batch as persist_assistant_run_batch_db,
     rename_conversation,
-    replace_conversation_workbench_and_metadata,
-    replace_conversation_workbench_config,
     save_history_summary,
     update_conversation_agent_id,
     update_conversation_chat_mode,
     update_conversation_knowledge_scope,
+    replace_conversation_workbench_config,
+    replace_conversation_workbench_and_metadata,
     update_conversation_message_content,
     update_conversation_message_status,
     update_message_minio_files,
@@ -47,15 +47,11 @@ from database.conversation_db import (
     update_message_unit_content,
     update_message_unit_status,
 )
-from database.conversation_db import (
-    persist_assistant_run_batch as persist_assistant_run_batch_db,
-)
 from database.model_management_db import get_model_by_model_id
 from management.services.model.adapter import get_llm_adapter_from_config
 from utils.config_utils import tenant_config_manager
+from nexent.core.agents.prompt.auxiliary import compose_auxiliary_prompt
 from utils.str_utils import remove_think_blocks
-from utils.time_context_utils import strip_current_time_prefix
-
 
 logger = logging.getLogger("conversation_management_service")
 monitoring_manager = get_monitoring_manager()

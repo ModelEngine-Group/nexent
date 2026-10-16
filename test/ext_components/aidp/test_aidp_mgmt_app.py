@@ -1801,8 +1801,6 @@ class TestAIDPServerSideKnowledgeFileQueries:
 
         async def run_blocking(name, _function, *args, **kwargs):
             calls.append((name, args, kwargs))
-            if name == "authenticate-aidp-request":
-                return _function(*args)
             if name == "aidp-list-documents":
                 return {"value": [{"file_uuid": "f-1", "file_name": "policy.pdf"}], "next_link": "/next"}
             if name == "aidp-document-count":
@@ -1821,7 +1819,7 @@ class TestAIDPServerSideKnowledgeFileQueries:
         assert body["total_reliable"] is True
         assert body["has_more"] is True
         assert {call[0] for call in calls} == {
-            "authenticate-aidp-request", "aidp-list-documents", "aidp-document-count"
+            "aidp-list-documents", "aidp-document-count"
         }
 
     def test_unfiltered_ingested_file_list_propagates_list_failure(self, monkeypatch):
@@ -1835,8 +1833,6 @@ class TestAIDPServerSideKnowledgeFileQueries:
         )
 
         async def run_blocking(name, _function, *args, **kwargs):
-            if name == "authenticate-aidp-request":
-                return _function(*args)
             if name == "aidp-list-documents":
                 raise list_error
             if name == "aidp-document-count":

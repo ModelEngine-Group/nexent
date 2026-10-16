@@ -1,8 +1,7 @@
-# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
-
 """Shared Agent read projections and availability rules."""
 
 from dataclasses import dataclass
+
 from typing import Dict, Optional
 
 from consts.agent_unavailable_reasons import AgentUnavailableReason
