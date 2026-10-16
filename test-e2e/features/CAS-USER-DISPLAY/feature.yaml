@@ -1,0 +1,19 @@
+schema_version: '1.0'
+module:
+  id: AUTH-IDENTITY
+  name: User identity presentation
+feature:
+  feature_id: CAS-USER-DISPLAY
+  name: CAS username presentation without identity mutations
+  status: active
+  description: Prefer linked CAS usernames for CAS viewers while retaining legacy identity values and operations.
+  business_rules:
+  - rule_id: CAS-DISPLAY-RULE-01
+    description: CAS viewers prefer nonblank CAS usernames and username identity column labels; other viewers preserve legacy values and email labels.
+  - rule_id: CAS-DISPLAY-RULE-02
+    description: Optional response metadata does not replace original email, IDs, author text, filtering or mutation payloads.
+  - rule_id: CAS-DISPLAY-RULE-03
+    description: Batch enrichment uses active explicitly linked identities and safely falls back when unavailable.
+  required_test_stages: [D2]
+  source:
+    spec_path: nexent-doc/docs/Developing/auth-cas-user-display/design.md

@@ -1,3 +1,5 @@
+# Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 """Completion-event unit regressions at the stream-to-persistence boundary."""
 
 import asyncio
@@ -81,3 +83,27 @@ async def test_child_empty_completion_does_not_replace_or_repeat_parent_result(s
     assert [(item.get("invocation_id"), item["content"]) for item in batch["message_units"]] == [
         ("child", "Child"), (None, "Parent")]
     assert batch["message_content"] == "Parent"
+
+
+@pytest.mark.asyncio
+async def test_search_hit_snapshots_survive_stream_buffering_without_filename_grouping(stream_capture):
+    metadata = [{"count": 0, "enabled": False, "tags": [0, False]}, {"standards": {"code": {"level": "E"}}}]
+    hits = [
+        {"title": "same.pdf", "filename": "same.pdf", "text": f"chunk {index}", "url": "",
+         "source_type": "file", "search_type": "aidp_search", "tool_sign": "j", "cite_index": index + 1,
+         "score_details": {"metadata": value, "chunk_id": f"chunk-{index}", "retrieval_source": "vector"}}
+        for index, value in enumerate(metadata)
+    ]
+    published, batch = await stream_capture([
+        {"type": "search_content", "content": json.dumps(hits), "tool_call_id": "call-search", "invocation_id": "child"},
+        {"type": "final_answer", "content": "Answer [[j1]][[j2]]"},
+    ])
+    assert json.loads(published[0]["content"]) == hits
+    records = batch["search_records"]
+    assert len(records) == 2
+    assert [record["aidp_metadata"] for record in records] == metadata
+    assert [record["aidp_source_reference"]["chunk_id"] for record in records] == ["chunk-0", "chunk-1"]
+    assert all("metadata" not in record["aidp_source_reference"] for record in records)
+    unit = batch["message_units"][0]
+    assert unit["tool_call_id"] == "call-search" and unit["invocation_id"] == "child"
+    assert all(record["unit_index"] == unit["unit_index"] for record in records)

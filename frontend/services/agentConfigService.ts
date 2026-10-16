@@ -1,3 +1,5 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import {
   API_ENDPOINTS,
   ApiError,
@@ -114,6 +116,7 @@ export const fetchTools = async () => {
           : [],
       updated_by: tool.updated_by || "",
       updated_by_name: tool.updated_by_name || "",
+      updated_by_cas_username: tool.updated_by_cas_username,
       inputs: tool.inputs,
       initParams: tool.params.map((param: any) => {
         return {
@@ -161,6 +164,7 @@ type AgentListApiItem = {
   display_name?: string;
   description: string;
   author?: string;
+  author_cas_username?: string | null;
   created_by?: string | null;
   create_time?: string;
   update_time?: string;
@@ -193,6 +197,7 @@ const formatAgentListItem = (agent: AgentListApiItem): Agent =>
     display_name: agent.display_name || agent.name,
     description: agent.description,
     author: agent.author,
+    author_cas_username: agent.author_cas_username,
     created_by: agent.created_by,
     create_time: agent.create_time,
     update_time: agent.update_time,
@@ -367,6 +372,7 @@ export const fetchPublishedAgentList = async () => {
       display_name: agent.display_name || agent.name,
       description: agent.description,
       author: agent.author,
+      author_cas_username: agent.author_cas_username,
       model_ids: agent.model_ids || (agent.model_id ? [agent.model_id] : []),
       model_names:
         agent.model_names || (agent.model_name ? [agent.model_name] : []),
@@ -561,6 +567,7 @@ export interface UpdateAgentInfoPayload {
   display_name?: string;
   description?: string;
   author?: string;
+  author_cas_username?: string | null;
   duty_prompt?: string;
   constraint_prompt?: string;
   few_shots_prompt?: string;
@@ -1068,6 +1075,7 @@ export const searchAgentInfo = async (
       display_name: data.display_name,
       description: data.description,
       author: data.author,
+      author_cas_username: data.author_cas_username,
       icon_url: data.icon_url,
       model:
         data.model_name ||
@@ -1206,6 +1214,7 @@ export const fetchAllAgents = async () => {
       display_name: agent.display_name || agent.name,
       description: agent.description,
       author: agent.author,
+      author_cas_username: agent.author_cas_username,
       is_available: agent.is_available,
       is_new: agent.is_new || false,
     }));

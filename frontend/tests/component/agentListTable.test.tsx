@@ -1,7 +1,7 @@
 // Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
 import { fireEvent, render, screen, within } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import AgentListTable, {
   formatAgentUpdateTime,
@@ -12,6 +12,12 @@ import {
 } from "../../app/[locale]/agents/components/agent-table-column-widths";
 import AgentTableHeader from "../../app/[locale]/agents/components/agent-list-table-header";
 import type { Agent } from "@/types/agentConfig";
+
+const session = vi.hoisted(() => ({ provider: "local" }));
+
+vi.mock("@/components/providers/AuthorizationProvider", () => ({
+  useAuthorizationContext: () => ({ user: { authProvider: session.provider } }),
+}));
 
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({
@@ -88,6 +94,43 @@ const secondAgent = {
 } as Agent;
 
 describe("AgentListTable", () => {
+  beforeEach(() => {
+    session.provider = "local";
+  });
+
+  it.each([
+    ["cas", "平台作者"],
+    ["local", "刘晨"],
+  ])(
+    "preserves creator identity and resizable columns for a %s viewer",
+    (provider, displayName) => {
+      session.provider = provider;
+      const agent = { ...firstAgent, author_cas_username: "平台作者" };
+      render(
+        <AgentListTable
+          agents={[agent, { ...secondAgent, author: "Imported Author" }]}
+          onOpen={vi.fn()}
+          onConfigure={vi.fn()}
+          onPublish={vi.fn()}
+          onManageVersions={vi.fn()}
+        />
+      );
+      const firstRow = screen
+        .getByRole("button", { name: agent.display_name })
+        .closest("tr")!;
+      expect(within(firstRow).getByText(displayName)).toBeInTheDocument();
+      expect(
+        within(firstRow).queryByText(provider === "cas" ? "刘晨" : "平台作者")
+      ).not.toBeInTheDocument();
+      expect(screen.getByText("Imported Author")).toBeInTheDocument();
+      expect(screen.getAllByRole("separator")).toHaveLength(7);
+      expect(screen.getByRole("columnheader", { name: "操作" })).toHaveClass(
+        "ant-table-cell-fix-end"
+      );
+      expect(agent.author).toBe("刘晨");
+      expect(agent.author_cas_username).toBe("平台作者");
+    }
+  );
   it("renders the specified columns and uses only update_time for the date", () => {
     const { getByTestId } = render(
       <AgentListTable

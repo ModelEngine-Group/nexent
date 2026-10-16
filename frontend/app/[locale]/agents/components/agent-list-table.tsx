@@ -5,6 +5,7 @@
 import { useEffect, useRef, useState } from "react";
 import { ConfigProvider, Table, Tag } from "antd";
 import type { ColumnsType } from "antd/es/table";
+import { UserIdentity } from "@/components/auth/UserIdentity";
 import { useTranslation } from "react-i18next";
 
 import AgentConfigActions from "./agent-config-actions";
@@ -181,8 +182,13 @@ export default function AgentListTable({
       dataIndex: "author",
       key: "creator",
       ellipsis: true,
-      render: (author: string | undefined) => (
-        <span className="text-[#64748b]">{author?.trim() || "-"}</span>
+      render: (author: string | undefined, agent: Agent) => (
+        <span className="text-[#64748b]">
+          <UserIdentity
+            casUsername={agent.author_cas_username}
+            fallback={author?.trim() || "-"}
+          />
+        </span>
       ),
     },
     {

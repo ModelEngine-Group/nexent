@@ -439,7 +439,6 @@ function AgentSetupContent({
                 key={`${currentAgentId ?? "unselected"}-${sessionGeneration}`}
                 agentId={currentAgentId}
                 showOptimizationSuggestions={showOptimizationSuggestions}
-                configurationLayout
                 disabled={
                   isComposerDisabled ||
                   isRequestedAgentLoading ||

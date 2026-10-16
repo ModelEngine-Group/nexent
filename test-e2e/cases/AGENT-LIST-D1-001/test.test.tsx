@@ -11,6 +11,10 @@ import AgentListTable, {
 } from "@/app/[locale]/agents/components/agent-list-table";
 import type { Agent } from "@/types/agentConfig";
 
+vi.mock("@/components/providers/AuthorizationProvider", () => ({
+  useAuthorizationContext: () => ({ user: { authProvider: "local" } }),
+}));
+
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({
     t: (key: string) => {

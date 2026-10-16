@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import logging
 import uuid
 from typing import Any, Collection, Dict, FrozenSet, List, Optional, Tuple
@@ -56,6 +58,8 @@ from services.notification_service import (
     deactivate_notifications,
 )
 from services.repository_import_precheck import build_repository_import_precheck
+
+from services.user_identity_service import enrich_repository_identities, repository_identity_fields
 
 logger = logging.getLogger("agent_repository_service")
 
@@ -161,6 +165,7 @@ def _to_summary_item(
         "agent_repository_id": record.get("agent_repository_id"),
         "agent_id": agent_id,
         "author": record.get("author"),
+        **repository_identity_fields(record),
         "submitted_by": record.get("submitted_by"),
         "name": record.get("name"),
         "display_name": record.get("display_name"),
@@ -337,6 +342,7 @@ def list_agent_repository_listings_impl(
     total = len(records)
     start = (page - 1) * page_size
     paged_records = records[start: start + page_size]
+    enrich_repository_identities(paged_records, "agent")
     paged_agent_ids = [
         int(record["agent_id"])
         for record in paged_records
@@ -845,6 +851,7 @@ def get_agent_repository_listing_detail_impl(
         )
     if not record:
         raise ValueError("Repository listing not found")
+    enrich_repository_identities([record], "agent")
     root_agent = _extract_root_agent_from_snapshot(record.get("agent_info_json"))
     agent_id = record.get("agent_id")
     download_total = 0
@@ -862,6 +869,7 @@ def get_agent_repository_listing_detail_impl(
         "display_name": record.get("display_name"),
         "description": record.get("description"),
         "author": record.get("author"),
+        **repository_identity_fields(record),
         "submitted_by": record.get("submitted_by"),
         "icon_url": record.get("icon_url"),
         "status": record.get("status"),
@@ -1044,6 +1052,7 @@ def update_agent_repository_status_impl(
         notify_content=notify_content,
     )
 
+    enrich_repository_identities([updated], "agent")
     return _to_summary_item(updated)
 
 
@@ -1096,6 +1105,7 @@ def _to_list_item(record: Dict[str, Any]) -> Dict[str, Any]:
         "display_name": record.get("display_name"),
         "description": record.get("description"),
         "author": record.get("author"),
+        **repository_identity_fields(record),
         "submitted_by": record.get("submitted_by"),
         "tags": record.get("tags") or [],
         "tool_count": record.get("tool_count"),
@@ -1118,6 +1128,7 @@ def _to_detail_item(
     is_updated: Optional[bool] = None,
 ) -> Dict[str, Any]:
     """Map a DB record to a marketplace detail payload."""
+    enrich_repository_identities([record], "agent")
     detail = _to_list_item(record)
     if include_bundles:
         detail["agent_info_json"] = record.get("agent_info_json")

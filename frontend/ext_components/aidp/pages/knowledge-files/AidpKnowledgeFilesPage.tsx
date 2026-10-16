@@ -1,4 +1,8 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 "use client";
+
+import { UserIdentity } from "@/components/auth/UserIdentity";
 
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
@@ -485,7 +489,10 @@ const AidpKnowledgeFilesPage: React.FC<AidpKnowledgeFilesPageProps> = ({
               <div className="flex min-w-0 items-center gap-3">
                 <UserOutlined className="rounded-lg bg-violet-100 p-2 text-lg text-violet-600" />
                 <AidpDetailField label={t("aidpKnowledge.detailCreator")}>
-                  {formatAidpCreator(detail.creator_name)}
+                  <UserIdentity
+                    casUsername={detail.creator_cas_username}
+                    fallback={formatAidpCreator(detail.creator_name)}
+                  />
                 </AidpDetailField>
               </div>
             </dl>
