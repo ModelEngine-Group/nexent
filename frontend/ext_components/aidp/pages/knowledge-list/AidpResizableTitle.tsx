@@ -1,3 +1,5 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 "use client";
 
 import React, { useEffect, useRef } from "react";
@@ -11,6 +13,8 @@ export interface AidpResizableTitleProps extends Omit<
 > {
   width?: number;
   maxWidth?: number;
+  /** Smallest width the resize handle can drag this column to. */
+  minWidth?: number;
   onResize?: (delta: number, widths: Record<string, number>) => void;
 }
 
@@ -29,6 +33,9 @@ function measureWidths(handle: HTMLElement): Record<string, number> {
 const AidpResizableTitle: React.FC<AidpResizableTitleProps> = ({
   width,
   maxWidth,
+  // Declared here so it is not forwarded to the <th>: React would reject the
+  // unknown attribute and print a warning for every header cell.
+  minWidth,
   onResize,
   children,
   ...rest
@@ -65,7 +72,7 @@ const AidpResizableTitle: React.FC<AidpResizableTitleProps> = ({
           tabIndex={0}
           aria-orientation="vertical"
           aria-label={t("aidpKnowledge.resizeColumn")}
-          aria-valuemin={AIDP_MIN_COLUMN_WIDTH}
+          aria-valuemin={minWidth ?? AIDP_MIN_COLUMN_WIDTH}
           aria-valuemax={maxWidth}
           aria-valuenow={width}
           className={styles.columnResizeHandle}
