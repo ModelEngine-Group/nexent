@@ -34,6 +34,7 @@ import {
   recordThreadActivity,
   startAgentConversation,
 } from "./adapter/thread-agent-registry";
+import { applyComposerRunConfig } from "./adapter/composer-run-config";
 import { remoteChatModelAdapter } from "./adapter/remote-chat-model-adapter";
 import { createNewChatAttachmentAdapter } from "./adapter/attachment-adapter";
 import {
@@ -643,39 +644,37 @@ const HomeContent: FC<{
   // conversation_id returned in the response header, which we then reuse as
   // `threadId` for future runs in the same thread.
   useEffect(() => {
-    runtime.thread.composer.setRunConfig({
-      custom: {
-        ...(selectedAgent?.id ? { agentId: selectedAgent.id } : {}),
-        ...(selectedAgent?.current_version_no
-          ? {
-              agentVersionNo: selectedAgent.current_version_no,
-            }
-          : {}),
-        ...(activeConversationId ? { threadId: activeConversationId } : {}),
-        ...(knowledgeScope ? { knowledgeScope } : {}),
-        ...(runtimeMetadataDirty ? { runtimeMetadata } : {}),
-        ...(runtimeMetadataDirty && Number(activeConversationId) > 0
-          ? { runtimeMetadataVersion }
-          : {}),
-        onRuntimeMetadataSent: handleRuntimeMetadataSent,
-        onKnowledgeScopeResolved: handleKnowledgeScopeResolved,
-        onGenerationStopped: handleGenerationStopped,
+    applyComposerRunConfig(runtime, activeThreadId, {
+      ...(selectedAgent?.id ? { agentId: selectedAgent.id } : {}),
+      ...(selectedAgent?.current_version_no
+        ? {
+            agentVersionNo: selectedAgent.current_version_no,
+          }
+        : {}),
+      ...(activeConversationId ? { threadId: activeConversationId } : {}),
+      ...(knowledgeScope ? { knowledgeScope } : {}),
+      ...(runtimeMetadataDirty ? { runtimeMetadata } : {}),
+      ...(runtimeMetadataDirty && Number(activeConversationId) > 0
+        ? { runtimeMetadataVersion }
+        : {}),
+      onRuntimeMetadataSent: handleRuntimeMetadataSent,
+      onKnowledgeScopeResolved: handleKnowledgeScopeResolved,
+      onGenerationStopped: handleGenerationStopped,
 
-        enablePlan: chatMode === "planning",
-        ...(activeThreadId
-          ? {
-              onServerConversationId: (
-                serverId: string,
-                initialQuestion?: string
-              ) =>
-                handleServerConversationId(
-                  activeThreadId,
-                  serverId,
-                  initialQuestion
-                ),
-            }
-          : {}),
-      },
+      enablePlan: chatMode === "planning",
+      ...(activeThreadId
+        ? {
+            onServerConversationId: (
+              serverId: string,
+              initialQuestion?: string
+            ) =>
+              handleServerConversationId(
+                activeThreadId,
+                serverId,
+                initialQuestion
+              ),
+          }
+        : {}),
     });
   }, [
     runtime,
