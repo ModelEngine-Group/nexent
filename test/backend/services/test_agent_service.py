@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import importlib.machinery
 from pathlib import Path
 import sys
@@ -5694,6 +5696,7 @@ async def test_run_agent_stream_auto_creates_conversation_when_missing(
     mock_save_messages,
     mock_generate_stream,
     mock_create_conversation,
+    mock_resolve_identity,
     mock_agent_request,
     mock_http_request,
 ):
@@ -5716,6 +5719,12 @@ async def test_run_agent_stream_auto_creates_conversation_when_missing(
     )
 
     # Assert conversation was created
+    mock_resolve_identity.assert_called_once_with(
+        authorization="Bearer token",
+        http_request=mock_http_request,
+        user_id=None,
+        tenant_id=None,
+    )
     mock_create_conversation.assert_called_once_with(
         title="New Conversation",
         user_id="u",

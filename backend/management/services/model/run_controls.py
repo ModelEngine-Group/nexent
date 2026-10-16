@@ -2,6 +2,7 @@
 
 """Resolve request-scoped root controls without mutating independent models."""
 
+from collections.abc import Callable
 from typing import Any
 
 from nexent.core.agents.agent_model import AgentConfig, ModelConfig
@@ -9,6 +10,44 @@ from nexent.core.agents.agent_model import AgentConfig, ModelConfig
 from consts.exceptions import RunModelControlsError
 from database.model_management_db import get_model_by_model_id
 from management.services.model.reasoning import reasoning_controls
+
+
+def _agent_record_for_run(request, tenant_id: str, lookup: Callable[..., dict]) -> dict:
+    """Resolve the same version while retaining the caller's Agent lookup boundary."""
+    from database.agent_db import query_current_version_no
+
+    return lookup(
+        agent_id=request.agent_id,
+        tenant_id=tenant_id,
+        version_no=request.version_no if request.version_no is not None
+        else (query_current_version_no(request.agent_id, tenant_id) or 0),
+    )
+
+
+def validate_agent_model_selection(request, tenant_id: str, lookup: Callable[..., dict]) -> None:
+    """Validate selected catalog models and native Agent associations before writes."""
+    selected_id = request.workbench.model_id if request.workbench else request.model_id
+    if selected_id is None:
+        return
+    validate_selected_model(selected_id, tenant_id)
+    if request.entrypoint != "workbench" and not request.is_debug and request.agent_id:
+        configured = _agent_record_for_run(request, tenant_id, lookup).get("model_ids") or []
+        if configured and selected_id not in configured:
+            from consts.exceptions import ForbiddenError
+
+            raise ForbiddenError("The selected model is not configured for this Agent")
+
+
+def preflight_agent_turn_controls(request, tenant_id: str, lookup: Callable[..., dict]) -> None:
+    """Preflight only explicit model controls using the native Agent's defaults."""
+    if all(getattr(request, field) is None for field in (
+        "model_id", "generation_config", "reasoning_effort", "reasoning_budget_tokens",
+    )):
+        return
+    root_record = None
+    if request.entrypoint != "workbench" and request.agent_id:
+        root_record = _agent_record_for_run(request, tenant_id, lookup)
+    preflight_turn_controls(request, tenant_id, root_record)
 
 
 def validate_selected_model(model_id: int, tenant_id: str) -> dict[str, Any]:

@@ -1,4 +1,4 @@
-# Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
 import asyncio
 from copy import deepcopy
@@ -1612,19 +1612,9 @@ async def run_agent_stream(
         tenant_id=tenant_id,
     )
     if not resume:
-        from management.services.model.run_controls import validate_selected_model
-        selected_id = agent_request.workbench.model_id if agent_request.workbench else agent_request.model_id
-        if selected_id is not None:
-            validate_selected_model(selected_id, resolved_tenant_id)
-            if agent_request.entrypoint != "workbench" and not agent_request.is_debug and agent_request.agent_id:
-                from database.agent_db import query_current_version_no
-                configured = search_agent_info_by_agent_id(
-                    agent_id=agent_request.agent_id, tenant_id=resolved_tenant_id,
-                    version_no=agent_request.version_no if agent_request.version_no is not None
-                    else (query_current_version_no(agent_request.agent_id, resolved_tenant_id) or 0),
-                ).get("model_ids") or []
-                if configured and selected_id not in configured:
-                    raise ForbiddenError("The selected model is not configured for this Agent")
+        from management.services.model import run_controls
+
+        run_controls.validate_agent_model_selection(agent_request, resolved_tenant_id, search_agent_info_by_agent_id)
     if agent_request.is_debug and not resume:
         # Debug executions deliberately do not create conversations, so they
         # need a transient identifier for lifecycle operations such as stop.
@@ -1693,18 +1683,8 @@ async def run_agent_stream(
                 agent_request.expected_workbench_config_version,
             )
 
-    if not resume and (agent_request.model_id is not None or agent_request.generation_config is not None
-                       or agent_request.reasoning_effort is not None or agent_request.reasoning_budget_tokens is not None):
-        from management.services.model.run_controls import preflight_turn_controls
-        root_record = None
-        if agent_request.entrypoint != "workbench" and agent_request.agent_id:
-            from database.agent_db import query_current_version_no
-            root_record = search_agent_info_by_agent_id(
-                agent_id=agent_request.agent_id, tenant_id=resolved_tenant_id,
-                version_no=agent_request.version_no if agent_request.version_no is not None
-                else (query_current_version_no(agent_request.agent_id, resolved_tenant_id) or 0),
-            )
-        preflight_turn_controls(agent_request, resolved_tenant_id, root_record)
+    if not resume:
+        run_controls.preflight_agent_turn_controls(agent_request, resolved_tenant_id, search_agent_info_by_agent_id)
 
     metadata_supplied = "metadata" in agent_request.model_fields_set
     metadata_update_requested = metadata_supplied and agent_request.metadata is not None

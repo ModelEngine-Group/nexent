@@ -2,13 +2,20 @@
 
 """Isolated presence, capability and root identity policy tests."""
 
+from unittest.mock import Mock
+
 import pytest
+from nexent.core.agents.agent_model import AgentConfig, ModelConfig
 from pydantic import ValidationError
 
-from consts.exceptions import RunModelControlsError
-from consts.model import NL2AgentRunRequest, NL2SkillRunRequest, RuntimeGenerationOverrides
+from consts.exceptions import ForbiddenError, RunModelControlsError
+from consts.model import (
+    AgentRequest,
+    NL2AgentRunRequest,
+    NL2SkillRunRequest,
+    RuntimeGenerationOverrides,
+)
 from management.services.model import run_controls
-from nexent.core.agents.agent_model import AgentConfig, ModelConfig
 
 EFFORTS = ["none", "minimal", "low", "medium", "high", "xhigh", "max"]
 
@@ -122,3 +129,68 @@ def test_creator_alias_preserves_independent_models_and_real_record(mocker):
     assert models[-1].url == base.url and models[-1].model_name == base.model_name
     assert models[-1].max_input_tokens == 7000
     assert independent.model_name == "independent" and base.cite_name == "selected"
+
+
+@pytest.mark.parametrize("version_no,current,expected", [(3, 7, 3), (None, 7, 7), (None, None, 0)])
+def test_native_selection_preserves_agent_version_and_tenant(mocker, version_no, current, expected):
+    request = AgentRequest(agent_id=42, query="fixture", model_id=9, version_no=version_no)
+    catalog = mocker.patch.object(run_controls, "validate_selected_model")
+    published = mocker.patch("database.agent_db.query_current_version_no", return_value=current)
+    lookup = Mock(return_value={"model_ids": [9]})
+    run_controls.validate_agent_model_selection(request, "tenant", lookup)
+    catalog.assert_called_once_with(9, "tenant")
+    lookup.assert_called_once_with(agent_id=42, tenant_id="tenant", version_no=expected)
+    if version_no is None:
+        published.assert_called_once_with(42, "tenant")
+    else:
+        published.assert_not_called()
+    lookup.return_value = {"model_ids": [1]}
+    with pytest.raises(ForbiddenError, match="not configured"):
+        run_controls.validate_agent_model_selection(request, "tenant", lookup)
+
+
+def test_workbench_and_debug_selection_validate_catalog_without_native_agent_allowlist(mocker):
+    catalog = mocker.patch.object(run_controls, "validate_selected_model")
+    lookup = Mock()
+    for request in (
+        AgentRequest(agent_id=42, query="fixture", model_id=9, is_debug=True),
+        AgentRequest(query="fixture", model_id=1, entrypoint="workbench", workbench={"mode": "generic_chat", "model_id": 9}),
+    ):
+        run_controls.validate_agent_model_selection(request, "tenant", lookup)
+        catalog.assert_called_with(9, "tenant")
+    lookup.assert_not_called()
+    catalog.side_effect = RunModelControlsError("model_unavailable")
+    with pytest.raises(RunModelControlsError, match="model_unavailable"):
+        run_controls.validate_agent_model_selection(request, "tenant", lookup)
+    lookup.assert_not_called()
+
+
+def test_default_run_does_not_lookup_or_preflight_missing_control_intent(mocker):
+    request = AgentRequest(agent_id=42, query="fixture")
+    lookup = Mock()
+    catalog = mocker.patch.object(run_controls, "validate_selected_model")
+    preflight = mocker.patch.object(run_controls, "preflight_turn_controls")
+    run_controls.validate_agent_model_selection(request, "tenant", lookup)
+    run_controls.preflight_agent_turn_controls(request, "tenant", lookup)
+    lookup.assert_not_called()
+    catalog.assert_not_called()
+    preflight.assert_not_called()
+
+
+@pytest.mark.parametrize("intent", [
+    {"model_id": 9}, {"generation_config": {}}, {"reasoning_effort": "auto"},
+    {"reasoning_budget_tokens": 1024}, {"generation_config": {"reasoning_budget_tokens": 0}},
+])
+def test_preflight_preserves_each_explicit_intent_and_entrypoint_defaults(mocker, intent):
+    native = AgentRequest(agent_id=42, query="fixture", version_no=3, **intent)
+    record = {"model_ids": [9], "model_params_override": {"9": {"temperature": 0.43}}}
+    lookup = Mock(return_value=record)
+    preflight = mocker.patch.object(run_controls, "preflight_turn_controls")
+    run_controls.preflight_agent_turn_controls(native, "tenant", lookup)
+    lookup.assert_called_once_with(agent_id=42, tenant_id="tenant", version_no=3)
+    preflight.assert_called_once_with(native, "tenant", record)
+    lookup.reset_mock()
+    workbench = AgentRequest(query="fixture", entrypoint="workbench", workbench={"mode": "generic_chat", "model_id": 9}, **intent)
+    run_controls.preflight_agent_turn_controls(workbench, "tenant", lookup)
+    preflight.assert_called_with(workbench, "tenant", None)
+    lookup.assert_not_called()
