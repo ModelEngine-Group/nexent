@@ -26,8 +26,10 @@ import {
   Home,
   LineChart,
   Puzzle,
-  PanelLeftClose,
-  PanelLeftOpen,
+  Pin,
+  PinOff,
+  Sparkles,
+  FolderCog,
   Settings,
   Zap,
 } from "lucide-react";
@@ -155,14 +157,14 @@ const ROUTE_CONFIG: RouteConfig[] = [
   },
   {
     path: "/skill-space",
-    Icon: Zap,
+    Icon: Sparkles,
     labelKey: "sidebar.skillSpace",
     order: 12,
     parentKey: "/resource-space",
   },
   {
     path: "/resource-manage",
-    Icon: Building2,
+    Icon: FolderCog,
     labelKey: "sidebar.resourceManage",
     order: 13,
     parentKey: null,
@@ -382,14 +384,12 @@ export function SideNavigation({ onPinnedChange }: SideNavigationProps = {}) {
         }
       }}
     >
-      {(!expanded || pinned) && (
-        <span
-          aria-hidden="true"
-          data-sidebar-divider
-          className="pointer-events-none absolute inset-y-0 right-0 w-[0.5px] bg-[rgba(25,25,25,0.15)]"
-        />
-      )}
-      <div className="mb-4 flex h-12 w-full shrink-0 items-center">
+      <span
+        aria-hidden="true"
+        data-sidebar-divider
+        className="pointer-events-none absolute inset-y-0 right-0 w-[0.5px] bg-[rgba(25,25,25,0.15)]"
+      />
+      <div className="mb-2 flex h-12 w-full shrink-0 items-center">
         <Link
           href="/"
           aria-label={t("sidebar.homePage")}
@@ -399,7 +399,7 @@ export function SideNavigation({ onPinnedChange }: SideNavigationProps = {}) {
             <img
               src={publicAsset("/modelengine-logo.png")}
               alt="logo"
-              className="h-8 w-8 object-contain"
+              className="h-10 w-10 object-contain"
             />
           </span>
           <NavigationRailLabel
@@ -415,14 +415,8 @@ export function SideNavigation({ onPinnedChange }: SideNavigationProps = {}) {
               aria-label={t(pinned ? "sidebar.unpin" : "sidebar.pin")}
               aria-pressed={pinned}
               onClick={togglePinned}
-              className={`!h-8 !w-8 shrink-0 !p-0 text-[#191919] ${pinned ? "!bg-[rgba(25,25,25,0.08)]" : ""}`}
-              icon={
-                pinned ? (
-                  <PanelLeftClose size={20} />
-                ) : (
-                  <PanelLeftOpen size={20} />
-                )
-              }
+              className={`!h-8 !w-8 shrink-0 !p-0 ${pinned ? "!text-[#2673e5] !bg-transparent" : "!text-[#777777]"}`}
+              icon={pinned ? <PinOff size={16} /> : <Pin size={16} />}
             />
           </Tooltip>
         )}
@@ -444,7 +438,9 @@ export function SideNavigation({ onPinnedChange }: SideNavigationProps = {}) {
                 onClick={() => handleRouteClick(route)}
               >
                 <span className="flex h-11 w-12 shrink-0 items-center justify-center">
-                  <Icon className={RAIL_ICON_CLASS} />
+                  <Icon
+                    className={`${RAIL_ICON_CLASS} ${isSelected ? "text-[#2673e5]" : ""}`}
+                  />
                 </span>
                 <NavigationRailLabel
                   expanded={expanded}
