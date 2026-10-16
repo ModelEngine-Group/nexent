@@ -1,0 +1,18 @@
+schema_version: '1.0'
+change:
+  change_id: AGENT-WELCOME-D4-20261015
+  change_type: test-fix
+  title: Adapt the existing agent configuration D4 journey to shared welcome
+  description: Replace removed welcome test IDs and obsolete embedded-composer coordinates with semantic panel-scoped selectors and shared welcome/bottom-composer layout assertions. Preserve the remainder of the existing journey.
+  affected_features:
+    existing: [F-045, F-054]
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing: []
+    added: []
+    modified: []
+    retired: []
+  no_case_change_reason: AGENT-CONFIG-D4-001 is an existing legacy journey selected by test/automation/d4/agent-config.playwright.config.mjs and run_agent_config_layout_e2e.mjs. No matching formal case-local binding was found; this change updates that existing script without inventing a duplicate formal Case or claiming formal registry execution.
+  notes: Test-only follow-up to chat-agent-suggestion AC-013 and shared default conversation presentation. Existing frontend UT covers welcome selection/state but cannot prove real DOM geometry; retain the legacy D4 boundary. No product code or traditional UT changes. Preserve workflow, saved guidance, readonly and selected-resource assertions. Execution results belong in the SPEC task evidence.

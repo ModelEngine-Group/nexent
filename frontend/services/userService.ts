@@ -1,3 +1,5 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import { API_ENDPOINTS, ApiError } from "./api";
 import { fetchWithAuth } from "@/lib/auth";
 
@@ -5,6 +7,7 @@ import { fetchWithAuth } from "@/lib/auth";
 export interface User {
   id: string;
   username: string;
+  cas_username?: string | null;
   role: string;
   group_names?: string[];
   email?: string;

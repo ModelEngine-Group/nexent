@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import asyncio
 from contextlib import AsyncExitStack
 import importlib
@@ -925,7 +927,9 @@ async def list_all_tools(tenant_id: str, labels: Optional[List[str]] = None):
             "updated_by_name": updated_by_email_map.get(tool.get("updated_by"), ""),
         }
         formatted_tools.append(formatted_tool)
-    return formatted_tools
+    from services.user_identity_service import enrich_cas_usernames
+
+    return enrich_cas_usernames(formatted_tools, {"updated_by_cas_username": "updated_by"})
 
 
 def load_last_tool_config_impl(tool_id: int, tenant_id: str, user_id: str):

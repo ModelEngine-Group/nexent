@@ -1,3 +1,5 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import React from "react";
 import { screen } from "@testing-library/dom";
 import { render } from "@testing-library/react";
@@ -102,6 +104,9 @@ vi.mock("../../app/[locale]/newchat/assistant-ui/threadlist-sidebar", () => ({
 
 vi.mock("@/hooks/agent/usePublishedAgentList", () => ({
   usePublishedAgentList: () => usePublishedAgentList(),
+}));
+vi.mock("@/hooks/chat/useConversationAgentHistory", () => ({
+  useConversationAgentHistory: () => ({ data: undefined }),
 }));
 vi.mock("../../app/[locale]/newchat/assistant-ui/agent-landing", () => ({
   AgentLandingPage: ({
