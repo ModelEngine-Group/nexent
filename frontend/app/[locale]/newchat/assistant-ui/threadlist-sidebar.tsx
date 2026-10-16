@@ -178,18 +178,24 @@ export function ThreadListSidebar({
                       <SidebarTrigger className="size-8 shrink-0" />
                     </div>
                   ) : (
-                    <div className="flex h-9 items-center gap-2 rounded-lg border border-border bg-white px-2">
-                      <SearchIcon className="size-4 shrink-0 text-muted-foreground" />
-                      <input
-                        value={legacySearchQuery}
-                        onChange={(event) =>
-                          setLegacySearchQuery(event.target.value)
-                        }
-                        placeholder={t("chat.sidebar.searchHistory")}
-                        aria-label={t("chat.sidebar.searchHistory")}
-                        className="h-full min-w-0 flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground"
-                      />
-                      <SidebarTrigger className="size-8 shrink-0" />
+                    <div className="flex items-center gap-2">
+                      <div className="flex h-9 min-w-0 flex-1 items-center gap-2 rounded-lg border border-border bg-white px-2">
+                        <SearchIcon className="size-4 shrink-0 text-muted-foreground" />
+                        <input
+                          value={legacySearchQuery}
+                          onChange={(event) =>
+                            setLegacySearchQuery(event.target.value)
+                          }
+                          placeholder={t("chat.sidebar.searchHistory")}
+                          aria-label={t("chat.sidebar.searchHistory")}
+                          className="h-full min-w-0 flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground"
+                        />
+                      </div>
+                      {/* Collapse trigger stays on the sidebar background,
+                          separated from the search box per the workbench UI design.
+                          The negative margin cancels the stacked header/sidebar
+                          padding so the icon sits near the panel's right edge. */}
+                      <SidebarTrigger className="size-8 shrink-0 -mr-4" />
                     </div>
                   )}
                   {newChatDesign && searchOpen && (
@@ -226,7 +232,7 @@ export function ThreadListSidebar({
                   ) : onNewConversation ? (
                     <button
                       type="button"
-                      className="flex h-9 flex-1 items-center gap-2 rounded-lg px-3 text-sm hover:bg-muted truncate"
+                      className="mt-3 flex h-9 flex-1 items-center gap-2 rounded-lg px-3 text-sm hover:bg-muted truncate"
                       onClick={onNewConversation}
                     >
                       <PlusIcon className="size-4 shrink-0" />
@@ -234,7 +240,7 @@ export function ThreadListSidebar({
                     </button>
                   ) : (
                     <ThreadListPrimitive.New
-                      className="flex h-9 flex-1 items-center gap-2 rounded-lg px-3 text-sm hover:bg-muted truncate"
+                      className="mt-3 flex h-9 flex-1 items-center gap-2 rounded-lg px-3 text-sm hover:bg-muted truncate"
                       onClick={onPrepareNewConversation}
                     >
                       <PlusIcon className="size-4 shrink-0" />

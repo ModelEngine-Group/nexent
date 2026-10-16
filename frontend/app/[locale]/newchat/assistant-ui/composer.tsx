@@ -316,6 +316,8 @@ const SkillComposerDirectiveChip: FC<LexicalDirectiveChipProps> = ({
 const WorkbenchComposerTagPrefix: FC = () => {
   const tag = useWorkbenchComposerTag();
   const text = useAuiState((state) => state.composer.text);
+  const { t } = useTranslation();
+  const [hovered, setHovered] = useState(false);
 
   useEffect(() => {
     if (!text?.trim()) setWorkbenchComposerTag(null);
@@ -323,9 +325,27 @@ const WorkbenchComposerTagPrefix: FC = () => {
 
   if (!tag || !text?.trim()) return null;
   return (
-    <span className="shrink-0 text-xs font-normal leading-5 text-[#197BD5]">
-      {tag}
-    </span>
+    <button
+      type="button"
+      aria-label={t("chat.composer.removeWorkbenchTag", "移除标签")}
+      className="-mt-0.5 flex h-7 shrink-0 cursor-pointer items-center gap-1.5 rounded-full bg-[#f0f0f0] px-2.5 text-xs font-normal leading-none text-[#191919] transition-colors hover:bg-[#dceafe] hover:text-[#197BD5]"
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
+      onFocus={() => setHovered(true)}
+      onBlur={() => setHovered(false)}
+      onClick={() => setWorkbenchComposerTag(null)}
+    >
+      {/* Per the design, the chip carries the stacked-layers icon, which swaps
+          to a remove cross on hover. Icons are conditionally rendered (not
+          toggled via CSS classes) because globals.css forces "display" on
+          `button svg` with !important, defeating hidden/visible utilities. */}
+      {hovered ? (
+        <X className="size-3.5 shrink-0" aria-hidden />
+      ) : (
+        <SkillStackIcon className="size-3.5 shrink-0" aria-hidden />
+      )}
+      <span className="max-w-40 truncate">{tag.label}</span>
+    </button>
   );
 };
 
@@ -347,25 +367,6 @@ function hashString(value: string): number {
   }
   return Math.abs(hash);
 }
-
-// Item row of the workbench "＋" overflow menu, styled after the
-// planning-mode menu.
-const ComposerPlusItem: FC<{
-  icon: ReactNode;
-  label: string;
-  active?: boolean;
-  onSelect: () => void;
-}> = ({ icon, label, active, onSelect }) => (
-  <button
-    type="button"
-    className="flex h-10 w-full items-center gap-2 rounded-lg px-2 py-2 text-base font-normal leading-6 text-foreground hover:bg-accent"
-    onClick={onSelect}
-  >
-    {icon}
-    {label}
-    {active ? <Check className="ml-auto size-4" /> : null}
-  </button>
-);
 
 export const Composer: FC<ComposerProps> = ({
   newChatDesign = false,
@@ -930,7 +931,7 @@ export const Composer: FC<ComposerProps> = ({
                     "max-h-48 min-h-14 w-full resize-none bg-transparent px-0 py-1 text-sm outline-none placeholder:text-muted-foreground",
                     workbenchPresentation &&
                       !newChatDesign &&
-                      "min-h-[92px] px-0 py-0",
+                      "min-h-[92px] px-0 py-0 text-base leading-6",
                     newChatDesign &&
                       "!text-[14px] block !min-h-[88px] !px-0 !py-0 leading-[22px] text-[#191919] placeholder:text-[#191919]/40",
                     workbenchPresentation &&
@@ -1438,24 +1439,6 @@ export const Composer: FC<ComposerProps> = ({
                             {t("chat.composer.uploadFile")}
                           </button>
                         </ComposerPrimitive.AddAttachment>
-                        <ComposerPlusItem
-                          icon={<MessageCircleMore className="size-4" />}
-                          label={t("chat.composer.planningMode")}
-                          active={chatMode === "planning"}
-                          onSelect={() => {
-                            onChatModeChange("planning");
-                            setPlusOpen(false);
-                          }}
-                        />
-                        <ComposerPlusItem
-                          icon={<Play className="size-4" />}
-                          label={t("chat.composer.executionMode")}
-                          active={chatMode === "execution"}
-                          onSelect={() => {
-                            onChatModeChange("execution");
-                            setPlusOpen(false);
-                          }}
-                        />
                       </PopoverContent>
                     </Popover>
                   </TooltipWrapper>
@@ -1467,7 +1450,7 @@ export const Composer: FC<ComposerProps> = ({
                     disabled={isRunning}
                   />
                 )}
-                {!compact && workbenchResources && (
+                {!compact && workbenchResources && !workbenchPresentation && (
                   <>
                     <Popover>
                       <PopoverTrigger asChild>
@@ -1512,8 +1495,8 @@ export const Composer: FC<ComposerProps> = ({
                 {!newChatDesign &&
                   !compact &&
                   !creationMode &&
-                  (workbenchPresentation ||
-                    knowledgeCapabilities?.sources.local.enabled ||
+                  !workbenchPresentation &&
+                  (knowledgeCapabilities?.sources.local.enabled ||
                     knowledgeCapabilities?.sources.aidp.enabled ||
                     knowledgeScope) && (
                     <Popover>
@@ -1564,12 +1547,6 @@ export const Composer: FC<ComposerProps> = ({
                       ) : null}
                     </Popover>
                   )}
-                {!compact && workbenchPresentation && (
-                  <ComposerAddAttachment
-                    label={t("chat.composer.uploadFile")}
-                    icon={<Paperclip className="size-5" />}
-                  />
-                )}
                 {!compact &&
                   !newChatDesign &&
                   !workbenchPresentation &&
@@ -1603,6 +1580,7 @@ export const Composer: FC<ComposerProps> = ({
                   <ModelSelector
                     models={models}
                     showEffort={newChatDesign || Boolean(workbenchPresentation)}
+                    showIcon={!workbenchPresentation}
                     value={selectedModelId}
                     onValueChange={onModelChange}
                     deepThinking={deepThinking}
@@ -1791,9 +1769,21 @@ const WorkbenchPlanningMenu: FC<{
 }> = ({ chatMode, onChatModeChange, disabled }) => {
   const { t } = useTranslation();
   const [open, setOpen] = useState(false);
-  const options: { value: ChatMode; label: string }[] = [
-    { value: "planning", label: t("chat.composer.planningMode") },
-    { value: "execution", label: t("chat.composer.executionMode") },
+  const options: {
+    value: ChatMode;
+    label: string;
+    icon: typeof MessageCircleMore;
+  }[] = [
+    {
+      value: "planning",
+      label: t("chat.composer.planningMode"),
+      icon: MessageCircleMore,
+    },
+    {
+      value: "execution",
+      label: t("chat.composer.executionMode"),
+      icon: Play,
+    },
   ];
 
   return (
@@ -1828,8 +1818,11 @@ const WorkbenchPlanningMenu: FC<{
               setOpen(false);
             }}
           >
-            {option.label}
-            {chatMode === option.value && <Check className="size-4" />}
+            <span className="flex min-w-0 items-center gap-2">
+              <option.icon className="size-5 shrink-0" aria-hidden />
+              {option.label}
+            </span>
+            {chatMode === option.value && <Check className="size-4 shrink-0" />}
           </button>
         ))}
       </PopoverContent>
@@ -1873,7 +1866,7 @@ const ComposerSendOrCancel: FC<{
               variant="outline"
               aria-label={t("chat.composer.stopGenerating")}
               className={cn(
-                "size-8 rounded-full ml-2 border-border bg-background text-primary hover:bg-muted",
+                "size-8 shrink-0 rounded-full ml-2 border-border bg-background text-primary hover:bg-muted",
                 debugLayout &&
                   "!ml-0 !size-10 !rounded-full !border-0 !bg-[#191919] !text-white"
               )}
@@ -1893,7 +1886,7 @@ const ComposerSendOrCancel: FC<{
             <Button
               size="icon"
               className={cn(
-                "size-8 rounded-full ml-2",
+                "size-8 shrink-0 rounded-full ml-2",
                 configurationLayout || debugLayout
                   ? "size-10 rounded-[26px] bg-[#191919] text-white hover:bg-[#191919]/90 disabled:opacity-30 [&_svg]:size-6"
                   : newChatDesign
