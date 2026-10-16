@@ -166,15 +166,16 @@ def create_new_index(
 async def get_knowledge_base_bound_agents(
     index_name: str = Path(..., min_length=1, pattern=r".*\S.*"),
     authorization: Optional[str] = Header(None),
+    tenant_id: Optional[str] = Query(None, description="Tenant ID for filtering (uses auth if not provided)"),
 ):
     """List agents bound to this knowledge base for deletion confirmation."""
     try:
-        _, tenant_id = get_current_user_id(authorization)
+        _, auth_tenant_id = get_current_user_id(authorization)
     except TokenExpiredError as exc:
         raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(exc)) from exc
     preview = await run_blocking(
         "preview-kb-deletion", ElasticSearchService.get_bound_agents, [index_name],
-        tenant_id=tenant_id,
+        tenant_id=tenant_id or auth_tenant_id,
         lane="control-io", owner="apps.vectordatabase_app",
     )
     return JSONResponse(status_code=HTTPStatus.OK, content=preview)

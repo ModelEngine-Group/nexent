@@ -1,8 +1,9 @@
-// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
-
 import { ErrorCode } from "@/const/errorCode";
 
-type Translate = (key: string, options?: Record<string, unknown>) => string;
+type Translate = (
+  key: string,
+  options?: Record<string, unknown>
+) => string;
 
 type BlockingFile = {
   file_name?: unknown;
@@ -50,7 +51,9 @@ function isErrorCode(error: unknown, expectedCode: string): boolean {
   );
 }
 
-function getDetails(error: unknown): Record<string, unknown> | undefined {
+function getDetails(
+  error: unknown
+): Record<string, unknown> | undefined {
   if (typeof error !== "object" || error === null || !("details" in error)) {
     return undefined;
   }

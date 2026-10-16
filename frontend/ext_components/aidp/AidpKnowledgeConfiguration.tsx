@@ -227,22 +227,19 @@ const AidpKnowledgeConfiguration: React.FC = () => {
 
   const handleDeleteKb = useCallback(
     async (kb: AidpKnowledgeBaseItem) => {
-      // Deletion cascades: the dialog tells the user which agents (and, via a
-      // fixed notice, conversations) lose their binding. A failed preview only
-      // drops that extra notice; the deletion itself still cascades.
+      // List affected agents when available; otherwise show the generic
+      // cascade notice for agents and conversations.
       const preview = await aidpKnowledgeService.previewBoundAgents(kb.kds_id);
       setDeleteConfirmOpen(true);
       Modal.confirm({
-        title: t("aidpKnowledge.confirmDeleteTitle"),
+        title: t("aidpKnowledge.confirmDeleteTitle", { name: kb.kds_name }),
         content: (
           <div>
-            <div>
-              {t("aidpKnowledge.confirmDeleteContent", { name: kb.kds_name })}
-            </div>
+            <div>{t("aidpKnowledge.confirmDeleteContent")}</div>
             <KnowledgeBaseDeleteNotice preview={preview} />
           </div>
         ),
-        okText: t("common.confirm"),
+        okText: t("knowledgeBase.modal.deleteConfirm.confirm"),
         cancelText: t("common.cancel"),
         centered: true,
         afterClose: () => setDeleteConfirmOpen(false),

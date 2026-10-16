@@ -218,9 +218,9 @@ const HomeContent: FC<{
   const knowledgePreviewsRef = useRef<
     Map<string, KnowledgeScopeEffectivePreview | null>
   >(new Map());
-  // True while a scope save is in flight, so a concurrent resync cannot
-  // overwrite the freshly saved selection with a stale read.
+  // Skip resync during saves and discard reads started before a newer read or save.
   const knowledgeScopeSavingRef = useRef(false);
+  const knowledgeScopeSyncRevisionRef = useRef(0);
 
   // All hooks must be called before any early returns
   const runtimeMainThreadId = useAuiState((s) => s.threads.mainThreadId);
@@ -437,10 +437,17 @@ const HomeContent: FC<{
       ) {
         return;
       }
+      const revision = ++knowledgeScopeSyncRevisionRef.current;
       void conversationService
         .getById(String(numericConversationId))
         .then((conversation) => {
-          if (cancelled || knowledgeScopeSavingRef.current) return;
+          if (
+            cancelled ||
+            knowledgeScopeSavingRef.current ||
+            revision !== knowledgeScopeSyncRevisionRef.current
+          ) {
+            return;
+          }
           const serverScope = conversation.knowledge_scope ?? null;
           if (activeThreadId) {
             knowledgeScopesRef.current.set(activeThreadId, serverScope);
@@ -545,6 +552,7 @@ const HomeContent: FC<{
     ) => {
       const numericConversationId = Number(activeConversationId);
       let nextPreview = preview ?? null;
+      knowledgeScopeSyncRevisionRef.current += 1;
       knowledgeScopeSavingRef.current = true;
       try {
         if (

@@ -1,5 +1,3 @@
-# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
-
 from consts.exceptions import MCPConnectionError, NotFoundException, ToolExecutionException
 import asyncio
 import importlib

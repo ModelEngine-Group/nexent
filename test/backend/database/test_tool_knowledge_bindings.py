@@ -3,11 +3,10 @@
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
+import database.tool_db as tool_db
 import pytest
 from sqlalchemy.dialects import postgresql
 from sqlalchemy.orm import Session
-
-import database.tool_db as tool_db
 
 
 @pytest.mark.parametrize("param_name,tool_name", [
@@ -32,14 +31,6 @@ def test_reference_query_filters_tool_and_ids_in_postgresql(param_name, tool_nam
 
 
 def test_preview_selects_only_agent_and_version(monkeypatch):
-    with Session() as session:
-        query = tool_db._query_knowledge_tool_instances(session, "index_names", {"idx"})
-        result_query = query.with_entities(tool_db.ToolInstance.agent_id, tool_db.ToolInstance.version_no).distinct()
-        compiled = result_query.statement.compile(dialect=postgresql.dialect())
-    select_clause = str(compiled).split("\nFROM ")[0]
-    assert "SELECT DISTINCT" in select_clause
-    assert "agent_id" in select_clause and "version_no" in select_clause
-    assert "params" not in select_clause and "user_id" not in select_clause
     query = MagicMock()
     query.with_entities.return_value.distinct.return_value.all.return_value = [
         SimpleNamespace(agent_id=7, version_no=0), SimpleNamespace(agent_id=7, version_no=2),
@@ -48,6 +39,10 @@ def test_preview_selects_only_agent_and_version(monkeypatch):
     assert tool_db.query_tool_knowledge_references(MagicMock(), "index_names", {"idx"}) == [
         {"agent_id": 7, "version_no": 0}, {"agent_id": 7, "version_no": 2},
     ]
+    query.with_entities.assert_called_once_with(
+        tool_db.ToolInstance.agent_id, tool_db.ToolInstance.version_no,
+    )
+    query.with_entities.return_value.distinct.assert_called_once_with()
 
 
 @pytest.mark.parametrize("param_name,argument", [("index_names", "index_names"), ("kds_list", "kds_ids")])

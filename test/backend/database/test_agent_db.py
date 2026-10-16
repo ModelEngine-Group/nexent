@@ -8,6 +8,10 @@ from unittest.mock import patch, MagicMock
 from sqlalchemy import Boolean, Column, Integer, MetaData, String, Table, column, create_engine, literal_column, table
 from sqlalchemy.orm import Session
 
+from test.common.module_stubs import capture_module_stubs
+
+_modules_before_stubs = sys.modules.copy()
+
 # 首先模拟consts模块，避免ModuleNotFoundError
 consts_mock = MagicMock()
 consts_mock.const = MagicMock()
@@ -158,7 +162,7 @@ from consts.exceptions import TenantResourceLimitError
 
 
 @pytest.fixture(autouse=True)
-def _default_to_ordinary_agent(monkeypatch):
+def _default_to_ordinary_agent(monkeypatch, _isolated_imports):
     """Keep general Agent DB tests scoped to an ordinary Agent."""
     monkeypatch.setattr(
         "backend.database.agent_db.is_system_agent",
@@ -1773,3 +1777,11 @@ def test_update_existing_relations_returns_early_when_empty():
         user_id="user1",
     )
     assert mock_rel.selected_agent_version_no == 1  # unchanged
+
+
+_install_module_stubs = capture_module_stubs(_modules_before_stubs)
+
+
+@pytest.fixture(autouse=True)
+def _isolated_imports(monkeypatch):
+    _install_module_stubs(monkeypatch)

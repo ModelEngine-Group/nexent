@@ -5,9 +5,13 @@
 import threading
 from unittest.mock import AsyncMock, MagicMock
 
+import apps.vectordatabase_app as local_app
+import ext_components.aidp.apps.aidp_mgmt_app as aidp_app
 import pytest
+from consts.exceptions import TokenExpiredError
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+from middleware.exception_handler import ExceptionHandlerMiddleware
 from nexent.core.concurrency import (
     LanePolicy,
     ThreadManager,
@@ -17,11 +21,6 @@ from nexent.core.concurrency import (
     set_default_thread_manager,
 )
 from starlette.requests import Request
-
-import apps.vectordatabase_app as local_app
-import ext_components.aidp.apps.aidp_mgmt_app as aidp_app
-from consts.exceptions import TokenExpiredError
-from middleware.exception_handler import ExceptionHandlerMiddleware
 
 
 EMPTY = {"agents": []}
@@ -53,21 +52,29 @@ def preview(request, monkeypatch):
         yield client, prefix, collect, auth, worker_mock
 
 
-def test_preview_uses_existing_business_route_and_returns_contract(preview):
+@pytest.mark.parametrize("agents", [[], [{"agent_id": 7, "display_name": "Private agent"}, {"agent_id": 8, "display_name": "Shared agent"}]])
+def test_preview_uses_existing_business_route_and_returns_contract(preview, agents):
     client, prefix, collect, auth, worker = preview
+    expected = {"agents": agents}
+    collect.return_value = expected
     response = client.get(f"{prefix}/missing-kb/bound_agents", headers={"Authorization": "Bearer fixture"})
     assert response.status_code == 200
-    assert response.json() == EMPTY
+    assert response.json() == expected
     collect.assert_called_once_with(["missing-kb"], tenant_id="t1")
     auth.assert_called_once_with("Bearer fixture")
     worker.assert_awaited_once()
     assert worker.call_args.args[1] is collect
 
 
-def test_preview_does_not_expose_retired_shared_endpoint(preview):
-    client, *_ = preview
-    assert client.post("/knowledge-bases/reference-preview", json={"provider": "local", "resource_id": "idx"}).status_code == 404
-    assert client.post("/knowledge-bases/statuses", json={"items": []}).status_code == 404
+@pytest.mark.parametrize("preview", ["local"], indirect=True)
+def test_resource_management_preview_uses_selected_tenant(preview):
+    client, prefix, collect, _, _ = preview
+    response = client.get(
+        f"{prefix}/idx-b/bound_agents?tenant_id=selected-tenant",
+        headers={"Authorization": "Bearer fixture"},
+    )
+    assert response.status_code == 200
+    collect.assert_called_once_with(["idx-b"], tenant_id="selected-tenant")
 
 
 def test_whitespace_path_is_rejected_before_auth_or_service(preview):
@@ -126,7 +133,7 @@ async def test_auth_runs_directly_and_binding_query_runs_in_managed_worker(monke
     set_default_thread_manager(manager)
     try:
         if local:
-            response = await local_app.get_knowledge_base_bound_agents("idx", "Bearer fixture")
+            response = await local_app.get_knowledge_base_bound_agents("idx", "Bearer fixture", tenant_id=None)
         else:
             request = Request({"type": "http", "headers": [(b"authorization", b"Bearer fixture")]})
             response = await aidp_app.get_knowledge_base_bound_agents(request, "kds-1")

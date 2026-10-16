@@ -1,5 +1,3 @@
-// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
-
 import { create } from "zustand";
 
 import { safeStringify } from "@/lib/utils";

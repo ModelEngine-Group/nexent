@@ -8,6 +8,10 @@ from unittest.mock import MagicMock, call
 import pytest
 
 
+from test.common.module_stubs import capture_module_stubs
+
+_modules_before_stubs = sys.modules.copy()
+
 # Ensure backend imports resolve
 sys.path.insert(0, __import__("os").path.join(__import__("os").path.dirname(__file__), "../../.."))
 
@@ -3759,3 +3763,11 @@ def test_update_conversation_knowledge_scope_missing_row(monkeypatch, mock_sessi
 
     assert ok is False
     session.execute.assert_called_once()
+
+
+_install_module_stubs = capture_module_stubs(_modules_before_stubs)
+
+
+@pytest.fixture(autouse=True)
+def _isolated_imports(monkeypatch):
+    _install_module_stubs(monkeypatch)

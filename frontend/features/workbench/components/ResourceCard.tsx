@@ -1,5 +1,3 @@
-// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
-
 import { useId, type ReactNode } from "react";
 import SharedResourceCard from "@/components/resource/ResourceCard";
 import { ArrowRight, Bot, BookOpen, Check, Puzzle } from "lucide-react";

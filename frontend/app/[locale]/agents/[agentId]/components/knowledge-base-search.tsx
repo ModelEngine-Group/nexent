@@ -1,5 +1,3 @@
-// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
-
 "use client";
 
 import { Fragment, useMemo, useState } from "react";
@@ -418,6 +416,7 @@ export default function KnowledgeBaseConfig({
                     : undefined,
                 ].filter((value): value is string => Boolean(value))
               : [];
+
             return (
               <div
                 key={selectedKnowledgeBase.id}
@@ -614,24 +613,22 @@ export default function KnowledgeBaseConfig({
         </div>
       ) : state.selectedKnowledgeBases.length > 0 ? (
         <div className="flex flex-wrap gap-2">
-          {state.selectedKnowledgeBases.map((knowledgeBase) => {
-            return (
-              <Tag
-                key={knowledgeBase.id}
-                closable={!state.isReadOnly}
-                onClose={
-                  !state.isReadOnly
-                    ? () => state.onKnowledgeBaseRemove(knowledgeBase.id)
-                    : undefined
-                }
-                className="!inline-flex !items-center !gap-1 !whitespace-nowrap !px-2.5 !py-1 !text-sm !text-foreground !rounded-full transition-colors hover:!shadow-sm !bg-primary/5 !border !border-primary/20 hover:!border-primary/40"
-              >
-                <span className="max-w-full truncate">
-                  {knowledgeBase.displayName}
-                </span>
-              </Tag>
-            );
-          })}
+          {state.selectedKnowledgeBases.map((knowledgeBase) => (
+            <Tag
+              key={knowledgeBase.id}
+              closable={!state.isReadOnly}
+              onClose={
+                !state.isReadOnly
+                  ? () => state.onKnowledgeBaseRemove(knowledgeBase.id)
+                  : undefined
+              }
+              className="!inline-flex !items-center !gap-1 !whitespace-nowrap !px-2.5 !py-1 !text-sm !text-foreground !bg-primary/5 !border !border-primary/20 !rounded-full transition-colors hover:!border-primary/40 hover:!shadow-sm"
+            >
+              <span className="max-w-full truncate">
+                {knowledgeBase.displayName}
+              </span>
+            </Tag>
+          ))}
         </div>
       ) : (
         <div className="flex min-h-20 items-center justify-center gap-4 rounded-md border border-dashed border-gray-300 bg-white px-4 py-3">

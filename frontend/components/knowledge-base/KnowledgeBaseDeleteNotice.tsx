@@ -7,12 +7,8 @@ import { useTranslation } from "react-i18next";
 import type { KnowledgeBaseDeletionPreview } from "@/types/knowledgeBase";
 
 /**
- * Extra content for the knowledge-base delete confirmation dialog.
- *
- * Deletion cascades on the backend: agent bindings (draft and published
- * versions alike) and conversation scopes are removed together with the
- * knowledge base. Agents are listed by name, one row per agent; conversations
- * are covered by a fixed notice instead of being enumerated.
+ * Show bound agent names and the conversation notice
+ * in the knowledge-base delete confirmation dialog.
  */
 export default function KnowledgeBaseDeleteNotice({
   preview,
@@ -20,30 +16,34 @@ export default function KnowledgeBaseDeleteNotice({
   preview: KnowledgeBaseDeletionPreview | null;
 }) {
   const { t } = useTranslation("common");
-  if (!preview) return null;
-
-  const agents = preview.agents ?? [];
-  if (agents.length === 0) {
-    return (
-      <div className="mt-2 text-sm text-gray-600">
-        {t("knowledgeBase.deleteNotice.conversationsNotice")}
-      </div>
-    );
-  }
+  const agents = preview?.agents ?? [];
 
   return (
     <div className="mt-2 space-y-1 text-sm text-gray-600">
-      <div>{t("knowledgeBase.deleteNotice.agentsIntro")}</div>
-      <ul
-        className="max-h-40 list-inside list-disc overflow-y-auto"
-        data-testid="knowledge-reference-delete-agents"
-      >
-        {agents.map((agent) => (
-          <li key={agent.agent_id} className="truncate">
-            {agent.display_name}
-          </li>
-        ))}
-      </ul>
+      {preview === null && (
+        <div>{t("knowledgeBase.deleteNotice.agentsNotice")}</div>
+      )}
+      {agents.length > 0 && (
+        <>
+          <div>{t("knowledgeBase.deleteNotice.agentsIntro")}</div>
+          <ul
+            className="max-h-40 list-inside list-disc overflow-y-auto overscroll-contain"
+            data-testid="knowledge-reference-delete-agents"
+            tabIndex={0}
+            aria-label={t("knowledgeBase.deleteNotice.agentsIntro")}
+          >
+            {agents.map((agent) => (
+              <li
+                key={agent.agent_id}
+                className="truncate"
+                title={agent.display_name}
+              >
+                {agent.display_name}
+              </li>
+            ))}
+          </ul>
+        </>
+      )}
       <div>{t("knowledgeBase.deleteNotice.conversationsNotice")}</div>
     </div>
   );

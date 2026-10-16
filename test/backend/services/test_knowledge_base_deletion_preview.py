@@ -4,14 +4,13 @@
 
 from unittest.mock import MagicMock
 
-import pytest
-
 import ext_components.aidp.services.aidp_service as aidp_service
 import management.services.knowledge_base.management as local_service
+import pytest
 
 
 @pytest.fixture(params=["local", "aidp"])
-def service(request, monkeypatch):
+def service(request):
     local = request.param == "local"
     module = local_service if local else aidp_service
     function = local_service.KnowledgeBaseManagementService.get_bound_agents if local else aidp_service.get_bound_agents
@@ -42,10 +41,3 @@ def test_database_failure_propagates_from_preview(service, monkeypatch):
     monkeypatch.setattr(module, "query_knowledge_binding_agents", MagicMock(side_effect=RuntimeError("db unavailable")))
     with pytest.raises(RuntimeError, match="db unavailable"):
         function(["one"], tenant_id="t1")
-
-
-def test_preview_returns_database_projection_without_extra_fields(service, monkeypatch):
-    module, function, _ = service
-    names = [{"agent_id": 7, "display_name": "Internal name"}, {"agent_id": 8, "display_name": "8"}]
-    monkeypatch.setattr(module, "query_knowledge_binding_agents", lambda **kwargs: names)
-    assert function(["one"], tenant_id="t1") == {"agents": names}

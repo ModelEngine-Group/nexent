@@ -2,8 +2,6 @@
 
 "use client";
 
-import knowledgeBaseService from "@/services/knowledgeBaseService";
-
 import React, { useMemo, useState, useEffect, useCallback } from "react";
 import { useTranslation } from "react-i18next";
 import {
@@ -32,6 +30,7 @@ import { useKnowledgeList } from "@/hooks/knowledge/useKnowledgeList";
 import { useGroupList } from "@/hooks/group/useGroupList";
 import { useAuthorization } from "@/hooks/auth/useAuthorization";
 import { useConfirmModal } from "@/hooks/useConfirmModal";
+import knowledgeBaseService from "@/services/knowledgeBaseService";
 import quotaService from "@/services/quotaService";
 import { type KnowledgeBase } from "@/types/knowledgeBase";
 import type { QuotaUsageResponse, KBQuotaStatus } from "@/types/quota";
@@ -74,6 +73,9 @@ export default function KnowledgeList({
   const knowledgeBases = data || [];
   const [keyword, setKeyword] = useState("");
   const [groupFilters, setGroupFilters] = useState<number[]>([]);
+  const [previewingKnowledgeId, setPreviewingKnowledgeId] = useState<
+    string | null
+  >(null);
 
   // Get actual user role from auth context
   const { user } = useAuthorization();
@@ -557,24 +559,37 @@ export default function KnowledgeList({
                 danger
                 icon={<Trash2 className="h-4 w-4" />}
                 size="small"
+                loading={previewingKnowledgeId === record.id}
+                disabled={previewingKnowledgeId !== null}
                 onClick={async () => {
                   // Deletion cascades: the dialog lists the agents that lose
                   // their binding, plus a fixed notice for conversations.
-                  const preview = await knowledgeBaseService.previewBoundAgents(
-                    record.id
-                  );
-                  confirm({
-                    title: t("knowledgeBase.modal.deleteConfirm.title"),
-                    content: (
-                      <div>
-                        <div>{t("common.cannotBeUndone")}</div>
-                        <KnowledgeBaseDeleteNotice preview={preview} />
-                      </div>
-                    ),
-                    okText: t("common.confirm"),
-                    cancelText: t("common.cancel"),
-                    onOk: () => handleDelete(record.id),
-                  });
+                  setPreviewingKnowledgeId(record.id);
+                  try {
+                    const preview =
+                      await knowledgeBaseService.previewBoundAgents(
+                        record.id,
+                        tenantId
+                      );
+                    confirm({
+                      title: t("knowledgeBase.modal.deleteConfirm.title", {
+                        name: record.name,
+                      }),
+                      content: (
+                        <div>
+                          <div>
+                            {t("knowledgeBase.modal.deleteConfirm.content")}
+                          </div>
+                          <KnowledgeBaseDeleteNotice preview={preview} />
+                        </div>
+                      ),
+                      okText: t("knowledgeBase.modal.deleteConfirm.confirm"),
+                      cancelText: t("common.cancel"),
+                      onOk: () => handleDelete(record.id),
+                    });
+                  } finally {
+                    setPreviewingKnowledgeId(null);
+                  }
                 }}
               />
             </Tooltip>

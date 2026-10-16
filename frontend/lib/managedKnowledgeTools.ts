@@ -1,5 +1,3 @@
-// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
-
 import type { Tool } from "@/types/agentConfig";
 
 export const MANAGED_KNOWLEDGE_TOOL_NAMES = [

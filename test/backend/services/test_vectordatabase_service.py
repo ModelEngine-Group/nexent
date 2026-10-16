@@ -21,8 +21,12 @@ import pytest
 from fastapi.responses import StreamingResponse
 
 
+from test.common.module_stubs import capture_module_stubs
+
+_modules_before_stubs = sys.modules.copy()
+
 @pytest.fixture(autouse=True)
-def isolate_binding_cleanup(monkeypatch):
+def isolate_binding_cleanup(monkeypatch, _isolated_imports):
     """Storage deletion tests isolate binding persistence, tested separately."""
     module = importlib.import_module("management.services.knowledge_base.management")
     monkeypatch.setattr(module, "get_db_session", MagicMock())
@@ -31,7 +35,7 @@ def isolate_binding_cleanup(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
-def isolate_list_tag_projection(monkeypatch):
+def isolate_list_tag_projection(monkeypatch, _isolated_imports):
     """Keep list tests independent from tag persistence, which has its own tests."""
     module = types.ModuleType("services.resource_tag_projection")
     def project_tags(resources, **kwargs):
@@ -492,7 +496,7 @@ for module_name, functions in {
     "database.tool_db": ("remove_tool_knowledge_references",),
     "database.conversation_db": ("remove_conversation_knowledge_bindings",),
 }.items():
-    boundary_module = sys.modules.get(module_name) or types.ModuleType(module_name)
+    boundary_module = types.ModuleType(module_name)
     for function_name in functions:
         setattr(boundary_module, function_name, MagicMock())
     sys.modules[module_name] = boundary_module
@@ -9640,3 +9644,11 @@ async def test_full_delete_knowledge_base_reports_lifecycle_cleanup_errors(monke
 
     assert "lifecycle database unavailable" in result["lifecycle_cleanup"]["error"]
     assert result["lifecycle_fence_cleanup"] == {"cleared_count": 0, "failed_count": 1}
+
+
+_install_module_stubs = capture_module_stubs(_modules_before_stubs)
+
+
+@pytest.fixture(autouse=True)
+def _isolated_imports(monkeypatch):
+    _install_module_stubs(monkeypatch)

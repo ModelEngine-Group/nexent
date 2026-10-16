@@ -2,8 +2,6 @@
 
 "use client";
 
-import knowledgeBaseService from "@/services/knowledgeBaseService";
-
 import type React from "react";
 import type { TFunction } from "i18next";
 import {
@@ -33,6 +31,7 @@ import { useConfirmModal } from "@/hooks/useConfirmModal";
 import log from "@/lib/logger";
 import { formatKnowledgeBaseDeleteError } from "@/lib/knowledgeBaseDeleteError";
 import { createKnowledgeBaseFilterKey } from "@/lib/knowledgeBaseViewport";
+import knowledgeBaseService from "@/services/knowledgeBaseService";
 import knowledgeBasePollingService from "@/services/knowledgeBasePollingService";
 import { isKnowledgeBaseFileSizeValid } from "@/services/uploadService";
 import { KnowledgeBase } from "@/types/knowledgeBase";
@@ -295,16 +294,7 @@ function DataConfig({ isActive }: DataConfigProps) {
   const [newKbEmbeddingModel, setNewKbEmbeddingModel] = useState<string>(""); // Selected embedding model for new KB
   // v2.6.0: per-KB embedding model params override
   const [newKbEmbeddingParamsOverride, setNewKbEmbeddingParamsOverride] =
-    useState<
-      Record<
-        string,
-        {
-          temperature?: number | null;
-          top_p?: number | null;
-          extra_params?: Record<string, unknown> | null;
-        }
-      >
-    >({});
+    useState<Record<string, { temperature?: number | null; top_p?: number | null; extra_params?: Record<string, unknown> | null }>>({});
   const [uploadFiles, setUploadFiles] = useState<File[]>([]);
   const [hasClickedUpload, setHasClickedUpload] = useState(false);
   const [showEmbeddingWarning, setShowEmbeddingWarning] = useState(false);
@@ -642,14 +632,14 @@ function DataConfig({ isActive }: DataConfigProps) {
 
     // Normal delete confirmation for local knowledge bases
     confirm({
-      title: t("knowledgeBase.modal.deleteConfirm.title"),
+      title: t("knowledgeBase.modal.deleteConfirm.title", { name: kb?.name ?? id }),
       content: (
         <div>
           <div>{t("knowledgeBase.modal.deleteConfirm.content")}</div>
           <KnowledgeBaseDeleteNotice preview={preview} />
         </div>
       ),
-      okText: t("common.confirm"),
+      okText: t("knowledgeBase.modal.deleteConfirm.confirm"),
       cancelText: t("common.cancel"),
       danger: true,
       onOk: async () => {

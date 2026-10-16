@@ -52,16 +52,18 @@ const resolveIsMultimodal = (indexInfo: any, stats: any): boolean =>
 // Knowledge base service class
 class KnowledgeBaseService {
   async previewBoundAgents(
-    indexName: string
+    indexName: string,
+    tenantId?: string | null
   ): Promise<KnowledgeBaseDeletionPreview | null> {
     try {
-      const response = await fetchWithErrorHandling(
-        API_ENDPOINTS.knowledgeBase.boundAgents(indexName),
-        {
-          method: "GET",
-          headers: getAuthHeaders(),
-        }
-      );
+      const endpoint = API_ENDPOINTS.knowledgeBase.boundAgents(indexName);
+      const query = tenantId
+        ? `?${new URLSearchParams({ tenant_id: tenantId })}`
+        : "";
+      const response = await fetchWithErrorHandling(`${endpoint}${query}`, {
+        method: "GET",
+        headers: getAuthHeaders(),
+      });
       return await response.json();
     } catch (error) {
       log.warn("Knowledge base deletion preview unavailable:", error);
@@ -1229,17 +1231,9 @@ class KnowledgeBaseService {
         }
       );
 
-      const result = await response.json().catch(() => null);
-      if (!response.ok || result?.status !== "success") {
-        // Preserve the EDS code and details (for example the agent reference
-        // conflict) so the caller can render the dedicated dialog.
-        throw new ApiError(
-          result?.code ?? response.status,
-          result?.message ||
-            result?.detail?.message ||
-            "Failed to delete knowledge base",
-          result?.details
-        );
+      const result = await response.json();
+      if (result.status !== "success") {
+        throw new Error(result.message || "Failed to delete knowledge base");
       }
       emitQuotaUsageChanged();
     } catch (error) {
