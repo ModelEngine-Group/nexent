@@ -9,6 +9,7 @@
 ## Shared constraints
 
 - Write code comments, docstrings, TODOs, and configuration comments in English. User-facing strings may use supported languages; this does not prescribe conversation language.
+- Every new or modified source file (`.py`, `.sh`, `.sql`, `.ts`, `.tsx`, `.js`, `.jsx`, `.mjs`) must start with the copyright header `Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.` (the end year tracks the current year, e.g. `2025-2027` in 2027) in the file's comment style (`#` for Python/Shell, `--` for SQL, `//` for TypeScript/JavaScript), placed after shebang/encoding lines. The `Copyright Header Check` CI job rejects changed files missing it; verify or fix locally with `python scripts/check_copyright.py [--fix] <files...>`.
 - In backend/SDK Python code, centralize environment reads in `backend/consts/const.py`. Backend callers import from `consts.const`; SDK code accepts parameters and must not read environment variables or introduce `from_env()` methods.
 - Every SQL file under `deploy/sql/` already merged into the target branch is immutable, including initialization and Supabase SQL. Do not edit, rename, or delete it. Add versioned migrations under `deploy/sql/migrations/`; application version is `APP_VERSION` in `backend/consts/const.py`.
 - Preserve existing HTTP routes, payloads, and response contracts when applying conventions to new code.

@@ -51,6 +51,9 @@ export const API_ENDPOINTS = {
   },
   conversation: {
     list: `${API_BASE_URL}/conversation/list`,
+    workbenchPins: `${API_BASE_URL}/conversation/workbench_pins`,
+    workbenchPin: (id: number) =>
+      `${API_BASE_URL}/conversation/${id}/workbench_pin`,
     create: `${API_BASE_URL}/conversation/create`,
     save: `${API_BASE_URL}/conversation/save`,
     rename: `${API_BASE_URL}/conversation/rename`,

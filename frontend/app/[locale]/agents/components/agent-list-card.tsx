@@ -1,9 +1,13 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 "use client";
 
+import { Tag } from "antd";
 import { Clock3 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 import { StandardButton } from "@/components/common/StandardButton";
+import { getAgentRepositoryTagLabel } from "@/lib/agentRepositoryLabels";
 import type { Agent } from "@/types/agentConfig";
 
 import AgentAvatar from "./agent-avatar";
@@ -45,41 +49,61 @@ export default function AgentListCard({
 }: AgentListCardProps) {
   const { t } = useTranslation("common");
   const title = agent.display_name || agent.name;
-  const category = agent.tags?.[0];
+  const rawCategory = agent.tags?.[0];
+  const category = rawCategory
+    ? getAgentRepositoryTagLabel(rawCategory, t)
+    : undefined;
   const date = formatAgentListDate(agent);
   const agentId = Number(agent.id);
 
   return (
-    <article className="group relative flex h-[148px] min-w-0 flex-col justify-between rounded-[12px] bg-white px-6 py-4 ring-1 ring-[rgba(201,201,201,0.4)] hover:ring-[#0067d1] focus-within:ring-[#0067d1]">
+    <article className="group relative flex h-[180px] min-w-0 flex-col justify-between rounded-[12px] bg-white px-6 py-4 ring-1 ring-[rgba(201,201,201,0.4)] hover:ring-[#0067d1] focus-within:ring-[#0067d1]">
       <button
-        data-testid="agent-card-body"
         type="button"
-        className="flex h-[86px] min-w-0 shrink-0 cursor-pointer flex-col text-left"
         onClick={() => onOpen(agent)}
+        data-testid="agent-card-body"
+        className="flex h-[112px] w-full min-w-0 shrink-0 cursor-pointer flex-col text-left"
         aria-label={title}
       >
-        <div className="flex h-10 min-w-0 items-center gap-3 pr-7">
-          <AgentAvatar agent={agent} size={40} iconSize={20} />
-          <span className="min-w-0 truncate text-[16px] font-medium leading-6 ![letter-spacing:0px] text-[#191919]">
-            {title}
-          </span>
-          {category ? (
-            <span className="h-[22px] max-w-[35%] shrink-0 truncate rounded-[4px] border border-solid border-[#b3b3b3] bg-[rgba(25,25,25,0.05)] px-2 py-0.5 text-[12px] leading-4 ![letter-spacing:0px] text-[#191919]">
-              {category}
-            </span>
-          ) : null}
-          <AgentListIndicators agent={agent} />
+        <div className="flex h-10 w-full min-w-0 items-center gap-3 pr-7">
+          <AgentAvatar
+            agent={agent}
+            size={40}
+            iconSize={20}
+            className="shrink-0"
+          />
+          <div className="flex h-full min-w-0 flex-1 flex-col items-start justify-center">
+            <div className="flex w-full min-w-0 items-center gap-2">
+              <span
+                title={title}
+                className="min-w-0 truncate text-[16px] font-medium leading-6 ![letter-spacing:0px] text-[#191919]"
+              >
+                {title}
+              </span>
+              <AgentListIndicators agent={agent} />
+            </div>
+          </div>
         </div>
         <p className="mt-1 h-[42px] line-clamp-2 w-full text-[12px] font-normal leading-5 ![letter-spacing:0px] text-[#777777]">
           {agent.description || t("agentRepository.card.noDescription")}
         </p>
+        <div className="mt-1 flex h-[22px] w-full min-w-0 items-center">
+          {category ? (
+            <Tag
+              title={category}
+              className="!m-0 !inline-flex !h-[22px] max-w-full items-center !rounded-full !border-0 !bg-[#E6F2FD] !px-2.5 !text-[12px] font-normal !leading-5 !text-[#0067D1]"
+            >
+              <span className="min-w-0 truncate">{category}</span>
+            </Tag>
+          ) : null}
+        </div>
       </button>
 
       <div
         data-testid="agent-card-footer"
-        className="flex h-[18px] shrink-0 items-center gap-[clamp(12px,calc(100%_-_314px),78px)] text-[12px] leading-[18px] ![letter-spacing:0px] group-hover:gap-2 group-focus-within:gap-2"
+        className="flex h-8 shrink-0 items-center gap-[clamp(12px,calc(100%_-_314px),78px)] text-[12px] leading-[18px] ![letter-spacing:0px]"
       >
-        <span className="inline-flex min-w-0 items-center gap-1 text-[rgba(25,25,25,0.7)] group-hover:flex-1 group-focus-within:flex-1">
+        <span className="inline-flex min-w-0 items-center gap-1 overflow-hidden text-[rgba(25,25,25,0.7)]">
           <Clock3 className="size-3 shrink-0" aria-hidden="true" />
           {date ? (
             <span className="truncate">
@@ -96,7 +120,7 @@ export default function AgentListCard({
         </span>
         <span
           data-testid="agent-card-status"
-          className="inline-flex shrink-0 items-center gap-1 text-[#191919] group-hover:hidden group-focus-within:hidden"
+          className="inline-flex shrink-0 items-center gap-1 text-[#191919]"
         >
           <span
             data-testid="agent-card-status-dot"
@@ -107,7 +131,7 @@ export default function AgentListCard({
             ? t("agentConfig.list.online")
             : t("agentConfig.list.offline")}
         </span>
-        <div className="hidden shrink-0 items-center gap-2 self-end group-hover:flex group-focus-within:flex">
+        <div className="pointer-events-none invisible ml-auto flex shrink-0 items-center gap-2 self-end group-hover:pointer-events-auto group-hover:visible group-focus-within:pointer-events-auto group-focus-within:visible">
           <StandardButton
             variant="primary"
             onClick={() => onConfigure(agentId)}

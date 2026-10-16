@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """Architecture checks for the Management service migration slices."""
 
 import ast
@@ -42,6 +44,7 @@ MIGRATED_MODULES = {
     "model/providers/tokenpony_provider.py",
     "model/reasoning.py",
     "model/resolver.py",
+    "model/run_controls.py",
     "skill/service.py",
     "skill/support.py",
 }

@@ -1,12 +1,17 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import {
+  ChevronLeftIcon,
   PanelLeftIcon,
-  PlusIcon,
+  SquarePen,
   SearchIcon,
-  Sparkle,
+  SquarePenIcon,
   XIcon,
 } from "lucide-react";
 import { useState } from "react";
+import { message } from "antd";
 import { StandardInput } from "@/components/common/StandardInput";
+import { StandardButton } from "@/components/common/StandardButton";
 import {
   Sidebar,
   SidebarContent,
@@ -53,20 +58,8 @@ interface ThreadListSidebarProps extends SidebarProps {
   newChatDesign?: boolean;
   /** Accepted for backward compatibility; the design removed the legacy switch. */
   showLegacySwitch?: boolean;
-}
-
-// "Discover agents" glyph: a magnifier with a sparkle at its top-right,
-// matching the design's AI-discovery icon.
-function DiscoverAgentsIcon({ className }: { className?: string }) {
-  return (
-    <span className={cn("relative inline-flex shrink-0", className)}>
-      <SearchIcon className="size-4" aria-hidden />
-      <Sparkle
-        className="absolute -right-1 -top-1 size-2 fill-current"
-        aria-hidden
-      />
-    </span>
-  );
+  /** Workbench uses user-scoped server IDs; undefined retains Agent-chat pins. */
+  pinStorageKey?: string | null;
 }
 
 export function ThreadListSidebar({
@@ -79,6 +72,7 @@ export function ThreadListSidebar({
   onAgentSelected,
   onRenameSuccess,
   newChatDesign = false,
+  pinStorageKey,
   ...props
 }: ThreadListSidebarProps) {
   const { state, toggleSidebar } = useSidebar();
@@ -115,14 +109,14 @@ export function ThreadListSidebar({
               </TooltipIconButton>
               {!newChatDesign && (
                 <TooltipIconButton
-                  tooltip={t("chat.sidebar.newConversation")}
+                  tooltip={t("workbench.sidebar.newConversation")}
                   side="right"
                   variant="ghost"
                   size="icon"
                   className="size-8"
                   onClick={onNewConversation}
                 >
-                  <PlusIcon className="size-4" />
+                  <SquarePen className="size-4" aria-hidden />
                 </TooltipIconButton>
               )}
             </div>
@@ -139,10 +133,21 @@ export function ThreadListSidebar({
         className={cn("h-full w-[296px] min-w-[296px] max-w-[296px] p-2")}
         style={{ backgroundColor: sidebarBackground }}
       >
-        <PinnedThreadsProvider>
+        <PinnedThreadsProvider
+          storageKey={pinStorageKey}
+          serverBacked={pinStorageKey !== undefined}
+          persistedConversationIds={pinStorageKey !== undefined}
+          serverConversationIds={serverConversationIds}
+          onStorageError={
+            pinStorageKey !== undefined
+              ? () => message.error(t("chat.threadList.pinServerFailed"))
+              : undefined
+          }
+        >
           <BatchSelectionProvider
             onNewConversation={onNewConversation}
             serverConversationIds={serverConversationIds}
+            conversationType={newChatDesign ? "agent_chat" : "workbench"}
           >
             <Sidebar
               {...props}
@@ -151,10 +156,25 @@ export function ThreadListSidebar({
               className={cn(props.className, "!h-full !w-full min-w-0")}
               style={{ backgroundColor: sidebarBackground, ...props.style }}
             >
-              <SidebarHeader>
+              <SidebarHeader className="pb-0">
                 <div className="flex flex-col gap-2 px-1">
                   {newChatDesign ? (
                     <div className="flex items-center gap-1">
+                      {/* Back chevron: returns to the discover-agents landing
+                          page (same handler the old filled button used).
+                          -mr-3 pulls the dropdown trigger over the button's
+                          inner padding so the title sits close to the glyph. */}
+                      {onPrepareNewConversation && (
+                        <TooltipIconButton
+                          tooltip={t("chat.sidebar.discoverAgents")}
+                          variant="ghost"
+                          size="icon"
+                          className="size-8 shrink-0 -mr-3"
+                          onClick={onPrepareNewConversation}
+                        >
+                          <ChevronLeftIcon className="size-4" />
+                        </TooltipIconButton>
+                      )}
                       {onAgentSelected && (
                         <div className="min-w-0 flex-1">
                           <AgentSelectorDropdown
@@ -178,23 +198,104 @@ export function ThreadListSidebar({
                       <SidebarTrigger className="size-8 shrink-0" />
                     </div>
                   ) : (
-                    <div className="flex h-9 items-center gap-2 rounded-lg border border-border bg-white px-2">
-                      <SearchIcon className="size-4 shrink-0 text-muted-foreground" />
-                      <input
-                        value={legacySearchQuery}
-                        onChange={(event) =>
-                          setLegacySearchQuery(event.target.value)
-                        }
-                        placeholder={t("chat.sidebar.searchHistory")}
-                        aria-label={t("chat.sidebar.searchHistory")}
-                        className="h-full min-w-0 flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground"
-                      />
-                      <SidebarTrigger className="size-8 shrink-0" />
-                    </div>
+                    <>
+                      <div
+                        data-workbench-header-actions
+                        className="flex h-8 items-center gap-2"
+                      >
+                        {onNewConversation ? (
+                          <StandardButton
+                            variant="default"
+                            className="!bg-white flex !h-8 min-w-0 flex-1 !w-auto items-center justify-center gap-2 !rounded-lg font-medium hover:brightness-95"
+                            onClick={onNewConversation}
+                          >
+                            <SquarePen
+                              className="size-4 shrink-0"
+                              aria-hidden
+                            />
+                            {t("workbench.sidebar.newConversation")}
+                          </StandardButton>
+                        ) : (
+                          <ThreadListPrimitive.New
+                            className="flex h-8 min-w-0 flex-1 items-center justify-center gap-2 rounded-lg border border-border bg-white px-3 text-sm text-[#191919]"
+                            onClick={onPrepareNewConversation}
+                          >
+                            <SquarePen
+                              className="size-4 shrink-0"
+                              aria-hidden
+                            />
+                            {t("workbench.sidebar.newConversation")}
+                          </ThreadListPrimitive.New>
+                        )}
+                        <TooltipIconButton
+                          tooltip={t("chat.sidebar.search")}
+                          variant="ghost"
+                          size="icon"
+                          className="size-8 shrink-0"
+                          aria-expanded={searchOpen}
+                          onClick={() => {
+                            setSearchOpen((open) => !open);
+                            setLegacySearchQuery("");
+                          }}
+                        >
+                          <SearchIcon className="size-4" />
+                        </TooltipIconButton>
+                        <SidebarTrigger className="size-8 shrink-0" />
+                      </div>
+                      {searchOpen && (
+                        <div data-workbench-history-search>
+                          <StandardInput
+                            autoFocus
+                            value={legacySearchQuery}
+                            onChange={(event) =>
+                              setLegacySearchQuery(event.target.value)
+                            }
+                            placeholder={t("chat.sidebar.searchHistory")}
+                            aria-label={t("chat.sidebar.searchHistory")}
+                            onKeyDown={(event) => {
+                              if (event.key === "Escape") {
+                                setSearchOpen(false);
+                                setLegacySearchQuery("");
+                              }
+                            }}
+                            suffix={
+                              <button
+                                type="button"
+                                aria-label={t("chat.threadList.cancel")}
+                                className="flex cursor-pointer items-center text-muted-foreground hover:text-foreground"
+                                onClick={() => {
+                                  setSearchOpen(false);
+                                  setLegacySearchQuery("");
+                                }}
+                              >
+                                <XIcon className="size-3.5" aria-hidden />
+                              </button>
+                            }
+                          />
+                        </div>
+                      )}
+                    </>
+                  )}
+                  {newChatDesign && onNewConversation && (
+                    // Prominent pill per the design reference: white fill on
+                    // the gray rail, compose glyph, centered label. Starts a
+                    // blank conversation via the page's new-thread handler.
+                    <button
+                      type="button"
+                      className="flex h-9 w-full cursor-pointer items-center justify-center gap-2 truncate rounded-lg bg-white text-[14px] font-medium text-[#191919] transition-colors hover:bg-[#e8e8e8]"
+                      onClick={onNewConversation}
+                    >
+                      <SquarePenIcon className="size-4 shrink-0 text-primary" />
+                      {t("chat.sidebar.newConversation")}
+                    </button>
                   )}
                   {newChatDesign && searchOpen && (
+                    // Toggled search field mirrors the pill's box (h-9,
+                    // rounded-lg) and sits below it so the header reads as
+                    // one evenly spaced stack.
                     <StandardInput
                       autoFocus
+                      className="!h-9 !rounded-lg"
                       value={conversationSearch}
                       onChange={(event) =>
                         setConversationSearch(event.target.value)
@@ -214,32 +315,6 @@ export function ThreadListSidebar({
                         </button>
                       }
                     />
-                  )}
-                  {newChatDesign ? (
-                    <ThreadListPrimitive.New
-                      className="flex h-9 w-full items-center gap-2 rounded-lg border px-3 text-sm hover:bg-muted truncate bg-[#e4e4e4] border-[#e4e4e4]"
-                      onClick={onPrepareNewConversation}
-                    >
-                      <DiscoverAgentsIcon className="size-4" />
-                      {t("chat.sidebar.discoverAgents")}
-                    </ThreadListPrimitive.New>
-                  ) : onNewConversation ? (
-                    <button
-                      type="button"
-                      className="flex h-9 flex-1 items-center gap-2 rounded-lg px-3 text-sm hover:bg-muted truncate"
-                      onClick={onNewConversation}
-                    >
-                      <PlusIcon className="size-4 shrink-0" />
-                      {t("chat.sidebar.newConversation")}
-                    </button>
-                  ) : (
-                    <ThreadListPrimitive.New
-                      className="flex h-9 flex-1 items-center gap-2 rounded-lg px-3 text-sm hover:bg-muted truncate"
-                      onClick={onPrepareNewConversation}
-                    >
-                      <PlusIcon className="size-4 shrink-0" />
-                      {t("chat.sidebar.newConversation")}
-                    </ThreadListPrimitive.New>
                   )}
                 </div>
               </SidebarHeader>

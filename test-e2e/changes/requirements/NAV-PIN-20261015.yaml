@@ -1,0 +1,24 @@
+schema_version: '1.0'
+change:
+  change_id: NAV-PIN-20261015
+  change_type: requirement
+  requirement_id: NAV-MENU-REQ-005
+  title: Add a pinnable sidebar header control
+  description: Expanded sidebar shows a toggle alongside the logo; pinning reserves240px and shrinks content, toggling again collapses to64px without immediate hover reopening. Pinned state uses a right divider without shadow; default hover expansion remains an overlay with shadow and no divider.
+  affected_features:
+    existing: []
+    added: []
+    modified: [NAV-MENU-VISIBILITY]
+    retired: []
+  affected_cases:
+    existing: []
+    added: []
+    modified: [NAV-MENU-D4-001]
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    behaviors: [expanded-only pin control, pinned state survives pointer exit, unpin collapses and cancels timers, layout reservation follows pin state]
+    reason: Extend sidebar and layout UT for local state and callback collaboration; existing D4 proves actual content resize, pinned divider and pointer behavior. Python code and backend contracts unchanged.
+    test_selectors:
+    - frontend/tests/component/sidebarHover.test.tsx
+    - frontend/tests/component/sharedShellLayout.test.tsx

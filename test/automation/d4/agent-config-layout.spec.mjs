@@ -1,3 +1,5 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -434,16 +436,66 @@ test("AGENT-CONFIG-D4-001 measured empty editor, saved guidance and guarded work
     .getByRole("group", { name: label("agent.highFidelity.workflowModes") });
   expect((await box(modes)).height).toBeCloseTo(32, 0);
   expect((await box(modes)).width).toBeCloseTo(318, 0);
-  const greeting = await box(page.getByTestId("agent-configuration-greeting"));
-  const composer = await box(
-    page.getByTestId("agent-configuration-welcome").locator("fieldset"),
+  const conversationPanel = page.getByTestId("agent-config-conversation-panel");
+  const greetingHeading = conversationPanel.getByRole("heading", {
+    name: label("nl2agent.configuration.title"),
+    exact: true,
+  });
+  const greetingMessage = conversationPanel.getByText(
+    label("nl2agent.configuration.description"),
+    { exact: true },
   );
-  console.log("Conversation geometry:", { greeting, composer });
-  expect(greeting.y).toBeCloseTo(348, 0);
-  expect(greeting.height).toBeCloseTo(100, 0);
-  expect(composer.width).toBeCloseTo(512, 0);
-  expect(composer.height).toBeCloseTo(164, 0);
-  expect(composer.y).toBeCloseTo(448, 0);
+  const suggestionsHeading = conversationPanel.getByRole("heading", {
+    name: label("agentSuggestion.heading"),
+    exact: true,
+  });
+  const suggestionsList = conversationPanel.getByRole("list");
+  const composerInput = conversationPanel.getByRole("textbox", {
+    name: label("chat.composer.placeholder"),
+    exact: true,
+  });
+  const composerFieldset = conversationPanel.locator("fieldset").filter({
+    has: composerInput,
+  });
+  await expect(greetingHeading).toBeInViewport();
+  await expect(greetingMessage).toBeInViewport();
+  await expect(suggestionsHeading).toBeInViewport();
+  await expect(suggestionsList).toBeInViewport();
+  await expect(suggestionsList.getByRole("button")).toHaveCount(4);
+  await expect(composerInput).toHaveCount(1);
+  await expect(composerInput).toBeEditable();
+  await expect(composerInput).toBeInViewport();
+  await expect(composerFieldset).toHaveCount(1);
+  const greeting = await box(greetingHeading);
+  const greetingText = await box(greetingMessage);
+  const suggestionsTitle = await box(suggestionsHeading);
+  const suggestions = await box(suggestionsList);
+  const composer = await box(composerFieldset);
+  expect(greeting.y + greeting.height).toBeLessThanOrEqual(greetingText.y + 1);
+  expect(
+    suggestionsTitle.y - greetingText.y - greetingText.height,
+  ).toBeGreaterThanOrEqual(24);
+  expect(suggestionsTitle.y + suggestionsTitle.height).toBeLessThanOrEqual(
+    suggestions.y + 1,
+  );
+  expect(suggestions.y + suggestions.height).toBeLessThanOrEqual(
+    composer.y + 1,
+  );
+  expect(composer.width).toBeGreaterThan(conversation.width * 0.8);
+  for (const bounds of [greeting, greetingText, suggestions, composer]) {
+    expect(bounds.x).toBeGreaterThanOrEqual(conversation.x - 1);
+    expect(bounds.x + bounds.width).toBeLessThanOrEqual(
+      conversation.x + conversation.width + 1,
+    );
+    expect(bounds.x + bounds.width / 2).toBeCloseTo(
+      conversation.x + conversation.width / 2,
+      0,
+    );
+  }
+  const composerBottomGap =
+    conversation.y + conversation.height - composer.y - composer.height;
+  expect(composerBottomGap).toBeGreaterThanOrEqual(0);
+  expect(composerBottomGap).toBeLessThanOrEqual(48);
   await assertNoOverflow(page);
   const cards = ["info", "model", "resources", "advanced"].map((name) =>
     page.getByTestId(`agent-config-card-${name}`),

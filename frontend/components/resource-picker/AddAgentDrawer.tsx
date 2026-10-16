@@ -1,6 +1,8 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 "use client";
 
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { App, Empty, Spin } from "antd";
 import { Bot, Clock, Globe } from "lucide-react";
@@ -10,10 +12,12 @@ import { usePublishedAgentList } from "@/hooks/agent/usePublishedAgentList";
 import { useExternalAgents } from "@/hooks/agent/useExternalAgents";
 import { useAgentStore } from "@/stores/agentStore";
 import { formatDate } from "@/lib/date";
+import { synchronizeExternalAgentRelations } from "@/lib/externalAgentRelations";
 import type { Agent } from "@/types/agentConfig";
 import { a2aClientService, type A2AExternalAgent } from "@/services/a2aService";
 import { AddResourceDrawer, CheckMark } from "./AddResourceDrawer";
 import type { AgentCardItem, SelectedItem } from "./types";
+import styles from "./ResourcePickerDrawer.module.css";
 
 const PAGE_SIZE = 10;
 
@@ -81,35 +85,35 @@ function AgentCard({
   return (
     <div
       className={cn(
-        "relative flex h-[149px] flex-col gap-1.5 rounded-[8px] border p-3",
-        selected ? "border-[#7EB6F0] bg-[#E6F2FD]" : "border-[#D9D9D9] bg-white"
+        styles.agentCard,
+        selected ? styles.agentCardSelected : "bg-white"
       )}
     >
-      <div className="absolute right-3 top-3">
+      <div className="absolute right-6 top-7">
         <CheckMark checked={selected} onToggle={onToggle} />
       </div>
-      <div className="flex items-center gap-2.5">
+      <div className="flex h-10 shrink-0 items-center gap-3 pr-6">
         <div
           className="flex h-10 w-10 shrink-0 items-center justify-center rounded-[8px] text-white"
           style={{ background: item.iconBg }}
         >
           {icon}
         </div>
-        <span className="truncate text-[14px] font-medium leading-[22px] text-[#191919]">
+        <span className="min-w-0 truncate text-[16px] font-medium leading-[24px] text-[#191919]">
           {item.name}
         </span>
       </div>
-      <p className="line-clamp-2 text-[14px] leading-[20px] text-[#737373]">
+      <p className="line-clamp-2 h-[42px] shrink-0 text-[12px] font-normal leading-[20px] text-[#777777]">
         {item.description}
       </p>
-      <div className="mt-auto flex items-center gap-3.5 text-[12px] leading-[18px] text-[#999]">
+      <div className={styles.agentMetadata}>
         {item.updatedAt && (
-          <span className="flex items-center gap-1">
-            <Clock size={14} />
+          <span className={styles.agentUpdatedAt}>
+            <Clock size={14} className="shrink-0" />
             {t("agentConfig.list.updatedAt", { date: item.updatedAt })}
           </span>
         )}
-        <span className="flex items-center gap-1">
+        <span className={styles.agentStatus}>
           <span
             className={cn(
               "size-1.5 rounded-full",
@@ -166,13 +170,34 @@ export function AddAgentDrawer({ open, onClose }: AddAgentDrawerProps) {
   const [page, setPage] = useState(1);
   const [tagFilter, setTagFilter] = useState("");
 
+  // Local drafts of the selected sub-agent ids. Changes are only committed to
+  // the agent store (and external A2A relations) when confirm is clicked.
+  const [draftInternalIds, setDraftInternalIds] = useState<number[]>([]);
+  const [draftExternalIds, setDraftExternalIds] = useState<number[]>([]);
+
+  const selectionSessionRef = useRef({ open: false, agentId: currentAgentId });
+  const synchronizedExternalIdsRef = useRef<number[]>([]);
+  const [isConfirming, setIsConfirming] = useState(false);
   useEffect(() => {
-    if (!open) return;
+    if (!open) {
+      selectionSessionRef.current.open = false;
+      return;
+    }
+    // Store updates from partial success must not discard the user's draft.
+    if (
+      selectionSessionRef.current.open &&
+      selectionSessionRef.current.agentId === currentAgentId
+    )
+      return;
+    selectionSessionRef.current = { open: true, agentId: currentAgentId };
+    synchronizedExternalIdsRef.current = [...selectedExternalIds];
     setActiveSource("internal");
     setSearch("");
     setPage(1);
     setTagFilter("");
-  }, [open]);
+    setDraftInternalIds(selectedInternalIds);
+    setDraftExternalIds(selectedExternalIds);
+  }, [open, currentAgentId, selectedInternalIds, selectedExternalIds]);
 
   const selectableInternalAgents = useMemo(
     () =>
@@ -228,10 +253,10 @@ export function AddAgentDrawer({ open, onClose }: AddAgentDrawerProps) {
     activeSource === "internal" ? isInternalLoading : isExternalLoading;
 
   const currentSelectedIds =
-    activeSource === "internal" ? selectedInternalIds : selectedExternalIds;
+    activeSource === "internal" ? draftInternalIds : draftExternalIds;
 
   const selectedChips = useMemo<SelectedItem[]>(() => {
-    const internalChips = selectedInternalIds.map((id) => {
+    const internalChips = draftInternalIds.map((id) => {
       const agent = internalAgents.find(
         (item: Agent) => Number(item.id) === id
       );
@@ -240,19 +265,14 @@ export function AddAgentDrawer({ open, onClose }: AddAgentDrawerProps) {
         label: agent?.display_name || agent?.name || String(id),
       };
     });
-    const externalChips = selectedExternalIds.map((id) => {
+    const externalChips = draftExternalIds.map((id) => {
       const agent = externalAgents.find(
         (item: A2AExternalAgent) => Number(item.id) === id
       );
       return { id: `external-${id}`, label: agent?.name || String(id) };
     });
     return [...internalChips, ...externalChips];
-  }, [
-    selectedExternalIds,
-    selectedInternalIds,
-    externalAgents,
-    internalAgents,
-  ]);
+  }, [draftExternalIds, draftInternalIds, externalAgents, internalAgents]);
 
   const allSelected =
     filteredAgents.length > 0 &&
@@ -260,13 +280,12 @@ export function AddAgentDrawer({ open, onClose }: AddAgentDrawerProps) {
       currentSelectedIds.includes(Number(item.id))
     );
 
-  const applyInternalSelection = (nextIds: number[]) => {
-    updateSubAgentIds(nextIds);
+  const computeInternalRelations = (nextIds: number[]) => {
     const existing = editedAgent?.sub_agent_relations || [];
     const addedIds = nextIds.filter(
       (id) => !existing.some((rel) => rel.agent_id === id)
     );
-    const nextRelations = [
+    return [
       ...existing.filter((rel) => nextIds.includes(rel.agent_id)),
       ...addedIds.map((agentId) => {
         const agent = internalAgents.find(
@@ -279,46 +298,23 @@ export function AddAgentDrawer({ open, onClose }: AddAgentDrawerProps) {
         };
       }),
     ];
-    updateSubAgentRelations(nextRelations);
-  };
-
-  const setExternalSelection = async (nextIds: number[]) => {
-    const added = nextIds.filter((id) => !selectedExternalIds.includes(id));
-    const removed = selectedExternalIds.filter((id) => !nextIds.includes(id));
-
-    if (currentAgentId && (added.length || removed.length)) {
-      const results = await Promise.all([
-        ...added.map((id) =>
-          a2aClientService.addRelation(Number(currentAgentId), id)
-        ),
-        ...removed.map((id) =>
-          a2aClientService.removeRelation(Number(currentAgentId), id)
-        ),
-      ]);
-      if (results.some((result) => !result.success)) {
-        messageApi.error(t("a2a.service.addRelationFailed"));
-        return;
-      }
-    }
-
-    updateExternalSubAgentIds(nextIds);
   };
 
   const toggle = (id: string) => {
     const num = Number(id);
     if (activeSource === "internal") {
-      const isSelected = selectedInternalIds.includes(num);
-      applyInternalSelection(
+      const isSelected = draftInternalIds.includes(num);
+      setDraftInternalIds(
         isSelected
-          ? selectedInternalIds.filter((item) => item !== num)
-          : [...selectedInternalIds, num]
+          ? draftInternalIds.filter((item) => item !== num)
+          : [...draftInternalIds, num]
       );
     } else {
-      const isSelected = selectedExternalIds.includes(num);
-      void setExternalSelection(
+      const isSelected = draftExternalIds.includes(num);
+      setDraftExternalIds(
         isSelected
-          ? selectedExternalIds.filter((item) => item !== num)
-          : [...selectedExternalIds, num]
+          ? draftExternalIds.filter((item) => item !== num)
+          : [...draftExternalIds, num]
       );
     }
   };
@@ -326,25 +322,62 @@ export function AddAgentDrawer({ open, onClose }: AddAgentDrawerProps) {
   const removeSelected = (id: string) => {
     if (id.startsWith("internal-")) {
       const num = Number(id.slice("internal-".length));
-      applyInternalSelection(
-        selectedInternalIds.filter((item) => item !== num)
-      );
+      setDraftInternalIds(draftInternalIds.filter((item) => item !== num));
       return;
     }
     if (id.startsWith("external-")) {
       const num = Number(id.slice("external-".length));
-      void setExternalSelection(
-        selectedExternalIds.filter((item) => item !== num)
-      );
+      setDraftExternalIds(draftExternalIds.filter((item) => item !== num));
     }
   };
 
   const handleSelectAll = (checked: boolean) => {
     const ids = filteredAgents.map((item) => Number(item.id));
     if (activeSource === "internal") {
-      applyInternalSelection(checked ? ids : []);
+      setDraftInternalIds(checked ? ids : []);
     } else {
-      void setExternalSelection(checked ? ids : []);
+      setDraftExternalIds(checked ? ids : []);
+    }
+  };
+
+  const confirmingRef = useRef(false);
+  const handleConfirm = async () => {
+    if (confirmingRef.current) return;
+    confirmingRef.current = true;
+    setIsConfirming(true);
+    try {
+      // Track confirmed changes so retries only submit pending relations.
+      if (currentAgentId) {
+        const { synchronizedIds, succeeded, failed } =
+          await synchronizeExternalAgentRelations(
+            Number(currentAgentId),
+            synchronizedExternalIdsRef.current,
+            draftExternalIds,
+            a2aClientService
+          );
+        synchronizedExternalIdsRef.current = synchronizedIds;
+        if (failed > 0) {
+          if (succeeded > 0) updateExternalSubAgentIds(synchronizedIds);
+          messageApi.error(
+            succeeded > 0
+              ? t("a2a.service.syncRelationsPartialFailed", {
+                  succeeded,
+                  failed,
+                })
+              : t("a2a.service.addRelationFailed")
+          );
+          return;
+        }
+      }
+      updateSubAgentIds(draftInternalIds);
+      updateSubAgentRelations(computeInternalRelations(draftInternalIds));
+      updateExternalSubAgentIds(draftExternalIds);
+      onClose();
+    } catch {
+      messageApi.error(t("a2a.service.addRelationFailed"));
+    } finally {
+      confirmingRef.current = false;
+      setIsConfirming(false);
     }
   };
 
@@ -359,8 +392,10 @@ export function AddAgentDrawer({ open, onClose }: AddAgentDrawerProps) {
 
   return (
     <AddResourceDrawer
+      width={768}
+      bodyClassName={cn(styles.drawer, styles.agent)}
       open={open}
-      title={t("agent.collaborative.selector.title")}
+      title={t("resourcePicker.addAgent", "添加协作智能体")}
       searchPlaceholder={t("agent.collaborative.selector.searchPlaceholder")}
       selected={selectedChips}
       tagOptions={activeSource === "internal" ? tagOptions : undefined}
@@ -368,19 +403,20 @@ export function AddAgentDrawer({ open, onClose }: AddAgentDrawerProps) {
       tabs={[
         {
           key: "internal",
-          label: t("agent.collaborative.selector.tab.internal"),
+          label: t("resourcePicker.tab.localAgent", "本地智能体"),
         },
         {
           key: "external",
-          label: t("agent.collaborative.selector.tab.external"),
+          label: t("resourcePicker.tab.externalAgent", "外部智能体"),
         },
       ]}
       activeTab={activeSource}
       total={filteredAgents.length}
       page={page}
       onPageChange={setPage}
-      showConfirm={false}
       onClose={onClose}
+      onConfirm={handleConfirm}
+      confirmLoading={isConfirming}
       onRemoveSelected={removeSelected}
       onSearch={setSearch}
       onTagChange={(value) => setTagFilter(value ?? "")}
@@ -396,7 +432,7 @@ export function AddAgentDrawer({ open, onClose }: AddAgentDrawerProps) {
       ) : filteredAgents.length === 0 ? (
         <Empty description={t("agent.collaborative.selector.empty")} />
       ) : (
-        <div className="grid grid-cols-2 content-start gap-2">
+        <div className={styles.agentGrid}>
           {pagedAgents.map((item) => (
             <AgentCard
               key={`${activeSource}-${item.id}`}

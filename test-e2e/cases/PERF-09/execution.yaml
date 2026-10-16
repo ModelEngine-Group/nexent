@@ -1,5 +1,6 @@
 schema_version: '1.0'
 case_id: PERF-09
+required_mock_services: [http-fixture]
 implementations:
 - framework: pytest
   file: test.py

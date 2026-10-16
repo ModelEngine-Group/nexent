@@ -1,4 +1,15 @@
+// Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 "use client";
+
+import type { ReasoningEffort } from "@/types/modelConfig";
+import { isReasoningEffort } from "@/lib/modelReasoning";
+import {
+  snapshotTurnModelControls,
+  type TurnModelControls,
+  type RuntimeGenerationOverrides,
+} from "@/features/model-controls/turnControls";
+import { rejectModelSelection } from "@/features/model-controls/rejectedSelection";
 
 import type {
   ChatModelAdapter,
@@ -14,6 +25,8 @@ import { ApiError } from "@/services/api";
 import { notifyWorkbenchConfigResolved } from "@/features/workbench/runtimeEvents";
 import log from "@/lib/logger";
 import { completeTrailingToolCalls } from "@/lib/toolCallStatus";
+import type { SourceAttributes } from "@/types/source";
+import { getSourceAttributes } from "@/lib/source";
 import {
   appendClarificationPart,
   isClarificationFallback,
@@ -309,6 +322,7 @@ interface NexentRunConfig {
   }) => void | Promise<void>;
   onNl2AgentStopped?: (agentId: number) => void;
   modelId?: number;
+  turnModelControls?: TurnModelControls;
   runtimeMetadata?: Record<string, unknown>;
   runtimeMetadataVersion?: number;
   onRuntimeMetadataSent?: (version?: number) => void;
@@ -953,7 +967,7 @@ export function attachExecutionLogsToTool(
  */
 export function attachSearchContentToTool(
   contentParts: any[],
-  item: {
+  item: SourceAttributes & {
     url: string;
     title: string;
     text?: string;
@@ -982,7 +996,7 @@ export function attachSearchContentToTool(
   if (!targetToolCall.searchContent) {
     targetToolCall.searchContent = [];
   }
-  if (item.url || item.sourceFile) {
+  if (item.url || item.sourceFile || item.filename || item.title) {
     targetToolCall.searchContent.push(item);
   }
   return true;
@@ -1013,7 +1027,7 @@ function findMostRecentToolCall(
 
 // Global registry for search sources by message ID (used by MarkdownText for [[b1]] rendering)
 // Keyed by messageId (from message.id in the stream), value is SearchSource[]
-export interface SearchSource {
+export interface SearchSource extends SourceAttributes {
   citeIndex: number;
   url: string;
   title: string;
@@ -1369,6 +1383,18 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
     const onServerConversationId = custom?.onServerConversationId;
     const onRunId = custom?.onRunId;
     const isResume = !isEphemeralRuntime && custom?.resume === true;
+    // Freeze the controls before draft creation or other asynchronous work.
+    const creationConfig = custom?.creationWorkbenchConfig
+      ? structuredClone(custom.creationWorkbenchConfig)
+      : undefined;
+    const creatorTurn = custom?.turnModelControls
+      ? structuredClone(custom.turnModelControls)
+      : creationConfig?.model_id != null
+        ? snapshotTurnModelControls(
+            creationConfig.model_id,
+            creationConfig.generation_config
+          )
+        : undefined;
     let nl2AgentId =
       typeof custom?.agentId === "string"
         ? Number(custom.agentId)
@@ -1570,18 +1596,32 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
       delete requestBody.reasoning_effort;
       delete requestBody.reasoning_budget_tokens;
     }
-    if (!workbenchConfig && !isEphemeralRuntime) {
+    if (!workbenchConfig && (!isEphemeralRuntime || isNl2Agent || isNl2Skill)) {
       const modelContext = context.config as
         { deepThinking?: boolean; reasoningEffort?: string } | undefined;
       if (modelContext?.deepThinking !== undefined) {
         requestBody.generation_config = {
           deep_thinking: modelContext.deepThinking,
+          ...(hasBudgetSelection
+            ? { reasoning_budget_tokens: reasoningBudgetTokens }
+            : {}),
           ...(modelContext.deepThinking &&
-          ["low", "medium", "high"].includes(modelContext.reasoningEffort ?? "")
+          !hasBudgetSelection &&
+          isReasoningEffort(modelContext.reasoningEffort)
             ? { thinking_effort: modelContext.reasoningEffort }
             : {}),
         };
       }
+    }
+    if (isNl2Agent || isNl2Skill) {
+      const turn = creatorTurn;
+      if (turn) {
+        requestBody.model_id = turn.model_id;
+        requestBody.generation_config = { ...turn.generation_config };
+      }
+      // One authority per creator turn; compatibility top-level fields are not duplicated.
+      delete requestBody.reasoning_effort;
+      delete requestBody.reasoning_budget_tokens;
     }
 
     let backendConversationId = hasServerConversationId
@@ -1673,20 +1713,12 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
           retry_user_message_id: isEphemeralRuntime
             ? custom?.retry_user_message_id
             : undefined,
-          workbench_config: isEphemeralRuntime
-            ? custom?.creationWorkbenchConfig
-            : undefined,
+          workbench_config: isEphemeralRuntime ? creationConfig : undefined,
           draft_snapshot: isNl2Skill ? custom?.draftSnapshot : undefined,
           language: isNl2Skill ? custom?.language : undefined,
-          model_id: isNl2Skill
-            ? (custom?.modelId ?? (requestBody.model_id as number | undefined))
-            : (requestBody.model_id as number | undefined),
+          model_id: requestBody.model_id as number | undefined,
           generation_config: requestBody.generation_config as
-            | {
-                deep_thinking: boolean;
-                thinking_effort?: "low" | "medium" | "high";
-              }
-            | undefined,
+            RuntimeGenerationOverrides | undefined,
           metadata: custom?.runtimeMetadata,
           expected_metadata_version: custom?.runtimeMetadataVersion,
           entrypoint: workbenchConfig ? "workbench" : undefined,
@@ -1703,7 +1735,7 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
               void stopBackendRun(numericId);
             }
           }
-          if (numericId > 0 && onServerConversationId) {
+          if (!userAborted && numericId > 0 && onServerConversationId) {
             onServerConversationId(
               String(numericId),
               !isResume && !hasServerConversationId ? query : undefined
@@ -1711,22 +1743,39 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
           }
         },
         (version) => {
-          returnedRuntimeMetadataVersion = version;
+          if (!userAborted) returnedRuntimeMetadataVersion = version;
         },
         (runId) => {
           backendRunId = runId;
-          onRunId?.(runId);
+          if (!userAborted) onRunId?.(runId);
           if (userAborted) {
             void stopBackendRun(runId);
           }
         },
-        (version) => custom?.onWorkbenchConfigVersion?.(version)
+        (version) => {
+          if (!userAborted) custom?.onWorkbenchConfigVersion?.(version);
+        }
       );
+      if (userAborted) {
+        if (!("type" in agentResponse)) await agentResponse.cancel();
+        cleanupAbortHandler();
+        await backendStopPromise;
+        return;
+      }
       if (!("type" in agentResponse)) custom?.onRunStarted?.();
       if (custom?.runtimeMetadata !== undefined) {
         custom.onRuntimeMetadataSent?.(returnedRuntimeMetadataVersion);
       }
     } catch (error: unknown) {
+      if (
+        !userAborted &&
+        error instanceof ApiError &&
+        ["model_not_available", "model_unavailable"].includes(
+          String(error.code)
+        )
+      ) {
+        rejectModelSelection(Number(requestBody.model_id));
+      }
       custom?.onRunRejected?.(error, messages[lastUserIndex]);
       cleanupAbortHandler();
       if (
@@ -2154,6 +2203,7 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
     // Preserves cite_index for [[b1]] → source registry linkage.
     const searchSourcesAccumulator: SearchSource[] = [];
     const searchImagesAccumulator: SearchSource[] = [];
+    const consumedImageMetadata = new Set<SearchSource>();
     let skillFileAttachments: CompleteAttachment[] = [];
     let nl2a: Nl2aMessage | undefined;
     const acceptNl2aBoundary = (chunk: SseChunk): boolean => {
@@ -2216,12 +2266,19 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
       for (const imageUrl of imageUrls) {
         if (!imageUrl) continue;
 
-        const metadata = imageMetadata[searchImagesAccumulator.length];
+        const metadata = imageMetadata.find(
+          (source) =>
+            source.url === imageUrl &&
+            !consumedImageMetadata.has(source)
+        );
+        if (metadata) consumedImageMetadata.add(metadata);
         const imageSource: SearchSource = {
           ...metadata,
           url: imageUrl,
           title: metadata?.title || imageUrl,
           text: metadata?.text,
+          citeIndex: metadata?.citeIndex ?? 0,
+          toolSign: metadata?.toolSign ?? "",
           sourceType: "url",
           isImage: true,
           imageKey:
@@ -2302,6 +2359,7 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
+        if (userAborted || abortSignal.aborted) return;
 
         buffer += decoder.decode(value, { stream: true });
 
@@ -2802,6 +2860,10 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
                     isImage,
                     imageKey: result.image_key,
                     retrievalHighlightTerms,
+                    ...getSourceAttributes(
+                      result.search_type,
+                      result.score_details
+                    ),
                   });
                 }
                 attachSearchContentToTool(
@@ -2822,6 +2884,10 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
                     isImage,
                     imageKey: result.image_key,
                     retrievalHighlightTerms,
+                    ...getSourceAttributes(
+                      result.search_type,
+                      result.score_details
+                    ),
                   },
                   chunk.tool_call_id
                 );
@@ -3129,6 +3195,10 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
                       isImage,
                       imageKey: result.image_key,
                       retrievalHighlightTerms,
+                      ...getSourceAttributes(
+                        result.search_type,
+                        result.score_details
+                      ),
                     });
                   }
                   attachSearchContentToTool(
@@ -3149,6 +3219,10 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
                       isImage,
                       imageKey: result.image_key,
                       retrievalHighlightTerms,
+                      ...getSourceAttributes(
+                        result.search_type,
+                        result.score_details
+                      ),
                     },
                     chunk.tool_call_id
                   );
@@ -3200,13 +3274,14 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
       const imageMetadata = searchSourcesAccumulator.filter(
         (source) => source.isImage
       );
+      const matchedImageSources = new Set<SearchSource>();
       for (const [index, image] of searchImagesAccumulator.entries()) {
-        const metadata =
-          imageMetadata.find((source) => {
-            if (!source.url) return false;
-            const relativeUrl = source.url.replace(/^\/+/, "");
-            return image.url.endsWith(relativeUrl);
-          }) ?? imageMetadata[index];
+        const metadata = imageMetadata.find((source) => {
+          if (!source.url || matchedImageSources.has(source)) return false;
+          const relativeUrl = source.url.replace(/^\/+/, "");
+          return image.url.endsWith(relativeUrl);
+        });
+        if (metadata) matchedImageSources.add(metadata);
         const imageKey =
           metadata?.imageKey ||
           (metadata?.toolSign && metadata.citeIndex !== undefined
@@ -3274,6 +3349,10 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
             citeIndex: source.citeIndex,
             toolSign: source.toolSign,
             retrievalHighlightTerms: source.retrievalHighlightTerms,
+            searchType: source.searchType,
+            sourceMetadata: source.sourceMetadata,
+            sourceReference: source.sourceReference,
+            publishedDate: source.publishedDate,
             messageId, // used by thread.tsx / MarkdownText to look up from registry
           });
         }
@@ -3290,6 +3369,9 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
           toolSign: image.toolSign,
           isImage: true,
           imageKey: image.imageKey,
+          searchType: image.searchType,
+          sourceMetadata: image.sourceMetadata,
+          sourceReference: image.sourceReference,
           messageId,
         });
       }

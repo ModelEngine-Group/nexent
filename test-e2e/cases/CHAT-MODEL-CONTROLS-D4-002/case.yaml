@@ -1,0 +1,115 @@
+schema_version: '1.0'
+stage: D4
+module: CHAT-MESSAGE
+case:
+  case_id: CHAT-MODEL-CONTROLS-D4-002
+  feature_id: CHAT-MODEL-CONTROLS
+  requirement_ids:
+  - CHAT-MODEL-CONTROLS-20261014
+  - CHAT-WORKBENCH-REFINEMENTS-20261015
+  - WB-CREATION-TOGGLE-EXIT-20261015
+  business_rule_ids:
+  - CHAT-MODEL-CONTROLS-RULE-001
+  - CHAT-MODEL-CONTROLS-RULE-002
+  - CHAT-MODEL-CONTROLS-RULE-005
+  title: 六入口候选范围、会话隔离、运行锁和失效选择恢复
+  type: E2E
+  priority: P1
+  status: active
+  automation: automated
+  objective: Verify shared controls preserve entry-specific candidate scopes and session lifecycle while guarding running
+    or invalid state in complete browser journeys.
+  preconditions:
+  - real frontend with isolated mock identities, authorized model directory, historical Workbench snapshots and controlled
+    slow/error streams.
+  - Agent chat is configured for a strict subset of tenant models; independent creator sessions can be reset through existing
+    Agent session or modal lifecycle.
+  test_data:
+    profile: mock
+    entries:
+    - ordinary-workbench
+    - ordinary-agent-chat
+    - workbench-agent-create
+    - workbench-skill-create
+    - independent-nl2agent
+    - independent-nl2skill
+    models:
+    - configured-A
+    - tenant-B
+    - invalid-historical-model
+    - capability-changed-model
+    identities:
+    - full-creator
+    - missing-agent-create
+    - missing-skill-create
+    - different-tenant-user
+  steps:
+  - order: 1
+    action: Inspect candidates on all six surfaces; verify ordinary Agent chat excludes tenant-B when not configured, then
+      select distinct permitted models in two sessions or modes and switch back.
+    expected: Agent chat preserves configured scope, other entries preserve tenant LLM scope; returning restores each session's
+      own selection and retains messages, input, uploaded attachment and valid draft. Clicking the currently active Agent/Skill
+      creation mode exits to ordinary conversation; clicking the other mode switches creation mode without altering input
+      position or bypassing running guards.
+  - order: 2
+    action: Load an existing Workbench creation snapshot, reset an independent Agent creation session, close/reopen a fresh
+      Skill creation modal and resolve an asynchronously delayed default after a user has selected a model.
+    expected: Workbench restores and validates saved controls; new independent sessions follow existing reset rules; delayed
+      default does not overwrite explicit user choice. No new standalone cross-refresh persistence is introduced.
+  - order: 3
+    action: Start a delayed run on each applicable entry, attempt to change model, reasoning and advanced settings, cancel,
+      then select another model and explicitly send again.
+    expected: Controls are locked during running and become editable after cancellation unless existing read-only/flow locks
+      remain; cancellation stays usable; old events do not overwrite the new selected state or draft.
+  - order: 4
+    action: Restore an inaccessible model snapshot or return an explicit model-unavailable API error; change to a valid model
+      and retry. Repeat entry visibility/disabled checks without each create permission and under a tenant change.
+    expected: Invalid selection shows an actionable error and blocks sending until reselection without discarding input/draft;
+      no silent fallback. Missing permissions follow existing visibility/read-only rules and never permit a creator run; tenant
+      changes do not retain another tenant's controls.
+  expected_results:
+  - Candidate scope, thread isolation and existing reset/restore behavior remain correct across all entries.
+  - Running/invalid states guard changes and recover after permitted cancel/reselection with original input and valid drafts
+    preserved.
+  forbidden_side_effects:
+  - No cross-session/tenant state leakage, unauthorized creation, duplicate generation or default-model fallback for an invalid
+    explicit selection.
+  - No forced runtime reconstruction that deletes chat messages, attachment state or committed draft data when merely changing
+    a model.
+  actor: Isolated authenticated users with controlled role/tenant variants
+  journey:
+  - Inspect six entry scopes
+  - Switch sessions and modes
+  - Restore or reset session
+  - Delay default loading
+  - Start and cancel generation
+  - Recover invalid model
+  - Check permissions and tenant isolation
+  final_business_result:
+  - Unified controls preserve original entry scopes and session behavior and safely recover from locks and invalid selection
+  failure_evidence:
+  - Browser trace and screenshots
+  - Sanitized request/event records and session snapshots
+  execution:
+    profiles:
+    - name: mock
+      required_services: []
+  acceptance:
+  - id: AC-01
+    description: Candidate scopes and existing session/reset rules preserve independent choices and drafts.
+    steps:
+    - 1
+    - 2
+    expected_results:
+    - 1
+    forbidden_side_effects:
+    - 2
+  - id: AC-02
+    description: Locks, invalid model recovery and permission/tenant changes prevent forbidden runs and contamination.
+    steps:
+    - 3
+    - 4
+    expected_results:
+    - 2
+    forbidden_side_effects:
+    - 1
