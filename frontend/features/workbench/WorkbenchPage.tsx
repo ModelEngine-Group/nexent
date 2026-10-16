@@ -1133,6 +1133,11 @@ const HomeContent: FC = () => {
   const handleNewConversation = useCallback(async () => {
     handlePrepareNewConversation();
     await runtime.threads.switchToNewThread();
+    // Re-fetch the conversation list: the thread the user just left only
+    // became a server-side conversation when its first message was sent, and
+    // without a reload it would disappear from the sidebar until a manual
+    // page refresh (the newchat page already reloads at this point).
+    await runtime.threads.reload();
   }, [handlePrepareNewConversation, runtime]);
 
   const applyAgentMounts = useCallback(
