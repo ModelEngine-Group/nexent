@@ -1,5 +1,8 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 from __future__ import annotations
 
+import asyncio
 import threading
 import time
 from dataclasses import dataclass
@@ -51,14 +54,7 @@ class ModelConcurrencyLimiter:
             raise ValueError("model concurrency limit must be greater than zero")
         if timeout_seconds <= 0:
             raise ValueError("model concurrency wait timeout must be greater than zero")
-        with self._lock:
-            entry = self._entries.get(key)
-            if entry is None:
-                entry = _LimiterEntry(limit, threading.BoundedSemaphore(limit))
-                self._entries[key] = entry
-            elif entry.limit != limit:
-                raise ValueError("conflicting concurrency limits for the same model key")
-            entry.references += 1
+        entry = self._retain_entry(key, limit)
 
         deadline = time.monotonic() + timeout_seconds
         try:
@@ -70,6 +66,46 @@ class ModelConcurrencyLimiter:
                     )
                 if entry.semaphore.acquire(timeout=min(0.05, remaining)):
                     return ModelConcurrencyPermit(self, key, entry)
+            raise RuntimeError("model concurrency wait cancelled")
+        except BaseException:
+            self._release_reference(key, entry)
+            raise
+
+    def _retain_entry(self, key, limit):
+        with self._lock:
+            entry = self._entries.get(key)
+            if entry is None:
+                entry = _LimiterEntry(limit, threading.BoundedSemaphore(limit))
+                self._entries[key] = entry
+            elif entry.limit != limit:
+                raise ValueError("conflicting concurrency limits for the same model key")
+            entry.references += 1
+            return entry
+
+    async def acquire_async(
+        self,
+        key: tuple[str, str, str],
+        limit: int,
+        timeout_seconds: float,
+        stop_event: threading.Event,
+    ) -> ModelConcurrencyPermit:
+        """Share sync admission state while never blocking the caller's event loop."""
+        if limit <= 0:
+            raise ValueError("model concurrency limit must be greater than zero")
+        if timeout_seconds <= 0:
+            raise ValueError("model concurrency wait timeout must be greater than zero")
+        entry = self._retain_entry(key, limit)
+        deadline = time.monotonic() + timeout_seconds
+        try:
+            while not stop_event.is_set():
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise ModelConcurrencyExceeded(
+                        f"model concurrency permit timed out after {timeout_seconds:.3f} seconds"
+                    )
+                if entry.semaphore.acquire(blocking=False):
+                    return ModelConcurrencyPermit(self, key, entry)
+                await asyncio.sleep(min(0.05, remaining))
             raise RuntimeError("model concurrency wait cancelled")
         except BaseException:
             self._release_reference(key, entry)
