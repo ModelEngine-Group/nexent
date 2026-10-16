@@ -329,8 +329,7 @@ function KnowledgeBaseUnavailableWarning({ message }: { message: string }) {
       <span
         role="img"
         aria-label={message}
-        tabIndex={0}
-        className="inline-flex shrink-0 cursor-help rounded-sm text-amber-600 outline-none focus-visible:ring-2 focus-visible:ring-amber-500 focus-visible:ring-offset-1"
+        className="inline-flex shrink-0 cursor-help text-amber-600"
       >
         <AlertTriangle size={14} aria-hidden="true" />
       </span>

@@ -44,6 +44,8 @@ import log from "@/lib/logger";
 import { ConversationTitleGuard } from "@/lib/conversationTitle";
 import { resolveAgentDeepLinkAction } from "@/lib/agentUsageGuide";
 import { usePublishedAgentList } from "@/hooks/agent/usePublishedAgentList";
+import { useComposerKnowledgeBases } from "@/hooks/chat/useComposerResources";
+import { useDeployment } from "@/components/providers/deploymentProvider";
 import { useConfig } from "@/hooks/useConfig";
 import { ServerDictationAdapter } from "./adapter/server-dictation-adapter";
 import type { STTModelConfig } from "@/types/modelConfig";
@@ -206,6 +208,10 @@ const HomeContent: FC<{
     useState<KnowledgeScopeEffectivePreview | null>(null);
   const [knowledgeCapabilities, setKnowledgeCapabilities] =
     useState<KnowledgeCapabilities | null>(null);
+  const { enableAidpKnowledge } = useDeployment();
+  // Observe the composer's catalog updates without starting another list request.
+  const { dataUpdatedAt: knowledgeCatalogUpdatedAt } =
+    useComposerKnowledgeBases(false, enableAidpKnowledge);
   const [runtimeMetadata, setRuntimeMetadata] = useState<
     Record<string, unknown>
   >({});
@@ -368,7 +374,7 @@ const HomeContent: FC<{
     return () => {
       cancelled = true;
     };
-  }, [selectedAgent]);
+  }, [selectedAgent, knowledgeCatalogUpdatedAt]);
 
   useEffect(() => {
     if (!activeThreadId) {
