@@ -2088,6 +2088,7 @@ async def run_agent_stream(
                     headers={
                         "Cache-Control": "no-cache",
                         "Connection": "keep-alive",
+                        "X-Accel-Buffering": "no",
                         "X-Stream-Status": "resumed",
                         "X-Last-Unit-Index": str(resume_info["resume_from_unit_index"]),
                     },
@@ -2127,6 +2128,7 @@ async def run_agent_stream(
             headers={
                 "Cache-Control": "no-cache",
                 "Connection": "keep-alive",
+                "X-Accel-Buffering": "no",
                 "X-Stream-Status": "resumed",
                 "X-Last-Unit-Index": str(resume_info["resume_from_unit_index"]),
             },
@@ -2218,6 +2220,7 @@ async def run_agent_stream(
             headers={
                 "Cache-Control": "no-cache",
                 "Connection": "keep-alive",
+                "X-Accel-Buffering": "no",
                 "X-Stream-Status": "conflict",
             },
         )
@@ -2370,7 +2373,7 @@ async def run_agent_stream(
                 reservation_token,
             )
 
-    headers = {"Cache-Control": "no-cache", "Connection": "keep-alive"}
+    headers = {"Cache-Control": "no-cache", "Connection": "keep-alive", "X-Accel-Buffering": "no"}
     debug_run_id = getattr(agent_request, "_debug_run_id", None)
     if debug_run_id is not None:
         headers["run_id"] = debug_run_id
