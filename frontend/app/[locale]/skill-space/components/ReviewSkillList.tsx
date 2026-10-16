@@ -1,7 +1,10 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 "use client";
 
 import { Button, Tag } from "antd";
 import { Bot, Check, Eye, X } from "lucide-react";
+import { useUserDisplayName } from "@/hooks/auth/useUserDisplayName";
 import { useTranslation } from "react-i18next";
 
 import { AsyncContent, PaginationBar } from "./SkillRepositoryControls";
@@ -63,6 +66,7 @@ export function ReviewSkillList({
   onReject: (listing: SkillRepositoryListingItem) => void;
 }) {
   const { t } = useTranslation("common");
+  const displayName = useUserDisplayName();
   return (
     <div className="flex flex-col gap-5">
       <AsyncContent
@@ -116,7 +120,10 @@ export function ReviewSkillList({
                       </div>
 
                       <div className="truncate text-sm text-slate-500 dark:text-slate-400">
-                        {getSubmitterDisplay(listing.submitted_by, t)}
+                        {displayName(
+                          listing.submitted_by_cas_username,
+                          getSubmitterDisplay(listing.submitted_by, t)
+                        )}
                       </div>
 
                       <div>

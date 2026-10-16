@@ -1,4 +1,6 @@
 #!/bin/bash
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 # Helm Deployment Script for Nexent
 # Usage: ./deploy.sh [apply] [options]
 #
@@ -51,6 +53,9 @@ if [ -f "$VERSION_HELPER" ]; then
     # shellcheck source=/dev/null
     source "$VERSION_HELPER"
 fi
+
+# shellcheck source=env.sh
+source "$SCRIPT_DIR/env.sh"
 
 # Global variables for deployment options
 IS_MAINLAND=""
@@ -452,136 +457,15 @@ render_k8s_runtime_config_values() {
       render_yaml_literal_file "$(basename "$file")" "$file" 6 8
     done < <(find "$SUPABASE_SQL_DIR" -maxdepth 1 -type f -name '*.sql' -print | sort -V)
     echo "  config:"
+    printf '    timezone: %s\n' "$(yaml_quote "${TZ:-Asia/Shanghai}")"
+    # Web does not load the backend env Secret; keep its Northbound proxy URL.
     echo "    services:"
-    printf '      configUrl: %s\n' "$(yaml_quote "$(env_or_default CONFIG_SERVICE_URL "http://nexent-config:5010")")"
-    printf '      elasticsearchService: %s\n' "$(yaml_quote "$(env_or_default ELASTICSEARCH_SERVICE "http://nexent-config:5010/api")")"
-    printf '      runtimeUrl: %s\n' "$(yaml_quote "$(env_or_default RUNTIME_SERVICE_URL "http://nexent-runtime:5014")")"
-    printf '      mcpServer: %s\n' "$(yaml_quote "$(env_or_default NEXENT_MCP_SERVER "http://nexent-mcp:5011")")"
-    printf '      mcpManagementServer: %s\n' "$(yaml_quote "$(env_or_default MCP_MANAGEMENT_API "http://nexent-mcp:5015")")"
-    printf '      dataProcessService: %s\n' "$(yaml_quote "$(env_or_default DATA_PROCESS_SERVICE "http://nexent-data-process:5012/api")")"
     printf '      northboundServer: %s\n' "$(yaml_quote "$(env_or_default NORTHBOUND_API_SERVER "http://nexent-northbound:5013/api")")"
-    printf '      northboundExternalUrl: %s\n' "$(yaml_quote "$(env_or_default NORTHBOUND_EXTERNAL_URL "")")"
-    echo "    postgres:"
-    printf '      host: %s\n' "$(yaml_quote "$(env_or_default POSTGRES_HOST "nexent-postgresql")")"
-    printf '      user: %s\n' "$(yaml_quote "$(env_or_default POSTGRES_USER "root")")"
-    printf '      db: %s\n' "$(yaml_quote "$(env_or_default POSTGRES_DB "nexent")")"
-    printf '      port: %s\n' "$(yaml_quote "$(env_or_default POSTGRES_PORT "5432")")"
+    # These inputs also supply defaults for runtime state and worker concurrency.
     echo "    redis:"
     printf '      url: %s\n' "$(yaml_quote "$(env_or_default REDIS_URL "redis://nexent-redis:6379/0")")"
-    printf '      backendUrl: %s\n' "$(yaml_quote "$(env_or_default REDIS_BACKEND_URL "redis://nexent-redis:6379/1")")"
-    printf '      port: %s\n' "$(yaml_quote "$(env_or_default REDIS_PORT "6379")")"
-    echo "    minio:"
-    printf '      endpoint: %s\n' "$(yaml_quote "$(env_or_default MINIO_ENDPOINT "http://nexent-minio:9000")")"
-    printf '      region: %s\n' "$(yaml_quote "$(env_or_default MINIO_REGION "cn-north-1")")"
-    printf '      defaultBucket: %s\n' "$(yaml_quote "$(env_or_default MINIO_DEFAULT_BUCKET "nexent")")"
-    echo "    elasticsearch:"
-    printf '      host: %s\n' "$(yaml_quote "$(env_or_default ELASTICSEARCH_HOST "http://nexent-elasticsearch:9200")")"
-    printf '      javaOpts: %s\n' "$(yaml_quote "$(env_or_default ES_JAVA_OPTS "-Xms2g -Xmx2g")")"
-    printf '      diskWatermarkLow: %s\n' "$(yaml_quote "$(env_or_default ES_DISK_WATERMARK_LOW "85%")")"
-    printf '      diskWatermarkHigh: %s\n' "$(yaml_quote "$(env_or_default ES_DISK_WATERMARK_HIGH "90%")")"
-    printf '      diskWatermarkFloodStage: %s\n' "$(yaml_quote "$(env_or_default ES_DISK_WATERMARK_FLOOD_STAGE "95%")")"
-    printf '    skipProxy: %s\n' "$(yaml_quote "$(env_or_default skip_proxy "true")")"
-    printf '    umask: %s\n' "$(yaml_quote "$(env_or_default UMASK "0022")")"
-    printf '    skillsPath: %s\n' "$(yaml_quote "$(env_or_default SKILLS_PATH "/mnt/nexent-data/skills")")"
-    printf '    logDir: %s\n' "$(yaml_quote "$(env_or_default LOG_DIR "/mnt/nexent-data/logs")")"
-    echo "    skill:"
-    printf '      maxSkillsPerTenant: %s\n' "$(yaml_quote "$(env_or_default MAX_SKILLS_PER_TENANT "1000")")"
-    printf '      maxUploadSizeMb: %s\n' "$(yaml_quote "$(env_or_default MAX_SKILL_UPLOAD_SIZE_MB "10")")"
-    echo "    evaluationSet:"
-    printf '      maxFileSizeMb: %s\n' "$(yaml_quote "$(env_or_default MAX_EVALUATION_SET_FILE_SIZE_MB "20")")"
-    echo "    modelEngine:"
-    printf '      enabled: %s\n' "$(yaml_quote "$(env_or_default MODEL_ENGINE_ENABLED "false")")"
-    echo "    voiceService:"
-    printf '      appid: %s\n' "$(yaml_quote "$(env_or_default APPID "app_id")")"
-    printf '      token: %s\n' "$(yaml_quote "$(env_or_default TOKEN "token")")"
-    printf '      cluster: %s\n' "$(yaml_quote "$(env_or_default CLUSTER "volcano_tts")")"
-    printf '      voiceType: %s\n' "$(yaml_quote "$(env_or_default VOICE_TYPE "zh_male_jieshuonansheng_mars_bigtts")")"
-    printf '      speedRatio: %s\n' "$(yaml_quote "$(env_or_default SPEED_RATIO "1.3")")"
-    echo "    modelPath:"
-    printf '      clipModelPath: %s\n' "$(yaml_quote "$(env_or_default CLIP_MODEL_PATH "/opt/models/clip-vit-base-patch32")")"
-    printf '      nltkData: %s\n' "$(yaml_quote "$(env_or_default NLTK_DATA "/opt/models/nltk_data")")"
-    printf '      tableTransformerModelPath: %s\n' "$(yaml_quote "$(env_or_default TABLE_TRANSFORMER_MODEL_PATH "/opt/models/table-transformer-structure-recognition")")"
-    printf '      unstructuredDefaultModelInitializeParamsJsonPath: %s\n' "$(yaml_quote "$(env_or_default UNSTRUCTURED_DEFAULT_MODEL_INITIALIZE_PARAMS_JSON_PATH "/opt/models/yolox")")"
-    echo "    terminal:"
-    printf '      sshPrivateKeyPath: %s\n' "$(yaml_quote "$(env_or_default SSH_PRIVATE_KEY_PATH "/path/to/openssh-server/ssh-keys/openssh_server_key")")"
-    echo "    supabase:"
-    printf '      dashboardUsername: %s\n' "$(yaml_quote "$(env_or_default DASHBOARD_USERNAME "supabase")")"
-    printf '      dashboardPassword: %s\n' "$(yaml_quote "$(env_or_default DASHBOARD_PASSWORD "Huawei123")")"
-    printf '      siteUrl: %s\n' "$(yaml_quote "$(env_or_default SITE_URL "http://localhost:3011")")"
-    printf '      supabaseUrl: %s\n' "$(yaml_quote "$(env_or_default SUPABASE_URL "http://nexent-supabase-kong:8000")")"
-    printf '      apiExternalUrl: %s\n' "$(yaml_quote "$(env_or_default API_EXTERNAL_URL "http://nexent-supabase-kong:8000")")"
-    printf '      disableSignup: %s\n' "$(yaml_quote "$(env_or_default DISABLE_SIGNUP "false")")"
-    printf '      jwtExpiry: %s\n' "$(yaml_quote "$(env_or_default JWT_EXPIRY "3600")")"
-    printf '      debugJwtExpireSeconds: %s\n' "$(yaml_quote "$(env_or_default DEBUG_JWT_EXPIRE_SECONDS "0")")"
-    printf '      enableEmailSignup: %s\n' "$(yaml_quote "$(env_or_default ENABLE_EMAIL_SIGNUP "true")")"
-    printf '      enableEmailAutoconfirm: %s\n' "$(yaml_quote "$(env_or_default ENABLE_EMAIL_AUTOCONFIRM "true")")"
-    printf '      enableAnonymousUsers: %s\n' "$(yaml_quote "$(env_or_default ENABLE_ANONYMOUS_USERS "false")")"
-    printf '      enablePhoneSignup: %s\n' "$(yaml_quote "$(env_or_default ENABLE_PHONE_SIGNUP "false")")"
-    printf '      enablePhoneAutoconfirm: %s\n' "$(yaml_quote "$(env_or_default ENABLE_PHONE_AUTOCONFIRM "false")")"
-    printf '      inviteCode: %s\n' "$(yaml_quote "$(env_or_default INVITE_CODE "nexent2025")")"
-    printf '      mailerUrlpathsConfirmation: %s\n' "$(yaml_quote "$(env_or_default MAILER_URLPATHS_CONFIRMATION "/auth/v1/verify")")"
-    printf '      mailerUrlpathsInvite: %s\n' "$(yaml_quote "$(env_or_default MAILER_URLPATHS_INVITE "/auth/v1/verify")")"
-    printf '      mailerUrlpathsRecovery: %s\n' "$(yaml_quote "$(env_or_default MAILER_URLPATHS_RECOVERY "/auth/v1/verify")")"
-    printf '      mailerUrlpathsEmailChange: %s\n' "$(yaml_quote "$(env_or_default MAILER_URLPATHS_EMAIL_CHANGE "/auth/v1/verify")")"
-    printf '      postgresHost: %s\n' "$(yaml_quote "$(env_or_default SUPABASE_POSTGRES_HOST "nexent-supabase-db")")"
-    printf '      postgresDb: %s\n' "$(yaml_quote "$(env_or_default SUPABASE_POSTGRES_DB "supabase")")"
-    printf '      postgresPort: %s\n' "$(yaml_quote "$(env_or_default SUPABASE_POSTGRES_PORT "5436")")"
-    printf '      additionalRedirectUrls: %s\n' "$(yaml_quote "$(env_or_default ADDITIONAL_REDIRECT_URLS "")")"
     echo "    dataProcess:"
-    printf '      flowerPort: %s\n' "$(yaml_quote "$(env_or_default FLOWER_PORT "5555")")"
-    printf '      disableCeleryFlower: %s\n' "$(yaml_quote "$(env_or_default DISABLE_CELERY_FLOWER "true")")"
-    printf '      dockerEnvironment: %s\n' "$(yaml_quote "$(env_or_default DOCKER_ENVIRONMENT "false")")"
-    printf '      enableUploadImage: %s\n' "$(yaml_quote "$(env_or_default ENABLE_UPLOAD_IMAGE "false")")"
-    printf '      celeryWorkerPrefetchMultiplier: %s\n' "$(yaml_quote "$(env_or_default CELERY_WORKER_PREFETCH_MULTIPLIER "1")")"
-    printf '      celeryTaskTimeLimit: %s\n' "$(yaml_quote "$(env_or_default CELERY_TASK_TIME_LIMIT "3600")")"
-    printf '      elasticsearchRequestTimeout: %s\n' "$(yaml_quote "$(env_or_default ELASTICSEARCH_REQUEST_TIMEOUT "30")")"
-    printf '      queues: %s\n' "$(yaml_quote "$(env_or_default QUEUES "process_q,parse_q,forward_q,forward_part_q,forward_aggregate_q")")"
     printf '      partProcessorCount: %s\n' "$(yaml_quote "$(env_or_default DP_PART_PROCESSOR_COUNT "3")")"
-    printf '      fileSplitSizeMb: %s\n' "$(yaml_quote "$(env_or_default DP_FILE_SPLIT_SIZE_MB "5")")"
-    printf '      parseMaxProcesses: %s\n' "$(yaml_quote "$(env_or_default DP_PARSE_MAX_PROCESSES "3")")"
-    printf '      parseMinProcesses: %s\n' "$(yaml_quote "$(env_or_default DP_PARSE_MIN_PROCESSES "1")")"
-    printf '      parseThreadsPerProcess: %s\n' "$(yaml_quote "$(env_or_default DP_PARSE_THREADS_PER_PROCESS "2")")"
-    printf '      parseMaxTasksPerChild: %s\n' "$(yaml_quote "$(env_or_default DP_PARSE_MAX_TASKS_PER_CHILD "1000")")"
-    printf '      preloadModels: %s\n' "$(yaml_quote "$(env_or_default DP_PRELOAD_MODELS "unstructured_default")")"
-    printf '      parserStartupTimeout: %s\n' "$(yaml_quote "$(env_or_default DP_PARSER_STARTUP_TIMEOUT_S "300")")"
-    printf '      workerName: %s\n' "$(yaml_quote "$(env_or_default WORKER_NAME "")")"
-    echo "    oauth:"
-    printf '      githubClientId: %s\n' "$(yaml_quote "$(env_or_default GITHUB_OAUTH_CLIENT_ID "")")"
-    printf '      githubClientSecret: %s\n' "$(yaml_quote "$(env_or_default GITHUB_OAUTH_CLIENT_SECRET "")")"
-    printf '      enableWechat: %s\n' "$(yaml_quote "$(env_or_default ENABLE_WECHAT_OAUTH "false")")"
-    printf '      wechatClientId: %s\n' "$(yaml_quote "$(env_or_default WECHAT_OAUTH_APP_ID "")")"
-    printf '      wechatClientSecret: %s\n' "$(yaml_quote "$(env_or_default WECHAT_OAUTH_APP_SECRET "")")"
-    printf '      gdeUrl: %s\n' "$(yaml_quote "$(env_or_default GDE_URL "")")"
-    printf '      gdeClientId: %s\n' "$(yaml_quote "$(env_or_default GDE_OAUTH_CLIENT_ID "")")"
-    printf '      gdeClientSecret: %s\n' "$(yaml_quote "$(env_or_default GDE_OAUTH_CLIENT_SECRET "")")"
-    printf '      sslVerify: %s\n' "$(yaml_quote "$(env_or_default OAUTH_SSL_VERIFY "true")")"
-    printf '      caBundle: %s\n' "$(yaml_quote "$(env_or_default OAUTH_CA_BUNDLE "")")"
-    printf '      callbackBaseUrl: %s\n' "$(yaml_quote "$(env_or_default OAUTH_CALLBACK_BASE_URL "http://localhost:30000")")"
-    printf '      loginMode: %s\n' "$(yaml_quote "$(env_or_default OAUTH_LOGIN_MODE "button")")"
-    echo "    cas:"
-    printf '      enabled: %s\n' "$(yaml_quote "$(env_or_default CAS_ENABLED "false")")"
-    printf '      serverUrl: %s\n' "$(yaml_quote "$(env_or_default CAS_SERVER_URL "")")"
-    printf '      validatePath: %s\n' "$(yaml_quote "$(env_or_default CAS_VALIDATE_PATH "/p3/serviceValidate")")"
-    printf '      callbackBaseUrl: %s\n' "$(yaml_quote "$(env_or_default CAS_CALLBACK_BASE_URL "http://localhost:30000")")"
-    printf '      loginMode: %s\n' "$(yaml_quote "$(env_or_default CAS_LOGIN_MODE "disabled")")"
-    printf '      userAttribute: %s\n' "$(yaml_quote "$(env_or_default CAS_USER_ATTRIBUTE "")")"
-    printf '      emailAttribute: %s\n' "$(yaml_quote "$(env_or_default CAS_EMAIL_ATTRIBUTE "email")")"
-    printf '      roleAttribute: %s\n' "$(yaml_quote "$(env_or_default CAS_ROLE_ATTRIBUTE "role")")"
-    printf '      defaultRole: %s\n' "$(yaml_quote "$(env_or_default CAS_DEFAULT_ROLE "USER")")"
-    printf '      tenantAttribute: %s\n' "$(yaml_quote "$(env_or_default CAS_TENANT_ATTRIBUTE "tenant_id")")"
-    printf '      defaultTenantId: %s\n' "$(yaml_quote "$(env_or_default CAS_DEFAULT_TENANT_ID "tenant_id")")"
-    printf '      roleMapJson: %s\n' "$(yaml_quote "$(env_or_default CAS_ROLE_MAP_JSON "")")"
-    printf '      sessionMaxAgeSeconds: %s\n' "$(yaml_quote "$(env_or_default CAS_SESSION_MAX_AGE_SECONDS "3600")")"
-    printf '      localSessionMaxAgeSeconds: %s\n' "$(yaml_quote "$(env_or_default LOCAL_SESSION_MAX_AGE_SECONDS "3600")")"
-    printf '      heartbeatUrl: %s\n' "$(yaml_quote "$(env_or_default CAS_HEARTBEAT_URL "")")"
-    printf '      heartbeatIntervalSeconds: %s\n' "$(yaml_quote "$(env_or_default CAS_HEARTBEAT_INTERVAL_SECONDS "300")")"
-    printf '      heartbeatCookieName: %s\n' "$(yaml_quote "$(env_or_default CAS_HEARTBEAT_COOKIE_NAME "")")"
-    printf '      renewBeforeSeconds: %s\n' "$(yaml_quote "$(env_or_default CAS_RENEW_BEFORE_SECONDS "300")")"
-    printf '      renewTimeoutSeconds: %s\n' "$(yaml_quote "$(env_or_default CAS_RENEW_TIMEOUT_SECONDS "10")")"
-    printf '      syntheticEmailDomain: %s\n' "$(yaml_quote "$(env_or_default CAS_SYNTHETIC_EMAIL_DOMAIN "cas.local")")"
-    printf '      logoutUrl: %s\n' "$(yaml_quote "$(env_or_default CAS_LOGOUT_URL "")")"
-    printf '      sslVerify: %s\n' "$(yaml_quote "$(env_or_default CAS_SSL_VERIFY "true")")"
-    printf '      caBundle: %s\n' "$(yaml_quote "$(env_or_default CAS_CA_BUNDLE "")")"
     echo "nexent-web:"
     echo "  config:"
     printf '    fileUploadSizeLimit: %s\n' "$(yaml_quote "$(env_or_default FILE_UPLOAD_SIZE_LIMIT "10")")"
@@ -589,7 +473,7 @@ render_k8s_runtime_config_values() {
   } > "$output_file"
 }
 
-# Get APP_VERSION from backend/consts/const.py
+# Read the current repository VERSION through the shared resolver.
 get_app_version() {
   if declare -F deployment_read_version >/dev/null 2>&1; then
     deployment_read_version ""
@@ -614,7 +498,6 @@ persist_deploy_options() {
   deployment_persist_local_config "$DEPLOY_OPTIONS_FILE"
   {
     printf 'k8s:\n'
-    printf '  appVersion: %s\n' "$(yaml_quote "$APP_VERSION")"
     printf '  isMainland: %s\n' "$(yaml_quote "$IS_MAINLAND_SAVED")"
     printf '  deploymentVersion: %s\n' "$(yaml_quote "$VERSION_CHOICE_SAVED")"
     printf '  persistenceMode: %s\n' "$(yaml_quote "$PERSISTENCE_MODE")"
@@ -642,7 +525,8 @@ apply_loaded_deploy_option() {
   local value="$2"
   case "$key" in
     APP_VERSION|appVersion)
-      [ -n "${K8S_APP_VERSION_EXPLICIT:-}" ] || APP_VERSION="$value"
+      # Saved release versions must not pin subsequent deployments.
+      return 0
       ;;
     IS_MAINLAND|isMainland)
       [ -n "${K8S_IS_MAINLAND_EXPLICIT:-}" ] || IS_MAINLAND="$value"
@@ -747,7 +631,7 @@ update_values_yaml() {
   fi
 
   if [ -z "$APP_VERSION" ]; then
-    echo "Failed to determine APP_VERSION from const.py, using 'latest'"
+    echo "Failed to determine APP_VERSION from VERSION, using 'latest'"
     APP_VERSION="latest"
   fi
   echo "Using APP_VERSION: $APP_VERSION"
@@ -1308,10 +1192,20 @@ render_runtime_secret_values() {
     local sql_checksum
     local supabase_postgres_password
     local supabase_secret_checksum
+    local root_env_data
+    local monitoring_env_data="      {}"
+    local monitoring_env_file
+
+    root_env_data="$(k8s_env_file_data "$ROOT_ENV_FILE" 6)" || return 1
+    monitoring_env_file="$(deployment_monitoring_env_file)"
+    if [ -f "$monitoring_env_file" ]; then
+        monitoring_env_data="$(k8s_env_file_data "$monitoring_env_file" 6)" || return 1
+    fi
 
     supabase_postgres_password="$(env_or_default SUPABASE_POSTGRES_PASSWORD "Huawei123")"
     gotrue_db_url="$(env_or_default GOTRUE_DB_DATABASE_URL "postgres://supabase_auth_admin:${supabase_postgres_password}@$(env_or_default SUPABASE_POSTGRES_HOST "nexent-supabase-db"):$(env_or_default SUPABASE_POSTGRES_PORT "5436")/$(env_or_default SUPABASE_POSTGRES_DB "supabase")?search_path=auth&sslmode=disable")"
     env_checksum="$(deployment_env_values_checksum)"
+    env_checksum="$(deployment_sha256_string "${env_checksum}|root=${root_env_data}|monitoring=${monitoring_env_data}|sandboxMode=${DEPLOYMENT_SANDBOX_MODE:-lightweight}|mcp=${NEXENT_MCP_DOCKER_IMAGE:-}|sandbox=${NEXENT_SANDBOX_IMAGE:-}")"
     sql_checksum="$(sql_files_checksum)"
     supabase_secret_checksum="$(deployment_sha256_string "jwt=${JWT_SECRET:-}|secretKeyBase=${SECRET_KEY_BASE:-}|vault=${VAULT_ENC_KEY:-}|anon=${SUPABASE_ANON_KEY:-}|service=${SUPABASE_SERVICE_ROLE_KEY:-}|postgres=${supabase_postgres_password}|gotrue=${gotrue_db_url}")"
 
@@ -1323,6 +1217,11 @@ render_runtime_secret_values() {
         printf '    supabaseSecret: %s\n' "$(yaml_quote "$supabase_secret_checksum")"
         deployment_render_image_rollout_checksums
         echo "nexent-common:"
+        echo "  envFiles:"
+        echo "    rootData:"
+        printf '%s\n' "$root_env_data"
+        echo "    monitoringData:"
+        printf '%s\n' "$monitoring_env_data"
         echo "  secrets:"
         printf '    elasticsearchApiKey: %s\n' "$(yaml_quote "$(env_or_default ELASTICSEARCH_API_KEY "")")"
         printf '    postgresPassword: %s\n' "$(yaml_quote "$(env_or_default NEXENT_POSTGRES_PASSWORD "nexent@4321")")"
@@ -1344,7 +1243,7 @@ render_runtime_secret_values() {
             printf '      postgresPassword: %s\n' "$(yaml_quote "$supabase_postgres_password")"
             printf '      gotrueDbUrl: %s\n' "$(yaml_quote "$gotrue_db_url")"
         fi
-    } > "$GENERATED_SECRETS_VALUES"
+    } | k8s_write_private_values "$GENERATED_SECRETS_VALUES"
 }
 
 render_infrastructure_secret_values() {
@@ -1618,7 +1517,7 @@ print_usage() {
         echo "  --image-source SOURCE      general、mainland 或 local-latest"
         echo "  --image-registry-prefix P  镜像仓库前缀，例如 registry.example.com/nexent"
         echo "  --is-mainland Y|N          兼容旧参数，映射为 mainland/general 镜像源"
-        echo "  --version VERSION          指定应用版本（未设置时自动从 const.py 检测）"
+        echo "  --version VERSION          指定应用版本（未设置时读取当前仓库 VERSION）"
         echo "  --defaults                 复用保存配置或内置默认值并跳过交互界面"
         echo "  --deployment-version VER   兼容旧部署版本：speed 或 full"
         echo "  --persistence-mode MODE    local、dynamic 或 existing"
@@ -1652,7 +1551,7 @@ print_usage() {
     echo "  --image-source SOURCE      general, mainland, or local-latest"
     echo "  --image-registry-prefix P  Image registry prefix, e.g. registry.example.com/nexent"
     echo "  --is-mainland Y|N          Legacy alias for image source mainland/general"
-    echo "  --version VERSION          Specify app version (auto-detected from const.py if not set)"
+    echo "  --version VERSION          Specify app version (defaults to the current repository VERSION)"
     echo "  --defaults                 Use saved config or built-in defaults and skip TUI"
     echo "  --deployment-version VER   Legacy deployment version: speed or full"
     echo "  --persistence-mode MODE    local, dynamic, or existing"

@@ -8,10 +8,9 @@ import { Dropdown, Tooltip } from "antd";
 import type { MenuProps } from "antd";
 import { ChevronDown } from "lucide-react";
 import { usePublishedAgentList } from "@/hooks/agent/usePublishedAgentList";
-import { useConversationAgentHistory } from "@/hooks/chat/useConversationAgentHistory";
-import { useThreadAgentRegistryVersion } from "../adapter/thread-agent-registry";
 import { getAgentIcon } from "@/lib/chat/agentIconUtils";
 import type { Agent, PublishedAgent } from "@/types/agentConfig";
+import { useRecentAgentIds } from "./use-recent-agent-ids";
 
 export interface AgentSelectorDropdownProps {
   selectedAgent?: Agent | null;
@@ -28,39 +27,7 @@ export const AgentSelectorDropdown: FC<AgentSelectorDropdownProps> = ({
   onAgentSelected,
 }) => {
   const { availableMainAgents, isLoading } = usePublishedAgentList();
-  const { data: conversations } = useConversationAgentHistory();
-  // Re-read the session recency list whenever a new selection is registered so
-  // the "most recently used" agent updates immediately after picking a card.
-  const registryVersion = useThreadAgentRegistryVersion();
-
-  const usedAgentIds = useMemo(() => {
-    const seen = new Set<number>();
-    const ordered: number[] = [];
-    for (const conversation of conversations ?? []) {
-      const id = conversation.agent_id;
-      if (typeof id === "number" && !seen.has(id)) {
-        seen.add(id);
-        ordered.push(id);
-      }
-    }
-    try {
-      const recent = JSON.parse(
-        window.sessionStorage.getItem("nexent_recent_agent_ids") || "[]"
-      );
-      if (Array.isArray(recent)) {
-        for (const id of recent) {
-          if (typeof id === "number" && !seen.has(id)) {
-            seen.add(id);
-            ordered.unshift(id);
-          }
-        }
-      }
-    } catch {
-      // ignore malformed session storage
-    }
-    void registryVersion;
-    return ordered;
-  }, [conversations, registryVersion]);
+  const usedAgentIds = useRecentAgentIds();
 
   const lastUsedAgent = useMemo(() => {
     for (const id of usedAgentIds) {
@@ -119,7 +86,7 @@ export const AgentSelectorDropdown: FC<AgentSelectorDropdownProps> = ({
     >
       <button
         type="button"
-        className="flex w-full cursor-pointer items-center gap-1.5 rounded-[4px] px-2 py-1 text-[16px] leading-[24px] text-[#191919] hover:bg-white"
+        className="flex w-full cursor-pointer items-center gap-1.5 rounded-[4px] py-1 pl-0.5 pr-2 text-[16px] leading-[24px] text-[#191919] hover:bg-white"
       >
         <Tooltip title={agentName}>
           <span className="min-w-0 flex-1 truncate text-left">{agentName}</span>

@@ -27,8 +27,7 @@ export interface AidpKbDetail {
   graph_config?: string | Record<string, unknown> | null;
   created_by?: string | null;
   creator_name?: string | null;
-  /** Owner display name some AIDP builds expose on the detail payload. */
-  user_name?: string | null;
+  creator_cas_username?: string | null;
 }
 
 export interface AidpDocumentItem {

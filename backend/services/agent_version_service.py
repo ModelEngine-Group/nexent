@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import logging
 from typing import Optional, Tuple, List, Dict, Any
 from sqlalchemy import update
@@ -33,6 +35,7 @@ from database.agent_version_db import (
 )
 from database.model_management_db import get_model_by_model_id, get_valid_model_ids
 from database.agent_db import is_system_agent
+from services.user_identity_service import enrich_cas_usernames
 from utils.str_utils import convert_string_to_list
 from consts.agent_unavailable_reasons import AgentUnavailableReason
 
@@ -372,6 +375,10 @@ def get_version_detail_impl(
     )
     result['is_available'] = is_available
     result['unavailable_reasons'] = unavailable_reasons
+    enrich_cas_usernames(
+        [result], {"author_cas_username": "created_by"},
+        email_fields={"author_cas_username": "author"},
+    )
 
     return result
 
@@ -990,6 +997,11 @@ async def list_published_agents_impl(
 
         # Build the final simple agent list
         simple_agent_list: list[dict] = []
+        enrich_cas_usernames(
+            [entry["raw_agent"] for entry in enriched_agents],
+            {"author_cas_username": "created_by"},
+            email_fields={"author_cas_username": "author"},
+        )
         for entry in enriched_agents:
             agent = entry["raw_agent"]
             unavailable_reasons = list(dict.fromkeys(entry["unavailable_reasons"]))
@@ -1022,6 +1034,8 @@ async def list_published_agents_impl(
                 "display_name": agent.get("display_name") if agent.get("display_name") else agent.get("name"),
                 "description": agent.get("description"),
                 "author": agent.get("author"),
+                **({"author_cas_username": agent["author_cas_username"]}
+                   if agent.get("author_cas_username") else {}),
                 "model_ids": model_ids_list,
                 "model_names": model_names_list,
                 "model_name": model_names_list[0] if model_names_list else None,
