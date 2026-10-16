@@ -1,3 +1,5 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import { chatConfig } from "@/const/chatConfig";
 import { MESSAGE_ROLES } from "@/const/chatConfig";
 import type { AgentAutomationProposalData } from "@/types/agentAutomation";

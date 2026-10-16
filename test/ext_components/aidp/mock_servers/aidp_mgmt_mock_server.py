@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """
 Standalone mock AIDP server for Nexent AIDP management endpoint testing.
 

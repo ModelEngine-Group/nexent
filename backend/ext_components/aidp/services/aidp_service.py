@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """
 AIDP Service Layer
 Handles API calls to AIDP for paginated knowledge base listing.

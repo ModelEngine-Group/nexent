@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """AIDP Management App Layer (v7.1).
 
 FastAPI endpoints for AIDP knowledge base CRUD with permission enforcement.

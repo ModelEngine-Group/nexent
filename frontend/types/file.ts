@@ -1,3 +1,5 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 // File type definitions shared across file preview components
 
 // `stream` is a document whose format is only known from the response (AIDP

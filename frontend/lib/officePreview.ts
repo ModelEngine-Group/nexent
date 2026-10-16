@@ -1,3 +1,5 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 /**
  * Helpers for previewing a document stream in the browser.
  *
@@ -334,8 +336,33 @@ export function officeHtmlToText(html: string): string {
     .replace(/<br\s*\/?>/gi, "\n")
     .replace(/<\/(p|div|li|tr|h[1-6])>/gi, "\n");
   if (typeof document === "undefined") {
-    return withBreaks.replace(/<[^>]*>/g, "").trim();
+    return stripMarkup(withBreaks).trim();
   }
   const parsed = new DOMParser().parseFromString(withBreaks, "text/html");
   return (parsed.body.textContent ?? "").trim();
+}
+
+/**
+ * Drop every tag from a markup string without a DOM.
+ *
+ * A strict left-to-right scan is used instead of a tag-matching regular
+ * expression: a regex has to guess where a tag ends, and an input built out of
+ * overlapping angle brackets (``<<script>script>``) then still answers with a
+ * tag, which is what makes that shape an incomplete sanitization. The scan
+ * simply never emits the two characters that delimit a tag, so the result can
+ * only ever be text.
+ */
+function stripMarkup(markup: string): string {
+  let text = "";
+  let insideTag = false;
+  for (const character of markup) {
+    if (character === "<") {
+      insideTag = true;
+    } else if (character === ">") {
+      insideTag = false;
+    } else if (!insideTag) {
+      text += character;
+    }
+  }
+  return text;
 }

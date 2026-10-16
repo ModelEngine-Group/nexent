@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import importlib.util
 import json
 import logging
@@ -1290,6 +1292,18 @@ def _setup_mock_async_client(aidp_service_module, response=None, side_effect=Non
     return mock_client
 
 
+class _UnreadableResponse(httpx.Response):
+    """A streamed error response whose body cannot be read.
+
+    Reading the body of an error response is itself a network operation, so it can
+    fail after the response object already exists. That is the case where the
+    service has to close the response before mapping the failure.
+    """
+
+    async def aread(self) -> bytes:
+        raise httpx.ReadError("connection lost while reading the preview body")
+
+
 def _make_http_error(status_code, method="GET"):
     """Create an httpx.HTTPStatusError with given status code."""
     request = httpx.Request(method, "http://127.0.0.1:30081")
@@ -2493,6 +2507,27 @@ class TestAidpDocumentFileOperations:
         assert exc_info.value.error_code == ErrorCode.AIDP_CONNECTION_ERROR
 
     @pytest.mark.asyncio
+    async def test_preview_closes_the_response_when_reading_it_fails(
+        self, aidp_service_module
+    ):
+        # The body is never read: aread() fails with a transport error instead.
+        response = _UnreadableResponse(
+            502,
+            stream=httpx.ByteStream(b""),
+            request=httpx.Request("GET", "http://127.0.0.1:30081"),
+        )
+        _setup_mock_async_client(aidp_service_module, response=response)
+
+        with pytest.raises(AppException) as exc_info:
+            await aidp_service_module.stream_aidp_preview_impl(
+                "http://127.0.0.1:30081", "jwt-token", "kb-1", "uuid-1"
+            )
+        assert exc_info.value.error_code == ErrorCode.AIDP_CONNECTION_ERROR
+        # The response already existed when the failure surfaced, so it must not be
+        # leaked: a streamed AIDP response keeps the connection open until closed.
+        assert response.is_closed
+
+    @pytest.mark.asyncio
     async def test_preview_maps_upstream_http_error(self, aidp_service_module):
         response = httpx.Response(
             404,
@@ -2509,6 +2544,26 @@ class TestAidpDocumentFileOperations:
                 "http://127.0.0.1:30081", "jwt-token", "kb-1", "uuid-1"
             )
         assert exc_info.value.error_code == ErrorCode.AIDP_SERVICE_ERROR
+
+    @pytest.mark.asyncio
+    async def test_preview_maps_a_status_error_raised_by_the_client(
+        self, aidp_service_module
+    ):
+        # A client can surface the status error itself, in which case the handler
+        # runs without a response of its own and has to map the exception.
+        request = httpx.Request("GET", "http://127.0.0.1:30081")
+        error = httpx.HTTPStatusError(
+            "upstream rejected the request",
+            request=request,
+            response=httpx.Response(403, request=request),
+        )
+        _setup_mock_async_client(aidp_service_module, side_effect=error)
+
+        with pytest.raises(AppException) as exc_info:
+            await aidp_service_module.stream_aidp_preview_impl(
+                "http://127.0.0.1:30081", "jwt-token", "kb-1", "uuid-1"
+            )
+        assert exc_info.value.error_code == ErrorCode.AIDP_AUTH_ERROR
 
 
 # ---------------------------------------------------------------------------

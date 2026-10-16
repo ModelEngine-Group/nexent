@@ -1,9 +1,12 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
   decodeServedFileName,
   getFileExtension,
+  officeHtmlToText,
   resolveStreamPreviewKind,
   // @ts-expect-error -- Node requires the extension for this standalone test.
 } from "../lib/officePreview.ts";
@@ -64,4 +67,25 @@ test("falls back to the type hint and the response MIME type", () => {
     resolveStreamPreviewKind("report.doc", undefined, "application/msword"),
     "unsupported"
   );
+});
+
+test("converts Office markup to plain text without a DOM", () => {
+  // Node has no `document`, so this exercises the parser-free fallback that
+  // server-side rendering and these tests rely on.
+  assert.equal(officeHtmlToText("<p>第一段</p>"), "第一段");
+  assert.equal(officeHtmlToText("<p>a</p><p>b</p>"), "a\nb");
+  assert.equal(officeHtmlToText("a<br/>b"), "a\nb");
+  assert.equal(
+    officeHtmlToText('<div style="color: red">styled</div>'),
+    "styled"
+  );
+  assert.equal(officeHtmlToText(""), "");
+});
+
+test("never leaves a tag behind, even for overlapping angle brackets", () => {
+  // A tag-matching regex answers this input with another tag; the scan cannot,
+  // because it never emits the characters that delimit one.
+  const echoed = officeHtmlToText("<<script>script>alert(1)</script>");
+  assert.ok(!echoed.includes("<"), echoed);
+  assert.ok(echoed.includes("alert(1)"), echoed);
 });
