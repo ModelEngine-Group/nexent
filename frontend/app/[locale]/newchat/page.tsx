@@ -620,14 +620,25 @@ const HomeContent: FC<{
     setSelectedAgent,
   ]);
 
+  // Whether the user has entered any view during this page load. The agent
+  // selection is transiently empty while the saved view is still being
+  // restored at startup; clearing the marker in that window would lose the
+  // restore target if the user refreshed again before initialization
+  // finished.
+  const viewEstablishedRef = useRef(false);
+
   // Keep the "return here after a refresh" marker in sync with what the user
   // is actually viewing: a saved conversation (restorable by id), the agent
   // of an unsent blank conversation, or nothing on the landing page.
   useEffect(() => {
     if (!selectedAgent) {
-      clearLastChatView();
+      // Only clear after a view was established in this page load.
+      if (viewEstablishedRef.current) {
+        clearLastChatView();
+      }
       return;
     }
+    viewEstablishedRef.current = true;
     const numericConversationId = Number(activeConversationId);
     if (Number.isInteger(numericConversationId) && numericConversationId > 0) {
       writeLastChatViewConversation(String(numericConversationId));

@@ -186,6 +186,23 @@ describe("newchat refresh restore wiring", () => {
     expect(screen.getByText("Agent list")).toBeInTheDocument();
   });
 
+  it("keeps the saved conversation while the initial view is still loading", () => {
+    window.sessionStorage.setItem(CONVERSATION_KEY, "77");
+    // Agents are still loading: no view has been established yet, so the
+    // marker must survive this window for a second refresh to restore.
+    usePublishedAgentList.mockReturnValue({ isLoading: true, agents: [] });
+    try {
+      render(<Home />);
+
+      expect(window.sessionStorage.getItem(CONVERSATION_KEY)).toBe("77");
+    } finally {
+      usePublishedAgentList.mockImplementation(() => ({
+        isLoading: false,
+        agents: [agent],
+      }));
+    }
+  });
+
   it("records the viewed conversation and clears it when returning to the landing", async () => {
     const user = userEvent.setup();
     runtimeState = {
