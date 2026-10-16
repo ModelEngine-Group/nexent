@@ -145,15 +145,13 @@ export function ThreadListSidebar({
                   {newChatDesign ? (
                     <div className="flex items-center gap-1">
                       {/* Back chevron: returns to the discover-agents landing
-                          page (same handler the old filled button used).
-                          -mr-3 pulls the dropdown trigger over the button's
-                          inner padding so the title sits close to the glyph. */}
+                          page (same handler the old filled button used). */}
                       {onPrepareNewConversation && (
                         <TooltipIconButton
                           tooltip={t("chat.sidebar.discoverAgents")}
                           variant="ghost"
                           size="icon"
-                          className="size-8 shrink-0 -mr-3"
+                          className="size-8 shrink-0"
                           onClick={onPrepareNewConversation}
                         >
                           <ChevronLeftIcon className="size-4" />
