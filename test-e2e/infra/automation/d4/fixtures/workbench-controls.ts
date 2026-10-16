@@ -50,7 +50,7 @@ export async function prepareWorkbench(page: Page, resourceCount = 1, options: {
       result = { code: 0, data: { items: (options.histories ?? []).slice(offset, offset + limit), metadata: { total: options.histories?.length ?? 0 } } };
     }
     else if (pathname === "/api/conversation/workbench_pins" || pathname.endsWith("/workbench_pin")) {
-      const scope = JSON.stringify([authorization.tenantId, authorization.userId]);
+      const scope = JSON.stringify([authorization.userId]);
       let ids = pinServer.scopes.get(scope) ?? [];
       if (request.method() === "PUT") {
         if (pinServer.rejectSave) {

@@ -1,0 +1,60 @@
+schema_version: '1.0'
+stage: D5
+module: CHAT-SIDEBAR
+case:
+  case_id: CHAT-SIDEBAR-D5-001
+  feature_id: CHAT-SIDEBAR
+  requirement_ids:
+  - WB-PIN-SYNC-20261016
+  business_rule_ids:
+  - CHAT-SIDEBAR-RULE-002
+  title: Personal conversation pin migration preserves valid legacy pins and safely repeats
+  type: RELIABILITY
+  priority: P1
+  status: active
+  automation: automated
+  objective: Execute additive migration against disposable PostgreSQL schemas and prove safe legacy transition.
+  preconditions:
+  - Reachable PostgreSQL configured by backend; disposable schemas only.
+  test_data:
+    profile: mock
+  steps:
+  - order: 1
+    action: Migrate valid active pins, cancelled scopes, invalid references and legacy duplicate rows.
+    expected: Only latest valid active owned Workbench pins are copied, preserving pin time and conversation
+      audit/content; the old table remains.
+  - order: 2
+    action: Unpin a migrated conversation and rerun the migration.
+    expected: Rerun preserves the unpinned value and creates no duplicate index or data.
+  - order: 3
+    action: Migrate a conversation pinned independently in multiple tenants.
+    expected: Migration raises an actionable ambiguity error atomically; the new column is absent and
+      legacy data is unchanged.
+  expected_results:
+  - Valid legacy pins persist in the new field and reruns cannot resurrect cancelled pins.
+  - Ambiguous migration fails atomically without data loss.
+  forbidden_side_effects:
+  - No changes outside disposable schemas, no legacy table deletion and no conversation activity/content
+    mutation.
+  risk_type: RELIABILITY
+  risk: Schema simplification could lose tenant preferences, resurrect cancelled pins or change activity.
+  condition:
+  - Upgrade from legacy pin table, including duplicate and ambiguous rows.
+  metrics:
+  - Migrated field values, schema columns/indexes and original row snapshots.
+  thresholds:
+  - All migration and unchanged-data assertions pass.
+  recovery_expectations:
+  - Failed ambiguity migration rolls back; legacy table remains for inspection.
+  acceptance:
+  - id: AC-01
+    description: Safe migration, rerun and rollback over real PostgreSQL.
+    steps:
+    - 1
+    - 2
+    - 3
+    expected_results:
+    - 1
+    - 2
+    forbidden_side_effects:
+    - 1
