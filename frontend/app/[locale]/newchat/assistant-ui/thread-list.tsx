@@ -1148,7 +1148,7 @@ const ThreadListItemContent: FC<ThreadListItemContentProps> = ({
       return (
         <button
           type="button"
-          className={`flex min-w-0 flex-1 cursor-pointer items-center gap-2 px-3 text-left text-sm transition-colors hover:bg-muted ${
+          className={`flex h-full min-w-0 flex-1 cursor-pointer items-center gap-2 rounded-lg px-3 text-left text-sm transition-colors hover:bg-muted ${
             selectedIds?.has(thread.id) ? "bg-accent" : ""
           }`}
           onClick={() => toggle?.(thread.id)}
