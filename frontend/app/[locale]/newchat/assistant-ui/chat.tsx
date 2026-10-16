@@ -1,4 +1,9 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 "use client";
+
+import type { ReasoningEffort } from "@/types/modelConfig";
+import type { ModelParameterSettingsControl } from "@/types/modelParameterSettings";
 
 import type { FC, ReactNode } from "react";
 import { useCallback, useMemo } from "react";
@@ -26,14 +31,17 @@ export interface ChatProps {
   chatMode?: ChatMode;
   onChatModeChange?: (mode: ChatMode) => void;
   showModelSelector?: boolean;
+  modelParameterSettings?: ModelParameterSettingsControl;
   modelSelectionScope?: "agent" | "tenant";
   fallbackAgentName?: string;
   selectedModelId?: string;
   onModelChange?: (modelId: string) => void;
   deepThinking?: boolean;
   onDeepThinkingChange?: (enabled: boolean) => void;
-  thinkingEffort?: "low" | "medium" | "high";
-  onThinkingEffortChange?: (effort: "low" | "medium" | "high") => void;
+  thinkingEffort?: ReasoningEffort;
+  onThinkingEffortChange?: (effort: ReasoningEffort) => void;
+  reasoningBudgetTokens?: number;
+  onReasoningBudgetTokensChange?: (budget: number) => void;
   showConversationTitle?: boolean;
   isDictationConfigured?: boolean;
   knowledgeScope?: ConversationKnowledgeScope | null;
@@ -89,6 +97,7 @@ export const Chat: FC<ChatProps> = ({
   chatMode = "execution",
   onChatModeChange = () => undefined,
   showModelSelector = true,
+  modelParameterSettings,
   modelSelectionScope = "agent",
   fallbackAgentName = "Nexent Workbench",
   selectedModelId,
@@ -97,6 +106,8 @@ export const Chat: FC<ChatProps> = ({
   onDeepThinkingChange,
   thinkingEffort,
   onThinkingEffortChange,
+  reasoningBudgetTokens,
+  onReasoningBudgetTokensChange,
   showConversationTitle = true,
   isDictationConfigured = false,
   knowledgeScope = null,
@@ -158,7 +169,10 @@ export const Chat: FC<ChatProps> = ({
           onDeepThinkingChange={onDeepThinkingChange}
           thinkingEffort={thinkingEffort}
           onThinkingEffortChange={onThinkingEffortChange}
+          reasoningBudgetTokens={reasoningBudgetTokens}
+          onReasoningBudgetTokensChange={onReasoningBudgetTokensChange}
           showModelSelector={showModelSelector}
+          modelParameterSettings={modelParameterSettings}
           modelSelectionScope={modelSelectionScope}
           chatMode={chatMode}
           onChatModeChange={onChatModeChange}
@@ -200,6 +214,7 @@ export const Chat: FC<ChatProps> = ({
       chatMode={chatMode}
       onChatModeChange={onChatModeChange}
       showModelSelector={showModelSelector}
+      modelParameterSettings={modelParameterSettings}
       modelSelectionScope={modelSelectionScope}
       selectedModelId={selectedModelId}
       onModelChange={onModelChange}
@@ -207,6 +222,8 @@ export const Chat: FC<ChatProps> = ({
       onDeepThinkingChange={onDeepThinkingChange}
       thinkingEffort={thinkingEffort}
       onThinkingEffortChange={onThinkingEffortChange}
+      reasoningBudgetTokens={reasoningBudgetTokens}
+      onReasoningBudgetTokensChange={onReasoningBudgetTokensChange}
       showConversationTitle={showConversationTitle}
       isDictationConfigured={isDictationConfigured}
       knowledgeScope={knowledgeScope}

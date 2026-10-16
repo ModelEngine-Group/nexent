@@ -1203,22 +1203,18 @@ def _get_skill_script_tools(
         return []
 
 
-async def create_model_config_list(tenant_id):
-    records = get_model_records({"model_type": "llm"}, tenant_id)
-    model_list = []
-    extra_body = {"logprobs": True} if LLM_INCLUDE_LOGPROBS else None
-    for record in records:
-        model_name = add_repo_to_name(
-            model_repo=record["model_repo"],
-            model_name=record["model_name"],
-        )
-        reasoning_capability = _resolve_reasoning_capability(
-            model_name=model_name,
-            base_url=record.get("base_url"),
-            provider_hint=record.get("model_factory"),
-        )
-        model_list.append(
-            ModelConfig(cite_name=record["display_name"],
+def create_model_config_from_record(record):
+    """Build a complete provider binding from one exact tenant model record."""
+    model_name = add_repo_to_name(
+        model_repo=record["model_repo"],
+        model_name=record["model_name"],
+    )
+    reasoning_capability = _resolve_reasoning_capability(
+        model_name=model_name,
+        base_url=record.get("base_url"),
+        provider_hint=record.get("model_factory"),
+    )
+    return ModelConfig(cite_name=record["display_name"],
                         api_key=record.get("api_key", ""),
                         model_name=model_name,
                         url=record["base_url"],
@@ -1250,7 +1246,13 @@ async def create_model_config_list(tenant_id):
                         reasoning_budget_tokens=_resolve_model_reasoning_budget(
                             record.get("extra_params"), reasoning_capability
                         ),
-                        extra_body=_build_extra_body(record.get("extra_params"))))
+                        extra_body=_build_extra_body(record.get("extra_params")))
+
+
+async def create_model_config_list(tenant_id):
+    records = get_model_records({"model_type": "llm"}, tenant_id)
+    model_list = [create_model_config_from_record(record) for record in records]
+    extra_body = {"logprobs": True} if LLM_INCLUDE_LOGPROBS else None
     # fit for old version, main_model and sub_model use default model
     main_model_config = tenant_config_manager.get_model_config(
         key=MODEL_CONFIG_MAPPING["llm"], tenant_id=tenant_id)
@@ -2586,38 +2588,12 @@ def apply_root_generation_overlay(
     """Add a root-only model alias without changing child Agent aliases."""
     if not generation_config:
         return
+    from management.services.model.run_controls import overlay_root_model
     for model_config in model_list:
         if model_config.cite_name != agent_config.model_name:
             continue
-        extra_body = dict(model_config.extra_body or {})
-        deep_thinking = bool(generation_config.get("deep_thinking"))
-        extra_body["enable_thinking"] = deep_thinking
-        # Effort is a dedicated ModelConfig field, not an extra_body override.
-        # Clear inherited model settings so the Workbench choice is authoritative.
-        extra_body.pop("reasoning_effort", None)
-        extra_body.pop("reasoning_budget_tokens", None)
-        root_model = model_config.model_copy(
-            deep=True,
-            update={
-                "cite_name": "workbench_root_model",
-                "enable_thinking": deep_thinking,
-                "reasoning_effort": (
-                    (generation_config.get("thinking_effort") or "low")
-                    if deep_thinking else None
-                ),
-                "reasoning_budget_tokens": None,
-                "temperature": (
-                    generation_config.get("temperature")
-                    if generation_config.get("temperature") is not None
-                    else model_config.temperature
-                ),
-                "top_p": (
-                    generation_config.get("top_p")
-                    if generation_config.get("top_p") is not None
-                    else model_config.top_p
-                ),
-                "extra_body": extra_body,
-            },
+        root_model = overlay_root_model(
+            model_config, generation_config, "workbench_root_model",
         )
         model_list.append(root_model)
         agent_config.model_name = root_model.cite_name
@@ -2650,6 +2626,9 @@ async def create_agent_run_info(
     runtime_generation_config: Optional[Dict[str, Any]] = None,
     runtime_sub_agent_mounts: Optional[List[Dict[str, Any]]] = None,
 ):
+    if override_model_id is not None:
+        from management.services.model.run_controls import validate_selected_record
+        validate_selected_record(get_model_by_model_id(override_model_id, tenant_id=tenant_id))
     workspace_run_id = uuid.uuid4().hex
     workspace_path = _build_run_workspace(user_id, workspace_run_id)
     if runtime_skill_snapshot is not None:
@@ -2814,61 +2793,21 @@ async def create_agent_run_info(
         runtime_generation_config,
     )
 
-    # A request-level effort is valid only when the selected model's switch is
-    # enabled. Known capabilities use their declared levels. Unknown/custom
-    # models use the common generic profile and let the provider reject an
-    # unsupported concrete value through the normal reasoning error path.
-    # ``auto`` is represented by an omitted per-request effort. The selected
-    # model keeps reasoning enabled, but the provider chooses the depth.
-    if reasoning_effort == "auto":
-        reasoning_effort = None
-    if reasoning_effort is not None:
-        selected_config = next(
-            (mc for mc in model_list if mc.cite_name == agent_config.model_name),
-            None,
-        )
-        capability = selected_config.reasoning_capability if selected_config else None
-        if not selected_config or not selected_config.enable_thinking:
-            raise ValidationError(
-                "The selected model does not support the requested reasoning effort"
-            )
-        if isinstance(capability, dict) and capability.get("status") == "supported":
-            supported_levels = capability.get("levels") or list(COMMON_REASONING_LEVELS)
-        else:
-            supported_levels = list(COMMON_REASONING_LEVELS)
-        if reasoning_effort not in supported_levels:
-            raise ValidationError(
-                "The selected model does not support the requested reasoning effort"
-            )
-        selected_config.reasoning_effort = reasoning_effort
-
-    if reasoning_budget_tokens is not None:
-        selected_config = next(
-            (mc for mc in model_list if mc.cite_name == agent_config.model_name),
-            None,
-        )
-        capability = selected_config.reasoning_capability if selected_config else None
-        if not selected_config or not selected_config.enable_thinking:
-            raise ValidationError(
-                "The selected model does not support the requested reasoning budget"
-            )
-        controls = capability.get("controls") if isinstance(capability, dict) else None
-        budget_control = next(
-            (control for control in controls or []
-             if isinstance(control, dict) and control.get("type") == "budget_tokens"),
-            None,
-        )
-        minimum = budget_control.get("min") if isinstance(budget_control, dict) else None
-        maximum = budget_control.get("max") if isinstance(budget_control, dict) else None
-        if not isinstance(minimum, int) or not isinstance(maximum, int):
-            raise ValidationError(
-                "The selected model does not support the requested reasoning budget"
-            )
-        if reasoning_budget_tokens < minimum or reasoning_budget_tokens > maximum:
-            raise ValidationError(
-                f"Reasoning budget must be between {minimum} and {maximum} tokens"
-            )
-        selected_config.reasoning_budget_tokens = reasoning_budget_tokens
+    # Legacy top-level fields use the same capability policy as generation overlays.
+    if reasoning_effort is not None or reasoning_budget_tokens is not None:
+        from management.services.model.run_controls import overlay_root_model
+        selected_config = next((m for m in model_list if m.cite_name == agent_config.model_name), None)
+        if selected_config is None:
+            from consts.exceptions import RunModelControlsError
+            raise RunModelControlsError("model_not_available")
+        legacy = {}
+        if reasoning_effort is not None:
+            legacy["thinking_effort"] = reasoning_effort
+        if reasoning_budget_tokens is not None:
+            legacy["reasoning_budget_tokens"] = reasoning_budget_tokens
+        overlay = overlay_root_model(selected_config, legacy, selected_config.cite_name)
+        index = model_list.index(selected_config)
+        model_list[index] = overlay
 
     remote_mcp_list = await get_remote_mcp_server_list(tenant_id=tenant_id, is_need_auth=True)
     default_mcp_url = get_tenant_local_mcp_server(tenant_id)

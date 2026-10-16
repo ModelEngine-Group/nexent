@@ -20,7 +20,7 @@ export default function AgentListIndicators({ agent }: { agent: Agent }) {
   if (!badge && agent.is_available !== false) return null;
 
   return (
-    <span className="inline-flex min-w-0 items-center gap-1 text-[11px] leading-4">
+    <span className="inline-flex min-w-0 max-w-[60%] shrink-0 items-center gap-1 text-[11px] leading-4">
       {badge ? (
         <Tooltip title={repositoryLabel}>
           <span

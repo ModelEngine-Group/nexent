@@ -13,6 +13,23 @@ beforeEach(() => {
   vi.clearAllMocks();
 });
 describe("identity metadata is read-only across existing API contracts", () => {
+  it.each(["Bob", "bob@test"])(
+    "forwards the search string %s without new request fields",
+    async (search) => {
+      request.mockResolvedValue(
+        new Response(JSON.stringify({ data: [], total: 0 }))
+      );
+      await listUsers("tenant", 1, 10, { search });
+      expect(JSON.parse(String(request.mock.calls[0][1]?.body))).toEqual({
+        tenant_id: "tenant",
+        page: 1,
+        page_size: 10,
+        search,
+        sort_by: "created_at",
+        sort_order: "desc",
+      });
+    }
+  );
   it("preserves metadata and raw emails while keeping list filters and ordering unchanged", async () => {
     const users = [
       { id: "a", username: "raw@test", cas_username: "用户名", role: "USER" },

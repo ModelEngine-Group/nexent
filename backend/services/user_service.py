@@ -26,7 +26,8 @@ logger = logging.getLogger(__name__)
 def get_users(tenant_id: str, page: Optional[int] = 1, page_size: Optional[int] = 20,
               sort_by: str = "created_at", sort_order: str = "desc",
               search: Optional[str] = None, roles: Optional[List[str]] = None,
-              group_ids: Optional[List[int]] = None) -> Dict[str, Any]:
+              group_ids: Optional[List[int]] = None, *,
+              search_cas_username: bool = False) -> Dict[str, Any]:
     """
     Get users belonging to a specific tenant with pagination and sorting
 
@@ -51,6 +52,7 @@ def get_users(tenant_id: str, page: Optional[int] = 1, page_size: Optional[int] 
             search=search,
             roles=roles,
             group_ids=group_ids,
+            **({"search_cas_username": True} if search_cas_username else {}),
         )
     else:
         result = get_users_by_tenant_id(tenant_id, page, page_size, sort_by, sort_order)
@@ -99,6 +101,7 @@ def get_users_for_requester(
     *,
     requester_tenant_id: str,
     requester_role: str,
+    search_cas_username: bool = False,
 ) -> Dict[str, Any]:
     """List users after enforcing role and tenant boundaries."""
     role = (requester_role or "").upper()
@@ -115,7 +118,8 @@ def get_users_for_requester(
     # mock the pre-filter signature.
     if search or roles or group_ids:
         return get_users(
-            tenant_id, page, page_size, sort_by, sort_order, search, roles, group_ids
+            tenant_id, page, page_size, sort_by, sort_order, search, roles, group_ids,
+            **({"search_cas_username": True} if search_cas_username else {}),
         )
     return get_users(tenant_id, page, page_size, sort_by, sort_order)
 

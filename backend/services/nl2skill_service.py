@@ -11,10 +11,13 @@ from collections.abc import AsyncIterator
 from typing import Any
 
 from nexent.core.agents.agent_model import AgentHistory, AgentRunInfo
+from nexent.core.agents.context import ContextManagerConfig
 from nexent.core.agents.run_agent import agent_run
 from nexent.core.utils.observer import MessageObserver
 
 from agents.create_agent_info import (
+    _resolve_input_budget,
+    _resolve_context_budget,
     create_model_config_list,
     join_minio_file_description_to_query,
 )
@@ -31,6 +34,7 @@ from management.services.skill.prompt import (
     get_nl2skill_prompt_template,
 )
 from services.thread_lifecycle_service import runtime_thread_manager
+from management.services.model.run_controls import resolve_creator_model, validate_selected_record, preflight_turn_controls
 
 logger = logging.getLogger(__name__)
 
@@ -151,6 +155,7 @@ def _resolve_model_for_nl2skill(
     if model_id is not None:
         # Use the explicitly requested model
         model_info = get_model_by_model_id(model_id, tenant_id)
+        validate_selected_record(model_info)
         if model_info:
             return (
                 model_info["display_name"],
@@ -191,6 +196,7 @@ async def build_nl2skill_run_info(
     """Build all request-scoped objects for one NL2Skill turn."""
 
     template_language = LANGUAGE["EN"] if language == LANGUAGE["EN"] else LANGUAGE["ZH"]
+    preflight_turn_controls(request, tenant_id)
     target_files = _extract_target_files(request.query, request.draft_snapshot)
     draft_snapshot = _normalize_draft_snapshot(request.draft_snapshot)
     final_query = await join_minio_file_description_to_query(
@@ -216,14 +222,38 @@ async def build_nl2skill_run_info(
         model_config_list=model_config_list,
     )
 
+    agent_config = create_nl2skill_agent_config(
+        system_prompt=template.get("system_prompt", ""),
+        model_name=cite_name,
+    )
+    if request.model_id is not None or request.generation_config is not None:
+        model_info = resolve_creator_model(
+            model_config_list, agent_config, tenant_id, request.model_id,
+            request.generation_config.model_dump(exclude_unset=True) if request.generation_config else None,
+            model_info,
+        )
+    input_budget, capacity_snapshot, resolved_capacity = _resolve_input_budget(model_info)
+    context_budget = _resolve_context_budget(
+        capacity_snapshot=resolved_capacity, tenant_id=tenant_id,
+        agent_requested_output_tokens=None, request_requested_output_tokens=None,
+    )
+    agent_config.capacity_snapshot = capacity_snapshot
+    agent_config.context_budget_snapshot = context_budget
+    # The SDK consumes the same selected-model capacity snapshot as the root.
+    agent_config.context_manager_config = ContextManagerConfig(
+        token_threshold=context_budget.compaction_trigger_threshold_tokens if context_budget else input_budget,
+        context_window_tokens=(resolved_capacity.context_window_tokens if resolved_capacity else None) or input_budget,
+        effective_input_limit_tokens=context_budget.effective_input_limit_tokens if context_budget else 0,
+        compaction_trigger_threshold_tokens=context_budget.compaction_trigger_threshold_tokens if context_budget else 0,
+        compaction_target_tokens=context_budget.compaction_target_tokens if context_budget else 0,
+    )
     return AgentRunInfo(
         query=template.get("user_prompt") or final_query,
         model_config_list=model_config_list,
         observer=MessageObserver(lang=template_language),
-        agent_config=create_nl2skill_agent_config(
-            system_prompt=template.get("system_prompt", ""),
-            model_name=model_name,
-        ),
+        agent_config=agent_config,
+        capacity_snapshot=capacity_snapshot,
+        context_budget_snapshot=context_budget,
         history=_convert_history(request.history),
         stop_event=threading.Event(),
         enable_planning=False,

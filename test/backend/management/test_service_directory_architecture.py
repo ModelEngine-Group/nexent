@@ -55,6 +55,7 @@ MIGRATED_MODULES = {
     "model/providers/tokenpony_provider.py",
     "model/reasoning.py",
     "model/resolver.py",
+    "model/run_controls.py",
     "skill/service.py",
     "skill/files.py",
     "skill/naming.py",

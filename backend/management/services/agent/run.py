@@ -179,7 +179,7 @@ async def prepare_agent_run(
         and agent_request.generation_config is not None
     ):
         runtime_generation_config = agent_request.generation_config.model_dump(
-            mode="json"
+            mode="json", exclude_unset=True
         )
     if runtime_generation_config is not None:
         create_run_kwargs["runtime_generation_config"] = runtime_generation_config

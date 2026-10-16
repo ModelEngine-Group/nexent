@@ -1,3 +1,5 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import { cloneElement, type ReactElement, type ReactNode } from "react";
 import { beforeEach, expect, it, vi } from "vitest";
 import {
@@ -48,6 +50,7 @@ function render(ui: ReactElement) {
 
 const runtime = vi.hoisted(() => ({
   thread: { isRunning: false, messages: [] },
+  threads: { mainThreadId: "fixture-thread" },
   composer: { text: "question", dictation: false, attachments: [] },
   cancel: vi.fn(),
 }));
@@ -103,12 +106,64 @@ vi.mock("@assistant-ui/react-lexical", () => ({
 vi.mock("@/app/newchat/adapter/remote-chat-model-adapter", () => ({
   planRegistry: { subscribe: () => () => {}, data: null },
 }));
+const selectorProps = vi.hoisted(() => vi.fn());
 vi.mock("@/app/newchat/ui/model-selector", () => ({
-  ModelSelector: () => <button>模型</button>,
+  ModelSelector: (props: unknown) => {
+    selectorProps(props);
+    return <button>模型</button>;
+  },
 }));
+
+it("forwards every known effort through Composer without fabricating a default", () => {
+  const changed = vi.fn();
+  render(
+    <Composer
+      models={[{ id: "1", name: "model" }]}
+      selectedModelId="1"
+      newChatDesign
+      chatMode="execution"
+      onChatModeChange={vi.fn()}
+      onThinkingEffortChange={changed}
+    />
+  );
+  const props = selectorProps.mock.lastCall?.[0] as {
+    effort?: string;
+    onEffortChange: (value: string) => void;
+  };
+  expect(props.effort).toBeUndefined();
+  for (const level of [
+    "auto",
+    "none",
+    "minimal",
+    "low",
+    "medium",
+    "high",
+    "xhigh",
+    "max",
+  ]) {
+    props.onEffortChange(level);
+    expect(changed).toHaveBeenLastCalledWith(level);
+  }
+  const count = changed.mock.calls.length;
+  props.onEffortChange("provider-invalid");
+  expect(changed).toHaveBeenCalledTimes(count);
+});
 vi.mock("@/app/newchat/ui/attachment", () => ({
   ComposerAttachments: () => null,
-  ComposerAddAttachment: () => <button>附件</button>,
+  ComposerAddAttachment: ({
+    label,
+    tooltip,
+    icon,
+  }: {
+    label?: string;
+    tooltip?: string;
+    icon?: ReactNode;
+  }) => (
+    <button aria-label={tooltip ?? "附件"} title={tooltip}>
+      {icon}
+      {label}
+    </button>
+  ),
 }));
 vi.mock(
   "@/app/newchat/assistant-ui/conversation-knowledge-scope-modal",
@@ -164,7 +219,7 @@ it.each(["skill_create", "agent_create"] as const)(
       input!.compareDocumentPosition(examples) &
         Node.DOCUMENT_POSITION_FOLLOWING
     ).toBeTruthy();
-    expect(examples.parentElement).toHaveClass("absolute", "top-full");
+    expect(examples.parentElement).not.toHaveClass("absolute");
     runtime.composer.text = "question";
   }
 );
@@ -201,16 +256,19 @@ it("UT-FE-WB-014 composer keeps resources between text and ordered toolbar", asy
   const mode = screen.getByRole("button", {
     name: "chat.composer.executionMode",
   });
-  expect(screen.queryByRole("button", { name: "Skill 创建" })).toBeNull();
+  expect(
+    screen.getByRole("button", { name: "Skill 创建" })
+  ).toBeInTheDocument();
   const chips = screen.getByLabelText("当前挂载资源");
   before(screen.getByRole("textbox"), chips);
   before(chips, mode);
   const labels = [
     "chat.composer.executionMode",
-    "chat.composer.skills",
+    "workbench.controls.agents",
     "chat.composer.knowledgeBase",
-    "附件",
+    "chat.composer.skills",
     "模型",
+    "workbench.controls.uploadAttachment",
   ];
   for (let index = 1; index < labels.length; index++) {
     before(
@@ -218,13 +276,30 @@ it("UT-FE-WB-014 composer keeps resources between text and ordered toolbar", asy
       screen.getByRole("button", { name: labels[index] })
     );
   }
-  expect(screen.getByRole("button", { name: "附件" })).toBeEnabled();
+  for (const label of labels.slice(1, 4)) {
+    expect(screen.getByRole("button", { name: label }).textContent).toBe(label);
+  }
+  const attachment = screen.getByRole("button", {
+    name: "workbench.controls.uploadAttachment",
+  });
+  expect(attachment).toBeEnabled();
+  expect(attachment.textContent).toBe("");
+  expect(attachment).toHaveAttribute(
+    "title",
+    "workbench.controls.uploadAttachment"
+  );
+  expect(attachment.querySelector(".lucide-paperclip")).not.toBeNull();
+  expect(
+    attachment.nextElementSibling?.querySelector(".lucide-mic")
+  ).not.toBeNull();
   expect(
     screen.getByRole("button", { name: "chat.composer.send" })
   ).toBeEnabled();
-  await userEvent.click(
-    screen.getByRole("button", { name: "Agent · Agent A" })
-  );
+  const agentButton = screen.getByRole("button", {
+    name: "workbench.controls.agents",
+  });
+  expect(agentButton?.tagName).toBe("BUTTON");
+  await userEvent.click(agentButton as HTMLButtonElement);
   expect(onSelectAgent).toHaveBeenCalledOnce();
   await userEvent.click(mode);
   const choices = within(screen.getByRole("dialog"));
@@ -263,12 +338,47 @@ it("UT-FE-WB-015 creation composer excludes resources and keeps the draft editab
   expect(screen.queryByRole("button", { name: /knowledgeScope/ })).toBeNull();
   expect(screen.getByRole("textbox")).toBeEnabled();
   expect(screen.getByRole("button", { name: "模型" })).toBeEnabled();
-  expect(screen.getByRole("button", { name: "附件" })).toBeEnabled();
+  expect(
+    screen.getByRole("button", { name: "workbench.controls.uploadAttachment" })
+  ).toBeEnabled();
   expect(
     screen.getByRole("button", { name: "chat.composer.send" })
   ).toBeDisabled();
   expect(screen.getByRole("status")).toHaveTextContent("创建能力尚未接入");
 });
+
+it.each([
+  ["", false, true],
+  ["   ", false, true],
+  ["Hello", false, false],
+  ["Hello", true, true],
+])(
+  "Workbench send state for text=%s disabled=%s",
+  (text, disabled, unavailable) => {
+    runtime.thread.isRunning = false;
+    runtime.composer.text = text as string;
+    render(
+      <Composer
+        {...base}
+        disabled={disabled as boolean}
+        workbenchPresentation={{
+          mode: "generic_chat",
+          onExitCreation: vi.fn(),
+          actions: null,
+        }}
+      />
+    );
+    const send = screen.getByRole("button", { name: "chat.composer.send" });
+    expect(send).toHaveClass(
+      "bg-transparent",
+      "text-[#0067d1]",
+      "disabled:text-muted-foreground"
+    );
+    expect(send.hasAttribute("disabled")).toBe(unavailable);
+    expect(send.parentElement).toHaveClass("inline-flex");
+    runtime.composer.text = "question";
+  }
+);
 
 it("UT-FE-WB-004 stop remains reachable while running and input recovers when idle", async () => {
   runtime.thread.isRunning = true;
@@ -370,4 +480,25 @@ it("canceling retrieval configuration discards edits before reopening", async ()
   const reopened = await openConfig();
   expect(reopened.getByRole("spinbutton")).toHaveValue("6");
   expect(save).not.toHaveBeenCalled();
+});
+
+it("ordinary chat scopes shared parameters to the active thread and locks them while running", () => {
+  runtime.threads.mainThreadId = "thread-a";
+  runtime.thread.isRunning = false;
+  const { rerender } = render(<Composer {...base} newChatDesign />);
+  expect(selectorProps.mock.lastCall?.[0]).toMatchObject({
+    parameterSettingsScopeKey: "thread-a",
+    parameterSettingsDisabled: false,
+  });
+  runtime.threads.mainThreadId = "thread-b";
+  runtime.thread.isRunning = true;
+  rerender(<Composer {...base} newChatDesign />);
+  expect(selectorProps.mock.lastCall?.[0]).toMatchObject({
+    parameterSettingsScopeKey: "thread-b",
+    parameterSettingsDisabled: true,
+  });
+  runtime.thread.isRunning = false;
+  rerender(<Composer {...base} newChatDesign disabled />);
+  expect(selectorProps.mock.lastCall?.[0].parameterSettingsDisabled).toBe(true);
+  runtime.threads.mainThreadId = "fixture-thread";
 });

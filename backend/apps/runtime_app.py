@@ -13,6 +13,7 @@ from apps.agent_automation_app import (
 from apps.agent_evaluation_runtime_app import router as agent_evaluation_runtime_router
 from apps.voice_app import voice_runtime_router as voice_router
 from apps.conversation_management_app import router as conversation_management_router
+from apps.workbench_pins_app import router as workbench_pins_router
 from apps.conversation_share_app import router as conversation_share_router
 from apps.file_management_app import (
     file_management_runtime_router as file_management_router,
@@ -115,6 +116,7 @@ app.include_router(agent_router)
 app.include_router(agent_evaluation_runtime_router)
 app.include_router(agent_automation_router)
 app.include_router(conversation_automation_router)
+app.include_router(workbench_pins_router)
 app.include_router(conversation_management_router)
 app.include_router(conversation_share_router)
 app.include_router(file_management_router)

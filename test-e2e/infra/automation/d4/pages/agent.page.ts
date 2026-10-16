@@ -246,10 +246,10 @@ export class AgentPage {
 
   async bindInternalCollaborator(displayName: string, expectedVersionName?: string): Promise<void> {
     await this.openAdvanced();
-    // Sub-agent binding lives in the 添加子智能体 section; selection goes
+    // Sub-agent binding lives in the collaborating-agent management section; selection goes
     // through the AddAgentDrawer and commits per row toggle (the drawer has
     // no confirm button) through the agent update autosave.
-    await this.openSection("添加子智能体");
+    await this.openSection("协作智能体管理");
     await this.page.getByRole("button", { name: "点击添加智能体", exact: true }).click();
     const drawer = this.page.getByRole("dialog");
     await expect(drawer).toBeVisible();
@@ -283,7 +283,7 @@ export class AgentPage {
   }
 
   async setConversationGuide(opening: string, exampleQuestion: string): Promise<void> {
-    await this.openSection("首页欢迎信息");
+    await this.openSection("开场白与示例问题");
     // The config surface renders the high-fidelity conversation guide: the
     // greeting textarea keeps aria-label 开场白 in both rendering modes (its
     // visible placeholder differs), the preset-question button is 添加问题
