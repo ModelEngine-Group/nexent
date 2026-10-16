@@ -1,0 +1,27 @@
+schema_version: '1.0'
+change:
+  change_id: MODEL-OUTLET-CAPABILITY-STORAGE-20261013
+  change_type: requirement
+  requirement_id: MODEL-OUTLET-CAPABILITY-STORAGE-20261013
+  title: Preserve capability column ownership on outlet load
+  description: Strict capability partition and restoration from a single-row field set without catalog access.
+  affected_features:
+    existing: [SDK-MODEL-OUTLET-STORAGE]
+    added: []
+    modified: [SDK-MODEL-OUTLET-STORAGE]
+    retired: []
+  affected_cases:
+    existing: []
+    added: []
+    modified: []
+    retired: []
+  traditional_ut:
+    decision: add
+    behaviors:
+    - Preserve strict BOOLEAN/NULL status conversion, unknown/empty domains and detached round-trip values.
+    - Reject duplicated, incomplete, inconsistent, non-JSON or oversized capability storage without leaking values.
+    - Enforce positive INT4 context limits and existing typed reasoning/modality/response contracts after restoration.
+    reason: Existing contracts validate capabilities in memory, not their persisted ownership. Pure partition/restore belongs in UT; no extra D1 adds necessary component evidence.
+    test_selectors: [test/sdk/core/model_service/test_outlet_capabilities.py]
+  no_case_change_reason: This pure codec does not connect database or runtime paths. Preserve existing Cases; complete-row/database and migration verification remains required separately.
+  notes: Designed in TECHNICAL-DESIGN before implementation. This does not prove complete ResolvedModelProfile storage or real database execution.

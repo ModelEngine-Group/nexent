@@ -43,6 +43,7 @@ import Image from "next/image";
 
 import { useAgentStore } from "@/stores/agentStore";
 import { AddModelDrawer } from "@/components/resource-picker/AddModelDrawer";
+import { AgentModelParameters } from "@/components/model/AgentModelParameters";
 import { ModelParamsModal } from "@/components/resource-picker/ModelParamsModal";
 import { useModelList } from "@/hooks/model/useModelList";
 import { useInferenceFieldSpecs } from "@/hooks/model/useInferenceFieldSpecs";
@@ -1084,7 +1085,22 @@ export default function AgentPrompt({
         ))}
 
       {/* Per-model parameter override popup */}
-      <ModelParamsModal
+      {configuringModel?.profileSchemaVersion ? (
+        <AgentModelParameters
+          key={configuringModel.id}
+          modelId={configuringModel.id}
+          name={configuringModel.displayName || configuringModel.name}
+          value={modelParamsOverride[String(configuringModel.id)] ?? {}}
+          disabled={isModelSelectionDisabled}
+          onClose={() => setConfiguringModelId(null)}
+          onApply={(entry) => {
+            const updated = { ...modelParamsOverride };
+            if (Object.keys(entry).length) updated[String(configuringModel.id)] = entry;
+            else delete updated[String(configuringModel.id)];
+            updateAgent({ model_params_override: Object.keys(updated).length ? updated : null });
+          }}
+        />
+      ) : <ModelParamsModal
         open={configuringModelId !== null}
         title={
           configuringModel
@@ -1112,7 +1128,7 @@ export default function AgentPrompt({
           top_p: (configuringModel as any)?.topP,
         }}
         disabled={isModelSelectionDisabled}
-      />
+      />}
     </div>
   );
 }

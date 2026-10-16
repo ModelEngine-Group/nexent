@@ -10,6 +10,8 @@ import pytest
 from test.backend.services import test_agent_service as legacy
 
 
+from test.backend.services.test_agent_service import isolate_conversation_model_preferences  # noqa: F401
+
 agent_run = legacy.agent_run_service
 agent_subscription = legacy.agent_subscription
 AgentRequest = legacy.AgentRequest

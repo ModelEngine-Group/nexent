@@ -48,10 +48,12 @@ from nexent.core.agents.run_agent import (
 )
 from nexent.core.concurrency import (
     ManagedExecution,
+    run_blocking,
 )
 from nexent.monitor import (
     agent_monitoring_context,
 )
+from services.conversation_model_preferences_service import read_model_preferences as _read_model_preferences
 from services.conversation_management_service import (
     get_current_run_user_message_id,
     get_latest_assistant_message,
@@ -121,6 +123,7 @@ def apply_workbench_runtime_plan(
     }
     agent_request.__dict__["_runtime_generation_config"] = (
         canonical_workbench.generation_config.model_dump(mode="json")
+        if getattr(canonical_workbench, "model_parameters_source", "legacy_generation") == "legacy_generation" else {}
     )
 
 
@@ -197,6 +200,10 @@ async def prepare_agent_run(
         ]
     if not agent_request.enable_automation_tool:
         create_run_kwargs["enable_automation_tool"] = False
+    if agent_request.conversation_id is not None and not agent_request.is_debug:
+        preferences = await run_blocking("run-model-preferences", _read_model_preferences, agent_request.conversation_id, user_id)
+        if preferences["model_parameter_preferences"]:
+            create_run_kwargs["model_parameter_preferences"] = preferences["model_parameter_preferences"]
     agent_run_info = await create_agent_run_info(
         **create_run_kwargs,
     )

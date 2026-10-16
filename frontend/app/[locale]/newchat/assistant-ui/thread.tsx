@@ -1009,6 +1009,7 @@ const ThreadView: FC<ThreadViewProps> = ({
                 emptyFooterContent
               ))}
             <Composer
+              conversationId={conversationId}
               newChatDesign={newChatDesign}
               debugLayout={debugLayout}
               models={models}

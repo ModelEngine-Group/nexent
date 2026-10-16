@@ -5259,6 +5259,12 @@ if __name__ == "__main__":
     pytest.main()
 
 
+@pytest.fixture(autouse=True)
+def isolate_conversation_model_preferences(monkeypatch):
+    """Keep run orchestration UT independent of the conversation database."""
+    monkeypatch.setattr(agent_run_service, "_read_model_preferences", MagicMock(return_value={"model_parameter_preferences": {}, "version": 0}))
+
+
 # Agent run tests
 @pytest.fixture
 def mock_agent_request():

@@ -1,5 +1,6 @@
 // Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
+import { agentParameterValues } from "@/lib/modelParameterLayers";
 import type { Agent, PublishedAgent } from "@/types/agentConfig";
 import type {
   ModelOption as CatalogModelOption,
@@ -152,6 +153,10 @@ export const deriveModelOptions = (
       (item) =>
         String(item.id) === id || item.name === id || item.displayName === id
     );
+    if (model?.profileSchemaVersion) {
+      return { id, name: fallbackName, profileSchemaVersion: model.profileSchemaVersion,
+        agentParameterDefaults: scope === "agent" ? agentParameterValues({ ...typedAgent.model_params_override?.[id] }) : {} };
+    }
     const extra =
       scope === "agent"
         ? typedAgent.model_params_override?.[id]?.extra_params
