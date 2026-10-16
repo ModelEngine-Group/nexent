@@ -23,7 +23,7 @@ change:
   traditional_ut:
     decision: strengthen
     behaviors:
-      - Repository listing summaries carry the publish time, and latest-first ordering sorts dated records by time descending with a repository-id tie-break while undated records stay last; the default order is unchanged.
+      - Repository listing summaries carry the publish time, and latest-first ordering sorts dated records by time descending with a repository-id tie-break while undated records stay last; the default order is unchanged, and unparsable publish times or a scope tenant without a published version collapse into the id-ordered tail instead of failing the page.
       - The listing route forwards the sort flag to the implementation, and each listing summary and detail exposes is_main_agent, defaulting to true when the agent is unknown or absent.
       - Tag normalization recovers tags from JSON and Python-repr stringified arrays and returns an empty list for unrecoverable input, and the list card renders the recovered tag instead of the raw stringified value.
       - The my-agents tab sends sort_by_update_time only when the latest-published order is selected and renders the main-agent badge for a main agent while leaving an ordinary agent unbadged.
@@ -36,6 +36,8 @@ change:
       - test/backend/database/test_agent_db.py
       - test/backend/services/test_agent_repository_service.py
       - test/backend/app/test_agent_repository_app.py
+      - test/backend/app/test_agent_app.py
+      - test/backend/services/test_agent_service.py
       - frontend/tests/component/agentTagsNormalization.test.tsx
       - frontend/tests/component/agentListCard.test.tsx
       - frontend/tests/component/myAgentMainBadge.test.tsx
