@@ -1,3 +1,5 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 "use client";
 
 import { useState } from "react";
@@ -89,7 +91,10 @@ export function AgentGroupsPanel() {
                   className="size-4 shrink-0 text-muted-foreground"
                   aria-hidden
                 />
-                <span className="min-w-0 flex-1 truncate text-base leading-6 text-[#191919]">
+                <span
+                  title={group.name}
+                  className="min-w-0 flex-1 truncate text-base leading-6 text-[#191919]"
+                >
                   {group.name}
                 </span>
                 <ChevronRightIcon
@@ -121,7 +126,10 @@ export function AgentGroupsPanel() {
                   key={sub.id}
                   className="flex h-10 items-center gap-2 rounded-lg bg-[rgba(25,25,25,0.03)] px-2 py-2 hover:bg-[rgba(25,25,25,0.06)]"
                 >
-                  <span className="min-w-0 flex-1 truncate text-sm leading-[22px] text-[rgba(25,25,25,0.7)]">
+                  <span
+                    title={sub.description}
+                    className="min-w-0 flex-1 truncate text-sm leading-[22px] text-[rgba(25,25,25,0.7)]"
+                  >
                     {sub.description}
                   </span>
                   <span className="shrink-0 whitespace-nowrap text-xs text-muted-foreground">

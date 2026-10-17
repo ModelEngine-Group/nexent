@@ -1,3 +1,5 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 "use client";
 
 import {
@@ -76,13 +78,16 @@ const DEFAULT_OPEN_SECTIONS: Record<ConfigSectionKey, boolean> = {
   role_model: true,
   tools: true,
   skills: true,
-  run_strategy: true,
-  publish_attributes: true,
+  run_strategy: false,
+  publish_attributes: false,
   collaborative_agents: true,
   knowledge_base: true,
-  conversation_guide: true,
+  conversation_guide: false,
   guardrail: false,
 };
+
+const CONFIG_CARD_SURFACE =
+  "relative overflow-hidden !shadow-none ring-1 ring-inset ring-transparent transition-[box-shadow] duration-200 ease-out hover:ring-gray-200 focus-within:ring-gray-300 motion-reduce:transition-none";
 
 interface ConfigSectionProps {
   title: string;
@@ -94,7 +99,7 @@ interface ConfigSectionProps {
   headerActions?: React.ReactNode;
   children: React.ReactNode;
   card?: boolean;
-  basic?: boolean;
+  separatorBefore?: boolean;
   testId?: string;
   referenceMinHeight?: number;
   contentGap?: 4 | 8;
@@ -110,7 +115,7 @@ function ConfigSection({
   headerActions,
   children,
   card = true,
-  basic = false,
+  separatorBefore = false,
   testId,
   referenceMinHeight,
   contentGap = 8,
@@ -119,28 +124,33 @@ function ConfigSection({
     <div
       ref={containerRef}
       data-testid={card ? undefined : testId}
-      className="min-w-0"
+      className={
+        card
+          ? "min-w-0"
+          : `group/section min-w-0 px-6 py-6 ${separatorBefore ? "border-t border-gray-100" : ""}`
+      }
     >
       <Collapsible
         open={open}
         onOpenChange={onOpenChange}
         className="w-full min-w-0"
       >
-        <div
-          className={`flex items-start justify-between gap-4 ${description ? "min-h-[50px]" : "min-h-6"}`}
-        >
-          <CollapsibleTrigger className="group flex min-w-0 flex-1 cursor-pointer select-none flex-col items-start gap-1 text-left">
-            <div className="flex h-6 min-w-0 items-center gap-2">
-              <div className="flex min-w-0 items-center gap-2 text-base font-medium leading-6 tracking-[0px] text-[#191919] [font-family:'HarmonyOS_Sans_SC','Huawei_Sans',sans-serif]">
+        <div className="flex min-h-6 items-center justify-between gap-4">
+          <CollapsibleTrigger className="group flex min-w-0 flex-1 cursor-pointer select-none items-center gap-4 rounded-md text-left outline-none focus-visible:ring-2 focus-visible:ring-[#2673e5]/40 focus-visible:ring-offset-4">
+            <span className="flex shrink-0 items-center gap-2 text-sm font-medium leading-[22px] tracking-[0px] text-gray-600 transition-colors duration-200 group-hover/section:text-gray-800 group-focus-within/section:text-gray-800 motion-reduce:transition-none [font-family:'HarmonyOS_Sans_SC','Huawei_Sans',sans-serif]">
+              <span className="flex h-[22px] w-[18px] shrink-0 items-center justify-center leading-none text-gray-400 transition-colors duration-200 group-hover/section:text-[#2673e5] group-focus-within/section:text-[#2673e5] motion-reduce:transition-none">
                 {icon}
-                <span className="truncate">{title}</span>
-                <ChevronDown className="h-4 w-4 shrink-0 text-[#191919] transition-transform group-data-[state=open]:rotate-180" />
-              </div>
-            </div>
+              </span>
+              <span>{title}</span>
+              <ChevronDown className="size-3.5 shrink-0 text-gray-400 transition-[color,transform] duration-200 group-hover/section:text-gray-600 group-data-[state=open]:rotate-180 motion-reduce:transition-none" />
+            </span>
             {description && (
-              <p className="min-h-[22px] max-w-full text-xs font-normal leading-[22px] tracking-[0px] text-[#808080]">
+              <span
+                title={description}
+                className="min-w-0 truncate text-xs font-normal leading-[22px] tracking-[0px] text-gray-500 transition-colors duration-200 group-hover/section:text-gray-600 group-focus-within/section:text-gray-600 motion-reduce:transition-none"
+              >
                 {description}
-              </p>
+              </span>
             )}
           </CollapsibleTrigger>
           {headerActions && (
@@ -151,7 +161,7 @@ function ConfigSection({
         </div>
         <CollapsibleContent
           forceMount
-          className={`${contentGap === 4 ? "pt-1" : "pt-2"} data-[state=closed]:hidden`}
+          className={`${contentGap === 4 ? "pt-2" : "pt-4"} data-[state=closed]:hidden`}
         >
           {children}
         </CollapsibleContent>
@@ -161,11 +171,7 @@ function ConfigSection({
   return card ? (
     <StandardCard
       data-testid={testId}
-      className={
-        basic
-          ? "shrink-0 ![box-shadow:none] !rounded-lg !px-6 !py-[18px]"
-          : "shrink-0 ![box-shadow:none] !rounded-lg !px-6 !py-4"
-      }
+      className={`${CONFIG_CARD_SURFACE} group/section shrink-0 !rounded-lg !bg-white !px-6 !py-5`}
       styles={{ body: { padding: 0 } }}
       style={
         open && referenceMinHeight
@@ -181,7 +187,6 @@ function ConfigSection({
 }
 
 interface AgentConfigProps {
-  creationGuideActive?: boolean;
   published?: boolean;
   canManualUnlock: boolean;
   onManualUnlock: () => void;
@@ -196,7 +201,6 @@ interface AgentConfigProps {
 }
 
 export default function AgentConfig({
-  creationGuideActive = false,
   published = false,
   canManualUnlock,
   onManualUnlock,
@@ -487,7 +491,7 @@ export default function AgentConfig({
         form={form}
         layout="vertical"
         disabled={isReadOnly}
-        className="flex h-full min-h-0 flex-col bg-[#f3f3f3] [&_.ant-form-item-label>label]:!h-[22px]"
+        className="flex h-full min-h-0 flex-col bg-[var(--navigation-surface)] [&_.ant-form-item-label>label]:!h-[22px]"
       >
         <AgentConfigHeader
           published={published}
@@ -496,9 +500,6 @@ export default function AgentConfig({
           readOnly={isReadOnly}
           debugVisible={debugVisible}
           canManualUnlock={canManualUnlock}
-          onEditIdentity={() => {
-            handleSectionOpenChange("display_info", true);
-          }}
           onConfigure={onConfigure}
           onDebug={handleDebug}
           onPublish={handlePublish}
@@ -508,18 +509,22 @@ export default function AgentConfig({
         <div
           className={
             debugVisible
-              ? "flex min-h-0 min-w-0 flex-1 gap-[10px] pl-4 pr-[18px] pb-3"
+              ? "flex min-h-0 min-w-0 flex-1 gap-5 px-4 pb-5"
               : "flex min-h-0 min-w-0 flex-1"
           }
         >
           <div
             data-testid="agent-config-scroll-region"
+            style={{
+              containerType: "inline-size",
+              containerName: "agent-config",
+            }}
             className={
               debugExpanded && debugVisible
                 ? "hidden"
                 : debugVisible
-                  ? "flex min-h-0 min-w-0 flex-1 flex-col gap-3 overflow-y-auto"
-                  : "flex min-h-0 min-w-0 flex-1 flex-col gap-3 overflow-y-auto pl-4 pr-[18px] pb-4"
+                  ? "flex min-h-0 min-w-0 flex-1 flex-col gap-5 overflow-y-auto"
+                  : "flex min-h-0 min-w-0 flex-1 flex-col gap-5 overflow-y-auto px-4 pb-6"
             }
           >
             {unavailableReasonLabels.length > 0 && (
@@ -553,29 +558,28 @@ export default function AgentConfig({
             )}
             <div
               data-agent-guide="core"
-              className="flex shrink-0 flex-col gap-3"
+              className="flex shrink-0 flex-col gap-5"
             >
               <ConfigSection
                 testId="agent-config-card-info"
-                basic
                 referenceMinHeight={224}
                 title={t("agent.highFidelity.basicTitle")}
                 description={t("agent.highFidelity.basicDescription")}
-                icon={<ContactRound className="size-6 shrink-0" />}
+                icon={<ContactRound className="size-[18px] shrink-0" />}
                 open={openSections.display_info}
                 onOpenChange={(open) =>
                   handleSectionOpenChange("display_info", open)
                 }
                 containerRef={displayInfoSectionRef}
               >
-                <AgentInfo highFidelity guideCompact={creationGuideActive} />
+                <AgentInfo highFidelity />
               </ConfigSection>
               <ConfigSection
                 testId="agent-config-card-model"
-                referenceMinHeight={creationGuideActive ? 272 : 268}
+                referenceMinHeight={268}
                 title={t("agent.highFidelity.modelTitle")}
                 description={t("agent.highFidelity.modelDescription")}
-                icon={<Box className="size-6 shrink-0" />}
+                icon={<Box className="size-[18px] shrink-0" />}
                 open={openSections.role_model}
                 onOpenChange={(open) =>
                   handleSectionOpenChange("role_model", open)
@@ -586,31 +590,27 @@ export default function AgentConfig({
               </ConfigSection>
             </div>
             <StandardCard
+              data-agent-guide="resources"
               data-testid="agent-config-card-resources"
-              className="relative shrink-0 ![box-shadow:none] !rounded-lg !px-6 !py-4"
+              className={`${CONFIG_CARD_SURFACE} shrink-0 !rounded-lg !bg-white !p-0`}
               styles={{
                 body: {
                   padding: 0,
                   display: "flex",
                   flexDirection: "column",
-                  gap: 16,
                 },
               }}
             >
-              <span
-                aria-hidden
-                data-agent-guide="resources"
-                className="pointer-events-none absolute inset-x-0 -top-[4.5px] bottom-[4.5px]"
-              />
               <KnowledgeBaseConfig
                 highFidelity
                 renderSection={(content, actions) => (
                   <ConfigSection
                     card={false}
+                    testId="agent-config-card-knowledge"
                     title={t("agent.highFidelity.knowledgeTitle")}
                     description={t("agent.highFidelity.knowledgeDescription")}
-                    icon={<BookOpen className="size-6 shrink-0" />}
-                    open={openSections.knowledge_base && !creationGuideActive}
+                    icon={<BookOpen className="size-[18px] shrink-0" />}
+                    open={openSections.knowledge_base}
                     onOpenChange={(open) =>
                       handleSectionOpenChange("knowledge_base", open)
                     }
@@ -621,28 +621,18 @@ export default function AgentConfig({
                   </ConfigSection>
                 )}
               />
-              <ConfigSection
-                card={false}
-                title={t("agent.highFidelity.guideTitle")}
-                description={t("agent.highFidelity.guideDescription")}
-                icon={<ScrollText className="size-6 shrink-0" />}
-                open={openSections.conversation_guide && !creationGuideActive}
-                onOpenChange={(open) =>
-                  handleSectionOpenChange("conversation_guide", open)
-                }
-                containerRef={conversationGuideSectionRef}
-              >
-                <AgentGuide highFidelity />
-              </ConfigSection>
+
               <AgentSkillCapability
                 highFidelity
                 renderSection={(content, actions) => (
                   <ConfigSection
                     card={false}
+                    separatorBefore
+                    testId="agent-config-card-skills"
                     title={t("agent.highFidelity.skillTitle")}
                     description={t("agent.highFidelity.skillDescription")}
-                    icon={<GraduationCap className="size-6 shrink-0" />}
-                    open={openSections.skills && !creationGuideActive}
+                    icon={<GraduationCap className="size-[18px] shrink-0" />}
+                    open={openSections.skills}
                     onOpenChange={(open) =>
                       handleSectionOpenChange("skills", open)
                     }
@@ -658,10 +648,12 @@ export default function AgentConfig({
                 renderSection={(content, actions) => (
                   <ConfigSection
                     card={false}
+                    separatorBefore
+                    testId="agent-config-card-tools"
                     title={t("agent.highFidelity.toolTitle")}
                     description={t("agent.highFidelity.toolDescription")}
-                    icon={<Puzzle className="size-6 shrink-0" />}
-                    open={openSections.tools && !creationGuideActive}
+                    icon={<Puzzle className="size-[18px] shrink-0" />}
+                    open={openSections.tools}
                     onOpenChange={(open) =>
                       handleSectionOpenChange("tools", open)
                     }
@@ -677,12 +669,12 @@ export default function AgentConfig({
                 renderSection={(content, actions) => (
                   <ConfigSection
                     card={false}
+                    separatorBefore
+                    testId="agent-config-card-child-agents"
                     title={t("agent.highFidelity.childTitle")}
                     description={t("agent.highFidelity.childDescription")}
-                    icon={<BlocksIcon className="size-6 shrink-0" />}
-                    open={
-                      openSections.collaborative_agents && !creationGuideActive
-                    }
+                    icon={<BlocksIcon className="size-[18px] shrink-0" />}
+                    open={openSections.collaborative_agents}
                     onOpenChange={(open) =>
                       handleSectionOpenChange("collaborative_agents", open)
                     }
@@ -694,55 +686,55 @@ export default function AgentConfig({
                 )}
               />
             </StandardCard>
-            <StandardCard
-              data-testid="agent-config-card-advanced"
-              className="shrink-0 ![box-shadow:none] !rounded-lg !px-6 !py-4"
-              styles={{
-                body: {
-                  padding: 0,
-                  display: "flex",
-                  flexDirection: "column",
-                  gap: 16,
-                },
-              }}
+            <ConfigSection
+              testId="agent-config-card-welcome"
+              title={t("agent.highFidelity.guideTitle")}
+              description={t("agent.highFidelity.guideDescription")}
+              icon={<ScrollText className="size-[18px] shrink-0" />}
+              open={openSections.conversation_guide}
+              onOpenChange={(open) =>
+                handleSectionOpenChange("conversation_guide", open)
+              }
+              containerRef={conversationGuideSectionRef}
             >
-              <ConfigSection
-                card={false}
-                title={t("agent.highFidelity.permissionTitle")}
-                description={t("agent.highFidelity.permissionDescription")}
-                icon={<CircleCheck className="size-6 shrink-0" />}
-                open={openSections.publish_attributes}
-                onOpenChange={(open) =>
-                  handleSectionOpenChange("publish_attributes", open)
-                }
-                containerRef={publishAttributesSectionRef}
-              >
-                <AgentDeployment highFidelity />
-              </ConfigSection>
-              <ConfigSection
-                card={false}
-                title={t("agent.highFidelity.advancedTitle")}
-                description=""
-                icon={<Settings2 className="size-6 shrink-0" />}
-                open={openSections.run_strategy}
-                onOpenChange={(open) =>
-                  handleSectionOpenChange("run_strategy", open)
-                }
-                containerRef={runStrategySectionRef}
-                headerActions={
-                  <Button
-                    type="text"
-                    size="small"
-                    aria-label={t("agent.highFidelity.moreSettings")}
-                    icon={<Settings2 size={16} />}
-                    onClick={() => handleSectionOpenChange("guardrail", true)}
-                    className="!size-6 !p-0"
-                  />
-                }
-              >
-                <AgentRunPolicy highFidelity />
-              </ConfigSection>
-            </StandardCard>
+              <AgentGuide highFidelity />
+            </ConfigSection>
+            <ConfigSection
+              testId="agent-config-card-permissions"
+              title={t("agent.highFidelity.permissionTitle")}
+              description={t("agent.highFidelity.permissionDescription")}
+              icon={<CircleCheck className="size-[18px] shrink-0" />}
+              open={openSections.publish_attributes}
+              onOpenChange={(open) =>
+                handleSectionOpenChange("publish_attributes", open)
+              }
+              containerRef={publishAttributesSectionRef}
+            >
+              <AgentDeployment highFidelity />
+            </ConfigSection>
+            <ConfigSection
+              testId="agent-config-card-advanced"
+              title={t("agent.highFidelity.advancedTitle")}
+              description=""
+              icon={<Settings2 className="size-[18px] shrink-0" />}
+              open={openSections.run_strategy}
+              onOpenChange={(open) =>
+                handleSectionOpenChange("run_strategy", open)
+              }
+              containerRef={runStrategySectionRef}
+              headerActions={
+                <Button
+                  type="text"
+                  size="small"
+                  aria-label={t("agent.highFidelity.moreSettings")}
+                  icon={<Settings2 size={16} />}
+                  onClick={() => handleSectionOpenChange("guardrail", true)}
+                  className="!size-6 !p-0"
+                />
+              }
+            >
+              <AgentRunPolicy highFidelity />
+            </ConfigSection>
             <Modal
               title={t("agent.highFidelity.moreSettings")}
               open={openSections.guardrail}

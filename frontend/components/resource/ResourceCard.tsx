@@ -1,3 +1,5 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 "use client";
 
 import { useId, type ReactNode, type Ref } from "react";
@@ -118,7 +120,7 @@ export default function ResourceCard({
                 className={cn(
                   "min-w-0 flex-1",
                   fixedHeaderLayout &&
-                    "flex h-11 flex-col justify-between self-center"
+                    "flex min-h-11 flex-col justify-between self-center"
                 )}
               >
                 <h2

@@ -1,3 +1,5 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import { STATUS_CODES } from "@/const/auth";
 import { ErrorCode } from "@/const/errorCode";
 import { withBasePath } from "@/lib/basePath";
@@ -49,6 +51,9 @@ export const API_ENDPOINTS = {
   },
   conversation: {
     list: `${API_BASE_URL}/conversation/list`,
+    workbenchPins: `${API_BASE_URL}/conversation/workbench_pins`,
+    workbenchPin: (id: number) =>
+      `${API_BASE_URL}/conversation/${id}/workbench_pin`,
     create: `${API_BASE_URL}/conversation/create`,
     save: `${API_BASE_URL}/conversation/save`,
     rename: `${API_BASE_URL}/conversation/rename`,
@@ -386,6 +391,12 @@ export const API_ENDPOINTS = {
     kbDetail: (id: string) => `${API_BASE_URL}/aidp-mgmt/knowledge-bases/${id}`,
     kbDocuments: (id: string) =>
       `${API_BASE_URL}/aidp-mgmt/knowledge-bases/${id}/documents`,
+    kbFiles: (id: string) =>
+      `${API_BASE_URL}/aidp-mgmt/knowledge-bases/${id}/files`,
+    kbUploadTasks: (id: string) =>
+      `${API_BASE_URL}/aidp-mgmt/knowledge-bases/${id}/upload-tasks`,
+    retryKbUploadTasks: (id: string) =>
+      `${API_BASE_URL}/aidp-mgmt/knowledge-bases/${id}/upload-tasks/retry`,
     removeKbDocuments: (id: string) =>
       `${API_BASE_URL}/aidp-mgmt/knowledge-bases/${id}/documents/remove`,
     downloadKbDocument: (id: string) =>
@@ -588,6 +599,9 @@ export const API_ENDPOINTS = {
         );
       }
       if (params?.tag?.trim()) queryParams.append("tag", params.tag.trim());
+      if (params?.sort_by_update_time) {
+        queryParams.append("sort_by_update_time", "true");
+      }
       const queryString = queryParams.toString();
       return `${API_BASE_URL}/repository/agent${queryString ? `?${queryString}` : ""}`;
     },

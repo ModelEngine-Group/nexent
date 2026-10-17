@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """Business logic for the ephemeral NL2Agent runtime."""
 
 import ast
@@ -48,6 +50,7 @@ from services.agent_draft_permission_service import (
     require_agent_draft_edit,
 )
 from services.thread_lifecycle_service import runtime_thread_manager
+from management.services.model.run_controls import resolve_creator_model, preflight_turn_controls
 from tool_collection.mcp.nl2agent_mcp_tools import (
     AgentDraftFields,
     INSTALLED_RESOURCE_SOURCES,
@@ -66,7 +69,9 @@ from tool_collection.mcp.nl2agent_mcp_tools import (
 )
 from utils.auth_utils import get_current_user_id
 from utils.config_utils import tenant_config_manager
-from utils.context_utils import build_authorized_context_input
+from management.services.agent.context import (
+    build_authorized_context_input,
+)
 from utils.http_client_utils import create_httpx_client
 
 logger = logging.getLogger(__name__)
@@ -804,7 +809,7 @@ async def _load_internal_uninstalled_resource_catalog(
     from services.skill_repository_service import (
         list_skill_repository_listings_impl,
     )
-    from management.services.skill.service import get_official_skills_with_status
+    from management.services.skill.transfer import get_official_skills_with_status
 
     catalog: list[dict[str, Any]] = []
     for skill in get_official_skills_with_status(tenant_id=tenant_id):
@@ -1335,6 +1340,7 @@ async def build_nl2agent_run_info(
     user_id, authenticated_tenant_id = get_current_user_id(authorization)
     if authenticated_tenant_id != tenant_id:
         raise PermissionError("tenant mismatch")
+    preflight_turn_controls(request, tenant_id)
     binding_context = await _build_verified_bound_resources_context(
         agent_id=request.agent_id,
         tenant_id=tenant_id,
@@ -1356,6 +1362,12 @@ async def build_nl2agent_run_info(
         key=MODEL_CONFIG_MAPPING["llm"],
         tenant_id=tenant_id,
     )
+    if request.model_id is not None or request.generation_config is not None:
+        default_model = resolve_creator_model(
+            model_config_list, agent_config, tenant_id, request.model_id,
+            request.generation_config.model_dump(exclude_unset=True) if request.generation_config else None,
+            default_model,
+        )
     input_budget, capacity_snapshot, resolved_capacity_snapshot = (
         _resolve_input_budget(default_model)
     )

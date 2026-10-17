@@ -1,0 +1,106 @@
+schema_version: '1.0'
+stage: D4
+module: CHAT-MESSAGE
+case:
+  case_id: CHAT-MODEL-CONTROLS-D4-003
+  feature_id: CHAT-MODEL-CONTROLS
+  requirement_ids:
+  - CHAT-MODEL-CONTROLS-20261014
+  - WB-CREATION-TOGGLE-EXIT-20261015
+  business_rule_ids:
+  - CHAT-MODEL-CONTROLS-RULE-002
+  - CHAT-MODEL-CONTROLS-RULE-006
+  title: 四个创建入口共享高级设置只保存前端值
+  type: E2E
+  priority: P1
+  status: active
+  automation: automated
+  objective: Prove creator advanced controls synchronize integer sliders/inputs, isolate local state and exclude sampling
+    UI values from actual run/history/configuration requests.
+  preconditions:
+  - actual frontend creator surfaces with isolated mock model directory, authorized identity and deterministic run endpoints.
+  - Two models and two creation sessions per applicable surface are available; browser records all run, snapshot and model
+    configuration writes.
+  test_data:
+    profile: mock
+    entries:
+    - workbench-agent-create
+    - workbench-skill-create
+    - independent-nl2agent
+    - independent-nl2skill
+    models:
+    - model-A
+    - model-B
+    levels:
+    - 1
+    - 50
+    - 73
+    - 90
+    - 100
+    invalid_inputs:
+    - zero
+    - above-maximum
+    - fractional
+    - empty
+    defaults:
+      temperature: 50
+      top_p: 90
+  steps:
+  - order: 1
+    action: Open model controls on each creator, hover/click/focus Advanced settings below reasoning effort; change both slider
+      and numeric input across minimum, middle and maximum values; exercise invalid/empty input and restore defaults.
+    expected: Shared panel is reachable by pointer and keyboard; numeric values and sliders stay synchronized as integers1-100,
+      invalid committed values do not persist and restore shows temperature50/TopP90.
+  - order: 2
+    action: Set model-A local levels, switch to B and back, switch to another creation session and return; transition NL2Agent
+      from welcome to subsequent composer.
+    expected: Values remain scoped to the current session and model during its lifetime, defaults apply to new scope, and
+      NL2Agent composer transition retains that session's local settings.
+  - order: 3
+    action: Explicitly send valid creation requests after editing controls, then inspect all run bodies, Workbench creation
+      snapshots, model-context-derived payloads and captured configuration API writes.
+    expected: No newly edited sampling level is sent as temperature/top_p or custom model fields, no global model save occurs;
+      actual model/thinking requests remain functional and existing backend parameters are not overwritten by UI state.
+  expected_results:
+  - Creator advanced panels match the existing shared control behavior, defaults and session/model isolation.
+  - New UI sampling levels never enter any run, history or global configuration request.
+  forbidden_side_effects:
+  - No provider-scale conversion or sampling injection from frontend levels, and no real provider/database calls through mock
+    browser fixtures.
+  - No model selection or thinking reset, message/attachment loss, cross-session contamination or global model configuration
+    mutation caused by sampling edits.
+  actor: Isolated authorized Agent and Skill creator
+  journey:
+  - Open creator model controls
+  - Edit slider and numeric values
+  - Restore defaults
+  - Switch models and sessions
+  - Transition composer
+  - Send and inspect requests
+  final_business_result:
+  - Advanced settings consistently provide local frontend interfaces while preserving actual model and reasoning integration
+  failure_evidence:
+  - Browser screenshots and trace
+  - Sanitized captured run/snapshot/configuration request log
+  execution:
+    profiles:
+    - name: mock
+      required_services: []
+  acceptance:
+  - id: AC-01
+    description: Local creator controls have correct bounds, synchronization and scoped state.
+    steps:
+    - 1
+    - 2
+    expected_results:
+    - 1
+    forbidden_side_effects:
+    - 2
+  - id: AC-02
+    description: Sending from creator entries excludes all new frontend sampling state from backend payloads.
+    steps:
+    - 3
+    expected_results:
+    - 2
+    forbidden_side_effects:
+    - 1

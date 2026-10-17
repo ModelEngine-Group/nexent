@@ -1,5 +1,8 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import logging
 import uuid
+from datetime import datetime
 from typing import Any, Collection, Dict, FrozenSet, List, Optional, Tuple
 
 from consts.agent_repository import (
@@ -21,7 +24,11 @@ from consts.notification import (
     EVENT_TYPE_REPOSITORY_REVIEW_PENDING,
     RESOURCE_TYPE_AGENT_REPOSITORY,
 )
-from database.agent_db import delete_agent_by_id, search_agent_info_by_agent_id
+from database.agent_db import (
+    batch_get_agent_main_flags,
+    delete_agent_by_id,
+    search_agent_info_by_agent_id,
+)
 from database.agent_repository_db import (
     fetch_draft_agent_mine_metadata,
     get_agent_repository_by_agent_id,
@@ -46,7 +53,7 @@ from management.services.agent.service import (
     import_agent_with_skills_impl,
     list_all_agent_info_impl,
 )
-from management.services.agent.icon_storage import (
+from management.services.agent.icon import (
     read_icon_image,
     upload_icon_image,
 )
@@ -56,6 +63,8 @@ from services.notification_service import (
     deactivate_notifications,
 )
 from services.repository_import_precheck import build_repository_import_precheck
+
+from services.user_identity_service import enrich_repository_identities, repository_identity_fields
 
 logger = logging.getLogger("agent_repository_service")
 
@@ -161,6 +170,7 @@ def _to_summary_item(
         "agent_repository_id": record.get("agent_repository_id"),
         "agent_id": agent_id,
         "author": record.get("author"),
+        **repository_identity_fields(record),
         "submitted_by": record.get("submitted_by"),
         "name": record.get("name"),
         "display_name": record.get("display_name"),
@@ -176,6 +186,7 @@ def _to_summary_item(
         "content": record.get("content"),
         "publisher_tenant_id": record.get("publisher_tenant_id"),
         "is_official": record.get("publisher_tenant_id") == SYSTEM_TENANT_ID,
+        "is_main_agent": record.get("is_main_agent", True),
     }
 
 
@@ -189,6 +200,70 @@ def _get_agent_download_totals(agent_ids: Collection[int]) -> Dict[int, int]:
     if not normalized_ids:
         return {}
     return sum_agent_repository_downloads_by_agent_ids(list(normalized_ids))
+
+
+def _get_agent_main_flags(agent_ids: Collection[int]) -> Dict[int, bool]:
+    """Return the main-agent flag per agent_id, degrading to no flags on error.
+
+    The flag is presentational only; when the lookup is unavailable the caller
+    falls back to the main-agent default instead of failing the listing request.
+    """
+    normalized_ids = {
+        int(agent_id)
+        for agent_id in agent_ids
+        if agent_id is not None
+    }
+    if not normalized_ids:
+        return {}
+    try:
+        return batch_get_agent_main_flags(list(normalized_ids))
+    except Exception as error:  # noqa: BLE001 - degrade to the default flag
+        logger.warning(
+            "Failed to resolve agent main-agent flags; defaulting to main: %s",
+            error,
+        )
+        return {}
+
+
+def _repository_id_sort_key(record: Dict[str, Any]) -> int:
+    """Return a comparable repository id for ordering, defaulting to -1."""
+    try:
+        return int(record.get("agent_repository_id"))
+    except (TypeError, ValueError):
+        return -1
+
+
+def _publish_time_sort_key(record: Dict[str, Any]) -> float:
+    """Return a numeric publish-time key; unparsable values collapse to 0.0."""
+    create_time = record.get("create_time")
+    if hasattr(create_time, "timestamp"):
+        return create_time.timestamp()
+    if isinstance(create_time, str):
+        try:
+            return datetime.fromisoformat(create_time).timestamp()
+        except ValueError:
+            return 0.0
+    return 0.0
+
+
+def _order_listings_by_publish_time(
+    records: List[Dict[str, Any]],
+) -> List[Dict[str, Any]]:
+    """Order listings by publish time descending, with undated listings last.
+
+    A repository-id tie-break keeps pagination deterministic across pages.
+    """
+    dated = [record for record in records if record.get("create_time") is not None]
+    undated = [record for record in records if record.get("create_time") is None]
+    dated.sort(
+        key=lambda record: (
+            _publish_time_sort_key(record),
+            _repository_id_sort_key(record),
+        ),
+        reverse=True,
+    )
+    undated.sort(key=_repository_id_sort_key, reverse=True)
+    return dated + undated
 
 
 def _matches_repository_listing_search_filter(record: dict, search: str) -> bool:
@@ -260,6 +335,7 @@ def list_agent_repository_listings_impl(
     search_tag_predicates: Optional[list] = None,
     tag_predicates: Optional[list] = None,
     tag: Optional[str] = None,
+    sort_by_update_time: bool = False,
 ) -> Dict[str, Any]:
     """List repository listings for the caller tenant with optional status filter."""
     if status is not None and status not in VALID_REPOSITORY_STATUSES:
@@ -334,14 +410,25 @@ def list_agent_repository_listings_impl(
             for record in records
             if tag.strip() in (record.get("tags") or [])
         ]
+    if sort_by_update_time:
+        # Order the merged tenant+official set as one list; ordering only in
+        # SQL would interleave the two query blocks incorrectly.
+        records = _order_listings_by_publish_time(records)
     total = len(records)
     start = (page - 1) * page_size
     paged_records = records[start: start + page_size]
+    enrich_repository_identities(paged_records, "agent")
     paged_agent_ids = [
         int(record["agent_id"])
         for record in paged_records
         if record.get("agent_id") is not None
     ]
+    main_flags = _get_agent_main_flags(paged_agent_ids)
+    for record in paged_records:
+        agent_id = record.get("agent_id")
+        record["is_main_agent"] = (
+            main_flags.get(int(agent_id), True) if agent_id is not None else True
+        )
     download_totals = _get_agent_download_totals(paged_agent_ids)
     return {
         "items": [
@@ -845,6 +932,7 @@ def get_agent_repository_listing_detail_impl(
         )
     if not record:
         raise ValueError("Repository listing not found")
+    enrich_repository_identities([record], "agent")
     root_agent = _extract_root_agent_from_snapshot(record.get("agent_info_json"))
     agent_id = record.get("agent_id")
     download_total = 0
@@ -853,6 +941,7 @@ def get_agent_repository_listing_detail_impl(
             int(agent_id),
             0,
         )
+    main_flags = _get_agent_main_flags([int(agent_id)]) if agent_id is not None else {}
 
     return {
         "agent_repository_id": record.get("agent_repository_id"),
@@ -862,6 +951,7 @@ def get_agent_repository_listing_detail_impl(
         "display_name": record.get("display_name"),
         "description": record.get("description"),
         "author": record.get("author"),
+        **repository_identity_fields(record),
         "submitted_by": record.get("submitted_by"),
         "icon_url": record.get("icon_url"),
         "status": record.get("status"),
@@ -872,6 +962,9 @@ def get_agent_repository_listing_detail_impl(
         "duty_prompt": root_agent.get("duty_prompt"),
         "tools": _extract_tool_names(root_agent),
         "is_official": record.get("publisher_tenant_id") == SYSTEM_TENANT_ID,
+        "is_main_agent": (
+            main_flags.get(int(agent_id), True) if agent_id is not None else True
+        ),
     }
 
 
@@ -1044,6 +1137,7 @@ def update_agent_repository_status_impl(
         notify_content=notify_content,
     )
 
+    enrich_repository_identities([updated], "agent")
     return _to_summary_item(updated)
 
 
@@ -1096,6 +1190,7 @@ def _to_list_item(record: Dict[str, Any]) -> Dict[str, Any]:
         "display_name": record.get("display_name"),
         "description": record.get("description"),
         "author": record.get("author"),
+        **repository_identity_fields(record),
         "submitted_by": record.get("submitted_by"),
         "tags": record.get("tags") or [],
         "tool_count": record.get("tool_count"),
@@ -1118,6 +1213,7 @@ def _to_detail_item(
     is_updated: Optional[bool] = None,
 ) -> Dict[str, Any]:
     """Map a DB record to a marketplace detail payload."""
+    enrich_repository_identities([record], "agent")
     detail = _to_list_item(record)
     if include_bundles:
         detail["agent_info_json"] = record.get("agent_info_json")

@@ -1,13 +1,16 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 "use client";
 
+import { SELECTED_RESOURCE_HOVER } from "@/const/selectedResourceStyles";
 import { Fragment, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { KnowledgeRetrievalParamsForm } from "@/components/tool-config/KnowledgeRetrievalParamsForm";
 import { useTranslation } from "react-i18next";
 import { Button, Modal, Spin, Tag, Tooltip } from "antd";
-import { Database, ChevronRight, Settings, Trash2, Plus } from "lucide-react";
+import { Database, ExternalLink, Settings, Trash2, Plus } from "lucide-react";
 
-import { AddKnowledgeDrawer } from "@/components/resource-picker/AddKnowledgeDrawer";
+import { KnowledgeDrawer } from "@/components/resource-picker/KnowledgeDrawer";
 import { useDeployment } from "@/components/providers/deploymentProvider";
 import { useKnowledgeBasesForToolConfig } from "@/hooks/useKnowledgeBaseSelector";
 import { useToolList } from "@/hooks/agent/useToolList";
@@ -339,19 +342,19 @@ export function KnowledgeBaseConfigActions() {
         {t("agent.knowledge.button.select")}
       </Button>
 
-      <AddKnowledgeDrawer
+      <KnowledgeDrawer
         open={selectorOpen}
         onClose={() => setSelectorOpen(false)}
         onConfirm={(knowledgeBaseList) => {
           state.onKnowledgeBaseConfirm(knowledgeBaseList);
           setSelectorOpen(false);
         }}
+        enableTagManagement={!state.isReadOnly}
         selectedIds={state.selectedIds}
         maxSelect={state.profile.maxSelect}
         isAidpSearch={state.profile.selectorType === "aidp_search"}
         knowledgeBases={state.knowledgeBases}
         isLoading={state.isLoading}
-        title={t("agent.knowledge.selectModal.title")}
         onRefresh={() => {
           void state.refetch();
         }}
@@ -397,7 +400,7 @@ export default function KnowledgeBaseConfig({
     const selectedKnowledgeBases = state?.selectedKnowledgeBases ?? [];
     const content = (
       <div className="flex flex-col gap-2">
-        <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+        <div className="grid grid-cols-1 gap-4 @min-[640px]/agent-config:grid-cols-2">
           {selectedKnowledgeBases.map((selectedKnowledgeBase) => {
             const knowledgeBase = selectedKnowledgeBase.knowledgeBase;
             const metadata = knowledgeBase
@@ -422,7 +425,7 @@ export default function KnowledgeBaseConfig({
               <div
                 key={selectedKnowledgeBase.id}
                 data-testid={`agent-selected-knowledge-base-${selectedKnowledgeBase.id}`}
-                className="flex h-12 min-w-0 items-center rounded-[4px] border border-solid border-[#dfdfdf] bg-white px-3 py-2 shadow-[0_2px_8px_rgba(0,0,0,0.08)]"
+                className={`flex h-12 min-w-0 items-center rounded-[4px] border border-solid border-[#dfdfdf] bg-white px-3 py-2 shadow-[0_2px_8px_rgba(0,0,0,0.08)] ${SELECTED_RESOURCE_HOVER}`}
               >
                 <span
                   data-testid="agent-knowledge-base-icon"
@@ -518,17 +521,6 @@ export default function KnowledgeBaseConfig({
     const actions = (
       <div className="flex h-6 items-center gap-2">
         <Button
-          type="link"
-          disabled={isReadOnly}
-          onClick={() => router.push("/knowledges")}
-          className="!h-[22px] !p-0 !text-sm !font-normal !leading-[22px] !tracking-[0px] !text-[#2673e5]"
-        >
-          <span className="inline-flex items-center gap-1">
-            {t("agentConfig.layout.newKnowledgeBase")}
-            <ChevronRight size={14} />
-          </span>
-        </Button>
-        <Button
           type="text"
           size="small"
           icon={<Settings size={14} />}
@@ -537,6 +529,17 @@ export default function KnowledgeBaseConfig({
           onClick={() => setConfigOpen(true)}
           className="!size-6 !p-0 !text-[#191919]"
         />
+        <Button
+          type="link"
+          disabled={isReadOnly}
+          onClick={() => router.push("/knowledges")}
+          className="!h-[22px] !p-0 !text-sm !font-normal !leading-[22px] !tracking-[0px] !text-[#2673e5]"
+        >
+          <span className="inline-flex items-center gap-1">
+            {t("agentConfig.layout.newKnowledgeBase")}
+            <ExternalLink size={14} />
+          </span>
+        </Button>
       </div>
     );
     return (
@@ -551,19 +554,19 @@ export default function KnowledgeBaseConfig({
         )}
         {state ? (
           <>
-            <AddKnowledgeDrawer
+            <KnowledgeDrawer
               open={selectorOpen}
               onClose={() => setSelectorOpen(false)}
               onConfirm={(knowledgeBaseList) => {
                 state.onKnowledgeBaseConfirm(knowledgeBaseList);
                 setSelectorOpen(false);
               }}
+              enableTagManagement={!state.isReadOnly}
               selectedIds={state.selectedIds}
               maxSelect={state.profile.maxSelect}
               isAidpSearch={state.profile.selectorType === "aidp_search"}
               knowledgeBases={state.knowledgeBases}
               isLoading={state.isLoading}
-              title={t("agent.knowledge.selectModal.title")}
               onRefresh={() => {
                 void state.refetch();
               }}

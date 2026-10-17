@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """
 Background scheduler that periodically checks knowledge bases with
 auto-summary enabled and regenerates summaries as needed.
@@ -87,12 +89,8 @@ def _run_auto_summary_for_kb(index_name: str, tenant_id: str):
         vdb_core = get_vector_db_core()
         service = ElasticSearchService()
 
-        from utils.document_vector_utils import (
-            process_documents_for_clustering,
-            kmeans_cluster_documents,
-            summarize_clusters_map_reduce,
-            merge_cluster_summaries,
-        )
+        from management.services.knowledge_base.summary import process_documents_for_clustering, summarize_clusters_map_reduce, merge_cluster_summaries
+        from management.services.knowledge_base.clustering import kmeans_cluster_documents
 
         # Get model_id from tenant config for LLM summarization
         model_id = None

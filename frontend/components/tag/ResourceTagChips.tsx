@@ -1,3 +1,5 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 "use client";
 
 import { useEffect, useState, type ReactNode } from "react";
@@ -14,6 +16,8 @@ interface ResourceTagChipsProps {
   refreshKey?: string | number;
   singleLine?: boolean;
   emptyText?: ReactNode;
+  className?: string;
+  tagClassName?: string;
   options?: {
     provider?: string | null;
     knowledgeBaseId?: string | null;
@@ -33,6 +37,8 @@ export default function ResourceTagChips({
   refreshKey,
   singleLine,
   emptyText,
+  className,
+  tagClassName,
   options,
 }: ResourceTagChipsProps) {
   const [assignments, setAssignments] = useState<TagAssignmentValue[]>([]);
@@ -65,6 +71,8 @@ export default function ResourceTagChips({
       max={max}
       overflowLabel={overflowLabel}
       singleLine={singleLine}
+      className={className}
+      tagClassName={tagClassName}
     />
   );
 }

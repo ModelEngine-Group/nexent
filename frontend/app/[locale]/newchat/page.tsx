@@ -1,3 +1,5 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 "use client";
 
 import {
@@ -18,6 +20,7 @@ import {
 import { Chat } from "./assistant-ui/chat";
 import type { ChatMode } from "./assistant-ui/composer";
 import { ThreadListSidebar } from "./assistant-ui/threadlist-sidebar";
+import { useRecentAgentIds } from "./assistant-ui/use-recent-agent-ids";
 import {
   cacheHistoricalChatMode,
   conversationThreadListAdapter,
@@ -29,7 +32,6 @@ import {
 } from "./adapter/conversation-thread-list-adapter";
 import {
   recordThreadActivity,
-  resumeLatestAgentConversation,
   startAgentConversation,
 } from "./adapter/thread-agent-registry";
 import { remoteChatModelAdapter } from "./adapter/remote-chat-model-adapter";
@@ -122,10 +124,13 @@ const PersistentChatHome: FC = () => {
 
   const handleAgentSelected = useCallback(
     async (agent: Agent) => {
+      // Reflect the selection before awaiting the runtime thread switch so a
+      // deep-linked Agent opens its chat right away instead of waiting for the
+      // thread list runtime to settle.
+      setSelectedAgent(agent);
+      log.log(`[Home] Agent selected: ${agent.display_name || agent.name}`);
       try {
         await startAgentConversation(runtime, Number(agent.id));
-        setSelectedAgent(agent);
-        log.log(`[Home] Agent selected: ${agent.display_name || agent.name}`);
       } catch (error) {
         log.error("[Home] Failed to switch to a new agent thread:", error);
       }
@@ -769,17 +774,37 @@ const HomeContent: FC<{
     onBack();
   }, [onBack]);
 
+  const recentAgentIds = useRecentAgentIds();
+  const { availableMainAgents } = usePublishedAgentList();
+
   const handleNewConversation = useCallback(async () => {
     shouldRestoreAgentRef.current = false;
     try {
+      if (!selectedAgent) {
+        // On the landing there is no active conversation: enter a blank
+        // conversation of the agent the top-bar selector displays (the most
+        // recently used one).
+        const lastUsed = recentAgentIds
+          .map((id) =>
+            availableMainAgents.find((agent) => Number(agent.id) === id)
+          )
+          .find((agent) => agent !== undefined);
+        if (lastUsed) {
+          setSelectedAgent(lastUsed);
+        }
+      }
       await runtime.threads.switchToNewThread();
       await runtime.threads.reload();
     } catch (error) {
       log.error("[HomeContent] Failed to start a new conversation:", error);
-    } finally {
-      onBack();
     }
-  }, [onBack, runtime]);
+  }, [
+    runtime,
+    selectedAgent,
+    recentAgentIds,
+    availableMainAgents,
+    setSelectedAgent,
+  ]);
 
   const handleAgentSelectedFromLanding = useCallback(
     async (agent: Agent) => {
@@ -793,18 +818,14 @@ const HomeContent: FC<{
     async (agent: Agent) => {
       try {
         shouldRestoreAgentRef.current = true;
-        await resumeLatestAgentConversation(
-          runtime,
-          Number(agent.id),
-          generatedTitles
-        );
+        await startAgentConversation(runtime, Number(agent.id));
         setSelectedAgent(agent);
       } catch (error) {
         log.error("[HomeContent] Failed to switch agent conversation:", error);
         message.error(t("chatInterface.errorFetchingConversationDetailsError"));
       }
     },
-    [runtime, generatedTitles, setSelectedAgent, t]
+    [runtime, setSelectedAgent, t]
   );
 
   return (

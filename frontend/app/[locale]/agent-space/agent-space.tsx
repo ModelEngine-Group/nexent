@@ -1,9 +1,22 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { MenuProps } from "antd";
-import { App, Button, Dropdown, Empty, Grid, Input, Modal, Spin } from "antd";
 import {
+  App,
+  Button,
+  Dropdown,
+  Empty,
+  Grid,
+  Input,
+  Modal,
+  Select,
+  Spin,
+} from "antd";
+import {
+  Bot,
   Copy,
   Download,
   MoreHorizontal,
@@ -11,6 +24,7 @@ import {
   Search,
   ShieldCheck,
 } from "lucide-react";
+import { useUserDisplayName } from "@/hooks/auth/useUserDisplayName";
 import { useTranslation } from "react-i18next";
 import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
 import { USER_ROLES } from "@/const/auth";
@@ -36,8 +50,11 @@ const CARD_GAP = 20;
 const MIN_CARD_HEIGHT = 240;
 const PAGINATION_HEIGHT = 60;
 
+type RepositorySortOrder = "default" | "latest";
+
 export function AgentSpace({ active }: { active: boolean }) {
   const { t } = useTranslation("common");
+  const displayName = useUserDisplayName();
   const { message } = App.useApp();
   const { user } = useAuthorizationContext();
   const showAdminMenu = user?.role === USER_ROLES.ADMIN;
@@ -91,6 +108,7 @@ export function AgentSpace({ active }: { active: boolean }) {
   const [tagPredicates, setTagPredicates] = useState<TagResourcePredicate[]>(
     []
   );
+  const [sortOrder, setSortOrder] = useState<RepositorySortOrder>("default");
   const [page, setPage] = useState(1);
   const { data: tagLibraries } = useTagLibraries();
   const defaultTagLibrary =
@@ -114,8 +132,9 @@ export function AgentSpace({ active }: { active: boolean }) {
         ? { search_tag_predicates: searchTagPredicates }
         : {}),
       ...(tagPredicates.length > 0 ? { tag_predicates: tagPredicates } : {}),
+      ...(sortOrder === "latest" ? { sort_by_update_time: true } : {}),
     }),
-    [page, pageSize, searchQuery, searchTagPredicates, tagPredicates]
+    [page, pageSize, searchQuery, searchTagPredicates, tagPredicates, sortOrder]
   );
   const { data, isLoading, isError, isFetching, refetch } =
     useAgentRepositoryListings(listingParams, active);
@@ -145,6 +164,10 @@ export function AgentSpace({ active }: { active: boolean }) {
   };
   const onTagPredicatesChange = (value: TagResourcePredicate[]) => {
     setTagPredicates(value);
+    setPage(1);
+  };
+  const onSortOrderChange = (value: RepositorySortOrder) => {
+    setSortOrder(value);
     setPage(1);
   };
   const onTakeDown = (listing: AgentRepositoryListingItem) =>
@@ -195,12 +218,18 @@ export function AgentSpace({ active }: { active: boolean }) {
       listing.display_name?.trim() ||
       listing.name?.trim() ||
       t("agentRepository.card.untitled");
-    const author = listing.author?.trim();
+    const author = displayName(
+      listing.author_cas_username,
+      listing.author?.trim() || ""
+    );
     const tags = listing.tags?.filter((tag) => tag.trim()) ?? [];
     const toolCount = listing.tool_count ?? 0;
     const downloads = listing.downloads ?? 0;
     const isTakingDown = updatingRepositoryId === listing.agent_repository_id;
     const isOfficialListing = listing.is_official === true;
+    const isMainAgent = listing.is_main_agent !== false;
+    const showBadge =
+      isOfficialListing || Boolean(listing.version_label) || isMainAgent;
     // Official templates are managed from the super-admin resource page.
     // The ordinary repository status menu must not expose take-down actions
     // for official listings to tenant administrators.
@@ -239,12 +268,18 @@ export function AgentSpace({ active }: { active: boolean }) {
           listing.description?.trim() || t("agentRepository.card.noDescription")
         }
         badge={
-          isOfficialListing || listing.version_label ? (
+          showBadge ? (
             <>
               {isOfficialListing ? (
                 <span className="inline-flex items-center gap-1 rounded-md bg-blue-50 px-1.5 py-0.5 text-[11px] font-medium text-blue-700 dark:bg-blue-950/40 dark:text-blue-300">
                   <ShieldCheck className="size-3" aria-hidden />
                   {t("agentRepository.card.official")}
+                </span>
+              ) : null}
+              {isMainAgent ? (
+                <span className="inline-flex items-center gap-1 rounded-md bg-amber-50 px-1.5 py-0.5 text-[11px] font-medium text-amber-700 dark:bg-amber-950/40 dark:text-amber-300">
+                  <Bot className="size-3" aria-hidden />
+                  {t("agentRepository.card.mainAgent")}
                 </span>
               ) : null}
               {listing.version_label ? (
@@ -341,6 +376,16 @@ export function AgentSpace({ active }: { active: boolean }) {
           definitions={tagDefinitions ?? []}
           value={tagPredicates}
           onChange={onTagPredicatesChange}
+        />
+        <Select<RepositorySortOrder>
+          value={sortOrder}
+          onChange={onSortOrderChange}
+          className="w-44 shrink-0"
+          aria-label={t("agentRepository.sort.label")}
+          options={[
+            { value: "default", label: t("agentRepository.sort.default") },
+            { value: "latest", label: t("agentRepository.sort.latest") },
+          ]}
         />
       </div>
       <div ref={gridRegionRef} className="min-h-0">

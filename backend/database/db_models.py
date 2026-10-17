@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 from sqlalchemy import (
     JSON,
     TIMESTAMP,
@@ -94,6 +96,10 @@ class ConversationRecord(TableBase):
         JSONB,
         nullable=True,
         doc="Canonical schema-v3 Workbench conversation declaration",
+    )
+    workbench_pinned_at = Column(
+        TIMESTAMP(timezone=True), nullable=True,
+        comment="Personal Workbench pin time; NULL means unpinned; independent of conversation activity",
     )
     workbench_config_version = Column(
         Integer,
@@ -351,6 +357,14 @@ class ConversationSourceSearch(TableBase):
     retrieval_highlight_terms = Column(
         JSONB,
         doc="Exact lexical terms returned by the retrieval engine for source highlighting",
+    )
+    aidp_metadata = Column(
+        JSONB, nullable=True,
+        comment="Opaque AIDP metadata snapshot returned for this retrieval hit",
+    )
+    aidp_source_reference = Column(
+        JSONB, nullable=True,
+        comment="AIDP source reference attributes for this retrieval hit, excluding metadata",
     )
     published_date = Column(TIMESTAMP(
         timezone=False), doc="Upload date of local files or network search date")

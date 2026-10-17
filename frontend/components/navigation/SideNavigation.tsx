@@ -1,9 +1,18 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 "use client";
 
-import { useEffect, useMemo, useState, type ComponentType } from "react";
+import {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ComponentType,
+} from "react";
 import { useTranslation } from "react-i18next";
 import { useParams, usePathname, useRouter } from "next/navigation";
 import Link from "next/link";
+import { Button, Tooltip } from "antd";
 import {
   Bell,
   BookOpen,
@@ -17,6 +26,10 @@ import {
   Home,
   LineChart,
   Puzzle,
+  Pin,
+  PinOff,
+  Sparkles,
+  FolderCog,
   Settings,
   Zap,
 } from "lucide-react";
@@ -26,6 +39,8 @@ import { useAuthorizationContext } from "@/components/providers/AuthorizationPro
 import { useAuthenticationContext } from "@/components/providers/AuthenticationProvider";
 import { useDeployment } from "@/components/providers/deploymentProvider";
 import { NotificationBell } from "@/components/navigation/NotificationBell";
+import { NavigationRailLabel } from "@/components/navigation/NavigationRailLabel";
+import { useGlobalConfigStore } from "@/stores/global";
 import { AUTH_EVENTS } from "@/const/auth";
 import {
   useMarkAllNotificationsRead,
@@ -142,14 +157,14 @@ const ROUTE_CONFIG: RouteConfig[] = [
   },
   {
     path: "/skill-space",
-    Icon: Zap,
+    Icon: Sparkles,
     labelKey: "sidebar.skillSpace",
     order: 12,
     parentKey: "/resource-space",
   },
   {
     path: "/resource-manage",
-    Icon: Building2,
+    Icon: FolderCog,
     labelKey: "sidebar.resourceManage",
     order: 13,
     parentKey: null,
@@ -164,12 +179,9 @@ const ROUTE_CONFIG: RouteConfig[] = [
 ];
 
 const RAIL_ITEM_CLASS =
-  "flex h-12 w-12 shrink-0 flex-col items-center justify-center rounded-[4px] border-0 bg-transparent p-2 text-[#191919]";
-const MENU_ITEM_CLASS = `${RAIL_ITEM_CLASS} !h-auto min-h-12 !px-0 !py-1`;
+  "group flex h-11 w-full shrink-0 cursor-pointer items-center overflow-hidden rounded-lg border-0 bg-transparent p-0 pr-2 text-left text-[var(--navigation-muted)] transition-colors duration-150 ease-out hover:bg-[var(--navigation-hover)] hover:text-[var(--navigation-foreground)] focus-visible:text-[var(--navigation-foreground)]";
 const RAIL_ICON_CLASS = "h-5 w-5 shrink-0";
-const RAIL_LABEL_CLASS =
-  "w-11 max-w-11 break-words text-center text-[12px] leading-[20px] ![letter-spacing:0px] text-[#191919]";
-const SELECTED_ITEM_CLASS = "!bg-[rgba(25,25,25,0.05)] !rounded-[12px]";
+const SELECTED_ITEM_CLASS = "!bg-[var(--navigation-selected)]";
 
 function isRouteAccessible(
   route: RouteConfig,
@@ -183,7 +195,11 @@ function isRouteAccessible(
   return accessibleRoutes.includes(route.path);
 }
 
-export function SideNavigation() {
+interface SideNavigationProps {
+  onPinnedChange?: (pinned: boolean) => void;
+}
+
+export function SideNavigation({ onPinnedChange }: SideNavigationProps = {}) {
   const { t } = useTranslation("common");
   const { accessibleRoutes } = useAuthorizationContext();
   const { isAuthenticated, openAuthPromptModal } = useAuthenticationContext();
@@ -192,6 +208,48 @@ export function SideNavigation() {
   const pathname = usePathname();
   const params = useParams<{ locale: string }>();
   const locale = params.locale === "en" ? "en" : "zh";
+  const { config } = useGlobalConfigStore();
+  const [expanded, setExpanded] = useState(false);
+  const [pinned, setPinned] = useState(false);
+  const suppressExpansion = useRef(false);
+  const hovered = useRef(false);
+  const popups = useRef({ account: false, notification: false });
+  const closeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const expand = () => {
+    if (closeTimer.current) clearTimeout(closeTimer.current);
+    if (suppressExpansion.current) return;
+    setExpanded(true);
+  };
+  const collapseLater = () => {
+    if (closeTimer.current) clearTimeout(closeTimer.current);
+    if (pinned || popups.current.account || popups.current.notification) return;
+    closeTimer.current = setTimeout(() => setExpanded(false), 160);
+  };
+  const handlePopupChange = (
+    key: "account" | "notification",
+    open: boolean
+  ) => {
+    popups.current[key] = open;
+    if (open) {
+      suppressExpansion.current = false;
+      expand();
+    } else if (!hovered.current) collapseLater();
+  };
+  const togglePinned = () => {
+    if (closeTimer.current) clearTimeout(closeTimer.current);
+    const nextPinned = !pinned;
+    suppressExpansion.current = !nextPinned;
+    setPinned(nextPinned);
+    setExpanded(nextPinned);
+    onPinnedChange?.(nextPinned);
+  };
+  useEffect(
+    () => () => {
+      if (closeTimer.current) clearTimeout(closeTimer.current);
+      onPinnedChange?.(false);
+    },
+    [onPinnedChange]
+  );
 
   const [pendingNavigationPath, setPendingNavigationPath] = useState<
     string | null
@@ -267,6 +325,8 @@ export function SideNavigation() {
   const notificationAction = isSpeedMode ? null : isAuthenticated ? (
     <NotificationBell
       rail
+      expanded={expanded}
+      onOpenChange={(open) => handlePopupChange("notification", open)}
       unreadCount={unreadCount}
       items={items}
       isLoading={isNotificationsLoading}
@@ -289,26 +349,81 @@ export function SideNavigation() {
         }
       }}
     >
-      <Bell className={RAIL_ICON_CLASS} />
+      <span className="flex h-11 w-12 shrink-0 items-center justify-center">
+        <Bell className={RAIL_ICON_CLASS} />
+      </span>
+      <NavigationRailLabel
+        expanded={expanded}
+        label={t("notifications.bell.label")}
+      />
     </button>
   );
 
   return (
-    <div className="flex h-full w-full flex-col items-center bg-[#f0f0f0] p-2">
-      <Link
-        href="/"
-        aria-label={t("sidebar.homePage")}
-        className="flex h-12 w-12 shrink-0 items-center justify-center rounded-[4px] p-2"
-      >
-        <img
-          src={publicAsset("/modelengine-logo.png")}
-          alt="logo"
-          className="h-8 w-8 object-contain"
-        />
-      </Link>
+    <div
+      data-sidebar-expanded={expanded}
+      data-sidebar-pinned={pinned}
+      className={`relative flex h-full flex-col bg-[var(--navigation-surface)] [--navigation-hover:color-mix(in_oklab,lab(92.4476%_-0.214785_-1.49835)_70%,transparent)] [--navigation-selected:lab(92.4476%_-0.214785_-1.49835)] [--navigation-muted:lab(47.7049%_-1.02875_-9.20491)] [--navigation-foreground:lab(11.6682%_-0.113927_-10.842)] p-2 transition-[width,box-shadow] duration-[180ms] ease-out motion-reduce:transition-none ${expanded ? "w-[240px]" : "w-16"} ${expanded && !pinned ? "shadow-[8px_0_24px_rgba(0,0,0,0.16)]" : ""}`}
+      onMouseEnter={() => {
+        hovered.current = true;
+        expand();
+      }}
+      onMouseLeave={() => {
+        hovered.current = false;
+        suppressExpansion.current = false;
+        collapseLater();
+      }}
+      onFocusCapture={expand}
+      onBlurCapture={(event) => {
+        if (
+          !event.currentTarget.contains(event.relatedTarget) &&
+          !hovered.current
+        ) {
+          suppressExpansion.current = false;
+          collapseLater();
+        }
+      }}
+    >
+      <span
+        aria-hidden="true"
+        data-sidebar-divider
+        className="pointer-events-none absolute inset-y-0 right-0 w-[0.5px] bg-[rgba(25,25,25,0.15)]"
+      />
+      <div className="mb-2 flex h-12 w-full shrink-0 items-center">
+        <Link
+          href="/"
+          aria-label={t("sidebar.homePage")}
+          className="flex h-12 min-w-0 flex-1 items-center overflow-hidden rounded-[4px] pr-2"
+        >
+          <span className="flex h-12 w-12 shrink-0 items-center justify-center">
+            <img
+              src={publicAsset("/modelengine-logo.png")}
+              alt="logo"
+              className="h-10 w-10 object-contain"
+            />
+          </span>
+          <NavigationRailLabel
+            expanded={expanded}
+            label={config.productName || "Nexent"}
+            variant="title"
+          />
+        </Link>
+        {expanded && (
+          <Tooltip title={t(pinned ? "sidebar.unpin" : "sidebar.pin")}>
+            <Button
+              type="text"
+              aria-label={t(pinned ? "sidebar.unpin" : "sidebar.pin")}
+              aria-pressed={pinned}
+              onClick={togglePinned}
+              className={`!h-8 !w-8 shrink-0 !p-0 ${pinned ? "!text-[#2673e5] !bg-transparent" : "!text-[#777777]"}`}
+              icon={pinned ? <PinOff size={16} /> : <Pin size={16} />}
+            />
+          </Tooltip>
+        )}
+      </div>
 
-      <nav className="min-h-0 w-12 flex-1 overflow-y-auto overflow-x-hidden">
-        <div className="flex flex-col items-center gap-[12px]">
+      <nav className="min-h-0 w-full flex-1 overflow-y-auto overflow-x-hidden">
+        <div className="flex flex-col gap-2">
           {accessibleMenuItems.map((route) => {
             const Icon = route.Icon;
             const isSelected = selectedKey === route.path;
@@ -318,20 +433,33 @@ export function SideNavigation() {
                 key={route.path}
                 type="button"
                 aria-current={isSelected ? "page" : undefined}
-                className={`${MENU_ITEM_CLASS} ${isSelected ? SELECTED_ITEM_CLASS : ""}`}
+                aria-label={t(route.labelKey)}
+                className={`${RAIL_ITEM_CLASS} ${isSelected ? SELECTED_ITEM_CLASS : ""}`}
                 onClick={() => handleRouteClick(route)}
               >
-                <Icon className={RAIL_ICON_CLASS} />
-                <span className={RAIL_LABEL_CLASS}>{t(route.labelKey)}</span>
+                <span className="flex h-11 w-12 shrink-0 items-center justify-center">
+                  <Icon
+                    className={`${RAIL_ICON_CLASS} ${isSelected ? "text-[#2673e5]" : ""}`}
+                  />
+                </span>
+                <NavigationRailLabel
+                  expanded={expanded}
+                  label={t(route.labelKey)}
+                  selected={isSelected}
+                />
               </button>
             );
           })}
         </div>
       </nav>
 
-      <div className="flex w-12 shrink-0 flex-col items-center">
+      <div className="flex w-full shrink-0 flex-col gap-1">
         {notificationAction}
-        <AvatarDropdown rail />
+        <AvatarDropdown
+          rail
+          expanded={expanded}
+          onOpenChange={(open) => handlePopupChange("account", open)}
+        />
       </div>
     </div>
   );

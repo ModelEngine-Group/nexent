@@ -3,6 +3,7 @@
 此页由结构化用例生成，不手工编辑。
 
 - D1 [AIDP-FE-FILES-01](../../cases/AIDP-FE-FILES-01/case.yaml) · active
+- D1 [AIDP-FE-GRAPH-01](../../cases/AIDP-FE-GRAPH-01/case.yaml) · active
 - D1 [AIDP-FE-LIST-01](../../cases/AIDP-FE-LIST-01/case.yaml) · active
 - D1 [UT-BE-AUTO-C41A646DB91F8B53](../../cases/UT-BE-AUTO-C41A646DB91F8B53/case.yaml) · active
 - D1 [UT-FE-AUTO-BA4BBC902BC06BE6](../../cases/UT-FE-AUTO-BA4BBC902BC06BE6/case.yaml) · active

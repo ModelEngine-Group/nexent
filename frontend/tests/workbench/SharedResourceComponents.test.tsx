@@ -1,6 +1,9 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import { expect, it, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { ResourceSelectionRow } from "@/features/workbench/components/ResourceSelectionRow";
 import ResourceCard from "@/components/resource/ResourceCard";
 import { ResourceSelectionGrid } from "@/features/workbench/components/ResourceSelectionGrid";
 import {
@@ -45,7 +48,53 @@ it("renders all picker results without default grid pagination, filters or creat
   expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
   expect(screen.queryByRole("tab")).not.toBeInTheDocument();
   expect(RESOURCE_PAGE_SIZE).toBe(6);
-  expect(resourcePage(Array.from({ length: 12 }, (_, i) => i), 2)).toEqual([
-    6, 7, 8, 9, 10, 11,
-  ]);
+  expect(
+    resourcePage(
+      Array.from({ length: 12 }, (_, i) => i),
+      2
+    )
+  ).toEqual([6, 7, 8, 9, 10, 11]);
+});
+
+it("text rows keep repository actions independent of selection and retain descriptive tags", async () => {
+  const select = vi.fn(),
+    action = vi.fn();
+  render(
+    <ResourceSelectionGrid layout="list">
+      <ResourceSelectionRow
+        title="Resource"
+        description="Details"
+        tags={["Finance"]}
+        onClick={select}
+        actions={<button onClick={action}>Import</button>}
+      />
+    </ResourceSelectionGrid>
+  );
+  const row = screen.getByRole("option", { name: "Resource" });
+  expect(row).toHaveTextContent("Details");
+  expect(row).toHaveTextContent("Finance");
+  expect(row.querySelector("svg")).toBeNull();
+  await userEvent.click(screen.getByRole("button", { name: "Import" }));
+  expect(action).toHaveBeenCalledOnce();
+  expect(select).not.toHaveBeenCalled();
+  await userEvent.click(row);
+  expect(select).toHaveBeenCalledOnce();
+});
+
+it("never caps the fixed header title column so title, subtitle and badge stay unclipped", () => {
+  render(
+    <ResourceCard
+      fixedHeaderLayout
+      title="Agent"
+      subtitle="Current version v1.0.0"
+      badge={<span>Main agent</span>}
+      description="Description"
+    />
+  );
+  const column = screen.getByRole("heading", { name: "Agent" }).parentElement;
+  expect(column).toHaveClass("min-h-11");
+  expect(column).not.toHaveClass("h-11");
+  expect(column).toHaveClass("flex-col");
+  expect(screen.getByText("Current version v1.0.0")).toBeInTheDocument();
+  expect(screen.getByText("Main agent")).toBeInTheDocument();
 });

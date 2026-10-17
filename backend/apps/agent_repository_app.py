@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import json
 import logging
 from http import HTTPStatus
@@ -30,7 +32,9 @@ from services.agent_repository_service import (
 from services.audit_service import record_security_event
 from services.official_agent_sync_service import sync_official_agents
 from utils.auth_utils import get_current_user_context, get_current_user_id
-from utils.agent_transfer_utils import AgentToolImportError
+from consts.exceptions import (
+    AgentToolImportError,
+)
 
 logger = logging.getLogger(__name__)
 agent_repository_router = APIRouter(prefix="/repository/agent")
@@ -171,6 +175,9 @@ async def list_agent_repository_listings_api(
         description="Structured tag predicates encoded as JSON",
     ),
     tag: Optional[str] = Query(None, description="Filter by an exact tag"),
+    sort_by_update_time: bool = Query(
+        False, description="Sort by repository publish time descending"
+    ),
     authorization: str = Header(None),
 ):
     """List all marketplace repository listings with optional status filter."""
@@ -182,6 +189,7 @@ async def list_agent_repository_listings_api(
             "page": page,
             "page_size": page_size,
             "search": search,
+            "sort_by_update_time": sort_by_update_time,
         }
         search_predicates = _parse_tag_predicates(search_tag_predicates)
         if search_predicates:

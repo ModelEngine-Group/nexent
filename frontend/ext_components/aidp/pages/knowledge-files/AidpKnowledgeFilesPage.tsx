@@ -1,4 +1,8 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 "use client";
+
+import { UserIdentity } from "@/components/auth/UserIdentity";
 
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
@@ -50,6 +54,18 @@ import AidpPagination from "@/ext_components/aidp/shared/components/AidpPaginati
 import AidpImportDrawer from "@/ext_components/aidp/features/file-import/AidpImportDrawer";
 import AidpUpdateKbModal from "@/ext_components/aidp/pages/knowledge-files/AidpUpdateKbModal";
 import AidpGroupNamesDisplay from "@/ext_components/aidp/shared/components/AidpGroupNamesDisplay";
+import AidpResizableTitle from "@/ext_components/aidp/pages/knowledge-list/AidpResizableTitle";
+import { AidpDetailField } from "@/ext_components/aidp/pages/knowledge-files/AidpKnowledgeDetailInformation";
+import AidpKnowledgeTasksTab from "@/ext_components/aidp/pages/knowledge-files/AidpKnowledgeTasksTab";
+import AidpKnowledgeInformationTab from "@/ext_components/aidp/pages/knowledge-files/AidpKnowledgeInformationTab";
+import {
+  AIDP_DETAIL_PAGE_SIZE,
+  FILE_COLUMN_MIN_WIDTHS,
+  formatDetailDateTime,
+  formatFileSize,
+  sumColumnWidths,
+  withResizableHeaders,
+} from "@/ext_components/aidp/pages/knowledge-files/utils/aidpKnowledgeDetailUtils";
 
 interface AidpKnowledgeFilesPageProps {
   knowledgeBase: AidpKnowledgeBaseItem;
@@ -59,51 +75,11 @@ interface AidpKnowledgeFilesPageProps {
   pollingPaused?: boolean;
 }
 
-const AidpDetailField = ({
-  label,
-  children,
-  className = "",
-}: {
-  label: string;
-  children: React.ReactNode;
-  className?: string;
-}) => (
-  <div className={`min-w-0 ${className}`}>
-    <dt className="mb-1 min-h-5 text-xs leading-5 text-gray-500">{label}</dt>
-    <dd className="m-0 min-h-6 break-words text-sm leading-6 text-gray-800">
-      {children}
-    </dd>
-  </div>
-);
+type DetailTab = "files" | "tasks" | "information";
 
-const PAGE_SIZE = 10;
+// AIDP caps a single batch document removal request at 10 files.
+const AIDP_BATCH_DELETE_MAX = 10;
 const UNKNOWN = AIDP_UNKNOWN_VALUE;
-
-const formatDetailDateTime = (value: unknown): string => {
-  if (typeof value !== "string" || !value.trim()) return UNKNOWN;
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return UNKNOWN;
-  return date.toLocaleString(undefined, {
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-    hourCycle: "h23",
-  });
-};
-
-const formatFileSize = (bytes?: number): string => {
-  if (typeof bytes !== "number" || !Number.isFinite(bytes) || bytes < 0) {
-    return UNKNOWN;
-  }
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-  if (bytes < 1024 * 1024 * 1024) {
-    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-  }
-  return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GB`;
-};
 
 const AidpKnowledgeFilesPage: React.FC<AidpKnowledgeFilesPageProps> = ({
   knowledgeBase,
@@ -114,13 +90,19 @@ const AidpKnowledgeFilesPage: React.FC<AidpKnowledgeFilesPageProps> = ({
 }) => {
   const { t, i18n } = useTranslation();
   const { message, modal } = App.useApp();
-  const { groupOptions, canReadGroups, groupsError } = useAidpGroupOptions();
+  const {
+    groupOptions,
+    canReadGroups,
+    canConfigureGroupPermissions,
+    groupsError,
+  } = useAidpGroupOptions();
   const { can } = usePermission();
   const detailQuery = useAidpKnowledgeDetail(knowledgeBase.kds_id);
   const detail = useMemo<AidpKbDetail>(
     () => ({ ...knowledgeBase, ...detailQuery.data }),
     [knowledgeBase, detailQuery.data]
   );
+  const [activeTab, setActiveTab] = useState<DetailTab>("files");
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
   const [editingKbMode, setEditingKbMode] = useState<
     "metadata" | "permissions" | null
@@ -129,7 +111,7 @@ const AidpKnowledgeFilesPage: React.FC<AidpKnowledgeFilesPageProps> = ({
   const [fileKeyword, setFileKeyword] = useState("");
   const [fileParams, setFileParams] = useState({
     page: 1,
-    pageSize: PAGE_SIZE,
+    pageSize: AIDP_DETAIL_PAGE_SIZE,
     keyword: "",
   });
   const { page: filePage, pageSize: filePageSize } = fileParams;
@@ -140,7 +122,9 @@ const AidpKnowledgeFilesPage: React.FC<AidpKnowledgeFilesPageProps> = ({
     fileParams.keyword,
     pollingPaused || importOpen || deleteConfirmOpen || editingKbMode !== null
   );
-  const files = filesQuery.data?.value ?? [];
+  // Memoized so callbacks depending on `files` keep a stable reference when
+  // the query has not produced a new page.
+  const files = useMemo(() => filesQuery.data?.value ?? [], [filesQuery.data]);
   const fileTotal = filesQuery.data?.total_count ?? files.length;
   const fileHasMore = filesQuery.data?.has_more ?? false;
   const fileTotalReliable = filesQuery.data?.total_reliable !== false;
@@ -153,6 +137,12 @@ const AidpKnowledgeFilesPage: React.FC<AidpKnowledgeFilesPageProps> = ({
         t("aidpKnowledge.detailFilesLoadFailed")
       )
     : undefined;
+
+  const [selectedFileKeys, setSelectedFileKeys] = useState<React.Key[]>([]);
+  const [fileColumnWidths, setFileColumnWidths] = useState<
+    Record<string, number>
+  >({});
+
   const groupNames = useMemo(() => {
     const names = new Map(
       groupOptions.map((option) => [option.value, option.label])
@@ -293,7 +283,88 @@ const AidpKnowledgeFilesPage: React.FC<AidpKnowledgeFilesPageProps> = ({
     [refreshFiles, i18n.language, knowledgeBase.kds_id, message, modal, t]
   );
 
-  const fileColumns: ColumnsType<AidpDocumentItem> = [
+  const handleBatchDeleteFiles = useCallback(() => {
+    // Selection keys can fall back to file_ino_no; map them back to the
+    // current page records so only real file UUIDs are sent to AIDP.
+    const fileUuids = files
+      .filter((file) =>
+        selectedFileKeys.includes(file.file_uuid || file.file_ino_no)
+      )
+      .map((file) => file.file_uuid)
+      .filter(Boolean);
+    if (fileUuids.length === 0) return;
+    // AIDP rejects oversized batch removals; guard before confirming.
+    if (fileUuids.length > AIDP_BATCH_DELETE_MAX) {
+      message.warning(
+        t("aidpKnowledge.deleteDocsLimit", { max: AIDP_BATCH_DELETE_MAX })
+      );
+      return;
+    }
+    setDeleteConfirmOpen(true);
+    // modal.confirm returns a thenable without .catch; wrap it so a failed
+    // confirmation surfaces through the dialog instead of an unhandled rejection.
+    void Promise.resolve(
+      modal.confirm({
+        title: t("aidpKnowledge.deleteDocsTitle", { count: fileUuids.length }),
+        centered: true,
+        okText: t("common.confirm"),
+        cancelText: t("common.cancel"),
+        okButtonProps: { danger: true },
+        afterClose: () => setDeleteConfirmOpen(false),
+        onOk: async () => {
+          try {
+            const result = await aidpKnowledgeService.removeDocs(
+              knowledgeBase.kds_id,
+              fileUuids
+            );
+            const { success, failed } = result.summary;
+            if (failed === 0) {
+              message.success(t("aidpKnowledge.deleteDocSuccess"));
+            } else if (success === 0) {
+              const first = result.failed_list[0];
+              const reason =
+                (i18n.language.startsWith("zh")
+                  ? first?.reason_zh || first?.reason_en
+                  : first?.reason_en || first?.reason_zh) ||
+                first?.message ||
+                first?.reason ||
+                t("aidpKnowledge.deleteDocFailed");
+              const code = first?.error_code ?? first?.code;
+              throw code ? new ApiError(code, reason) : new Error(reason);
+            } else {
+              message.warning(
+                t("aidpKnowledge.deleteDocsPartial", { success, failed })
+              );
+            }
+            void refreshFiles();
+            void detailQuery.refetch();
+          } catch (error) {
+            log.error("Failed to batch delete AIDP files:", {
+              id: knowledgeBase.kds_id,
+              count: fileUuids.length,
+              error,
+            });
+            message.error(
+              getAidpErrorMessage(error, t, t("aidpKnowledge.deleteDocFailed"))
+            );
+            throw error;
+          }
+        },
+      })
+    ).catch(() => undefined);
+  }, [
+    detailQuery,
+    files,
+    i18n.language,
+    knowledgeBase.kds_id,
+    message,
+    modal,
+    refreshFiles,
+    selectedFileKeys,
+    t,
+  ]);
+
+  const baseFileColumns: ColumnsType<AidpDocumentItem> = [
     {
       title: t("aidpKnowledge.detailFileName"),
       dataIndex: "file_name",
@@ -371,6 +442,12 @@ const AidpKnowledgeFilesPage: React.FC<AidpKnowledgeFilesPageProps> = ({
       ),
     },
   ];
+  const fileColumns = withResizableHeaders(
+    baseFileColumns,
+    fileColumnWidths,
+    FILE_COLUMN_MIN_WIDTHS,
+    setFileColumnWidths
+  );
 
   const privateScope = detail.ingroup_permission === "PRIVATE";
 
@@ -485,7 +562,10 @@ const AidpKnowledgeFilesPage: React.FC<AidpKnowledgeFilesPageProps> = ({
               <div className="flex min-w-0 items-center gap-3">
                 <UserOutlined className="rounded-lg bg-violet-100 p-2 text-lg text-violet-600" />
                 <AidpDetailField label={t("aidpKnowledge.detailCreator")}>
-                  {formatAidpCreator(detail.creator_name)}
+                  <UserIdentity
+                    casUsername={detail.creator_cas_username}
+                    fallback={formatAidpCreator(detail.creator_name)}
+                  />
                 </AidpDetailField>
               </div>
             </dl>
@@ -516,76 +596,126 @@ const AidpKnowledgeFilesPage: React.FC<AidpKnowledgeFilesPageProps> = ({
         />
       )}
       <Tabs
-        activeKey="files"
+        activeKey={activeTab}
+        onChange={(key) => setActiveTab(key as DetailTab)}
         className="shrink-0 [&>.ant-tabs-nav]:mb-0 [&>.ant-tabs-content-holder]:hidden"
         tabBarStyle={{ marginBottom: 0 }}
-        items={[{ key: "files", label: t("aidpKnowledge.detailTabFiles") }]}
+        items={[
+          { key: "files", label: t("aidpKnowledge.detailTabUploadedFiles") },
+          { key: "tasks", label: t("aidpKnowledge.detailTabTasks") },
+          {
+            key: "information",
+            label: t("aidpKnowledge.detailTabInformation"),
+          },
+        ]}
       />
 
-      <section className="flex min-h-[360px] flex-1 shrink-0 flex-col bg-white">
-        <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-          <Input
-            allowClear
-            prefix={<SearchOutlined className="text-gray-400" />}
-            value={fileKeyword}
-            onChange={(event) => setFileKeyword(event.target.value)}
-            placeholder={t("aidpKnowledge.detailFileSearch")}
-            style={{ width: 280, maxWidth: "100%" }}
-          />
-          <div className="flex items-center gap-2">
-            <Tooltip title={t("aidpKnowledge.refresh")}>
-              <Button
-                aria-label={t("aidpKnowledge.refresh")}
-                icon={<ReloadOutlined spin={loadingFiles} />}
-                onClick={() => void refreshFiles()}
-              />
-            </Tooltip>
-            {canEdit && isAvailable && (
-              <Button
-                type="primary"
-                icon={<UploadOutlined />}
-                onClick={() => setImportOpen(true)}
-              >
-                {t("aidpKnowledge.importFile")}
-              </Button>
-            )}
+      {activeTab === "files" && (
+        <section className="flex min-h-[360px] flex-1 shrink-0 flex-col bg-white">
+          <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+            <Input
+              allowClear
+              prefix={<SearchOutlined className="text-gray-400" />}
+              value={fileKeyword}
+              onChange={(event) => setFileKeyword(event.target.value)}
+              placeholder={t("aidpKnowledge.detailFileSearch")}
+              style={{ width: 280, maxWidth: "100%" }}
+            />
+            <div className="flex items-center gap-2">
+              <Tooltip title={t("aidpKnowledge.refresh")}>
+                <Button
+                  aria-label={t("aidpKnowledge.refresh")}
+                  icon={<ReloadOutlined spin={loadingFiles} />}
+                  onClick={() => void refreshFiles()}
+                />
+              </Tooltip>
+              {canEdit && (
+                <Button
+                  disabled={selectedFileKeys.length === 0}
+                  onClick={handleBatchDeleteFiles}
+                >
+                  {t("common.delete")}
+                </Button>
+              )}
+              {canEdit && isAvailable && (
+                <Button
+                  type="primary"
+                  icon={<UploadOutlined />}
+                  onClick={() => setImportOpen(true)}
+                >
+                  {t("aidpKnowledge.importFile")}
+                </Button>
+              )}
+            </div>
           </div>
-        </div>
-        {fileError && (
-          <Alert type="error" showIcon title={fileError} className="mb-4" />
-        )}
-        <div className="flex-1">
-          <Table<AidpDocumentItem>
-            rowKey={(record) => record.file_uuid || record.file_ino_no}
-            columns={fileColumns}
-            dataSource={files}
-            loading={loadingFiles}
-            pagination={false}
-            scroll={{ x: 930 }}
-            locale={{
-              emptyText: fileError ? null : (
-                <Empty description={t("aidpKnowledge.detailFilesEmpty")} />
-              ),
-            }}
-            size="middle"
-          />
-        </div>
-        <div className="mt-4 shrink-0 border-t border-gray-200 py-3">
-          <AidpPagination
-            currentPage={filePage}
-            pageSize={filePageSize}
-            total={fileTotal}
-            totalReliable={fileTotalReliable}
-            hasMore={fileHasMore}
-            onPageChange={(page) =>
-              setFileParams((current) => ({ ...current, page }))
-            }
-            onPageSizeChange={(pageSize) =>
-              setFileParams((current) => ({ ...current, pageSize, page: 1 }))
-            }
-          />
-        </div>
-      </section>
+          {fileError && (
+            <Alert type="error" showIcon title={fileError} className="mb-4" />
+          )}
+          <div className="flex-1">
+            <Table<AidpDocumentItem>
+              rowKey={(record) => record.file_uuid || record.file_ino_no}
+              columns={fileColumns}
+              dataSource={files}
+              loading={loadingFiles}
+              rowSelection={
+                canEdit
+                  ? {
+                      selectedRowKeys: selectedFileKeys,
+                      onChange: (keys) => setSelectedFileKeys(keys),
+                    }
+                  : undefined
+              }
+              pagination={false}
+              components={{
+                header: { cell: AidpResizableTitle },
+              }}
+              scroll={{ x: sumColumnWidths(fileColumns) }}
+              locale={{
+                emptyText: fileError ? null : (
+                  <Empty description={t("aidpKnowledge.detailFilesEmpty")} />
+                ),
+              }}
+              size="middle"
+            />
+          </div>
+          <div className="mt-4 shrink-0 border-t border-gray-200 py-3">
+            <AidpPagination
+              currentPage={filePage}
+              pageSize={filePageSize}
+              total={fileTotal}
+              totalReliable={fileTotalReliable}
+              hasMore={fileHasMore}
+              onPageChange={(page) =>
+                setFileParams((current) => ({ ...current, page }))
+              }
+              onPageSizeChange={(pageSize) =>
+                setFileParams((current) => ({ ...current, pageSize, page: 1 }))
+              }
+            />
+          </div>
+        </section>
+      )}
+
+      {activeTab === "tasks" && (
+        <AidpKnowledgeTasksTab
+          knowledgeBaseId={knowledgeBase.kds_id}
+          canEdit={canEdit}
+          // Tab-level dialogs mask the tab bar, so only the page-level edit
+          // modal can be open while the tasks tab is mounted.
+          pollingPaused={pollingPaused || editingKbMode !== null}
+        />
+      )}
+
+      {activeTab === "information" && (
+        <AidpKnowledgeInformationTab
+          detail={detail}
+          groupNames={groupNames}
+          canConfigureGroupPermissions={canConfigureGroupPermissions}
+          detailFetching={detailQuery.isFetching}
+          onEditPermissions={() => setEditingKbMode("permissions")}
+          onRefreshDetail={() => detailQuery.refetch()}
+        />
+      )}
 
       <AidpUpdateKbModal
         open={editingKbMode !== null}
