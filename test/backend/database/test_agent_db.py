@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import sys
 import types
 import pytest
@@ -734,6 +736,7 @@ def agent_list_info_columns(monkeypatch):
         "ingroup_permission": String,
         "description": String,
         "version_no": Integer,
+        "current_version_no": Integer,
         "delete_flag": String,
         "enabled": Boolean,
         "agent_origin": String,
@@ -773,7 +776,7 @@ def test_query_agent_list_candidates_by_tenant_id(
 
     expected_columns = [
         "agent_id", "tenant_id", "name", "display_name", "created_by",
-        "create_time", "group_ids", "ingroup_permission",
+        "create_time", "group_ids", "ingroup_permission", "current_version_no",
     ]
     if include_description:
         expected_columns.append("description")
@@ -806,6 +809,7 @@ def test_agent_list_candidates_exclude_system_agents_before_page_slicing(monkeyp
         Column("create_time", Integer),
         Column("group_ids", String),
         Column("ingroup_permission", String),
+        Column("current_version_no", Integer),
         Column("description", String),
         Column("version_no", Integer),
         Column("delete_flag", String),
@@ -1764,3 +1768,33 @@ def test_update_existing_relations_returns_early_when_empty():
         user_id="user1",
     )
     assert mock_rel.selected_agent_version_no == 1  # unchanged
+
+
+def test_batch_get_agent_main_flags_returns_flag_map(monkeypatch, mock_session):
+    """Batch main-agent lookup maps each agent id to its is_main_agent flag."""
+    from backend.database.agent_db import batch_get_agent_main_flags
+
+    session, query = mock_session
+    mock_filter = MagicMock()
+    mock_filter.all.return_value = [
+        SimpleNamespace(agent_id=10, is_main_agent=True),
+        SimpleNamespace(agent_id=11, is_main_agent=False),
+    ]
+    query.filter.return_value = mock_filter
+
+    mock_ctx = MagicMock()
+    mock_ctx.__enter__.return_value = session
+    mock_ctx.__exit__.return_value = None
+    monkeypatch.setattr("backend.database.agent_db.get_db_session", lambda: mock_ctx)
+
+    assert batch_get_agent_main_flags([10, 11]) == {10: True, 11: False}
+
+
+def test_batch_get_agent_main_flags_returns_empty_without_ids(mock_session):
+    """No ids (or only None entries) short-circuits without querying the DB."""
+    from backend.database.agent_db import batch_get_agent_main_flags
+
+    session, query = mock_session
+    assert batch_get_agent_main_flags([]) == {}
+    assert batch_get_agent_main_flags([None]) == {}
+    query.filter.assert_not_called()

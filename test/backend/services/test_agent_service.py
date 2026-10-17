@@ -8,6 +8,7 @@ import json
 import io
 import types
 from contextlib import contextmanager
+from datetime import datetime
 from unittest.mock import ANY, patch, MagicMock, mock_open, call, Mock, AsyncMock
 import os
 
@@ -3704,6 +3705,146 @@ async def test_list_agent_page_preserves_cross_tenant_order_and_version_scope(mo
     assert result["pagination"]["total"] == 2
 
 
+def _publish_sort_candidates():
+    """Raw candidates covering newest, mid, oldest, and never-published agents."""
+    return [
+        {"agent_id": 1, "name": "Oldest", "created_by": "alice",
+         "current_version_no": 1},
+        {"agent_id": 2, "name": "Newest", "created_by": "alice",
+         "current_version_no": 1},
+        {"agent_id": 3, "name": "NeverPublished", "created_by": "alice",
+         "current_version_no": 0},
+        {"agent_id": 4, "name": "Mid", "created_by": "alice",
+         "current_version_no": 2},
+    ]
+
+
+_PUBLISH_TIMES = {
+    (1, 1): "2026-01-01T00:00:00",
+    (2, 1): "2026-09-01T00:00:00",
+    (4, 2): "2026-05-01T00:00:00",
+}
+
+
+def _mock_publish_sort(monkeypatch, candidates):
+    _mock_paged_agent_candidates(monkeypatch, candidates)
+
+    async def enrich_page(*, tenant_id, agent_ids, **_kwargs):
+        return [
+            {"agent_id": agent_id, "current_version_no": 1,
+             "is_available": True, "unavailable_reasons": []}
+            for agent_id in agent_ids
+        ]
+
+    def versions(agent_ids, tenant_id, version_nos):
+        return [
+            {
+                "agent_id": agent_id,
+                "version_no": version_no,
+                "create_time": _PUBLISH_TIMES.get((agent_id, version_no)),
+            }
+            for agent_id, version_no in zip(agent_ids, version_nos)
+        ]
+
+    monkeypatch.setattr(agent_management, "list_all_agent_info_impl", enrich_page)
+    monkeypatch.setattr(agent_management, "batch_search_version_names", versions)
+
+
+@pytest.mark.asyncio
+async def test_list_agent_page_sort_by_publish_time_orders_newest_first(monkeypatch):
+    """sort_by_update_time leads with the newest publish time, undated last."""
+    _mock_publish_sort(monkeypatch, _publish_sort_candidates())
+
+    result = await list_agent_page_impl(
+        tenant_id="tenant_123", user_id="alice", page=1, page_size=10,
+        sort_by_update_time=True,
+    )
+
+    assert [item["agent_id"] for item in result["items"]] == [2, 4, 1, 3]
+    assert result["pagination"]["total"] == 4
+
+
+@pytest.mark.asyncio
+async def test_list_agent_page_sort_by_publish_time_is_stable_across_pages(monkeypatch):
+    """The publish-time ordering applies before slicing, so pages stay ordered."""
+    _mock_publish_sort(monkeypatch, _publish_sort_candidates())
+
+    first_page = await list_agent_page_impl(
+        tenant_id="tenant_123", user_id="alice", page=1, page_size=2,
+        sort_by_update_time=True,
+    )
+    second_page = await list_agent_page_impl(
+        tenant_id="tenant_123", user_id="alice", page=2, page_size=2,
+        sort_by_update_time=True,
+    )
+
+    assert [item["agent_id"] for item in first_page["items"]] == [2, 4]
+    assert [item["agent_id"] for item in second_page["items"]] == [1, 3]
+
+
+@pytest.mark.asyncio
+async def test_list_agent_page_default_order_unchanged_without_sort(monkeypatch):
+    """Leaving the flag off keeps the pre-existing candidate ordering."""
+    _mock_publish_sort(monkeypatch, _publish_sort_candidates())
+
+    result = await list_agent_page_impl(
+        tenant_id="tenant_123", user_id="alice", page=1, page_size=10,
+    )
+
+    assert [item["agent_id"] for item in result["items"]] == [1, 2, 3, 4]
+
+
+def test_publish_time_sort_value_normalizes_supported_inputs():
+    """Datetimes and ISO strings sort by epoch; anything else collapses to 0.0."""
+    assert agent_management._publish_time_sort_value(
+        datetime(2026, 1, 1)
+    ) == datetime(2026, 1, 1).timestamp()
+    assert agent_management._publish_time_sort_value(
+        "2026-01-01T00:00:00"
+    ) == datetime(2026, 1, 1).timestamp()
+    assert agent_management._publish_time_sort_value("not-a-date") == 0.0
+    assert agent_management._publish_time_sort_value(None) == 0.0
+
+
+def test_order_agents_by_publish_time_skips_scopes_without_versions(monkeypatch):
+    """A scope tenant without a published version is skipped, not queried."""
+    queried_scopes = []
+
+    def versions(agent_ids, tenant_id, version_nos):
+        queried_scopes.append((tenant_id, list(agent_ids)))
+        return []
+
+    monkeypatch.setattr(agent_management, "batch_search_version_names", versions)
+    agents = [
+        {"agent_id": 1, "tenant_id": "tenant_123", "current_version_no": 0},
+        {"agent_id": 2, "tenant_id": "tenant_other", "current_version_no": 1},
+    ]
+
+    ordered = agent_management._order_agents_by_publish_time(
+        agents, ["tenant_123", "tenant_other"]
+    )
+
+    assert queried_scopes == [("tenant_other", [2])]
+    assert [agent["agent_id"] for agent in ordered] == [2, 1]
+
+
+def test_order_agents_by_publish_time_degrades_when_version_lookup_fails(monkeypatch):
+    """A failing publish-time lookup keeps every agent in the undated tail."""
+
+    def boom(*_args, **_kwargs):
+        raise RuntimeError("version store unavailable")
+
+    monkeypatch.setattr(agent_management, "batch_search_version_names", boom)
+    agents = [
+        {"agent_id": 1, "tenant_id": "tenant_123", "current_version_no": 1},
+        {"agent_id": 2, "tenant_id": "tenant_123", "current_version_no": 1},
+    ]
+
+    ordered = agent_management._order_agents_by_publish_time(agents, ["tenant_123"])
+
+    assert [agent["agent_id"] for agent in ordered] == [2, 1]
+
+
 @pytest.mark.asyncio
 @patch("management.services.model.resolver.get_model_by_model_id")
 @patch("management.services.agent.management.check_agent_availability")
@@ -3808,6 +3949,52 @@ async def test_list_all_agent_info_impl_success(
     # Verify mock calls
     mock_query_agents.assert_called_once_with(tenant_id="test_tenant")
     mock_get_user_tenant.assert_called_once_with("admin_user")
+
+
+@pytest.mark.asyncio
+@patch("management.services.model.resolver.get_model_by_model_id")
+@patch("management.services.agent.management.check_agent_availability")
+@patch("management.services.agent.management.convert_string_to_list")
+@patch("management.services.agent.management.get_user_tenant_by_user_id")
+@patch("management.services.agent.management.query_group_ids_by_user")
+@patch("management.services.agent.management.query_all_agent_info_by_tenant_id")
+async def test_list_all_agent_info_impl_emits_is_main_agent(
+    mock_query_agents,
+    mock_query_groups,
+    mock_get_user_tenant,
+    mock_convert_list,
+    mock_check_availability,
+    mock_get_model,
+):
+    """is_main_agent mirrors the stored flag and defaults to True when absent."""
+    mock_agents = [
+        {"agent_id": 1, "name": "Main", "display_name": "Main",
+         "description": "", "enabled": True, "group_ids": "",
+         "created_by": "user1", "create_time": 1, "is_main_agent": True},
+        {"agent_id": 2, "name": "Secondary", "display_name": "Secondary",
+         "description": "", "enabled": True, "group_ids": "",
+         "created_by": "user2", "create_time": 2, "is_main_agent": False},
+        {"agent_id": 3, "name": "Legacy", "display_name": "Legacy",
+         "description": "", "enabled": True, "group_ids": "",
+         "created_by": "user3", "create_time": 3},
+    ]
+
+    mock_query_agents.return_value = mock_agents
+    mock_get_user_tenant.return_value = {"user_role": "ADMIN"}
+    mock_query_groups.return_value = []
+    mock_convert_list.side_effect = lambda x: (
+        [] if not x else [int(i) for i in x.split(",")]
+    )
+    mock_check_availability.side_effect = lambda *args, **kwargs: (True, [])
+    mock_get_model.return_value = None
+
+    result = await list_all_agent_info_impl(
+        tenant_id="test_tenant", user_id="admin_user"
+    )
+
+    assert result[0]["is_main_agent"] is True
+    assert result[1]["is_main_agent"] is False
+    assert result[2]["is_main_agent"] is True  # missing field defaults to main
 
 
 @pytest.mark.asyncio
