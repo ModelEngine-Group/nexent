@@ -34,8 +34,16 @@ import {
   recordThreadActivity,
   startAgentConversation,
 } from "./adapter/thread-agent-registry";
+import { applyComposerRunConfig } from "./adapter/composer-run-config";
 import { remoteChatModelAdapter } from "./adapter/remote-chat-model-adapter";
 import { createNewChatAttachmentAdapter } from "./adapter/attachment-adapter";
+import {
+  clearLastChatView,
+  readLastChatViewState,
+  writeLastChatViewAgent,
+  writeLastChatViewConversation,
+  type LastChatViewState,
+} from "./last-chat-view";
 import { SidebarProvider } from "@/components/ui/sidebar";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { message } from "antd";
@@ -93,6 +101,12 @@ const PersistentChatHome: FC = () => {
     null
   );
   const consumedDeepLinkRef = useRef(false);
+  // Read once at mount: what (if anything) should this refresh restore? Deep
+  // links win, so this is null whenever the URL carries linking parameters.
+  const [lastChatView] = useState<LastChatViewState | null>(
+    readLastChatViewState
+  );
+  const didRestoreLastAgentRef = useRef(false);
   const { modelConfig } = useConfig();
   const dictationAdapter = useMemo(
     () => new ServerDictationAdapter(() => modelConfig?.stt),
@@ -118,6 +132,11 @@ const PersistentChatHome: FC = () => {
     },
     adapter: conversationThreadListAdapter,
     threadId: requestedThreadId,
+    // Return to the conversation the user was viewing before the refresh.
+    // The runtime switches to it once the adapter is ready; when the stored
+    // conversation no longer exists the switch fails silently and the page
+    // shows the default landing view.
+    initialThreadId: lastChatView?.conversationId,
   });
 
   const { isLoading: isLoadingAgents, agents } = usePublishedAgentList();
@@ -154,6 +173,22 @@ const PersistentChatHome: FC = () => {
       handleAgentSelected(action.agent);
     }
   }, [agents, deepLinkedAgentId, handleAgentSelected, isLoadingAgents]);
+
+  // A refresh in a brand-new conversation has no server-side conversation to
+  // restore; bring back a blank conversation of the same agent instead so the
+  // composer state (selected agent) survives the reload.
+  useEffect(() => {
+    if (didRestoreLastAgentRef.current || isLoadingAgents) return;
+    didRestoreLastAgentRef.current = true;
+    // A saved conversation owns the restore; its metadata selects the agent.
+    if (!lastChatView || lastChatView.conversationId) return;
+    const agent = agents.find(
+      (candidate) => Number(candidate.id) === Number(lastChatView.agentId)
+    );
+    if (agent) {
+      void handleAgentSelected(agent);
+    }
+  }, [agents, isLoadingAgents, handleAgentSelected, lastChatView]);
 
   const handleBack = useCallback(() => {
     setSelectedAgent(null);
@@ -588,45 +623,72 @@ const HomeContent: FC<{
     setSelectedAgent,
   ]);
 
+  // Whether the user has entered any view during this page load. The agent
+  // selection is transiently empty while the saved view is still being
+  // restored at startup; clearing the marker in that window would lose the
+  // restore target if the user refreshed again before initialization
+  // finished.
+  const viewEstablishedRef = useRef(false);
+
+  // Keep the "return here after a refresh" marker in sync with what the user
+  // is actually viewing: a saved conversation (restorable by id), the agent
+  // of an unsent blank conversation, or nothing on the landing page.
+  useEffect(() => {
+    if (!selectedAgent) {
+      // Only clear after a view was established in this page load.
+      if (viewEstablishedRef.current) {
+        clearLastChatView();
+      }
+      return;
+    }
+    viewEstablishedRef.current = true;
+    const numericConversationId = Number(activeConversationId);
+    if (Number.isInteger(numericConversationId) && numericConversationId > 0) {
+      writeLastChatViewConversation(String(numericConversationId));
+      return;
+    }
+    // No server-side conversation yet: remember the agent so the refresh can
+    // reopen a blank conversation with the same selection.
+    writeLastChatViewAgent(String(selectedAgent.id));
+  }, [selectedAgent, activeConversationId]);
+
   // Sync selected agent and active thread into composer's runConfig so the
   // ChatModelAdapter can forward both agent_id and conversation_id reliably.
   // `onServerConversationId` lets the adapter report back the server-issued
   // conversation_id returned in the response header, which we then reuse as
   // `threadId` for future runs in the same thread.
   useEffect(() => {
-    runtime.thread.composer.setRunConfig({
-      custom: {
-        ...(selectedAgent?.id ? { agentId: selectedAgent.id } : {}),
-        ...(selectedAgent?.current_version_no
-          ? {
-              agentVersionNo: selectedAgent.current_version_no,
-            }
-          : {}),
-        ...(activeConversationId ? { threadId: activeConversationId } : {}),
-        ...(knowledgeScope ? { knowledgeScope } : {}),
-        ...(runtimeMetadataDirty ? { runtimeMetadata } : {}),
-        ...(runtimeMetadataDirty && Number(activeConversationId) > 0
-          ? { runtimeMetadataVersion }
-          : {}),
-        onRuntimeMetadataSent: handleRuntimeMetadataSent,
-        onKnowledgeScopeResolved: handleKnowledgeScopeResolved,
-        onGenerationStopped: handleGenerationStopped,
+    applyComposerRunConfig(runtime, activeThreadId, {
+      ...(selectedAgent?.id ? { agentId: selectedAgent.id } : {}),
+      ...(selectedAgent?.current_version_no
+        ? {
+            agentVersionNo: selectedAgent.current_version_no,
+          }
+        : {}),
+      ...(activeConversationId ? { threadId: activeConversationId } : {}),
+      ...(knowledgeScope ? { knowledgeScope } : {}),
+      ...(runtimeMetadataDirty ? { runtimeMetadata } : {}),
+      ...(runtimeMetadataDirty && Number(activeConversationId) > 0
+        ? { runtimeMetadataVersion }
+        : {}),
+      onRuntimeMetadataSent: handleRuntimeMetadataSent,
+      onKnowledgeScopeResolved: handleKnowledgeScopeResolved,
+      onGenerationStopped: handleGenerationStopped,
 
-        enablePlan: chatMode === "planning",
-        ...(activeThreadId
-          ? {
-              onServerConversationId: (
-                serverId: string,
-                initialQuestion?: string
-              ) =>
-                handleServerConversationId(
-                  activeThreadId,
-                  serverId,
-                  initialQuestion
-                ),
-            }
-          : {}),
-      },
+      enablePlan: chatMode === "planning",
+      ...(activeThreadId
+        ? {
+            onServerConversationId: (
+              serverId: string,
+              initialQuestion?: string
+            ) =>
+              handleServerConversationId(
+                activeThreadId,
+                serverId,
+                initialQuestion
+              ),
+          }
+        : {}),
     });
   }, [
     runtime,
