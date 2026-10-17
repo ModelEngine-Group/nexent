@@ -21,7 +21,7 @@ test/backend/
 │   ├── test_file_management_app.py
 │   ├── test_image_app.py
 │   ├── test_knowledge_summary_app.py
-│   ├── test_model_managment_app.py
+│   ├── test_model_management_app.py
 │   ├── test_northbound_app.py
 │   ├── test_prompt_app.py
 │   ├── test_remote_mcp_app.py
