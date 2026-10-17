@@ -177,6 +177,24 @@ def _get_doc_history_path(kds_id: str, tenant_id: str | None = None) -> str:
     )
 
 
+def _get_ocr_annotate_path(
+    kds_id: str, file_uuid: str, tenant_id: str | None = None
+) -> str:
+    """Build the knowledge-base scoped preview (OCR annotate) API path.
+
+    Unlike the file action endpoints (``Download``/``Remove``/``History``),
+    which address the file in the request body, the preview endpoint carries it
+    in the path (``.../KnowledgeBases/{kds_id}/OcrAnnotate/{file_uuid}``). AIDP
+    serves the original bytes for the formats it can render itself
+    (docx/xlsx/pptx/pdf/txt) and converts every other format to PDF, reporting
+    the served name in the ``X-File-Name`` response header.
+    """
+    return (
+        f"/KnowledgeBase/Tenants/{_resolve_tenant_id(tenant_id)}"
+        f"/KnowledgeBases/{kds_id}/OcrAnnotate/{file_uuid}"
+    )
+
+
 def _build_list_query(page: int, page_size: int, keyword: str | None = None) -> str:
     """Build the query string for a knowledge-base list request.
 
@@ -1579,6 +1597,57 @@ async def stream_aidp_doc_impl(
         if response is not None:
             await response.aclose()
         _raise_aidp_http_error(e, "document download")
+
+
+async def stream_aidp_preview_impl(
+    server_url: str,
+    api_key: str,
+    kds_id: str,
+    file_uuid: str,
+) -> httpx.Response:
+    """Open the AIDP preview stream for one document.
+
+    AIDP answers this endpoint with the original bytes for the formats it can
+    render itself (docx/xlsx/pptx/pdf/txt) and with a PDF conversion for every
+    other format. The served name therefore does not always match the uploaded
+    one, and the caller reads it from the ``X-File-Name`` response header to
+    pick a renderer.
+    """
+    normalized_url = _validate_params(server_url, api_key)
+
+    headers = {"Authorization": f"Bearer {api_key}"}
+    preview_path = _get_ocr_annotate_path(kds_id, file_uuid)
+    preview_url = urljoin(f"{normalized_url}/", preview_path)
+    logger.info("Previewing AIDP document %s from %s", file_uuid, preview_url)
+
+    response: httpx.Response | None = None
+    try:
+        client = http_client_manager.get_async_client(
+            base_url=normalized_url,
+            timeout=_AIDP_DOWNLOAD_TIMEOUT_SECONDS,
+            verify_ssl=False,
+        )
+        response = await client.send(
+            client.build_request("GET", preview_url, headers=headers),
+            stream=True,
+        )
+        if response.status_code >= 400:
+            await response.aread()
+        response.raise_for_status()
+        return response
+    except httpx.RequestError as e:
+        if response is not None:
+            await response.aclose()
+        # ``logger.exception`` already records the traceback.
+        logger.exception("AIDP document preview request failed")
+        raise AppException(
+            ErrorCode.AIDP_CONNECTION_ERROR,
+            f"AIDP API request failed: {e!s}",
+        )
+    except httpx.HTTPStatusError as e:
+        if response is not None:
+            await response.aclose()
+        _raise_aidp_http_error(e, "document preview")
 
 
 def count_aidp_docs_impl(server_url: str, api_key: str, kds_id: str) -> int:
