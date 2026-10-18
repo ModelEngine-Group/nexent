@@ -25,5 +25,9 @@ export default defineConfig({
     setupFiles: ["./tests/component/setup.ts"],
     include: ["tests/component/**/*.test.tsx"],
     clearMocks: true,
+    // Component specs render the whole antd agent workspace and mirror the D1
+    // harness (test/automation/d1/agent-config.vitest.config.mjs), which also
+    // allows 30s per test; the 5s default is too tight for a full page render.
+    testTimeout: 30_000,
   },
 });

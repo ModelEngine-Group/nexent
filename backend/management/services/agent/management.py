@@ -3,6 +3,7 @@
 """Agent listing, deletion, relationships and sandbox policy."""
 
 import logging
+from datetime import datetime
 from typing import (
     Any,
     Dict,
@@ -130,6 +131,74 @@ async def clear_agent_new_mark_impl(agent_id: int, tenant_id: str, user_id: str)
         f"clear_agent_new_mark_impl called for agent_id={agent_id}, tenant_id={tenant_id}, user_id={user_id}, affected_rows={rowcount}"
     )
     return rowcount
+
+
+def _publish_time_sort_value(value: Any) -> float:
+    """Convert a stored publish time into a comparable epoch value."""
+    if isinstance(value, datetime):
+        return value.timestamp()
+    if isinstance(value, str):
+        try:
+            return datetime.fromisoformat(value).timestamp()
+        except ValueError:
+            return 0.0
+    return 0.0
+
+
+def _order_agents_by_publish_time(
+    agents: List[Dict[str, Any]], tenant_ids: List[str]
+) -> List[Dict[str, Any]]:
+    """Order agents by their latest published version time, newest first.
+
+    An agent that has never published a version has no publish time and is
+    placed after every dated agent. The agent id breaks ties so pagination
+    stays deterministic across pages.
+    """
+    publish_times: Dict[tuple, Any] = {}
+    for scope_tenant_id in tenant_ids:
+        versioned = [
+            agent
+            for agent in agents
+            if agent.get("tenant_id") == scope_tenant_id
+            and int(agent.get("current_version_no") or 0) > 0
+        ]
+        if not versioned:
+            continue
+        try:
+            rows = batch_search_version_names(
+                [int(agent["agent_id"]) for agent in versioned],
+                scope_tenant_id,
+                [int(agent["current_version_no"]) for agent in versioned],
+            )
+        except Exception as error:
+            logger.warning("Failed to load agent publish times: %s", error)
+            continue
+        for row in rows:
+            publish_times[
+                (scope_tenant_id, int(row["agent_id"]), int(row["version_no"]))
+            ] = row.get("create_time")
+
+    dated: List[tuple] = []
+    undated: List[Dict[str, Any]] = []
+    for agent in agents:
+        publish_time = publish_times.get(
+            (
+                agent.get("tenant_id"),
+                int(agent["agent_id"]),
+                int(agent.get("current_version_no") or 0),
+            )
+        )
+        if publish_time is None:
+            undated.append(agent)
+        else:
+            dated.append((publish_time, int(agent["agent_id"]), agent))
+
+    dated.sort(
+        key=lambda entry: (_publish_time_sort_value(entry[0]), entry[1]),
+        reverse=True,
+    )
+    undated.sort(key=lambda agent: int(agent["agent_id"]), reverse=True)
+    return [entry[2] for entry in dated] + undated
 
 
 async def list_all_agent_info_impl(
@@ -288,6 +357,11 @@ async def list_all_agent_info_impl(
                     "is_available": len(unavailable_reasons) == 0,
                     "unavailable_reasons": unavailable_reasons,
                     "is_new": agent.get("is_new", False),
+                    "is_main_agent": (
+                        True
+                        if agent.get("is_main_agent") is None
+                        else bool(agent["is_main_agent"])
+                    ),
                     "group_ids": convert_string_to_list(agent.get("group_ids")),
                     "permission": permission,
                     "is_published": agent.get("current_version_no") is not None,
@@ -324,6 +398,7 @@ async def list_agent_page_impl(
     created_by_not: Optional[str] = None,
     tag_predicates: Optional[list] = None,
     search_tag_predicates: Optional[list] = None,
+    sort_by_update_time: bool = False,
     include_repository_info: bool = False,
 ) -> Dict[str, Any]:
     """List visible agents with server-side filters and pagination."""
@@ -481,6 +556,11 @@ async def list_agent_page_impl(
                 for field in ("name", "display_name", "description")
             )
         ]
+
+    if sort_by_update_time:
+        # Order the whole filtered set before slicing so the newest published
+        # agents lead every page, not just the first one.
+        agents = _order_agents_by_publish_time(agents, tenant_ids)
 
     total = len(agents)
     offset = (page - 1) * page_size
