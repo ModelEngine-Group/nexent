@@ -363,6 +363,36 @@ def _reject_legacy_flat_tag_fields(data: Any) -> None:
         )
 
 
+def _validate_tag_batch_ids(resource_ids: list[int]) -> list[int]:
+    if any(resource_id <= 0 or resource_id > 9223372036854775807 for resource_id in resource_ids):
+        raise ValueError("resource IDs must contain positive bigint identifiers")
+    return list(dict.fromkeys(resource_ids))
+
+
+class AgentTagAssignmentBatchRequest(BaseModel):
+    """Read at most one page of canonical agent assignments."""
+
+    model_config = ConfigDict(extra="forbid")
+    agent_ids: list[int] = Field(..., min_length=1, max_length=500)
+
+    @field_validator("agent_ids")
+    @classmethod
+    def validate_agent_ids(cls, agent_ids: list[int]) -> list[int]:
+        return _validate_tag_batch_ids(agent_ids)
+
+
+class ToolTagAssignmentBatchRequest(BaseModel):
+    """Read at most one page of tool assignments in authenticated tenant scope."""
+
+    model_config = ConfigDict(extra="forbid")
+    tool_ids: list[int] = Field(..., min_length=1, max_length=500)
+
+    @field_validator("tool_ids")
+    @classmethod
+    def validate_tool_ids(cls, tool_ids: list[int]) -> list[int]:
+        return _validate_tag_batch_ids(tool_ids)
+
+
 class TagAssignmentReplaceRequest(BaseModel):
     """Controlled value identifiers replacing one resource's assignments."""
 

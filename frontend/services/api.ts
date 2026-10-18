@@ -19,6 +19,8 @@ import type { NotificationListParams } from "@/types/notification";
 export const API_BASE_URL = withBasePath("/api");
 
 export const API_ENDPOINTS = {
+  agentTagAssignmentsBatch: `${API_BASE_URL}/tag-libraries/assignments/agent/batch_read`,
+  toolTagAssignmentsBatch: `${API_BASE_URL}/tag-libraries/assignments/tool/batch_read`,
   user: {
     signup: `${API_BASE_URL}/user/signup`,
     signin: `${API_BASE_URL}/user/signin`,
