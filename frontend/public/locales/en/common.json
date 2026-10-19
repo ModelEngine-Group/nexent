@@ -1,7 +1,7 @@
 {
   "workbench.genericAgentName": "Agent Workbench",
   "workbench.landingGreeting": "Hi, I'm Nexent. What can I help you with?",
-  "workbench.landingGreetingHi": "Hi, I'm Nexent",
+  "workbench.landingGreetingHi": "Hi, I'm {{productName}}",
   "workbench.landingGreetingAsk": "What can I help you with",
   "workbench.askMeLikeThis": "Recommended prompts",
   "workbench.recommendedPrompts": "Suggested prompts",
