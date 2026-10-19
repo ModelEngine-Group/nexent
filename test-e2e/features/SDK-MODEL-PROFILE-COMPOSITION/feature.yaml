@@ -1,0 +1,28 @@
+schema_version: '1.0'
+module:
+  id: SDK-MODEL-SERVICE
+  name: SDK model service
+feature:
+  feature_id: SDK-MODEL-PROFILE-COMPOSITION
+  name: Nexent profile supplements and composition
+  status: planned
+  description: Combine pinned sources with explicit versioned Nexent policy into strict
+    model/provider definitions and provider-model drafts without transport or persistence.
+  business_rules:
+  - rule_id: SDK-MODEL-PROFILE-COMPOSITION-RULE-01
+    description: Supplemented capability, instruction and parameter declarations retain
+      exact source and override evidence; no inferred provider behavior.
+  - rule_id: SDK-MODEL-PROFILE-COMPOSITION-RULE-02
+    description: Exact selections first combine upstream facts, then apply model, provider
+      and exact-combination supplements in that priority order before user values.
+      Contradictory same-layer declarations and unregistered references fail explicitly.
+  - rule_id: SDK-MODEL-PROFILE-COMPOSITION-RULE-03
+    description: Source and supplement revisions identify immutable complete catalogs;
+      invalid loads never publish partial definitions.
+  required_test_stages:
+  - D1
+  source:
+    requirement_ids:
+    - MODEL-PROFILE-COMPOSITION-20261013
+    notes: SPEC AC-01/02/07; this component does not prove provider availability,
+      saved outlets or Agent execution.

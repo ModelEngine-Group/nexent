@@ -1,0 +1,32 @@
+schema_version: '1.0'
+change:
+  change_id: MODEL-OUTLET-RESOLUTION-20261013
+  change_type: requirement
+  requirement_id: MODEL-OUTLET-RESOLUTION-20261013
+  title: Construct complete resolved outlet snapshots
+  description: Connect composed policy with save-time validated outlet identity, connection and provenance.
+  affected_features:
+    existing: []
+    added:
+    - SDK-MODEL-OUTLET-RESOLUTION
+    modified: []
+    retired: []
+  affected_cases:
+    existing: []
+    added:
+    - MPR-D1-001
+    modified: []
+    retired: []
+  traditional_ut:
+    decision: add
+    behaviors:
+    - Complete new snapshots preserve exact request identity, composed values, traditional mapping and atomic source provenance.
+    - Construction checks connection, implementation versions and protected extra fields without reapplying defaults or retaining
+      raw credentials.
+    - Saved snapshots load without source access; mismatched catalog revisions and inconsistent selections fail before persistence.
+    reason: New constructor needs unit normal/boundary/error assertions; D1 proves actual collaboration missing from independent
+      composition and storage UT.
+    test_selectors:
+    - test/sdk/core/model_service/test_outlet_resolution.py
+  notes: 'D1 admission: MPC ends at composed policy, MOP starts with a synthetic DTO; neither proves actual source policy
+    can become a persistable snapshot. Existing Cases remain unchanged.'

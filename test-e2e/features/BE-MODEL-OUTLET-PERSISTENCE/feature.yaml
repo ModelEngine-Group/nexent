@@ -1,0 +1,22 @@
+schema_version: '1.0'
+module:
+  id: MODEL-SERVICE
+  name: Model service
+feature:
+  feature_id: BE-MODEL-OUTLET-PERSISTENCE
+  name: Transactional resolved outlet persistence
+  status: planned
+  description: Persist and restore complete model configuration with tenant isolation and optimistic updates.
+  business_rules:
+  - rule_id: BE-MODEL-OUTLET-PERSISTENCE-RULE-01
+    description: Creation and restoration use one row and a caller-owned transaction without source composition or duplicate credentials.
+  - rule_id: BE-MODEL-OUTLET-PERSISTENCE-RULE-02
+    description: Reads and updates enforce tenant and active state; updates check expected revision and reject immutable identity/rule changes.
+  - rule_id: BE-MODEL-OUTLET-PERSISTENCE-RULE-03
+    description: SQL failures and stale updates cannot partially write configuration; errors do not expose credentials.
+  - rule_id: BE-MODEL-OUTLET-PERSISTENCE-RULE-04
+    description: Conversation preferences store only explicit values per outlet in the owned conversation row; independent revisions and explicit deletion never modify outlet defaults or model-visible metadata.
+  required_test_stages: [D3]
+  source:
+    requirement_ids: [MODEL-OUTLET-PERSISTENCE-20261013]
+    notes: Backend storage boundary; UI, request transport and legacy conversion remain separate work.

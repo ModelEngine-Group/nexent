@@ -1,0 +1,28 @@
+schema_version: '1.0'
+change:
+  change_id: MODEL-OUTLET-SCHEMA-20261013
+  change_type: requirement
+  requirement_id: MODEL-OUTLET-SCHEMA-20261013
+  title: Extend model outlet storage schema
+  description: Add capability/configuration columns and strict top_p capability support without legacy data conversion.
+  affected_features:
+    existing: []
+    added: [BE-MODEL-OUTLET-SCHEMA]
+    modified: []
+    retired: []
+  affected_cases:
+    existing: []
+    added: [MOS-D5-001]
+    modified: []
+    retired: []
+  traditional_ut:
+    decision: add
+    behaviors:
+    - ORM columns expose the reviewed types, unknown defaults and emitted database comments.
+    - top_p capability has strict supported/unsupported/unknown semantics and a versioned explicit override path.
+    reason: Existing unit tests do not cover outlet schema metadata or top_p; actual SQL execution and failure recovery require distinct D5 proof.
+    test_selectors:
+    - test/backend/database/test_model_outlet_schema.py
+    - test/sdk/core/model_service/test_profile_capabilities.py
+    - test/sdk/core/model_service/test_composition.py
+  notes: Designed before schema implementation. Unit selectors now exist; formal script and actual PostgreSQL verification remain pending. No SQL execution pass is claimed.

@@ -1,0 +1,74 @@
+schema_version: '1.0'
+stage: D1
+module: MODEL-SERVICE
+case:
+  case_id: MPR-D1-001
+  feature_id: SDK-MODEL-OUTLET-RESOLUTION
+  business_rule_ids:
+  - SDK-MODEL-OUTLET-RESOLUTION-RULE-01
+  - SDK-MODEL-OUTLET-RESOLUTION-RULE-02
+  - SDK-MODEL-OUTLET-RESOLUTION-RULE-03
+  title: Compose and restore source-independent complete outlets
+  type: SDK-UT
+  priority: P1
+  status: active
+  automation: automated
+  objective: Prove real source/policy/construction/codec collaboration with only implementation availability controlled.
+  preconditions:
+  - Shipped sources available; controlled registry does not claim production adapter availability.
+  test_data:
+    configuration: Shipped Alibaba Qwen and custom endpoint fixtures; no real credentials.
+  steps:
+  - order: 1
+    action: Read shipped TOML/supplements, compose Alibaba Qwen, construct and encode/restore a complete outlet.
+    expected: Exact identity, parameters, mapping and source/override provenance survive.
+  - order: 2
+    action: Construct custom provider with an explicitly chosen model atom, encode its row, modify copied source and disable
+      catalog access before loading.
+    expected: User request identity stays distinct from atom identity; saved snapshot is unchanged without default reapplication
+      or external calls.
+  - order: 3
+    action: Try stale catalog revision, inconsistent policy selection, unavailable binding and protected extra request paths.
+    expected: Invalid combinations fail before publishing storage output; diagnostics exclude submitted private values.
+  expected_results: &id001
+  - Exact identity, parameters, mapping and source/override provenance survive.
+  - User request identity stays distinct from atom identity; saved snapshot is unchanged without default reapplication or
+    external calls.
+  - Invalid combinations fail before publishing storage output; diagnostics exclude submitted private values.
+  forbidden_side_effects:
+  - No network/provider execution, database write or shipped source mutation.
+  - No raw credentials/private parameter values in diagnostics or source access during saved-row loading.
+  acceptance:
+  - id: AC-01
+    description: Exact identity, parameters, mapping and source/override provenance survive.
+    steps:
+    - 1
+    expected_results:
+    - 1
+    forbidden_side_effects:
+    - 1
+    - 2
+  - id: AC-02
+    description: User request identity stays distinct from atom identity; saved snapshot is unchanged without default reapplication
+      or external calls.
+    steps:
+    - 2
+    expected_results:
+    - 2
+    forbidden_side_effects:
+    - 1
+    - 2
+  - id: AC-03
+    description: Invalid combinations fail before publishing storage output; diagnostics exclude submitted private values.
+    steps:
+    - 3
+    expected_results:
+    - 3
+    forbidden_side_effects:
+    - 1
+    - 2
+  unit_boundary: Real source reader, supplement loader, composer, outlet constructor and row codecs; only implementation availability
+    is controlled.
+  inputs:
+  - Shipped Alibaba Qwen policy, explicit custom model/provider selection, copied source changes and invalid combinations.
+  assertions: *id001
