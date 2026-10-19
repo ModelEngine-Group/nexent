@@ -37,7 +37,13 @@ import { DEFAULT_CONVERSATION_KNOWLEDGE_SCOPE } from "@/types/knowledgeScope";
 import { ResourceCard } from "@/features/workbench";
 import { ResourceSelectionRow } from "@/features/workbench/components/ResourceSelectionRow";
 import { useToolList } from "@/hooks/agent/useToolList";
-import { aidpErrors, mergeAidpConfig } from "@/lib/aidpRetrievalConfig";
+import {
+  aidpDefaults,
+  aidpErrors,
+  mergeAidpConfig,
+} from "@/lib/aidpRetrievalConfig";
+import { ParamDialog } from "@/components/resource-picker/ParamDialog";
+import { AidpRetrievalParamsForm } from "@/components/tool-config/AidpRetrievalParamsForm";
 import { KnowledgeRetrievalParamsForm } from "@/components/tool-config/KnowledgeRetrievalParamsForm";
 import {
   AIDP_NON_PERSISTED_PARAM_NAMES,
@@ -961,66 +967,80 @@ export const ConversationKnowledgeScopeModal: FC<
           )}
         </Spin>
       </ResourcePickerPresentation>
-      <Modal
-        open={retrievalOpen && open}
-        width={configuredSource === "aidp" ? 480 : undefined}
-        title={t("agent.knowledge.configModal.title")}
-        onCancel={() => setRetrievalOpen(false)}
-        okText={t("common.confirm", "确定")}
-        cancelText={t("common.cancel", "取消")}
-        destroyOnHidden={configuredSource === "aidp"}
-        okButtonProps={{
-          disabled:
+      {configuredSource === "aidp" && retrievalOpen && open ? (
+        <ParamDialog
+          open
+          variant="tool"
+          title={t("aidpRetrieval.title")}
+          onClose={() => setRetrievalOpen(false)}
+          onConfirm={() => {
+            if (disabled) return;
+            setDraft((current) => ({
+              ...current,
+              retrieval_config: { ...retrievalDraft },
+            }));
+            setRetrievalOpen(false);
+          }}
+          confirmDisabled={
+            disabled ||
             toolsLoading ||
-            disabled ||
-            (configuredSource === "aidp" &&
-              Object.keys(aidpErrors(aidpRetrievalValues)).length > 0),
-        }}
-        onOk={() => {
-          if (
-            disabled ||
-            (configuredSource === "aidp" &&
-              Object.keys(aidpErrors(aidpRetrievalValues)).length > 0)
-          )
-            return;
-          setDraft((current) => ({
-            ...current,
-            retrieval_config: { ...retrievalDraft },
-          }));
-          setRetrievalOpen(false);
-        }}
-      >
-        <KnowledgeRetrievalParamsForm
-          disabled={disabled}
-          toolName={configuredSource === "aidp" ? "aidp_search" : undefined}
-          onPatch={(patch) =>
-            setRetrievalDraft((current) => ({ ...current, ...patch }))
+            Object.keys(aidpErrors(aidpRetrievalValues)).length > 0
           }
-          params={retrievalParams}
-          values={
-            configuredSource === "aidp"
-              ? aidpRetrievalValues
-              : Object.fromEntries(
-                  retrievalParams.map((param: ToolParam) => [
-                    param.name,
-                    retrievalDraft[param.name] ??
-                      capabilities?.sources[configuredSource ?? "local"]
-                        .default_retrieval_config?.[param.name] ??
-                      param.value ??
-                      param.default,
-                  ])
-                )
-          }
-          onChange={(name, next) =>
-            setRetrievalDraft((current) => {
-              const value = { ...current };
-              if (next == null) delete value[name];
-              else value[name] = next;
-              return value;
-            })
-          }
-        />
-      </Modal>
+          onReset={() => setRetrievalDraft({ ...aidpDefaults })}
+          resetText={t("aidpRetrieval.reset")}
+          resetDisabled={disabled}
+          destroyOnHidden
+        >
+          <AidpRetrievalParamsForm
+            values={aidpRetrievalValues}
+            disabled={disabled}
+            scope="conversation"
+            onChange={(patch) =>
+              setRetrievalDraft((current) => ({ ...current, ...patch }))
+            }
+          />
+        </ParamDialog>
+      ) : (
+        <Modal
+          open={retrievalOpen && open}
+          title={t("agent.knowledge.configModal.title")}
+          onCancel={() => setRetrievalOpen(false)}
+          okText={t("common.confirm", "确定")}
+          cancelText={t("common.cancel", "取消")}
+          okButtonProps={{ disabled: toolsLoading || disabled }}
+          onOk={() => {
+            if (disabled) return;
+            setDraft((current) => ({
+              ...current,
+              retrieval_config: { ...retrievalDraft },
+            }));
+            setRetrievalOpen(false);
+          }}
+        >
+          <KnowledgeRetrievalParamsForm
+            disabled={disabled}
+            params={retrievalParams}
+            values={Object.fromEntries(
+              retrievalParams.map((param: ToolParam) => [
+                param.name,
+                retrievalDraft[param.name] ??
+                  capabilities?.sources[configuredSource ?? "local"]
+                    .default_retrieval_config?.[param.name] ??
+                  param.value ??
+                  param.default,
+              ])
+            )}
+            onChange={(name, next) =>
+              setRetrievalDraft((current) => {
+                const value = { ...current };
+                if (next == null) delete value[name];
+                else value[name] = next;
+                return value;
+              })
+            }
+          />
+        </Modal>
+      )}
     </>
   );
 };

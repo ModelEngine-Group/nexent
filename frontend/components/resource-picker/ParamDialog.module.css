@@ -97,6 +97,23 @@
   background: #efefef !important;
 }
 
+.resetLink {
+  margin-right: auto;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: #777;
+  font-family: "Huawei Sans", "HarmonyOS Sans SC", sans-serif;
+  font-size: 12px;
+  line-height: 16px;
+  cursor: pointer;
+}
+
+.resetLink:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
 .cancelButton,
 .confirmButton {
   width: 96px !important;

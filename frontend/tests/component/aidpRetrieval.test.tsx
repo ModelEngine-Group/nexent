@@ -13,7 +13,7 @@ import {
 } from "@/lib/aidpRetrievalConfig";
 
 vi.mock("react-i18next", () => ({
-  useTranslation: () => ({ t: (s: string) => s }),
+  useTranslation: () => ({ t: (s: string) => s, i18n: { language: "en" } }),
 }));
 
 function Controlled({ initial = {} }: { initial?: Record<string, unknown> }) {
@@ -32,6 +32,16 @@ const field = (name: string) =>
   screen.getByRole("spinbutton", { name: `aidpRetrieval.fields.${name}` });
 const change = (name: string, value: string) =>
   fireEvent.change(field(name), { target: { value } });
+const group = (channel: string) =>
+  screen.getByRole("region", { name: `aidpRetrieval.groups.${channel}` });
+const candidateField = (channel: "vector_search" | "full_text_search") =>
+  within(group(channel)).getByRole("spinbutton", {
+    name: "aidpRetrieval.fields.initialCandidates",
+  });
+const changeCandidate = (
+  channel: "vector_search" | "full_text_search",
+  value: string
+) => fireEvent.change(candidateField(channel), { target: { value } });
 
 describe("AIDP retrieval policy and controlled form", () => {
   it("reflects single-channel values when a tool configuration finishes loading", () => {
@@ -51,15 +61,15 @@ describe("AIDP retrieval policy and controlled form", () => {
     expect(update).not.toHaveBeenCalled();
     fireEvent.click(screen.getByText("aidpRetrieval.details"));
     expect(
-      screen.queryByRole("spinbutton", {
-        name: "aidpRetrieval.fields.vector_candidates",
+      screen.queryByRole("region", {
+        name: "aidpRetrieval.groups.vector_search",
       })
     ).not.toBeInTheDocument();
     expect(
       screen.getByRole("spinbutton", {
         name: "aidpRetrieval.fields.graph_top_k",
       })
-    ).toHaveValue("0");
+    ).toHaveValue(0);
   });
   it.each(policyFixtures)("shares Python policy fixtures: $name", (fixture) => {
     expect(resolveAidpConfig(fixture.config)).toMatchObject(fixture.expected);
@@ -113,19 +123,21 @@ describe("AIDP retrieval policy and controlled form", () => {
   it("starts collapsed, follows until manually set and restores following", () => {
     render(<Controlled />);
     expect(
-      screen.queryByRole("spinbutton", {
-        name: "aidpRetrieval.fields.vector_candidates",
+      screen.queryByRole("region", {
+        name: "aidpRetrieval.groups.vector_search",
       })
     ).not.toBeInTheDocument();
     fireEvent.click(screen.getByText("aidpRetrieval.details"));
     change("top_k", "30");
-    expect(field("vector_candidates")).toHaveValue("30");
-    change("vector_candidates", "50");
+    expect(candidateField("vector_search")).toHaveValue(30);
+    changeCandidate("vector_search", "50");
     change("top_k", "40");
-    expect(field("vector_candidates")).toHaveValue("50");
-    expect(field("full_text_candidates")).toHaveValue("40");
-    fireEvent.click(screen.getAllByText("aidpRetrieval.follow")[0]);
-    expect(field("vector_candidates")).toHaveValue("40");
+    expect(candidateField("vector_search")).toHaveValue(50);
+    expect(candidateField("full_text_search")).toHaveValue(40);
+    fireEvent.click(
+      within(group("vector_search")).getByText("aidpRetrieval.resumeFollow")
+    );
+    expect(candidateField("vector_search")).toHaveValue(40);
     expect(
       JSON.parse(screen.getByTestId("config").textContent!).vector_candidates
     ).toBeNull();
@@ -153,17 +165,17 @@ describe("AIDP retrieval policy and controlled form", () => {
     fireEvent.click(screen.getByText(/aidpRetrieval.combination/));
     fireEvent.click(
       screen.getByRole("checkbox", {
-        name: "aidpRetrieval.methods.graph_search",
+        name: "aidpRetrieval.channelShort.graph_search",
       })
     );
     fireEvent.click(
       screen.getByRole("checkbox", {
-        name: "aidpRetrieval.methods.full_text_search",
+        name: "aidpRetrieval.channelShort.full_text_search",
       })
     );
     expect(
       screen.getByRole("checkbox", {
-        name: "aidpRetrieval.methods.vector_search",
+        name: "aidpRetrieval.channelShort.vector_search",
       })
     ).toBeChecked();
     const raw = JSON.parse(screen.getByTestId("config").textContent!);
@@ -193,10 +205,10 @@ describe("AIDP retrieval policy and controlled form", () => {
         onConfirm={confirm}
       />
     );
-    expect(field("top_k")).toHaveValue("7");
+    expect(field("top_k")).toHaveValue(7);
     expect(
-      screen.queryByRole("spinbutton", {
-        name: "aidpRetrieval.fields.vector_candidates",
+      screen.queryByRole("region", {
+        name: "aidpRetrieval.groups.vector_search",
       })
     ).not.toBeInTheDocument();
     change("top_k", "30");

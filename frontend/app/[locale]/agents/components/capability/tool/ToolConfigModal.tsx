@@ -1485,6 +1485,17 @@ export default function ToolConfigModal({
   const aidpInvalid =
     isAidpTool(tool?.name) && Object.keys(aidpErrors(aidpValues)).length > 0;
 
+  const applyAidpPatch = (patch: Record<string, unknown>) => {
+    const fields: Record<string, unknown> = {};
+    const updated = currentParams.map((param, index) => {
+      if (!(param.name in patch)) return param;
+      fields[`param_${index}`] = patch[param.name];
+      return { ...param, value: patch[param.name] };
+    });
+    form.setFieldsValue(fields);
+    setCurrentParams(updated);
+  };
+
   const handleSave = async () => {
     if (aidpInvalid) return;
     // Mark that user has attempted to submit the form
@@ -2271,6 +2282,15 @@ export default function ToolConfigModal({
         }
         cancelText={t("common.cancel")}
         destroyOnHidden={isAidpTool(tool?.name)}
+        onReset={
+          isAidpTool(tool?.name)
+            ? () => applyAidpPatch({ ...aidpDefaults })
+            : undefined
+        }
+        resetText={
+          isAidpTool(tool?.name) ? t("aidpRetrieval.reset") : undefined
+        }
+        resetDisabled={isLoading}
         confirmDisabled={
           isLoading || hasFormErrors || hasEmptyRequired || aidpInvalid
         }
@@ -2312,16 +2332,9 @@ export default function ToolConfigModal({
               {isAidpTool(tool?.name) && (
                 <AidpRetrievalParamsForm
                   values={aidpValues}
-                  onChange={(patch) => {
-                    const fields: Record<string, unknown> = {};
-                    const updated = currentParams.map((param, index) => {
-                      if (!(param.name in patch)) return param;
-                      fields[`param_${index}`] = patch[param.name];
-                      return { ...param, value: patch[param.name] };
-                    });
-                    form.setFieldsValue(fields);
-                    setCurrentParams(updated);
-                  }}
+                  disabled={isLoading}
+                  scope="tool"
+                  onChange={applyAidpPatch}
                 />
               )}
               {currentParams.map((param, index) => {

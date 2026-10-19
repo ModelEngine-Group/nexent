@@ -132,29 +132,34 @@ it("AIDP conversation draft clears inherited candidates with null and cancels wi
     })
   );
   const settings = within(
-    (
-      await screen.findByText("agent.knowledge.configModal.title")
-    ).closest<HTMLElement>('[role="dialog"]')!
+    (await screen.findByText("aidpRetrieval.title")).closest<HTMLElement>(
+      '[role="dialog"]'
+    )!
   );
   expect(
     settings.getByRole("spinbutton", { name: "aidpRetrieval.fields.top_k" })
-  ).toHaveValue("7");
+  ).toHaveValue(7);
   await userEvent.click(settings.getByText("aidpRetrieval.details"));
-  expect(
-    settings.getByRole("spinbutton", {
-      name: "aidpRetrieval.fields.vector_candidates",
+  const vectorGroup = within(
+    settings.getByRole("region", {
+      name: "aidpRetrieval.groups.vector_search",
     })
-  ).toHaveValue("30");
-  await userEvent.click(settings.getAllByText("aidpRetrieval.follow")[0]);
+  );
+  expect(
+    vectorGroup.getByRole("spinbutton", {
+      name: "aidpRetrieval.fields.initialCandidates",
+    })
+  ).toHaveValue(30);
+  await userEvent.click(vectorGroup.getByText("aidpRetrieval.resumeFollow"));
   fireEvent.change(
     settings.getByRole("spinbutton", { name: "aidpRetrieval.fields.top_k" }),
     { target: { value: "9" } }
   );
   expect(
-    settings.getByRole("spinbutton", {
-      name: "aidpRetrieval.fields.vector_candidates",
+    vectorGroup.getByRole("spinbutton", {
+      name: "aidpRetrieval.fields.initialCandidates",
     })
-  ).toHaveValue("9");
+  ).toHaveValue(9);
   expect(confirm).not.toHaveBeenCalled();
   await userEvent.click(
     settings.getByRole("button", { name: "common.confirm" })

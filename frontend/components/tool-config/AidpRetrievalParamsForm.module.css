@@ -1,0 +1,394 @@
+/* Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved. */
+
+/* Visual contract ported from the approved prototype:
+   local-docs/aidp-graph-retrieval/ui-reference/aidp-retrieval-settings-refined.html */
+
+.form {
+  position: relative;
+  font-family: inherit;
+  font-size: 14px;
+  line-height: 22px;
+  color: #191919;
+}
+
+.form * {
+  box-sizing: border-box;
+}
+
+.scope {
+  margin: 0 0 20px;
+  font-size: 12px;
+  line-height: 18px;
+  color: #777;
+}
+
+.fields {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 16px;
+}
+
+.field {
+  min-width: 0;
+}
+
+.full {
+  grid-column: 1 / -1;
+}
+
+.commonFields {
+  margin-top: 16px;
+}
+
+.heading {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 22px;
+  margin-bottom: 8px;
+}
+
+.heading label {
+  min-width: 0;
+}
+
+.helpButton {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+  padding: 0;
+  border: 1px solid #ccc;
+  border-radius: 50%;
+  background: transparent;
+  color: #888;
+  font-size: 12px;
+  line-height: 12px;
+  font-weight: 400;
+  cursor: help;
+}
+
+.control {
+  width: 100%;
+  height: 28px;
+  padding: 0 10px;
+  border: 1px solid #c9c9c9;
+  border-radius: 2px;
+  background: #fff;
+  color: #191919;
+  font: inherit;
+  font-size: 14px;
+  line-height: 22px;
+}
+
+.control:focus {
+  outline: 2px solid rgba(38, 115, 229, 0.15);
+  border-color: #2673e5;
+}
+
+.control[aria-invalid="true"] {
+  border-color: #d54941;
+}
+
+.control:disabled,
+.select:disabled {
+  background: #f5f5f5;
+  color: #777;
+  cursor: not-allowed;
+}
+
+.selectDescription {
+  margin: 6px 0 0;
+  color: #777;
+  font-size: 12px;
+  line-height: 18px;
+}
+
+.switchRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 28px;
+}
+
+.switch {
+  position: relative;
+  flex: 0 0 auto;
+  width: 38px;
+  height: 20px;
+  margin: 0;
+  border: 0;
+  border-radius: 10px;
+  background: #ccc;
+  appearance: none;
+  cursor: pointer;
+}
+
+.switch::after {
+  content: "";
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: #fff;
+  transition: transform 0.15s;
+}
+
+.switch:checked {
+  background: #0067d1;
+}
+
+.switch:checked::after {
+  transform: translateX(18px);
+}
+
+.switch:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.switchState {
+  font-size: 12px;
+  color: #777;
+}
+
+.section {
+  margin-top: 18px;
+  border-top: 1px solid #eee;
+}
+
+.sectionSummary {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 13px 0 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-weight: 500;
+  text-align: left;
+  cursor: pointer;
+}
+
+.sectionArrow {
+  display: inline-flex;
+  align-items: center;
+  color: #777;
+  transition: transform 0.15s;
+}
+
+.sectionArrowOpen {
+  transform: rotate(90deg);
+}
+
+.sectionState {
+  margin-left: auto;
+  padding-left: 6px;
+  font-size: 12px;
+  font-weight: 400;
+  color: #777;
+  text-align: right;
+}
+
+.sectionContent {
+  padding-top: 16px;
+}
+
+.combinationSection {
+  margin-top: 0;
+  padding-bottom: 18px;
+  border-top: 0;
+}
+
+.combinationSection .sectionSummary {
+  padding-top: 0;
+}
+
+.choices {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px 20px;
+}
+
+.choice {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+}
+
+.choice input {
+  width: 14px;
+  height: 14px;
+  margin: 0;
+  accent-color: #0067d1;
+}
+
+.followRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+  margin-top: 5px;
+  color: #777;
+  font-size: 12px;
+  line-height: 18px;
+}
+
+.followLink {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: #2673e5;
+  font-size: 12px;
+  line-height: 18px;
+  cursor: pointer;
+}
+
+.group + .group {
+  margin-top: 18px;
+  padding-top: 14px;
+  border-top: 1px solid #eee;
+}
+
+.groupHeading {
+  margin: 0 0 12px;
+  color: #777;
+  font-size: 12px;
+  font-weight: 400;
+  line-height: 18px;
+}
+
+.graphSort {
+  margin-top: 14px;
+}
+
+.independentCount {
+  margin-top: 14px;
+}
+
+.inlineNote {
+  margin: 6px 0 0;
+  color: #777;
+  font-size: 12px;
+  line-height: 18px;
+}
+
+.validation {
+  margin: 14px 0 0;
+  color: #c83e3e;
+  font-size: 12px;
+  line-height: 18px;
+}
+
+.footer {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 16px;
+  margin-top: 24px;
+}
+
+.resetLink {
+  margin-right: auto;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: #777;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.resetLink:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.button {
+  width: 96px;
+  height: 32px;
+  padding: 5px 12px;
+  border: 1px solid #c9c9c9;
+  border-radius: 4px;
+  background: #fff;
+  color: #191919;
+  font: inherit;
+  font-size: 14px;
+  line-height: 22px;
+  cursor: pointer;
+}
+
+.buttonPrimary {
+  border: 0;
+  background: #2673e5;
+  color: #fff;
+}
+
+.button:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+/* Dark, sectioned help popover rendered in a body portal. */
+.helpPopover {
+  position: fixed;
+  z-index: 1300;
+  width: min(320px, calc(100vw - 24px));
+  padding: 12px 14px;
+  border-radius: 5px;
+  background: #242424;
+  color: #fff;
+  box-shadow: 0 3px 12px rgba(0, 0, 0, 0.15);
+  font-size: 12px;
+  line-height: 19px;
+  text-align: left;
+  overflow-wrap: anywhere;
+}
+
+.helpPart + .helpPart {
+  margin-top: 10px;
+}
+
+.helpHeading {
+  margin-bottom: 3px;
+  font-weight: 500;
+}
+
+.helpBody {
+  margin: 0;
+}
+
+.helpBody + .helpBody {
+  margin-top: 4px;
+}
+
+@media (max-width: 400px) {
+  .fields {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 14px;
+  }
+
+  .footer {
+    gap: 8px;
+  }
+
+  .button {
+    width: 76px;
+  }
+
+  .control {
+    height: 32px;
+    font-size: 16px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .form * {
+    transition: none !important;
+  }
+}
