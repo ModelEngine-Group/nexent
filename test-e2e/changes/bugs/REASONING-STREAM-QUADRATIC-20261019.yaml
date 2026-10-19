@@ -9,9 +9,11 @@ change:
     Every streamed chunk re-parses the full accumulated reasoning text through a
     single ReactMarkdown instance in ui/reasoning.tsx. At a measured ~4ms per KB
     per parse, one 40KB reasoning block costs ~30s of main-thread parsing and
-    freezes the page; multi-step NL2Agent creation runs that stream marathon
-    reasoning kill the tab entirely while the backend stays healthy (no errors,
-    all LLM calls 200).
+    freezes the page while the backend stays healthy (no errors, all LLM calls
+    200). Note: the hard "This page couldn't load" crash seen on the same
+    marathon runs is a SEPARATE defect (React error #185 from streaming parts
+    index reordering) fixed on branch fix/stream-parts-index-stability; this
+    change only bounds parse cost.
   expected_behavior: >-
     Per-chunk streaming cost stays proportional to the active tail (bounded by
     maxTailLength); sealed prefix segments parse exactly once and stay
@@ -52,5 +54,10 @@ change:
     tier-2/3 splits can change streaming rendering until completion, which is
     acceptable because the completed state re-renders the full text once.
     Adjacent risk not changed here: text parts still render through
-    MarkdownTextPrimitive full-text parsing while streaming; reasoning parts
-    were the crashing path.
+    MarkdownTextPrimitive full-text parsing while streaming. Correction after
+    deployment verification: this fix bounds parse cost only. The recurring
+    hard page crash ("This page couldn't load", React minified error #185)
+    reproduced WITH this fix deployed and is caused by streaming parts index
+    reordering in the adapter, not by parse cost; see bug record
+    STREAM-PARTS-INDEX-REORDER-20261019 on branch
+    fix/stream-parts-index-stability.
