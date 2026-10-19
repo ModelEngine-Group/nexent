@@ -30,12 +30,12 @@
       {
         "order": 2,
         "action": "Return source, id/text_id, score zero, pages and transient/errors from the protocol fixture.",
-        "expected": "Both wrappers preserve scope and provenance; retries remain limited to three transient attempts; invalid configuration causes no HTTP."
+        "expected": "Both wrappers preserve scope and provenance and share retrieval errors; missing/null/non-list result is rejected while an empty list is valid; retries remain limited to three transient attempts; invalid configuration causes no HTTP."
       }
     ],
     "expected_results": [
       "POST FusionSearch uses topk/multi_modal_enable, dynamic candidates, zero caps, channel-specific objects and no inactive fields.",
-      "Both wrappers preserve scope and provenance; retries remain limited to three transient attempts; invalid configuration causes no HTTP."
+      "Both wrappers preserve scope and provenance and share retrieval errors; missing/null/non-list result is rejected while an empty list is valid; retries remain limited to three transient attempts; invalid configuration causes no HTTP."
     ],
     "forbidden_side_effects": [
       "Do not mutate other configurations, expand managed scope, expose credentials or issue HTTP for invalid settings."
@@ -43,7 +43,7 @@
     "acceptance": [
       {
         "id": "AC-01",
-        "description": "POST FusionSearch uses topk/multi_modal_enable, dynamic candidates, zero caps, channel-specific objects and no inactive fields.; Both wrappers preserve scope and provenance; retries remain limited to three transient attempts; invalid configuration causes no HTTP.",
+        "description": "POST FusionSearch uses topk/multi_modal_enable, dynamic candidates, zero caps, channel-specific objects and no inactive fields.; Both wrappers preserve scope and provenance and share retrieval errors; missing/null/non-list result is rejected while an empty list is valid; retries remain limited to three transient attempts; invalid configuration causes no HTTP.",
         "steps": [
           1,
           2
@@ -65,7 +65,7 @@
         "POST FusionSearch uses topk/multi_modal_enable, dynamic candidates, zero caps, channel-specific objects and no inactive fields."
       ],
       "response_expectations": [
-        "Both wrappers preserve scope and provenance; retries remain limited to three transient attempts; invalid configuration causes no HTTP."
+        "Both wrappers preserve scope and provenance and share retrieval errors; missing/null/non-list result is rejected while an empty list is valid; retries remain limited to three transient attempts; invalid configuration causes no HTTP."
       ]
     }
   }

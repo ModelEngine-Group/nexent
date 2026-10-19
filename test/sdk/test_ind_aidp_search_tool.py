@@ -6,6 +6,7 @@ from unittest.mock import MagicMock
 import httpx
 import pytest
 
+import nexent.core.ext_components.aidp.retrieval_client as retrieval_client
 import nexent.core.tools.ind_aidp_search_tool as ind_aidp_search_tool_module
 from nexent.core.tools.ind_aidp_search_tool import (
     IndependentAidpSearchError,
@@ -55,7 +56,7 @@ def test_retries_transient_status_and_uses_bearer(monkeypatch):
     ]
     tool._http_client = MagicMock()
     tool._http_client.post.side_effect = responses
-    monkeypatch.setattr(ind_aidp_search_tool_module.time, "sleep", lambda _: None)
+    monkeypatch.setattr(retrieval_client.time, "sleep", lambda _: None)
 
     assert tool._execute_request("question") == []
     assert tool._http_client.post.call_count == 2
@@ -209,7 +210,7 @@ def test_exhausts_retries_then_raises(monkeypatch):
     request = httpx.Request("POST", tool._retrieve_url())
     tool._http_client = MagicMock()
     tool._http_client.post.return_value = httpx.Response(503, request=request)
-    monkeypatch.setattr(ind_aidp_search_tool_module.time, "sleep", lambda _: None)
+    monkeypatch.setattr(retrieval_client.time, "sleep", lambda _: None)
 
     with pytest.raises(IndependentAidpSearchError, match="HTTP 503"):
         tool._execute_request("question")
@@ -243,7 +244,8 @@ def test_forward_rejects_empty_query_and_wraps_http_errors():
     with pytest.raises(ValueError, match="query"):
         tool.forward("   ")
 
-    tool._execute_request = MagicMock(side_effect=httpx.HTTPError("boom"))
+    tool._http_client = MagicMock()
+    tool._http_client.post.side_effect = httpx.HTTPError("boom")
     with pytest.raises(IndependentAidpSearchError, match="HTTP error"):
         tool.forward("question")
 

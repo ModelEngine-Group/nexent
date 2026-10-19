@@ -397,7 +397,7 @@ class TestAidpSearchToolForward:
         with pytest.raises(Exception) as exc_info:
             aidp_tool.forward("query")
 
-        assert "AIDP HTTP error: boom" in str(exc_info.value)
+        assert "AIDP HTTP error: request failed (HTTPError" in str(exc_info.value)
 
     def test_forward_invalid_response_shape_raises_wrapped_exception(self, aidp_tool):
         mock_response = MagicMock()
@@ -408,7 +408,7 @@ class TestAidpSearchToolForward:
         with pytest.raises(Exception) as exc_info:
             aidp_tool.forward("query")
 
-        assert "AIDP search error: Invalid AIDP response" in str(exc_info.value)
+        assert "AIDP response field 'result' must be a list" in str(exc_info.value)
 
 
 class TestAidpBuildImageUrl:
@@ -899,8 +899,8 @@ class TestExecuteRequestRetry:
         assert len(records) == 1
         assert aidp_tool._mock_http_client.post.call_count == 2
 
-    def test_retry_503_all_attempts_exhausted_raises_503_specific(self, aidp_tool, monkeypatch):
-        """All 3 attempts return 503. Should raise AidpSearchError with 503-specific message."""
+    def test_retry_503_all_attempts_exhausted_raises_shared_error(self, aidp_tool, monkeypatch):
+        """All three failures use the shared status and attempt-count error."""
         resp_503 = self._make_response(503)
         aidp_tool._mock_http_client.post.return_value = resp_503
 
@@ -909,7 +909,7 @@ class TestExecuteRequestRetry:
 
         with pytest.raises(Exception) as exc_info:
             aidp_tool._execute_request("query", ["kb1"])
-        assert "temporarily unavailable" in str(exc_info.value).lower() or "503" in str(exc_info.value)
+        assert "HTTP 503 after 3 attempts" in str(exc_info.value)
         assert aidp_tool._mock_http_client.post.call_count == 3
 
     def test_retry_502_all_attempts_exhausted_raises_generic(self, aidp_tool, monkeypatch):
@@ -925,12 +925,12 @@ class TestExecuteRequestRetry:
         assert "502" in str(exc_info.value)
         assert aidp_tool._mock_http_client.post.call_count == 3
 
-    def test_no_retry_on_400(self, aidp_tool):
+    def test_no_retry_on_400(self, aidp_tool, aidp_module):
         """400 is not a retryable status. Should raise immediately after one call."""
         resp_400 = self._make_response(400)
         aidp_tool._mock_http_client.post.return_value = resp_400
 
-        with pytest.raises(httpx.HTTPStatusError):
+        with pytest.raises(aidp_module.AidpSearchError, match="HTTP 400 after 1 attempts"):
             aidp_tool._execute_request("query", ["kb1"])
         assert aidp_tool._mock_http_client.post.call_count == 1
 

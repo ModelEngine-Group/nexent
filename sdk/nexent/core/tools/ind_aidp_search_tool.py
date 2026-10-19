@@ -12,14 +12,12 @@ import re
 from typing import Any, Callable, Dict, List, Optional
 from urllib.parse import urljoin, urlparse
 
-import httpx
 from pydantic import Field
 from pydantic.fields import FieldInfo
 from smolagents.tools import Tool
 
 from ...utils.http_client_manager import http_client_manager
-from ..ext_components.aidp.retrieval_client import post_retrieval
-from ..ext_components.aidp.retrieval_client import time as time
+from ..ext_components.aidp.retrieval_client import AidpRetrievalError, post_retrieval
 from ..ext_components.aidp.retrieval_config import (
     ALL_CHANNELS,
     CONFIG_KEYS,
@@ -39,13 +37,11 @@ from ..utils.tools_common_message import (
 
 logger = logging.getLogger("ind_aidp_search_tool")
 
+IndependentAidpSearchError = AidpRetrievalError
+
 _MAX_KDS = 10
 _HTML_IMAGE_TAG_PATTERN = re.compile(r"<img\b[^>]*>", re.IGNORECASE)
 _IMAGE_MARKER_PATH = "/__aidp_image__/"
-
-
-class IndependentAidpSearchError(RuntimeError):
-    """Raised when independent AIDP retrieval cannot complete."""
 
 
 def _field_default(value: Any, fallback: Any) -> Any:
@@ -86,13 +82,13 @@ class IndependentAidpSearchTool(Tool):
     name = "ind_aidp_search"
     is_user_selectable = True
     description = (
-        "Searches independently configured AIDP knowledge bases with FusionSearch. "
+        "Searches independently configured AIDP knowledge bases using configured vector, full-text, graph or combined retrieval. "
         "The configured knowledge bases are the default scope; callers may provide a "
         "different kds_list for one invocation. Image results include safe image markers; copy a relevant marker "
         "unchanged into the final answer and never invent or expose an AIDP image URL."
     )
     description_zh = (
-        "通过独立配置的 AIDP FusionSearch 检索知识库。工具配置提供默认知识库范围，"
+        "按已配置的向量、全文、图谱或组合方式检索独立 AIDP 知识库。工具配置提供默认知识库范围，"
         "每次调用也可以传入不同的 kds_list。相关图片需原样引用结果中的安全图片标记。"
     )
     inputs = {
@@ -128,18 +124,24 @@ class IndependentAidpSearchTool(Tool):
             "description": "Knowledge base IDs fixed for this tool instance",
             "description_zh": "此工具实例固定检索的知识库 ID 列表",
         },
-        "search_method": {"description": "FusionSearch method", "description_zh": "检索方式"},
+        "search_method": {"description": "FusionSearch method", "description_zh": "检索方式：向量、全文、图谱或使用竖线分隔的组合"},
         "reranking_enable": {"description": "Enable reranking", "description_zh": "是否启用重排"},
-        "reranking_mode": {"description": "Reranking mode", "description_zh": "重排模式"},
+        "reranking_mode": {"description": "Reranking mode", "description_zh": "重排策略：性能优先、精度优先或术语覆盖"},
         "rewrite_enable": {"description": "Enable query rewrite", "description_zh": "是否启用查询改写"},
         "related_search_enable": {"description": "Enable related search", "description_zh": "是否启用关联检索"},
         "score_threshold": {"description": "Similarity threshold (0-1)", "description_zh": "相似度阈值（0-1）"},
         "top_k": {"description": "Number of results (1-100)", "description_zh": "返回结果数量（1-100）"},
         "multi_modal": {"description": "Return image/table chunks", "description_zh": "是否返回图片和表格块"},
+        "vector_candidates": {"description_zh": "向量候选数；未设置时跟随总返回上限"},
+        "full_text_candidates": {"description_zh": "全文候选数；未设置时跟随总返回上限"},
+        "hybrid_top_k": {"description_zh": "向量／全文部分返回上限；0 表示不单独限制，最终仍受总返回上限约束"},
+        "graph_top_k": {"description_zh": "图谱返回上限；0 表示不单独限制，最终仍受总返回上限约束"},
+        "vector_score_threshold": {"description_zh": "向量检索分数阈值，范围 0–1"},
+        "full_text_score_threshold": {"description_zh": "全文检索分数阈值，范围 0–1"},
+        "graph_score_threshold": {"description_zh": "图谱检索分数阈值，范围 0–1"},
+        "graph_reranking_enable": {"description_zh": "图谱是否参与重排；未设置时跟随全局重排开关"},
+        "query_expansion_enable": {"description_zh": "是否启用查询扩展"},
     }
-    init_param_descriptions.update({key: {"description": key.replace("_", " "), "description_zh": key}
-                                    for key in CONFIG_KEYS - init_param_descriptions.keys()})
-
     output_type = "string"
     category = ToolCategory.SEARCH.value
     tool_sign = ToolSign.INDEPENDENT_AIDP_SEARCH.value
@@ -150,9 +152,9 @@ class IndependentAidpSearchTool(Tool):
         api_key: str = Field(description="Independent AIDP API key"),
         tenant_id: str = Field(default="aidp", description="AIDP tenant identifier"),
         kds_list: List[str] = Field(default_factory=list, description="Knowledge base IDs"),
-        search_method: str = Field(default=ALL_CHANNELS, description="Search method"),
+        search_method: str = Field(default=ALL_CHANNELS, description="Retrieval channels: vector_search, full_text_search, graph_search or a pipe-separated combination"),
         reranking_enable: bool = Field(default=True, description="Enable reranking"),
-        reranking_mode: str = Field(default="performance", description="Reranking mode"),
+        reranking_mode: str = Field(default="performance", description="Reranking strategy: performance, high_accuracy or jargon_coverage"),
         rewrite_enable: bool = Field(default=False, description="Enable query rewrite"),
         related_search_enable: bool = Field(default=False, description="Enable related search"),
         score_threshold: float = Field(default=0.0, description="Score threshold", ge=0.0, le=1.0),
@@ -160,8 +162,8 @@ class IndependentAidpSearchTool(Tool):
         multi_modal: bool = Field(default=True, description="Return multimodal chunks"),
         vector_candidates: Optional[int] = Field(default=None, ge=1, le=500, description="Vector candidates; null follows top_k"),
         full_text_candidates: Optional[int] = Field(default=None, ge=1, le=500, description="Full-text candidates; null follows top_k"),
-        hybrid_top_k: int = Field(default=0, ge=0, le=100, description="Vector/full-text cap; zero is unlimited"),
-        graph_top_k: int = Field(default=0, ge=0, le=100, description="Graph cap; zero is unlimited"),
+        hybrid_top_k: int = Field(default=0, ge=0, le=100, description="Vector/full-text cap; zero means no separate cap, still bounded by top_k"),
+        graph_top_k: int = Field(default=0, ge=0, le=100, description="Graph cap; zero means no separate cap, still bounded by top_k"),
         vector_score_threshold: float = Field(default=0.0, ge=0.0, le=1.0, description="Vector threshold"),
         full_text_score_threshold: float = Field(default=0.0, ge=0.0, le=1.0, description="Full-text threshold"),
         graph_score_threshold: float = Field(default=0.0, ge=0.0, le=1.0, description="Graph threshold"),
@@ -225,19 +227,9 @@ class IndependentAidpSearchTool(Tool):
     def _execute_request(
         self, query: str, kds_list: Optional[List[str]] = None
     ) -> List[Dict[str, Any]]:
-        response = post_retrieval(self._http_client, self._retrieve_url(), self.api_key, self._payload(query, kds_list))
-        try:
-            response.raise_for_status()
-            data = response.json()
-        except httpx.HTTPStatusError as exc:
-            raise IndependentAidpSearchError(
-                f"AIDP FusionSearch returned HTTP {response.status_code}"
-            ) from exc
-        except ValueError as exc:
-            raise IndependentAidpSearchError("AIDP returned invalid JSON") from exc
-        if not isinstance(data, dict) or not isinstance(data.get("result"), list):
-            raise IndependentAidpSearchError("AIDP response field 'result' must be a list")
-        return data["result"]
+        return post_retrieval(
+            self._http_client, self._retrieve_url(), self.api_key, self._payload(query, kds_list),
+        )
 
     def _emit_running_prompt(self, query: str) -> None:
         if self.observer:
@@ -337,10 +329,8 @@ class IndependentAidpSearchTool(Tool):
                 scope.scope_was_specified,
             )
         self._emit_running_prompt(normalized_query)
-        try:
-            records = self._execute_request(normalized_query, search_kds_list)
-        except httpx.HTTPError as exc:
-            raise IndependentAidpSearchError(f"AIDP HTTP error: {exc}") from exc
+        records = self._execute_request(normalized_query, search_kds_list)
+
         if not records:
             return build_knowledge_search_response(
                 [],

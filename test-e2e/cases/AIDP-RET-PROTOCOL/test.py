@@ -8,6 +8,7 @@ import httpx
 import pytest
 
 from nexent.core.ext_components.aidp.aidp_search_tool import AidpSearchError, AidpSearchTool
+from nexent.core.ext_components.aidp.retrieval_client import AidpRetrievalError
 from nexent.core.ext_components.aidp.retrieval_config import SEARCH_METHODS, validate_config
 from nexent.core.tools.ind_aidp_search_tool import IndependentAidpSearchError, IndependentAidpSearchTool
 from nexent.core.utils.observer import MessageObserver
@@ -96,14 +97,14 @@ def test_wire_channels_and_sources(provider, method):
 def test_wire_retry_errors_and_no_invalid_http(provider):
     url,state=provider
     for tool in tools(url):
-        error=AidpSearchError if isinstance(tool,AidpSearchTool) else IndependentAidpSearchError
-        for statuses,body,attempts,fails in [([503,200],{"result":[]},2,False),([503]*3,{"result":[]},3,True),([400],{"result":[]},1,True),([200],b"not-json",1,True),([200],{"result":{}},1,True)]:
+        assert AidpSearchError is IndependentAidpSearchError is AidpRetrievalError
+        for statuses,body,attempts,fails in [([503,200],{"result":[]},2,False),([503]*3,{"result":[]},3,True),([400],{"result":[]},1,True),([200],b"not-json",1,True),([200],{"result":{}},1,True),([200],{},1,True),([200],{"result":None},1,True),([200],[],1,True)]:
             state.update(statuses=statuses,body=body)
             before=len(state["requests"])
             with httpx.Client() as client:
                 tool._http_client=client
                 if fails:
-                    with pytest.raises((error,httpx.HTTPStatusError,ValueError)):
+                    with pytest.raises(AidpRetrievalError):
                         tool._execute_request("q",["kb"])
                 else:
                     assert tool._execute_request("q",["kb"])==[]
