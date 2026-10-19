@@ -112,6 +112,3 @@ agent_repository_frontend
 .codex/skills/openspec-*
 # Added by Serena MCP
 .serena/
-
-# Keep PR verification screenshots outside version control.
-/docs/pr-assets/
