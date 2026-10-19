@@ -1000,6 +1000,7 @@ const ThreadView: FC<ThreadViewProps> = ({
                 emptyFooterContent
               ))}
             <Composer
+              conversationId={conversationId}
               debugLayout={debugLayout}
               models={models}
               selectedModelId={selectedModelId}

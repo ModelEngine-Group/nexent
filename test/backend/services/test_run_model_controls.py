@@ -121,6 +121,7 @@ def test_creator_alias_preserves_independent_models_and_real_record(mocker):
               "temperature": 0.43, "top_p": 0.78, "max_input_tokens": 7000,
               "extra_params": {"enable_thinking": True, "reasoning_effort": "medium"}}
     from agents import create_agent_info
+    mocker.patch.object(create_agent_info, "restore_model_snapshot", return_value=None)
     mocker.patch.object(create_agent_info, "_resolve_reasoning_capability", return_value=base.reasoning_capability)
     mocker.patch.object(run_controls, "get_model_by_model_id", return_value=record)
     models = [base, independent]
@@ -365,3 +366,22 @@ def test_creator_dto_preserves_typed_overlay_presence_and_ignores_empty_snapshot
     request = NL2SkillRunRequest(query="create", generation_config=overlay, workbench_config={"model_id": 9})
     assert request.generation_config.model_dump(exclude_unset=True) == {"thinking_effort": "xhigh"}
     assert overlay.model_fields_set == {"thinking_effort"}
+
+
+@pytest.mark.parametrize('values,effort,budget,expected', [
+    ({'temperature': 0, 'top_p': 0.7}, None, None, {'temperature': 0, 'top_p': 0.7}),
+    ({'deep_thinking': False}, None, None, {'enable_thinking': False}),
+    ({'thinking_effort': 'high'}, 'high', None, {'reasoning_effort': 'high'}),
+    ({'reasoning_budget_tokens': 4096}, None, 4096, {'reasoning_budget_tokens': 4096}),
+])
+def test_resolved_overlay_sends_only_explicit_controls_to_frozen_profile(mocker, values, effort, budget, expected):
+    frozen = Mock(schema_version=1)
+    root = model(resolved_profile=frozen, enable_thinking=False,
+                 reasoning_effort=effort, reasoning_budget_tokens=budget)
+    options = mocker.patch('nexent.core.model_service.compatibility.invocation_options.LegacyInvocationOptions')
+    updated = Mock()
+    options.return_value.resolve.return_value = updated
+    assert run_controls._bind_resolved_overlay(root, values) is root
+    options.assert_called_once_with(expected)
+    options.return_value.resolve.assert_called_once_with(frozen)
+    assert root.resolved_profile is updated

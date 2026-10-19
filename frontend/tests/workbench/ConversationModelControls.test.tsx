@@ -183,3 +183,12 @@ describe("shared conversation model controls", () => {
       );
   });
 });
+
+
+it("keeps the outlet selection without sending legacy defaults over saved profile preferences", () => {
+  const options: ModelOption[] = [{ id: "42", name: "Profile", profileSchemaVersion: 1 }];
+  const { result } = renderHook(() => useConversationModelControls(options, "profile"));
+  expect(result.current.snapshot).toEqual({ model_id: 42, generation_config: {} });
+  act(() => result.current.onDeepThinkingChange(true));
+  expect(result.current.snapshot).toEqual({ model_id: 42, generation_config: {} });
+});

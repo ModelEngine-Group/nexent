@@ -1,3 +1,5 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import type {
   WorkbenchCapabilityPreview,
   WorkbenchAgentMount,
@@ -42,6 +44,7 @@ export const initialWorkbenchState: WorkbenchState = {
   config: {
     schema_version: 3,
     mode: "generic_chat",
+    model_parameters_source: "outlet_preferences",
     generation_config: { deep_thinking: false, thinking_effort: "low" },
     agent_mounts: [],
     skill_mounts: [],

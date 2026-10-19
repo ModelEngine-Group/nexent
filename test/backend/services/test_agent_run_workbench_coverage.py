@@ -10,6 +10,8 @@ import pytest
 from test.backend.services import test_agent_service as legacy
 
 
+from test.backend.services.test_agent_service import isolate_conversation_model_preferences  # noqa: F401
+
 agent_run = legacy.agent_run_service
 agent_subscription = legacy.agent_subscription
 AgentRequest = legacy.AgentRequest
@@ -103,12 +105,15 @@ def test_apply_workbench_runtime_plan_attaches_all_runtime_overrides(monkeypatch
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("stored_generation", [True, False])
+@pytest.mark.parametrize("preferences,is_debug", [({}, False), ({"12": {"temperature": 0}}, False), ({"12": {"temperature": 0}}, True)])
 async def test_prepare_agent_run_forwards_workbench_runtime_state(
-    monkeypatch, stored_generation
+    monkeypatch, stored_generation, preferences, is_debug
 ):
     from consts.model import WorkbenchGenerationConfig
 
-    request = _request()
+    request = _request(is_debug=is_debug)
+    preference_reader = MagicMock(return_value={"model_parameter_preferences": preferences})
+    monkeypatch.setattr(agent_run, "_read_model_preferences", preference_reader)
     request.__dict__["_runtime_knowledge_context"] = {"policy": "strict"}
     request.__dict__["_runtime_knowledge_tools"] = [{"id": "knowledge"}]
     request.__dict__["_runtime_skill_snapshot"] = {"1": ["skill-a"]}
@@ -158,6 +163,14 @@ async def test_prepare_agent_run_forwards_workbench_runtime_state(
     )
 
     kwargs = create_run.await_args.kwargs
+    if not is_debug:
+        preference_reader.assert_called_once_with(123, "user-a")
+    else:
+        preference_reader.assert_not_called()
+    if preferences and not is_debug:
+        assert kwargs["model_parameter_preferences"] == preferences
+    else:
+        assert "model_parameter_preferences" not in kwargs
     assert kwargs["runtime_knowledge_context"] == {"policy": "strict"}
     assert kwargs["runtime_knowledge_tools"] == [{"id": "knowledge"}]
     assert kwargs["runtime_skill_snapshot"] == {"1": ["skill-a"]}

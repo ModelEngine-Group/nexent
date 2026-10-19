@@ -1,0 +1,21 @@
+schema_version: '1.0'
+module:
+  id: SDK-MODEL-SERVICE
+  name: SDK model service
+feature:
+  feature_id: SDK-MODEL-PROFILE-PARAMETERS
+  name: Model profile parameter rules and values
+  status: planned
+  description: Finite declarative parameter schemas, permissions and value application shared by outlet and conversation configuration.
+  business_rules:
+  - rule_id: SDK-MODEL-PROFILE-PARAMETERS-RULE-01
+    description: Accept only the declared finite schema keywords and JSON values, with no remote references, scripts or coercion.
+  - rule_id: SDK-MODEL-PROFILE-PARAMETERS-RULE-02
+    description: Missing, explicit null, false and zero remain distinct; defaults, fixed values, permissions and conditions are applied explicitly.
+  - rule_id: SDK-MODEL-PROFILE-PARAMETERS-RULE-03
+    description: Configuration errors expose parameter paths and categories without echoing submitted or fixed values.
+  required_test_stages: []
+  source:
+    requirement_ids:
+    - MODEL-PROFILE-PARAMETERS-20261013
+    notes: Initial isolated schema validation belongs in traditional UT; composition and service contracts will receive component/API proof before wiring. No outlet, frontend or runtime acceptance claimed.

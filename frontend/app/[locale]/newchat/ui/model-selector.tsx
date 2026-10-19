@@ -68,6 +68,8 @@ const getReasoningEffortName = (
   t(`chat.modelSelector.effort.${option.id}`, { defaultValue: option.name });
 
 export type ModelOption = {
+  profileSchemaVersion?: number;
+  agentParameterDefaults?: Record<string, unknown>;
   id: string;
   name: string;
   description?: string;
@@ -273,7 +275,7 @@ function ModelSelectorRoot({
   });
   const selectedModel = models.find((m) => m.id === value);
   // Keep the shared selector settings visible before a model is selected.
-  const showDeepThinkingControl = true;
+  const showDeepThinkingControl = !selectedModel?.profileSchemaVersion;
 
   // Model lists are loaded asynchronously.  Without this sync an initially
   // empty list leaves the selector permanently unselected because
@@ -448,6 +450,7 @@ function ModelSelectorValue({
   const effortName =
     showEffort &&
     deepThinking &&
+    !selectedModel.profileSchemaVersion &&
     selectedModel.budgetTokens === undefined &&
     effort !== undefined
       ? (() => {
@@ -688,6 +691,7 @@ function ModelSelectorEffort({
     budgetTokens,
     setBudgetTokens,
   } = useModelSelectorContext();
+  if (selectedModel?.profileSchemaVersion) return null;
   const resolvedLabel = label ?? t("chat.modelSelector.reasoningEffort");
   const displayedEfforts = efforts ?? [];
   const budgetRange = selectedModel?.budgetTokens;
@@ -840,7 +844,7 @@ function ModelSelectorModelContext() {
         modelName: value,
         ...(showDeepThinkingControl ? { deepThinking } : undefined),
         reasoningCapability: selectedModel?.reasoningCapability,
-        ...(deepThinking
+        ...(showDeepThinkingControl && deepThinking
           ? budgetPreferred
             ? budgetTokens !== undefined
               ? { reasoningBudgetTokens: budgetTokens }
@@ -895,6 +899,7 @@ function ModelSelectorAdvancedSettings({
     onChange: (next: ModelParameterValue) =>
       setLocalValues((current) => ({ ...current, [localScope]: next })),
   };
+  if (selectedModel?.profileSchemaVersion) return null;
   return (
     <ModelParameterSettings
       key={resolved.scopeKey ?? localScope}

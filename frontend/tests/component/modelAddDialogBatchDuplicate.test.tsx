@@ -62,7 +62,7 @@ const CONFLICT_DETAIL =
   "Name BAAI/bge-m3 is already in use, please choose another display name";
 
 const DUP_MODEL = "BAAI/bge-m3";
-const OK_MODEL = "Qwen/Qwen3-8B";
+const OK_MODEL = "BAAI/bge-large-en";
 
 function renderBatchDialog() {
   const onSuccess = vi.fn();
@@ -87,7 +87,7 @@ async function prepareSelection(models: string[]) {
     models.map((name) => ({
       id: name,
       model_name: name,
-      model_type: "llm",
+      model_type: "embedding",
     }))
   );
   const user = userEvent.setup();

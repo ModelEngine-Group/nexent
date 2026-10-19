@@ -321,6 +321,7 @@ sys.modules['management.services.model.adapter'] = _create_stub_module(
     "management.services.model.adapter",
     get_llm_adapter=MagicMock(return_value="stub_llm_adapter"),
     get_vlm_adapter=MagicMock(return_value="stub_vlm_adapter"),
+    restore_model_snapshot=MagicMock(return_value=None),
 )
 sys.modules['services.memory_config_service'] = MagicMock()
 sys.modules['services.memory_external_provider_service'] = _create_stub_module(
@@ -353,6 +354,8 @@ sys.modules['nexent.memory'].models = sys.modules['nexent.memory.models']
 
 # Create nested modules for nexent.core to satisfy imports safely
 sys.modules['nexent.core'] = _create_stub_module("nexent.core")
+# Keep the new pure model-service compatibility utilities available to this legacy fixture.
+sys.modules['nexent.core'].__path__ = [str(TEST_ROOT.parent / "sdk" / "nexent" / "core")]
 _concurrency_mod = _create_stub_module("nexent.core.concurrency")
 
 
@@ -4042,12 +4045,12 @@ class TestCreateModelConfigList:
     def test_reasoning_helpers_filter_model_fields_and_resolve_effort(self):
         module = create_agent_info_module
 
-        assert module._is_thinking_enabled(None) is False
-        assert module._is_thinking_enabled({"enable_thinking": True}) is True
-        assert module._is_thinking_enabled({"enable_thinking": False}) is False
-        assert module._is_thinking_enabled({"reasoning_effort": "high"}) is True
+        assert module.legacy_thinking_enabled(None) is False
+        assert module.legacy_thinking_enabled({"enable_thinking": True}) is True
+        assert module.legacy_thinking_enabled({"enable_thinking": False}) is False
+        assert module.legacy_thinking_enabled({"reasoning_effort": "high"}) is True
 
-        assert module._build_extra_body({
+        assert module.legacy_extra_body({
             "enable_thinking": True,
             "reasoning_effort": "high",
             "temperature": 0.2,
@@ -4055,26 +4058,26 @@ class TestCreateModelConfigList:
         }) == {"enable_thinking": True, "temperature": 0.2, "top_k": 4}
 
         supported = {"status": "supported", "levels": ["low", "high"], "default": "high"}
-        assert module._resolve_model_reasoning_effort(
+        assert module.legacy_reasoning_effort(
             {"enable_thinking": True, "reasoning_effort": "low"}, supported
         ) == "low"
-        assert module._resolve_model_reasoning_effort(
+        assert module.legacy_reasoning_effort(
             {"enable_thinking": True, "reasoning_effort": "medium"}, supported
         ) == "high"
-        assert module._resolve_model_reasoning_effort(
+        assert module.legacy_reasoning_effort(
             {"enable_thinking": True}, {"status": "supported", "levels": [], "default": None}
         ) is None
-        assert module._resolve_model_reasoning_effort(
+        assert module.legacy_reasoning_effort(
             {"enable_thinking": True}, {"status": "unsupported"}
         ) is None
-        assert module._resolve_model_reasoning_effort(
+        assert module.legacy_reasoning_effort(
             {"enable_thinking": True, "reasoning_effort": "high"},
             {"status": "unsupported"},
         ) == "high"
-        assert module._resolve_model_reasoning_effort(
+        assert module.legacy_reasoning_effort(
             {"enable_thinking": True, "reasoning_effort": "auto"}, supported
         ) is None
-        assert module._resolve_model_reasoning_effort(
+        assert module.legacy_reasoning_effort(
             {"enable_thinking": False, "reasoning_effort": "high"}, supported
         ) is None
 
@@ -4082,20 +4085,20 @@ class TestCreateModelConfigList:
             "status": "supported",
             "controls": [{"type": "budget_tokens", "min": 128, "max": 32768}],
         }
-        assert module._resolve_model_reasoning_budget(
+        assert module.legacy_reasoning_budget(
             {"enable_thinking": True, "reasoning_budget_tokens": 64},
             budget_capability,
         ) == 128
-        assert module._resolve_model_reasoning_budget(
+        assert module.legacy_reasoning_budget(
             {"enable_thinking": True, "reasoning_budget_tokens": 65536},
             budget_capability,
         ) == 32768
-        assert module._resolve_model_reasoning_budget(
+        assert module.legacy_reasoning_budget(
             {"enable_thinking": True, "reasoning_budget_tokens": 4096},
             {"status": "supported", "controls": []},
         ) == 4096
         for value in (True, 0, -1, "4096"):
-            assert module._resolve_model_reasoning_budget(
+            assert module.legacy_reasoning_budget(
                 {"enable_thinking": True, "reasoning_budget_tokens": value},
                 budget_capability,
             ) is None
@@ -4417,7 +4420,14 @@ class RuntimeModelStub(types.SimpleNamespace):
 
 
 class TestCreateAgentRunInfo:
-    """Tests for the create_agent_run_info function"""
+    """Tests for the create_agent_run_info orchestration boundary."""
+
+    @pytest.fixture(autouse=True)
+    def mock_profile_binding(self):
+        # These orchestration tests supply sentinel model/config values. Profile
+        # binding itself is exercised with real profiles in its service suite.
+        with patch("services.agent_model_parameters.bind_agent_model_profiles"):
+            yield
 
     @pytest.mark.asyncio
     async def test_create_agent_run_info_applies_reasoning_overrides(self):
@@ -8517,3 +8527,20 @@ class TestBuildSecurityHeaders:
         ):
             assert _select_agent_model_id([7, 8], None, "tenant") == 8
             assert _select_agent_model_id([7, 8], 9, "tenant") == 9
+
+
+def test_saved_outlet_agent_window_bounds_inherited_limits_without_fallback():
+    """AC-PARAM-LAYERS: pass a consistent smaller window to the budget resolver."""
+    model = {"model_id": 42, "model_name": "model", "model_factory": "custom",
+             "profile_schema_version": 1, "context_window_tokens": 200000,
+             "max_input_tokens": 180000, "max_output_tokens": 32000,
+             "default_max_output_tokens": 2048}
+    snapshot = MockModelCapacitySnapshot(context_window_tokens=64000, provider_input_limit_tokens=61952)
+    with patch("backend.agents.create_agent_info.resolve_capacity", return_value=snapshot) as resolver:
+        budget, monitoring, actual = _resolve_input_budget(model, {"context_window_tokens": 64000})
+    assert actual is snapshot and budget == 61952
+    assert resolver.call_args.kwargs["operator_overrides"] == {
+        "context_window_tokens": 64000, "max_input_tokens": 64000,
+        "max_output_tokens": 32000, "default_output_reserve_tokens": 2048}
+    assert model["context_window_tokens"] == 200000
+    assert monitoring["context_window_tokens"] == 64000
