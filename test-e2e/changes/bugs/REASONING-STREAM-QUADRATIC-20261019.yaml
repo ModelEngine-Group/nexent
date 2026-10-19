@@ -1,0 +1,56 @@
+schema_version: '1.0'
+change:
+  change_id: REASONING-STREAM-QUADRATIC-20261019
+  change_type: bugfix
+  bug_id: REASONING-STREAM-QUADRATIC-20261019
+  title: Bound streaming reasoning markdown re-parse cost
+  description: Seal streamed reasoning text into memoized prefix segments so each chunk only re-parses the active tail.
+  observed_behavior: >-
+    Every streamed chunk re-parses the full accumulated reasoning text through a
+    single ReactMarkdown instance in ui/reasoning.tsx. At a measured ~4ms per KB
+    per parse, one 40KB reasoning block costs ~30s of main-thread parsing and
+    freezes the page; multi-step NL2Agent creation runs that stream marathon
+    reasoning kill the tab entirely while the backend stays healthy (no errors,
+    all LLM calls 200).
+  expected_behavior: >-
+    Per-chunk streaming cost stays proportional to the active tail (bounded by
+    maxTailLength); sealed prefix segments parse exactly once and stay
+    byte-identical while the text grows; completed reasoning still renders once
+    from the full text through MarkdownTextPrimitive.
+  escaped_stage: D4
+  coverage_gap:
+    type: missing_assertion
+    description: Existing reasoning tests cover stream-to-part mapping and step markers but not streaming render cost or per-chunk re-parse counts.
+  feature_contract_changed: false
+  affected_features:
+    existing: []
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing: []
+    added: []
+    modified: []
+    retired: []
+  traditional_ut:
+    decision: add
+    behaviors:
+      - Sealed segments always concatenate back to the exact source text, including fenced code blocks, CRLF input and trailing content without a newline.
+      - Never split inside fenced code blocks; seal at blank lines outside fences once the minimum segment length is reached.
+      - Fall back to line-break and whitespace cuts when the tail exceeds maxTailLength, keeping every sealed segment bounded.
+      - Keep sealed segments byte-identical while the text grows (append-stability), which is what keeps the memoized prefix from re-parsing.
+      - Streaming render re-parses only the active tail per chunk; sealed prefix segments render exactly once.
+    reason: Unit and component proofs cover the split contract and re-parse bounding; full-page marathon streaming stays a manual/browser concern documented in the change notes.
+    test_selectors:
+      - frontend/tests/workbench/StreamingReasoningSegments.test.tsx
+  notes: >-
+    Reproduced on develop@ab9d74813 via NL2Agent creation cards that trigger
+    marathon reasoning (weak resource candidates or unsatisfiable knowledge-base
+    requirements). Root cause is the streaming branch of StreamingReasoning in
+    frontend/app/[locale]/newchat/ui/reasoning.tsx; fix splits the text with
+    frontend/app/[locale]/newchat/ui/streaming-markdown-split.ts. Transient
+    tier-2/3 splits can change streaming rendering until completion, which is
+    acceptable because the completed state re-renders the full text once.
+    Adjacent risk not changed here: text parts still render through
+    MarkdownTextPrimitive full-text parsing while streaming; reasoning parts
+    were the crashing path.

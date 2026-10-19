@@ -1,6 +1,8 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 "use client";
 
-import { memo } from "react";
+import { memo, useMemo } from "react";
 import { cva, type VariantProps } from "class-variance-authority";
 import { BrainIcon, ChevronDownIcon } from "lucide-react";
 import {
@@ -11,6 +13,7 @@ import { MarkdownTextPrimitive } from "@assistant-ui/react-markdown";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { defaultComponents } from "./markdown-text";
+import { splitStreamingMarkdown } from "./streaming-markdown-split";
 import {
   Collapsible,
   CollapsibleContent,
@@ -272,6 +275,26 @@ const StreamingMarkdownSegment = memo(({ content }: { content: string }) => (
 
 StreamingMarkdownSegment.displayName = "StreamingMarkdownSegment";
 
+/**
+ * Renders streaming reasoning as sealed prefix segments plus an active tail.
+ *
+ * Sealed segments are memoized and parse exactly once; only the tail
+ * re-parses on each streamed chunk, so per-chunk cost stays proportional to
+ * the tail instead of the full accumulated text (see
+ * streaming-markdown-split.ts for the boundary rules). Exported for
+ * component tests.
+ */
+export function StreamingReasoningSegments({ text }: { text: string }) {
+  const segments = useMemo(() => splitStreamingMarkdown(text), [text]);
+  return (
+    <div className="aui-streaming-reasoning space-y-3 text-sm leading-relaxed text-muted-foreground/90">
+      {segments.map((segment, index) => (
+        <StreamingMarkdownSegment key={index} content={segment} />
+      ))}
+    </div>
+  );
+}
+
 const StreamingReasoning = () => {
   const text = useAuiState((s) =>
     s.part?.type === "reasoning" ? s.part.text : "",
@@ -289,11 +312,7 @@ const StreamingReasoning = () => {
     );
   }
 
-  return (
-    <div className="aui-streaming-reasoning space-y-3 text-sm leading-relaxed text-muted-foreground/90">
-      <StreamingMarkdownSegment content={text} />
-    </div>
-  );
+  return <StreamingReasoningSegments text={text} />;
 };
 
 const ReasoningImpl: ReasoningMessagePartComponent = () => <StreamingReasoning />;
