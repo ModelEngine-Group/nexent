@@ -4,8 +4,10 @@ import asyncio
 import inspect
 import json
 import logging
+import time
 import uuid
-from contextlib import aclosing
+from contextlib import aclosing, contextmanager
+from contextvars import ContextVar
 from types import SimpleNamespace
 
 from ...concurrency import ManagedTaskSpec, RunCancellationScope
@@ -70,26 +72,30 @@ class JiuwenAdapter(AgentCoreAdapter):
         self.native_agent = None
         self.resources = None
         self.mcp = None
+        self.context_bridge = None
         self.owner_id = f"nexent_{uuid.uuid4().hex}"
         self.session_id = f"{self.owner_id}_session"
+        self.events = JiuwenEventAdapter(
+            getattr(run_info, "observer", None),
+            getattr(getattr(run_info, "agent_config", None), "name", "jiuwen"), self.owner_id,
+            capacity_provider=lambda: self.context_bridge.capacity_metadata() if self.context_bridge else None)
+        self._active_resource = ContextVar("jiuwen_resource", default=None)
+        self._run_completed = False
         self.tool_configs = []
         self.visible_tool_names = set()
         self.business_tools = {}
         self.prefix_messages = []
         self._closed = False
         self._tool_executions = []
+        self.text_protocol = False
 
     @classmethod
     def capabilities(cls):
-        return frozenset({"tools", "mcp", "skills", "streaming", "history", "cancellation"})
+        return frozenset({"tools", "mcp", "skills", "streaming", "history", "cancellation", "workers", "a2a"})
 
     def validate(self):
         config = self.run_info.agent_config
         unsupported = []
-        if config.worker_agents:
-            unsupported.append("worker_agents")
-        if config.external_a2a_agents:
-            unsupported.append("external_a2a_agents")
         if config.enable_planning:
             unsupported.append("enable_planning")
         if config.verification_config.enabled or (
@@ -100,12 +106,6 @@ class JiuwenAdapter(AgentCoreAdapter):
             unsupported.append("smolagents output protocol")
         if config.provide_run_summary:
             unsupported.append("provide_run_summary")
-        if config.context_manager_config is not None:
-            from ..context.policy import resolve_policy
-
-            policy = resolve_policy(config.context_manager_config.policy_layers)
-            if policy.processing_mode.value != "passthrough":
-                unsupported.append("adaptive context compaction (disable enable_context_manager for Jiuwen)")
         if config.model_name and any(model.cite_name == config.model_name and model.prompt_cache
                                      for model in self.run_info.model_config_list):
             unsupported.append("provider prompt_cache policy")
@@ -116,10 +116,27 @@ class JiuwenAdapter(AgentCoreAdapter):
         )
         if self.model_config is None:
             raise ValueError(f"Model alias not found: {config.model_name}")
+        profile = self.model_config.resolved_profile
+        from ...model_service.profiles.resolved_profile import ResolvedModelProfile
+
+        if not isinstance(profile, ResolvedModelProfile):
+            raise UnsupportedAgentCoreConfig("Jiuwen requires a trusted resolved model outlet snapshot")
+        if profile.outlet_id is None:
+            raise UnsupportedAgentCoreConfig("Jiuwen requires a saved model outlet identity")
+        if str(self.run_info.tenant_id or "") != profile.identity.tenant_id:
+            raise UnsupportedAgentCoreConfig("Jiuwen model outlet tenant mismatch")
+        if (self.model_config.model_name != profile.identity.request_model_id
+                or self.model_config.url.rstrip("/") != profile.connection.base_url.rstrip("/")):
+            raise UnsupportedAgentCoreConfig("Jiuwen model outlet identity mismatch")
+        self.text_protocol = profile.capabilities.tools.status != "supported"
         self.tool_configs = list(config.tools)
         registry = {tool.name or tool.class_name: tool for tool in self.tool_configs}
         if len(registry) != len(self.tool_configs):
             raise ValueError("Duplicate tool names in agent configuration")
+        from .jiuwen_protocol import EXECUTION_TOOL
+
+        if EXECUTION_TOOL in registry:
+            raise UnsupportedAgentCoreConfig("Reserved Jiuwen execution tool name")
         self.visible_tool_names = set(registry)
         if config.prompt_tool_policy_snapshot is not None:
             policy = PromptToolPolicySnapshot.from_mapping(config.prompt_tool_policy_snapshot)
@@ -130,22 +147,50 @@ class JiuwenAdapter(AgentCoreAdapter):
             )
             self.tool_configs = list(effective.execution_tools.values())
             self.visible_tool_names = set(effective.tools)
+        collaborator_names = [child.invocation_name or child.name for child in config.worker_agents]
+        collaborator_names.extend(child.name for child in config.external_a2a_agents)
+        all_names = [*registry, *collaborator_names]
+        if len(all_names) != len(set(all_names)) or EXECUTION_TOOL in collaborator_names:
+            raise UnsupportedAgentCoreConfig("Duplicate or reserved collaboration tool name")
+        self.visible_tool_names.update(collaborator_names)
         if any(tool.source == "mcp" for tool in self.tool_configs) and not self.run_info.mcp_host:
             raise ValueError("Authorized MCP tools require resolved MCP hosts")
 
+    @contextmanager
     def _observe_tool(self, name, arguments):
         call_id = uuid.uuid4().hex
-        self.run_info.observer.add_message(
-            self.run_info.agent_config.name, ProcessType.TOOL, "",
-            tool_name=name, tool_arguments=arguments, tool_call_id=call_id,
-        )
-        return self.run_info.observer.tool_call_context(call_id)
+        provider_id = self.events.tool_call(name, arguments, call_id)
+        token = self._active_resource.set((call_id, provider_id))
+        try:
+            with self.run_info.observer.tool_call_context(call_id):
+                try:
+                    yield
+                except BaseException as error:
+                    self.events.tool_result(call_id, provider_id, type(error).__name__, is_error=True)
+                    raise
+        finally:
+            self._active_resource.reset(token)
+
+    def _resource_result(self, result):
+        active = self._active_resource.get()
+        if active is not None:
+            value = result.model_dump() if hasattr(result, "model_dump") else result
+            if isinstance(value, str):
+                try:
+                    value = json.loads(value)
+                except ValueError:
+                    pass
+            is_error = isinstance(value, dict) and (value.get("success") is False or value.get("isError") is True
+                                                    or value.get("status") in ("error", "failed"))
+            rendered = result if isinstance(result, str) else json.dumps(value, ensure_ascii=False, default=str)
+            self.events.tool_result(*active, rendered, is_error)
+        # Keep legacy side channels for artifacts and existing consumers.
+        self.run_info.observer.add_message(self.run_info.agent_config.name, ProcessType.EXECUTION_LOGS, str(result))
 
     def prepare(self):
         from openjiuwen.core.foundation.tool import LocalFunction, ToolCard
         from openjiuwen.core.single_agent import AgentCard
         from openjiuwen.harness.factory import create_deep_agent
-        from openjiuwen.harness.rails.model_anomaly_detection_rail import ModelAnomalyDetectionRail
 
         from ..run_agent import _get_default_agent_thread_manager
 
@@ -161,6 +206,7 @@ class JiuwenAdapter(AgentCoreAdapter):
             workspace_path=info.workspace_path, workspace_run_id=info.workspace_run_id, minio_files=info.minio_files,
             cancellation_scope=self.scope, user_context=info.user_context,
         )
+        self.resources.core_run_info = info
         native_tools = []
         for config in self.tool_configs:
             if config.source == "mcp" or config.class_name == "ParallelExecutorTool":
@@ -173,18 +219,49 @@ class JiuwenAdapter(AgentCoreAdapter):
                     ToolCard(name=name, description=config.description or tool.description,
                              input_params=_tool_schema(tool.inputs)), self._business_handler(name, tool.forward),
                 ))
+        for child in info.agent_config.worker_agents:
+            tool = self.resources._create_subagent_definition(child, {})
+            self.business_tools[tool.name] = tool
+            native_tools.append(LocalFunction(
+                ToolCard(name=tool.name, description=tool.description, input_params=_tool_schema(tool.inputs)),
+                self._business_handler(tool.name, tool, lane="control-io"),
+            ))
+        for external in info.agent_config.external_a2a_agents:
+            from ..a2a_agent_proxy import ExternalA2AAgentWrapper
+            from ..subagent_wrapper import SubAgentDefinition
+
+            definition = SubAgentDefinition(external.name, external.description or external.name)
+
+            def invoke_remote(task, _config=external):
+                # A proxy owns a single call; parallel siblings never share client/task state.
+                if self.scope.cancelled:
+                    raise RunTerminated()
+                remote = ExternalA2AAgentWrapper(
+                    _config.to_a2a_agent_info(), stop_event=self.scope.stop_event,
+                    observer=info.observer, cancellation_scope=self.scope, user_context=info.user_context,
+                )
+                remote.set_runtime_metadata(info.runtime_metadata)
+                return remote(task=task)
+
+            definition.forward = invoke_remote
+            tool = self.resources._wrap_subagent(definition, external, agent_id=str(external.agent_id))
+            self.business_tools[tool.name] = tool
+            native_tools.append(LocalFunction(
+                ToolCard(name=tool.name, description=tool.description, input_params=_tool_schema(tool.inputs)),
+                self._business_handler(tool.name, tool.forward, lane="control-io"),
+            ))
         # Reuse file/sandbox infrastructure, never construct a smolagents Agent.
         self.resources.agent = SimpleNamespace(tools=self.business_tools, python_executor=None)
         self._bind_skill_sandbox()
         self.query = self.resources._prepare_file_workspace(info.query)
         prompt = self._compile_context()
         rails = self._skill_rails()
-        # Retry only the native model call, never a completed business tool or run.
-        rails.append(ModelAnomalyDetectionRail(
-            max_retries=0, transient_max_retries=1, transient_base_delay_seconds=0.5,
-            tool_loop_compact={"enabled": False},
-        ))
         model = self._create_model()
+        from .jiuwen_context import JiuwenContextBridge
+
+        self.context_bridge = JiuwenContextBridge(info, self.scope, self.manager, model, self.context_items)
+        model.prepare_messages = self.context_bridge.prepare_messages
+        model.prefix = []
         self.native_agent = create_deep_agent(
             model, card=AgentCard(id=self.owner_id, name=info.agent_config.name,
                                  description=info.agent_config.description),
@@ -192,13 +269,16 @@ class JiuwenAdapter(AgentCoreAdapter):
             max_iterations=info.agent_config.max_steps, workspace=info.workspace_path,
             enable_task_loop=False, enable_sys_operation=False, enable_read_image_multimodal=False,
             enable_model_anomaly_detection_rail=False, language="cn" if info.observer.lang == "zh" else "en",
-            parallel_tool_calls=True,
+            enable_tool_resilience_rail=False, enable_skill_discovery=False,
+            parallel_tool_calls=False,
         )
         if any(config.class_name == "ParallelExecutorTool" and
                (config.name or "parallel_executor") in self.visible_tool_names for config in self.tool_configs):
             self._bind_parallel_tool()
+        if self.text_protocol:
+            self._bind_text_executor()
 
-    def _business_handler(self, name, forward):
+    def _business_handler(self, name, forward, *, lane="model-tool-io"):
         async def execute(**arguments):
             if self.scope.cancelled:
                 raise asyncio.CancelledError()
@@ -207,18 +287,37 @@ class JiuwenAdapter(AgentCoreAdapter):
                     result = await forward(**arguments)
                 else:
                     execution = self.manager.submit(
-                        "model-tool-io", ManagedTaskSpec(task_name=f"jiuwen-tool-{name}", owner=__name__),
+                        lane, ManagedTaskSpec(task_name=f"jiuwen-tool-{name}", owner=__name__),
                         forward, **arguments,
                     )
                     self._tool_executions.append(execution)
                     try:
-                        result = await asyncio.wrap_future(execution.future)
+                        if lane == "control-io":
+                            timeout = self.run_info.collaboration_timeout_seconds
+                            if self.run_info.model_deadline is not None:
+                                timeout = min(timeout, max(0.0, self.run_info.model_deadline - time.monotonic()))
+                            result = await asyncio.wait_for(asyncio.wrap_future(execution.future), timeout)
+                        else:
+                            result = await asyncio.wrap_future(execution.future)
+                    except TimeoutError:
+                        if lane != "control-io":
+                            raise
+                        logger.warning(
+                            "event=agent_collaboration_timeout agent_name=%s timeout_seconds=%.3f "
+                            "phase=queue_or_execution error_type=TimeoutError",
+                            name, timeout,
+                        )
+                        self.scope.cancel()
+                        self.manager.cancel(execution.execution_id, reason="Collaboration deadline exceeded",
+                                            wait_timeout=0, mark_stuck_on_timeout=False)
+                        raise
                     except asyncio.CancelledError:
                         self.manager.cancel(execution.execution_id, reason="Jiuwen run cancelled", wait_timeout=0,
                                             mark_stuck_on_timeout=False)
                         raise
-                self.run_info.observer.add_message(self.run_info.agent_config.name, ProcessType.EXECUTION_LOGS,
-                                                   str(result))
+                    if inspect.isawaitable(result):
+                        result = await result
+                self._resource_result(result)
                 return result
 
         return execute
@@ -242,6 +341,7 @@ class JiuwenAdapter(AgentCoreAdapter):
                                     ContextItemType.WORKER_AGENT, ContextItemType.EXTERNAL_AGENT,
                                     ContextItemType.CURRENT_TASK}:
                 context.append(ContextItem.from_input(item))
+        self.context_items = context
         self.prefix_messages = ContextItemRenderer().render(context)
         self.prefix_messages.extend(
             {"role": history.role, "content": history.content}
@@ -257,81 +357,90 @@ class JiuwenAdapter(AgentCoreAdapter):
         return prompt + "\n\n" + current_task_guidance
 
     def _create_model(self):
-        from openjiuwen.core.foundation.llm import Model
-        from openjiuwen.core.foundation.llm.schema.config import ModelClientConfig, ModelRequestConfig
-
-        from ...models.model_concurrency import model_concurrency_limiter
+        from ...model_service.registry import AuthenticationRegistry
+        from ...model_service.service import ModelService
         from ...utils.token_estimation import estimate_tokens_text
+        from .jiuwen_model import JiuwenServiceModel
 
-        config = self.model_config
-        prefix = self.prefix_messages
-        info = self.run_info
-        budget = getattr(info.agent_config.context_manager_config, "effective_input_limit_tokens", 0)
-        model_step = 0
+        info, config = self.run_info, self.model_config
+        profile = config.resolved_profile
+        output_cap = profile.parameter_values.get("max_output_tokens", profile.parameter_values.get("max_tokens"))
+        budget = info.context_budget_snapshot or info.agent_config.context_budget_snapshot
+        if (budget is None and info.agent_config.requested_output_tokens is not None
+                and info.agent_config.requested_output_tokens != output_cap):
+            raise UnsupportedAgentCoreConfig(
+                "Resolve the Agent output override into the outlet snapshot before running")
+        if budget is not None and budget.requested_output_tokens != output_cap:
+            raise UnsupportedAgentCoreConfig("Resolve the output budget into the outlet snapshot before running")
+        service = info.model_service
+        if service is None:
+            # Capture credentials before any later configuration mutation.
+            credential = config.api_key
+            tenant = profile.identity.tenant_id
+            reference = profile.connection.credential_ref
 
-        def start_model_call():
-            nonlocal model_step
-            model_step += 1
-            info.observer.add_message(info.agent_config.name, ProcessType.STEP_COUNT, str(model_step))
+            def lookup(selected_tenant, selected_reference):
+                if selected_tenant != tenant or selected_reference != reference:
+                    raise PermissionError("Model credential scope mismatch")
+                return credential
 
-        def acquire(messages, tools):
-            if budget:
-                rendered = json.dumps([message.model_dump() if hasattr(message, "model_dump") else message
-                                       for message in messages], ensure_ascii=False, default=str)
-                schemas = json.dumps(tools or [], ensure_ascii=False, default=str)
-                if estimate_tokens_text(rendered + schemas) > budget:
-                    raise UnsupportedAgentCoreConfig("Jiuwen input exceeds the resolved Nexent context budget")
-            if config.concurrency_limit is not None:
-                return model_concurrency_limiter.acquire(
-                    (str(info.tenant_id or "default"), str(config.model_factory or "unknown"), config.model_name),
-                    config.concurrency_limit, config.timeout_seconds or 300, info.stop_event,
-                )
-            return None
+            auth = AuthenticationRegistry()
+            service = ModelService(lambda snapshot: auth.sender_for(snapshot, lookup))
+        step = 0
 
-        class RunModel(Model):
-            async def invoke(model_self, messages, **kwargs):
-                start_model_call()
-                messages = _prepend_context_messages(messages, prefix)
-                permit = acquire(messages, kwargs.get("tools"))
-                try:
-                    return await super().invoke(messages, **kwargs)
-                finally:
-                    if permit:
-                        permit.release()
+        def on_step(_request):
+            nonlocal step
+            step += 1
+            self.events.begin_step(_request)
 
-            async def stream(model_self, messages, **kwargs):
-                start_model_call()
-                messages = _prepend_context_messages(messages, prefix)
-                permit = acquire(messages, kwargs.get("tools"))
-                try:
-                    async for chunk in super().stream(messages, **kwargs):
-                        yield chunk
-                finally:
-                    if permit:
-                        permit.release()
+        def on_event(event):
+            self.events.model_event(event)
+            if event.type == "message_completed":
+                info.observer.add_message(info.agent_config.name, ProcessType.TOKEN_COUNT,
+                                          event.message.usage.model_dump_json())
 
-        timeout = config.timeout_seconds or 300.0
-        return RunModel(
-            ModelClientConfig(
-                client_provider="OpenAI", api_key=config.api_key, api_base=config.url,
-                auth_mode="api_key" if config.api_key else "none",
-                timeout=timeout, stream_first_chunk_timeout=timeout, stream_idle_timeout=min(timeout, 60),
-                max_retries=0, use_shared_llm_http_client=False, verify_ssl=config.ssl_verify is not False,
-                extensions={"request_extra_body": config.extra_body or {}},
-            ),
-            ModelRequestConfig(
-                model=config.model_name, temperature=config.temperature, top_p=config.top_p,
-                max_tokens=self.run_info.agent_config.requested_output_tokens or config.max_output_tokens,
-                context_window=config.context_window_tokens,
-                reasoning={"mode": "enabled" if config.enable_thinking else "disabled",
-                           "effort": config.reasoning_effort, "budget_tokens": config.reasoning_budget_tokens},
-            ),
+        def validate_input(view):
+            budget = getattr(info.agent_config.context_manager_config, "effective_input_limit_tokens", 0)
+            if budget and estimate_tokens_text(view.model_dump_json()) > budget:
+                raise UnsupportedAgentCoreConfig("Jiuwen input exceeds the resolved Nexent context budget")
+
+        return JiuwenServiceModel(service, profile, self.scope, prefix=self.prefix_messages,
+                                  run_id=self.owner_id, deadline=info.model_deadline,
+                                  on_step=on_step, on_event=on_event, validate_input=validate_input,
+                                  on_error=self.events.record_error, on_recovery=self.events.recovery)
+
+    def _bind_text_executor(self):
+        from openjiuwen.core.foundation.tool import LocalFunction, ToolCard
+
+        from ..sandbox import SandboxConfig, _execute_with_tool_context, build_python_executor
+        from .jiuwen_protocol import EXECUTION_TOOL
+
+        executor = self.resources.agent.python_executor
+        if executor is None:
+            executor = build_python_executor(self.run_info.sandbox_config or SandboxConfig(), logger,
+                                             host_tools_exist=True, cancellation_scope=self.scope)
+            self.resources._sandbox_executors.append(executor)
+            self.resources.agent.python_executor = executor
+
+        def execute(code):
+            # The sandbox lane waits on the run loop, never on another sandbox execution.
+            # Native and text calls share the exact ability, including MCP deadlines/identity.
+            executor.send_tools(self.resource_bridge.bindings())
+            output = _execute_with_tool_context(executor, code)
+            return json.dumps({"output": str(output.output), "logs": output.logs,
+                               "is_final_answer": output.is_final_answer}, ensure_ascii=False)
+
+        card = ToolCard(name=EXECUTION_TOOL, description="Execute a validated controlled text block",
+                        input_params={"type": "object", "properties": {"code": {"type": "string"}},
+                                      "required": ["code"], "additionalProperties": False})
+        self.native_agent.ability_manager.add_ability(
+            card, LocalFunction(card, self._business_handler(EXECUTION_TOOL, execute, lane="sandbox")),
         )
 
     def _skill_rails(self):
         from .skills import NexentSkillRail
 
-        directories, names = set(), set()
+        directories, names, authorized_by_root = set(), set(), {}
         for config in self.tool_configs:
             if config.class_name not in {"ReadSkillMdTool", "RunSkillScriptTool", "ReadSkillConfigTool"}:
                 continue
@@ -342,7 +451,9 @@ class JiuwenAdapter(AgentCoreAdapter):
             if parameters.get("local_skills_dir"):
                 directories.add(parameters["local_skills_dir"])
                 names.update(authorized)
-        return [NexentSkillRail(sorted(directories), sorted(names))] if directories and names else []
+                authorized_by_root.setdefault(parameters["local_skills_dir"], set()).update(authorized)
+        return [NexentSkillRail(sorted(directories), sorted(names), authorized_by_root=authorized_by_root)] \
+            if directories and names else []
 
     def _bind_skill_sandbox(self):
         from ..sandbox import SandboxLevel, SandboxSkillScriptRunner, build_python_executor
@@ -360,35 +471,52 @@ class JiuwenAdapter(AgentCoreAdapter):
         self.resources._sandbox_skill_runners.append(runner)
         for tool in self.business_tools.values():
             if getattr(tool, "name", None) == "run_skill_script":
-                tool.bind_execution_backend(runner, on_complete=lambda _result: self.resources._pull_file_workspace_from_sandbox())
+                tool.bind_execution_backend(
+                    runner, on_complete=lambda _result: self.resources._pull_file_workspace_from_sandbox())
 
     def _bind_parallel_tool(self):
         from openjiuwen.core.foundation.tool import LocalFunction, ToolCard
-        from openjiuwen.core.runner import Runner
 
-        async def parallel(tasks):
-            async def invoke(task):
+        from ...tools.parallel_executor import ParallelExecutorTool
+
+        # Reuse the existing scheduler/results/timeout contract. Bridge waiters
+        # use control-io; actual resource effects still use model-tool-io.
+        scheduler = ParallelExecutorTool(execution_lane="control-io")
+
+        def parallel(tasks, timeout=None, max_workers=4):
+            bindings = self.resource_bridge.bindings()
+            prepared = []
+            for task in tasks:
                 name = task["tool_name"]
-                if name == "parallel_executor":
-                    raise ValueError("Recursive parallel executor is not allowed")
-                card = self.native_agent.ability_manager.get(name)
-                if card is None:
-                    raise PermissionError("Parallel task references an unavailable tool")
-                tool = Runner.resource_mgr.get_tool(card.id)
-                return await tool.invoke(task.get("arguments", {}))
+                if name == "parallel_executor" or name not in bindings:
+                    raise PermissionError("Parallel task references an unavailable resource")
+                item = (bindings[name], task.get("arguments") or {})
+                if task.get("result_key") is not None:
+                    item += (task["result_key"],)
+                prepared.append(item)
+            return scheduler.forward(prepared, timeout=timeout, max_workers=max_workers)
 
-            with self._observe_tool("parallel_executor", {"tasks": tasks}):
-                return await asyncio.gather(*(invoke(task) for task in tasks))
-
-        card = ToolCard(name="parallel_executor", description="Execute independent authorized native tools concurrently.",
+        card = ToolCard(name="parallel_executor", description="Execute independent authorized resources concurrently.",
                         input_params={"type": "object", "properties": {"tasks": {"type": "array", "maxItems": 16,
                             "items": {"type": "object", "properties": {"tool_name": {"type": "string"},
-                                "arguments": {"type": "object"}}, "required": ["tool_name"]}}}, "required": ["tasks"]})
-        self.native_agent.ability_manager.add_ability(card, LocalFunction(card, parallel))
+                                "arguments": {"type": "object"}, "result_key": {"type": "string"}},
+                                "required": ["tool_name"], "additionalProperties": False}},
+                            "timeout": {"type": "integer", "minimum": 1, "default": 120},
+                            "max_workers": {"type": "integer", "minimum": 1, "maximum": 16, "default": 4}},
+                            "required": ["tasks"], "additionalProperties": False})
+        self.native_agent.ability_manager.add_ability(
+            card, LocalFunction(
+                card, self._business_handler("parallel_executor", parallel, lane="background-service")),
+        )
 
     def run(self):
         try:
-            asyncio.run(self._run_async())
+            answer = asyncio.run(self._run_async())
+            if self.events.final_answer is None:
+                self.events.last_error = self.events.error("JIUWEN_TERMINAL_MISSING")
+                raise RuntimeError("Jiuwen stream ended without a terminal answer")
+            self._run_completed = True
+            return answer
         except asyncio.CancelledError:
             raise RunTerminated() from None
 
@@ -400,6 +528,9 @@ class JiuwenAdapter(AgentCoreAdapter):
         info = self.run_info
         current = asyncio.current_task()
         loop = asyncio.get_running_loop()
+        from .jiuwen_resources import JiuwenResourceBridge
+
+        self.resource_bridge = JiuwenResourceBridge(self.native_agent, loop, self.scope, self.visible_tool_names)
         token = self.scope.register_closer(lambda: loop.call_soon_threadsafe(current.cancel))
 
         async def watch_stop():
@@ -408,18 +539,18 @@ class JiuwenAdapter(AgentCoreAdapter):
             current.cancel()
 
         watcher = asyncio.create_task(watch_stop())
-        events = JiuwenEventAdapter(info.observer, info.agent_config.name)
+        events = self.events
         try:
             mcp_tools = [tool for tool in self.tool_configs if tool.source == "mcp" and
                          (tool.name or tool.class_name) in self.visible_tool_names]
             if mcp_tools:
                 self.mcp = JiuwenMCPCollection(
                     authorized_tools=mcp_tools, observe=self._observe_tool, manager=self.manager,
-                    emit_result=lambda result: info.observer.add_message(
-                        info.agent_config.name, ProcessType.EXECUTION_LOGS, str(result)),
+                    emit_result=self._resource_result,
                     user_context=info.user_context,
                     server_parameters=info.mcp_host, cancellation_scope=self.scope,
-                    tool_timeout_seconds=info.mcp_tool_timeout_seconds, close_timeout_seconds=info.mcp_close_timeout_seconds,
+                    tool_timeout_seconds=info.mcp_tool_timeout_seconds,
+                    close_timeout_seconds=info.mcp_close_timeout_seconds,
                     connect_timeout_seconds=info.mcp_request_timeout_seconds or 10.0,
                 )
                 collection = self.mcp.__enter__()
@@ -427,7 +558,8 @@ class JiuwenAdapter(AgentCoreAdapter):
                     self.native_agent.ability_manager.add_ability(tool.card, tool)
             info.observer.add_message(info.agent_config.name, ProcessType.AGENT_NEW_RUN, self.query)
             for event in info.agent_config.pre_run_tool_events:
-                info.observer.add_message(info.agent_config.name, ProcessType.OTHER, json.dumps(event, ensure_ascii=False))
+                info.observer.add_message(
+                    info.agent_config.name, ProcessType.OTHER, json.dumps(event, ensure_ascii=False))
             async with aclosing(Runner.run_agent_streaming(
                 self.native_agent, {"query": self.query, "conversation_id": self.session_id}, session=self.session_id,
             )) as stream:
@@ -439,7 +571,7 @@ class JiuwenAdapter(AgentCoreAdapter):
                     events.emit(chunk)
             if self.scope.cancelled:
                 raise asyncio.CancelledError()
-            events.finish()
+            return events.final_answer
         finally:
             watcher.cancel()
             await asyncio.gather(watcher, return_exceptions=True)
@@ -454,7 +586,22 @@ class JiuwenAdapter(AgentCoreAdapter):
     def close(self):
         if self._closed:
             return
+        try:
+            self._close_resources()
+        except BaseException:
+            self._run_completed = False
+            raise
+        finally:
+            status = "stopped" if self.run_info.stop_event.is_set() else (
+                "completed" if self._run_completed else "failed")
+            self.run_info.run_result = self.events.finish(status)
+
+    def _close_resources(self):
+        if self._closed:
+            return
         self._closed = True
+        if self.context_bridge is not None:
+            self.context_bridge.close()
         if self.native_agent is not None:
             from openjiuwen.core.runner import Runner
 
@@ -470,6 +617,7 @@ class JiuwenAdapter(AgentCoreAdapter):
                 self.mcp.close()
         finally:
             if self.resources:
+                self.resources._close_subagent_invocations()
                 try:
                     self.resources._finalize_file_workspace()
                 finally:

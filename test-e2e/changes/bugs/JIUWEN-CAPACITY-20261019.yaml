@@ -1,0 +1,48 @@
+schema_version: '1.0'
+change:
+  change_id: JIUWEN-CAPACITY-20261019
+  change_type: bugfix
+  bug_id: JIUWEN-CAPACITY-20261019
+  title: Propagate shared Nexent context capacity through Jiuwen observations
+  description: Use the existing run-local ContextManager configuration for Jiuwen
+    capacity and threshold output, including passthrough mode; map public metadata
+    to the original token_count protocol.
+  observed_behavior: Jiuwen public steps omit context window and CM thresholds, causing
+    the common usage component to render counts while smolagents renders a percentage.
+  expected_behavior: Both Core outputs retain the same configured capacity and effective
+    CM metadata when CM is enabled or disabled; unknown values remain unknown and
+    saved history stays compatible.
+  escaped_stage: production
+  coverage_gap:
+    type: missing_assertion
+    description: The real UI journey checks main components but not shared capacity
+      metadata or percentage/detail presentation across Core switches.
+  feature_contract_changed: true
+  affected_features:
+    existing: []
+    modified:
+    - JIUWEN-OUTPUT
+    added: []
+    retired: []
+  affected_cases:
+    existing:
+    - JIUWEN-OUTPUT-D5-001
+    modified:
+    - JIUWEN-OUTPUT-D3-001
+    - JIUWEN-REAL-UI-D4-001
+    added: []
+    retired: []
+  traditional_ut:
+    decision: add
+    behaviors:
+    - Shared CM capacity emitted on successful/error steps in both processing modes
+    - Capacity is preserved in realtime and saved Nexent event conversion; legacy
+      missing data remains unknown
+    - Invalid public capacity values rejected without inventing usage
+    reason: Python SDK/public output and frontend normalization behavior change. Python
+      UT and FE UT are separate from formal runtime/browser proof.
+    test_selectors:
+    - test/sdk/core/agents/test_jiuwen_capacity_output.py
+  notes: Reuse the existing ContextManager and resolved config; no new resolver, Core-specific
+    frontend renderer or SQL. Strengthen existing D3 and real D4 rather than add duplicate
+    D1. Prior AIDP 502 and global F-111 reference remain separate failures.

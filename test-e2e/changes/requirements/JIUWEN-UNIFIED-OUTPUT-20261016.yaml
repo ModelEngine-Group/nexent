@@ -1,0 +1,34 @@
+schema_version: '1.0'
+change:
+  change_id: JIUWEN-UNIFIED-OUTPUT-20261016
+  change_type: requirement
+  requirement_id: JIUWEN-UNIFIED-OUTPUT-20261016
+  title: Normalize Core outputs into the existing Nexent conversation UI
+  description: Replace the M5 dedicated runtime renderer with a shared output protocol
+    adapter consumed by the original live/history parsers.
+  affected_features:
+    existing: []
+    modified:
+    - JIUWEN-OUTPUT
+    added: []
+    retired: []
+  affected_cases:
+    existing:
+    - JIUWEN-OUTPUT-D3-001
+    - JIUWEN-OUTPUT-D5-001
+    modified:
+    - JIUWEN-OUTPUT-D4-001
+    added: []
+    retired: []
+  traditional_ut:
+    decision: exempt
+    behaviors:
+    - Frontend unit tests cover output normalization, lifecycle safety, error correlation,
+      legacy and mixed-Core compatibility.
+    reason: Frontend-only product change; no Python product behavior changes. Relevant
+      frontend unit tests are mandatory and separate from formal browser proof.
+    test_selectors: []
+  notes: Existing M5 SPEC directly revised. Preserve all business assertions in D4,
+    replacing dedicated runtime DOM with original shared components. No new D1; existing
+    Python D3/D5 regress public SDK/backend contracts. Prior global F-111 missing
+    reference remains independent.

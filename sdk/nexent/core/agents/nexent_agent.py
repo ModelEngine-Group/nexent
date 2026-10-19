@@ -277,6 +277,7 @@ class NexentAgent:
         if not isinstance(observer, MessageObserver):
             raise TypeError("Create Observer Object with MessageObserver")
 
+        self.core_run_info = None
         self.observer = observer
         self.model_config_list = model_config_list
         self.stop_event = stop_event
@@ -782,6 +783,13 @@ class NexentAgent:
                 parent_token = self.cancellation_scope.register_closer(scope.cancel)
             if scope.cancelled or self.stop_event.is_set():
                 raise RunTerminated("Subagent invocation cancelled before allocation")
+            from .core_adapters.children import child_run_info, invoke_child
+
+            if getattr(self, "core_run_info", None) is not None:
+                info = child_run_info(self.core_run_info, config, scope)
+                yield lambda task, **kwargs: invoke_child(info, task)
+                drained = True
+                return
             runtime = type(self)(
                 observer=self.observer,
                 model_config_list=self.model_config_list,
@@ -1561,6 +1569,7 @@ class NexentAgent:
                 if hasattr(self.agent, "step_metrics"):
                     monitoring_manager.set_agent_context_metrics(self.agent.step_metrics)
                 monitoring_manager.set_openinference_output(final_answer_for_trace)
+            return final_answer_for_trace
 
     def _record_workspace_upload(self, upload: Dict[str, Any]) -> None:
         """Collect one upload result for the frontend artifact event."""

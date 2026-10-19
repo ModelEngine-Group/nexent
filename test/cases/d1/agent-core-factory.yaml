@@ -1,0 +1,132 @@
+schema_version: '1.0'
+stage: D1
+module: AGENT-CORE
+cases:
+- case_id: AGENT-CORE-D1-001
+  feature_id: AGENT-CORE-001
+  business_rule_ids:
+  - AGENT-CORE-001-R1
+  title: Factory default and native dispatch
+  type: SDK-UT
+  priority: P1
+  status: active
+  automation: automated
+  objective: Factory default and native dispatch
+  preconditions:
+  - Use isolated run resources and deterministic local fixtures.
+  test_data:
+    core: jiuwen
+    legacy_core: smolagents
+  steps:
+  - order: 1
+    action: 'Exercise scenario: Default selection is smolagents.'
+    expected: Default selection is smolagents
+  - order: 2
+    action: 'Exercise scenario: Explicit jiuwen resolves a native adapter.'
+    expected: Explicit jiuwen resolves a native adapter
+  - order: 3
+    action: 'Exercise scenario: Unknown and duplicate registrations fail.'
+    expected: Unknown and duplicate registrations fail
+  expected_results: &id001
+  - Default selection is smolagents
+  - Explicit jiuwen resolves a native adapter
+  - Unknown and duplicate registrations fail
+  forbidden_side_effects:
+  - No smolagents execution in the Jiuwen branch.
+  - No unauthorized tools or cross-run resources.
+  execution:
+    profiles:
+    - name: mock
+      required_services: []
+    timeout_seconds: 60
+  unit_boundary: Agent core factory and adapter
+  inputs:
+  - Resolved Nexent agent and run configuration
+  assertions: *id001
+- case_id: AGENT-CORE-D1-002
+  feature_id: AGENT-CORE-001
+  business_rule_ids:
+  - AGENT-CORE-001-R2
+  - AGENT-CORE-001-R3
+  title: Native config and authorized tool translation
+  type: SDK-UT
+  priority: P1
+  status: active
+  automation: automated
+  objective: Native config and authorized tool translation
+  preconditions:
+  - Use isolated run resources and deterministic local fixtures.
+  test_data:
+    core: jiuwen
+    legacy_core: smolagents
+  steps:
+  - order: 1
+    action: 'Exercise scenario: Model alias and maximum iterations are preserved.'
+    expected: Model alias and maximum iterations are preserved
+  - order: 2
+    action: 'Exercise scenario: Business instructions exclude code-action templates.'
+    expected: Business instructions exclude code-action templates
+  - order: 3
+    action: 'Exercise scenario: Unsupported configuration fails before provider calls.'
+    expected: Unsupported configuration fails before provider calls
+  - order: 4
+    action: 'Exercise scenario: Only configured local and skill tools are native abilities.'
+    expected: Only configured local and skill tools are native abilities
+  expected_results: &id002
+  - Model alias and maximum iterations are preserved
+  - Business instructions exclude code-action templates
+  - Unsupported configuration fails before provider calls
+  - Only configured local and skill tools are native abilities
+  forbidden_side_effects:
+  - No smolagents execution in the Jiuwen branch.
+  - No unauthorized tools or cross-run resources.
+  execution:
+    profiles:
+    - name: mock
+      required_services: []
+    timeout_seconds: 60
+  unit_boundary: Agent core factory and adapter
+  inputs:
+  - Resolved Nexent agent and run configuration
+  assertions: *id002
+- case_id: AGENT-CORE-D1-003
+  feature_id: AGENT-CORE-001
+  business_rule_ids:
+  - AGENT-CORE-001-R4
+  title: Native stream output and terminal errors
+  type: SDK-UT
+  priority: P1
+  status: active
+  automation: automated
+  objective: Native stream output and terminal errors
+  preconditions:
+  - Use isolated run resources and deterministic local fixtures.
+  test_data:
+    core: jiuwen
+    legacy_core: smolagents
+  steps:
+  - order: 1
+    action: 'Exercise scenario: Incremental output is preserved.'
+    expected: Incremental output is preserved
+  - order: 2
+    action: 'Exercise scenario: Exactly one final answer is emitted.'
+    expected: Exactly one final answer is emitted
+  - order: 3
+    action: 'Exercise scenario: Error and missing final result produce failure.'
+    expected: Error and missing final result produce failure
+  expected_results: &id003
+  - Incremental output is preserved
+  - Exactly one final answer is emitted
+  - Error and missing final result produce failure
+  forbidden_side_effects:
+  - No smolagents execution in the Jiuwen branch.
+  - No unauthorized tools or cross-run resources.
+  execution:
+    profiles:
+    - name: mock
+      required_services: []
+    timeout_seconds: 60
+  unit_boundary: Agent core factory and adapter
+  inputs:
+  - Resolved Nexent agent and run configuration
+  assertions: *id003

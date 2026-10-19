@@ -1189,6 +1189,8 @@ def _get_skill_script_tools(
 
 
 async def create_model_config_list(tenant_id):
+    from services.model_runtime_snapshot_service import restore_runtime_model_snapshot
+
     records = get_model_records({"model_type": "llm"}, tenant_id)
     model_list = []
     extra_body = {"logprobs": True} if LLM_INCLUDE_LOGPROBS else None
@@ -1204,6 +1206,7 @@ async def create_model_config_list(tenant_id):
         )
         model_list.append(
             ModelConfig(cite_name=record["display_name"],
+                        resolved_profile=restore_runtime_model_snapshot(record, tenant_id, strict=False),
                         api_key=record.get("api_key", ""),
                         model_name=model_name,
                         url=record["base_url"],
@@ -1243,6 +1246,7 @@ async def create_model_config_list(tenant_id):
         main_model_config.get("model_factory"))
     model_list.append(
         ModelConfig(cite_name="main_model",
+                    resolved_profile=restore_runtime_model_snapshot(main_model_config, tenant_id, strict=False),
                     api_key=main_model_config.get("api_key", ""),
                     model_name=get_model_name_from_config(main_model_config) if main_model_config.get(
                         "model_name") else "",
@@ -1255,6 +1259,7 @@ async def create_model_config_list(tenant_id):
                     extra_body=extra_body))
     model_list.append(
         ModelConfig(cite_name="sub_model",
+                    resolved_profile=restore_runtime_model_snapshot(main_model_config, tenant_id, strict=False),
                     api_key=main_model_config.get("api_key", ""),
                     model_name=get_model_name_from_config(main_model_config) if main_model_config.get(
                         "model_name") else "",
@@ -1303,6 +1308,15 @@ def _inject_plan_tools(tools: List[ToolConfig], enable_planning: bool) -> None:
             source="builtin",
         ),
     ])
+
+
+def build_agent_context_policy(enable_context_manager, tenant_policy=None, agent_policy=None, request_policy=None):
+    """Apply the saved CM switch at Agent precedence, retaining explicit request overrides."""
+    mode = "adaptive_compact" if enable_context_manager else "passthrough"
+    return PolicyLayers.model_validate({
+        "platform": {"processing_mode": mode}, "tenant": tenant_policy,
+        "agent": {**(agent_policy or {}), "processing_mode": mode}, "request": request_policy,
+    })
 
 
 async def create_agent_config(
@@ -1872,14 +1886,10 @@ async def create_agent_config(
         f"skills_count={len(skills)}, "
         f"items={[f'{item.id}(type={item.type.value},priority={item.priority})' for item in context_items]}"
     )
-    policy_layers = PolicyLayers.model_validate({
-        "platform": {
-            "processing_mode": "adaptive_compact" if enable_context_manager else "passthrough"
-        },
-        "tenant": tenant_config_manager.get_context_policy(tenant_id),
-        "agent": agent_info.get("context_policy"),
-        "request": request_context_policy,
-    })
+    policy_layers = build_agent_context_policy(
+        enable_context_manager, tenant_config_manager.get_context_policy(tenant_id),
+        agent_info.get("context_policy"), request_context_policy,
+    )
     effective_context_policy = resolve_policy(policy_layers)
     effective_processing_mode = getattr(
         effective_context_policy.processing_mode,
@@ -2564,6 +2574,97 @@ def filter_mcp_servers_and_tools(input_agent_config: AgentConfig, mcp_info_dict)
     return list(used_mcp_urls)
 
 
+def _apply_agent_model_overrides(model_list, *, agent_id, tenant_id, version_no):
+    """Apply only the selected Agent version's saved overrides to detached models."""
+    _agent_info_for_override = search_agent_info_by_agent_id(
+        agent_id=agent_id, tenant_id=tenant_id, version_no=version_no)
+    model_params_override = (_agent_info_for_override or {}).get("model_params_override") or {}
+    if model_params_override:
+        for model_id_str, override_entry in model_params_override.items():
+            if not isinstance(override_entry, dict):
+                continue
+            try:
+                override_model_id = int(model_id_str)
+            except (ValueError, TypeError):
+                continue
+            override_model_info = get_model_by_model_id(override_model_id, tenant_id=tenant_id)
+            if not override_model_info:
+                continue
+            display_name = override_model_info.get("display_name")
+            if not display_name:
+                continue
+            for mc in model_list:
+                if mc.cite_name == display_name:
+                    if override_entry.get("temperature") is not None:
+                        mc.temperature = override_entry["temperature"]
+                    if override_entry.get("top_p") is not None:
+                        mc.top_p = override_entry["top_p"]
+                    # v2.6.0: capacity fields are overridable per-agent. The
+                    # authoritative consumer for request shaping is the W1/W2
+                    # resolution (agent-selected model), this keeps each
+                    # ModelConfig consistent with its override entry.
+                    for field in _OPERATOR_OVERRIDE_FIELDS:
+                        if override_entry.get(field) is not None:
+                            setattr(mc, field, override_entry[field])
+                    override_extra = override_entry.get("extra_params")
+                    if override_extra and isinstance(override_extra, dict):
+                        merged = dict(mc.extra_body or {})
+                        for k, v in override_extra.items():
+                            if k == "enable_thinking":
+                                if isinstance(v, bool):
+                                    mc.enable_thinking = v
+                                    if not v:
+                                        mc.reasoning_effort = None
+                                        mc.reasoning_budget_tokens = None
+                                continue
+                            if k == "reasoning_effort":
+                                if isinstance(v, str):
+                                    mc.reasoning_effort = v
+                                continue
+                            if k == "reasoning_budget_tokens":
+                                if isinstance(v, int) and not isinstance(v, bool) and v > 0:
+                                    mc.reasoning_budget_tokens = v
+                                continue
+                            if k == "__custom__" and isinstance(v, dict):
+                                for custom_key, custom_value in v.items():
+                                    # A null custom value is an explicit
+                                    # removal marker: the agent opts out of a
+                                    # model-level custom param instead of
+                                    # inheriting it.
+                                    if custom_value is None:
+                                        merged.pop(custom_key, None)
+                                    else:
+                                        merged[custom_key] = custom_value
+                            else:
+                                merged[k] = v
+                        mc.extra_body = merged if merged else None
+                    if override_entry.get("reasoning_effort") is not None:
+                        mc.reasoning_effort = override_entry["reasoning_effort"]
+                    if override_entry.get("reasoning_budget_tokens") is not None:
+                        budget = override_entry["reasoning_budget_tokens"]
+                        if isinstance(budget, int) and not isinstance(budget, bool) and budget > 0:
+                            mc.reasoning_budget_tokens = budget
+                    break
+
+
+def _capture_child_model_configs(config, models, tenant_id):
+    """Freeze each child outlet before any parent or request-scoped overlay."""
+    from services.model_runtime_options_service import compile_model_runtime_profile
+
+    for child in getattr(config, "worker_agents", ()):
+        child_models = [model.model_copy(deep=True) for model in models]
+        _apply_agent_model_overrides(
+            child_models, agent_id=child.agent_id, tenant_id=tenant_id, version_no=child.version_no,
+        )
+        selected = next((model for model in child_models if model.cite_name == child.model_name), None)
+        if selected is None:
+            raise ValueError("CHILD_MODEL_OUTLET_NOT_FOUND")
+        if child.agent_core == "jiuwen":
+            selected.resolved_profile = compile_model_runtime_profile(selected, child)
+        child.runtime_model_config = selected.model_copy(deep=True)
+        _capture_child_model_configs(child, models, tenant_id)
+
+
 def apply_root_generation_overlay(
     model_list: List[ModelConfig],
     agent_config: AgentConfig,
@@ -2729,75 +2830,10 @@ async def create_agent_run_info(
     # stored on ag_tenant_agent_t. We match each override entry to a ModelConfig
     # by display_name (the cite_name used in model_config_list) and merge the
     # override values on top of the model-level defaults.
-    _agent_info_for_override = search_agent_info_by_agent_id(
-        agent_id=agent_id, tenant_id=tenant_id, version_no=version_no)
-    model_params_override = (_agent_info_for_override or {}).get("model_params_override") or {}
-    if model_params_override:
-        for model_id_str, override_entry in model_params_override.items():
-            if not isinstance(override_entry, dict):
-                continue
-            try:
-                override_model_id = int(model_id_str)
-            except (ValueError, TypeError):
-                continue
-            override_model_info = get_model_by_model_id(override_model_id, tenant_id=tenant_id)
-            if not override_model_info:
-                continue
-            display_name = override_model_info.get("display_name")
-            if not display_name:
-                continue
-            for mc in model_list:
-                if mc.cite_name == display_name:
-                    if override_entry.get("temperature") is not None:
-                        mc.temperature = override_entry["temperature"]
-                    if override_entry.get("top_p") is not None:
-                        mc.top_p = override_entry["top_p"]
-                    # v2.6.0: capacity fields are overridable per-agent. The
-                    # authoritative consumer for request shaping is the W1/W2
-                    # resolution (agent-selected model), this keeps each
-                    # ModelConfig consistent with its override entry.
-                    for field in _OPERATOR_OVERRIDE_FIELDS:
-                        if override_entry.get(field) is not None:
-                            setattr(mc, field, override_entry[field])
-                    override_extra = override_entry.get("extra_params")
-                    if override_extra and isinstance(override_extra, dict):
-                        merged = dict(mc.extra_body or {})
-                        for k, v in override_extra.items():
-                            if k == "enable_thinking":
-                                if isinstance(v, bool):
-                                    mc.enable_thinking = v
-                                    if not v:
-                                        mc.reasoning_effort = None
-                                        mc.reasoning_budget_tokens = None
-                                continue
-                            if k == "reasoning_effort":
-                                if isinstance(v, str):
-                                    mc.reasoning_effort = v
-                                continue
-                            if k == "reasoning_budget_tokens":
-                                if isinstance(v, int) and not isinstance(v, bool) and v > 0:
-                                    mc.reasoning_budget_tokens = v
-                                continue
-                            if k == "__custom__" and isinstance(v, dict):
-                                for custom_key, custom_value in v.items():
-                                    # A null custom value is an explicit
-                                    # removal marker: the agent opts out of a
-                                    # model-level custom param instead of
-                                    # inheriting it.
-                                    if custom_value is None:
-                                        merged.pop(custom_key, None)
-                                    else:
-                                        merged[custom_key] = custom_value
-                            else:
-                                merged[k] = v
-                        mc.extra_body = merged if merged else None
-                    if override_entry.get("reasoning_effort") is not None:
-                        mc.reasoning_effort = override_entry["reasoning_effort"]
-                    if override_entry.get("reasoning_budget_tokens") is not None:
-                        budget = override_entry["reasoning_budget_tokens"]
-                        if isinstance(budget, int) and not isinstance(budget, bool) and budget > 0:
-                            mc.reasoning_budget_tokens = budget
-                    break
+    _capture_child_model_configs(agent_config, model_list, tenant_id)
+    _apply_agent_model_overrides(
+        model_list, agent_id=agent_id, tenant_id=tenant_id, version_no=version_no,
+    )
     # Request-scoped Workbench settings apply only to the root model. Static
     # children retain the model aliases from their published versions.
     # Static children keep their published aliases and never inherit this overlay.
@@ -2862,6 +2898,14 @@ async def create_agent_run_info(
                 f"Reasoning budget must be between {minimum} and {maximum} tokens"
             )
         selected_config.reasoning_budget_tokens = reasoning_budget_tokens
+
+    if getattr(agent_config, "agent_core", "smolagents") == "jiuwen":
+        from services.model_runtime_options_service import compile_model_runtime_profile
+
+        selected_config = next((mc for mc in model_list if mc.cite_name == agent_config.model_name), None)
+        if selected_config is None:
+            raise ValueError("MODEL_OUTLET_NOT_FOUND")
+        selected_config.resolved_profile = compile_model_runtime_profile(selected_config, agent_config)
 
     remote_mcp_list = await get_remote_mcp_server_list(tenant_id=tenant_id, is_need_auth=True)
     default_mcp_url = get_tenant_local_mcp_server(tenant_id)

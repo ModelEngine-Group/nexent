@@ -1,0 +1,72 @@
+schema_version: '1.0'
+stage: D4
+module: AGENT-CORE
+case:
+  case_id: JIUWEN-OUTPUT-D4-001
+  feature_id: JIUWEN-OUTPUT
+  requirement_ids:
+  - JIUWEN-M5-20261016
+  - JIUWEN-UNIFIED-OUTPUT-20261016
+  business_rule_ids:
+  - JIUWEN-OUTPUT-RULE-001
+  - JIUWEN-OUTPUT-RULE-002
+  - JIUWEN-OUTPUT-RULE-003
+  - JIUWEN-OUTPUT-RULE-004
+  title: Jiuwen output contract and display D4
+  type: E2E
+  priority: P1
+  status: active
+  automation: automated
+  objective: Preserve ordered runtime facts and explicit terminal semantics through
+    streaming, persistence and display.
+  preconditions:
+  - Installed Jiuwen and existing local controlled model/resource services; isolated
+    PostgreSQL for persistence; frontend fixture server for D4.
+  test_data:
+    profile: mock
+    locale: zh
+    viewport:
+      width: 1920
+      height: 1080
+  steps:
+  - order: 1
+    action: Open an old chat, send a Jiuwen request containing intermediate text,
+      reasoning, business tools, MCP, Skills, child and A2A groups.
+    expected: Execution process shows same-level ordered content and tool cards, child/A2A
+      results and one final answer outside the process. All Core output uses the existing
+      reasoning, tool, final and child components; no runtime-output renderer.
+  - order: 2
+    action: Reload the chat, then load failed/stopped partial and legacy Code messages.
+    expected: Saved and live projections agree; partial/error remains visible with
+      failed/stopped status, unknown usage is not zero and legacy messages still render.
+  expected_results: &id001
+  - Execution process shows same-level ordered content and tool cards, child/A2A results
+    and one final answer outside the process. All Core output uses the existing reasoning,
+    tool, final and child components; no runtime-output renderer.
+  - Saved and live projections agree; partial/error remains visible with failed/stopped
+    status, unknown usage is not zero and legacy messages still render.
+  forbidden_side_effects:
+  - No inferred success from EOF or text; no duplicate final, lost partial, cross-invocation
+    tool pairing, invented reasoning or native HTTP bypass.
+  - No Core-specific renderer or duplicate frontend parsing pipeline; no native output
+    card selected from agent_core.
+  actor: Authorized Agent development user
+  journey:
+  - Open an old chat, send a Jiuwen request containing intermediate text, reasoning,
+    business tools, MCP, Skills, child and A2A groups.
+  - Reload the chat, then load failed/stopped partial and legacy Code messages.
+  final_business_result: *id001
+  failure_evidence:
+  - Fixed Playwright journey assertions, sanitized request payloads and terminal audit.
+  acceptance:
+  - id: AC-01
+    description: Public output and terminal/display contract preserves execution facts.
+    steps:
+    - 1
+    - 2
+    expected_results:
+    - 1
+    - 2
+    forbidden_side_effects:
+    - 1
+    - 2

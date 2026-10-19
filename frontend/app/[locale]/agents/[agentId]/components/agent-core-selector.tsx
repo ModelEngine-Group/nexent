@@ -38,7 +38,7 @@ export default function AgentCoreSelector() {
           id="agent-context-manager"
           aria-label={t("agent.core.contextManager")}
           checked={agent.enable_context_manager ?? true}
-          disabled={readOnly || core === "jiuwen"}
+          disabled={readOnly}
           onChange={(enable_context_manager) =>
             update({ enable_context_manager })
           }

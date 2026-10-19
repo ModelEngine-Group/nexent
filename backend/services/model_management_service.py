@@ -23,20 +23,21 @@ from consts.provider import (
 )
 
 from database.model_management_db import (
-    create_model_record,
     delete_model_record,
     get_model_by_model_id,
     get_model_by_name_factory,
     get_models_by_display_name,
     get_model_records,
     get_models_by_tenant_factory_type,
-    update_model_record
 )
 from database.tenant_config_db import (
     get_single_config_info,
     insert_config,
     update_config_by_tenant_config_id,
 )
+
+
+from services.model_runtime_provisioning_service import create_model_record, update_model_record
 from services.model_provider_service import (
     prepare_model_dict,
     merge_existing_model_attributes,
@@ -1158,6 +1159,7 @@ async def list_models_for_tenant(tenant_id: str):
         }
 
         for record in records:
+            record.pop("runtime_outlet_snapshot", None)
             _enrich_model_reasoning_capability(record)
             record["model_name"] = add_repo_to_name(
                 model_repo=record["model_repo"],
@@ -1185,6 +1187,7 @@ async def list_llm_models_for_tenant(tenant_id: str):
         records = get_model_records({"model_type": "llm"}, tenant_id)
         result: List[Dict[str, Any]] = []
         for record in records:
+            record.pop("runtime_outlet_snapshot", None)
             _enrich_model_reasoning_capability(record)
             result.append({
                 "model_id": record["model_id"],

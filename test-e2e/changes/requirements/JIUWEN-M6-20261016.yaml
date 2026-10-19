@@ -1,0 +1,53 @@
+schema_version: '1.0'
+change:
+  change_id: JIUWEN-M6-20261016
+  change_type: requirement
+  requirement_id: JIUWEN-M6-20261016
+  title: Jiuwen logical recovery and deployed real-model acceptance
+  description: Complete AC-018 and execute authorized M6 deployment with real model/resource
+    and history checks.
+  affected_features:
+    existing:
+    - JIUWEN-OUTPUT
+    - JIUWEN-CONTEXT
+    added:
+    - JIUWEN-RECOVERY
+    - JIUWEN-RELEASE
+    modified:
+    - JIUWEN-MODEL-BRIDGE
+    retired: []
+  affected_cases:
+    existing:
+    - JIUWEN-OUTPUT-D3-001
+    - JIUWEN-OUTPUT-D4-001
+    - JIUWEN-OUTPUT-D5-001
+    - JIUWEN-CONTEXT-D3-001
+    - JIUWEN-RESOURCES-D3-002
+    - JIUWEN-CONTEXT-D4-001
+    - JIUWEN-RESOURCES-D3-001
+    added:
+    - JIUWEN-RECOVERY-D5-001
+    - JIUWEN-RELEASE-D3-001
+    modified:
+    - JIUWEN-MODEL-BRIDGE-D5-001
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    behaviors:
+    - Independent turn/step limits and cancellation/deadline before each correction.
+    - Preserve partial and classify fatal errors; report recovery without poisoning
+      a later successful terminal.
+    - No tool call exposed until fully validated; physical attempts remain ModelService
+      owned.
+    reason: Existing model bridge/output UT fail closed but do not prove allowed in-loop
+      logical recovery. Add budget/mapping UT and one real-loop D5, no duplicate D1.
+    test_selectors:
+    - test/sdk/core/agents/test_jiuwen_model_service.py
+    - test/sdk/core/agents/test_jiuwen_output.py
+    - test/sdk/core/model_service/test_openai_stream.py
+    - test/sdk/monitor/test_monitoring_token_totals.py
+    - test/backend/database/test_conversation_append_order.py
+    - test/backend/services/test_conversation_runtime_boundary.py
+    - test/backend/services/test_conversation_management_service.py
+  notes: M6 deployment evidence and real smoke remain separate from controlled formal
+    profile; unavailable real prerequisites block acceptance.

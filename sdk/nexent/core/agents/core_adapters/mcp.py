@@ -3,6 +3,7 @@
 import asyncio
 import logging
 from contextlib import AsyncExitStack, nullcontext
+from copy import deepcopy
 from types import SimpleNamespace
 
 from openjiuwen.core.foundation.tool.mcp.base import McpServerConfig, MCPTool, McpToolCard
@@ -26,7 +27,7 @@ class JiuwenMCPCollection(ManagedMCPToolCollection):
         self.observe = observe
         self.emit_result = emit_result
         self.terminal_error = None
-        self.user_context = dict(user_context or {})
+        self.user_context = deepcopy(dict(user_context or {}))
 
     async def _run_async_session(self):
         from ..run_agent import _normalize_mcp_config
@@ -61,7 +62,7 @@ class JiuwenMCPCollection(ManagedMCPToolCollection):
                 client, remote_card = match
                 properties = remote_card.input_params.get("properties", {})
                 hidden = [name for name in USER_CONTEXT_FIELDS if name in properties]
-                proxy = _ManagedNativeClient(self, client, remote_card.name, hidden)
+                proxy = _ManagedNativeClient(self, client, remote_card.name, hidden, tool_config.params)
                 card = remote_card.model_copy(deep=True)
                 for name in hidden:
                     card.input_params["properties"].pop(name, None)
@@ -84,15 +85,16 @@ class JiuwenMCPCollection(ManagedMCPToolCollection):
 
 
 class _ManagedNativeClient:
-    def __init__(self, owner, client, remote_name, hidden_fields=()):
+    def __init__(self, owner, client, remote_name, hidden_fields=(), configured_arguments=None):
         self.owner, self.client, self.remote_name = owner, client, remote_name
         self.hidden_fields = hidden_fields
+        self.configured_arguments = deepcopy(dict(configured_arguments or {}))
 
     async def call_tool(self, tool_name, arguments):
         owner = self.owner
         if owner.cancellation_scope.cancelled:
             raise asyncio.CancelledError()
-        arguments = dict(arguments)
+        arguments = {**arguments, **deepcopy(self.configured_arguments)}
         for name in self.hidden_fields:
             arguments[name] = owner.user_context.get(name)
         execution = owner.manager.submit(

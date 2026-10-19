@@ -1,0 +1,58 @@
+schema_version: '1.0'
+stage: D5
+module: AGENT-CORE
+cases:
+- case_id: AGENT-CORE-D5-001
+  feature_id: AGENT-CORE-001
+  business_rule_ids:
+  - AGENT-CORE-001-R3
+  - AGENT-CORE-001-R4
+  title: Cancellation timeout and isolation
+  type: RELIABILITY
+  priority: P1
+  status: active
+  automation: automated
+  objective: Cancellation timeout and isolation
+  preconditions:
+  - Use isolated run resources and deterministic local fixtures.
+  test_data:
+    core: jiuwen
+    legacy_core: smolagents
+  steps:
+  - order: 1
+    action: 'Exercise scenario: Blocked native task stops within close grace.'
+    expected: Blocked native task stops within close grace
+  - order: 2
+    action: 'Exercise scenario: MCP tool deadline cancels call and closes client.'
+    expected: MCP tool deadline cancels call and closes client
+  - order: 3
+    action: 'Exercise scenario: Concurrent owner registrations cannot cross runs.'
+    expected: Concurrent owner registrations cannot cross runs
+  - order: 4
+    action: 'Exercise scenario: Cancelled worker emits no successful final answer.'
+    expected: Cancelled worker emits no successful final answer
+  expected_results:
+  - Blocked native task stops within close grace
+  - MCP tool deadline cancels call and closes client
+  - Concurrent owner registrations cannot cross runs
+  - Cancelled worker emits no successful final answer
+  forbidden_side_effects:
+  - No smolagents execution in the Jiuwen branch.
+  - No unauthorized tools or cross-run resources.
+  execution:
+    profiles:
+    - name: mock
+      required_services: []
+    timeout_seconds: 60
+  risk_type: RELIABILITY
+  risk: Stalled tasks leak resources or overwrite another run.
+  condition:
+  - Cancel a blocked model/tool task.
+  - Run isolated owners with identical tool names.
+  metrics:
+  - Termination latency and resource count
+  thresholds:
+  - Worker stops within 5 seconds.
+  - All owned resources return to baseline.
+  recovery_expectations:
+  - Subsequent independent run succeeds.

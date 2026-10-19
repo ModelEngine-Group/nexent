@@ -8,6 +8,7 @@ from pydantic import (
     ConfigDict,
     EmailStr,
     Field,
+    PrivateAttr,
     field_validator,
     model_validator,
 )
@@ -960,6 +961,8 @@ def reject_legacy_agent_fields(value):
 
 
 class AgentRequest(BaseModel):
+    _runtime_user_message_id: Optional[int] = PrivateAttr(default=None)
+    _runtime_user_message_index: Optional[int] = PrivateAttr(default=None)
     query: str
     conversation_id: Optional[int] = None
     history: Optional[List[HistoryItem]] = None

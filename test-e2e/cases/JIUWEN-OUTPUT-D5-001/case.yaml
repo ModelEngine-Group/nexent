@@ -1,0 +1,72 @@
+schema_version: '1.0'
+stage: D5
+module: AGENT-CORE
+case:
+  case_id: JIUWEN-OUTPUT-D5-001
+  feature_id: JIUWEN-OUTPUT
+  requirement_ids:
+  - JIUWEN-M5-20261016
+  business_rule_ids:
+  - JIUWEN-OUTPUT-RULE-001
+  - JIUWEN-OUTPUT-RULE-002
+  - JIUWEN-OUTPUT-RULE-003
+  title: Jiuwen output contract and display D5
+  type: RELIABILITY
+  priority: P0
+  status: active
+  automation: automated
+  objective: Preserve ordered runtime facts and explicit terminal semantics through
+    streaming, persistence and display.
+  preconditions:
+  - Installed Jiuwen and existing local controlled model/resource services; isolated
+    PostgreSQL for persistence; frontend fixture server for D4.
+  test_data:
+    profile: mock
+  steps:
+  - order: 1
+    action: Inject missing/duplicate Runner terminals, a stream failure after visible
+      output, or cancellation during real execution.
+    expected: At most one terminal is emitted, missing/duplicate terminal is failed,
+      partial is retained and failed/stopped cannot become successful after later
+      content.
+  - order: 2
+    action: Persist and reload fault output, then run a fresh authorized turn.
+    expected: Stored and displayed terminal state match SDK outcome, no final answer
+      is invented, previous tools are not replayed and owned resources drain.
+  expected_results:
+  - At most one terminal is emitted, missing/duplicate terminal is failed, partial
+    is retained and failed/stopped cannot become successful after later content.
+  - Stored and displayed terminal state match SDK outcome, no final answer is invented,
+    previous tools are not replayed and owned resources drain.
+  forbidden_side_effects:
+  - No inferred success from EOF or text; no duplicate final, lost partial, cross-invocation
+    tool pairing, invented reasoning or native HTTP bypass.
+  acceptance:
+  - id: AC-01
+    description: Public output and terminal/display contract preserves execution facts.
+    steps:
+    - 1
+    - 2
+    expected_results:
+    - 1
+    - 2
+    forbidden_side_effects:
+    - 1
+  execution:
+    profiles:
+    - name: mock
+      required_services:
+      - http-fixture
+      - model-provider
+    timeout_seconds: 240
+  risk_type: RELIABILITY
+  risk: False success or lost/replayed execution facts on terminal/stream faults.
+  condition:
+  - Missing/duplicate terminal, visible partial then stream failure, or explicit cancellation.
+  metrics:
+  - Terminal count/status, retained blocks, effect count, owned workers and recovery.
+  thresholds:
+  - One terminal at most; zero inferred success or repeated side effects; managed
+    workers drain.
+  recovery_expectations:
+  - New authorized turn completes without executing old tasks.

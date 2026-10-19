@@ -47,7 +47,6 @@ from consts.exceptions import (
 from consts.error_code import ErrorCode
 from consts.exceptions import AppException
 
-from database.model_management_db import create_model_record
 from database.user_tenant_db import insert_user_tenant, get_user_tenant_by_user_id
 from database.oauth_account_db import list_oauth_accounts_by_user_id
 from database.group_db import query_group_ids_by_user
@@ -60,6 +59,13 @@ from management.services.skill.service import init_skill_list_for_tenant
 
 
 logging.getLogger("user_management_service").setLevel(logging.INFO)
+
+
+def create_model_record(*args, **kwargs):
+    """Provision trusted snapshots when a tenant receives its initial models."""
+    from services.model_runtime_provisioning_service import create_model_record as persist
+
+    return persist(*args, **kwargs)
 
 
 def get_provider_username(user_id: str, provider: str) -> Optional[str]:

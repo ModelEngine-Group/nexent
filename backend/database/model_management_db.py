@@ -12,7 +12,7 @@ from .utils import add_creation_tracking, add_update_tracking
 logger = logging.getLogger("database.model_management_db")
 
 
-def create_model_record(model_data: Dict[str, Any], user_id: str, tenant_id: str) -> bool:
+def create_model_record(model_data: Dict[str, Any], user_id: str, tenant_id: str, *, runtime_profile_builder=None) -> bool:
     """
     Create a model record
 
@@ -45,7 +45,15 @@ def create_model_record(model_data: Dict[str, Any], user_id: str, tenant_id: str
             cleaned_data["extra_params"] = filter_extra_params(model_type, extra_params)
 
         # Build the insert statement
+        cleaned_data.pop("runtime_outlet_snapshot", None)
         stmt = insert(ModelRecord).values(cleaned_data)
+        if runtime_profile_builder is not None:
+            model_id = session.execute(stmt.returning(ModelRecord.model_id)).scalar_one()
+            record = as_dict(session.scalars(select(ModelRecord).where(ModelRecord.model_id == model_id)).one())
+            snapshot = runtime_profile_builder(record)
+            session.execute(update(ModelRecord).where(ModelRecord.model_id == model_id)
+                            .values(runtime_outlet_snapshot=snapshot))
+            return True
 
         # Execute the insert statement
         result = session.execute(stmt)
@@ -57,7 +65,8 @@ def update_model_record(
         model_id: int,
         update_data: Dict[str, Any],
         user_id: Optional[str] = None,
-        tenant_id: Optional[str] = None
+        tenant_id: Optional[str] = None,
+        *, runtime_profile_builder=None,
 ) -> bool:
     """
     Update a model record
@@ -84,6 +93,15 @@ def update_model_record(
         if tenant_id is not None:
             cleaned_data["tenant_id"] = tenant_id
 
+        current = None
+        if runtime_profile_builder is not None:
+            query = select(ModelRecord).where(ModelRecord.model_id == model_id, ModelRecord.delete_flag == "N")
+            if tenant_id is not None:
+                query = query.where(ModelRecord.tenant_id == tenant_id)
+            current = session.scalars(query.with_for_update()).first()
+            if current is None:
+                return False
+
         # v2.6.0: filter extra_params to only allowed keys for this model type.
         # When model_type is not part of the update payload, look it up from the
         # existing record so filtering still applies.
@@ -91,11 +109,17 @@ def update_model_record(
         if extra_params is not None:
             model_type = cleaned_data.get("model_type")
             if model_type is None:
-                model_type = session.scalars(
+                model_type = current.model_type if current is not None else session.scalars(
                     select(ModelRecord.model_type).where(
                         ModelRecord.model_id == model_id)
                 ).first()
             cleaned_data["extra_params"] = filter_extra_params(model_type, extra_params)
+
+        cleaned_data.pop("runtime_outlet_snapshot", None)
+        if runtime_profile_builder is not None:
+            record = {**as_dict(current), **{key: value for key, value in cleaned_data.items()
+                                            if key not in {"update_time"}}}
+            cleaned_data["runtime_outlet_snapshot"] = runtime_profile_builder(record)
 
         # Build the update statement
         stmt = update(ModelRecord).where(

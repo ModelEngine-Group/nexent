@@ -20,6 +20,8 @@ except ImportError:  # Compatibility with slim test/runtime consts stubs.
 from database.attachment_db import _build_mcp_presigned_url, get_file_url, upload_fileobj
 from services.file_management_service import is_allowed_skill_upload_path
 
+from utils.runtime_output import is_runtime_event
+
 logger = logging.getLogger(__name__)
 
 
@@ -28,11 +30,16 @@ def finalize_buffered_unit_fragments(message_units: list[dict[str, Any]]) -> int
     finalized_bytes = 0
     for unit in message_units:
         unit.pop("_attempt_id", None)
+        unit.pop("_block_id", None)
         fragments = unit.pop("_content_fragments", None)
         if fragments is not None:
             content = "".join(fragments)
             unit["content"] = content
             unit["unit_content"] = content
+        envelope = unit.pop("_runtime_envelope", None)
+        if envelope is not None:
+            envelope["content"] = unit["content"]
+            unit["content"] = unit["unit_content"] = json.dumps(envelope, ensure_ascii=False)
         finalized_bytes += len(str(unit.get("unit_content", "")).encode("utf-8"))
     return finalized_bytes
 
@@ -62,6 +69,8 @@ def is_stream_unit_continuation(
         and current_unit.get("_attempt_id") == data.get("attempt_id")
         and current_unit.get("invocation_id") == data.get("invocation_id")
         and current_unit.get("_step_id") == data.get("step_id")
+        and current_unit.get("_block_id") == data.get("block_id")
+        and bool(current_unit.get("_runtime_envelope")) == is_runtime_event(data)
     )
 
 
@@ -103,6 +112,8 @@ def extract_skill_file_upload_payloads(content: str) -> list[dict]:
 
 def serialize_stream_unit_content(data: Dict[str, Any], content: Any) -> str:
     """Preserve structured content and tool metadata in the text unit column."""
+    if is_runtime_event(data):
+        return json.dumps({**data, "content": content}, ensure_ascii=False)
     if data.get("type") == "human_interaction" and not isinstance(content, str):
         return json.dumps(content, ensure_ascii=False)
     if data.get("type") not in {"tool", "tool-call"}:

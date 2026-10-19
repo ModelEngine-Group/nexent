@@ -82,6 +82,14 @@ class ContextManager:
         fallback_system_prompt: str,
         items: Optional[Sequence[Any]] = None,
     ) -> ManagedRunContext:
+        """Adapt legacy memory callers to the shared item-only preparation contract."""
+        return self.prepare_items_context(fallback_system_prompt=fallback_system_prompt, items=items)
+
+    def prepare_items_context(
+        self,
+        fallback_system_prompt: str,
+        items: Optional[Sequence[Any]] = None,
+    ) -> ManagedRunContext:
         self._history_candidate = None
         self._run_compaction_attempts = 0
         self._current_item_cache.clear()
@@ -126,9 +134,32 @@ class ContextManager:
         request_system_messages: Sequence[ChatMessage | dict[str, object]] = (),
         request_tail_messages: Sequence[ChatMessage | dict[str, object]] = (),
     ) -> FinalContext:
+        """Project legacy memory once, then use the Core-independent assembly path."""
+        run_context = run_context or self.prepare_run_context(memory, "")
+        return self.assemble_context_items(
+            model=model, current_items=self._project_current_run(memory, current_run_start_idx),
+            tools=tools, purpose=purpose, task=task, final_answer_templates=final_answer_templates,
+            run_context=run_context, force_compaction=force_compaction,
+            request_system_messages=request_system_messages, request_tail_messages=request_tail_messages,
+        )
+
+    def assemble_context_items(
+        self,
+        *,
+        model: Any,
+        current_items: Sequence[ContextItem] = (),
+        tools: Sequence[Any] | None = None,
+        purpose: str = "step",
+        task: str | None = None,
+        final_answer_templates: Optional[Dict[str, Any]] = None,
+        run_context: ManagedRunContext | None = None,
+        force_compaction: bool = False,
+        request_system_messages: Sequence[ChatMessage | dict[str, object]] = (),
+        request_tail_messages: Sequence[ChatMessage | dict[str, object]] = (),
+    ) -> FinalContext:
         if purpose != "step" and (request_system_messages or request_tail_messages):
             raise ValueError("Request-only action messages require step purpose")
-        run_context = run_context or self.prepare_run_context(memory, "")
+        run_context = run_context or self.prepare_items_context("")
         policy = resolve_policy(self.config.policy_layers)
         persisted_items = list(run_context.items)
         if self._history_candidate is not None:
@@ -142,7 +173,6 @@ class ContextManager:
                 }
             ]
             persisted_items.append(self._history_candidate.as_item())
-        current_items = self._project_current_run(memory, current_run_start_idx)
         items = sorted([*persisted_items, *current_items], key=lambda item: item.layout_key)
         purpose_stable, purpose_dynamic = self._purpose_messages(
             purpose=purpose,

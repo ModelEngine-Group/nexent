@@ -379,33 +379,18 @@ class TestConversationManagementService(unittest.TestCase):
         self.assertEqual(save_source_search(search_data, user_id="u"), 7)
         mock_create_source_search.assert_called_once_with(search_data, user_id="u")
 
-    @patch('backend.services.conversation_management_service.save_message')
-    def test_save_conversation_user(self, mock_save_message):
-        """User messages only create a message row, no unit records are created."""
-        mock_save_message.return_value = 999
+    @patch('backend.services.conversation_management_service.append_conversation_user_message')
+    def test_save_conversation_user(self, mock_append):
+        """User messages use the database-reserved pair and create no unit records."""
+        mock_append.return_value = (999, 2)
         agent_request = AgentRequest(
-            conversation_id=123,
-            query="What is machine learning?",
-            minio_files=[],
-            history=[
-                {"role": "user", "content": "Hello"},
-                {"role": "assistant", "content": "Hi there"}
-            ]
+            conversation_id=123, query="What is machine learning?", minio_files=[],
+            history=[{"role": "user", "content": "Hello"}, {"role": "assistant", "content": "Hi there"}],
         )
-
-        # Execute
         save_conversation_user(agent_request, self.user_id, self.tenant_id)
-
-        # Assert: save_message is called exactly once (no unit records for user messages)
-        mock_save_message.assert_called_once()
-        request_arg = mock_save_message.call_args[0][0]
-        self.assertEqual(request_arg.conversation_id, 123)
-        # Based on 1 user message in history
-        self.assertEqual(request_arg.message_idx, 2)
-        self.assertEqual(request_arg.role, "user")
-        self.assertEqual(request_arg.message[0].type, "string")
-        self.assertEqual(
-            request_arg.message[0].content, "What is machine learning?")
+        mock_append.assert_called_once_with(123, "What is machine learning?", [], self.user_id)
+        self.assertEqual(agent_request._runtime_user_message_id, 999)
+        self.assertEqual(agent_request._runtime_user_message_index, 2)
 
     def test_save_conversation_assistant_is_removed(self):
         """save_conversation_assistant has been replaced by the incremental
@@ -420,10 +405,10 @@ class TestConversationManagementService(unittest.TestCase):
             save_conversation_assistant(
                 agent_request, [], self.user_id, self.tenant_id)
 
-    @patch('backend.services.conversation_management_service.save_message')
+    @patch('backend.services.conversation_management_service.append_conversation_user_message')
     def test_save_conversation_user_strips_runtime_time_marker(self, mock_save_message):
         """Remove the appended runtime time marker before persisting the user request."""
-        mock_save_message.return_value = 1001
+        mock_save_message.return_value = (1001, 0)
         agent_request = AgentRequest(
             conversation_id=456,
             query="What is the weather?\n\n[Current time: 2026-01-01 20:00:00]",
@@ -434,13 +419,13 @@ class TestConversationManagementService(unittest.TestCase):
         save_conversation_user(agent_request, self.user_id, self.tenant_id)
 
         mock_save_message.assert_called_once()
-        request_arg = mock_save_message.call_args[0][0]
-        self.assertEqual(request_arg.message[0].content, "What is the weather?")
+        saved_content = mock_save_message.call_args[0][1]
+        self.assertEqual(saved_content, "What is the weather?")
 
-    @patch('backend.services.conversation_management_service.save_message')
+    @patch('backend.services.conversation_management_service.append_conversation_user_message')
     def test_save_conversation_user_without_prefix_unchanged(self, mock_save_message):
         """When query has no [Current time: ...] prefix, it should be persisted as-is."""
-        mock_save_message.return_value = 1002
+        mock_save_message.return_value = (1002, 0)
         agent_request = AgentRequest(
             conversation_id=456,
             query="What is machine learning?",
@@ -451,13 +436,13 @@ class TestConversationManagementService(unittest.TestCase):
         save_conversation_user(agent_request, self.user_id, self.tenant_id)
 
         mock_save_message.assert_called_once()
-        request_arg = mock_save_message.call_args[0][0]
-        self.assertEqual(request_arg.message[0].content, "What is machine learning?")
+        saved_content = mock_save_message.call_args[0][1]
+        self.assertEqual(saved_content, "What is machine learning?")
 
-    @patch('backend.services.conversation_management_service.save_message')
+    @patch('backend.services.conversation_management_service.append_conversation_user_message')
     def test_save_conversation_user_empty_query(self, mock_save_message):
         """When query is empty, it should be persisted as-is without errors."""
-        mock_save_message.return_value = 1003
+        mock_save_message.return_value = (1003, 0)
         agent_request = AgentRequest(
             conversation_id=456,
             query="",
@@ -468,13 +453,13 @@ class TestConversationManagementService(unittest.TestCase):
         save_conversation_user(agent_request, self.user_id, self.tenant_id)
 
         mock_save_message.assert_called_once()
-        request_arg = mock_save_message.call_args[0][0]
-        self.assertEqual(request_arg.message[0].content, "")
+        saved_content = mock_save_message.call_args[0][1]
+        self.assertEqual(saved_content, "")
 
-    @patch('backend.services.conversation_management_service.save_message')
+    @patch('backend.services.conversation_management_service.append_conversation_user_message')
     def test_save_conversation_user_malformed_prefix_no_bracket(self, mock_save_message):
         """When query has [Current time: prefix but no closing bracket, persist as-is."""
-        mock_save_message.return_value = 1004
+        mock_save_message.return_value = (1004, 0)
         agent_request = AgentRequest(
             conversation_id=456,
             query="[Current time: no closing bracket here",
@@ -485,8 +470,8 @@ class TestConversationManagementService(unittest.TestCase):
         save_conversation_user(agent_request, self.user_id, self.tenant_id)
 
         mock_save_message.assert_called_once()
-        request_arg = mock_save_message.call_args[0][0]
-        self.assertEqual(request_arg.message[0].content, "[Current time: no closing bracket here")
+        saved_content = mock_save_message.call_args[0][1]
+        self.assertEqual(saved_content, "[Current time: no closing bracket here")
 
     @patch('backend.services.conversation_management_service.get_llm_adapter_from_config')
     @patch('backend.services.conversation_management_service.compose_auxiliary_prompt')

@@ -10,7 +10,7 @@ from services.model_gateway_service import build_adapter_fresh
 from services.voice_service import get_voice_service
 from consts.const import LOCALHOST_IP, LOCALHOST_NAME, DOCKER_INTERNAL_HOST
 from consts.model import ModelConnectStatusEnum
-from database.model_management_db import get_model_by_display_name, update_model_record
+from database.model_management_db import get_model_by_display_name
 from utils.config_utils import get_model_name_from_config
 
 logger = logging.getLogger("model_health_service")
@@ -21,6 +21,13 @@ SILICONFLOW_MODEL_FACTORY = "silicon"
 PROVIDER_CATALOG_HEALTHCHECK_FACTORIES = {DASHSCOPE_MODEL_FACTORY, TOKENPONY_MODEL_FACTORY}
 
 EMBEDDING_TYPES = {"embedding", "multi_embedding"}
+
+
+def update_model_record(*args, **kwargs):
+    """Keep health writes synchronized with trusted runtime snapshots."""
+    from services.model_runtime_provisioning_service import update_model_record as persist
+
+    return persist(*args, **kwargs)
 
 
 def _normalize_embedding_url(base_url: str) -> str:

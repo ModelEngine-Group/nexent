@@ -1,0 +1,15 @@
+schema_version: '1.0'
+case_id: JIUWEN-RESOURCES-D3-001
+implementations:
+- framework: pytest
+  file: test_resources.py
+  selector: test_resource_protocol_roundtrip
+timeout_seconds: 180
+acceptance_bindings:
+  AC-01:
+  - test_resource_protocol_roundtrip
+preparation:
+  families: []
+  anchors: false
+  special_assets: false
+  d4_groups: []

@@ -2209,6 +2209,7 @@ const SubAgentGroupRenderer: FC<{
   const content = useAuiState((s) => s.message.content) as ReadonlyArray<{
     type?: string;
     metadata?: {
+      executionStatus?: "completed" | "failed" | "stopped";
       subagentId?: number | string;
       runId?: string;
       agentName?: string;
@@ -2271,6 +2272,7 @@ const SubAgentGroupRenderer: FC<{
 
   return (
     <SubAgentContainer
+      executionStatus={indices.map(index => content[index]?.metadata?.executionStatus).find(status => status === "failed" || status === "stopped")}
       agentName={descriptor.agentName}
       depth={descriptor.depth}
       isRunning={descriptor.isRunning}

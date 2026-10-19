@@ -29,8 +29,8 @@ class AgentCoreAdapter(ABC):
         """Bind resolved resources for this run."""
 
     @abstractmethod
-    def run(self) -> None:
-        """Execute and emit the existing Nexent observer protocol."""
+    def run(self) -> Any:
+        """Emit the existing observer protocol and return the terminal value to a delegator."""
 
     def close(self) -> None:
         """Release only resources owned by this adapter; must be idempotent."""

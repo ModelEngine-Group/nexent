@@ -9,10 +9,11 @@ from nexent.core.concurrency import run_blocking
 from nexent.monitor import get_monitoring_manager, set_monitoring_context, set_monitoring_operation
 
 from consts.const import LANGUAGE, MODEL_CONFIG_MAPPING, MESSAGE_ROLE, DEFAULT_EN_TITLE, DEFAULT_ZH_TITLE
-from consts.model import AgentRequest, MessageRequest, MessageUnit
+from consts.model import AgentRequest, MessageRequest
 from consts.exceptions import AppException, ConversationNotFoundError, ValidationError
 from database.conversation_db import (
     CHAT_MODE_VALUES,
+    append_conversation_user_message,
     create_conversation,
     create_conversation_message,
     create_message_unit,
@@ -275,23 +276,11 @@ def save_conversation_user(request: AgentRequest, user_id: str, tenant_id: str) 
     Note: conversation_message_unit_t only stores assistant message content.
     User messages do not need unit records.
     """
-    user_role_count = sum(1 for item in getattr(
-        request, "history", []) if item.role == MESSAGE_ROLE["USER"])
-
-    # Strip the locale-specific current-time prefix before persisting so historical
-    # messages do not show the time marker. The prefix is injected by
-    # run_agent_stream for the LLM call only.
-    raw_query = strip_current_time_prefix(request.query)
-
-    conversation_req = MessageRequest(
-        conversation_id=request.conversation_id,
-        message_idx=user_role_count * 2,
-        role=MESSAGE_ROLE["USER"],
-        message=[MessageUnit(type="string", content=raw_query)],
-        minio_files=request.minio_files,
+    message_id, message_index = append_conversation_user_message(
+        request.conversation_id, strip_current_time_prefix(request.query), request.minio_files, user_id,
     )
-    save_message(
-        conversation_req, user_id=user_id, tenant_id=tenant_id)
+    request._runtime_user_message_id = message_id
+    request._runtime_user_message_index = message_index
 
 
 def save_conversation_assistant(request: AgentRequest, messages: List[str], user_id: str, tenant_id: str):

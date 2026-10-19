@@ -1,0 +1,15 @@
+schema_version: '1.0'
+case_id: JIUWEN-RESOURCES-D3-002
+implementations:
+- framework: pytest
+  file: test_collaboration.py
+  selector: test_configured_collaboration
+timeout_seconds: 180
+acceptance_bindings:
+  AC-01:
+  - test_configured_collaboration
+preparation:
+  families: []
+  anchors: false
+  special_assets: false
+  d4_groups: []

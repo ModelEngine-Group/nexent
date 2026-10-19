@@ -1,11 +1,13 @@
 "use client";
 
 import { useState } from "react";
+import { useTranslation } from "react-i18next";
 import {
   BotIcon,
   CheckIcon,
   ChevronDownIcon,
   LoaderIcon,
+  XCircleIcon,
 } from "lucide-react";
 import {
   Collapsible,
@@ -47,6 +49,7 @@ export interface SubAgentContainerProps {
   agentName: string;
   depth: number;
   isRunning?: boolean;
+  executionStatus?: "completed" | "failed" | "stopped";
   task?: string;
   runId?: string;
   subagentId?: number | string;
@@ -57,6 +60,7 @@ export const SubAgentContainer = ({
   agentName,
   depth,
   isRunning,
+  executionStatus,
   task,
   runId,
   subagentId,
@@ -64,6 +68,9 @@ export const SubAgentContainer = ({
 }: SubAgentContainerProps) => {
   // Open by default while the sub-agent is still running so users can watch
   // the reasoning and tool calls unfold.
+  const { t } = useTranslation();
+  const unsuccessful =
+    executionStatus === "failed" || executionStatus === "stopped";
   const [open, setOpen] = useState(Boolean(isRunning));
   const accent = accentForDepth(depth);
 
@@ -73,20 +80,18 @@ export const SubAgentContainer = ({
       onOpenChange={setOpen}
       className={cn(
         "my-3 ml-3 overflow-hidden rounded-lg border bg-card/80 shadow-sm",
-        accent.border,
+        accent.border
       )}
       data-subagent-depth={depth}
       data-subagent-run-id={runId}
       data-subagent-id={subagentId}
     >
-      <CollapsibleTrigger
-        className="group flex w-full cursor-pointer flex-col gap-1.5 px-3.5 py-3 text-left transition-colors hover:bg-muted/40 data-[state=open]:bg-muted/25"
-      >
+      <CollapsibleTrigger className="group flex w-full cursor-pointer flex-col gap-1.5 px-3.5 py-3 text-left transition-colors hover:bg-muted/40 data-[state=open]:bg-muted/25">
         <div className="flex min-w-0 items-center gap-2.5">
           <span
             className={cn(
               "flex shrink-0 items-center justify-center rounded-md bg-muted/80",
-              accent.icon,
+              accent.icon
             )}
           >
             <BotIcon className="size-4" aria-hidden />
@@ -95,16 +100,24 @@ export const SubAgentContainer = ({
             {agentName}
           </span>
           <Badge
-            variant={isRunning ? "warning" : "success"}
+            variant={
+              unsuccessful ? "destructive" : isRunning ? "warning" : "success"
+            }
             size="sm"
             className="ml-auto shrink-0 gap-1 border-0"
           >
             {isRunning ? (
               <LoaderIcon className="animate-spin" aria-hidden />
+            ) : unsuccessful ? (
+              <XCircleIcon aria-hidden />
             ) : (
               <CheckIcon aria-hidden />
             )}
-            {isRunning ? "Running" : "Completed"}
+            {unsuccessful
+              ? t(`chat.executionStatus.${executionStatus}`)
+              : isRunning
+                ? "Running"
+                : "Completed"}
           </Badge>
           <ChevronDownIcon className="chevron size-4 shrink-0 text-muted-foreground transition-transform duration-200 group-data-[state=open]:rotate-180" />
         </div>

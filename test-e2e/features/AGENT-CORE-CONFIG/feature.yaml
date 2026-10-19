@@ -1,0 +1,26 @@
+schema_version: '1.0'
+module:
+  id: AGENT-CORE
+  name: Agent core configuration
+feature:
+  feature_id: AGENT-CORE-CONFIG
+  name: Selectable agent core configuration
+  status: active
+  description: Select an agent core while preserving supported resources and enforcing
+    unsupported configuration constraints.
+  business_rules:
+  - rule_id: AGENT-CORE-CONFIG-RULE-001
+    description: Core defaults to smolagents, persists through saves/reloads and cannot
+      be changed in read-only mode.
+  - rule_id: AGENT-CORE-CONFIG-RULE-002
+    description: Core selection preserves all policies and bindings; unsupported controls
+      are disabled without changing stored values.
+  - rule_id: AGENT-CORE-CONFIG-RULE-003
+    description: Creation preserves explicit false or true context manager flags and
+      omitted true default.
+  required_test_stages:
+  - D4
+  source:
+    requirement_ids:
+    - AGENT-CORE-UI-20261013
+    spec_path: ../nexent-doc/docs/Developing/runtime-agent-core-factory/design.md

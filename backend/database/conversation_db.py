@@ -1,4 +1,5 @@
 import json
+from contextlib import nullcontext
 from copy import deepcopy
 from datetime import datetime
 from typing import Any, Dict, List, Optional, TypedDict
@@ -277,7 +278,7 @@ def create_conversation(conversation_title: str, user_id: Optional[str] = None,
 
 
 def create_conversation_message(message_data: Dict[str, Any], user_id: Optional[str] = None,
-                                 status: str = 'completed') -> int:
+                                 status: str = 'completed', *, _session=None) -> int:
     """
     Create a conversation message record
 
@@ -294,7 +295,7 @@ def create_conversation_message(message_data: Dict[str, Any], user_id: Optional[
     Returns:
         int: Newly created message ID (auto-increment ID)
     """
-    with get_db_session() as session:
+    with (nullcontext(_session) if _session is not None else get_db_session()) as session:
         # Ensure conversation_id is integer type
         conversation_id = int(message_data['conversation_id'])
         message_idx = int(message_data['message_idx'])
@@ -326,6 +327,29 @@ def create_conversation_message(message_data: Dict[str, Any], user_id: Optional[
         result = session.execute(stmt)
         message_id = result.scalar()
         return message_id
+
+
+def append_conversation_user_message(conversation_id: int, content: str, minio_files, user_id: str) -> tuple[int, int]:
+    """Reserve an ordered user/assistant pair independently of client history."""
+    with get_db_session() as session:
+        _lock_conversation_limit_scope(session, f"conversation-turn-limit:{conversation_id}")
+        allowed = session.scalar(select(ConversationRecord.conversation_id).where(
+            ConversationRecord.conversation_id == conversation_id,
+            ConversationRecord.created_by == user_id,
+            ConversationRecord.delete_flag == "N",
+        ))
+        if allowed is None:
+            raise ConversationNotFoundError("Conversation not found")
+        latest = session.scalar(select(func.max(ConversationMessage.message_index)).where(
+            ConversationMessage.conversation_id == conversation_id,
+            ConversationMessage.delete_flag == "N",
+        ))
+        index = 0 if latest is None else max(0, (int(latest) // 2 + 1) * 2)
+        message_id = create_conversation_message({
+            "conversation_id": conversation_id, "message_idx": index, "role": MESSAGE_ROLE["USER"],
+            "content": content, "minio_files": minio_files,
+        }, user_id, _session=session)
+        return message_id, index
 
 
 def create_message_units(message_units: List[Dict[str, Any]], message_id: int, conversation_id: int,
@@ -2548,10 +2572,36 @@ def get_historical_context(
         if pending_user is not None:
             turns.append(_history_turn(pending_user, _UNANSWERED_CONTEXT_NOTE))
 
+        assistant_ids = [turn["assistant_message_id"] for turn in turns if turn["assistant_message_id"] > 0]
+        if assistant_ids:
+            records = session.execute(select(
+                ConversationMessageUnit.message_id, ConversationMessageUnit.unit_type,
+                ConversationMessageUnit.unit_content, ConversationMessageUnit.tool_call_id,
+                ConversationMessageUnit.invocation_id,
+            ).where(
+                ConversationMessageUnit.conversation_id == conversation_id,
+                ConversationMessageUnit.message_id.in_(assistant_ids),
+                ConversationMessageUnit.unit_type.in_([
+                    "tool", "tool-call", "tool_result", "execution_logs", "error", "file_artifact",
+                ]),
+                ConversationMessageUnit.unit_status == "completed",
+                ConversationMessageUnit.delete_flag == "N",
+            ).order_by(asc(ConversationMessageUnit.message_id), asc(ConversationMessageUnit.unit_index))).all()
+            by_message = {}
+            for record in records:
+                by_message.setdefault(record.message_id, []).append({
+                    "record_type": record.unit_type, "content": record.unit_content,
+                    "tool_call_id": record.tool_call_id, "invocation_id": record.invocation_id,
+                })
+            for turn in turns:
+                if turn["assistant_message_id"] in by_message:
+                    turn["execution_records"] = by_message[turn["assistant_message_id"]]
+
         summary_result = None
         if summary_record and summary_payload:
             summary_result = {
                 "unit_id": summary_record.unit_id,
                 **summary_payload,
             }
-        return {"history_summary": summary_result, "conversation_turns": turns}
+        return {"history_summary": summary_result, "conversation_turns": turns,
+                "current_user_message_index": current.message_index}

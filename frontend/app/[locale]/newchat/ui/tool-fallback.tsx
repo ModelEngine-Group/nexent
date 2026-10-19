@@ -263,22 +263,31 @@ const ToolFallbackImpl = ({
   argsText,
   result,
   status,
+  isError,
   searchContent,
 }: ToolCallMessagePartProps & {
   searchContent?: ToolSearchSource[];
 }) => {
+  const displayStatus: ToolCallMessagePartStatus | undefined = isError
+    ? {
+        type: "incomplete",
+        reason: "error",
+        error: typeof result === "string" ? result : "Tool execution failed",
+      }
+    : status;
   const isCancelled =
-    status?.type === "incomplete" && status.reason === "cancelled";
+    displayStatus?.type === "incomplete" &&
+    displayStatus.reason === "cancelled";
 
   return (
     <ToolFallbackRoot>
-      <ToolFallbackTrigger toolName={toolName} status={status} />
+      <ToolFallbackTrigger toolName={toolName} status={displayStatus} />
       {!isCancelled && (
         <ToolFallbackContent>
           <ToolFallbackArgs argsText={argsText} />
           <ToolFallbackResult result={result} />
           <ToolFallbackSearchContent searchContent={searchContent} />
-          <ToolFallbackError status={status} />
+          <ToolFallbackError status={displayStatus} />
         </ToolFallbackContent>
       )}
     </ToolFallbackRoot>

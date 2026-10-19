@@ -116,7 +116,7 @@ export function CollaborativeAgentActions({
   const updateExternalSubAgentIds = useAgentStore(
     (state) => state.updateExternalSubAgentIds
   );
-  const isReadOnly = useAgentReadOnly() || editedAgent?.agent_core === "jiuwen";
+  const isReadOnly = useAgentReadOnly();
   const { invalidate: invalidateExternalAgents } = useExternalAgents();
   const externalSubAgentIdList = editedAgent?.external_sub_agent_id_list || [];
 
@@ -218,7 +218,7 @@ export default function CollaborativeAgent({
   const updateExternalSubAgentIds = useAgentStore(
     (state) => state.updateExternalSubAgentIds
   );
-  const isReadOnly = useAgentReadOnly() || editedAgent?.agent_core === "jiuwen";
+  const isReadOnly = useAgentReadOnly();
 
   const { availableAgents: internalAgents } = usePublishedAgentList();
   const { availableAgents: externalAgents } = useExternalAgents();

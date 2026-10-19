@@ -8,10 +8,14 @@ from openjiuwen.harness.rails.skills.skill_use_rail import SkillUseRail
 class NexentSkillRail(SkillUseRail):
     """Keep native skill discovery/prompt lifecycle without adding host shell tools."""
 
-    def __init__(self, directories: list[str], names: list[str]):
+    def __init__(self, directories: list[str], names: list[str], *, authorized_by_root=None):
         super().__init__(directories, enabled_skills=names, skill_mode="all", include_tools=False, enable_cache=False)
         self._roots = tuple(Path(directory).resolve() for directory in directories)
         self._names = frozenset(names)
+        authorization = authorized_by_root if authorized_by_root is not None else {
+            directory: names for directory in directories
+        }
+        self._authorized_by_root = {Path(root).resolve(): frozenset(allowed) for root, allowed in authorization.items()}
 
     def init(self, agent):
         # Authorized Nexent read/run handlers are already native abilities.
@@ -23,7 +27,8 @@ class NexentSkillRail(SkillUseRail):
         path = path.resolve()
         if path.name != "SKILL.md" or path.parent.name not in self._names:
             raise PermissionError("Skill is outside the authorized snapshot")
-        if not any(path.is_relative_to(root) for root in self._roots):
+        if not any(path.is_relative_to(root) and path.parent.name in allowed
+                   for root, allowed in self._authorized_by_root.items()):
             raise PermissionError("Skill path escapes the authorized snapshot")
         text = path.read_text(encoding="utf-8-sig")
         return "\n".join(text.splitlines()[:head]) if head is not None else text

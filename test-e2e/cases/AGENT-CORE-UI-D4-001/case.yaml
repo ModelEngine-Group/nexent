@@ -1,0 +1,84 @@
+schema_version: '1.0'
+stage: D4
+module: AGENT-CORE
+case:
+  case_id: AGENT-CORE-UI-D4-001
+  feature_id: AGENT-CORE-CONFIG
+  requirement_ids:
+  - AGENT-CORE-UI-20261013
+  - JIUWEN-M3-20261015
+  - JIUWEN-M4-20261016
+  business_rule_ids:
+  - AGENT-CORE-CONFIG-RULE-001
+  - AGENT-CORE-CONFIG-RULE-002
+  title: Select Jiuwen and persist a compatible agent draft
+  type: E2E
+  priority: P1
+  status: active
+  automation: automated
+  objective: Core changes preserve all resource and policy values across save, reload,
+    rollback and return to smolagents.
+  preconditions:
+  - A running frontend is reachable; deterministic existing HTTP fixtures isolate
+    Agent data, authorization and model/resource boundaries.
+  test_data:
+    profile: mock
+    locale: zh
+    viewport:
+      width: 1920
+      height: 1080
+  steps:
+  - order: 1
+    action: Open an editable draft with smolagents and select Jiuwen.
+    expected: Jiuwen save changes only Core; all policy values and resource bindings
+      are preserved.
+  - order: 2
+    action: Reload, inspect disabled controls and preserved values, then select smolagents
+      and inspect restored editability.
+    expected: Reload preserves Jiuwen and saved values; unsupported controls are disabled;
+      switching back restores editability and original bindings. Jiuwen collaboration
+      selection and discovery remain editable. The saved CM switch is editable under
+      Jiuwen.
+  - order: 3
+    action: Reject the next Core save and retry selection.
+    expected: Failure restores saved Core and displays error; retry persists Jiuwen.
+  - order: 4
+    action: Open the same configuration with read-only permissions.
+    expected: Core cannot be changed and no mutation or run request occurs. Collaboration
+      selection and discovery remain disabled.
+  expected_results: &id001
+  - Jiuwen save changes only Core; all policy values and resource bindings are preserved.
+  - Reload preserves Jiuwen and saved values; unsupported controls are disabled; switching
+    back restores editability and original bindings. Jiuwen collaboration selection
+    and discovery remain editable. The saved CM switch is editable under Jiuwen.
+  - Failure restores saved Core and displays error; retry persists Jiuwen.
+  - Core cannot be changed and no mutation or run request occurs. Collaboration selection
+    and discovery remain disabled.
+  forbidden_side_effects:
+  - No unrelated writes, agent run, loss of resource/policy values or read-only mutations.
+  actor: Authorized Agent development user
+  journey:
+  - Open an editable draft with smolagents and select Jiuwen.
+  - Reload, inspect disabled controls and preserved values, then select smolagents
+    and inspect restored editability.
+  - Reject the next Core save and retry selection.
+  - Open the same configuration with read-only permissions.
+  final_business_result: *id001
+  failure_evidence:
+  - Fixed Playwright journey assertions, sanitized request payloads and terminal audit.
+  acceptance:
+  - id: AC-01
+    description: Core changes preserve all resource and policy values across save,
+      reload, rollback and return to smolagents.
+    steps:
+    - 1
+    - 2
+    - 3
+    - 4
+    expected_results:
+    - 1
+    - 2
+    - 3
+    - 4
+    forbidden_side_effects:
+    - 1

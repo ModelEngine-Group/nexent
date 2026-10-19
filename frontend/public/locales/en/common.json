@@ -284,6 +284,9 @@
   "chat.attachments.preview": "Preview {{name}}",
   "chat.attachments.remove": "Remove {{name}}",
   "chat.attachments.download": "Download",
+  "chat.executionStatus.failed": "Execution failed",
+  "chat.executionStatus.stopped": "Stopped",
+  "chat.tokenUsage.unknown": "Unknown",
   "chat.tokenUsage.used": "used",
   "chat.tokenUsage.turn": "this turn",
   "chat.tokenUsage.details": "Token usage details",
@@ -5779,5 +5782,13 @@
   "modelParams.token.outputReserveInfo": "Output space reserved within the context window",
   "agent.core.label": "Agent Core",
   "agent.core.contextManager": "Automatic context compaction",
-  "agent.core.jiuwenHint": "Jiuwen does not yet support planning, automatic context compaction, run summaries, protocol repair, verification, guardrails or collaborative agents. Switching disables these options and clears collaboration bindings while keeping models, prompts, tools and skills. Configure them again manually after switching back to smolagents."
+  "agent.core.jiuwenHint": "Jiuwen supports tools, MCP, Skills, child agents and A2A collaboration. Switching Core preserves every setting. Context management follows the saved CM configuration. Planning, summaries, protocol repair, verification and guardrails are not supported yet. Disable these capabilities under smolagents before running Jiuwen; all bindings remain when switching back.",
+  "chat.runtimeOutput.process": "Execution process",
+  "chat.runtimeOutput.reasoning": "Reasoning",
+  "chat.runtimeOutput.failed": "Execution failed",
+  "chat.runtimeOutput.stopped": "Stopped",
+  "chat.runtimeOutput.subagent": "Sub-agent",
+  "chat.runtimeOutput.unknown": "Unknown",
+  "chat.runtimeOutput.step": "Step {{step}} · {{duration}} s · ",
+  "chat.runtimeOutput.usage": "Input {{input}} / output {{output}}"
 }

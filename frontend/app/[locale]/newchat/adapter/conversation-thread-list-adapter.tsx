@@ -1,5 +1,8 @@
 "use client";
 
+import { normalizeNexentHistory } from "@/lib/nexentOutputAdapter";
+import type { NexentOutputStatus } from "@/types/nexentOutput";
+
 import type { FC, MutableRefObject, PropsWithChildren } from "react";
 import { useMemo } from "react";
 import {
@@ -44,6 +47,7 @@ import { createAssistantStream } from "assistant-stream";
 import type { AttachmentType } from "../utils/attachment-type";
 import {
   attachExecutionLogsToTool,
+  markSubAgentRunFinished,
   collapseSubAgentParts,
   attachSearchContentToTool,
   buildExecutionCodePart,
@@ -382,7 +386,7 @@ export class RemoteConversationHistoryAdapter implements ThreadHistoryAdapter {
 
       // Backend returns message as a string for user messages, but as an array of
       // ApiMessageItem for assistant messages. Normalize to array for consistent handling.
-      const messageParts = Array.isArray(msg.message)
+      const sourceParts = Array.isArray(msg.message)
         ? msg.message.map((part) => ({
             ...part,
             content:
@@ -393,6 +397,8 @@ export class RemoteConversationHistoryAdapter implements ThreadHistoryAdapter {
         : typeof msg.message === "string"
           ? [{ type: "text", content: msg.message }]
           : [];
+      const normalized = normalizeNexentHistory(sourceParts, msg.status);
+      const messageParts = normalized.events;
       const runHasFinalAnswer = messageParts.some(
         (part) => part.type === "final_answer"
       );
@@ -459,6 +465,7 @@ export class RemoteConversationHistoryAdapter implements ThreadHistoryAdapter {
       }
 
       const content: any[] = [];
+      let restoredRuntimeStatus: NexentOutputStatus | undefined;
       let historicalCardAction: Nl2AgentCardAction | null = null;
       let historicalNl2a:
         import("./remote-chat-model-adapter").Nl2aMessage | null = null;
@@ -630,7 +637,8 @@ export class RemoteConversationHistoryAdapter implements ThreadHistoryAdapter {
           return imagePart;
         };
 
-        for (const [partIndex, part] of messageParts.entries()) {
+        restoredRuntimeStatus = normalized.status;
+        for (const [partIndex, part] of normalized.events.entries()) {
           if (
             part.type === "model_attempt_control" &&
             detail.workbench_config?.mode === "skill_create"
@@ -925,6 +933,7 @@ export class RemoteConversationHistoryAdapter implements ThreadHistoryAdapter {
             })();
             flushReasoning(endInvocationId ?? part.invocation_id);
             let payload: {
+              status?: "completed" | "failed" | "stopped";
               invocation_id?: string;
             } = {};
             try {
@@ -954,6 +963,7 @@ export class RemoteConversationHistoryAdapter implements ThreadHistoryAdapter {
                 });
                 closing.reasoningText = "";
               }
+              markSubAgentRunFinished(content, closing.runId, payload.status);
               activeSubAgents.delete(invocationId);
             } else if (activeSubAgents.size > 0) {
               // No id supplied (very old payload): fall back to closing the
@@ -1129,7 +1139,7 @@ export class RemoteConversationHistoryAdapter implements ThreadHistoryAdapter {
             flushReasoning(part.invocation_id);
             if (part.content) {
               const meta = buildMetadata(part.invocation_id);
-              finalAnswers.apply({ ...part, content: unwrapFinalAnswer(part.content), answer_phase: "delta" }, meta);
+              finalAnswers.apply({ ...part, content: unwrapFinalAnswer(part.content), answer_phase: part.answer_phase ?? "delta" }, meta);
             }
           }
         }
@@ -1316,7 +1326,8 @@ export class RemoteConversationHistoryAdapter implements ThreadHistoryAdapter {
             ? { nl2agentCardAction: historicalCardAction }
             : {}),
           ...(historicalNl2a ? { nl2a: historicalNl2a } : {}),
-          ...(stepTokenCounts.length > 0 ? { stepTokenCounts } : {}),
+          // Empty saved usage must not fall back to another turn's live counters.
+          stepTokenCounts,
           ...(msg.role === "user" && typeof msg.message_index === "number"
             ? { historicalMessageIndex: msg.message_index }
             : {}),
@@ -1328,6 +1339,7 @@ export class RemoteConversationHistoryAdapter implements ThreadHistoryAdapter {
         id: messageId,
         role: msg.role,
         content,
+        ...(restoredRuntimeStatus ? {status: restoredRuntimeStatus} : {}),
         ...(createdAt ? { createdAt } : {}),
         ...(msg.role === "user" && attachments.length > 0
           ? { attachments }

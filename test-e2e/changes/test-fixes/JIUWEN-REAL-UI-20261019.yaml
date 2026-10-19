@@ -1,0 +1,24 @@
+schema_version: '1.0'
+change:
+  change_id: JIUWEN-REAL-UI-20261019
+  change_type: test-fix
+  title: Qualify real file-assistant uploads and cross-Core chat presentation
+  description: Add missing real-browser proof beyond the controlled API display journey
+    and deployed HTTP image fixture. No product behavior change.
+  affected_features:
+    existing:
+    - JIUWEN-OUTPUT
+    modified: []
+    added: []
+    retired: []
+  affected_cases:
+    existing: []
+    modified: []
+    added:
+    - JIUWEN-REAL-UI-D4-001
+    retired: []
+  notes: Existing IMAGE-D3 proves an existing object over HTTP; OUTPUT-D4 and CONTEXT-D4
+    use controlled APIs. None prove a real Composer upload plus actual model/tool
+    calls and config-side published switching together. New D4 proves this user journey;
+    no duplicate D1/UT, no product code change. Global pre-existing F-111 reference
+    is an independent blocker.

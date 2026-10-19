@@ -1,0 +1,70 @@
+schema_version: '1.0'
+stage: D3
+module: AGENT-CORE
+cases:
+- case_id: AGENT-CORE-D3-001
+  feature_id: AGENT-CORE-001
+  business_rule_ids:
+  - AGENT-CORE-001-R2
+  - AGENT-CORE-001-R3
+  - AGENT-CORE-001-R4
+  title: Nexent worker executes native model tools MCP and skills
+  type: AGENT-IT
+  priority: P1
+  status: active
+  automation: automated
+  objective: Nexent worker executes native model tools MCP and skills
+  preconditions:
+  - Use isolated run resources and deterministic local fixtures.
+  test_data:
+    core: jiuwen
+    legacy_core: smolagents
+  steps:
+  - order: 1
+    action: 'Exercise scenario: Native model receives local and authorized MCP tools.'
+    expected: Native model receives local and authorized MCP tools
+  - order: 2
+    action: 'Exercise scenario: Local and MCP calls execute once with expected results.'
+    expected: Local and MCP calls execute once with expected results
+  - order: 3
+    action: 'Exercise scenario: Authorized SKILL.md is loaded into native prompt.'
+    expected: Authorized SKILL.md is loaded into native prompt
+  - order: 4
+    action: 'Exercise scenario: Worker emits one final answer and completed outcome.'
+    expected: Worker emits one final answer and completed outcome
+  - order: 5
+    action: 'Exercise scenario: Native registrations and MCP session are released.'
+    expected: Native registrations and MCP session are released
+  - order: 6
+    action: Replay prior user and assistant turns through direct SDK history and an authorized context snapshot.
+    expected: Native HTTP model receives system instructions first, each authorized historical message once and the current query once; snapshot input excludes fallback history.
+  - order: 7
+    action: Ask a different follow-up question after the completed tool chain.
+    expected: Only the latest request executes; previous tool and MCP calls are not repeated.
+  - order: 8
+    action: Inject one transient model failure after the local tool result and continue the native loop.
+    expected: The model call retries once and completes without replaying the successful local tool.
+  expected_results: &id001
+  - Native model receives local and authorized MCP tools
+  - Local and MCP calls execute once with expected results
+  - Authorized SKILL.md is loaded into native prompt
+  - Worker emits one final answer and completed outcome
+  - Native registrations and MCP session are released
+  - Native HTTP model receives authorized history once without mixing message types or leaking fallback history.
+  - Task-changing follow-ups reuse prior context without repeating completed tools.
+  - One transient model failure recovers with one retry and no tool replay.
+  forbidden_side_effects:
+  - No smolagents execution in the Jiuwen branch.
+  - No unauthorized tools or cross-run resources.
+  execution:
+    profiles:
+    - name: mock
+      required_services: []
+    timeout_seconds: 60
+  integration_boundary:
+  - Nexent SDK worker
+  - Jiuwen Runner and native HTTP model/MCP fixtures
+  - Authorized skill snapshot
+  observations: *id001
+  cleanup:
+  - Release native tool registrations, MCP client and run session.

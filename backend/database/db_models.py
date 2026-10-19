@@ -425,6 +425,12 @@ class ModelRecord(TableBase):
     __tablename__ = "model_record_t"
     __table_args__ = {"schema": SCHEMA}
 
+    runtime_outlet_snapshot = Column(
+        JSONB, nullable=True,
+        comment="Management-owned canonical outlet row plus source fingerprint; NULL requires explicit provisioning. "
+                "Contains no credentials; validated by the shared profile codec, maximum 1 MiB.",
+    )
+
     model_id = Column(Integer, Sequence("model_record_t_model_id_seq", schema=SCHEMA),
                       primary_key=True, nullable=False, doc="Model ID, unique primary key")
     model_repo = Column(String(100), doc="Model path address")

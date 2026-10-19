@@ -50,6 +50,9 @@ PROTOCOL_GRPC = "GRPC"
 
 
 class ModelConfig(BaseModel):
+    resolved_profile: Optional[Any] = Field(
+        default=None, repr=False, description="Trusted outlet snapshot, validated by the selected runtime adapter",
+    )
     cite_name: str = Field(description="Model alias")
     api_key: str = Field(description="API key", default="")
     model_name: str = Field(description="Model call name")
@@ -322,6 +325,10 @@ class AgentConfig(BaseModel):
         ge=1,
     )
     model_name: str = Field(description="Model alias from ModelConfig")
+    runtime_model_config: Optional[ModelConfig] = Field(
+        default=None, exclude=True, repr=False,
+        description="Application-resolved per-agent model binding, isolated from parent overlays",
+    )
     output_protocol: Literal["code_action", "final_envelope"] = Field(
         description="Closed model-output protocol used by the Agent runtime",
         default="code_action",
@@ -417,6 +424,11 @@ class AgentPlan(BaseModel):
 
 
 class AgentRunInfo(BaseModel):
+    collaboration_timeout_seconds: float = Field(default=300.0, gt=0,
+        description="Total deadline for a nested collaboration including queue wait")
+    model_service: Optional[Any] = Field(default=None, exclude=True, repr=False)
+    model_deadline: Optional[float] = Field(default=None, exclude=True)
+    run_result: Optional[Any] = Field(default=None, exclude=True, description="Explicit public runtime result")
     attempt_outcome: Optional[str] = Field(default=None, description="Typed worker outcome for the application host")
     query: str = Field(description="User query")
     model_config_list: List[ModelConfig] = Field(description="List of model configurations")

@@ -5257,6 +5257,14 @@ def mock_http_request():
     return Request(scope={"type": "http", "headers": []})
 
 
+@pytest.fixture
+def authorized_history_boundary(monkeypatch):
+    monkeypatch.setattr("management.services.agent.run.get_current_run_user_message_id", lambda *a: 11)
+    monkeypatch.setattr("management.services.agent.run.load_historical_context", lambda *a: {
+        "conversation_turns": [], "history_summary": None,
+    })
+
+
 @pytest.mark.asyncio
 @patch("management.services.agent.run.build_memory_context")
 @patch("management.services.agent.run.create_agent_run_info", new_callable=AsyncMock)
@@ -5267,6 +5275,7 @@ async def test_prepare_agent_run(
     mock_build_memory_context,
     mock_agent_request,
     mock_http_request,
+    authorized_history_boundary,
 ):
     """Test prepare_agent_run function."""
     # Setup
@@ -5333,6 +5342,7 @@ async def test_prepare_agent_run_can_disable_automation_tool(
     mock_create_run_info,
     mock_build_memory_context,
     mock_agent_request,
+    authorized_history_boundary,
 ):
     mock_agent_request.enable_automation_tool = False
     mock_run_info = MagicMock()
@@ -6977,6 +6987,12 @@ async def test_generate_stream_registers_and_streams(monkeypatch):
         AsyncMock(return_value=MagicMock()),
     )
 
+    # Orchestration starts from an already saved, authorized database boundary.
+    monkeypatch.setattr(agent_run_service, "get_current_run_user_message_id", lambda *_: 13)
+    monkeypatch.setattr(agent_run_service, "load_historical_context", lambda *_: {
+        "history_summary": None, "conversation_turns": [], "current_user_message_index": 8,
+    })
+
     registered = {}
 
     def fake_register(conv_id, run_info, user_id, **kwargs):
@@ -7016,6 +7032,7 @@ async def test_generate_stream_registers_and_streams(monkeypatch):
     ):
         collected.append(d)
 
+    assert agent_request._runtime_user_message_index == 8
     assert registered.get("conv_id") == 555
     assert registered.get("user_id") == "u"
     assert registered.get("run_info") is not None

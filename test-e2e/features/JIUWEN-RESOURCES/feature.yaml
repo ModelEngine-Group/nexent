@@ -1,0 +1,31 @@
+schema_version: '1.0'
+module:
+  id: AGENT-CORE
+  name: Agent core runtime
+feature:
+  feature_id: JIUWEN-RESOURCES
+  name: Jiuwen shared resource execution and trusted outlet onboarding
+  status: active
+  description: M3 resource bridge, lossless core selection and management-side trusted
+    snapshots.
+  business_rules:
+  - rule_id: JIUWEN-RESOURCES-RULE-001
+    description: Native and text calls share authorized tool/MCP/Skills execution,
+      identity, observations and cleanup.
+  - rule_id: JIUWEN-RESOURCES-RULE-002
+    description: Core selection preserves saved policies and resource bindings; unsupported
+      capabilities fail explicitly.
+  - rule_id: JIUWEN-RESOURCES-RULE-003
+    description: Management and migration persist trusted versioned snapshots; runtime
+      restores without catalog and rejects stale/cross-tenant profiles.
+  - rule_id: JIUWEN-RESOURCES-RULE-004
+    description: Each child invocation selects its own Core and frozen model outlet/options;
+      A2A uses its configured remote protocol, authenticated context, deadline and
+      cancellation ownership.
+  required_test_stages:
+  - D3
+  - D5
+  source:
+    requirement_ids:
+    - JIUWEN-M3-20261015
+    spec_path: ../nexent-doc/docs/Developing/runtime-agent-core-factory/design.md

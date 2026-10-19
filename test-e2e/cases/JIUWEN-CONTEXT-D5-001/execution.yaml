@@ -1,0 +1,15 @@
+schema_version: '1.0'
+case_id: JIUWEN-CONTEXT-D5-001
+implementations:
+- framework: pytest
+  file: test_context.py
+  selector: test_context_failure_preserves_history
+timeout_seconds: 240
+acceptance_bindings:
+  AC-01:
+  - test_context_failure_preserves_history
+preparation:
+  families: []
+  anchors: false
+  special_assets: false
+  d4_groups: []

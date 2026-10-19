@@ -1,0 +1,48 @@
+schema_version: '1.0'
+change:
+  change_id: JIUWEN-M5-20261016
+  change_type: requirement
+  requirement_id: JIUWEN-M5-20261016
+  title: Jiuwen public output, persistence and display
+  description: Implement SPEC M5 / AC-017 with minimal shared contracts and existing
+    SSE/storage/UI adapters.
+  affected_features:
+    existing: []
+    added:
+    - JIUWEN-OUTPUT
+    modified: []
+    retired: []
+  affected_cases:
+    existing:
+    - JIUWEN-RESOURCES-D3-001
+    - JIUWEN-RESOURCES-D3-002
+    - JIUWEN-MODEL-BRIDGE-D5-001
+    added:
+    - JIUWEN-OUTPUT-D3-001
+    - JIUWEN-OUTPUT-D4-001
+    - JIUWEN-OUTPUT-D5-001
+    modified: []
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    behaviors:
+    - Validate public observation/result fields and terminal cardinality; preserve
+      unknown usage and full call IDs.
+    - Serialize and merge envelopes per block; terminal status and final content require
+      explicit root result.
+    - Use one projection for live/history, preserve partial/errors and legacy display;
+      isolate child identities.
+    reason: Existing Jiuwen mapping/model and resource tests prove execution, not
+      ordered public observations or persistence/display. Add seam UT and D3/D4/D5;
+      no duplicate D1.
+    test_selectors:
+    - test/sdk/core/agents/test_jiuwen_output.py
+    - test/sdk/core/agents/test_jiuwen_model_service.py
+    - test/sdk/core/agents/test_core_child_dispatch.py
+    - test/sdk/core/utils/test_observer.py
+    - test/backend/utils/test_runtime_output.py
+    - test/backend/services/test_agent_service.py
+    - frontend/tests/component/runtimeOutput.test.tsx
+    - frontend/tests/component/subagentRuntimeStatus.test.tsx
+  notes: M5 does not implement new native/code engines or AC-018 logical recovery.
+    Existing global F-111 rule blocker remains separate.

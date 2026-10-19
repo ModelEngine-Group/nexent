@@ -1,0 +1,16 @@
+schema_version: '1.0'
+case_id: JIUWEN-MODEL-BRIDGE-D3-001
+implementations:
+- framework: pytest
+  file: test_runtime.py
+  selector: test_factory_service_protocol_loop
+  profiles:
+  - mock
+acceptance_bindings:
+  AC-01:
+  - test_factory_service_protocol_loop
+preparation:
+  families: []
+  anchors: false
+  special_assets: false
+  d4_groups: []

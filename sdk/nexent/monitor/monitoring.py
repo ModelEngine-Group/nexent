@@ -1957,8 +1957,13 @@ class LLMTokenTracker:
                 "token_length": len(token)
             })
 
-    def record_completion(self, input_tokens: int = 0, output_tokens: int = 0) -> None:
-        """Record completion metrics using OpenInference semantic conventions."""
+    def record_completion(
+        self, input_tokens: int = 0, output_tokens: int = 0, *, total_tokens: Optional[int] = None,
+    ) -> None:
+        """Record completion metrics, preserving a supplied provider total."""
+        if total_tokens is not None and (type(total_tokens) is not int or total_tokens < 0):
+            raise ValueError("Reported total tokens must be a non-negative integer")
+        reported_total = input_tokens + output_tokens if total_tokens is None else total_tokens
         if not self.manager.is_enabled:
             return
 
@@ -1985,12 +1990,12 @@ class LLMTokenTracker:
             usage_details = {
                 "input": input_tokens,
                 "output": output_tokens,
-                "total": input_tokens + output_tokens,
+                "total": reported_total,
             }
             self.span.set_attributes({
                 "llm.token_count.prompt": input_tokens,
                 "llm.token_count.completion": output_tokens,
-                "llm.token_count.total": input_tokens + output_tokens,
+                "llm.token_count.total": reported_total,
                 "llm.usage_details": json.dumps(
                     usage_details, ensure_ascii=False),
                 "llm.generation_rate": generation_rate,

@@ -8,6 +8,7 @@ import re
 from dataclasses import dataclass
 from typing import Any, Sequence
 
+from .history_facts import turn_execution_text, turn_user_text
 from .llm_summary import LLMSummary
 from .models import ContextItem, ContextItemInput, ContextItemType
 
@@ -81,8 +82,9 @@ class HistorySummaryInput:
             covered_through = int(payload["covered_through_message_id"])
         canonical_turns = tuple(
             (
-                str(turn.content["user_message"]),
-                str(turn.content["assistant_final_answer"]),
+                turn_user_text(turn.content),
+                "\n".join(filter(None, (turn_execution_text(turn.content),
+                                         str(turn.content["assistant_final_answer"])))),
             )
             for turn in turns
         )

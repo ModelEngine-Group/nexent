@@ -42,6 +42,11 @@ class ProcessType(Enum):
     MODEL_OUTPUT_CODE = "model_output_code"  # model streaming output, code content
     MODEL_ATTEMPT_CONTROL = "model_attempt_control"  # hidden begin/rollback/commit boundary
 
+    MODEL_OUTPUT = "model_output"  # Ordered normal body from a native runtime
+    TOOL_RESULT = "tool_result"  # Exact resource observation, including errors
+    STEP_OBSERVATION = "step_observation"  # Public model-step metrics
+    RUN_TERMINAL = "run_terminal"  # Explicit public Agent result
+
     STEP_COUNT = "step_count"  # current step of agent
     PARSE = "parse"  # code parsing result
     EXECUTION_LOGS = "execution_logs"  # code execution result
@@ -716,9 +721,13 @@ class MessageObserver:
             agent_name=kwargs.get("agent_name"),
             explicit_agent_id=explicit_agent_id,
             metadata={
-                key: kwargs[key]
-                for key in ("error_code", "retryable")
-                if key in kwargs
+                **{key: kwargs[key] for key in ("error_code", "retryable") if key in kwargs},
+                **{key: value for key, value in (kwargs.get("runtime_envelope") or {}).items()
+                   if key in {"schema_version", "runtime_mode", "agent_core", "turn_id", "block_id", "sequence",
+                              "phase", "local_call_id", "provider_call_id", "tool_call_id", "tool_name",
+                              "tool_arguments", "raw_arguments", "result", "is_error", "usage", "finish_reason",
+                              "step_number", "duration", "step_error", "status", "end_reason", "final_content",
+                              "final_block_ids", "error", "context_capacity"}}
             },
         )
 
@@ -765,6 +774,8 @@ class MessageObserver:
             "task": task if task is not None else "",
             "invocation_id": invocation_id,
         }
+        if stack:
+            payload_data["parent_invocation_id"] = stack[-1][0]
         if invocation_name is not None:
             payload_data["invocation_name"] = invocation_name
         payload_data.update({key: value for key, value in {

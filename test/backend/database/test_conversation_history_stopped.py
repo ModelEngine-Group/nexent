@@ -19,7 +19,7 @@ def history_db(monkeypatch):
         connection.exec_driver_sql("ATTACH DATABASE ':memory:' AS nexent")
         connection.exec_driver_sql("CREATE TABLE nexent.conversation_record_t (conversation_id INTEGER PRIMARY KEY, created_by TEXT, delete_flag TEXT)")
         connection.exec_driver_sql("CREATE TABLE nexent.conversation_message_t (message_id INTEGER PRIMARY KEY, conversation_id INTEGER, message_index INTEGER, message_role TEXT, message_content TEXT, minio_files TEXT, status TEXT, delete_flag TEXT)")
-        connection.exec_driver_sql("CREATE TABLE nexent.conversation_message_unit_t (unit_id INTEGER PRIMARY KEY, message_id INTEGER, conversation_id INTEGER, unit_index INTEGER, unit_type TEXT, unit_content TEXT, unit_status TEXT, delete_flag TEXT)")
+        connection.exec_driver_sql("CREATE TABLE nexent.conversation_message_unit_t (unit_id INTEGER PRIMARY KEY, message_id INTEGER, conversation_id INTEGER, unit_index INTEGER, unit_type TEXT, unit_content TEXT, unit_status TEXT, delete_flag TEXT, tool_call_id TEXT, invocation_id TEXT)")
         connection.exec_driver_sql("INSERT INTO nexent.conversation_record_t VALUES (1, 'owner', 'N')")
 
     @contextmanager
@@ -37,7 +37,7 @@ def history_db(monkeypatch):
 
     def unit(uid, mid, kind, content, status="completed", deleted="N"):
         with engine.begin() as connection:
-            connection.execute(text("INSERT INTO nexent.conversation_message_unit_t VALUES (:id, :mid, 1, :id, :kind, :body, :status, :deleted)"),
+            connection.execute(text("INSERT INTO nexent.conversation_message_unit_t (unit_id, message_id, conversation_id, unit_index, unit_type, unit_content, unit_status, delete_flag) VALUES (:id, :mid, 1, :id, :kind, :body, :status, :deleted)"),
                                {"id": uid, "mid": mid, "kind": kind, "body": content, "status": status, "deleted": deleted})
 
     yield module, message, unit
@@ -104,3 +104,22 @@ def test_projection_is_bounded_and_excludes_deleted_or_future_rows(history_db):
     turns = module.get_historical_context(1, 3, "owner", "tenant")["conversation_turns"]
     assert len(turns) == 1
     assert len(turns[0]["assistant_final_answer"]) < 16100
+
+
+def test_completed_history_keeps_only_persisted_execution_evidence(history_db):
+    module, message, unit = history_db
+    message(1, "user", "Use the old file", files=[{"name": "old.txt", "url": "s3://files/old.txt"}])
+    message(2, "assistant", "Completed")
+    message(3, "user", "Current task")
+    unit(1, 2, "tool", '{"tool_name":"old_tool","tool_arguments":{"a":1}}')
+    unit(2, 2, "execution_logs", "Saved result")
+    unit(3, 2, "error", "Saved failure")
+    unit(4, 2, "parse", "Never replay code")
+    unit(5, 2, "execution_logs", "Not committed", status="streaming")
+    unit(6, 2, "error", "Deleted error", deleted="Y")
+    projected = module.get_historical_context(1, 3, "owner", "tenant")["conversation_turns"][0]
+    records = projected["execution_records"]
+    assert [record["record_type"] for record in records] == ["tool", "execution_logs", "error"]
+    assert "Saved result" in str(records) and "Saved failure" in str(records)
+    assert all(text not in str(records) for text in ["Never replay", "Not committed", "Deleted error"])
+    assert "s3://files/old.txt" in projected["attachments"]

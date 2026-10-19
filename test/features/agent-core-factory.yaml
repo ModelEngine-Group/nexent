@@ -1,0 +1,33 @@
+schema_version: '1.0'
+module:
+  id: AGENT-CORE
+  name: Agent core execution
+features:
+- feature_id: AGENT-CORE-001
+  name: Optional Jiuwen native agent core
+  status: active
+  description: Execute Nexent configured agents through a factory and native core
+    adapter.
+  business_rules:
+  - rule_id: AGENT-CORE-001-R1
+    description: Default smolagents and explicit jiuwen dispatch through a factory;
+      unknown cores fail closed.
+  - rule_id: AGENT-CORE-001-R2
+    description: Jiuwen owns the model loop and authorized local, MCP and skill tool
+      execution.
+  - rule_id: AGENT-CORE-001-R3
+    description: Unsupported policies fail before execution and unconfigured tools
+      are never exposed.
+  - rule_id: AGENT-CORE-001-R4
+    description: Streaming has one final result; failures and cancellation preserve
+      typed outcomes and reclaim resources.
+  - rule_id: AGENT-CORE-001-R5
+    description: Persisted core selection survives version snapshots and import/export;
+      old configs default to smolagents.
+  required_test_stages:
+  - D1
+  - D2
+  - D3
+  - D5
+  source:
+    spec_path: docs/Developing/runtime-agent-core-factory/proposal.md

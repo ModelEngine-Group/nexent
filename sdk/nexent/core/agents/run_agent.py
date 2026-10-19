@@ -366,6 +366,8 @@ def agent_run_thread(agent_run_info: AgentRunInfo):
 
 def _agent_run_thread(agent_run_info: AgentRunInfo):
     mcp_host = getattr(agent_run_info, "mcp_host", None)
+    if hasattr(agent_run_info, "run_result"):
+        agent_run_info.run_result = None
     try:
         # Keep the runner compatible with legacy/lightweight AgentRunInfo
         # stand-ins used by integrations.  Full AgentRunInfo instances always
@@ -389,7 +391,11 @@ def _agent_run_thread(agent_run_info: AgentRunInfo):
         finally:
             adapter.close()
 
-        agent_run_info.attempt_outcome = "stopped" if agent_run_info.stop_event.is_set() else "completed"
+        from ..agent_runtime_support.output import RunResult
+
+        result = getattr(agent_run_info, "run_result", None)
+        agent_run_info.attempt_outcome = result.status if isinstance(result, RunResult) else (
+            "stopped" if agent_run_info.stop_event.is_set() else "completed")
     except (RunTerminated, CancelledError):
         agent_run_info.attempt_outcome = "stopped"
     except (ModelInvocationTerminalError, ModelOutputProtocolExhaustedError):
@@ -397,11 +403,10 @@ def _agent_run_thread(agent_run_info: AgentRunInfo):
         raise
     except Exception as e:
         agent_run_info.attempt_outcome = "failed"
-        agent_run_info.observer.add_message(
-            "",
-            ProcessType.FINAL_ANSWER,
-            _agent_run_error_message(agent_run_info, mcp_host, e),
-        )
+        if getattr(agent_run_info, "run_result", None) is None:
+            agent_run_info.observer.add_message(
+                "", ProcessType.FINAL_ANSWER, _agent_run_error_message(agent_run_info, mcp_host, e),
+            )
         raise ValueError(f"Error in agent_run_thread: {e}")
     finally:
         # Agent construction, MCP setup, and executor initialization can fail
@@ -437,6 +442,7 @@ def _run_smolagents(agent_run_info: AgentRunInfo):
             minio_files=getattr(agent_run_info, "minio_files", None),
             cancellation_scope=agent_run_info.cancellation_scope,
         )
+        nexent.core_run_info = agent_run_info
         agent = nexent.create_single_agent(  # NOSONAR - constructs the SDK's trusted CoreAgent implementation.
             agent_run_info.agent_config,
             context_items_override=_get_authorized_context_items(agent_run_info),
@@ -445,7 +451,7 @@ def _run_smolagents(agent_run_info: AgentRunInfo):
 
         nexent.add_history_to_agent(_get_authorized_history(agent_run_info))
         try:
-            nexent.agent_run_with_observer(
+            return nexent.agent_run_with_observer(
                 query=agent_run_info.query,
                 reset=False,
                 additional_args=build_run_additional_args(agent_run_info),
@@ -486,6 +492,7 @@ def _run_smolagents(agent_run_info: AgentRunInfo):
                 minio_files=getattr(agent_run_info, "minio_files", None),
                 cancellation_scope=agent_run_info.cancellation_scope,
             )
+            nexent.core_run_info = agent_run_info
             agent = nexent.create_single_agent(  # NOSONAR - constructs the SDK's trusted CoreAgent implementation.
                 agent_run_info.agent_config,
                 context_items_override=_get_authorized_context_items(agent_run_info),
@@ -494,7 +501,7 @@ def _run_smolagents(agent_run_info: AgentRunInfo):
 
             nexent.add_history_to_agent(_get_authorized_history(agent_run_info))
             try:
-                nexent.agent_run_with_observer(
+                return nexent.agent_run_with_observer(
                     query=agent_run_info.query,
                     reset=False,
                     additional_args=build_run_additional_args(agent_run_info),

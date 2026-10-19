@@ -1,0 +1,33 @@
+schema_version: '1.0'
+change:
+  change_id: AGENT-CORE-UI-20261013
+  change_type: requirement
+  requirement_id: AGENT-CORE-UI-20261013
+  title: Expose agent core selection and preserve creation context flags
+  description: Extend the factory integration with an editable UI and compatible Jiuwen
+    policies.
+  affected_features:
+    existing: []
+    added:
+    - AGENT-CORE-CONFIG
+    modified: []
+    retired: []
+  affected_cases:
+    existing: []
+    added:
+    - AGENT-CORE-UI-D4-001
+    modified: []
+    retired: []
+  traditional_ut:
+    decision: add
+    behaviors:
+    - Creation preserves false, true and omitted default flags.
+    - Core switching preserves resources, clears unsupported settings and child bindings,
+      respects read-only and recovers from failed save.
+    reason: Existing service tests omit context flag assertions; isolated policy proof
+      stays in UT. Browser journey adds real UI/store/payload evidence.
+    test_selectors:
+    - test/backend/services/test_agent_core_creation.py
+    - frontend/tests/component/agentCore.test.tsx
+  notes: Supplemental deployed HTTP/runtime probes prove creation persistence and
+    both core runs; preserve legacy factory D1/D3/D5 assets.

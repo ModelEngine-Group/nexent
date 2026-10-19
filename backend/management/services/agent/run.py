@@ -116,6 +116,7 @@ from utils.agent_stream_utils import (
     transform_skill_files_to_standard_format as _transform_skill_files_to_standard_format,
 )
 from utils.context_utils import build_authorized_context_input
+from utils.runtime_output import RuntimeOutputState, is_runtime_event
 from utils.config_utils import get_model_name_from_config, tenant_config_manager
 
 # Monitoring utilities: bind Agent metadata once at the request boundary.
@@ -393,6 +394,7 @@ async def _stream_agent_chunks(
     # matching the legacy batch merge logic.
     _MERGEABLE_TYPES = {
         ProcessType.FINAL_ANSWER.value,
+        "model_output",
         ProcessType.MODEL_OUTPUT_CODE.value,
         ProcessType.MODEL_OUTPUT_THINKING.value,
         ProcessType.MODEL_OUTPUT_DEEP_THINKING.value,
@@ -408,6 +410,8 @@ async def _stream_agent_chunks(
     buffered_image_url_set: set[str] = set()
     buffered_automation_proposals: list[dict[str, Any]] = []
     final_answer_content = ""
+    runtime_output = RuntimeOutputState(
+        required=getattr(agent_run_info.agent_config, "agent_core", None) == "jiuwen")
 
     # Determine if we're in resume mode
     is_resume_mode = resume_from_unit_index > 0
@@ -421,9 +425,13 @@ async def _stream_agent_chunks(
             for item in (getattr(agent_request, "history", None) or ())
             if item.role == MESSAGE_ROLE["USER"]
         )
+        saved_index = getattr(agent_request, "_runtime_user_message_index", None)
+        assistant_index = (
+            saved_index + 1 if type(saved_index) is int and saved_index >= 0 else user_role_count * 2 + 1
+        )
         assistant_message_req = MessageRequest(
             conversation_id=agent_request.conversation_id,
-            message_idx=user_role_count * 2 + 1,
+            message_idx=assistant_index,
             role=MESSAGE_ROLE["ASSISTANT"],
             message=[],
             minio_files=None,
@@ -499,6 +507,7 @@ async def _stream_agent_chunks(
             try:
                 data = json.loads(chunk)
                 chunk_type = data.get("type")
+                runtime_output.observe(data)
                 chunk_content = data.get("content", "") or ""
                 if chunk_type == "final_answer":
                     has_body = resolve_answer_completion(buffered_units, data)
@@ -765,10 +774,13 @@ async def _stream_agent_chunks(
                             "invocation_id": data.get("invocation_id"),
                             "_attempt_id": data.get("attempt_id"),
                             "_step_id": data.get("step_id"),
+                            "_block_id": data.get("block_id"),
+                            **({"_runtime_envelope": dict(data)} if is_runtime_event(data) else {}),
                             "mergeable": mergeable,
                         }
                         if mergeable:
-                            current_unit["_content_fragments"] = [persisted_content]
+                            current_unit["_content_fragments"] = [
+                                chunk_content if is_runtime_event(data) else persisted_content]
                             current_unit["content"] = ""
                             current_unit["unit_content"] = ""
                         buffered_units.append(current_unit)
@@ -823,6 +835,11 @@ async def _stream_agent_chunks(
             # ``error`` chunk, so the async iterator can finish normally while
             # the worker outcome still authoritatively marks the run failed.
             terminal_status = outcome
+
+        if runtime_output.required:
+            terminal_status = runtime_output.status
+            if outcome in {"failed", "stopped"}:
+                terminal_status = outcome
 
         try:
             skill_file_payloads = list(captured_skill_files.values())
@@ -910,6 +927,8 @@ async def _stream_agent_chunks(
                 persistence_bytes = _finalize_buffered_unit_fragments(buffered_units)
                 final_answer_content = next((unit["content"] for unit in reversed(buffered_units)
                                              if unit["type"] == "final_answer" and not unit.get("invocation_id")), "")
+                if runtime_output.required:
+                    final_answer_content = runtime_output.final_content if terminal_status == "completed" else ""
                 logger.info(
                     "Finalizing assistant persistence conversation=%s units=%s bytes=%s",
                     agent_request.conversation_id,
@@ -1184,6 +1203,32 @@ async def prepare_agent_run(
     Prepare for an agent run by creating context and run info, and registering the run.
     """
 
+    historical_context = None
+    if not agent_request.is_debug and agent_request.conversation_id is not None:
+        current_message_id = getattr(agent_request, "_runtime_user_message_id", None)
+        if type(current_message_id) is not int:
+            current_message_id = get_current_run_user_message_id(
+                agent_request.conversation_id, user_id
+            )
+        if not isinstance(current_message_id, int) or isinstance(
+            current_message_id, bool
+        ):
+            current_message_id = None
+            logger.warning(
+                "Current user message boundary is unavailable; rejecting historical run"
+            )
+        if current_message_id is not None:
+            historical_context = load_historical_context(
+                agent_request.conversation_id, current_message_id, user_id, tenant_id
+            )
+    if not agent_request.is_debug and agent_request.conversation_id is not None and historical_context is None:
+        raise ForbiddenError("Authorized conversation history boundary is unavailable")
+
+    if isinstance(historical_context, dict):
+        saved_index = historical_context.get("current_user_message_index")
+        if type(saved_index) is int and saved_index >= 0:
+            agent_request._runtime_user_message_index = saved_index
+
     memory_context = build_memory_context(
         user_id, tenant_id, agent_request.agent_id, skip_query=not allow_memory_search
     )
@@ -1255,22 +1300,6 @@ async def prepare_agent_run(
         None,
     )
 
-    historical_context = None
-    if not agent_request.is_debug and agent_request.conversation_id is not None:
-        current_message_id = get_current_run_user_message_id(
-            agent_request.conversation_id, user_id
-        )
-        if not isinstance(current_message_id, int) or isinstance(
-            current_message_id, bool
-        ):
-            current_message_id = None
-            logger.warning(
-                "Current user message boundary is unavailable; historical checkpoint loading skipped"
-            )
-        if current_message_id is not None:
-            historical_context = load_historical_context(
-                agent_request.conversation_id, current_message_id, user_id, tenant_id
-            )
     agent_run_info.context_input = build_authorized_context_input(
         agent_run_info, historical_context
     )
