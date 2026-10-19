@@ -541,6 +541,7 @@ def query_agent_list_candidates_by_tenant_id(
         AgentInfo.create_time,
         AgentInfo.group_ids,
         AgentInfo.ingroup_permission,
+        AgentInfo.current_version_no,
     ]
     if include_description:
         columns.append(AgentInfo.description)
@@ -602,6 +603,33 @@ def batch_search_agent_display_names(agent_ids: List[int], tenant_id: str) -> di
             AgentInfo.delete_flag != 'Y'
         ).all()
         return {a.agent_id: (a.display_name or a.name) for a in agents}
+
+
+def batch_get_agent_main_flags(agent_ids: List[int]) -> dict:
+    """
+    Batch query the main-agent flag by agent IDs.
+    Returns a dict mapping agent_id -> is_main_agent.
+
+    Agent IDs are globally unique (the primary key is ``(agent_id, version_no)``),
+    so no tenant filter is applied; this lets the lookup resolve both caller-tenant
+    listings and official listings published under the system tenant.
+
+    Args:
+        agent_ids: List of agent IDs to query
+    """
+    unique_ids = {int(agent_id) for agent_id in agent_ids if agent_id is not None}
+    if not unique_ids:
+        return {}
+    with get_db_session() as session:
+        agents = session.query(
+            AgentInfo.agent_id,
+            AgentInfo.is_main_agent,
+        ).filter(
+            AgentInfo.agent_id.in_(list(unique_ids)),
+            AgentInfo.version_no == 0,
+            AgentInfo.delete_flag != 'Y',
+        ).all()
+        return {a.agent_id: a.is_main_agent for a in agents}
 
 
 def _ensure_system_relation_mutation_allowed(

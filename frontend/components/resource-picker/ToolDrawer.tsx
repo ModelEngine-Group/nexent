@@ -4,11 +4,11 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Button, Tooltip } from "antd";
-import { Settings, Tag } from "lucide-react";
+import { Tooltip } from "antd";
+import { Settings } from "lucide-react";
 import i18n from "i18next";
 
-import { AddResourceDrawer, CheckMark } from "./AddResourceDrawer";
+import { ResourceDrawer } from "./ResourceDrawer";
 import { useToolList } from "@/hooks/agent/useToolList";
 import { useMcpServerList } from "@/hooks/mcp/useMcpServerList";
 import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
@@ -30,9 +30,14 @@ import {
   getToolLabels,
 } from "@/app/agents/components/capability/tool/utils";
 
-import styles from "./ResourcePickerDrawer.module.css";
+import { ResourceCollection, ResourceItem } from "./ResourceItem";
 
-const PAGE_SIZE = 10;
+import { useResourceTagFilter } from "@/hooks/useResourceTagFilter";
+import { useToolTagAssignments } from "@/hooks/useToolTagAssignments";
+import { ResourceTagFilterControl } from "./ResourceTagFilterControl";
+import { ResourceAssignedTags } from "./ResourceAssignedTags";
+
+import styles from "./ResourcePickerDrawer.module.css";
 
 // Stable fallback so the zustand selector returns a referentially-stable value
 // when `editedAgent?.tools` is undefined (avoids a getSnapshot infinite loop).
@@ -100,19 +105,19 @@ const SOURCE_TABS: { key: string; labelKey: string; sourceValue: string }[] = [
   },
 ];
 
-export interface AddToolDrawerProps {
+export interface ToolDrawerProps {
   open: boolean;
   onClose: () => void;
   onOpenManageLabels?: () => void;
   currentAgentId?: number;
 }
 
-export function AddToolDrawer({
+export function ToolDrawer({
   open,
   onClose,
   onOpenManageLabels,
   currentAgentId,
-}: AddToolDrawerProps) {
+}: ToolDrawerProps) {
   const { t } = useTranslation("common");
   const { confirm } = useConfirmModal();
 
@@ -165,29 +170,15 @@ export function AddToolDrawer({
   }, [open, selectedTools]);
 
   const [search, setSearch] = useState("");
-  const [activeTag, setActiveTag] = useState("");
   const [activeTab, setActiveTab] = useState("local");
   const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(10);
 
   // ToolConfigModal — handles add/update to store internally on save
   const [configModalOpen, setConfigModalOpen] = useState(false);
   const [configTool, setConfigTool] = useState<Tool | null>(null);
   const [configParams, setConfigParams] = useState<ToolParam[]>([]);
   const [isSelectingAll, setIsSelectingAll] = useState(false);
-
-  // Collect all unique labels from available tools for the single tag dropdown
-  const allLabels = useMemo(() => {
-    const labelSet = new Set<string>();
-    selectableTools.forEach((tool: Tool) => {
-      getToolLabels(tool).forEach((label: string) => labelSet.add(label));
-    });
-    return Array.from(labelSet).sort((a, b) => a.localeCompare(b));
-  }, [selectableTools]);
-
-  const tagOptions = useMemo(
-    () => allLabels.map((label) => ({ value: label, label })),
-    [allLabels]
-  );
 
   // Tools available in the active source tab (MCP tools filtered by visible server).
   const activeTabTools = useMemo(() => {
@@ -207,11 +198,21 @@ export function AddToolDrawer({
     return sourceTools;
   }, [activeTab, allMcpServerNames, selectableTools, visibleMcpNames]);
 
-  // Filter by search (name/description/labels) and single active tag (AND).
+  const resourceTags = useResourceTagFilter(
+    open,
+    "tool",
+    activeTabTools.map((tool) => String(tool.id))
+  );
+  // Combine text search with the unified tag service match set.
   const filteredTools = useMemo(() => {
     const kw = search.trim().toLowerCase();
     return activeTabTools
       .filter((tool: Tool) => {
+        if (
+          resourceTags.matchedIds &&
+          !resourceTags.matchedIds.has(String(tool.id))
+        )
+          return false;
         if (kw) {
           const desc = getToolDescription(tool);
           const matchSearch =
@@ -222,11 +223,10 @@ export function AddToolDrawer({
             );
           if (!matchSearch) return false;
         }
-        if (activeTag && !getToolLabels(tool).includes(activeTag)) return false;
         return true;
       })
       .sort((a: Tool, b: Tool) => a.name.localeCompare(b.name));
-  }, [activeTabTools, activeTag, search]);
+  }, [activeTabTools, search, resourceTags.matchedIds]);
 
   const selectedToolIds = useMemo(
     () => new Set(draftTools.map((tool) => parseInt(tool.id))),
@@ -298,8 +298,14 @@ export function AddToolDrawer({
 
   const total = filteredTools.length;
   const pagedTools = useMemo(
-    () => filteredTools.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE),
-    [filteredTools, page]
+    () => filteredTools.slice((page - 1) * pageSize, page * pageSize),
+    [filteredTools, page, pageSize]
+  );
+  const toolAssignments = useToolTagAssignments(
+    open,
+    pagedTools.map((tool) => String(tool.id)),
+    resourceTags.revision,
+    tenantId
   );
 
   // Auto-switch to first available tab when the active tab has no tools.
@@ -326,7 +332,7 @@ export function AddToolDrawer({
 
   useEffect(() => {
     setPage(1);
-  }, [activeTab, search, activeTag]);
+  }, [activeTab, search, resourceTags.matchedIds]);
 
   // Open ToolConfigModal (handles add/update internally on save)
   const openConfigModal = useCallback(
@@ -482,7 +488,6 @@ export function AddToolDrawer({
 
   const onCloseDialog = useCallback(() => {
     setSearch("");
-    setActiveTag("");
     setActiveTab("local");
     setPage(1);
     onClose();
@@ -512,30 +517,25 @@ export function AddToolDrawer({
 
   return (
     <>
-      <AddResourceDrawer
-        width={768}
+      <ResourceDrawer
+        width="min(768px, 100vw)"
         bodyClassName={cn(styles.drawer, styles.tool)}
-        title={
-          <div className="flex min-w-0 items-center gap-2">
-            <span className="min-w-0 flex-1 truncate">
-              {t("resourcePicker.addTool", "添加工具")}
-            </span>
-            {onOpenManageLabels ? (
-              <Button
-                type="text"
-                size="small"
-                icon={<Tag size={13} />}
-                onClick={onOpenManageLabels}
-                className="!text-purple-500 hover:!text-purple-600 hover:!bg-purple-50 h-6 text-xs"
-              >
-                {t("toolPool.manageLabels")}
-              </Button>
-            ) : null}
-          </div>
+        title={t("resourcePicker.addTool", "添加工具")}
+        tagManagement={
+          onOpenManageLabels ? { onClick: onOpenManageLabels } : undefined
         }
         open={open}
         searchPlaceholder={t("toolPool.searchToolsPlaceholder")}
-        tagOptions={tagOptions}
+        tagFilter={
+          <ResourceTagFilterControl
+            filter={resourceTags}
+            onChange={() => setPage(1)}
+          />
+        }
+        confirmDisabled={
+          resourceTags.filtering ||
+          !!(resourceTags.predicates.length && resourceTags.error)
+        }
         selected={selectedChips}
         listTitle={t("resourcePicker.list.tool")}
         tabs={tabItems}
@@ -544,17 +544,25 @@ export function AddToolDrawer({
         page={page}
         onClose={onCloseDialog}
         onConfirm={handleConfirm}
+        keyword={search}
         onSearch={setSearch}
-        onTagChange={(value) => setActiveTag(value ?? "")}
         onTabChange={setActiveTab}
         onRemoveSelected={removeTool}
         onSelectAll={handleSelectAll}
         allSelected={allVisibleToolsSelected}
-        onRefresh={() => void invalidate()}
+        onRefresh={() => {
+          void invalidate();
+          if (open && pagedTools.length > 0) void toolAssignments.refetch();
+        }}
         onPageChange={setPage}
+        pageSize={pageSize}
+        onPageSizeChange={(size) => {
+          setPageSize(size);
+          setPage(1);
+        }}
       >
         {total > 0 ? (
-          <div className="flex flex-col gap-2">
+          <ResourceCollection>
             {pagedTools.map((tool: Tool) => {
               const isSelected = selectedToolIds.has(parseInt(tool.id));
               const disabled = isToolDisabled(
@@ -575,72 +583,43 @@ export function AddToolDrawer({
                 : null;
 
               const row = (
-                <div
-                  role="button"
-                  tabIndex={disabled ? -1 : 0}
-                  className={cn(
-                    "flex h-[59px] shrink-0 items-center justify-between gap-3 rounded-[4px] py-[9px] pl-5 pr-7 transition-colors",
-                    isSelected ? "bg-[#E6F2FD]" : "bg-transparent",
-                    disabled
-                      ? "cursor-not-allowed opacity-50"
-                      : "cursor-pointer hover:bg-gray-50"
-                  )}
-                  onClick={disabled ? undefined : () => handleToolToggle(tool)}
-                  onKeyDown={(event) => {
-                    if (
-                      !disabled &&
-                      (event.key === "Enter" || event.key === " ")
-                    ) {
-                      event.preventDefault();
-                      handleToolToggle(tool);
-                    }
+                <ResourceItem
+                  item={{
+                    key: String(tool.id),
+                    name: tool.name,
+                    description: getToolDescription(tool),
+                    tags: getToolLabels(tool),
+                    raw: tool,
                   }}
-                >
-                  <div className="flex min-w-0 flex-1 flex-col">
-                    <div className="flex items-center gap-2">
-                      <span
-                        className={cn(
-                          "truncate text-[14px] leading-[22px]",
-                          isSelected
-                            ? "font-medium text-[#0067D1]"
-                            : "font-medium text-[#191919]"
-                        )}
-                      >
-                        {tool.name}
-                      </span>
-                      {getToolLabels(tool)
-                        .slice(0, 2)
-                        .map((label: string) => (
-                          <span
-                            key={label}
-                            className="h-5 shrink-0 rounded-[2px] bg-[#F5F5F5] px-2 text-[12px] leading-[20px] text-[#393939]"
-                          >
-                            {label}
-                          </span>
-                        ))}
-                    </div>
-                    {tool.description ? (
-                      <p className="m-0 truncate text-[14px] font-normal leading-[22px] text-[#777777]">
-                        {getToolDescription(tool)}
-                      </p>
-                    ) : null}
-                  </div>
-                  {!disabled && (
-                    <button
-                      type="button"
-                      onClick={(event) => {
-                        event.stopPropagation();
-                        void openConfigModal(tool);
-                      }}
-                      aria-label={t("toolPool.configure")}
-                      title={t("toolPool.configure")}
-                      className="flex size-7 shrink-0 items-center justify-center rounded-md text-gray-400 transition-colors hover:bg-gray-100 hover:text-gray-600"
-                    >
-                      <Settings className="size-4" />
-                    </button>
-                  )}
-                  <CheckMark checked={isSelected} />
-                </div>
+                  selected={isSelected}
+                  disabled={disabled}
+                  onToggle={() => void handleToolToggle(tool)}
+                  slots={{
+                    renderTags: () => (
+                      <ResourceAssignedTags
+                        resourceType="tool"
+                        resourceId={String(tool.id)}
+                        tags={getToolLabels(tool)}
+                        assignments={
+                          toolAssignments.data?.[String(tool.id)] ?? []
+                        }
+                        refreshKey={resourceTags.revision}
+                      />
+                    ),
+                    renderActions: () =>
+                      !disabled ? (
+                        <button
+                          type="button"
+                          onClick={() => void openConfigModal(tool)}
+                          aria-label={t("toolPool.configure")}
+                          title={t("toolPool.configure")}
+                          className="flex size-7 shrink-0 items-center justify-center rounded-md text-gray-400 transition-colors hover:bg-gray-100 hover:text-gray-600"
+                        >
+                          <Settings className="size-4" />
+                        </button>
+                      ) : null,
+                  }}
+                />
               );
 
               return (
@@ -650,7 +629,7 @@ export function AddToolDrawer({
                       title={t(disabledTooltipKey)}
                       mouseEnterDelay={0.2}
                     >
-                      {row}
+                      <div>{row}</div>
                     </Tooltip>
                   ) : (
                     row
@@ -658,13 +637,13 @@ export function AddToolDrawer({
                 </div>
               );
             })}
-          </div>
+          </ResourceCollection>
         ) : (
           <div className="flex flex-1 items-center justify-center text-sm text-gray-400">
             {t("toolPool.noSearchResults")}
           </div>
         )}
-      </AddResourceDrawer>
+      </ResourceDrawer>
 
       <ToolConfigModal
         isOpen={configModalOpen}

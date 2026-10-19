@@ -105,9 +105,12 @@
 }
 
 .agentCard {
+  transition:
+    box-shadow 150ms ease,
+    background-color 150ms ease;
   position: relative;
   display: flex;
-  height: 148px;
+  min-height: 148px;
   min-width: 0;
   flex-direction: column;
   gap: 4px;
@@ -127,7 +130,8 @@
   height: 18px;
   flex-shrink: 0;
   align-items: center;
-  gap: 78px;
+  gap: 12px;
+  justify-content: space-between;
   margin-top: auto;
   font-size: 12px;
   line-height: 18px;
@@ -145,14 +149,16 @@
   color: rgba(25, 25, 25, 0.7);
 }
 
-.agentStatus {
-  display: flex;
-  flex-shrink: 0;
-  align-items: center;
-  gap: 4px;
+.agentVersion {
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
   white-space: nowrap;
   font-family: "Huawei Sans", "HarmonyOS Sans SC", sans-serif;
-  color: #191919;
+  font-size: 12px;
+  line-height: 18px;
+  color: #777777;
 }
 
 /* The knowledge design retains a 24px gap after selected chips. */

@@ -2,9 +2,8 @@
 
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { Database } from "lucide-react";
-import { Empty, Spin } from "antd";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Alert, Empty, Spin } from "antd";
 import type { TFunction } from "i18next";
 import { useTranslation } from "react-i18next";
 import { useEmbeddingModelDialog } from "@/hooks/knowledge/useEmbeddingModelDialog";
@@ -14,7 +13,6 @@ import { cn } from "@/lib/utils";
 import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
 import { useKnowledgeList } from "@/hooks/knowledge/useKnowledgeList";
 import { useGroupList } from "@/hooks/group/useGroupList";
-import { formatDate } from "@/lib/date";
 import type { KnowledgeBase } from "@/types/knowledgeBase";
 import knowledgeBaseService from "@/services/knowledgeBaseService";
 import log from "@/lib/logger";
@@ -24,28 +22,20 @@ import {
   isEmbeddingModelCompatible as isEmbeddingModelCompatibleBase,
   isMultimodalConstraintMismatch as isMultimodalConstraintMismatchBase,
 } from "@/lib/knowledgeBaseCompatibility";
-import { AddResourceDrawer, CheckMark } from "./AddResourceDrawer";
+import { ResourceDrawer } from "./ResourceDrawer";
+import { ResourceCollection, ResourceItem } from "./ResourceItem";
+import type {
+  ResourceItemSlots,
+  ResourceViewMode,
+} from "@/types/resourcePicker";
 import type { KnowledgeItem, SelectedItem } from "./types";
+import { useResourceTagFilter } from "@/hooks/useResourceTagFilter";
+import { ResourceTagFilterControl } from "./ResourceTagFilterControl";
+import { ResourceAssignedTags } from "./ResourceAssignedTags";
+import { useResourceTagAssignments } from "@/hooks/useResourceTagAssignments";
+import { ResourceTagManagementModal } from "./ResourceTagManagementModal";
+
 import styles from "./ResourcePickerDrawer.module.css";
-
-const PAGE_SIZE = 10;
-
-const ICON_BG_PALETTE = [
-  "#8B7BF6",
-  "#7B5BF2",
-  "#9F8CF8",
-  "#5B8DEF",
-  "#3B82F6",
-  "#4D6BFE",
-];
-
-function iconColorFor(seed: string): string {
-  let hash = 0;
-  for (let i = 0; i < seed.length; i += 1) {
-    hash = (hash * 31 + seed.charCodeAt(i)) >>> 0;
-  }
-  return ICON_BG_PALETTE[hash % ICON_BG_PALETTE.length];
-}
 
 function toKnowledgeItem(
   kb: KnowledgeBase,
@@ -53,11 +43,19 @@ function toKnowledgeItem(
   options?: { isAidp?: boolean; groupNames?: string[] }
 ): KnowledgeItem {
   const isAidp = options?.isAidp ?? false;
-  const meta: string[] = [];
+  const description = kb.description?.trim() ?? "";
+  const displayDescription = /^elasticsearch index$/i.test(description)
+    ? ""
+    : description;
+  const meta: string[] = [
+    `${t("knowledgeBase.create.field.embeddingModel")}: ${
+      kb.embeddingModel && kb.embeddingModel !== "unknown"
+        ? kb.embeddingModel
+        : t("common.unknown")
+    }`,
+  ];
 
   if (isAidp) {
-    const created = formatDate(kb.createdAt);
-    if (created) meta.push(created);
     meta.push(
       t("resourcePicker.knowledge.documents", { count: kb.documentCount })
     );
@@ -70,14 +68,11 @@ function toKnowledgeItem(
         kb.ingroup_permission === "PRIVATE"
           ? t("resourcePicker.knowledge.private")
           : options?.groupNames?.[0],
-      description: kb.description ?? "",
-      iconBg: iconColorFor(kb.id),
+      description: displayDescription,
       meta,
     };
   }
 
-  const usedAt = formatDate(kb.updatedAt);
-  if (usedAt) meta.push(t("resourcePicker.knowledge.usedAt", { date: usedAt }));
   meta.push(
     t("resourcePicker.knowledge.documents", { count: kb.documentCount })
   );
@@ -86,96 +81,17 @@ function toKnowledgeItem(
     id: kb.id,
     name: kb.display_name || kb.name,
     category: kb.source || undefined,
-    description: kb.description ?? "",
-    iconBg: iconColorFor(kb.id),
+    description: displayDescription,
     meta,
   };
 }
 
-function KnowledgeRow({
-  item,
-  selected,
-  onToggle,
-  canSelect = true,
-}: {
-  item: KnowledgeItem;
-  selected: boolean;
-  onToggle: () => void;
-  canSelect?: boolean;
-}) {
-  return (
-    <div
-      data-knowledge-selected={selected}
-      className={cn(
-        "relative flex h-[104px] w-full shrink-0 flex-col items-start justify-between",
-        !canSelect ? "opacity-60" : ""
-      )}
-    >
-      <div className="flex h-8 w-full shrink-0 items-center gap-2 pr-10">
-        <div
-          className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg text-white"
-          style={{
-            background: "linear-gradient(135deg, #B8A3FF 0%, #6941D9 100%)",
-          }}
-        >
-          <Database size={20} strokeWidth={1.8} />
-        </div>
-        <div className="flex min-w-0 items-center gap-2">
-          <span
-            className="min-w-0 truncate text-[14px] font-bold leading-[21px] text-[#191919]"
-            style={{
-              fontFamily: '"HarmonyHeiTi", "HarmonyOS Sans SC", sans-serif',
-            }}
-          >
-            {item.name}
-          </span>
-          {item.category && (
-            <span
-              className="flex h-5 shrink-0 items-center rounded-[2px] border border-[#D9D9D9] bg-[#F2F2F2] px-[6px] text-[12px] leading-[18px] text-[#4D4D4D]"
-              style={{
-                fontFamily: '"HarmonyHeiTi", "HarmonyOS Sans SC", sans-serif',
-              }}
-            >
-              {item.category}
-            </span>
-          )}
-        </div>
-      </div>
-      <p
-        className="line-clamp-2 h-9 w-[calc(100%-40px)] text-[12px] leading-[18px] text-[#191919]/70"
-        style={{
-          fontFamily: '"HarmonyHeiTi", "HarmonyOS Sans SC", sans-serif',
-        }}
-      >
-        {item.description}
-      </p>
-      <div
-        className="flex h-[18px] w-[calc(100%-40px)] items-center text-[12px] leading-[18px] text-[#191919]/40"
-        style={{
-          fontFamily: '"HarmonyHeiTi", "HarmonyOS Sans SC", sans-serif',
-        }}
-      >
-        {item.meta.map((text, i) => (
-          <span key={text} className="flex items-center">
-            {i > 0 && <span className="mx-4 h-2.5 w-px bg-[#DDD]" />}
-            {text}
-          </span>
-        ))}
-      </div>
-      <div className="absolute right-0 top-1/2 -translate-y-1/2">
-        <CheckMark
-          checked={selected}
-          onToggle={canSelect ? onToggle : undefined}
-        />
-      </div>
-    </div>
-  );
-}
-
-export interface AddKnowledgeDrawerProps {
+export interface KnowledgeDrawerProps {
   open: boolean;
   onClose: () => void;
-  onConfirm?: (selected: KnowledgeBase[]) => void;
+  onConfirm?: (selected: KnowledgeBase[]) => void | Promise<void>;
+  viewMode?: ResourceViewMode;
+  slots?: ResourceItemSlots<KnowledgeBase>;
   /** Drawer title; falls back to the localized "添加知识库". */
   title?: string;
   /** When provided, the drawer is controlled and uses this list instead of self-fetching. */
@@ -187,6 +103,8 @@ export interface AddKnowledgeDrawerProps {
   isAidpSearch?: boolean;
   /** Refresh action (wired to the drawer's refresh button). */
   onRefresh?: () => void;
+  onOpenManageTags?: () => void;
+  enableTagManagement?: boolean;
   // Embedding-model compatibility inputs for nexent-source validation.
   toolMultimodal?: boolean | null;
   currentEmbeddingModel?: string | null;
@@ -195,10 +113,12 @@ export interface AddKnowledgeDrawerProps {
   currentMultiEmbeddingModelId?: number | null;
 }
 
-export function AddKnowledgeDrawer({
+export function KnowledgeDrawer({
   open,
   onClose,
   onConfirm,
+  viewMode = "list",
+  slots,
   title,
   knowledgeBases: knowledgeBasesProp,
   isLoading: isLoadingProp,
@@ -206,18 +126,28 @@ export function AddKnowledgeDrawer({
   maxSelect,
   isAidpSearch = false,
   onRefresh,
+  onOpenManageTags,
+  enableTagManagement = false,
   toolMultimodal = null,
   currentEmbeddingModel = null,
   currentMultiEmbeddingModel = null,
   currentEmbeddingModelId = null,
   currentMultiEmbeddingModelId = null,
-}: AddKnowledgeDrawerProps) {
+}: KnowledgeDrawerProps) {
   const { t } = useTranslation("common");
+  const [tagManagementOpen, setTagManagementOpen] = useState(false);
+  const [previousOpen, setPreviousOpen] = useState(open);
+  if (previousOpen !== open) {
+    setPreviousOpen(open);
+    if (!open) setTagManagementOpen(false);
+  }
   const { user } = useAuthorizationContext();
   const tenantId = user?.tenantId ?? null;
 
   // Self-fetching fallback (used by the standalone demo page).
-  const selfFetch = useKnowledgeList(tenantId);
+  const selfFetch = useKnowledgeList(
+    open && knowledgeBasesProp === undefined ? tenantId : null
+  );
   const { data: groupListData } = useGroupList(isAidpSearch ? tenantId : null);
 
   const groupNameById = useMemo(
@@ -233,6 +163,11 @@ export function AddKnowledgeDrawer({
 
   const controlled = knowledgeBasesProp !== undefined;
   const knowledgeBases = knowledgeBasesProp ?? selfFetch.data ?? [];
+  const resourceTags = useResourceTagFilter(
+    open,
+    "knowledge_base",
+    knowledgeBases.map((kb) => kb.id)
+  );
   const isLoading = controlled ? (isLoadingProp ?? false) : selfFetch.isLoading;
 
   const groupNamesFor = (kb: KnowledgeBase): string[] =>
@@ -240,25 +175,16 @@ export function AddKnowledgeDrawer({
       .map((groupId) => groupNameById.get(groupId))
       .filter((name): name is string => Boolean(name));
 
-  const allItems: KnowledgeItem[] = useMemo(
-    () =>
-      knowledgeBases.map((kb) =>
-        toKnowledgeItem(kb, t, {
-          isAidp: isAidpSearch,
-          groupNames: groupNamesFor(kb),
-        })
-      ),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [knowledgeBases, isAidpSearch, groupNameById, t]
-  );
-
   // ---- Selection state (seeded from props on open) ----
   const [selectedIdsSet, setSelectedIdsSet] = useState<Set<string>>(
     () => new Set()
   );
+  const confirming = useRef(false);
+  const [saving, setSaving] = useState(false);
+  const [confirmError, setConfirmError] = useState<string>();
   const [keyword, setKeyword] = useState("");
   const [page, setPage] = useState(1);
-  const [tagFilter, setTagFilter] = useState("");
+  const [pageSize, setPageSize] = useState(10);
 
   // Model-mismatch confirm modal state.
   const [pendingSelection, setPendingSelection] = useState<{
@@ -288,8 +214,8 @@ export function AddKnowledgeDrawer({
   useEffect(() => {
     if (open) {
       setSelectedIdsSet(new Set(selectedIdsProp ?? []));
+      setConfirmError(undefined);
       setKeyword("");
-      setTagFilter("");
       setPage(1);
       setEmbeddingModelDialogOpen(false);
       setEmbeddingModelDialogData(null);
@@ -303,7 +229,7 @@ export function AddKnowledgeDrawer({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
 
-  // ---- Selection validation (parity with KnowledgeBaseSelectorModal) ----
+  // ---- Selection validation (parity with KnowledgeSelectorDrawer) ----
   const checkCanSelect = useCallback(
     (kb: KnowledgeBase): boolean => {
       if (isAidpSearch) return true;
@@ -478,8 +404,23 @@ export function AddKnowledgeDrawer({
       return;
     }
 
-    onConfirm?.(selectedKBs);
-    onClose();
+    if (confirming.current) return;
+    confirming.current = true;
+    setSaving(true);
+    setConfirmError(undefined);
+    try {
+      await onConfirm?.(selectedKBs);
+      onClose();
+    } catch (error) {
+      setConfirmError(
+        error instanceof Error
+          ? error.message
+          : t("resourcePicker.selectionFailed", "选择失败，请重试")
+      );
+    } finally {
+      confirming.current = false;
+      setSaving(false);
+    }
   }, [
     knowledgeBases,
     onConfirm,
@@ -490,22 +431,14 @@ export function AddKnowledgeDrawer({
     setEmbeddingModelDialogOpen,
     setConfiguringKbIds,
     configuredKbIndexNames,
+    t,
   ]);
 
   // ---- Filters / pagination ----
-  const tagOptions = useMemo(() => {
-    if (isAidpSearch) return [];
-    const sources = new Set<string>();
-    allItems.forEach((item) => {
-      if (item.category) sources.add(item.category);
-    });
-    return Array.from(sources)
-      .sort((left, right) => (left < right ? -1 : Number(left > right)))
-      .map((value) => ({ value, label: value }));
-  }, [allItems, isAidpSearch]);
-
   const filteredKbs = useMemo(() => {
-    let filtered = knowledgeBases;
+    let filtered = knowledgeBases.filter(
+      (kb) => !resourceTags.matchedIds || resourceTags.matchedIds.has(kb.id)
+    );
     const kw = keyword.trim().toLowerCase();
     if (kw) {
       filtered = filtered.filter(
@@ -514,26 +447,31 @@ export function AddKnowledgeDrawer({
           (kb.description ?? "").toLowerCase().includes(kw)
       );
     }
-    if (tagFilter) {
-      filtered = filtered.filter((kb) => kb.source === tagFilter);
-    }
     return filtered;
-  }, [knowledgeBases, keyword, tagFilter]);
+  }, [knowledgeBases, keyword, resourceTags.matchedIds]);
 
   useEffect(() => {
     setPage(1);
-  }, [keyword, tagFilter]);
+  }, [keyword, resourceTags.matchedIds]);
 
   const pagedItems = useMemo(
     () =>
-      filteredKbs.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE).map((kb) =>
+      filteredKbs.slice((page - 1) * pageSize, page * pageSize).map((kb) =>
         toKnowledgeItem(kb, t, {
           isAidp: isAidpSearch,
           groupNames: groupNamesFor(kb),
         })
       ),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [filteredKbs, page, isAidpSearch, groupNameById, t]
+    [filteredKbs, page, pageSize, isAidpSearch, groupNameById, t]
+  );
+
+  const assignments = useResourceTagAssignments(
+    "knowledge_base",
+    open && !isLoading && !slots?.renderTags,
+    pagedItems.map((item) => item.id),
+    resourceTags.revision,
+    tenantId
   );
 
   const selected: SelectedItem[] = useMemo(
@@ -549,8 +487,10 @@ export function AddKnowledgeDrawer({
     filteredKbs.every((kb) => selectedIdsSet.has(kb.id));
 
   const handleRefresh = () => {
+    if (open && pagedItems.length && !slots?.renderTags)
+      void assignments.refetch();
     if (onRefresh) onRefresh();
-    else void selfFetch.refetch();
+    else if (!controlled) void selfFetch.refetch();
   };
 
   const handleSelectAll = (checked: boolean) => {
@@ -574,8 +514,18 @@ export function AddKnowledgeDrawer({
 
   return (
     <>
-      <AddResourceDrawer
-        width={768}
+      <ResourceDrawer
+        width="min(768px, 100vw)"
+        keyword={keyword}
+        confirmLoading={saving}
+        confirmDisabled={
+          isLoading ||
+          resourceTags.filtering ||
+          !!(resourceTags.predicates.length && resourceTags.error)
+        }
+        controlsContent={
+          confirmError ? <Alert type="error" title={confirmError} /> : undefined
+        }
         bodyClassName={cn(styles.drawer, styles.knowledge)}
         open={open}
         title={title ?? t("resourcePicker.addKnowledge", "添加知识库")}
@@ -584,11 +534,28 @@ export function AddKnowledgeDrawer({
           "搜索知识库名称及描述"
         )}
         selected={selected}
-        tagOptions={tagOptions}
+        tagFilter={
+          <ResourceTagFilterControl
+            filter={resourceTags}
+            onChange={() => setPage(1)}
+          />
+        }
         listTitle={t("resourcePicker.list.knowledge", "知识库列表")}
+        tagManagement={
+          onOpenManageTags || enableTagManagement
+            ? {
+                onClick: onOpenManageTags ?? (() => setTagManagementOpen(true)),
+              }
+            : undefined
+        }
         total={filteredKbs.length}
         page={page}
         onPageChange={setPage}
+        pageSize={pageSize}
+        onPageSizeChange={(size) => {
+          setPageSize(size);
+          setPage(1);
+        }}
         showConfirm
         onClose={onClose}
         onConfirm={() => {
@@ -596,8 +563,7 @@ export function AddKnowledgeDrawer({
         }}
         onRemoveSelected={(id) => toggleSelection(id)}
         onSearch={setKeyword}
-        onTagChange={(value) => setTagFilter(value ?? "")}
-        onRefresh={handleRefresh}
+        onRefresh={onRefresh || !controlled ? handleRefresh : undefined}
         onSelectAll={handleSelectAll}
         allSelected={allSelected}
       >
@@ -608,32 +574,107 @@ export function AddKnowledgeDrawer({
         ) : filteredKbs.length === 0 ? (
           <Empty description={t("resourcePicker.empty", "暂无数据")} />
         ) : (
-          <div className="flex flex-col gap-0">
+          <ResourceCollection
+            viewMode={viewMode}
+            className={viewMode === "list" ? "gap-0" : undefined}
+          >
             {pagedItems.map((item) => {
               const kb = filteredKbs.find((k) => k.id === item.id);
               const selected_ = selectedIdsSet.has(item.id);
               const canSelect = kb ? checkCanSelect(kb) : true;
-              return (
-                <div
-                  key={item.id}
-                  data-knowledge-row
-                  className={cn(
-                    "box-border flex h-32 w-full shrink-0 items-center px-4 py-3 shadow-[inset_0_-1px_0_#fff]",
-                    selected_ ? "bg-[#E6F2FD]" : "bg-white"
-                  )}
-                >
-                  <KnowledgeRow
-                    item={item}
+              if (kb) {
+                return (
+                  <ResourceItem
+                    key={item.id}
+                    item={{
+                      key: item.id,
+                      name: item.name,
+                      description: [item.description, ...item.meta]
+                        .filter(Boolean)
+                        .join(" · "),
+                      badges: [
+                        ...(isAidpSearch && item.category
+                          ? [item.category]
+                          : []),
+                        ...(kb.is_multimodal === true
+                          ? [t("resourcePicker.knowledge.multimodal", "多模态")]
+                          : kb.is_multimodal === false
+                            ? [t("resourcePicker.knowledge.textOnly", "仅文本")]
+                            : []),
+                      ],
+                      tags: kb.tags,
+                      metadata: item.meta.map((value, index) => ({
+                        key: String(index),
+                        value,
+                        label: "",
+                      })),
+                      raw: kb,
+                    }}
+                    viewMode={viewMode}
+                    slots={{
+                      ...slots,
+                      renderDescription:
+                        slots?.renderDescription ??
+                        (() => (
+                          <span className="flex flex-wrap items-center gap-x-3 gap-y-1">
+                            {[item.description, ...item.meta]
+                              .filter(Boolean)
+                              .map((text, index) => (
+                                <span key={index}>{text}</span>
+                              ))}
+                          </span>
+                        )),
+                      renderTags:
+                        slots?.renderTags ??
+                        (() => (
+                          <ResourceAssignedTags
+                            resourceType="knowledge_base"
+                            resourceId={kb.id}
+                            tags={kb.tags}
+                            assignments={assignments.data?.[kb.id] ?? []}
+                            refreshKey={resourceTags.revision}
+                          />
+                        )),
+                      renderTitleTrailing:
+                        slots?.renderTitleTrailing ??
+                        (() => (
+                          <span
+                            className="truncate rounded-full border border-border bg-muted px-2 text-xs leading-5 text-muted-foreground"
+                            title={kb.source || t("common.unknown")}
+                          >
+                            {kb.source || t("common.unknown")}
+                          </span>
+                        )),
+                      renderMetadata: slots?.renderMetadata ?? (() => null),
+                    }}
                     selected={selected_}
-                    canSelect={canSelect}
-                    onToggle={() => kb && toggleSelection(kb.id)}
+                    disabled={!canSelect}
+                    onToggle={() => toggleSelection(kb.id)}
                   />
-                </div>
-              );
+                );
+              }
+              return null;
             })}
-          </div>
+          </ResourceCollection>
         )}
-      </AddResourceDrawer>
+      </ResourceDrawer>
+
+      {tagManagementOpen && (
+        <ResourceTagManagementModal
+          resourceType="knowledge_base"
+          resources={knowledgeBases.map((kb) => ({
+            id: kb.id,
+            name: kb.display_name || kb.name,
+            canEdit: kb.permission === "EDIT",
+          }))}
+          definitions={resourceTags.definitions}
+          onClose={() => {
+            setTagManagementOpen(false);
+            resourceTags.retry();
+          }}
+          onSaved={() => resourceTags.retry()}
+        />
+      )}
 
       {/* Model-mismatch confirmation modal */}
       <KnowledgeModelMismatchModal

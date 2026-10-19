@@ -19,6 +19,10 @@ import type { NotificationListParams } from "@/types/notification";
 export const API_BASE_URL = withBasePath("/api");
 
 export const API_ENDPOINTS = {
+  skillTagAssignmentsBatch: `${API_BASE_URL}/tag-libraries/assignments/skill/batch_read`,
+  knowledgeTagAssignmentsBatch: `${API_BASE_URL}/tag-libraries/assignments/knowledge_base/batch_read`,
+  agentTagAssignmentsBatch: `${API_BASE_URL}/tag-libraries/assignments/agent/batch_read`,
+  toolTagAssignmentsBatch: `${API_BASE_URL}/tag-libraries/assignments/tool/batch_read`,
   user: {
     signup: `${API_BASE_URL}/user/signup`,
     signin: `${API_BASE_URL}/user/signin`,
@@ -405,6 +409,11 @@ export const API_ENDPOINTS = {
       `${API_BASE_URL}/aidp-mgmt/knowledge-bases/${id}/documents/remove`,
     downloadKbDocument: (id: string) =>
       `${API_BASE_URL}/aidp-mgmt/knowledge-bases/${id}/documents/download`,
+    /** GET endpoint that streams one AIDP document for preview. AIDP serves
+     *  the original bytes for docx/xlsx/pptx/pdf/txt and a PDF conversion for
+     *  every other format, and reports the served name in `X-File-Name`. */
+    previewKbDocument: (id: string, fileUuid: string) =>
+      `${API_BASE_URL}/aidp-mgmt/knowledge-bases/${id}/documents/${encodeURIComponent(fileUuid)}/preview`,
     models: `${API_BASE_URL}/aidp-mgmt/models`,
     graphTemplate: `${API_BASE_URL}/aidp-mgmt/knowledge-bases/graph-template`,
     /** PATCH endpoint for the per-KB in-group permission. */
@@ -603,6 +612,9 @@ export const API_ENDPOINTS = {
         );
       }
       if (params?.tag?.trim()) queryParams.append("tag", params.tag.trim());
+      if (params?.sort_by_update_time) {
+        queryParams.append("sort_by_update_time", "true");
+      }
       const queryString = queryParams.toString();
       return `${API_BASE_URL}/repository/agent${queryString ? `?${queryString}` : ""}`;
     },

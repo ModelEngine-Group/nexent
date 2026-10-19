@@ -1,0 +1,15 @@
+schema_version: '1.0'
+case_id: AGENT-REPO-SORT-MAIN-TAG-D4-001
+implementations:
+- framework: playwright
+  file: test.spec.ts
+  selector: AGENT-REPO-SORT-MAIN-TAG-D4-001
+timeout_seconds: 300
+acceptance_bindings:
+  AC-01:
+  - AGENT-REPO-SORT-MAIN-TAG-D4-001
+preparation:
+  families: []
+  anchors: false
+  special_assets: false
+  d4_groups: []

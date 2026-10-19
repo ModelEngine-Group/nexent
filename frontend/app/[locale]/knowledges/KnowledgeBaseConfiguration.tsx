@@ -30,7 +30,6 @@ import { getKnowledgeResourceLimitMessage } from "@/const/errorMessageI18n";
 import { useConfirmModal } from "@/hooks/useConfirmModal";
 import log from "@/lib/logger";
 import { formatKnowledgeBaseDeleteError } from "@/lib/knowledgeBaseDeleteError";
-import { createKnowledgeBaseFilterKey } from "@/lib/knowledgeBaseViewport";
 import knowledgeBaseService from "@/services/knowledgeBaseService";
 import knowledgeBasePollingService from "@/services/knowledgeBasePollingService";
 import { isKnowledgeBaseFileSizeValid } from "@/services/uploadService";
@@ -42,6 +41,7 @@ import { SETUP_PAGE_CONTAINER, STANDARD_CARD } from "@/const/layoutConstants";
 import { QUOTA_USAGE_CHANGED_EVENT } from "@/lib/quotaEvents";
 import quotaService from "@/services/quotaService";
 import type { KBQuotaStatus, QuotaUsageResponse } from "@/types/quota";
+import type { TagResourcePredicate } from "@/types/tagManagement";
 
 import KnowledgeBaseList from "./components/knowledge/KnowledgeBaseList";
 import DocumentList from "./components/document/DocumentList";
@@ -256,9 +256,7 @@ function DataConfig({ isActive }: DataConfigProps) {
   const {
     state: kbState,
     fetchKnowledgeBases,
-    loadMoreKnowledgeBases,
     listPagination,
-    isLoadingMore,
     createKnowledgeBase,
     deleteKnowledgeBase,
     setActiveKnowledgeBase,
@@ -294,7 +292,16 @@ function DataConfig({ isActive }: DataConfigProps) {
   const [newKbEmbeddingModel, setNewKbEmbeddingModel] = useState<string>(""); // Selected embedding model for new KB
   // v2.6.0: per-KB embedding model params override
   const [newKbEmbeddingParamsOverride, setNewKbEmbeddingParamsOverride] =
-    useState<Record<string, { temperature?: number | null; top_p?: number | null; extra_params?: Record<string, unknown> | null }>>({});
+    useState<
+      Record<
+        string,
+        {
+          temperature?: number | null;
+          top_p?: number | null;
+          extra_params?: Record<string, unknown> | null;
+        }
+      >
+    >({});
   const [uploadFiles, setUploadFiles] = useState<File[]>([]);
   const [hasClickedUpload, setHasClickedUpload] = useState(false);
   const [showEmbeddingWarning, setShowEmbeddingWarning] = useState(false);
@@ -305,78 +312,58 @@ function DataConfig({ isActive }: DataConfigProps) {
   const [searchQuery, setSearchQuery] = useState("");
   const [sourceFilter, setSourceFilter] = useState<string[]>([]);
   const [modelFilter, setModelFilter] = useState<string[]>([]);
-  const lastRequestedFilterKeyRef = useRef(
-    createKnowledgeBaseFilterKey(searchQuery, sourceFilter, modelFilter)
-  );
+  const [tagFilter, setTagFilter] = useState<TagResourcePredicate[]>([]);
+  const [listPage, setListPage] = useState(1);
+  const [listPageSize, setListPageSize] = useState(12);
   const initialLoadStartedRef = useRef(false);
-  const initialCapacityRequestRef = useRef(false);
-  const initialPageSizeRef = useRef(1);
-  const [initialListPending, setInitialListPending] = useState(true);
+  const listRequestKey = JSON.stringify([
+    listPage,
+    listPageSize,
+    searchQuery,
+    sourceFilter,
+    modelFilter,
+  ]);
+  const [completedListRequestKey, setCompletedListRequestKey] = useState<
+    string | null
+  >(null);
+  const initialListPending = completedListRequestKey !== listRequestKey;
   const contentRef = useRef<HTMLDivElement | null>(null);
 
-  const handleViewportCapacityChange = useCallback(
-    (capacity: number, hasMeasuredRows: boolean) => {
-      const pageSize = Math.max(1, Math.ceil(capacity));
-      initialPageSizeRef.current = pageSize;
-      const loadedCount = kbState.knowledgeBases.length;
-      if (initialLoadStartedRef.current && !listPagination.hasMore) {
-        setInitialListPending(false);
-        return;
-      }
-      if (
-        kbState.isLoading ||
-        isLoadingMore ||
-        initialCapacityRequestRef.current ||
-        (initialLoadStartedRef.current &&
-          (!hasMeasuredRows || loadedCount >= pageSize))
-      ) {
-        return;
-      }
-
-      initialLoadStartedRef.current = true;
-      initialCapacityRequestRef.current = true;
-      setInitialListPending(true);
-      void fetchKnowledgeBases(false, true, true, {
-        keyword: searchQuery,
-        sources: sourceFilter,
-        models: modelFilter,
-        limit: pageSize,
-      }).finally(() => {
-        initialCapacityRequestRef.current = false;
-        setInitialListPending(false);
-      });
-    },
-    [
-      fetchKnowledgeBases,
-      kbState.isLoading,
-      kbState.knowledgeBases.length,
-      isLoadingMore,
-      listPagination.hasMore,
-      modelFilter,
-      searchQuery,
-      sourceFilter,
-    ]
-  );
-
   useEffect(() => {
-    const filterKey = createKnowledgeBaseFilterKey(
-      searchQuery,
-      sourceFilter,
-      modelFilter
+    let cancelled = false;
+    const initial = !initialLoadStartedRef.current;
+    const timer = window.setTimeout(
+      () => {
+        initialLoadStartedRef.current = true;
+        void fetchKnowledgeBases(!initial, false, initial, {
+          keyword: searchQuery,
+          sources: sourceFilter,
+          models: modelFilter,
+          offset: (listPage - 1) * listPageSize,
+          limit: listPageSize,
+        })
+          .catch((error) => {
+            log.error("Failed to load the knowledge catalog page", error);
+          })
+          .finally(() => {
+            if (!cancelled) setCompletedListRequestKey(listRequestKey);
+          });
+      },
+      initial ? 0 : 250
     );
-    if (filterKey === lastRequestedFilterKeyRef.current) return;
-
-    const timer = window.setTimeout(() => {
-      lastRequestedFilterKeyRef.current = filterKey;
-      fetchKnowledgeBases(true, false, false, {
-        keyword: searchQuery,
-        sources: sourceFilter,
-        models: modelFilter,
-        limit: initialPageSizeRef.current,
-      });
-    }, 250);
-    return () => window.clearTimeout(timer);
-  }, [fetchKnowledgeBases, modelFilter, searchQuery, sourceFilter]);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [
+    fetchKnowledgeBases,
+    listRequestKey,
+    listPage,
+    listPageSize,
+    modelFilter,
+    searchQuery,
+    sourceFilter,
+  ]);
 
   const availableEmbeddingModels = useMemo(() => {
     const embeddingRelatedModels = models.filter(
@@ -1122,8 +1109,12 @@ function DataConfig({ isActive }: DataConfigProps) {
       <div
         className="w-full h-full mx-auto relative"
         style={{
-          maxWidth: SETUP_PAGE_CONTAINER.MAX_WIDTH,
-          padding: `0 ${SETUP_PAGE_CONTAINER.HORIZONTAL_PADDING}`,
+          maxWidth: kbState.activeKnowledgeBase
+            ? SETUP_PAGE_CONTAINER.MAX_WIDTH
+            : undefined,
+          padding: kbState.activeKnowledgeBase
+            ? `0 ${SETUP_PAGE_CONTAINER.HORIZONTAL_PADDING}`
+            : undefined,
         }}
       >
         <div
@@ -1155,8 +1146,12 @@ function DataConfig({ isActive }: DataConfigProps) {
       <div
         className="w-full h-full mx-auto relative"
         style={{
-          maxWidth: SETUP_PAGE_CONTAINER.MAX_WIDTH,
-          padding: `0 ${SETUP_PAGE_CONTAINER.HORIZONTAL_PADDING}`,
+          maxWidth: kbState.activeKnowledgeBase
+            ? SETUP_PAGE_CONTAINER.MAX_WIDTH
+            : undefined,
+          padding: kbState.activeKnowledgeBase
+            ? `0 ${SETUP_PAGE_CONTAINER.HORIZONTAL_PADDING}`
+            : undefined,
         }}
         ref={contentRef}
         onDragOver={handleDragOver}
@@ -1170,19 +1165,24 @@ function DataConfig({ isActive }: DataConfigProps) {
                 knowledgeBases={kbState.knowledgeBases}
                 activeKnowledgeBase={kbState.activeKnowledgeBase}
                 isLoading={kbState.isLoading}
-                isLoadingMore={isLoadingMore}
                 syncLoading={kbState.syncLoading}
                 totalCount={listPagination.total}
-                hasMore={listPagination.hasMore}
-                estimatedRowHeight={listPagination.estimatedRowHeight}
-                estimatedItemHeights={listPagination.estimatedItemHeights}
+                page={listPage}
+                pageSize={listPageSize}
+                onPageChange={setListPage}
+                onPageSizeChange={(size) => {
+                  setListPageSize(size);
+                  setListPage(1);
+                }}
+                error={kbState.error}
+                onRetry={() => {
+                  void fetchKnowledgeBases(true, false, false);
+                }}
                 availableSources={listPagination.facets.sources}
                 availableModels={listPagination.facets.models}
                 quotaUsage={quotaUsage}
-                onLoadMore={loadMoreKnowledgeBases}
                 serverFiltered
                 initialLoadPending={initialListPending}
-                onViewportCapacityChange={handleViewportCapacityChange}
                 onClick={handleKnowledgeBaseClick}
                 onDelete={handleDelete}
                 onSync={handleSync}
@@ -1203,20 +1203,30 @@ function DataConfig({ isActive }: DataConfigProps) {
                   }
                 }}
                 // Search and filter props
+                tagFilter={tagFilter}
+                onTagFilterChange={(values) => {
+                  setTagFilter(values);
+                  setListPage(1);
+                }}
                 searchQuery={searchQuery}
-                onSearchChange={setSearchQuery}
+                onSearchChange={(value) => {
+                  setSearchQuery(value);
+                  setListPage(1);
+                }}
                 sourceFilter={sourceFilter}
-                onSourceFilterChange={(values) =>
+                onSourceFilterChange={(values) => {
                   setSourceFilter(
                     Array.isArray(values) ? values : values ? [values] : []
-                  )
-                }
+                  );
+                  setListPage(1);
+                }}
                 modelFilter={modelFilter}
-                onModelFilterChange={(values) =>
+                onModelFilterChange={(values) => {
                   setModelFilter(
                     Array.isArray(values) ? values : values ? [values] : []
-                  )
-                }
+                  );
+                  setListPage(1);
+                }}
               />
               <Modal
                 open={isCreatingMode}

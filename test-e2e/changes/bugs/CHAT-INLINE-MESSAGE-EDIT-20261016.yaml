@@ -1,0 +1,32 @@
+schema_version: '1.0'
+change:
+  change_id: CHAT-INLINE-MESSAGE-EDIT-20261016
+  change_type: bugfix
+  bug_id: CHAT-INLINE-MESSAGE-EDIT-20261016
+  title: Render the user message edit composer inline
+  description: Register the assistant-ui edit composer and show a rounded multiline editor with cancel and send actions at the original message position.
+  observed_behavior: The pencil starts the message edit runtime but the custom message renderer never renders its edit composer.
+  expected_behavior: Editing shows the original text in place; cancellation preserves the message and sending uses the existing edit and branch runtime.
+  escaped_stage: D4
+  coverage_gap:
+    type: missing_assertion
+    description: No focused inline-message-edit assertions were found in the inspected frontend tests and formal Case YAML.
+  feature_contract_changed: false
+  affected_features:
+    existing: []
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing: []
+    added: []
+    modified: []
+    retired: []
+  traditional_ut:
+    decision: add
+    behaviors:
+      - Pencil opens the original text in the message edit composer.
+      - Cancel and Escape leave the original message and answer unchanged.
+      - Send submits once through the existing runtime; empty drafts are disabled and plain Enter inserts a newline.
+    reason: Focused regression coverage is needed for edit rendering and composer interactions.
+  notes: Test additions and execution were not requested; verification remains incomplete. See the colocated design.md for acceptance and local type-check limitations.

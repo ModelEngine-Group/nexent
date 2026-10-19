@@ -214,6 +214,7 @@ def test_list_agent_repository_listings_api_success(
         page=1,
         page_size=10,
         search=None,
+        sort_by_update_time=False,
     )
 
 
@@ -245,6 +246,7 @@ def test_list_agent_repository_listings_api_passes_agent_id(
         page=1,
         page_size=10,
         search=None,
+        sort_by_update_time=False,
     )
 
 
@@ -276,6 +278,7 @@ def test_list_agent_repository_listings_api_passes_pending_review_status(
         page=1,
         page_size=10,
         search=None,
+        sort_by_update_time=False,
     )
 
 
@@ -315,6 +318,7 @@ def test_list_agent_repository_listings_api_passes_pagination_and_search(
         page=2,
         page_size=6,
         search="alpha",
+        sort_by_update_time=False,
     )
 
 
@@ -343,6 +347,7 @@ def test_list_agent_repository_listings_api_passes_tag_filter(
         page_size=10,
         search=None,
         tag="operations",
+        sort_by_update_time=False,
     )
 
 
@@ -405,6 +410,49 @@ def test_list_agent_repository_listings_api_passes_tag_predicates(
     assert mock_list.call_args.kwargs["tag_predicates"] == [
         _TagAssignmentFilter(definition_id=1, value_ids=[2])
     ]
+
+
+def test_list_agent_repository_listings_api_passes_sort_selector(
+    mocker,
+    mock_auth_header,
+):
+    """Test listing API forwards the latest-first sort selector to the service."""
+    mocker.patch(
+        "apps.agent_repository_app.get_current_user_id",
+        return_value=("test_user_id", "test_tenant_id"),
+    )
+    mock_list = mocker.patch(
+        "apps.agent_repository_app.list_agent_repository_listings_impl",
+        return_value={"items": []},
+    )
+
+    response = client.get(
+        "/repository/agent?sort_by_update_time=true",
+        headers=mock_auth_header,
+    )
+
+    assert response.status_code == 200
+    assert mock_list.call_args.kwargs["sort_by_update_time"] is True
+
+
+def test_list_agent_repository_listings_api_returns_main_agent_flag(
+    mocker,
+    mock_auth_header,
+):
+    """Test listing API response carries the main-agent flag through to the client."""
+    mocker.patch(
+        "apps.agent_repository_app.get_current_user_id",
+        return_value=("test_user_id", "test_tenant_id"),
+    )
+    mocker.patch(
+        "apps.agent_repository_app.list_agent_repository_listings_impl",
+        return_value={"items": [{"agent_repository_id": 1, "is_main_agent": False}]},
+    )
+
+    response = client.get("/repository/agent", headers=mock_auth_header)
+
+    assert response.status_code == 200
+    assert response.json()["items"][0]["is_main_agent"] is False
 
 
 def test_list_agent_repository_tag_stats_api(mocker, mock_auth_header):
@@ -1000,11 +1048,13 @@ def test_get_agent_repository_listing_detail_api_passes_tenant_id(
     mock_get_detail.return_value = {
         "agent_repository_id": 42,
         "name": "agent_one",
+        "is_main_agent": False,
     }
 
     response = client.get("/repository/agent/42", headers=mock_auth_header)
 
     assert response.status_code == 200
+    assert response.json()["is_main_agent"] is False
     mock_get_detail.assert_called_once_with(42, "test_tenant_id")
 
 

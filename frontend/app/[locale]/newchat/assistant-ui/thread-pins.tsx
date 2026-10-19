@@ -13,6 +13,8 @@ import {
   type ReactNode,
 } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { workbenchPinsQueryKey } from "@/lib/workbenchPins";
+import type { WorkbenchPinItem } from "@/types/conversation";
 import { conversationService } from "@/services/conversationService";
 
 export interface ThreadPinIdentity {
@@ -98,6 +100,8 @@ export function hoistPinnedThreads<T>(
 
 interface PinnedThreadsValue {
   pinnedIds: ReadonlySet<string>;
+  serverPins?: readonly WorkbenchPinItem[];
+  serverPinsRevision?: number;
   canPin: (thread: ThreadPinIdentity) => boolean;
   isPinned: (thread: ThreadPinIdentity) => boolean;
   togglePin: (thread: ThreadPinIdentity) => void;
@@ -146,7 +150,10 @@ function ServerPinnedThreadsState({
   onStorageError,
 }: PinnedThreadsProviderProps) {
   const client = useQueryClient();
-  const queryKey = useMemo(() => ["workbench-pins", storageKey], [storageKey]);
+  const queryKey = useMemo(
+    () => workbenchPinsQueryKey(storageKey),
+    [storageKey]
+  );
   const query = useQuery({
     queryKey,
     queryFn: () => conversationService.getWorkbenchPins(),
@@ -156,6 +163,36 @@ function ServerPinnedThreadsState({
     refetchOnReconnect: "always",
   });
   const pending = useRef(false);
+  useEffect(() => {
+    if (!storageKey) return;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    let lastRefresh = 0;
+    const refreshOnActivity = () => {
+      // Embedded pages may stay visible when their host window regains focus.
+      if (document.visibilityState !== "visible" || timer !== undefined) return;
+      timer = setTimeout(
+        () => {
+          timer = undefined;
+          if (document.visibilityState !== "visible" || pending.current) return;
+          lastRefresh = Date.now();
+          void client.refetchQueries(
+            { queryKey, exact: true, type: "active" },
+            { cancelRefetch: false }
+          );
+        },
+        Math.max(0, 5_000 - (Date.now() - lastRefresh))
+      );
+    };
+    window.addEventListener("focus", refreshOnActivity);
+    document.addEventListener("focusin", refreshOnActivity);
+    document.addEventListener("pointerdown", refreshOnActivity);
+    return () => {
+      if (timer !== undefined) clearTimeout(timer);
+      window.removeEventListener("focus", refreshOnActivity);
+      document.removeEventListener("focusin", refreshOnActivity);
+      document.removeEventListener("pointerdown", refreshOnActivity);
+    };
+  }, [client, queryKey, storageKey]);
   const reportedError = useRef<Error | null>(null);
   const mutation = useMutation({
     mutationFn: ({ id, pinned }: { id: number; pinned: boolean }) =>
@@ -203,6 +240,8 @@ function ServerPinnedThreadsState({
     );
     return {
       pinnedIds,
+      serverPins: query.isSuccess ? query.data.items : undefined,
+      serverPinsRevision: query.dataUpdatedAt,
       togglePin,
       canPin: (thread: ThreadPinIdentity) =>
         Boolean(query.data) &&
@@ -215,9 +254,11 @@ function ServerPinnedThreadsState({
         order.get(resolveKey(thread) ?? "") ?? -1,
     };
   }, [
+    query.isSuccess,
+    query.data,
+    query.dataUpdatedAt,
     pinnedIds,
     togglePin,
-    query.data,
     query.isError,
     mutation.isPending,
     resolveKey,

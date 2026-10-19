@@ -2,7 +2,13 @@
 
 "use client";
 
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+  type ReactNode,
+} from "react";
 import { Empty, Spin } from "antd";
 import { Sparkles } from "lucide-react";
 import { useTranslation } from "react-i18next";
@@ -12,10 +18,8 @@ import { cn } from "@/lib/utils";
 import { MODEL_PROVIDER_LOGOS } from "@/const/modelConfig";
 import { useModelList } from "@/hooks/model/useModelList";
 import type { ModelOption } from "@/types/modelConfig";
-import { AddResourceDrawer, CheckMark } from "./AddResourceDrawer";
+import { ResourceDrawer, CheckMark } from "./ResourceDrawer";
 import type { ModelGroup, ModelItem, SelectedItem } from "./types";
-
-const PAGE_SIZE = 10;
 
 const ICON_BG_PALETTE = ["#4D6BFE", "#7B5BF2", "#2E5BFF", "#3B82F6", "#1F2329"];
 
@@ -42,7 +46,7 @@ function toModelItem(model: ModelOption, capabilityTags: string[]): ModelItem {
   };
 }
 
-export interface AddModelDrawerProps {
+export interface ModelDrawerProps {
   open: boolean;
   onClose: () => void;
   onConfirm?: (selected: ModelItem[]) => void;
@@ -53,7 +57,7 @@ export interface AddModelDrawerProps {
   selectedTrailing?: ReactNode;
 }
 
-export function AddModelDrawer({
+export function ModelDrawer({
   open,
   onClose,
   onConfirm,
@@ -62,7 +66,7 @@ export function AddModelDrawer({
   onSelectionChange,
   disabled = false,
   selectedTrailing,
-}: AddModelDrawerProps) {
+}: ModelDrawerProps) {
   const { t } = useTranslation("common");
   const {
     llmModels: queriedModels,
@@ -83,6 +87,7 @@ export function AddModelDrawer({
   const draftIdSet = useMemo(() => new Set(draftIds.map(String)), [draftIds]);
   const [keyword, setKeyword] = useState("");
   const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(10);
 
   // Base helper: source key for a model (falls back for models without one).
   const sourceOf = (model: ModelOption) => model.source || "unknown";
@@ -132,7 +137,8 @@ export function AddModelDrawer({
   }, [groups, activeGroup]);
 
   const allModels = useMemo(
-    () => llmModels.map((model) => toModelItem(model, capabilityTagsFor(model))),
+    () =>
+      llmModels.map((model) => toModelItem(model, capabilityTagsFor(model))),
     [llmModels, capabilityTagsFor]
   );
 
@@ -155,8 +161,8 @@ export function AddModelDrawer({
   }, [keyword, activeGroup]);
 
   const pagedModels = activeModels.slice(
-    (page - 1) * PAGE_SIZE,
-    page * PAGE_SIZE
+    (page - 1) * pageSize,
+    page * pageSize
   );
 
   const selected: SelectedItem[] = useMemo(
@@ -190,7 +196,7 @@ export function AddModelDrawer({
   };
 
   return (
-    <AddResourceDrawer
+    <ResourceDrawer
       open={open}
       title={t("resourcePicker.addModel", "添加模型")}
       searchPlaceholder={t("resourcePicker.search.model", "按名称、描述检索")}
@@ -200,9 +206,15 @@ export function AddModelDrawer({
       total={activeModels.length}
       page={page}
       onPageChange={setPage}
+      pageSize={pageSize}
+      onPageSizeChange={(size) => {
+        setPageSize(size);
+        setPage(1);
+      }}
       onClose={onClose}
       onConfirm={handleConfirm}
       onRemoveSelected={(id) => toggleModel(id)}
+      keyword={keyword}
       onSearch={setKeyword}
       onRefresh={() => {
         void refetch();
@@ -244,8 +256,7 @@ export function AddModelDrawer({
             ) : (
               pagedModels.map((item) => {
                 const isSelected = draftIdSet.has(item.id);
-                const providerLogo =
-                  MODEL_PROVIDER_LOGOS[item.provider ?? ""];
+                const providerLogo = MODEL_PROVIDER_LOGOS[item.provider ?? ""];
                 return (
                   <div
                     key={item.id}
@@ -308,6 +319,6 @@ export function AddModelDrawer({
           </div>
         </div>
       )}
-    </AddResourceDrawer>
+    </ResourceDrawer>
   );
 }

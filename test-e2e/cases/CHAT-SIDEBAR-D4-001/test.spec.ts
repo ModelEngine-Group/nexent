@@ -144,7 +144,7 @@ journey("CHAT-SIDEBAR-D4-001", async ({ page, contract }) => {
     await expect(
       page.getByText("Pinned presentation", { exact: true }),
     ).toBeVisible();
-    await expect(page.getByText("置顶对话", { exact: true })).toHaveCount(0);
+    await pinned("Pinned presentation");
     state.authorization.tenantId = "workbench-tenant";
     await page.reload();
     await pinned("Pinned presentation");
@@ -159,8 +159,10 @@ journey("CHAT-SIDEBAR-D4-001", async ({ page, contract }) => {
     await expect(page.getByText(/^(刚刚|\d+(分钟|小时|天)前)$/)).toHaveCount(0);
     await menu("Pinned presentation");
     await page.getByRole("menuitem", { name: "取消置顶", exact: true }).click();
-    await expect(labels()).toHaveCount(1);
-    await expect(labels().first()).toHaveText("最近对话");
+    // The sidebar header owns the fallback label; do not duplicate it inside the list.
+    await expect(labels()).toHaveCount(0);
+    await expect(page.getByText("最近对话", { exact: true })).toHaveCount(1);
+    await expect(page.getByText("最近对话", { exact: true })).toBeVisible();
     await expect(
       page.getByText("Pinned presentation", { exact: true }),
     ).toBeVisible();
@@ -309,6 +311,35 @@ journey("CHAT-SIDEBAR-D4-001", async ({ page, contract }) => {
       ).toBeVisible();
       await expect(page.locator('svg[aria-label="置顶对话"]')).toHaveCount(2);
       state.pinServer.rejectSave = false;
+
+      // Device A reloads only its initial page before B pins an unseen older history.
+      await page.reload();
+      await expect(page.getByText("Additional history 39", { exact: true })).toHaveCount(0);
+      const draft = page.locator("[data-workbench-composer]");
+      await draft.fill("Keep this unsent draft while pins synchronize");
+      const origin = await page.evaluate(() => performance.timeOrigin);
+      const originalUrl = page.url();
+      await second.bringToFront();
+      await second.getByText("加载更多", { exact: true }).click();
+      const oldMenu = second.getByRole("button", { name: "Additional history 39 的会话操作", exact: true });
+      await oldMenu.focus();
+      await oldMenu.press("Enter");
+      await second.getByRole("menuitem", { name: "置顶", exact: true }).click();
+      await expect(second.locator('svg[aria-label="置顶对话"]')).toHaveCount(3);
+      await page.bringToFront();
+      // Embedded pages can remain visible; a real composer interaction must revalidate pins.
+      await draft.click();
+      await expect(page.getByText("Additional history 39", { exact: true })).toBeVisible();
+      await expect(page.locator('svg[aria-label="置顶对话"]')).toHaveCount(3);
+      await expect(draft).toHaveValue("Keep this unsent draft while pins synchronize");
+      // Existing visibility refresh remains supported after the interaction-only refresh.
+      await page.evaluate(() => window.dispatchEvent(new Event("visibilitychange")));
+      await expect(draft).toHaveValue("Keep this unsent draft while pins synchronize");
+      expect(await page.evaluate(() => performance.timeOrigin)).toBe(origin);
+      expect(page.url()).toBe(originalUrl);
+      await page.getByText("加载更多", { exact: true }).click();
+      await expect(page.getByText("Additional history 39", { exact: true })).toHaveCount(1);
+      await expect(page.getByRole("button", { name: "Additional history 39 的会话操作", exact: true })).toHaveCount(1);
     } finally {
       await device.close();
     }

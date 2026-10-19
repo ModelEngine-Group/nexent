@@ -8,6 +8,7 @@ import {
   SquarePenIcon,
   XIcon,
 } from "lucide-react";
+import { WorkbenchPinHistorySync } from "./workbench-pin-history-sync";
 import { useState } from "react";
 import { message } from "antd";
 import { StandardInput } from "@/components/common/StandardInput";
@@ -144,6 +145,7 @@ export function ThreadListSidebar({
               : undefined
           }
         >
+          {pinStorageKey && <WorkbenchPinHistorySync key={pinStorageKey} />}
           <BatchSelectionProvider
             onNewConversation={onNewConversation}
             serverConversationIds={serverConversationIds}

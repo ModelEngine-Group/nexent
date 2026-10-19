@@ -6,6 +6,7 @@ case:
   feature_id: CHAT-SIDEBAR
   requirement_ids:
   - WB-SERVER-PINS-20261014
+  - WB-PIN-SYNC-20261016
   business_rule_ids:
   - CHAT-SIDEBAR-RULE-003
   title: Authenticated Workbench pin API persists ordered state in PostgreSQL
@@ -38,12 +39,12 @@ case:
       conversation activity and content remain unchanged.
   - order: 2
     action: Unpin/repin and concurrently pin the same and distinct histories.
-    expected: Repin moves first; serialized writes produce one active pin per user/tenant/conversation
+    expected: Repin moves first; serialized writes produce one pin timestamp per owned conversation
       with strict order.
   - order: 3
-    action: Read as another user/tenant and attempt missing, foreign, deleted, Agent-chat,
+    action: Read as another user and as the same owner under another tenant and attempt missing, foreign, deleted, Agent-chat,
       malformed or unauthenticated writes.
-    expected: Scopes are isolated; inaccessible histories return 404, malformed inputs
+    expected: Other accounts are isolated; the same owner retains pins across tenant changes; inaccessible histories return 404, malformed inputs
       422 and missing identity 401 without changing confirmed pins.
   expected_results:
   - Independent clients receive identical persisted pin state and order.

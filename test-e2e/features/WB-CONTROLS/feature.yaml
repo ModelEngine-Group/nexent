@@ -20,6 +20,8 @@ feature:
   - rule_id: WB-CONTROLS-RULE-004
     description: Both entry points derive available reasoning controls from model capability regardless of saved enablement,
       forwarding supported effort enum values through existing generation paths while preserving other model parameters.
+  - rule_id: WB-CONTROLS-RULE-005
+    description: Workbench, newchat and NL2Agent share the white Composer and transparent paper-plane send defaults without presentation opt-ins; supported mode and resource actions are configured independently of appearance. Newchat uses direct bottom-toolbar knowledge and skill controls with the shared resource drawers; composer spacing is optically balanced with extra top padding and a taller input, while muted toolbar and creation labels match in font size.
   required_test_stages:
   - D4
   source:
@@ -32,4 +34,5 @@ feature:
     - WB-CREATION-TOGGLE-EXIT-20261015
     - WB-NEW-CONVERSATION-STYLE-20261015
     - WB-RESOURCE-LISTS-20261015
+    - COMPOSER-DEFAULTS-20261018
     spec_path: ../nexent-doc/nexent/agent-workbench/changes/chat-workbench-resource-controls/proposal.md

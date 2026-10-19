@@ -2,27 +2,34 @@
 
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import {
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { useTranslation } from "react-i18next";
-import { Button } from "antd";
-import { Settings, Tag } from "lucide-react";
+import { Alert, Button } from "antd";
+import { Pencil, Settings, Tag } from "lucide-react";
 
-import { AddResourceDrawer, CheckMark } from "./AddResourceDrawer";
+import { ResourceDrawer } from "./ResourceDrawer";
 import { useSkillList } from "@/hooks/agent/useSkillList";
 import log from "@/lib/logger";
-import { cn } from "@/lib/utils";
+import { ResourceCollection, ResourceItem } from "./ResourceItem";
 import { fetchSkillInstances } from "@/services/agentConfigService";
-import { useAgentStore } from "@/stores/agentStore";
 import type { Skill, SkillGroup, SkillParam } from "@/types/agentConfig";
-import SkillConfigModal from "@/app/agents/components/capability/skill/SkillConfigModal";
+import SkillConfigModal from "@/components/skill-config/SkillConfigModal";
+
+import { useResourceTagFilter } from "@/hooks/useResourceTagFilter";
+import { ResourceTagFilterControl } from "./ResourceTagFilterControl";
+import { ResourceAssignedTags } from "./ResourceAssignedTags";
+import { AuthorizationContext } from "@/components/providers/AuthorizationProvider";
+import { useResourceTagAssignments } from "@/hooks/useResourceTagAssignments";
+import { ResourceTagManagementModal } from "./ResourceTagManagementModal";
 
 import styles from "./ResourcePickerDrawer.module.css";
-
-const PAGE_SIZE = 10;
-
-// Stable fallback so the zustand selector returns a referentially-stable value
-// when `editedAgent?.skills` is undefined (avoids a getSnapshot infinite loop).
-const EMPTY_SKILLS: Skill[] = [];
 
 // ---- Skill config helpers (inlined from capability/skill/utils.ts) ----
 const isMissingRequiredValue = (value: unknown): boolean =>
@@ -74,11 +81,17 @@ const hasMissingRequiredSkillConfig = (skill: Skill): boolean => {
 const requiresSkillConfigOnSelection = (skill: Skill): boolean =>
   skill.name.toLowerCase() === "search-knowledge-base";
 
-export interface AddSkillDrawerProps {
+export interface SkillDrawerProps {
   open: boolean;
   onClose: () => void;
+  selectedSkills: Skill[];
+  onConfirm: (skills: Skill[]) => void | Promise<void>;
+  groups?: SkillGroup[];
+  onRefresh?: () => void;
   onOpenManageTags?: () => void;
+  enableTagManagement?: boolean;
   onOpenTagManagement?: () => void;
+  onEditSkill?: (skill: Skill) => void;
   currentAgentId?: number;
   isReadOnly?: boolean;
 }
@@ -86,54 +99,73 @@ export interface AddSkillDrawerProps {
 const includesText = (value: string | null | undefined, query: string) =>
   value?.toLowerCase().includes(query) ?? false;
 
-const matchesSkillFilters = (
-  skill: Skill,
-  query: string,
-  activeTag: string
-) => {
+const matchesSkillFilters = (skill: Skill, query: string) => {
   const matchesText =
     !query ||
     includesText(skill.name, query) ||
     includesText(skill.description, query) ||
     (skill.tags || []).some((tag) => includesText(tag, query));
-  const matchesTag = !activeTag || (skill.tags || []).includes(activeTag);
 
-  return matchesText && matchesTag;
+  return matchesText;
 };
 
-export function AddSkillDrawer({
+export function SkillDrawer({
   open,
   onClose,
+  selectedSkills,
+  onConfirm,
+  groups,
+  onRefresh,
   onOpenManageTags,
+  enableTagManagement = false,
   onOpenTagManagement,
+  onEditSkill,
   currentAgentId,
   isReadOnly,
-}: AddSkillDrawerProps) {
+}: SkillDrawerProps) {
   const { t } = useTranslation("common");
-  const { groupedSkills, availableSkills, invalidate } = useSkillList({
-    enabled: open,
-  });
+  const [tagManagementOpen, setTagManagementOpen] = useState(false);
+  const [previousOpen, setPreviousOpen] = useState(open);
+  if (previousOpen !== open) {
+    setPreviousOpen(open);
+    if (!open) setTagManagementOpen(false);
+  }
+  const catalog = useSkillList({ enabled: open && groups === undefined });
+  const groupedSkills = groups ?? catalog.groupedSkills;
+  const availableSkills = useMemo(
+    () => groupedSkills.flatMap((group) => group.skills),
+    [groupedSkills]
+  );
+  const resourceTags = useResourceTagFilter(
+    open,
+    "skill",
+    availableSkills.map((skill) => String(skill.skill_id))
+  );
+  const authorization = useContext(AuthorizationContext);
+  const invalidate = onRefresh ?? catalog.invalidate;
   const [search, setSearch] = useState("");
-  const [activeTag, setActiveTag] = useState("");
   const [activeTab, setActiveTab] = useState("");
   const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(10);
   const [configSkill, setConfigSkill] = useState<Skill | null>(null);
   const [skillInstanceMap, setSkillInstanceMap] = useState<
     Record<string, Record<string, unknown>>
   >({});
 
-  const selectedSkills = useAgentStore(
-    (state) => state.editedAgent?.skills ?? EMPTY_SKILLS
-  );
-  const updateSkills = useAgentStore((state) => state.updateSkills);
-
   // Local draft of the selected skills. Changes are only committed to the
   // agent store when the confirm button is clicked.
   const [draftSkills, setDraftSkills] = useState<Skill[]>([]);
 
+  const sessionOpen = useRef(false);
+  const confirming = useRef(false);
+  const [saving, setSaving] = useState(false);
+  const [confirmError, setConfirmError] = useState<string>();
   useEffect(() => {
-    if (!open) return;
-    setDraftSkills(selectedSkills);
+    if (open && !sessionOpen.current) {
+      setDraftSkills(selectedSkills);
+      setConfirmError(undefined);
+    }
+    sessionOpen.current = open;
   }, [open, selectedSkills]);
 
   const selectedSkillIds = useMemo(
@@ -141,30 +173,20 @@ export function AddSkillDrawer({
     [draftSkills]
   );
 
-  const allTags = useMemo(() => {
-    const tagSet = new Set<string>();
-    availableSkills.forEach((skill: Skill) =>
-      (skill.tags || []).forEach((tag: string) => tagSet.add(tag))
-    );
-    return [...tagSet].sort((left, right) => left.localeCompare(right));
-  }, [availableSkills]);
-
-  const tagOptions = useMemo(
-    () => allTags.map((tag) => ({ value: tag, label: tag })),
-    [allTags]
-  );
-
   const filteredGroups = useMemo<SkillGroup[]>(() => {
     const query = search.trim().toLowerCase();
     return groupedSkills
       .map((group) => ({
         ...group,
-        skills: group.skills.filter((skill: Skill) =>
-          matchesSkillFilters(skill, query, activeTag)
+        skills: group.skills.filter(
+          (skill: Skill) =>
+            matchesSkillFilters(skill, query) &&
+            (!resourceTags.matchedIds ||
+              resourceTags.matchedIds.has(String(skill.skill_id)))
         ),
       }))
       .filter((group) => group.skills.length > 0);
-  }, [activeTag, groupedSkills, search]);
+  }, [groupedSkills, search, resourceTags.matchedIds]);
 
   const tabItems = useMemo(
     () =>
@@ -229,8 +251,15 @@ export function AddSkillDrawer({
   const total = activeGroup?.skills.length ?? 0;
   const pagedSkills = useMemo(() => {
     const skills = activeGroup?.skills ?? [];
-    return skills.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
-  }, [activeGroup, page]);
+    return skills.slice((page - 1) * pageSize, page * pageSize);
+  }, [activeGroup, page, pageSize]);
+  const assignments = useResourceTagAssignments(
+    "skill",
+    open,
+    pagedSkills.map((skill) => String(skill.skill_id)),
+    resourceTags.revision,
+    authorization?.user?.tenantId ?? null
+  );
 
   useEffect(() => {
     if (!open || groupedSkills.length === 0) return;
@@ -243,7 +272,7 @@ export function AddSkillDrawer({
 
   useEffect(() => {
     setPage(1);
-  }, [activeTab, search, activeTag]);
+  }, [activeTab, search, resourceTags.matchedIds]);
 
   useEffect(() => {
     if (!open || !currentAgentId) {
@@ -406,56 +435,65 @@ export function AddSkillDrawer({
 
   const onCloseDialog = useCallback(() => {
     setSearch("");
-    setActiveTag("");
     setActiveTab("");
     setPage(1);
     onClose();
   }, [onClose]);
 
-  const handleConfirm = useCallback(() => {
-    updateSkills(draftSkills);
-    onCloseDialog();
-  }, [draftSkills, updateSkills, onCloseDialog]);
+  const handleConfirm = async () => {
+    if (confirming.current || isReadOnly) return;
+    confirming.current = true;
+    setSaving(true);
+    setConfirmError(undefined);
+    try {
+      await onConfirm(draftSkills);
+      onCloseDialog();
+    } catch (error) {
+      setConfirmError(
+        error instanceof Error
+          ? error.message
+          : t("resourcePicker.selectionFailed", "选择失败，请重试")
+      );
+    } finally {
+      confirming.current = false;
+      setSaving(false);
+    }
+  };
 
   return (
-    <AddResourceDrawer
-      width={768}
+    <ResourceDrawer
+      width="min(768px, 100vw)"
       bodyClassName={styles.drawer}
-      title={
-        <div className="flex min-w-0 items-center gap-2">
-          <span className="min-w-0 flex-1 truncate">
-            {t("resourcePicker.addSkill", "添加技能")}
-          </span>
-          {onOpenTagManagement ? (
-            <Button
-              type="text"
-              size="small"
-              icon={<Tag size={13} />}
-              disabled={!skillMetadataModifiable}
-              onClick={onOpenTagManagement}
-              className="h-6 text-xs !text-purple-500 hover:!text-purple-600 hover:!bg-purple-50 disabled:!text-gray-400"
-            >
-              {t("tagManagement.title.definitionManagement")}
-            </Button>
-          ) : null}
-        </div>
-      }
+      title={t("resourcePicker.addSkill", "添加技能")}
       open={open}
       searchPlaceholder={t("skillPool.searchSkillsPlaceholder")}
-      tagOptions={tagOptions}
+      tagFilter={
+        <ResourceTagFilterControl
+          filter={resourceTags}
+          onChange={() => setPage(1)}
+        />
+      }
       selected={selectedChips}
       listTitle={t("resourcePicker.list.skill")}
+      tagManagement={
+        onOpenManageTags || enableTagManagement
+          ? {
+              onClick: onOpenManageTags ?? (() => setTagManagementOpen(true)),
+              disabled: isReadOnly || !skillMetadataModifiable,
+            }
+          : undefined
+      }
       listHeaderExtra={
-        onOpenManageTags ? (
-          <button
-            type="button"
-            disabled={!skillMetadataModifiable}
-            onClick={onOpenManageTags}
-            className="flex cursor-pointer items-center gap-1 border-0 bg-transparent p-0 text-[#2673E5] disabled:cursor-not-allowed disabled:text-[#B3B3B3]"
+        onOpenTagManagement ? (
+          <Button
+            type="text"
+            size="small"
+            icon={<Tag size={14} />}
+            disabled={isReadOnly || !skillMetadataModifiable}
+            onClick={onOpenTagManagement}
           >
-            <Tag size={14} />
-            {t("skillPool.manageTags")}
-          </button>
+            {t("tagManagement.title.definitionManagement")}
+          </Button>
         ) : undefined
       }
       tabs={tabItems}
@@ -463,18 +501,35 @@ export function AddSkillDrawer({
       total={total}
       page={page}
       onClose={onCloseDialog}
-      onConfirm={handleConfirm}
+      onConfirm={() => void handleConfirm()}
+      confirmLoading={saving}
+      confirmDisabled={
+        isReadOnly ||
+        resourceTags.filtering ||
+        !!(resourceTags.predicates.length && resourceTags.error)
+      }
+      keyword={search}
+      controlsContent={
+        confirmError ? <Alert type="error" title={confirmError} /> : undefined
+      }
       onSearch={setSearch}
-      onTagChange={(value) => setActiveTag(value ?? "")}
       onTabChange={setActiveTab}
       onRemoveSelected={removeSkill}
       onSelectAll={handleSelectAll}
       allSelected={allVisibleSkillsSelected}
-      onRefresh={() => void invalidate()}
+      onRefresh={() => {
+        void invalidate();
+        if (open && pagedSkills.length) void assignments.refetch();
+      }}
       onPageChange={setPage}
+      pageSize={pageSize}
+      onPageSizeChange={(size) => {
+        setPageSize(size);
+        setPage(1);
+      }}
     >
       {activeGroup ? (
-        <div className="flex flex-col gap-2">
+        <ResourceCollection>
           {pagedSkills.map((skill) => {
             const isSelected = selectedSkillIds.has(Number(skill.skill_id));
             const hasConfigurableParams =
@@ -482,81 +537,90 @@ export function AddSkillDrawer({
               skill.config_schemas.length > 0;
 
             return (
-              <div
+              <ResourceItem
                 key={skill.skill_id}
-                role="button"
-                tabIndex={isReadOnly ? -1 : 0}
-                className={cn(
-                  "flex h-[59px] shrink-0 items-center justify-between gap-3 rounded-[4px] py-[9px] pl-5 pr-7 transition-colors",
-                  isSelected ? "bg-[#E6F2FD]" : "bg-transparent",
-                  isReadOnly
-                    ? "cursor-not-allowed opacity-60"
-                    : "cursor-pointer hover:bg-gray-50"
-                )}
-                onClick={isReadOnly ? undefined : () => toggleSkill(skill)}
-                onKeyDown={(event) => {
-                  if (
-                    !isReadOnly &&
-                    (event.key === "Enter" || event.key === " ")
-                  ) {
-                    event.preventDefault();
-                    toggleSkill(skill);
-                  }
+                item={{
+                  key: String(skill.skill_id),
+                  name: skill.name,
+                  description: skill.description,
+                  tags: skill.tags,
+                  raw: skill,
                 }}
-              >
-                <div className="flex min-w-0 flex-1 flex-col">
-                  <div className="flex items-center gap-2">
-                    <span
-                      className={cn(
-                        "truncate text-[14px] leading-[22px]",
-                        isSelected
-                          ? "font-medium text-[#0067D1]"
-                          : "font-medium text-[#191919]"
+                selected={isSelected}
+                disabled={isReadOnly || saving}
+                onToggle={() => toggleSkill(skill)}
+                slots={{
+                  renderTags: () => (
+                    <ResourceAssignedTags
+                      resourceType="skill"
+                      resourceId={String(skill.skill_id)}
+                      tags={skill.tags}
+                      assignments={
+                        assignments.data?.[String(skill.skill_id)] ?? []
+                      }
+                      refreshKey={resourceTags.revision}
+                    />
+                  ),
+                  renderActions: () => (
+                    <div className="flex items-center gap-1">
+                      {onEditSkill && (
+                        <button
+                          type="button"
+                          disabled={
+                            isReadOnly || saving || skill.permission !== "EDIT"
+                          }
+                          onClick={() => onEditSkill(skill)}
+                          aria-label={t("skillManagement.edit.title")}
+                          title={t("skillManagement.edit.title")}
+                          className="flex size-7 shrink-0 items-center justify-center rounded-md text-gray-400 transition-colors hover:bg-gray-100 hover:text-gray-600 disabled:cursor-not-allowed disabled:opacity-40"
+                        >
+                          <Pencil className="size-4" />
+                        </button>
                       )}
-                    >
-                      {skill.name}
-                    </span>
-                    {(skill.tags || []).slice(0, 2).map((tag) => (
-                      <span
-                        key={tag}
-                        className="h-5 shrink-0 rounded-[2px] bg-[#F5F5F5] px-2 text-[12px] leading-[20px] text-[#393939]"
+                      <button
+                        type="button"
+                        disabled={
+                          isReadOnly || saving || !hasConfigurableParams
+                        }
+                        onClick={(event) => openSkillConfig(skill, event)}
+                        aria-label={t("skillPool.configure")}
+                        title={t(
+                          hasConfigurableParams
+                            ? "skillPool.configure"
+                            : "resourcePicker.skill.noParameters"
+                        )}
+                        className="flex size-7 shrink-0 items-center justify-center rounded-md text-gray-400 transition-colors hover:bg-gray-100 hover:text-gray-600 disabled:cursor-not-allowed disabled:opacity-40"
                       >
-                        {tag}
-                      </span>
-                    ))}
-                  </div>
-                  {skill.description ? (
-                    <p className="m-0 truncate text-[14px] font-normal leading-[22px] text-[#777777]">
-                      {skill.description}
-                    </p>
-                  ) : null}
-                </div>
-                <div
-                  className="flex shrink-0 items-center gap-1"
-                  data-testid={`skill-picker-actions-${skill.skill_id}`}
-                >
-                  {hasConfigurableParams ? (
-                    <button
-                      type="button"
-                      disabled={isReadOnly}
-                      onClick={(event) => openSkillConfig(skill, event)}
-                      aria-label={t("skillPool.configure")}
-                      title={t("skillPool.configure")}
-                      className="flex size-7 shrink-0 items-center justify-center rounded-md text-gray-400 transition-colors hover:bg-gray-100 hover:text-gray-600 disabled:cursor-not-allowed disabled:opacity-40"
-                    >
-                      <Settings className="size-4" />
-                    </button>
-                  ) : null}
-                </div>
-                <CheckMark checked={isSelected} />
-              </div>
+                        <Settings className="size-4" />
+                      </button>
+                    </div>
+                  ),
+                }}
+              />
             );
           })}
-        </div>
+        </ResourceCollection>
       ) : (
         <div className="flex flex-1 items-center justify-center text-sm text-gray-400">
           {t("skillPool.noSearchResults")}
         </div>
+      )}
+
+      {tagManagementOpen && (
+        <ResourceTagManagementModal
+          resourceType="skill"
+          resources={availableSkills.map((skill) => ({
+            id: String(skill.skill_id),
+            name: skill.name,
+            canEdit: !isReadOnly && skill.permission === "EDIT",
+          }))}
+          definitions={resourceTags.definitions}
+          onClose={() => {
+            setTagManagementOpen(false);
+            resourceTags.retry();
+          }}
+          onSaved={() => resourceTags.retry()}
+        />
       )}
 
       {configSkill ? (
@@ -571,6 +635,6 @@ export function AddSkillDrawer({
           maskClosable
         />
       ) : null}
-    </AddResourceDrawer>
+    </ResourceDrawer>
   );
 }

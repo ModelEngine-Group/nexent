@@ -1,7 +1,10 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """Unit tests for agent marketplace repository service."""
 
 import sys
 import types
+from datetime import datetime
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, call, patch
 from enum import Enum
@@ -41,6 +44,7 @@ sys.modules["database.user_tenant_db"] = _user_tenant_db_mock
 
 _agent_db_mock = MagicMock()
 _agent_db_mock.search_agent_info_by_agent_id = MagicMock()
+_agent_db_mock.batch_get_agent_main_flags = MagicMock(return_value={})
 sys.modules["database.agent_db"] = _agent_db_mock
 
 _agent_version_db_mock = MagicMock()
@@ -430,6 +434,171 @@ def test_list_repository_listings_rejects_invalid_status_with_agent_id():
             )
 
     mock_list.assert_not_called()
+
+
+def _listing_record(repository_id: int, agent_id: int, create_time, **overrides) -> dict:
+    record = {
+        **_repository_record(
+            agent_repository_id=repository_id,
+            agent_id=agent_id,
+            status="shared",
+        ),
+        "create_time": create_time,
+    }
+    record.update(overrides)
+    return record
+
+
+def test_list_repository_listings_orders_by_publish_time_descending():
+    records = [
+        _listing_record(1, 10, datetime(2024, 1, 1)),
+        _listing_record(3, 12, datetime(2024, 3, 1)),
+        _listing_record(2, 11, datetime(2024, 2, 1)),
+    ]
+
+    with patch.object(ars, "list_agent_repository_summaries", return_value=records):
+        result = ars.list_agent_repository_listings_impl(
+            "tenant_a", status="shared", sort_by_update_time=True
+        )
+
+    assert [item["agent_repository_id"] for item in result["items"]] == [3, 2, 1]
+
+
+def test_list_repository_listings_sort_tie_breaks_by_id_and_puts_nulls_last():
+    records = [
+        _listing_record(5, 15, None),
+        _listing_record(2, 12, datetime(2024, 2, 1)),
+        _listing_record(7, 17, datetime(2024, 2, 1)),
+    ]
+
+    with patch.object(ars, "list_agent_repository_summaries", return_value=records):
+        result = ars.list_agent_repository_listings_impl(
+            "tenant_a", status="shared", sort_by_update_time=True
+        )
+
+    assert [item["agent_repository_id"] for item in result["items"]] == [7, 2, 5]
+
+
+def test_list_repository_listings_default_order_unchanged_without_sort():
+    records = [
+        _listing_record(1, 10, datetime(2024, 3, 1)),
+        _listing_record(2, 11, datetime(2024, 1, 1)),
+    ]
+
+    with patch.object(ars, "list_agent_repository_summaries", return_value=records):
+        result = ars.list_agent_repository_listings_impl("tenant_a", status="shared")
+
+    assert [item["agent_repository_id"] for item in result["items"]] == [1, 2]
+
+
+def test_list_repository_listings_sorts_merged_tenant_and_official_records():
+    tenant_records = [
+        _listing_record(1, 10, datetime(2024, 1, 1)),
+        _listing_record(4, 13, datetime(2024, 4, 1)),
+    ]
+    official_records = [
+        _listing_record(2, 11, datetime(2024, 2, 1), publisher_tenant_id="system"),
+        _listing_record(3, 12, datetime(2024, 3, 1), publisher_tenant_id="system"),
+    ]
+
+    with patch.object(
+        ars,
+        "list_agent_repository_summaries",
+        side_effect=[tenant_records, official_records],
+    ), patch.object(
+        ars, "sum_agent_repository_downloads_by_agent_ids", return_value={}
+    ):
+        result = ars.list_agent_repository_listings_impl(
+            "tenant_a", sort_by_update_time=True
+        )
+
+    assert [item["agent_repository_id"] for item in result["items"]] == [4, 3, 2, 1]
+
+
+def test_list_repository_listings_sorted_pages_stay_stable():
+    records = [
+        _listing_record(index, index, datetime(2024, 1, index))
+        for index in range(1, 8)
+    ]
+
+    with patch.object(ars, "list_agent_repository_summaries", return_value=records):
+        page_one = ars.list_agent_repository_listings_impl(
+            "tenant_a", status="shared", sort_by_update_time=True, page=1, page_size=3
+        )
+        page_two = ars.list_agent_repository_listings_impl(
+            "tenant_a", status="shared", sort_by_update_time=True, page=2, page_size=3
+        )
+
+    assert [item["agent_repository_id"] for item in page_one["items"]] == [7, 6, 5]
+    assert [item["agent_repository_id"] for item in page_two["items"]] == [4, 3, 2]
+
+
+def test_list_repository_listings_exposes_main_agent_flag():
+    records = [_listing_record(1, 10, datetime(2024, 1, 1)), _listing_record(2, 11, datetime(2024, 1, 2))]
+
+    with patch.object(
+        ars, "list_agent_repository_summaries", return_value=records
+    ), patch.object(
+        ars, "batch_get_agent_main_flags", return_value={10: True, 11: False}
+    ):
+        result = ars.list_agent_repository_listings_impl("tenant_a", status="shared")
+
+    flags = {item["agent_id"]: item["is_main_agent"] for item in result["items"]}
+    assert flags == {10: True, 11: False}
+
+
+def test_list_repository_listings_defaults_main_agent_flag_when_unknown():
+    records = [_listing_record(1, 10, datetime(2024, 1, 1))]
+
+    with patch.object(
+        ars, "list_agent_repository_summaries", return_value=records
+    ), patch.object(ars, "batch_get_agent_main_flags", return_value={}):
+        result = ars.list_agent_repository_listings_impl("tenant_a", status="shared")
+
+    assert result["items"][0]["is_main_agent"] is True
+
+
+def test_get_agent_repository_listing_detail_exposes_main_agent_flag():
+    record = _listing_record(1, 10, datetime(2024, 1, 1))
+    record["agent_info_json"] = {"agent_id": 10, "agent_info": {}, "mcp_info": []}
+
+    with patch.object(
+        ars, "get_agent_repository_by_id", return_value=record
+    ), patch.object(
+        ars, "batch_get_agent_main_flags", return_value={10: False}
+    ):
+        result = ars.get_agent_repository_listing_detail_impl(1, "tenant_a")
+
+    assert result["is_main_agent"] is False
+
+
+def test_get_agent_main_flags_degrades_to_empty_on_lookup_error():
+    with patch.object(
+        ars,
+        "batch_get_agent_main_flags",
+        side_effect=RuntimeError("database unavailable"),
+    ):
+        assert ars._get_agent_main_flags([1, 2]) == {}
+
+    assert ars._get_agent_main_flags([]) == {}
+
+
+def test_repository_id_sort_key_defaults_unusable_ids_to_minus_one():
+    """A missing or non-numeric repository id sorts below every real id."""
+    assert ars._repository_id_sort_key({"agent_repository_id": 7}) == 7
+    assert ars._repository_id_sort_key({"agent_repository_id": "abc"}) == -1
+    assert ars._repository_id_sort_key({"agent_repository_id": None}) == -1
+    assert ars._repository_id_sort_key({}) == -1
+
+
+def test_publish_time_sort_key_parses_strings_and_collapses_unusable_values():
+    """ISO strings sort by epoch; junk strings and non-times collapse to 0.0."""
+    assert ars._publish_time_sort_key(
+        {"create_time": "2024-05-01T00:00:00"}
+    ) == datetime(2024, 5, 1).timestamp()
+    assert ars._publish_time_sort_key({"create_time": "not-a-date"}) == 0.0
+    assert ars._publish_time_sort_key({"create_time": 20240501}) == 0.0
+    assert ars._publish_time_sort_key({}) == 0.0
 
 
 def test_normalize_listing_tags_trims_dedupes_and_limits():

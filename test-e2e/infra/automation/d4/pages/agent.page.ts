@@ -57,7 +57,7 @@ export class AgentPage {
 
   async select(displayName: string): Promise<void> {
     await this.open();
-    const search = this.page.getByPlaceholder("按名称或描述搜索", { exact: true });
+    const search = this.page.getByPlaceholder("按名称、描述或标签搜索", { exact: true });
     await search.fill(displayName);
     // The card body opens details, not the editor. The editor entry is the
     // card's 配置 action, revealed only on hover/focus-within, scoped to the
@@ -514,7 +514,7 @@ export class AgentPage {
 
   async exportSelected(displayName: string): Promise<Download> {
     await this.open();
-    await this.page.getByPlaceholder("按名称或描述搜索", { exact: true }).fill(displayName);
+    await this.page.getByPlaceholder("按名称、描述或标签搜索", { exact: true }).fill(displayName);
     const card = this.page.getByRole("button", { name: displayName, exact: true }).locator("xpath=..");
     await expect(card).toHaveCount(1);
     await card.getByRole("button", { name: "更多操作", exact: true }).click();
@@ -525,7 +525,7 @@ export class AgentPage {
 
   async copyAgent(displayName: string): Promise<number> {
     await this.open();
-    await this.page.getByPlaceholder("按名称或描述搜索", { exact: true }).fill(displayName);
+    await this.page.getByPlaceholder("按名称、描述或标签搜索", { exact: true }).fill(displayName);
     const card = this.page.getByRole("button", { name: displayName, exact: true }).locator("xpath=..");
     await expect(card).toHaveCount(1);
     await card.getByRole("button", { name: "更多操作", exact: true }).click();

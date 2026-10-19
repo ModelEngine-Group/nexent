@@ -2,6 +2,7 @@
 
 "use client";
 
+import { SELECTED_RESOURCE_HOVER } from "@/const/selectedResourceStyles";
 import { useMemo, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { Button, Tooltip } from "antd";
@@ -19,7 +20,7 @@ import { useSkillList } from "@/hooks/agent/useSkillList";
 import { useAgentStore } from "@/stores/agentStore";
 import type { Skill, SkillParam } from "@/types/agentConfig";
 import SkillDetailModal from "../../../components/capability/SkillDetailModal";
-import SkillConfigModal from "../../../components/capability/skill/SkillConfigModal";
+import SkillConfigModal from "@/components/skill-config/SkillConfigModal";
 
 type SkillSourceKey = "official" | "custom";
 
@@ -169,7 +170,7 @@ export default function SelectedSkillManagement({
   if (highFidelity) {
     return (
       <>
-        <div className="grid grid-cols-1 gap-2 @min-[640px]/agent-config:grid-cols-2">
+        <div className="grid grid-cols-1 gap-4 @min-[640px]/agent-config:grid-cols-2">
           {groupedSkills.flatMap((group) =>
             group.skills.map((skill) => {
               const canEditSkill =
@@ -187,7 +188,7 @@ export default function SelectedSkillManagement({
                 <div
                   key={skill.skill_id}
                   data-testid={`agent-selected-skill-${skill.skill_id}`}
-                  className="flex h-12 min-w-0 items-center gap-2 rounded-[4px] border border-[#d9d9d9] bg-white px-2"
+                  className={`flex h-12 min-w-0 items-center gap-2 rounded-[4px] border border-[#d9d9d9] bg-white px-2 ${SELECTED_RESOURCE_HOVER}`}
                 >
                   <Sparkles
                     size={18}

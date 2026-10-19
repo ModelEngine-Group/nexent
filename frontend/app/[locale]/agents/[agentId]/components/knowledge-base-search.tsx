@@ -2,7 +2,8 @@
 
 "use client";
 
-import { Fragment, useMemo, useState } from "react";
+import { SELECTED_RESOURCE_HOVER } from "@/const/selectedResourceStyles";
+import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { KnowledgeRetrievalParamsForm } from "@/components/tool-config/KnowledgeRetrievalParamsForm";
 import { useTranslation } from "react-i18next";
@@ -16,7 +17,7 @@ import {
   Plus,
 } from "lucide-react";
 
-import { AddKnowledgeDrawer } from "@/components/resource-picker/AddKnowledgeDrawer";
+import { KnowledgeDrawer } from "@/components/resource-picker/KnowledgeDrawer";
 import { useDeployment } from "@/components/providers/deploymentProvider";
 import { useKnowledgeBasesForToolConfig } from "@/hooks/useKnowledgeBaseSelector";
 import { useToolList } from "@/hooks/agent/useToolList";
@@ -30,7 +31,6 @@ import {
 } from "@/lib/managedKnowledgeTools";
 import type { Tool, ToolParam } from "@/types/agentConfig";
 import type { KnowledgeBase } from "@/types/knowledgeBase";
-import { formatDate } from "@/lib/date";
 import { ResourceAddButton } from "@/components/common/ResourceAddButton";
 import type { ResourceSectionProps } from "./resource-section.types";
 
@@ -364,13 +364,14 @@ export function KnowledgeBaseConfigActions() {
         {t("agent.knowledge.button.select")}
       </Button>
 
-      <AddKnowledgeDrawer
+      <KnowledgeDrawer
         open={selectorOpen}
         onClose={() => setSelectorOpen(false)}
         onConfirm={(knowledgeBaseList) => {
           state.onKnowledgeBaseConfirm(knowledgeBaseList);
           setSelectorOpen(false);
         }}
+        enableTagManagement={!state.isReadOnly}
         selectedIds={state.selectedIds}
         maxSelect={state.profile.maxSelect}
         isAidpSearch={state.profile.selectorType === "aidp_search"}
@@ -421,14 +422,11 @@ export default function KnowledgeBaseConfig({
     const selectedKnowledgeBases = state?.selectedKnowledgeBases ?? [];
     const content = (
       <div className="flex flex-col gap-2">
-        <div className="grid grid-cols-1 gap-2 @min-[640px]/agent-config:grid-cols-2">
+        <div className="grid grid-cols-1 gap-4 @min-[640px]/agent-config:grid-cols-2">
           {selectedKnowledgeBases.map((selectedKnowledgeBase) => {
             const knowledgeBase = selectedKnowledgeBase.knowledgeBase;
             const metadata = knowledgeBase
               ? [
-                  knowledgeBase.createdAt
-                    ? `${formatDate(knowledgeBase.createdAt)} ${t("knowledgeBase.tag.used")}`
-                    : t("knowledgeBase.tag.used"),
                   knowledgeBase.documentCount !== undefined
                     ? t("agent.knowledgeBase.card.documents", {
                         count: knowledgeBase.documentCount,
@@ -446,7 +444,7 @@ export default function KnowledgeBaseConfig({
               <div
                 key={selectedKnowledgeBase.id}
                 data-testid={`agent-selected-knowledge-base-${selectedKnowledgeBase.id}`}
-                className="flex h-12 min-w-0 items-center rounded-[4px] border border-solid border-[#dfdfdf] bg-white px-3 py-2 shadow-[0_2px_8px_rgba(0,0,0,0.08)]"
+                className={`flex h-12 min-w-0 items-center rounded-[4px] border border-solid border-[#dfdfdf] bg-white px-3 py-2 shadow-[0_2px_8px_rgba(0,0,0,0.08)] ${SELECTED_RESOURCE_HOVER}`}
               >
                 <span
                   data-testid="agent-knowledge-base-icon"
@@ -455,11 +453,11 @@ export default function KnowledgeBaseConfig({
                 >
                   <Database size={16} strokeWidth={2} className="text-white" />
                 </span>
-                <div className="ml-2 flex min-w-0 flex-1 items-center gap-2 overflow-hidden">
+                <div className="mx-2 flex min-w-0 flex-1 items-center gap-2">
                   <Tooltip title={selectedKnowledgeBase.displayName}>
                     <span
                       data-testid="agent-selected-knowledge-base-name"
-                      className="min-w-0 max-w-[45%] truncate text-sm leading-[22px] text-[#191919]"
+                      className="min-w-0 flex-1 truncate text-sm leading-[22px] text-[#191919]"
                     >
                       {selectedKnowledgeBase.displayName}
                     </span>
@@ -473,21 +471,15 @@ export default function KnowledgeBaseConfig({
                     <Tooltip title={metadata.join(" | ")}>
                       <span
                         data-testid="agent-selected-knowledge-base-metadata"
-                        className="flex max-w-[46%] shrink-0 items-center gap-2 overflow-hidden whitespace-nowrap text-xs leading-[18px] text-[#808080]"
+                        className="flex shrink-0 items-center gap-2 whitespace-nowrap text-xs leading-[18px] text-[#808080]"
                       >
                         {metadata.map((value, index) => (
-                          <Fragment
+                          <span
                             key={`${selectedKnowledgeBase.id}-${index}`}
+                            className="whitespace-nowrap"
                           >
-                            {index > 0 && (
-                              <span
-                                data-testid="agent-knowledge-base-metadata-separator"
-                                aria-hidden="true"
-                                className="h-4 w-px shrink-0 bg-[#dfdfdf]"
-                              />
-                            )}
-                            <span className="truncate">{value}</span>
-                          </Fragment>
+                            {value}
+                          </span>
                         ))}
                       </span>
                     </Tooltip>
@@ -580,13 +572,14 @@ export default function KnowledgeBaseConfig({
         )}
         {state ? (
           <>
-            <AddKnowledgeDrawer
+            <KnowledgeDrawer
               open={selectorOpen}
               onClose={() => setSelectorOpen(false)}
               onConfirm={(knowledgeBaseList) => {
                 state.onKnowledgeBaseConfirm(knowledgeBaseList);
                 setSelectorOpen(false);
               }}
+              enableTagManagement={!state.isReadOnly}
               selectedIds={state.selectedIds}
               maxSelect={state.profile.maxSelect}
               isAidpSearch={state.profile.selectorType === "aidp_search"}

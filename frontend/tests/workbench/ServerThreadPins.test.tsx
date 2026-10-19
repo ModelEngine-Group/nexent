@@ -186,3 +186,106 @@ it("focus refresh reads changes from another device", async () => {
   focusManager.setFocused(undefined);
   client.clear();
 });
+
+it("refreshes from visible-page interaction without visibilitychange and coalesces activity", async () => {
+  const get = vi
+    .spyOn(conversationService, "getWorkbenchPins")
+    .mockResolvedValueOnce(snapshot([42]))
+    .mockResolvedValue(snapshot([43, 42]));
+  const { client, unmount } = setup();
+  await waitFor(() =>
+    expect(screen.getByTestId("pins")).toHaveTextContent("42")
+  );
+  fireEvent.pointerDown(document.body);
+  fireEvent.focusIn(document.body);
+  fireEvent.focus(window);
+  await waitFor(() =>
+    expect(screen.getByTestId("pins")).toHaveTextContent("43,42")
+  );
+  expect(get).toHaveBeenCalledTimes(2);
+  unmount();
+  fireEvent.pointerDown(document.body);
+  fireEvent.focus(window);
+  expect(get).toHaveBeenCalledTimes(2);
+  client.clear();
+});
+
+it("queues a throttled trailing refresh and cancels it on unmount", async () => {
+  const get = vi
+    .spyOn(conversationService, "getWorkbenchPins")
+    .mockResolvedValue(snapshot([42]));
+  const { client, unmount } = setup();
+  await waitFor(() =>
+    expect(screen.getByTestId("pins")).toHaveTextContent("42")
+  );
+  fireEvent.pointerDown(document.body);
+  await waitFor(() => expect(get).toHaveBeenCalledTimes(2));
+  vi.useFakeTimers();
+  try {
+    get.mockResolvedValue(snapshot([43]));
+    fireEvent.pointerDown(document.body);
+    fireEvent.focusIn(document.body);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(5_050);
+    });
+    expect(get).toHaveBeenCalledTimes(3);
+    fireEvent.pointerDown(document.body);
+    unmount();
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(5_050);
+    });
+    expect(get).toHaveBeenCalledTimes(3);
+  } finally {
+    vi.useRealTimers();
+    client.clear();
+  }
+});
+
+it("does not activity-refresh without identity or while hidden", async () => {
+  const get = vi
+    .spyOn(conversationService, "getWorkbenchPins")
+    .mockResolvedValue(snapshot([42]));
+  const disabled = setup(null);
+  fireEvent.pointerDown(document.body);
+  fireEvent.focus(window);
+  expect(get).not.toHaveBeenCalled();
+  disabled.unmount();
+  disabled.client.clear();
+  const { client, unmount } = setup();
+  await waitFor(() =>
+    expect(screen.getByTestId("pins")).toHaveTextContent("42")
+  );
+  vi.spyOn(document, "visibilityState", "get").mockReturnValue("hidden");
+  fireEvent.pointerDown(document.body);
+  fireEvent.focus(window);
+  expect(get).toHaveBeenCalledTimes(1);
+  unmount();
+  client.clear();
+});
+
+it("does not start an activity read during an acknowledged pin mutation", async () => {
+  const get = vi
+    .spyOn(conversationService, "getWorkbenchPins")
+    .mockResolvedValue(snapshot([]));
+  let finish!: (value: WorkbenchPins) => void;
+  vi.spyOn(conversationService, "setWorkbenchPin").mockImplementation(
+    () =>
+      new Promise((resolve) => {
+        finish = resolve;
+      })
+  );
+  const { client, unmount } = setup();
+  await waitFor(() => expect(screen.getByText("Toggle")).toBeEnabled());
+  fireEvent.click(screen.getByText("Toggle"));
+  fireEvent.pointerDown(document.body);
+  await act(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  });
+  expect(get).toHaveBeenCalledTimes(1);
+  await act(async () => finish(snapshot([42])));
+  await waitFor(() =>
+    expect(screen.getByTestId("pins")).toHaveTextContent("42")
+  );
+  unmount();
+  client.clear();
+});

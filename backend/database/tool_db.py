@@ -1,6 +1,5 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
-
 import json
 import logging
 import re
@@ -102,6 +101,19 @@ def create_or_update_tool_by_tool_info(
             session.flush()  # Flush to get the ID
             tool_instance = new_tool_instance
         return as_dict(tool_instance)
+
+
+def query_tenant_tools_by_ids(tenant_id: str, tool_ids: list[int]) -> list[dict]:
+    """Read only visible tenant tools with one bounded query."""
+    if not tool_ids:
+        return []
+    with get_db_session() as session:
+        tools = session.query(ToolInfo).filter(
+            ToolInfo.author == tenant_id,
+            ToolInfo.delete_flag != 'Y',
+            ToolInfo.tool_id.in_(tool_ids),
+        ).all()
+        return [as_dict(tool) for tool in tools]
 
 
 def query_all_tools(tenant_id: str):

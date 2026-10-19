@@ -3,6 +3,10 @@
 "use client";
 
 import {
+  ComposerAttachment,
+  ComposerDictation,
+} from "@/app/newchat/assistant-ui/composer-tools";
+import {
   useCallback,
   useEffect,
   useMemo,
@@ -126,10 +130,13 @@ const PersistentChatHome: FC = () => {
 
   const handleAgentSelected = useCallback(
     async (agent: Agent) => {
+      // Reflect the selection before awaiting the runtime thread switch so a
+      // deep-linked Agent opens its chat right away instead of waiting for the
+      // thread list runtime to settle.
+      setSelectedAgent(agent);
+      log.log(`[Home] Agent selected: ${agent.display_name || agent.name}`);
       try {
         await startAgentConversation(runtime, Number(agent.id));
-        setSelectedAgent(agent);
-        log.log(`[Home] Agent selected: ${agent.display_name || agent.name}`);
       } catch (error) {
         log.error("[Home] Failed to switch to a new agent thread:", error);
       }
@@ -921,7 +928,12 @@ const HomeContent: FC<{
               onBack={handleThreadBack}
               chatMode={chatMode}
               onChatModeChange={handleChatModeChange}
-              isDictationConfigured={isDictationConfigured}
+              composerTools={
+                <>
+                  <ComposerAttachment />
+                  <ComposerDictation configured={isDictationConfigured} />
+                </>
+              }
               knowledgeScope={knowledgeScope}
               knowledgePreview={knowledgePreview}
               knowledgeCapabilities={knowledgeCapabilities}
