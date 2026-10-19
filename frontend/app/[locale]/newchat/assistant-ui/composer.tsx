@@ -670,9 +670,8 @@ export const Composer: FC<ComposerProps> = ({
               )}
             {skillFiles ? (
               <LexicalComposerInput
-                placeholder={
-                  configurationLayout ? "" : t("chat.composer.placeholder")
-                }
+                aria-label={t("chat.composer.inputLabel")}
+                placeholder=""
                 className="relative mb-0 max-h-48 min-h-20 w-full bg-transparent px-0 py-0 text-sm text-[#191919] outline-none [&_.aui-lexical-input]:min-h-20 [&_.aui-lexical-input]:outline-none [&_.aui-lexical-placeholder]:pointer-events-none [&_.aui-lexical-placeholder]:absolute [&_.aui-lexical-placeholder]:top-0 [&_.aui-lexical-placeholder]:text-muted-foreground"
                 submitMode="enter"
                 autoFocus
@@ -683,10 +682,8 @@ export const Composer: FC<ComposerProps> = ({
               <div className="flex items-start">
                 <ComposerPrimitive.Input
                   data-workbench-composer
-                  aria-label={t("chat.composer.placeholder")}
-                  placeholder={
-                    configurationLayout ? "" : t("chat.composer.placeholder")
-                  }
+                  aria-label={t("chat.composer.inputLabel")}
+                  placeholder=""
                   className={cn(
                     "max-h-48 min-h-20 min-w-0 w-auto flex-1 resize-none bg-transparent px-0 py-0 text-sm text-[#191919] outline-none placeholder:text-muted-foreground",
                     configurationLayout && "!min-h-[56px] !px-4",
@@ -775,24 +772,20 @@ export const Composer: FC<ComposerProps> = ({
                     {t("chat.composer.knowledgeBase")}
                   </Button>
                 )}
-                {!creationMode &&
-                  (onOpenWorkbenchSkillPicker || conversationResources) && (
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="sm"
-                      disabled={isRunning || disabled}
-                      className="h-8 text-sm font-normal text-muted-foreground"
-                      onClick={
-                        onOpenWorkbenchSkillPicker ||
-                        (() => setSkillPickerOpen(true))
-                      }
-                      aria-label={t("chat.composer.skills")}
-                    >
-                      <SkillStackIcon className="size-5" />
-                      {t("chat.composer.skills")}
-                    </Button>
-                  )}
+                {!creationMode && onOpenWorkbenchSkillPicker && (
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    disabled={isRunning || disabled}
+                    className="h-8 text-sm font-normal text-muted-foreground"
+                    onClick={onOpenWorkbenchSkillPicker}
+                    aria-label={t("chat.composer.skills")}
+                  >
+                    <SkillStackIcon className="size-5" />
+                    {t("chat.composer.skills")}
+                  </Button>
+                )}
                 {allowRuntimeMetadata && onRuntimeMetadataChange && (
                   <RuntimeMetadataEditor
                     value={runtimeMetadata}

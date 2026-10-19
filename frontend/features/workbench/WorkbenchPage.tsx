@@ -1523,11 +1523,6 @@ const HomeContent: FC = () => {
           disabled={isThreadRunning}
           open={skillPickerOpen}
           selected={workbenchState.config.skill_mounts}
-          loadDefaults={async () =>
-            (
-              workbenchBootstrap?.generic_agent?.default_skill_resources ?? []
-            ).map((skill) => ({ skill_id: skill.skill_id, config_values: {} }))
-          }
           onCancel={() => setSkillPickerOpen(false)}
           onConfirm={handleReplaceWorkbenchSkills}
         />

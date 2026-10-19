@@ -246,3 +246,38 @@ it("preserves knowledge selection across layouts and failed confirmation, with i
   expect(confirm.mock.calls[0][0]).toEqual(knowledgeBases);
   expect(confirm.mock.calls[1][0]).toEqual(knowledgeBases);
 });
+
+it("AIDP configuration accepts string IDs without local model checks and caps selections at ten", async () => {
+  const confirm = vi.fn();
+  const aidpKnowledge = Array.from({ length: 11 }, (_, i) => ({
+    ...knowledgeBases[0],
+    id: `kds:${i}`,
+    name: `AIDP ${i}`,
+    source: "aidp",
+    embeddingModel: "unknown",
+    documentCount: 0,
+    chunkCount: 0,
+  }));
+  render(
+    <KnowledgeDrawer
+      open
+      isAidpSearch
+      maxSelect={10}
+      knowledgeBases={aidpKnowledge}
+      onClose={vi.fn()}
+      onConfirm={confirm}
+    />
+  );
+  await changePageSize(20);
+  for (const kb of aidpKnowledge)
+    fireEvent.click(screen.getByRole("option", { name: kb.name }));
+  expect(screen.getByRole("option", { name: "AIDP 10" })).toHaveAttribute(
+    "aria-selected",
+    "false"
+  );
+  fireEvent.click(screen.getByRole("button", { name: "确认" }));
+  await waitFor(() => expect(confirm).toHaveBeenCalledOnce());
+  expect(confirm.mock.calls[0][0].map((kb: KnowledgeBase) => kb.id)).toEqual(
+    aidpKnowledge.slice(0, 10).map((kb) => kb.id)
+  );
+});

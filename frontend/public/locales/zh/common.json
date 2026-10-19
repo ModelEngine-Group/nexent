@@ -37,7 +37,6 @@
   "chat.composer.skills": "技能",
   "chat.composer.knowledgeBase": "知识库",
   "chat.composer.uploadFile": "上传文件",
-  "chat.composer.workbenchPlaceholder": "输入\"/\"快速引用技能及指令",
   "chat.threadList.justNow": "刚刚",
   "chat.threadList.pinServerFailed": "读取或保存置顶失败，请稍后重试",
   "chat.sidebar.searchHistory": "搜索历史对话",
@@ -208,7 +207,7 @@
   "chat.composer.planning": "规划",
   "chat.composer.execution": "执行",
   "chat.composer.plan": "执行计划",
-  "chat.composer.placeholder": "输入\"/\"快速引用技能及指令",
+  "chat.composer.inputLabel": "对话输入",
   "chat.composer.voiceInput": "开始语音输入",
   "chat.composer.stopVoiceInput": "停止语音输入",
   "chat.composer.voiceInputDisabled": "请配置语音识别模型",
@@ -6193,5 +6192,7 @@
   "mcpTools.publish.tagsInheritedHint": "标签继承自源 MCP 服务",
   "notifications.deepLink.mcpNotFound": "未找到链接对应的 MCP 服务",
   "a2a.security.requirementRequired": "请选择认证方式",
-  "common.error.loadFailed": "加载失败，请稍后重试"
+  "common.error.loadFailed": "加载失败，请稍后重试",
+  "workbench.controls.mineTab": "我的",
+  "workbench.controls.repositoryTab": "仓库"
 }

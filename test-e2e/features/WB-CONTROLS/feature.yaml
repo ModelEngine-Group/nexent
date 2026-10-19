@@ -19,12 +19,21 @@ feature:
       explicit zero survives immutable root-only runtime snapshots, and session/model scopes remain isolated. Explicit sampling
       must not silently disappear on provider retry. Configured Agent/model defaults are displayed as numbers with exact slider
       positions without creating overrides. Null inherits per field through Agent/model configuration to shared SDK defaults
-      temperature 1.0 and top_p 1.0; read-only model-list effective_sampling uses those same defaults without filling stored values.
+      temperature 1.0 and top_p 1.0; read-only model-list effective_sampling uses those same defaults without filling stored
+      values.
   - rule_id: WB-CONTROLS-RULE-004
     description: Both entry points derive available reasoning controls from model capability regardless of saved enablement,
       forwarding supported effort enum values through existing generation paths while preserving other model parameters.
   - rule_id: WB-CONTROLS-RULE-005
-    description: Workbench, newchat and NL2Agent share the white Composer and transparent paper-plane send defaults without presentation opt-ins; supported mode and resource actions are configured independently of appearance. Newchat uses direct bottom-toolbar knowledge and skill controls with the shared resource drawers; composer spacing is optically balanced with extra top padding and a taller input, while muted toolbar and creation labels match in font size.
+    description: Workbench, newchat and NL2Agent share the white Composer and transparent paper-plane send defaults without
+      presentation opt-ins; supported mode and resource actions are configured independently of appearance. Newchat uses a direct
+      bottom-toolbar knowledge control and hides unconnected temporary skill selection; Workbench retains its skill callback.
+      Composer spacing is optically balanced
+      with extra top padding and a taller input, while muted toolbar and creation labels match in font size.
+      All shared composer inputs have no visible placeholder guidance and retain a neutral accessible label.
+  - rule_id: WB-CONTROLS-RULE-006
+    description: Workbench reuses configuration resource controls and knowledge presentation; Agent/Skill tabs remain Mine/Repository,
+      Agent cards and Refresh/Select-all headers match configuration; footers use Close/Confirm only and page sizes default to 10 with exactly 10/20/50, tag management is absent, and AIDP string KDS scope, per-scene local identities and persistence remain intact.
   required_test_stages:
   - D4
   source:
@@ -40,4 +49,7 @@ feature:
     - CHAT-SAMPLING-20261016
     - COMPOSER-DEFAULTS-20261018
     - CHAT-SAMPLING-DISPLAY-20261019
+    - WB-SHARED-SELECTORS-20261019
+    - COMPOSER-EMPTY-HINT-20261019
+    - COMPOSER-HIDE-CHAT-SKILL-20261019
     spec_path: ../nexent-doc/nexent/agent-workbench/changes/chat-workbench-resource-controls/proposal.md
