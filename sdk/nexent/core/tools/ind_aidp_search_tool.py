@@ -23,8 +23,9 @@ from ..ext_components.aidp.retrieval_client import time as time
 from ..ext_components.aidp.retrieval_config import (
     ALL_CHANNELS,
     CONFIG_KEYS,
+    DEFAULTS,
     build_payload,
-    validate_config,
+    resolve_config,
 )
 from ..utils.observer import MessageObserver, ProcessType
 from ..utils.tools_common_message import (
@@ -180,16 +181,15 @@ class IndependentAidpSearchTool(Tool):
         self.tenant_id = resolved_tenant_id.strip()
         self.kds_list = _parse_kds_list(kds_list)
 
-        self.search_method = _field_default(search_method, ALL_CHANNELS)
-        self.reranking_mode = _field_default(reranking_mode, "performance")
-        self.reranking_enable = bool(_field_default(reranking_enable, True))
-        self.rewrite_enable = bool(_field_default(rewrite_enable, False))
-        self.related_search_enable = bool(_field_default(related_search_enable, False))
-        self.score_threshold = max(0.0, min(float(_field_default(score_threshold, 0.0)), 1.0))
-        self.top_k = max(1, min(int(_field_default(top_k, 10)), 100))
-        self.multi_modal = bool(_field_default(multi_modal, True))
-        config = {key: getattr(self, key) for key in CONFIG_KEYS if hasattr(self, key)}
-        config.update({
+        config = {
+            "search_method": search_method,
+            "reranking_mode": reranking_mode,
+            "reranking_enable": reranking_enable,
+            "rewrite_enable": rewrite_enable,
+            "related_search_enable": related_search_enable,
+            "score_threshold": score_threshold,
+            "top_k": top_k,
+            "multi_modal": multi_modal,
             "vector_candidates": vector_candidates,
             "full_text_candidates": full_text_candidates,
             "hybrid_top_k": hybrid_top_k,
@@ -199,9 +199,9 @@ class IndependentAidpSearchTool(Tool):
             "graph_score_threshold": graph_score_threshold,
             "graph_reranking_enable": graph_reranking_enable,
             "query_expansion_enable": query_expansion_enable,
-        })
-        config = {key: _field_default(value, None) for key, value in config.items()}
-        resolved = validate_config(config)
+        }
+        config = {key: _field_default(value, DEFAULTS[key]) for key, value in config.items()}
+        resolved = resolve_config(config)
         for key, value in resolved.items():
             setattr(self, key, value)
         self.observer = _field_default(observer, None)

@@ -8,7 +8,7 @@ import httpx
 import pytest
 
 from nexent.core.ext_components.aidp.aidp_search_tool import AidpSearchError, AidpSearchTool
-from nexent.core.ext_components.aidp.retrieval_config import SEARCH_METHODS
+from nexent.core.ext_components.aidp.retrieval_config import SEARCH_METHODS, validate_config
 from nexent.core.tools.ind_aidp_search_tool import IndependentAidpSearchError, IndependentAidpSearchTool
 from nexent.core.utils.observer import MessageObserver
 
@@ -42,6 +42,7 @@ def provider():
 
 
 def tools(url, **config):
+    config = validate_config(config)
     return [cls(server_url=url, api_key="fixture-token", tenant_id="fixture",kds_list=["kb"], **config)
             for cls in (AidpSearchTool, IndependentAidpSearchTool)]
 

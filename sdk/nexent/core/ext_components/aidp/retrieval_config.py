@@ -24,8 +24,6 @@ INTEGER_RANGES = {"top_k": (1, 100), "vector_candidates": (1, 500),
 def normalize_method(value):
     if value == "hybrid_search":
         return ALL_CHANNELS
-    if not isinstance(value, str) or any(token not in CHANNELS for token in value.split("|")):
-        raise ValueError("search_method: invalid retrieval method")
     tokens = set(value.split("|"))
     return "|".join(c for c in CHANNELS if c in tokens)
 
@@ -43,7 +41,7 @@ def merge_config(*layers):
                 merged[key] = value
         for key in CANDIDATES:
             value = merged.get(key)
-            if "top_k" in merged and type(value) is int and value == merged["top_k"]:
+            if "top_k" in merged and value == merged["top_k"]:
                 merged[key] = None
     return merged
 
@@ -66,13 +64,20 @@ THRESHOLD_KEYS = frozenset({"score_threshold", "vector_score_threshold",
                             "full_text_score_threshold", "graph_score_threshold"})
 
 
-def validate_config(config):
-    """Validate raw configuration at save, import, test and SDK construction boundaries."""
-    result = resolve_config(config)
-    if not isinstance(result["reranking_mode"], str) or result["reranking_mode"] not in RERANK_MODES:
-        raise ValueError("reranking_mode: invalid reranking strategy")
-    for key, value in result.items():
-        if key in BOOLEAN_KEYS:
+def validate_config(config, inherited=None):
+    """Check submitted fields before merging them with trusted persisted values."""
+    for key, value in config.items():
+        if value is None:
+            continue
+        if key == "search_method":
+            if not isinstance(value, str) or (
+                value != "hybrid_search" and any(token not in CHANNELS for token in value.split("|"))
+            ):
+                raise ValueError("search_method: invalid retrieval method")
+        elif key == "reranking_mode":
+            if not isinstance(value, str) or value not in RERANK_MODES:
+                raise ValueError("reranking_mode: invalid reranking strategy")
+        elif key in BOOLEAN_KEYS:
             if not isinstance(value, bool):
                 raise ValueError(f"{key}: expected boolean")
         elif key in INTEGER_RANGES:
@@ -82,6 +87,7 @@ def validate_config(config):
         elif key in THRESHOLD_KEYS:
             if isinstance(value, bool) or not isinstance(value, (int, float)) or not 0 <= value <= 1:
                 raise ValueError(f"{key}: expected finite number 0-1")
+    result = resolve_config(merge_config(inherited or {}, config))
     if result["graph_reranking_enable"] and not result["reranking_enable"]:
         raise ValueError("graph_reranking_enable: requires reranking_enable")
     channels = active_channels(result["search_method"])
@@ -92,7 +98,7 @@ def validate_config(config):
         raise ValueError("hybrid_top_k: must not exceed top_k")
     if graph and g > k:
         raise ValueError("graph_top_k: must not exceed top_k")
-    if hybrid and graph and h > 0 and g > 0 and h + g > k:
+    if hybrid and graph and h + g > k:
         raise ValueError("hybrid_top_k + graph_top_k: must not exceed top_k")
     for channel, key in (("vector_search", "vector_candidates"), ("full_text_search", "full_text_candidates")):
         if channel in channels and h > result[key]:
@@ -102,7 +108,7 @@ def validate_config(config):
 
 def prepare_config(config, inherited):
     """Validate an input patch and preserve automatic following when saving it."""
-    effective = validate_config(merge_config(inherited, config))
+    effective = validate_config(config, inherited)
     raw = merge_config(config)
     if "search_method" in raw:
         raw["search_method"] = effective["search_method"]

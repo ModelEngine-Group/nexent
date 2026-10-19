@@ -630,6 +630,12 @@ def update_tool_info_impl(tool_info: ToolInstanceInfoRequest, tenant_id: str, us
         except ValueError as exc:
             raise ValidationError(str(exc)) from exc
 
+    else:
+        _validate_tool_param_ranges(
+            tool_info.tool_id,
+            dict(getattr(tool_info, "params", None) or {}),
+        )
+
     if _is_aidp_search_tool(tool_info.tool_id, tool.get("name")):
         existing = query_tool_instances_by_id(
             tool_info.agent_id,
@@ -676,10 +682,7 @@ def update_tool_info_impl(tool_info: ToolInstanceInfoRequest, tenant_id: str, us
                 params["kds_list"] = list(dict.fromkeys(hidden_existing + visible_submitted))
         tool_info.params = params
 
-    _validate_tool_param_ranges(
-        tool_info.tool_id,
-        dict(getattr(tool_info, "params", None) or {}),
-    )
+
 
     tool_instance = create_or_update_tool_by_tool_info(
         tool_info, tenant_id, user_id, version_no=version_no)

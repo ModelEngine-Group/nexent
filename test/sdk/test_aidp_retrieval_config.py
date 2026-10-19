@@ -110,3 +110,20 @@ def test_payload_uses_prepared_config_without_revalidation(monkeypatch):
     second = policy.build_payload(effective, "second", ["kb"])
     assert first["topk"] == second["topk"] == 7
     assert first["search_method"] == second["search_method"] == ALL_CHANNELS
+
+
+@pytest.mark.parametrize("patch", [
+    {"top_k": 1, "vector_candidates": True},
+    {"top_k": 10, "vector_candidates": 10.0},
+    {"top_k": 10, "full_text_candidates": 10.0},
+])
+def test_submission_types_are_checked_before_equal_candidates_become_following(patch):
+    with pytest.raises(ValueError, match="candidates"):
+        prepare_config(patch, {})
+
+
+def test_partial_submission_checks_relations_against_trusted_inheritance():
+    inherited = {"top_k": 10, "search_method": "vector_search", "hybrid_top_k": 6}
+    with pytest.raises(ValueError, match="vector_candidates"):
+        prepare_config({"vector_candidates": 5}, inherited)
+    assert prepare_config({"vector_candidates": 10}, inherited) == {"vector_candidates": None}

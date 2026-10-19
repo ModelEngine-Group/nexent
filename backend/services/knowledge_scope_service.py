@@ -182,6 +182,40 @@ def snapshot_runtime_knowledge_tree(
     return deepcopy(_walk_agent_tree(agent_id, tenant_id, version_no))
 
 
+def validate_request_retrieval_overrides(agent_request, tenant_id):
+    """Prepare explicitly submitted tool policies at the agent request boundary."""
+    from nexent.core.ext_components.aidp.retrieval_config import CONFIG_KEYS, prepare_config
+
+    tool_params = agent_request.tool_params
+    if not any(
+        CONFIG_KEYS.intersection(params)
+        for agent in tool_params.agents.values() for params in agent.tools.values()
+    ):
+        return
+    plan = getattr(agent_request, "_runtime_mount_plan", None)
+    tree = getattr(plan, "knowledge_tree", None)
+    if tree is None:
+        version = resolve_root_version(
+            agent_request.agent_id, tenant_id, agent_request.version_no, agent_request.is_debug,
+        )
+        tree = snapshot_runtime_knowledge_tree(agent_request.agent_id, tenant_id, version)
+    for node in tree:
+        overrides = tool_params.agents.get(node["agent_name"])
+        if overrides is None:
+            continue
+        for tool in node["tools"]:
+            if tool.get("class_name") != AIDP_TOOL_CLASS:
+                continue
+            params = overrides.tools.get(tool.get("name"), overrides.tools.get(AIDP_TOOL_CLASS))
+            if params is None or not CONFIG_KEYS.intersection(params):
+                continue
+            inherited = {param["name"]: param.get("default") for param in tool.get("params", [])}
+            try:
+                params.update(prepare_config(params, inherited))
+            except ValueError as exc:
+                raise ValidationError(str(exc)) from exc
+
+
 def validate_conversation_retrieval_config(scope, tenant_id, agent_id=None, version_no=None):
     """Check a submitted AIDP policy against its inherited root before persistence."""
     from nexent.core.ext_components.aidp.retrieval_config import (

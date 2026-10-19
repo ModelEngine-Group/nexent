@@ -148,3 +148,30 @@ async def test_workbench_run_requires_configuration_after_request_normalization(
         await agent_run.run_agent_stream(
             request, Request(scope={"type": "http", "headers": []}), "Bearer token"
         )
+
+
+@pytest.mark.asyncio
+async def test_submitted_tool_policy_is_rejected_at_request_boundary(monkeypatch):
+    from fastapi import Request
+    from consts.model import WorkbenchSessionConfig
+    from consts.exceptions import ValidationError
+
+    canonical = WorkbenchSessionConfig.model_validate(
+        {"mode": "single_agent_chat", "agent_mounts": [{"agent_id": 7}]}
+    )
+    request = _request(
+        entrypoint="workbench", workbench=canonical, expected_workbench_config_version=2,
+        tool_params={"agents": {"root": {"tools": {"aidp_search": {"top_k": 0}}}}},
+    )
+    _configure_early_workbench_run(monkeypatch, canonical, {
+        "workbench_config": canonical.model_dump(mode="json"), "workbench_config_version": 2,
+    })
+    knowledge_scope = __import__("services.knowledge_scope_service", fromlist=["snapshot_runtime_knowledge_tree"])
+    validate = MagicMock(side_effect=ValidationError("top_k: expected integer 1-100"))
+    monkeypatch.setattr(knowledge_scope, "validate_request_retrieval_overrides", validate, raising=False)
+    with pytest.raises(ValidationError, match="top_k"):
+        await agent_run.run_agent_stream(
+            request, Request(scope={"type": "http", "headers": []}), "Bearer token",
+        )
+    validate.assert_called_once_with(request, "tenant-a")
+    agent_run.agent_run_manager.reserve_agent_capacity.assert_not_called()

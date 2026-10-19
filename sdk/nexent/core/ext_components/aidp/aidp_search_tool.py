@@ -33,16 +33,14 @@ from .retrieval_client import time as time
 from .retrieval_config import (
     ALL_CHANNELS,
     CONFIG_KEYS,
-    RERANK_MODES,
+    DEFAULTS,
     build_payload,
-    normalize_method,
-    validate_config,
+    resolve_config,
 )
 
 
 logger = logging.getLogger("aidp_search_tool")
 
-_VALID_RERANK_MODES = RERANK_MODES
 _MAX_KDS = 10
 
 _HTML_IMAGE_TAG_PATTERN = re.compile(r"<img\b[^>]*>", re.IGNORECASE)
@@ -68,15 +66,6 @@ def _parse_kds_list(kds_list: str) -> List[str]:
     if not isinstance(parsed_kds, list) or len(parsed_kds) > _MAX_KDS:
         raise ValueError(f"kds_list must be a list of 0-{_MAX_KDS} knowledge base IDs")
     return [str(k) for k in parsed_kds]
-
-
-def _coerce_choice(raw: str, valid: set, default: str, label: str) -> str:
-    """Coerce ``raw`` to one of ``valid`` or fall back to ``default``."""
-    value = raw or default
-    if value not in valid:
-        logger.warning("Invalid %s '%s', defaulting to %s", label, value, default)
-        return default
-    return value
 
 
 class AidpSearchTool(Tool):
@@ -216,24 +205,15 @@ class AidpSearchTool(Tool):
             raise ValueError("api_key is required and must be a non-empty string")
         if not self.tenant_id:
             raise ValueError("tenant_id is required and must be a non-empty string")
-        try:
-            self.search_method = normalize_method(_resolve_field_default(search_method, ALL_CHANNELS))
-        except ValueError:
-            self.search_method = ALL_CHANNELS
-        self.reranking_mode = _coerce_choice(
-            _resolve_field_default(reranking_mode, "performance"), _VALID_RERANK_MODES, "performance", "reranking_mode"
-        )
-        self.reranking_enable = bool(_resolve_field_default(reranking_enable, True))
-        self.rewrite_enable = bool(_resolve_field_default(rewrite_enable, False))
-        self.related_search_enable = bool(_resolve_field_default(related_search_enable, False))
-        resolved_score_threshold = _resolve_field_default(score_threshold, 0.0)
-        resolved_top_k = _resolve_field_default(top_k, 10)
-        resolved_multi_modal = _resolve_field_default(multi_modal, True)
-        self.score_threshold = max(0.0, min(float(resolved_score_threshold), 1.0))
-        self.top_k = max(1, min(int(resolved_top_k), 100))
-        self.multi_modal = bool(resolved_multi_modal)
-        config = {key: getattr(self, key) for key in CONFIG_KEYS if hasattr(self, key)}
-        config.update({
+        config = {
+            "search_method": search_method,
+            "reranking_mode": reranking_mode,
+            "reranking_enable": reranking_enable,
+            "rewrite_enable": rewrite_enable,
+            "related_search_enable": related_search_enable,
+            "score_threshold": score_threshold,
+            "top_k": top_k,
+            "multi_modal": multi_modal,
             "vector_candidates": vector_candidates,
             "full_text_candidates": full_text_candidates,
             "hybrid_top_k": hybrid_top_k,
@@ -243,9 +223,9 @@ class AidpSearchTool(Tool):
             "graph_score_threshold": graph_score_threshold,
             "graph_reranking_enable": graph_reranking_enable,
             "query_expansion_enable": query_expansion_enable,
-        })
-        config = {key: _resolve_field_default(value, None) for key, value in config.items()}
-        resolved = validate_config(config)
+        }
+        config = {key: _resolve_field_default(value, DEFAULTS[key]) for key, value in config.items()}
+        resolved = resolve_config(config)
         for key, value in resolved.items():
             setattr(self, key, value)
         self.observer = _resolve_field_default(observer, None)

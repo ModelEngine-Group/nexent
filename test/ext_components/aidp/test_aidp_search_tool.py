@@ -1,3 +1,4 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 # Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
 
 import importlib.util
@@ -187,8 +188,8 @@ class TestAidpSearchToolInit:
                 reranking_mode="high_accuracy",
                 rewrite_enable=True,
                 related_search_enable=True,
-                score_threshold=1.5,
-                top_k=200,
+                score_threshold=1.0,
+                top_k=100,
                 multi_modal=True,
                 observer=mock_observer,
             )
@@ -245,18 +246,21 @@ class TestAidpSearchToolInit:
 
         assert "kds_list must be a valid JSON array" in str(exc_info.value)
 
-    def test_init_invalid_modes_fall_back(self, aidp_module, mock_observer):
+    def test_init_reads_official_legacy_method_without_revalidation(self, aidp_module, mock_observer, monkeypatch):
         mock_client = MagicMock()
         aidp_module.http_client_manager.get_sync_client.return_value = mock_client
 
+        def unexpected(*args, **kwargs):
+            raise AssertionError("Persisted retrieval configuration must not be revalidated")
+        monkeypatch.setattr(aidp_module, "validate_config", unexpected, raising=False)
         tool = aidp_module.AidpSearchTool(
                 server_url="https://aidp.example.com",
                 api_key="jwt-token",
                 tenant_id="aidp",
                 kds_list='["kb1"]',
-                search_method="bad-method",
+                search_method="hybrid_search",
                 reranking_enable=True,
-                reranking_mode="bad-mode",
+                reranking_mode="performance",
                 rewrite_enable=False,
                 related_search_enable=False,
                 score_threshold=0.0,

@@ -6013,19 +6013,33 @@ async def test_call_mcp_tool_enforces_runtime_timeout(monkeypatch):
         )
 
 
-@pytest.mark.parametrize("params", [{"hybrid_top_k":8,"graph_top_k":5}, {"reranking_enable":False,"graph_reranking_enable":True}, {"top_k":True}])
-def test_aidp_policy_rejected_before_persistence_or_provider(mocker, params):
+@pytest.mark.parametrize("params,rejected", [
+    ({"hybrid_top_k": 8, "graph_top_k": 5}, True),
+    ({"reranking_enable": False, "graph_reranking_enable": True}, True),
+    ({"top_k": True}, True),
+    ({"top_k": 10, "vector_candidates": 10}, False),
+])
+def test_aidp_policy_checked_once_before_persistence(mocker, params, rejected):
     from types import SimpleNamespace
     from consts.exceptions import ValidationError
-    mocker.patch.object(_tool_cfg_service,"require_agent_draft_edit")
-    mocker.patch.object(_tool_cfg_service,"query_all_tools",return_value=[{"tool_id":9,"name":"ind_aidp_search","is_available":True}])
-    persist = mocker.patch.object(_tool_cfg_service,"create_or_update_tool_by_tool_info")
-    provider = mocker.patch.object(_tool_cfg_service,"_resolve_aidp_snapshot")
-    request=SimpleNamespace(agent_id=1,tool_id=9,version_no=0,params=params)
-    with pytest.raises(ValidationError):
-        _tool_cfg_service.update_tool_info_impl(request,"tenant","user")
-    persist.assert_not_called()
+    mocker.patch.object(_tool_cfg_service, "require_agent_draft_edit")
+    mocker.patch.object(_tool_cfg_service, "query_all_tools", return_value=[{
+        "tool_id": 9, "name": "ind_aidp_search", "is_available": True,
+    }])
+    persist = mocker.patch.object(_tool_cfg_service, "create_or_update_tool_by_tool_info")
+    provider = mocker.patch.object(_tool_cfg_service, "_resolve_aidp_snapshot")
+    duplicate_check = mocker.patch.object(_tool_cfg_service, "_validate_tool_param_ranges")
+    request = SimpleNamespace(agent_id=1, tool_id=9, version_no=0, params=params)
+    if rejected:
+        with pytest.raises(ValidationError):
+            _tool_cfg_service.update_tool_info_impl(request, "tenant", "user")
+        persist.assert_not_called()
+    else:
+        _tool_cfg_service.update_tool_info_impl(request, "tenant", "user")
+        assert request.params == {"top_k": 10, "vector_candidates": None}
+        persist.assert_called_once()
     provider.assert_not_called()
+    duplicate_check.assert_not_called()
 
 
 def test_aidp_catalog_optional_candidates_are_numeric_and_following(mocker):

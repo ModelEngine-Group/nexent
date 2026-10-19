@@ -7452,11 +7452,15 @@ class TestBuildInternalS3Url:
 class TestMergeToolParams:
     """Tests for _merge_tool_params function."""
 
-    def test_aidp_null_candidates_clear_inheritance_but_ordinary_null_inherits(self):
+    def test_aidp_null_candidates_clear_inheritance_but_ordinary_null_inherits(self, monkeypatch):
         from nexent.core.ext_components.aidp.retrieval_config import (
             build_payload,
             resolve_config,
         )
+        import nexent.core.ext_components.aidp.retrieval_config as policy
+        def unexpected(*args, **kwargs):
+            raise AssertionError("Internal merging must not revalidate prepared policies")
+        monkeypatch.setattr(policy, "validate_config", unexpected)
         record={"class_name":"AidpSearchTool","params":[{"name":"top_k","default":10},
                 {"name":"vector_candidates","default":30},{"name":"multi_modal","default":False},
                 {"name":"reranking_enable","default":False}]}

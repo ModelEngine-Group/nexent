@@ -723,13 +723,8 @@ def _merge_tool_params(
 
     if override_params:
         if tool_record.get("class_name") == "AidpSearchTool":
-            from nexent.core.ext_components.aidp.retrieval_config import CONFIG_KEYS, merge_config, validate_config
+            from nexent.core.ext_components.aidp.retrieval_config import CONFIG_KEYS, merge_config
             policy = merge_config(merged_params, override_params)
-            if CONFIG_KEYS.intersection(override_params):
-                try:
-                    validate_config(policy)
-                except ValueError as exc:
-                    raise ValidationError(str(exc)) from exc
             merged_params.update({key: value for key, value in override_params.items() if key not in CONFIG_KEYS})
             merged_params.update(policy)
         else:

@@ -405,6 +405,10 @@ async def run_agent_stream(
         validate_conversation_retrieval_config(
             request_scope, resolved_tenant_id, agent_request.agent_id, agent_request.version_no,
         )
+    if not resume and agent_request.tool_params is not None:
+        from services.knowledge_scope_service import validate_request_retrieval_overrides
+
+        validate_request_retrieval_overrides(agent_request, resolved_tenant_id)
     resolved_scope = None
     if source_scope is not None and not resume:
         if agent_request.agent_id is None:

@@ -27,7 +27,9 @@
         "AIDP-RET-CONFIG-API",
         "AIDP-RET-RUNTIME"
       ],
-      "modified": [],
+      "modified": [
+        "AIDP-RET-PROTOCOL"
+      ],
       "retired": []
     },
     "traditional_ut": {
@@ -35,7 +37,8 @@
       "behaviors": [
         "Seven explicit channel combinations and strict numeric/dependency validation at input boundaries",
         "Historical missing/null defaults; equal candidates automatically follow while different candidates stay fixed",
-        "Merged conversation overrides, two wrapper identities and response provenance"
+        "Merged conversation overrides, two wrapper identities and response provenance",
+        "Trust saved policies during merging and SDK construction; validate raw submitted fields before following normalization"
       ],
       "reason": "Existing UT proves legacy wrapper and permissions but lacks advanced policy boundaries.",
       "test_selectors": [
@@ -52,9 +55,10 @@
         "test/backend/services/test_conversation_workbench_service_coverage.py",
         "test/backend/app/test_conversation_workbench_coverage.py",
         "test/backend/services/test_agent_run_workbench_coverage.py",
-        "test/backend/services/test_agent_run_workbench_state_coverage.py"
+        "test/backend/services/test_agent_run_workbench_state_coverage.py",
+        "test/backend/services/test_knowledge_scope_retrieval_input.py"
       ]
     },
-    "notes": "Real provider and browser evidence remain required and blocked until prerequisites are established. No new D1 quota; retain all historical D1. Local design/tasks are outside the product repository."
+    "notes": "Real provider and browser evidence remain required and blocked until prerequisites are established. No new D1 quota; retain all historical D1. Local design/tasks are outside the product repository. Review follow-up: validation runs only at save/import/test/request input boundaries. Persisted policies are trusted; SDK construction only resolves defaults and documented legacy names. Official v2.4.0-v2.7.0 sources confirm hybrid_search and absent advanced fields; no arbitrary malformed database types are assumed. Protocol fixture prepares external input once before constructing the two wrappers; no real provider or browser execution is claimed."
   }
 }
