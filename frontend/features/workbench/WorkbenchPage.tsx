@@ -36,6 +36,7 @@ import {
   setHistoricalChatModeListener,
   setServerConversationIdState,
 } from "@/app/newchat/adapter/conversation-thread-list-adapter";
+import { applyComposerRunConfig } from "@/app/newchat/adapter/composer-run-config";
 import { useConversationResume } from "./hooks/useConversationResume";
 import { useConversationScopedState } from "./hooks/useConversationScopedState";
 import { SidebarProvider } from "@/components/ui/sidebar";
@@ -1034,112 +1035,108 @@ const HomeContent: FC = () => {
   // conversation_id returned in the response header, which we then reuse as
   // `threadId` for future runs in the same thread.
   useEffect(() => {
-    runtime.thread.composer.setRunConfig({
-      custom: {
-        ...(workbenchState.config.mode === "agent_create" && creationAgent
-          ? { agentId: creationAgent.agentId }
-          : {}),
-        ...(activeConversationId ? { threadId: activeConversationId } : {}),
-        ...(knowledgeScope ? { knowledgeScope } : {}),
-        ...(runtimeMetadataDirty ? { runtimeMetadata } : {}),
-        ...(runtimeMetadataDirty && Number(activeConversationId) > 0
-          ? { runtimeMetadataVersion }
-          : {}),
-        onRuntimeMetadataSent: handleRuntimeMetadataSent,
-        onWorkbenchConfigVersion: (version: number) =>
-          activeConversationIdRef.current === activeConversationId &&
-          dispatchWorkbench({ type: "set-version", version }),
-        onWorkbenchConfigConflict: async (query: string) => {
-          const current = await conversationService.getById(
-            String(activeConversationId)
-          );
-          if (activeConversationIdRef.current !== activeConversationId) return;
-          if (current.workbench_config) {
-            dispatchWorkbench({
-              type: "restore",
-              config: current.workbench_config,
-              version: current.workbench_config_version ?? 0,
-            });
-            setKnowledgeScope(current.workbench_config.knowledge_scope ?? null);
-            setKnowledgePreview(null);
+    applyComposerRunConfig(runtime, activeThreadId, {
+      ...(workbenchState.config.mode === "agent_create" && creationAgent
+        ? { agentId: creationAgent.agentId }
+        : {}),
+      ...(activeConversationId ? { threadId: activeConversationId } : {}),
+      ...(knowledgeScope ? { knowledgeScope } : {}),
+      ...(runtimeMetadataDirty ? { runtimeMetadata } : {}),
+      ...(runtimeMetadataDirty && Number(activeConversationId) > 0
+        ? { runtimeMetadataVersion }
+        : {}),
+      onRuntimeMetadataSent: handleRuntimeMetadataSent,
+      onWorkbenchConfigVersion: (version: number) =>
+        activeConversationIdRef.current === activeConversationId &&
+        dispatchWorkbench({ type: "set-version", version }),
+      onWorkbenchConfigConflict: async (query: string) => {
+        const current = await conversationService.getById(
+          String(activeConversationId)
+        );
+        if (activeConversationIdRef.current !== activeConversationId) return;
+        if (current.workbench_config) {
+          dispatchWorkbench({
+            type: "restore",
+            config: current.workbench_config,
+            version: current.workbench_config_version ?? 0,
+          });
+          setKnowledgeScope(current.workbench_config.knowledge_scope ?? null);
+          setKnowledgePreview(null);
+        }
+        if (!runtime.thread.composer.getState().text)
+          runtime.thread.composer.setText(query);
+        message.warning("配置已更新，已重新加载并保留输入；请确认后重新发送");
+      },
+      onKnowledgeScopeResolved: handleKnowledgeScopeResolved,
+      onGenerationStopped: handleGenerationStopped,
+      enablePlan: chatMode === "planning",
+      ...(workbenchState.config.mode === "agent_create"
+        ? {
+            runtimeMode: "nl2agent" as const,
+            persistCreationHistory: true,
+            creationWorkbenchConfig: effectiveWorkbenchConfig,
+            autoCreateAgentDraft: shouldAutoCreateAgentDraft(
+              activeConversationId,
+              activeThreadId != null &&
+                recoverableCreationThreads.has(activeThreadId)
+            ),
+            agentAuthor: user?.email || "",
+            onNl2AgentDraftCreated: async (created: CreatedAgentResult) => {
+              await prepareWorkbenchAgentDraft(created.agentId);
+              resetNl2AgentFlow(created.agentId);
+              const threadId = runtime.threads.getState().mainThreadId;
+              if (!threadId) return;
+              creationAgentsByThreadRef.current = {
+                ...creationAgentsByThreadRef.current,
+                [threadId]: created,
+              };
+              setCreationAgentsByThread(creationAgentsByThreadRef.current);
+              setRecoverableCreationThreads((threads) => {
+                const next = new Set(threads);
+                next.delete(threadId);
+                return next;
+              });
+            },
+            onNl2AgentState: handleNl2AgentState,
           }
-          if (!runtime.thread.composer.getState().text)
-            runtime.thread.composer.setText(query);
-          message.warning("配置已更新，已重新加载并保留输入；请确认后重新发送");
-        },
-        onKnowledgeScopeResolved: handleKnowledgeScopeResolved,
-        onGenerationStopped: handleGenerationStopped,
-        enablePlan: chatMode === "planning",
-        ...(workbenchState.config.mode === "agent_create"
+        : workbenchState.config.mode === "skill_create"
           ? {
-              runtimeMode: "nl2agent" as const,
+              runtimeMode: "nl2skill" as const,
               persistCreationHistory: true,
               creationWorkbenchConfig: effectiveWorkbenchConfig,
-              autoCreateAgentDraft: shouldAutoCreateAgentDraft(
-                activeConversationId,
-                activeThreadId != null &&
-                  recoverableCreationThreads.has(activeThreadId)
-              ),
-              agentAuthor: user?.email || "",
-              onNl2AgentDraftCreated: async (created: CreatedAgentResult) => {
-                await prepareWorkbenchAgentDraft(created.agentId);
-                resetNl2AgentFlow(created.agentId);
-                const threadId = runtime.threads.getState().mainThreadId;
-                if (!threadId) return;
-                creationAgentsByThreadRef.current = {
-                  ...creationAgentsByThreadRef.current,
-                  [threadId]: created,
-                };
-                setCreationAgentsByThread(creationAgentsByThreadRef.current);
-                setRecoverableCreationThreads((threads) => {
-                  const next = new Set(threads);
-                  next.delete(threadId);
-                  return next;
-                });
-              },
-              onNl2AgentState: handleNl2AgentState,
-            }
-          : workbenchState.config.mode === "skill_create"
-            ? {
-                runtimeMode: "nl2skill" as const,
-                persistCreationHistory: true,
-                creationWorkbenchConfig: effectiveWorkbenchConfig,
-                complexity: "complicated" as const,
-                language: i18n.language?.startsWith("en")
-                  ? ("en" as const)
-                  : ("zh" as const),
-                modelId: effectiveWorkbenchConfig.model_id,
-                draftSnapshot: {
-                  ...(buildSkillSavePayload(skillDraftRef.current) ?? {}),
-                  files: Object.entries(skillDraftRef.current.files).map(
-                    ([path, content]) => ({ path, content })
-                  ),
-                },
-                onNl2SkillEvent: handleNl2SkillEvent,
-              }
-            : {}),
-        ...(!["agent_create", "skill_create"].includes(
-          workbenchState.config.mode
-        )
-          ? {
-              workbenchConfig: effectiveWorkbenchConfig,
-              workbenchConfigVersion: workbenchState.configVersion,
-            }
-          : {}),
-        ...(activeThreadId
-          ? {
-              onServerConversationId: (
-                serverId: string,
-                initialQuestion?: string
-              ) =>
-                handleServerConversationId(
-                  activeThreadId,
-                  serverId,
-                  initialQuestion
+              complexity: "complicated" as const,
+              language: i18n.language?.startsWith("en")
+                ? ("en" as const)
+                : ("zh" as const),
+              modelId: effectiveWorkbenchConfig.model_id,
+              draftSnapshot: {
+                ...(buildSkillSavePayload(skillDraftRef.current) ?? {}),
+                files: Object.entries(skillDraftRef.current.files).map(
+                  ([path, content]) => ({ path, content })
                 ),
+              },
+              onNl2SkillEvent: handleNl2SkillEvent,
             }
           : {}),
-      },
+      ...(!["agent_create", "skill_create"].includes(workbenchState.config.mode)
+        ? {
+            workbenchConfig: effectiveWorkbenchConfig,
+            workbenchConfigVersion: workbenchState.configVersion,
+          }
+        : {}),
+      ...(activeThreadId
+        ? {
+            onServerConversationId: (
+              serverId: string,
+              initialQuestion?: string
+            ) =>
+              handleServerConversationId(
+                activeThreadId,
+                serverId,
+                initialQuestion
+              ),
+          }
+        : {}),
     });
   }, [
     runtime,
@@ -1223,6 +1220,11 @@ const HomeContent: FC = () => {
   const handleNewConversation = useCallback(async () => {
     handlePrepareNewConversation();
     await runtime.threads.switchToNewThread();
+    // Re-fetch the conversation list: the thread the user just left only
+    // became a server-side conversation when its first message was sent, and
+    // without a reload it would disappear from the sidebar until a manual
+    // page refresh (the newchat page already reloads at this point).
+    await runtime.threads.reload();
   }, [handlePrepareNewConversation, runtime]);
 
   const applyAgentMounts = useCallback(

@@ -105,7 +105,7 @@ def selection(repo, args):
 
 
 def doctor(repo, home, records, *, live=False):
-    problems = static_config_problems(home, records)
+    problems = static_config_problems(home, records, repo=repo)
     expected_runtime = (home / "runtime/test-venv").resolve()
     if Path(sys.prefix).resolve() != expected_runtime or not test_python(home).is_file():
         problems.append("Run this suite with the dedicated <test-home>/runtime/test-venv Python")

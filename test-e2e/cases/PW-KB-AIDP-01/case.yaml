@@ -13,15 +13,15 @@ case:
   automation: automated
   objective: 独立验证AIDP分支，禁止同脚本locator猜Local/AIDP；知识召回通过真实Agent工具链证明。
   preconditions:
-  - 本机aidp-journey配置已选择mock或real_smoke profile并导出oracle（real_smoke需显式真实AIDP KB/文档/问题/预期文本/来源）。
+  - AIDP服务由 ext mock 提供（knowledge-provider，种子 aidp-kb-product）；无需任何机器本地档位配置。
   - 已登录租户管理员账号。
   - /knowledges呈现AIDP分支，Local个人容量控件不出现。
   - run-owned Agent（d4_llm_agent）已READY且模型可用。
   test_data:
-    legacy_asset_declaration: config/environment.yaml；config/aidp-journey.yaml；agents/d4_llm_agent
+    legacy_asset_declaration: config/environment.yaml；agents/d4_llm_agent
   steps:
   - order: 1
-    action: 在AIDP列表选择指定测试知识库并进入文件管理，验证所选资源（real_smoke额外验证预期文档）。
+    action: 在AIDP列表选择指定测试知识库并进入文件管理，验证所选资源。
     expected: 进入的文件管理属于所选KB；当前AIDP列表没有召回输入框，不以名称筛选冒充检索。
   - order: 2
     action: 打开run-owned Agent配置页并选择该Agent，通过AddKnowledgeDrawer绑定该AIDP知识库并等待真实autosave。
@@ -41,13 +41,6 @@ case:
   - order: 7
     action: 通过真实发布动作释放含绑定编辑的新Agent版本，随后新开会话向同一Agent发送固定问题，验证知识作用域。
     expected: 发布成功且新会话回答同样包含oracle文本片段。
-  execution:
-    profiles:
-    - name: mock
-      required_services:
-      - knowledge-provider
-    - name: real_smoke
-      required_services: []
   acceptance:
   - id: AC-01
     description: The AIDP branch is proven mode-exclusive (its own markers present, Local
@@ -79,8 +72,8 @@ case:
     forbidden_side_effects: []
   - id: AC-04
     description: A full refresh retains the released knowledge binding and, after the real
-      release action, a brand-new conversation recalls the same oracle under the explicitly
-      selected profile.
+      release action, a brand-new conversation recalls the same Mock oracle; the run also
+      records the successful Mock attach evidence (runtime/ext-knowledge-attach.json).
     steps:
     - 6
     - 7
@@ -90,9 +83,9 @@ case:
     forbidden_side_effects: []
   expected_results:
   - 绑定autosave（工具配置请求）携带aidp_search工具身份与所选KB的kds ID。
-  - Debug回答包含oracle稳定文本片段（真实AIDP工具召回）。
+  - Debug回答包含oracle稳定文本片段（ext mock 的 AIDP 工具召回）。
   - 新会话回答同样包含oracle文本片段（知识作用域成立）。
-  - 执行profile记录为mock或real_smoke。
+  - 运行证据记录 ext mock 附着（runtime/ext-knowledge-attach.json）。
   forbidden_side_effects: []
   source:
     legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022

@@ -13,8 +13,6 @@ from urllib.request import build_opener, ProxyHandler
 
 import yaml
 
-from test_asset_lib import repository_root
-
 
 ENV_LINE = re.compile(r"^(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)=(.*)$")
 SERVICES = ("config", "runtime", "northbound", "data_process")
@@ -62,7 +60,7 @@ def valid_url(value: object) -> bool:
     return parsed.scheme in {"http", "https"} and bool(parsed.hostname) and not parsed.username and not parsed.password
 
 
-def static_config_problems(home: Path, records: list[dict]) -> list[str]:
+def static_config_problems(home: Path, records: list[dict], *, repo: Path) -> list[str]:
     config = home / "config"
     daily, problems = env_file(config / "daily.env")
     _, errors = env_file(config / "secrets.env")
@@ -113,14 +111,7 @@ def static_config_problems(home: Path, records: list[dict]) -> list[str]:
     # exists (missing config is reported at attach time, only by cases that
     # actually declare an ext-served logical service).
     from ext_attach import config_problems
-    problems.extend(config_problems(home, repository_root()))
-    # Profile-selected cases demand their selection config up front.
-    for record in records:
-        selection = (record.get("execution") or {}).get("profile_selection")
-        if selection and not (home / "config" / f"{selection}.yaml").is_file():
-            problems.append(
-                f"config/{selection}.yaml is required by {record['case_id']} profile selection"
-            )
+    problems.extend(config_problems(home, repo))
     return sorted(set(problems))
 
 
