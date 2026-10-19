@@ -6300,7 +6300,16 @@
     "catalogChangedDetail": "当前草稿引用的档案版本已变化。刷新档案后将保留已填写的配置和手动选择，重新校验后请检查再保存。",
     "refreshCatalog": "刷新档案",
     "retryPreview": "重新校验",
-    "baseConfiguration": "模型基础配置"
+    "baseConfiguration": "模型基础配置",
+    "layout": {
+      "emptyTitle": "填写模型名称后自动带出参数",
+      "emptyDescription": "系统会匹配模型档案，也可手动选择或修改",
+      "source": "来自档案",
+      "reset": "恢复档案默认",
+      "advancedHint": "TLS、超时、认证与自定义参数",
+      "checkAfterSave": "保存后检测连通性",
+      "awaitingProfile": "填写服务地址后加载配置"
+    }
   },
   "modelMigration": {
     "pending": "旧版本迁移 · 待检查",
