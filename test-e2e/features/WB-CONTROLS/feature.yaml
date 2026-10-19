@@ -22,6 +22,8 @@ feature:
       forwarding supported effort enum values through existing generation paths while preserving other model parameters.
   - rule_id: WB-CONTROLS-RULE-005
     description: Workbench, newchat and NL2Agent share the white Composer and transparent paper-plane send defaults without presentation opt-ins; supported mode and resource actions are configured independently of appearance. Newchat uses direct bottom-toolbar knowledge and skill controls with the shared resource drawers; composer spacing is optically balanced with extra top padding and a taller input, while muted toolbar and creation labels match in font size.
+  - rule_id: WB-CONTROLS-RULE-006
+    description: Workbench shows unified loading until conversation, models, capabilities and resource restoration settle; transient initialization warnings never appear in the composer. Completed empty or failed loads leave loading and expose persistent feedback.
   required_test_stages:
   - D4
   source:
@@ -35,4 +37,5 @@ feature:
     - WB-NEW-CONVERSATION-STYLE-20261015
     - WB-RESOURCE-LISTS-20261015
     - COMPOSER-DEFAULTS-20261018
+    - WB-LOADING-20261019
     spec_path: ../nexent-doc/nexent/agent-workbench/changes/chat-workbench-resource-controls/proposal.md

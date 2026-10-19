@@ -41,6 +41,7 @@ import { message } from "antd";
 import type { Agent } from "@/types/agentConfig";
 import { useModelList } from "@/hooks/model/useModelList";
 import { withDefaultWorkbenchModel } from "./modelOptions";
+import { WorkbenchLoadingBoundary } from "./components/WorkbenchLoadingBoundary";
 import { selectWorkbenchModel } from "@/features/model-controls/modelOptions";
 import log from "@/lib/logger";
 import { ConversationTitleGuard } from "@/lib/conversationTitle";
@@ -120,6 +121,7 @@ const HomeContent: FC = () => {
     isDictationConfigured,
     workbenchState,
     workbenchBootstrap,
+    isLoadingWorkbenchBootstrap,
     onWorkbenchModeChange,
     dispatchWorkbench,
   } = useWorkbenchSession();
@@ -1295,16 +1297,7 @@ const HomeContent: FC = () => {
     message.success("Skill 已保存到我的 Skills");
   };
 
-  // Conditional rendering must happen after all hooks
-  if (!ready) {
-    return (
-      <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
-        Loading conversation…
-      </div>
-    );
-  }
-
-  return (
+  const content = (
     <div className="flex w-full h-full">
       <div className="shrink-0 h-full">
         <SidebarProvider className="w-auto h-full">
@@ -1566,5 +1559,16 @@ const HomeContent: FC = () => {
         />
       </div>
     </div>
+  );
+
+  return (
+    <WorkbenchLoadingBoundary
+      conversationReady={ready}
+      modelsLoading={isLoadingModels}
+      bootstrapLoading={isLoadingWorkbenchBootstrap}
+      resourcesResolving={workbenchState.resolving}
+    >
+      {content}
+    </WorkbenchLoadingBoundary>
   );
 };
