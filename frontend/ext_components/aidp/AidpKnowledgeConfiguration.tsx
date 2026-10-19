@@ -2,11 +2,15 @@
 
 "use client";
 
+import aidpKnowledgeService from "@/ext_components/aidp/shared/services/aidpKnowledgeService";
+
 import React, { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useParams, useRouter } from "next/navigation";
 
 import { App, Modal } from "antd";
+
+import KnowledgeBaseDeleteNotice from "@/components/knowledge-base/KnowledgeBaseDeleteNotice";
 
 import { KB_SEARCH_DEBOUNCE_MS } from "./pages/knowledge-list/constants";
 import type { AidpKnowledgeBaseItem } from "@/ext_components/aidp/shared/types/knowledge";
@@ -166,12 +170,20 @@ const AidpKnowledgeConfiguration: React.FC = () => {
   );
 
   const handleDeleteKb = useCallback(
-    (kb: AidpKnowledgeBaseItem) => {
+    async (kb: AidpKnowledgeBaseItem) => {
+      // List affected agents when available; otherwise show the generic
+      // cascade notice for agents and conversations.
+      const preview = await aidpKnowledgeService.previewBoundAgents(kb.kds_id);
       setDeleteConfirmOpen(true);
       Modal.confirm({
-        title: t("aidpKnowledge.confirmDeleteTitle"),
-        content: t("aidpKnowledge.confirmDeleteContent", { name: kb.kds_name }),
-        okText: t("common.confirm"),
+        title: t("aidpKnowledge.confirmDeleteTitle", { name: kb.kds_name }),
+        content: (
+          <div>
+            <div>{t("aidpKnowledge.confirmDeleteContent")}</div>
+            <KnowledgeBaseDeleteNotice preview={preview} />
+          </div>
+        ),
+        okText: t("knowledgeBase.modal.deleteConfirm.confirm"),
         cancelText: t("common.cancel"),
         centered: true,
         afterClose: () => setDeleteConfirmOpen(false),

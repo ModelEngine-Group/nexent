@@ -35,6 +35,10 @@ BACKEND_DIR = os.path.join(PROJECT_ROOT, "backend")
 if BACKEND_DIR not in sys.path:
     sys.path.insert(0, BACKEND_DIR)
 
+from test.common.module_stubs import capture_module_stubs
+
+_modules_before_stubs = sys.modules.copy()
+
 # --- Module stubs --------------------------------------------------------
 
 def _mod(name):
@@ -66,7 +70,7 @@ nexent_storage_factory.MinIOStorageConfig = _MinIOStorageConfig
 
 for mod in (nexent_pkg, nexent_utils, nexent_http_mgr, nexent_storage,
             nexent_storage_factory, services_pkg, tag_management_service):
-    sys.modules.setdefault(mod.__name__, mod)
+    sys.modules[mod.__name__] = mod
 
 # Register non-prefixed ``database`` / ``database.client`` stubs so that
 # production modules (which import as ``from database.client import ...``)
@@ -75,13 +79,15 @@ for mod in (nexent_pkg, nexent_utils, nexent_http_mgr, nexent_storage,
 # module objects that broke mock patching.
 _db_pkg = sys.modules.get("database") or _mod("database")
 _db_pkg.__path__ = [os.path.join(BACKEND_DIR, "database")]
-_db_client = sys.modules.get("database.client") or _mod("database.client")
+_db_client = _mod("database.client")
 _db_client.MinioClient = MagicMock()
 _db_client.PostgresClient = MagicMock()
 _db_client.as_dict = lambda obj: dict(obj) if isinstance(obj, dict) else {}
 _db_client.get_db_session = MagicMock()
+_db_client.filter_property = MagicMock()
+_db_client.db_client = MagicMock()
 for mod in (_db_pkg, _db_client):
-    sys.modules.setdefault(mod.__name__, mod)
+    sys.modules[mod.__name__] = mod
 
 # Production modules under test
 from ext_components.aidp.apps.aidp_mgmt_app import (  # noqa: E402
@@ -195,7 +201,7 @@ def test_unified_save_local_failure_prevents_aidp(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
-def configure_aidp_constants(monkeypatch):
+def configure_aidp_constants(monkeypatch, _isolated_imports):
     """Pin AIDP credentials and auth helper behaviour for every test."""
     from ext_components.aidp.apps import aidp_mgmt_app
     from ext_components.aidp.services import aidp_access_service
@@ -3057,3 +3063,11 @@ class TestDeleteKnowledgeBaseFailure:
         assert response.status_code == HTTPStatus.OK
         assert response.json() == {"success": False}
         mock_soft.assert_not_called()
+
+
+_install_module_stubs = capture_module_stubs(_modules_before_stubs)
+
+
+@pytest.fixture(autouse=True)
+def _isolated_imports(monkeypatch):
+    _install_module_stubs(monkeypatch)

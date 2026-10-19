@@ -1,12 +1,14 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
 import logging
-from typing import List, Optional
-from sqlalchemy import or_, text, update
+from typing import List, Optional, Sequence
+from sqlalchemy import String, and_, cast, func, or_, text, tuple_, update
+from sqlalchemy.orm import aliased
 
 from database.client import get_db_session, as_dict, filter_property
-from database.db_models import AgentInfo, ToolInstance, AgentRelation
+from database.db_models import AgentInfo, ToolInstance, AgentRelation, AgentVersion
 from database.agent_version_db import query_current_version_no
+from database.tool_db import query_tool_knowledge_references
 from consts.const import ASSET_OWNER_TENANT_ID, MAX_AGENTS_PER_TENANT
 from consts.exceptions import AgentNotFoundError, TenantResourceLimitError
 from utils.str_utils import convert_list_to_string
@@ -859,3 +861,47 @@ def delete_agent_relationship(
             AgentRelation.version_no == version_no
         ).update(
             {AgentRelation.delete_flag: 'Y', 'updated_by': user_id})
+
+
+def query_knowledge_binding_agents(
+    *, tenant_id: str, index_names: Sequence[str] = (), kds_ids: Sequence[str] = (),
+) -> list[dict]:
+    """Return the names of bound agents whose draft and referenced version exist."""
+    with get_db_session() as session:
+        bindings = []
+        for param_name, ids in (("index_names", index_names), ("kds_list", kds_ids)):
+            if ids:
+                bindings.extend(query_tool_knowledge_references(session, param_name, set(ids)))
+        if not bindings:
+            return []
+
+        snapshot = aliased(AgentInfo)
+        display_name = func.coalesce(
+            func.nullif(AgentInfo.display_name, ""), func.nullif(AgentInfo.name, ""),
+            cast(AgentInfo.agent_id, String),
+        ).label("display_name")
+        rows = (
+            session.query(AgentInfo.agent_id, display_name)
+            .join(snapshot, and_(
+                snapshot.agent_id == AgentInfo.agent_id,
+                tuple_(snapshot.agent_id, snapshot.version_no).in_(
+                    [(row["agent_id"], row["version_no"]) for row in bindings]
+                ),
+                snapshot.delete_flag != "Y",
+            ))
+            .outerjoin(AgentVersion, and_(
+                AgentVersion.agent_id == snapshot.agent_id,
+                AgentVersion.version_no == snapshot.version_no,
+                AgentVersion.delete_flag != "Y",
+            ))
+            .filter(
+                AgentInfo.tenant_id.in_((tenant_id, ASSET_OWNER_TENANT_ID)),
+                AgentInfo.version_no == 0,
+                AgentInfo.delete_flag != "Y",
+                or_(snapshot.version_no == 0, AgentVersion.id.isnot(None)),
+            )
+            .distinct()
+            .order_by(display_name, AgentInfo.agent_id)
+            .all()
+        )
+        return [dict(row._mapping) for row in rows]

@@ -38,6 +38,7 @@ from consts.exceptions import AppException, UnauthorizedError
 from database.user_tenant_db import get_user_role_by_tenant
 from ext_components.aidp.consts.aidp_exceptions import (
     AidpGroupValidationError,
+    AidpKbNotFoundError,
 )
 from ext_components.aidp.database import aidp_permission_db
 from ext_components.aidp.services import aidp_permission_service as perms
@@ -63,6 +64,7 @@ from ext_components.aidp.services.aidp_service import (
     delete_aidp_kb_impl,
     get_aidp_graph_template_impl,
     get_aidp_kb_impl,
+    get_bound_agents,
     list_aidp_channels_impl,
     list_aidp_doc_history_impl,
     list_aidp_docs_impl,
@@ -955,6 +957,25 @@ async def update_knowledge_base(
     invalidate_aidp_kb_detail_cache(server_url, api_key, kds_id)
 
     return JSONResponse(status_code=HTTPStatus.OK, content=result)
+
+
+@aidp_mgmt_router.get("/knowledge-bases/{kds_id}/bound_agents")
+async def get_knowledge_base_bound_agents(
+    request: Request,
+    kds_id: Annotated[str, Path(min_length=1, pattern=r".*\S.*")],
+) -> JSONResponse:
+    """List agents bound to this AIDP knowledge base for deletion confirmation."""
+    user_id, tenant_id = await _auth(request)
+    try:
+        perms.require_permission(kds_id, user_id, tenant_id, required="READ")
+    except AidpKbNotFoundError:
+        return JSONResponse(status_code=HTTPStatus.OK, content={"agents": []})
+    preview = await run_blocking(
+        "preview-aidp-kb-deletion", get_bound_agents, [kds_id],
+        tenant_id=tenant_id,
+        lane="control-io", owner="ext_components.aidp.apps.aidp_mgmt_app",
+    )
+    return JSONResponse(status_code=HTTPStatus.OK, content=preview)
 
 
 @aidp_mgmt_router.delete("/knowledge-bases/{kds_id}")
