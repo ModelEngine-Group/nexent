@@ -60,6 +60,11 @@ def aidp_service_module():
     register_module(module_name, module)
     spec.loader.exec_module(module)
 
+    # Remote API tests isolate binding persistence, covered by cascade tests.
+    module.get_db_session = MagicMock()
+    module.remove_tool_knowledge_references = MagicMock()
+    module.remove_conversation_knowledge_bindings = MagicMock()
+
     try:
         yield module
     finally:
@@ -1848,6 +1853,12 @@ class TestUpdateAidpKbImpl:
 class TestDeleteAidpKbImpl:
     """Tests for delete_aidp_kb_impl (DELETE KB endpoint)."""
 
+    @pytest.fixture(autouse=True)
+    def binding_session(self, aidp_service_module):
+        context = aidp_service_module.get_db_session.return_value
+        context.__exit__.return_value = False
+        return context.__enter__.return_value
+
     @pytest.mark.parametrize(
         "server_url,api_key",
         [("", "token"), ("ftp://bad", "token"), ("http://ok", "")],
@@ -1859,7 +1870,7 @@ class TestDeleteAidpKbImpl:
             )
         assert exc_info.value.error_code == ErrorCode.AIDP_CONFIG_INVALID
 
-    def test_success(self, aidp_service_module):
+    def test_success(self, aidp_service_module, binding_session):
         mock_resp = MagicMock()
         mock_resp.raise_for_status.return_value = None
         _setup_mock_client(aidp_service_module, method="delete", response=mock_resp)
@@ -1868,6 +1879,12 @@ class TestDeleteAidpKbImpl:
             server_url="http://127.0.0.1:30081", api_key="jwt-token", kds_id="kb-1"
         )
         assert result is True
+        aidp_service_module.remove_tool_knowledge_references.assert_called_once_with(
+            binding_session, kds_ids=["kb-1"]
+        )
+        aidp_service_module.remove_conversation_knowledge_bindings.assert_called_once_with(
+            binding_session, kds_ids=["kb-1"]
+        )
 
     @pytest.mark.parametrize("status_code", [401, 403])
     def test_auth_error(self, aidp_service_module, status_code):
@@ -1877,6 +1894,7 @@ class TestDeleteAidpKbImpl:
                 server_url="http://127.0.0.1:30081", api_key="jwt-token", kds_id="kb-1"
             )
         assert exc_info.value.error_code == ErrorCode.AIDP_AUTH_ERROR
+        aidp_service_module.get_db_session.assert_not_called()
 
     def test_rate_limit_error(self, aidp_service_module):
         _setup_mock_client(aidp_service_module, method="delete", side_effect=_make_http_error(429, "DELETE"))
@@ -1885,6 +1903,7 @@ class TestDeleteAidpKbImpl:
                 server_url="http://127.0.0.1:30081", api_key="jwt-token", kds_id="kb-1"
             )
         assert exc_info.value.error_code == ErrorCode.AIDP_RATE_LIMIT
+        aidp_service_module.get_db_session.assert_not_called()
 
     def test_service_error(self, aidp_service_module):
         _setup_mock_client(aidp_service_module, method="delete", side_effect=_make_http_error(500, "DELETE"))
@@ -1893,6 +1912,7 @@ class TestDeleteAidpKbImpl:
                 server_url="http://127.0.0.1:30081", api_key="jwt-token", kds_id="kb-1"
             )
         assert exc_info.value.error_code == ErrorCode.AIDP_SERVICE_ERROR
+        aidp_service_module.get_db_session.assert_not_called()
 
     def test_connection_error(self, aidp_service_module):
         request = httpx.Request("DELETE", "http://127.0.0.1:30081")
@@ -1905,6 +1925,37 @@ class TestDeleteAidpKbImpl:
                 server_url="http://127.0.0.1:30081", api_key="jwt-token", kds_id="kb-1"
             )
         assert exc_info.value.error_code == ErrorCode.AIDP_CONNECTION_ERROR
+        aidp_service_module.get_db_session.assert_not_called()
+
+    def test_already_absent_still_cleans_bindings(self, aidp_service_module, binding_session):
+        _setup_mock_client(aidp_service_module, method="delete", side_effect=_make_http_error(404, "DELETE"))
+        assert aidp_service_module.delete_aidp_kb_impl("http://aidp.test", "test-key", "kb-1") is True
+        aidp_service_module.remove_tool_knowledge_references.assert_called_once_with(
+            binding_session, kds_ids=["kb-1"]
+        )
+        aidp_service_module.remove_conversation_knowledge_bindings.assert_called_once_with(
+            binding_session, kds_ids=["kb-1"]
+        )
+
+    @pytest.mark.parametrize("failed_step", ["tool", "conversation", "commit"])
+    def test_binding_failure_does_not_fail_deletion(self, aidp_service_module, caplog, failed_step):
+        response = MagicMock()
+        response.raise_for_status.return_value = None
+        _setup_mock_client(aidp_service_module, method="delete", response=response)
+        if failed_step == "commit":
+            aidp_service_module.get_db_session.return_value.__exit__.side_effect = RuntimeError("commit failed")
+        else:
+            cleanup = (aidp_service_module.remove_tool_knowledge_references if failed_step == "tool"
+                       else aidp_service_module.remove_conversation_knowledge_bindings)
+            cleanup.side_effect = RuntimeError("cleanup failed")
+        with caplog.at_level(logging.WARNING):
+            assert aidp_service_module.delete_aidp_kb_impl("http://aidp.test", "test-key", "kb-1") is True
+        assert any(
+            record.levelno == logging.WARNING
+            and "Failed to clean up bindings" in record.message
+            and "kb-1" in record.message
+            for record in caplog.records
+        )
 
 
 # ---------------------------------------------------------------------------

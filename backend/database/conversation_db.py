@@ -3,9 +3,10 @@
 import json
 from copy import deepcopy
 from datetime import datetime
-from typing import Any, Dict, List, Optional, TypedDict
+from typing import Any, Dict, List, Optional, Sequence, Set, TypedDict
 
-from sqlalchemy import asc, desc, func, insert, select, text, update
+from sqlalchemy import asc, desc, func, insert, or_, select, text, update
+from sqlalchemy.orm import Session
 
 from consts.const import (
     MAX_CONVERSATION_TURNS,
@@ -20,6 +21,7 @@ from consts.exceptions import (
     WorkbenchConfigVersionConflict,
     WorkbenchError,
 )
+from database.db_models import KnowledgeRecord
 
 from .client import as_dict, db_client, get_db_session
 from .db_models import (
@@ -2566,3 +2568,66 @@ def get_historical_context(
                 **summary_payload,
             }
         return {"history_summary": summary_result, "conversation_turns": turns}
+
+
+def _remove_scope_references(
+    scope: Optional[Dict[str, Any]], targets: Dict[str, Set[str]],
+) -> Optional[Dict[str, Any]]:
+    """Remove selected IDs while preserving an explicitly empty search scope."""
+    if scope is None:
+        return None
+    updated = deepcopy(scope)
+    for provider, ids in targets.items():
+        key = "knowledge_ids" if provider == "local" else "kds_ids"
+        branch = updated[provider]
+        kept = [item for item in branch[key] if item not in ids]
+        if kept != branch[key]:
+            branch[key] = kept
+            if not kept:
+                branch["mode"] = "disabled"
+    return updated
+
+
+def remove_conversation_knowledge_bindings(
+    session: Session, *, index_names: Sequence[str] = (), kds_ids: Sequence[str] = (),
+) -> None:
+    """Remove deleted IDs from conversation scopes and canonical Workbench config."""
+    targets = {}
+    if index_names:
+        targets["local"] = {
+            str(row.knowledge_id) for row in session.query(KnowledgeRecord.knowledge_id).filter(
+                KnowledgeRecord.index_name.in_(index_names),
+            ).all()
+        }
+    if kds_ids:
+        targets["aidp"] = set(kds_ids)
+
+    filters = []
+    for provider, ids in targets.items():
+        key = "knowledge_ids" if provider == "local" else "kds_ids"
+        for resource_id in sorted(ids):
+            selection = {provider: {key: [resource_id]}}
+            filters.extend((
+                ConversationRecord.knowledge_scope.contains(selection),
+                ConversationRecord.workbench_config.contains({"knowledge_scope": selection}),
+            ))
+    if not filters:
+        return
+
+    records = session.query(ConversationRecord).filter(
+        ConversationRecord.delete_flag == "N", or_(*filters),
+    ).with_for_update().all()
+    for record in records:
+        scope = _remove_scope_references(record.knowledge_scope, targets)
+        workbench = record.workbench_config
+        if workbench is not None:
+            workbench = {
+                **workbench,
+                "knowledge_scope": _remove_scope_references(workbench["knowledge_scope"], targets),
+            }
+        if scope != record.knowledge_scope:
+            record.knowledge_scope = scope
+        if workbench != record.workbench_config:
+            record.workbench_config = workbench
+            record.workbench_config_version += 1
+        record.update_time = func.current_timestamp()
