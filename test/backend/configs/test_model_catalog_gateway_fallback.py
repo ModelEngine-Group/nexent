@@ -138,6 +138,49 @@ def test_toggle_only_native_declaration_remains_toggle_only(catalog):
     assert result["levels"] == []
 
 
+@pytest.mark.parametrize("bad_entry", [None, "invalid-provider", []])
+def test_malformed_provider_entries_do_not_hide_a_valid_native_model(catalog, bad_entry):
+    catalog["providers"] = {"broken": bad_entry, **catalog["providers"]}
+    result = resolve()
+    assert result is not None
+    assert result["levels"] == ["low", "medium", "xhigh"]
+    assert result["matched_api"] == GATEWAY
+
+
+@pytest.mark.parametrize("bad_models", [None, [], "invalid-model-map"])
+def test_malformed_native_model_collections_are_unavailable(catalog, bad_models):
+    catalog["providers"]["alibaba-cn"]["models"] = bad_models
+    assert resolve() is None
+
+
+@pytest.mark.parametrize("bad_model", [None, [], "invalid-model"])
+def test_malformed_model_entries_do_not_hide_a_valid_native_model(catalog, bad_model):
+    models = catalog["providers"]["alibaba-cn"]["models"]
+    catalog["providers"]["alibaba-cn"]["models"] = {"broken": bad_model, **models}
+    result = resolve()
+    assert result is not None
+    assert result["matched_model_id"] == "qwen3.8-max"
+    assert result["provider_id"] == "OpenAI-API-Compatible"
+
+
+@pytest.mark.parametrize("native", [None, SimpleNamespace(base_url="")])
+def test_native_provider_without_metadata_never_uses_reseller_controls(catalog, monkeypatch, native):
+    monkeypatch.setattr(loader, "get_provider_info", lambda _: native)
+    assert resolve() is None
+
+
+def test_effort_only_profile_keeps_gateway_factory_and_actual_url(catalog):
+    catalog["providers"]["alibaba-cn"]["models"]["qwen3.8-max"]["reasoning_options"] = {
+        "type": "effort", "values": ["low", "medium", "xhigh"],
+    }
+    result = resolve(url=GATEWAY + "/", hint="modelengine")
+    assert result["controls"] == [{"type": "effort", "values": ["low", "medium", "xhigh"]}]
+    assert result["provider_id"] == "modelengine"
+    assert result["matched_api"] == GATEWAY
+    assert result["toggle_wire_format"] is None
+    assert result["budget_wire_format"] is None
+
+
 @pytest.mark.parametrize("enabled", [True, False])
 def test_resolved_gateway_controls_build_generic_sdk_parameters(catalog, enabled):
     from consts.model import ReasoningCapability
