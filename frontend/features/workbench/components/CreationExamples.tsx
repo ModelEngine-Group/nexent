@@ -9,8 +9,8 @@ import {
   ClipboardCheck,
   NotebookPen,
   BookOpen,
-  Image,
-  Newspaper,
+  Headphones,
+  ChartColumn,
 } from "lucide-react";
 import { CREATION_PROMPTS } from "../state";
 
@@ -21,24 +21,9 @@ const examples = {
     { key: "meetingNotes", title: "会议纪要整理", icon: NotebookPen },
   ],
   agent_create: [
-    {
-      key: "healthReport",
-      title: "体检报告解读助手",
-      description: "识别报告，解释指标，生成解读文档",
-      icon: Image,
-    },
-    {
-      key: "medicalBriefing",
-      title: "医学情报简报助手",
-      description: "追踪医学进展，制作简报并通过邮件分享",
-      icon: Newspaper,
-    },
-    {
-      key: "patientEducation",
-      title: "患者宣教制作助手",
-      description: "编写宣教内容，生成配图与可打印材料",
-      icon: BookOpen,
-    },
+    { key: "knowledgeAssistant", title: "企业知识问答助手", icon: BookOpen },
+    { key: "customerService", title: "智能客服", icon: Headphones },
+    { key: "businessAnalysis", title: "经营数据分析助手", icon: ChartColumn },
   ],
 };
 
@@ -65,18 +50,11 @@ export function CreationExamples({
         </h2>
       </div>
       <div className="flex flex-col gap-2">
-        {examples[mode].map((example, index) => {
-          const { key, title, icon: Icon } = example;
-          const translationKey = `workbench.creationExamples.${mode === "skill_create" ? "skill" : "agent"}.${key}`;
-          const prompt = t(translationKey, CREATION_PROMPTS[mode][index]);
-          const cardTitle =
-            mode === "agent_create"
-              ? t(`${translationKey}.title`, title)
-              : title;
-          const description =
-            "description" in example
-              ? t(`${translationKey}.description`, example.description)
-              : prompt;
+        {examples[mode].map(({ key, title, icon: Icon }, index) => {
+          const prompt = t(
+            `workbench.creationExamples.${mode === "skill_create" ? "skill" : "agent"}.${key}`,
+            CREATION_PROMPTS[mode][index]
+          );
           return (
             <button
               type="button"
@@ -98,10 +76,10 @@ export function CreationExamples({
               </span>
               <span className="min-w-0">
                 <span className="block text-sm font-medium text-foreground">
-                  {cardTitle}
+                  {title}
                 </span>
                 <span className="mt-1 block text-xs leading-5 text-muted-foreground">
-                  {description}
+                  {prompt}
                 </span>
               </span>
             </button>

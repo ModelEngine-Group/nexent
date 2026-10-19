@@ -58,7 +58,6 @@ import {
   returnFromCreation,
 } from "./conversationTransitions";
 import { CreationActions } from "./components/CreationActions";
-import { WorkbenchGreeting } from "./components/WorkbenchGreeting";
 import { SkillCreationResultCard } from "./components/CreationResultCards";
 import {
   applySkillCreationEvent,
@@ -1347,7 +1346,18 @@ const HomeContent: FC = () => {
             selectedAgent={null}
             modelSelectionScope="tenant"
             fallbackAgentName={t("workbench.genericAgentName", "智能体工作台")}
-            landingContent={<WorkbenchGreeting />}
+            landingContent={
+              <div className="flex w-full flex-col items-center text-center">
+                <h1 className="text-[36px] leading-[54px] text-[#191919]">
+                  <span className="font-bold">
+                    {t("workbench.landingGreetingHi", "你好，我是Nexent")}
+                  </span>{" "}
+                  <span className="font-normal">
+                    {t("workbench.landingGreetingAsk", "需要我帮你做什么")}
+                  </span>
+                </h1>
+              </div>
+            }
             selectedModelId={effectiveWorkbenchConfig.model_id?.toString()}
             deepThinking={
               effectiveWorkbenchConfig.generation_config.deep_thinking
