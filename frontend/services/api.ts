@@ -54,6 +54,7 @@ export const API_ENDPOINTS = {
     renew: `${API_BASE_URL}/user/cas/renew`,
   },
   conversation: {
+    modelPreferences: (conversationId: number, modelId: number) => `${API_BASE_URL}/conversation/${conversationId}/model_preferences/${modelId}`,
     list: `${API_BASE_URL}/conversation/list`,
     workbenchPins: `${API_BASE_URL}/conversation/workbench_pins`,
     workbenchPin: (id: number) =>
@@ -310,6 +311,35 @@ export const API_ENDPOINTS = {
     manageProviderModelCreate: `${API_BASE_URL}/model/manage/provider/create`,
     // Preset Model Catalog (预置模型目录)
     catalogAll: `${API_BASE_URL}/model/catalog/all`,
+    modelProfiles: (
+      params: {
+        query?: string;
+        family?: string;
+        page?: number;
+        page_size?: number;
+      } = {}
+    ) => {
+      const search = new URLSearchParams();
+      Object.entries(params).forEach(([key, value]) => {
+        if (value !== undefined) search.set(key, String(value));
+      });
+      return `${API_BASE_URL}/model/model_profiles?${search.toString()}`;
+    },
+    providerProfiles: (
+      params: { query?: string; page?: number; page_size?: number } = {}
+    ) => {
+      const search = new URLSearchParams();
+      Object.entries(params).forEach(([key, value]) => {
+        if (value !== undefined) search.set(key, String(value));
+      });
+      return `${API_BASE_URL}/model/provider_profiles?${search.toString()}`;
+    },
+    profileProtocols: `${API_BASE_URL}/model/profile_protocols`,
+    profilePreviews: `${API_BASE_URL}/model/profile_previews`,
+    outlets: `${API_BASE_URL}/model/outlets`,
+    outletMigrationReviews: (modelId: number) => `${API_BASE_URL}/model/outlets/${modelId}/migration_reviews`,
+    outletValidations: `${API_BASE_URL}/model/outlet_validations`,
+    outlet: (modelId: number) => `${API_BASE_URL}/model/outlets/${modelId}`,
     catalogProviders: `${API_BASE_URL}/model/catalog/providers`,
     catalogProviderModels: (provider: string, modelType?: string) => {
       const base = `${API_BASE_URL}/model/catalog/${encodeURIComponent(provider)}/models`;
