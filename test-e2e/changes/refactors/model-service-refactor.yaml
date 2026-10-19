@@ -33,5 +33,5 @@ change:
       for the merged upstream contract.
     test_selectors:
     - test/backend/services/test_model_management_service.py
-    - test/backend/app/test_model_managment_app.py
+    - test/backend/app/test_model_management_app.py
     - test/backend/services/test_core_service_slimming.py

@@ -23,7 +23,7 @@ backend/
 │   ├── conversation_management_app.py  # Conversation management APIs
 │   ├── conversation_share_app.py       # Conversation sharing APIs
 │   ├── vectordatabase_app.py    # Knowledge base retrieval APIs
-│   ├── model_managment_app.py   # Model management APIs (capacity suggestions / concurrency governance)
+│   ├── model_management_app.py   # Model management APIs (capacity suggestions / concurrency governance)
 │   ├── voice_app.py             # Voice APIs (STT/TTS WebSocket)
 │   ├── file_management_app.py   # File management APIs (upload / preview / signed URLs)
 │   ├── remote_mcp_app.py        # MCP service and API→MCP conversion APIs (/mcp)

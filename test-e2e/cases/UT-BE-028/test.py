@@ -20,7 +20,7 @@ STAGE = pytest.mark.stage("D1")
 @STAGE
 @pytest.mark.case_id("UT-BE-028")
 def test_model_catalog_custom_json_and_http_credentials_follow_the_v260_contract() -> None:
-    from apps.model_managment_app import _sanitize_model_credentials
+    from apps.model_management_app import _sanitize_model_credentials
     from consts.model import filter_extra_params
     from configs.model_catalog_loader import _normalize_catalog
 
