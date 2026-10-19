@@ -6184,5 +6184,7 @@
   "mcpTools.publish.tagsInheritedHint": "标签继承自源 MCP 服务",
   "notifications.deepLink.mcpNotFound": "未找到链接对应的 MCP 服务",
   "a2a.security.requirementRequired": "请选择认证方式",
-  "common.error.loadFailed": "加载失败，请稍后重试"
+  "common.error.loadFailed": "加载失败，请稍后重试",
+  "workbench.import.precheckTitle": "导入预检",
+  "workbench.import.importAndSelect": "导入并选择"
 }
