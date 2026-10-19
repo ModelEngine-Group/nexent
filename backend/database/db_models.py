@@ -108,6 +108,11 @@ class ConversationRecord(TableBase):
         doc="Monotonic version of the canonical Workbench declaration",
     )
 
+    model_parameter_preferences = Column(JSONB, nullable=False, server_default=text("'{}'::jsonb"),
+        comment="Explicit parameter preferences keyed by outlet ID; no credentials or default-value copies.")
+    model_parameter_preferences_version = Column(Integer, nullable=False, server_default=text("0"),
+        comment="Optimistic revision of model preferences, independent of metadata and Workbench configuration.")
+
 
 class ConversationMessage(TableBase):
     """
@@ -496,6 +501,25 @@ class ModelRecord(TableBase):
         Float, doc="Default nucleus sampling probability for LLM/VLM models. NULL means provider default. Nullable.")
     extra_params = Column(
         JSONB, doc="Fixed inference params without dedicated columns (key-value pairs constrained by FIXED_INFERENCE_FIELDS_BY_TYPE). NULL means no extra params.")
+
+    # Schema extension only: NULL capability values remain unknown until outlet migration.
+    reasoning_supported = Column(Boolean, comment="Reasoning support: true supported, false unsupported, NULL unknown.")
+    reasoning_controls = Column(JSONB, comment="Declared reasoning control domains; NULL unknown, empty array no controls.")
+    native_tool_call_supported = Column(Boolean, comment="Native tool call support; NULL unknown, not an execution guarantee.")
+    structured_output_supported = Column(Boolean, comment="Structured output support; NULL unknown, formats require binding.")
+    temperature_supported = Column(Boolean, comment="Temperature control support; NULL unknown, separate from parameter value.")
+    top_p_supported = Column(Boolean, comment="Top-p control support; NULL unknown, separate from parameter value.")
+    input_modalities = Column(JSONB, comment="Unique supported input modality names; NULL unknown, empty array no modalities.")
+    output_modalities = Column(JSONB, comment="Unique supported output modality names; NULL unknown, empty array no modalities.")
+    enable_thinking = Column(Boolean, comment="Saved thinking switch; NULL omitted unless marked as explicit JSON null.")
+    default_max_output_tokens = Column(Integer, comment="Saved LLM request output default; separate from the hard output cap. NULL omitted unless explicitly marked null.")
+    reasoning_effort = Column(String(30), comment="Saved reasoning effort; NULL omitted unless marked as explicit JSON null.")
+    reasoning_budget_tokens = Column(Integer, comment="Saved reasoning token budget; sentinel values require explicit declaration.")
+    protocol_id = Column(String(30), comment="Registered model protocol; NULL only before resolved outlet migration completes.")
+    resolved_profile = Column(JSONB, comment="Remaining resolved rules, bindings and provenance; no copies of dedicated column values.")
+    profile_schema_version = Column(Integer, comment="Persisted resolved profile schema version; NULL for pre-migration rows.")
+    config_revision = Column(Integer, nullable=False, default=1, server_default=text("1"),
+                             comment="Outlet configuration revision for optimistic updates; initial value 1.")
 
 
 class ModelMonitoringRecord(SimpleTableBase):
