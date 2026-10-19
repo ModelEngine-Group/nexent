@@ -219,9 +219,9 @@ async def test_create_agent_config_filters_root_knowledge_tools_before_cycle_che
         lambda **_kwargs: {"name": "root"},
     )
     monkeypatch.setattr(create_agent_info, "query_sub_agent_relations", lambda **_kwargs: [])
-    runtime_mount = types.ModuleType("services.runtime_knowledge_mount")
+    runtime_mount = types.ModuleType("management.services.knowledge_base.mount")
     runtime_mount.MANAGED_CLASSES = {"knowledge_search"}
-    monkeypatch.setitem(sys.modules, "services.runtime_knowledge_mount", runtime_mount)
+    monkeypatch.setitem(sys.modules, "management.services.knowledge_base.mount", runtime_mount)
 
     with pytest.raises(WorkbenchError, match="WORKBENCH_AGENT_CYCLE"):
         await create_agent_info.create_agent_config(

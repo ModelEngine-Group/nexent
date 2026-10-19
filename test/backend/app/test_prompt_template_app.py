@@ -1,3 +1,4 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 import importlib
 import os
 import sys
@@ -17,8 +18,8 @@ BACKEND_PATH = os.path.abspath(
 def _reset_prompt_template_app_modules():
     yield
     sys.modules.pop("apps.prompt_template_app", None)
-    sys.modules.pop("services.prompt_template_service", None)
-    sys.modules.pop("utils.auth_utils", None)
+    sys.modules.pop("management.services.agent.prompt_templates", None)
+    sys.modules.pop("management.services.permission.identity.authentication_helpers", None)
     sys.modules.pop("consts.model", None)
 
 
@@ -27,7 +28,7 @@ def prompt_template_app_module(monkeypatch):
     if BACKEND_PATH not in sys.path:
         sys.path.insert(0, BACKEND_PATH)
 
-    service_module = types.ModuleType("services.prompt_template_service")
+    service_module = types.ModuleType("management.services.agent.prompt_templates")
     for name in [
         "create_prompt_template_impl",
         "delete_prompt_template_impl",
@@ -36,7 +37,7 @@ def prompt_template_app_module(monkeypatch):
         "update_prompt_template_impl",
     ]:
         setattr(service_module, name, lambda *args, **kwargs: None)
-    monkeypatch.setitem(sys.modules, "services.prompt_template_service", service_module)
+    monkeypatch.setitem(sys.modules, "management.services.agent.prompt_templates", service_module)
 
     class PromptTemplateRequest(BaseModel):
         template_name: str
@@ -49,9 +50,9 @@ def prompt_template_app_module(monkeypatch):
     consts_model_module.PromptTemplateRequest = PromptTemplateRequest
     monkeypatch.setitem(sys.modules, "consts.model", consts_model_module)
 
-    auth_module = types.ModuleType("utils.auth_utils")
+    auth_module = types.ModuleType("management.services.permission.identity.authentication_helpers")
     auth_module.get_current_user_id = lambda authorization: ("user-1", "tenant-1")
-    monkeypatch.setitem(sys.modules, "utils.auth_utils", auth_module)
+    monkeypatch.setitem(sys.modules, "management.services.permission.identity.authentication_helpers", auth_module)
 
     sys.modules.pop("apps.prompt_template_app", None)
     module = importlib.import_module("apps.prompt_template_app")

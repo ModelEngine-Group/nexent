@@ -50,8 +50,8 @@ from consts.exceptions import (
 )
 from permissions.depends import require
 from permissions.models import CurrentUser
-from services.asset_owner_visibility import apply_agent_detail_prompt_visibility
-from services.audit_service import AUDIT_DETAIL_LIST_LIMIT, record_security_event
+from management.services.permission.asset_owner import apply_agent_detail_prompt_visibility
+from management.services.monitor.audit import AUDIT_DETAIL_LIST_LIMIT, record_security_event
 
 from management.services.agent.service import (
     get_agent_info_impl,
@@ -74,23 +74,23 @@ from management.services.agent.service import (
     import_agent_with_skills_impl,
     check_skill_conflicts_impl,
 )
-from services.prompt_service import generate_guardrail_rules_impl
-from services.knowledge_scope_service import get_agent_knowledge_capabilities
-from services.workbench_service import (
+from management.services.agent.prompt_generation import generate_guardrail_rules_impl
+from management.services.knowledge_base.scope import get_agent_knowledge_capabilities
+from management.services.agent.workbench import (
     build_workbench_capability_preview,
     build_workbench_main_profile,
 )
 from management.services.agent.system import (
     ensure_workbench_main_agent,
 )
-from services.agent_draft_permission_service import AgentDraftEditError
-from services.nl2agent_service import Nl2AgentDraftSaveError, create_nl2agent_stream
+from consts.exceptions import AgentDraftEditError
+from management.services.agent.creation import Nl2AgentDraftSaveError, create_nl2agent_stream
 from consts.exceptions import RunModelControlsError
-from services.workbench_creation_history_service import (
+from management.services.conversation.creation_history import (
     prepare_creation_history,
     persist_creation_stream,
 )
-from services.agent_version_service import (
+from management.services.agent.versions import (
     publish_version_impl,
     get_version_list_impl,
     get_version_impl,
@@ -104,7 +104,7 @@ from services.agent_version_service import (
     compare_versions_impl,
     list_published_agents_impl,
 )
-from utils.auth_utils import (
+from management.services.permission.identity.authentication_helpers import (
     get_current_user_info,
     get_current_user_id,
     verify_internal_runtime_jwt,

@@ -72,24 +72,24 @@ from management.services.agent.read import (
 )
 from management.services.skill.service import SkillService
 from nexent.core.concurrency import run_blocking
-from services.agent_reasoning_service import (
+from management.services.agent.reasoning import (
     snapshot_agent_reasoning_config as build_reasoning_snapshot,
 )
-from services.asset_owner_visibility import resolve_agent_list_permission
-from services.conversation_management_service import (
+from management.services.permission.asset_owner import resolve_agent_list_permission
+from management.services.conversation.service import (
     generate_conversation_title_service,  # noqa: F401 - compatibility patch point
     save_message_unit,  # noqa: F401 - retained as a compatibility re-export
     update_unit_status,  # noqa: F401 - retained as a compatibility re-export
 )
-from services.prompt_template_service import (
+from management.services.agent.prompt_templates import (
     SYSTEM_PROMPT_TEMPLATE_ID,
     SYSTEM_PROMPT_TEMPLATE_NAME,
     get_prompt_template_summary,
 )
-from services.user_identity_service import enrich_cas_usernames
-from utils.auth_utils import get_current_user_info
-from utils.config_utils import tenant_config_manager
-from utils.str_utils import convert_list_to_string, convert_string_to_list
+from management.services.permission.identity.display import enrich_cas_usernames
+from management.services.permission.identity.authentication_helpers import get_current_user_info
+from management.services.configuration.tenant.settings import tenant_config_manager
+from management.db.serialization import convert_list_to_string, convert_string_to_list
 
 # Monitoring utilities: bind Agent metadata once at the request boundary.
 

@@ -1,3 +1,4 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 import importlib
 import os
 import sys
@@ -14,7 +15,7 @@ BACKEND_PATH = os.path.abspath(
 @pytest.fixture(autouse=True)
 def _reset_prompt_template_service_modules():
     yield
-    sys.modules.pop("services.prompt_template_service", None)
+    sys.modules.pop("management.services.agent.prompt_templates", None)
     sys.modules.pop("database.prompt_template_db", None)
     sys.modules.pop("consts.model", None)
 
@@ -69,8 +70,8 @@ def prompt_template_service_module(monkeypatch):
         setattr(db_module, name, lambda *args, **kwargs: None)
     monkeypatch.setitem(sys.modules, "database.prompt_template_db", db_module)
 
-    sys.modules.pop("services.prompt_template_service", None)
-    module = importlib.import_module("services.prompt_template_service")
+    sys.modules.pop("management.services.agent.prompt_templates", None)
+    module = importlib.import_module("management.services.agent.prompt_templates")
     return importlib.reload(module)
 
 

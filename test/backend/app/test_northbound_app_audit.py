@@ -1,3 +1,4 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """Audit entries recorded on successful northbound API key operations.
 
 Feature-scoped companion to ``test_northbound_app.py``.
@@ -17,7 +18,7 @@ with pytest.MonkeyPatch.context() as import_mocks:
     import_mocks.setitem(sys.modules, "management.services.agent.service", MagicMock())
     from apps.northbound_app import router
 
-from services.northbound_service import NorthboundContext
+from management.services.agent.northbound import NorthboundContext
 
 app = FastAPI()
 app.include_router(router)

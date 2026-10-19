@@ -1,3 +1,4 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 import sys
 import types
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -149,16 +150,16 @@ sys.modules["nexent"] = nexent_pkg
 sys.modules["nexent.memory"] = memory_pkg
 
 services_pkg = types.ModuleType("services")
-config_service_mod = types.ModuleType("services.memory_provider_config_service")
-plugin_loader_mod = types.ModuleType("services.memory_provider_plugin_loader")
+config_service_mod = types.ModuleType("management.services.memory.providers.configuration")
+plugin_loader_mod = types.ModuleType("management.services.memory.providers.plugins")
 config_service_mod.MemoryProviderConfigService = MagicMock
 plugin_loader_mod.PluginLoader = MagicMock
 sys.modules["services"] = services_pkg
-sys.modules["services.memory_provider_config_service"] = config_service_mod
-sys.modules["services.memory_provider_plugin_loader"] = plugin_loader_mod
+sys.modules["management.services.memory.providers.configuration"] = config_service_mod
+sys.modules["management.services.memory.providers.plugins"] = plugin_loader_mod
 
-from backend.services import memory_external_provider_service as service_module  # noqa: E402
-from backend.services.memory_external_provider_service import MemoryExternalProviderService  # noqa: E402
+from management.services.memory.providers import service as service_module  # noqa: E402
+from management.services.memory.providers.service import MemoryExternalProviderService  # noqa: E402
 
 
 @pytest.fixture

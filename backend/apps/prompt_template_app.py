@@ -1,3 +1,4 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 import logging
 from http import HTTPStatus
 from typing import Optional
@@ -7,14 +8,14 @@ from starlette.responses import JSONResponse
 
 from consts.exceptions import DuplicateError, NotFoundException, ValidationError, TokenExpiredError
 from consts.model import PromptTemplateRequest
-from services.prompt_template_service import (
+from management.services.agent.prompt_templates import (
     create_prompt_template_impl,
     delete_prompt_template_impl,
     get_prompt_template_detail_impl,
     list_prompt_templates_impl,
     update_prompt_template_impl,
 )
-from utils.auth_utils import get_current_user_id
+from management.services.permission.identity.authentication_helpers import get_current_user_id
 
 router = APIRouter(prefix="/prompt_templates")
 logger = logging.getLogger("prompt_template_app")

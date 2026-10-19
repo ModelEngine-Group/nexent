@@ -1,11 +1,12 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 from __future__ import annotations
 
 from unittest.mock import Mock
 
 import pytest
 
-from services import repository_import_precheck as precheck
-from services.repository_import_precheck import _check_model_available
+from management.services.repository import precheck as precheck
+from management.services.repository.precheck import _check_model_available
 from management.services.model.resolver import is_model_available
 from consts.model import ModelConnectStatusEnum
 

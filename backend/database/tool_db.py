@@ -8,7 +8,7 @@ from database.client import get_db_session, filter_property, as_dict
 from database.db_models import ToolInstance, ToolInfo
 from consts.model import ToolSourceEnum
 from consts.tool_labels import BUILTIN_LABEL_MAP
-from utils.tool_utils import get_local_tools_description_zh
+from management.services.tool.catalog import get_local_tools_description_zh
 
 
 def create_tool(tool_info, version_no: int = 0):
@@ -419,7 +419,7 @@ def add_tool_field(tool_info):
                 ele["default"] = instance_value
         tool_dict = as_dict(tool)
         tool_dict["params"] = tool_params
-        
+
         # Merge description_zh from SDK for local tools
         tool_name = tool_dict.get("name")
         if tool_dict.get("source") == "local":
@@ -427,7 +427,7 @@ def add_tool_field(tool_info):
             if tool_name in local_tool_descriptions:
                 sdk_info = local_tool_descriptions[tool_name]
                 tool_dict["description_zh"] = sdk_info.get("description_zh")
-                
+
                 # Merge params description_zh from SDK
                 for param in tool_params:
                     if not param.get("description_zh"):
@@ -435,7 +435,7 @@ def add_tool_field(tool_info):
                             if sdk_param.get("name") == param.get("name"):
                                 param["description_zh"] = sdk_param.get("description_zh")
                                 break
-                
+
                 # Merge inputs description_zh from SDK
                 inputs_str = tool_dict.get("inputs", "{}")
                 try:
@@ -449,7 +449,7 @@ def add_tool_field(tool_info):
                         tool_dict["inputs"] = json.dumps(inputs, ensure_ascii=False)
                 except (json.JSONDecodeError, TypeError):
                     pass
-        
+
         # combine tool_info and tool_dict
         tool_info.update(tool_dict)
         return tool_info

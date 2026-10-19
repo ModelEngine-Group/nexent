@@ -1,3 +1,4 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """D5 cancellation and thread-lifecycle contract for NL2Agent streaming."""
 
 from __future__ import annotations
@@ -8,7 +9,7 @@ from types import SimpleNamespace
 
 import pytest
 
-import services.nl2agent_service as service
+import management.services.agent.creation as service
 
 
 @pytest.mark.stage("D5")

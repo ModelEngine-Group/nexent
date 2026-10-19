@@ -30,8 +30,8 @@ from database.tool_db import (
 from management.services.skill.transfer import install_skills_from_zip_for_tenant
 from nexent.core.prompts import load_prompt
 from packaging.version import InvalidVersion, Version
-from services.agent_version_service import publish_version_impl
-from services.prompt_template_service import (
+from management.services.agent.versions import publish_version_impl
+from management.services.agent.prompt_templates import (
     SYSTEM_PROMPT_TEMPLATE_ID,
     SYSTEM_PROMPT_TEMPLATE_NAME,
 )

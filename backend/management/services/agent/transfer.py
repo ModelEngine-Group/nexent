@@ -51,15 +51,15 @@ from management.services.agent.naming import (
     generate_unique_agent_value,
 )
 from management.services.skill.service import SkillService
-from services.agent_version_service import publish_version_impl
-from services.prompt_template_service import (
+from management.services.agent.versions import publish_version_impl
+from management.services.agent.prompt_templates import (
     SYSTEM_PROMPT_TEMPLATE_ID,
     SYSTEM_PROMPT_TEMPLATE_NAME,
 )
-from utils.auth_utils import get_current_user_info
-from utils.config_utils import tenant_config_manager
+from management.services.permission.identity.authentication_helpers import get_current_user_info
+from management.services.configuration.tenant.settings import tenant_config_manager
 from management.services.skill.naming import generate_available_copy_skill_name
-from utils.str_utils import convert_list_to_string
+from management.db.serialization import convert_list_to_string
 
 logger = logging.getLogger(__name__)
 

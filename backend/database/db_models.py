@@ -1068,7 +1068,7 @@ class MemoryRecord(TableBase):
 
     This is the authoritative store for agent short-term memory, which
     additionally mirrors the content into Elasticsearch (managed by
-    ``services.memory_index_service``).
+    ``management.services.memory.index``).
 
     The isolation contract from ``memory_design.md`` is enforced by the
     database access layer, not by the schema:

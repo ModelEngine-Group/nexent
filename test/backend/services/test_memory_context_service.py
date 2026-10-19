@@ -1,4 +1,5 @@
-"""Unit tests for ``backend.services.memory_context_service``.
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+"""Unit tests for ``management.services.memory.context``.
 
 Covers:
 
@@ -291,17 +292,17 @@ vectordb_service_mod.get_vector_db_core = MagicMock(name="get_vector_db_core")
 sys.modules["management.services.knowledge_base.service"] = vectordb_service_mod
 
 
-# Stub ``services.memory_index_service`` (transitive only).
-memory_index_service_mod = types.ModuleType("services.memory_index_service")
+# Stub ``management.services.memory.index`` (transitive only).
+memory_index_service_mod = types.ModuleType("management.services.memory.index")
 memory_index_service_mod.MemoryIndexService = MagicMock(name="MemoryIndexService")
 memory_index_service_mod.get_memory_index_service = MagicMock(name="get_memory_index_service")
-sys.modules["services.memory_index_service"] = memory_index_service_mod
+sys.modules["management.services.memory.index"] = memory_index_service_mod
 
 
-# Stub ``services.memory_record_service`` — the unit under test imports
+# Stub ``management.services.memory.records`` — the unit under test imports
 # ``_compute_content_embedding`` and ``_resolve_tenant_embedding_model_info``
 # directly from this module.
-memory_record_service_mod = types.ModuleType("services.memory_record_service")
+memory_record_service_mod = types.ModuleType("management.services.memory.records")
 memory_record_service_mod.MemoryRecordService = MagicMock(name="MemoryRecordService")
 memory_record_service_mod._compute_content_embedding = MagicMock(
     name="_compute_content_embedding", return_value=None
@@ -310,11 +311,11 @@ memory_record_service_mod._resolve_tenant_embedding_model_info = MagicMock(
     name="_resolve_tenant_embedding_model_info", return_value=None
 )
 memory_record_service_mod.get_memory_record_service = MagicMock(name="get_memory_record_service")
-sys.modules["services.memory_record_service"] = memory_record_service_mod
+sys.modules["management.services.memory.records"] = memory_record_service_mod
 
 
-# Stub ``services.memory_retrieval_service``.
-memory_retrieval_service_mod = types.ModuleType("services.memory_retrieval_service")
+# Stub ``management.services.memory.retrieval``.
+memory_retrieval_service_mod = types.ModuleType("management.services.memory.retrieval")
 memory_retrieval_service_mod.MemoryRetrievalService = MagicMock(name="MemoryRetrievalService")
 memory_retrieval_service_mod.get_memory_retrieval_service = MagicMock(
     name="get_memory_retrieval_service"
@@ -322,8 +323,8 @@ memory_retrieval_service_mod.get_memory_retrieval_service = MagicMock(
 memory_retrieval_service_mod.reset_memory_retrieval_service = MagicMock(
     name="reset_memory_retrieval_service"
 )
-sys.modules["services.memory_retrieval_service"] = memory_retrieval_service_mod
-sys.modules["backend.services.memory_retrieval_service"] = memory_retrieval_service_mod
+sys.modules["management.services.memory.retrieval"] = memory_retrieval_service_mod
+sys.modules["management.services.memory.retrieval"] = memory_retrieval_service_mod
 
 
 # Stub ``consts.const`` with the constants the unit under test imports.
@@ -355,7 +356,7 @@ sys.modules["consts.const"] = consts_mod
 # ---------------------------------------------------------------------------
 
 
-from backend.services import memory_context_service  # noqa: E402
+from management.services.memory import context as memory_context_service  # noqa: E402
 
 
 # ---------------------------------------------------------------------------

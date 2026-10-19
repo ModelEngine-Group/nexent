@@ -74,7 +74,7 @@ def _project_python_files(root):
 def test_ac002_preview_key_matches_existing_contract(monkeypatch):
     import hashlib
 
-    module = load_source(monkeypatch, "backend/utils/storage_key_utils.py", "slimming_keys")
+    module = load_source(monkeypatch, "backend/management/services/file/preview.py", "slimming_keys")
     for name in ("a.docx", "folder/中文.pptx", "without-extension", "a.b.c"):
         stem = name.rsplit(".", 1)[0] if "." in name else name
         digest = hashlib.md5(name.encode()).hexdigest()[:8]
@@ -135,7 +135,7 @@ def test_ac003_template_resolution_and_output_normalization(naming, monkeypatch)
             "agent_name_regenerate_user_prompt": "{{ task_description }} {{ existing_values }}",
         }
 
-    dependency(monkeypatch, "services.prompt_template_service", resolve_prompt_generate_template=resolve)
+    dependency(monkeypatch, "management.services.agent.prompt_templates", resolve_prompt_generate_template=resolve)
     calls = []
     monkeypatch.setattr(naming, "call_llm_for_system_prompt", lambda **kw: calls.append(kw) or " fresh \nignored")
     assert naming.regenerate_agent_value(
@@ -205,9 +205,9 @@ def test_ac008_shared_run_preparation(monkeypatch, enabled, debug):
         calls.append((args, kwargs))
         return types.SimpleNamespace(user_config=types.SimpleNamespace(memory_switch=enabled, agent_share_option="private"))
 
-    dependency(monkeypatch, "services.memory_config_service", build_memory_context=memory)
-    dependency(monkeypatch, "utils.monitoring", monitoring_manager=types.SimpleNamespace(bind_agent_context=lambda value: value))
-    dependency(monkeypatch, "utils.monitoring_identity", resolve_monitoring_user_email=lambda user, tenant: "person@example.com")
+    dependency(monkeypatch, "management.services.configuration.user.memory", build_memory_context=memory)
+    dependency(monkeypatch, "infrastructure.observability.bootstrap", monitoring_manager=types.SimpleNamespace(bind_agent_context=lambda value: value))
+    dependency(monkeypatch, "management.services.monitor.identity", resolve_monitoring_user_email=lambda user, tenant: "person@example.com")
     module = load_source(monkeypatch, "backend/management/services/agent/context.py", "slimming_run_context")
     request = types.SimpleNamespace(
         agent_id=3, conversation_id=4, query="hello", is_debug=debug, history=[1, 2], minio_files=[]
@@ -237,7 +237,7 @@ def model_resolver(monkeypatch):
     )
     dependency(monkeypatch, "management.services.model.adapter", build_adapter_fresh=lambda *args: args)
     dependency(
-        monkeypatch, "utils.config_utils",
+        monkeypatch, "management.services.configuration.tenant.settings",
         tenant_config_manager=types.SimpleNamespace(get_model_config=lambda **kwargs: {}),
     )
     return load_source(monkeypatch, "backend/management/services/model/resolver.py", "management.services.model.resolver")
@@ -454,7 +454,7 @@ def test_ac016_management_services_are_grouped_by_business_package():
     )
 
     assert root_modules == ["__init__.py"]
-    assert business_packages == ["agent", "knowledge_base", "model", "skill"]
+    assert business_packages == ['agent', 'automation', 'configuration', 'conversation', 'evaluation', 'file', 'knowledge_base', 'mcp', 'memory', 'model', 'monitor', 'notification', 'permission', 'repository', 'skill', 'tag', 'tool']
     assert all((services_root / package / "__init__.py").is_file() for package in business_packages)
 
 

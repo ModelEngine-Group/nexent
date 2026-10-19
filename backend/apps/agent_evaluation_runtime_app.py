@@ -1,3 +1,4 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """Internal runtime endpoints for agent-evaluation execution."""
 
 import logging
@@ -14,8 +15,8 @@ from database.agent_evaluation_db import (
     claim_agent_evaluation_run,
     get_agent_evaluation,
 )
-from services.thread_lifecycle_service import runtime_thread_manager
-from utils.auth_utils import verify_internal_runtime_jwt
+from infrastructure.concurrency import runtime_thread_manager
+from management.services.permission.identity.authentication_helpers import verify_internal_runtime_jwt
 
 
 logger = logging.getLogger("agent_evaluation_runtime_app")
@@ -41,14 +42,14 @@ class TrialRunRequest(BaseModel):
 
 def _load_evaluation_executor():
     """Load the evaluation service only when a runtime run is dispatched."""
-    from services.agent_evaluation_service import execute_agent_evaluation_run
+    from management.services.evaluation.runs import execute_agent_evaluation_run
 
     return execute_agent_evaluation_run
 
 
 def _load_trial_executor():
     """Load the trial executor only when Runtime receives a trial request."""
-    from services.agent_evaluation_service import trial_run_evaluator_impl
+    from management.services.evaluation.runs import trial_run_evaluator_impl
 
     return trial_run_evaluator_impl
 

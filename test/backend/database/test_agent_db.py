@@ -69,9 +69,9 @@ utils_mock.auth_utils.get_current_user_id_from_token = MagicMock(return_value="t
 
 # 将模拟的utils模块添加到sys.modules中
 sys.modules['utils'] = utils_mock
-sys.modules['utils.auth_utils'] = utils_mock.auth_utils
+sys.modules['management.services.permission.identity.authentication_helpers'] = utils_mock.auth_utils
 
-# Stub utils.str_utils to satisfy imports in backend.database.agent_db
+# Stub management.db.serialization to satisfy imports in backend.database.agent_db
 str_utils_mock = MagicMock()
 str_utils_mock.convert_list_to_string = MagicMock(
     side_effect=lambda items: "" if items is None else ",".join(str(i) for i in items)
@@ -79,7 +79,7 @@ str_utils_mock.convert_list_to_string = MagicMock(
 str_utils_mock.convert_string_to_list = MagicMock(
     side_effect=lambda s: [] if not s else [int(x) for x in str(s).split(",") if str(x).strip().isdigit()]
 )
-sys.modules['utils.str_utils'] = str_utils_mock
+sys.modules['management.db.serialization'] = str_utils_mock
 
 # Provide a stub for the `boto3` module so that it can be imported safely even
 # if the testing environment does not have it available.

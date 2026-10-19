@@ -9,7 +9,7 @@ from database.db_models import AgentInfo, ToolInstance, AgentRelation
 from database.agent_version_db import query_current_version_no
 from consts.const import ASSET_OWNER_TENANT_ID, MAX_AGENTS_PER_TENANT
 from consts.exceptions import AgentNotFoundError, TenantResourceLimitError
-from utils.str_utils import convert_list_to_string
+from management.db.serialization import convert_list_to_string
 
 logger = logging.getLogger("agent_db")
 

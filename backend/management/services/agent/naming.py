@@ -74,7 +74,7 @@ def regenerate_agent_value(
 ) -> str:
     """Regenerate one naming field with five attempts and suffix fallback."""
     if user_id is not None:
-        from services.prompt_template_service import resolve_prompt_generate_template
+        from management.services.agent.prompt_templates import resolve_prompt_generate_template
 
         template = resolve_prompt_generate_template(
             tenant_id=tenant_id,

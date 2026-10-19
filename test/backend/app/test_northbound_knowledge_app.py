@@ -36,20 +36,20 @@ class NorthboundContext:
     token_id: int = 0
 
 
-northbound_service_module = types.ModuleType("services.northbound_service")
+northbound_service_module = types.ModuleType("management.services.agent.northbound")
 northbound_service_module.NorthboundContext = NorthboundContext
-sys.modules["services.northbound_service"] = northbound_service_module
+sys.modules["management.services.agent.northbound"] = northbound_service_module
 
-file_mgmt_module = types.ModuleType("services.file_management_service")
+file_mgmt_module = types.ModuleType("management.services.file.service")
 file_mgmt_module.upload_files_impl = AsyncMock()
 file_mgmt_module.get_file_url_impl = AsyncMock()
 file_mgmt_module.get_file_stream_impl = AsyncMock()
 file_mgmt_module.check_file_access = MagicMock(return_value=True)
-sys.modules["services.file_management_service"] = file_mgmt_module
+sys.modules["management.services.file.service"] = file_mgmt_module
 
-redis_service_module = types.ModuleType("services.redis_service")
+redis_service_module = types.ModuleType("management.services.knowledge_base.task_state")
 redis_service_module.get_redis_service = MagicMock()
-sys.modules["services.redis_service"] = redis_service_module
+sys.modules["management.services.knowledge_base.task_state"] = redis_service_module
 
 vectordb_service_module = types.ModuleType("management.services.knowledge_base.service")
 
@@ -181,9 +181,9 @@ class VectorDatabaseType:
 consts_const_module.VectorDatabaseType = VectorDatabaseType
 sys.modules["consts.const"] = consts_const_module
 
-utils_auth_module = types.ModuleType("utils.auth_utils")
+utils_auth_module = types.ModuleType("management.services.permission.identity.authentication_helpers")
 utils_auth_module.generate_session_jwt = MagicMock(return_value="jwt-token")
-sys.modules["utils.auth_utils"] = utils_auth_module
+sys.modules["management.services.permission.identity.authentication_helpers"] = utils_auth_module
 
 utils_fm_module = types.ModuleType("management.services.knowledge_base.ingestion")
 utils_fm_module.trigger_data_process = AsyncMock(return_value={"status": "ok"})

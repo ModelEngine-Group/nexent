@@ -26,11 +26,11 @@ from management.services.knowledge_base.service import (
     check_knowledge_base_exist_impl,
     KnowledgeBaseNeedsModelConfigError,
 )
-from services.audit_service import record_security_event
-from services.file_management_service import check_file_access
-from services.quota_service import QuotaService
-from services.redis_service import get_redis_service
-from utils.auth_utils import get_current_user_context, get_current_user_id
+from management.services.monitor.audit import record_security_event
+from management.services.file.service import check_file_access
+from management.services.knowledge_base.quota import QuotaService
+from management.services.knowledge_base.task_state import get_redis_service
+from management.services.permission.identity.authentication_helpers import get_current_user_context, get_current_user_id
 from management.services.knowledge_base.status import get_all_files_status
 from database.knowledge_db import get_index_name_by_knowledge_name, get_knowledge_record
 from database.model_management_db import get_model_by_model_id
@@ -173,7 +173,7 @@ async def delete_index(
         require_knowledge_base_edit_permission(index_name, user_id, tenant_id)
         # Call the centralized full deletion service
         result = await ElasticSearchService.full_delete_knowledge_base(index_name, vdb_core, user_id)
-        from services.tag_management_service import TagManagementService
+        from management.services.tag.library import TagManagementService
 
         TagManagementService.cleanup_resource_assignments(
             tenant_id, "knowledge_base", index_name, user_id
@@ -723,7 +723,7 @@ async def delete_documents(
         )
 
         if scope == "full":
-            from services.tag_management_service import TagManagementService
+            from management.services.tag.library import TagManagementService
 
             TagManagementService.cleanup_document_assignments(
                 tenant_id, "local", index_name, path_or_url, user_id

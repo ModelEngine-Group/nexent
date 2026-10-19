@@ -1,3 +1,4 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """D5 main security, reliability and deployment smoke scenarios."""
 
 from __future__ import annotations
@@ -153,7 +154,7 @@ async def _config_sync_isolated() -> None:
 
 
 async def _workspace_cleanup_contract() -> None:
-    source = (repo_root() / "backend" / "services" / "workspace_cleanup_service.py").read_text(encoding="utf-8")
+    source = (repo_root() / "backend" / "runtime" / "services" / "workspace_cleanup.py").read_text(encoding="utf-8")
     assert "cleanup_orphaned_agent_workspaces" in source
     assert "_RUN_ID_PATTERN.fullmatch(run_dir.name)" in source
     assert "root.is_symlink()" in source and "run_dir.is_symlink()" in source

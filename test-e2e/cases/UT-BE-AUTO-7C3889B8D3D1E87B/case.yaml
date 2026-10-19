@@ -16,7 +16,7 @@ case:
   - 本地依赖/组件测试环境可运行；不要求外部模型服务在线。
   - 设置 NEXENT_TEST_HOME，目录不位于 Nexent Git 仓库内。
   - 当次 run_id 已生成，所有新建资源名称带 run_id；测试基线固定为 develop 当前批次锁定的产品提交；执行时另记录实际被测commit。
-  - 本用例为纯 mock 级单元测试：mock backend/services/memory_external_provider_service.py 的 get_memory_external_provider_service 与 backend/services/memory_ingestion_event_service.py
+  - 本用例为纯 mock 级单元测试：mock backend/management/services/memory/providers/service.py 的 get_memory_external_provider_service 与 backend/management/services/memory/ingestion.py
     的 MemoryIngestionEventService.send_ingest_all_enabled，不依赖真实外部 memory provider、数据库或模型。
   test_data:
     legacy_asset_declaration: '- 无：纯 mock 级单元测试，不依赖本地固定资产。'
@@ -25,7 +25,7 @@ case:
     action: 在本地工作区读取与“外部记忆 provider 扇出写入”相关的 fixture/配置；测试代码不得读取生产凭据。
     expected: 无启用 provider 时 _fanout_external_ingest 短路返回且不调用 send_ingest_all_enabled。
   - order: 2
-    action: 直接导入 backend/services/memory_backend_adapter.py 的 _fanout_external_ingest 与 _backend_store_hook，构造最小 payload（tenant_id/user_id/content）与
+    action: 直接导入 backend/management/services/memory/provider.py 的 _fanout_external_ingest 与 _backend_store_hook，构造最小 payload（tenant_id/user_id/content）与
       result（memory_id）；mock provider_service 的 _config_service.get_enabled_providers 与 MemoryIngestionEventService.send_ingest_all_enabled
       返回值。
     expected: 有启用 provider 时 send_ingest_all_enabled 以单个 MemoryIngestUnit（event_type=memory_stored、event_id=result，memory_id、unit_content=payload，content）调用一次。

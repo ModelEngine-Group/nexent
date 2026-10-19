@@ -1,3 +1,4 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 import logging
 import textwrap
 from pathlib import Path
@@ -5,7 +6,7 @@ from pathlib import Path
 import pytest
 import yaml
 
-from services.memory_provider_plugin_loader import PluginInfo, PluginLoader
+from management.services.memory.providers.plugins import PluginInfo, PluginLoader
 
 pytestmark = [
     pytest.mark.case_id('UT-BE-AUTO-475EB869B7D8F069'),

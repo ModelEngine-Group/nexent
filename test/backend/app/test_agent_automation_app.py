@@ -1,3 +1,4 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 import os
 import sys
 from unittest.mock import AsyncMock, MagicMock
@@ -12,12 +13,12 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../../backend"))
 from apps import agent_automation_app
 from apps.app_factory import create_app
 from consts.exceptions import UnauthorizedError
-from services.agent_automation.errors import (
+from consts.exceptions import (
     AgentAutomationError,
     AutomationConversationAlreadyBoundError,
     AutomationNotFoundError,
 )
-from services.agent_automation.models import (
+from contracts.automation import (
     AutomationProposalPatchRequest,
     AutomationTaskPatchRequest,
 )

@@ -172,7 +172,7 @@ _concurrency_module.ThreadCapacityExceeded = _ThreadCapacityExceeded
 _concurrency_module.ThreadQueueTimedOut = _ThreadQueueTimedOut
 _concurrency_module.run_blocking = _run_blocking
 sys.modules["nexent.core.concurrency"] = _concurrency_module
-_thread_lifecycle_module = types.ModuleType("services.thread_lifecycle_service")
+_thread_lifecycle_module = types.ModuleType("infrastructure.concurrency")
 _thread_lifecycle_module.runtime_thread_manager = MagicMock()
 _thread_lifecycle_module.runtime_thread_manager.run = AsyncMock(
     side_effect=_run_managed
@@ -183,7 +183,7 @@ _thread_lifecycle_module.runtime_thread_manager.submit.return_value = MagicMock(
 )
 _thread_lifecycle_module.runtime_thread_manager.wait_until_started = AsyncMock()
 _thread_lifecycle_module.config_thread_manager = MagicMock()
-sys.modules["services.thread_lifecycle_service"] = _thread_lifecycle_module
+sys.modules["infrastructure.concurrency"] = _thread_lifecycle_module
 sys.modules["nexent.core.agents"] = MagicMock()
 sys.modules["nexent.core.agents"].__path__ = [str(Path(__file__).resolve().parents[3] / "sdk/nexent/core/agents")]
 sys.modules["nexent.core.agents"].__spec__ = importlib.machinery.ModuleSpec("nexent.core.agents", loader=None, is_package=True)
@@ -209,17 +209,17 @@ sys.modules["nexent.memory.memory_service"] = MagicMock()
 memory_models_module = types.ModuleType("nexent.memory.models")
 memory_models_module.MemoryIngestUnit = MagicMock
 sys.modules["nexent.memory.models"] = memory_models_module
-knowledge_scope_service_module = types.ModuleType("services.knowledge_scope_service")
+knowledge_scope_service_module = types.ModuleType("management.services.knowledge_base.scope")
 knowledge_scope_service_module.build_runtime_knowledge_resources = MagicMock
 knowledge_scope_service_module.resolve_knowledge_scope = MagicMock
-sys.modules["services.knowledge_scope_service"] = knowledge_scope_service_module
-fa_memory_extractor_module = types.ModuleType("services.fa_memory_extractor")
+sys.modules["management.services.knowledge_base.scope"] = knowledge_scope_service_module
+fa_memory_extractor_module = types.ModuleType("management.services.memory.extraction")
 fa_memory_extractor_module.FaMemoryExtractor = MagicMock
-sys.modules["services.fa_memory_extractor"] = fa_memory_extractor_module
-memory_backend_adapter_module = types.ModuleType("services.memory_backend_adapter")
+sys.modules["management.services.memory.extraction"] = fa_memory_extractor_module
+memory_backend_adapter_module = types.ModuleType("management.services.memory.provider")
 memory_backend_adapter_module._build_ingestion_event_service = MagicMock
 memory_backend_adapter_module.build_memory_service_for_fa_extraction = MagicMock
-sys.modules["services.memory_backend_adapter"] = memory_backend_adapter_module
+sys.modules["management.services.memory.provider"] = memory_backend_adapter_module
 sys.modules["nexent.storage"] = MagicMock()
 sys.modules["nexent.storage.storage_client_factory"] = MagicMock()
 sys.modules["nexent.storage.minio_config"] = MagicMock()
@@ -273,12 +273,12 @@ services_module.__path__ = [
 ]
 sys.modules["services"] = services_module
 
-tag_management_service_module = types.ModuleType("services.tag_management_service")
+tag_management_service_module = types.ModuleType("management.services.tag.library")
 tag_management_service_module.TagManagementService = MagicMock()
-sys.modules["services.tag_management_service"] = tag_management_service_module
+sys.modules["management.services.tag.library"] = tag_management_service_module
 setattr(services_module, "tag_management_service", tag_management_service_module)
 
-runtime_state_service_module = types.ModuleType("services.runtime_state_service")
+runtime_state_service_module = types.ModuleType("management.services.agent.run_state")
 runtime_state_service_mock = MagicMock()
 runtime_state_service_mock.enabled = False
 runtime_state_service_mock.is_cancelled_async = AsyncMock(return_value=False)
@@ -288,7 +288,7 @@ runtime_state_service_mock.wait_for_stream_events_async = AsyncMock(return_value
 runtime_state_service_mock.get_stream_status_async = AsyncMock(return_value={})
 runtime_state_service_mock.reset_stream_async = AsyncMock(return_value=None)
 runtime_state_service_module.runtime_state_service = runtime_state_service_mock
-sys.modules["services.runtime_state_service"] = runtime_state_service_module
+sys.modules["management.services.agent.run_state"] = runtime_state_service_module
 
 conversation_management_service_mock = MagicMock()
 memory_config_service_mock = MagicMock()
@@ -306,15 +306,15 @@ prompt_template_service_mock.resolve_prompt_generate_template = MagicMock(
     return_value={}
 )
 
-sys.modules["services.conversation_management_service"] = (
+sys.modules["management.services.conversation.service"] = (
     conversation_management_service_mock
 )
-sys.modules["services.memory_config_service"] = memory_config_service_mock
-sys.modules["services.agent_version_service"] = agent_version_service_mock
+sys.modules["management.services.configuration.user.memory"] = memory_config_service_mock
+sys.modules["management.services.agent.versions"] = agent_version_service_mock
 sys.modules["management.services.skill.service"] = skill_service_mock
-sys.modules["services.prompt_template_service"] = prompt_template_service_mock
-sys.modules["services.file_management_service"] = MagicMock()
-sys.modules["services.streaming_channel"] = MagicMock()
+sys.modules["management.services.agent.prompt_templates"] = prompt_template_service_mock
+sys.modules["management.services.file.service"] = MagicMock()
+sys.modules["infrastructure.streaming.channels"] = MagicMock()
 
 model_gateway_service_mock = types.ModuleType("management.services.model.adapter")
 model_gateway_service_mock.build_adapter_fresh = MagicMock()
@@ -390,7 +390,7 @@ streaming_channel_manager_mock.complete_channel = AsyncMock(
     side_effect=_complete_test_streaming_channel
 )
 sys.modules[
-    "services.streaming_channel"
+    "infrastructure.streaming.channels"
 ].streaming_channel_manager = streaming_channel_manager_mock
 setattr(
     services_module, "skill_service", sys.modules["management.services.skill.service"]
@@ -402,15 +402,14 @@ import importlib.util
 _asset_owner_path = (
     Path(__file__).resolve().parents[3]
     / "backend"
-    / "services"
-    / "asset_owner_visibility.py"
+    / 'management' / 'services' / 'permission' / 'asset_owner.py'
 )
 _asset_owner_spec = importlib.util.spec_from_file_location(
-    "services.asset_owner_visibility", _asset_owner_path
+    "management.services.permission.asset_owner", _asset_owner_path
 )
 _asset_owner_mod = importlib.util.module_from_spec(_asset_owner_spec)
 _asset_owner_spec.loader.exec_module(_asset_owner_mod)
-sys.modules["services.asset_owner_visibility"] = _asset_owner_mod
+sys.modules["management.services.permission.asset_owner"] = _asset_owner_mod
 setattr(services_module, "asset_owner_visibility", _asset_owner_mod)
 
 # Mock agents submodules
@@ -449,9 +448,9 @@ utils_module.__path__ = [
     os.path.join(os.path.dirname(__file__), "../../../backend/utils")
 ]
 sys.modules["utils"] = utils_module
-sys.modules["utils.auth_utils"] = MagicMock()
+sys.modules["management.services.permission.identity.authentication_helpers"] = MagicMock()
 sys.modules["utils.thread_utils"] = MagicMock()
-sys.modules["utils.knowledge_telemetry"] = MagicMock()
+sys.modules["infrastructure.observability.knowledge"] = MagicMock()
 
 
 # Mock str_utils with actual convert_list_to_string implementation
@@ -574,16 +573,16 @@ sys.modules["nexent.core.models.rerank_model"] = rerank_module
 # Don't mock agent_model yet, we need to import ToolConfig first
 sys.modules["nexent.memory"] = MagicMock()
 sys.modules["nexent.memory.memory_service"] = MagicMock()
-sys.modules["utils.str_utils"] = MagicMock()
-sys.modules["utils.str_utils"].convert_list_to_string = mock_convert_list_to_string
-sys.modules["utils.str_utils"].convert_string_to_list = lambda s: (
+sys.modules["management.db.serialization"] = MagicMock()
+sys.modules["management.db.serialization"].convert_list_to_string = mock_convert_list_to_string
+sys.modules["management.db.serialization"].convert_string_to_list = lambda s: (
     s.split(",") if s else []
 )
 
-sys.modules["utils.config_utils"] = MagicMock()
+sys.modules["management.services.configuration.tenant.settings"] = MagicMock()
 sys.modules["management.services.agent.prompt"] = MagicMock()
 sys.modules["management.services.model.invocation"] = MagicMock()
-sys.modules["utils.monitoring"] = MagicMock()
+sys.modules["infrastructure.observability.bootstrap"] = MagicMock()
 
 # =============================================================================
 # STEP 2: Now import after all mocks are in place
@@ -617,8 +616,8 @@ monitoring_manager_mock.set_span_attributes = MagicMock()
 
 sys.modules["nexent.monitor"].get_monitoring_manager = lambda: monitoring_manager_mock
 sys.modules["nexent.monitor"].monitoring_manager = monitoring_manager_mock
-sys.modules["utils.monitoring"].monitoring_manager = monitoring_manager_mock
-sys.modules["utils.monitoring"].setup_fastapi_app = MagicMock(return_value=True)
+sys.modules["infrastructure.observability.bootstrap"].monitoring_manager = monitoring_manager_mock
+sys.modules["infrastructure.observability.bootstrap"].setup_fastapi_app = MagicMock(return_value=True)
 
 # Mock storage config validate
 sys.modules["nexent.storage.minio_config"].MinIOStorageConfig = type(
@@ -719,7 +718,7 @@ from test.backend.services.agent_legacy_helpers import (
     load_default_agents_json_file,
     get_agent_id_by_name,
 )
-from services.conversation_management_service import (
+from management.services.conversation.service import (
     save_message,
     save_message_unit,
     update_unit_status,
@@ -4405,7 +4404,7 @@ async def test_list_all_agent_info_impl_user_permission_read_only(
     mock_query_groups.return_value = [1]  # User is in group 1, so can see both agents
 
     # Mock convert_string_to_list to handle both empty strings and comma-separated values
-    # This should match the actual implementation in utils.str_utils
+    # This should match the actual implementation in management.db.serialization
     def convert_side_effect(x):
         if not x or (isinstance(x, str) and x.strip() == ""):
             return []
@@ -4491,7 +4490,7 @@ async def test_list_all_agent_info_impl_group_filtering(
     mock_query_groups.return_value = [1, 2]  # User is in groups 1 and 2
 
     # Mock convert_string_to_list to handle both empty strings and comma-separated values
-    # This should match the actual implementation in utils.str_utils
+    # This should match the actual implementation in management.db.serialization
     def convert_side_effect(x):
         if not x or (isinstance(x, str) and x.strip() == ""):
             return []
@@ -5727,7 +5726,7 @@ async def test_ut_be_tlm_033_agent_id_capacity_rejects_before_managed_execution(
     "management.services.agent.subscription._resolve_user_tenant_language",
     return_value=(None, None, "en"),
 )
-@patch("services.memory_config_service.build_memory_context")
+@patch("management.services.configuration.user.memory.build_memory_context")
 @patch("management.services.agent.subscription.save_messages")
 @patch("management.services.agent.subscription.generate_stream")
 async def test_run_agent_stream(
@@ -5897,7 +5896,7 @@ async def test_run_agent_stream_rejects_concurrent_run_with_sse_error(
 @patch("management.services.agent.subscription.create_new_conversation")
 @patch("management.services.agent.subscription.generate_stream")
 @patch("management.services.agent.subscription.save_messages")
-@patch("services.memory_config_service.build_memory_context")
+@patch("management.services.configuration.user.memory.build_memory_context")
 async def test_run_agent_stream_auto_creates_conversation_when_missing(
     mock_build_mem_ctx,
     mock_save_messages,
@@ -5964,7 +5963,7 @@ async def test_run_agent_stream_auto_creates_conversation_when_missing(
     "management.services.agent.subscription._resolve_user_tenant_language",
     return_value=("u", "t", "en"),
 )
-@patch("services.memory_config_service.build_memory_context")
+@patch("management.services.configuration.user.memory.build_memory_context")
 @patch("management.services.agent.subscription.save_messages")
 @patch("management.services.agent.subscription.generate_stream")
 async def test_run_agent_stream_sanitizes_uncaught_stream_exception(
@@ -6015,7 +6014,7 @@ async def test_run_agent_stream_sanitizes_uncaught_stream_exception(
     "management.services.agent.subscription._resolve_user_tenant_language",
     return_value=("u", "t", "en"),
 )
-@patch("services.memory_config_service.build_memory_context")
+@patch("management.services.configuration.user.memory.build_memory_context")
 @patch("management.services.agent.subscription.save_messages")
 async def test_non_debug_producer_survives_sse_disconnect(
     mock_save_messages,
@@ -6161,7 +6160,7 @@ async def test_cancelled_producer_explicitly_closes_stream_generator(monkeypatch
     "management.services.agent.subscription._resolve_user_tenant_language",
     return_value=("u", "t", "en"),
 )
-@patch("services.memory_config_service.build_memory_context")
+@patch("management.services.configuration.user.memory.build_memory_context")
 @patch("management.services.agent.subscription.save_messages")
 async def test_debug_stream_keeps_direct_execution_path(
     mock_save_messages,
@@ -7288,7 +7287,7 @@ async def test_generate_stream_preserves_active_run_error_and_releases_reservati
     "management.services.agent.subscription._resolve_user_tenant_language",
     return_value=(None, None, "en"),
 )
-@patch("services.memory_config_service.build_memory_context")
+@patch("management.services.configuration.user.memory.build_memory_context")
 @patch("management.services.agent.subscription.save_messages")
 @patch("management.services.agent.subscription.generate_stream")
 async def test_run_agent_stream_no_memory(
@@ -7327,7 +7326,7 @@ async def test_run_agent_stream_no_memory(
     "management.services.agent.subscription._resolve_user_tenant_language",
     return_value=("u", "t", "en"),
 )
-@patch("services.memory_config_service.build_memory_context")
+@patch("management.services.configuration.user.memory.build_memory_context")
 @patch("management.services.agent.subscription.save_messages")
 @patch("management.services.agent.subscription.generate_stream")
 async def test_run_agent_stream_skip_user_save(
@@ -11831,7 +11830,7 @@ async def test_update_agent_info_impl_skill_update_exception(
 @pytest.mark.asyncio
 @patch("management.services.agent.context.AgentRunMetadata")
 @patch("management.services.agent.subscription._resolve_user_tenant_language")
-@patch("services.memory_config_service.build_memory_context")
+@patch("management.services.configuration.user.memory.build_memory_context")
 @patch("management.services.agent.subscription.save_messages")
 @patch("management.services.agent.subscription.generate_stream")
 async def test_run_agent_stream_binds_agent_monitoring_context(
@@ -11895,7 +11894,7 @@ async def test_run_agent_background_consumes_stream_and_returns_assistant_messag
     memory_context = MagicMock(user_config=MagicMock(memory_switch=False))
     with (
         patch(
-            "services.memory_config_service.build_memory_context",
+            "management.services.configuration.user.memory.build_memory_context",
             return_value=memory_context,
         ),
         patch(
@@ -20787,7 +20786,7 @@ async def test_run_agent_stream_rejects_metadata_when_agent_disallows(
 @patch("management.services.agent.subscription.create_new_conversation")
 @patch("management.services.agent.subscription.generate_stream")
 @patch("management.services.agent.subscription.save_messages")
-@patch("services.memory_config_service.build_memory_context")
+@patch("management.services.configuration.user.memory.build_memory_context")
 async def test_run_agent_stream_new_conversation_persists_runtime_metadata(
     mock_build_mem_ctx,
     mock_save_messages,
@@ -20843,7 +20842,7 @@ async def test_run_agent_stream_new_conversation_persists_runtime_metadata(
 @patch("management.services.agent.subscription.update_conversation_agent_id_service")
 @patch("management.services.agent.subscription.generate_stream")
 @patch("management.services.agent.subscription.save_messages")
-@patch("services.memory_config_service.build_memory_context")
+@patch("management.services.configuration.user.memory.build_memory_context")
 async def test_run_agent_stream_existing_conversation_resolves_metadata(
     mock_build_mem_ctx,
     mock_save_messages,

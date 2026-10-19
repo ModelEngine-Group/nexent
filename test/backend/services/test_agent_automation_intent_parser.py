@@ -1,3 +1,4 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 import os
 import sys
 from datetime import datetime
@@ -8,7 +9,7 @@ import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../../backend"))
 
-from services.agent_automation.intent_parser import parse_automation_intent
+from management.services.automation.intent_parser import parse_automation_intent
 
 
 REFERENCE_TIME = datetime(2026, 7, 13, 10, 0, tzinfo=ZoneInfo("Asia/Shanghai"))

@@ -1,3 +1,4 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """Define and implement the internal Local MCP tools used by NL2Agent."""
 
 import json
@@ -11,7 +12,7 @@ from nexent.core.agents.agent_model import ToolConfig
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
 from consts.exceptions import UnauthorizedError
-from utils.auth_utils import get_current_user_id
+from management.services.permission.identity.authentication_helpers import get_current_user_id
 
 logger = logging.getLogger(__name__)
 
@@ -788,7 +789,7 @@ async def search_installed_mcp_tools(keywords: list[str]) -> dict[str, Any]:
 
     try:
         # Keep NL2Agent runtime dependencies out of the MCP server startup path.
-        from services.nl2agent_service import search_installed_mcp_tools_by_query
+        from management.services.agent.creation import search_installed_mcp_tools_by_query
 
         authorization = get_http_request().headers.get("Authorization")
         _, tenant_id = get_current_user_id(authorization)
@@ -844,11 +845,9 @@ async def search_installed_resources(
         )
 
     try:
-        from services.agent_draft_permission_service import (
-            AgentDraftEditError,
-            require_agent_draft_edit,
-        )
-        from services.nl2agent_service import search_installed_resources_impl
+        from consts.exceptions import AgentDraftEditError
+        from management.services.agent.authorization import require_agent_draft_edit
+        from management.services.agent.creation import search_installed_resources_impl
 
         authorization = get_http_request().headers.get("Authorization")
         user_id, tenant_id = get_current_user_id(authorization)
@@ -898,11 +897,9 @@ async def search_uninstalled_resources(
         )
 
     try:
-        from services.agent_draft_permission_service import (
-            AgentDraftEditError,
-            require_agent_draft_edit,
-        )
-        from services.nl2agent_service import search_uninstalled_resources_impl
+        from consts.exceptions import AgentDraftEditError
+        from management.services.agent.authorization import require_agent_draft_edit
+        from management.services.agent.creation import search_uninstalled_resources_impl
 
         authorization = get_http_request().headers.get("Authorization")
         user_id, tenant_id = get_current_user_id(authorization)
@@ -953,11 +950,9 @@ async def recommend_resources(
         )
 
     try:
-        from services.agent_draft_permission_service import (
-            AgentDraftEditError,
-            require_agent_draft_edit,
-        )
-        from services.nl2agent_service import (
+        from consts.exceptions import AgentDraftEditError
+        from management.services.agent.authorization import require_agent_draft_edit
+        from management.services.agent.creation import (
             Nl2AgentResourceError,
             recommend_resources_impl,
         )
@@ -1006,10 +1001,8 @@ async def nl2a_wrapper(
 ) -> str:
     """Return the NL2Agent JSON template selected by subtype in its wrapper."""
 
-    from services.agent_draft_permission_service import (
-        AgentDraftEditError,
-        require_agent_draft_edit,
-    )
+    from consts.exceptions import AgentDraftEditError
+    from management.services.agent.authorization import require_agent_draft_edit
 
     try:
         resolved_agent_id = _resolve_agent_context_id(agent_id)
@@ -1044,7 +1037,7 @@ async def nl2a_wrapper(
                 resource_result=supplied,
             )
 
-        from services.nl2agent_service import recommend_resources_impl
+        from management.services.agent.creation import recommend_resources_impl
 
         sources = {resource.candidate.source for resource in supplied.resources}
         required_sources = (
@@ -1162,7 +1155,7 @@ async def save_agent_draft_fields(
         )
 
     try:
-        from services.nl2agent_service import (
+        from management.services.agent.creation import (
             Nl2AgentCompletionError,
             Nl2AgentDraftSaveError,
             save_agent_draft_fields_impl,

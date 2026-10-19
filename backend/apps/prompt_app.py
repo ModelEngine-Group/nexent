@@ -1,3 +1,4 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 import logging
 from http import HTTPStatus
 from typing import Optional
@@ -10,14 +11,14 @@ from consts.model import (
     OptimizePromptBadCaseRequest,
     OptimizePromptFromDebugRequest,
 )
-from services.prompt_service import (
+from management.services.agent.prompt_generation import (
     gen_system_prompt_streamable,
     OptimizeRequest,
     OptimizeResult,
     PromptOptimizationService,
 )
 from adapters.exception import NexentCapabilityError
-from utils.auth_utils import get_current_user_info
+from management.services.permission.identity.authentication_helpers import get_current_user_info
 
 router = APIRouter(prefix="/prompt")
 logger = logging.getLogger("prompt_app")

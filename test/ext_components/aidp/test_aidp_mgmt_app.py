@@ -53,7 +53,7 @@ nexent_storage_factory.create_storage_client_from_config = MagicMock()
 
 services_pkg = _mod("services")
 services_pkg.__path__ = [os.path.join(BACKEND_DIR, "services")]
-tag_management_service = _mod("services.tag_management_service")
+tag_management_service = _mod("management.services.tag.library")
 tag_management_service.TagManagementService = MagicMock()
 
 
@@ -2793,7 +2793,7 @@ class TestNormalizeKbConfigFields:
 
 def test_cleanup_document_assignments_delegates_to_tag_management(monkeypatch):
     """The delete flow keeps document assignment usage in sync."""
-    import services.tag_management_service as tag_service
+    import management.services.tag.library as tag_service
     from ext_components.aidp.apps import aidp_mgmt_app
 
     sentinel = MagicMock()

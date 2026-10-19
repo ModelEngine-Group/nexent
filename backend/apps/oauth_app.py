@@ -1,3 +1,4 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 import logging
 
 from fastapi import APIRouter, Header, HTTPException, Request
@@ -18,7 +19,7 @@ from consts.exceptions import (
 )
 from consts.oauth_providers import get_all_provider_definitions
 from database.oauth_account_db import get_oauth_account_by_provider
-from services.oauth_service import (
+from management.services.permission.identity.oauth import (
     complete_pending_oauth_account,
     create_or_update_oauth_account,
     ensure_user_tenant_exists,
@@ -34,13 +35,13 @@ from services.oauth_service import (
     parse_state,
     unlink_account,
 )
-from utils.auth_utils import (
+from management.services.permission.identity.authentication_helpers import (
     calculate_expires_at,
     generate_session_jwt,
     get_current_user_id,
     get_supabase_admin_client,
 )
-from services.audit_service import record_security_event
+from management.services.monitor.audit import record_security_event
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/user/oauth", tags=["oauth"])

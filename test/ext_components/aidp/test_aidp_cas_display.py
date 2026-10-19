@@ -15,7 +15,7 @@ from test.ext_components.aidp.test_aidp_mgmt_app import (
 @pytest.mark.parametrize("lookup_failed", [False, True])
 def test_detail_optional_cas_creator_preserves_local_owner_contract(monkeypatch, lookup_failed):
     from ext_components.aidp.apps import aidp_mgmt_app as module
-    from services import user_identity_service
+    from management.services.permission.identity import display as user_identity_service
 
     monkeypatch.setattr(module.perms, "require_permission", lambda *a, **kw: MagicMock(permission="EDIT"))
     monkeypatch.setattr(module, "get_aidp_kb_impl", lambda *a: {"kds_name": "Knowledge", "user_name": "remote"})

@@ -1,3 +1,4 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """
 Unit tests for config_app module.
 
@@ -223,17 +224,17 @@ class TestConfigAppRouterConfiguration:
             sys.modules, "nexent.core.concurrency", concurrency_module
         )
         thread_lifecycle_module = types.ModuleType(
-            "services.thread_lifecycle_service"
+            "infrastructure.concurrency"
         )
         thread_lifecycle_module.config_thread_manager = ConfigThreadManager()
         monkeypatch.setitem(
             sys.modules,
-            "services.thread_lifecycle_service",
+            "infrastructure.concurrency",
             thread_lifecycle_module,
         )
-        prompt_service_module = types.ModuleType("services.prompt_template_service")
+        prompt_service_module = types.ModuleType("management.services.agent.prompt_templates")
         prompt_service_module.sync_system_default_prompt_template = MagicMock()
-        monkeypatch.setitem(sys.modules, "services.prompt_template_service", prompt_service_module)
+        monkeypatch.setitem(sys.modules, "management.services.agent.prompt_templates", prompt_service_module)
 
         module_path = Path(backend_dir) / "apps" / "config_app.py"
         spec = importlib.util.spec_from_file_location("isolated_config_app", module_path)
@@ -257,7 +258,7 @@ class TestConfigAppRouterConfiguration:
         schedule_upload_cleanup = AsyncMock()
         schedule_workbench_main_backfill = MagicMock()
         startup_recovery_module = types.ModuleType(
-            "services.startup_recovery_service"
+            "management.recovery"
         )
         startup_recovery_module.recover_config_tasks = recover_config_tasks
         startup_recovery_module.schedule_interrupted_upload_cleanup = (
@@ -268,19 +269,19 @@ class TestConfigAppRouterConfiguration:
         )
         monkeypatch.setitem(
             sys.modules,
-            "services.startup_recovery_service",
+            "management.recovery",
             startup_recovery_module,
         )
 
         start_evaluation_maintenance = MagicMock()
         evaluation_maintenance_module = types.ModuleType(
-            "services.evaluation_maintenance"
+            "management.services.evaluation.maintenance"
         )
         evaluation_maintenance_module.start = start_evaluation_maintenance
         evaluation_maintenance_module.stop = MagicMock()
         monkeypatch.setitem(
             sys.modules,
-            "services.evaluation_maintenance",
+            "management.services.evaluation.maintenance",
             evaluation_maintenance_module,
         )
 
@@ -288,12 +289,12 @@ class TestConfigAppRouterConfiguration:
         dreaming_scheduler.start = AsyncMock()
         dreaming_scheduler.stop = AsyncMock()
         dreaming_scheduler_module = types.ModuleType(
-            "services.memory_dreaming_scheduler"
+            "management.services.memory.dreaming.scheduler"
         )
         dreaming_scheduler_module.dreaming_scheduler = dreaming_scheduler
         monkeypatch.setitem(
             sys.modules,
-            "services.memory_dreaming_scheduler",
+            "management.services.memory.dreaming.scheduler",
             dreaming_scheduler_module,
         )
 
@@ -421,7 +422,7 @@ class TestConfigAppMonitoring:
         from unittest.mock import patch
 
         # Test with monitoring enabled but module not available
-        with patch.dict('sys.modules', {'utils.monitoring': None}):
+        with patch.dict('sys.modules', {'infrastructure.observability.bootstrap': None}):
             with patch('backend.apps.app_factory.logger') as mock_logger:
                 app = create_app(enable_monitoring=True)
                 assert app is not None

@@ -21,7 +21,7 @@ case:
     legacy_asset_declaration: '- ${NEXENT_TEST_HOME}/config/environment.yaml（仅本地测试环境参数）'
   steps:
   - order: 1
-    action: 导入 backend/services/nl2agent_service.py 的 _is_nl2agent_recommendable_tool 函数，并确认模块常量 _LOCAL_KNOWLEDGE_TOOL_NAMES
+    action: 导入 backend/management/services/agent/creation.py 的 _is_nl2agent_recommendable_tool 函数，并确认模块常量 _LOCAL_KNOWLEDGE_TOOL_NAMES
       与 _AIDP_KNOWLEDGE_TOOL_NAME 已定义。
     expected: ENABLE_AIDP_KNOWLEDGE 为 True 时：knowledge_base_search 返回 False（被过滤），ind_aidp_search、aidp_search 与普通工具返回 True（可推荐）。
   - order: 2

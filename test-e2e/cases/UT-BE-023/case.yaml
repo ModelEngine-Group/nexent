@@ -21,7 +21,7 @@ case:
     legacy_asset_declaration: '- ${NEXENT_TEST_HOME}/config/environment.yaml（仅本地测试环境参数）'
   steps:
   - order: 1
-    action: 在本地工作区导入 backend/services/config_sync_service.py 的 save_config_impl、build_app_config 与 LEGACY_APP_CONFIG_KEYS，mock
+    action: 在本地工作区导入 backend/management/services/configuration/tenant/service.py 的 save_config_impl、build_app_config 与 LEGACY_APP_CONFIG_KEYS，mock
       tenant_config_manager 的 load_config/set_single_config/delete_single_config/update_single_config/get_app_config；测试代码不得读取生产凭据。
     expected: save_config_impl 对 LEGACY_APP_CONFIG_KEYS（APP_NAME/APP_DESCRIPTION/NAME/DESCRIPTION）对应键跳过处理，既不写入 tenant_config
       也不进入 env_config。

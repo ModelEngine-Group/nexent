@@ -31,7 +31,7 @@ _MODULE_PATCH_NAMES = [
     'management.services.model.invocation',
     'management.services.agent.prompt',
     'management.services.agent.service',
-    'services.prompt_template_service',
+    'management.services.agent.prompt_templates',
     'nexent',
     'nexent.core',
     'nexent.core.prompts',
@@ -47,7 +47,7 @@ _MODULE_PATCH_NAMES = [
     'nexent.vector_database',
     'nexent.memory',
     'nexent.monitor',
-    'services.thread_lifecycle_service',
+    'infrastructure.concurrency',
 ]
 _MODULE_PATCH_ORIGINALS = {
     name: sys.modules.get(name, _MODULE_PATCH_SENTINEL)
@@ -204,8 +204,8 @@ sys.modules['management.services.agent.prompt'] = MagicMock()
 
 # Mock services
 sys.modules['management.services.agent.service'] = MagicMock()
-sys.modules['services.prompt_template_service'] = MagicMock()
-thread_lifecycle_stub = types.ModuleType('services.thread_lifecycle_service')
+sys.modules['management.services.agent.prompt_templates'] = MagicMock()
+thread_lifecycle_stub = types.ModuleType('infrastructure.concurrency')
 thread_lifecycle_stub.config_thread_manager = MagicMock()
 
 
@@ -219,9 +219,9 @@ def _submit_prompt(_lane, _spec, fn, *args, **kwargs):
 
 
 thread_lifecycle_stub.config_thread_manager.submit.side_effect = _submit_prompt
-sys.modules['services.thread_lifecycle_service'] = thread_lifecycle_stub
+sys.modules['infrastructure.concurrency'] = thread_lifecycle_stub
 
-from backend.services.prompt_service import (
+from management.services.agent.prompt_generation import (
     generate_and_save_system_prompt_impl,
     gen_system_prompt_streamable,
     generate_system_prompt,
@@ -243,10 +243,10 @@ class TestPromptService(unittest.TestCase):
     def setUp(self):
         self.test_model_id = 1
 
-    @patch('backend.services.prompt_service.call_llm_for_system_prompt')
+    @patch('management.services.agent.prompt_generation.call_llm_for_system_prompt')
     @patch('nexent.core.agents.prompt.meta.load_prompt')
-    @patch('backend.services.prompt_service.query_tools_by_ids')
-    @patch('backend.services.prompt_service.search_agent_info_by_agent_id')
+    @patch('management.services.agent.prompt_generation.query_tools_by_ids')
+    @patch('management.services.agent.prompt_generation.search_agent_info_by_agent_id')
     def test_optimize_prompt_section_impl_success(
         self,
         mock_search_agent_info,
@@ -335,10 +335,10 @@ class TestPromptService(unittest.TestCase):
         self.assertEqual(template_vars["feedback"], "Be clearer")
         self.assertEqual(template_vars["knowledge_base_names"], "")
 
-    @patch('backend.services.prompt_service.generate_system_prompt')
-    @patch('backend.services.prompt_service.query_tools_by_ids')
-    @patch('backend.services.prompt_service.search_agent_info_by_agent_id')
-    @patch('backend.services.prompt_service.query_all_agent_info_by_tenant_id')
+    @patch('management.services.agent.prompt_generation.generate_system_prompt')
+    @patch('management.services.agent.prompt_generation.query_tools_by_ids')
+    @patch('management.services.agent.prompt_generation.search_agent_info_by_agent_id')
+    @patch('management.services.agent.prompt_generation.query_all_agent_info_by_tenant_id')
     def test_generate_and_save_system_prompt_impl(
         self,
         mock_query_all_agents,
@@ -402,11 +402,11 @@ class TestPromptService(unittest.TestCase):
         self.assertEqual(call_args[0][1], "Test task")  # task_description
         self.assertEqual(call_args[0][2], [mock_tool1, mock_tool2])  # tool_info_list
 
-    @patch('backend.services.prompt_service.query_all_agent_info_by_tenant_id')
-    @patch('backend.services.prompt_service.generate_system_prompt')
-    @patch('backend.services.prompt_service.get_enabled_tool_description_for_generate_prompt')
-    @patch('backend.services.prompt_service.get_enabled_sub_agent_description_for_generate_prompt')
-    @patch('backend.services.prompt_service.get_knowledge_base_display_names')
+    @patch('management.services.agent.prompt_generation.query_all_agent_info_by_tenant_id')
+    @patch('management.services.agent.prompt_generation.generate_system_prompt')
+    @patch('management.services.agent.prompt_generation.get_enabled_tool_description_for_generate_prompt')
+    @patch('management.services.agent.prompt_generation.get_enabled_sub_agent_description_for_generate_prompt')
+    @patch('management.services.agent.prompt_generation.get_knowledge_base_display_names')
     def test_generate_and_save_system_prompt_impl_create_mode(
         self,
         mock_get_kb_display_names,
@@ -469,12 +469,12 @@ class TestPromptService(unittest.TestCase):
             True,  # has_selected_resources
         )
 
-    @patch('backend.services.prompt_service.regenerate_agent_value')
-    @patch('backend.services.prompt_service.check_agent_value_duplicate')
-    @patch('backend.services.prompt_service.query_all_agent_info_by_tenant_id')
-    @patch('backend.services.prompt_service.generate_system_prompt')
-    @patch('backend.services.prompt_service.query_tools_by_ids')
-    @patch('backend.services.prompt_service.search_agent_info_by_agent_id')
+    @patch('management.services.agent.prompt_generation.regenerate_agent_value')
+    @patch('management.services.agent.prompt_generation.check_agent_value_duplicate')
+    @patch('management.services.agent.prompt_generation.query_all_agent_info_by_tenant_id')
+    @patch('management.services.agent.prompt_generation.generate_system_prompt')
+    @patch('management.services.agent.prompt_generation.query_tools_by_ids')
+    @patch('management.services.agent.prompt_generation.search_agent_info_by_agent_id')
     def test_generate_and_save_system_prompt_impl_duplicate_names_regenerated(
         self,
         mock_search_agent_info,
@@ -526,13 +526,13 @@ class TestPromptService(unittest.TestCase):
 
         self.assertEqual(mock_regen_value.call_count, 2)
 
-    @patch('backend.services.prompt_service.generate_unique_agent_value')
-    @patch('backend.services.prompt_service.regenerate_agent_value')
-    @patch('backend.services.prompt_service.check_agent_value_duplicate')
-    @patch('backend.services.prompt_service.query_all_agent_info_by_tenant_id')
-    @patch('backend.services.prompt_service.generate_system_prompt')
-    @patch('backend.services.prompt_service.query_tools_by_ids')
-    @patch('backend.services.prompt_service.search_agent_info_by_agent_id')
+    @patch('management.services.agent.prompt_generation.generate_unique_agent_value')
+    @patch('management.services.agent.prompt_generation.regenerate_agent_value')
+    @patch('management.services.agent.prompt_generation.check_agent_value_duplicate')
+    @patch('management.services.agent.prompt_generation.query_all_agent_info_by_tenant_id')
+    @patch('management.services.agent.prompt_generation.generate_system_prompt')
+    @patch('management.services.agent.prompt_generation.query_tools_by_ids')
+    @patch('management.services.agent.prompt_generation.search_agent_info_by_agent_id')
     def test_generate_and_save_system_prompt_impl_duplicate_names_fallback_suffix(
         self,
         mock_search_agent_info,
@@ -583,11 +583,11 @@ class TestPromptService(unittest.TestCase):
 
         self.assertEqual(mock_generate_unique_value.call_count, 2)
 
-    @patch('backend.services.prompt_service.check_agent_value_duplicate')
-    @patch('backend.services.prompt_service.query_all_agent_info_by_tenant_id')
-    @patch('backend.services.prompt_service.generate_system_prompt')
-    @patch('backend.services.prompt_service.query_tools_by_ids')
-    @patch('backend.services.prompt_service.search_agent_info_by_agent_id')
+    @patch('management.services.agent.prompt_generation.check_agent_value_duplicate')
+    @patch('management.services.agent.prompt_generation.query_all_agent_info_by_tenant_id')
+    @patch('management.services.agent.prompt_generation.generate_system_prompt')
+    @patch('management.services.agent.prompt_generation.query_tools_by_ids')
+    @patch('management.services.agent.prompt_generation.search_agent_info_by_agent_id')
     def test_generate_and_save_system_prompt_impl_name_fields_incomplete(
         self,
         mock_search_agent_info,
@@ -631,24 +631,24 @@ class TestPromptService(unittest.TestCase):
         # Only complete name fields should be yielded
         var_items = [r for r in result if r["type"] == "agent_var_name"]
         disp_items = [r for r in result if r["type"] == "agent_display_name"]
-        
+
         # Should only have complete items (incomplete ones are not yielded)
         self.assertEqual(len(var_items), 1)
         self.assertEqual(len(disp_items), 1)
         self.assertTrue(var_items[0].get("is_complete", False))
         self.assertTrue(disp_items[0].get("is_complete", False))
-        
+
         # Duplicate checking should only be called for complete items
         self.assertEqual(
             [item.args[0] for item in mock_check_value_dup.call_args_list],
             ["name", "display_name"],
         )
 
-    @patch('backend.services.prompt_service.check_agent_value_duplicate')
-    @patch('backend.services.prompt_service.query_all_agent_info_by_tenant_id')
-    @patch('backend.services.prompt_service.generate_system_prompt')
-    @patch('backend.services.prompt_service.query_tools_by_ids')
-    @patch('backend.services.prompt_service.search_agent_info_by_agent_id')
+    @patch('management.services.agent.prompt_generation.check_agent_value_duplicate')
+    @patch('management.services.agent.prompt_generation.query_all_agent_info_by_tenant_id')
+    @patch('management.services.agent.prompt_generation.generate_system_prompt')
+    @patch('management.services.agent.prompt_generation.query_tools_by_ids')
+    @patch('management.services.agent.prompt_generation.search_agent_info_by_agent_id')
     def test_generate_and_save_system_prompt_impl_display_name_complete_no_duplicate(
         self,
         mock_search_agent_info,
@@ -688,17 +688,17 @@ class TestPromptService(unittest.TestCase):
         self.assertEqual(len(disp_items), 1)
         self.assertEqual(disp_items[0]["content"], "Test Agent")
         self.assertTrue(disp_items[0].get("is_complete", False))
-        
+
         # Should check for duplicate but not regenerate
         mock_check_value_dup.assert_called_once()
 
-    @patch('backend.services.prompt_service.generate_unique_agent_value')
-    @patch('backend.services.prompt_service.regenerate_agent_value')
-    @patch('backend.services.prompt_service.check_agent_value_duplicate')
-    @patch('backend.services.prompt_service.query_all_agent_info_by_tenant_id')
-    @patch('backend.services.prompt_service.generate_system_prompt')
-    @patch('backend.services.prompt_service.query_tools_by_ids')
-    @patch('backend.services.prompt_service.search_agent_info_by_agent_id')
+    @patch('management.services.agent.prompt_generation.generate_unique_agent_value')
+    @patch('management.services.agent.prompt_generation.regenerate_agent_value')
+    @patch('management.services.agent.prompt_generation.check_agent_value_duplicate')
+    @patch('management.services.agent.prompt_generation.query_all_agent_info_by_tenant_id')
+    @patch('management.services.agent.prompt_generation.generate_system_prompt')
+    @patch('management.services.agent.prompt_generation.query_tools_by_ids')
+    @patch('management.services.agent.prompt_generation.search_agent_info_by_agent_id')
     def test_generate_and_save_system_prompt_impl_display_name_complete_with_duplicate(
         self,
         mock_search_agent_info,
@@ -742,18 +742,18 @@ class TestPromptService(unittest.TestCase):
         self.assertEqual(len(disp_items), 1)
         self.assertEqual(disp_items[0]["content"], "Regenerated Display Name")
         self.assertTrue(disp_items[0].get("is_complete", False))
-        
+
         # Should check for duplicate and regenerate
         mock_check_value_dup.assert_called_once()
         mock_regen_value.assert_called_once()
 
-    @patch('backend.services.prompt_service.generate_unique_agent_value')
-    @patch('backend.services.prompt_service.regenerate_agent_value')
-    @patch('backend.services.prompt_service.check_agent_value_duplicate')
-    @patch('backend.services.prompt_service.query_all_agent_info_by_tenant_id')
-    @patch('backend.services.prompt_service.generate_system_prompt')
-    @patch('backend.services.prompt_service.query_tools_by_ids')
-    @patch('backend.services.prompt_service.search_agent_info_by_agent_id')
+    @patch('management.services.agent.prompt_generation.generate_unique_agent_value')
+    @patch('management.services.agent.prompt_generation.regenerate_agent_value')
+    @patch('management.services.agent.prompt_generation.check_agent_value_duplicate')
+    @patch('management.services.agent.prompt_generation.query_all_agent_info_by_tenant_id')
+    @patch('management.services.agent.prompt_generation.generate_system_prompt')
+    @patch('management.services.agent.prompt_generation.query_tools_by_ids')
+    @patch('management.services.agent.prompt_generation.search_agent_info_by_agent_id')
     def test_generate_and_save_system_prompt_impl_display_name_llm_failure_fallback(
         self,
         mock_search_agent_info,
@@ -797,13 +797,13 @@ class TestPromptService(unittest.TestCase):
         self.assertEqual(len(disp_items), 1)
         self.assertEqual(disp_items[0]["content"], "fallback_display_2")
         self.assertTrue(disp_items[0].get("is_complete", False))
-        
+
         # Should check for duplicate, try LLM regeneration, then use fallback
         mock_check_value_dup.assert_called_once()
         mock_regen_value.assert_called_once()
         mock_generate_unique_value.assert_called_once()
 
-    @patch('backend.services.prompt_service.generate_and_save_system_prompt_impl')
+    @patch('management.services.agent.prompt_generation.generate_and_save_system_prompt_impl')
     def test_gen_system_prompt_streamable(self, mock_generate_impl):
         """Test gen_system_prompt_streamable function"""
         # Setup mock data
@@ -849,10 +849,10 @@ class TestPromptService(unittest.TestCase):
             expected_data = f"data: {json.dumps({'success': True, 'data': test_data[i]}, ensure_ascii=False)}\n\n"
             self.assertEqual(result, expected_data)
 
-    @patch('backend.services.prompt_service.call_llm_for_system_prompt')
-    @patch('backend.services.prompt_service.join_info_for_generate_system_prompt')
-    @patch('backend.services.prompt_service.resolve_prompt_generate_template')
-    @patch('backend.services.prompt_service.get_model_by_model_id')
+    @patch('management.services.agent.prompt_generation.call_llm_for_system_prompt')
+    @patch('management.services.agent.prompt_generation.join_info_for_generate_system_prompt')
+    @patch('management.services.agent.prompt_generation.resolve_prompt_generate_template')
+    @patch('management.services.agent.prompt_generation.get_model_by_model_id')
     def test_generate_system_prompt(self, mock_get_model, mock_resolve_prompt_template, mock_join_info, mock_call_llm):
         # Setup
         mock_get_model.return_value = None  # No DB connection needed; concurrency_limit defaults to unlimited
@@ -976,10 +976,10 @@ class TestPromptService(unittest.TestCase):
             self.assertIsInstance(result["is_complete"], bool)
             self.assertIsInstance(result["content"], str)
 
-    @patch('backend.services.prompt_service.call_llm_for_system_prompt')
-    @patch('backend.services.prompt_service.join_info_for_generate_system_prompt')
-    @patch('backend.services.prompt_service.resolve_prompt_generate_template')
-    @patch('backend.services.prompt_service.get_model_by_model_id')
+    @patch('management.services.agent.prompt_generation.call_llm_for_system_prompt')
+    @patch('management.services.agent.prompt_generation.join_info_for_generate_system_prompt')
+    @patch('management.services.agent.prompt_generation.resolve_prompt_generate_template')
+    @patch('management.services.agent.prompt_generation.get_model_by_model_id')
     def test_generate_system_prompt_with_exception(self, mock_get_model, mock_resolve_prompt_template, mock_join_info, mock_call_llm):
         # Setup
         mock_get_model.return_value = None  # No DB connection needed; concurrency_limit defaults to unlimited
@@ -1076,8 +1076,8 @@ class TestPromptService(unittest.TestCase):
             template_vars["task_description"], mock_task_description)
 
 
-    @patch('backend.services.prompt_service.query_tools_by_ids')
-    @patch('backend.services.prompt_service.get_enable_tool_id_by_agent_id')
+    @patch('management.services.agent.prompt_generation.query_tools_by_ids')
+    @patch('management.services.agent.prompt_generation.get_enable_tool_id_by_agent_id')
     def test_get_enabled_tool_description_for_generate_prompt(
         self,
         mock_get_enable_tool_ids,
@@ -1102,8 +1102,8 @@ class TestPromptService(unittest.TestCase):
         self.assertEqual(result[1], {"tool_id": 2})
         self.assertEqual(result[2]["name"], "parallel_executor")
 
-    @patch('backend.services.prompt_service.query_tools_by_ids')
-    @patch('backend.services.prompt_service.get_enable_tool_id_by_agent_id')
+    @patch('management.services.agent.prompt_generation.query_tools_by_ids')
+    @patch('management.services.agent.prompt_generation.get_enable_tool_id_by_agent_id')
     def test_get_enabled_tool_description_parallel_executor_not_duplicated(
         self,
         mock_get_enable_tool_ids,
@@ -1121,15 +1121,15 @@ class TestPromptService(unittest.TestCase):
         self.assertEqual(len(result), 1)
         self.assertEqual(result[0]["tool_id"], 99)
 
-    @patch('backend.services.prompt_service.search_agent_info_by_agent_id')
-    @patch('backend.services.prompt_service.query_sub_agents_id_list')
+    @patch('management.services.agent.prompt_generation.search_agent_info_by_agent_id')
+    @patch('management.services.agent.prompt_generation.query_sub_agents_id_list')
     def test_get_enabled_sub_agent_description_for_generate_prompt(
         self,
         mock_query_sub_ids,
         mock_search_agent,
     ):
         """Wrapper should fetch sub-agent IDs then hydrate them with info."""
-        from backend.services.prompt_service import get_enabled_sub_agent_description_for_generate_prompt
+        from management.services.agent.prompt_generation import get_enabled_sub_agent_description_for_generate_prompt
 
         mock_query_sub_ids.return_value = [10, 20]
         mock_search_agent.side_effect = [
@@ -1151,7 +1151,7 @@ class TestPromptService(unittest.TestCase):
 
     # ==================== Additional tests for higher coverage ====================
 
-    @patch('backend.services.prompt_service.generate_and_save_system_prompt_impl')
+    @patch('management.services.agent.prompt_generation.generate_and_save_system_prompt_impl')
     def test_gen_system_prompt_streamable_with_app_exception(self, mock_generate_impl):
         """Test gen_system_prompt_streamable handles AppException and returns error through SSE"""
         from consts.error_code import ErrorCode
@@ -1182,7 +1182,7 @@ class TestPromptService(unittest.TestCase):
         self.assertEqual(parsed['error']['code'], str(ErrorCode.MODEL_NOT_FOUND.value))
         self.assertEqual(parsed['error']['message'], "Model not found error")
 
-    @patch('backend.services.prompt_service.generate_and_save_system_prompt_impl')
+    @patch('management.services.agent.prompt_generation.generate_and_save_system_prompt_impl')
     def test_gen_system_prompt_streamable_with_generic_exception(self, mock_generate_impl):
         """Test gen_system_prompt_streamable handles generic Exception and returns error through SSE"""
         # Setup - mock generate_and_save_system_prompt_impl to raise generic Exception
@@ -1207,10 +1207,10 @@ class TestPromptService(unittest.TestCase):
         # Should use default error code for non-AppException
         self.assertIn('error', parsed)
 
-    @patch('backend.services.prompt_service.search_agent_info_by_agent_id')
-    @patch('backend.services.prompt_service.query_tools_by_ids')
-    @patch('backend.services.prompt_service.generate_system_prompt')
-    @patch('backend.services.prompt_service.query_all_agent_info_by_tenant_id')
+    @patch('management.services.agent.prompt_generation.search_agent_info_by_agent_id')
+    @patch('management.services.agent.prompt_generation.query_tools_by_ids')
+    @patch('management.services.agent.prompt_generation.generate_system_prompt')
+    @patch('management.services.agent.prompt_generation.query_all_agent_info_by_tenant_id')
     def test_generate_and_save_system_prompt_impl_sub_agent_exception(
         self,
         mock_query_all_agents,
@@ -1251,11 +1251,11 @@ class TestPromptService(unittest.TestCase):
         # Assert - should still return results (exception was logged but not raised)
         self.assertGreater(len(result), 0)
 
-    @patch('backend.services.prompt_service.check_agent_value_duplicate')
-    @patch('backend.services.prompt_service.query_all_agent_info_by_tenant_id')
-    @patch('backend.services.prompt_service.generate_system_prompt')
-    @patch('backend.services.prompt_service.query_tools_by_ids')
-    @patch('backend.services.prompt_service.search_agent_info_by_agent_id')
+    @patch('management.services.agent.prompt_generation.check_agent_value_duplicate')
+    @patch('management.services.agent.prompt_generation.query_all_agent_info_by_tenant_id')
+    @patch('management.services.agent.prompt_generation.generate_system_prompt')
+    @patch('management.services.agent.prompt_generation.query_tools_by_ids')
+    @patch('management.services.agent.prompt_generation.search_agent_info_by_agent_id')
     def test_generate_and_save_system_prompt_impl_empty_content_raises_exception(
         self,
         mock_search_agent_info,
@@ -1297,10 +1297,10 @@ class TestPromptService(unittest.TestCase):
 
         self.assertIn("Failed to generate prompt content", str(context.exception))
 
-    @patch('backend.services.prompt_service.call_llm_for_system_prompt')
-    @patch('backend.services.prompt_service.join_info_for_generate_system_prompt')
-    @patch('backend.services.prompt_service.resolve_prompt_generate_template')
-    @patch('backend.services.prompt_service.get_model_by_model_id')
+    @patch('management.services.agent.prompt_generation.call_llm_for_system_prompt')
+    @patch('management.services.agent.prompt_generation.join_info_for_generate_system_prompt')
+    @patch('management.services.agent.prompt_generation.resolve_prompt_generate_template')
+    @patch('management.services.agent.prompt_generation.get_model_by_model_id')
     def test_generate_system_prompt_error_before_streaming(
         self,
         mock_get_model,
@@ -1350,10 +1350,10 @@ class TestPromptService(unittest.TestCase):
 
         self.assertIn("LLM connection error", str(context.exception))
 
-    @patch('backend.services.prompt_service.call_llm_for_system_prompt')
-    @patch('backend.services.prompt_service.join_info_for_generate_system_prompt')
-    @patch('backend.services.prompt_service.resolve_prompt_generate_template')
-    @patch('backend.services.prompt_service.get_model_by_model_id')
+    @patch('management.services.agent.prompt_generation.call_llm_for_system_prompt')
+    @patch('management.services.agent.prompt_generation.join_info_for_generate_system_prompt')
+    @patch('management.services.agent.prompt_generation.resolve_prompt_generate_template')
+    @patch('management.services.agent.prompt_generation.get_model_by_model_id')
     def test_generate_system_prompt_error_during_streaming(
         self,
         mock_get_model,
@@ -1413,15 +1413,15 @@ class TestPromptService(unittest.TestCase):
         # Should eventually raise an exception
         self.assertIn("LLM error during generation", str(context.exception))
 
-    @patch('backend.services.prompt_service.query_tools_by_ids')
-    @patch('backend.services.prompt_service.get_enable_tool_id_by_agent_id')
+    @patch('management.services.agent.prompt_generation.query_tools_by_ids')
+    @patch('management.services.agent.prompt_generation.get_enable_tool_id_by_agent_id')
     def test_get_enabled_tool_description_for_generate_prompt_empty_tool_ids(
         self,
         mock_get_enable_tool_ids,
         mock_query_tools,
     ):
         """Test get_enabled_tool_description_for_generate_prompt with empty tool IDs"""
-        from backend.services.prompt_service import get_enabled_tool_description_for_generate_prompt
+        from management.services.agent.prompt_generation import get_enabled_tool_description_for_generate_prompt
 
         # Setup - return empty list
         mock_get_enable_tool_ids.return_value = []
@@ -1434,15 +1434,15 @@ class TestPromptService(unittest.TestCase):
         # Should return empty list
         self.assertEqual(result, [])
 
-    @patch('backend.services.prompt_service.search_agent_info_by_agent_id')
-    @patch('backend.services.prompt_service.query_sub_agents_id_list')
+    @patch('management.services.agent.prompt_generation.search_agent_info_by_agent_id')
+    @patch('management.services.agent.prompt_generation.query_sub_agents_id_list')
     def test_get_enabled_sub_agent_description_for_generate_prompt_empty(
         self,
         mock_query_sub_ids,
         mock_search_agent,
     ):
         """Test get_enabled_sub_agent_description_for_generate_prompt with empty sub-agent IDs"""
-        from backend.services.prompt_service import get_enabled_sub_agent_description_for_generate_prompt
+        from management.services.agent.prompt_generation import get_enabled_sub_agent_description_for_generate_prompt
 
         # Setup - return empty list
         mock_query_sub_ids.return_value = []
@@ -1574,15 +1574,15 @@ class TestPromptService(unittest.TestCase):
         self.assertNotIn("知识库工具仅代表检索能力", template_vars["tool_description"])
         self.assertNotIn("当前会话允许的知识库范围", template_vars["tool_description"])
 
-    @patch('backend.services.prompt_service.get_knowledge_name_map_by_index_names')
-    @patch('backend.services.prompt_service.query_tool_instances_by_id')
+    @patch('management.services.agent.prompt_generation.get_knowledge_name_map_by_index_names')
+    @patch('management.services.agent.prompt_generation.query_tool_instances_by_id')
     def test_get_knowledge_base_display_names_with_configured_kb(
         self,
         mock_query_tool_instance,
         mock_get_knowledge_map,
     ):
         """Test get_knowledge_base_display_names with configured knowledge base"""
-        from backend.services.prompt_service import get_knowledge_base_display_names
+        from management.services.agent.prompt_generation import get_knowledge_base_display_names
 
         # Setup
         tool_info_list = [
@@ -1617,10 +1617,10 @@ class TestPromptService(unittest.TestCase):
             tenant_id="tenant-abc",
         )
 
-    @patch('backend.services.prompt_service.query_tool_instances_by_id')
+    @patch('management.services.agent.prompt_generation.query_tool_instances_by_id')
     def test_get_knowledge_base_display_names_no_kb_tool(self, mock_query_tool_instance):
         """Test get_knowledge_base_display_names when no knowledge_base_search tool exists"""
-        from backend.services.prompt_service import get_knowledge_base_display_names
+        from management.services.agent.prompt_generation import get_knowledge_base_display_names
 
         # Setup - no knowledge_base_search tool
         tool_info_list = [
@@ -1638,15 +1638,15 @@ class TestPromptService(unittest.TestCase):
         self.assertIsNone(result)
         mock_query_tool_instance.assert_not_called()
 
-    @patch('backend.services.prompt_service.get_knowledge_name_map_by_index_names')
-    @patch('backend.services.prompt_service.query_tool_instances_by_id')
+    @patch('management.services.agent.prompt_generation.get_knowledge_name_map_by_index_names')
+    @patch('management.services.agent.prompt_generation.query_tool_instances_by_id')
     def test_get_knowledge_base_display_names_empty_index_names(
         self,
         mock_query_tool_instance,
         mock_get_knowledge_map,
     ):
         """Test get_knowledge_base_display_names when index_names is empty"""
-        from backend.services.prompt_service import get_knowledge_base_display_names
+        from management.services.agent.prompt_generation import get_knowledge_base_display_names
 
         # Setup
         tool_info_list = [
@@ -1668,15 +1668,15 @@ class TestPromptService(unittest.TestCase):
         self.assertIsNone(result)
         mock_get_knowledge_map.assert_not_called()
 
-    @patch('backend.services.prompt_service.get_knowledge_name_map_by_index_names')
-    @patch('backend.services.prompt_service.query_tool_instances_by_id')
+    @patch('management.services.agent.prompt_generation.get_knowledge_name_map_by_index_names')
+    @patch('management.services.agent.prompt_generation.query_tool_instances_by_id')
     def test_get_knowledge_base_display_names_with_json_string(
         self,
         mock_query_tool_instance,
         mock_get_knowledge_map,
     ):
         """Test get_knowledge_base_display_names when index_names is a JSON string"""
-        from backend.services.prompt_service import get_knowledge_base_display_names
+        from management.services.agent.prompt_generation import get_knowledge_base_display_names
 
         # Setup
         tool_info_list = [
@@ -1703,15 +1703,15 @@ class TestPromptService(unittest.TestCase):
         # Assert
         self.assertEqual(result, ["redis", "kafka"])
 
-    @patch('backend.services.prompt_service.get_knowledge_name_map_by_index_names')
-    @patch('backend.services.prompt_service.query_tool_instances_by_id')
+    @patch('management.services.agent.prompt_generation.get_knowledge_name_map_by_index_names')
+    @patch('management.services.agent.prompt_generation.query_tool_instances_by_id')
     def test_get_knowledge_base_display_names_multiple_tools(
         self,
         mock_query_tool_instance,
         mock_get_knowledge_map,
     ):
         """Test get_knowledge_base_display_names with multiple knowledge_base_search tools"""
-        from backend.services.prompt_service import get_knowledge_base_display_names
+        from management.services.agent.prompt_generation import get_knowledge_base_display_names
 
         # Setup - two knowledge_base_search tools
         tool_info_list = [
@@ -1739,15 +1739,15 @@ class TestPromptService(unittest.TestCase):
         self.assertEqual(result, ["redis", "kafka"])
         self.assertEqual(mock_query_tool_instance.call_count, 2)
 
-    @patch('backend.services.prompt_service.get_knowledge_name_map_by_index_names')
-    @patch('backend.services.prompt_service.query_tool_instances_by_id')
+    @patch('management.services.agent.prompt_generation.get_knowledge_name_map_by_index_names')
+    @patch('management.services.agent.prompt_generation.query_tool_instances_by_id')
     def test_get_knowledge_base_display_names_duplicate_index_names(
         self,
         mock_query_tool_instance,
         mock_get_knowledge_map,
     ):
         """Test get_knowledge_base_display_names handles duplicate index_names"""
-        from backend.services.prompt_service import get_knowledge_base_display_names
+        from management.services.agent.prompt_generation import get_knowledge_base_display_names
 
         # Setup
         tool_info_list = [
@@ -1777,15 +1777,15 @@ class TestPromptService(unittest.TestCase):
             tenant_id="tenant-abc",
         )
 
-    @patch('backend.services.prompt_service.get_knowledge_name_map_by_index_names')
-    @patch('backend.services.prompt_service.query_tool_instances_by_id')
+    @patch('management.services.agent.prompt_generation.get_knowledge_name_map_by_index_names')
+    @patch('management.services.agent.prompt_generation.query_tool_instances_by_id')
     def test_get_knowledge_base_display_names_query_tool_instance_exception(
         self,
         mock_query_tool_instance,
         mock_get_knowledge_map,
     ):
         """Test get_knowledge_base_display_names handles query_tool_instances_by_id exception gracefully (lines 445-446)"""
-        from backend.services.prompt_service import get_knowledge_base_display_names
+        from management.services.agent.prompt_generation import get_knowledge_base_display_names
 
         # Setup - two knowledge_base_search tools
         tool_info_list = [
@@ -1818,7 +1818,7 @@ class TestPromptService(unittest.TestCase):
             tenant_id="tenant-abc",
         )
 
-    @patch('backend.services.prompt_service.generate_and_save_system_prompt_impl')
+    @patch('management.services.agent.prompt_generation.generate_and_save_system_prompt_impl')
     def test_gen_system_prompt_streamable_knowledge_base_flow(self, mock_generate_impl):
         """Test gen_system_prompt_streamable with knowledge base configuration"""
         # Setup
@@ -1880,7 +1880,7 @@ class TestPromptService(unittest.TestCase):
 
     def test_optimize_prompt_section_impl_empty_result(self):
         """Test that empty LLM result raises AppException"""
-        with patch('backend.services.prompt_service.call_llm_for_system_prompt') as mock_call_llm:
+        with patch('management.services.agent.prompt_generation.call_llm_for_system_prompt') as mock_call_llm:
             with patch('nexent.core.agents.prompt.meta.load_prompt') as mock_template:
                 mock_template.side_effect = lambda language, path: _load_sdk_resource(language, path) if path != "meta/optimize_prompt" else {
                     "OPTIMIZE_SYSTEM_PROMPT": "System prompt",
@@ -1907,9 +1907,9 @@ class TestPromptService(unittest.TestCase):
 
     def test_optimize_prompt_section_impl_uses_default_title(self):
         """Test that section_title defaults when not provided"""
-        with patch('backend.services.prompt_service.call_llm_for_system_prompt') as mock_call_llm:
+        with patch('management.services.agent.prompt_generation.call_llm_for_system_prompt') as mock_call_llm:
             with patch('nexent.core.agents.prompt.meta.load_prompt') as mock_template:
-                with patch('backend.services.prompt_service.join_info_for_optimize_prompt_section') as mock_join:
+                with patch('management.services.agent.prompt_generation.join_info_for_optimize_prompt_section') as mock_join:
                     mock_template.side_effect = lambda language, path: _load_sdk_resource(language, path) if path != "meta/optimize_prompt" else {
                         "OPTIMIZE_SYSTEM_PROMPT": "System prompt",
                         "OPTIMIZE_USER_PROMPT": "User prompt",
@@ -1980,29 +1980,29 @@ class TestPromptService(unittest.TestCase):
 
     def test_default_prompt_section_title_zh(self):
         """Test _default_prompt_section_title with Chinese language"""
-        from backend.services.prompt_service import _default_prompt_section_title
+        from management.services.agent.prompt_generation import _default_prompt_section_title
         self.assertEqual(_default_prompt_section_title("duty", "zh"), "智能体角色")
         self.assertEqual(_default_prompt_section_title("constraint", "zh"), "使用要求")
         self.assertEqual(_default_prompt_section_title("few_shots", "zh"), "示例")
 
     def test_default_prompt_section_title_en(self):
         """Test _default_prompt_section_title with English language"""
-        from backend.services.prompt_service import _default_prompt_section_title
+        from management.services.agent.prompt_generation import _default_prompt_section_title
         self.assertEqual(_default_prompt_section_title("duty", "en"), "Agent Role")
         self.assertEqual(_default_prompt_section_title("constraint", "en"), "Usage Requirements")
         self.assertEqual(_default_prompt_section_title("few_shots", "en"), "Few Shots")
 
     def test_default_prompt_section_title_unknown_lang(self):
         """Test _default_prompt_section_title falls back to ZH for unknown language"""
-        from backend.services.prompt_service import _default_prompt_section_title
+        from management.services.agent.prompt_generation import _default_prompt_section_title
         self.assertEqual(_default_prompt_section_title("duty", "xx"), "智能体角色")
         self.assertEqual(_default_prompt_section_title("unknown_type", "en"), "unknown_type")
 
-    @patch('backend.services.prompt_service.query_tools_by_ids')
-    @patch('backend.services.prompt_service.get_enable_tool_id_by_agent_id')
+    @patch('management.services.agent.prompt_generation.query_tools_by_ids')
+    @patch('management.services.agent.prompt_generation.get_enable_tool_id_by_agent_id')
     def test_resolve_prompt_generation_tools_empty_ids(self, mock_get_ids, mock_query_tools):
         """Test _resolve_prompt_generation_tools with empty tool_ids uses DB fallback"""
-        from backend.services.prompt_service import _resolve_prompt_generation_tools
+        from management.services.agent.prompt_generation import _resolve_prompt_generation_tools
         mock_get_ids.return_value = [1, 2]
         mock_query_tools.return_value = [{"name": "tool1"}]
 
@@ -2011,20 +2011,20 @@ class TestPromptService(unittest.TestCase):
         mock_get_ids.assert_called_once()
         mock_query_tools.assert_called_once_with([1, 2])
 
-    @patch('backend.services.prompt_service.search_agent_info_by_agent_id')
+    @patch('management.services.agent.prompt_generation.search_agent_info_by_agent_id')
     def test_resolve_prompt_generation_sub_agents_empty_ids(self, mock_search):
         """Test _resolve_prompt_generation_sub_agents with empty sub_agent_ids uses DB fallback"""
-        from backend.services.prompt_service import _resolve_prompt_generation_sub_agents
+        from management.services.agent.prompt_generation import _resolve_prompt_generation_sub_agents
         mock_search.return_value = {"name": "sub1"}
 
         result = _resolve_prompt_generation_sub_agents(agent_id=123, tenant_id="tenant-x", sub_agent_ids=[])
 
         mock_search.assert_not_called()
 
-    @patch('backend.services.prompt_service.search_agent_info_by_agent_id')
+    @patch('management.services.agent.prompt_generation.search_agent_info_by_agent_id')
     def test_resolve_prompt_generation_sub_agents_with_ids(self, mock_search):
         """Test _resolve_prompt_generation_sub_agents with sub_agent_ids queries DB"""
-        from backend.services.prompt_service import _resolve_prompt_generation_sub_agents
+        from management.services.agent.prompt_generation import _resolve_prompt_generation_sub_agents
         mock_search.return_value = {"name": "sub1"}
 
         result = _resolve_prompt_generation_sub_agents(agent_id=123, tenant_id="tenant-x", sub_agent_ids=[10, 20])
@@ -2032,10 +2032,10 @@ class TestPromptService(unittest.TestCase):
         self.assertEqual(mock_search.call_count, 2)
         self.assertEqual(len(result), 2)
 
-    @patch('backend.services.prompt_service.search_agent_info_by_agent_id')
+    @patch('management.services.agent.prompt_generation.search_agent_info_by_agent_id')
     def test_resolve_prompt_generation_sub_agents_exception_handling(self, mock_search):
         """Test _resolve_prompt_generation_sub_agents handles exception gracefully"""
-        from backend.services.prompt_service import _resolve_prompt_generation_sub_agents
+        from management.services.agent.prompt_generation import _resolve_prompt_generation_sub_agents
         mock_search.side_effect = [Exception("DB error"), {"name": "sub2"}]
 
         result = _resolve_prompt_generation_sub_agents(agent_id=123, tenant_id="tenant-x", sub_agent_ids=[10, 20])
@@ -2043,11 +2043,11 @@ class TestPromptService(unittest.TestCase):
         self.assertEqual(len(result), 1)
         self.assertEqual(result[0]["name"], "sub2")
 
-    @patch('backend.services.prompt_service.get_knowledge_name_map_by_index_names')
-    @patch('backend.services.prompt_service.query_tool_instances_by_id')
+    @patch('management.services.agent.prompt_generation.get_knowledge_name_map_by_index_names')
+    @patch('management.services.agent.prompt_generation.query_tool_instances_by_id')
     def test_get_knowledge_base_display_names_json_decode_error(self, mock_query, mock_get_map):
         """Test get_knowledge_base_display_names handles JSON decode error gracefully"""
-        from backend.services.prompt_service import get_knowledge_base_display_names
+        from management.services.agent.prompt_generation import get_knowledge_base_display_names
         tool_info_list = [{"tool_id": 1, "name": "knowledge_base_search"}]
         mock_query.return_value = {"params": {"index_names": "not valid json ["}}
         mock_get_map.return_value = {}
@@ -2056,11 +2056,11 @@ class TestPromptService(unittest.TestCase):
 
         self.assertIsNone(result)
 
-    @patch('backend.services.prompt_service.get_knowledge_name_map_by_index_names')
-    @patch('backend.services.prompt_service.query_tool_instances_by_id')
+    @patch('management.services.agent.prompt_generation.get_knowledge_name_map_by_index_names')
+    @patch('management.services.agent.prompt_generation.query_tool_instances_by_id')
     def test_get_knowledge_base_display_names_empty_result_map(self, mock_query, mock_get_map):
         """Test get_knowledge_base_display_names when knowledge_name_map returns empty, uses index_name as fallback"""
-        from backend.services.prompt_service import get_knowledge_base_display_names
+        from management.services.agent.prompt_generation import get_knowledge_base_display_names
         tool_info_list = [{"tool_id": 1, "name": "knowledge_base_search"}]
         mock_query.return_value = {"params": {"index_names": ["index-1"]}}
         mock_get_map.return_value = {}
@@ -2069,15 +2069,15 @@ class TestPromptService(unittest.TestCase):
 
         self.assertEqual(result, ["index-1"])
 
-    @patch('backend.services.prompt_service.get_enabled_tool_description_for_generate_prompt')
+    @patch('management.services.agent.prompt_generation.get_enabled_tool_description_for_generate_prompt')
     def test_generate_and_save_system_prompt_impl_empty_tool_ids_fallback(self, mock_enabled_tools):
         """Test generate_and_save_system_prompt_impl uses DB fallback when tool_ids is empty"""
         mock_enabled_tools.return_value = [{"name": "db_tool"}]
 
-        with patch('backend.services.prompt_service.query_all_agent_info_by_tenant_id') as mock_query_agents:
+        with patch('management.services.agent.prompt_generation.query_all_agent_info_by_tenant_id') as mock_query_agents:
             mock_query_agents.return_value = []
 
-            with patch('backend.services.prompt_service.generate_system_prompt') as mock_gen:
+            with patch('management.services.agent.prompt_generation.generate_system_prompt') as mock_gen:
                 def mock_generator(*args, **kwargs):
                     yield {"type": "duty", "content": "duty content", "is_complete": True}
 
@@ -2096,15 +2096,15 @@ class TestPromptService(unittest.TestCase):
 
                 mock_enabled_tools.assert_called_once()
 
-    @patch('backend.services.prompt_service.get_knowledge_base_display_names')
+    @patch('management.services.agent.prompt_generation.get_knowledge_base_display_names')
     def test_generate_and_save_system_prompt_impl_frontend_provided_kb_names(self, mock_get_kb):
         """Test generate_and_save_system_prompt_impl uses frontend KB names when provided"""
         mock_get_kb.return_value = ["frontend-kb"]
 
-        with patch('backend.services.prompt_service.query_all_agent_info_by_tenant_id') as mock_query_agents:
+        with patch('management.services.agent.prompt_generation.query_all_agent_info_by_tenant_id') as mock_query_agents:
             mock_query_agents.return_value = []
 
-            with patch('backend.services.prompt_service.generate_system_prompt') as mock_gen:
+            with patch('management.services.agent.prompt_generation.generate_system_prompt') as mock_gen:
                 def mock_generator(*args, **kwargs):
                     yield {"type": "duty", "content": "duty content", "is_complete": True}
 
@@ -2124,10 +2124,10 @@ class TestPromptService(unittest.TestCase):
 
                 mock_get_kb.assert_not_called()
 
-    @patch('backend.services.prompt_service.call_llm_for_system_prompt')
-    @patch('backend.services.prompt_service.join_info_for_generate_system_prompt')
-    @patch('backend.services.prompt_service.resolve_prompt_generate_template')
-    @patch('backend.services.prompt_service.get_model_by_model_id')
+    @patch('management.services.agent.prompt_generation.call_llm_for_system_prompt')
+    @patch('management.services.agent.prompt_generation.join_info_for_generate_system_prompt')
+    @patch('management.services.agent.prompt_generation.resolve_prompt_generate_template')
+    @patch('management.services.agent.prompt_generation.get_model_by_model_id')
     def test_generate_system_prompt_no_selected_resources(self, mock_get_model, mock_resolve, mock_join, mock_call_llm):
         """Test generate_system_prompt with has_selected_resources=False skips constraint/few_shots"""
         mock_get_model.return_value = None
@@ -2174,10 +2174,10 @@ class TestPromptService(unittest.TestCase):
         self.assertEqual(len(fewshots_items), 1)
         self.assertEqual(fewshots_items[0]["content"], "")
 
-    @patch('backend.services.prompt_service.call_llm_for_system_prompt')
-    @patch('backend.services.prompt_service.join_info_for_generate_system_prompt')
-    @patch('backend.services.prompt_service.resolve_prompt_generate_template')
-    @patch('backend.services.prompt_service.get_model_by_model_id')
+    @patch('management.services.agent.prompt_generation.call_llm_for_system_prompt')
+    @patch('management.services.agent.prompt_generation.join_info_for_generate_system_prompt')
+    @patch('management.services.agent.prompt_generation.resolve_prompt_generate_template')
+    @patch('management.services.agent.prompt_generation.get_model_by_model_id')
     def test_generate_system_prompt_with_concurrency_limit(self, mock_get_model, mock_resolve, mock_join, mock_call_llm):
         """Test generate_system_prompt with concurrency_limit < 6 uses semaphore"""
         mock_get_model.return_value = {"concurrency_limit": 2}
@@ -2220,8 +2220,8 @@ class TestPromptService(unittest.TestCase):
 class TestPromptOptimizationService(unittest.TestCase):
     """Tests for PromptOptimizationService Jiuwen SDK integration"""
 
-    @patch('backend.services.prompt_service.optimize_prompt_section_impl')
-    @patch('backend.services.prompt_service.ENABLE_JIUWEN_SDK', False)
+    @patch('management.services.agent.prompt_generation.optimize_prompt_section_impl')
+    @patch('management.services.agent.prompt_generation.ENABLE_JIUWEN_SDK', False)
     def test_optimize_nexent_fallback_general_mode(self, mock_impl):
         """nexent 模式: mode=general 应该调用 optimize_prompt_section_impl"""
         mock_impl.return_value = {
@@ -2244,7 +2244,7 @@ class TestPromptOptimizationService(unittest.TestCase):
         self.assertEqual(result.optimized_content, "new")
         mock_impl.assert_called_once()
 
-    @patch('backend.services.prompt_service.ENABLE_JIUWEN_SDK', False)
+    @patch('management.services.agent.prompt_generation.ENABLE_JIUWEN_SDK', False)
     def test_optimize_nexent_fallback_insert_mode_raises(self):
         """nexent 模式: mode=insert 应该抛出 NexentCapabilityError"""
         from adapters.exception import NexentCapabilityError
@@ -2260,7 +2260,7 @@ class TestPromptOptimizationService(unittest.TestCase):
             service.optimize(req)
         self.assertIn("insert", str(ctx.exception))
 
-    @patch('backend.services.prompt_service.ENABLE_JIUWEN_SDK', False)
+    @patch('management.services.agent.prompt_generation.ENABLE_JIUWEN_SDK', False)
     def test_optimize_nexent_fallback_select_mode_raises(self):
         """nexent 模式: mode=select 应该抛出 NexentCapabilityError"""
         from adapters.exception import NexentCapabilityError
@@ -2275,7 +2275,7 @@ class TestPromptOptimizationService(unittest.TestCase):
         with self.assertRaises(NexentCapabilityError):
             service.optimize(req)
 
-    @patch('backend.services.prompt_service.ENABLE_JIUWEN_SDK', False)
+    @patch('management.services.agent.prompt_generation.ENABLE_JIUWEN_SDK', False)
     def test_optimize_badcase_nexent_raises(self):
         """nexent 模式: badcase 优化应该抛出 NexentCapabilityError"""
         from adapters.exception import NexentCapabilityError
@@ -2289,17 +2289,17 @@ class TestPromptOptimizationService(unittest.TestCase):
             )
         self.assertIn("badcase", str(ctx.exception))
 
-    @patch('backend.services.prompt_service.ENABLE_JIUWEN_SDK', True)
+    @patch('management.services.agent.prompt_generation.ENABLE_JIUWEN_SDK', True)
     def test_is_jiuwen_mode_available_env_disabled(self):
         """开关关闭时 Jiuwen SDK 不可用"""
         from consts.const import ENABLE_JIUWEN_SDK
 
         # Patch ENABLE_JIUWEN_SDK to False
-        with patch('backend.services.prompt_service.ENABLE_JIUWEN_SDK', False):
+        with patch('management.services.agent.prompt_generation.ENABLE_JIUWEN_SDK', False):
             service = PromptOptimizationService(model_id=1, tenant_id="t", language="zh")
             self.assertFalse(service.is_jiuwen_mode_available())
 
-    @patch('backend.services.prompt_service.ENABLE_JIUWEN_SDK', True)
+    @patch('management.services.agent.prompt_generation.ENABLE_JIUWEN_SDK', True)
     def test_is_jiuwen_mode_available_openjiuwen_missing(self):
         """openjiuwen 未安装时 Jiuwen SDK 不可用"""
         service = PromptOptimizationService(model_id=1, tenant_id="t", language="zh")
@@ -2339,8 +2339,8 @@ class TestPromptOptimizationService(unittest.TestCase):
         self.assertEqual(res.section_type, "duty")
         self.assertEqual(res.section_title, "title")
         self.assertEqual(res.original_content, "old")
-    @patch('backend.services.prompt_service.get_enabled_sub_agent_description_for_generate_prompt')
-    @patch('backend.services.prompt_service.get_enabled_tool_description_for_generate_prompt')
+    @patch('management.services.agent.prompt_generation.get_enabled_sub_agent_description_for_generate_prompt')
+    @patch('management.services.agent.prompt_generation.get_enabled_tool_description_for_generate_prompt')
     def test_generate_and_save_system_prompt_impl_auto_detect_no_resources(
         self, mock_enabled_tools, mock_enabled_sub_agents
     ):
@@ -2352,10 +2352,10 @@ class TestPromptOptimizationService(unittest.TestCase):
         mock_enabled_tools.return_value = []
         mock_enabled_sub_agents.return_value = []
 
-        with patch('backend.services.prompt_service.query_all_agent_info_by_tenant_id') as mock_query_agents:
+        with patch('management.services.agent.prompt_generation.query_all_agent_info_by_tenant_id') as mock_query_agents:
             mock_query_agents.return_value = []
 
-            with patch('backend.services.prompt_service.generate_system_prompt') as mock_gen:
+            with patch('management.services.agent.prompt_generation.generate_system_prompt') as mock_gen:
                 def mock_generator(*args, **kwargs):
                     yield {"type": "duty", "content": "duty content", "is_complete": True}
                     yield {"type": "agent_var_name", "content": "test", "is_complete": True}
@@ -2387,8 +2387,8 @@ class TestPromptOptimizationService(unittest.TestCase):
                     "has_selected_resources should be False when both tool and sub-agent lists are empty",
                 )
 
-    @patch('backend.services.prompt_service.get_enabled_sub_agent_description_for_generate_prompt')
-    @patch('backend.services.prompt_service.get_enabled_tool_description_for_generate_prompt')
+    @patch('management.services.agent.prompt_generation.get_enabled_sub_agent_description_for_generate_prompt')
+    @patch('management.services.agent.prompt_generation.get_enabled_tool_description_for_generate_prompt')
     def test_generate_and_save_system_prompt_impl_auto_detect_has_tools(
         self, mock_enabled_tools, mock_enabled_sub_agents
     ):
@@ -2396,10 +2396,10 @@ class TestPromptOptimizationService(unittest.TestCase):
         mock_enabled_tools.return_value = [{"name": "db_tool"}]
         mock_enabled_sub_agents.return_value = []
 
-        with patch('backend.services.prompt_service.query_all_agent_info_by_tenant_id') as mock_query_agents:
+        with patch('management.services.agent.prompt_generation.query_all_agent_info_by_tenant_id') as mock_query_agents:
             mock_query_agents.return_value = []
 
-            with patch('backend.services.prompt_service.generate_system_prompt') as mock_gen:
+            with patch('management.services.agent.prompt_generation.generate_system_prompt') as mock_gen:
                 def mock_generator(*args, **kwargs):
                     yield {"type": "duty", "content": "duty", "is_complete": True}
                     yield {"type": "constraint", "content": "constraints", "is_complete": True}
@@ -2433,8 +2433,8 @@ class TestPromptOptimizationService(unittest.TestCase):
                     "has_selected_resources should be True when tools are present",
                 )
 
-    @patch('backend.services.prompt_service.get_enabled_sub_agent_description_for_generate_prompt')
-    @patch('backend.services.prompt_service.get_enabled_tool_description_for_generate_prompt')
+    @patch('management.services.agent.prompt_generation.get_enabled_sub_agent_description_for_generate_prompt')
+    @patch('management.services.agent.prompt_generation.get_enabled_tool_description_for_generate_prompt')
     def test_generate_and_save_system_prompt_impl_auto_detect_has_sub_agents(
         self, mock_enabled_tools, mock_enabled_sub_agents
     ):
@@ -2442,10 +2442,10 @@ class TestPromptOptimizationService(unittest.TestCase):
         mock_enabled_tools.return_value = []
         mock_enabled_sub_agents.return_value = [{"name": "sub_agent"}]
 
-        with patch('backend.services.prompt_service.query_all_agent_info_by_tenant_id') as mock_query_agents:
+        with patch('management.services.agent.prompt_generation.query_all_agent_info_by_tenant_id') as mock_query_agents:
             mock_query_agents.return_value = []
 
-            with patch('backend.services.prompt_service.generate_system_prompt') as mock_gen:
+            with patch('management.services.agent.prompt_generation.generate_system_prompt') as mock_gen:
                 def mock_generator(*args, **kwargs):
                     yield {"type": "duty", "content": "duty", "is_complete": True}
                     yield {"type": "constraint", "content": "constraints", "is_complete": True}
@@ -2499,11 +2499,11 @@ class TestGenerateAndSaveSystemPromptImplAidpKbNames(unittest.TestCase):
             yield {"type": "agent_description", "content": "desc", "is_complete": True}
         return mock_gen
 
-    @patch('backend.services.prompt_service.query_all_agent_info_by_tenant_id')
-    @patch('backend.services.prompt_service.generate_system_prompt')
-    @patch('backend.services.prompt_service._resolve_aidp_kb_display_names')
-    @patch('backend.services.prompt_service.query_tools_by_ids')
-    @patch('backend.services.prompt_service.search_agent_info_by_agent_id')
+    @patch('management.services.agent.prompt_generation.query_all_agent_info_by_tenant_id')
+    @patch('management.services.agent.prompt_generation.generate_system_prompt')
+    @patch('management.services.agent.prompt_generation._resolve_aidp_kb_display_names')
+    @patch('management.services.agent.prompt_generation.query_tools_by_ids')
+    @patch('management.services.agent.prompt_generation.search_agent_info_by_agent_id')
     def test_frontend_provided_aidp_names_is_used_directly(
         self,
         mock_search_agent,
@@ -2541,11 +2541,11 @@ class TestGenerateAndSaveSystemPromptImplAidpKbNames(unittest.TestCase):
         )
         self.assertIsNone(bound_args.arguments["aidp_kb_display_names"])
 
-    @patch('backend.services.prompt_service.query_all_agent_info_by_tenant_id')
-    @patch('backend.services.prompt_service.generate_system_prompt')
-    @patch('backend.services.prompt_service._resolve_aidp_kb_display_names')
-    @patch('backend.services.prompt_service.query_tools_by_ids')
-    @patch('backend.services.prompt_service.search_agent_info_by_agent_id')
+    @patch('management.services.agent.prompt_generation.query_all_agent_info_by_tenant_id')
+    @patch('management.services.agent.prompt_generation.generate_system_prompt')
+    @patch('management.services.agent.prompt_generation._resolve_aidp_kb_display_names')
+    @patch('management.services.agent.prompt_generation.query_tools_by_ids')
+    @patch('management.services.agent.prompt_generation.search_agent_info_by_agent_id')
     def test_falls_back_to_db_resolution_when_not_provided(
         self,
         mock_search_agent,
@@ -2586,11 +2586,11 @@ class TestGenerateAndSaveSystemPromptImplAidpKbNames(unittest.TestCase):
         )
         self.assertIsNone(bound_args.arguments["aidp_kb_display_names"])
 
-    @patch('backend.services.prompt_service.query_all_agent_info_by_tenant_id')
-    @patch('backend.services.prompt_service.generate_system_prompt')
-    @patch('backend.services.prompt_service._resolve_aidp_kb_display_names')
-    @patch('backend.services.prompt_service.query_tools_by_ids')
-    @patch('backend.services.prompt_service.search_agent_info_by_agent_id')
+    @patch('management.services.agent.prompt_generation.query_all_agent_info_by_tenant_id')
+    @patch('management.services.agent.prompt_generation.generate_system_prompt')
+    @patch('management.services.agent.prompt_generation._resolve_aidp_kb_display_names')
+    @patch('management.services.agent.prompt_generation.query_tools_by_ids')
+    @patch('management.services.agent.prompt_generation.search_agent_info_by_agent_id')
     def test_empty_frontend_names_triggers_fallback(
         self,
         mock_search_agent,
@@ -2622,12 +2622,12 @@ class TestGenerateAndSaveSystemPromptImplAidpKbNames(unittest.TestCase):
 
         mock_resolve_aidp.assert_not_called()
 
-    @patch('backend.services.prompt_service.join_info_for_generate_system_prompt')
-    @patch('backend.services.prompt_service.query_all_agent_info_by_tenant_id')
-    @patch('backend.services.prompt_service.generate_system_prompt')
-    @patch('backend.services.prompt_service._resolve_aidp_kb_display_names')
-    @patch('backend.services.prompt_service.query_tools_by_ids')
-    @patch('backend.services.prompt_service.search_agent_info_by_agent_id')
+    @patch('management.services.agent.prompt_generation.join_info_for_generate_system_prompt')
+    @patch('management.services.agent.prompt_generation.query_all_agent_info_by_tenant_id')
+    @patch('management.services.agent.prompt_generation.generate_system_prompt')
+    @patch('management.services.agent.prompt_generation._resolve_aidp_kb_display_names')
+    @patch('management.services.agent.prompt_generation.query_tools_by_ids')
+    @patch('management.services.agent.prompt_generation.search_agent_info_by_agent_id')
     def test_aidp_names_passed_through_to_join_info(
         self,
         mock_search_agent,
@@ -2756,7 +2756,7 @@ class TestJoinInfoForGenerateSystemPromptAidpKbNames(unittest.TestCase):
 class TestResolveAidpKbDisplayNames(unittest.TestCase):
     """Test _resolve_aidp_kb_display_names delegation."""
 
-    @patch('backend.services.prompt_service.get_aidp_kb_display_names')
+    @patch('management.services.agent.prompt_generation.get_aidp_kb_display_names')
     def test_delegates_to_get_aidp_kb_display_names(self, mock_get_aidp):
         tool_info = [{"name": "aidp_search", "tool_id": 42}]
         mock_get_aidp.return_value = ["resolved-kb-1", "resolved-kb-2"]
@@ -2812,44 +2812,44 @@ class TestExtractJsonObject(unittest.TestCase):
     """Tests for _extract_json_object helper (lines 486-513)."""
 
     def test_returns_none_for_empty_input(self):
-        from backend.services.prompt_service import _extract_json_object
+        from management.services.agent.prompt_generation import _extract_json_object
         self.assertIsNone(_extract_json_object(""))
         self.assertIsNone(_extract_json_object(None))
         self.assertIsNone(_extract_json_object("   "))
 
     def test_returns_none_when_no_braces(self):
-        from backend.services.prompt_service import _extract_json_object
+        from management.services.agent.prompt_generation import _extract_json_object
         self.assertIsNone(_extract_json_object("just plain text no json"))
 
     def test_extracts_simple_json_object(self):
-        from backend.services.prompt_service import _extract_json_object
+        from management.services.agent.prompt_generation import _extract_json_object
         raw = 'some text {"key": "value"} more text'
         result = _extract_json_object(raw)
         self.assertEqual(result, {"key": "value"})
 
     def test_extracts_nested_json(self):
-        from backend.services.prompt_service import _extract_json_object
+        from management.services.agent.prompt_generation import _extract_json_object
         raw = '{"type": "single", "candidates": [{"pattern": "\\d+", "desc": "digits"}]}'
         result = _extract_json_object(raw)
         self.assertEqual(result["type"], "single")
         self.assertEqual(len(result["candidates"]), 1)
 
     def test_handles_single_quotes_fallback(self):
-        from backend.services.prompt_service import _extract_json_object
+        from management.services.agent.prompt_generation import _extract_json_object
         raw = "{'type': 'single', 'count': 1}"
         result = _extract_json_object(raw)
         self.assertEqual(result["type"], "single")
         self.assertEqual(result["count"], 1)
 
     def test_handles_trailing_commas_fallback(self):
-        from backend.services.prompt_service import _extract_json_object
+        from management.services.agent.prompt_generation import _extract_json_object
         raw = '{"type": "single", "items": [1, 2,],}'
         result = _extract_json_object(raw)
         # Should fix trailing commas and parse successfully
         self.assertIsNotNone(result)
 
     def test_handles_invalid_json_escape_fallback(self):
-        from backend.services.prompt_service import _extract_json_object
+        from management.services.agent.prompt_generation import _extract_json_object
         # LLM often outputs \d \w etc. with single backslash (invalid JSON)
         raw = r'{"pattern": "\d+\.\d+"}'
         result = _extract_json_object(raw)
@@ -2857,13 +2857,13 @@ class TestExtractJsonObject(unittest.TestCase):
         self.assertIn("pattern", result)
 
     def test_returns_none_for_completely_invalid_json(self):
-        from backend.services.prompt_service import _extract_json_object
+        from management.services.agent.prompt_generation import _extract_json_object
         raw = "{not json at all!!!"
         result = _extract_json_object(raw)
         self.assertIsNone(result)
 
     def test_end_before_start_returns_none(self):
-        from backend.services.prompt_service import _extract_json_object
+        from management.services.agent.prompt_generation import _extract_json_object
         raw = "} something {"
         result = _extract_json_object(raw)
         self.assertIsNone(result)
@@ -2873,7 +2873,7 @@ class TestGenerateGuardrailRulesImpl(unittest.TestCase):
     """Tests for generate_guardrail_rules_impl (lines 547-586)."""
 
     def test_empty_description_raises(self):
-        from backend.services.prompt_service import generate_guardrail_rules_impl
+        from management.services.agent.prompt_generation import generate_guardrail_rules_impl
         with self.assertRaises(AppException) as ctx:
             generate_guardrail_rules_impl(
                 description="",
@@ -2883,7 +2883,7 @@ class TestGenerateGuardrailRulesImpl(unittest.TestCase):
         self.assertEqual(ctx.exception.error_code, ErrorCode.COMMON_MISSING_REQUIRED_FIELD)
 
     def test_whitespace_description_raises(self):
-        from backend.services.prompt_service import generate_guardrail_rules_impl
+        from management.services.agent.prompt_generation import generate_guardrail_rules_impl
         with self.assertRaises(AppException) as ctx:
             generate_guardrail_rules_impl(
                 description="   ",
@@ -2892,10 +2892,10 @@ class TestGenerateGuardrailRulesImpl(unittest.TestCase):
             )
         self.assertEqual(ctx.exception.error_code, ErrorCode.COMMON_MISSING_REQUIRED_FIELD)
 
-    @patch('backend.services.prompt_service.call_llm_for_system_prompt')
+    @patch('management.services.agent.prompt_generation.call_llm_for_system_prompt')
     @patch('nexent.core.agents.prompt.auxiliary.load_prompt')
     def test_empty_llm_response_raises(self, mock_template, mock_llm):
-        from backend.services.prompt_service import generate_guardrail_rules_impl
+        from management.services.agent.prompt_generation import generate_guardrail_rules_impl
         mock_template.return_value = {
             "GUARDRAIL_USER_PROMPT": "prompt {{ description }}",
             "GUARDRAIL_SYSTEM_PROMPT": "system",
@@ -2910,10 +2910,10 @@ class TestGenerateGuardrailRulesImpl(unittest.TestCase):
             )
         self.assertEqual(ctx.exception.error_code, ErrorCode.MODEL_PROMPT_GENERATION_FAILED)
 
-    @patch('backend.services.prompt_service.call_llm_for_system_prompt')
+    @patch('management.services.agent.prompt_generation.call_llm_for_system_prompt')
     @patch('nexent.core.agents.prompt.auxiliary.load_prompt')
     def test_invalid_json_response_raises(self, mock_template, mock_llm):
-        from backend.services.prompt_service import generate_guardrail_rules_impl
+        from management.services.agent.prompt_generation import generate_guardrail_rules_impl
         mock_template.return_value = {
             "GUARDRAIL_USER_PROMPT": "prompt {{ description }}",
             "GUARDRAIL_SYSTEM_PROMPT": "system",
@@ -2928,10 +2928,10 @@ class TestGenerateGuardrailRulesImpl(unittest.TestCase):
             )
         self.assertEqual(ctx.exception.error_code, ErrorCode.MODEL_PROMPT_GENERATION_FAILED)
 
-    @patch('backend.services.prompt_service.call_llm_for_system_prompt')
+    @patch('management.services.agent.prompt_generation.call_llm_for_system_prompt')
     @patch('nexent.core.agents.prompt.auxiliary.load_prompt')
     def test_unknown_type_raises(self, mock_template, mock_llm):
-        from backend.services.prompt_service import generate_guardrail_rules_impl
+        from management.services.agent.prompt_generation import generate_guardrail_rules_impl
         mock_template.return_value = {
             "GUARDRAIL_USER_PROMPT": "prompt {{ description }}",
             "GUARDRAIL_SYSTEM_PROMPT": "system",
@@ -2947,10 +2947,10 @@ class TestGenerateGuardrailRulesImpl(unittest.TestCase):
         self.assertEqual(ctx.exception.error_code, ErrorCode.MODEL_PROMPT_GENERATION_FAILED)
         self.assertIn("Unknown guardrail result type", ctx.exception.message)
 
-    @patch('backend.services.prompt_service.call_llm_for_system_prompt')
+    @patch('management.services.agent.prompt_generation.call_llm_for_system_prompt')
     @patch('nexent.core.agents.prompt.auxiliary.load_prompt')
     def test_single_type_success(self, mock_template, mock_llm):
-        from backend.services.prompt_service import generate_guardrail_rules_impl
+        from management.services.agent.prompt_generation import generate_guardrail_rules_impl
         mock_template.return_value = {
             "GUARDRAIL_USER_PROMPT": "prompt {{ description }}",
             "GUARDRAIL_SYSTEM_PROMPT": "system",
@@ -2965,10 +2965,10 @@ class TestGenerateGuardrailRulesImpl(unittest.TestCase):
         self.assertEqual(result["type"], "single")
         self.assertIsInstance(result["candidates"], list)
 
-    @patch('backend.services.prompt_service.call_llm_for_system_prompt')
+    @patch('management.services.agent.prompt_generation.call_llm_for_system_prompt')
     @patch('nexent.core.agents.prompt.auxiliary.load_prompt')
     def test_multi_type_success(self, mock_template, mock_llm):
-        from backend.services.prompt_service import generate_guardrail_rules_impl
+        from management.services.agent.prompt_generation import generate_guardrail_rules_impl
         mock_template.return_value = {
             "GUARDRAIL_USER_PROMPT": "prompt {{ description }}",
             "GUARDRAIL_SYSTEM_PROMPT": "system",
@@ -2983,10 +2983,10 @@ class TestGenerateGuardrailRulesImpl(unittest.TestCase):
         self.assertEqual(result["type"], "multi")
         self.assertIsInstance(result["rules"], list)
 
-    @patch('backend.services.prompt_service.call_llm_for_system_prompt')
+    @patch('management.services.agent.prompt_generation.call_llm_for_system_prompt')
     @patch('nexent.core.agents.prompt.auxiliary.load_prompt')
     def test_single_type_with_non_list_candidates(self, mock_template, mock_llm):
-        from backend.services.prompt_service import generate_guardrail_rules_impl
+        from management.services.agent.prompt_generation import generate_guardrail_rules_impl
         mock_template.return_value = {
             "GUARDRAIL_USER_PROMPT": "prompt {{ description }}",
             "GUARDRAIL_SYSTEM_PROMPT": "system",
@@ -3001,10 +3001,10 @@ class TestGenerateGuardrailRulesImpl(unittest.TestCase):
         self.assertEqual(result["type"], "single")
         self.assertEqual(result["candidates"], [])
 
-    @patch('backend.services.prompt_service.call_llm_for_system_prompt')
+    @patch('management.services.agent.prompt_generation.call_llm_for_system_prompt')
     @patch('nexent.core.agents.prompt.auxiliary.load_prompt')
     def test_multi_type_with_non_list_rules(self, mock_template, mock_llm):
-        from backend.services.prompt_service import generate_guardrail_rules_impl
+        from management.services.agent.prompt_generation import generate_guardrail_rules_impl
         mock_template.return_value = {
             "GUARDRAIL_USER_PROMPT": "prompt {{ description }}",
             "GUARDRAIL_SYSTEM_PROMPT": "system",
@@ -3024,20 +3024,20 @@ class TestGetAidpKbDisplayNames(unittest.TestCase):
     """Tests for get_aidp_kb_display_names (lines 1086-1099)."""
 
     def test_no_aidp_tool_returns_none(self):
-        from backend.services.prompt_service import get_aidp_kb_display_names
+        from management.services.agent.prompt_generation import get_aidp_kb_display_names
         tool_info_list = [{"name": "web_search", "tool_id": 1}]
         result = get_aidp_kb_display_names(tool_info_list, "user1", "tenant1")
         self.assertIsNone(result)
 
     def test_empty_tool_list_returns_none(self):
-        from backend.services.prompt_service import get_aidp_kb_display_names
+        from management.services.agent.prompt_generation import get_aidp_kb_display_names
         result = get_aidp_kb_display_names([], "user1", "tenant1")
         self.assertIsNone(result)
 
-    @patch('backend.services.prompt_service.sys')
+    @patch('management.services.agent.prompt_generation.sys')
     def test_aidp_tool_found_returns_display_names(self, mock_sys_mod):
         """When aidp_search tool exists, import and call permission service."""
-        from backend.services.prompt_service import get_aidp_kb_display_names
+        from management.services.agent.prompt_generation import get_aidp_kb_display_names
 
         mock_access_module = MagicMock()
         mock_access_module.resolve_current_aidp_access.return_value = types.SimpleNamespace(
@@ -3056,10 +3056,10 @@ class TestGetAidpKbDisplayNames(unittest.TestCase):
 
         self.assertEqual(result, ["KB-Alpha", "KB-Beta"])
 
-    @patch('backend.services.prompt_service.sys')
+    @patch('management.services.agent.prompt_generation.sys')
     def test_aidp_tool_found_empty_map_returns_none(self, mock_sys_mod):
         """When kds_name_to_id_map is empty, return None."""
-        from backend.services.prompt_service import get_aidp_kb_display_names
+        from management.services.agent.prompt_generation import get_aidp_kb_display_names
 
         mock_access_module = MagicMock()
         mock_access_module.resolve_current_aidp_access.return_value = types.SimpleNamespace(
@@ -3075,10 +3075,10 @@ class TestGetAidpKbDisplayNames(unittest.TestCase):
 
         self.assertIsNone(result)
 
-    @patch('backend.services.prompt_service.sys')
+    @patch('management.services.agent.prompt_generation.sys')
     def test_aidp_tool_import_error_returns_none(self, mock_sys_mod):
         """When import fails, return None gracefully."""
-        from backend.services.prompt_service import get_aidp_kb_display_names
+        from management.services.agent.prompt_generation import get_aidp_kb_display_names
 
         tool_info_list = [{"name": "aidp_search", "tool_id": 42}]
 
@@ -3096,7 +3096,7 @@ class TestStreamResultsErrorPath(unittest.TestCase):
     def test_error_holder_raises_immediately(self):
         """When error_holder has an error, _stream_results raises it after joining threads."""
         import queue as q_module
-        from backend.services.prompt_service import _stream_results
+        from management.services.agent.prompt_generation import _stream_results
 
         produce_q = q_module.Queue()
         latest = {"duty": "", "constraint": "", "few_shots": "",
@@ -3117,7 +3117,7 @@ class TestStreamResultsErrorPath(unittest.TestCase):
     def test_streaming_yields_updated_content(self):
         """When content changes and stop flags complete, yields streaming data then final results."""
         import queue as q_module
-        from backend.services.prompt_service import _stream_results
+        from management.services.agent.prompt_generation import _stream_results
 
         produce_q = q_module.Queue()
         latest = {"duty": "duty content", "constraint": "", "few_shots": "",
@@ -3145,7 +3145,7 @@ class TestStreamResultsErrorPath(unittest.TestCase):
     def test_streaming_yields_intermediate_updates(self):
         """When new content appears, yields intermediate streaming updates."""
         import queue as q_module
-        from backend.services.prompt_service import _stream_results
+        from management.services.agent.prompt_generation import _stream_results
 
         produce_q = q_module.Queue()
 
@@ -3199,7 +3199,7 @@ class TestStreamResultsErrorPath(unittest.TestCase):
 class TestPromptOptimizationServiceOptimizeFromDebug(unittest.TestCase):
     """Tests for PromptOptimizationService.optimize_from_debug (lines 1158-1215)."""
 
-    @patch('backend.services.prompt_service.ENABLE_JIUWEN_SDK', False)
+    @patch('management.services.agent.prompt_generation.ENABLE_JIUWEN_SDK', False)
     def test_empty_feedback_raises(self):
         service = PromptOptimizationService(model_id=1, tenant_id="t", language="zh")
         selected = type("S", (), {"user_question": "q", "assistant_answer": "a"})()
@@ -3207,14 +3207,14 @@ class TestPromptOptimizationServiceOptimizeFromDebug(unittest.TestCase):
             service.optimize_from_debug(agent_id=1, feedback="", selected=selected)
         self.assertEqual(ctx.exception.error_code, ErrorCode.COMMON_MISSING_REQUIRED_FIELD)
 
-    @patch('backend.services.prompt_service.ENABLE_JIUWEN_SDK', False)
+    @patch('management.services.agent.prompt_generation.ENABLE_JIUWEN_SDK', False)
     def test_whitespace_feedback_raises(self):
         service = PromptOptimizationService(model_id=1, tenant_id="t", language="zh")
         selected = type("S", (), {"user_question": "q", "assistant_answer": "a"})()
         with self.assertRaises(AppException):
             service.optimize_from_debug(agent_id=1, feedback="   ", selected=selected)
 
-    @patch('backend.services.prompt_service.ENABLE_JIUWEN_SDK', False)
+    @patch('management.services.agent.prompt_generation.ENABLE_JIUWEN_SDK', False)
     def test_jiuwen_unavailable_raises(self):
         from adapters.exception import NexentCapabilityError
         service = PromptOptimizationService(model_id=1, tenant_id="t", language="zh")
@@ -3222,9 +3222,9 @@ class TestPromptOptimizationServiceOptimizeFromDebug(unittest.TestCase):
         with self.assertRaises(NexentCapabilityError):
             service.optimize_from_debug(agent_id=1, feedback="good feedback", selected=selected)
 
-    @patch('backend.services.prompt_service._get_jiuwen_adapter_class')
-    @patch('backend.services.prompt_service.search_agent_info_by_agent_id')
-    @patch('backend.services.prompt_service.ENABLE_JIUWEN_SDK', True)
+    @patch('management.services.agent.prompt_generation._get_jiuwen_adapter_class')
+    @patch('management.services.agent.prompt_generation.search_agent_info_by_agent_id')
+    @patch('management.services.agent.prompt_generation.ENABLE_JIUWEN_SDK', True)
     def test_successful_optimize_from_debug(self, mock_search_agent, mock_get_adapter):
         from adapters.exception import JiuwenSDKError
 
@@ -3252,9 +3252,9 @@ class TestPromptOptimizationServiceOptimizeFromDebug(unittest.TestCase):
         self.assertEqual(result.section_type, "full_prompt")
         mock_adapter_instance.optimize_badcase.assert_called_once()
 
-    @patch('backend.services.prompt_service._get_jiuwen_adapter_class')
-    @patch('backend.services.prompt_service.search_agent_info_by_agent_id')
-    @patch('backend.services.prompt_service.ENABLE_JIUWEN_SDK', True)
+    @patch('management.services.agent.prompt_generation._get_jiuwen_adapter_class')
+    @patch('management.services.agent.prompt_generation.search_agent_info_by_agent_id')
+    @patch('management.services.agent.prompt_generation.ENABLE_JIUWEN_SDK', True)
     def test_optimize_from_debug_with_dict_selected(self, mock_search_agent, mock_get_adapter):
         """Test optimize_from_debug when selected is a dict rather than an object."""
         mock_search_agent.return_value = {
@@ -3279,9 +3279,9 @@ class TestPromptOptimizationServiceOptimizeFromDebug(unittest.TestCase):
 
         self.assertEqual(result.optimized_content, "Optimized")
 
-    @patch('backend.services.prompt_service._get_jiuwen_adapter_class')
-    @patch('backend.services.prompt_service.search_agent_info_by_agent_id')
-    @patch('backend.services.prompt_service.ENABLE_JIUWEN_SDK', True)
+    @patch('management.services.agent.prompt_generation._get_jiuwen_adapter_class')
+    @patch('management.services.agent.prompt_generation.search_agent_info_by_agent_id')
+    @patch('management.services.agent.prompt_generation.ENABLE_JIUWEN_SDK', True)
     def test_optimize_from_debug_empty_prompt_raises(self, mock_search_agent, mock_get_adapter):
         """When all agent prompts are None, the joined prompt strips to empty => AppException."""
         mock_search_agent.return_value = {
@@ -3306,9 +3306,9 @@ class TestPromptOptimizationServiceOptimizeFromDebug(unittest.TestCase):
         result = service.optimize_from_debug(agent_id=1, feedback="feedback", selected=selected)
         self.assertEqual(result.source, "jiuwen")
 
-    @patch('backend.services.prompt_service._get_jiuwen_adapter_class')
-    @patch('backend.services.prompt_service.search_agent_info_by_agent_id')
-    @patch('backend.services.prompt_service.ENABLE_JIUWEN_SDK', True)
+    @patch('management.services.agent.prompt_generation._get_jiuwen_adapter_class')
+    @patch('management.services.agent.prompt_generation.search_agent_info_by_agent_id')
+    @patch('management.services.agent.prompt_generation.ENABLE_JIUWEN_SDK', True)
     def test_optimize_from_debug_adapter_none_raises(self, mock_search_agent, mock_get_adapter):
         """When _get_jiuwen_adapter_class returns None after is_jiuwen_mode_available check, raises JiuwenSDKError."""
         from adapters.exception import JiuwenSDKError
@@ -3332,8 +3332,8 @@ class TestPromptOptimizationServiceOptimizeFromDebug(unittest.TestCase):
 class TestPromptOptimizationServiceOptimizeJiuwen(unittest.TestCase):
     """Tests for PromptOptimizationService.optimize with Jiuwen SDK paths (lines 1238-1303)."""
 
-    @patch('backend.services.prompt_service._get_jiuwen_adapter_class')
-    @patch('backend.services.prompt_service.ENABLE_JIUWEN_SDK', True)
+    @patch('management.services.agent.prompt_generation._get_jiuwen_adapter_class')
+    @patch('management.services.agent.prompt_generation.ENABLE_JIUWEN_SDK', True)
     def test_optimize_jiuwen_general_mode(self, mock_get_adapter):
         """Jiuwen SDK general mode returns optimized content."""
         mock_adapter_cls = MagicMock()
@@ -3356,8 +3356,8 @@ class TestPromptOptimizationServiceOptimizeJiuwen(unittest.TestCase):
         self.assertEqual(result.optimized_content, "Optimized by Jiuwen")
         self.assertEqual(result.original_content, "Original content")
 
-    @patch('backend.services.prompt_service._get_jiuwen_adapter_class')
-    @patch('backend.services.prompt_service.ENABLE_JIUWEN_SDK', True)
+    @patch('management.services.agent.prompt_generation._get_jiuwen_adapter_class')
+    @patch('management.services.agent.prompt_generation.ENABLE_JIUWEN_SDK', True)
     def test_optimize_jiuwen_insert_mode(self, mock_get_adapter):
         """Jiuwen SDK insert mode inserts text at start_pos."""
         mock_adapter_cls = MagicMock()
@@ -3378,8 +3378,8 @@ class TestPromptOptimizationServiceOptimizeJiuwen(unittest.TestCase):
 
         self.assertEqual(result.optimized_content, "ABINSERTEDCDE")
 
-    @patch('backend.services.prompt_service._get_jiuwen_adapter_class')
-    @patch('backend.services.prompt_service.ENABLE_JIUWEN_SDK', True)
+    @patch('management.services.agent.prompt_generation._get_jiuwen_adapter_class')
+    @patch('management.services.agent.prompt_generation.ENABLE_JIUWEN_SDK', True)
     def test_optimize_jiuwen_select_mode(self, mock_get_adapter):
         """Jiuwen SDK select mode replaces selected range."""
         mock_adapter_cls = MagicMock()
@@ -3401,8 +3401,8 @@ class TestPromptOptimizationServiceOptimizeJiuwen(unittest.TestCase):
         # "ABCDEF"[:1] + "REPLACED" + "ABCDEF"[4:] = "A" + "REPLACED" + "EF"
         self.assertEqual(result.optimized_content, "AREPLACEDEF")
 
-    @patch('backend.services.prompt_service._get_jiuwen_adapter_class')
-    @patch('backend.services.prompt_service.ENABLE_JIUWEN_SDK', True)
+    @patch('management.services.agent.prompt_generation._get_jiuwen_adapter_class')
+    @patch('management.services.agent.prompt_generation.ENABLE_JIUWEN_SDK', True)
     def test_optimize_jiuwen_insert_no_start_pos_raises(self, mock_get_adapter):
         """Insert mode without start_pos raises JiuwenSDKError."""
         from adapters.exception import JiuwenSDKError
@@ -3425,8 +3425,8 @@ class TestPromptOptimizationServiceOptimizeJiuwen(unittest.TestCase):
         with self.assertRaises(JiuwenSDKError):
             service._optimize_with_jiuwen(req)
 
-    @patch('backend.services.prompt_service._get_jiuwen_adapter_class')
-    @patch('backend.services.prompt_service.ENABLE_JIUWEN_SDK', True)
+    @patch('management.services.agent.prompt_generation._get_jiuwen_adapter_class')
+    @patch('management.services.agent.prompt_generation.ENABLE_JIUWEN_SDK', True)
     def test_optimize_jiuwen_insert_out_of_bounds_raises(self, mock_get_adapter):
         """Insert mode with out-of-bounds start_pos raises JiuwenSDKError."""
         from adapters.exception import JiuwenSDKError
@@ -3448,8 +3448,8 @@ class TestPromptOptimizationServiceOptimizeJiuwen(unittest.TestCase):
         with self.assertRaises(JiuwenSDKError):
             service._optimize_with_jiuwen(req)
 
-    @patch('backend.services.prompt_service._get_jiuwen_adapter_class')
-    @patch('backend.services.prompt_service.ENABLE_JIUWEN_SDK', True)
+    @patch('management.services.agent.prompt_generation._get_jiuwen_adapter_class')
+    @patch('management.services.agent.prompt_generation.ENABLE_JIUWEN_SDK', True)
     def test_optimize_jiuwen_select_missing_positions_raises(self, mock_get_adapter):
         """Select mode without start_pos/end_pos raises JiuwenSDKError."""
         from adapters.exception import JiuwenSDKError
@@ -3471,8 +3471,8 @@ class TestPromptOptimizationServiceOptimizeJiuwen(unittest.TestCase):
         with self.assertRaises(JiuwenSDKError):
             service._optimize_with_jiuwen(req)
 
-    @patch('backend.services.prompt_service._get_jiuwen_adapter_class')
-    @patch('backend.services.prompt_service.ENABLE_JIUWEN_SDK', True)
+    @patch('management.services.agent.prompt_generation._get_jiuwen_adapter_class')
+    @patch('management.services.agent.prompt_generation.ENABLE_JIUWEN_SDK', True)
     def test_optimize_jiuwen_select_non_int_positions_raises(self, mock_get_adapter):
         """Select mode with non-integer positions raises JiuwenSDKError."""
         from adapters.exception import JiuwenSDKError
@@ -3494,8 +3494,8 @@ class TestPromptOptimizationServiceOptimizeJiuwen(unittest.TestCase):
         with self.assertRaises(JiuwenSDKError):
             service._optimize_with_jiuwen(req)
 
-    @patch('backend.services.prompt_service._get_jiuwen_adapter_class')
-    @patch('backend.services.prompt_service.ENABLE_JIUWEN_SDK', True)
+    @patch('management.services.agent.prompt_generation._get_jiuwen_adapter_class')
+    @patch('management.services.agent.prompt_generation.ENABLE_JIUWEN_SDK', True)
     def test_optimize_jiuwen_select_invalid_range_raises(self, mock_get_adapter):
         """Select mode with start >= end raises JiuwenSDKError."""
         from adapters.exception import JiuwenSDKError
@@ -3517,8 +3517,8 @@ class TestPromptOptimizationServiceOptimizeJiuwen(unittest.TestCase):
         with self.assertRaises(JiuwenSDKError):
             service._optimize_with_jiuwen(req)
 
-    @patch('backend.services.prompt_service._get_jiuwen_adapter_class')
-    @patch('backend.services.prompt_service.ENABLE_JIUWEN_SDK', True)
+    @patch('management.services.agent.prompt_generation._get_jiuwen_adapter_class')
+    @patch('management.services.agent.prompt_generation.ENABLE_JIUWEN_SDK', True)
     def test_optimize_jiuwen_select_end_out_of_bounds_raises(self, mock_get_adapter):
         """Select mode with end_pos > length raises JiuwenSDKError."""
         from adapters.exception import JiuwenSDKError
@@ -3540,8 +3540,8 @@ class TestPromptOptimizationServiceOptimizeJiuwen(unittest.TestCase):
         with self.assertRaises(JiuwenSDKError):
             service._optimize_with_jiuwen(req)
 
-    @patch('backend.services.prompt_service._get_jiuwen_adapter_class')
-    @patch('backend.services.prompt_service.ENABLE_JIUWEN_SDK', True)
+    @patch('management.services.agent.prompt_generation._get_jiuwen_adapter_class')
+    @patch('management.services.agent.prompt_generation.ENABLE_JIUWEN_SDK', True)
     def test_optimize_jiuwen_adapter_unavailable_raises(self, mock_get_adapter):
         """When adapter class is None in _optimize_with_jiuwen, raises JiuwenSDKError."""
         from adapters.exception import JiuwenSDKError
@@ -3559,9 +3559,9 @@ class TestPromptOptimizationServiceOptimizeJiuwen(unittest.TestCase):
         with self.assertRaises(JiuwenSDKError):
             service._optimize_with_jiuwen(req)
 
-    @patch('backend.services.prompt_service._get_jiuwen_adapter_class')
-    @patch('backend.services.prompt_service.optimize_prompt_section_impl')
-    @patch('backend.services.prompt_service.ENABLE_JIUWEN_SDK', True)
+    @patch('management.services.agent.prompt_generation._get_jiuwen_adapter_class')
+    @patch('management.services.agent.prompt_generation.optimize_prompt_section_impl')
+    @patch('management.services.agent.prompt_generation.ENABLE_JIUWEN_SDK', True)
     def test_optimize_jiuwen_error_falls_back_to_nexent(self, mock_impl, mock_get_adapter):
         """When Jiuwen SDK raises JiuwenSDKError, falls back to nexent native."""
         from adapters.exception import JiuwenSDKError
@@ -3594,8 +3594,8 @@ class TestPromptOptimizationServiceOptimizeJiuwen(unittest.TestCase):
 class TestPromptOptimizationServiceBadcaseJiuwen(unittest.TestCase):
     """Tests for optimize_badcase with Jiuwen SDK (lines 1354-1388)."""
 
-    @patch('backend.services.prompt_service._get_jiuwen_adapter_class')
-    @patch('backend.services.prompt_service.ENABLE_JIUWEN_SDK', True)
+    @patch('management.services.agent.prompt_generation._get_jiuwen_adapter_class')
+    @patch('management.services.agent.prompt_generation.ENABLE_JIUWEN_SDK', True)
     def test_badcase_jiuwen_success(self, mock_get_adapter):
         """Jiuwen SDK badcase optimization succeeds."""
         mock_adapter_cls = MagicMock()
@@ -3617,8 +3617,8 @@ class TestPromptOptimizationServiceBadcaseJiuwen(unittest.TestCase):
         self.assertEqual(result.optimized_content, "Badcase optimized")
         self.assertEqual(result.original_content, "Current prompt")
 
-    @patch('backend.services.prompt_service._get_jiuwen_adapter_class')
-    @patch('backend.services.prompt_service.ENABLE_JIUWEN_SDK', True)
+    @patch('management.services.agent.prompt_generation._get_jiuwen_adapter_class')
+    @patch('management.services.agent.prompt_generation.ENABLE_JIUWEN_SDK', True)
     def test_badcase_jiuwen_fallback_on_error(self, mock_get_adapter):
         """When Jiuwen SDK badcase fails, falls back to nexent which raises NexentCapabilityError."""
         from adapters.exception import JiuwenSDKError, NexentCapabilityError
@@ -3641,8 +3641,8 @@ class TestPromptOptimizationServiceBadcaseJiuwen(unittest.TestCase):
                 section_title="Role",
             )
 
-    @patch('backend.services.prompt_service._get_jiuwen_adapter_class')
-    @patch('backend.services.prompt_service.ENABLE_JIUWEN_SDK', True)
+    @patch('management.services.agent.prompt_generation._get_jiuwen_adapter_class')
+    @patch('management.services.agent.prompt_generation.ENABLE_JIUWEN_SDK', True)
     def test_badcase_jiuwen_adapter_none_raises(self, mock_get_adapter):
         """When adapter class is None in badcase, raises JiuwenSDKError."""
         from adapters.exception import JiuwenSDKError, NexentCapabilityError
@@ -3667,7 +3667,7 @@ class TestGetJiuwenAdapterClass(unittest.TestCase):
 
     def test_returns_adapter_when_importable(self):
         """When adapters module has JiuwenSDKAdapter, return it."""
-        from backend.services.prompt_service import _get_jiuwen_adapter_class
+        from management.services.agent.prompt_generation import _get_jiuwen_adapter_class
 
         mock_adapter = MagicMock()
         mock_module = MagicMock()
@@ -3680,7 +3680,7 @@ class TestGetJiuwenAdapterClass(unittest.TestCase):
 
     def test_returns_none_when_not_importable(self):
         """When adapters module is not found, return None."""
-        from backend.services.prompt_service import _get_jiuwen_adapter_class
+        from management.services.agent.prompt_generation import _get_jiuwen_adapter_class
 
         with patch.dict(sys.modules, {'adapters': None}):
             with patch('builtins.__import__', side_effect=ModuleNotFoundError("No module named 'adapters'")):
@@ -3692,14 +3692,14 @@ class TestGetJiuwenAdapterClass(unittest.TestCase):
 class TestGreetingGeneration(unittest.TestCase):
     """Tests for greeting generation within generate_and_save_system_prompt_impl (lines 347-388)."""
 
-    @patch('backend.services.prompt_service.update_agent')
-    @patch('backend.services.prompt_service.call_llm_for_system_prompt')
+    @patch('management.services.agent.prompt_generation.update_agent')
+    @patch('management.services.agent.prompt_generation.call_llm_for_system_prompt')
     @patch('nexent.core.agents.prompt.auxiliary.load_prompt')
-    @patch('backend.services.prompt_service.check_agent_value_duplicate')
-    @patch('backend.services.prompt_service.query_all_agent_info_by_tenant_id')
-    @patch('backend.services.prompt_service.generate_system_prompt')
-    @patch('backend.services.prompt_service.query_tools_by_ids')
-    @patch('backend.services.prompt_service.search_agent_info_by_agent_id')
+    @patch('management.services.agent.prompt_generation.check_agent_value_duplicate')
+    @patch('management.services.agent.prompt_generation.query_all_agent_info_by_tenant_id')
+    @patch('management.services.agent.prompt_generation.generate_system_prompt')
+    @patch('management.services.agent.prompt_generation.query_tools_by_ids')
+    @patch('management.services.agent.prompt_generation.search_agent_info_by_agent_id')
     def test_greeting_generation_with_valid_json(
         self,
         mock_search_agent,
@@ -3758,14 +3758,14 @@ class TestGreetingGeneration(unittest.TestCase):
         parsed_questions = json.loads(question_items[0]["content"])
         self.assertEqual(len(parsed_questions), 3)
 
-    @patch('backend.services.prompt_service.update_agent')
-    @patch('backend.services.prompt_service.call_llm_for_system_prompt')
+    @patch('management.services.agent.prompt_generation.update_agent')
+    @patch('management.services.agent.prompt_generation.call_llm_for_system_prompt')
     @patch('nexent.core.agents.prompt.auxiliary.load_prompt')
-    @patch('backend.services.prompt_service.check_agent_value_duplicate')
-    @patch('backend.services.prompt_service.query_all_agent_info_by_tenant_id')
-    @patch('backend.services.prompt_service.generate_system_prompt')
-    @patch('backend.services.prompt_service.query_tools_by_ids')
-    @patch('backend.services.prompt_service.search_agent_info_by_agent_id')
+    @patch('management.services.agent.prompt_generation.check_agent_value_duplicate')
+    @patch('management.services.agent.prompt_generation.query_all_agent_info_by_tenant_id')
+    @patch('management.services.agent.prompt_generation.generate_system_prompt')
+    @patch('management.services.agent.prompt_generation.query_tools_by_ids')
+    @patch('management.services.agent.prompt_generation.search_agent_info_by_agent_id')
     def test_greeting_generation_invalid_json_fallback(
         self,
         mock_search_agent,
@@ -3820,14 +3820,14 @@ class TestGreetingGeneration(unittest.TestCase):
         parsed_questions = json.loads(question_items[0]["content"])
         self.assertEqual(parsed_questions, [])
 
-    @patch('backend.services.prompt_service.update_agent')
-    @patch('backend.services.prompt_service.call_llm_for_system_prompt')
+    @patch('management.services.agent.prompt_generation.update_agent')
+    @patch('management.services.agent.prompt_generation.call_llm_for_system_prompt')
     @patch('nexent.core.agents.prompt.auxiliary.load_prompt')
-    @patch('backend.services.prompt_service.check_agent_value_duplicate')
-    @patch('backend.services.prompt_service.query_all_agent_info_by_tenant_id')
-    @patch('backend.services.prompt_service.generate_system_prompt')
-    @patch('backend.services.prompt_service.query_tools_by_ids')
-    @patch('backend.services.prompt_service.search_agent_info_by_agent_id')
+    @patch('management.services.agent.prompt_generation.check_agent_value_duplicate')
+    @patch('management.services.agent.prompt_generation.query_all_agent_info_by_tenant_id')
+    @patch('management.services.agent.prompt_generation.generate_system_prompt')
+    @patch('management.services.agent.prompt_generation.query_tools_by_ids')
+    @patch('management.services.agent.prompt_generation.search_agent_info_by_agent_id')
     def test_greeting_example_questions_truncated_at_six(
         self,
         mock_search_agent,
@@ -3884,14 +3884,14 @@ class TestGreetingGeneration(unittest.TestCase):
         parsed = json.loads(question_items[0]["content"])
         self.assertEqual(len(parsed), 6)
 
-    @patch('backend.services.prompt_service.update_agent')
-    @patch('backend.services.prompt_service.call_llm_for_system_prompt')
+    @patch('management.services.agent.prompt_generation.update_agent')
+    @patch('management.services.agent.prompt_generation.call_llm_for_system_prompt')
     @patch('nexent.core.agents.prompt.auxiliary.load_prompt')
-    @patch('backend.services.prompt_service.check_agent_value_duplicate')
-    @patch('backend.services.prompt_service.query_all_agent_info_by_tenant_id')
-    @patch('backend.services.prompt_service.generate_system_prompt')
-    @patch('backend.services.prompt_service.query_tools_by_ids')
-    @patch('backend.services.prompt_service.search_agent_info_by_agent_id')
+    @patch('management.services.agent.prompt_generation.check_agent_value_duplicate')
+    @patch('management.services.agent.prompt_generation.query_all_agent_info_by_tenant_id')
+    @patch('management.services.agent.prompt_generation.generate_system_prompt')
+    @patch('management.services.agent.prompt_generation.query_tools_by_ids')
+    @patch('management.services.agent.prompt_generation.search_agent_info_by_agent_id')
     def test_greeting_skips_agent_update_in_create_mode(
         self,
         mock_search_agent,
@@ -3941,13 +3941,13 @@ class TestGreetingGeneration(unittest.TestCase):
 
         mock_update_agent.assert_not_called()
 
-    @patch('backend.services.prompt_service.call_llm_for_system_prompt')
+    @patch('management.services.agent.prompt_generation.call_llm_for_system_prompt')
     @patch('nexent.core.agents.prompt.auxiliary.load_prompt')
-    @patch('backend.services.prompt_service.check_agent_value_duplicate')
-    @patch('backend.services.prompt_service.query_all_agent_info_by_tenant_id')
-    @patch('backend.services.prompt_service.generate_system_prompt')
-    @patch('backend.services.prompt_service.query_tools_by_ids')
-    @patch('backend.services.prompt_service.search_agent_info_by_agent_id')
+    @patch('management.services.agent.prompt_generation.check_agent_value_duplicate')
+    @patch('management.services.agent.prompt_generation.query_all_agent_info_by_tenant_id')
+    @patch('management.services.agent.prompt_generation.generate_system_prompt')
+    @patch('management.services.agent.prompt_generation.query_tools_by_ids')
+    @patch('management.services.agent.prompt_generation.search_agent_info_by_agent_id')
     def test_greeting_exception_does_not_stop_flow(
         self,
         mock_search_agent,
@@ -3997,14 +3997,14 @@ class TestGreetingGeneration(unittest.TestCase):
 class TestGreetingJsonDecodeError(unittest.TestCase):
     """Test greeting JSON decode error path (lines 360-361)."""
 
-    @patch('backend.services.prompt_service.update_agent')
-    @patch('backend.services.prompt_service.call_llm_for_system_prompt')
+    @patch('management.services.agent.prompt_generation.update_agent')
+    @patch('management.services.agent.prompt_generation.call_llm_for_system_prompt')
     @patch('nexent.core.agents.prompt.auxiliary.load_prompt')
-    @patch('backend.services.prompt_service.check_agent_value_duplicate')
-    @patch('backend.services.prompt_service.query_all_agent_info_by_tenant_id')
-    @patch('backend.services.prompt_service.generate_system_prompt')
-    @patch('backend.services.prompt_service.query_tools_by_ids')
-    @patch('backend.services.prompt_service.search_agent_info_by_agent_id')
+    @patch('management.services.agent.prompt_generation.check_agent_value_duplicate')
+    @patch('management.services.agent.prompt_generation.query_all_agent_info_by_tenant_id')
+    @patch('management.services.agent.prompt_generation.generate_system_prompt')
+    @patch('management.services.agent.prompt_generation.query_tools_by_ids')
+    @patch('management.services.agent.prompt_generation.search_agent_info_by_agent_id')
     def test_greeting_json_decode_error_falls_back(
         self,
         mock_search_agent,
@@ -4062,7 +4062,7 @@ class TestExtractJsonObjectEdgeCases(unittest.TestCase):
 
     def test_utterly_broken_json_all_fallbacks_fail(self):
         """When all JSON repair strategies fail, return None (lines 512-513)."""
-        from backend.services.prompt_service import _extract_json_object
+        from management.services.agent.prompt_generation import _extract_json_object
         # Snippet with unbalanced braces that confuses all three strategies
         raw = '{\\x not valid json ever }'
         result = _extract_json_object(raw)
@@ -4073,7 +4073,7 @@ class TestExtractJsonObjectEdgeCases(unittest.TestCase):
 class TestOptimizeBadcaseWithJiuwenDirect(unittest.TestCase):
     """Test _optimize_badcase_with_jiuwen when adapter unavailable (line 1377)."""
 
-    @patch('backend.services.prompt_service._get_jiuwen_adapter_class')
+    @patch('management.services.agent.prompt_generation._get_jiuwen_adapter_class')
     def test_badcase_jiuwen_adapter_none_raises_directly(self, mock_get_adapter):
         """When adapter class is None, _optimize_badcase_with_jiuwen raises JiuwenSDKError."""
         from adapters.exception import JiuwenSDKError
@@ -4110,7 +4110,7 @@ class TestKnowledgeAgnosticPromptRules(unittest.TestCase):
         self.assertIn("current conversation", copied[0]["reason"])
         self.assertIn("fixed index_names", copied[0]["reason"])
 
-    @patch('backend.services.prompt_service._get_jiuwen_adapter_class')
+    @patch('management.services.agent.prompt_generation._get_jiuwen_adapter_class')
     def test_jiuwen_general_optimization_receives_scope_rule(self, mock_get_adapter):
         adapter = MagicMock()
         adapter.optimize.return_value = "optimized"

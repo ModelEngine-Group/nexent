@@ -34,8 +34,8 @@ from consts.exceptions import (
     tenant_resource_limit_error_payload,
 )
 from consts.model import NL2AgentRunRequest
-from services.agent_draft_permission_service import AgentDraftEditError
-from services.nl2agent_service import Nl2AgentDraftSaveError
+from consts.exceptions import AgentDraftEditError
+from management.services.agent.creation import Nl2AgentDraftSaveError
 
 # Filter out deprecation warnings from third-party libraries
 warnings.filterwarnings(
@@ -136,20 +136,20 @@ sys.modules['database.client'] = MagicMock()
 sys.modules['database.agent_db'] = MagicMock()
 sys.modules['agents.create_agent_info'] = MagicMock()
 sys.modules['nexent.core.agents.run_agent'] = MagicMock()
-sys.modules['utils.auth_utils'] = MagicMock()
-sys.modules['utils.config_utils'] = MagicMock()
+sys.modules['management.services.permission.identity.authentication_helpers'] = MagicMock()
+sys.modules['management.services.configuration.tenant.settings'] = MagicMock()
 sys.modules['utils.thread_utils'] = MagicMock()
-sys.modules['utils.monitoring'] = MagicMock()
-sys.modules['utils.monitoring'].monitoring_manager = monitoring_manager_mock
-sys.modules['utils.monitoring'].setup_fastapi_app = MagicMock(
+sys.modules['infrastructure.observability.bootstrap'] = MagicMock()
+sys.modules['infrastructure.observability.bootstrap'].monitoring_manager = monitoring_manager_mock
+sys.modules['infrastructure.observability.bootstrap'].setup_fastapi_app = MagicMock(
     return_value=True)
 sys.modules['agents.agent_run_manager'] = MagicMock()
 sys.modules['management.services.agent.service'] = MagicMock()
 sys.modules['management.services.skill.service'] = MagicMock()
-sys.modules['services.conversation_management_service'] = MagicMock()
-sys.modules['services.memory_config_service'] = MagicMock()
-sys.modules['services.agent_version_service'] = MagicMock()
-sys.modules['services.prompt_service'] = MagicMock()
+sys.modules['management.services.conversation.service'] = MagicMock()
+sys.modules['management.services.configuration.user.memory'] = MagicMock()
+sys.modules['management.services.agent.versions'] = MagicMock()
+sys.modules['management.services.agent.prompt_generation'] = MagicMock()
 
 # Now safe to import app modules after all mocks are set up
 from apps.agent_app import (

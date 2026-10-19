@@ -1,3 +1,4 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 import asyncio
 import logging
 from contextlib import asynccontextmanager
@@ -71,15 +72,15 @@ from nexent.core.concurrency import (
     set_default_thread_manager,
 )
 from consts.task_recovery import CONFIG_SERVICE_NAME
-from services.prompt_template_service import sync_system_default_prompt_template
-from services.thread_lifecycle_service import config_thread_manager
+from management.services.agent.prompt_templates import sync_system_default_prompt_template
+from infrastructure.concurrency import config_thread_manager
 
 logger = logging.getLogger("base_app")
 
 
 async def recover_config_tasks_on_startup():
-    from services.evaluation_maintenance import start as start_eval_maintenance
-    from services.startup_recovery_service import (
+    from management.services.evaluation.maintenance import start as start_eval_maintenance
+    from management.recovery import (
         recover_config_tasks,
         schedule_interrupted_upload_cleanup,
         schedule_workbench_main_backfill,
@@ -114,13 +115,13 @@ async def sync_default_prompt_template_on_startup():
 
 
 async def start_dreaming_scheduler():
-    from services.memory_dreaming_scheduler import dreaming_scheduler
+    from management.services.memory.dreaming.scheduler import dreaming_scheduler
 
     await dreaming_scheduler.start()
 
 
 async def stop_dreaming_scheduler():
-    from services.memory_dreaming_scheduler import dreaming_scheduler
+    from management.services.memory.dreaming.scheduler import dreaming_scheduler
 
     await dreaming_scheduler.stop()
 
@@ -139,7 +140,7 @@ async def config_lifespan(_app):
         # Preserve the scheduler's existing graceful shutdown behavior. Task
         # state recovery remains exclusively in the startup path above.
         await stop_dreaming_scheduler()
-        from services.evaluation_maintenance import stop as stop_eval_maintenance
+        from management.services.evaluation.maintenance import stop as stop_eval_maintenance
 
         stop_eval_maintenance()
         try:

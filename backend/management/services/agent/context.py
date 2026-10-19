@@ -162,9 +162,9 @@ def build_agent_run_context(
     request, user_id: str, tenant_id: str, language: str, *, extra_metadata: dict
 ):
     """Preview memory once and bind the metadata shared by both consumers."""
-    from services.memory_config_service import build_memory_context
-    from utils.monitoring import monitoring_manager
-    from utils.monitoring_identity import resolve_monitoring_user_email
+    from management.services.configuration.user.memory import build_memory_context
+    from infrastructure.observability.bootstrap import monitoring_manager
+    from management.services.monitor.identity import resolve_monitoring_user_email
 
     memory = build_memory_context(
         user_id, tenant_id, request.agent_id, skip_query=request.is_debug

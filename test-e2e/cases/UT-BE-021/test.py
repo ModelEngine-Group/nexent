@@ -1,3 +1,4 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """D1 backend policy tests for repository, sharing, runtime and memory."""
 
 from __future__ import annotations
@@ -32,7 +33,7 @@ STAGE = pytest.mark.stage("D1")
 @pytest.mark.asyncio
 async def test_northbound_idempotency_rejects_inflight_and_allows_replay_after_end(monkeypatch: pytest.MonkeyPatch) -> None:
     from consts.exceptions import LimitExceededError
-    from services import northbound_service as service
+    from management.services.agent import northbound as service
 
     monkeypatch.setattr(type(service.runtime_state_service), "enabled", property(lambda _self: False))
     service._IDEMPOTENCY_RUNNING.clear()
@@ -43,11 +44,3 @@ async def test_northbound_idempotency_rejects_inflight_and_allows_replay_after_e
     await service.idempotency_end(key)
     await service.idempotency_start(key, ttl_seconds=60)
     await service.idempotency_end(key)
-
-
-
-
-
-
-
-

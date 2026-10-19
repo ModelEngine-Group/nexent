@@ -10,20 +10,20 @@ from test.common.source_files import iter_project_python_files
 
 ROOT = Path(__file__).resolve().parents[3]
 PRODUCTION_PATHS = (
-    "backend/services/prompt_service.py",
+    "backend/management/services/agent/prompt_generation.py",
     "backend/management/services/agent/naming.py",
     "backend/management/services/agent/prompt.py",
     "backend/agents/nl2agent_agent.py",
-    "backend/services/prompt_template_service.py",
-    "backend/services/conversation_management_service.py",
-    "backend/services/agent_automation/intent_analyzer.py",
-    "backend/services/agent_automation/prompt_generator.py",
-    "backend/services/agent_evaluation_service.py",
-    "backend/services/evaluation_set_service.py",
-    "backend/services/evaluator_service.py",
+    "backend/management/services/agent/prompt_templates.py",
+    "backend/management/services/conversation/service.py",
+    "backend/management/services/automation/intent.py",
+    "backend/management/services/automation/prompt.py",
+    "backend/management/services/evaluation/runs.py",
+    "backend/management/services/evaluation/sets.py",
+    "backend/management/services/evaluation/evaluators.py",
     'backend/management/services/knowledge_base/summary.py',
-    "backend/services/fa_memory_extractor.py",
-    "backend/services/memory_dreaming_summarizer.py",
+    "backend/management/services/memory/extraction.py",
+    "backend/management/services/memory/dreaming/summarizer.py",
     "backend/management/services/agent/profile.py",
 )
 
@@ -58,9 +58,9 @@ def test_ut_be_fps_018_backend_imports_only_current_assembly_modules():
         source = path.read_text(encoding="utf-8-sig")
         assert not any(module in source for module in old_modules), path
     direct_callers = {
-        "backend/services/evaluation_set_service.py": "nexent.core.agents.prompt.evaluation",
+        "backend/management/services/evaluation/sets.py": "nexent.core.agents.prompt.evaluation",
         'backend/management/services/knowledge_base/summary.py': "nexent.core.agents.prompt.document",
-        "backend/services/fa_memory_extractor.py": "nexent.core.agents.prompt.memory",
+        "backend/management/services/memory/extraction.py": "nexent.core.agents.prompt.memory",
         "backend/agents/create_agent_info.py": "nexent.core.agents.prompt.user_context",
     }
     for path, module in direct_callers.items():

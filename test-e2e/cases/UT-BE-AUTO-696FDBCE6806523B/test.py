@@ -1,3 +1,4 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 from __future__ import annotations
 
 import asyncio
@@ -6,7 +7,7 @@ import types
 
 import pytest
 
-from services import nl2agent_service
+from management.services.agent import creation as nl2agent_service
 
 CASE_ID = "UT-BE-AUTO-696FDBCE6806523B"
 _NORMAL_TOOL = "some_normal_tool"
@@ -37,7 +38,7 @@ class _FakeSkillService:
 
 
 def _install_catalog_dependencies(monkeypatch, tools: list) -> None:
-    tcs_name = "services.tool_configuration_service"
+    tcs_name = "management.services.tool.configuration"
     existing_tcs = sys.modules.get(tcs_name)
 
     async def _fake_list_all_tools(tenant_id=None, labels=None):
