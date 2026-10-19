@@ -1,5 +1,8 @@
 // Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+
 import { journey } from "../../infra/automation/d4/runner/journey";
 import { executeFixedScenario } from "../../infra/automation/d4/runner/scenario";
 import { loginCurrent } from "../../infra/automation/d4/runner/sessions";
@@ -11,18 +14,15 @@ import { AidpKnowledgePage } from "../../infra/automation/d4/pages/aidp-knowledg
 /**
  * PW-KB-AIDP-01 — AIDP knowledge branch, end to end, mode-exclusive.
  *
- * The profile is selected by the machine-local aidp-journey configuration
- * through the suite worker (never guessed in the script):
- *  - mock: the real product runs against the controlled AIDP (ext-knowledge
- *    instance, seed aidp-kb-product). The oracle is the stable seed text,
- *    its source document and the selected KB id — a name filter match never
- *    impersonates retrieval here.
- *  - real_smoke: the real product runs against an explicitly configured
- *    real AIDP; the oracle comes from the same configuration. Mock results
- *    never count as real_smoke.
+ * The journey always runs against the controlled AIDP served by the
+ * ext-knowledge mock (logical service knowledge-provider, seed
+ * aidp-kb-product); there is no profile selection and no real AIDP
+ * environment. The oracle is the stable seed text, its source document and
+ * the selected KB id — a name filter match never impersonates retrieval
+ * here.
  */
 
-const MOCK_ORACLE = {
+const ORACLE = {
   kbName: "AIDP Product Handbook",
   kbId: "aidp-kb-product",
   query: "AIDP Search 提供了什么能力？请引用原文回答。",
@@ -31,57 +31,20 @@ const MOCK_ORACLE = {
 };
 
 interface JourneyOracle {
-  profile: string;
   kbName: string;
   kbId: string;
-  docName?: string;
   query: string;
   expectedText: string;
   expectedSource: string;
 }
 
-function oracleForProfile(): JourneyOracle {
-  const profile = (process.env.NEXENT_TEST_SELECTED_PROFILE || "").trim();
-  if (profile === "mock") {
-    return { profile, ...MOCK_ORACLE };
-  }
-  if (profile === "real_smoke") {
-    const required = [
-      "NEXENT_TEST_AIDP_REAL_KB_ID",
-      "NEXENT_TEST_AIDP_REAL_KB_NAME",
-      "NEXENT_TEST_AIDP_REAL_QUERY",
-      "NEXENT_TEST_AIDP_REAL_EXPECTED_TEXT",
-      "NEXENT_TEST_AIDP_REAL_EXPECTED_SOURCE",
-    ] as const;
-    const missing = required.filter((name) => !(process.env[name] || "").trim());
-    if (missing.length) {
-      throw new Error(
-        `real_smoke profile is not configured: missing ${missing.join(", ")}; ` +
-          "fill config/aidp-journey.yaml or stay on the mock profile",
-      );
-    }
-    return {
-      profile,
-      kbId: process.env.NEXENT_TEST_AIDP_REAL_KB_ID!.trim(),
-      kbName: process.env.NEXENT_TEST_AIDP_REAL_KB_NAME!.trim(),
-      docName: (process.env.NEXENT_TEST_AIDP_REAL_DOC_NAME || "").trim() || undefined,
-      query: process.env.NEXENT_TEST_AIDP_REAL_QUERY!.trim(),
-      expectedText: process.env.NEXENT_TEST_AIDP_REAL_EXPECTED_TEXT!.trim(),
-      expectedSource: process.env.NEXENT_TEST_AIDP_REAL_EXPECTED_SOURCE!.trim(),
-    };
-  }
-  throw new Error(
-    "NEXENT_TEST_SELECTED_PROFILE is required: run this case through the suite " +
-      "worker so the aidp-journey profile selection resolves mock or real_smoke",
-  );
-}
+const oracle: JourneyOracle = ORACLE;
 
 journey("PW-KB-AIDP-01", async (context) => {
   const { page, expect } = context;
   const aidp = new AidpKnowledgePage(page);
   const agents = new AgentPage(page);
   const chat = new ChatPage(page);
-  let oracle: JourneyOracle | null = null;
   let agentDisplay = "";
   let bindingPayload = "";
   let bindingToolVerified = false;
@@ -91,8 +54,7 @@ journey("PW-KB-AIDP-01", async (context) => {
   await executeFixedScenario(context, {
     preconditions: [
       async () => {
-        oracle = oracleForProfile();
-        return `profile ${oracle.profile} resolved from the aidp-journey configuration`;
+        return `using the built-in mock oracle (ext-knowledge seed ${oracle.kbId})`;
       },
       async () => {
         await loginCurrent(page, "tenant_a_admin");
@@ -111,33 +73,29 @@ journey("PW-KB-AIDP-01", async (context) => {
     ],
     steps: [
       async () => {
-        await aidp.selectKnowledgeBase(oracle!.kbName);
-        if (oracle!.docName) {
-          await aidp.expectDocument(oracle!.docName);
-          return `entered file management for ${oracle!.kbName} and verified document ${oracle!.docName}`;
-        }
-        return `entered file management for ${oracle!.kbName} and verified the selected resource`;
+        await aidp.selectKnowledgeBase(oracle.kbName);
+        return `entered file management for ${oracle.kbName} and verified the selected resource`;
       },
       async () => {
         await agents.open();
         await agents.select(agentDisplay);
-        const payload = await agents.bindKnowledgeBase(oracle!.kbName, "aidp_search");
+        const payload = await agents.bindKnowledgeBase(oracle.kbName, "aidp_search");
         bindingPayload = JSON.stringify(payload ?? {});
         // The tool-config autosave body carries the numeric tool id, not the
         // semantic name; the id is proven against the product's own tool list
         // so the saved params can only belong to aidp_search.
         const aidpToolId = await agents.toolIdBySemanticName("aidp_search");
         expect(Number(payload?.tool_id)).toBe(aidpToolId);
-        expect(bindingPayload).toContain(oracle!.kbId);
+        expect(bindingPayload).toContain(oracle.kbId);
         bindingToolVerified = true;
-        return `bound AIDP KB ${oracle!.kbName} (${oracle!.kbId}) through the real drawer and verified the aidp_search autosave`;
+        return `bound AIDP KB ${oracle.kbName} (${oracle.kbId}) through the real drawer and verified the aidp_search autosave`;
       },
       async () => {
-        debugAnswer = await agents.debug(oracle!.query, oracle!.expectedText);
+        debugAnswer = await agents.debug(oracle.query, oracle.expectedText);
         return "Agent Debug completed a real AIDP tool recall stream";
       },
       async () => {
-        expect(debugAnswer).toContain(oracle!.expectedText);
+        expect(debugAnswer).toContain(oracle.expectedText);
         return `debug answer contained the oracle text fragment`;
       },
       async () => {
@@ -150,8 +108,8 @@ journey("PW-KB-AIDP-01", async (context) => {
         const labels = await chips.evaluateAll((nodes) =>
           nodes.map((node) => node.getAttribute("aria-label") || ""),
         );
-        expect(labels.join("\n")).toContain(oracle!.expectedSource);
-        return `citation named the oracle source ${oracle!.expectedSource}`;
+        expect(labels.join("\n")).toContain(oracle.expectedSource);
+        return `citation named the oracle source ${oracle.expectedSource}`;
       },
       async () => {
         await page.reload({ waitUntil: "domcontentloaded" });
@@ -159,7 +117,7 @@ journey("PW-KB-AIDP-01", async (context) => {
         await agents.openBasic();
         await agents.openSection("知识库管理");
         await expect(
-          page.getByTestId("agent-selected-knowledge-base-name").filter({ hasText: oracle!.kbName }),
+          page.getByTestId("agent-selected-knowledge-base-name").filter({ hasText: oracle.kbName }),
         ).toBeVisible();
         return "full Agent-page refresh retained the AIDP knowledge binding";
       },
@@ -169,31 +127,37 @@ journey("PW-KB-AIDP-01", async (context) => {
         // action before starting a brand-new conversation.
         await agents.publishDraft("d4-aidp-journey", "AIDP knowledge binding journey");
         await chat.openAgent(agentDisplay);
-        await chat.startMessage(oracle!.query);
+        await chat.startMessage(oracle.query);
         await chat.waitForCompletion();
         const messages = await chat.assistantMessages().allInnerTexts();
         conversationAnswer = messages.join("\n");
-        expect(conversationAnswer).toContain(oracle!.expectedText);
+        expect(conversationAnswer).toContain(oracle.expectedText);
         return "released the edited agent and a brand-new conversation recalled the same oracle through the agent-scoped AIDP knowledge";
       },
     ],
     assertions: [
       async () => {
         expect(bindingToolVerified).toBe(true);
-        expect(bindingPayload).toContain(oracle!.kbId);
-        return `the autosaved aidp_search tool config carried the KB id ${oracle!.kbId}`;
+        expect(bindingPayload).toContain(oracle.kbId);
+        return `the autosaved aidp_search tool config carried the KB id ${oracle.kbId}`;
       },
       async () => {
-        expect(debugAnswer).toContain(oracle!.expectedText);
+        expect(debugAnswer).toContain(oracle.expectedText);
         return "Agent Debug produced a real AIDP retrieval answer with the oracle text";
       },
       async () => {
-        expect(conversationAnswer).toContain(oracle!.expectedText);
+        expect(conversationAnswer).toContain(oracle.expectedText);
         return "the knowledge scope survived into a new conversation";
       },
       async () => {
-        expect(oracle!.profile).toMatch(/^(mock|real_smoke)$/);
-        return `journey executed under the explicitly selected ${oracle!.profile} profile`;
+        // The run is mock-backed by contract: the suite worker's attach to
+        // the controlled AIDP mock (identity, lock, reset) must be recorded
+        // for this case in runtime/ext-knowledge-attach.json.
+        const resultDir = process.env.RESULT_DIR || "";
+        const evidencePath = join(resultDir, "runtime", "ext-knowledge-attach.json");
+        const evidence = JSON.parse(readFileSync(evidencePath, "utf-8")) as { attached?: boolean };
+        expect(evidence.attached).toBe(true);
+        return "the ext mock attach evidence was recorded for this case";
       },
     ],
   });

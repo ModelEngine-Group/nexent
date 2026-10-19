@@ -22,7 +22,10 @@ from consts.const import (
     PERMISSION_PRIVATE,
 )
 from consts.exceptions import AppException, DuplicateError
+from database.agent_db import query_knowledge_binding_agents
 from database.attachment_db import get_file_stream
+from database.client import get_db_session
+from database.conversation_db import remove_conversation_knowledge_bindings
 from database.group_db import query_group_ids_by_user
 from database.knowledge_db import (
     create_knowledge_record,
@@ -38,6 +41,7 @@ from database.knowledge_file_lifecycle_db import (
     delete_file_records_for_knowledge_base,
 )
 from database.model_management_db import get_model_by_model_id
+from database.tool_db import remove_tool_knowledge_references
 from database.user_tenant_db import get_user_tenant_by_user_id
 from fastapi import Body, Depends, Path, Query
 from management.services.knowledge_base.common import (
@@ -93,6 +97,11 @@ class KnowledgeBaseManagementService(KnowledgeBaseFileService):
         require_knowledge_base_read_permission
     )
     filter_accessible_indices = staticmethod(filter_accessible_indices)
+
+    @staticmethod
+    def get_bound_agents(index_names: list[str], *, tenant_id: str) -> dict:
+        """Preview agents affected by deleting the selected knowledge bases."""
+        return {"agents": query_knowledge_binding_agents(index_names=index_names, tenant_id=tenant_id)}
 
     @staticmethod
     async def full_delete_knowledge_base(
@@ -229,6 +238,12 @@ class KnowledgeBaseManagementService(KnowledgeBaseFileService):
             if "errors" in redis_cleanup_result:
                 result["redis_warnings"] = redis_cleanup_result["errors"]
 
+            try:
+                with get_db_session() as session:
+                    remove_tool_knowledge_references(session, index_names=[index_name])
+                    remove_conversation_knowledge_bindings(session, index_names=[index_name])
+            except Exception as exc:  # noqa: BLE001 - Binding cleanup must not fail knowledge-base deletion.
+                logger.warning("Failed to clean up bindings for deleted knowledge base '%s': %s", index_name, exc)
             logger.info(
                 f"Successfully completed full deletion process for knowledge base '{index_name}'."
             )

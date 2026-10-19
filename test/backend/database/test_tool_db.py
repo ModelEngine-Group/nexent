@@ -1,11 +1,16 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import sys
 import pytest
 from unittest.mock import patch, MagicMock
 
 
+from test.common.module_stubs import capture_module_stubs
+
+_modules_before_stubs = sys.modules.copy()
+
 @pytest.fixture(autouse=True)
-def _default_to_ordinary_agent(monkeypatch):
+def _default_to_ordinary_agent(monkeypatch, _isolated_imports):
     """Keep general ToolInstance tests scoped to an ordinary Agent."""
     monkeypatch.setattr(
         sys.modules["backend.database.agent_db"],
@@ -1963,3 +1968,11 @@ def test_update_tool_labels_not_found(monkeypatch, mock_session):
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
+
+
+_install_module_stubs = capture_module_stubs(_modules_before_stubs)
+
+
+@pytest.fixture(autouse=True)
+def _isolated_imports(monkeypatch):
+    _install_module_stubs(monkeypatch)

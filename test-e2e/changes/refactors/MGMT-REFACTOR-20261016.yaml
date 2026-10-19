@@ -94,6 +94,7 @@ change:
     test_selectors:
     - test/backend/agents/test_create_agent_info.py
     - test/backend/agents/test_create_agent_info_workbench_coverage.py
+    - test/backend/agents/test_nl2agent_agent.py
     - test/backend/app/test_a2a_client_app.py
     - test/backend/app/test_agent_app.py
     - test/backend/app/test_agent_automation_app.py
@@ -112,7 +113,9 @@ change:
     - test/backend/app/test_file_management_app.py
     - test/backend/app/test_idata_app.py
     - test/backend/app/test_image_app.py
+    - test/backend/app/test_knowledge_base_bound_agents.py
     - test/backend/app/test_knowledge_summary_app.py
+    - test/backend/app/test_northbound_app.py
     - test/backend/app/test_northbound_app_audit.py
     - test/backend/app/test_northbound_base_app.py
     - test/backend/app/test_northbound_knowledge_app.py
@@ -135,12 +138,17 @@ change:
     - test/backend/data_process/test_celery_prefork_coverage.py
     - test/backend/data_process/test_utils.py
     - test/backend/database/test_agent_db.py
+    - test/backend/database/test_agent_knowledge_bindings.py
     - test/backend/database/test_agent_repository_db.py
     - test/backend/database/test_agent_version_db.py
+    - test/backend/database/test_conversation_db.py
+    - test/backend/database/test_conversation_db_workbench_coverage.py
+    - test/backend/database/test_conversation_knowledge_bindings.py
     - test/backend/database/test_group_db.py
     - test/backend/database/test_invitation_db.py
     - test/backend/database/test_knowledge_db.py
     - test/backend/database/test_model_managment_db.py
+    - test/backend/database/test_nl2agent_agent_db.py
     - test/backend/database/test_remote_mcp_db.py
     - test/backend/database/test_role_permission_db.py
     - test/backend/database/test_skill_db.py
@@ -148,6 +156,7 @@ change:
     - test/backend/database/test_tenant_config_db.py
     - test/backend/database/test_tool_db.py
     - test/backend/database/test_tool_db_tenant_query.py
+    - test/backend/database/test_tool_knowledge_bindings.py
     - test/backend/database/test_user_tenant_db.py
     - test/backend/database/test_workbench_pin_db.py
     - test/backend/management/test_management_relocation.py
@@ -210,6 +219,8 @@ change:
     - test/backend/services/test_image_service.py
     - test/backend/services/test_ind_aidp_service.py
     - test/backend/services/test_invitation_service.py
+    - test/backend/services/test_knowledge_base_deletion_bindings.py
+    - test/backend/services/test_knowledge_base_deletion_preview.py
     - test/backend/services/test_knowledge_scope_service.py
     - test/backend/services/test_knowledge_storage_service.py
     - test/backend/services/test_mcp_container_service.py
@@ -237,6 +248,7 @@ change:
     - test/backend/services/test_model_health_service.py
     - test/backend/services/test_model_management_service.py
     - test/backend/services/test_nl2agent_service.py
+    - test/backend/services/test_nl2skill_service.py
     - test/backend/services/test_northbound_model_lane.py
     - test/backend/services/test_northbound_service.py
     - test/backend/services/test_notification_service.py
@@ -316,6 +328,7 @@ change:
     - test/backend/utils/test_time_context_localization.py
     - test/ext_components/aidp/test_aidp_cas_display.py
     - test/ext_components/aidp/test_aidp_mgmt_app.py
+    - test/ext_components/aidp/test_aidp_service.py
     - test/ext_components/ext_knowledge/test_dify_fidelity.py
     - test/ext_components/ext_knowledge/test_haotian_fidelity.py
     - test/ext_components/ext_knowledge/test_idata_fidelity.py
@@ -327,4 +340,7 @@ change:
     D1 is regression execution; historical acceptance completeness remains unreviewed.
     Scope narrowed by user on 2026-10-19: workspace cleanup, NL2Agent and Northbound
     keep their original services owners; backend/runtime package is removed. NL2Skill
-    retains only the necessary relocated dependency imports as explicitly approved.'
+    retains only the necessary relocated dependency imports as explicitly approved.
+    Integrate develop commits 4d84586e4 and 848cf42bc before PR; keep upstream knowledge
+    binding cleanup and mock-only Daily changes, updating only canonical dependency
+    imports.'

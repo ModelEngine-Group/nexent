@@ -8,6 +8,10 @@ from unittest.mock import patch, MagicMock
 from sqlalchemy import Boolean, Column, Integer, MetaData, String, Table, column, create_engine, literal_column, table
 from sqlalchemy.orm import Session
 
+from test.common.module_stubs import capture_module_stubs
+
+_modules_before_stubs = sys.modules.copy()
+
 # 首先模拟consts模块，避免ModuleNotFoundError
 consts_mock = MagicMock()
 consts_mock.const = MagicMock()
@@ -128,6 +132,13 @@ sys.modules['database.db_models'] = db_models_mock
 sys.modules['backend.database.db_models'] = db_models_mock
 
 # 现在可以安全地导入被测试的模块
+for module_name, function_name in (
+    ("database.tool_db", "query_tool_knowledge_references"),
+):
+    collaborator = types.ModuleType(module_name)
+    setattr(collaborator, function_name, MagicMock())
+    sys.modules[module_name] = collaborator
+
 from backend.database.agent_db import (
     search_agent_info_by_agent_id,
     search_agent_id_by_agent_name,
@@ -151,7 +162,7 @@ from consts.exceptions import TenantResourceLimitError
 
 
 @pytest.fixture(autouse=True)
-def _default_to_ordinary_agent(monkeypatch):
+def _default_to_ordinary_agent(monkeypatch, _isolated_imports):
     """Keep general Agent DB tests scoped to an ordinary Agent."""
     monkeypatch.setattr(
         "backend.database.agent_db.is_system_agent",
@@ -570,8 +581,6 @@ def test_update_agent_success(monkeypatch, mock_session):
 
 def test_cmsr_006_update_preserves_explicitly_disabled_protocol_repair(monkeypatch, mock_session):
     """A partial update must not reset a disabled protocol repair policy."""
-    from backend.consts.model import AgentInfoRequest
-
     session, query = mock_session
     mock_agent = MockAgent()
     query.filter.return_value.first.return_value = mock_agent
@@ -580,10 +589,10 @@ def test_cmsr_006_update_preserves_explicitly_disabled_protocol_repair(monkeypat
     monkeypatch.setattr("backend.database.agent_db.get_db_session", lambda: mock_ctx)
     monkeypatch.setattr("backend.database.agent_db.filter_property", lambda data, model: data)
 
-    update_agent(1, AgentInfoRequest(enable_protocol_repair_retry=False), "user1")
+    update_agent(1, SimpleNamespace(enable_protocol_repair_retry=False), "user1")
     assert mock_agent.enable_protocol_repair_retry is False
 
-    update_agent(1, AgentInfoRequest(description="updated"), "user1")
+    update_agent(1, SimpleNamespace(description="updated"), "user1")
     assert mock_agent.enable_protocol_repair_retry is False
 
 def test_update_agent_skips_none_and_converts_group_ids(monkeypatch, mock_session):
@@ -1798,3 +1807,11 @@ def test_batch_get_agent_main_flags_returns_empty_without_ids(mock_session):
     assert batch_get_agent_main_flags([]) == {}
     assert batch_get_agent_main_flags([None]) == {}
     query.filter.assert_not_called()
+
+
+_install_module_stubs = capture_module_stubs(_modules_before_stubs)
+
+
+@pytest.fixture(autouse=True)
+def _isolated_imports(monkeypatch):
+    _install_module_stubs(monkeypatch)

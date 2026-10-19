@@ -8,6 +8,7 @@ import pytest
 from test.ext_components.aidp.test_aidp_mgmt_app import (
     _bearer,
     _client,
+    _isolated_imports,
     configure_aidp_constants,  # noqa: F401 - shared autouse fixture
 )
 

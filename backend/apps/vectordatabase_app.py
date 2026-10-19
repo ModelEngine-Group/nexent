@@ -1,14 +1,20 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
-import logging
 import json
+import logging
+import re
 from http import HTTPStatus
 from typing import Annotated, Any, Dict, List, Optional
 
 from fastapi import APIRouter, Body, Depends, Header, HTTPException, Path, Query, Request
 from fastapi.responses import JSONResponse
-import re
+from nexent.core.concurrency import run_blocking
+from nexent.vector_database.base import VectorDatabaseCore
 
+from apps.permission_utils import (
+    require_knowledge_base_edit_permission,
+    require_knowledge_base_read_permission,
+)
 from consts.const import ASSET_OWNER_TENANT_ID
 from consts.error_code import ErrorCode
 from consts.exceptions import (
@@ -17,27 +23,23 @@ from consts.exceptions import (
     TokenExpiredError,
 )
 from consts.model import ChunkCreateRequest, ChunkUpdateRequest, HybridSearchRequest, IndexingResponse
-from consts.scheduler import VALID_SUMMARY_FREQUENCIES, SUMMARY_FREQUENCY_OPTIONS_FOR_API
-from nexent.vector_database.base import VectorDatabaseCore
-from management.services.model.resolver import get_embedding_model_by_id
+from consts.scheduler import SUMMARY_FREQUENCY_OPTIONS_FOR_API, VALID_SUMMARY_FREQUENCIES
+from database.knowledge_db import get_index_name_by_knowledge_name, get_knowledge_record
+from database.model_management_db import get_model_by_model_id
 from management.services.knowledge_base.service import (
     ElasticSearchService,
-    get_vector_db_core,
-    check_knowledge_base_exist_impl,
     KnowledgeBaseNeedsModelConfigError,
+    check_knowledge_base_exist_impl,
+    get_vector_db_core,
 )
+from management.services.knowledge_base.status import get_all_files_status
+from management.services.model.resolver import get_embedding_model_by_id
 from management.services.monitor.audit import record_security_event
 from management.services.file.service import check_file_access
 from management.services.knowledge_base.quota import QuotaService
 from management.services.knowledge_base.task_state import get_redis_service
 from management.services.permission.identity.authentication_helpers import get_current_user_context, get_current_user_id
-from management.services.knowledge_base.status import get_all_files_status
-from database.knowledge_db import get_index_name_by_knowledge_name, get_knowledge_record
-from database.model_management_db import get_model_by_model_id
-from apps.permission_utils import (
-    require_knowledge_base_edit_permission,
-    require_knowledge_base_read_permission,
-)
+
 
 router = APIRouter(prefix="/indices")
 service = ElasticSearchService()
@@ -157,6 +159,34 @@ def create_new_index(
     except Exception as e:
         raise HTTPException(
             status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=f"Error creating index: {str(e)}")
+
+
+@router.get("/{index_name}/bound_agents")
+async def get_knowledge_base_bound_agents(
+    index_name: str = Path(..., min_length=1, pattern=r".*\S.*"),
+    authorization: Optional[str] = Header(None),
+    tenant_id: Optional[str] = Query(None, description="Tenant ID for filtering (uses auth if not provided)"),
+):
+    """List agents bound to this knowledge base for deletion confirmation."""
+    try:
+        user_id, auth_tenant_id, role = get_current_user_context(authorization)
+    except TokenExpiredError as exc:
+        raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(exc)) from exc
+    target_tenant_id = tenant_id or auth_tenant_id
+    if target_tenant_id != auth_tenant_id and role != "SU":
+        raise HTTPException(status_code=HTTPStatus.FORBIDDEN, detail="Not authorized to access this tenant")
+    try:
+        require_knowledge_base_read_permission(index_name, user_id, target_tenant_id)
+    except HTTPException as exc:
+        if exc.status_code != HTTPStatus.NOT_FOUND:
+            raise
+        return JSONResponse(status_code=HTTPStatus.OK, content={"agents": []})
+    preview = await run_blocking(
+        "preview-kb-deletion", ElasticSearchService.get_bound_agents, [index_name],
+        tenant_id=target_tenant_id,
+        lane="control-io", owner="apps.vectordatabase_app",
+    )
+    return JSONResponse(status_code=HTTPStatus.OK, content=preview)
 
 
 @router.delete("/{index_name}")

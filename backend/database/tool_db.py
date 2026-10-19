@@ -1,14 +1,22 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
-import re
 import json
-from typing import List, Optional
-from database.agent_db import logger
-from database.client import get_db_session, filter_property, as_dict
-from database.db_models import ToolInstance, ToolInfo
+import logging
+import re
+from typing import Dict, List, Optional, Sequence, Set
+
+from sqlalchemy import cast, or_
+from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy.orm import Session
+
 from consts.model import ToolSourceEnum
 from consts.tool_labels import BUILTIN_LABEL_MAP
+from database.client import as_dict, filter_property, get_db_session
+from database.db_models import ToolInfo, ToolInstance
 from management.services.tool.catalog import get_local_tools_description_zh
+
+
+logger = logging.getLogger(__name__)
 
 
 def create_tool(tool_info, version_no: int = 0):
@@ -552,3 +560,41 @@ def search_last_tool_instance_by_tool_id(tool_id: int, tenant_id: str, user_id: 
         ).order_by(ToolInstance.update_time.desc())
         tool_instance = query.first()
         return as_dict(tool_instance) if tool_instance else None
+
+
+def _query_knowledge_tool_instances(session: Session, param_name: str, resource_ids: Set[str]):
+    """Select live tool configurations containing at least one requested ID."""
+    tool_name = {"index_names": "knowledge_base_search", "kds_list": "aidp_search"}[param_name]
+    return session.query(ToolInstance).join(
+        ToolInfo, ToolInfo.tool_id == ToolInstance.tool_id,
+    ).filter(
+        ToolInfo.name == tool_name,
+        ToolInfo.delete_flag != "Y",
+        ToolInstance.delete_flag != "Y",
+        or_(*(cast(ToolInstance.params[param_name], JSONB).contains([resource_id])
+              for resource_id in sorted(resource_ids))),
+    )
+
+
+def query_tool_knowledge_references(
+    session: Session, param_name: str, resource_ids: Set[str],
+) -> List[Dict[str, int]]:
+    """Return agent/version pairs whose tool configurations reference the IDs."""
+    rows = _query_knowledge_tool_instances(session, param_name, resource_ids).with_entities(
+        ToolInstance.agent_id, ToolInstance.version_no,
+    ).distinct().all()
+    return [{"agent_id": row.agent_id, "version_no": row.version_no} for row in rows]
+
+
+def remove_tool_knowledge_references(
+    session: Session, *, index_names: Sequence[str] = (), kds_ids: Sequence[str] = (),
+) -> None:
+    """Remove deleted IDs from draft and published tool configurations."""
+    for param_name, ids in (("index_names", index_names), ("kds_list", kds_ids)):
+        if not ids:
+            continue
+        deleted_ids = set(ids)
+        for instance in _query_knowledge_tool_instances(session, param_name, deleted_ids).all():
+            params = dict(instance.params)
+            params[param_name] = [item for item in params[param_name] if item not in deleted_ids]
+            instance.params = params

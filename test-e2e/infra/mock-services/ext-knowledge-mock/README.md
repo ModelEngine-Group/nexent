@@ -201,6 +201,11 @@ into the suite worker; cases declare their dependency through
 starts or stops the Compose stack itself — deployment and teardown are
 explicit operator steps.
 
+Profile-selected cases were removed together with the mock/real split:
+PW-KB-AIDP-01 attaches this instance directly through its plain
+`knowledge-provider` dependency, and there is no machine-local journey file
+to create.
+
 ## Deliberate quirks (do not "fix" without checking the adapters)
 
 - Dify retrieve/upload-file are registered under both `/datasets/...`

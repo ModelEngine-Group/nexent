@@ -21,8 +21,21 @@ import pytest
 from fastapi.responses import StreamingResponse
 
 
+from test.common.module_stubs import capture_module_stubs
+
+_modules_before_stubs = sys.modules.copy()
+
 @pytest.fixture(autouse=True)
-def isolate_list_tag_projection(monkeypatch):
+def isolate_binding_cleanup(monkeypatch, _isolated_imports):
+    """Storage deletion tests isolate binding persistence, tested separately."""
+    module = importlib.import_module("management.services.knowledge_base.management")
+    monkeypatch.setattr(module, "get_db_session", MagicMock())
+    for name in ("remove_tool_knowledge_references", "remove_conversation_knowledge_bindings"):
+        monkeypatch.setattr(module, name, MagicMock())
+
+
+@pytest.fixture(autouse=True)
+def isolate_list_tag_projection(monkeypatch, _isolated_imports):
     """Keep list tests independent from tag persistence, which has its own tests."""
     module = types.ModuleType("management.services.tag.projection")
     def project_tags(resources, **kwargs):
@@ -475,6 +488,18 @@ backend_database_module = importlib.import_module('backend.database')
 sys.modules['backend.database'] = backend_database_module
 backend_database_client_module = importlib.import_module('backend.database.client')
 sys.modules['backend.database.client'] = backend_database_client_module
+
+# Storage deletion tests isolate Agent previews and binding persistence.
+# Their actual implementations are covered in focused app/database tests.
+for module_name, functions in {
+    "database.agent_db": ("query_knowledge_binding_agents",),
+    "database.tool_db": ("remove_tool_knowledge_references",),
+    "database.conversation_db": ("remove_conversation_knowledge_bindings",),
+}.items():
+    boundary_module = types.ModuleType(module_name)
+    for function_name in functions:
+        setattr(boundary_module, function_name, MagicMock())
+    sys.modules[module_name] = boundary_module
 
 # Apply patches AFTER loading the module (so patch targets resolve)
 with patch('botocore.client.BaseClient._make_api_call'), \
@@ -9619,3 +9644,11 @@ async def test_full_delete_knowledge_base_reports_lifecycle_cleanup_errors(monke
 
     assert "lifecycle database unavailable" in result["lifecycle_cleanup"]["error"]
     assert result["lifecycle_fence_cleanup"] == {"cleared_count": 0, "failed_count": 1}
+
+
+_install_module_stubs = capture_module_stubs(_modules_before_stubs)
+
+
+@pytest.fixture(autouse=True)
+def _isolated_imports(monkeypatch):
+    _install_module_stubs(monkeypatch)
