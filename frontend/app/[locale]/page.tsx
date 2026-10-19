@@ -1,3 +1,5 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 "use client";
 
 import { useEffect } from "react";
@@ -26,16 +28,47 @@ export default function Homepage() {
   const { t } = useTranslation("common");
   const { isSpeedMode, isDeploymentReady, enableAgentWorkbench, hideHomePage } =
     useDeployment();
-  const { isAuthenticated, openAuthPromptModal } = useAuthenticationContext();
-  const { canAccessRoute, openAuthzPromptModal } = useAuthorizationContext();
+  const { isAuthenticated, isAuthChecking, openAuthPromptModal } =
+    useAuthenticationContext();
+  const {
+    isAuthzReady,
+    accessibleRoutes,
+    canAccessRoute,
+    openAuthzPromptModal,
+  } = useAuthorizationContext();
   const router = useRouter();
   const { config } = useGlobalConfigStore();
 
+  const needsAuthorization = isAuthenticated || isSpeedMode;
+  const isEntryReady =
+    isDeploymentReady &&
+    (isSpeedMode || !isAuthChecking) &&
+    (!needsAuthorization || isAuthzReady);
+  const defaultEntry = !needsAuthorization
+    ? enableAgentWorkbench
+      ? "/workbench"
+      : "/newchat"
+    : enableAgentWorkbench &&
+        (canAccessRoute("/workbench") || canAccessRoute("/chat"))
+      ? "/workbench"
+      : canAccessRoute("/newchat")
+        ? "/newchat"
+        : accessibleRoutes.find(
+            (route) =>
+              ![
+                "/",
+                "/chat",
+                "/workbench",
+                "/agent-dev",
+                "/resource-space",
+              ].includes(route)
+          );
+
   useEffect(() => {
-    if (isDeploymentReady && hideHomePage) {
-      router.replace(enableAgentWorkbench ? "/workbench" : "/newchat");
+    if (isEntryReady && hideHomePage && defaultEntry) {
+      router.replace(defaultEntry);
     }
-  }, [isDeploymentReady, hideHomePage, enableAgentWorkbench, router]);
+  }, [isEntryReady, hideHomePage, defaultEntry, router]);
 
   /**
    * Navigate to a route with permission pre-check
@@ -66,7 +99,9 @@ export default function Homepage() {
   const canShowQuickAction = (route: string) =>
     !isAuthenticated || canAccessRoute(route);
 
-  if (!isDeploymentReady || hideHomePage) return null;
+  if (!isDeploymentReady || (hideHomePage && (!isEntryReady || defaultEntry))) {
+    return null;
+  }
 
   return (
     <div className="w-full min-h-full flex flex-col items-center justify-center pt-6 pb-8">
