@@ -19,7 +19,6 @@ import json
 import logging
 import os
 import sys
-import threading
 import types
 from http import HTTPStatus
 from typing import Any
@@ -992,69 +991,6 @@ class TestUploadDocuments:
         assert [file.filename for file in mock_upload.call_args.args[3]] == ["valid.pdf"]
 
 
-# --- List documents ------------------------------------------------------
-
-
-class TestListDocuments:
-    def test_list_documents_uses_count_api(self):
-        client = _client()
-        from ext_components.aidp.apps import aidp_mgmt_app
-        from ext_components.aidp.services import aidp_permission_service
-
-        # No channel is resolvable, so the request exercises the completed-files
-        # fallback (the history path has its own tests below).
-        with patch.object(aidp_permission_service, "require_permission",
-                          return_value=MagicMock(permission="READ_ONLY")), \
-             patch.object(aidp_mgmt_app, "list_aidp_docs_impl",
-                          return_value={"value": [{"name": "a"}], "next_link": "/next"}), \
-             patch.object(aidp_mgmt_app, "count_aidp_docs_impl", return_value=42):
-            response = client.get(
-                "/aidp-mgmt/knowledge-bases/kb-1/documents",
-                headers=_bearer(),
-            )
-        assert response.status_code == HTTPStatus.OK
-        body = response.json()
-        assert body["total_count"] == 42
-        assert body["has_more"] is True
-        assert "processing_count" not in body
-
-    def test_list_and_count_requests_run_concurrently(self):
-        client = _client()
-        from ext_components.aidp.apps import aidp_mgmt_app
-        from ext_components.aidp.services import aidp_permission_service
-
-        rendezvous = threading.Barrier(2, timeout=2)
-
-        def list_docs(*_args, **_kwargs):
-            rendezvous.wait()
-            return {"value": [{"file_name": "doc.txt"}]}
-
-        def count_docs(*_args, **_kwargs):
-            rendezvous.wait()
-            return 1
-
-        with patch.object(
-            aidp_permission_service,
-            "require_permission",
-            return_value=MagicMock(permission="READ_ONLY"),
-        ), patch.object(
-            aidp_mgmt_app,
-            "list_aidp_docs_impl",
-            side_effect=list_docs,
-        ), patch.object(
-            aidp_mgmt_app,
-            "count_aidp_docs_impl",
-            side_effect=count_docs,
-        ):
-            response = client.get(
-                "/aidp-mgmt/knowledge-bases/kb-1/documents",
-                headers=_bearer(),
-            )
-
-        assert response.status_code == HTTPStatus.OK
-        assert response.json()["total_count"] == 1
-
-
 # --- Remove/download documents -------------------------------------------
 
 
@@ -1815,31 +1751,6 @@ class TestGetKbFetchFailure:
 
 
 # ---------------------------------------------------------------------------
-# List documents - count API failure fallback (lines 488-493, 504)
-# ---------------------------------------------------------------------------
-
-
-class TestListDocumentsCountFailure:
-    def test_list_docs_fails_when_count_api_fails(self):
-        client = _client()
-        from ext_components.aidp.apps import aidp_mgmt_app
-        from ext_components.aidp.services import aidp_permission_service
-
-        with patch.object(aidp_permission_service, "require_permission",
-                          return_value=MagicMock(permission="READ_ONLY")), \
-             patch.object(aidp_mgmt_app, "list_aidp_docs_impl",
-                          return_value={"value": [{"a": 1}, {"a": 2}]}), \
-             patch.object(aidp_mgmt_app, "count_aidp_docs_impl",
-                          side_effect=AppException(ErrorCode.AIDP_SERVICE_ERROR, "count failed")):
-            response = client.get(
-                "/aidp-mgmt/knowledge-bases/kb-1/documents",
-                headers=_bearer(),
-            )
-        assert response.status_code == AppException(ErrorCode.AIDP_SERVICE_ERROR).http_status
-        assert response.json()["code"] == ErrorCode.AIDP_SERVICE_ERROR.value
-
-
-# ---------------------------------------------------------------------------
 # Set permission - edge cases (lines 519, 535)
 # ---------------------------------------------------------------------------
 
@@ -2013,99 +1924,6 @@ class TestUpdateKnowledgeBaseKdsNameSync:
 
 
 
-class TestAIDPServerSideKnowledgeFileQueries:
-    """File and task page queries are delegated to AIDP without local scans."""
-
-    @staticmethod
-    def _read_only():
-        return MagicMock(permission="READ_ONLY")
-
-    def test_ingested_file_search_forwards_page_and_keyword_once(self):
-        client = _client()
-        from ext_components.aidp.apps import aidp_mgmt_app
-        from ext_components.aidp.services import aidp_permission_service
-
-        page = {
-            "value": [{"file_uuid": "f-1", "file_name": "制度手册.pdf"}],
-            "total_count": 1,
-            "next_link": "/next-page",
-        }
-        with patch.object(aidp_permission_service, "require_permission",
-                          return_value=self._read_only()), \
-             patch.object(aidp_mgmt_app, "list_aidp_docs_impl",
-                          return_value=page) as list_docs:
-            response = client.get(
-                "/aidp-mgmt/knowledge-bases/kb-1/documents?page=2&page_size=5&keyword=%E5%88%B6%E5%BA%A6",
-                headers=_bearer(),
-            )
-
-        assert response.status_code == HTTPStatus.OK
-        body = response.json()
-        assert body["value"] == page["value"]
-        assert body["has_more"] is True
-        assert body["total_reliable"] is False
-        list_docs.assert_called_once_with(
-            SERVER_URL, API_KEY, "kb-1", 2, 5, "制度"
-        )
-
-    def test_unfiltered_ingested_file_list_uses_count_endpoint(self, monkeypatch):
-        from ext_components.aidp.apps import aidp_mgmt_app as module
-
-        monkeypatch.setattr(
-            module.perms, "require_permission", lambda *a, **kw: self._read_only()
-        )
-        calls = []
-
-        async def run_blocking(name, _function, *args, **kwargs):
-            calls.append((name, args, kwargs))
-            if name == "aidp-list-documents":
-                return {"value": [{"file_uuid": "f-1", "file_name": "policy.pdf"}], "next_link": "/next"}
-            if name == "aidp-document-count":
-                return 25
-            raise AssertionError(f"Unexpected blocking call: {name}")
-
-        monkeypatch.setattr(module, "run_blocking", run_blocking)
-        response = _client().get(
-            "/aidp-mgmt/knowledge-bases/kb-1/documents?page=1&page_size=10",
-            headers=_bearer(),
-        )
-
-        assert response.status_code == HTTPStatus.OK
-        body = response.json()
-        assert body["total_count"] == 25
-        assert body["total_reliable"] is True
-        assert body["has_more"] is True
-        assert {call[0] for call in calls} == {
-            "aidp-list-documents", "aidp-document-count"
-        }
-
-    def test_unfiltered_ingested_file_list_propagates_list_failure(self, monkeypatch):
-        from ext_components.aidp.apps import aidp_mgmt_app as module
-
-        monkeypatch.setattr(
-            module.perms, "require_permission", lambda *a, **kw: self._read_only()
-        )
-        list_error = module.AppException(
-            module.ErrorCode.AIDP_CONNECTION_ERROR, "AIDP is unavailable"
-        )
-
-        async def run_blocking(name, _function, *args, **kwargs):
-            if name == "aidp-list-documents":
-                raise list_error
-            if name == "aidp-document-count":
-                return 0
-            raise AssertionError(f"Unexpected blocking call: {name}")
-
-        monkeypatch.setattr(module, "run_blocking", run_blocking)
-        response = _client().get(
-            "/aidp-mgmt/knowledge-bases/kb-1/documents",
-            headers=_bearer(),
-        )
-
-        assert response.status_code == list_error.http_status
-        assert response.json()["code"] == module.ErrorCode.AIDP_CONNECTION_ERROR.value
-
-
 # ---------------------------------------------------------------------------
 # Dedicated detail-page endpoints: ingested files, upload tasks, retry
 # ---------------------------------------------------------------------------
@@ -2145,13 +1963,15 @@ class TestKnowledgeFilesEndpoint:
             SERVER_URL, API_KEY, "kb-1", 2, 1, "制度"
         )
 
-    def test_file_list_keeps_upstream_next_link_on_short_page(self):
+    def test_file_list_stops_on_short_filtered_page(self):
         client = _client()
         from ext_components.aidp.apps import aidp_mgmt_app
         from ext_components.aidp.services import aidp_permission_service
 
         page = {
             "value": [{"file_uuid": "f-1"}, {"file_uuid": "f-2"}],
+            # The live service returns next_link on every page, including the
+            # last one, so its presence must not keep "next" enabled.
             "next_link": "/next-page",
         }
         with patch.object(aidp_permission_service, "require_permission",
@@ -2165,11 +1985,49 @@ class TestKnowledgeFilesEndpoint:
 
         assert response.status_code == HTTPStatus.OK
         body = response.json()
-        # An explicit next_link is authoritative even on a short page, matching
-        # the /documents contract: suppressing it would strand the remaining
-        # keyword matches on pages the user can no longer reach.
-        assert body["has_more"] is True
+        assert body["has_more"] is False
         assert body["total_reliable"] is False
+
+    def test_file_list_reports_more_on_full_filtered_page(self):
+        client = _client()
+        from ext_components.aidp.apps import aidp_mgmt_app
+        from ext_components.aidp.services import aidp_permission_service
+
+        page = {
+            "value": [{"file_uuid": "f-1"}, {"file_uuid": "f-2"}],
+            "next_link": "/next-page",
+        }
+        with patch.object(aidp_permission_service, "require_permission",
+                          return_value=MagicMock(permission="READ_ONLY")), \
+             patch.object(aidp_mgmt_app, "list_aidp_docs_impl",
+                          return_value=page):
+            response = client.get(
+                "/aidp-mgmt/knowledge-bases/kb-1/files?page=1&page_size=2&keyword=x",
+                headers=_bearer(),
+            )
+
+        assert response.status_code == HTTPStatus.OK
+        assert response.json()["has_more"] is True
+
+    def test_file_list_rejects_malformed_payload(self):
+        client = _client()
+        from ext_components.aidp.apps import aidp_mgmt_app
+        from ext_components.aidp.services import aidp_permission_service
+
+        with patch.object(aidp_permission_service, "require_permission",
+                          return_value=MagicMock(permission="READ_ONLY")), \
+             patch.object(aidp_mgmt_app, "list_aidp_docs_impl",
+                          return_value={"unexpected": True}), \
+             patch.object(aidp_mgmt_app, "count_aidp_docs_impl", return_value=1):
+            response = client.get(
+                "/aidp-mgmt/knowledge-bases/kb-1/files",
+                headers=_bearer(),
+            )
+
+        assert response.status_code == AppException(
+            ErrorCode.AIDP_RESPONSE_ERROR
+        ).http_status
+        assert response.json()["code"] == ErrorCode.AIDP_RESPONSE_ERROR.value
 
     def test_unfiltered_file_list_uses_cached_count(self):
         client = _client()
@@ -2275,12 +2133,12 @@ class TestUploadTasksEndpoint:
         assert response.status_code == HTTPStatus.OK
         body = response.json()
         assert body["value"] == history["value"]
-        # Keyword/status filters make the pre-filter total_record_count
-        # unusable as a pagination total: filtered queries keep the
-        # page-local fallback and follow the upstream next_link instead.
+        # Filtered pagination uses the row count: the live service always
+        # returns next_link and total_record_count has not been verified for
+        # status-filtered queries.
         assert body["total_count"] == 8  # (page - 1) * page_size + rows
         assert body["total_reliable"] is False
-        assert body["has_more"] is True
+        assert body["has_more"] is False
         assert body["stats"] == {
             "total": 31,
             "extracting": 3,
@@ -2294,21 +2152,17 @@ class TestUploadTasksEndpoint:
             2, 7, 4, "制度",
         )
 
-    def test_filtered_upload_task_query_with_no_next_link_disables_next_page(self):
+    def test_filtered_upload_task_short_page_disables_next_page(self):
         client = _client()
         from ext_components.aidp.apps import aidp_mgmt_app
         from ext_components.aidp.services import aidp_permission_service
 
-        # total_record_count is a pre-filter global statistic: 317 records in
-        # total but a single keyword match and no next_link. Treating the
-        # global value as a reliable filtered total would render ~32 mostly
-        # empty pages with Next enabled (AidpPagination trusts total_count
-        # when total_reliable is true), so the filtered query must fall back
-        # to the upstream paging signal and leave Next disabled.
+        # A short filtered page is the last page. The live service always
+        # returns next_link, so only the row count can decide.
         history = {
             "value": [{"file_uuid": "f-1", "file_name": "制度手册.pdf", "status": 1}],
             "total_count": 1,
-            "next_link": None,
+            "next_link": "/next-page",
             "total_record_count": 317,
         }
         with patch.object(aidp_permission_service, "require_permission",
@@ -2365,6 +2219,66 @@ class TestUploadTasksEndpoint:
             SERVER_URL, API_KEY, "fs-1", "/aidp/knowledge/kb-1", "kb-1", None,
             1, 10, 0, None,
         )
+
+    def test_filtered_upload_task_full_page_reports_more(self):
+        client = _client()
+        from ext_components.aidp.apps import aidp_mgmt_app
+        from ext_components.aidp.services import aidp_permission_service
+
+        history = {
+            "value": [
+                {"file_uuid": f"f-{index}", "file_name": "制度手册.pdf", "status": 1}
+                for index in range(10)
+            ],
+            "next_link": "/next-page",
+            "total_record_count": 31,
+        }
+        with patch.object(aidp_permission_service, "require_permission",
+                          return_value=MagicMock(permission="READ_ONLY")), \
+             patch.object(aidp_mgmt_app, "_resolve_doc_history_channel",
+                          return_value={"fs_id": "fs-1", "src_dir": "/aidp/knowledge/kb-1"}), \
+             patch.object(aidp_mgmt_app, "list_aidp_doc_history_impl",
+                          return_value=history):
+            response = client.get(
+                "/aidp-mgmt/knowledge-bases/kb-1/upload-tasks?page=1&page_size=10&keyword=%E5%88%B6%E5%BA%A6",
+                headers=_bearer(),
+            )
+
+        assert response.status_code == HTTPStatus.OK
+        body = response.json()
+        assert body["total_reliable"] is False
+        assert body["has_more"] is True
+
+    def test_unfiltered_upload_task_last_page_ignores_next_link(self):
+        client = _client()
+        from ext_components.aidp.apps import aidp_mgmt_app
+        from ext_components.aidp.services import aidp_permission_service
+
+        history = {
+            "value": [
+                {"file_uuid": f"f-{index}", "file_name": "制度手册.pdf", "status": 1}
+                for index in range(10)
+            ],
+            # The live service returns next_link even on the last page.
+            "next_link": "/next-page",
+            "total_record_count": 20,
+        }
+        with patch.object(aidp_permission_service, "require_permission",
+                          return_value=MagicMock(permission="READ_ONLY")), \
+             patch.object(aidp_mgmt_app, "_resolve_doc_history_channel",
+                          return_value={"fs_id": "fs-1", "src_dir": "/aidp/knowledge/kb-1"}), \
+             patch.object(aidp_mgmt_app, "list_aidp_doc_history_impl",
+                          return_value=history):
+            response = client.get(
+                "/aidp-mgmt/knowledge-bases/kb-1/upload-tasks?page=2&page_size=10&status=0",
+                headers=_bearer(),
+            )
+
+        assert response.status_code == HTTPStatus.OK
+        body = response.json()
+        assert body["total_count"] == 20
+        assert body["total_reliable"] is True
+        assert body["has_more"] is False
 
     def test_upload_task_listing_survives_unresolvable_channel(self):
         client = _client()
@@ -2883,24 +2797,6 @@ class TestResolveDocHistoryChannel:
         assert "'name'" in message
 
 
-class TestHistoryReportsMore:
-    """Only unambiguous pagination signals are trusted."""
-
-    @pytest.mark.parametrize("payload,expected", [
-        ({"has_more": True}, True),
-        ({"has_more": False}, False),
-        ({"next_link": "/next"}, True),
-        ({"next_link": None}, False),
-        ({"has_more": "yes", "next_link": "/next"}, True),
-        ({"has_more": "yes"}, None),
-        ({}, None),
-    ])
-    def test_only_unambiguous_signals_are_trusted(self, payload, expected):
-        from ext_components.aidp.apps import aidp_mgmt_app
-
-        assert aidp_mgmt_app._history_reports_more(payload) == expected
-
-
 class TestUpdateGraphConfigDegradedStorage:
     """The stored graph_config shape never leaks into the PATCH payload."""
 
@@ -2936,32 +2832,6 @@ class TestUpdateGraphConfigDegradedStorage:
             {"llm_model_name": "gpt-4o"}, ensure_ascii=False
         )
         assert payload["is_exist_graph"] is True
-
-
-class TestListDocumentsResponseShape:
-    """A malformed document list is reported, never rendered as empty."""
-
-    def test_unexpected_list_response_shape_is_reported(self):
-        client = _client()
-        from consts.error_code import ErrorCode
-        from consts.exceptions import AppException
-        from ext_components.aidp.apps import aidp_mgmt_app
-        from ext_components.aidp.services import aidp_permission_service
-
-        with patch.object(aidp_permission_service, "require_permission",
-                          return_value=MagicMock(permission="READ_ONLY")), \
-             patch.object(aidp_mgmt_app, "list_aidp_docs_impl",
-                          return_value={"unexpected": True}), \
-             patch.object(aidp_mgmt_app, "count_aidp_docs_impl", return_value=1):
-            response = client.get(
-                "/aidp-mgmt/knowledge-bases/kb-1/documents",
-                headers=_bearer(),
-            )
-
-        assert response.status_code == AppException(
-            ErrorCode.AIDP_RESPONSE_ERROR
-        ).http_status
-        assert response.json()["code"] == ErrorCode.AIDP_RESPONSE_ERROR.value
 
 
 class TestSetPermissionBlankName:

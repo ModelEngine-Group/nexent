@@ -107,7 +107,7 @@ async def test_aidp_kb_update_delete_core_api_auto_7513fef9904b9f3f(
             )
             assert_status(upload, 200)
 
-            docs = await api.get(f'/aidp-mgmt/knowledge-bases/{kds_id}/documents')
+            docs = await api.get(f'/aidp-mgmt/knowledge-bases/{kds_id}/files')
             assert_status(docs, 200)
 
             detail_before = await api.get(f'/aidp-mgmt/knowledge-bases/{kds_id}')
@@ -156,7 +156,7 @@ async def test_aidp_kb_update_delete_core_api_auto_7513fef9904b9f3f(
             detail_after = await api.get(f'/aidp-mgmt/knowledge-bases/{kds_id}')
             assert_status(detail_after, 404)
 
-            docs_after = await api.get(f'/aidp-mgmt/knowledge-bases/{kds_id}/documents')
+            docs_after = await api.get(f'/aidp-mgmt/knowledge-bases/{kds_id}/files')
             assert_status(docs_after, 404)
 
         async with client('config', token=tenant_b_admin.access_token) as api:

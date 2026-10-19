@@ -52,6 +52,7 @@ async def aidp_kb(tenant_a_admin):
 async def test_aidp_document_upload_list_contract(aidp_kb, tenant_a_admin, tenant_a_user):
     kds_id = aidp_kb
     documents_path = f'/aidp-mgmt/knowledge-bases/{kds_id}/documents'
+    files_path = f'/aidp-mgmt/knowledge-bases/{kds_id}/files'
     suffix = f'{os.getpid()}-{int(time.time())}'
 
     async with client('config', token=tenant_a_admin.access_token) as api:
@@ -103,15 +104,30 @@ async def test_aidp_document_upload_list_contract(aidp_kb, tenant_a_admin, tenan
             reason = failed_by_name[valid_name]
             assert reason['reason_zh'] not in {SIZE_20MB_REASON_ZH, COUNT_REASON_ZH}
 
-        resp = await api.get(documents_path, params={'page': 1, 'page_size': 10})
+        resp = await api.get(files_path, params={'page': 1, 'page_size': 10})
         assert_status(resp, 200)
         payload = resp.json()
         assert isinstance(payload.get('value'), list)
         assert len(payload['value']) <= 10
         assert isinstance(payload.get('total_count'), int)
         assert isinstance(payload.get('has_more'), bool)
+        assert payload.get('processing_count') == 0
+        assert isinstance(payload.get('total_reliable'), bool)
         if payload['total_count'] == 0:
             assert payload['has_more'] is False
+
+        # AIDP always returns next_link, including on the last page. A short
+        # filtered page must therefore disable "next" instead of trusting it.
+        filtered = await api.get(
+            files_path,
+            params={'page': 1, 'page_size': 10, 'keyword': valid_name},
+        )
+        assert_status(filtered, 200)
+        filtered_payload = filtered.json()
+        assert len(filtered_payload['value']) <= 10
+        assert filtered_payload['total_reliable'] is False
+        if len(filtered_payload['value']) < 10:
+            assert filtered_payload['has_more'] is False
 
     async with client('config') as anonymous:
         resp = await anonymous.post(documents_path, files=[_file('x.txt', b'x')])
@@ -122,12 +138,12 @@ async def test_aidp_document_upload_list_contract(aidp_kb, tenant_a_admin, tenan
         assert_status(resp, 403)
         assert tenant_a_admin.password not in resp.text
         assert tenant_a_admin.access_token not in resp.text
-        resp = await user_api.get(documents_path, params={'page': 1, 'page_size': 10})
+        resp = await user_api.get(files_path, params={'page': 1, 'page_size': 10})
         assert_status(resp, 403)
 
     async with client('config', token=tenant_a_admin.access_token) as api:
         resp = await api.get(
-            '/aidp-mgmt/knowledge-bases/nonexistent-kds-xyz/documents',
+            '/aidp-mgmt/knowledge-bases/nonexistent-kds-xyz/files',
             params={'page': 1, 'page_size': 10},
         )
         assert_status(resp, 404)

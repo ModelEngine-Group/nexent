@@ -165,6 +165,24 @@ const AidpKnowledgeInformationTab: React.FC<
       );
   }, [llmModelsData]);
 
+  // Display-only lookup: the live detail returns the embedding model as a
+  // canonical path, while ModelService exposes the user-facing display_name.
+  const { data: embeddingModelsData } = useQuery({
+    queryKey: ["aidp-models", "embedding", "KnowledgeBase"],
+    queryFn: () =>
+      aidpKnowledgeService.listModels("embedding", "KnowledgeBase"),
+    staleTime: 5 * 60 * 1000,
+    enabled: Boolean(detail.embedding_model),
+  });
+  const embeddingModelLabel = useMemo(() => {
+    const models: AidpModelItem[] = embeddingModelsData?.models ?? [];
+    const match = models.find((m) => m.model_name === detail.embedding_model);
+    if (match?.display_name) return match.display_name;
+    if (!detail.embedding_model) return undefined;
+    const segments = detail.embedding_model.split("/").filter(Boolean);
+    return segments[segments.length - 1] || detail.embedding_model;
+  }, [detail.embedding_model, embeddingModelsData]);
+
   useEffect(() => {
     if (!settingModal) return;
     if (settingModal === "vlm") {
@@ -353,6 +371,7 @@ const AidpKnowledgeInformationTab: React.FC<
           graphConfig={graphConfig}
           groupNames={groupNames}
           canConfigureGroupPermissions={canConfigureGroupPermissions}
+          embeddingModelLabel={embeddingModelLabel}
           formatDateTime={formatDetailDateTime}
           onEditPermissions={onEditPermissions}
           onEditSetting={setSettingModal}

@@ -116,6 +116,11 @@ _UPLOAD_SECONDS = 0.0
 _FILE_QUERY_SECONDS = 0.0
 _FILE_QUERY_FAIL = False
 _FILE_DELETE_FAIL = False
+# Real AIDP keeps a deleted row visible with file_status=1 for about five
+# seconds before removing it from KnowledgeFiles. History keeps the row as an
+# audit record. Tests can override this to zero when they do not need the
+# transition window.
+_FILE_DELETE_SECONDS = 5.0
 
 # Entries one history page returns. Real AIDP pages the channel directory, so the
 # backend has to walk the pages; keep this small to exercise that locally.
@@ -215,8 +220,10 @@ def _seed_initial_data() -> None:
             "first_upload_time": now - 3600,
             "update_time": now - 1800,
             "status": 3,
-            "error_code": "VEC101",
-            "extraction_failure_reason": "向量服务暂时不可用，任务未能完成向量入库。",
+            "extraction_failure_reason": json.dumps(
+                {"error_code": 1520, "msg": "向量服务暂时不可用，任务未能完成向量入库。"},
+                ensure_ascii=False,
+            ),
         },
         {
             "file_uuid": "00000000-0000-4000-8000-000000000004",
@@ -237,8 +244,10 @@ def _seed_initial_data() -> None:
             "first_upload_time": now - 7200,
             "update_time": now - 5400,
             "status": 5,
-            "error_code": "GRAPH201",
-            "extraction_failure_reason": "图谱任务处理失败，请检查知识图谱配置后重试。",
+            "extraction_failure_reason": json.dumps(
+                {"error_code": 1601, "msg": "图谱任务处理失败，请检查知识图谱配置后重试。"},
+                ensure_ascii=False,
+            ),
         },
         {
             "file_uuid": "00000000-0000-4000-8000-000000000006",
@@ -250,27 +259,37 @@ def _seed_initial_data() -> None:
             "update_time": now - 120,
             "status": 2,
         },
+        {
+            "file_uuid": "00000000-0000-4000-8000-000000000007",
+            "file_ino_no": 1007,
+            "file_name": "删除失败示例.txt",
+            "file_size": 1024,
+            "file_type": "txt",
+            "first_upload_time": now - 7200,
+            "update_time": now - 3600,
+            "status": 1,
+            "file_status": 2,
+        },
     ]
     _KNOWLEDGE_BASES["aidp-kb-faq"].update({
-        "embedding_model": "bge-m3",
+        "embedding_model": "/models/FileEmbeddingModel_v0_1_1/v1.0.0/FileEmbeddingModel_v0_1_1",
         "vlm_model": "Qwen3-VL-8B-Instruct",
-        "rerank_model": "bge-reranker-v2-m3",
         "chunk_mode": 0,
         "chunk_token_num": 512,
         "chunk_overlap_num": 10,
         "topk": 10,
         "similarity": 0.6,
         "is_exist_graph": True,
-        "llm_model_name": "Qwen3-8B-Instruct",
+        "llm_model_name": "qwen3_8b",
         "graph_config": {
             "domain": "general",
-            "retrieve_default_topk": 10,
             "retrieve_subgraph_hop": 2,
             "no_think_mode": True,
             "prompt_language": "chinese",
             "prompt_text": "作为专业知识图谱构建引擎，仅提取文本实体、关系、属性三元组，输出固定 JSON 数组。",
             "synonym_merge_enable": False,
             "disambiguation_enable": False,
+            "llm_model_name": "qwen3_8b",
         },
     })
 
@@ -373,8 +392,10 @@ def _ensure_detail_demo_tasks() -> None:
             "first_upload_time": now - 3600,
             "update_time": now - 1800,
             "status": 3,
-            "error_code": "VEC101",
-            "extraction_failure_reason": "向量服务暂时不可用，任务未能完成向量入库。",
+            "extraction_failure_reason": json.dumps(
+                {"error_code": 1520, "msg": "向量服务暂时不可用，任务未能完成向量入库。"},
+                ensure_ascii=False,
+            ),
         },
         {
             "file_uuid": "00000000-0000-4000-8000-000000000004",
@@ -395,8 +416,10 @@ def _ensure_detail_demo_tasks() -> None:
             "first_upload_time": now - 7200,
             "update_time": now - 5400,
             "status": 5,
-            "error_code": "GRAPH201",
-            "extraction_failure_reason": "图谱任务处理失败，请检查知识图谱配置后重试。",
+            "extraction_failure_reason": json.dumps(
+                {"error_code": 1601, "msg": "图谱任务处理失败，请检查知识图谱配置后重试。"},
+                ensure_ascii=False,
+            ),
         },
         {
             "file_uuid": "00000000-0000-4000-8000-000000000006",
@@ -441,18 +464,17 @@ def _ensure_chinese_demo_data() -> None:
         "current_cap": 0.84,
         "document_count": 8,
         "chunk_count": 286,
-        "embedding_model": "bge-m3",
+        "embedding_model": "/models/FileEmbeddingModel_v0_1_1/v1.0.0/FileEmbeddingModel_v0_1_1",
         "is_multimodal": True,
         "caption_enable": 1,
         "vlm_model": "Qwen3-VL-8B-Instruct",
-        "rerank_model": "bge-reranker-v2-m3",
         "chunk_mode": 0,
         "chunk_token_num": 1024,
         "chunk_overlap_num": 128,
         "topk": 10,
         "similarity": 0.62,
         "is_exist_graph": True,
-        "llm_model_name": "Qwen3-8B-Instruct",
+        "llm_model_name": "qwen3_8b",
     }
     if kb.get("create_time") == 1718000300:
         kb["create_time"] = now - 45 * 24 * 60 * 60
@@ -465,10 +487,10 @@ def _ensure_chinese_demo_data() -> None:
 
     graph_defaults = {
         "domain": "general",
-        "retrieve_default_topk": 10,
         "retrieve_subgraph_hop": 2,
         "no_think_mode": False,
         "prompt_language": "chinese",
+        "llm_model_name": "qwen3_8b",
         "prompt_text": (
             "你是政务服务与城市治理领域的知识图谱构建助手。请从材料中识别办事事项、办理部门、"
             "申请条件、所需材料、办理流程、办理时限、服务地点、政策依据、城市设施、责任单位和应急事件。"
@@ -524,11 +546,19 @@ def _ensure_chinese_demo_data() -> None:
             item["reason"] = failure_reason
         return item
 
-    vector_failure = (
-        "文档解析和分片已完成，但向量索引服务暂时不可用，未能写入向量库。请稍后重新提取。"
+    vector_failure = json.dumps(
+        {
+            "error_code": 1520,
+            "msg": "文档解析和分片已完成，但向量索引服务暂时不可用，未能写入向量库。请稍后重新提取。",
+        },
+        ensure_ascii=False,
     )
-    graph_failure = (
-        "文件已完成向量化，但实体关系抽取未能完成，图谱数据没有写入。请检查知识图谱配置后重试。"
+    graph_failure = json.dumps(
+        {
+            "error_code": 1601,
+            "msg": "文件已完成向量化，但实体关系抽取未能完成，图谱数据没有写入。请检查知识图谱配置后重试。",
+        },
+        ensure_ascii=False,
     )
     fixtures = [
         demo_file(1, "政务服务办事指南.pdf", "pdf", 1_835_008, 18, 1, hours_since_update=24),
@@ -622,8 +652,103 @@ def _public_document(document: Dict[str, Any]) -> Dict[str, Any]:
     return {key: value for key, value in document.items() if not key.startswith("_")}
 
 
+def _active_documents(kds_id: str) -> List[Dict[str, Any]]:
+    """Return completed files still visible in KnowledgeFiles.
+
+    A successful Remove marks the row ``file_status=1`` and keeps it visible
+    until ``_deleted_at`` passes; after that the row is hidden here but stays in
+    the history audit log.
+    """
+    now = time.time()
+    return [
+        doc
+        for doc in _DOCUMENTS_BY_KB.get(kds_id, [])
+        if _visible_in_completed_listing(doc)
+        and not (
+            isinstance(doc.get("_deleted_at"), (int, float))
+            and doc["_deleted_at"] <= now
+        )
+    ]
+
+
+_DERIVED_KB_FIELDS = frozenset(
+    {
+        "document_count",
+        "update_time",
+        "embedding_model",
+        "rerank_model",
+        "chunk_mode",
+        "chunk_token_num",
+        "chunk_overlap_num",
+        "caption_enable",
+        "is_multimodal",
+        "topk",
+        "llm_model_name",
+        "created_by",
+        "creator_name",
+    }
+)
+
+
+def _public_kb_detail(kb: Dict[str, Any]) -> Dict[str, Any]:
+    """Mirror the live AIDP detail response, not the mock's internal record.
+
+    The live service keeps chunking and embedding settings inside
+    ``kms_config_str``, exposes ``top_k`` (with the underscore), nests the graph
+    LLM model inside ``graph_config``, and does not return ``update_time``,
+    ``rerank_model``, ``is_multimodal`` or any ``retrieve_default_topk``.
+    """
+    result = {
+        key: value
+        for key, value in kb.items()
+        if not key.startswith("_") and key not in _DERIVED_KB_FIELDS
+    }
+    result["top_k"] = kb.get("top_k", kb.get("topk", 10))
+    kms_config = kb.get("kms_config_str")
+    if not (isinstance(kms_config, str) and kms_config.strip()):
+        kms_config = {
+            "chunk_token_num": kb.get("chunk_token_num", 1024),
+            "chunk_overlap_num": kb.get("chunk_overlap_num", 128),
+            "embedding_model": kb.get(
+                "embedding_model",
+                "/models/FileEmbeddingModel_v0_1_1/v1.0.0/FileEmbeddingModel_v0_1_1",
+            ),
+            "caption_enable": kb.get(
+                "caption_enable", 1 if kb.get("vlm_model") else 0
+            ),
+            "chunk_mode": kb.get("chunk_mode", 0),
+        }
+        kms_config = json.dumps(kms_config, ensure_ascii=False)
+    result["kms_config_str"] = kms_config
+
+    graph = kb.get("graph_config")
+    if isinstance(graph, str):
+        try:
+            graph = json.loads(graph)
+        except json.JSONDecodeError:
+            graph = None
+    if isinstance(graph, dict):
+        graph = dict(graph)
+        graph.pop("retrieve_default_topk", None)
+        model_name = kb.get("llm_model_name")
+        if isinstance(model_name, str) and model_name.strip():
+            graph.setdefault("llm_model_name", model_name)
+        result["graph_config"] = json.dumps(graph, ensure_ascii=False)
+    else:
+        result["graph_config"] = ""
+
+    result["vlm_model"] = kb.get("vlm_model", "")
+    result["similarity"] = kb.get("similarity", 0.0)
+    result["is_exist_graph"] = bool(kb.get("is_exist_graph", False))
+    result["is_personal"] = kb.get("is_personal", 0)
+    result["state"] = kb.get("state", 4)
+    result["role"] = kb.get("role", "Owner")
+    result["user_name"] = kb.get("user_name")
+    return result
+
+
 def _find_document(kds_id: str, file_uuid: str) -> Optional[Dict[str, Any]]:
-    return next(
+    found = next(
         (
             document
             for document in _DOCUMENTS_BY_KB.get(kds_id, [])
@@ -631,6 +756,12 @@ def _find_document(kds_id: str, file_uuid: str) -> Optional[Dict[str, Any]]:
         ),
         None,
     )
+    if found is None:
+        return None
+    deleted_at = found.get("_deleted_at")
+    if isinstance(deleted_at, (int, float)) and deleted_at <= time.time():
+        return None
+    return found
 
 
 def _document_content(document: Dict[str, Any]) -> bytes:
@@ -893,6 +1024,14 @@ class RemoveFilesBody(BaseModel):
     file_uuids: List[uuid.UUID] = Field(..., min_length=1)
 
 
+class CountFilesBody(BaseModel):
+    """Body of POST .../KnowledgeFiles/Count (all fields optional)."""
+
+    fs_id: Optional[str] = None
+    dir_path: Optional[str] = None
+    keyword: Optional[str] = Field(default=None, max_length=200)
+
+
 class DownloadFileBody(BaseModel):
     file_uuid: uuid.UUID = Field(...)
 
@@ -1108,20 +1247,26 @@ def count_knowledge_bases(
 @app.post(f"{_KB_PREFIX}/{{kds_id}}/KnowledgeFiles/Count")
 def count_documents(
     kds_id: str,
+    body: Optional[CountFilesBody] = None,
     authorization: Optional[str] = Header(default=None),
 ) -> JSONResponse:
     """Count documents in a knowledge base.
-    AIDP uses POST .../KnowledgeBases/{kds_id}/KnowledgeFiles/Count with
-    empty body, returning {"count": <int>}.
+
+    AIDP uses POST .../KnowledgeBases/{kds_id}/KnowledgeFiles/Count. The body
+    is optional; when it carries ``keyword`` the count is filtered, matching the
+    live service.
     """
     _check_auth(authorization)
     if kds_id not in _KNOWLEDGE_BASES:
         raise HTTPException(status_code=404, detail=f"Knowledge base {kds_id} not found")
-    # Only ingested files count on the legacy endpoint, matching the list.
-    count = len([
-        doc for doc in _DOCUMENTS_BY_KB.get(kds_id, [])
-        if _visible_in_completed_listing(doc)
-    ])
+    docs = _active_documents(kds_id)
+    keyword = body.keyword.strip().casefold() if body and body.keyword else ""
+    if keyword:
+        docs = [
+            doc for doc in docs
+            if keyword in str(doc.get("file_name") or "").casefold()
+        ]
+    count = len(docs)
     logger.info("COUNT DOCS  kds_id=%s count=%d", kds_id, count)
     return JSONResponse(content={"count": count})
 
@@ -1257,8 +1402,9 @@ def get_knowledge_base(
     if not kb:
         raise HTTPException(status_code=404, detail=f"Knowledge base {kds_id} not found")
 
-    # Match AIDP's detail response: file counts come from the Count endpoint.
-    result = {key: value for key, value in kb.items() if key != "document_count"}
+    # Match AIDP's detail response: file counts come from the Count endpoint
+    # and configuration fields stay inside kms_config_str / graph_config.
+    result = _public_kb_detail(kb)
 
     logger.info("GET  kds_id=%s", kds_id)
     return JSONResponse(content=result)
@@ -1450,10 +1596,7 @@ def list_documents(
     if kds_id not in _KNOWLEDGE_BASES:
         raise HTTPException(status_code=404, detail=f"Knowledge base {kds_id} not found")
 
-    all_docs = [
-        doc for doc in _DOCUMENTS_BY_KB.get(kds_id, [])
-        if _visible_in_completed_listing(doc)
-    ]
+    all_docs = _active_documents(kds_id)
     normalized_keyword = keyword.strip().casefold() if isinstance(keyword, str) else ""
     if normalized_keyword:
         all_docs = [
@@ -1462,16 +1605,18 @@ def list_documents(
         ]
     start = (page - 1) * page_size
     end = start + page_size
-    items = [_public_document(doc) for doc in all_docs[start:end]]
+    items = [
+        {**_public_document(doc), "file_status": int(doc.get("file_status", 0))}
+        for doc in all_docs[start:end]
+    ]
 
-    # Real AIDP returns `next_link` as the authoritative "more pages exist"
-    # signal. When there are no more docs, next_link is simply absent.
-    # `total_count` mirrors AIDP's page count; next_link signals another page.
-    next_link = None
-    if end < len(all_docs):
-        next_link = f"{_KB_PREFIX}/{kds_id}/KnowledgeFiles?page={page + 1}&page_size={page_size}"
-        if normalized_keyword:
-            next_link += f"&keyword={quote(keyword.strip(), safe='')}"
+    # The live service returns next_link on every page, including the last and
+    # empty ones; callers must use the row count (or Count) to decide whether
+    # another page exists. Keep the shape faithful so local tests do not rely
+    # on next_link being absent at the end.
+    next_link = f"{_KB_PREFIX}/{kds_id}/KnowledgeFiles?page={page + 1}&page_size={page_size}"
+    if normalized_keyword:
+        next_link += f"&keyword={quote(keyword.strip(), safe='')}"
 
     logger.info("LIST DOCS  kds_id=%s page=%d returned=%d total=%d", kds_id, page, len(items), len(all_docs))
     return JSONResponse(content={
@@ -1494,26 +1639,38 @@ def remove_documents(
         raise HTTPException(status_code=404, detail=f"Knowledge base {kds_id} not found")
 
     documents = _DOCUMENTS_BY_KB.setdefault(kds_id, [])
-    remaining = list(documents)
     success_list: List[Dict[str, str]] = []
     failed_list: List[Dict[str, str]] = []
+    now = time.time()
     for raw_file_uuid in body.file_uuids:
         file_uuid = str(raw_file_uuid)
         matched = next(
-            (document for document in remaining if document.get("file_uuid") == file_uuid),
+            (document for document in documents if document.get("file_uuid") == file_uuid),
             None,
         )
-        if matched is None or _FILE_DELETE_FAIL:
+        already_deleted = (
+            matched is not None
+            and isinstance(matched.get("_deleted_at"), (int, float))
+            and matched["_deleted_at"] <= now
+        )
+        if matched is None or already_deleted or _FILE_DELETE_FAIL:
+            if matched is not None and _FILE_DELETE_FAIL:
+                # Deletion failed upstream: keep the row visible and expose the
+                # failed state the detail page renders.
+                matched["file_status"] = 2
             failed_list.append({
                 "file_uuid": file_uuid,
                 **({"code": "130501", "message": "Mock file removal failed"}
                    if _FILE_DELETE_FAIL else {}),
             })
             continue
-        remaining.remove(matched)
+        # Removal is asynchronous in the live service: the row stays in
+        # KnowledgeFiles with file_status=1 for a short window, then disappears.
+        matched["file_status"] = 1
+        matched["_deleted_at"] = now + _FILE_DELETE_SECONDS
         success_list.append({"file_uuid": file_uuid})
 
-    _DOCUMENTS_BY_KB[kds_id] = remaining
+    _DOCUMENTS_BY_KB[kds_id] = documents
     _save_state()
     logger.info(
         "REMOVE DOCS  kds_id=%s total=%d success=%d failed=%d",
@@ -1660,7 +1817,7 @@ def knowledge_file_history(
     The endpoint is knowledge-base scoped, like the channel catalog and the
     document list; the body still addresses the request to one channel directory
     of that KB. AIDP retains the last 30 days of history, supports status and
-    file-name filtering, and includes summary counts independent of the filters.
+    file-name filtering, and reports summary counts for the filtered set.
     """
     _check_auth(authorization)
 
@@ -1696,13 +1853,6 @@ def knowledge_file_history(
     # first page is caught locally instead of in production. The sort is stable,
     # so documents keep their insertion order inside each group.
     all_recent_items.sort(key=lambda item: item["status"] in _TERMINAL_STATUSES)
-    stats = {
-        "total_record_count": len(all_recent_items),
-        "success_record_count": sum(1 for item in all_recent_items if item["status"] == 1),
-        "processing_record_count": sum(1 for item in all_recent_items if item["status"] == 2),
-        "failed_record_count": sum(1 for item in all_recent_items if item["status"] in (3, 5)),
-        "waiting_record_count": sum(1 for item in all_recent_items if item["status"] == 4),
-    }
     items = list(all_recent_items)
     if body.status not in (None, 0):
         status_aliases = {
@@ -1720,20 +1870,26 @@ def knowledge_file_history(
             item for item in items
             if normalized_keyword in str(item.get("file_name") or "").casefold()
         ]
+    # The live service reports total_record_count for the filtered set.
+    stats = {
+        "total_record_count": len(items),
+        "success_record_count": sum(1 for item in items if item["status"] == 1),
+        "processing_record_count": sum(1 for item in items if item["status"] == 2),
+        "failed_record_count": sum(1 for item in items if item["status"] in (3, 5)),
+        "waiting_record_count": sum(1 for item in items if item["status"] == 4),
+    }
     page = body.page if isinstance(body.page, int) and body.page > 0 else 1
     page_size = body.page_size or _HISTORY_PAGE_SIZE
     start = (page - 1) * page_size
     end = start + page_size
     page_items = items[start:end]
+    # next_link is always present in the live service, including on the last
+    # page, and it does not preserve the status filter.
     next_link = (
         f"{_KB_PREFIX}/{kds_id}/KnowledgeFiles/History?page={page + 1}"
         f"&page_size={page_size}"
-        if end < len(items)
-        else None
     )
-    if next_link and body.status not in (None, 0):
-        next_link += f"&status={body.status}"
-    if next_link and normalized_keyword:
+    if normalized_keyword:
         next_link += f"&keyword={quote(body.keyword.strip(), safe='')}"
     logger.info(
         "FILE HISTORY  kds_id=%s fs_id=%s dir_path=%s page=%d returned=%d total=%d",

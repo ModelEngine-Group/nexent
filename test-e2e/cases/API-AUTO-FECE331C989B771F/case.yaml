@@ -45,10 +45,11 @@ case:
     expected: 列表分页：HTTP 200，value 长度不超过 page_size，total_count 与 has_more 与页内数据及真实总数一致。
   - order: 5
     action: 部分成功：混合提交 1 个合法文件与 2 个超限文件，记录 summary(total/success/failed) 与 success_list、failed_list 的成员归属。
-    expected: 计数降级：AIDP 文档 Count API 失败时返回 total_reliable=false，total_count 退化为页内条数，has_more 依据 next_link 存在或 page_count>=page_size
-      推断。
+    expected: 计数降级：AIDP 文档 Count API 失败时返回 total_reliable=false，total_count 退化为页内条数；过滤查询按本页行数判断 has_more（AIDP 的
+      next_link 永远存在，不能作为翻页信号）。
   - order: 6
-    action: 列表分页：上传若干合法文件后调用 GET /aidp-mgmt/knowledge-bases/{kds_id}/documents?page=1&page_size=10，记录 value/total_count/has_more。
+    action: 列表分页：上传若干合法文件后调用 GET /aidp-mgmt/knowledge-bases/{kds_id}/files?page=1&page_size=10，记录
+      value/total_count/has_more/total_reliable/processing_count。
     expected: 越权与隔离：仅 READ 账号上传、无权限账号访问分别返回 403/404（未认证返回 401），不出现跨租户数据泄露。
   - order: 7
     action: 计数降级：将 AIDP 文档计数接口指向失败 stub 或注入异常，再次调用列表端点，记录 total_reliable、total_count、has_more 与 next_link。
@@ -67,8 +68,8 @@ case:
   - 部分成功：summary.total 等于提交文件总数，success 与 failed 分别等于 success_list、failed_list 长度且两者之和等于 total；合法文件进入 success_list、超限文件进入
     failed_list。
   - 列表分页：HTTP 200，value 长度不超过 page_size，total_count 与 has_more 与页内数据及真实总数一致。
-  - 计数降级：AIDP 文档 Count API 失败时返回 total_reliable=false，total_count 退化为页内条数，has_more 依据 next_link 存在或 page_count>=page_size
-    推断。
+  - 计数降级：AIDP 文档 Count API 失败时返回 total_reliable=false，total_count 退化为页内条数；过滤查询按本页行数判断 has_more（AIDP 的
+    next_link 永远存在，不能作为翻页信号）。
   - 越权与隔离：仅 READ 账号上传、无权限账号访问分别返回 403/404（未认证返回 401），不出现跨租户数据泄露。
   - 日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。
   forbidden_side_effects: []
@@ -86,8 +87,9 @@ case:
       每个成员的 file_name/reason_zh/reason_en。
     - 大小上限：分别提交超过 20MB 的 txt/xls/xlsx/csv 小文件类型，以及超过 1GB 的其它类型（如 pdf）文件，记录每个失败项的 file_name/reason_zh/reason_en。
     - 部分成功：混合提交 1 个合法文件与 2 个超限文件，记录 summary(total/success/failed) 与 success_list、failed_list 的成员归属。
-    - 列表分页：上传若干合法文件后调用 GET /aidp-mgmt/knowledge-bases/{kds_id}/documents?page=1&page_size=10，记录 value/total_count/has_more。
-    - 计数降级：将 AIDP 文档计数接口指向失败 stub 或注入异常，再次调用列表端点，记录 total_reliable、total_count、has_more 与 next_link。
+    - 列表分页：上传若干合法文件后调用 GET /aidp-mgmt/knowledge-bases/{kds_id}/files?page=1&page_size=10，记录
+      value/total_count/has_more/total_reliable/processing_count。
+    - 计数降级：将 AIDP 文档计数接口指向失败 stub 或注入异常，再次调用列表端点，记录 total_reliable、total_count 与 has_more。
     - 越权：以仅 READ 权限账号调用上传端点、以无权限账号调用列表端点，记录 401/403/404 与租户隔离。
     - 检查日志与错误响应不含明文 password/token/API key；清理临时知识库与上传文档。
     response_expectations:

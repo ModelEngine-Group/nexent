@@ -2,7 +2,7 @@
 
 "use client";
 
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import { Alert, App, Button, Drawer, Empty, Input, Table, Tooltip } from "antd";
@@ -29,6 +29,7 @@ import {
   formatDetailDateTime,
   formatFailureTaskDateTime,
   formatFileSize,
+  parseAidpFailureReason,
   statusCode,
   sumColumnWidths,
   withResizableHeaders,
@@ -73,6 +74,13 @@ const AidpKnowledgeTasksTab: React.FC<AidpKnowledgeTasksTabProps> = ({
   const { page: taskPage, pageSize: taskPageSize } = taskParams;
   const [failureTask, setFailureTask] = useState<AidpDocumentItem | null>(null);
   const [retryingFileUuid, setRetryingFileUuid] = useState<string | null>(null);
+  const failureReason = useMemo(
+    () =>
+      parseAidpFailureReason(
+        failureTask?.extraction_failure_reason || failureTask?.reason
+      ),
+    [failureTask]
+  );
   const [taskColumnWidths, setTaskColumnWidths] = useState<
     Record<string, number>
   >({});
@@ -115,6 +123,37 @@ const AidpKnowledgeTasksTab: React.FC<AidpKnowledgeTasksTabProps> = ({
     }, 250);
     return () => window.clearTimeout(timer);
   }, [taskKeyword]);
+
+  // AIDP returns next_link on every page, so a filtered page that is exactly
+  // full can still be the last one. Once such a page is found empty, return to
+  // the previous page instead of leaving the tab blank.
+  useEffect(() => {
+    if (
+      !tasksQuery.isSuccess ||
+      tasksQuery.isFetching ||
+      tasks.length ||
+      taskPage <= 1
+    )
+      return;
+    const lastPage = taskTotalReliable
+      ? Math.max(1, Math.ceil(taskTotal / taskPageSize))
+      : taskPage - 1;
+    const frame = window.requestAnimationFrame(() =>
+      setTaskParams((current) => ({
+        ...current,
+        page: Math.min(taskPage - 1, lastPage),
+      }))
+    );
+    return () => window.cancelAnimationFrame(frame);
+  }, [
+    taskPage,
+    taskPageSize,
+    taskTotal,
+    taskTotalReliable,
+    tasks.length,
+    tasksQuery.isFetching,
+    tasksQuery.isSuccess,
+  ]);
 
   const refreshTasks = useCallback(
     () => refetchTasks({ cancelRefetch: false }),
@@ -165,7 +204,7 @@ const AidpKnowledgeTasksTab: React.FC<AidpKnowledgeTasksTabProps> = ({
     { value: 0, label: t("aidpKnowledge.taskAll") },
     { value: 1, label: t("aidpKnowledge.taskSuccess") },
     { value: 2, label: t("aidpKnowledge.taskExtracting") },
-    { value: 3, label: t("aidpKnowledge.taskVectorFailed") },
+    { value: 3, label: t("aidpKnowledge.taskFailed") },
     { value: 4, label: t("aidpKnowledge.taskQueued") },
     { value: 5, label: t("aidpKnowledge.taskGraphFailed") },
   ];
@@ -217,7 +256,7 @@ const AidpKnowledgeTasksTab: React.FC<AidpKnowledgeTasksTabProps> = ({
         const labelKeys: Record<number, string> = {
           1: "aidpKnowledge.taskSuccess",
           2: "aidpKnowledge.taskExtracting",
-          3: "aidpKnowledge.taskVectorFailed",
+          3: "aidpKnowledge.taskFailed",
           4: "aidpKnowledge.taskQueued",
           5: "aidpKnowledge.taskGraphFailed",
         };
@@ -428,7 +467,7 @@ const AidpKnowledgeTasksTab: React.FC<AidpKnowledgeTasksTabProps> = ({
                   <i className="h-2 w-2 shrink-0 rounded-full bg-red-500" />
                   {statusCode(failureTask.status) === 5
                     ? t("aidpKnowledge.taskGraphFailed")
-                    : t("aidpKnowledge.taskVectorFailed")}
+                    : t("aidpKnowledge.taskFailed")}
                 </span>
               </div>
             </div>
@@ -445,7 +484,9 @@ const AidpKnowledgeTasksTab: React.FC<AidpKnowledgeTasksTabProps> = ({
                 {t("aidpKnowledge.detailErrorCode")}
               </div>
               <div className="text-sm leading-5 text-gray-900">
-                {descriptionValue(failureTask.error_code)}
+                {descriptionValue(
+                  failureReason?.code ?? failureTask.error_code
+                )}
               </div>
             </div>
             <div className="space-y-1">
@@ -453,9 +494,7 @@ const AidpKnowledgeTasksTab: React.FC<AidpKnowledgeTasksTabProps> = ({
                 {t("aidpKnowledge.detailFailureReason")}
               </div>
               <div className="whitespace-pre-wrap break-words text-sm leading-5 text-gray-900">
-                {descriptionValue(
-                  failureTask.extraction_failure_reason || failureTask.reason
-                )}
+                {descriptionValue(failureReason?.message ?? failureReason?.raw)}
               </div>
             </div>
           </div>

@@ -8,7 +8,10 @@ import { Button, Switch, Tag, Tooltip } from "antd";
 import { EditOutlined } from "@ant-design/icons";
 
 import type { AidpKbDetail } from "@/ext_components/aidp/shared/types/management";
-import { AIDP_UNKNOWN_VALUE, formatAidpCreator } from "@/ext_components/aidp/shared/utils/aidpKnowledgeDisplay";
+import {
+  AIDP_UNKNOWN_VALUE,
+  formatAidpCreator,
+} from "@/ext_components/aidp/shared/utils/aidpKnowledgeDisplay";
 import AidpGroupNamesDisplay from "@/ext_components/aidp/shared/components/AidpGroupNamesDisplay";
 
 export const AidpDetailField = ({
@@ -44,6 +47,8 @@ interface AidpKnowledgeDetailInformationProps {
   graphConfig: Record<string, unknown>;
   groupNames: string[];
   canConfigureGroupPermissions: boolean;
+  /** Friendly embedding model label resolved from AIDP ModelService. */
+  embeddingModelLabel?: string;
   formatDateTime: (value: unknown) => string;
   onEditSetting: (setting: AidpDetailSetting) => void;
   onEditPermissions: () => void;
@@ -59,6 +64,7 @@ const AidpKnowledgeDetailInformation = ({
   graphConfig,
   groupNames,
   canConfigureGroupPermissions,
+  embeddingModelLabel,
   formatDateTime,
   onEditSetting,
   onEditPermissions,
@@ -103,9 +109,11 @@ const AidpKnowledgeDetailInformation = ({
           <AidpDetailField label={t("aidpKnowledge.detailCreatedAt")}>
             {formatDateTime(detail.created_at)}
           </AidpDetailField>
-          <AidpDetailField label={t("aidpKnowledge.detailUpdatedAt")}>
-            {formatDateTime(detail.updated_at)}
-          </AidpDetailField>
+          {detail.updated_at ? (
+            <AidpDetailField label={t("aidpKnowledge.detailUpdatedAt")}>
+              {formatDateTime(detail.updated_at)}
+            </AidpDetailField>
+          ) : null}
           <AidpDetailField label={t("aidpKnowledge.detailCreator")}>
             {formatAidpCreator(detail.creator_name) || AIDP_UNKNOWN_VALUE}
           </AidpDetailField>
@@ -128,7 +136,9 @@ const AidpKnowledgeDetailInformation = ({
             {editButton("chunk_mode", t("aidpKnowledge.detailEditChunkMode"))}
           </AidpDetailField>
           <AidpDetailField label={t("aidpKnowledge.detailEmbeddingModel")}>
-            {detail.embedding_model || AIDP_UNKNOWN_VALUE}
+            {embeddingModelLabel ||
+              detail.embedding_model ||
+              AIDP_UNKNOWN_VALUE}
           </AidpDetailField>
           <AidpDetailField label={t("aidpKnowledge.detailVlmModel")}>
             {multimodalEnabled ? (
@@ -142,9 +152,6 @@ const AidpKnowledgeDetailInformation = ({
               <Tag color="default">{t("common.disabled")}</Tag>
             )}
             {editButton("vlm", t("aidpKnowledge.detailEditVlm"))}
-          </AidpDetailField>
-          <AidpDetailField label={t("aidpKnowledge.detailRerankModel")}>
-            {detail.rerank_model || AIDP_UNKNOWN_VALUE}
           </AidpDetailField>
           <AidpDetailField label={t("aidpKnowledge.detailSimilarity")}>
             {displayValue(detail.similarity)}
@@ -188,9 +195,6 @@ const AidpKnowledgeDetailInformation = ({
             </AidpDetailField>
             <AidpDetailField label={t("aidpKnowledge.detailGraphDomain")}>
               {displayValue(graphConfig.domain)}
-            </AidpDetailField>
-            <AidpDetailField label={t("aidpKnowledge.detailGraphTopK")}>
-              {displayValue(graphConfig.retrieve_default_topk)}
             </AidpDetailField>
             <AidpDetailField label={t("aidpKnowledge.detailGraphThinking")}>
               <span>

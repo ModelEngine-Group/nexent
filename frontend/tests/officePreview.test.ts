@@ -44,6 +44,9 @@ test("resolves the renderer from the name the server actually served", () => {
   assert.equal(resolveStreamPreviewKind("deck.pptx"), "pptx");
   assert.equal(resolveStreamPreviewKind("notes.txt"), "text");
   assert.equal(resolveStreamPreviewKind("photo.png"), "image");
+  // AIDP accepts html uploads; render them as text, never as executable markup.
+  assert.equal(resolveStreamPreviewKind("page.html"), "text");
+  assert.equal(resolveStreamPreviewKind("page.HTM"), "text");
 });
 
 test("falls back to the type hint and the response MIME type", () => {
