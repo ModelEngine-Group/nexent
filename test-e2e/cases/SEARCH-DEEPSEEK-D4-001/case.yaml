@@ -38,7 +38,7 @@
       {
         "order": 1,
         "action": "Open the real DeepSeek config UI in Chinese and English; enable quality, save and submit actual frontend validation requests.",
-        "expected": "Default count is 10, switch starts off, enabling produces true in saved configuration and validation; each request carries the current page language."
+        "expected": "Default count is 10, switch starts off, its tooltip does not repeat the label, localization and max_content_chars are absent, enabling produces true in saved configuration and validation; each request carries the current page language."
       },
       {
         "order": 2,

@@ -6013,6 +6013,24 @@ async def test_call_mcp_tool_enforces_runtime_timeout(monkeypatch):
         )
 
 class TestDeepSeekSearchConfiguration:
+    @pytest.mark.asyncio
+    async def test_stale_catalog_uses_current_parameter_names_and_tooltip(self):
+        from backend.services import tool_configuration_service as service
+
+        row = {"tool_id": 2, "name": "deepseek_search", "source": "local", "params": [
+            {"name": "localization"}, {"name": "max_content_chars"},
+            {"name": "only_high_quality", "description_zh": "仅优质内容，旧提示"},
+        ]}
+        descriptions = {"deepseek_search": {"params": [
+            {"name": "only_high_quality", "description_zh": "开启后仅返回排序分不低于 1.5 的结果"},
+        ]}}
+        with patch.object(service, "query_all_tools", return_value=[row]), patch.object(
+            service, "get_local_tools_description_zh", return_value=descriptions
+        ):
+            result = await service.list_all_tools("tenant")
+        assert result[0]["params"] == descriptions["deepseek_search"]["params"]
+        assert len(row["params"]) == 3
+
     class SearchStub:
         def __init__(self, deepseek_api_key, only_high_quality=False, language="zh", observer=None):
             self.language = language
@@ -6027,7 +6045,8 @@ class TestDeepSeekSearchConfiguration:
         from backend.services import tool_configuration_service as service
         DeepSeekSearchTool = self.SearchStub
 
-        params = {"deepseek_api_key": "synthetic-key", "only_high_quality": True, "language": "en"}
+        params = {"deepseek_api_key": "synthetic-key", "only_high_quality": True, "language": "en",
+                  "localization": "::1", "max_content_chars": 200}
         before = dict(params)
         with patch.object(service, "_get_tool_class_by_name", return_value=DeepSeekSearchTool), patch.object(
             DeepSeekSearchTool, "forward", autospec=True, return_value="[]"
@@ -6074,7 +6093,8 @@ class TestDeepSeekSearchConfiguration:
     def test_valid_config_persists_without_runtime_fields(self):
         from backend.services import tool_configuration_service as service
 
-        params = {"deepseek_api_key": "synthetic", "only_high_quality": True, "language": "en"}
+        params = {"deepseek_api_key": "synthetic", "only_high_quality": True, "language": "en",
+                  "localization": "::1", "max_content_chars": 200}
         request = Mock(agent_id=1, tool_id=2, version_no=0, params=params)
         with patch.object(service, "require_agent_draft_edit"), patch.object(
             service, "query_all_tools", return_value=[{"tool_id": 2, "name": "deepseek_search", "is_available": True}]

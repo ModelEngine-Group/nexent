@@ -38,7 +38,7 @@
       {
         "order": 1,
         "action": "Configure DeepSeek with default count and quality enabled, execute Chinese then English search through the actual boundary.",
-        "expected": "Count is 10; quality filtering retains 1.5 and above; language follows each request; matching result references are available."
+        "expected": "Count is 10; quality filtering retains 1.5 and above; language follows each request; long text is returned in full with matching model and source references."
       },
       {
         "order": 2,

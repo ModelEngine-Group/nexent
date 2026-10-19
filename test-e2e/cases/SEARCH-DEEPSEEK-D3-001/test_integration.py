@@ -24,7 +24,7 @@ def test_deepseek_http_sources_and_language(monkeypatch):
         def do_POST(self):
             payload = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
             captured.append((self.path, payload, self.headers.get("Authorization")))
-            rows = [{"title": f"Result {i}", "url": f"https://example.com/{i}", "summary": f"Summary {i}",
+            rows = [{"title": f"Result {i}", "url": f"https://example.com/{i}", "summary": f"Summary {i}" * 5000,
                      "rerank_score": score, "authority": 3} for i, score in enumerate([1.49, 1.5, 3])]
             if payload["query"].startswith("filtered"):
                 for row in rows:
@@ -59,6 +59,7 @@ def test_deepseek_http_sources_and_language(monkeypatch):
             assert observer.add_message.call_args.args[1] == ProcessType.SEARCH_CONTENT
             assert [f'o{item["cite_index"]}' for item in sources] == [item["index"] for item in results]
             assert sources[0]["url"] == "https://example.com/1"
+            assert results[0]["text"] == sources[0]["text"] == "Summary 1" * 5000
             assert captured[-1] == ("/v1/tools/search", {
                 "query": f"topic site:example.com lang:{language}", "count": 10, "need_content": False,
             }, "Bearer synthetic")

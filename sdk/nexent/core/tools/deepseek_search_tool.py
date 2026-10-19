@@ -2,7 +2,6 @@
 
 """DeepSeek Search adapter with platform source references and bounded retries."""
 
-import ipaddress
 import json
 import logging
 import math
@@ -59,10 +58,8 @@ class DeepSeekSearchTool(Tool):
     init_param_descriptions = {
         "deepseek_api_key": {"description_zh": "DeepSeek API 密钥"},
         "max_results": {"description_zh": "请求结果数量，质量过滤后可能少于此数"},
-        "only_high_quality": {"description_zh": "仅优质内容，开启后仅返回排序分不低于 1.5 的结果"},
+        "only_high_quality": {"description_zh": "开启后仅返回排序分不低于 1.5 的结果"},
         "need_content": {"description_zh": "返回网页正文，缺失时使用摘要"},
-        "max_content_chars": {"description_zh": "每条结果供模型阅读的最大正文或摘要字符数"},
-        "localization": {"description_zh": "优先返回本地结果的 IP 地址，可留空"},
         "timeout_seconds": {"description_zh": "每次 HTTP 尝试的网络超时秒数"},
         "max_retries": {"description_zh": "失败后的最大重试次数"},
     }
@@ -72,11 +69,9 @@ class DeepSeekSearchTool(Tool):
         deepseek_api_key: str = Field(description="DeepSeek API key", min_length=1),
         max_results: int = Field(default=10, ge=1, le=50, description="Requested result count before quality filtering"),
         only_high_quality: bool = Field(
-            default=False, description="High-quality results only (rerank score >= 1.5); may return fewer results"
+            default=False, description="When enabled, return only results with rerank score >= 1.5; may return fewer results"
         ),
         need_content: bool = Field(default=False, description="Return webpage content, falling back to summaries"),
-        max_content_chars: int = Field(default=2000, ge=200, le=20000, description="Maximum text characters per result"),
-        localization: str = Field(default="", description="IP address for localized results; leave empty to omit"),
         timeout_seconds: int = Field(default=30, ge=1, le=120, description="Network timeout seconds per attempt"),
         max_retries: int = Field(default=2, ge=0, le=2, description="Maximum additional HTTP attempts"),
         observer: MessageObserver = Field(default=None, exclude=True, description="Message observer"),
@@ -88,7 +83,7 @@ class DeepSeekSearchTool(Tool):
             raise ValueError("DeepSeek API key is required.")
         self._api_key = key.strip()
         for name, value, lower, upper in (
-            ("max_results", max_results, 1, 50), ("max_content_chars", max_content_chars, 200, 20000),
+            ("max_results", max_results, 1, 50),
             ("timeout_seconds", timeout_seconds, 1, 120), ("max_retries", max_retries, 0, 2),
         ):
             value = unwrap_field_info(value)
@@ -100,14 +95,6 @@ class DeepSeekSearchTool(Tool):
             if type(value) is not bool:
                 raise ValueError(f"{name} must be a boolean.")
             setattr(self, name, value)
-        self.localization = unwrap_field_info(localization)
-        if not isinstance(self.localization, str):
-            raise ValueError("localization must be an IP address or empty.")
-        if self.localization:
-            try:
-                ipaddress.ip_address(self.localization)
-            except ValueError:
-                raise ValueError("localization must be an IP address or empty.") from None
         language = unwrap_field_info(language)
         self.language = language.lower().replace("_", "-").split("-")[0] if isinstance(language, str) else ""
         if self.language not in ("zh", "en"):
@@ -145,8 +132,6 @@ class DeepSeekSearchTool(Tool):
 
     def _request(self, query: str) -> dict:
         payload = {"query": query, "count": self.max_results, "need_content": self.need_content}
-        if self.localization:
-            payload["localization"] = self.localization
         messages = {
             400: "DeepSeek rejected the search parameters.", 401: "DeepSeek API key is invalid.",
             402: "DeepSeek account balance is insufficient.", 413: "DeepSeek search request is too large.",
@@ -212,13 +197,10 @@ class DeepSeekSearchTool(Tool):
             if (self.only_high_quality and score < 1.5) or url in seen:
                 continue
             seen.add(url)
-            original = item[source]
-            truncated = len(original) > self.max_content_chars
-            text = original[:self.max_content_chars] + ("\n[truncated]" if truncated else "")
             metadata = {key: item.get(key) for key in ("rerank_score", "authority", "snippet", "site_name", "site_icon")}
-            metadata.update(text_source=source, text_truncated=truncated)
+            metadata.update(text_source=source)
             messages.append({
-                "title": item.get("title") or url, "url": url, "text": text,
+                "title": item.get("title") or url, "url": url, "text": item[source],
                 "published_date": item.get("date"), "source_type": "url", "filename": "", "score": "",
                 "score_details": {"deepseek": metadata}, "search_type": self.name, "tool_sign": self.tool_sign,
             })

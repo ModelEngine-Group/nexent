@@ -8526,7 +8526,8 @@ class TestDeepSeekRuntimeLanguage:
 
         records = [{"tool_id": 7, "name": "deepseek_search", "class_name": "DeepSeekSearchTool",
                     "source": "local", "output_type": "string", "inputs": "{}"}]
-        params = {"language": "zh", "deepseek_api_key": "synthetic", "only_high_quality": True}
+        params = {"language": "zh", "deepseek_api_key": "synthetic", "only_high_quality": True,
+                  "localization": "::1", "max_content_chars": 200}
         with patch.object(module, "discover_langchain_tools", new_callable=AsyncMock, return_value=[]), patch.object(
             module, "_resolve_runtime_tool_records", return_value=records
         ), patch.object(module, "search_agent_info_by_agent_id", return_value={"name": "Agent"}), patch.object(
@@ -8535,5 +8536,7 @@ class TestDeepSeekRuntimeLanguage:
             await module.create_tool_config_list(1, "tenant", "user", language=language)
             actual = config.call_args.kwargs["params"]
             assert actual["language"] == language
+            assert "localization" not in actual
+            assert "max_content_chars" not in actual
             assert actual["only_high_quality"] is True
             assert params["language"] == "zh"

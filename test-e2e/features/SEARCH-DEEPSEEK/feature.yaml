@@ -12,7 +12,7 @@
     "business_rules": [
       {
         "rule_id": "SEARCH-DEEPSEEK-RULE-001",
-        "description": "Instance configuration controls count (default 10), quality threshold (inclusive 1.5) and bounded content."
+        "description": "Instance configuration controls count (default 10) and quality threshold (inclusive 1.5); selected text is returned in full without localization or length-limit parameters. New tool registration assigns unified Keywords=search."
       },
       {
         "rule_id": "SEARCH-DEEPSEEK-RULE-002",

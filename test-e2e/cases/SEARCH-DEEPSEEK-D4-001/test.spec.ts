@@ -31,8 +31,8 @@ journey("SEARCH-DEEPSEEK-D4-001", async ({ page, contract }) => {
       type: "boolean",
       optional: true,
       default: false,
-      description: "High-quality results only (score >= 1.5)",
-      description_zh: "仅优质内容，开启后保留排序分不低于 1.5 的结果",
+      description: "When enabled, return only results with rerank score >= 1.5",
+      description_zh: "开启后仅返回排序分不低于 1.5 的结果",
     },
   ];
   const tool = {
@@ -119,12 +119,20 @@ journey("SEARCH-DEEPSEEK-D4-001", async ({ page, contract }) => {
   await contract.step(contract.expectedIds("steps")[0], async () => {
     for (const language of ["zh", "en"] as const) {
       const dialog = await open(language);
+      await expect(dialog.getByText("localization", { exact: true })).toHaveCount(0);
+      await expect(dialog.getByText("max_content_chars", { exact: true })).toHaveCount(0);
       const label =
         language === "zh" ? "仅优质内容" : "High-quality results only";
       const qualityRow = dialog
         .locator(".ant-form-item")
         .filter({ hasText: label });
       const quality = qualityRow.getByRole("switch");
+      await qualityRow.getByText("?", { exact: true }).hover();
+      await expect(page.getByRole("tooltip")).toHaveText(
+        language === "zh"
+          ? "开启后仅返回排序分不低于 1.5 的结果"
+          : "When enabled, return only results with rerank score >= 1.5",
+      );
       await expect(quality).toHaveAttribute("aria-checked", "false");
       await dialog
         .locator('input[type="password"]')

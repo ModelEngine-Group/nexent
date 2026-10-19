@@ -70,7 +70,7 @@ def test_invalid_query_never_requests(wire, query):
 @pytest.mark.parametrize("config", [
     {"max_results": 0}, {"max_results": 51}, {"max_results": True}, {"max_results": 1.5},
     {"only_high_quality": "true"}, {"need_content": 1}, {"max_retries": 3},
-    {"timeout_seconds": 0}, {"max_content_chars": 199}, {"localization": "host"}, {"language": "fr"},
+    {"timeout_seconds": 0}, {"language": "fr"},
 ])
 def test_invalid_configuration(config):
     with pytest.raises(ValueError):
@@ -118,10 +118,16 @@ def test_content_fallback(wire, need_content, extra, expected):
     assert json.loads(tool(need_content=need_content).forward("topic"))[0]["text"] == expected
 
 
-def test_truncation_and_sequential_indices(wire):
-    wire.post.return_value = httpx.Response(200, json={"results": [result(content="中" * 201)]})
-    search = tool(need_content=True, max_content_chars=200)
-    assert json.loads(search.forward("topic"))[0]["text"] == "中" * 200 + "\n[truncated]"
+@pytest.mark.parametrize("need_content,field", [(True, "content"), (False, "summary")])
+def test_full_text_and_sequential_indices(wire, need_content, field):
+    text = "中😀" * 15000
+    wire.post.return_value = httpx.Response(200, json={"results": [result(**{field: text})]})
+    observer = Mock()
+    search = tool(need_content=need_content, observer=observer)
+    assert json.loads(search.forward("topic"))[0]["text"] == text
+    sources = json.loads(observer.add_message.call_args.args[2])
+    assert sources[0]["text"] == text
+    assert "text_truncated" not in sources[0]["score_details"]["deepseek"]
     assert json.loads(search.forward("topic"))[0]["index"] == "o2"
 
 
@@ -192,6 +198,9 @@ def test_metadata_excludes_runtime_context():
     assert "only_high_quality" in names
     assert "observer" not in names
     assert "language" not in names
+    assert names.isdisjoint({"localization", "max_content_chars"})
+    quality = next(param for param in metadata["params"] if param["name"] == "only_high_quality")
+    assert not quality["description_zh"].startswith("仅优质内容")
     assert inspect.signature(DeepSeekSearchTool.__init__).parameters["max_results"].default.default == 10
     for key in ("description", "description_zh"):
         description = metadata["inputs"]["query"][key]
@@ -199,12 +208,12 @@ def test_metadata_excludes_runtime_context():
             assert syntax in description
 
 
-def test_localization_and_instance_keys_stay_separate(wire):
-    first = DeepSeekSearchTool(deepseek_api_key="first", max_results=50, localization="::1")
+def test_instance_keys_stay_separate_without_localization(wire):
+    first = DeepSeekSearchTool(deepseek_api_key="first", max_results=50)
     second = DeepSeekSearchTool(deepseek_api_key="second", language="en")
     first.forward("topic")
     second.forward("topic")
-    assert wire.post.call_args_list[0].kwargs["json"]["localization"] == "::1"
+    assert "localization" not in wire.post.call_args_list[0].kwargs["json"]
     assert wire.post.call_args_list[0].kwargs["json"]["count"] == 50
     assert "localization" not in wire.post.call_args_list[1].kwargs["json"]
     assert wire.post.call_args_list[0].kwargs["headers"]["Authorization"] == "Bearer first"

@@ -14,7 +14,7 @@
 `deepseek_api_key`，默认请求 `max_results=10`，支持 1～50 条。
 `only_high_quality` 为默认关闭的“仅优质内容”开关，开启后保留
 `rerank_score >= 1.5` 的结果，过滤后不补请求。`need_content` 默认关闭，
-使用长摘要；开启后优先使用正文。`max_content_chars` 默认 2000，限制每条模型文本。
+使用长摘要；开启后优先使用正文。摘要和正文完整返回，不做长度截断；不提供地域 IP 配置。
 
 Agent 只传 `query`，支持 `site:`、`-site:`、`-关键词`、`-"排除短语"`、
 `"精确短语"`、`after:`、`before:` 以及用 `OR` 连接多个站点。

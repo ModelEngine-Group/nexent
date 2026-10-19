@@ -364,6 +364,11 @@ def update_tool_table_from_scan_tool_list(
                     {"created_by": user_id, "updated_by": user_id, "author": tenant_id, "is_available": is_available})
                 new_tool = ToolInfo(**filtered_tool_data)
                 session.add(new_tool)
+                if tool.name == "deepseek_search" and tool.source == ToolSourceEnum.LOCAL.value:
+                    from database.tool_default_tags_db import initialize_search_tool_tags
+
+                    session.flush()
+                    initialize_search_tool_tags(session, tenant_id, new_tool.tool_id, user_id)
     logger.info("Updated tool table in PG database")
 
 

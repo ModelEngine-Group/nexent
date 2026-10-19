@@ -666,6 +666,8 @@ def update_tool_info_impl(tool_info: ToolInstanceInfoRequest, tenant_id: str, us
             params = dict(tool_info.params or {})
             params.pop("language", None)
             params.pop("observer", None)
+            params.pop("localization", None)
+            params.pop("max_content_chars", None)
             tool_class = _get_tool_class_by_name("deepseek_search")
             if tool_class is None:
                 raise ValueError("DeepSeek Search is unavailable.")
@@ -880,6 +882,14 @@ async def list_all_tools(tenant_id: str, labels: Optional[List[str]] = None):
         # Always use SDK inputs for local tools to stay in sync with current tool code
         is_local = tool.get("source") == "local"
         sdk_info = local_tool_descriptions.get(tool_name) if is_local else None
+
+        if is_local and tool_name == "deepseek_search" and sdk_info:
+            tool = dict(tool)
+            current_params = {param["name"]: param for param in sdk_info.get("params", [])}
+            tool["params"] = [
+                {**param, "description_zh": current_params[param["name"]].get("description_zh")}
+                for param in tool.get("params", []) if param.get("name") in current_params
+            ]
 
         if is_local and sdk_info:
             description_zh = sdk_info.get("description_zh")
@@ -1147,6 +1157,8 @@ def _validate_local_tool(
         # Parse instantiation parameters first
         instantiation_params = dict(params or {})
         if tool_name == "deepseek_search":
+            instantiation_params.pop("localization", None)
+            instantiation_params.pop("max_content_chars", None)
             instantiation_params["language"] = language
             instantiation_params["observer"] = None
         # Get signature and extract default values for all parameters

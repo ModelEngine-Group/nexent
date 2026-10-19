@@ -2112,6 +2112,8 @@ async def create_tool_config_list(
         )
         param_dict = _merge_tool_params(tool, effective_override_params)
         if tool.get("class_name") == "DeepSeekSearchTool":
+            param_dict.pop("localization", None)
+            param_dict.pop("max_content_chars", None)
             # Run language is authoritative over persisted or request-level tool parameters.
             param_dict["language"] = language
         if tool.get("class_name") == "AidpSearchTool":

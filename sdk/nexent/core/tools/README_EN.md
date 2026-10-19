@@ -15,7 +15,7 @@ Configure the required `deepseek_api_key`. `max_results` defaults to 10 (range 1
 The `only_high_quality` switch defaults to false; when enabled it retains results with
 `rerank_score >= 1.5`, without additional requests to fill the result count.
 `need_content` defaults to false (long summaries); enable it to prefer webpage content.
-`max_content_chars` defaults to 2000 per model-facing result.
+Selected summaries and content are returned in full without truncation. No localization IP configuration is exposed.
 
 The Agent supplies only `query`, with `site:`, `-site:`, `-keyword`, `-"excluded phrase"`,
 `"exact phrase"`, `after:`, `before:`, and multiple sites joined by `OR`.
