@@ -16,18 +16,18 @@ case:
   preconditions:
   - '- 本地依赖/组件测试环境可运行，不要求外部模型服务在线。
 
-    - 使用 mock 验证 northbound_thread_manager 与 services.startup_recovery_service 的调用契约，不依赖真实 DB/MinIO。
+    - 使用 mock 验证 northbound_thread_manager 与 management.recovery 的调用契约，不依赖真实 DB/MinIO。
 
     - ${NEXENT_TEST_HOME}/config/environment.yaml（仅本地测试环境参数）'
   test_data:
     legacy_asset_declaration: '- 本地依赖/组件测试环境可运行，不要求外部模型服务在线。
 
-      - 使用 mock 验证 northbound_thread_manager 与 services.startup_recovery_service 的调用契约，不依赖真实 DB/MinIO。
+      - 使用 mock 验证 northbound_thread_manager 与 management.recovery 的调用契约，不依赖真实 DB/MinIO。
 
       - ${NEXENT_TEST_HOME}/config/environment.yaml（仅本地测试环境参数）'
   steps:
   - order: 1
-    action: 直接导入 backend/apps/northbound_base_app.py，将 northbound_thread_manager 状态置为 ManagerState.CREATED，并 mock services.startup_recovery_service.recover_northbound_tasks
+    action: 直接导入 backend/apps/northbound_base_app.py，将 northbound_thread_manager 状态置为 ManagerState.CREATED，并 mock management.recovery.recover_northbound_tasks
       与 schedule_interrupted_upload_cleanup。
     expected: lifespan 启动顺序与 northbound_base_app.py:77-87 契约一致：CREATED→start→设默认 manager→set_thread_manager→recover→schedule
       cleanup。
@@ -71,7 +71,7 @@ case:
   condition:
   - '- 本地依赖/组件测试环境可运行，不要求外部模型服务在线。
 
-    - 使用 mock 验证 northbound_thread_manager 与 services.startup_recovery_service 的调用契约，不依赖真实 DB/MinIO。
+    - 使用 mock 验证 northbound_thread_manager 与 management.recovery 的调用契约，不依赖真实 DB/MinIO。
 
     - ${NEXENT_TEST_HOME}/config/environment.yaml（仅本地测试环境参数）'
   metrics:

@@ -218,7 +218,7 @@ def test_parallel_indices_do_not_collide(wire):
 def test_metadata_excludes_runtime_context():
     import inspect
 
-    from backend.utils.tool_utils import (
+    from management.services.tool.catalog import (
         get_local_tools_classes,
         get_local_tools_description_zh,
     )

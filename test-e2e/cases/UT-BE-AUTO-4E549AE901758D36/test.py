@@ -1,3 +1,4 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 from __future__ import annotations
 
 import logging
@@ -6,7 +7,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from backend.services.fa_memory_extractor import ExtractionResult, FaMemoryExtractor
+from management.services.memory.extraction import ExtractionResult, FaMemoryExtractor
 from nexent.memory.models import MemoryLayer, MemoryType
 
 

@@ -44,11 +44,11 @@ from management.services.knowledge_base.management import (
 from management.services.knowledge_base.status import get_all_files_status
 from nexent.core.concurrency import run_blocking
 from nexent.vector_database.base import VectorDatabaseCore
-from services.knowledge_storage_service import (
+from management.services.knowledge_base.storage import (
     release_storage_charge,
     resolve_storage_reference,
 )
-from services.redis_service import get_redis_service
+from management.services.knowledge_base.task_state import get_redis_service
 
 _document_delete_tasks: Dict[str, asyncio.Task] = {}
 

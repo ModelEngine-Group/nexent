@@ -10,7 +10,7 @@ from sqlalchemy.dialects import postgresql
 from sqlalchemy.orm import Query, Session
 
 import database.conversation_db as db
-import services.conversation_management_service as conversations
+import management.services.conversation.service as conversations
 from consts.exceptions import WorkbenchConfigVersionConflict
 from consts.model import ConversationKnowledgeScopeRequest, WorkbenchSessionConfig
 

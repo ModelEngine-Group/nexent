@@ -1,3 +1,4 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """Define and implement the internal Local MCP tools used by NL2Agent."""
 
 import json
@@ -11,7 +12,7 @@ from nexent.core.agents.agent_model import ToolConfig
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
 from consts.exceptions import UnauthorizedError
-from utils.auth_utils import get_current_user_id
+from management.services.permission.identity.authentication_helpers import get_current_user_id
 
 logger = logging.getLogger(__name__)
 
@@ -844,10 +845,8 @@ async def search_installed_resources(
         )
 
     try:
-        from services.agent_draft_permission_service import (
-            AgentDraftEditError,
-            require_agent_draft_edit,
-        )
+        from consts.exceptions import AgentDraftEditError
+        from management.services.agent.authorization import require_agent_draft_edit
         from services.nl2agent_service import search_installed_resources_impl
 
         authorization = get_http_request().headers.get("Authorization")
@@ -898,10 +897,8 @@ async def search_uninstalled_resources(
         )
 
     try:
-        from services.agent_draft_permission_service import (
-            AgentDraftEditError,
-            require_agent_draft_edit,
-        )
+        from consts.exceptions import AgentDraftEditError
+        from management.services.agent.authorization import require_agent_draft_edit
         from services.nl2agent_service import search_uninstalled_resources_impl
 
         authorization = get_http_request().headers.get("Authorization")
@@ -953,10 +950,8 @@ async def recommend_resources(
         )
 
     try:
-        from services.agent_draft_permission_service import (
-            AgentDraftEditError,
-            require_agent_draft_edit,
-        )
+        from consts.exceptions import AgentDraftEditError
+        from management.services.agent.authorization import require_agent_draft_edit
         from services.nl2agent_service import (
             Nl2AgentResourceError,
             recommend_resources_impl,
@@ -1006,10 +1001,8 @@ async def nl2a_wrapper(
 ) -> str:
     """Return the NL2Agent JSON template selected by subtype in its wrapper."""
 
-    from services.agent_draft_permission_service import (
-        AgentDraftEditError,
-        require_agent_draft_edit,
-    )
+    from consts.exceptions import AgentDraftEditError
+    from management.services.agent.authorization import require_agent_draft_edit
 
     try:
         resolved_agent_id = _resolve_agent_context_id(agent_id)

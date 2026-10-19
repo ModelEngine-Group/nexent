@@ -39,19 +39,19 @@ from nexent.memory import models as memory_models
 
 from consts.capability_profiles import CATALOG as CAPABILITY_CATALOG
 
-from services.file_management_service import validate_urls_access
+from management.services.file.service import validate_urls_access
 from management.services.model.resolver import get_rerank_model, is_model_available
 from management.services.knowledge_base.service import (
     ElasticSearchService,
     get_vector_db_core,
     get_embedding_model_by_index_name,
 )
-from services.remote_mcp_service import get_remote_mcp_server_list
-from services.memory_external_provider_service import get_memory_external_provider_service
+from management.services.mcp.service import get_remote_mcp_server_list
+from management.services.memory.providers.service import get_memory_external_provider_service
 
 from database.a2a_agent_db import PROTOCOL_JSONRPC
-from services.memory_config_service import build_memory_context
-from services.ind_aidp_service import create_ind_aidp_image_url_builder
+from management.services.configuration.user.memory import build_memory_context
+from management.services.knowledge_base.providers.aidp import create_ind_aidp_image_url_builder
 from management.services.model.adapter import get_llm_adapter, get_vlm_adapter
 from database.agent_db import (
     search_agent_info_by_agent_id,
@@ -69,7 +69,7 @@ from management.services.agent.prompt import (
     load_agent_prompt_bundle,
 )
 from nexent.core.agents.prompt import AgentPromptComposer, get_builtin_tool_descriptions
-from utils.config_utils import (
+from management.services.configuration.tenant.settings import (
     tenant_config_manager,
 )
 from management.services.model.names import (
@@ -84,9 +84,9 @@ from management.services.agent.prompt import (
 from management.services.agent.context import (
     build_context_inputs,
 )
-from utils.http_client_utils import create_httpx_client
-from utils.mcp_url_utils import get_tenant_local_mcp_server
-from utils.redis_utils import get_redis_client
+from infrastructure.http.client import create_httpx_client
+from management.services.mcp.addressing import get_tenant_local_mcp_server
+from infrastructure.redis import get_redis_client
 from consts.const import (
     AGENT_WORKSPACE_ROOT,
     NEXENT_SANDBOX_WORKSPACE_MODE,
@@ -175,7 +175,7 @@ def _ensure_agent_reasoning_snapshot(
     version_no: int,
 ) -> None:
     """Backfill reasoning ownership for agents created before Scheme B."""
-    from services.agent_reasoning_service import snapshot_agent_reasoning_config
+    from management.services.agent.reasoning import snapshot_agent_reasoning_config
 
     try:
         agent_info = search_agent_info_by_agent_id(
@@ -1357,7 +1357,7 @@ async def create_agent_config(
         child_tool_params = normalized_tool_params.model_copy(deep=True)
         root_override = child_tool_params.agents.get(agent_info.get("name"))
         if root_override is not None:
-            from services.runtime_knowledge_mount import MANAGED_CLASSES
+            from management.services.knowledge_base.mount import MANAGED_CLASSES
 
             managed_names = MANAGED_CLASSES | {
                 tool.get("name") for tool in runtime_knowledge_tools
@@ -1474,7 +1474,7 @@ async def create_agent_config(
         and conversation_id is not None
         and automation_user_message
     ):
-        from services.agent_automation.tool_adapter import (
+        from management.services.automation.proposal import (
             agent_loop_automation_tool_adapter,
         )
         tool_list.append(
@@ -1514,7 +1514,7 @@ async def create_agent_config(
     # The memory capability switch controls tenant, user, and agent memory.
     if memory_context.user_config.memory_switch:
         try:
-            from services.memory_record_service import (
+            from management.services.memory.records import (
                 _resolve_tenant_embedding_model_info,
             )
 
@@ -1539,11 +1539,11 @@ async def create_agent_config(
             # backend services via the adapter. The facade handles policy
             # enforcement, embedding lookup, and idempotency on its own
             # and dispatches persistence/retrieval to
-            # ``services.memory_record_service`` /
-            # ``services.memory_retrieval_service``.
+            # ``management.services.memory.records`` /
+            # ``management.services.memory.retrieval``.
             memory_service = None
             try:
-                from services.memory_backend_adapter import build_memory_service_for_agent
+                from management.services.memory.provider import build_memory_service_for_agent
 
                 memory_service = build_memory_service_for_agent(
                     tenant_id=memory_context.tenant_id,
@@ -1565,7 +1565,7 @@ async def create_agent_config(
 
             memory_context_service = None
             try:
-                from services.memory_context_service import get_memory_context_service
+                from management.services.memory.context import get_memory_context_service
 
                 memory_context_service = get_memory_context_service()
                 if memory_context_service is None:
@@ -2070,7 +2070,7 @@ async def create_tool_config_list(
 
     # Look up agent name for use in error messages.
     if runtime_knowledge_tools is not None:
-        from services.runtime_knowledge_mount import MANAGED_CLASSES
+        from management.services.knowledge_base.mount import MANAGED_CLASSES
 
         tools_list = [tool for tool in tools_list if tool.get("class_name") not in MANAGED_CLASSES]
         tools_list.extend(copy.deepcopy([
@@ -2385,7 +2385,7 @@ async def discover_langchain_tools():
     Returns:
         list: List of discovered LangChain tool instances
     """
-    from utils.langchain_utils import discover_langchain_modules
+    from management.services.tool.langchain import discover_langchain_modules
 
     langchain_tools = []
 

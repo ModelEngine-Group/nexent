@@ -24,7 +24,7 @@ case:
     action: 准备本地真实测试环境和“config_sync 跨服务同步、失败重试/一致性｜核心流程”要求的最小数据，所有可变资源使用 RunID 前缀。
     expected: 功能结果与代码契约一致，测试过程无未处理异常。
   - order: 2
-    action: 通过 backend/apps/config_sync_app.py; backend/services/config_sync_service.py 对外暴露的真实入口执行目标操作，不直接修改最终数据库状态绕过业务逻辑。
+    action: 通过 backend/apps/config_sync_app.py; backend/management/services/configuration/tenant/service.py 对外暴露的真实入口执行目标操作，不直接修改最终数据库状态绕过业务逻辑。
     expected: 关键状态在 API 返回、数据库/存储和后续读取中保持一致。
   - order: 3
     action: 记录请求参数、返回状态、资源ID和关键副作用。

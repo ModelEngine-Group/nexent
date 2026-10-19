@@ -1,3 +1,4 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 from __future__ import annotations
 
 from datetime import datetime, timedelta
@@ -13,7 +14,7 @@ def test_interrupted_upload_delete_failure_degrades_to_recovery(monkeypatch):
     from database import attachment_db, client as client_db
     from database import knowledge_file_lifecycle_db as lifecycle_db
     from database.db_models import KnowledgeFileLifecycle
-    from services.startup_recovery_service import (
+    from management.recovery import (
         UPLOAD_RECOVERY_GRACE_SECONDS,
         fail_interrupted_uploads,
     )

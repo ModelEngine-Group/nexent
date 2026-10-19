@@ -1,8 +1,9 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 from __future__ import annotations
 
 import pytest
 
-from backend.utils.config_utils import (
+from management.services.configuration.tenant.settings import (
     CONTEXT_COMPACTION_TRIGGER_RATIO_KEY,
     LEGACY_CONTEXT_SOFT_LIMIT_RATIO_KEY,
     TenantConfigManager,

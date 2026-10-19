@@ -183,16 +183,6 @@ export const API_ENDPOINTS = {
     optimize: `${API_BASE_URL}/prompt/optimize`,
     optimizeFromDebug: `${API_BASE_URL}/prompt/optimize/from_debug`,
   },
-  promptTemplates: {
-    list: `${API_BASE_URL}/prompt_templates`,
-    detail: (templateId: number) =>
-      `${API_BASE_URL}/prompt_templates/${templateId}`,
-    create: `${API_BASE_URL}/prompt_templates`,
-    update: (templateId: number) =>
-      `${API_BASE_URL}/prompt_templates/${templateId}`,
-    delete: (templateId: number) =>
-      `${API_BASE_URL}/prompt_templates/${templateId}`,
-  },
   evaluationSets: {
     list: `${API_BASE_URL}/evaluation-sets`,
     config: `${API_BASE_URL}/evaluation-sets/config`,

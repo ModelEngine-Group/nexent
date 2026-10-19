@@ -1,3 +1,4 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """D1 contracts for tags, HITL, model catalog, logging and sandbox cleanup."""
 
 from __future__ import annotations
@@ -22,7 +23,7 @@ STAGE = pytest.mark.stage("D1")
 @STAGE
 @pytest.mark.case_id("UT-BE-029")
 def test_hybrid_log_handler_rotates_on_size_and_keeps_machine_readable_output(tmp_path) -> None:
-    from utils.logging_utils import HybridRotatingFileHandler
+    from infrastructure.logging import HybridRotatingFileHandler
 
     target = tmp_path / "runtime.log"
     handler = HybridRotatingFileHandler(
@@ -45,5 +46,3 @@ def test_hybrid_log_handler_rotates_on_size_and_keeps_machine_readable_output(tm
     combined = "\n".join(item.read_text(encoding="utf-8") for item in files)
     assert "third-visible-line" in combined
     assert "\x1b[" not in combined
-
-
