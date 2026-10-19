@@ -29,8 +29,6 @@ export type AgentConfigUpdate = Partial<
     | "business_description"
     | "business_logic_model_id"
     | "business_logic_model_name"
-    | "prompt_template_id"
-    | "prompt_template_name"
     | "verification_config"
     | "group_ids"
     | "ingroup_permission"
@@ -190,8 +188,6 @@ export interface Agent {
   business_description?: string;
   business_logic_model_name?: string;
   business_logic_model_id?: number;
-  prompt_template_id?: number;
-  prompt_template_name?: string;
   is_available?: boolean;
   is_new?: boolean;
   sub_agent_id_list?: number[];
@@ -656,7 +652,6 @@ export interface GeneratePromptParams {
   agent_id: number;
   task_description: string;
   model_id: number;
-  prompt_template_id?: number;
   tool_ids?: number[]; // Optional: tool IDs selected in frontend (takes precedence over database query)
   sub_agent_ids?: number[]; // Optional: sub-agent IDs selected in frontend (takes precedence over database query)
   /**

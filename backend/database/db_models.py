@@ -724,10 +724,6 @@ class AgentInfo(TableBase):
         String(100), doc="Model name used for business logic prompt generation")
     business_logic_model_id = Column(
         Integer, doc="Model ID used for business logic prompt generation, foreign key reference to model_record_t.model_id")
-    prompt_template_id = Column(
-        Integer, doc="Prompt template ID used for business logic prompt generation")
-    prompt_template_name = Column(String(
-        100), doc="Prompt template name used for business logic prompt generation")
     group_ids = Column(String, doc="Agent group IDs list")
     is_new = Column(Boolean, default=False, doc="Whether this agent is marked as new for the user")
     current_version_no = Column(Integer, nullable=True, doc="Current published version number. NULL means no version published yet")
@@ -763,44 +759,6 @@ class AgentInfo(TableBase):
     greeting_message = Column(Text, doc="Agent greeting message displayed on chat initial screen")
     example_questions = Column(JSONB, doc="List of example questions for starting a conversation with this agent")
     icon_url = Column(String(1024), doc="Object storage key for the agent icon")
-
-
-class PromptTemplate(TableBase):
-    """
-    Prompt template table for user-defined prompt generation templates.
-    """
-    __tablename__ = "ag_prompt_template_t"
-    __table_args__ = (
-        Index(
-            "uq_prompt_template_user_name_active",
-            "tenant_id",
-            "user_id",
-            "template_name",
-            unique=True,
-            postgresql_where=text("delete_flag = 'N'"),
-        ),
-        Index(
-            "idx_ag_prompt_template_t_user",
-            "tenant_id",
-            "user_id",
-            "template_type",
-            postgresql_where=text("delete_flag = 'N'"),
-        ),
-        {"schema": SCHEMA},
-    )
-
-    template_id = Column(Integer, Sequence(
-        "ag_prompt_template_t_template_id_seq", schema=SCHEMA), primary_key=True, nullable=False, autoincrement=True, doc="Prompt template ID")
-    template_name = Column(String(100), nullable=False,
-                           doc="Prompt template name")
-    description = Column(String(500), doc="Prompt template description")
-    template_type = Column(String(50), nullable=False,
-                           default="agent_generate", doc="Prompt template type")
-    tenant_id = Column(String(100), nullable=False, doc="Tenant ID")
-    user_id = Column(String(100), nullable=False, doc="User ID")
-    template_content_zh = Column(
-        JSONB, nullable=False, doc="Chinese prompt template content")
-    template_content_en = Column(JSONB, doc="English prompt template content")
 
 
 class ToolInstance(TableBase):

@@ -185,7 +185,6 @@ sys.modules["consts.exceptions"] = consts_exceptions_mod
 sys.modules["consts.model"] = MagicMock()
 sys.modules["consts.scheduler"] = consts_scheduler_mod
 sys.modules["consts.error_code"] = MagicMock()
-sys.modules["consts.prompt_template"] = MagicMock()
 
 
 class _VectorDatabaseCore:

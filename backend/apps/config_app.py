@@ -22,7 +22,6 @@ from apps.mock_user_management_app import router as mock_user_management_router
 from apps.model_managment_app import router as model_manager_router
 from apps.oauth_app import router as oauth_router
 from apps.prompt_app import router as prompt_router
-from apps.prompt_template_app import router as prompt_template_router
 from apps.mcp_management_app import router as mcp_management_router
 from apps.remote_mcp_app import router as remote_mcp_router
 from apps.skill_app import router as skill_router
@@ -72,7 +71,6 @@ from nexent.core.concurrency import (
     set_default_thread_manager,
 )
 from consts.task_recovery import CONFIG_SERVICE_NAME
-from management.services.agent.prompt_templates import sync_system_default_prompt_template
 from infrastructure.concurrency import config_thread_manager
 
 logger = logging.getLogger("base_app")
@@ -100,18 +98,13 @@ async def recover_config_tasks_on_startup():
         schedule_workbench_main_backfill()
 
 
-async def sync_default_prompt_template_on_startup():
-    """Sync defaults and validate enabled external service configuration."""
+async def validate_external_service_configuration():
+    """Validate enabled external service configuration before startup."""
     if ENABLE_AIDP_KNOWLEDGE and (not AIDP_SERVER_URL or not AIDP_API_KEY):
         raise RuntimeError(
             "AIDP_SERVER_URL and AIDP_API_KEY are required when ENABLE_AIDP_KNOWLEDGE=true"
         )
 
-    try:
-        sync_system_default_prompt_template()
-        logger.info("System default prompt template synced successfully.")
-    except Exception as exc:
-        logger.error(f"Failed to sync system default prompt template: {str(exc)}")
 
 
 async def start_dreaming_scheduler():
@@ -132,7 +125,7 @@ async def config_lifespan(_app):
         config_thread_manager.start()
     set_default_thread_manager(config_thread_manager)
     await recover_config_tasks_on_startup()
-    await sync_default_prompt_template_on_startup()
+    await validate_external_service_configuration()
     await start_dreaming_scheduler()
     try:
         yield
@@ -195,7 +188,6 @@ app.include_router(cas_router)
 
 app.include_router(summary_router)
 app.include_router(prompt_router)
-app.include_router(prompt_template_router)
 app.include_router(skill_router)
 app.include_router(tenant_config_router)
 app.include_router(mcp_management_router)

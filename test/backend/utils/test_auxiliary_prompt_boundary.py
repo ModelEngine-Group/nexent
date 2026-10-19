@@ -14,7 +14,6 @@ PRODUCTION_PATHS = (
     "backend/management/services/agent/naming.py",
     "backend/management/services/agent/prompt.py",
     "backend/agents/nl2agent_agent.py",
-    "backend/management/services/agent/prompt_templates.py",
     "backend/management/services/conversation/service.py",
     "backend/management/services/automation/intent.py",
     "backend/management/services/automation/prompt.py",

@@ -52,10 +52,6 @@ from management.services.agent.naming import (
 )
 from management.services.skill.service import SkillService
 from management.services.agent.versions import publish_version_impl
-from management.services.agent.prompt_templates import (
-    SYSTEM_PROMPT_TEMPLATE_ID,
-    SYSTEM_PROMPT_TEMPLATE_NAME,
-)
 from management.services.permission.identity.authentication_helpers import get_current_user_info
 from management.services.configuration.tenant.settings import tenant_config_manager
 from management.services.skill.naming import generate_available_copy_skill_name
@@ -475,8 +471,6 @@ async def export_agent_by_agent_id(
         business_logic_model_id=business_logic_model_id,
         business_logic_model_name=business_logic_model_display_name,
         skill_names=skill_names,
-        prompt_template_id=agent_info.get("prompt_template_id"),
-        prompt_template_name=agent_info.get("prompt_template_name"),
         greeting_message=agent_info.get("greeting_message"),
         example_questions=agent_info.get("example_questions"),
     )
@@ -636,10 +630,6 @@ async def import_agent_by_agent_id(
                 business_logic_model_id[0] if business_logic_model_id else None
             ),
             "business_logic_model_name": import_agent_info.business_logic_model_name,
-            "prompt_template_id": import_agent_info.prompt_template_id
-            or SYSTEM_PROMPT_TEMPLATE_ID,
-            "prompt_template_name": import_agent_info.prompt_template_name
-            or SYSTEM_PROMPT_TEMPLATE_NAME,
             "max_steps": import_agent_info.max_steps,
             "requested_output_tokens": import_agent_info.requested_output_tokens,
             "is_main_agent": getattr(import_agent_info, "is_main_agent", True),

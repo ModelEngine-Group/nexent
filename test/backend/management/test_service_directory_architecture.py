@@ -26,7 +26,6 @@ MIGRATED_MODULES = {
     'agent/profile.py',
     'agent/prompt.py',
     'agent/prompt_generation.py',
-    'agent/prompt_templates.py',
     'agent/read.py',
     'agent/reasoning.py',
     'agent/run.py',

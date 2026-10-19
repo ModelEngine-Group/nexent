@@ -191,8 +191,6 @@ class MockAgent:
         self.provide_run_summary = None
         self.is_main_agent = True
         self.business_description = None
-        self.prompt_template_id = None
-        self.prompt_template_name = None
         self.group_ids = None
         self.is_new = True
         self.requested_output_tokens = None

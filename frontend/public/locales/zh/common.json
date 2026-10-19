@@ -1478,7 +1478,7 @@
   "businessLogic.config.message.agentDeleteSuccess": "智能体删除成功",
   "businessLogic.config.message.agentDeleteFailed": "智能体删除失败",
   "businessLogic.config.message.agentSaveSuccess": "智能体保存成功",
-  "businessLogic.config.template.contentRequired": "该字段不能为空",
+  "project.config.contentRequired": "该字段不能为空",
   "businessLogic.config.import.duplicateTitle": "检测到重名智能体",
   "businessLogic.config.import.duplicateDescription": "导入的智能体名称或展示名称与已有智能体重复。您可以选择直接导入或调用 LLM 重新生成唯一名称后导入。",
   "businessLogic.config.import.duplicateConfirm": "重新生成并导入",

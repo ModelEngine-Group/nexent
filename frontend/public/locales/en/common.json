@@ -1585,7 +1585,7 @@
   "businessLogic.config.message.agentDeleteSuccess": "Agent delete success",
   "businessLogic.config.message.agentDeleteFailed": "Agent delete failed",
   "businessLogic.config.message.agentSaveSuccess": "Agent save success",
-  "businessLogic.config.template.contentRequired": "This field is required",
+  "project.config.contentRequired": "This field is required",
   "businessLogic.config.import.duplicateTitle": "Duplicate Agent detected",
   "businessLogic.config.import.duplicateDescription": "The imported Agent name or display name conflicts with an existing Agent. You can choose to import directly or call the LLM to regenerate a unique name before importing.",
   "businessLogic.config.import.duplicateConfirm": "Regenerate and import",

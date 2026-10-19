@@ -31,10 +31,6 @@ from management.services.skill.transfer import install_skills_from_zip_for_tenan
 from nexent.core.prompts import load_prompt
 from packaging.version import InvalidVersion, Version
 from management.services.agent.versions import publish_version_impl
-from management.services.agent.prompt_templates import (
-    SYSTEM_PROMPT_TEMPLATE_ID,
-    SYSTEM_PROMPT_TEMPLATE_NAME,
-)
 from sqlalchemy.exc import IntegrityError
 
 logger = logging.getLogger(__name__)
@@ -194,8 +190,6 @@ class SystemAgentProvider:
             "agent_origin": "SYSTEM",
             "system_revision": None,
             "model_ids": [],
-            "prompt_template_id": SYSTEM_PROMPT_TEMPLATE_ID,
-            "prompt_template_name": SYSTEM_PROMPT_TEMPLATE_NAME,
             "group_ids": "",
             "ingroup_permission": "PRIVATE",
             "is_new": False,

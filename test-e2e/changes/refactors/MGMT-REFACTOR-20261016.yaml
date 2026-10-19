@@ -123,7 +123,6 @@ change:
     - test/backend/app/test_oauth_app.py
     - test/backend/app/test_oauth_app_audit.py
     - test/backend/app/test_prompt_app.py
-    - test/backend/app/test_prompt_template_app.py
     - test/backend/app/test_remote_mcp_app.py
     - test/backend/app/test_skill_app.py
     - test/backend/app/test_skill_repository_app.py
@@ -258,7 +257,6 @@ change:
     - test/backend/services/test_official_agent_service.py
     - test/backend/services/test_official_agent_sync_service.py
     - test/backend/services/test_prompt_service.py
-    - test/backend/services/test_prompt_template_service.py
     - test/backend/services/test_quota_service.py
     - test/backend/services/test_ragflow_service.py
     - test/backend/services/test_redis_service.py

@@ -89,8 +89,7 @@ def naming(monkeypatch):
     dependency(monkeypatch, "management.services.model.invocation", call_llm_for_system_prompt=lambda **kw: "fresh")
     dependency(
         monkeypatch, "management.services.agent.prompt",
-        get_prompt_generate_prompt_template=lambda language: {},
-        normalize_prompt_generate_template_content=lambda value: value,
+        load_default_generation_prompt=lambda language: {},
     )
     return load_source(monkeypatch, "backend/management/services/agent/naming.py", "slimming_naming")
 
@@ -125,24 +124,23 @@ def test_ac003_five_attempts_then_suffix(naming, monkeypatch, field, failure):
     assert all(call["model_id"] == 12 and call["tenant_id"] == "tenant" for call in calls)
 
 
-def test_ac003_template_resolution_and_output_normalization(naming, monkeypatch):
+def test_ac003_default_prompt_and_output_normalization(naming, monkeypatch):
     observed = {}
 
-    def resolve(**kwargs):
-        observed.update(kwargs)
+    def resolve(language):
+        observed["language"] = language
         return {
             "agent_name_regenerate_system_prompt": "old={{ original_value }}",
             "agent_name_regenerate_user_prompt": "{{ task_description }} {{ existing_values }}",
         }
 
-    dependency(monkeypatch, "management.services.agent.prompt_templates", resolve_prompt_generate_template=resolve)
+    monkeypatch.setattr(naming, "load_default_generation_prompt", resolve)
     calls = []
     monkeypatch.setattr(naming, "call_llm_for_system_prompt", lambda **kw: calls.append(kw) or " fresh \nignored")
     assert naming.regenerate_agent_value(
-        "name", "old", ["z", "a"], "task", 12, "tenant", user_id="user", prompt_template_id=7
+        "name", "old", ["z", "a"], "task", 12, "tenant", language="en"
     ) == "fresh"
-    assert observed["prompt_template_id"] == 7
-    assert observed["user_id"] == "user"
+    assert observed == {"language": "en"}
     assert calls[0]["system_prompt"] == "old=old"
     assert calls[0]["user_prompt"] == "task a, z"
 

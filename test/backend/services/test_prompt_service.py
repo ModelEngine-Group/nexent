@@ -31,7 +31,6 @@ _MODULE_PATCH_NAMES = [
     'management.services.model.invocation',
     'management.services.agent.prompt',
     'management.services.agent.service',
-    'management.services.agent.prompt_templates',
     'nexent',
     'nexent.core',
     'nexent.core.prompts',
@@ -204,7 +203,6 @@ sys.modules['management.services.agent.prompt'] = MagicMock()
 
 # Mock services
 sys.modules['management.services.agent.service'] = MagicMock()
-sys.modules['management.services.agent.prompt_templates'] = MagicMock()
 thread_lifecycle_stub = types.ModuleType('infrastructure.concurrency')
 thread_lifecycle_stub.config_thread_manager = MagicMock()
 
@@ -463,7 +461,6 @@ class TestPromptService(unittest.TestCase):
             "user123",
             self.test_model_id,
             "zh",
-            None,
             None,
             None,  # aidp_kb_display_names
             True,  # has_selected_resources
@@ -836,7 +833,6 @@ class TestPromptService(unittest.TestCase):
             user_id="user123",
             tenant_id="tenant456",
             language="zh",
-            prompt_template_id=None,
             tool_ids=None,
             sub_agent_ids=None,
             knowledge_base_display_names=None,
@@ -851,7 +847,7 @@ class TestPromptService(unittest.TestCase):
 
     @patch('management.services.agent.prompt_generation.call_llm_for_system_prompt')
     @patch('management.services.agent.prompt_generation.join_info_for_generate_system_prompt')
-    @patch('management.services.agent.prompt_generation.resolve_prompt_generate_template')
+    @patch('management.services.agent.prompt_generation.load_default_generation_prompt')
     @patch('management.services.agent.prompt_generation.get_model_by_model_id')
     def test_generate_system_prompt(self, mock_get_model, mock_resolve_prompt_template, mock_join_info, mock_call_llm):
         # Setup
@@ -925,12 +921,7 @@ class TestPromptService(unittest.TestCase):
 
         # Assert
         # Verify template loading
-        mock_resolve_prompt_template.assert_called_once_with(
-            tenant_id=mock_tenant_id,
-            user_id="test_user",
-            language=mock_language,
-            prompt_template_id=None,
-        )
+        mock_resolve_prompt_template.assert_called_once_with(mock_language)
 
         # Verify template joining - now includes knowledge_base_display_names parameter
         mock_join_info.assert_called_once_with(
@@ -978,7 +969,7 @@ class TestPromptService(unittest.TestCase):
 
     @patch('management.services.agent.prompt_generation.call_llm_for_system_prompt')
     @patch('management.services.agent.prompt_generation.join_info_for_generate_system_prompt')
-    @patch('management.services.agent.prompt_generation.resolve_prompt_generate_template')
+    @patch('management.services.agent.prompt_generation.load_default_generation_prompt')
     @patch('management.services.agent.prompt_generation.get_model_by_model_id')
     def test_generate_system_prompt_with_exception(self, mock_get_model, mock_resolve_prompt_template, mock_join_info, mock_call_llm):
         # Setup
@@ -1299,7 +1290,7 @@ class TestPromptService(unittest.TestCase):
 
     @patch('management.services.agent.prompt_generation.call_llm_for_system_prompt')
     @patch('management.services.agent.prompt_generation.join_info_for_generate_system_prompt')
-    @patch('management.services.agent.prompt_generation.resolve_prompt_generate_template')
+    @patch('management.services.agent.prompt_generation.load_default_generation_prompt')
     @patch('management.services.agent.prompt_generation.get_model_by_model_id')
     def test_generate_system_prompt_error_before_streaming(
         self,
@@ -1352,7 +1343,7 @@ class TestPromptService(unittest.TestCase):
 
     @patch('management.services.agent.prompt_generation.call_llm_for_system_prompt')
     @patch('management.services.agent.prompt_generation.join_info_for_generate_system_prompt')
-    @patch('management.services.agent.prompt_generation.resolve_prompt_generate_template')
+    @patch('management.services.agent.prompt_generation.load_default_generation_prompt')
     @patch('management.services.agent.prompt_generation.get_model_by_model_id')
     def test_generate_system_prompt_error_during_streaming(
         self,
@@ -2126,7 +2117,7 @@ class TestPromptService(unittest.TestCase):
 
     @patch('management.services.agent.prompt_generation.call_llm_for_system_prompt')
     @patch('management.services.agent.prompt_generation.join_info_for_generate_system_prompt')
-    @patch('management.services.agent.prompt_generation.resolve_prompt_generate_template')
+    @patch('management.services.agent.prompt_generation.load_default_generation_prompt')
     @patch('management.services.agent.prompt_generation.get_model_by_model_id')
     def test_generate_system_prompt_no_selected_resources(self, mock_get_model, mock_resolve, mock_join, mock_call_llm):
         """Test generate_system_prompt with has_selected_resources=False skips constraint/few_shots"""
@@ -2176,7 +2167,7 @@ class TestPromptService(unittest.TestCase):
 
     @patch('management.services.agent.prompt_generation.call_llm_for_system_prompt')
     @patch('management.services.agent.prompt_generation.join_info_for_generate_system_prompt')
-    @patch('management.services.agent.prompt_generation.resolve_prompt_generate_template')
+    @patch('management.services.agent.prompt_generation.load_default_generation_prompt')
     @patch('management.services.agent.prompt_generation.get_model_by_model_id')
     def test_generate_system_prompt_with_concurrency_limit(self, mock_get_model, mock_resolve, mock_join, mock_call_llm):
         """Test generate_system_prompt with concurrency_limit < 6 uses semaphore"""

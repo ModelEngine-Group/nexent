@@ -143,7 +143,6 @@ class TestConfigAppRouterConfiguration:
             "apps.model_managment_app": {"router": APIRouter()},
             "apps.oauth_app": {"router": APIRouter()},
             "apps.prompt_app": {"router": APIRouter()},
-            "apps.prompt_template_app": {"router": APIRouter()},
             "apps.mcp_management_app": {"router": APIRouter()},
             "apps.remote_mcp_app": {"router": APIRouter()},
             "apps.skill_app": {"router": APIRouter()},
@@ -184,6 +183,11 @@ class TestConfigAppRouterConfiguration:
             for attribute, value in attributes.items():
                 setattr(module, attribute, value)
             monkeypatch.setitem(sys.modules, module_name, module)
+
+        retired_router = APIRouter(prefix="/prompt-template")
+        retired_module = types.ModuleType("apps.prompt_template_app")
+        retired_module.router = retired_router
+        monkeypatch.setitem(sys.modules, "apps.prompt_template_app", retired_module)
 
         const_module = types.ModuleType("consts.const")
         const_module.AIDP_API_KEY = ""
@@ -232,15 +236,13 @@ class TestConfigAppRouterConfiguration:
             "infrastructure.concurrency",
             thread_lifecycle_module,
         )
-        prompt_service_module = types.ModuleType("management.services.agent.prompt_templates")
-        prompt_service_module.sync_system_default_prompt_template = MagicMock()
-        monkeypatch.setitem(sys.modules, "management.services.agent.prompt_templates", prompt_service_module)
 
         module_path = Path(backend_dir) / "apps" / "config_app.py"
         spec = importlib.util.spec_from_file_location("isolated_config_app", module_path)
         config_app = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(config_app)
 
+        assert all(router is not retired_router for router in config_app.app.included_routers)
         assert api_key_router in config_app.app.included_routers
         assert {route.path for route in api_key_router.routes} == {
             "/api-keys",
@@ -253,6 +255,11 @@ class TestConfigAppRouterConfiguration:
             "service_name": "config",
             "active_count": 0,
         }
+
+        asyncio.run(config_app.validate_external_service_configuration())
+        with patch.object(config_app, "ENABLE_AIDP_KNOWLEDGE", True):
+            with pytest.raises(RuntimeError, match="AIDP_SERVER_URL and AIDP_API_KEY"):
+                asyncio.run(config_app.validate_external_service_configuration())
 
         recover_config_tasks = MagicMock()
         schedule_upload_cleanup = AsyncMock()
@@ -298,7 +305,7 @@ class TestConfigAppRouterConfiguration:
             dreaming_scheduler_module,
         )
 
-        sync_defaults = AsyncMock()
+        validate_external = AsyncMock()
 
         async def exercise_lifespan():
             async with config_app.config_lifespan(None):
@@ -306,8 +313,8 @@ class TestConfigAppRouterConfiguration:
 
         with patch.object(
             config_app,
-            "sync_default_prompt_template_on_startup",
-            new=sync_defaults,
+            "validate_external_service_configuration",
+            new=validate_external,
         ), patch.object(config_app, "ENABLE_AGENT_WORKBENCH", True):
             asyncio.run(exercise_lifespan())
 
@@ -318,7 +325,7 @@ class TestConfigAppRouterConfiguration:
         )
         schedule_upload_cleanup.assert_awaited_once_with("nexent-config")
         schedule_workbench_main_backfill.assert_called_once_with()
-        sync_defaults.assert_awaited_once_with()
+        validate_external.assert_awaited_once_with()
         dreaming_scheduler.start.assert_awaited_once_with()
         dreaming_scheduler.stop.assert_awaited_once_with()
 

@@ -34,7 +34,7 @@ from management.services.agent.naming import (
     regenerate_agent_value,
 )
 from database.agent_db import update_agent
-from management.services.agent.prompt_templates import resolve_prompt_generate_template
+from management.services.agent.prompt import load_default_generation_prompt
 from infrastructure.concurrency import config_thread_manager
 from management.services.model.invocation import call_llm_for_system_prompt
 
@@ -109,7 +109,7 @@ def _copy_bad_cases_with_scope_instruction(bad_cases: list, language: str) -> li
     return copied_cases
 
 
-def gen_system_prompt_streamable(agent_id: int, model_id: int, task_description: str, user_id: str, tenant_id: str, language: str, prompt_template_id: Optional[int] = None, tool_ids: Optional[List[int]] = None, sub_agent_ids: Optional[List[int]] = None, knowledge_base_display_names: Optional[List[str]] = None, has_selected_resources: bool = True):
+def gen_system_prompt_streamable(agent_id: int, model_id: int, task_description: str, user_id: str, tenant_id: str, language: str, tool_ids: Optional[List[int]] = None, sub_agent_ids: Optional[List[int]] = None, knowledge_base_display_names: Optional[List[str]] = None, has_selected_resources: bool = True):
     try:
         for system_prompt in generate_and_save_system_prompt_impl(
             agent_id=agent_id,
@@ -118,7 +118,6 @@ def gen_system_prompt_streamable(agent_id: int, model_id: int, task_description:
             user_id=user_id,
             tenant_id=tenant_id,
             language=language,
-            prompt_template_id=prompt_template_id,
             tool_ids=tool_ids,
             sub_agent_ids=sub_agent_ids,
             knowledge_base_display_names=knowledge_base_display_names,
@@ -145,7 +144,6 @@ def generate_and_save_system_prompt_impl(agent_id: int,
                                          user_id: str,
                                          tenant_id: str,
                                          language: str,
-                                         prompt_template_id: Optional[int] = None,
                                          tool_ids: Optional[List[int]] = None,
                                          sub_agent_ids: Optional[List[int]] = None,
                                          knowledge_base_display_names: Optional[List[str]] = None,
@@ -225,7 +223,6 @@ def generate_and_save_system_prompt_impl(agent_id: int,
         user_id,
         model_id,
         language,
-        prompt_template_id,
         knowledge_base_display_names,
         aidp_kb_display_names,
         has_selected_resources
@@ -255,8 +252,6 @@ def generate_and_save_system_prompt_impl(agent_id: int,
                             language=language,
                             agents_cache=all_agents,
                             exclude_agent_id=agent_id,
-                            prompt_template_id=prompt_template_id,
-                            user_id=user_id,
                         )
                     except Exception as exc:
                         logger.error("Failed to regenerate agent %s with LLM: %s, using fallback", field_key, exc)
@@ -528,14 +523,9 @@ def generate_guardrail_rules_impl(
     )
 
 
-def generate_system_prompt(sub_agent_info_list, task_description, tool_info_list, tenant_id: str, user_id: str, model_id: int, language: str = LANGUAGE["ZH"], prompt_template_id: Optional[int] = None, knowledge_base_display_names: Optional[List[str]] = None, aidp_kb_display_names: Optional[List[str]] = None, has_selected_resources: bool = True):
+def generate_system_prompt(sub_agent_info_list, task_description, tool_info_list, tenant_id: str, user_id: str, model_id: int, language: str = LANGUAGE["ZH"], knowledge_base_display_names: Optional[List[str]] = None, aidp_kb_display_names: Optional[List[str]] = None, has_selected_resources: bool = True):
     """Main function for generating system prompts"""
-    prompt_for_generate = resolve_prompt_generate_template(
-        tenant_id=tenant_id,
-        user_id=user_id,
-        language=language,
-        prompt_template_id=prompt_template_id,
-    )
+    prompt_for_generate = load_default_generation_prompt(language)
 
     # Prepare content for generating system prompts
     content = join_info_for_generate_system_prompt(

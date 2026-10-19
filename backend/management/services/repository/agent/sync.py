@@ -46,8 +46,6 @@ def _source_agent_payload(agent: Any) -> dict[str, Any]:
         "model_ids": agent.model_ids,
         "business_logic_model_id": agent.business_logic_model_id,
         "business_logic_model_name": agent.business_logic_model_name,
-        "prompt_template_id": agent.prompt_template_id,
-        "prompt_template_name": agent.prompt_template_name,
         "greeting_message": agent.greeting_message,
         "example_questions": agent.example_questions,
     }

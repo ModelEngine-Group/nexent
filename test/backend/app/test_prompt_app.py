@@ -66,7 +66,7 @@ def test_generate_prompt_preserves_valid_description_and_sse(description, mocker
     assert response.headers["content-type"].startswith("text/event-stream")
     assert response.text == event
     generate.assert_called_once_with(
-        **payload, prompt_template_id=None, user_id="user-1", tenant_id="tenant-1", language="en"
+        **payload, user_id="user-1", tenant_id="tenant-1", language="en"
     )
 
 
