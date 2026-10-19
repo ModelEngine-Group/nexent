@@ -1,3 +1,5 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 export const AIDP_MIN_COLUMN_WIDTH = 64;
 
 /** Distribute available space proportionally, freezing columns at the minimum. */
