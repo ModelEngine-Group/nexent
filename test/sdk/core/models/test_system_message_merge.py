@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """Verify one system message and one text block at model request boundaries."""
 
 from copy import deepcopy
@@ -66,6 +68,7 @@ def make_model():
     model = object.__new__(OpenAIModel)
     model.client = SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(create=Mock())))
     model.model_id = "test-model"
+    model.explicit_sampling = ()
     return model
 
 

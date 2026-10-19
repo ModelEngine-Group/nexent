@@ -38,6 +38,7 @@ change:
     - test/backend/services/test_sampling_model_controls.py
     - test/backend/services/test_run_model_controls.py
     - test/sdk/core/models/test_openai_sampling_controls.py
+    - test/sdk/core/models/test_system_message_merge.py
     - test/sdk/core/models/test_openai_llm.py
     - test/backend/services/test_agent_service.py
     - test/backend/services/test_nl2agent_service.py
@@ -50,4 +51,6 @@ change:
     - frontend/tests/workbench/Nl2AgentPanelControls.test.tsx
   notes: Design precedes implementation. No SQL/schema version change. Existing Workbench generation_config JSON persists
     values. Targeted API/runtime/browser Cases are strengthened; historical rules describing frontend-only levels are superseded
-    only for this capability.
+    only for this capability. Post-merge CI exposed an existing system-message UT fixture that bypasses the model constructor;
+    initialize its empty explicit_sampling tuple to retain the original provider-dispatch and trace assertions. This is a
+    traditional UT fixture repair only, with no product, model-parameter, Feature or formal Case contract change.
