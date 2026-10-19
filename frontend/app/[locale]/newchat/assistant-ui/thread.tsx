@@ -1004,7 +1004,7 @@ const ThreadView: FC<ThreadViewProps> = ({
                 emptyFooterContent
               ))}
             <Composer
-              debugLayout={debugLayout}
+              hidePlan={debugLayout}
               models={models}
               selectedModelId={selectedModelId}
               onModelChange={onModelChange}
