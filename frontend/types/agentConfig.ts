@@ -7,7 +7,6 @@ import type { MyAgentRepositoryInfoItem } from "@/types/agentRepository";
 import { ChatMessageType } from "./chat";
 import { ModelOption } from "@/types/modelConfig";
 import { GENERATE_PROMPT_STREAM_TYPES } from "../const/agentConfig";
-import type { PromptTemplateFieldKey } from "../const/promptTemplate";
 
 export type AgentConfigUpdate = Partial<
   Pick<
@@ -730,26 +729,4 @@ export interface StreamResponseData {
   type: (typeof GENERATE_PROMPT_STREAM_TYPES)[keyof typeof GENERATE_PROMPT_STREAM_TYPES];
   content: string;
   is_complete: boolean;
-}
-
-export type PromptTemplateContent = Record<PromptTemplateFieldKey, string>;
-
-export interface PromptTemplate {
-  template_id: number;
-  template_name: string;
-  description?: string | null;
-  template_type: string;
-  template_content_zh: PromptTemplateContent;
-  template_content_en?: PromptTemplateContent | null;
-  is_system_default?: boolean;
-  create_time?: string;
-  update_time?: string;
-}
-
-export interface PromptTemplatePayload {
-  template_name: string;
-  description?: string;
-  template_type?: string;
-  template_content_zh: PromptTemplateContent;
-  template_content_en?: PromptTemplateContent | null;
 }

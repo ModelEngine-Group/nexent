@@ -1,0 +1,42 @@
+schema_version: '1.0'
+change:
+  change_id: PROMPT-TEMPLATE-UI-CLEANUP-20261019
+  change_type: refactor
+  title: Remove unreachable frontend prompt-template management code
+  description: Remove unreferenced template-management hook, service, constants, types,
+    endpoints and locale copy. Preserve active backend template resolution and saved
+    Agent template identifiers.
+  affected_features:
+    existing: []
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing: []
+    added: []
+    modified: []
+    retired: []
+  feature_contract_changed: false
+  no_case_change_reason: No reachable frontend entry used this management surface.
+    Existing backend prompt generation and template management remain unchanged; retain
+    all formal Cases. Dead dependency removal is checked by existing traditional frontend
+    and backend tests and a before/after TypeScript diagnostic comparison.
+  traditional_ut:
+    decision: reuse
+    behaviors:
+    - Current Agent editor navigation and locale resources remain valid.
+    - Existing backend prompt-template CRUD, private lookup and language fallback
+      behavior stays unchanged.
+    reason: Reuse existing assertions because this removal affects unreachable frontend
+      code and leaves active backend behavior intact.
+    test_selectors:
+    - frontend/tests/agentVersionSwitchGuard.test.ts
+    - frontend/tests/agentUsageGuideLocales.test.ts
+    - test/backend/services/test_prompt_template_service.py
+    - test/backend/app/test_prompt_template_app.py
+    - test/backend/services/test_prompt_service.py
+    - test/backend/app/test_prompt_app.py
+  notes: Analysis distinguishes private generation-template management from active
+    SDK runtime prompt resources, Agent creation templates and AIDP graph templates.
+    Keep the contentRequired locale key used by project configuration. No persistence
+    or HTTP contract changes.
