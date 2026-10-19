@@ -209,14 +209,17 @@ def test_aidp_unified_reset_restores_knobs_and_failures(http_client):
     listing = http_client.get(api_files_path, headers=AIDP_AUTH)
     assert listing.status_code == 200
     assert [doc["file_name"] for doc in listing.json()["value"]] == ["completed-probe.txt"]
-    # History page size restored to 10: both FAQ documents fit one page.
+    # History page size restored to 10: all FAQ seed documents fit one page.
     history = http_client.post(
         FAQ_HISTORY, headers=AIDP_AUTH,
         json={"dir_path": "/aidp/knowledge/aidp-kb-faq", "page": 1},
     )
     assert history.status_code == 200
-    assert len(history.json()["value"]) == 4
-    assert history.json()["next_link"] is None
+    assert len(history.json()["value"]) == 5
+    assert history.json()["total_record_count"] == 5
+    # The live service always returns next_link; the row count above, not its
+    # presence, proves the page is complete.
+    assert history.json()["next_link"] is not None
 
 
 def test_wire_log_reports_truncation_accounting(http_client):
