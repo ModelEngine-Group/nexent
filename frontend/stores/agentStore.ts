@@ -1,6 +1,9 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import { create } from "zustand";
 
 import { safeStringify } from "@/lib/utils";
+import { queryClient } from "@/lib/queryClient";
 import {
   searchToolConfig,
   updateAgentInfo,
@@ -491,6 +494,7 @@ async function processSaveQueue(): Promise<void> {
         if (!result.success) {
           throw result.error ?? new Error(result.message);
         }
+        void queryClient.invalidateQueries({ queryKey: ["agents"] });
 
         const savedAgent = useAgentStore.getState().savedAgent;
         if (task.patch.tools !== undefined) {
