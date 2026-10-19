@@ -1552,8 +1552,9 @@ async def test_validate_agent_generation_complete_uses_database_state(mocker):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("facts", [[], [{"resource_type": "tool", "resource_id": 7, "name": "search"}]])
 async def test_validate_agent_generation_complete_allows_empty_resource_prompts(
-    mocker,
+    mocker, facts,
 ):
     mocker.patch(
         "services.nl2agent_service._load_verified_nl2agent_state",
@@ -1569,7 +1570,7 @@ async def test_validate_agent_generation_complete_allows_empty_resource_prompts(
                 "greeting_message": "Hello, what should we write?",
                 "example_questions": ["Improve this paragraph"],
             },
-            [],
+            facts,
         ),
     )
 
@@ -1581,8 +1582,9 @@ async def test_validate_agent_generation_complete_allows_empty_resource_prompts(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("duty_prompt", [None, "", "   "])
 async def test_validate_agent_generation_complete_rejects_incomplete_resource_prompts(
-    mocker,
+    mocker, duty_prompt,
 ):
     mocker.patch(
         "services.nl2agent_service._load_verified_nl2agent_state",
@@ -1592,9 +1594,9 @@ async def test_validate_agent_generation_complete_rejects_incomplete_resource_pr
                 "name": "research_assistant",
                 "display_name": "Research Assistant",
                 "description": "Research help",
-                "duty_prompt": "Research sources.",
+                "duty_prompt": duty_prompt,
                 "constraint_prompt": "Use search.",
-                "few_shots_prompt": "",
+                "few_shots_prompt": "A valid legacy example",
                 "greeting_message": "Hello",
                 "example_questions": ["Research this topic"],
             },
@@ -1617,7 +1619,7 @@ async def test_validate_agent_generation_complete_rejects_incomplete_resource_pr
         )
 
     assert exc_info.value.code == "prompt_fields_incomplete"
-    assert exc_info.value.failed_fields == ["few_shots_prompt"]
+    assert exc_info.value.failed_fields == ["duty_prompt"]
 
 
 @pytest.mark.asyncio

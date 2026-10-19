@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import ast
 import json
 import re
@@ -98,7 +100,7 @@ def test_build_nl2agent_system_prompt_configures_existing_draft(
         assert "New Agent summary:" in prompt
         assert "### Atomic Action Contract" in prompt
         assert "once the action is known, emit executable code immediately" in prompt
-        assert 'equal to `["duty_prompt"]`' in prompt
+        assert 'equal to `["duty_prompt", "constraint_prompt", "few_shots_prompt"]`' in prompt
         assert "exactly one concise Think-Code example" in prompt
         assert "Weather Assistant" not in prompt
         assert "Describe the tasks this Agent must perform" not in prompt
@@ -116,7 +118,7 @@ def test_build_nl2agent_system_prompt_configures_existing_draft(
         assert "新智能体已完成生成" in prompt
         assert "### 原子动作输出契约" in prompt
         assert "确定动作后必须立即输出可执行代码" in prompt
-        assert '`updated_fields` 是 `["duty_prompt"]`' in prompt
+        assert '`updated_fields` 是 `["duty_prompt", "constraint_prompt", "few_shots_prompt"]`' in prompt
         assert "只编写一个紧凑的“思考-代码”示例" in prompt
         assert "天气助手" not in prompt
         assert "请详细说明这个智能体需要完成的任务" not in prompt
@@ -134,7 +136,7 @@ def test_build_nl2agent_system_prompt_configures_existing_draft(
     few_shots_save = next(
         code_block
         for code_block in code_blocks
-        if 'fields={"few_shots_prompt": few_shots}' in code_block
+        if 'fields={"duty_prompt": prompt,' in code_block
     )
     assert r"\x3ccode>" in few_shots_save
     assert r"\x3c/code>" in few_shots_save

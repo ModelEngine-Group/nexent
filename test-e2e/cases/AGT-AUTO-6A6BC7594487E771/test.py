@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 from __future__ import annotations
 
 import json
@@ -66,9 +68,6 @@ def assert_complete_draft(snapshot):
     questions = snapshot.get('example_questions')
     assert isinstance(questions, list) and questions and all(
         isinstance(question, str) and question.strip() for question in questions), 'Missing example questions'
-    if any(snapshot.get(field) for field in ('tools', 'skills', 'related_agent_ids')):
-        for field in ('constraint_prompt', 'few_shots_prompt'):
-            assert isinstance(snapshot.get(field), str) and snapshot[field].strip(), f'Missing resource Prompt: {field}'
 
 
 async def _read_agent(identity, agent_id):
