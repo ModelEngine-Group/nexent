@@ -948,8 +948,8 @@ class WorkbenchGenerationConfig(BaseModel):
     deep_thinking: bool = False
     thinking_effort: Literal["auto", "none", "minimal", "low", "medium", "high", "xhigh", "max"] = "low"
     reasoning_budget_tokens: Optional[StrictInt] = Field(default=None, ge=0)
-    temperature: Optional[float] = Field(default=None, ge=0, le=2)
-    top_p: Optional[float] = Field(default=None, gt=0, le=1)
+    temperature: Optional[float] = Field(default=None, ge=0, le=2, strict=True, allow_inf_nan=False)
+    top_p: Optional[float] = Field(default=None, ge=0, le=1, strict=True, allow_inf_nan=False)
     requested_output_tokens: Optional[int] = Field(default=None, gt=0)
 
 
@@ -1089,12 +1089,14 @@ class AgentRequest(BaseModel):
 
 
 class RuntimeGenerationOverrides(BaseModel):
-    """Partial reasoning intent; absent fields never materialize defaults."""
+    """Partial generation intent; absent fields never materialize defaults."""
 
     model_config = ConfigDict(extra="forbid")
     deep_thinking: Optional[StrictBool] = None
     thinking_effort: Optional[Literal["auto", "none", "minimal", "low", "medium", "high", "xhigh", "max"]] = None
     reasoning_budget_tokens: Optional[StrictInt] = Field(default=None, ge=0)
+    temperature: Optional[float] = Field(default=None, ge=0, le=2, strict=True, allow_inf_nan=False)
+    top_p: Optional[float] = Field(default=None, ge=0, le=1, strict=True, allow_inf_nan=False)
 
     @field_validator("deep_thinking", "thinking_effort", "reasoning_budget_tokens", mode="before")
     @classmethod
@@ -1133,7 +1135,11 @@ class NL2ModelControlsRequest(BaseModel):
                 value["model_id"] = snapshot_model
             saved = snapshot.get("generation_config")
             if isinstance(saved, dict):
-                for key in ("deep_thinking", "thinking_effort", "reasoning_budget_tokens"):
+                for key in ("deep_thinking", "thinking_effort", "reasoning_budget_tokens", "temperature", "top_p"):
+                    if key in ("temperature", "top_p") and key in saved and saved[key] is None:
+                        if overlay.get(key) is not None:
+                            raise ValueError("model_controls_invalid: conflicting sampling snapshot")
+                        continue
                     if key not in saved or saved[key] is None:
                         continue
                     if key in overlay and overlay[key] != saved[key]:

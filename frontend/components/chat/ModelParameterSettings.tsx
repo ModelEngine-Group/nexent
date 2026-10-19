@@ -8,65 +8,99 @@ import { ChevronRight } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import type { ModelParameterSettingsControl } from "@/types/modelParameterSettings";
 
+function configuredValue(value: number | undefined, max: number) {
+  return value != null && Number.isFinite(value) && value >= 0 && value <= max
+    ? value
+    : undefined;
+}
+
 function ParameterLevel({
   label,
   value,
+  inheritedValue,
+  max,
   disabled,
   onChange,
 }: {
   label: string;
-  value: number;
+  value?: number;
+  inheritedValue?: number;
+  max: number;
   disabled?: boolean;
   onChange: (value: number) => void;
 }) {
   const { t } = useTranslation();
-  const [text, setText] = useState(String(value));
+  const displayValue = configuredValue(value ?? inheritedValue, max);
+  const [text, setText] = useState(
+    displayValue == null ? "" : String(displayValue)
+  );
   const [error, setError] = useState(false);
-  const [previousValue, setPreviousValue] = useState(value);
-  if (previousValue !== value) {
-    setPreviousValue(value);
-    setText(String(value));
+  const [dirty, setDirty] = useState(false);
+  const [previousValue, setPreviousValue] = useState(displayValue);
+  if (previousValue !== displayValue) {
+    setPreviousValue(displayValue);
+    setText(displayValue == null ? "" : String(displayValue));
     setError(false);
+    setDirty(false);
   }
   const commit = () => {
+    if (!dirty) return;
     const next = Number(text);
-    if (!text.trim() || !Number.isInteger(next) || next < 1 || next > 100) {
+    if (!text.trim() || !Number.isFinite(next) || next < 0 || next > max) {
       setError(true);
       return;
     }
     setError(false);
+    setDirty(false);
+    setText(String(next));
     if (next !== value) onChange(next);
   };
+  const sliderValue = text.trim()
+    ? (configuredValue(Number(text), max) ?? displayValue ?? null)
+    : (displayValue ?? null);
   return (
     <div className="space-y-1">
       <label className="text-sm">{label}</label>
       <div className="flex items-center gap-3">
-        <Slider
-          min={1}
-          max={100}
-          step={1}
-          value={
-            Number(text) >= 1 && Number(text) <= 100 ? Number(text) : value
-          }
-          disabled={disabled}
-          className="min-w-0 flex-1"
-          ariaLabelForHandle={`${label} ${t("workbench.controls.slider", "滑块")}`}
-          onChange={(next) => {
-            setText(String(next));
-            setError(false);
-          }}
-          onChangeComplete={onChange}
-        />
+        {sliderValue != null ? (
+          <Slider
+            min={0}
+            max={max}
+            step={0.1}
+            value={sliderValue}
+            marks={{
+              [sliderValue]: { label: <span />, style: { display: "none" } },
+            }}
+            disabled={disabled}
+            className="!m-0 min-w-0 flex-1 [&_.ant-slider-dot]:hidden"
+            ariaLabelForHandle={`${label} ${t("workbench.controls.slider", "滑块")}`}
+            onChange={(next) => {
+              setText(String(next));
+              setError(false);
+              setDirty(true);
+            }}
+            onChangeComplete={onChange}
+          />
+        ) : (
+          <div
+            aria-hidden="true"
+            className="h-1 min-w-0 flex-1 rounded bg-muted"
+          />
+        )}
         <input
           type="number"
-          min={1}
-          max={100}
-          step={1}
+          min={0}
+          max={max}
+          step={0.1}
+          placeholder="—"
           aria-label={label}
           aria-invalid={error}
           disabled={disabled}
           value={text}
-          onChange={(event) => setText(event.target.value)}
+          onChange={(event) => {
+            setText(event.target.value);
+            setDirty(true);
+          }}
           onBlur={commit}
           onKeyDown={(event) => {
             event.stopPropagation();
@@ -80,7 +114,11 @@ function ParameterLevel({
       </div>
       {error && (
         <p role="alert" className="text-xs text-destructive">
-          {t("workbench.controls.integerRange", "请输入 1–100 的整数")}
+          {t("workbench.controls.numberRange", {
+            defaultValue: "请输入 {{min}}–{{max}} 的数字",
+            min: 0,
+            max,
+          })}
         </p>
       )}
     </div>
@@ -135,25 +173,46 @@ export function ModelParameterSettings(control: ModelParameterSettingsControl) {
           <ParameterLevel
             key={`temperature-${resetVersion}`}
             label={t("workbench.controls.temperature", "温度")}
-            value={control.value.temperatureLevel}
+            value={control.value.temperature}
+            inheritedValue={control.inheritedValue?.temperature}
+            max={2}
             disabled={control.disabled}
-            onChange={(temperatureLevel) =>
-              control.onChange({ ...control.value, temperatureLevel })
+            onChange={(temperature) =>
+              control.onChange({ ...control.value, temperature })
             }
           />
           <ParameterLevel
             key={`top-p-${resetVersion}`}
             label="Top P"
-            value={control.value.topPLevel}
+            value={control.value.top_p}
+            inheritedValue={control.inheritedValue?.top_p}
+            max={1}
             disabled={control.disabled}
-            onChange={(topPLevel) =>
-              control.onChange({ ...control.value, topPLevel })
-            }
+            onChange={(top_p) => control.onChange({ ...control.value, top_p })}
           />
+          {(configuredValue(
+            control.value.temperature ?? control.inheritedValue?.temperature,
+            2
+          ) == null ||
+            configuredValue(
+              control.value.top_p ?? control.inheritedValue?.top_p,
+              1
+            ) == null) && (
+            <p className="text-xs text-muted-foreground">
+              {t(
+                "workbench.controls.configureDefaults",
+                "请先在模型配置中设置默认值，或输入本次使用的数值。"
+              )}
+            </p>
+          )}
           <Button
             size="small"
+            htmlType="button"
             disabled={control.disabled}
-            onClick={() => {
+            onPointerDown={(event) => event.preventDefault()}
+            onClick={(event) => {
+              event.preventDefault();
+              event.stopPropagation();
               control.onChange({ ...control.defaultValue });
               setResetVersion((value) => value + 1);
             }}
@@ -168,7 +227,6 @@ export function ModelParameterSettings(control: ModelParameterSettingsControl) {
         type="button"
         disabled={control.disabled}
         aria-expanded={open}
-        onFocus={() => setOpen(true)}
         onKeyDown={(event) => {
           if (["Enter", "ArrowRight", " "].includes(event.key)) {
             event.preventDefault();

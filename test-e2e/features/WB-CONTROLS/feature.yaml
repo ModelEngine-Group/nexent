@@ -6,7 +6,7 @@ feature:
   feature_id: WB-CONTROLS
   name: Workbench resource and creation controls
   status: active
-  description: Direct internal resource drawers, explicit creation modes and shared local model settings for Workbench and
+  description: Direct internal resource drawers, explicit creation modes and shared runtime model settings for Workbench and
     Agent chat.
   business_rules:
   - rule_id: WB-CONTROLS-RULE-001
@@ -15,8 +15,11 @@ feature:
   - rule_id: WB-CONTROLS-RULE-002
     description: Above-composer creation actions select isolated modes with matching fill-only recommendations.
   - rule_id: WB-CONTROLS-RULE-003
-    description: Shared model selector exposes Advanced settings by default below reasoning effort in Workbench and Agent
-      chat, synchronizing local 1-100 levels without backend mutations.
+    description: Shared advanced settings use temperature 0-2 and top_p 0-1 (step 0.1); untouched/reset values inherit defaults,
+      explicit zero survives immutable root-only runtime snapshots, and session/model scopes remain isolated. Explicit sampling
+      must not silently disappear on provider retry. Configured Agent/model defaults are displayed as numbers with exact slider
+      positions without creating overrides. Null inherits per field through Agent/model configuration to shared SDK defaults
+      temperature 1.0 and top_p 1.0; read-only model-list effective_sampling uses those same defaults without filling stored values.
   - rule_id: WB-CONTROLS-RULE-004
     description: Both entry points derive available reasoning controls from model capability regardless of saved enablement,
       forwarding supported effort enum values through existing generation paths while preserving other model parameters.
@@ -34,5 +37,7 @@ feature:
     - WB-CREATION-TOGGLE-EXIT-20261015
     - WB-NEW-CONVERSATION-STYLE-20261015
     - WB-RESOURCE-LISTS-20261015
+    - CHAT-SAMPLING-20261016
     - COMPOSER-DEFAULTS-20261018
+    - CHAT-SAMPLING-DISPLAY-20261019
     spec_path: ../nexent-doc/nexent/agent-workbench/changes/chat-workbench-resource-controls/proposal.md

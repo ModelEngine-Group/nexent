@@ -341,4 +341,7 @@ change:
     retains only the necessary relocated dependency imports as explicitly approved.
     Integrate develop commits 4d84586e4 and 848cf42bc before PR; keep upstream knowledge
     binding cleanup and mock-only Daily changes, updating only canonical dependency
-    imports.'
+    imports. Merge develop e7339599f on 2026-10-19, including chat refresh restoration
+    and sampling overrides. Resolve copyright-header whitespace conflicts only; preserve
+    upstream business behavior, relocated service owners and private prompt-template
+    retirement.'

@@ -59,7 +59,7 @@ describe("shared conversation model controls", () => {
     expect(budget.result.current.reasoningBudgetTokens).toBe(2048);
   });
 
-  it("blocks a rejected selection until explicit reselection and retains sampling outside run controls", () => {
+  it("blocks a rejected selection until explicit reselection and retains explicit sampling in immutable run controls", () => {
     const { result, rerender } = renderHook(
       ({ key }) => useConversationModelControls(models, key),
       { initialProps: { key: "first" } }
@@ -69,33 +69,32 @@ describe("shared conversation model controls", () => {
     expect(result.current.snapshot).toBe(first);
     act(() =>
       result.current.modelParameterSettings.onChange({
-        temperatureLevel: 73,
-        topPLevel: 1,
+        temperature: 0.7,
+        top_p: 1,
       })
     );
     act(() => rejectModelSelection(1));
     expect(result.current.canSend).toBe(false);
     expect(result.current.modelParameterSettings.value).toEqual({
-      temperatureLevel: 73,
-      topPLevel: 1,
+      temperature: 0.7,
+      top_p: 1,
     });
     act(() => result.current.onModelChange("2"));
     expect(result.current.canSend).toBe(true);
-    expect(result.current.modelParameterSettings.value.temperatureLevel).toBe(
-      50
-    );
+    expect(
+      result.current.modelParameterSettings.value.temperature
+    ).toBeUndefined();
     act(() => result.current.onModelChange("1"));
     expect(result.current.canSend).toBe(true);
-    expect(result.current.modelParameterSettings.value.temperatureLevel).toBe(
-      73
-    );
-    expect(result.current.snapshot?.generation_config).not.toHaveProperty(
-      "temperature"
-    );
+    expect(result.current.modelParameterSettings.value.temperature).toBe(0.7);
+    expect(result.current.snapshot?.generation_config).toMatchObject({
+      temperature: 0.7,
+      top_p: 1,
+    });
     rerender({ key: "second" });
-    expect(result.current.modelParameterSettings.value.temperatureLevel).toBe(
-      50
-    );
+    expect(
+      result.current.modelParameterSettings.value.temperature
+    ).toBeUndefined();
   });
   it("keeps explicit selection through delayed defaults and preserves per-model reasoning", () => {
     const { result, rerender } = renderHook(
@@ -164,18 +163,23 @@ describe("shared conversation model controls", () => {
     expect(plain.result.current.models[0].efforts).toBeUndefined();
   });
 
-  it("snapshots only runtime controls, keeps copied intent immutable and excludes local sampling", () => {
+  it("snapshots only canonical runtime controls and keeps copied intent immutable", () => {
     const values = {
       deep_thinking: true,
       thinking_effort: "xhigh" as const,
-      temperature: 73,
-      top_p: 90,
+      temperature: 0.7,
+      top_p: 0,
     };
     const snapshot = snapshotTurnModelControls(2, values);
     values.deep_thinking = false;
     expect(snapshot).toEqual({
       model_id: 2,
-      generation_config: { deep_thinking: true, thinking_effort: "xhigh" },
+      generation_config: {
+        deep_thinking: true,
+        thinking_effort: "xhigh",
+        temperature: 0.7,
+        top_p: 0,
+      },
     });
     for (const id of [0, -1, 1.5, "main_model"])
       expect(() => snapshotTurnModelControls(id, {})).toThrow(

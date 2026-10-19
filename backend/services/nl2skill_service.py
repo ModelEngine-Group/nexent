@@ -353,10 +353,11 @@ async def create_nl2skill_stream(
             yield serialize({"type": "done", "content": ""})
         except asyncio.CancelledError:
             raise
-        except Exception:
+        except Exception as exc:
             logger.exception("NL2Skill execution failed")
+            from management.services.agent.stream import sampling_configuration_error_payload
             yield serialize(
-                {
+                sampling_configuration_error_payload(exc) or {
                     "type": "error",
                     "content": "NL2Skill execution failed.",
                 }

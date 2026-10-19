@@ -1474,10 +1474,12 @@ async def create_nl2agent_stream(
                     boundary_delivered = False
         except asyncio.CancelledError:
             raise
-        except Exception:
+        except Exception as exc:
             logger.exception("NL2Agent execution failed")
+            from management.services.agent.stream import sampling_configuration_error_payload
+            sampling_error = sampling_configuration_error_payload(exc)
             error_payload = json.dumps(
-                {
+                sampling_error or {
                     "type": "error",
                     "content": "NL2Agent execution failed.",
                 },

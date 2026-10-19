@@ -4,7 +4,7 @@ module: CHAT-MESSAGE
 case:
   case_id: CHAT-MODEL-CONTROLS-D3-001
   feature_id: CHAT-MODEL-CONTROLS
-  requirement_ids: [CHAT-MODEL-CONTROLS-20261014]
+  requirement_ids: [CHAT-MODEL-CONTROLS-20261014, CHAT-SAMPLING-20261016, CHAT-SAMPLING-DISPLAY-20261019]
   business_rule_ids: [CHAT-MODEL-CONTROLS-RULE-002, CHAT-MODEL-CONTROLS-RULE-003, CHAT-MODEL-CONTROLS-RULE-004, CHAT-MODEL-CONTROLS-RULE-006]
   title: 实际运行根模型、思考参数与上下文容量同源
   type: INTEGRATION
@@ -33,14 +33,17 @@ case:
       expected: Valid structured outputs and normal terminal events remain usable; target Agent model fields and independent models are unchanged when generated payload excludes them; snapshots match the resolved model/controls and original allowed draft writes.
     - order: 4
       action: Compare original backend temperature/top_p/custom/output parameters and all independent model identities before and after reasoning overrides and creator execution.
-      expected: Existing backend parameters retain original effective values; frontend sampling levels are absent from run/history controls; root copies do not mutate shared or child model configuration.
+      expected: Untouched parameters inherit original effective values. Explicit temperature/top_p including zero reach actual provider HTTP unchanged, override Agent defaults only on the root, persist in Workbench snapshots, and do not mutate shared or child models.
+    - order: 5
+      action: Clear model sampling configuration and send omitted, null, partial and explicit-zero sampling through ordinary and creator paths; compare model-list effective metadata and actual provider wire.
+      expected: Null continues inheritance per field through Agent and model to shared SDK defaults 1.0/1.0. The displayed metadata matches model-level runtime defaults; Agent overrides retain priority only in Agent scope. Root reasoning, capacity, custom fields and independent models remain intact; stored global sampling stays null.
   expected_results:
     - Actual selected root, provider endpoint/model and capacity source agree for ordinary and creator runtime paths.
     - All supported reasoning intents preserve exact semantics and existing sampling/output/custom settings.
     - Existing SSE, generated draft outputs, target Agent models and independent model routes remain intact.
   forbidden_side_effects:
     - No silent use of tenant-default A for an explicit B selection or mutation of global model configuration.
-    - No implicit target/child/business/embedding/STT/TTS model replacement and no UI sampling injection.
+    - No implicit target/child/business/embedding/STT/TTS model replacement or persisted sampling override from inherited defaults.
   integration_boundary:
     - Real HTTP endpoint and internal NL2 adapters to tenant model lookup, shared resolver, root overlay, capacity policy, Agent/NL2 runtime, SDK and provider HTTP protocol.
     - Case-owned authentication identity and catalog capability inputs accompany disposable PostgreSQL records and deterministic external HTTP providers. Resolver, run-info builders, capacity policy, Agent runtime and SDK execute unchanged; observation wrappers call their real implementations.
@@ -59,3 +62,8 @@ case:
       steps: [2, 3, 4]
       expected_results: [2, 3]
       forbidden_side_effects: [2]
+    - id: AC-03
+      description: Null inherits through configured values to unified SDK sampling defaults, consistent with read-only display metadata and provider wire.
+      steps: [5]
+      expected_results: [2, 3]
+      forbidden_side_effects: [1, 2]
