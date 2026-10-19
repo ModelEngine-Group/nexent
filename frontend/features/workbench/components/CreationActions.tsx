@@ -24,7 +24,7 @@ export function CreationActions({
   const { t } = useTranslation();
   if (!canCreateAgent && !canCreateSkill) return null;
   return (
-    <div className="mb-2 flex flex-wrap items-center gap-2 text-xs">
+    <div className="mb-2 flex flex-wrap items-center gap-2 text-sm font-normal leading-5 text-muted-foreground">
       {canCreateAgent && (
         <button
           type="button"

@@ -43,7 +43,7 @@ export interface ChatProps {
   reasoningBudgetTokens?: number;
   onReasoningBudgetTokensChange?: (budget: number) => void;
   showConversationTitle?: boolean;
-  isDictationConfigured?: boolean;
+  composerTools?: ReactNode;
   knowledgeScope?: ConversationKnowledgeScope | null;
   knowledgePreview?: KnowledgeScopeEffectivePreview | null;
   knowledgeCapabilities?: KnowledgeCapabilities | null;
@@ -66,8 +66,6 @@ export interface ChatProps {
   workbenchResources?: import("@/features/workbench/types").WorkbenchResourceControls;
   onRemoveWorkbenchSkill?: (skillId: number) => void;
   onOpenWorkbenchSkillPicker?: () => void;
-  workbenchSkillPopover?: ReactNode;
-  workbenchKnowledgePopover?: ReactNode;
 }
 
 const AgentsLoadingState: FC = () => {
@@ -95,7 +93,7 @@ export const Chat: FC<ChatProps> = ({
   onAgentSelected,
   onBack,
   chatMode = "execution",
-  onChatModeChange = () => undefined,
+  onChatModeChange,
   showModelSelector = true,
   modelParameterSettings,
   modelSelectionScope = "agent",
@@ -109,7 +107,7 @@ export const Chat: FC<ChatProps> = ({
   reasoningBudgetTokens,
   onReasoningBudgetTokensChange,
   showConversationTitle = true,
-  isDictationConfigured = false,
+  composerTools,
   knowledgeScope = null,
   knowledgePreview = null,
   knowledgeCapabilities = null,
@@ -128,8 +126,6 @@ export const Chat: FC<ChatProps> = ({
   workbenchResources,
   onRemoveWorkbenchSkill,
   onOpenWorkbenchSkillPicker,
-  workbenchSkillPopover,
-  workbenchKnowledgePopover,
 }) => {
   const handleSelectAgent = useCallback(
     (agent: Agent) => {
@@ -176,7 +172,7 @@ export const Chat: FC<ChatProps> = ({
           modelSelectionScope={modelSelectionScope}
           chatMode={chatMode}
           onChatModeChange={onChatModeChange}
-          isDictationConfigured={isDictationConfigured}
+          composerTools={composerTools}
           readOnly={readOnly}
           readOnlyReason={readOnlyReason}
           interactionContent={interactionContent}
@@ -185,8 +181,6 @@ export const Chat: FC<ChatProps> = ({
           workbenchResources={workbenchResources}
           onOpenWorkbenchSkillPicker={onOpenWorkbenchSkillPicker}
           onRemoveWorkbenchSkill={onRemoveWorkbenchSkill}
-          workbenchSkillPopover={workbenchSkillPopover}
-          workbenchKnowledgePopover={workbenchKnowledgePopover}
           skillFiles={skillFiles}
           knowledgeScope={knowledgeScope}
           knowledgePreview={knowledgePreview}
@@ -225,7 +219,7 @@ export const Chat: FC<ChatProps> = ({
       reasoningBudgetTokens={reasoningBudgetTokens}
       onReasoningBudgetTokensChange={onReasoningBudgetTokensChange}
       showConversationTitle={showConversationTitle}
-      isDictationConfigured={isDictationConfigured}
+      composerTools={composerTools}
       knowledgeScope={knowledgeScope}
       knowledgePreview={knowledgePreview}
       knowledgeCapabilities={knowledgeCapabilities}
@@ -242,8 +236,6 @@ export const Chat: FC<ChatProps> = ({
       workbenchResources={workbenchResources}
       onRemoveWorkbenchSkill={onRemoveWorkbenchSkill}
       onOpenWorkbenchSkillPicker={onOpenWorkbenchSkillPicker}
-      workbenchSkillPopover={workbenchSkillPopover}
-      workbenchKnowledgePopover={workbenchKnowledgePopover}
     />
   );
 };
