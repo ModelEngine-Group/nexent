@@ -1,0 +1,82 @@
+schema_version: '1.0'
+change:
+  change_id: AGENT-PROMPT-UNIFICATION-20261019
+  change_type: bugfix
+  bug_id: AGENT-PROMPT-UNIFICATION-20261019
+  title: Use duty_prompt as the sole configured Agent prompt
+  description: Migrate legacy prompt sections and align generation, editing and execution.
+  observed_behavior: Partial duty edits retain conflicting legacy runtime instructions
+    and tools still advertise legacy fields.
+  expected_behavior: All legacy sections migrate once; only duty_prompt is edited,
+    generated and consumed.
+  escaped_stage: D3
+  coverage_gap:
+    type: missing_boundary
+    description: Existing template UT covers full saves but not legacy data migration,
+      legacy tool rejection or single-source runtime consumption.
+  feature_contract_changed: false
+  affected_features:
+    existing:
+    - F-045
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing:
+    - AGT-003
+    - UT-BE-AUTO-3B69B045EA9A318F
+    added:
+    - AGENT-PROMPT-D5-001
+    modified:
+    - AGT-AUTO-6A6BC7594487E771
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    behaviors:
+    - Reject legacy draft fields and non-array example questions before saving.
+    - Bilingual generation saves only duty_prompt and exposes no legacy prompt fields.
+    - Legacy writes consolidate while unrelated partial fields remain unchanged.
+    - Runtime, optimization and evaluation ignore poisoned legacy fields.
+    - SDK and all context callers expose only duty_prompt; removed parameters/templates
+      are rejected and platform guidance remains intact.
+    reason: Unit assertions cover policy and adapters; real SQL migration needs a
+      distinct disposable PostgreSQL D5 boundary.
+    test_selectors:
+    - test/backend/agents/test_agent_prompt_contract.py
+    - test/backend/agents/test_nl2agent_agent.py
+    - test/backend/agents/test_nl2agent_single_prompt.py
+    - test/backend/services/test_nl2agent_service.py
+    - test/backend/agents/test_create_agent_info.py
+    - test/backend/services/test_prompt_service.py
+    - test/backend/services/test_agent_evaluation_service.py
+    - test/backend/database/test_agent_db.py
+    - test/backend/services/test_mcp_internal_tool_search.py
+    - test/sdk/core/agents/test_auxiliary_prompt_composition.py
+    - frontend/tests/component/agentSinglePrompt.test.tsx
+    - frontend/tests/component/agentConfigLayout.test.tsx
+    - test/backend/utils/test_agent_profile_utils.py
+    - test/backend/services/test_agent_service.py
+    - test/backend/services/test_agent_transfer_utils.py
+    - test/backend/services/test_official_agent_bundle_service.py
+    - test/backend/services/test_official_agent_sync_service.py
+    - test/sdk/core/agents/test_prompt_outline.py
+    - test/sdk/core/agents/test_prompt_sdk_assembly.py
+    - test/sdk/core/agents/test_agent_prompt_composer.py
+    - test/backend/utils/test_context_utils.py
+    - test/backend/utils/test_context_item_types.py
+    - test/backend/utils/test_agent_prompt_bundle.py
+    - test/sdk/benchmark/test_agent_runner_tracking.py
+    - test/sdk/benchmark/test_webhook_server_security.py
+    - test/sdk/core/agents/test_single_business_prompt.py
+    - test/sdk/core/agents/test_sdk_prompt_template_catalog.py
+    - test/sdk/benchmark/test_single_prompt_entrypoints.py
+    - test/sdk/benchmark/test_export_agent_config.py
+    - test/sdk/benchmark/test_run_benchmark_cli.py
+    - test/sdk/benchmark/test_run_benchmark_execution.py
+    - test/sdk/core/agents/test_system_prompt_copy.py
+    - test/sdk/core/agents/test_prompt_resource_layout.py
+    - test/sdk/core/agents/test_prompt_assembly_boundary.py
+    - test/sdk/core/agents/test_fixed_system_prompts.py
+    - test/sdk/core/agents/test_direct_prompt_resources.py
+  notes: 'Design: ../nexent-doc/nexent/nl2agent-resource-recommendation-flow/design.md,
+    2026-10-19 storage/runtime section. No live database migration.'

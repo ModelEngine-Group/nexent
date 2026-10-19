@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 #!/usr/bin/env python3
 """
 Unified benchmark runner for Nexent Agent evaluation.
@@ -49,8 +51,6 @@ YAML config file structure (see export_agent_config.py):
     prompts:
       duty_prompt: |
         You are a professional mathematics assistant...
-      constraint_prompt: ""
-      few_shots_prompt: ""
     tools: [...]
     sub_agents: [...]
     skills: [...]
@@ -645,11 +645,9 @@ def main():
     parser.add_argument("--language", type=str, choices=["en", "zh"],
                         help="Prompt language (overrides YAML)")
     parser.add_argument("--duty-prompt", type=str,
-                        help="Custom duty prompt (overrides YAML)")
-    parser.add_argument("--constraint-prompt", type=str,
-                        help="Custom constraint prompt (overrides YAML)")
-    parser.add_argument("--few-shots-prompt", type=str,
-                        help="Custom few shots prompt (overrides YAML)")
+                        help="Complete business prompt including constraints and examples (overrides YAML)")
+
+
     parser.add_argument("--system-prompt-file", type=str,
                         help="Path to custom system prompt file (bypasses template)")
     parser.add_argument(
@@ -796,11 +794,11 @@ def main():
 
     # Merge config: CLI args override YAML
     prompts = agent_config.get("prompts", {})
+    if set(prompts) - {"duty_prompt"}:
+        raise ValueError("Agent prompts only supports duty_prompt; migrate legacy configuration first")
     agent_cfg = agent_config.get("agent_config", {})
 
     duty_prompt = args.duty_prompt or prompts.get("duty_prompt", "")
-    constraint_prompt = args.constraint_prompt or prompts.get("constraint_prompt", "")
-    few_shots_prompt = args.few_shots_prompt or prompts.get("few_shots_prompt", "")
     max_steps = args.max_steps or agent_cfg.get("max_steps", 10)
     temperature = args.temperature if args.temperature is not None else agent_cfg.get("temperature", 0.1)
     language = args.language or "en"
@@ -936,8 +934,6 @@ def main():
     task_fn = make_nexent_task(
         system_prompt=system_prompt,
         duty_prompt=duty_prompt,
-        constraint_prompt=constraint_prompt,
-        few_shots_prompt=few_shots_prompt,
         max_steps=max_steps,
         temperature=temperature,
         language=language,

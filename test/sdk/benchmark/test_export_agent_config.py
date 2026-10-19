@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import sys
 
 import pytest
@@ -24,9 +26,7 @@ class _FakeCursor:
             "gaia_agent",
             "GAIA Agent",
             "Description",
-            "Duty",
-            "Constraint",
-            "",
+            "Duty\n\n# Constraints\nConstraint",
             15,
             True,
             False,
@@ -104,6 +104,7 @@ def test_export_agent_config_externalizes_tool_secrets(
 
     raw_output = output_path.read_text(encoding="utf-8")
     config = yaml.safe_load(raw_output)
+    assert config["prompts"] == {"duty_prompt": "Duty\n\n# Constraints\nConstraint"}
     exa_params = config["tools"][0]["tool_params"]
     terminal_params = config["tools"][1]["tool_params"]
     console_output = capsys.readouterr().out

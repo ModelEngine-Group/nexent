@@ -11,7 +11,7 @@ from agents.nl2agent_agent import build_nl2agent_system_prompt
 
 
 @pytest.mark.parametrize("language", ["zh", "en"])
-def test_prompt_examples_save_visible_content_and_clear_legacy_sections(language):
+def test_prompt_examples_save_only_visible_content(language):
     prompt = build_nl2agent_system_prompt(language)
     saves = []
     for source in re.findall(r"<code>\n(.*?)\n</code>", prompt, re.DOTALL):
@@ -32,11 +32,11 @@ def test_prompt_examples_save_visible_content_and_clear_legacy_sections(language
                         pytest.fail("An example still saves a separate hidden prompt")
     assert len(saves) == 2
     for fields in saves:
-        assert set(fields) == {"duty_prompt", "constraint_prompt", "few_shots_prompt"}
-        assert ast.literal_eval(fields["constraint_prompt"]) == ""
-        assert ast.literal_eval(fields["few_shots_prompt"]) == ""
-    assert ('`updated_fields` 是 `["duty_prompt", "constraint_prompt", "few_shots_prompt"]`' in prompt
-            or 'equal to `["duty_prompt", "constraint_prompt", "few_shots_prompt"]`' in prompt)
+        assert set(fields) == {"duty_prompt"}
+    assert "constraint_prompt" not in prompt
+    assert "few_shots_prompt" not in prompt
+    assert ('`updated_fields` 是 `["duty_prompt"]`' in prompt
+            or 'equal to `["duty_prompt"]`' in prompt)
     assert ('只生成并同时保存 `greeting_message` 和 `example_questions`' in prompt
             or 'save only `greeting_message` and `example_questions` together' in prompt)
     assert ('限制、运行规则、演示或示例均对应单输入框' in prompt

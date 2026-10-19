@@ -102,8 +102,6 @@ AGENT_DRAFT_FIELD_ORDER = (
     "display_name",
     "description",
     "duty_prompt",
-    "constraint_prompt",
-    "few_shots_prompt",
     "greeting_message",
     "example_questions",
 )

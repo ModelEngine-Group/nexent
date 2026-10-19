@@ -29,6 +29,7 @@ import { deleteCommunityMcpTool } from "@/services/mcpToolsService";
 import RepositoryTagFilter from "@/components/tag/RepositoryTagFilter";
 import { REPOSITORY_PAGE_SIZE } from "@/const/resource";
 import ResourceCardGrid from "@/components/resource/ResourceCardGrid";
+import McpCommunityRequestError from "./components/add/community/McpCommunityRequestError";
 import TagDefinitionManagementModal from "@/components/tag/TagDefinitionManagementModal";
 import McpToolsSearchFilterBar from "./components/McpToolsSearchFilterBar";
 import RepositoryMcpCard from "./components/RepositoryMcpCard";
@@ -105,6 +106,10 @@ export function McpSpace({
         {browser.loading ? (
           <PlaceholderBox>
             <Spin />
+          </PlaceholderBox>
+        ) : browser.error ? (
+          <PlaceholderBox>
+            <McpCommunityRequestError onRetry={() => void browser.refetch()} />
           </PlaceholderBox>
         ) : filteredServices.length === 0 ? (
           <PlaceholderBox>

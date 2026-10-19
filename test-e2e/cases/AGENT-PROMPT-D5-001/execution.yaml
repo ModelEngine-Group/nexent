@@ -1,0 +1,12 @@
+schema_version: '1.0'
+case_id: AGENT-PROMPT-D5-001
+implementations:
+- framework: pytest
+  file: test_migration.py
+  selector: test_
+timeout_seconds: 180
+acceptance_bindings:
+  AC-01:
+  - test_legacy_prompt_migration_preserves_rows_and_repeated_execution
+  AC-02:
+  - test_legacy_prompt_migration_preserves_rows_and_repeated_execution

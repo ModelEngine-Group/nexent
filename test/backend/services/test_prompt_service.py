@@ -3251,6 +3251,8 @@ class TestPromptOptimizationServiceOptimizeFromDebug(unittest.TestCase):
         self.assertEqual(result.source, "jiuwen")
         self.assertEqual(result.section_type, "full_prompt")
         mock_adapter_instance.optimize_badcase.assert_called_once()
+        self.assertEqual(mock_adapter_instance.optimize_badcase.call_args.kwargs["prompt"], "Duty content")
+        self.assertEqual(result.original_content, "Duty content")
 
     @patch('backend.services.prompt_service._get_jiuwen_adapter_class')
     @patch('backend.services.prompt_service.search_agent_info_by_agent_id')
@@ -3283,28 +3285,20 @@ class TestPromptOptimizationServiceOptimizeFromDebug(unittest.TestCase):
     @patch('backend.services.prompt_service.search_agent_info_by_agent_id')
     @patch('backend.services.prompt_service.ENABLE_JIUWEN_SDK', True)
     def test_optimize_from_debug_empty_prompt_raises(self, mock_search_agent, mock_get_adapter):
-        """When all agent prompts are None, the joined prompt strips to empty => AppException."""
+        """A missing unified prompt cannot fall back to legacy content or headings."""
         mock_search_agent.return_value = {
             "duty_prompt": None,
-            "constraint_prompt": None,
-            "few_shots_prompt": None,
+            "constraint_prompt": "Poisoned legacy rule",
+            "few_shots_prompt": "Poisoned legacy example",
         }
-
         mock_adapter_cls = MagicMock()
         mock_get_adapter.return_value = mock_adapter_cls
-
         service = PromptOptimizationService(model_id=1, tenant_id="t", language="zh")
         selected = type("S", (), {"user_question": "q", "assistant_answer": "a"})()
-
-        # When all prompts are None, strip gives empty strings, joined gives "# Duty\n\n# Constraint\n\n# FewShots"
-        # which is NOT empty after strip. So this won't raise for empty_prompt.
-        # The function proceeds and calls adapter.optimize_badcase successfully.
-        mock_adapter_instance = MagicMock()
-        mock_adapter_instance.optimize_badcase.return_value = "optimized"
-        mock_adapter_cls.return_value = mock_adapter_instance
-
-        result = service.optimize_from_debug(agent_id=1, feedback="feedback", selected=selected)
-        self.assertEqual(result.source, "jiuwen")
+        with self.assertRaises(AppException) as caught:
+            service.optimize_from_debug(agent_id=1, feedback="feedback", selected=selected)
+        self.assertEqual(caught.exception.error_code, ErrorCode.COMMON_MISSING_REQUIRED_FIELD)
+        mock_adapter_cls.return_value.optimize_badcase.assert_not_called()
 
     @patch('backend.services.prompt_service._get_jiuwen_adapter_class')
     @patch('backend.services.prompt_service.search_agent_info_by_agent_id')

@@ -3,7 +3,8 @@
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { ReactNode } from "react";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { McpTransportType } from "@/const/mcpTools";
 import { useMcpCommunityBrowser } from "@/hooks/mcpTools/useMcpCommunityBrowser";
 import {
   fetchCommunityMcpCards,
@@ -15,10 +16,17 @@ vi.mock("@/services/mcpToolsService", () => ({
   fetchCommunityMcpTagStats: vi.fn(async () => ({ success: true, data: [] })),
 }));
 
+const clients: QueryClient[] = [];
+beforeEach(() => vi.mocked(fetchCommunityMcpCards).mockReset());
+afterEach(() => {
+  for (const client of clients.splice(0)) client.clear();
+});
+
 function setup() {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   });
+  clients.push(client);
   return renderHook(() => useMcpCommunityBrowser(true, 12), {
     wrapper: ({ children }: { children: ReactNode }) => (
       <QueryClientProvider client={client}>{children}</QueryClientProvider>
@@ -51,10 +59,53 @@ describe("MCP repository page transitions", () => {
       )
     );
     expect(result.current.page).toBe(2);
+    expect(result.current.total).toBe(0);
     expect(result.current.loading).toBe(true);
     await act(async () => rejectNext(new Error("Network unavailable")));
     await waitFor(() => expect(result.current.loading).toBe(false));
     expect(result.current.page).toBe(2);
+    expect(result.current.error).toEqual(new Error("Network unavailable"));
+  });
+
+  it("retries the failed page with the same search and filters", async () => {
+    vi.mocked(fetchCommunityMcpCards).mockResolvedValue(response(25));
+    const { result } = setup();
+    await waitFor(() => expect(result.current.total).toBe(25));
+    act(() => {
+      result.current.updateFilter("tag", "analytics");
+      result.current.updateFilter("transport", McpTransportType.SSE);
+      result.current.updateFilter("search", "tool");
+    });
+    await waitFor(() =>
+      expect(fetchCommunityMcpCards).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          search: "tool",
+          transportType: "sse",
+          tag: "analytics",
+        })
+      )
+    );
+    vi.mocked(fetchCommunityMcpCards).mockRejectedValueOnce(
+      new Error("Network unavailable")
+    );
+    act(() => result.current.setPage(2));
+    await waitFor(() => expect(result.current.error).toBeInstanceOf(Error));
+    const failedParameters = vi.mocked(fetchCommunityMcpCards).mock
+      .lastCall?.[0];
+    expect(failedParameters).toEqual({
+      search: "tool",
+      transportType: "sse",
+      tag: "analytics",
+      page: 2,
+      limit: 12,
+    });
+    await act(async () => {
+      await result.current.refetch();
+    });
+    await waitFor(() => expect(result.current.error).toBeNull());
+    expect(result.current.page).toBe(2);
+    expect(result.current.total).toBe(25);
+    expect(fetchCommunityMcpCards).toHaveBeenLastCalledWith(failedParameters);
   });
 
   it("clamps an out-of-range page only after a successful authoritative response", async () => {

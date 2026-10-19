@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import copy
 import json
 import logging
@@ -1083,17 +1085,7 @@ class PromptOptimizationService:
         agent_info = search_agent_info_by_agent_id(
             agent_id=agent_id, tenant_id=self.tenant_id, version_no=0)
 
-        duty = (agent_info.get("duty_prompt") or "").strip()
-        constraint = (agent_info.get("constraint_prompt") or "").strip()
-        few_shots = (agent_info.get("few_shots_prompt") or "").strip()
-
-        original_full_prompt = "\n\n".join(
-            [
-                "# Duty\n" + duty,
-                "# Constraint\n" + constraint,
-                "# FewShots\n" + few_shots,
-            ]
-        ).strip()
+        original_full_prompt = (agent_info.get("duty_prompt") or "").strip()
 
         if not original_full_prompt:
             raise AppException(

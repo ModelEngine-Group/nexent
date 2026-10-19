@@ -1,0 +1,36 @@
+schema_version: '1.0'
+change:
+  change_id: MCP-COMMUNITY-RECOVERY-20261019
+  change_type: bugfix
+  bug_id: MCP-COMMUNITY-RECOVERY-20261019
+  title: Recover failed MCP community page requests
+  description: Show localized request failures and retry the same page with existing query state.
+  observed_behavior: Failed uncached pages become empty lists and pagination disappears.
+  expected_behavior: Failure shows retry without pagination; retry preserves the page and filters.
+  escaped_stage: production
+  coverage_gap:
+    type: missing_assertion
+    description: Existing pagination UT asserts only retained page and successful clamping, not failure feedback or retry recovery.
+  feature_contract_changed: false
+  affected_features:
+    existing: []
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing: []
+    added: []
+    modified: []
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    behaviors:
+    - Preserve the failed page and filters during pending and failed requests without additional total caching.
+    - Show localized failure and retry without empty-list feedback or pagination in both community views.
+    - Retry same query, recover successfully, permit repeated retry.
+    - Successful empty and shrunk responses retain existing behavior; cached cards do not mask request errors.
+    reason: Frontend state and controlled-query rendering require focused UT; no Python or API contract changes and no duplicate formal D1.
+    test_selectors:
+    - frontend/tests/component/mcpRepositoryPagination.test.tsx
+    - frontend/tests/component/mcpCommunityRecovery.test.tsx
+  notes: 'Design: ../nexent-doc/docs/Developing/mcp-community-pagination-recovery/design.md. F-086 API baseline is unaffected; browser D4 is unverified.'

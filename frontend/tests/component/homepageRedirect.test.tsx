@@ -12,6 +12,8 @@ const state = vi.hoisted(() => ({
   authenticated: true,
   checking: false,
   authzReady: true,
+  authzLoading: false,
+  authzError: null as Error | null,
   routes: ["/", "/resource-manage", "/owner-manage"],
   replace: vi.fn(),
   prompt: vi.fn(),
@@ -42,6 +44,9 @@ vi.mock("@/components/providers/AuthenticationProvider", () => ({
 vi.mock("@/components/providers/AuthorizationProvider", () => ({
   useAuthorizationContext: () => ({
     isAuthzReady: state.authzReady,
+    isLoading: state.authzLoading,
+    error: state.authzError,
+    refetch: vi.fn(),
     accessibleRoutes: state.routes,
     canAccessRoute: (route: string) => state.routes.includes(route),
     openAuthzPromptModal: state.prompt,
@@ -60,6 +65,8 @@ beforeEach(() => {
     authenticated: true,
     checking: false,
     authzReady: true,
+    authzLoading: false,
+    authzError: null,
     routes: ["/", "/resource-manage", "/owner-manage"],
   });
 });
@@ -157,5 +164,23 @@ test("speed mode also waits for authorization before selecting an entry", () => 
   state.speed = true;
   state.authzReady = false;
   render(<Homepage />);
+  expect(state.replace).not.toHaveBeenCalled();
+});
+
+test("cached permissions do not redirect while authorization is refreshing", () => {
+  state.authzLoading = true;
+  render(<Homepage />);
+  expect(state.replace).not.toHaveBeenCalled();
+});
+
+test("cached permissions do not redirect after an authorization refresh fails", () => {
+  state.authzError = new Error("Service unavailable");
+  render(<Homepage />);
+  expect(screen.getByRole("alert")).toHaveTextContent(
+    "page.authorizationError"
+  );
+  expect(
+    screen.getByRole("button", { name: "page.retryAuthorization" })
+  ).toBeEnabled();
   expect(state.replace).not.toHaveBeenCalled();
 });

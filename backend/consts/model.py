@@ -18,6 +18,7 @@ from pydantic import (
 from nexent.core.agents.agent_model import AgentVerificationConfig, ToolConfig
 
 from consts.prompt_template import PROMPT_GENERATE_TEMPLATE_FIELD_ALIAS_MAP
+from utils.agent_prompt import normalize_agent_prompt_fields
 
 
 def _validated_context_policy(value: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
@@ -1596,6 +1597,17 @@ class ExportAndImportAgentInfo(BaseModel):
     model_params_override: Optional[Dict[str, Any]] = None
     greeting_message: Optional[str] = None
     example_questions: Optional[List[str]] = None
+
+    @model_validator(mode="after")
+    def normalize_business_prompt(self):
+        patch = normalize_agent_prompt_fields({
+            "duty_prompt": self.duty_prompt,
+            "constraint_prompt": self.constraint_prompt,
+            "few_shots_prompt": self.few_shots_prompt,
+        })
+        for key, value in patch.items():
+            setattr(self, key, value)
+        return self
 
     @field_validator("context_policy")
     @classmethod

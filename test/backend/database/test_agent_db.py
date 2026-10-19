@@ -1,6 +1,7 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
 import sys
+from pathlib import Path
 import types
 import pytest
 from types import SimpleNamespace
@@ -67,7 +68,8 @@ exceptions_mock.AgentNotFoundError = AgentNotFoundError
 sys.modules["consts.exceptions"] = exceptions_mock
 
 # 模拟utils模块
-utils_mock = MagicMock()
+utils_mock = types.ModuleType("utils")
+utils_mock.__path__ = [str(Path(__file__).resolve().parents[3] / "backend/utils")]
 utils_mock.auth_utils = MagicMock()
 utils_mock.auth_utils.get_current_user_id_from_token = MagicMock(return_value="test_user_id")
 
@@ -453,12 +455,15 @@ def test_create_agent_success(monkeypatch, mock_session, requested_policy, expec
     monkeypatch.setattr("backend.database.agent_db.as_dict", lambda obj: obj.__dict__)
     monkeypatch.setattr("backend.database.agent_db._enforce_tenant_agent_limit", lambda *_args: None)
     def make_agent(**kwargs):
+        assert kwargs["constraint_prompt"] == kwargs["few_shots_prompt"] == ""
+        assert kwargs["duty_prompt"] == "# Responsibilities\nDuty\n\n# Constraints\nRule\n\n# Examples\nExample"
         mock_agent.enable_protocol_repair_retry = kwargs["enable_protocol_repair_retry"]
         return mock_agent
 
     monkeypatch.setattr("backend.database.agent_db.AgentInfo", make_agent)
 
-    agent_info = {"name": "new_agent", "description": "test description"}
+    agent_info = {"name": "new_agent", "description": "test description",
+                  "duty_prompt": "Duty", "constraint_prompt": "Rule", "few_shots_prompt": "Example"}
     if requested_policy is not None:
         agent_info["enable_protocol_repair_retry"] = requested_policy
     result = create_agent(agent_info, "tenant1", "user1")

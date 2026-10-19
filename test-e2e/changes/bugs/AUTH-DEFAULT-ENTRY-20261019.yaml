@@ -6,7 +6,7 @@ change:
   title: Select an authorized default entry when Home is hidden
   description: Wait for permissions and route SU to accessible management instead of Workbench.
   observed_behavior: Root always opens Workbench and its denial guard returns to root indefinitely.
-  expected_behavior: Root selects an accessible enabled page after authorization; no destination leaves Home visible.
+  expected_behavior: Root selects an accessible enabled page after applied authorization; failures show retry and never navigate; no destination leaves Home visible.
   escaped_stage: production
   coverage_gap:
     type: unknown_baseline
@@ -26,10 +26,14 @@ change:
     decision: add
     behaviors:
     - SU selects an accessible management page rather than denied conversation routes.
-    - Loading authorization prevents premature redirects.
+    - Loading or failed authorization prevents premature redirects, including cached permissions.
+    - Failed requests show localized retry; retry applies shared permissions before authorized navigation.
+    - Repeated failure and malformed responses remain recoverable; empty routes are valid.
+    - Speed mode recovers identically and guests ignore unrelated authorization errors.
     - Workbench preference, legacy alias, deployment gates and guest entry are preserved.
     - Empty or nonfunctional permissions stop automatic navigation and retain Home.
     reason: Root selection is frontend unit behavior; no Python code changes. New D1 would duplicate controlled-provider unit assertions; historical browser assets are unavailable.
     test_selectors:
     - frontend/tests/component/homepageRedirect.test.tsx
+    - frontend/tests/component/authorizationRecovery.test.tsx
   notes: 'Design: ../nexent-doc/docs/Developing/auth-permission-default-entry/design.md. No sidebar, API or permission grants change; NAV-MENU-VISIBILITY cases remain unaffected. Browser journey coverage is unverified.'

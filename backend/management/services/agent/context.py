@@ -90,9 +90,7 @@ def _composer(language: str, is_manager: bool, prompt_bundle):
 
 
 def build_context_inputs(
-    duty: Optional[str] = None,
-    constraint: Optional[str] = None,
-    few_shots: Optional[str] = None,
+    duty_prompt: Optional[str] = None,
     language: str = "zh",
     is_manager: bool = True,
     enable_planning: bool = False,
@@ -121,7 +119,7 @@ def build_context_inputs(
     *,
     prompt_bundle,
 ) -> List[ContextItemInput]:
-    """Adapt legacy Backend callers to the SDK-owned prompt composer."""
+    """Compose authorized context from one business prompt and platform resources."""
     composer = _composer(language, is_manager, prompt_bundle)
     arguments = locals().copy()
     arguments.pop("composer")

@@ -1,3 +1,5 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 /**
  * useAgentGeneration hook
  *
@@ -206,13 +208,23 @@ export function useAgentGeneration({
 
           // User is still on the same agent, apply the generated content
           // AI-generated fields come from cache, other fields come from editedAgent
+          const dutyPrompt = cached?.dutyPrompt || editedAgent.duty_prompt || "";
+          const legacySections = [
+            ["Responsibilities", dutyPrompt],
+            ["Constraints", cached?.constraintPrompt || ""],
+            ["Examples", cached?.fewShotsPrompt || ""],
+          ];
+          const completePrompt = legacySections.slice(1).some(([, value]) => value.trim())
+            ? legacySections
+                .filter(([, value]) => value.trim())
+                .map(([title, value]) => `# ${title}\n${value}`)
+                .join("\n\n")
+            : dutyPrompt;
           const configUpdates: AgentConfigUpdate = {
             name: cached?.agentName || editedAgent.name || "",
             display_name: cached?.agentDisplayName || editedAgent.display_name || "",
             description: cached?.agentDescription || editedAgent.description || "",
-            duty_prompt: cached?.dutyPrompt || editedAgent.duty_prompt || "",
-            constraint_prompt: cached?.constraintPrompt || editedAgent.constraint_prompt || "",
-            few_shots_prompt: cached?.fewShotsPrompt || editedAgent.few_shots_prompt || "",
+            duty_prompt: completePrompt,
             greeting_message: cached?.greetingMessage || editedAgent.greeting_message || "",
             example_questions: cached?.exampleQuestions
               ? (typeof cached.exampleQuestions === "string"

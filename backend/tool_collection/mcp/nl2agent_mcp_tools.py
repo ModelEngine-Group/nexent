@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """Define and implement the internal Local MCP tools used by NL2Agent."""
 
 import json
@@ -95,6 +97,11 @@ NL2A_WRAPPER_DESCRIPTION = (
 SAVE_AGENT_DRAFT_FIELDS_DESCRIPTION = (
     "Partially update the current tenant's existing ordinary agent draft. "
     "Always pass the current agent_id and only whitelisted fields, never null. "
+    "Allowed fields: name, display_name, description, duty_prompt, greeting_message, example_questions. "
+    "duty_prompt is the only business prompt and contains responsibilities, constraints and examples. "
+    "greeting_message and example_questions are separate conversation settings; "
+    "example_questions must be a list of strings, never a newline-delimited string. "
+    "Only submit the fields determined by the current action. "
     "The name field may be set only when the existing draft name is empty; "
     "display_name may be set only alongside the first name on an empty Workbench Draft; "
     "all other display names are immutable. Call the tool as "
@@ -106,8 +113,6 @@ MAX_REQUIREMENT_CLARIFICATION_QUESTIONS = 5
 _NL2AGENT_PROMPT_FIELDS = frozenset(
     {
         "duty_prompt",
-        "constraint_prompt",
-        "few_shots_prompt",
         "greeting_message",
         "example_questions",
     }
@@ -378,11 +383,11 @@ class AgentDraftFields(BaseModel):
     )
     display_name: str | None = Field(default=None, min_length=1, max_length=100)
     description: str | None = None
-    duty_prompt: str | None = None
-    constraint_prompt: str | None = None
-    few_shots_prompt: str | None = None
+    duty_prompt: str | None = Field(default=None, description="Complete business prompt including constraints and examples.")
     greeting_message: str | None = None
-    example_questions: list[str] | None = Field(default=None, max_length=6)
+    example_questions: list[str] | None = Field(
+        default=None, max_length=6, description="Array of suggested question strings; not a newline-delimited string."
+    )
 
     @model_validator(mode="before")
     @classmethod
@@ -666,8 +671,6 @@ def create_nl2agent_mcp_tool_configs() -> list[ToolConfig]:
                             "name": "str",
                             "description": "str",
                             "duty_prompt": "str",
-                            "constraint_prompt": "str",
-                            "few_shots_prompt": "str",
                             "greeting_message": "str",
                             "example_questions": "list[str]",
                         }.items()

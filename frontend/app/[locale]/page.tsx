@@ -2,7 +2,7 @@
 
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useTranslation } from "react-i18next";
 import {
@@ -14,7 +14,7 @@ import {
   TextQuote,
   AlertTriangle,
 } from "lucide-react";
-import { Button, Row, Col, Card } from "antd";
+import { Button, Row, Col, Card, Result } from "antd";
 import { motion } from "framer-motion";
 import { useDeployment } from "@/components/providers/deploymentProvider";
 import { useAuthenticationContext } from "@/components/providers/AuthenticationProvider";
@@ -35,15 +35,20 @@ export default function Homepage() {
     accessibleRoutes,
     canAccessRoute,
     openAuthzPromptModal,
+    isLoading: isAuthzLoading,
+    error: authzError,
+    refetch: retryAuthorization,
   } = useAuthorizationContext();
   const router = useRouter();
   const { config } = useGlobalConfigStore();
+  const [isRetrying, setIsRetrying] = useState(false);
 
   const needsAuthorization = isAuthenticated || isSpeedMode;
   const isEntryReady =
     isDeploymentReady &&
     (isSpeedMode || !isAuthChecking) &&
-    (!needsAuthorization || isAuthzReady);
+    (!needsAuthorization ||
+      (isAuthzReady && !isAuthzLoading && !authzError && !isRetrying));
   const defaultEntry = !needsAuthorization
     ? enableAgentWorkbench
       ? "/workbench"
@@ -99,7 +104,40 @@ export default function Homepage() {
   const canShowQuickAction = (route: string) =>
     !isAuthenticated || canAccessRoute(route);
 
-  if (!isDeploymentReady || (hideHomePage && (!isEntryReady || defaultEntry))) {
+  if (!isDeploymentReady) {
+    return null;
+  }
+
+  if (needsAuthorization && (authzError || isRetrying)) {
+    return (
+      <div className="flex min-h-full items-center justify-center" role="alert">
+        <Result
+          status="error"
+          title={t("page.authorizationError")}
+          subTitle={t("page.authorizationErrorDescription")}
+          extra={
+            <Button
+              type="primary"
+              loading={isRetrying || isAuthzLoading}
+              disabled={isRetrying || isAuthzLoading}
+              onClick={async () => {
+                setIsRetrying(true);
+                try {
+                  await retryAuthorization();
+                } finally {
+                  setIsRetrying(false);
+                }
+              }}
+            >
+              {t("page.retryAuthorization")}
+            </Button>
+          }
+        />
+      </div>
+    );
+  }
+
+  if (hideHomePage && (!isEntryReady || defaultEntry)) {
     return null;
   }
 

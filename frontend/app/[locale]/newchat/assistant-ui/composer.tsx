@@ -549,15 +549,18 @@ export const Composer: FC<ComposerProps> = ({
     t,
   ]);
 
+  const fieldsetDisabled =
+    disabled && !disabledReason && modelSelectionDisabled !== false;
+
   return (
     <div className="relative w-full min-w-0 font-sans">
       {workbenchPresentation && workbenchPresentation.actions}
       <fieldset
-        disabled={disabled && !disabledReason}
-        aria-disabled={disabled && !disabledReason}
+        disabled={fieldsetDisabled}
+        aria-disabled={fieldsetDisabled}
         className={cn(
           "relative m-0 flex min-w-0 w-full flex-col overflow-visible gap-2 rounded-[20px] border-[0.5px] border-solid border-[#191919]/[0.08] bg-white px-4 pb-4 pt-5 shadow-[0_1px_6px_0_rgba(0,0,0,0.16)]",
-          disabled && !disabledReason && "cursor-not-allowed opacity-60",
+          fieldsetDisabled && "cursor-not-allowed opacity-60",
           configurationLayout &&
             "min-h-[164px] rounded-[20px] border-[0.5px] border-[#191919]/[0.08] bg-white shadow-[0_1px_6px_rgba(0,0,0,0.16)]"
         )}

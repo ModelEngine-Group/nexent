@@ -1,0 +1,73 @@
+schema_version: '1.0'
+stage: D5
+module: V5-BASELINE
+case:
+  case_id: AGENT-PROMPT-D5-001
+  feature_id: F-045
+  business_rule_ids:
+  - F-045-RULE-01
+  title: Single Agent prompt migration preserves data and is repeatable
+  type: DEPLOYMENT
+  priority: P1
+  status: active
+  automation: automated
+  objective: Execute the versioned migration against synthetic rows in a disposable
+    PostgreSQL container.
+  preconditions:
+  - Docker is available and postgres:15-alpine is already present; create only a uniquely
+    named disposable container.
+  test_data:
+    source: Synthetic draft, published, deleted and multi-tenant rows; empty, null,
+      Unicode and whitespace-only prompts.
+  steps:
+  - order: 1
+    action: Create a run-owned PostgreSQL container without published ports and seed
+      a minimal Agent table with all variants.
+    expected: Only isolated synthetic data is created.
+  - order: 2
+    action: Run the production migration and compare all prompt and unrelated column
+      values.
+    expected: Legacy content is retained in ordered sections; old columns are empty,
+      single prompts and metadata are unchanged.
+  - order: 3
+    action: Run the migration again and compare the entire table, then remove the
+      container in finally.
+    expected: Second execution changes nothing and cleanup succeeds even on assertion
+      failure.
+  expected_results:
+  - All legacy variants including draft/history/deleted rows merge without content
+    loss or unrelated field changes.
+  - Repeat execution preserves the complete snapshot and run-owned resources are removed.
+  forbidden_side_effects:
+  - Do not access existing databases, publish ports, use product credentials or remove
+    unrelated containers.
+  risk_type: DEPLOYMENT
+  risk: Lost constraints, duplicated examples or runtime data loss during the single-prompt
+    transition.
+  condition:
+  - Actual migration SQL runs twice in a run-owned PostgreSQL container.
+  metrics:
+  - Exact row values and field order before/after both executions; cleanup exit status.
+  thresholds:
+  - All comparisons pass and no unrelated data changes.
+  recovery_expectations:
+  - Transaction errors roll back; test cleanup removes only the run-owned container.
+  acceptance:
+  - id: AC-01
+    description: Isolated real SQL preserves all legacy content and metadata across
+      variants.
+    steps:
+    - 1
+    - 2
+    expected_results:
+    - 1
+    forbidden_side_effects:
+    - 1
+  - id: AC-02
+    description: Repeat execution is idempotent and run-owned resources are cleaned.
+    steps:
+    - 3
+    expected_results:
+    - 2
+    forbidden_side_effects:
+    - 1

@@ -2141,7 +2141,8 @@ class TestBuildAgentProfileParts:
         }
         parts = service_module._build_agent_profile_parts(profile)
         assert "- Name: A" in parts[0]
-        assert len(parts) == 5
+        assert len(parts) == 4
+        assert "cp" not in "\n".join(parts)
 
     def test_skips_empty_fields(self, service_module):
         profile = {

@@ -2286,6 +2286,9 @@ class TestCreateAgentConfig:
         )
 
         mocks["build_components"].assert_called_once()
+        assert mocks["build_components"].call_args.kwargs["duty_prompt"] == "test duty"
+        assert "constraint" not in mocks["build_components"].call_args.kwargs
+        assert "few_shots" not in mocks["build_components"].call_args.kwargs
         mocks["prepare_templates"].assert_not_awaited()
         assert mocks["agent_config"].call_args.kwargs["context_items"] is components
         # UT-BE-TRACE-021: preserve the UI name separately from the variable name.
@@ -2462,6 +2465,9 @@ class TestCreateAgentConfig:
         )
 
         mocks["build_components"].assert_called_once()
+        assert mocks["build_components"].call_args.kwargs["duty_prompt"] == "test duty"
+        assert "constraint" not in mocks["build_components"].call_args.kwargs
+        assert "few_shots" not in mocks["build_components"].call_args.kwargs
         mocks["prepare_templates"].assert_not_called()
         assert mocks["agent_config"].call_args.kwargs["context_items"] is components
         config = mocks["agent_config"].call_args.kwargs["context_manager_config"]

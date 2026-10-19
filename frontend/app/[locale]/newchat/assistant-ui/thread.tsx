@@ -527,7 +527,7 @@ export const Thread: FC<ThreadProps> = ({
         welcomeContent={welcomeContent}
         onBack={onBack}
         models={models}
-        selectedModelId={effectiveSelectedModelId}
+        selectedModelId={modelIsValid ? effectiveSelectedModelId : ""}
         onModelChange={handleModelChange}
         deepThinking={deepThinking ?? controls.deepThinking}
         onDeepThinkingChange={
@@ -563,12 +563,7 @@ export const Thread: FC<ThreadProps> = ({
         onRuntimeMetadataChange={onRuntimeMetadataChange}
         readOnly={readOnly || (showModelSelector && !modelIsValid)}
         modelSelectionDisabled={readOnly}
-        readOnlyReason={
-          readOnlyReason ??
-          (showModelSelector && !modelIsValid
-            ? t("chat.modelSelector.invalidSelection")
-            : undefined)
-        }
+        readOnlyReason={readOnlyReason}
         showComposer={showComposer}
         configurationLayout={configurationLayout}
         debugLayout={debugLayout}
