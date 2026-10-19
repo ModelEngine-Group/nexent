@@ -9,7 +9,6 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import { ChevronRight } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import {
   aidpChannels,
@@ -18,6 +17,7 @@ import {
   aidpMethods,
   resolveAidpConfig,
 } from "@/lib/aidpRetrievalConfig";
+import { SectionChevron } from "@/components/resource-picker/ParamDialog";
 import styles from "./AidpRetrievalParamsForm.module.css";
 
 const ENHANCEMENT_KEYS = [
@@ -300,14 +300,8 @@ function Section({
         aria-expanded={open}
         onClick={onToggle}
       >
-        <span
-          className={[styles.sectionArrow, open ? styles.sectionArrowOpen : ""]
-            .filter(Boolean)
-            .join(" ")}
-        >
-          <ChevronRight size={14} />
-        </span>
-        <span>{title}</span>
+        <span className={styles.sectionTitle}>{title}</span>
+        <SectionChevron expanded={open} />
         <span className={styles.sectionState}>{summary}</span>
       </button>
       {open ? <div className={styles.sectionContent}>{children}</div> : null}
@@ -526,51 +520,6 @@ export function AidpRetrievalParamsForm({
                 : ""}
           </p>
         </div>
-
-        {mixed ? (
-          <Section
-            title={t("aidpRetrieval.combination")}
-            summary={combinationSummary}
-            open={combinationOpen}
-            onToggle={() => setCombinationOpen((current) => !current)}
-            className={`${styles.full} ${styles.combinationSection}`}
-          >
-            <div
-              role="group"
-              aria-label={t("aidpRetrieval.combination")}
-              className={styles.choices}
-            >
-              {aidpChannels.map((channel) => (
-                <label key={channel} className={styles.choice}>
-                  <input
-                    type="checkbox"
-                    checked={channels.includes(channel)}
-                    disabled={disabled}
-                    onChange={(event) => {
-                      const next = aidpChannels.filter((method) =>
-                        method === channel
-                          ? event.target.checked
-                          : channels.includes(method)
-                      );
-                      onChange({
-                        search_method:
-                          next.length === 3
-                            ? "hybrid_search"
-                            : next.length < 2
-                              ? `${next.join("|")}|`
-                              : next.join("|"),
-                      });
-                    }}
-                  />
-                  <span>{t(`aidpRetrieval.channelShort.${channel}`)}</span>
-                </label>
-              ))}
-            </div>
-            <p className={styles.inlineNote}>
-              {t("aidpRetrieval.combinationHint")}
-            </p>
-          </Section>
-        ) : null}
       </div>
 
       <div className={`${styles.fields} ${styles.commonFields}`}>
@@ -631,6 +580,50 @@ export function AidpRetrievalParamsForm({
           </select>
         </div>
       </div>
+
+      {mixed ? (
+        <Section
+          title={t("aidpRetrieval.combination")}
+          summary={combinationSummary}
+          open={combinationOpen}
+          onToggle={() => setCombinationOpen((current) => !current)}
+        >
+          <div
+            role="group"
+            aria-label={t("aidpRetrieval.combination")}
+            className={styles.choices}
+          >
+            {aidpChannels.map((channel) => (
+              <label key={channel} className={styles.choice}>
+                <input
+                  type="checkbox"
+                  checked={channels.includes(channel)}
+                  disabled={disabled}
+                  onChange={(event) => {
+                    const next = aidpChannels.filter((method) =>
+                      method === channel
+                        ? event.target.checked
+                        : channels.includes(method)
+                    );
+                    onChange({
+                      search_method:
+                        next.length === 3
+                          ? "hybrid_search"
+                          : next.length < 2
+                            ? `${next.join("|")}|`
+                            : next.join("|"),
+                    });
+                  }}
+                />
+                <span>{t(`aidpRetrieval.channelShort.${channel}`)}</span>
+              </label>
+            ))}
+          </div>
+          <p className={styles.inlineNote}>
+            {t("aidpRetrieval.combinationHint")}
+          </p>
+        </Section>
+      ) : null}
 
       <Section
         title={t("aidpRetrieval.details")}

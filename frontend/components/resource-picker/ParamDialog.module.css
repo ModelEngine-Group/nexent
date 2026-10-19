@@ -57,7 +57,7 @@
 .dialog :global(input.ant-input) {
   height: 28px !important;
   padding: 0 12px !important;
-  border-radius: 2px !important;
+  border-radius: 6px !important;
   font-size: 14px !important;
   line-height: 22px !important;
 }
@@ -69,7 +69,7 @@
 
 .dialog :global(.ant-input-number) {
   height: 28px;
-  border-radius: 2px;
+  border-radius: 6px;
 }
 
 .dialog :global(.ant-input-number-input) {
@@ -121,7 +121,7 @@
   width: 96px !important;
   height: 32px !important;
   padding: 5px 16px !important;
-  border-radius: 4px !important;
+  border-radius: 6px !important;
   font-family: "Huawei Sans", "HarmonyOS Sans SC", sans-serif !important;
   font-size: 14px !important;
   line-height: 22px !important;

@@ -63,7 +63,7 @@
   border: 1px solid #ccc;
   border-radius: 50%;
   background: transparent;
-  color: #888;
+  color: #bbb;
   font-size: 12px;
   line-height: 12px;
   font-weight: 400;
@@ -75,7 +75,7 @@
   height: 28px;
   padding: 0 10px;
   border: 1px solid #c9c9c9;
-  border-radius: 2px;
+  border-radius: 6px;
   background: #fff;
   color: #191919;
   font: inherit;
@@ -164,7 +164,7 @@
 .sectionSummary {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 4px;
   width: 100%;
   padding: 13px 0 0;
   border: 0;
@@ -176,15 +176,8 @@
   cursor: pointer;
 }
 
-.sectionArrow {
-  display: inline-flex;
-  align-items: center;
-  color: #777;
-  transition: transform 0.15s;
-}
-
-.sectionArrowOpen {
-  transform: rotate(90deg);
+.sectionTitle {
+  min-width: 0;
 }
 
 .sectionState {
@@ -198,16 +191,6 @@
 
 .sectionContent {
   padding-top: 16px;
-}
-
-.combinationSection {
-  margin-top: 0;
-  padding-bottom: 18px;
-  border-top: 0;
-}
-
-.combinationSection .sectionSummary {
-  padding-top: 0;
 }
 
 .choices {

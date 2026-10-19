@@ -8,6 +8,7 @@ import {
   aidpErrors,
   isAidpTool,
   mergeAidpConfig,
+  resolveAidpConfig,
 } from "@/lib/aidpRetrievalConfig";
 
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
@@ -238,6 +239,7 @@ export default function ToolConfigModal({
 
   // Tool test panel visibility state
   const [testPanelVisible, setTestPanelVisible] = useState(false);
+  const [aidpConfigOpen, setAidpConfigOpen] = useState(false);
   const revealTestSection = useCallback(
     (section: HTMLDivElement | null) => {
       if (!section || !testPanelVisible) return;
@@ -402,6 +404,10 @@ export default function ToolConfigModal({
 
   // Reset testPanelKbIds to [] on modal open (before config KB IDs are loaded).
   // This prevents stale test panel KB when switching between tools with different KBs.
+  useEffect(() => {
+    if (isOpen) setAidpConfigOpen(false);
+  }, [isOpen, tool?.id]);
+
   useEffect(() => {
     const wasClosed = !prevIsOpenRef.current;
     prevIsOpenRef.current = isOpen;
@@ -1484,6 +1490,16 @@ export default function ToolConfigModal({
   );
   const aidpInvalid =
     isAidpTool(tool?.name) && Object.keys(aidpErrors(aidpValues)).length > 0;
+  const aidpResolvedValues = resolveAidpConfig(aidpValues);
+  const aidpDefaultValues = resolveAidpConfig({});
+  const aidpCustomized = Object.keys(aidpDefaultValues).some(
+    (key) => aidpResolvedValues[key] !== aidpDefaultValues[key]
+  );
+  const toolParamLabel = (name: string) =>
+    isAidpTool(tool?.name) &&
+    ["server_url", "api_key", "tenant_id", "kds_list"].includes(name)
+      ? t(`aidpRetrieval.toolParams.${name}`)
+      : name;
 
   const applyAidpPatch = (patch: Record<string, unknown>) => {
     const fields: Record<string, unknown> = {};
@@ -2329,14 +2345,6 @@ export default function ToolConfigModal({
             }}
           >
             <div className="w-full">
-              {isAidpTool(tool?.name) && (
-                <AidpRetrievalParamsForm
-                  values={aidpValues}
-                  disabled={isLoading}
-                  scope="tool"
-                  onChange={applyAidpPatch}
-                />
-              )}
               {currentParams.map((param, index) => {
                 if (isAidpTool(tool?.name) && param.name in aidpDefaults)
                   return null;
@@ -2537,7 +2545,7 @@ export default function ToolConfigModal({
                     colon={false}
                     label={
                       <ParamLabel
-                        label={param.name}
+                        label={toolParamLabel(param.name)}
                         required={param.required}
                         info={Boolean(
                           getLocalizedDescription(
@@ -2573,6 +2581,42 @@ export default function ToolConfigModal({
                   </Form.Item>
                 );
               })}
+              {isAidpTool(tool?.name) && (
+                <div className="mt-2 border-t border-[#EEEEEE] pt-2">
+                  <button
+                    type="button"
+                    aria-expanded={aidpConfigOpen}
+                    onClick={() => setAidpConfigOpen((current) => !current)}
+                    className="flex h-8 w-full items-center gap-1.5 border-0 bg-transparent p-0 text-left"
+                  >
+                    <span className="text-[14px] font-bold leading-[22px] text-[#191919]">
+                      {t("aidpRetrieval.toolSection.title")}
+                    </span>
+                    <SectionChevron expanded={aidpConfigOpen} />
+                    <span
+                      className={`ml-auto text-[12px] leading-[18px] ${
+                        aidpInvalid ? "text-[#C83E3E]" : "text-[#777]"
+                      }`}
+                    >
+                      {aidpInvalid
+                        ? t("aidpRetrieval.invalid")
+                        : aidpCustomized
+                          ? t("aidpRetrieval.toolSection.customized")
+                          : t("aidpRetrieval.toolSection.defaults")}
+                    </span>
+                  </button>
+                  {aidpConfigOpen ? (
+                    <div className="pt-4">
+                      <AidpRetrievalParamsForm
+                        values={aidpValues}
+                        disabled={isLoading}
+                        scope="tool"
+                        onChange={applyAidpPatch}
+                      />
+                    </div>
+                  ) : null}
+                </div>
+              )}
             </div>
           </Form>
         </div>
