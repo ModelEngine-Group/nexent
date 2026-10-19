@@ -53,6 +53,7 @@ from .context_overflow import (
     is_provider_context_overflow,
 )
 from .model_concurrency import ModelConcurrencyExceeded, model_concurrency_limiter
+from .sampling import DEFAULT_TEMPERATURE, DEFAULT_TOP_P, resolve_sampling
 from .retry import (
     DEFAULT_MODEL_RETRY,
     ModelRetryConfig,
@@ -192,7 +193,7 @@ class OpenAIModel(OpenAIServerModel):
 
     # Public SDK constructor: keep common kwargs explicit and read extension
     # kwargs below to preserve backward-compatible keyword call sites.
-    def __init__(self, observer: MessageObserver = MessageObserver, temperature=0.2, top_p=0.95,
+    def __init__(self, observer: MessageObserver = MessageObserver, temperature=DEFAULT_TEMPERATURE, top_p=DEFAULT_TOP_P,
                  ssl_verify=True, reasoning_effort: Optional[str] = None,
                  reasoning_budget_tokens: Optional[int] = None,
                  reasoning_capability: Optional[Dict[str, Any]] = None,
@@ -220,8 +221,8 @@ class OpenAIModel(OpenAIServerModel):
 
         Args:
             observer: MessageObserver instance for tracking model output
-            temperature: Sampling temperature (default: 0.2)
-            top_p: Top-p sampling parameter (default: 0.95)
+            temperature: Sampling temperature (default: 1.0; None inherits this default)
+            top_p: Top-p sampling parameter (default: 1.0; None inherits this default)
             reasoning_effort: Optional canonical reasoning effort level declared
                                by the selected model's capability profile.
             reasoning_capability: Optional catalog metadata describing how the
@@ -258,8 +259,9 @@ class OpenAIModel(OpenAIServerModel):
         prompt_cache: Optional[Dict[str, Any]] = kwargs.pop("prompt_cache", None)
 
         self.observer = observer
-        self.temperature = temperature
-        self.top_p = top_p
+        sampling = resolve_sampling(temperature, top_p)
+        self.temperature = sampling["temperature"]
+        self.top_p = sampling["top_p"]
         self.explicit_sampling = tuple(explicit_sampling or ())
         self.reasoning_effort = reasoning_effort
         self.reasoning_budget_tokens = reasoning_budget_tokens

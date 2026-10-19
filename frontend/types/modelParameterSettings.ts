@@ -10,6 +10,8 @@ export interface ModelParameterSettingsControl {
   scopeKey?: string;
   value: ModelParameterValue;
   defaultValue: ModelParameterValue;
+  /** Read-only configured defaults used for display, never runtime overrides. */
+  inheritedValue?: ModelParameterValue;
   disabled?: boolean;
   onChange: (value: ModelParameterValue) => void;
 }

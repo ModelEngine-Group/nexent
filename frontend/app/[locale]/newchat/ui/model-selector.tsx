@@ -88,6 +88,8 @@ export type ModelOption = {
   budgetTokens?: { min: number; max: number };
   /** Persisted model/agent budget, when one was explicitly configured. */
   defaultBudgetTokens?: number;
+  /** Effective Agent/model sampling defaults, separate from turn overrides. */
+  defaultSampling?: ModelParameterValue;
   reasoningCapability?: ReasoningCapability;
 };
 
@@ -909,6 +911,7 @@ function ModelSelectorAdvancedSettings({
     <ModelParameterSettings
       key={resolved.scopeKey ?? localScope}
       {...resolved}
+      inheritedValue={resolved.inheritedValue ?? selectedModel?.defaultSampling}
       disabled={disabled || Boolean(resolved.disabled) || !selectedModel}
     />
   );

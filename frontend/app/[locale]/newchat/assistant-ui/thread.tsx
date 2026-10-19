@@ -28,6 +28,10 @@ import { useTranslation } from "react-i18next";
 import { MarkdownText } from "../ui/markdown-text";
 import { UserMessageBubble } from "@/components/interaction/user-message-bubble";
 import { UserMessageEditComposer } from "../components/user-message-edit-composer";
+import {
+  ThreadMessageRenderProvider,
+  threadMessageRenderers,
+} from "./thread-message-renderers";
 import { ClarificationMessageCard } from "../components/clarification-message-card";
 import { Reasoning, GroupReasoningTrigger } from "../ui/reasoning";
 import { ExecutionCodeBlock } from "../ui/execution-code-block";
@@ -208,12 +212,12 @@ export interface ThreadProps {
   reasoningBudgetTokens?: number;
   onReasoningBudgetTokensChange?: (budget: number) => void;
   chatMode: ChatMode;
-  onChatModeChange: (mode: ChatMode) => void;
+  onChatModeChange?: (mode: ChatMode) => void;
   showModelSelector?: boolean;
   modelParameterSettings?: ModelParameterSettingsControl;
   modelSelectionScope?: ModelSelectionScope;
   showConversationTitle?: boolean;
-  isDictationConfigured?: boolean;
+  composerTools?: ReactNode;
   knowledgeScope?: ConversationKnowledgeScope | null;
   knowledgePreview?: KnowledgeScopeEffectivePreview | null;
   knowledgeCapabilities?: KnowledgeCapabilities | null;
@@ -238,8 +242,6 @@ export interface ThreadProps {
   workbenchResources?: import("@/features/workbench/types").WorkbenchResourceControls;
   onRemoveWorkbenchSkill?: (skillId: number) => void;
   onOpenWorkbenchSkillPicker?: () => void;
-  workbenchSkillPopover?: ReactNode;
-  workbenchKnowledgePopover?: ReactNode;
 }
 
 /**
@@ -281,7 +283,7 @@ export const Thread: FC<ThreadProps> = ({
   modelParameterSettings,
   modelSelectionScope = "agent",
   showConversationTitle = true,
-  isDictationConfigured = false,
+  composerTools,
   knowledgeScope = null,
   knowledgePreview = null,
   knowledgeCapabilities = null,
@@ -303,8 +305,6 @@ export const Thread: FC<ThreadProps> = ({
   workbenchResources,
   onRemoveWorkbenchSkill,
   onOpenWorkbenchSkillPicker,
-  workbenchSkillPopover,
-  workbenchKnowledgePopover,
 }) => {
   const { t } = useTranslation();
   const models = useAgentModels(agent, modelSelectionScope);
@@ -551,7 +551,7 @@ export const Thread: FC<ThreadProps> = ({
           modelParameterSettings ?? controls.modelParameterSettings
         }
         showConversationTitle={showConversationTitle}
-        isDictationConfigured={isDictationConfigured}
+        composerTools={composerTools}
         knowledgeScope={knowledgeScope}
         knowledgePreview={knowledgePreview}
         knowledgeCapabilities={knowledgeCapabilities}
@@ -579,8 +579,6 @@ export const Thread: FC<ThreadProps> = ({
         workbenchResources={workbenchResources}
         onRemoveWorkbenchSkill={onRemoveWorkbenchSkill}
         onOpenWorkbenchSkillPicker={onOpenWorkbenchSkillPicker}
-        workbenchSkillPopover={workbenchSkillPopover}
-        workbenchKnowledgePopover={workbenchKnowledgePopover}
         hasMessages={hasMessages}
         displayName={displayName}
         conversationTitle={conversationTitle}
@@ -671,11 +669,11 @@ interface ThreadViewProps {
   reasoningBudgetTokens?: number;
   onReasoningBudgetTokensChange?: (budget: number) => void;
   chatMode: ChatMode;
-  onChatModeChange: (mode: ChatMode) => void;
+  onChatModeChange?: (mode: ChatMode) => void;
   showModelSelector: boolean;
   modelParameterSettings?: ModelParameterSettingsControl;
   showConversationTitle: boolean;
-  isDictationConfigured: boolean;
+  composerTools?: ReactNode;
   knowledgeScope: ConversationKnowledgeScope | null;
   knowledgePreview: KnowledgeScopeEffectivePreview | null;
   knowledgeCapabilities: KnowledgeCapabilities | null;
@@ -718,8 +716,6 @@ interface ThreadViewProps {
   workbenchResources?: import("@/features/workbench/types").WorkbenchResourceControls;
   onRemoveWorkbenchSkill?: (skillId: number) => void;
   onOpenWorkbenchSkillPicker?: () => void;
-  workbenchSkillPopover?: ReactNode;
-  workbenchKnowledgePopover?: ReactNode;
 }
 
 const ThreadView: FC<ThreadViewProps> = ({
@@ -742,7 +738,7 @@ const ThreadView: FC<ThreadViewProps> = ({
   showModelSelector,
   modelParameterSettings,
   showConversationTitle,
-  isDictationConfigured,
+  composerTools,
   knowledgeScope,
   knowledgePreview,
   knowledgeCapabilities,
@@ -782,8 +778,6 @@ const ThreadView: FC<ThreadViewProps> = ({
   workbenchResources,
   onRemoveWorkbenchSkill,
   onOpenWorkbenchSkillPicker,
-  workbenchSkillPopover,
-  workbenchKnowledgePopover,
 }) => {
   const { t } = useTranslation();
   const workbenchLanding = Boolean(
@@ -1010,7 +1004,6 @@ const ThreadView: FC<ThreadViewProps> = ({
                 emptyFooterContent
               ))}
             <Composer
-              newChatDesign={newChatDesign}
               debugLayout={debugLayout}
               models={models}
               selectedModelId={selectedModelId}
@@ -1025,12 +1018,10 @@ const ThreadView: FC<ThreadViewProps> = ({
               onChatModeChange={onChatModeChange}
               showModelSelector={showModelSelector}
               modelParameterSettings={modelParameterSettings}
-              isDictationConfigured={isDictationConfigured}
               knowledgeScope={knowledgeScope}
               knowledgePreview={knowledgePreview}
               knowledgeCapabilities={knowledgeCapabilities}
               onKnowledgeScopeChange={onKnowledgeScopeChange}
-              compact={variant === "embedded"}
               skillFiles={skillFiles}
               runtimeMetadata={runtimeMetadata}
               onRuntimeMetadataChange={onRuntimeMetadataChange}
@@ -1042,9 +1033,9 @@ const ThreadView: FC<ThreadViewProps> = ({
               workbenchResources={workbenchResources}
               onRemoveWorkbenchSkill={onRemoveWorkbenchSkill}
               onOpenWorkbenchSkillPicker={onOpenWorkbenchSkillPicker}
-              workbenchSkillPopover={workbenchSkillPopover}
-              workbenchKnowledgePopover={workbenchKnowledgePopover}
-            />
+            >
+              {composerTools}
+            </Composer>
             {footerContent}
           </ThreadPrimitive.ViewportFooter>
         )}
@@ -1168,27 +1159,23 @@ export const ThreadMessages: FC<{
 
   const messageComponents = useMemo(
     () => ({
-      UserMessage: () => (
-        <UserMessage
-          readOnly={readOnly}
-          enableSkillDirectives={enableSkillDirectives}
-        />
-      ),
-      AssistantMessage: () => (
-        <AssistantMessage
-          agent={agent}
-          readOnly={readOnly}
-          onSkillFileSelect={onSkillFileSelect}
-        />
-      ),
+      ...threadMessageRenderers,
       EditComposer: readOnly || shareMode ? undefined : UserMessageEditComposer,
     }),
-    [agent, enableSkillDirectives, onSkillFileSelect, readOnly, shareMode]
+    [readOnly, shareMode]
   );
+  const renderState = {
+    agent,
+    readOnly,
+    enableSkillDirectives,
+    onSkillFileSelect,
+    UserMessage,
+    AssistantMessage,
+  };
 
   if (shareMode) {
     return (
-      <>
+      <ThreadMessageRenderProvider {...renderState}>
         {shareMessageGroups.map((group) => {
           const shareSelected =
             group.userMessageId !== undefined &&
@@ -1227,11 +1214,15 @@ export const ThreadMessages: FC<{
             </div>
           );
         })}
-      </>
+      </ThreadMessageRenderProvider>
     );
   }
 
-  return <ThreadPrimitive.Messages components={messageComponents} />;
+  return (
+    <ThreadMessageRenderProvider {...renderState}>
+      <ThreadPrimitive.Messages components={messageComponents} />
+    </ThreadMessageRenderProvider>
+  );
 };
 
 const ThreadScrollToBottom: FC = () => {

@@ -4,6 +4,7 @@
 
 import {
   createElement,
+  useContext,
   useEffect,
   useRef,
   useState,
@@ -27,6 +28,9 @@ import type { AgentCardItem, SelectedItem } from "./types";
 import { useResourceTagFilter } from "@/hooks/useResourceTagFilter";
 import { ResourceTagFilterControl } from "./ResourceTagFilterControl";
 import { ResourceAssignedTags } from "./ResourceAssignedTags";
+import { AuthorizationContext } from "@/components/providers/AuthorizationProvider";
+import { useResourceTagAssignments } from "@/hooks/useResourceTagAssignments";
+import type { TagAssignmentValue } from "@/types/tagManagement";
 
 import styles from "./ResourcePickerDrawer.module.css";
 
@@ -78,6 +82,7 @@ function AgentCard({
   icon,
   disabled = false,
   refreshKey,
+  assignments,
 }: {
   item: AgentCardItem;
   selected: boolean;
@@ -85,6 +90,7 @@ function AgentCard({
   icon: ReactNode;
   disabled?: boolean;
   refreshKey?: number;
+  assignments: TagAssignmentValue[];
 }) {
   const { t } = useTranslation("common");
   const [failedIconSource, setFailedIconSource] = useState<string>();
@@ -174,6 +180,7 @@ function AgentCard({
           resourceId={item.tagResourceId}
           tags={item.tags}
           refreshKey={refreshKey}
+          assignments={assignments}
         />
       )}
       <div className={styles.agentMetadata}>
@@ -219,6 +226,7 @@ export function AgentDrawer({
   title,
 }: AgentDrawerProps) {
   const { t } = useTranslation("common");
+  const authorization = useContext(AuthorizationContext);
   const [activeKey, setActiveKey] = useState("");
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(1);
@@ -269,6 +277,18 @@ export function AgentDrawer({
     currentPage * pageSize
   );
   const selectedIds = new Set(draft.map((item) => item.id));
+  const tagIds = [
+    ...new Set(
+      paged.flatMap((item) => (item.tagResourceId ? [item.tagResourceId] : []))
+    ),
+  ];
+  const assignments = useResourceTagAssignments(
+    "agent",
+    open && !category?.loading && !category?.error,
+    tagIds,
+    resourceTags.revision,
+    authorization?.user?.tenantId ?? null
+  );
   const allSelected =
     paged.length > 0 && paged.every((item) => selectedIds.has(item.id));
   const partiallySelected =
@@ -364,7 +384,14 @@ export function AgentDrawer({
       }
       allSelected={allSelected}
       partiallySelected={partiallySelected}
-      onRefresh={onRefresh}
+      onRefresh={
+        onRefresh
+          ? () => {
+              onRefresh();
+              if (open && tagIds.length > 0) void assignments.refetch();
+            }
+          : undefined
+      }
     >
       {category?.error ? (
         <Alert type="error" title={category.error} />
@@ -386,6 +413,7 @@ export function AgentDrawer({
               item={item}
               disabled={saving}
               refreshKey={resourceTags.revision}
+              assignments={assignments.data?.[item.tagResourceId ?? ""] ?? []}
               selected={selectedIds.has(item.id)}
               onToggle={() => toggle(item)}
               icon={category?.icon ?? <Bot size={20} />}

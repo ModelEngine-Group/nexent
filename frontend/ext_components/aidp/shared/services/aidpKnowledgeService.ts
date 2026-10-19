@@ -435,6 +435,20 @@ class AidpKnowledgeService {
       body: JSON.stringify({ file_uuid: fileUuid }),
     });
   }
+
+  /**
+   * Build the URL that streams one document for preview.
+   *
+   * A URL is returned rather than a request because the preview surface loads it
+   * directly (fetch, `<img>`, `<a download>`); authentication travels in the
+   * HttpOnly cookie, so no authorisation header is needed. AIDP serves the
+   * original bytes for docx/xlsx/pptx/pdf/txt and a PDF conversion for every
+   * other format, and reports the served name in the `X-File-Name` header the
+   * preview reads to pick a renderer.
+   */
+  getPreviewUrl(id: string, fileUuid: string): string {
+    return API_ENDPOINTS.aidpMgmt.previewKbDocument(id, fileUuid);
+  }
 }
 
 const aidpKnowledgeService = new AidpKnowledgeService();

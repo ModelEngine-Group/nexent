@@ -184,12 +184,10 @@ export const Nl2AgentChatPanel = forwardRef<
             agent={nl2AgentDisplay}
             generatedTitle={assistantTitle}
             chatMode="execution"
-            onChatModeChange={() => undefined}
             {...modelControls}
             modelSelectionScope="tenant"
             showModelSelector
             showConversationTitle={false}
-            isDictationConfigured={Boolean(modelConfig?.stt)}
             readOnly={disabled || !modelControls.canCreate}
             variant="embedded"
             welcomeContent={

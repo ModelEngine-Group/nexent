@@ -1,5 +1,9 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import logging
 from typing import Any, Dict, List, Optional
+
+from nexent.core.models.sampling import resolve_sampling
 
 from consts.const import (
     DOCKER_INTERNAL_HOST,
@@ -947,6 +951,10 @@ async def list_models_for_tenant(tenant_id: str):
             # Map model_type if necessary (for ModelEngine compatibility)
             if record.get("model_type") in type_map:
                 record["model_type"] = type_map[record["model_type"]]
+
+            if record.get("model_type") == "llm":
+                # Display metadata must never fill persisted configuration fields.
+                record["effective_sampling"] = resolve_sampling(record.get("temperature"), record.get("top_p"))
 
             result.append(record)
 

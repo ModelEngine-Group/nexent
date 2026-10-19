@@ -4,6 +4,7 @@ import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { render, changePageSize } from "./resourceDrawerTestUtils";
 import { ToolDrawer } from "@/components/resource-picker/ToolDrawer";
+import { tagManagementApi } from "@/services/tagManagementService";
 
 const state = vi.hoisted(() => ({
   editedAgent: { tools: [] },
@@ -32,6 +33,7 @@ vi.mock("@/services/tagManagementService", () => ({
     listLibraries: vi.fn(async () => []),
     listDefinitions: vi.fn(async () => []),
     getAssignments: vi.fn(async () => ({ assignments: [] })),
+    getToolAssignmentsBatch: vi.fn(async () => []),
     filterResourceIds: vi.fn(async () => ({ matched_resource_ids: [] })),
   },
 }));
@@ -90,15 +92,42 @@ describe("ToolDrawer shared rows", () => {
     try {
       render(<ToolDrawer open onClose={vi.fn()} />);
       expect(screen.getAllByRole("option")).toHaveLength(10);
+      await waitFor(() =>
+        expect(
+          tagManagementApi.getToolAssignmentsBatch
+        ).toHaveBeenCalledExactlyOnceWith(
+          Array.from({ length: 10 }, (_, index) => String(index + 1))
+        )
+      );
+      expect(tagManagementApi.getAssignments).not.toHaveBeenCalled();
       fireEvent.click(screen.getByRole("button", { name: "3" }));
       expect(
         screen.getByRole("option", { name: "Tool 21" })
       ).toBeInTheDocument();
+      await waitFor(() =>
+        expect(
+          tagManagementApi.getToolAssignmentsBatch
+        ).toHaveBeenLastCalledWith(["21"])
+      );
       await changePageSize(20);
       expect(screen.getAllByRole("option")).toHaveLength(20);
       expect(
         screen.getByRole("option", { name: "Tool 01" })
       ).toBeInTheDocument();
+      await waitFor(() =>
+        expect(
+          tagManagementApi.getToolAssignmentsBatch
+        ).toHaveBeenLastCalledWith(
+          Array.from({ length: 20 }, (_, index) => String(index + 1))
+        )
+      );
+      expect(tagManagementApi.getAssignments).not.toHaveBeenCalled();
+      fireEvent.click(screen.getByRole("button", { name: "刷新" }));
+      await waitFor(() =>
+        expect(tagManagementApi.getToolAssignmentsBatch).toHaveBeenCalledTimes(
+          4
+        )
+      );
     } finally {
       state.tools = original;
     }

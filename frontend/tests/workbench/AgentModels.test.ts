@@ -600,3 +600,55 @@ it("keeps unconfigured reasoning automatic instead of substituting a capability 
     )[0].defaultEffort
   ).toBe("xhigh");
 });
+
+it("displays per-field Agent and model sampling defaults without leaking them into tenant scope", () => {
+  const model: ModelOption = {
+    ...reasoningModelFixture,
+    temperature: 0.45,
+    topP: 0.83,
+  };
+  const agent: Agent = {
+    ...reasoningAgentFixture,
+    model_ids: [11],
+    model_names: ["qwen"],
+    model_params_override: { "11": { temperature: 0, top_p: null } },
+  };
+  expect(
+    deriveModelOptions(agent, [model], "agent")[0].defaultSampling
+  ).toEqual({ temperature: 0, top_p: 0.83 });
+  expect(
+    deriveModelOptions(agent, [model], "tenant")[0].defaultSampling
+  ).toEqual({ temperature: 0.45, top_p: 0.83 });
+  expect(
+    deriveModelOptions(agent, [reasoningModelFixture], "tenant")[0]
+      .defaultSampling
+  ).toBeUndefined();
+  expect(agent.model_params_override).toEqual({
+    "11": { temperature: 0, top_p: null },
+  });
+});
+
+it("uses backend SDK sampling metadata only as the final per-field display fallback", () => {
+  const model: ModelOption = {
+    ...reasoningModelFixture,
+    effectiveSampling: { temperature: 1, top_p: 1 },
+  };
+  const agent: Agent = {
+    ...reasoningAgentFixture,
+    model_ids: [11],
+    model_names: ["qwen"],
+    model_params_override: { "11": { temperature: 0, top_p: null } },
+  };
+  expect(
+    deriveModelOptions(agent, [model], "agent")[0].defaultSampling
+  ).toEqual({ temperature: 0, top_p: 1 });
+  expect(
+    deriveModelOptions(agent, [model], "tenant")[0].defaultSampling
+  ).toEqual({ temperature: 1, top_p: 1 });
+  expect(
+    deriveModelOptions(agent, [{ ...model, topP: 0.87 }], "agent")[0]
+      .defaultSampling
+  ).toEqual({ temperature: 0, top_p: 0.87 });
+  expect(model.temperature).toBeUndefined();
+  expect(model.topP).toBeUndefined();
+});

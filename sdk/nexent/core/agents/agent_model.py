@@ -7,9 +7,10 @@ from dataclasses import fields, is_dataclass
 from threading import Event
 from typing import TYPE_CHECKING, Any, Dict, List, Literal, Optional, Union
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, ValidationInfo, field_validator, model_validator
 
 from ..models.capacity_budget import ContextBudgetSnapshot
+from ..models.sampling import DEFAULT_TEMPERATURE, DEFAULT_TOP_P, resolve_sampling
 from ..utils.observer import MessageObserver
 from .context.models import ContextItemInput
 
@@ -56,8 +57,15 @@ class ModelConfig(BaseModel):
     api_key: str = Field(description="API key", default="")
     model_name: str = Field(description="Model call name")
     url: str = Field(description="Model endpoint URL")
-    temperature: Optional[float] = Field(description="Temperature", default=0.1)
-    top_p: Optional[float] = Field(description="Top P", default=0.95)
+    temperature: Optional[float] = Field(description="Temperature", default=DEFAULT_TEMPERATURE)
+    top_p: Optional[float] = Field(description="Top P", default=DEFAULT_TOP_P)
+
+    @field_validator("temperature", "top_p", mode="before")
+    @classmethod
+    def inherit_sampling_default(cls, value: Any, info: ValidationInfo) -> Any:
+        """Database nulls inherit the same SDK defaults as omitted fields."""
+        return resolve_sampling()[info.field_name] if value is None else value
+
     explicit_sampling: List[Literal["temperature", "top_p"]] = Field(
         default_factory=list,
         description="Request-scoped sampling intent that must not be dropped on provider retry",

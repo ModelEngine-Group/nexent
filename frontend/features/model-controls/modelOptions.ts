@@ -168,6 +168,14 @@ export const deriveModelOptions = (
       scope === "agent"
         ? typedAgent.model_params_override?.[id]?.extra_params
         : undefined;
+    const sampling =
+      scope === "agent" ? typedAgent.model_params_override?.[id] : undefined;
+    const temperature =
+      sampling?.temperature ??
+      model?.temperature ??
+      model?.effectiveSampling?.temperature;
+    const topP =
+      sampling?.top_p ?? model?.topP ?? model?.effectiveSampling?.top_p;
     const capability = model?.reasoningCapability;
     const effortControl =
       capability?.status === "supported"
@@ -207,6 +215,14 @@ export const deriveModelOptions = (
     return {
       id,
       name: fallbackName,
+      ...(temperature != null || topP != null
+        ? {
+            defaultSampling: {
+              ...(temperature != null ? { temperature } : {}),
+              ...(topP != null ? { top_p: topP } : {}),
+            },
+          }
+        : {}),
       reasoningCapability: capability,
       defaultDeepThinking:
         typeof extra?.enable_thinking === "boolean"

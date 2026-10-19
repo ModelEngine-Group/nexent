@@ -18,6 +18,8 @@ export async function prepareControls(page: Page, histories: Array<Record<string
   };
   const model = (id: number, name: string, capability: any) => ({
     model_id: id, display_name: name, model_name: name, model_factory: "openai", model_type: "llm",
+    ...(id === 1 ? {temperature:0.6,top_p:0.85} : {}),
+    effective_sampling: id === 1 ? {temperature:0.6,top_p:0.85} : {temperature:1,top_p:1},
     connect_status: "available", extra_params: { enable_thinking: false, reasoning_effort: "low" }, reasoning_capability: capability,
   });
   const effort = { status: "supported", source: "catalog", levels, controls: [{ type: "effort", values: levels }] };

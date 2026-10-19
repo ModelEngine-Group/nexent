@@ -1,13 +1,27 @@
 // Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
 import { expect } from "playwright/test";
+import { join } from "node:path";
 import { journey } from "../../infra/automation/d4/runner/journey";
 import { prepareWorkbench } from "../../infra/automation/d4/fixtures/workbench-controls";
 
 journey("WB-CONTROLS-D4-002", async ({ page, contract }) => {
   await page.setViewportSize({ width: 1174, height: 1188 });
-  const state = await prepareWorkbench(page);
+  const history = {conversation_id:91,conversation_title:"Saved parameter reset",agent_id:null,create_time:Date.now(),update_time:Date.now()};
+  const state = await prepareWorkbench(page, 1, {histories:[history],samplingDefaults:{temperature:0.6,top_p:0.85},agentSamplingDefaults:{temperature:0.45}});
   const input = page.locator("[data-workbench-composer]");
+  const expectAligned = async (panel: ReturnType<typeof page.getByRole>) => {
+    for (const label of ["温度", "Top P"]) {
+      const numeric = panel.getByRole("spinbutton", {name:label,exact:true});
+      const rail = numeric.locator("..").locator(".ant-slider-rail");
+      await expect.poll(async () => {
+        const a = await numeric.boundingBox(), b = await rail.boundingBox();
+        if (!a || !b) return Number.POSITIVE_INFINITY;
+        return Math.abs(a.y + a.height / 2 - b.y - b.height / 2);
+      }).toBeLessThanOrEqual(1);
+    }
+  };
+
   await contract.precondition(contract.expectedIds("preconditions")[0], async () => {
     await expect(input).toBeVisible();
     await expect(page.getByText("Fixture Model", { exact: true })).toBeVisible();
@@ -56,7 +70,8 @@ journey("WB-CONTROLS-D4-002", async ({ page, contract }) => {
       await advanced.hover();
       const panel = page.getByRole("region", { name: "高级设置", exact: true });
       const temperature = panel.getByRole("spinbutton", { name: "温度", exact: true });
-      await expect(temperature).toHaveValue("");
+      await expect(temperature).toHaveValue("0.6");
+      await expectAligned(panel);
       const slider = panel.getByRole("slider", { name: "温度 滑块", exact: true });
       await slider.focus();
       await slider.hover();
@@ -74,7 +89,8 @@ journey("WB-CONTROLS-D4-002", async ({ page, contract }) => {
         await expect(panel.getByRole("alert")).toHaveText("请输入 0–2 的数字");
       }
       await panel.getByRole("button", { name: "恢复默认", exact: true }).click();
-      await expect(temperature).toHaveValue(""); await expect(topP).toHaveValue("");
+      await expect(temperature).toHaveValue("0.6"); await expect(topP).toHaveValue("0.85");
+      await expectAligned(panel);
       await expect(input).toHaveValue("Ordinary conversation draft");
       await page.goto(`${process.env.NEXENT_BASE_URL}/zh/newchat`);
       await expect(page).toHaveURL(/\/zh\/newchat/);
@@ -89,13 +105,17 @@ journey("WB-CONTROLS-D4-002", async ({ page, contract }) => {
       await sharedAdvanced.hover();
       const sharedPanel = page.getByRole("region", { name: "高级设置", exact: true });
       const sharedTemperature = sharedPanel.getByRole("spinbutton", { name: "温度", exact: true });
+      await expect(sharedTemperature).toHaveValue("0.45");
+      await expectAligned(sharedPanel);
+      await expect(sharedPanel.getByRole("slider",{name:"温度 滑块"})).toHaveAttribute("aria-valuenow","0.45");
       await sharedTemperature.fill("0.7"); await sharedTemperature.press("Enter");
       await expect(sharedPanel.getByRole("slider", { name: "温度 滑块" })).toHaveAttribute("aria-valuenow", "0.7");
       const sharedTopP = sharedPanel.getByRole("spinbutton", { name: "Top P", exact: true });
       await sharedTopP.fill("0.4"); await sharedTopP.press("Enter");
       await expect(sharedPanel.getByRole("slider", { name: "Top P 滑块" })).toHaveAttribute("aria-valuenow", "0.4");
       await sharedPanel.getByRole("button", { name: "恢复默认", exact: true }).click();
-      await expect(sharedTemperature).toHaveValue(""); await expect(sharedTopP).toHaveValue("");
+      await expect(sharedTemperature).toHaveValue("0.45"); await expect(sharedTopP).toHaveValue("0.85");
+      await expectAligned(sharedPanel);
       expect(state.writes).toEqual(writesBeforeParameters);
       await page.goto(`${process.env.NEXENT_BASE_URL}/zh/workbench`);
       await expect(input).toBeVisible();
@@ -122,5 +142,59 @@ journey("WB-CONTROLS-D4-002", async ({ page, contract }) => {
       }
     }
     expect(state.writes).toEqual([]);
+  });
+  await contract.step(contract.expectedIds("steps")[3], async () => {
+    let config = {schema_version:3,mode:"generic_chat",model_id:1,generation_config:{deep_thinking:false,thinking_effort:"auto",requested_output_tokens:2048,temperature:0.7,top_p:0.4},agent_mounts:[],skill_mounts:[]};
+    let version = 1;
+    let reads = 0;
+    const patches: Array<{config:typeof config;expected_version:number}> = [];
+    await page.route("**/api/conversation/91", async route => {
+      reads++;
+      await route.fulfill({status:200,contentType:"application/json",body:JSON.stringify({code:0,data:[{...history,message:[
+        {role:"user",message:"Saved fixture question",message_id:101,message_index:0,status:"completed"},
+        {role:"assistant",message:[{type:"final_answer",content:"Saved reply remains mounted"}],message_id:102,message_index:1,status:"completed"},
+      ],workbench_config:config,workbench_config_version:version}]})});
+    });
+    await page.route("**/api/conversation/91/workbench-config", async route => {
+      patches.push(route.request().postDataJSON());
+      await new Promise(resolve=>setTimeout(resolve,500));
+      config=patches.at(-1)!.config;
+      version++;
+      await route.fulfill({status:200,contentType:"application/json",body:JSON.stringify({code:0,data:{workbench_config:config,workbench_config_version:version}})});
+    });
+    await page.getByRole("button").filter({has:page.getByText("Saved parameter reset",{exact:true})}).click();
+    await expect(page.getByText("Saved reply remains mounted",{exact:true})).toBeVisible();
+    await expect(page.locator('[data-slot="model-selector-trigger"]')).toBeEnabled();
+    await input.fill("Unsent reset regression draft");
+    const assistant = await page.locator('[data-slot="aui_assistant-message-root"]').elementHandle();
+    const composer = await input.elementHandle();
+    const url = page.url();
+    const navigations: string[]=[];
+    const navigation = (frame: import("playwright/test").Frame) => { if(frame===page.mainFrame()) navigations.push(frame.url()); };
+    page.on("framenavigated",navigation);
+    await page.locator('[data-slot="model-selector-trigger"]').click();
+    await page.getByRole("button",{name:"高级设置",exact:true}).hover();
+    const panel = page.getByRole("region",{name:"高级设置",exact:true});
+    const readsBeforeReset=reads;
+    await panel.getByRole("button",{name:"恢复默认",exact:true}).click();
+    await expect.poll(()=>patches.length).toBe(1);
+    await expect(panel.getByRole("spinbutton",{name:"温度",exact:true})).toBeDisabled();
+    expect(await assistant!.evaluate(node=>node.isConnected)).toBe(true);
+    expect(await composer!.evaluate(node=>node.isConnected)).toBe(true);
+    await expect(panel.getByRole("spinbutton",{name:"温度",exact:true})).toHaveValue("0.6");
+    await expect(panel.getByRole("spinbutton",{name:"Top P",exact:true})).toHaveValue("0.85");
+    await expect(panel.getByRole("spinbutton",{name:"温度",exact:true})).toBeEnabled();
+    expect(await assistant!.evaluate(node=>node.isConnected)).toBe(true);
+    expect(await composer!.evaluate(node=>node.isConnected)).toBe(true);
+    await expect(input).toHaveValue("Unsent reset regression draft");
+    expect(page.url()).toBe(url); expect(navigations).toEqual([]); expect(reads).toBe(readsBeforeReset);
+    expect(patches[0].expected_version).toBe(1);
+    expect(patches[0].config).toMatchObject({model_id:1,mode:"generic_chat",generation_config:{deep_thinking:false,thinking_effort:"auto",requested_output_tokens:2048},agent_mounts:[],skill_mounts:[]});
+    expect(patches[0].config.generation_config.temperature ?? null).toBeNull();
+    expect(patches[0].config.generation_config.top_p ?? null).toBeNull();
+    expect(state.writes).toEqual([]);
+    page.off("framenavigated",navigation);
+    await assistant!.dispose(); await composer!.dispose();
+    await page.screenshot({path:join(process.env.NEXENT_TEST_HOME!,"artifacts","sampling-reset-after.png")});
   });
 });
