@@ -168,7 +168,8 @@ describe("newchat refresh restore wiring", () => {
     expect(window.sessionStorage.getItem(CONVERSATION_KEY)).toBeNull();
 
     // Returning through the menu therefore starts on the landing page.
-    capturedRuntimeOptions = undefined;
+    // (The mocked runtime hook overwrites the captured options on every
+    // render, so they can be asserted directly after the second render.)
     render(<Home />);
     expect(capturedRuntimeOptions?.initialThreadId).toBeUndefined();
     expect(screen.getByText("Agent list")).toBeInTheDocument();
