@@ -11,9 +11,15 @@ import {
 } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { ModelParameterSettings } from "@/components/chat/ModelParameterSettings";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
 import type { ModelParameterValue } from "@/types/modelParameterSettings";
 
-vi.mock("react-i18next", () => ({
+vi.mock("react-i18next", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("react-i18next")>()),
   useTranslation: () => ({
     t: (_key: string, fallback: unknown) =>
       typeof fallback === "string" ? fallback : "请输入 0–2 的数字",
@@ -35,11 +41,63 @@ function Harness({ changed }: { changed: (value: unknown) => void }) {
   );
 }
 
+it("does not open from model-menu autofocus when the thinking switch is disabled", async () => {
+  const changed = vi.fn();
+  const user = userEvent.setup();
+  render(
+    <Popover>
+      <PopoverTrigger>Open model menu</PopoverTrigger>
+      <PopoverContent>
+        <button type="button" disabled>
+          Deep thinking
+        </button>
+        <Harness changed={changed} />
+      </PopoverContent>
+    </Popover>
+  );
+  await user.click(screen.getByRole("button", { name: "Open model menu" }));
+  const advanced = await screen.findByRole("button", { name: "高级设置" });
+  await waitFor(() => expect(advanced).toHaveFocus());
+  expect(advanced).toHaveAttribute("aria-expanded", "false");
+  expect(
+    screen.queryByRole("region", { name: "高级设置" })
+  ).not.toBeInTheDocument();
+  expect(changed).not.toHaveBeenCalled();
+  await user.hover(advanced);
+  const panel = await screen.findByRole("region", { name: "高级设置" });
+  await waitFor(() => expect(panel).toBeVisible());
+  expect(changed).not.toHaveBeenCalled();
+});
+
+it.each(["Enter", " ", "ArrowRight"])(
+  "opens only on explicit %s activation after focus and closes with Escape",
+  async (key) => {
+    const changed = vi.fn();
+    render(<Harness changed={changed} />);
+    const advanced = screen.getByRole("button", { name: "高级设置" });
+    fireEvent.focus(advanced);
+    expect(advanced).toHaveAttribute("aria-expanded", "false");
+    fireEvent.keyDown(advanced, { key });
+    const panel = await screen.findByRole("region", { name: "高级设置" });
+    await waitFor(() => expect(panel).toBeVisible());
+    fireEvent.keyDown(panel, { key: "Escape" });
+    await waitFor(() =>
+      expect(advanced).toHaveAttribute("aria-expanded", "false")
+    );
+    await waitFor(() => expect(panel).not.toBeVisible());
+    await userEvent.click(advanced);
+    await waitFor(() => expect(panel).toBeVisible());
+    expect(changed).not.toHaveBeenCalled();
+  }
+);
+
 it("inherits until edited, preserves zero and decimals, then resets both overrides", async () => {
   const changed = vi.fn();
   const requests = vi.spyOn(globalThis, "fetch");
   render(<Harness changed={changed} />);
-  fireEvent.focus(screen.getByRole("button", { name: "高级设置" }));
+  fireEvent.keyDown(screen.getByRole("button", { name: "高级设置" }), {
+    key: "Enter",
+  });
   const panel = within(await screen.findByRole("region", { name: "高级设置" }));
   const temperature = panel.getByRole("spinbutton", { name: "温度" });
   const topP = panel.getByRole("spinbutton", { name: "Top P" });
@@ -79,7 +137,9 @@ it.each(["", "-0.1", "2.1"])(
   async (invalid) => {
     const changed = vi.fn();
     render(<Harness changed={changed} />);
-    fireEvent.focus(screen.getByRole("button", { name: "高级设置" }));
+    fireEvent.keyDown(screen.getByRole("button", { name: "高级设置" }), {
+      key: "Enter",
+    });
     const input = await screen.findByRole("spinbutton", { name: "温度" });
     fireEvent.change(input, { target: { value: invalid } });
     fireEvent.blur(input);
@@ -93,7 +153,9 @@ it.each(["", "-0.1", "2.1"])(
 it("keyboard sliders commit decimal steps and Top P rejects values above one", async () => {
   const changed = vi.fn();
   render(<Harness changed={changed} />);
-  fireEvent.focus(screen.getByRole("button", { name: "高级设置" }));
+  fireEvent.keyDown(screen.getByRole("button", { name: "高级设置" }), {
+    key: "Enter",
+  });
   const slider = await screen.findByRole("slider", { name: "温度 滑块" });
   fireEvent.keyDown(slider, {
     key: "ArrowRight",
@@ -123,7 +185,9 @@ it("shows configured zero and exact decimal defaults without turning focus or re
     onChange: changed,
   };
   const { rerender } = render(<ModelParameterSettings {...props} />);
-  fireEvent.focus(screen.getByRole("button", { name: "高级设置" }));
+  fireEvent.keyDown(screen.getByRole("button", { name: "高级设置" }), {
+    key: "Enter",
+  });
   const t = await screen.findByRole("spinbutton", { name: "温度" });
   const p = screen.getByRole("spinbutton", { name: "Top P" });
   expect(t).toHaveValue(0);
@@ -165,7 +229,9 @@ it("does not invent an unknown default or a zero slider handle, but permits a ru
   render(
     <ModelParameterSettings value={{}} defaultValue={{}} onChange={changed} />
   );
-  fireEvent.focus(screen.getByRole("button", { name: "高级设置" }));
+  fireEvent.keyDown(screen.getByRole("button", { name: "高级设置" }), {
+    key: "Enter",
+  });
   const t = await screen.findByRole("spinbutton", { name: "温度" });
   expect(t).toHaveValue(null);
   expect(t).not.toHaveAttribute("placeholder", "继承默认");
@@ -198,7 +264,9 @@ it("restoring discards an uncommitted numeric draft without submitting or saving
       <Harness changed={changed} />
     </form>
   );
-  fireEvent.focus(screen.getByRole("button", { name: "高级设置" }));
+  fireEvent.keyDown(screen.getByRole("button", { name: "高级设置" }), {
+    key: "Enter",
+  });
   const temperature = await screen.findByRole("spinbutton", { name: "温度" });
   await userEvent.click(temperature);
   fireEvent.change(temperature, { target: { value: "0.4" } });

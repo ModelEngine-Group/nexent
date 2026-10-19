@@ -11,6 +11,7 @@ case:
   - CHAT-SAMPLING-20261016
   - CHAT-SAMPLING-DISPLAY-20261019
   - WB-SAMPLING-RESET-REMOUNT-20261019
+  - CHAT-ADVANCED-AUTOFOCUS-20261019
   business_rule_ids:
   - WB-CONTROLS-RULE-002
   - WB-CONTROLS-RULE-003
@@ -31,8 +32,8 @@ case:
       active creation button restores the ordinary draft. Chinese Skill button reads 技能创建; composer and textarea keep their
       top positions during mode entry, recommendation fill and return.
   - order: 2
-    action: Hover Advanced settings below effort, drag and type decimal values, test invalid input and restore defaults.
-    expected: Advanced settings has no gear and its label aligns with the other setting rows. Controls synchronize within
+    action: Open model menus with unsupported reasoning on Workbench and Agent chat; focus Advanced settings, then activate it by hover or keyboard. Drag and type decimal values, test invalid input and restore defaults.
+    expected: Opening the model menu or merely focusing Advanced settings keeps its panel closed, including automatic focus when thinking is disabled. Hover and explicit keyboard activation open it. Advanced settings has no gear and its label aligns with the other setting rows. Controls synchronize within
       temperature 0-2 and Top P 0-1 with step 0.1, remain open during editing, and new-conversation settings change without
       automatic generation or global model writes. New Agent chat also exposes shared Advanced settings with presence-aware
       runtime numeric editing while real model/thinking controls remain available. Configured defaults appear as numeric
@@ -43,7 +44,7 @@ case:
     expected: Only agent:create and skill:create independently enable their matching creation buttons; allowed buttons enter
       the matching mode without generation.
   - order: 4
-    action: Open an existing completed conversation, retain an unsent draft and reset sampling overrides while its versioned configuration PATCH is delayed.
+    action: Open an existing completed conversation, retain an unsent draft and reset sampling overrides while its versioned configuration PATCH is delayed. After the existing save lock completes, deliberately reopen Advanced settings to inspect the defaults.
     expected: Inputs/sliders return to inherited defaults; the same document, active history, message DOM and composer draft remain mounted. Only sampling fields are cleared; model, reasoning and mounts remain unchanged. Save remains locked while pending, no history reload or generation occurs, and exactly one configuration PATCH completes.
   expected_results:
   - Mode-specific recommendations and runtime parameter controls are usable through the browser.

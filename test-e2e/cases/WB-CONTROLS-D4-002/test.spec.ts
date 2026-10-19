@@ -58,6 +58,13 @@ journey("WB-CONTROLS-D4-002", async ({ page, contract }) => {
       await page.getByText("Fixture Model", { exact: true }).click();
       const advanced = page.getByRole("button", { name: "高级设置", exact: true });
       await expect(advanced).toBeVisible();
+      const panel = page.getByRole("region", { name: "高级设置", exact: true });
+      await expect(page.getByRole("switch", { name: "深度思考" })).toBeDisabled();
+      await expect(advanced).toBeFocused();
+      await expect(advanced).toHaveAttribute("aria-expanded", "false");
+      await expect(panel).not.toBeVisible();
+      await advanced.focus();
+      await expect(panel).not.toBeVisible();
       await expect(advanced.locator(".lucide-settings")).toHaveCount(0);
       await expect.poll(async () => {
         const advancedLabel = await advanced.getByText("高级设置", { exact: true }).boundingBox();
@@ -68,7 +75,6 @@ journey("WB-CONTROLS-D4-002", async ({ page, contract }) => {
       await expect(effort).toHaveCount(0);
       expect((await advanced.boundingBox())!.y).toBeGreaterThan((await page.getByText("深度思考", {exact:true}).boundingBox())!.y);
       await advanced.hover();
-      const panel = page.getByRole("region", { name: "高级设置", exact: true });
       const temperature = panel.getByRole("spinbutton", { name: "温度", exact: true });
       await expect(temperature).toHaveValue("0.6");
       await expectAligned(panel);
@@ -100,10 +106,16 @@ journey("WB-CONTROLS-D4-002", async ({ page, contract }) => {
       await page.getByText("Fixture Model", { exact: true }).click();
       const sharedAdvanced = page.getByRole("button", { name: "高级设置", exact: true });
       await expect(sharedAdvanced).toBeVisible();
+      const sharedPanel = page.getByRole("region", { name: "高级设置", exact: true });
+      await expect(sharedAdvanced).toBeFocused();
+      await expect(sharedAdvanced).toHaveAttribute("aria-expanded", "false");
+      await expect(sharedPanel).not.toBeVisible();
+      await sharedAdvanced.focus();
+      await expect(sharedPanel).not.toBeVisible();
       await expect(page.getByText("深度思考", { exact: true })).toBeVisible();
       await expect(page.getByText("思考强度", { exact: true })).toHaveCount(0);
-      await sharedAdvanced.hover();
-      const sharedPanel = page.getByRole("region", { name: "高级设置", exact: true });
+      await sharedAdvanced.press("ArrowRight");
+      await expect(sharedPanel).toBeVisible();
       const sharedTemperature = sharedPanel.getByRole("spinbutton", { name: "温度", exact: true });
       await expect(sharedTemperature).toHaveValue("0.45");
       await expectAligned(sharedPanel);
@@ -181,6 +193,15 @@ journey("WB-CONTROLS-D4-002", async ({ page, contract }) => {
     await expect(panel.getByRole("spinbutton",{name:"温度",exact:true})).toBeDisabled();
     expect(await assistant!.evaluate(node=>node.isConnected)).toBe(true);
     expect(await composer!.evaluate(node=>node.isConnected)).toBe(true);
+    // Saving temporarily disables/closes the model menu. Deliberately reopen
+    // the nested panel rather than depending on the removed autofocus action.
+    await expect(page.locator('[data-slot="model-selector-trigger"]')).toBeEnabled();
+    await expect(panel).not.toBeVisible();
+    const advancedAfterSave = page.getByRole("button",{name:"高级设置",exact:true});
+    if (!(await advancedAfterSave.isVisible())) {
+      await page.locator('[data-slot="model-selector-trigger"]').click();
+    }
+    await advancedAfterSave.hover();
     await expect(panel.getByRole("spinbutton",{name:"温度",exact:true})).toHaveValue("0.6");
     await expect(panel.getByRole("spinbutton",{name:"Top P",exact:true})).toHaveValue("0.85");
     await expect(panel.getByRole("spinbutton",{name:"温度",exact:true})).toBeEnabled();

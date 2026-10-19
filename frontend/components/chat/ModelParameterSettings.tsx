@@ -227,7 +227,6 @@ export function ModelParameterSettings(control: ModelParameterSettingsControl) {
         type="button"
         disabled={control.disabled}
         aria-expanded={open}
-        onFocus={() => setOpen(true)}
         onKeyDown={(event) => {
           if (["Enter", "ArrowRight", " "].includes(event.key)) {
             event.preventDefault();

@@ -337,7 +337,9 @@ it("default shared settings isolate local values by model and conversation witho
   );
   const { rerender } = render(view("12", "thread-a"));
   const openPanel = async () => {
-    fireEvent.focus(screen.getByRole("button", { name: "高级设置" }));
+    fireEvent.keyDown(screen.getByRole("button", { name: "高级设置" }), {
+      key: "Enter",
+    });
     return within(await screen.findByRole("region", { name: "高级设置" }));
   };
   let panel = await openPanel();
@@ -377,7 +379,9 @@ it("shared parameter editing honors disabled state and controlled callers", asyn
   const { rerender } = render(
     <ModelSelector models={models} value="12" parameterSettings={control} />
   );
-  fireEvent.focus(screen.getByRole("button", { name: "高级设置" }));
+  fireEvent.keyDown(screen.getByRole("button", { name: "高级设置" }), {
+    key: "Enter",
+  });
   const input = await screen.findByRole("spinbutton", { name: "温度" });
   expect(input).toHaveValue(0.6);
   fireEvent.change(input, { target: { value: "0.8" } });
