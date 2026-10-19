@@ -48,7 +48,6 @@ import { createAssistantStream } from "assistant-stream";
 import type { AttachmentType } from "../utils/attachment-type";
 import {
   attachExecutionLogsToTool,
-  collapseSubAgentParts,
   attachSearchContentToTool,
   buildExecutionCodePart,
   buildToolCallPart,
@@ -203,8 +202,12 @@ const toToolSearchItem = (value: unknown) => {
         sourceType:
           typeof item.source_type === "string" ? item.source_type : undefined,
         filename: filename || undefined,
-        publishedDate: typeof item.published_date === "string" ? item.published_date : undefined,
-        downloadUrl: typeof item.download_url === "string" ? item.download_url : undefined,
+        publishedDate:
+          typeof item.published_date === "string"
+            ? item.published_date
+            : undefined,
+        downloadUrl:
+          typeof item.download_url === "string" ? item.download_url : undefined,
         sourceFile: sourceFile || imageMetadata?.source_file || undefined,
         objectName:
           typeof item.object_name === "string" ? item.object_name : undefined,
@@ -212,7 +215,7 @@ const toToolSearchItem = (value: unknown) => {
         toolSign,
         isImage: Boolean(imageMetadata),
         retrievalHighlightTerms: getRetrievalHighlightTerms(item.score_details),
-                ...getSourceAttributes(item.search_type, item.score_details),
+        ...getSourceAttributes(item.search_type, item.score_details),
       }
     : null;
 };
@@ -1341,8 +1344,11 @@ export class RemoteConversationHistoryAdapter implements ThreadHistoryAdapter {
         }
       }
 
-      const orderedContent = collapseSubAgentParts(content);
-      content.splice(0, content.length, ...orderedContent);
+      // Keep the restored parts in persisted arrival order. The live stream
+      // no longer reorders parts either (see the key-stability note on
+      // ``buildStreamResult`` in remote-chat-model-adapter), so a reloaded
+      // marathon message renders in the same order the user saw live, and a
+      // sub-agent run's parts only cluster when they arrived contiguously.
 
       const attachments = restoreAttachments(msg, messageId);
       if (msg.role === "assistant" && attachments.length > 0) {
@@ -1715,7 +1721,8 @@ const waitForServerConversationId = async (
 export const createConversationThreadListAdapter = (
   conversationType: "agent_chat" | "workbench",
   pinStorageKey?: string,
-  loadPins: () => Promise<WorkbenchPins> = () => conversationService.getWorkbenchPins()
+  loadPins: () => Promise<WorkbenchPins> = () =>
+    conversationService.getWorkbenchPins()
 ): RemoteThreadListAdapter => {
   const prefetchedConversationIds = new Set<string>();
   return {

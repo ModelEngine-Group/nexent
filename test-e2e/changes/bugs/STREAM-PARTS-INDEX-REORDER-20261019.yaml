@@ -1,0 +1,73 @@
+schema_version: '1.0'
+change:
+  change_id: STREAM-PARTS-INDEX-REORDER-20261019
+  change_type: bugfix
+  bug_id: STREAM-PARTS-INDEX-REORDER-20261019
+  title: Keep streaming message parts index-stable (React #185 page crash)
+  description: Stop reordering the yielded message parts array so index-derived React keys stay stable during streaming.
+  observed_behavior: >-
+    Multi-step NL2Agent creation runs crash the whole newchat page mid-stream
+    with the built-in "This page couldn't load" error page (Next.js
+    DefaultGlobalError, no digest). The browser console shows React minified
+    error #185 ("Maximum update depth exceeded") with a stack through Radix
+    Presence's ref callback (setNode -> dispatchSetState) and ~50 nested
+    render/commit cycles. Normal conversations and short tool runs never
+    crash; only long marathon messages with interleaved parallel sub-agent
+    output do.
+  expected_behavior: >-
+    Across consecutive stream yields, a part already emitted at index i keeps
+    index i and its identity: parts are only appended or replaced in place,
+    never reordered or removed. A sub-agent run whose parts arrive
+    contiguously still renders as one clustered card; a run whose parts
+    interleave with other output renders as continuation cards instead of
+    crashing the page. The history-summary "idle" event replaces its card in
+    place with an empty tombstone that renders nothing.
+  escaped_stage: D4
+  coverage_gap:
+    type: missing_assertion
+    description: Existing adapter tests assert per-yield content mapping and step markers but never the cross-yield positional stability of the parts array, which is the React key contract the renderer depends on.
+  feature_contract_changed: false
+  affected_features:
+    existing: []
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing: []
+    added: []
+    modified: []
+    retired: []
+  traditional_ut:
+    decision: add
+    behaviors:
+      - Parallel sub-agent output interleaving with parent and sibling parts never changes the identity of an already-emitted part index (append-only growth).
+      - A late tool-call part of an earlier run stays at the end in arrival order instead of being moved back beside its run's earlier parts.
+      - A sequential sub-agent run's boundary, reasoning and tool-call parts remain contiguous so the existing single-card grouping is preserved.
+      - The history-summary "idle" status replaces the card in place (status "idle", no summary, renders nothing) instead of splicing it out and shifting later part indices.
+    reason: The adapter-level yield contract is fully provable with the SSE harness; the React remount cascade it prevents is documented in the test docblock and change notes rather than re-simulated in jsdom.
+    test_selectors:
+      - frontend/tests/workbench/StreamPartsIndexStability.test.ts
+  notes: >-
+    Root cause chain (verified by decompiling the two shipped chunks named in
+    the user's console stack): @assistant-ui's MessagePrimitive.GroupedParts
+    keys non-tool parts by array index (part-${index}); the adapter's
+    collapseSubAgentParts reordered the parts array on EVERY stream yield
+    (moving later parts of a sub-agent run back to the run's first-occurrence
+    position) and the history-summary "idle" event spliced its card out of
+    the middle of the array; each reorder changed the keys of all following
+    parts and remounted their subtrees; each remounted Radix Presence ref
+    fires a nested setState during commit (setNode), and marathon messages
+    with 50+ Presence-wrapped groups (reasoning/tool/sub-agent collapsibles)
+    accumulated 50 nested updates, tripping React error #185 and taking the
+    page down via the root global-error boundary. Fix deletes
+    collapseSubAgentParts (arrival order is kept everywhere, live and on
+    history reload) and turns the idle removal into an in-place tombstone.
+    Visual trade-off accepted: with truly parallel interleaved runs a run may
+    render as continuation cards instead of one merged card. Residual
+    same-class risks NOT changed here (each is a bounded one-shot removal, not
+    a per-yield reorder): finalAnswerProjection's reclassify_step removal of
+    an empty deep-thinking part, nl2skill attempt rollback removals, and the
+    label-only flush removal in flushOpenReasoning. The separate marathon
+    reasoning re-parse freeze is fixed on branch
+    fix/reasoning-stream-quadratic-render (perf only; it did not cause this
+    crash).

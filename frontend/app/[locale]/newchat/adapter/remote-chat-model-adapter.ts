@@ -1235,38 +1235,6 @@ export function markSubAgentRunFinished(parts: any[], runId: string): void {
 }
 
 /**
- * Collects interleaved parts for each sub-agent invocation into one stable
- * contiguous segment. The first occurrence of an invocation determines the
- * segment position; the original order inside that invocation is preserved.
- */
-export function collapseSubAgentParts(parts: any[]): any[] {
-  const groupedParts = new Map<string, any[]>();
-  const emittedRuns = new Set<string>();
-  const collapsed: any[] = [];
-
-  for (const part of parts) {
-    const runId = part?.metadata?.runId;
-    if (!runId) {
-      collapsed.push(part);
-      continue;
-    }
-
-    let group = groupedParts.get(runId);
-    if (!group) {
-      group = [];
-      groupedParts.set(runId, group);
-    }
-    group.push(part);
-
-    if (emittedRuns.has(runId)) continue;
-    emittedRuns.add(runId);
-    collapsed.push(group);
-  }
-
-  return collapsed.flat();
-}
-
-/**
  * Lookup helper exported for the conversation thread list adapter so the
  * historical message loader can use the same shape when reconstructing
  * sub-agent runs from persisted units.
@@ -2268,8 +2236,7 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
 
         const metadata = imageMetadata.find(
           (source) =>
-            source.url === imageUrl &&
-            !consumedImageMetadata.has(source)
+            source.url === imageUrl && !consumedImageMetadata.has(source)
         );
         if (metadata) consumedImageMetadata.add(metadata);
         const imageSource: SearchSource = {
@@ -2323,7 +2290,19 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
         (part) => part.type === "data" && part.name === "history-summary"
       );
       if (payload.status === "idle") {
-        if (existingIndex >= 0) contentParts.splice(existingIndex, 1);
+        // Replace the card in place with an empty idle tombstone instead of
+        // splicing it out: removing a mid-array part shifts the indices of
+        // every later part, remounting their subtrees (see the key-stability
+        // note on ``buildStreamResult``). ``HistorySummaryCard`` renders
+        // nothing for an idle part without a summary, so the visual result
+        // matches the old removal.
+        if (existingIndex >= 0) {
+          contentParts[existingIndex] = {
+            type: "data",
+            name: "history-summary",
+            data: { status: "idle" },
+          };
+        }
         return true;
       }
       if (payload.status !== "compacting" && payload.status !== "accepted") {
@@ -2337,15 +2316,23 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
 
     // Generate a stable message ID for this stream so MarkdownText can look up sources
     const messageId = `msg_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+    // The yielded content array must stay append/replace-in-place stable:
+    // ``MessagePrimitive.GroupedParts`` derives React keys for non-tool parts
+    // from the part's array index (``part-${index}``). Reordering parts between
+    // yields remounts every shifted subtree, and each remounted Radix
+    // ``Presence`` ref fires a nested state update (``setNode``) during commit.
+    // Long multi-step runs accumulate 50+ nested updates and React aborts
+    // with "Maximum update depth exceeded" (minified error #185), which takes
+    // the whole page down via the root ``global-error`` boundary. So: never
+    // reorder or remove parts here — only append new ones or replace a part
+    // in place.
     const buildStreamResult = (content: any[]): ChatModelRunResult => ({
-      content: collapseSubAgentParts(
-        content.map((part) =>
-          part.type === "data" &&
-          part.name === "clarification" &&
-          (userAborted || content.some((item) => item.isError))
-            ? { ...part, data: { ...part.data, completed: false } }
-            : part
-        )
+      content: content.map((part) =>
+        part.type === "data" &&
+        part.name === "clarification" &&
+        (userAborted || content.some((item) => item.isError))
+          ? { ...part, data: { ...part.data, completed: false } }
+          : part
       ),
       metadata: nl2a ? { custom: { nl2a } } : undefined,
     });
@@ -2642,7 +2629,9 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
           // than blindly popping the most recent stack entry.
           if (chunk.type === "subagent_start") {
             // Commit parent reasoning before opening the first nested card so
-            // the transient parent part cannot be reordered behind it.
+            // the parent's streaming part stays visually separate from the
+            // sub-agent's parts (parts are never reordered across yields; see
+            // the key-stability note on ``buildStreamResult``).
             flushOpenReasoning();
             const payload = parseSubAgentStart(chunk.content);
             const agentId =
@@ -3376,9 +3365,7 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
         });
       }
 
-      const finalResult = buildStreamResult(
-        collapseSubAgentParts(contentParts)
-      );
+      const finalResult = buildStreamResult(contentParts);
       const timingResult =
         storedTiming ??
         buildTimingResult(streamStartTime, firstTokenTime, toolCallCount);

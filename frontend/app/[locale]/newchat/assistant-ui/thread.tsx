@@ -129,7 +129,9 @@ import {
 } from "../adapter/remote-chat-model-adapter";
 
 type HistorySummaryData = {
-  status?: "compacting" | "accepted";
+  // "idle" is a tombstone status written in place of removing the part so
+  // part indices stay stable during streaming; it renders nothing.
+  status?: "compacting" | "accepted" | "idle";
   summary?: { markdown?: string } | string;
   covered_through_message_id?: number;
 };
