@@ -21,7 +21,7 @@ journey("WB-CONTROLS-D4-002", async ({ page, contract }) => {
       await expect.poll(async () => Math.abs((await input.boundingBox())!.y - initialInputY)).toBeLessThanOrEqual(1);
       await expect.poll(async () => Math.abs((await composer.boundingBox())!.y - initialComposerY)).toBeLessThanOrEqual(1);
     };
-    for (const [mode, example] of [["智能体创建", "企业知识问答助手"], ["技能创建", "发票信息提取"]]) {
+    for (const [mode, example] of [["智能体创建", "体检报告解读助手"], ["技能创建", "发票信息提取"]]) {
       const button = page.getByRole("button", { name: mode, exact: true });
       const a = await button.boundingBox(), b = await input.boundingBox();
       expect(a!.y).toBeLessThan(b!.y);

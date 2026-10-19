@@ -13,7 +13,7 @@ feature:
     description: Direct controls open draft resource drawers with Mine/Repository and structured filtering; cancel never mounts
       resources.
   - rule_id: WB-CONTROLS-RULE-002
-    description: Above-composer creation actions select isolated modes with matching fill-only recommendations.
+    description: Above-composer creation actions select isolated modes with matching fill-only recommendations. Agent creation displays three localized medical workflow titles and short descriptions; selecting one fills the complete prompt without sending.
   - rule_id: WB-CONTROLS-RULE-003
     description: Shared model selector exposes Advanced settings by default below reasoning effort in Workbench and Agent
       chat, synchronizing local 1-100 levels without backend mutations.
@@ -28,6 +28,7 @@ feature:
   - D4
   source:
     requirement_ids:
+    - WB-MEDICAL-EXAMPLES-20261019
     - WB-CONTROLS-20261013
     - WB-SHARED-PARAMS-20261014
     - WB-REASONING-CAPABILITY-20261014
