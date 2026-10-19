@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 from unittest.mock import patch
 
 from services.agent_reasoning_service import (
@@ -228,3 +230,23 @@ def test_snapshot_agent_reasoning_config_uses_existing_map_when_request_is_omitt
             existing_overrides=None,
             tenant_id="tenant-1",
         ) == {"7": {"extra_params": {}}}
+
+
+def test_saved_llm_outlets_do_not_generate_new_agent_owned_reasoning_defaults():
+    from services.model_profile_service import build_outlet_draft
+    from nexent.core.model_service.profiles.outlet_storage import encode_resolved_model_profile
+    from nexent.core.model_service.registry import model_service_references
+    from test.backend.services.test_model_profile_service import draft_request
+
+    profile, _ = build_outlet_draft(draft_request(), "tenant")
+    data = profile.model_dump()
+    data["outlet_id"] = 1
+    data["connection"]["credential_ref"]["model_id"] = 1
+    row = encode_resolved_model_profile(profile.__class__.model_validate(data), registered_references=model_service_references())
+    with patch("services.agent_reasoning_service.get_model_by_model_id",
+               return_value=row), \
+         patch("services.agent_reasoning_service._resolve_model_reasoning_capability") as resolve:
+        assert snapshot_agent_reasoning_config([1], None, None, "tenant") is None
+        explicit = {"1": {"extra_params": {"enable_thinking": False}}}
+        assert snapshot_agent_reasoning_config([1], explicit, None, "tenant") == explicit
+        resolve.assert_not_called()
