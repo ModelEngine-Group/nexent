@@ -1,0 +1,48 @@
+schema_version: '1.0'
+module:
+  id: AGENT-REPO
+  name: Agent repository listings
+  description: Agent repository catalog listings plus the agent management page that browses the same agents.
+feature:
+  feature_id: AGENT-REPO-SORT-MAIN-TAG
+  name: Agent repository publish-time sort, main-agent indicator and tag search
+  status: active
+  description: >-
+    The agent space lists tenant agents on the repository tab and the my-agents tab, each with an optional
+    latest-published-first order, and marks each listing card as a main or an ordinary agent on both tabs;
+    the agent management page matches agents by tag on top of its name and description search, recovering tags
+    that arrive as a stringified array instead of crashing, and narrows its list through a tag filter that
+    combines with the text query and clears.
+  business_rules:
+  - rule_id: AGENT-REPO-SORT-MAIN-TAG-RULE-001
+    description: >-
+      On both the repository tab and the my-agents tab of the agent space, the sort control offers a default order
+      and a latest-published order; choosing the latest-published order requests publish-time descending sorting
+      and renders the returned listings newest published first with undated listings last, while the default order
+      leaves the request unchanged.
+  - rule_id: AGENT-REPO-SORT-MAIN-TAG-RULE-002
+    description: >-
+      Every agent listing card, on both the repository tab and the my-agents tab, shows an amber main-agent badge
+      when the listing is a main agent, and an ordinary listing with no version label renders no such badge, so main
+      and ordinary agents are visually distinguished.
+  - rule_id: AGENT-REPO-SORT-MAIN-TAG-RULE-003
+    description: >-
+      The agent management page matches agents by tag from its search box, including a tag persisted as a stringified
+      array, renders the recovered tag instead of the raw stringified value, and keeps the list usable.
+  - rule_id: AGENT-REPO-SORT-MAIN-TAG-RULE-004
+    description: >-
+      The agent management page's tag filter narrows the list to the agents carrying the selected tag, combines with
+      the free-text query as an intersection rather than a union, and clearing the tag filter restores the
+      query-only result.
+  - rule_id: AGENT-REPO-SORT-MAIN-TAG-RULE-005
+    description: >-
+      Changing the sort option while a listing sits on a later page resets that listing to the first page under the
+      newly selected order, on the repository tab and the my-agents tab of the agent space alike.
+  required_test_stages:
+  - D4
+  source:
+    requirement_ids:
+    - AGENT-REPO-SORT-MAIN-TAG-20261013
+    notes: >-
+      Traditional backend UT and frontend component UT prove the ordering helper, route forwarding and tag
+      normalization; this Feature owns the browser-level acceptance of the three user-visible behaviors.

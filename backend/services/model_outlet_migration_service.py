@@ -17,7 +17,7 @@ from nexent.core.model_service.profiles.resolved_profile import ResolvedModelPro
 from nexent.core.model_service.registry import model_service_references
 from pydantic import ValidationError
 from services.model_profile_service import build_outlet_draft
-from utils.model_name_utils import add_repo_to_name
+from management.services.model.names import add_repo_to_name
 
 MIGRATION_VERSION = "legacy_llm_outlet_v2"
 

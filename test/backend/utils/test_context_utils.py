@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """Tests for authorized backend ContextItemInput snapshot construction."""
 
 from dataclasses import dataclass
@@ -12,13 +14,13 @@ from nexent.core.agents.context import (
 from nexent.core.agents.context.models import normalize_context_inputs
 from nexent.core.agents.prompt import AgentPromptComposer
 
-from backend.management.services.agent.prompt_template_loader import (
+from backend.management.services.agent.prompt import (
     load_agent_prompt_bundle,
 )
-from backend.utils.context_utils import (
+from backend.management.services.agent.context import (
     build_authorized_context_input,
 )
-from backend.utils.context_utils import (
+from backend.management.services.agent.context import (
     build_context_inputs as _runtime_build_context_inputs,
 )
 

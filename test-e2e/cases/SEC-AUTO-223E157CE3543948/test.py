@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 from __future__ import annotations
 
 import logging
@@ -7,10 +9,7 @@ import types
 import pytest
 
 import consts.const as const
-from management.services.agent.management import (
-    build_sandbox_policy,
-    get_sandbox_minio_client,
-)
+from management.services.agent.policy import build_sandbox_policy, get_sandbox_minio_client
 
 
 @pytest.mark.case_id('SEC-AUTO-223E157CE3543948')

@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """Tenant-scoped persistence operations for unified tag management."""
 
 import base64
@@ -247,7 +249,7 @@ class TagManagementDB:
         return binding
 
     @staticmethod
-    def _assignment_rows(session, tenant_id: str, resource_type: str, resource_id: str):
+    def _assignment_rows(session, tenant_id: str, resource_type: str, resource_id: str | list[str]):
         return (
             session.query(ResourceTagAssignment, TagDefinition, TagValue)
             .join(
@@ -268,7 +270,11 @@ class TagManagementDB:
             .filter(
                 ResourceTagAssignment.tenant_id == tenant_id,
                 ResourceTagAssignment.resource_type == resource_type,
-                ResourceTagAssignment.resource_id == resource_id,
+                (
+                    ResourceTagAssignment.resource_id.in_(resource_id)
+                    if isinstance(resource_id, list)
+                    else ResourceTagAssignment.resource_id == resource_id
+                ),
                 ResourceTagAssignment.delete_flag == ACTIVE_DELETE_FLAG,
             )
             .order_by(
@@ -837,6 +843,25 @@ class TagManagementDB:
             _set_audit_fields(value, actor_id)
             session.flush()
             return 0
+
+    @staticmethod
+    def list_resource_assignments_batch(
+        tenant_id: str, resource_type: str, resource_ids: list[str], library_code: str
+    ) -> dict[str, list[dict[str, Any]]]:
+        """Read assignments for all authorized IDs with one assignment query."""
+        result = {resource_id: [] for resource_id in resource_ids}
+        if not result:
+            return result
+        with get_db_session() as session:
+            TagManagementDB._get_active_resource_binding(
+                session, tenant_id, resource_type, library_code, for_update=False
+            )
+            rows = TagManagementDB._assignment_rows(
+                session, tenant_id, resource_type, list(result)
+            ).all()
+            for assignment, definition, value in rows:
+                result[assignment.resource_id].append(_assignment_data(definition, value))
+        return result
 
     @staticmethod
     def list_resource_assignments(

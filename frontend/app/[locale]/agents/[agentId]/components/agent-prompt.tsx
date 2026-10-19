@@ -1,5 +1,8 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 "use client";
 
+import { SELECTED_RESOURCE_HOVER } from "@/const/selectedResourceStyles";
 import { useTranslation } from "react-i18next";
 import {
   Button,
@@ -40,11 +43,12 @@ import { CSS } from "@dnd-kit/utilities";
 import Image from "next/image";
 
 import { useAgentStore } from "@/stores/agentStore";
-import { AddModelDrawer } from "@/components/resource-picker/AddModelDrawer";
+import { ModelDrawer } from "@/components/resource-picker/ModelDrawer";
 import { ModelParamsModal } from "@/components/resource-picker/ModelParamsModal";
 import { useModelList } from "@/hooks/model/useModelList";
 import { useInferenceFieldSpecs } from "@/hooks/model/useInferenceFieldSpecs";
 import type { ModelOption } from "@/types/modelConfig";
+import { MODEL_PROVIDER_LOGOS } from "@/const/modelConfig";
 import { ResourceAddButton } from "@/components/common/ResourceAddButton";
 import {
   ModelAdvancedSettingsValue,
@@ -130,15 +134,6 @@ function SortableModelItem({
   );
 }
 
-const MODEL_PROVIDER_LOGOS: Record<string, string> = {
-  deepseek: "/deepseek.png",
-  openai: "/openai.png",
-  qwen: "/qwen.png",
-  silicon: "/siliconflow.png",
-  siliconflow: "/siliconflow.png",
-  modelengine: "/modelengine.png",
-};
-
 interface SelectedModelCardProps {
   model: ModelOption;
   disabled: boolean;
@@ -195,7 +190,7 @@ function SelectedModelCard({
     <div
       ref={setNodeRef}
       data-testid={`agent-selected-model-${model.id}`}
-      className={`flex h-12 min-w-0 items-center gap-2 rounded-[4px] border border-[#d9d9d9] bg-white px-2 transition-shadow ${
+      className={`flex h-12 min-w-0 items-center gap-2 rounded-[4px] border border-[#d9d9d9] bg-white px-2 ${SELECTED_RESOURCE_HOVER} ${
         isDragging ? "z-10 opacity-60 shadow-md" : ""
       }`}
       style={{
@@ -340,7 +335,7 @@ function HighFidelityModelGrid({
       onDragEnd={handleDragEnd}
     >
       <SortableContext items={modelIds} strategy={rectSortingStrategy}>
-        <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+        <div className="grid grid-cols-1 gap-4 @min-[640px]/agent-config:grid-cols-2">
           {selectedModels.map((model) => (
             <SelectedModelCard
               key={model.id}
@@ -999,33 +994,21 @@ export default function AgentPrompt({
               sensors={sensors}
             />
           </Form.Item>
-          <div className="-mb-2 flex items-center gap-2 text-sm leading-[22px] tracking-[0px]">
+          <div className="-mb-2 flex items-center justify-between gap-2 text-sm leading-[22px] tracking-[0px]">
             <label htmlFor="agent-primary-prompt" className="text-[#191919]">
               <span className="mr-1 text-[#f5222d]">*</span>
               {t("agent.highFidelity.prompt")}
             </label>
-            <div className="flex items-center gap-2">
-              <Tooltip title={t("agent.highFidelity.additionalPrompts")}>
-                <Button
-                  type="text"
-                  className="!h-[22px] !w-[22px] !p-0"
-                  icon={<Settings2 size={14} />}
-                  aria-label={t("agent.highFidelity.additionalPrompts")}
-                  disabled={false}
-                  onClick={() => setAdditionalPromptsOpen(true)}
-                />
-              </Tooltip>
-              <Button
-                type="link"
-                autoInsertSpace={false}
-                className="!h-[22px] !p-0 !text-sm !leading-[22px] !text-[#2673e5] disabled:!text-[#dfdfdf]"
-                icon={<Sparkles size={14} />}
-                disabled={isReadOnly || !onOptimizePrompt}
-                onClick={onOptimizePrompt}
-              >
-                {t("agent.highFidelity.optimizePrompt")}
-              </Button>
-            </div>
+            <Button
+              type="link"
+              autoInsertSpace={false}
+              className="!h-[22px] !p-0 !text-sm !leading-[22px] !text-[#2673e5] disabled:!text-[#dfdfdf]"
+              icon={<Sparkles size={14} />}
+              disabled={isReadOnly || !onOptimizePrompt}
+              onClick={onOptimizePrompt}
+            >
+              {t("agent.highFidelity.optimizePrompt")}
+            </Button>
           </div>
           <div className="relative">
             <HighFidelityTextArea
@@ -1036,7 +1019,7 @@ export default function AgentPrompt({
               disabled={isReadOnly}
               classNames={{
                 textarea:
-                  "!h-[52px] !min-h-[52px] !resize-none !rounded-[4px] !py-[5px] !pl-3 !pr-8 !text-sm !leading-[22px] !tracking-[0px] !text-[#191919] [font-family:'HarmonyOS_Sans_SC',sans-serif]",
+                  "!h-[160px] !min-h-[160px] !resize-none !rounded-[4px] !py-[5px] !pl-3 !pr-8 !text-sm !leading-[22px] !tracking-[0px] !text-[#191919] [font-family:'HarmonyOS_Sans_SC',sans-serif]",
                 count:
                   "!bottom-2 !right-3 !text-xs !leading-[22px] !text-[#808080]",
               }}
@@ -1044,9 +1027,6 @@ export default function AgentPrompt({
                 updateDraft({ duty_prompt: event.target.value })
               }
             />
-            <div className="absolute right-1 top-2">
-              {renderExpandButton("duty")}
-            </div>
           </div>
           <Modal
             open={additionalPromptsOpen}
@@ -1058,12 +1038,11 @@ export default function AgentPrompt({
           >
             {promptTabs}
           </Modal>
-          <AddModelDrawer
+          <ModelDrawer
             open={isModelSelectionOpen}
             onClose={() => setIsModelSelectionOpen(false)}
             models={availableLlmModels ?? []}
             selectedModelIds={selectedModelIds}
-            selectedTrailing={modelSelectionActions}
             disabled={isModelSelectionDisabled}
             onSelectionChange={(ids) => {
               if (isModelSelectionDisabled) return;

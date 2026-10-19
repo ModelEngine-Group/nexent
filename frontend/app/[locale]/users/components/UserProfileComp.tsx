@@ -1,3 +1,5 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 "use client";
 
 import React, { useState, useEffect } from "react";
@@ -47,6 +49,7 @@ import {
   createUserToken,
 } from "@/services/tokenService";
 import { ErrorCode } from "@/const/errorCode";
+import { UserIdentity } from "@/components/auth/UserIdentity";
 
 /**
  * UserProfileComp - User profile and account settings component
@@ -292,9 +295,10 @@ export default function UserProfileComp() {
                       : t("common.email") || "Email"}
                   </span>
                   <span className="text-gray-900 dark:text-gray-100 text-sm font-medium">
-                    {isCasUser
-                      ? user?.username?.trim() || user?.email?.trim() || "-"
-                      : user?.email?.trim() || "-"}
+                    <UserIdentity
+                      casUsername={user?.username}
+                      fallback={user?.email?.trim() || "-"}
+                    />
                   </span>
                 </div>
                 <div className="px-6 py-3 flex items-center justify-between">

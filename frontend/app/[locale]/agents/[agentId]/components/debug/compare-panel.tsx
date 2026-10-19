@@ -1,5 +1,11 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 "use client";
 
+import {
+  ComposerAttachment,
+  ComposerDictation,
+} from "@/app/newchat/assistant-ui/composer-tools";
 import {
   useCallback,
   useEffect,
@@ -204,7 +210,6 @@ const SideThread: FC<SideThreadProps> = ({
               onChatModeChange={onChatModeChange}
               showModelSelector={false}
               showConversationTitle={false}
-              isDictationConfigured={dictationConfigured}
               variant="embedded"
               showComposer={false}
             />
@@ -215,8 +220,10 @@ const SideThread: FC<SideThreadProps> = ({
                   chatMode={chatMode}
                   onChatModeChange={onChatModeChange}
                   showModelSelector={false}
-                  isDictationConfigured={dictationConfigured}
-                />,
+                >
+                  <ComposerAttachment />
+                  <ComposerDictation configured={dictationConfigured} />
+                </Composer>,
                 composerPortalTarget
               )}
           </div>

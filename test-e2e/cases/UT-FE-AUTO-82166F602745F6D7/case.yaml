@@ -6,6 +6,9 @@ case:
   feature_id: F-065
   business_rule_ids:
   - F-065-RULE-01
+  - F-065-RULE-02
+  - F-065-RULE-03
+  - F-065-RULE-04
   title: 引用角标组合key匹配、旧角标兼容、句级高亮与来源字段透传｜核心流程
   type: FE-COMP
   priority: P1
@@ -43,13 +46,55 @@ case:
   - order: 7
     action: 对匹配不到来源的角标断言 loading 状态正确、不抛出未处理异常。
     expected: retrievalHighlightTerms/publishedDate 透传无丢失；匹配不到来源时 loading 正确且无未处理异常。
+  - order: 8
+    action: 注入同名 AIDP 多切片且 metadata 含零、false、数组、嵌套对象的来源，点击各自引用并检查面板和属性悬浮内容；无 metadata 时检查没有空区域。
+    expected: 每条命中的原始 metadata、searchType 与技术引用完整透传；提供方显示 AIDP 而业务 source 原值保留；属性可通过悬浮、聚焦和点击访问，操作不触发文件预览。
+  - order: 9
+    action: 为 AIDP 来源提供文件名、业务 metadata、切片 ID、图片 URL 和其他可能的下载地址，检查不显示下载按钮且不调用下载服务；对本地附件检查原下载行为。
+    expected: AIDP 来源始终没有下载动作；本地附件仍走已有存储下载。
+  - order: 10
+    action: 注入原始来源 a1、a2 和图片 a3、a4，正文按 a1、a3、a4、a2 顺序引用。点击 a2 再点击 a4，检查角标、悬浮提示与真实来源面板的编号和选中身份。
+    expected: a2 在正文、悬浮提示与来源卡均显示 4；图片卡 a3、a4 显示 2、3，点击 a4 选中第二张图片，原始引用键仍为 a2、a4。
   expected_results:
   - 组合 key 精确匹配各自来源，a1 与 b1 互不混淆并返回对应 SearchSource。
   - 纯数字旧角标回退匹配到相等 citeIndex 来源，历史会话保持可读。
   - 开启句级高亮时 citationContext 返回角标前一句完整 scope 文本，且不跨段落/跨表格单元扩展。
   - 高亮开启与关闭情况下点击角标均能用 selectedCitationKey 选中并滚动到来源。
   - retrievalHighlightTerms/publishedDate 透传无丢失；匹配不到来源时 loading 正确且无未处理异常。
-  forbidden_side_effects: []
+  - metadata 和技术引用按命中完整透传，原始 key/value 可访问，提供方与业务 source 分开且空 metadata 无区域。
+  - AIDP 引用来源不提供下载动作；本地附件回归通过。
+  - 图片参与回答统一编号；正文、提示和两个侧栏标签页编号一致且原始引用身份不变。
+  forbidden_side_effects:
+  - AIDP 来源不调用本地存储或按文件名、切片 ID、图片地址猜原文件；查看属性不触发预览或下载。
+  - 显示编号不得修改 citeIndex、toolSign 或 selectedCitationKey，也不得在切换来源和图片标签页时重新编号。
+  acceptance:
+  - id: AC-01
+    description: Distinct composite keys and numeric legacy compatibility remain correct.
+    steps: [1, 2, 3]
+    expected_results: [1, 2]
+  - id: AC-02
+    description: Sentence scope, selection and scrolling remain correct.
+    steps: [4, 5]
+    expected_results: [3, 4]
+  - id: AC-03
+    description: Existing source fields and unmatched markers remain readable.
+    steps: [6, 7]
+    expected_results: [5]
+  - id: AC-04
+    description: Per-hit metadata, provider and technical reference reach the real panel and selectable attributes without preview side effects.
+    steps: [8]
+    expected_results: [6]
+    forbidden_side_effects: [1]
+  - id: AC-05
+    description: AIDP citation downloads remain unavailable until retrieval exposes a verified original-file identity; local downloads remain available.
+    steps: [9]
+    expected_results: [7]
+    forbidden_side_effects: [1]
+  - id: AC-06
+    description: Inline citations, hover labels and source/image cards share message-wide numbering without changing citation identity.
+    steps: [10]
+    expected_results: [8]
+    forbidden_side_effects: [2]
   source:
     legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
     legacy_sheet: 02_测试用例基线
@@ -58,6 +103,7 @@ case:
   inputs:
   - 无（纯前端组件逻辑，固定测试数据内联于测试代码）
   assertions:
+  - 正文、悬浮提示与来源和图片卡片共用首次引用顺序编号，显示编号不修改原始引用身份。
   - 组合 key 精确匹配各自来源，a1 与 b1 互不混淆并返回对应 SearchSource。
   - 纯数字旧角标回退匹配到相等 citeIndex 来源，历史会话保持可读。
   - 开启句级高亮时 citationContext 返回角标前一句完整 scope 文本，且不跨段落/跨表格单元扩展。

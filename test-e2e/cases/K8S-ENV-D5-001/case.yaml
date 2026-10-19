@@ -1,0 +1,82 @@
+schema_version: '1.0'
+stage: D5
+module: V5-BASELINE
+case:
+  case_id: K8S-ENV-D5-001
+  feature_id: F-173
+  business_rule_ids: [F-173-RULE-02]
+  title: K8s backend env file injection, precedence, replacement and cleanup
+  type: DEPLOYMENT
+  priority: P1
+  status: active
+  automation: automated
+  objective: Prove that actual Kubernetes containers receive complete synthetic env file configuration at the production Compose service boundary and receive new/changed/deleted values after replacement.
+  preconditions:
+    - Bash, Helm and kubectl are installed; the machine-local test home and result directory are available.
+    - D5_ENABLE_MUTATING_DEPLOYMENT=true and D5_ISOLATED_ENVIRONMENT=true explicitly authorize mutations on an isolated test cluster.
+    - NEXENT_D5_K8S_CONTEXT explicitly selects that isolated cluster; no current-context fallback is permitted.
+    - NEXENT_D5_K8S_PROBE_IMAGE identifies an available image with python3 and a shell; it contains no product credentials.
+    - The test identity may create and delete a new run-scoped namespace and its Secrets, ConfigMaps, Deployments and Pods.
+  test_data:
+    source: Synthetic temporary root and monitoring env files; never read deploy/env/.env.
+    variants: Unknown added key, empty string, multiline/JSON value, root/monitoring collision, credential collision, platform collision, CAS override, Redis/worker derived defaults, modified key and removed key.
+  steps:
+    - order: 1
+      action: Check all mutation/isolation/context/image prerequisites before any kubectl command; render synthetic env payloads through the production helper and render the production Helm chart for a unique namespace.
+      expected: Missing prerequisites are BLOCKED without cluster access; valid payloads contain all declared synthetic keys and no inherited host-only key.
+    - order: 2
+      action: Assert Secret references for the five backend Deployment templates and their absence in Web/infrastructure. Create the new namespace and apply only synthetic Secrets/ConfigMap plus five probe Deployments using the rendered backend env/envFrom configuration.
+      expected: Only the five backend probes load root env, and only Config/Runtime load monitoring env; no existing release is touched.
+    - order: 3
+      action: Read probe environment snapshots and compare root/monitoring/final-credential/explicit-env collisions, empty values, unknown keys, derived defaults and platform overrides across all five backend probes.
+      expected: Every selected env value matches the declared precedence and service scope; platform settings and finalized synthetic credentials win; runtime-state Redis and worker concurrency follow the configured input values.
+    - order: 4
+      action: Change a synthetic value, add a key, delete a key and rerender fresh Secret payloads and the deployment environment checksum; replace the env Secrets and update the probe templates, then await rollout and reread all snapshots.
+      expected: All five new containers receive the modified and added values, the removed key is absent, and the environment checksum differs.
+    - order: 5
+      action: Delete the run-scoped namespace in a finally block and confirm its removal; check that the repository local env and the selected pre-existing namespaces/releases were not modified.
+      expected: All run-owned resources are cleaned after success or failure; cleanup failure is reported rather than swallowed.
+  expected_results:
+    - All file-declared synthetic root keys reach the five backend containers with preserved string values and without host-only key leakage.
+    - Monitoring scope and effective precedence match production Compose; explicit Kubernetes settings and final credentials win; Web/infrastructure do not reference the new Secrets.
+    - Redeployment changes and adds values, removes deleted keys and changes the Pod environment checksum.
+    - Missing prerequisites block before cluster access; all run-owned resources are cleaned and existing configuration/releases are preserved.
+  forbidden_side_effects:
+    - Reading or modifying the real deployment .env, dumping arbitrary container environments or printing credential values in evidence.
+    - Accessing an implicit current context or creating/updating/deleting resources outside the newly created run namespace.
+    - Swallowing failed rollout or cleanup, or treating a missing test cluster as a pass.
+  acceptance:
+    - id: AC-001
+      description: Complete file-declared string configuration reaches actual backend containers without host-only leakage.
+      steps: [1, 3]
+      expected_results: [1]
+      forbidden_side_effects: [1]
+    - id: AC-002
+      description: Service-specific monitoring and credentials/platform precedence are respected.
+      steps: [2, 3]
+      expected_results: [2]
+      forbidden_side_effects: [2]
+    - id: AC-003
+      description: Replacement updates, adds and deletes configuration in newly started containers.
+      steps: [4]
+      expected_results: [3]
+    - id: AC-004
+      description: Prerequisite gating and cleanup preserve unrelated resources and report missing or failed runtime proof.
+      steps: [1, 5]
+      expected_results: [4]
+      forbidden_side_effects: [1, 2, 3]
+  risk_type: DEPLOYMENT
+  risk: Omitted or stale environment variables silently disable business features, incorrect precedence breaks Kubernetes configuration, and overly broad Secret references disclose backend credentials to unrelated services.
+  condition:
+    - Five probe Deployments use env/envFrom from the real Helm backend templates on an explicitly selected isolated Kubernetes cluster.
+    - Two successive synthetic configurations contain collisions and added/changed/deleted keys.
+  metrics:
+    - Correct environment snapshots across five services, including exact empty/multiline string preservation.
+    - Number of stale removed keys, unintended Secret references and unrelated modified resources.
+    - Successful rollout and confirmed namespace cleanup.
+  thresholds:
+    - All five backend snapshots satisfy every declared comparison; stale keys, unintended references and unrelated modifications are zero.
+    - Both rollouts finish within 180 seconds and namespace cleanup within 120 seconds.
+  recovery_expectations:
+    - A failed assertion or rollout still deletes only this run's namespace; any cleanup failure remains a failed result.
+    - An unavailable isolated cluster remains a dependency blocker; no mutation of an existing deployment is attempted.

@@ -1,7 +1,10 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import { defineConfig } from "vitest/config";
 import { fileURLToPath, URL } from "node:url";
 
 export default defineConfig({
+  oxc: { jsx: { runtime: "automatic" } },
   resolve: {
     alias: [
       {
@@ -11,7 +14,6 @@ export default defineConfig({
       { find: "@", replacement: fileURLToPath(new URL("./", import.meta.url)) },
     ],
   },
-  oxc: { jsx: { runtime: "automatic" } },
   test: {
     environment: "jsdom",
     include: ["tests/workbench/**/*.test.{ts,tsx}"],

@@ -143,7 +143,7 @@ def test_suggest_capacity_includes_reasoning_capability(mocker):
     """The shared model/base-URL lookup is returned to custom-access callers."""
     from backend.apps.model_managment_app import _suggest_capacity_for_request
     from backend.consts.model import ModelCapacitySuggestionRequest
-    from backend.services.model_capacity_suggestion_service import (
+    from management.services.model.capacity import (
         CapacitySuggestionMatchKind,
         CapacitySuggestionResult,
     )
@@ -2171,3 +2171,22 @@ class TestModelAuditEntries:
         assert "result=success" in messages[0]
         assert '"display_names":["qwen-7b","qwen-14b"]' in messages[0]
         assert '"auto_configured_defaults":["llm"]' in messages[0]
+
+
+@pytest.mark.parametrize("endpoint", ["/model/provider/create", "/model/manage/provider/create"])
+@pytest.mark.parametrize("status_code", [401, 403, 502])
+def test_provider_domain_error_preserves_upstream_http_contract(client, auth_header, mocker, endpoint, status_code):
+    """Map the model domain error to develop's unchanged HTTP status and detail."""
+    from consts.exceptions import ModelProviderError
+
+    discover = mocker.patch(
+        "backend.apps.model_managment_app.create_provider_models_for_tenant",
+        side_effect=ModelProviderError(status_code, "provider_error: Provider unavailable"),
+    )
+    payload = {"provider": "silicon", "model_type": "llm", "api_key": "fixture"}
+    if "/manage/" in endpoint:
+        payload["tenant_id"] = "test_tenant"
+    response = client.post(endpoint, json=payload, headers=auth_header)
+    assert response.status_code == status_code
+    assert response.json() == {"detail": "provider_error: Provider unavailable"}
+    discover.assert_awaited_once()

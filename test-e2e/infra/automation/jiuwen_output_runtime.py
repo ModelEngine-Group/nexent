@@ -11,7 +11,7 @@ from jiuwen_context_runtime import context_database
 async def persist_output(monkeypatch, info, output):
     from consts.model import AgentRequest, HistoryItem
     from database.conversation_db import create_conversation, create_conversation_message, get_conversation_history
-    from management.services.agent import run as application
+    from management.services.agent import execution as application
 
     conversation = create_conversation("Output contract", "owner", agent_id=42)["conversation_id"]
     create_conversation_message({"conversation_id":conversation,"message_idx":0,"role":"user",

@@ -88,7 +88,7 @@ _consts_model.ToolSourceEnum = _ToolSourceEnum
 sys.modules["consts.model"] = _consts_model
 
 # Keep model availability real while isolating adapter construction and config.
-sys.modules.setdefault("services.model_gateway_service", MagicMock())
+sys.modules.setdefault("management.services.model.adapter", MagicMock())
 sys.modules.setdefault("utils.config_utils", MagicMock())
 
 from services import repository_import_precheck as precheck_service

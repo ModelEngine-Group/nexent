@@ -9,7 +9,7 @@ from pytest_mock import MockFixture
 
 import aiohttp
 
-from backend.services.providers.modelengine_provider import (
+from management.services.model.providers.modelengine_provider import (
     ModelEngineProvider,
     MODEL_ENGINE_NORTH_PREFIX,
     get_model_engine_raw_url,
@@ -51,7 +51,7 @@ class TestModelEngineProvider:
         mock_session_cm.__aexit__ = AsyncMock(return_value=None)
 
         mocker.patch(
-            "backend.services.providers.modelengine_provider.aiohttp.ClientSession",
+            "management.services.model.providers.modelengine_provider.aiohttp.ClientSession",
             return_value=mock_session_cm
         )
 
@@ -103,7 +103,7 @@ class TestModelEngineProvider:
         mock_session_cm.__aexit__ = AsyncMock(return_value=None)
 
         mocker.patch(
-            "backend.services.providers.modelengine_provider.aiohttp.ClientSession",
+            "management.services.model.providers.modelengine_provider.aiohttp.ClientSession",
             return_value=mock_session_cm
         )
 
@@ -148,7 +148,7 @@ class TestModelEngineProvider:
         mock_session_cm.__aexit__ = AsyncMock(return_value=None)
 
         mocker.patch(
-            "backend.services.providers.modelengine_provider.aiohttp.ClientSession",
+            "management.services.model.providers.modelengine_provider.aiohttp.ClientSession",
             return_value=mock_session_cm
         )
 
@@ -187,7 +187,7 @@ class TestModelEngineProvider:
         mock_session_cm.__aexit__ = AsyncMock(return_value=None)
 
         mocker.patch(
-            "backend.services.providers.modelengine_provider.aiohttp.ClientSession",
+            "management.services.model.providers.modelengine_provider.aiohttp.ClientSession",
             return_value=mock_session_cm
         )
 
@@ -248,7 +248,7 @@ class TestModelEngineProvider:
         mock_session_cm.__aexit__ = AsyncMock(return_value=None)
 
         mocker.patch(
-            "backend.services.providers.modelengine_provider.aiohttp.ClientSession",
+            "management.services.model.providers.modelengine_provider.aiohttp.ClientSession",
             return_value=mock_session_cm
         )
 
@@ -285,7 +285,7 @@ class TestModelEngineProvider:
         mock_session_cm.__aexit__ = AsyncMock(return_value=None)
 
         mocker.patch(
-            "backend.services.providers.modelengine_provider.aiohttp.ClientSession",
+            "management.services.model.providers.modelengine_provider.aiohttp.ClientSession",
             return_value=mock_session_cm
         )
 
@@ -311,7 +311,7 @@ class TestModelEngineProvider:
         mock_session_cm.__aexit__ = AsyncMock(return_value=None)
 
         mocker.patch(
-            "backend.services.providers.modelengine_provider.aiohttp.ClientSession",
+            "management.services.model.providers.modelengine_provider.aiohttp.ClientSession",
             return_value=mock_session_cm
         )
 
@@ -359,7 +359,7 @@ class TestModelEngineProvider:
         mock_session_cm.__aexit__ = AsyncMock(return_value=None)
 
         mocker.patch(
-            "backend.services.providers.modelengine_provider.aiohttp.ClientSession",
+            "management.services.model.providers.modelengine_provider.aiohttp.ClientSession",
             return_value=mock_session_cm
         )
 
@@ -411,7 +411,7 @@ class TestModelEngineProvider:
         mock_session_cm.__aexit__ = AsyncMock(return_value=None)
 
         mocker.patch(
-            "backend.services.providers.modelengine_provider.aiohttp.ClientSession",
+            "management.services.model.providers.modelengine_provider.aiohttp.ClientSession",
             return_value=mock_session_cm
         )
 
@@ -454,7 +454,7 @@ class TestModelEngineProvider:
         mock_session_cm.__aexit__ = AsyncMock(return_value=None)
 
         mocker.patch(
-            "backend.services.providers.modelengine_provider.aiohttp.ClientSession",
+            "management.services.model.providers.modelengine_provider.aiohttp.ClientSession",
             return_value=mock_session_cm
         )
 

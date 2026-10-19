@@ -13,12 +13,8 @@ from consts.const import (
     TENANT_NAME
 )
 from database.model_management_db import get_model_id_by_display_name, get_model_records
-from utils.config_utils import (
-    get_env_key,
-    get_model_name_from_config,
-    safe_value,
-    tenant_config_manager
-)
+from utils.config_utils import get_env_key, safe_value, tenant_config_manager
+from management.services.model.names import get_model_name_from_config
 
 logger = logging.getLogger("config_sync_service")
 

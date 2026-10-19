@@ -1,3 +1,5 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import React from "react";
 import { act, fireEvent, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
@@ -96,10 +98,12 @@ describe("AIDP-FE-LIST-01", () => {
       }),
     ).toBeNull();
     fireEvent.click(screen.getByText(kb.description));
-    expect(matching(base + "/kb-a/documents")).toHaveLength(0);
+    expect(identity.push).not.toHaveBeenCalled();
     fireEvent.click(screen.getByText(kb.kds_name));
     await waitFor(() =>
-      expect(matching(base + "/kb-a/documents")).toHaveLength(1),
+      expect(identity.push).toHaveBeenCalledWith(
+        "/zh/knowledges/detail?kb=kb-a",
+      ),
     );
   });
 

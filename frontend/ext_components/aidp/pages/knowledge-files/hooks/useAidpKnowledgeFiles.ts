@@ -1,3 +1,5 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import type { AidpKbDetail } from "@/ext_components/aidp/shared/types/management";
 import log from "@/lib/logger";
@@ -17,7 +19,7 @@ export const useAidpKnowledgeFiles = (
     queryKey: [...scope.key, "files", id, { page, pageSize, keyword }],
     queryFn: async ({ signal }) => {
       try {
-        const result = await aidpKnowledgeService.listDocs(
+        const result = await aidpKnowledgeService.listIngestedFiles(
           id,
           page,
           pageSize,

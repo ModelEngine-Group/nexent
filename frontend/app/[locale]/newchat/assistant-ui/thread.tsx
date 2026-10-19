@@ -1,6 +1,20 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 "use client";
 
+import { useConversationModelControls } from "@/features/model-controls/useConversationModelControls";
+import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
+import type { ReasoningEffort } from "@/types/modelConfig";
+import type { ModelParameterSettingsControl } from "@/types/modelParameterSettings";
+
+import type { SourceAttributes } from "@/types/source";
 import {
+  buildCitationDisplayIndexMap,
+  withCitationDisplayIndices,
+} from "@/lib/citationDisplay";
+
+import {
+  createElement,
   useCallback,
   useEffect,
   useMemo,
@@ -13,12 +27,20 @@ import type { CompleteAttachment } from "@assistant-ui/react";
 import { useTranslation } from "react-i18next";
 import { MarkdownText } from "../ui/markdown-text";
 import { UserMessageBubble } from "@/components/interaction/user-message-bubble";
+import { UserMessageEditComposer } from "../components/user-message-edit-composer";
+import {
+  ThreadMessageRenderProvider,
+  threadMessageRenderers,
+} from "./thread-message-renderers";
 import { ClarificationMessageCard } from "../components/clarification-message-card";
 import { Reasoning, GroupReasoningTrigger } from "../ui/reasoning";
 import { ExecutionCodeBlock } from "../ui/execution-code-block";
 import { SubAgentContainer } from "../ui/subagent";
 import { TooltipIconButton } from "../ui/tooltip-icon-button";
 import { Composer, type ChatMode } from "./composer";
+import { AgentWelcome } from "@/components/agent/agent-welcome";
+import { TextSuggestion } from "@/components/agent/agent-suggestion";
+import type { AgentSuggestionItem } from "@/types/agentSuggestion";
 import { NewChatWelcomeBackdrop } from "./newchat-welcome-backdrop";
 import newChatStyles from "./newchat-design.module.css";
 import { Button } from "@/components/ui/button";
@@ -61,8 +83,6 @@ import {
   ArrowDownIcon,
   AlertTriangleIcon,
   SparklesIcon,
-  Lightbulb,
-  type LucideIcon,
   PencilIcon,
   Share2Icon,
   XCircleIcon,
@@ -95,7 +115,6 @@ import { ToolFallback } from "../ui/tool-fallback";
 import { ToolRecommendations } from "../ui/tool-recommendations";
 import { AgentDraftCard } from "../ui/agent-draft-card";
 import { AgentCreationResultCard } from "@/features/workbench/components/CreationResultCards";
-import { WorkbenchLandingExamples } from "@/features/workbench/components/WorkbenchLandingExamples";
 import { RequirementClarificationCard } from "../ui/requirement-clarification-card";
 import { InstalledResourceBindingCard } from "../ui/installed-resource-binding-card";
 import { SuggestedResourceInstallationCard } from "../ui/suggested-resource-installation-card";
@@ -173,13 +192,7 @@ import type {
 import { SkillFileCard } from "../ui/skill-file-card";
 import type { SkillFileContent } from "@/types/skill";
 
-export interface WelcomeSuggestion {
-  id: string;
-  title: string;
-  description: string;
-  prompt: string;
-  icon: LucideIcon;
-}
+export type WelcomeSuggestion = AgentSuggestionItem;
 
 export interface ThreadProps {
   agent: Agent | PublishedAgent;
@@ -194,14 +207,17 @@ export interface ThreadProps {
   onModelChange?: (modelId: string) => void;
   deepThinking?: boolean;
   onDeepThinkingChange?: (enabled: boolean) => void;
-  thinkingEffort?: "low" | "medium" | "high";
-  onThinkingEffortChange?: (effort: "low" | "medium" | "high") => void;
+  thinkingEffort?: ReasoningEffort;
+  onThinkingEffortChange?: (effort: ReasoningEffort) => void;
+  reasoningBudgetTokens?: number;
+  onReasoningBudgetTokensChange?: (budget: number) => void;
   chatMode: ChatMode;
-  onChatModeChange: (mode: ChatMode) => void;
+  onChatModeChange?: (mode: ChatMode) => void;
   showModelSelector?: boolean;
+  modelParameterSettings?: ModelParameterSettingsControl;
   modelSelectionScope?: ModelSelectionScope;
   showConversationTitle?: boolean;
-  isDictationConfigured?: boolean;
+  composerTools?: ReactNode;
   knowledgeScope?: ConversationKnowledgeScope | null;
   knowledgePreview?: KnowledgeScopeEffectivePreview | null;
   knowledgeCapabilities?: KnowledgeCapabilities | null;
@@ -226,8 +242,6 @@ export interface ThreadProps {
   workbenchResources?: import("@/features/workbench/types").WorkbenchResourceControls;
   onRemoveWorkbenchSkill?: (skillId: number) => void;
   onOpenWorkbenchSkillPicker?: () => void;
-  workbenchSkillPopover?: ReactNode;
-  workbenchKnowledgePopover?: ReactNode;
 }
 
 /**
@@ -261,12 +275,15 @@ export const Thread: FC<ThreadProps> = ({
   onDeepThinkingChange,
   thinkingEffort,
   onThinkingEffortChange,
+  reasoningBudgetTokens,
+  onReasoningBudgetTokensChange,
   chatMode,
   onChatModeChange,
   showModelSelector = true,
+  modelParameterSettings,
   modelSelectionScope = "agent",
   showConversationTitle = true,
-  isDictationConfigured = false,
+  composerTools,
   knowledgeScope = null,
   knowledgePreview = null,
   knowledgeCapabilities = null,
@@ -288,35 +305,27 @@ export const Thread: FC<ThreadProps> = ({
   workbenchResources,
   onRemoveWorkbenchSkill,
   onOpenWorkbenchSkillPicker,
-  workbenchSkillPopover,
-  workbenchKnowledgePopover,
 }) => {
   const { t } = useTranslation();
   const models = useAgentModels(agent, modelSelectionScope);
-  const [localSelectedModelId, setLocalSelectedModelId] = useState<string>();
-  const selectedModelIsValid = Boolean(
-    selectedModelId && models.some((model) => model.id === selectedModelId)
+  const threadKey = useAuiState((state) => state.threads.mainThreadId);
+  const { user } = useAuthorizationContext();
+  const controls = useConversationModelControls(
+    models,
+    `${user?.tenantId ?? ""}:${user?.id ?? ""}:${agent.id}:${threadKey ?? "new"}`,
+    selectedModelId,
+    onModelChange ? (selectedModelId ?? "") : undefined
   );
-  const fallbackModelId = models[0]?.id;
-  const effectiveSelectedModelId = selectedModelIsValid
-    ? selectedModelId
-    : onModelChange
-      ? ""
-      : localSelectedModelId &&
-          models.some((model) => model.id === localSelectedModelId)
-        ? localSelectedModelId
-        : fallbackModelId;
-  const handleModelChange = useCallback(
-    (modelId: string) => {
-      if (!models.some((model) => model.id === modelId)) return;
-      if (onModelChange) {
-        onModelChange(modelId);
-      } else {
-        setLocalSelectedModelId(modelId);
-      }
-    },
-    [models, onModelChange]
-  );
+  const effectiveSelectedModelId = onModelChange
+    ? (selectedModelId ?? "")
+    : controls.selectedModelId;
+  const modelIsValid =
+    models.some((model) => model.id === effectiveSelectedModelId) &&
+    controls.canSend;
+  const handleModelChange = (id: string) => {
+    controls.onModelChange(id);
+    onModelChange?.(id);
+  };
 
   const messages = useAuiState((s) => s.thread.messages);
   const currentThreadTitle = useAuiState((s) => {
@@ -520,15 +529,29 @@ export const Thread: FC<ThreadProps> = ({
         models={models}
         selectedModelId={effectiveSelectedModelId}
         onModelChange={handleModelChange}
-        deepThinking={deepThinking}
-        onDeepThinkingChange={onDeepThinkingChange}
-        thinkingEffort={thinkingEffort}
-        onThinkingEffortChange={onThinkingEffortChange}
+        deepThinking={deepThinking ?? controls.deepThinking}
+        onDeepThinkingChange={
+          onDeepThinkingChange ?? controls.onDeepThinkingChange
+        }
+        thinkingEffort={thinkingEffort ?? controls.thinkingEffort}
+        onThinkingEffortChange={
+          onThinkingEffortChange ?? controls.onThinkingEffortChange
+        }
+        reasoningBudgetTokens={
+          reasoningBudgetTokens ?? controls.reasoningBudgetTokens
+        }
+        onReasoningBudgetTokensChange={
+          onReasoningBudgetTokensChange ??
+          controls.onReasoningBudgetTokensChange
+        }
         chatMode={chatMode}
         onChatModeChange={onChatModeChange}
         showModelSelector={showModelSelector}
+        modelParameterSettings={
+          modelParameterSettings ?? controls.modelParameterSettings
+        }
         showConversationTitle={showConversationTitle}
-        isDictationConfigured={isDictationConfigured}
+        composerTools={composerTools}
         knowledgeScope={knowledgeScope}
         knowledgePreview={knowledgePreview}
         knowledgeCapabilities={knowledgeCapabilities}
@@ -538,8 +561,14 @@ export const Thread: FC<ThreadProps> = ({
         onSkillFileSelect={onSkillFileSelect}
         runtimeMetadata={runtimeMetadata}
         onRuntimeMetadataChange={onRuntimeMetadataChange}
-        readOnly={readOnly}
-        readOnlyReason={readOnlyReason}
+        readOnly={readOnly || (showModelSelector && !modelIsValid)}
+        modelSelectionDisabled={readOnly}
+        readOnlyReason={
+          readOnlyReason ??
+          (showModelSelector && !modelIsValid
+            ? t("chat.modelSelector.invalidSelection")
+            : undefined)
+        }
         showComposer={showComposer}
         configurationLayout={configurationLayout}
         debugLayout={debugLayout}
@@ -550,8 +579,6 @@ export const Thread: FC<ThreadProps> = ({
         workbenchResources={workbenchResources}
         onRemoveWorkbenchSkill={onRemoveWorkbenchSkill}
         onOpenWorkbenchSkillPicker={onOpenWorkbenchSkillPicker}
-        workbenchSkillPopover={workbenchSkillPopover}
-        workbenchKnowledgePopover={workbenchKnowledgePopover}
         hasMessages={hasMessages}
         displayName={displayName}
         conversationTitle={conversationTitle}
@@ -637,13 +664,16 @@ interface ThreadViewProps {
   onModelChange?: (modelId: string) => void;
   deepThinking?: boolean;
   onDeepThinkingChange?: (enabled: boolean) => void;
-  thinkingEffort?: "low" | "medium" | "high";
-  onThinkingEffortChange?: (effort: "low" | "medium" | "high") => void;
+  thinkingEffort?: ReasoningEffort;
+  onThinkingEffortChange?: (effort: ReasoningEffort) => void;
+  reasoningBudgetTokens?: number;
+  onReasoningBudgetTokensChange?: (budget: number) => void;
   chatMode: ChatMode;
-  onChatModeChange: (mode: ChatMode) => void;
+  onChatModeChange?: (mode: ChatMode) => void;
   showModelSelector: boolean;
+  modelParameterSettings?: ModelParameterSettingsControl;
   showConversationTitle: boolean;
-  isDictationConfigured: boolean;
+  composerTools?: ReactNode;
   knowledgeScope: ConversationKnowledgeScope | null;
   knowledgePreview: KnowledgeScopeEffectivePreview | null;
   knowledgeCapabilities: KnowledgeCapabilities | null;
@@ -674,6 +704,7 @@ interface ThreadViewProps {
   runtimeMetadata: Record<string, unknown>;
   onRuntimeMetadataChange?: (value: Record<string, unknown>) => void;
   readOnly: boolean;
+  modelSelectionDisabled?: boolean;
   readOnlyReason?: string;
   showComposer: boolean;
   configurationLayout: boolean;
@@ -685,8 +716,6 @@ interface ThreadViewProps {
   workbenchResources?: import("@/features/workbench/types").WorkbenchResourceControls;
   onRemoveWorkbenchSkill?: (skillId: number) => void;
   onOpenWorkbenchSkillPicker?: () => void;
-  workbenchSkillPopover?: ReactNode;
-  workbenchKnowledgePopover?: ReactNode;
 }
 
 const ThreadView: FC<ThreadViewProps> = ({
@@ -702,11 +731,14 @@ const ThreadView: FC<ThreadViewProps> = ({
   onDeepThinkingChange,
   thinkingEffort,
   onThinkingEffortChange,
+  reasoningBudgetTokens,
+  onReasoningBudgetTokensChange,
   chatMode,
   onChatModeChange,
   showModelSelector,
+  modelParameterSettings,
   showConversationTitle,
-  isDictationConfigured,
+  composerTools,
   knowledgeScope,
   knowledgePreview,
   knowledgeCapabilities,
@@ -734,6 +766,7 @@ const ThreadView: FC<ThreadViewProps> = ({
   runtimeMetadata,
   onRuntimeMetadataChange,
   readOnly,
+  modelSelectionDisabled,
   readOnlyReason,
   showComposer,
   configurationLayout,
@@ -745,13 +778,19 @@ const ThreadView: FC<ThreadViewProps> = ({
   workbenchResources,
   onRemoveWorkbenchSkill,
   onOpenWorkbenchSkillPicker,
-  workbenchSkillPopover,
-  workbenchKnowledgePopover,
 }) => {
   const { t } = useTranslation();
   const workbenchLanding = Boolean(
     workbenchPresentation && !hasMessages && !isShareMode
   );
+  const aui = useAui();
+  const suggestions = welcomeSuggestions?.length
+    ? welcomeSuggestions.slice(0, 4)
+    : (agent.example_questions || []).slice(0, 4).map((question, index) => ({
+        id: `question-${index}`,
+        title: question,
+        prompt: question,
+      }));
 
   return (
     <ThreadPrimitive.Root
@@ -768,7 +807,7 @@ const ThreadView: FC<ThreadViewProps> = ({
         className={cn(
           "flex h-full min-w-0 flex-1 flex-col",
           newChatDesign && "relative [container-type:size]",
-          workbenchLanding && "overflow-y-auto pb-[10vh]"
+          workbenchLanding && "overflow-y-auto pb-[10vh] [container-type:size]"
         )}
       >
         {newChatDesign && !hasMessages && <NewChatWelcomeBackdrop />}
@@ -882,12 +921,16 @@ const ThreadView: FC<ThreadViewProps> = ({
             variant === "embedded" ? "px-4 py-4" : "px-8 py-6",
             newChatDesign && "relative !max-w-[922px] !px-4 !py-0",
             newChatDesign && !hasMessages && "!max-w-none",
+            !hasMessages &&
+              !workbenchLanding &&
+              !debugLayout &&
+              "!overflow-y-hidden",
             debugLayout && "!max-w-none !p-0",
             configurationLayout &&
               !hasMessages &&
               "!max-w-none !overflow-hidden !p-0",
             workbenchLanding &&
-              "relative mt-auto flex-none max-w-[890px] overflow-visible px-4 pb-0 pt-6 sm:px-8"
+              "relative mt-[max(24px,calc(50cqh-220px))] flex-none max-w-[890px] overflow-visible px-4 pb-0 pt-6 sm:px-8"
           )}
         >
           {workbenchLanding && (
@@ -914,12 +957,24 @@ const ThreadView: FC<ThreadViewProps> = ({
             />
           ) : (
             (welcomeContent ?? (
-              <ThreadWelcomeContent
-                agent={agent}
-                newChatDesign={newChatDesign}
-                title={welcomeTitle}
-                suggestions={welcomeSuggestions}
-              />
+              <AgentWelcome
+                title={welcomeTitle || agent.display_name || agent.name}
+                greeting={agent.greeting_message || agent.description}
+                icon={
+                  <span className="flex size-14 shrink-0 items-center justify-center rounded-full bg-gradient-to-r from-[#FFA654] to-[#F056A0]">
+                    {createElement(getAgentIcon(agent), {
+                      className: "size-7 text-white",
+                      "aria-hidden": true,
+                    })}
+                  </span>
+                }
+              >
+                <TextSuggestion
+                  suggestions={suggestions}
+                  disabled={readOnly || isRunning}
+                  onSelect={(prompt) => aui.composer().setText(prompt)}
+                />
+              </AgentWelcome>
             ))
           )}
           {interactionContent}
@@ -933,7 +988,7 @@ const ThreadView: FC<ThreadViewProps> = ({
               newChatDesign && "!max-w-[922px] shrink-0 !gap-0 !px-4 !pb-6",
               debugLayout && "!max-w-none !shrink-0 !gap-4 !px-0 !pb-0",
               workbenchLanding &&
-                "static mb-auto max-w-[890px] gap-4 px-4 pb-6 pt-8 sm:px-8"
+                "static shrink-0 max-w-[890px] gap-4 px-4 pb-6 pt-8 sm:px-8"
             )}
           >
             {!newChatDesign && (!debugLayout || hasMessages) && (
@@ -949,7 +1004,6 @@ const ThreadView: FC<ThreadViewProps> = ({
                 emptyFooterContent
               ))}
             <Composer
-              newChatDesign={newChatDesign}
               debugLayout={debugLayout}
               models={models}
               selectedModelId={selectedModelId}
@@ -958,32 +1012,30 @@ const ThreadView: FC<ThreadViewProps> = ({
               onDeepThinkingChange={onDeepThinkingChange}
               thinkingEffort={thinkingEffort}
               onThinkingEffortChange={onThinkingEffortChange}
+              reasoningBudgetTokens={reasoningBudgetTokens}
+              onReasoningBudgetTokensChange={onReasoningBudgetTokensChange}
               chatMode={chatMode}
               onChatModeChange={onChatModeChange}
               showModelSelector={showModelSelector}
-              isDictationConfigured={isDictationConfigured}
+              modelParameterSettings={modelParameterSettings}
               knowledgeScope={knowledgeScope}
               knowledgePreview={knowledgePreview}
               knowledgeCapabilities={knowledgeCapabilities}
               onKnowledgeScopeChange={onKnowledgeScopeChange}
-              compact={variant === "embedded"}
               skillFiles={skillFiles}
               runtimeMetadata={runtimeMetadata}
               onRuntimeMetadataChange={onRuntimeMetadataChange}
               allowRuntimeMetadata={agent.allow_chat_metadata === true}
               disabled={readOnly}
+              modelSelectionDisabled={modelSelectionDisabled}
               disabledReason={readOnlyReason}
               workbenchPresentation={workbenchPresentation}
               workbenchResources={workbenchResources}
               onRemoveWorkbenchSkill={onRemoveWorkbenchSkill}
               onOpenWorkbenchSkillPicker={onOpenWorkbenchSkillPicker}
-              workbenchSkillPopover={workbenchSkillPopover}
-              workbenchKnowledgePopover={workbenchKnowledgePopover}
-            />
-            {workbenchLanding &&
-              workbenchPresentation?.mode === "generic_chat" && (
-                <WorkbenchLandingExamples />
-              )}
+            >
+              {composerTools}
+            </Composer>
             {footerContent}
           </ThreadPrimitive.ViewportFooter>
         )}
@@ -995,6 +1047,7 @@ const ThreadView: FC<ThreadViewProps> = ({
         open={selection !== null}
         selectedCitationKey={selection?.selectedCitationKey}
         citationContext={selection?.citationContext}
+        selectionToken={selection ?? undefined}
         onClose={onPanelClose}
       />
     </ThreadPrimitive.Root>
@@ -1048,6 +1101,7 @@ export const ReadOnlyConversation: FC<{
           open={selection !== null}
           selectedCitationKey={selection?.selectedCitationKey}
           citationContext={selection?.citationContext}
+          selectionToken={selection ?? undefined}
           onClose={close}
         />
       </ThreadPrimitive.Root>
@@ -1055,147 +1109,10 @@ export const ReadOnlyConversation: FC<{
   );
 };
 
-interface ThreadWelcomeContentProps {
-  agent: Agent | PublishedAgent;
-  newChatDesign?: boolean;
-  title?: string;
-  suggestions?: readonly WelcomeSuggestion[];
-}
-
-const ThreadWelcomeContent: FC<ThreadWelcomeContentProps> = ({
-  agent,
-  newChatDesign = false,
-  suggestions = [],
-}) => {
-  const aui = useAui();
-  const { t } = useTranslation();
-  const Icon = getAgentIcon(agent);
-  const displayName = agent.display_name || agent.name;
-  const sampleQuestions = (agent.example_questions || []).slice(0, 4);
-  const displayedSuggestions = suggestions.slice(0, 4);
-
-  const handleSampleQuestionClick = useCallback(
-    (question: string) => {
-      aui.composer().setText(question);
-    },
-    [aui]
-  );
-
-  const suggestionRows =
-    displayedSuggestions.length > 0
-      ? displayedSuggestions.map((suggestion) => ({
-          id: suggestion.id,
-          text: suggestion.title,
-          prompt: suggestion.prompt,
-        }))
-      : sampleQuestions.map((question, index) => ({
-          id: `question-${index}`,
-          text: question,
-          prompt: question,
-        }));
-
-  return (
-    <div
-      className={cn(
-        "flex h-full min-h-0 flex-col overflow-y-auto px-8 py-6",
-        newChatDesign &&
-          "!px-0 !pb-6 !pt-[min(30.5556cqh,max(32px,calc(100cqh-694px)))] [font-family:'HarmonyOS_Sans_SC',sans-serif]"
-      )}
-    >
-      {/* elastic space above the welcome block, per design */}
-      {!newChatDesign && <div className="min-h-6 flex-[3]" aria-hidden />}
-
-      {/* The design uses a 72px heading row and a 24px greeting gap. */}
-      <div
-        className={cn(
-          "mx-auto flex w-full max-w-[890px] shrink-0 flex-col items-center gap-6 pb-6",
-          newChatDesign && "!pb-0"
-        )}
-      >
-        <div
-          className={cn(
-            "flex items-center justify-center gap-4",
-            newChatDesign && "min-h-[72px] px-2"
-          )}
-        >
-          <span
-            className={cn(
-              "flex size-14 shrink-0 items-center justify-center",
-              newChatDesign && "size-[72px]"
-            )}
-          >
-            <span className="flex size-14 items-center justify-center rounded-full bg-gradient-to-r from-[#FFA654] to-[#F056A0]">
-              <Icon className="size-7 text-white" aria-hidden />
-            </span>
-          </span>
-          <h1 className="text-[36px] font-bold leading-[54px] text-[#191919]">
-            {displayName}
-          </h1>
-        </div>
-        <p
-          className={cn(
-            "text-center text-[14px] leading-[22px] text-[#191919]",
-            newChatDesign && "text-[16px] font-medium leading-6"
-          )}
-        >
-          {agent.greeting_message || agent.description}
-        </p>
-      </div>
-
-      {!newChatDesign && <div className="min-h-6 flex-1" aria-hidden />}
-
-      {suggestionRows.length > 0 && (
-        <div
-          className={cn(
-            "mx-auto w-full max-w-[890px] shrink-0",
-            newChatDesign && "mt-[120px] px-4"
-          )}
-        >
-          <p
-            className={cn(
-              "text-[14px] font-bold leading-[22px] text-[#191919]",
-              newChatDesign && "text-[16px] font-medium text-black"
-            )}
-          >
-            {t("chat.thread.tryQuestions")}
-          </p>
-          <div
-            className={cn("mt-2 flex flex-col", newChatDesign && "mt-3 gap-2")}
-          >
-            {suggestionRows.map((row) => (
-              <button
-                key={row.id}
-                type="button"
-                onClick={() => handleSampleQuestionClick(row.prompt)}
-                className={cn(
-                  "flex h-12 items-center gap-3 rounded-[4px] px-1 text-left transition-colors hover:bg-white/70",
-                  newChatDesign && "h-[46px] gap-1 px-0 py-3"
-                )}
-              >
-                <Lightbulb
-                  className={cn(
-                    "size-4 shrink-0 text-[#191919]",
-                    newChatDesign && "size-[18px]"
-                  )}
-                  aria-hidden
-                />
-                <span className="min-w-0 truncate text-[14px] leading-[22px] text-[#191919]">
-                  {row.text}
-                </span>
-              </button>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {!newChatDesign && <div className="min-h-10 flex-[2]" aria-hidden />}
-    </div>
-  );
-};
-
 export const ThreadMessages: FC<{
   agent: Agent | PublishedAgent;
   readOnly?: boolean;
+  modelSelectionDisabled?: boolean;
   shareMode?: boolean;
   selectedShareMessageIds?: Set<number>;
   backendMessageIdsByAuiId?: Map<string, number>;
@@ -1205,6 +1122,7 @@ export const ThreadMessages: FC<{
 }> = ({
   agent,
   readOnly = false,
+  modelSelectionDisabled,
   shareMode = false,
   selectedShareMessageIds,
   backendMessageIdsByAuiId,
@@ -1241,26 +1159,23 @@ export const ThreadMessages: FC<{
 
   const messageComponents = useMemo(
     () => ({
-      UserMessage: () => (
-        <UserMessage
-          readOnly={readOnly}
-          enableSkillDirectives={enableSkillDirectives}
-        />
-      ),
-      AssistantMessage: () => (
-        <AssistantMessage
-          agent={agent}
-          readOnly={readOnly}
-          onSkillFileSelect={onSkillFileSelect}
-        />
-      ),
+      ...threadMessageRenderers,
+      EditComposer: readOnly || shareMode ? undefined : UserMessageEditComposer,
     }),
-    [agent, enableSkillDirectives, onSkillFileSelect, readOnly]
+    [readOnly, shareMode]
   );
+  const renderState = {
+    agent,
+    readOnly,
+    enableSkillDirectives,
+    onSkillFileSelect,
+    UserMessage,
+    AssistantMessage,
+  };
 
   if (shareMode) {
     return (
-      <>
+      <ThreadMessageRenderProvider {...renderState}>
         {shareMessageGroups.map((group) => {
           const shareSelected =
             group.userMessageId !== undefined &&
@@ -1299,34 +1214,14 @@ export const ThreadMessages: FC<{
             </div>
           );
         })}
-      </>
+      </ThreadMessageRenderProvider>
     );
   }
 
   return (
-    <ThreadPrimitive.Messages>
-      {({ message }) => {
-        if (message.role === "user") {
-          return (
-            <UserMessage
-              readOnly={readOnly}
-              enableSkillDirectives={enableSkillDirectives}
-              shareMode={shareMode}
-              selectedShareMessageIds={selectedShareMessageIds}
-              backendMessageIdsByAuiId={backendMessageIdsByAuiId}
-              onToggleShareMessage={onToggleShareMessage}
-            />
-          );
-        }
-        return (
-          <AssistantMessage
-            agent={agent}
-            readOnly={readOnly}
-            onSkillFileSelect={onSkillFileSelect}
-          />
-        );
-      }}
-    </ThreadPrimitive.Messages>
+    <ThreadMessageRenderProvider {...renderState}>
+      <ThreadPrimitive.Messages components={messageComponents} />
+    </ThreadMessageRenderProvider>
   );
 };
 
@@ -1482,7 +1377,6 @@ const AssistantMessage: FC<{
   const ACTION_BAR_PT = "pt-1 pb-1 mb-1";
   const ACTION_BAR_HEIGHT = `-mb-7.5 min-h-7.5 ${ACTION_BAR_PT}`;
 
-  const AgentIcon = getAgentIcon(agent);
   const agentName = agent.display_name || agent.name;
 
   const nl2a = useAuiState(
@@ -1533,7 +1427,9 @@ const AssistantMessage: FC<{
               className="flex size-7 shrink-0 items-center justify-center rounded-full bg-primary/10 ring-1 ring-primary/10"
               aria-hidden
             >
-              <AgentIcon className="size-4 text-primary" />
+              {createElement(getAgentIcon(agent), {
+                className: "size-4 text-primary",
+              })}
             </div>
             <span className="text-sm font-medium text-foreground">
               {agentName}
@@ -2064,7 +1960,7 @@ const UserActionBar: FC = () => {
  * detect the synthetic `isImage` flag on picture_web entries. The base shape
  * stays compatible with `@assistant-ui/react`'s `SourceMessagePartComponent`.
  */
-interface SourcePartLike {
+interface SourcePartLike extends SourceAttributes {
   type: "source";
   sourceType?: "url" | "document";
   url?: string;
@@ -2325,9 +2221,17 @@ const SourceGroupButton: FC<SourceGroupButtonProps> = ({ indices }) => {
           isImage: source.isImage,
           citeIndex: source.citeIndex,
           toolSign: source.toolSign,
+          searchType: source.searchType,
+          sourceMetadata: source.sourceMetadata,
+          sourceReference: source.sourceReference,
+          retrievalHighlightTerms: source.retrievalHighlightTerms,
         }))
       : groupedSources;
-    for (const item of displaySources) {
+    const numberedSources = withCitationDisplayIndices(
+      displaySources,
+      buildCitationDisplayIndexMap(content, displaySources)
+    );
+    for (const item of numberedSources) {
       if (item.isImage) {
         imgs.push(item);
       } else {

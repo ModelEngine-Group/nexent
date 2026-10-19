@@ -33,7 +33,7 @@ export default function Homepage() {
 
   useEffect(() => {
     if (isDeploymentReady && hideHomePage) {
-      router.replace(enableAgentWorkbench ? "/workbench" : "/chat");
+      router.replace(enableAgentWorkbench ? "/workbench" : "/newchat");
     }
   }, [isDeploymentReady, hideHomePage, enableAgentWorkbench, router]);
 
@@ -101,7 +101,7 @@ export default function Homepage() {
           transition={{ duration: 0.8, delay: 0.4 }}
         >
           <Row gutter={[16, 16]} justify="center">
-            {canShowQuickAction("/chat") && (
+            {canShowQuickAction("/newchat") && (
               <Col xs={24} sm={24} md={8}>
                 <div style={{ display: "flex", justifyContent: "center" }}>
                   <Button type="primary" size="large" onClick={navigateToChat}>

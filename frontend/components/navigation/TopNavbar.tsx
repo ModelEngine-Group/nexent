@@ -10,7 +10,6 @@ import { languageOptions } from "@/const/constants";
 import { useLanguageSwitch } from "@/lib/language";
 import React, { useEffect, useState } from "react";
 import { Flex, Layout } from "antd";
-import { ChatTopNavContent } from "./ChatTopNavContent";
 import { useAuthorizationContext } from "../providers/AuthorizationProvider";
 import { useDeployment } from "../providers/deploymentProvider";
 import { monitoringService } from "@/services/monitoringService";
@@ -26,7 +25,7 @@ function buildMonitoringUrl(status: MonitoringStatus | null): string | null {
   return status.dashboard_url || null;
 }
 
-export function TopNavbar({ isChatPage }: { isChatPage: boolean }) {
+export function TopNavbar() {
   const { t } = useTranslation("common");
   const { user } = useAuthorizationContext();
   const { isSpeedMode } = useDeployment();
@@ -68,15 +67,6 @@ export function TopNavbar({ isChatPage }: { isChatPage: boolean }) {
     if (!monitoringUrl) return;
     window.open(monitoringUrl, "_blank", "noopener,noreferrer");
   };
-
-  const leftContent = isChatPage ? (
-    <Flex align="center" gap={12}>
-      <div className="h-6 border-l border-slate-300 dark:border-slate-600" />
-      <div className="text-slate-600 dark:text-slate-400">
-        <ChatTopNavContent />
-      </div>
-    </Flex>
-  ) : null;
 
   // Right content - Additional content + default navigation items
   const rightContent = (
@@ -161,9 +151,6 @@ export function TopNavbar({ isChatPage }: { isChatPage: boolean }) {
       }}
     >
       <div className="h-full flex items-center justify-between">
-        {/* Left section - Logo + additional title */}
-        {leftContent}
-
         {/* Right section - Additional content + default navigation */}
         {rightContent}
       </div>

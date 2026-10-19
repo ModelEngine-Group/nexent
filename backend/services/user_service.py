@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """
 User service layer - handles user-related business logic
 """
@@ -16,6 +18,7 @@ from database.oauth_account_db import soft_delete_all_oauth_accounts_by_user_id
 from consts.const import IS_SPEED_MODE
 from consts.exceptions import ForbiddenError, NotFoundException
 from utils.auth_utils import get_supabase_admin_client
+from services.user_identity_service import enrich_cas_usernames
 
 logger = logging.getLogger(__name__)
 
@@ -23,7 +26,8 @@ logger = logging.getLogger(__name__)
 def get_users(tenant_id: str, page: Optional[int] = 1, page_size: Optional[int] = 20,
               sort_by: str = "created_at", sort_order: str = "desc",
               search: Optional[str] = None, roles: Optional[List[str]] = None,
-              group_ids: Optional[List[int]] = None) -> Dict[str, Any]:
+              group_ids: Optional[List[int]] = None, *,
+              search_cas_username: bool = False) -> Dict[str, Any]:
     """
     Get users belonging to a specific tenant with pagination and sorting
 
@@ -48,6 +52,7 @@ def get_users(tenant_id: str, page: Optional[int] = 1, page_size: Optional[int] 
             search=search,
             roles=roles,
             group_ids=group_ids,
+            **({"search_cas_username": True} if search_cas_username else {}),
         )
     else:
         result = get_users_by_tenant_id(tenant_id, page, page_size, sort_by, sort_order)
@@ -66,6 +71,8 @@ def get_users(tenant_id: str, page: Optional[int] = 1, page_size: Optional[int] 
         }
         for r in result["users"]
     ]
+
+    enrich_cas_usernames(users, {"cas_username": "id"})
 
     # Calculate pagination info only if pagination is used
     if page is not None and page_size is not None:
@@ -94,6 +101,7 @@ def get_users_for_requester(
     *,
     requester_tenant_id: str,
     requester_role: str,
+    search_cas_username: bool = False,
 ) -> Dict[str, Any]:
     """List users after enforcing role and tenant boundaries."""
     role = (requester_role or "").upper()
@@ -110,7 +118,8 @@ def get_users_for_requester(
     # mock the pre-filter signature.
     if search or roles or group_ids:
         return get_users(
-            tenant_id, page, page_size, sort_by, sort_order, search, roles, group_ids
+            tenant_id, page, page_size, sort_by, sort_order, search, roles, group_ids,
+            **({"search_cas_username": True} if search_cas_username else {}),
         )
     return get_users(tenant_id, page, page_size, sort_by, sort_order)
 
@@ -155,6 +164,7 @@ async def update_user(user_id: str, update_data: Dict[str, Any], updated_by: str
             "role": user_tenant_data["user_role"]
         }
 
+        enrich_cas_usernames([user_info], {"cas_username": "id"})
         logger.info(f"Updated user {user_id} role to {update_data.get('role')} by user {updated_by}")
         return user_info
 

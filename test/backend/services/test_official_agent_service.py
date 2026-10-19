@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """Unit tests for official agent listing service."""
 
 import json
@@ -24,6 +26,13 @@ consts_model = types.ModuleType("consts.model")
 
 class _ModelConnectStatusEnum(Enum):
     AVAILABLE = "available"
+
+
+class _ToolSourceEnum(Enum):
+    LOCAL = "local"
+    MCP = "mcp"
+    LANGCHAIN = "langchain"
+    BUILTIN = "builtin"
 
 
 class _KnowledgeBaseSeedDoc(BaseModel):
@@ -172,6 +181,7 @@ class _ToolInstanceInfoRequest(BaseModel):
 
 
 consts_model.ModelConnectStatusEnum = _ModelConnectStatusEnum
+consts_model.ToolSourceEnum = _ToolSourceEnum
 consts_model.OfficialAgentBundle = _OfficialAgentBundle
 consts_model.OfficialAgentListItem = _OfficialAgentListItem
 consts_model.OfficialAgentAgentInfo = _OfficialAgentAgentInfo
@@ -439,14 +449,14 @@ def test_is_agent_installed_when_agent_missing():
 
 
 async def test_has_available_embedding_model_true():
-    fake = types.ModuleType("services.model_management_service")
+    fake = types.ModuleType("management.services.model.management")
     fake.list_models_for_tenant = AsyncMock(
         return_value=[
             {"model_id": 1, "model_type": "llm", "connect_status": "available"},
             {"model_id": 2, "model_type": "embedding", "connect_status": "available"},
         ]
     )
-    with patch.dict(sys.modules, {"services.model_management_service": fake}):
+    with patch.dict(sys.modules, {"management.services.model.management": fake}):
         assert (
             await official_agent_service._has_available_embedding_model("tenant-1")
             is True
@@ -454,7 +464,7 @@ async def test_has_available_embedding_model_true():
 
 
 async def test_first_available_embedding_model_id_returns_id():
-    fake = types.ModuleType("services.model_management_service")
+    fake = types.ModuleType("management.services.model.management")
     fake.list_models_for_tenant = AsyncMock(
         return_value=[
             {"model_id": 1, "model_type": "llm", "connect_status": "available"},
@@ -462,7 +472,7 @@ async def test_first_available_embedding_model_id_returns_id():
             {"model_id": 3, "model_type": "multi_embedding", "connect_status": "available"},
         ]
     )
-    with patch.dict(sys.modules, {"services.model_management_service": fake}):
+    with patch.dict(sys.modules, {"management.services.model.management": fake}):
         model_id = await official_agent_service._first_available_embedding_model_id(
             "tenant-1"
         )
@@ -470,14 +480,14 @@ async def test_first_available_embedding_model_id_returns_id():
 
 
 async def test_has_available_embedding_model_false_when_unavailable():
-    fake = types.ModuleType("services.model_management_service")
+    fake = types.ModuleType("management.services.model.management")
     fake.list_models_for_tenant = AsyncMock(
         return_value=[
             {"model_id": 1, "model_type": "embedding", "connect_status": "unavailable"},
             {"model_id": 2, "model_type": "llm", "connect_status": "available"},
         ]
     )
-    with patch.dict(sys.modules, {"services.model_management_service": fake}):
+    with patch.dict(sys.modules, {"management.services.model.management": fake}):
         assert (
             await official_agent_service._has_available_embedding_model("tenant-1")
             is False
@@ -486,9 +496,9 @@ async def test_has_available_embedding_model_false_when_unavailable():
 
 async def test_missing_model_types_reports_all_missing():
     bundle = _make_bundle(name="research", has_knowledge=True)
-    fake = types.ModuleType("services.model_management_service")
+    fake = types.ModuleType("management.services.model.management")
     fake.list_models_for_tenant = AsyncMock(return_value=[])
-    with patch.dict(sys.modules, {"services.model_management_service": fake}):
+    with patch.dict(sys.modules, {"management.services.model.management": fake}):
         missing = await official_agent_service._missing_model_types(bundle, "tenant-1")
     assert missing == ["llm", "embedding"]
 
@@ -502,28 +512,28 @@ async def test_missing_model_types_reports_rerank_when_enabled():
             params={"index_names": ["kb-1"], "rerank": True},
         )
     ]
-    fake = types.ModuleType("services.model_management_service")
+    fake = types.ModuleType("management.services.model.management")
     fake.list_models_for_tenant = AsyncMock(
         return_value=[
             {"model_id": 1, "model_type": "llm", "connect_status": "available"},
             {"model_id": 2, "model_type": "embedding", "connect_status": "available"},
         ]
     )
-    with patch.dict(sys.modules, {"services.model_management_service": fake}):
+    with patch.dict(sys.modules, {"management.services.model.management": fake}):
         missing = await official_agent_service._missing_model_types(bundle, "tenant-1")
     assert missing == ["rerank"]
 
 
 async def test_missing_model_types_empty_when_all_present():
     bundle = _make_bundle(name="research", has_knowledge=True)
-    fake = types.ModuleType("services.model_management_service")
+    fake = types.ModuleType("management.services.model.management")
     fake.list_models_for_tenant = AsyncMock(
         return_value=[
             {"model_id": 1, "model_type": "llm", "connect_status": "available"},
             {"model_id": 2, "model_type": "multi_embedding", "connect_status": "available"},
         ]
     )
-    with patch.dict(sys.modules, {"services.model_management_service": fake}):
+    with patch.dict(sys.modules, {"management.services.model.management": fake}):
         missing = await official_agent_service._missing_model_types(bundle, "tenant-1")
     assert missing == []
 
@@ -1378,7 +1388,7 @@ async def test_create_knowledge_bases_uploads_binary_docs(tmp_path):
     fake_file_svc.upload_files_impl = AsyncMock(
         return_value=([], ["minio/a.docx"], ["a.docx"])
     )
-    fake_utils = types.ModuleType("utils.file_management_utils")
+    fake_utils = types.ModuleType("management.services.knowledge_base.ingestion")
     fake_utils.trigger_data_process = AsyncMock()
 
     with patch.dict(
@@ -1391,7 +1401,7 @@ async def test_create_knowledge_bases_uploads_binary_docs(tmp_path):
             "management.services.model.resolver": fake_model_resolver,
             "database.group_db": fake_group_db,
             "services.file_management_service": fake_file_svc,
-            "utils.file_management_utils": fake_utils,
+            "management.services.knowledge_base.ingestion": fake_utils,
         },
     ):
         mapping = await official_agent_service._create_knowledge_bases(
@@ -1690,7 +1700,7 @@ async def test_index_binary_docs_skips_processing_when_upload_returns_no_path(tm
     binary_file.write_bytes(b"pdf")
     fake_file_svc = types.ModuleType("services.file_management_service")
     fake_file_svc.upload_files_impl = AsyncMock(return_value=([], [], []))
-    fake_utils = types.ModuleType("utils.file_management_utils")
+    fake_utils = types.ModuleType("management.services.knowledge_base.ingestion")
     fake_utils.trigger_data_process = AsyncMock()
     doc = _KnowledgeBaseSeedDoc(file_name="guide.pdf", file_path=str(binary_file))
 
@@ -1698,7 +1708,7 @@ async def test_index_binary_docs_skips_processing_when_upload_returns_no_path(tm
         sys.modules,
         {
             "services.file_management_service": fake_file_svc,
-            "utils.file_management_utils": fake_utils,
+            "management.services.knowledge_base.ingestion": fake_utils,
         },
     ):
         await official_agent_service._index_binary_docs(

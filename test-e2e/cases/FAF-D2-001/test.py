@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """FAF-D2-001 real stream-generator contract with SDK events."""
 import asyncio
 import json
@@ -5,6 +7,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 import pytest
 from management.services.agent import run as agent_run_service
+import management.services.agent.execution as agent_execution
 from nexent.core.utils.observer import MessageObserver, ProcessType
 
 pytestmark = [pytest.mark.case_id("FAF-D2-001"), pytest.mark.stage("D2")]
@@ -54,20 +57,20 @@ async def _capture_events(monkeypatch, events):
             yield json.dumps(event)
 
     batches = []
-    monkeypatch.setattr(agent_run_service, "agent_run", source)
-    monkeypatch.setattr(agent_run_service, "save_message", MagicMock(return_value=42))
+    monkeypatch.setattr(agent_execution, "agent_run", source)
+    monkeypatch.setattr(agent_execution, "save_message", MagicMock(return_value=42))
     monkeypatch.setattr(
-        agent_run_service,
+        agent_execution,
         "persist_assistant_run_batch",
         lambda **kwargs: batches.append(kwargs),
     )
     monkeypatch.setattr(
-        agent_run_service, "_unregister_agent_run_after_execution", MagicMock()
+        agent_execution, "_unregister_agent_run_after_execution", MagicMock()
     )
     monkeypatch.setattr(
-        agent_run_service.streaming_channel_manager, "complete_channel", AsyncMock()
+        agent_execution.streaming_channel_manager, "complete_channel", AsyncMock()
     )
-    monkeypatch.setattr(agent_run_service, "_cleanup_channel_later", AsyncMock())
+    monkeypatch.setattr(agent_execution, "_cleanup_channel_later", AsyncMock())
 
     async def managed(_lane, _spec, fn, *args, **kwargs):
         return fn(*args, **kwargs)
@@ -75,8 +78,8 @@ async def _capture_events(monkeypatch, events):
     async def cancel(*_args, **_kwargs):
         await asyncio.Event().wait()
 
-    monkeypatch.setattr(agent_run_service.runtime_thread_manager, "run", managed)
-    monkeypatch.setattr(agent_run_service, "_poll_runtime_cancel_signal", cancel)
+    monkeypatch.setattr(agent_execution.runtime_thread_manager, "run", managed)
+    monkeypatch.setattr(agent_execution, "_poll_runtime_cancel_signal", cancel)
     info = SimpleNamespace(
         agent_config=SimpleNamespace(pre_run_tool_events=()),
         cancellation_scope=None,

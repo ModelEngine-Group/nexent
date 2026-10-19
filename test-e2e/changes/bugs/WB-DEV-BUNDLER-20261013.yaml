@@ -1,0 +1,33 @@
+schema_version: '1.0'
+change:
+  change_id: WB-DEV-BUNDLER-20261013
+  change_type: bugfix
+  bug_id: WB-DEV-BUNDLER-20261013
+  title: Worktree development startup fails with linked dependencies
+  description: Select Webpack for shared node_modules links in the development custom server.
+  observed_behavior: pnpm dev fails with a Turbopack panic because the worktree dependency junction points outside the project root.
+  expected_behavior: The custom development server starts with shared dependencies, preserving regular checkout and production behavior.
+  escaped_stage: D4
+  coverage_gap:
+    type: missing_assertion
+    description: Prior Workbench verification used the Next CLI with explicit Webpack and did not exercise server.js bundler selection for the actual pnpm dev entry.
+  feature_contract_changed: false
+  affected_features:
+    existing: [WB-CONTROLS]
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing: [WB-CONTROLS-D4-001]
+    added: []
+    modified: []
+    retired: []
+  traditional_ut:
+    decision: add
+    test_selectors: [frontend/tests/devServerOptions.test.mjs]
+    behaviors:
+      - A real directory link chooses explicit Webpack for development.
+      - An ordinary dependency directory keeps Turbopack and production selects no development bundler options.
+    reason: Node unit tests prove development option selection; unchanged D4 runs against the actual custom server to verify the Workbench still renders and works.
+  no_case_change_reason: Development launcher options change without a business or HTTP contract change; reuse the Workbench browser Case with the corrected startup entry.
+  notes: Existing chat-workbench-resource-controls design and task documents own this local worktree follow-up. No dependency installation or environment-file replacement.

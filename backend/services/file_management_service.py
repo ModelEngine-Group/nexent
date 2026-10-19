@@ -51,7 +51,8 @@ from database.attachment_db import (
 from database.knowledge_file_lifecycle_db import create_file_records, transition_file_record
 from database.model_management_db import get_model_by_model_id
 from management.services.knowledge_base.service import ElasticSearchService, get_vector_db_core
-from utils.config_utils import get_model_name_from_config, tenant_config_manager
+from utils.config_utils import tenant_config_manager
+from management.services.model.names import get_model_name_from_config
 from utils.file_management_utils import save_upload_file
 from utils.knowledge_ingestion_errors import ingestion_error_fields
 from utils.knowledge_telemetry import trace_knowledge_operation

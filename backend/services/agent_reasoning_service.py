@@ -4,8 +4,8 @@ from copy import deepcopy
 from typing import Optional
 
 from database.model_management_db import get_model_by_model_id
-from utils.model_name_utils import add_repo_to_name
-from utils.reasoning import normalize_reasoning_params
+from management.services.model.names import add_repo_to_name
+from management.services.model.reasoning import normalize_reasoning_params
 
 
 REASONING_EFFORT_VALUES = {

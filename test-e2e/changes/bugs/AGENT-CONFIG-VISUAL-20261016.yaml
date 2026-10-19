@@ -1,0 +1,32 @@
+schema_version: '1.0'
+change:
+  change_id: AGENT-CONFIG-VISUAL-20261016
+  change_type: bugfix
+  bug_id: AGENT-CONFIG-VISUAL-20261016
+  title: Soften Agent configuration surfaces and increase spacing
+  description: Match navigation gray, separate configuration panes/cards, and replace blue gradient hover with subtle surface and text feedback.
+  observed_behavior: Configuration uses a separate gray, dense spacing, dark icons and static text with a blue gradient hover.
+  expected_behavior: Shared navigation surface, generous spacing, lighter hierarchy, smooth hover/focus, and four resource sections expanded by default with subtle separators.
+  escaped_stage: D4
+  coverage_gap:
+    type: unknown_baseline
+    description: Existing configuration layout UT proves expansion and actions, not browser visual appearance; no owning visual formal Case found.
+  feature_contract_changed: false
+  traditional_ut:
+    decision: strengthen
+    reason: Strengthen existing frontend UT for the requested default resource expansion, independent collapse, agent-switch reset and focus after collapse; appearance still needs browser inspection. No Python changes.
+    behaviors:
+    - Preserve section expansion, generation locks, saving and debug/publish controls.
+    test_selectors:
+    - frontend/tests/component/agentConfigLayout.test.tsx
+  affected_features:
+    existing: []
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing: []
+    added: []
+    modified: []
+    retired: []
+  notes: Design at nexent-doc/docs/Developing/dev-agent-config-visual-spacing/design.md. No new formal Cases; existing frontend UT strengthened for local default expansion. Existing tsconfig.json edit is unrelated.

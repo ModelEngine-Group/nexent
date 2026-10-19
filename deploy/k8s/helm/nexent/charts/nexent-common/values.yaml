@@ -21,8 +21,14 @@ sqlFiles:
   migrations: {}
   supabase: {}
 
+# Base64-encoded file-declared values; full env files are backend-only Secrets.
+envFiles:
+  rootData: {}
+  monitoringData: {}
+
 # ConfigMap data - this will be used by nexent-config ConfigMap
 config:
+  timezone: "Asia/Shanghai"
   # Service URLs (internal)
   services:
     configUrl: "http://nexent-config:5010"

@@ -1,3 +1,5 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import { expect, it, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
@@ -28,9 +30,7 @@ it.each(["skill_create", "agent_create"] as const)(
     state.setText.mockReset();
     const select = vi.fn(),
       modeChange = vi.fn();
-    const { rerender } = render(
-      <CreationExamples mode={mode} onBack={modeChange} />
-    );
+    const { rerender } = render(<CreationExamples mode={mode} />);
     expect(
       screen
         .getAllByRole("button")
@@ -53,11 +53,11 @@ it.each(["skill_create", "agent_create"] as const)(
     expect(select).not.toHaveBeenCalled();
     expect(modeChange).not.toHaveBeenCalled();
     state.text = "editable draft";
-    rerender(<CreationExamples mode={mode} onBack={modeChange} />);
+    rerender(<CreationExamples mode={mode} />);
     expect(screen.queryAllByRole("button")).toHaveLength(0);
     state.text = "";
     state.locale = "en";
-    rerender(<CreationExamples mode={mode} onBack={modeChange} />);
+    rerender(<CreationExamples mode={mode} />);
     expect(screen.getByText(en[key])).toBeInTheDocument();
     expect(
       screen

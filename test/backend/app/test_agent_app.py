@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """
 Unit tests for backend.apps.agent_app module.
 
@@ -1746,8 +1748,33 @@ def test_list_agent_page_api_forwards_filters_and_returns_paged_agents(
         search="support",
         page=2,
         page_size=5,
+        sort_by_update_time=False,
         include_repository_info=True,
     )
+
+
+def test_list_agent_page_api_forwards_publish_time_sort(mocker, mock_auth_header):
+    """The latest-published-first selector is forwarded to the service."""
+    mocker.patch(
+        "apps.agent_app.get_current_user_info",
+        return_value=("test_user", "auth_tenant", "en"),
+    )
+    mock_list = mocker.patch(
+        "apps.agent_app.list_agent_page_impl", new_callable=AsyncMock
+    )
+    mock_list.return_value = {
+        "items": [],
+        "pagination": {"page": 1, "page_size": 5, "total": 0, "total_pages": 0},
+    }
+
+    response = config_client.get(
+        "/agent/list/page",
+        params={"sort_by_update_time": "true"},
+        headers=mock_auth_header,
+    )
+
+    assert response.status_code == 200
+    assert mock_list.await_args.kwargs["sort_by_update_time"] is True
 
 
 def test_list_agent_page_api_forwards_creator_and_structured_tag_filters(

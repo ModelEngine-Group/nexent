@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import json
 import logging
 from http import HTTPStatus
@@ -78,9 +80,12 @@ from services.workbench_service import (
     build_workbench_capability_preview,
     build_workbench_main_profile,
 )
-from management.services.agent.system_agent_provider import ensure_workbench_main_agent
+from management.services.agent.system import (
+    ensure_workbench_main_agent,
+)
 from services.agent_draft_permission_service import AgentDraftEditError
 from services.nl2agent_service import Nl2AgentDraftSaveError, create_nl2agent_stream
+from consts.exceptions import RunModelControlsError
 from services.workbench_creation_history_service import (
     prepare_creation_history,
     persist_creation_stream,
@@ -258,6 +263,9 @@ async def agent_run_api(
         raise HTTPException(status_code=HTTPStatus.FORBIDDEN, detail=str(e)) from e
     except WorkbenchError as e:
         raise HTTPException(status_code=e.status_code, detail={"code": e.code}) from e
+    except RunModelControlsError as e:
+        status = {"model_not_available": 404, "model_unavailable": 409, "model_type_invalid": 400}.get(e.code, 422)
+        raise HTTPException(status_code=status, detail={"code": e.code}) from e
     except ValidationError as e:
         raise HTTPException(
             status_code=HTTPStatus.UNPROCESSABLE_ENTITY,
@@ -313,6 +321,9 @@ async def northbound_agent_run_api(
             status_code=HTTPStatus.FORBIDDEN,
             detail=str(exc),
         ) from exc
+    except RunModelControlsError as exc:
+        status = {"model_not_available": 404, "model_unavailable": 409, "model_type_invalid": 400}.get(exc.code, 422)
+        raise HTTPException(status_code=status, detail={"code": exc.code}) from exc
     except ValidationError as exc:
         raise HTTPException(
             status_code=HTTPStatus.UNPROCESSABLE_ENTITY,
@@ -395,6 +406,9 @@ async def nl2agent_run_api(
             status_code=status_code,
             detail={"code": exc.code, "message": "Agent draft cannot be reused."},
         ) from exc
+    except RunModelControlsError as exc:
+        status = {"model_not_available": 404, "model_unavailable": 409, "model_type_invalid": 400}.get(exc.code, 422)
+        raise HTTPException(status_code=status, detail={"code": exc.code}) from exc
     except Nl2AgentDraftSaveError as exc:
         raise HTTPException(
             status_code=HTTPStatus.BAD_REQUEST,
@@ -926,6 +940,9 @@ async def list_agent_page_api(
     search_tag_predicates: Optional[str] = Query(None, description="Text-search tag predicates as JSON"),
     page: int = Query(1, ge=1, description="Page number starting from 1"),
     page_size: int = Query(20, ge=1, le=100, description="Items per page"),
+    sort_by_update_time: bool = Query(
+        False, description="Order by latest published version time"
+    ),
     include_repository_info: bool = Query(
         False, description="Include repository listings for agents on this page"
     ),
@@ -950,6 +967,7 @@ async def list_agent_page_api(
             "search": search,
             "page": page,
             "page_size": page_size,
+            "sort_by_update_time": sort_by_update_time,
             "include_repository_info": include_repository_info,
         }
         if created_by:

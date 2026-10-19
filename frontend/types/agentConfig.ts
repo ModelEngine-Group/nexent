@@ -1,3 +1,5 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 // Agent Configuration Types
 import type { Dispatch, SetStateAction } from "react";
 import type { MyAgentRepositoryInfoItem } from "@/types/agentRepository";
@@ -123,6 +125,7 @@ export interface PublishedAgent {
   display_name?: string;
   description: string;
   author?: string;
+  author_cas_username?: string | null;
   unavailable_reasons?: string[];
   model_ids?: number[];
   model_names?: string[];
@@ -157,6 +160,7 @@ export interface Agent {
   description: string;
   tags?: string[];
   author?: string;
+  author_cas_username?: string | null;
   /** Nexent user_id of the agent creator (owner). */
   created_by?: string | null;
   create_time?: string;
@@ -223,6 +227,7 @@ export interface Agent {
 export type AgentCore = "smolagents" | "jiuwen";
 
 export interface Tool {
+  updated_by_cas_username?: string | null;
   id: string;
   name: string;
   origin_name?: string;

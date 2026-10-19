@@ -1,3 +1,5 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 // Shared types for the "add resource" slide-out drawers (agent, knowledge, model, skill, tool).
 
 export interface SelectedItem {
@@ -18,9 +20,14 @@ export interface TagOption {
 /** Card entry for the "add agent" drawer. */
 export interface AgentCardItem {
   id: string;
+  /** Original numeric identity, independent of caller-defined selection keys. */
+  agentId?: number;
+  tagResourceId?: string;
+  iconUrl?: string;
   name: string;
   description: string;
-  iconBg: string;
+  iconBg?: string;
+  version?: string;
   updatedAt?: string;
   online?: boolean;
   tags?: string[];
@@ -32,7 +39,6 @@ export interface KnowledgeItem {
   name: string;
   category?: string;
   description: string;
-  iconBg: string;
   meta: string[];
 }
 
@@ -49,6 +55,8 @@ export interface ModelItem {
   id: string;
   name: string;
   tags: string[];
+  /** Lowercased modelFactory/source used to resolve a provider logo. */
+  provider?: string;
 }
 
 /** Row entry shared by the "add skill" and "add tool" drawers. */

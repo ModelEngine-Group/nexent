@@ -1,3 +1,5 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import { fileURLToPath } from "node:url";
 import { createServer } from "node:http";
 import fs from "node:fs";
@@ -43,9 +45,17 @@ dotenv.config({
   override: false, // Don't override existing environment variables (important for Docker)
 });
 
+// Standalone production packaging does not include development-only helpers.
+const devBundlerOptions = dev
+  ? (await import("./dev-server-options.mjs")).getDevBundlerOptions(
+      dev,
+      path.join(__dirname, "node_modules")
+    )
+  : {};
+
 const app = next({
   dev,
-  turbo: dev,
+  ...devBundlerOptions,
   ...(nextConfig && { conf: nextConfig }),
 });
 const handle = app.getRequestHandler();

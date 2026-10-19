@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """Knowledge-base list result normalization and composition."""
 
 from typing import Any, Dict, List, Optional
@@ -25,7 +27,9 @@ def _sort_key(item: Dict[str, Any]) -> tuple[str, str, str]:
     )
 
 
-def _merge_ordered_info(primary_info: List[Dict[str, Any]], asset_info: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+def _merge_ordered_info(
+    primary_info: List[Dict[str, Any]], asset_info: List[Dict[str, Any]]
+) -> List[Dict[str, Any]]:
     merged = []
     primary_index = asset_index = 0
     while primary_index < len(primary_info) and asset_index < len(asset_info):
@@ -54,18 +58,20 @@ def merge_indices_results(
     if offset is None or limit is None:
         result = {"indices": combined_indices, "count": len(combined_indices)}
         if has_info:
-            result["indices_info"] = primary.get("indices_info", []) + asset_owner.get("indices_info", [])
+            result["indices_info"] = primary.get("indices_info", []) + asset_owner.get(
+                "indices_info", []
+            )
         return result
 
     combined_info = _merge_ordered_info(
         primary.get("indices_info", []),
         asset_owner.get("indices_info", []),
     )
-    page_info = combined_info[offset:offset + limit]
+    page_info = combined_info[offset : offset + limit]
     page_indices = (
         [item["name"] for item in page_info]
         if combined_info
-        else combined_indices[offset:offset + limit]
+        else combined_indices[offset : offset + limit]
     )
     total = int(primary.get("total", primary.get("count", 0))) + int(
         asset_owner.get("total", asset_owner.get("count", 0))
@@ -89,7 +95,9 @@ def merge_indices_results(
     return result
 
 
-def merge_list_indices_results(primary: Dict[str, Any], asset_owner: Dict[str, Any]) -> Dict[str, Any]:
+def merge_list_indices_results(
+    primary: Dict[str, Any], asset_owner: Dict[str, Any]
+) -> Dict[str, Any]:
     return merge_indices_results(primary, asset_owner)
 
 

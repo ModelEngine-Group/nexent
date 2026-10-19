@@ -1,3 +1,5 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 "use client";
 
 import { useState } from "react";
@@ -29,13 +31,19 @@ export function SkillConfigModal({
 
   return (
     <ParamDialog
+      variant="skill"
       open={open}
       title={`${skillName} 配置`}
       onClose={onClose}
-      onConfirm={() => onConfirm?.({ tavily_api_key: apiKey, max_results: maxResults })}
+      onConfirm={() =>
+        onConfirm?.({ tavily_api_key: apiKey, max_results: maxResults })
+      }
     >
       <ParamField label="tavily_api_key" required info>
-        <ParamInput value={apiKey} onChange={(e) => setApiKey(e.target.value)} />
+        <ParamInput
+          value={apiKey}
+          onChange={(e) => setApiKey(e.target.value)}
+        />
       </ParamField>
 
       <ParamField label="max_results" info>
@@ -46,7 +54,7 @@ export function SkillConfigModal({
         />
       </ParamField>
 
-      <div className="flex items-center gap-3">
+      <div className="flex flex-col items-start gap-2">
         <ParamLabel label="Image filter" info />
         <ParamSwitch checked={imageFilter} onChange={setImageFilter} />
       </div>

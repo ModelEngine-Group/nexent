@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import ast
 import asyncio
 import json
@@ -68,7 +70,7 @@ from services.thread_lifecycle_service import (
     config_thread_manager,
     runtime_thread_manager,
 )
-from utils.llm_utils import call_llm_for_system_prompt
+from management.services.model.invocation import call_llm_for_system_prompt
 from nexent.core.agents.prompt.auxiliary import AuxiliaryPrompt, compose_auxiliary_prompt
 from nexent.core.agents.prompt.evaluation import (
     compose_analysis_report,
@@ -1321,7 +1323,9 @@ def _generate_test_queries(
 
     Uses the same template as case generation; extracts only the query strings.
     """
-    from utils.agent_profile_utils import fetch_agent_profile
+    from management.services.agent.profile import (
+        fetch_agent_profile,
+    )
 
     profile = fetch_agent_profile(agent_id, tenant_id)
     if not profile:

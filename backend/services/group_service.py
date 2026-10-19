@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """
 Group service for managing groups and group memberships.
 """
@@ -24,6 +26,7 @@ from database.tenant_config_db import get_single_config_info, insert_config, upd
 from consts.exceptions import NotFoundException, UnauthorizedError, ValidationError
 from consts.const import DEFAULT_GROUP_ID
 from services.tenant_service import get_tenant_info
+from services.user_identity_service import enrich_cas_usernames
 
 logger = logging.getLogger(__name__)
 
@@ -465,7 +468,7 @@ def get_group_users(group_id: int) -> List[Dict[str, Any]]:
                     "role": user_info.get("user_role", "")
                 })
 
-    return filtered_users
+    return enrich_cas_usernames(filtered_users, {"cas_username": "id"})
 
 
 def get_group_user_count(group_id: int) -> int:

@@ -1,0 +1,70 @@
+schema_version: '1.0'
+stage: D5
+module: CHAT-SIDEBAR
+case:
+  case_id: CHAT-SIDEBAR-D5-001
+  feature_id: CHAT-SIDEBAR
+  requirement_ids:
+  - WB-PIN-SYNC-20261016
+  business_rule_ids:
+  - CHAT-SIDEBAR-RULE-003
+  title: Workbench personal pin schema uses only the existing conversation table
+  type: RELIABILITY
+  priority: P1
+  status: active
+  automation: automated
+  objective: Execute direct column/index SQL against disposable PostgreSQL schemas and prove repeatability
+    without separate-table creation.
+  preconditions:
+  - Reachable PostgreSQL configured by backend; disposable schemas only.
+  test_data:
+    profile: mock
+  steps:
+  - order: 1
+    action: Apply the personal pin SQL to an existing conversation table with active, deleted and Agent-chat
+      rows.
+    expected: A nullable timezone-aware pin timestamp, column comment and ordered partial index are added;
+      existing conversation data is unchanged and no separate pin table is created.
+  - order: 2
+    action: Set a current personal pin timestamp and repeat the same SQL.
+    expected: Current pin values and conversation activity/content remain unchanged; the field and index
+      are not duplicated.
+  - order: 3
+    action: Inspect the versioned migration catalog used by deployment.
+    expected: The old separate-table SQL is absent, no remaining migration creates that table, and the
+      new SQL contains no compatibility/backfill/drop sequence.
+  expected_results:
+  - Personal pin schema is added directly to the existing conversation table without creating a separate
+    table or changing existing conversation data.
+  - Repeat execution preserves current pin values and keeps exactly one field and index.
+  forbidden_side_effects:
+  - No changes outside disposable schemas; no separate pin table creation, legacy backfill or deletion
+    SQL; no conversation activity/content mutation.
+  risk_type: RELIABILITY
+  risk: Unnecessary legacy migrations could create obsolete tables or overwrite current personal pin values.
+  condition:
+  - The feature has not shipped to production; deployment uses the simplified migration catalog.
+  metrics:
+  - Column type/nullability/comment, index definition, migration catalog and conversation snapshots.
+  thresholds:
+  - All direct schema and repeatability assertions pass.
+  recovery_expectations:
+  - Repeated deployment does not reset pin values or modify conversation data.
+  acceptance:
+  - id: AC-01
+    description: Direct field/index creation on the existing conversation table with no data changes.
+    steps:
+    - 1
+    expected_results:
+    - 1
+    forbidden_side_effects:
+    - 1
+  - id: AC-02
+    description: Repeatability preserves pins and the catalog excludes the superseded separate-table sequence.
+    steps:
+    - 2
+    - 3
+    expected_results:
+    - 2
+    forbidden_side_effects:
+    - 1

@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """
 Integration test for document vector operations.
 
@@ -73,11 +75,7 @@ patch('nexent.storage.storage_client_factory.create_storage_client_from_config',
 patch('nexent.storage.minio_config.MinIOStorageConfig.validate', lambda self: None).start()
 patch('backend.database.client.MinioClient', return_value=minio_client_mock).start()
 
-from backend.utils.document_vector_utils import (
-    calculate_document_embedding,
-    auto_determine_k,
-    kmeans_cluster_documents
-)
+from backend.management.services.knowledge_base.clustering import calculate_document_embedding, auto_determine_k, kmeans_cluster_documents
 
 
 class TestDocumentVectorIntegration:

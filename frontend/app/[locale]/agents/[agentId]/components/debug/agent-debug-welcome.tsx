@@ -1,13 +1,17 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 "use client";
 
 import { Avatar } from "antd";
 import { Lightbulb } from "lucide-react";
 import { useTranslation } from "react-i18next";
-import { useState } from "react";
+import { createElement, useState } from "react";
 import type { Agent } from "@/types/agentConfig";
 import { API_ENDPOINTS } from "@/services/api";
-import { getAgentUploadedIconRevision } from "@/lib/chat/agentIconUtils";
-import { DefaultAgentAvatar } from "../DefaultAgentAvatar";
+import {
+  getAgentIcon,
+  getAgentUploadedIconRevision,
+} from "@/lib/chat/agentIconUtils";
 
 interface AgentDebugWelcomeProps {
   agent: Agent;
@@ -28,8 +32,8 @@ export function AgentDebugWelcome({ agent }: AgentDebugWelcomeProps) {
         <Avatar
           size={72}
           src={iconSource !== failedIcon ? iconSource : undefined}
-          icon={<DefaultAgentAvatar size={72} />}
-          className="!shrink-0 !bg-transparent"
+          icon={createElement(getAgentIcon(agent), { size: 36 })}
+          className="!shrink-0 !bg-primary/10 !text-primary"
           onError={() => {
             setFailedIcon(iconSource);
             return false;

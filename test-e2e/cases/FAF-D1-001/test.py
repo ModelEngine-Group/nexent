@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """FAF-D1-001: role classification, completion and step persistence."""
 
 import importlib.util
@@ -22,7 +24,7 @@ def load_module(name, path):
 
 
 observer_module = load_module("faf_observer", "sdk/nexent/core/utils/observer.py")
-projection = load_module("faf_projection", "backend/utils/final_answer_projection.py")
+projection = load_module("faf_projection", "backend/management/services/agent/stream.py")
 MessageObserver = observer_module.MessageObserver
 ProcessType = observer_module.ProcessType
 

@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import logging
 import uuid
 from typing import Any, Dict, List, Optional
@@ -358,6 +360,19 @@ def delete_knowledge_record(query: Dict[str, Any]) -> bool:
             return True
     except SQLAlchemyError as e:
         raise e
+
+
+def get_knowledge_records_for_tag_read(tenant_id: str, index_names: list[str]) -> list[dict]:
+    """Read active knowledge-base records for one authenticated tenant page."""
+    if not index_names:
+        return []
+    with get_db_session() as session:
+        records = session.query(KnowledgeRecord).filter(
+            KnowledgeRecord.tenant_id == tenant_id,
+            KnowledgeRecord.delete_flag != 'Y',
+            KnowledgeRecord.index_name.in_(index_names),
+        ).all()
+        return [as_dict(record) for record in records]
 
 
 def get_knowledge_record(query: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:

@@ -97,12 +97,6 @@ vi.mock('@/components/ui/tabs', () => ({
 vi.mock('@/components/common/ExpandEditModal', () => ({ default: () => null }));
 vi.mock('@/components/chat/RuntimeMetadataEditor', () => ({ RuntimeMetadataEditor: () => null }));
 
-vi.mock('@/app/chat/components/chatModelSelector', () => ({
-  ChatModelSelector: (props: any) => {
-    h.chatModelSelectorProps = props;
-    return null;
-  },
-}));
 
 vi.mock('@/app/[locale]/agents/components/agentInfo/DebugMessageList', () => ({ default: () => null }));
 vi.mock('@/app/[locale]/agents/components/agentInfo/DebugOptimizeModal', () => ({ default: () => null }));
@@ -125,7 +119,6 @@ vi.mock('@/services/conversationService', () => ({
 vi.mock('@/services/configService', () => ({
   configService: { fetchRuntimeFrontendConfig: () => Promise.resolve({}) },
 }));
-vi.mock('@/app/chat/streaming/chatStreamHandler', () => ({ handleStreamResponse: vi.fn() }));
 vi.mock('@/const/chatConfig', () => ({
   MESSAGE_ROLES: { USER: 'user', ASSISTANT: 'assistant', SYSTEM: 'system' },
   chatConfig: {

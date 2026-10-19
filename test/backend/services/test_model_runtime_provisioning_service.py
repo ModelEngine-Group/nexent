@@ -178,3 +178,23 @@ def test_clearing_an_explicit_capacity_column_does_not_restore_a_catalog_default
     record["context_window_tokens"] = None
     record["runtime_outlet_snapshot"] = build_runtime_outlet_snapshot(record)
     assert restore_runtime_model_snapshot(record, "tenant").capabilities.context.combined_window is None
+
+
+def test_record_factory_and_request_overlay_preserve_trusted_outlet(saved):
+    """The refactored record factory must retain the Jiuwen outlet binding."""
+    from agents.create_agent_info import create_model_config_from_record
+    from management.services.model.run_controls import overlay_root_model
+
+    base = create_model_config_from_record(saved, "tenant")
+    original = base.resolved_profile.model_dump()
+    overlay = overlay_root_model(base, {"temperature": 0.3}, "turn_model")
+    compiled = compile_model_runtime_profile(overlay, AgentConfig(
+        name="root", description="Root", model_name="turn_model", tools=[], agent_core="jiuwen",
+    ))
+
+    assert base.resolved_profile.outlet_id == compiled.outlet_id == saved["model_id"]
+    assert compiled.identity.tenant_id == "tenant"
+    assert compiled.parameter_values["temperature"] == 0.3
+    assert base.temperature == 0.7
+    assert base.resolved_profile.model_dump() == original
+    assert overlay.resolved_profile.model_dump() == original

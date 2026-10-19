@@ -1,5 +1,10 @@
 import { fireEvent, render, screen } from "@testing-library/react";
 import { expect, it, vi } from "vitest";
+vi.mock("@assistant-ui/react", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@assistant-ui/react")>()),
+  useAuiState: (selector: (state: { message: { content: unknown[] } }) => unknown) =>
+    selector({ message: { content: [] } }),
+}));
 vi.mock("../../app/[locale]/newchat/ui/sources-panel-context", () => ({
   useSourcesPanel: () => ({ setSources: vi.fn(), setOpen: vi.fn() }),
 }));

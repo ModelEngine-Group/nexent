@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """Tests for tenant isolation in API key management."""
 
 from unittest.mock import MagicMock, patch
@@ -182,3 +184,32 @@ def test_list_tenant_api_keys_rejects_other_tenant():
         api_key_service.list_tenant_api_keys(
             actor_tenant_id="tenant-a", actor_role="ADMIN", tenant_id="tenant-b"
         )
+
+
+@pytest.mark.parametrize("lookup_failed", [False, True])
+def test_api_key_display_metadata_keeps_owners_creators_and_ordering(monkeypatch, lookup_failed):
+    from services import user_identity_service
+
+    rows = [{"token_id": 1, "user_id": "owner", "created_by": "creator",
+             "owner_email": "owner@test", "creator_email": "creator@test"}]
+    lookup = MagicMock(return_value={
+        "owner": {"cas_username": "所有者", "email": "owner@test"},
+        "creator": {"cas_username": "创建人", "email": "creator@test"},
+    })
+    if lookup_failed:
+        lookup.side_effect = RuntimeError("controlled lookup failure")
+    monkeypatch.setattr(user_identity_service, "get_cas_identities", lookup)
+    list_tokens = MagicMock(return_value={"items": rows, "total": 11})
+    monkeypatch.setattr(api_key_service, "list_active_tokens_by_tenant", list_tokens)
+    result = api_key_service.list_tenant_api_keys(actor_tenant_id="t", actor_role="ADMIN", tenant_id="t",
+                                                  page=2, page_size=5, sort_order="asc")
+    list_tokens.assert_called_once_with("t", 2, 5, "asc")
+    assert result["total"] == 11
+    row = result["items"][0]
+    assert row["user_id"] == "owner" and row["created_by"] == "creator"
+    assert row["owner_email"] == "owner@test" and row["creator_email"] == "creator@test"
+    if lookup_failed:
+        assert "owner_cas_username" not in row and "creator_cas_username" not in row
+    else:
+        assert row["owner_cas_username"] == "所有者" and row["creator_cas_username"] == "创建人"
+    lookup.assert_called_once_with({"owner", "creator"})

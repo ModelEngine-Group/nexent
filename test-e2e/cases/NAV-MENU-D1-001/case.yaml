@@ -24,7 +24,8 @@ case:
     profile: mock
     routes:
     - /agents
-    - /chat
+    - /newchat
+    - /workbench
     - /agent-space
     locales:
     - zh

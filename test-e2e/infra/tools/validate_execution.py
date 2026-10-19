@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """Validate case-local execution metadata and build the derived registry."""
 
 from __future__ import annotations
@@ -17,6 +19,28 @@ from test_asset_lib import (
 FRAMEWORKS = {"pytest", "vitest", "playwright", "custom"}
 EXECUTION_FIELDS = {"schema_version", "case_id", "implementations", "required_assets", "required_mock_services", "notes", "preparation", "timeout_seconds", "acceptance_bindings"}
 IMPLEMENTATION_FIELDS = {"framework", "file", "selector", "profiles"}
+# Logical mock-service IDs (legacy schema enum). The suite worker resolves
+# the ext-served subset (knowledge-provider / http-fixture / model-provider)
+# against the machine-local ext-knowledge configuration at attach time.
+LOGICAL_MOCK_SERVICES = {"model-provider", "mcp-server", "knowledge-provider", "memory-provider", "a2a-agent", "http-fixture"}
+
+
+def _mock_service_issues(execution_path, raw) -> list[ValidationIssue]:
+    """Strict dependency declarations: known logical IDs, no duplicates."""
+    services = raw.get("required_mock_services", [])
+    if not isinstance(services, list) or any(not isinstance(item, str) for item in services):
+        return [ValidationIssue(execution_path, "required_mock_services",
+                                "required_mock_services must be a list of logical service IDs")]
+    issues = []
+    if len(set(services)) != len(services):
+        issues.append(ValidationIssue(execution_path, "required_mock_services",
+                                      "required_mock_services contains duplicates"))
+    unknown = [item for item in services if item not in LOGICAL_MOCK_SERVICES]
+    if unknown:
+        issues.append(ValidationIssue(
+            execution_path, "required_mock_services",
+            "unknown logical mock service(s): " + ", ".join(sorted(unknown))))
+    return issues
 
 
 def inspect(root: Path, phase: str = "implementation") -> tuple[list[ValidationIssue], dict]:
@@ -44,6 +68,7 @@ def inspect(root: Path, phase: str = "implementation") -> tuple[list[ValidationI
             continue
         if raw.get("case_id") != case_id:
             issues.append(ValidationIssue(execution_path, "case_id", "Execution Case ID differs from its directory"))
+        issues.extend(_mock_service_issues(execution_path, raw))
         required_acceptance = phase == "implementation" and case.get("automation") == "automated"
         issues.extend(ValidationIssue(execution_path, "acceptance_bindings", problem)
                       for problem in binding_issues(case, raw.get("acceptance_bindings"), required=required_acceptance))

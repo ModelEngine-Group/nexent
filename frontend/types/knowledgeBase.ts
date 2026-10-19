@@ -1,3 +1,5 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 // Knowledge base related type definitions
 
 import {
@@ -245,4 +247,8 @@ export interface KnowledgeBaseListQuery {
   keyword?: string;
   sources?: string[];
   models?: string[];
+}
+
+export interface KnowledgeBaseDeletionPreview {
+  agents: { agent_id: number; display_name: string }[];
 }

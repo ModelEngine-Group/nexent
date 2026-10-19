@@ -1,3 +1,5 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import type {
   AidpKnowledgeBaseItem as SharedKnowledgeBaseItem,
   AidpKnowledgeBaseListResponse as SharedKnowledgeBaseListResponse,
@@ -10,6 +12,7 @@ export interface AidpKnowledgeBaseItem extends Omit<
 > {
   created_by?: string | null;
   creator_name?: string | null;
+  creator_cas_username?: string | null;
 }
 
 export interface AidpKnowledgeBaseListResponse extends Omit<

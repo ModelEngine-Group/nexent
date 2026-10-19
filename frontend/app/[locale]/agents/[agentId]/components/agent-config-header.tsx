@@ -1,15 +1,19 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 "use client";
 
-import { useState } from "react";
+import { createElement, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Avatar, Button, Tooltip } from "antd";
-import { LockOpen, Pencil, Send } from "lucide-react";
+import { LockOpen, Send } from "lucide-react";
 
 import { StandardButton } from "@/components/common/StandardButton";
 import { API_ENDPOINTS } from "@/services/api";
-import { getAgentUploadedIconRevision } from "@/lib/chat/agentIconUtils";
+import {
+  getAgentIcon,
+  getAgentUploadedIconRevision,
+} from "@/lib/chat/agentIconUtils";
 import { useAgentStore, type AgentDraft } from "@/stores/agentStore";
-import { DefaultAgentAvatar } from "./DefaultAgentAvatar";
 
 interface AgentConfigHeaderProps {
   agent: AgentDraft;
@@ -17,7 +21,6 @@ interface AgentConfigHeaderProps {
   readOnly: boolean;
   debugVisible: boolean;
   canManualUnlock: boolean;
-  onEditIdentity: () => void;
   onConfigure: () => void;
   onDebug: () => void;
   onPublish: () => void;
@@ -32,7 +35,6 @@ export function AgentConfigHeader({
   readOnly,
   debugVisible,
   canManualUnlock,
-  onEditIdentity,
   onConfigure,
   onDebug,
   onPublish,
@@ -64,39 +66,35 @@ export function AgentConfigHeader({
     <div
       ref={actionAreaRef}
       data-testid="agent-config-header"
-      className="relative flex min-h-[74px] shrink-0 flex-wrap items-center justify-between gap-x-4 gap-y-2 pl-4 pr-[18px] py-[10px] 2xl:grid 2xl:grid-cols-[1fr_auto_1fr]"
+      className="relative flex min-h-[74px] shrink-0 flex-wrap items-center justify-between gap-x-4 gap-y-2 px-4 py-7 2xl:grid 2xl:grid-cols-[1fr_auto_1fr]"
     >
       <span
         aria-hidden="true"
         data-agent-guide="workflow"
         className="pointer-events-none absolute inset-y-0 left-0 right-0 2xl:left-[31.2%]"
       />
-      <div className="flex min-w-0 items-center gap-3">
+      <div className="flex min-w-0 max-w-full items-center gap-3">
         <Avatar
           size={50}
           shape="square"
           src={iconSource !== failedIcon ? iconSource : undefined}
-          icon={<DefaultAgentAvatar size={38} />}
-          className="shrink-0 !flex !items-center !justify-center !rounded-lg !bg-white !border !border-solid !border-[#c9c9c9]"
+          icon={createElement(getAgentIcon({ agent_id: agentId ?? 0 }), {
+            size: 28,
+          })}
+          className="shrink-0 !flex !items-center !justify-center !rounded-lg !bg-primary/10 !text-primary !border !border-solid !border-[#c9c9c9]"
           onError={() => {
             setFailedIcon(iconSource);
             return false;
           }}
         />
-        <div className="flex min-w-0 flex-col gap-1">
+        <div className="flex min-w-0 flex-1 flex-col gap-1">
           <div className="flex min-w-0 items-center gap-2">
-            <span className="max-w-[240px] truncate text-xl font-medium leading-7 text-[#191919] [font-family:'HarmonyOS_Sans_SC',sans-serif]">
+            <span
+              title={agent.display_name || agent.name}
+              className="min-w-0 truncate text-xl font-medium leading-7 text-[#191919] [font-family:'HarmonyOS_Sans_SC',sans-serif]"
+            >
               {agent.display_name || agent.name}
             </span>
-            <Button
-              type="text"
-              size="small"
-              aria-label={t("agent.highFidelity.editIdentity")}
-              icon={<Pencil size={16} />}
-              disabled={readOnly}
-              onClick={onEditIdentity}
-              className="!size-6 !p-0 !text-[#2673e5]"
-            />
           </div>
           <div className="flex items-center gap-4 text-xs font-normal leading-[22px] text-[#808080]">
             <span>
@@ -153,14 +151,6 @@ export function AgentConfigHeader({
           }
         >
           {t("agent.highFidelity.debugMode")}
-        </Button>
-        <Button
-          type="text"
-          disabled={agentId === null || readOnly}
-          onClick={onPublish}
-          className="!text-[#777777]"
-        >
-          {t("agent.highFidelity.publishMode")}
         </Button>
       </div>
       <div className="flex shrink-0 items-center gap-2 justify-self-end">

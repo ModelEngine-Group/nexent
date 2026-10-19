@@ -1,8 +1,12 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """Tests for content_classifier_utils."""
 
 import pytest
 
-from utils.content_classifier_utils import ContentClassifier
+from management.services.skill.classifier import (
+    ContentClassifier,
+)
 
 
 class TestContentClassifier:

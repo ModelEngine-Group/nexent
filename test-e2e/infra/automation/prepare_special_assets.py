@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """Create batch-scoped D5 performance and reliability assets through product APIs."""
 
 from __future__ import annotations
@@ -11,6 +13,7 @@ from uuid import uuid4
 
 from d3.assets import create_registered_knowledge_base, model_id, model_request
 from shared.asset_registry import AssetDependencyError, register_asset, register_asset_failure, resolve_asset
+from shared.ext_knowledge import fault_model_base_url
 from shared.model_health import create_configured_model_dependency
 from shared.preparation_evidence import record_failure, safe_reason, run_preparation
 from shared.auth import sign_in
@@ -111,25 +114,17 @@ async def prepare_large_attachment(identity) -> None:
 async def prepare_fault_model(identity) -> None:
     if resolve_asset("reliability", "fault_model_id", required=False):
         return
-    # The runner allocates a fresh port for every batch and exports the fully
-    # resolved container-reachable URL.  A configured template URL is only a
-    # fallback; hard-coding the historical 19192 port makes later D3/D5 calls
-    # target a service that is no longer running.
-    controlled_url = (
-        os.getenv("NEXENT_TEST_ASSETS_URL")
-        or os.getenv("NEXENT_TEST_ASSETS_CONTAINER_URL")
-    )
-    if not controlled_url:
-        raise RuntimeError(
-            "NEXENT_TEST_ASSETS_URL is required before preparing the controlled fault model"
-        )
-    controlled_url = controlled_url.rstrip("/")
+    # The ext-knowledge fault provider serves the controlled model: the API
+    # base is the product-reachable root plus /v1 (real wire traffic lands on
+    # /v1/chat/completions). A missing attach is an explicit error, never a
+    # silent fallback to some historical port.
+    api_base = fault_model_base_url()
     display_name = f"daily-fault-{uuid4().hex[:8]}"
     payload = model_request("llm", display_name=display_name)
     payload.update({
         "model_name": "controlled-fault-model",
         "api_key": "controlled-test-key",
-        "base_url": f"{controlled_url}/fault/v1",
+        "base_url": api_base,
     })
     async with client("config", token=identity.access_token, timeout=MODEL_TIMEOUT) as api:
         created = await api.post("/model/create", json=payload)

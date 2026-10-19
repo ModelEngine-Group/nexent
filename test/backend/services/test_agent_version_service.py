@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import asyncio
 import sys
 import types
@@ -77,7 +79,7 @@ utils_mock.skill_params_utils.strip_params_comments_for_db = MagicMock(
 sys.modules['utils'] = utils_mock
 sys.modules['utils.auth_utils'] = utils_mock.auth_utils
 sys.modules['utils.str_utils'] = utils_mock.str_utils
-sys.modules['utils.skill_params_utils'] = utils_mock.skill_params_utils
+sys.modules['management.services.skill.params'] = utils_mock.skill_params_utils
 
 # Mock boto3
 boto3_mock = MagicMock()

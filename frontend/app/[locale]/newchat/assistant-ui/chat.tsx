@@ -1,4 +1,9 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 "use client";
+
+import type { ReasoningEffort } from "@/types/modelConfig";
+import type { ModelParameterSettingsControl } from "@/types/modelParameterSettings";
 
 import type { FC, ReactNode } from "react";
 import { useCallback, useMemo } from "react";
@@ -26,16 +31,19 @@ export interface ChatProps {
   chatMode?: ChatMode;
   onChatModeChange?: (mode: ChatMode) => void;
   showModelSelector?: boolean;
+  modelParameterSettings?: ModelParameterSettingsControl;
   modelSelectionScope?: "agent" | "tenant";
   fallbackAgentName?: string;
   selectedModelId?: string;
   onModelChange?: (modelId: string) => void;
   deepThinking?: boolean;
   onDeepThinkingChange?: (enabled: boolean) => void;
-  thinkingEffort?: "low" | "medium" | "high";
-  onThinkingEffortChange?: (effort: "low" | "medium" | "high") => void;
+  thinkingEffort?: ReasoningEffort;
+  onThinkingEffortChange?: (effort: ReasoningEffort) => void;
+  reasoningBudgetTokens?: number;
+  onReasoningBudgetTokensChange?: (budget: number) => void;
   showConversationTitle?: boolean;
-  isDictationConfigured?: boolean;
+  composerTools?: ReactNode;
   knowledgeScope?: ConversationKnowledgeScope | null;
   knowledgePreview?: KnowledgeScopeEffectivePreview | null;
   knowledgeCapabilities?: KnowledgeCapabilities | null;
@@ -58,8 +66,6 @@ export interface ChatProps {
   workbenchResources?: import("@/features/workbench/types").WorkbenchResourceControls;
   onRemoveWorkbenchSkill?: (skillId: number) => void;
   onOpenWorkbenchSkillPicker?: () => void;
-  workbenchSkillPopover?: ReactNode;
-  workbenchKnowledgePopover?: ReactNode;
 }
 
 const AgentsLoadingState: FC = () => {
@@ -87,8 +93,9 @@ export const Chat: FC<ChatProps> = ({
   onAgentSelected,
   onBack,
   chatMode = "execution",
-  onChatModeChange = () => undefined,
+  onChatModeChange,
   showModelSelector = true,
+  modelParameterSettings,
   modelSelectionScope = "agent",
   fallbackAgentName = "Nexent Workbench",
   selectedModelId,
@@ -97,8 +104,10 @@ export const Chat: FC<ChatProps> = ({
   onDeepThinkingChange,
   thinkingEffort,
   onThinkingEffortChange,
+  reasoningBudgetTokens,
+  onReasoningBudgetTokensChange,
   showConversationTitle = true,
-  isDictationConfigured = false,
+  composerTools,
   knowledgeScope = null,
   knowledgePreview = null,
   knowledgeCapabilities = null,
@@ -117,8 +126,6 @@ export const Chat: FC<ChatProps> = ({
   workbenchResources,
   onRemoveWorkbenchSkill,
   onOpenWorkbenchSkillPicker,
-  workbenchSkillPopover,
-  workbenchKnowledgePopover,
 }) => {
   const handleSelectAgent = useCallback(
     (agent: Agent) => {
@@ -158,11 +165,14 @@ export const Chat: FC<ChatProps> = ({
           onDeepThinkingChange={onDeepThinkingChange}
           thinkingEffort={thinkingEffort}
           onThinkingEffortChange={onThinkingEffortChange}
+          reasoningBudgetTokens={reasoningBudgetTokens}
+          onReasoningBudgetTokensChange={onReasoningBudgetTokensChange}
           showModelSelector={showModelSelector}
+          modelParameterSettings={modelParameterSettings}
           modelSelectionScope={modelSelectionScope}
           chatMode={chatMode}
           onChatModeChange={onChatModeChange}
-          isDictationConfigured={isDictationConfigured}
+          composerTools={composerTools}
           readOnly={readOnly}
           readOnlyReason={readOnlyReason}
           interactionContent={interactionContent}
@@ -171,8 +181,6 @@ export const Chat: FC<ChatProps> = ({
           workbenchResources={workbenchResources}
           onOpenWorkbenchSkillPicker={onOpenWorkbenchSkillPicker}
           onRemoveWorkbenchSkill={onRemoveWorkbenchSkill}
-          workbenchSkillPopover={workbenchSkillPopover}
-          workbenchKnowledgePopover={workbenchKnowledgePopover}
           skillFiles={skillFiles}
           knowledgeScope={knowledgeScope}
           knowledgePreview={knowledgePreview}
@@ -200,6 +208,7 @@ export const Chat: FC<ChatProps> = ({
       chatMode={chatMode}
       onChatModeChange={onChatModeChange}
       showModelSelector={showModelSelector}
+      modelParameterSettings={modelParameterSettings}
       modelSelectionScope={modelSelectionScope}
       selectedModelId={selectedModelId}
       onModelChange={onModelChange}
@@ -207,8 +216,10 @@ export const Chat: FC<ChatProps> = ({
       onDeepThinkingChange={onDeepThinkingChange}
       thinkingEffort={thinkingEffort}
       onThinkingEffortChange={onThinkingEffortChange}
+      reasoningBudgetTokens={reasoningBudgetTokens}
+      onReasoningBudgetTokensChange={onReasoningBudgetTokensChange}
       showConversationTitle={showConversationTitle}
-      isDictationConfigured={isDictationConfigured}
+      composerTools={composerTools}
       knowledgeScope={knowledgeScope}
       knowledgePreview={knowledgePreview}
       knowledgeCapabilities={knowledgeCapabilities}
@@ -225,8 +236,6 @@ export const Chat: FC<ChatProps> = ({
       workbenchResources={workbenchResources}
       onRemoveWorkbenchSkill={onRemoveWorkbenchSkill}
       onOpenWorkbenchSkillPicker={onOpenWorkbenchSkillPicker}
-      workbenchSkillPopover={workbenchSkillPopover}
-      workbenchKnowledgePopover={workbenchKnowledgePopover}
     />
   );
 };

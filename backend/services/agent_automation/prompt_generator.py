@@ -226,7 +226,7 @@ class LLMAutomationPromptStrategy(AutomationPromptStrategy):
     ) -> str:
         from nexent.core.models import OpenAIModel
         from nexent.core.utils.observer import MessageObserver
-        from utils.config_utils import get_model_name_from_config
+        from management.services.model.names import get_model_name_from_config
 
         values = {"instruction": context.instruction.strip()}
         prompt = compose_auxiliary_prompt(context.language, "automation_task_content", values)

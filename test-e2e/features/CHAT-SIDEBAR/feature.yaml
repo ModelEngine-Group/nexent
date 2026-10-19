@@ -6,16 +6,36 @@ feature:
   feature_id: CHAT-SIDEBAR
   name: Conversation sidebar preserved after merge
   status: active
-  description: Persisted visibility, normalized rename and server-ID batch deletion
-    preserve sidebar state.
+  description: Persisted visibility, normalized rename, agent-group batch selection
+    and server-ID batch deletion preserve sidebar state.
   business_rules:
+  - rule_id: CHAT-SIDEBAR-RULE-003
+    description: Workbench pin/unpin persists on the owning personal conversation for the authenticated user,
+      using persisted conversation IDs. Tenant changes retain that personal preference. Focus/reconnect refresh hydrates missing pinned histories beyond the loaded page. Pins are newest first across devices;
+      repinning moves first. Workbench rows show localized relative times when timestamps
+      are available; recency/search/rename/paging
+      and Agent-chat pins are preserved. Failed saves do not report success; drafts
+      and inaccessible/non-Workbench conversations cannot be pinned.
   - rule_id: CHAT-SIDEBAR-RULE-001
     description: Persisted conversations remain visible; unsent drafts stay hidden;
       rename propagates normalized title and remote identity; batch deletion resolves
       server IDs and resets deleted active threads.
+  - rule_id: CHAT-SIDEBAR-RULE-002
+    description: In agent-chat batch mode, selecting an agent selects or clears every
+      persisted conversation for that agent across paginated list results, updates the
+      selected/total state, and leaves conversations from other agents unchanged.
   required_test_stages:
   - D1
+  - D4
+  - D3
+  - D5
   source:
     requirement_ids:
     - CHAT-SIDEBAR-REQ-001
+    - WB-HISTORY-PINS-20261014
+    - WB-PIN-ORDER-20261014
+    - WB-HISTORY-ROW-TIME-20261014
+    - WB-SERVER-PINS-20261014
+    - WB-PIN-SYNC-20261016
+    - WB-HISTORY-TIME-RESTORE-20261014
     spec_path: ../nexent-doc/docs/Developing/agt-pr4058-test-delivery/design.md

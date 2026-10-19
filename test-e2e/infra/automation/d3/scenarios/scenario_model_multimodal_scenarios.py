@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """D3 real-provider model, voice, and image integration scenarios."""
 
 from __future__ import annotations
@@ -14,7 +16,8 @@ import pytest
 from d3.assets import asset_path, model_request, get_test_asset
 from shared.cases import case_params
 from shared.audio import stt_transport_audio
-from shared.config import controlled_asset_url, load_secret_env, load_yaml, service_url
+from shared.config import load_secret_env, load_yaml, service_url
+from shared.ext_knowledge import product_url as ext_product_url
 from shared.http import MODEL_TIMEOUT, assert_status, client, redacted_response_body
 from shared.factories.tenant import isolated_accounts
 
@@ -372,7 +375,10 @@ async def _tts_error() -> None:
 
 
 async def _image_proxy(valid: bool) -> None:
-    url = controlled_asset_url(str(get_test_asset("images", "remote_path"))) if valid else "http://127.0.0.1:9/unavailable.png"
+    # The product's image proxy fetches the upstream URL, so the seeded
+    # /assets/image.png (real PNG bytes) must be addressed on the
+    # product-reachable side; the failure branch stays an unreachable host.
+    url = f"{ext_product_url()}/assets/image.png" if valid else "http://127.0.0.1:9/unavailable.png"
     async with client("config", timeout=MODEL_TIMEOUT) as api:
         response = await api.get("/image", params={"url": url, "format": "json"})
         streamed = await api.get("/image", params={"url": url, "format": "stream"})

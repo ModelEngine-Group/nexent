@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import logging
 from typing import Optional
 
@@ -16,7 +18,10 @@ from database.prompt_template_db import (
     update_prompt_template,
 )
 from nexent.core.agents.prompt.meta import load_generation_template
-from utils.prompt_template_utils import merge_prompt_generate_templates, normalize_prompt_generate_template_content
+from management.services.agent.prompt import (
+    merge_prompt_generate_templates,
+    normalize_prompt_generate_template_content,
+)
 
 logger = logging.getLogger("prompt_template_service")
 

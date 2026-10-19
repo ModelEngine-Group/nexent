@@ -10,6 +10,8 @@ feature:
   business_rules:
   - rule_id: F-180-RULE-01
     description: 预置 Provider/模型目录、推理字段规范、模型 Profile 与 reasoning 模型连通性检查
+  - rule_id: F-180-RULE-02
+    description: Only unmatched gateway URLs may resolve declared native-model toggle and effort controls by unambiguous model ID; retain generic gateway identity and exclude native-provider budgets. Matched provider results remain authoritative.
   required_test_stages:
   - D1
   - D2

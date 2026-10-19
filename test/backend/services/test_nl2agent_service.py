@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import asyncio
 import json
 import sys
@@ -964,7 +966,7 @@ async def test_search_internal_uninstalled_resources_aggregates_sources_and_excl
     mocker, skill_repository,
 ):
     mocker.patch(
-        "management.services.skill.service.get_official_skills_with_status",
+        'management.services.skill.transfer.get_official_skills_with_status',
         return_value=[
             {
                 "skill_id": 0,
@@ -1143,7 +1145,7 @@ def test_installation_snapshot_redacts_nested_secret_shapes():
 @pytest.mark.asyncio
 async def test_uninstalled_catalog_paginates_and_filters_invalid_entries(mocker, skill_repository):
     mocker.patch(
-        "management.services.skill.service.get_official_skills_with_status",
+        'management.services.skill.transfer.get_official_skills_with_status',
         return_value=[
             {
                 "name": "PDF report",

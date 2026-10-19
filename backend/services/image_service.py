@@ -11,7 +11,8 @@ import aiohttp
 from consts.const import AIDP_API_KEY, AIDP_SERVER_URL, DATA_PROCESS_SERVICE
 from consts.const import MODEL_CONFIG_MAPPING
 from database.model_management_db import get_model_by_model_id
-from utils.config_utils import tenant_config_manager, get_model_name_from_config
+from utils.config_utils import tenant_config_manager
+from management.services.model.names import get_model_name_from_config
 
 from nexent import MessageObserver
 from nexent.core.models import OpenAIVLModel

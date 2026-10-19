@@ -118,7 +118,7 @@ def message(conversation, index, role, content, files=None, status="completed"):
 
 def record_output(conversation, index, output):
     from database.conversation_db import create_message_units
-    from utils.agent_stream_utils import serialize_stream_unit_content
+    from management.services.agent.stream import serialize_stream_unit_content
     answer = "".join(event.get("content", "") for event in output if event.get("type") == "final_answer")
     mid = message(conversation, index, "assistant", answer)
     units = []

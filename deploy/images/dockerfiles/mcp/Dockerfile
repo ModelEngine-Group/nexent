@@ -24,7 +24,15 @@ RUN --mount=type=cache,id=nexent-mcp-apt-cache-${TARGETARCH},target=/var/cache/a
         done; \
     fi && \
     apt-get update && \
-    apt-get install -y --no-install-recommends curl ca-certificates gnupg xz-utils
+    apt-get install -y --no-install-recommends \
+        curl \
+        vim \
+        procps \
+        wget \
+        less \
+        ca-certificates \
+        gnupg \
+        xz-utils
 
 # Install Node.js 20 from official binaries (pin exact version to avoid repo issues)
 ARG NODE_VERSION=20.17.0

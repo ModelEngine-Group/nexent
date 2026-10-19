@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """Offline tests for the machine-local developer entrypoint."""
 
 from __future__ import annotations
@@ -47,7 +49,7 @@ class LocalOnboardingTests(unittest.TestCase):
                                       mcp_container_host=None)
             create_missing(home, args)
             online = [{"stage": "D2", "status": "active", "execution": {"preparation": {"anchors": []}}}]
-            problems = static_config_problems(home, online)
+            problems = static_config_problems(home, online, repo=Path(__file__).resolve().parents[4])
             self.assertTrue(any("placeholder" in issue for issue in problems))
             self.assertFalse(any("unset secret key" in issue for issue in problems))
 

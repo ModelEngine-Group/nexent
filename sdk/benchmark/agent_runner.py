@@ -1,4 +1,6 @@
 # -*- coding: utf-8 -*-
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """
 Shared utilities for building and running nexent agents in benchmarks.
 
@@ -24,8 +26,12 @@ from dotenv import load_dotenv  # noqa: E402
 # injects them into sys.path automatically - no manual path manipulation needed.
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import paths  # noqa: E402, F401 - side-effect: adds sdk/, backend/ to sys.path
-from management.services.agent.prompt_template_loader import load_agent_prompt_bundle  # noqa: E402
-from utils.context_utils import build_context_inputs  # noqa: E402
+from management.services.agent.prompt import (
+    load_agent_prompt_bundle,
+)
+from management.services.agent.context import (
+    build_context_inputs,
+)
 
 from nexent.core.agents.agent_model import (  # noqa: E402
     AgentConfig,

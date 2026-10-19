@@ -1,3 +1,5 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 "use client";
 
 import type { FC } from "react";
@@ -334,7 +336,10 @@ function AgentCard({
         <div className="flex size-10 shrink-0 items-center justify-center rounded-full bg-primary/10">
           <Icon className="size-5 text-primary" aria-hidden />
         </div>
-        <p className="min-w-0 flex-1 truncate pt-2 text-[16px] font-bold leading-[24px] text-[#1a1a1a]">
+        <p
+          title={displayName}
+          className="min-w-0 flex-1 truncate pt-2 text-[16px] font-bold leading-[24px] text-[#1a1a1a]"
+        >
           {displayName}
         </p>
         <span className="shrink-0">

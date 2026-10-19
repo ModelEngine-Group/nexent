@@ -1,4 +1,8 @@
-from backend.utils.memory_tool_prompt import should_enable_memory_tool_policy
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
+from backend.management.services.agent.prompt import (
+    should_enable_memory_tool_policy,
+)
 
 
 def test_policy_is_empty_without_store_memory():

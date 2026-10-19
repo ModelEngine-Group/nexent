@@ -1,0 +1,10 @@
+schema_version: '1.0'
+case_id: CHAT-MODEL-CONTROLS-D2-001
+implementations:
+  - framework: pytest
+    file: test_api.py
+    selector: test_http
+acceptance_bindings:
+  AC-01: [test_http_control_intents]
+  AC-02: [test_http_rejects_invalid_overlays_before_execution]
+timeout_seconds: 120

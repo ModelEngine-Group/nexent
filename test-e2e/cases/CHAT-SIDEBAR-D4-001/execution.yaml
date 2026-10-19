@@ -1,0 +1,9 @@
+schema_version: '1.0'
+case_id: CHAT-SIDEBAR-D4-001
+implementations:
+  - framework: playwright
+    file: test.spec.ts
+    selector: CHAT-SIDEBAR-D4-001
+timeout_seconds: 300
+acceptance_bindings:
+  AC-01: [CHAT-SIDEBAR-D4-001]

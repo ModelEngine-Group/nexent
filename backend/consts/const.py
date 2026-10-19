@@ -1,3 +1,4 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 import os
 from enum import Enum
 from pathlib import Path
@@ -314,8 +315,10 @@ IS_SPEED_MODE = DEPLOYMENT_VERSION == "speed"
 
 # AIDP Knowledge Base configuration
 ENABLE_AIDP_KNOWLEDGE = os.getenv("ENABLE_AIDP_KNOWLEDGE", "false").lower() in ("true", "1", "yes", "on")
-ENABLE_AGENT_WORKBENCH = os.getenv("ENABLE_AGENT_WORKBENCH", "false").lower() in ("true", "1", "yes", "on")
-HIDE_HOME_PAGE = os.getenv("HIDE_HOME_PAGE", "false").lower() in ("true", "1", "yes", "on")
+# Defaults are on so a fresh deployment lands on the Agent Workbench with the
+# standalone Home page hidden. Set either variable to a falsey value to opt out.
+ENABLE_AGENT_WORKBENCH = os.getenv("ENABLE_AGENT_WORKBENCH", "true").lower() in ("true", "1", "yes", "on")
+HIDE_HOME_PAGE = os.getenv("HIDE_HOME_PAGE", "true").lower() in ("true", "1", "yes", "on")
 AIDP_SERVER_URL = os.getenv("AIDP_SERVER_URL", "")
 AIDP_API_KEY = os.getenv("AIDP_API_KEY", "")
 AIDP_TENANT_ID = os.getenv("AIDP_TENANT_ID", "aidp")
@@ -937,3 +940,7 @@ MODELS_DEV_CATALOG_JSON_PATH = os.getenv(
 
 # External Memory Provider Configuration
 MEMORY_PROVIDER_PLUGINS_DIR = os.getenv("MEMORY_PROVIDER_PLUGINS_DIR", "")
+
+
+# Bundled LiteLLM catalog used for model capacity suggestions.
+NEXENT_LITELLM_JSON = os.environ.get("NEXENT_LITELLM_JSON", "/opt/nexent/litellm_models.json")

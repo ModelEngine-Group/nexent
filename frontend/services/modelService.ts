@@ -1,3 +1,5 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 "use client";
 
 import { API_ENDPOINTS } from "./api";
@@ -132,6 +134,7 @@ const buildInferenceParamsRequestBody = (model: {
 const mapInferenceParamsFromApi = (model: any) => ({
   temperature: model.temperature,
   topP: model.top_p,
+  effectiveSampling: model.effective_sampling,
   extraParams: model.extra_params,
   enableThinking:
     model.extra_params?.enable_thinking === true ||

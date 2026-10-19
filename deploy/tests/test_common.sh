@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
 set -euo pipefail
 
@@ -7,6 +8,8 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/../common/common.sh"
 # shellcheck source=/dev/null
 source "$SCRIPT_DIR/../common/version.sh"
+# shellcheck source=/dev/null
+source "$SCRIPT_DIR/../k8s/env.sh"
 
 TMP_DIR="${TMPDIR:-/tmp}/nexent-deployment-test-$$"
 mkdir -p "$TMP_DIR"
@@ -417,10 +420,13 @@ assert_contains "$(cat "$K8S_CHART_DIR/charts/nexent-data-process/templates/depl
 assert_not_contains "$(cat "$K8S_CHART_DIR/charts/nexent-data-process/templates/deployment.yaml")" "checksum/nexent-backend:" "data-process deployment should not keep removed backend rollout annotation"
 assert_contains "$(cat "$K8S_CHART_DIR/charts/nexent-common/templates/configmap.yaml")" "CAS_DEFAULT_TENANT_ID" "common configmap should expose the CAS default tenant"
 assert_contains "$(cat "$K8S_CHART_DIR/charts/nexent-common/values.yaml")" "defaultTenantId: \"tenant_id\"" "common values should preserve the CAS default tenant"
-assert_contains "$(cat "$SCRIPT_DIR/../k8s/deploy.sh")" "CAS_DEFAULT_TENANT_ID" "k8s deploy should render the CAS default tenant from environment configuration"
 assert_contains "$(cat "$K8S_CHART_DIR/charts/nexent-common/templates/configmap.yaml")" "CAS_DEFAULT_ROLE" "common configmap should expose the CAS default role"
 assert_contains "$(cat "$K8S_CHART_DIR/charts/nexent-common/values.yaml")" "defaultRole: \"USER\"" "common values should preserve the CAS default role"
-assert_contains "$(cat "$SCRIPT_DIR/../k8s/deploy.sh")" "CAS_DEFAULT_ROLE" "k8s deploy should render the CAS default role from environment configuration"
+CAS_ENV_FILE="$TMP_DIR/cas.env"
+printf 'CAS_DEFAULT_TENANT_ID=synthetic-tenant\nCAS_DEFAULT_ROLE=ADMIN\n' > "$CAS_ENV_FILE"
+CAS_ENV_DATA="$(k8s_env_file_data "$CAS_ENV_FILE")"
+assert_contains "$CAS_ENV_DATA" "CAS_DEFAULT_TENANT_ID: \"$(printf '%s' synthetic-tenant | base64 | tr -d '\r\n')\"" "k8s env Secret should preserve the configured CAS default tenant"
+assert_contains "$CAS_ENV_DATA" "CAS_DEFAULT_ROLE: \"$(printf '%s' ADMIN | base64 | tr -d '\r\n')\"" "k8s env Secret should preserve the configured CAS default role"
 assert_contains "$(cat "$SCRIPT_DIR/../env/.env.example")" "CAS_DEFAULT_ROLE=USER" "docker environment example should preserve the CAS default role"
 assert_contains "$(cat "$K8S_CHART_DIR/charts/nexent-common/templates/configmap.yaml")" "CAS_HEARTBEAT_URL" "common configmap should expose the CAS heartbeat URL"
 assert_contains "$(cat "$K8S_CHART_DIR/charts/nexent-common/templates/configmap.yaml")" "CAS_HEARTBEAT_INTERVAL_SECONDS" "common configmap should expose the CAS heartbeat interval"

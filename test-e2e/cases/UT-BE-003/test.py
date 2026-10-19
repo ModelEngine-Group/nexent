@@ -34,7 +34,7 @@ def _profile(version: str = "2026-01") -> SimpleNamespace:
 @STAGE
 @pytest.mark.case_id("UT-BE-003")
 def test_capacity_suggestion_exact_and_provider_inference() -> None:
-    from services.model_capacity_suggestion_service import suggest_capacity
+    from management.services.model.capacity import suggest_capacity
 
     catalog = {("openai", "gpt-functional"): _profile()}
     exact = suggest_capacity("gpt-functional", provider_hint="openai", model_type="llm", catalog=catalog)

@@ -1,3 +1,5 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 "use client";
 
 import { useState, useEffect, useRef } from "react";
@@ -14,6 +16,7 @@ import {
 } from "antd";
 import { Settings, PenLine, X } from "lucide-react";
 
+import { ParamLabel, TestRunLink } from "@/components/resource-picker/ParamDialog";
 import { Tool, ToolParam } from "@/types/agentConfig";
 import { KnowledgeBase } from "@/types/knowledgeBase";
 import {
@@ -785,7 +788,7 @@ export default function ToolTestPanel({
   if (!tool) return null;
 
   return (
-    <div className="mb-4">
+    <div data-config-part="test-panel" className="flex flex-col gap-2">
       <div>
         {/* Input parameters section with conditional toggle */}
         {Object.keys(parameterValues).length > 0 && (
@@ -798,7 +801,7 @@ export default function ToolTestPanel({
                 marginBottom: 8,
               }}
             >
-              <Text strong style={{ display: "block", marginBottom: 8 }}>
+              <Text strong style={{ display: "block", marginBottom: 0, fontSize: 14, lineHeight: "22px" }}>
                 {t("toolConfig.toolTest.inputParams")}
               </Text>
               {/* Only show toggle button if parsing was successful */}
@@ -961,16 +964,10 @@ export default function ToolTestPanel({
               )}
             </div>
 
-            <Form
-              form={form}
-              layout="horizontal"
-              labelAlign="left"
-              labelCol={{ span: 6 }}
-              wrapperCol={{ span: 18 }}
-            >
+            <Form form={form} layout="vertical">
               {isManualInputMode ? (
                 // Manual JSON input mode
-                <Form.Item className="w-full" wrapperCol={{ span: 24 }}>
+                <Form.Item style={{ marginBottom: 16 }}>
                   <Input.TextArea
                     value={manualJsonInput}
                     onChange={(e) => setManualJsonInput(e.target.value)}
@@ -1085,21 +1082,27 @@ export default function ToolTestPanel({
                       return (
                         <Form.Item
                           key={paramName}
+                          required={false}
+                          colon={false}
                           label={
-                            <span style={{ width: "100%" }} title={paramName}>
-                              {paramName}
-                            </span>
+                            <ParamLabel
+                              label={paramName}
+                              info={Boolean(
+                                getLocalizedDescription(
+                                  description,
+                                  description_zh
+                                )
+                              )}
+                              infoText={getLocalizedDescription(
+                                description,
+                                description_zh
+                              )}
+                              size="md"
+                            />
                           }
                           name={fieldName}
                           rules={rules}
-                          tooltip={{
-                            title: getLocalizedDescription(
-                              description,
-                              description_zh
-                            ),
-                            placement: "topLeft",
-                            styles: { root: { maxWidth: 400 } },
-                          }}
+                          style={{ marginBottom: 16 }}
                         >
                           {/* KB selector for knowledge_base_search tool */}
                           {isKnowledgeBaseSearchTool &&
@@ -1138,21 +1141,17 @@ export default function ToolTestPanel({
           </>
         )}
 
-        <Button
-          type="primary"
+        <TestRunLink
+          label={
+            testExecuting ? t("toolConfig.toolTest.executing") : undefined
+          }
           onClick={executeTest}
-          loading={testExecuting}
           disabled={testExecuting || configInvalid}
-          style={{ width: "100%" }}
-        >
-          {testExecuting
-            ? t("toolConfig.toolTest.executing")
-            : t("toolConfig.toolTest.execute")}
-        </Button>
+        />
       </div>
       {/* Test result */}
-      <div className="mt-3">
-        <Text strong style={{ display: "block", marginBottom: 8 }}>
+      <div data-config-part="test-result" className="flex flex-col gap-2">
+        <Text strong style={{ display: "block", marginBottom: 0, fontSize: 14, lineHeight: "22px" }}>
           {t("toolConfig.toolTest.result")}
         </Text>
         <Input.TextArea

@@ -1,6 +1,11 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import { expect, type Locator, type Page } from "playwright/test";
 import { writeFileSync } from "node:fs";
 import { appPath } from "../runner/runtime-config";
+
+/** A path or a full setFiles payload (name/mimeType/buffer). */
+type AttachmentPayload = string | Parameters<FileChooser["setFiles"]>[0];
 
 export class ChatPage {
   private lastServerConversationId?: number;
@@ -33,13 +38,22 @@ export class ChatPage {
   }
 
   async selectAgent(displayName: string): Promise<void> {
-    const search = this.page.getByPlaceholder("搜索智能体...");
+    // The discover-agents landing search is 搜索智能体名称 now. The card's
+    // accessible name mixes the agent name, description, tag and the
+    // 更多操作 menu, so scope by the exact name text inside the card
+    // instead of matching the first button whose name merely contains it.
+    const search = this.page.getByPlaceholder("搜索智能体名称");
     await expect(search).toBeVisible();
     await search.fill(displayName);
-    const card = this.page.getByRole("button", { name: new RegExp(displayName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")) }).first();
-    await expect(card).toBeVisible();
+    const card = this.page.locator("div[role='button']").filter({
+      has: this.page.getByText(displayName, { exact: true }),
+    });
+    await expect(card).toHaveCount(1);
     await card.click();
-    await expect(this.page.getByPlaceholder("发送消息...")).toBeVisible();
+    // Landing selection is complete when the discover page is replaced by
+    // the conversation view with a usable composer.
+    await expect(this.page.getByRole("heading", { name: "发现智能体" })).toBeHidden();
+    await expect(this.page.getByPlaceholder('输入"/"快速引用技能及指令')).toBeVisible();
   }
 
   async selectMode(mode: "规划" | "执行"): Promise<void> {
@@ -50,7 +64,7 @@ export class ChatPage {
 
   async startMessage(prompt: string): Promise<Locator> {
     const before = await this.assistantMessages().count();
-    const composer = this.page.getByPlaceholder("发送消息...");
+    const composer = this.page.getByPlaceholder('输入"/"快速引用技能及指令');
     await composer.fill(prompt);
     const runResponse = this.page.waitForResponse(
       (response) => response.request().method() === "POST"
@@ -135,7 +149,7 @@ export class ChatPage {
     }
     // A cancelled message is incomplete, so it has no Completed badge.
     await expect(this.page.locator("button:has(svg.lucide-square)")).toHaveCount(0, { timeout: 120_000 });
-    await expect(this.page.getByPlaceholder("发送消息...")).toBeEditable();
+    await expect(this.page.getByPlaceholder('输入"/"快速引用技能及指令')).toBeEditable();
     // Stop acknowledgement precedes persistence/worker finalization. Wait for
     // the owned stream's terminal history before continuing or reconnecting.
     await expect.poll(async () => {
@@ -230,10 +244,17 @@ export class ChatPage {
       .filter({ has: this.page.locator("svg.lucide-plus") });
     await expect(create).toHaveCount(1);
     await create.click();
-    await expect(this.page.getByPlaceholder("搜索智能体...")).toBeVisible();
-    await this.page.getByPlaceholder("搜索智能体...").fill(displayName);
-    await this.page.getByRole("button", { name: new RegExp(displayName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")) }).first().click();
-    await expect(this.page.getByPlaceholder("发送消息...")).toBeVisible();
+    const search = this.page.getByPlaceholder("搜索智能体名称");
+    await expect(search).toBeVisible();
+    await search.fill(displayName);
+    // Same precise card scoping as selectAgent: the card's accessible name
+    // mixes name, description and the 更多操作 menu.
+    const card = this.page.locator("div[role='button']").filter({
+      has: this.page.getByText(displayName, { exact: true }),
+    });
+    await expect(card).toHaveCount(1);
+    await card.click();
+    await expect(this.page.getByPlaceholder('输入"/"快速引用技能及指令')).toBeVisible();
   }
 
   threadButton(title: string): Locator {
@@ -324,9 +345,28 @@ export class ChatPage {
     await expect(dialog).toBeHidden();
   }
 
-  async uploadAttachment(filePath: string): Promise<void> {
+  async uploadAttachment(payload: AttachmentPayload): Promise<void> {
+    // Older composer layouts expose a direct 添加附件 button; the new-chat
+    // design moved the entry behind the toolbar ＋ panel (添加 -> 上传文件,
+    // the file-chooser trigger).
+    const legacy = this.page.getByRole("button", { name: "添加附件", exact: true });
+    if (await legacy.isVisible().catch(() => false)) {
+      const chooser = this.page.waitForEvent("filechooser");
+      await legacy.click();
+      await (await chooser).setFiles(payload);
+      return;
+    }
+    await this.page.locator("[data-composer-action-trigger]").last().click();
     const chooser = this.page.waitForEvent("filechooser");
-    await this.page.getByRole("button", { name: "添加附件", exact: true }).click();
-    await (await chooser).setFiles(filePath);
+    await this.page.getByRole("button", { name: "上传文件", exact: true }).click();
+    await (await chooser).setFiles(payload);
+    // The panel's 上传文件 row does not close the panel itself. An open panel
+    // overlays the composer and intercepts later clicks (the panel closes on
+    // any pointerdown outside it or its trigger), so dismiss it explicitly.
+    const panel = this.page.locator("[data-composer-action-panel]");
+    if (await panel.isVisible().catch(() => false)) {
+      await this.page.mouse.click(8, 8);
+      await expect(panel).toBeHidden();
+    }
   }
 }

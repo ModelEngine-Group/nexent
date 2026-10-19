@@ -1,11 +1,13 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """Knowledge-base permission resolution and reusable permission requirements."""
 
 import logging
 from typing import List, Optional
 
 from consts.const import ASSET_OWNER_TENANT_ID, IS_SPEED_MODE, PERMISSION_EDIT
-from database.knowledge_db import get_knowledge_record
 from database.group_db import query_group_ids_by_user
+from database.knowledge_db import get_knowledge_record
 from database.user_tenant_db import get_user_tenant_by_user_id
 from permissions.dac import ResourceAccessControl
 from permissions.models import Resource
@@ -25,39 +27,47 @@ def resolve_knowledge_base_permission(
     if not record:
         raise ValueError(f"Knowledge base '{index_name}' not found")
 
+    return resolve_knowledge_base_permissions([dict(record, index_name=index_name)], user_id, tenant_id)[index_name]
+
+
+def resolve_knowledge_base_permissions(
+    records: List[dict], user_id: str, tenant_id: Optional[str] = None,
+) -> dict[str, Optional[str]]:
+    """Resolve a page with one role lookup and one group lookup."""
+    if not records:
+        return {}
     user_tenant = get_user_tenant_by_user_id(user_id)
     if not user_tenant and not IS_SPEED_MODE:
-        return None
-
+        return {record["index_name"]: None for record in records}
     user_role = (user_tenant or {}).get("user_role")
     user_tenant_id = str((user_tenant or {}).get("tenant_id") or tenant_id or "")
-    effective_user_role = user_role
     if user_id == user_tenant_id:
-        effective_user_role = "ADMIN"
-        logger.info("User %s identified as legacy admin", user_id)
+        user_role = "ADMIN"
     elif IS_SPEED_MODE and not user_role:
-        effective_user_role = "SPEED"
-    role = (effective_user_role or "").upper()
-    if IS_SPEED_MODE and not user_tenant_id:
-        user_tenant_id = str(record.get("tenant_id") or tenant_id or "")
-
-    access = ResourceAccessControl.check(
-        Resource(
-            resource_type="knowledge_base",
-            resource_id=index_name,
-            tenant_id=record.get("tenant_id"),
-            created_by=record.get("created_by"),
-            ingroup_permission=record.get("ingroup_permission"),
-            group_ids=record.get("group_ids"),
-            knowledge_sources=record.get("knowledge_sources"),
-        ),
-        user_id=user_id,
-        role=role,
-        user_groups=query_group_ids_by_user(user_id),
-        user_tenant_id=user_tenant_id,
-        asset_owner_tenant_id=ASSET_OWNER_TENANT_ID,
-    )
-    return access.permission_label
+        user_role = "SPEED"
+    role = (user_role or "").upper()
+    groups = query_group_ids_by_user(user_id)
+    permissions = {}
+    for record in records:
+        index_name = record["index_name"]
+        effective_tenant = user_tenant_id
+        if IS_SPEED_MODE and not effective_tenant:
+            effective_tenant = str(record.get("tenant_id") or tenant_id or "")
+        access = ResourceAccessControl.check(
+            Resource(
+                resource_type="knowledge_base",
+                resource_id=index_name,
+                tenant_id=record.get("tenant_id"),
+                created_by=record.get("created_by"),
+                ingroup_permission=record.get("ingroup_permission"),
+                group_ids=record.get("group_ids"),
+                knowledge_sources=record.get("knowledge_sources"),
+            ),
+            user_id=user_id, role=role, user_groups=groups,
+            user_tenant_id=effective_tenant, asset_owner_tenant_id=ASSET_OWNER_TENANT_ID,
+        )
+        permissions[index_name] = access.permission_label
+    return permissions
 
 
 def require_knowledge_base_permission(
@@ -114,7 +124,9 @@ def filter_accessible_indices(
     accessible = []
     for index_name in index_names:
         try:
-            permission = resolve_knowledge_base_permission(index_name, user_id, tenant_id)
+            permission = resolve_knowledge_base_permission(
+                index_name, user_id, tenant_id
+            )
         except ValueError:
             logger.warning(
                 "Knowledge base '%s' not found during permission check, skipping",

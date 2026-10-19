@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """Formal D2 SSE contract for model-attempt streams."""
 
 import asyncio
@@ -8,6 +10,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from management.services.agent import run as agent_run_service
+import management.services.agent.execution as agent_execution
 
 pytestmark = [pytest.mark.case_id("CMSR-D2-001"), pytest.mark.stage("D2")]
 
@@ -32,16 +35,16 @@ async def _success_delta_is_published_before_completion(monkeypatch, failure_kin
         yield json.dumps({"type": "model_attempt_control", "content": "", "phase": "commit", "attempt_id": "success"})
         yield json.dumps({"type": "parse", "content": "print(1)"})
 
-    monkeypatch.setattr(agent_run_service, "agent_run", controlled_agent_run)
-    monkeypatch.setattr(agent_run_service, "save_message", MagicMock(return_value=4242))
+    monkeypatch.setattr(agent_execution, "agent_run", controlled_agent_run)
+    monkeypatch.setattr(agent_execution, "save_message", MagicMock(return_value=4242))
     monkeypatch.setattr(
-        agent_run_service,
+        agent_execution,
         "persist_assistant_run_batch",
         lambda **kwargs: persisted_batches.append(kwargs),
     )
-    monkeypatch.setattr(agent_run_service, "_unregister_agent_run_after_execution", MagicMock())
-    monkeypatch.setattr(agent_run_service.streaming_channel_manager, "complete_channel", AsyncMock())
-    monkeypatch.setattr(agent_run_service, "_cleanup_channel_later", AsyncMock())
+    monkeypatch.setattr(agent_execution, "_unregister_agent_run_after_execution", MagicMock())
+    monkeypatch.setattr(agent_execution.streaming_channel_manager, "complete_channel", AsyncMock())
+    monkeypatch.setattr(agent_execution, "_cleanup_channel_later", AsyncMock())
 
     async def run_managed(_lane, _spec, fn, *args, **kwargs):
         return fn(*args, **kwargs)
@@ -49,8 +52,8 @@ async def _success_delta_is_published_before_completion(monkeypatch, failure_kin
     async def wait_for_cancel(*_args, **_kwargs):
         await asyncio.Event().wait()
 
-    monkeypatch.setattr(agent_run_service.runtime_thread_manager, "run", run_managed)
-    monkeypatch.setattr(agent_run_service, "_poll_runtime_cancel_signal", wait_for_cancel)
+    monkeypatch.setattr(agent_execution.runtime_thread_manager, "run", run_managed)
+    monkeypatch.setattr(agent_execution, "_poll_runtime_cancel_signal", wait_for_cancel)
     request = SimpleNamespace(conversation_id=999, history=[], is_debug=False)
     info = SimpleNamespace(
         agent_config=SimpleNamespace(pre_run_tool_events=()),
@@ -101,15 +104,15 @@ async def _exhausted_raw_answer_streams_before_commit(monkeypatch):
         yield json.dumps({"type": "model_attempt_control", "content": "", "phase": "commit", "attempt_id": "third"})
         yield json.dumps({"type": "final_answer", "content": "final answer"})
 
-    monkeypatch.setattr(agent_run_service, "agent_run", controlled_agent_run)
-    monkeypatch.setattr(agent_run_service, "save_message", MagicMock(return_value=4243))
+    monkeypatch.setattr(agent_execution, "agent_run", controlled_agent_run)
+    monkeypatch.setattr(agent_execution, "save_message", MagicMock(return_value=4243))
     monkeypatch.setattr(
-        agent_run_service, "persist_assistant_run_batch",
+        agent_execution, "persist_assistant_run_batch",
         lambda **kwargs: persisted_batches.append(kwargs),
     )
-    monkeypatch.setattr(agent_run_service, "_unregister_agent_run_after_execution", MagicMock())
-    monkeypatch.setattr(agent_run_service.streaming_channel_manager, "complete_channel", AsyncMock())
-    monkeypatch.setattr(agent_run_service, "_cleanup_channel_later", AsyncMock())
+    monkeypatch.setattr(agent_execution, "_unregister_agent_run_after_execution", MagicMock())
+    monkeypatch.setattr(agent_execution.streaming_channel_manager, "complete_channel", AsyncMock())
+    monkeypatch.setattr(agent_execution, "_cleanup_channel_later", AsyncMock())
 
     async def run_managed(_lane, _spec, fn, *args, **kwargs):
         return fn(*args, **kwargs)
@@ -117,8 +120,8 @@ async def _exhausted_raw_answer_streams_before_commit(monkeypatch):
     async def wait_for_cancel(*_args, **_kwargs):
         await asyncio.Event().wait()
 
-    monkeypatch.setattr(agent_run_service.runtime_thread_manager, "run", run_managed)
-    monkeypatch.setattr(agent_run_service, "_poll_runtime_cancel_signal", wait_for_cancel)
+    monkeypatch.setattr(agent_execution.runtime_thread_manager, "run", run_managed)
+    monkeypatch.setattr(agent_execution, "_poll_runtime_cancel_signal", wait_for_cancel)
     request = SimpleNamespace(conversation_id=999, history=[], is_debug=False)
     info = SimpleNamespace(
         agent_config=SimpleNamespace(pre_run_tool_events=()),

@@ -1,11 +1,14 @@
-export { AddAgentDrawer, type AddAgentDrawerProps } from "./AddAgentDrawer";
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 export {
-  AddKnowledgeDrawer,
-  type AddKnowledgeDrawerProps,
-} from "./AddKnowledgeDrawer";
-export { AddModelDrawer, type AddModelDrawerProps } from "./AddModelDrawer";
-export { AddSkillDrawer, type AddSkillDrawerProps } from "./AddSkillDrawer";
-export { AddToolDrawer, type AddToolDrawerProps } from "./AddToolDrawer";
+  AgentDrawer,
+  type AgentDrawerProps,
+  type AgentDrawerCategory,
+} from "./AgentDrawer";
+export { KnowledgeDrawer, type KnowledgeDrawerProps } from "./KnowledgeDrawer";
+export { ModelDrawer, type ModelDrawerProps } from "./ModelDrawer";
+export { SkillDrawer, type SkillDrawerProps } from "./SkillDrawer";
+export { ToolDrawer, type ToolDrawerProps } from "./ToolDrawer";
 export {
   ParamDialog,
   ParamSwitch,
@@ -22,10 +25,7 @@ export {
   SkillConfigModal,
   type SkillConfigModalProps,
 } from "./SkillConfigModal";
-export {
-  ToolConfigModal,
-  type ToolConfigModalProps,
-} from "./ToolConfigModal";
+export { ToolConfigModal, type ToolConfigModalProps } from "./ToolConfigModal";
 export type {
   AgentCardItem,
   KnowledgeItem,
@@ -36,3 +36,15 @@ export type {
   SelectedItem,
   TagOption,
 } from "./types";
+export { ResourceDrawer, type ResourceDrawerProps } from "./ResourceDrawer";
+export {
+  ResourceItem,
+  ResourceCollection,
+  type ResourceItemProps,
+} from "./ResourceItem";
+export type {
+  ResourceItemData,
+  ResourceItemContext,
+  ResourceItemSlots,
+  ResourceViewMode,
+} from "@/types/resourcePicker";

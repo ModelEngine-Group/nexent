@@ -1,0 +1,43 @@
+schema_version: '1.0'
+change:
+  change_id: CHAT-WORKBENCH-REFINEMENTS-20261015
+  change_type: requirement
+  requirement_id: CHAT-WORKBENCH-REFINEMENTS-20261015
+  title: 工作台模式退出、列表选择、侧栏与模型默认值细化
+  description: Toggle active creation modes off, show Agent selection as read-only rows, improve sidebar actions and restore
+    configured reasoning defaults when re-enabling thinking.
+  affected_features:
+    existing: []
+    added: []
+    modified:
+    - WB-CONTROLS
+    - CHAT-MODEL-CONTROLS
+    retired: []
+  affected_cases:
+    existing: []
+    added: []
+    modified:
+    - WB-CONTROLS-D4-001
+    - WB-CONTROLS-D4-003
+    - CHAT-MODEL-CONTROLS-D4-001
+    - CHAT-MODEL-CONTROLS-D4-002
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    test_selectors:
+    - frontend/tests/workbench/CreationActions.test.tsx
+    - frontend/tests/workbench/AgentPicker.test.tsx
+    - frontend/tests/workbench/AgentModels.test.ts
+    - frontend/tests/workbench/ConversationModelControls.test.tsx
+    - frontend/tests/workbench/ModelSelectorThinking.test.tsx
+    behaviors:
+    - Clicking the active creation mode exits while running and permission guards remain.
+    - Agent picker rows preserve selection, filtering, pagination and repository imports without an edit action.
+    - Thinking off hides the effort/budget row; enabling restores Agent field overrides before model defaults and validates
+      capability.
+    - Shared controllers retain session isolation and original runtime serialization; Workbench sampling/output values remain
+      unchanged.
+    reason: Strengthen existing frontend unit owners and D4 journeys; no backend parameter, endpoint or persistence contract
+      changes, so backend UT and D2/D3 reruns add no new proof for this frontend-only change.
+  notes: Reuse four formal owners; no new Case IDs, D1/D5 quota, backend writes or global model configuration updates. Sidebar
+    layout is checked at the actual D4 surface, not by CSS class mirror tests.

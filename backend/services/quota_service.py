@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """
 Quota service for KB storage capacity management.
 
@@ -780,6 +782,9 @@ class QuotaService:
         total_pages = (total + page_size - 1) // page_size if page_size > 0 else 0
         start = (page - 1) * page_size
         paged = items[start : start + page_size] if page_size > 0 else items
+        from services.user_identity_service import enrich_cas_usernames
+
+        enrich_cas_usernames(paged, {"cas_username": "user_id"})
         return {
             "total": total,
             "page": page,

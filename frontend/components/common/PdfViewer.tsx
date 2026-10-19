@@ -1,3 +1,5 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 "use client";
 
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
@@ -89,7 +91,7 @@ async function resolveOutlineItemPageNumber(
   }
 }
 
-export function PdfViewer({ url, fileName }: Readonly<PdfViewerProps>) {
+export function PdfViewer({ url, fileName, initialScaleMode = 'fit-page' }: Readonly<PdfViewerProps>) {
   const { t } = useTranslation('common');
 
   const [numPages, setNumPages] = useState<number>(0);
@@ -104,7 +106,7 @@ export function PdfViewer({ url, fileName }: Readonly<PdfViewerProps>) {
   const [outline, setOutline] = useState<OutlineItem[] | null>(null);
   const [showOutline, setShowOutline] = useState<boolean>(false);
   
-  const [scaleMode, setScaleMode] = useState<ScaleMode>('fit-page');
+  const [scaleMode, setScaleMode] = useState<ScaleMode>(initialScaleMode);
   const [customScale, setCustomScale] = useState<number>(1);
   const [containerWidth, setContainerWidth] = useState<number>(0);
   const [containerHeight, setContainerHeight] = useState<number>(0);

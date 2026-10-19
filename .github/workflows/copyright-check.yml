@@ -1,0 +1,67 @@
+name: Copyright Header Check
+
+concurrency:
+  group: copyright-check-${{ github.ref }}
+  cancel-in-progress: true
+
+on:
+  workflow_dispatch:
+    inputs:
+      check_mode:
+        description: 'check scope: all files or only files changed in the latest commit'
+        required: false
+        default: 'all'
+        type: choice
+        options:
+          - all
+          - changed
+  pull_request:
+    branches: [develop, 'release/**', 'hotfix/**']
+    paths:
+      - '**.py'
+      - '**.sh'
+      - '**.sql'
+      - '**.ts'
+      - '**.tsx'
+      - '**.js'
+      - '**.jsx'
+      - '**.mjs'
+      - '.github/workflows/copyright-check.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  copyright-check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: Collect changed files
+        if: github.event_name != 'workflow_dispatch' || github.event.inputs.check_mode == 'changed'
+        run: |
+          set -e
+          touch changed_files.txt
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            git diff --name-only --diff-filter=ACMR "origin/${{ github.base_ref }}...HEAD" > changed_files.txt
+          else
+            git diff --name-only --diff-filter=ACMR HEAD~1..HEAD > changed_files.txt
+          fi
+          echo "---- changed files ----"
+          cat changed_files.txt
+
+      - name: Check copyright headers on changed files
+        if: github.event_name != 'workflow_dispatch' || github.event.inputs.check_mode == 'changed'
+        run: python scripts/check_copyright.py --files-from changed_files.txt
+
+      - name: Check copyright headers on all files
+        if: github.event_name == 'workflow_dispatch' && github.event.inputs.check_mode == 'all'
+        run: python scripts/check_copyright.py

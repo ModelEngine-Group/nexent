@@ -1,3 +1,5 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
@@ -280,6 +282,14 @@ async function createModel(
   }
   return modelService.addCustomModel(params as any);
 }
+
+// Backend rejects a create whose display_name collides with an existing
+// record with HTTP 409 and the detail "Name <display_name> is already in
+// use, please choose another display name" (both /model/create and
+// /model/manage/create). Other ValueErrors also map to 409 (e.g. embedding
+// dimension probing), so match the stable message, not the status alone.
+const isDisplayNameConflictError = (error: unknown): boolean =>
+  error instanceof ModelError && /is already in use/i.test(error.message);
 
 /**
  * Always send chunk params for embedding-family rows (old-dialog parity):
@@ -1049,20 +1059,25 @@ function BatchAddForm({
     setSubmitting(true);
     let created = 0;
     const failed: string[] = [];
+    // Display names the backend rejected as duplicates (HTTP 409 name
+    // conflict). Tracked separately from `failed` so the summary can tell
+    // the user exactly which rows collided instead of a generic failure.
+    const duplicateNames: string[] = [];
     const createdDisplayNames: string[] = [];
     for (const row of rows) {
       // User-modified overrides win; otherwise use catalog suggestions.
       const override = rowOverrides[row.id] ?? rowSuggestions[row.id];
+      // develop #4009: no automatic renaming — the clean model name is
+      // the default display name; a collision with an existing row is
+      // reported as a per-row failure instead of silently suffixed.
+      const displayName = override?.displayName?.trim() || row.model_name;
       try {
         const params: Record<string, any> = {
           name: row.model_name,
           type: row.model_type,
           url: baseUrl.trim(),
           apiKey: apiKey.trim(),
-          // develop #4009: no automatic renaming — the clean model name is
-          // the default display name; a collision with an existing row is
-          // reported as a per-row failure instead of silently suffixed.
-          displayName: override?.displayName?.trim() || row.model_name,
+          displayName,
           maxTokens: isEmbeddingModelType(row.model_type) ? 1024 : 4096,
           modelFactory:
             provider === CUSTOM_PROVIDER_KEY
@@ -1089,12 +1104,14 @@ function BatchAddForm({
         // Embedding rows always carry chunk params (gear values or defaults).
         applyEmbeddingChunkParams(params, override?.settings);
         await createModel(tenantId, params);
-        createdDisplayNames.push(
-          override?.displayName?.trim() || row.model_name
-        );
+        createdDisplayNames.push(displayName);
         created++;
       } catch (error: any) {
-        failed.push(row.model_name);
+        if (isDisplayNameConflictError(error)) {
+          duplicateNames.push(displayName);
+        } else {
+          failed.push(row.model_name);
+        }
         log.error("batch add model failed", row.model_name, error);
       }
     }
@@ -1113,12 +1130,26 @@ function BatchAddForm({
       }
     }
     setSubmitting(false);
+    const duplicateList = duplicateNames.join("、");
+    const failedCount = failed.length + duplicateNames.length;
     if (created > 0) {
-      if (failed.length === 0) {
+      if (failedCount === 0) {
         message.success(
           t("modelConfig.addDialog.batchSuccess", {
             defaultValue: `已添加 ${created} 个模型`,
             count: created,
+          })
+        );
+      } else if (duplicateNames.length > 0) {
+        // Partial success with name collisions: name the duplicates so the
+        // operator knows a retry only needs the non-duplicate rows.
+        message.warning(
+          t("modelConfig.addDialog.batchPartialDuplicates", {
+            defaultValue: `已添加 ${created} 个模型，${failedCount} 个失败，其中 ${duplicateNames.length} 个模型已存在（${duplicateList}）`,
+            count: created,
+            failed: failedCount,
+            duplicates: duplicateNames.length,
+            names: duplicateList,
           })
         );
       } else {
@@ -1136,12 +1167,34 @@ function BatchAddForm({
     }
     // All creates failed: keep the dialog open so the operator can fix the
     // cause (key / URL / names) without re-entering everything.
-    message.error(
-      t("modelConfig.addDialog.batchAllFailed", {
-        defaultValue: `全部 ${failed.length} 个模型添加失败，请检查后重试`,
-        failed: failed.length,
-      })
-    );
+    if (duplicateNames.length > 0 && failed.length === 0) {
+      // Every row collided with an existing display name — the most common
+      // batch-add confusion, so say so instead of the generic failure text.
+      message.error(
+        t("modelConfig.addDialog.batchAllDuplicates", {
+          defaultValue: `全部 ${duplicateNames.length} 个模型添加失败：模型已存在（${duplicateList}），请勿重复添加`,
+          total: duplicateNames.length,
+          names: duplicateList,
+        })
+      );
+    } else if (duplicateNames.length > 0) {
+      message.error(
+        t("modelConfig.addDialog.batchAllFailedDuplicates", {
+          defaultValue: `全部 ${failedCount} 个模型添加失败：${duplicateNames.length} 个模型已存在（${duplicateList}），${failed.length} 个请检查后重试`,
+          failed: failedCount,
+          duplicates: duplicateNames.length,
+          names: duplicateList,
+          others: failed.length,
+        })
+      );
+    } else {
+      message.error(
+        t("modelConfig.addDialog.batchAllFailed", {
+          defaultValue: `全部 ${failed.length} 个模型添加失败，请检查后重试`,
+          failed: failed.length,
+        })
+      );
+    }
   }
 
   return (
@@ -1404,7 +1457,7 @@ function BatchAddForm({
             {selectedCount > 0
               ? t("modelConfig.addDialog.selectedCount", {
                   defaultValue: `已选 ${selectedCount} 个模型`,
-                  count: selectedCount,
+                  selectedCount,
                 })
               : ""}
           </span>

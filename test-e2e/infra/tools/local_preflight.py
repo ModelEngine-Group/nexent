@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """Read-only checks for the selected machine-local Nexent test configuration."""
 
 from __future__ import annotations
@@ -58,7 +60,7 @@ def valid_url(value: object) -> bool:
     return parsed.scheme in {"http", "https"} and bool(parsed.hostname) and not parsed.username and not parsed.password
 
 
-def static_config_problems(home: Path, records: list[dict]) -> list[str]:
+def static_config_problems(home: Path, records: list[dict], *, repo: Path) -> list[str]:
     config = home / "config"
     daily, problems = env_file(config / "daily.env")
     _, errors = env_file(config / "secrets.env")
@@ -105,6 +107,11 @@ def static_config_problems(home: Path, records: list[dict]) -> list[str]:
             for name in ("NEXENT_TEST_ASSETS_CONTAINER_HOST", "NEXENT_TEST_MCP_CONTAINER_HOST"):
                 if not daily.get(name):
                     problems.append(f"daily.env {name} is required by selected anchored cases")
+    # ext-knowledge attach: validate the machine-local configuration when it
+    # exists (missing config is reported at attach time, only by cases that
+    # actually declare an ext-served logical service).
+    from ext_attach import config_problems
+    problems.extend(config_problems(home, repo))
     return sorted(set(problems))
 
 

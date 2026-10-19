@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import importlib.machinery
 import types
 import unittest
@@ -33,7 +35,7 @@ sys.modules['services'] = services_pkg
 sys.modules['services.invitation_service'] = MagicMock()
 sys.modules['services.group_service'] = MagicMock()
 sys.modules['services.tool_configuration_service'] = MagicMock()
-sys.modules['management.services.skill.service'] = MagicMock()
+sys.modules['management.services.skill.transfer'] = MagicMock()
 
 asset_owner_visibility_mock = types.ModuleType('services.asset_owner_visibility')
 asset_owner_visibility_mock.filter_accessible_routes_for_asset_owner_feature = lambda routes: routes

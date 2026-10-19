@@ -33,7 +33,7 @@ def build_runtime_outlet_snapshot(record):
     )
     from nexent.core.model_service.registry import model_service_references
     from services.model_outlet_migration_service import build_legacy_outlet_snapshot
-    from utils.model_name_utils import add_repo_to_name
+    from management.services.model.names import add_repo_to_name
 
     fingerprint = model_source_fingerprint(record)
     current = record.get("runtime_outlet_snapshot") or {}

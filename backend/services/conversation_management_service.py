@@ -1,7 +1,11 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import json
 import logging
 
-from utils.time_context_utils import strip_current_time_prefix
+from management.services.agent.context import (
+    strip_current_time_prefix,
+)
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
@@ -49,7 +53,7 @@ from database.conversation_db import (
     update_message_unit_status,
 )
 from database.model_management_db import get_model_by_model_id
-from services.model_gateway_service import get_llm_adapter_from_config
+from management.services.model.adapter import get_llm_adapter_from_config
 from utils.config_utils import tenant_config_manager
 from nexent.core.agents.prompt.auxiliary import compose_auxiliary_prompt
 from utils.str_utils import remove_think_blocks
@@ -818,6 +822,10 @@ def get_conversation_history_service(conversation_id: int, user_id: str) -> List
                            "cite_index": record["cite_index"], "search_type": record["search_type"],
                            "tool_sign": record["tool_sign"], "score_details": {}}
 
+            search_item["score_details"].update(record.get("aidp_source_reference") or {})
+            if record.get("aidp_metadata") is not None:
+                search_item["score_details"]["metadata"] = record["aidp_metadata"]
+
             if record["score_accuracy"] is not None:
                 search_item["score_details"]["accuracy"] = record["score_accuracy"]
             if record["score_semantic"] is not None:
@@ -1080,10 +1088,16 @@ def get_sources_service(conversation_id: Optional[int], message_id: Optional[int
                     "filename": record["source_title"] if record["source_type"] == "file" else None,
                     "published_date": record["published_date"].strftime("%Y-%m-%d") if record[
                         "published_date"] else None,
-                    "score": record["score_overall"]
+                    "score": record["score_overall"],
+                    "cite_index": record.get("cite_index"),
+                    "search_type": record.get("search_type"),
+                    "tool_sign": record.get("tool_sign"),
                 }
 
                 search_item["score_details"] = {}
+                search_item["score_details"].update(record.get("aidp_source_reference") or {})
+                if record.get("aidp_metadata") is not None:
+                    search_item["score_details"]["metadata"] = record["aidp_metadata"]
                 if record["score_accuracy"] is not None:
                     search_item["score_details"]["accuracy"] = record["score_accuracy"]
                 if record["score_semantic"] is not None:

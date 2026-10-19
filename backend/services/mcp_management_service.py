@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import logging
 from datetime import datetime
 from typing import Any, Dict, FrozenSet, List, Tuple
@@ -45,6 +47,7 @@ from services.notification_service import (
     create_repository_review_notification,
     deactivate_notifications,
 )
+from services.user_identity_service import enrich_cas_usernames
 from utils.str_utils import convert_list_to_string, convert_string_to_list
 
 logger = logging.getLogger("mcp_management_service")
@@ -167,6 +170,7 @@ def _to_community_card(row: Dict[str, Any]) -> Dict[str, Any]:
         "reviewType": "initial_listing",
         "installCount": row.get("download_count") or 0,
         "authorDisplayName": _resolve_author_display_name(row.get("user_id")),
+        **({"authorCasUsername": row["author_cas_username"]} if row.get("author_cas_username") else {}),
         "groupIds": row.get("group_ids"),
         "ingroupPermission": row.get("ingroup_permission"),
     }
@@ -261,6 +265,7 @@ async def list_community_mcp_services(
     if page is not None:
         list_kwargs["page"] = page
     db_result = get_mcp_market_records(**list_kwargs)
+    enrich_cas_usernames(db_result.get("items", []), {"author_cas_username": "user_id"})
     return {
         "count": db_result.get("count", 0),
         "total": db_result.get("total"),
@@ -652,6 +657,7 @@ async def list_community_mcp_review_services(
         cursor=cursor,
         limit=limit,
     )
+    enrich_cas_usernames(db_result.get("items", []), {"author_cas_username": "user_id"})
     return {
         "count": db_result.get("count", 0),
         "nextCursor": db_result.get("nextCursor"),
@@ -694,6 +700,7 @@ async def list_my_community_mcp_services(
         tenant_id=tenant_id,
         user_id=user_id,
     )
+    enrich_cas_usernames(market_rows, {"author_cas_username": "user_id"})
     items = [_to_community_card(row) for row in market_rows]
     return {
         "count": len(items),

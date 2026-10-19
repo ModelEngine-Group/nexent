@@ -20,7 +20,12 @@ from nexent.monitor import (
     set_monitoring_operation,
 )
 from services.thread_lifecycle_service import config_thread_manager
-from utils.config_utils import get_model_name_from_config, tenant_config_manager
+from management.services.model.names import (
+    get_model_name_from_config,
+)
+from utils.config_utils import (
+    tenant_config_manager,
+)
 from utils.monitoring_identity import resolve_monitoring_user_email
 
 logger = logging.getLogger(__name__)

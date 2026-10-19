@@ -1,0 +1,35 @@
+schema_version: '1.0'
+change:
+  change_id: K8S-ENV-INJECTION
+  change_type: bugfix
+  bug_id: K8S-ENV-INJECTION
+  title: Inject complete deployment env files into Kubernetes backend containers
+  description: Replace the fixed-list-only injection boundary with backend-only env file Secrets while preserving production Compose service scope and explicit deployment overrides.
+  observed_behavior: Docker Compose loads the entire deployment .env for five backend services, whereas Kubernetes maps a fixed subset. New business configuration can therefore be silently omitted.
+  expected_behavior: All file-declared variables reach the five backend services; only Config and Runtime load monitoring.env. Final credentials and explicit Kubernetes parameters win; a subsequent deployment updates and removes variables without exposing the new Secrets to Web or infrastructure.
+  escaped_stage: unknown
+  coverage_gap:
+    type: missing_boundary
+    description: Existing deploy/tests/test_common.sh asserts selected mappings and rollout checksums, and DEP-AUTO-7177AC18CCE799DD proves sandbox option dispatch. Neither proves complete env file injection through Kubernetes envFrom or removal after an update.
+  feature_contract_changed: true
+  affected_features:
+    existing: []
+    added: []
+    modified: [F-173]
+    retired: []
+  affected_cases:
+    existing: [DEP-AUTO-7177AC18CCE799DD]
+    added: [K8S-ENV-D5-001]
+    modified: []
+    retired: []
+  traditional_ut:
+    decision: add
+    behaviors:
+      - Preserve Bash-loaded string values, empty values, quoting, JSON, multiline strings and last duplicate assignments; emit only file-declared keys.
+      - Reject unreadable or invalid env files without publishing partial values or sensitive diagnostics; generated application Secret values are mode 0600.
+      - Verify default Helm compatibility, backend-only Secret references, platform overrides, update/removal and deterministic rollout checksums using synthetic configuration.
+      - Remove redundant backend runtime-value copies while retaining Web-specific mappings, Redis runtime-state fallback, derived worker concurrency, final credentials and direct Helm defaults.
+    reason: The new renderer and manifest composition have isolated contracts suitable for traditional UT. Real Kubernetes env resolution and replacement need separate D5 evidence; no additional D1-D4 boundary is introduced.
+    test_selectors:
+      - test/backend/deploy/test_k8s_env_injection.py
+  notes: 'User explicitly waived the external nexent-doc SPEC requirement for this change. Repository-local design and evidence: test-e2e/changes/bugs/K8S-ENV-INJECTION/design.md. Do not change the local deployment .env, existing clusters, SQL, HTTP interfaces or CI. The D5 case requires an explicitly selected isolated test cluster and mutation gates; missing prerequisites remain BLOCKED.'

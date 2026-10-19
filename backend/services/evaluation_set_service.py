@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import json
 import logging
 import re
@@ -40,7 +42,7 @@ from database.evaluation_set_db import (
     update_evaluation_set_case_count,
 )
 from database.knowledge_db import get_index_name_by_knowledge_name
-from utils.llm_utils import call_llm_for_system_prompt
+from management.services.model.invocation import call_llm_for_system_prompt
 from nexent.core.agents.prompt.auxiliary import compose_auxiliary_prompt
 from nexent.core.agents.prompt.evaluation import (
     compose_evaluation_case_context_blocks,
@@ -847,7 +849,7 @@ def _build_agent_context_block(agent_id, tenant_id) -> str:
     if not agent_id:
         return ""
     try:
-        from utils.agent_profile_utils import (
+        from management.services.agent.profile import (
             fetch_agent_profile,
             format_agent_profile_context,
         )

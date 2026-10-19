@@ -3,7 +3,7 @@
 import json
 import pytest
 from utils.runtime_output import RuntimeOutputState
-from utils.agent_stream_utils import finalize_buffered_unit_fragments, serialize_stream_unit_content, is_stream_unit_continuation
+from management.services.agent.stream import finalize_buffered_unit_fragments, serialize_stream_unit_content, is_stream_unit_continuation
 
 
 def terminal(**kwargs):

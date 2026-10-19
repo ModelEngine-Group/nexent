@@ -1,5 +1,10 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 "use client";
 
+import { useQueryClient } from "@tanstack/react-query";
+import { conversationService } from "@/services/conversationService";
+import { workbenchPinsQueryKey } from "@/lib/workbenchPins";
 import {
   createContext,
   useContext,
@@ -18,7 +23,9 @@ import {
   type AssistantRuntime,
 } from "@assistant-ui/react";
 import { remoteChatModelAdapter } from "@/app/newchat/adapter/remote-chat-model-adapter";
-import { workbenchConversationThreadListAdapter } from "@/app/newchat/adapter/conversation-thread-list-adapter";
+import { createConversationThreadListAdapter } from "@/app/newchat/adapter/conversation-thread-list-adapter";
+import { getWorkbenchPinStorageKey } from "@/app/newchat/assistant-ui/thread-pins";
+import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
 import { createNewChatAttachmentAdapter } from "@/app/newchat/adapter/attachment-adapter";
 import { ServerDictationAdapter } from "@/app/newchat/adapter/server-dictation-adapter";
 import { TooltipProvider } from "@/components/ui/tooltip";
@@ -87,6 +94,21 @@ export function WorkbenchSessionProvider({
   children: ReactNode;
 }) {
   useConversationRouteGuard("workbench");
+  const { user } = useAuthorizationContext();
+  const queryClient = useQueryClient();
+  const pinStorageKey = user
+    ? getWorkbenchPinStorageKey(user.id, user.tenantId)
+    : undefined;
+  const threadListAdapter = useMemo(
+    () =>
+      createConversationThreadListAdapter("workbench", pinStorageKey, () =>
+        queryClient.ensureQueryData({
+          queryKey: workbenchPinsQueryKey(pinStorageKey),
+          queryFn: () => conversationService.getWorkbenchPins(),
+        })
+      ),
+    [pinStorageKey, queryClient]
+  );
   const [selectedAgent, setSelectedAgent] = useState<Agent | null>(null);
   const [workbenchState, dispatchWorkbench] = useReducer(
     workbenchReducer,
@@ -128,7 +150,7 @@ export function WorkbenchSessionProvider({
     runtimeHook: function useWorkbenchRuntime() {
       return useLocalChatRuntime(dictationAdapter);
     },
-    adapter: workbenchConversationThreadListAdapter,
+    adapter: threadListAdapter,
     threadId: requestedThreadId,
   });
 

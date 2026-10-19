@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import os
 import sys
 import unittest
@@ -15,7 +17,7 @@ _MODULES_TO_RESTORE = [
     "database.oauth_account_db",
     "database.user_tenant_db",
     "services.oauth_service",
-    "management.services.skill.service",
+    "management.services.skill.transfer",
     "services.tool_configuration_service",
     "utils.auth_utils",
 ]
@@ -55,7 +57,7 @@ sys.modules["database.cas_session_db"] = MagicMock()
 sys.modules["database.oauth_account_db"] = MagicMock()
 sys.modules["database.user_tenant_db"] = MagicMock()
 sys.modules["services.oauth_service"] = MagicMock()
-sys.modules["management.services.skill.service"] = MagicMock()
+sys.modules["management.services.skill.transfer"] = MagicMock()
 sys.modules["services.tool_configuration_service"] = MagicMock()
 sys.modules["utils.auth_utils"] = MagicMock()
 

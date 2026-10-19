@@ -1,0 +1,9 @@
+schema_version: '1.0'
+case_id: WB-CONTROLS-D4-003
+implementations:
+  - framework: playwright
+    file: test.spec.ts
+    selector: WB-CONTROLS-D4-003
+timeout_seconds: 300
+acceptance_bindings:
+  AC-01: [WB-CONTROLS-D4-003]

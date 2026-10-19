@@ -111,7 +111,7 @@ content_sha256 = "a1d815dc34328bd0719fc557794d696205a7506a06515f8e2d84c24f3bce1b
 [[sources]]
 kind = "provider"
 path = "providers/alibaba-cn/provider.toml"
-content_sha256 = "0060172cf93a8db8b8427021030a3ad5c388c919f7fc47df9723ba8b08d5f54b"
+content_sha256 = "21ba23ae62bf3ac0755c6760458b9212cc95ee32b761bd2e51bcd988178525a7"
 
 [[sources]]
 kind = "provider"

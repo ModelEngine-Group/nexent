@@ -1,0 +1,72 @@
+schema_version: '1.0'
+change:
+  change_id: DAILY-KB-DRIFT-REPAIRS-20261013
+  change_type: test-fix
+  title: Repair daily knowledge-base case drift (D2 delete signature, agent card configure action, chat landing search and composer)
+  description: >-
+    The 2026-10-12 batch (HEAD 984399740, 636 cases / 579 PASS) left four
+    knowledge-domain cases unexecuted or failing for harness reasons, not
+    product ones. API-AUTO-FC03F18034CB0D51 raised TypeError because the
+    direct delete_documents call omitted the now-required http_request
+    parameter before any branch executed: the call now passes a real
+    Starlette Request, the audit sink is isolated at its actual lookup site
+    (apps.vectordatabase_app.record_security_event) and every original
+    redis non-duplication, pending, fallback, error and permission
+    assertion still runs, plus one-security-event-per-terminal-deletion
+    and no-audit-on-400/403 assertions. PW-KB-LOCAL-01 step 7 failed
+    because AgentPage.select still looked for the old card 编辑 action:
+    the agent list now renders continuous cards whose 配置 action appears
+    on hover, so select scopes the exact run-owned card, hovers it, enters
+    the configure route and verifies URL and agent identity. Knowledge
+    binding now uses the 知识库管理 section, the AddKnowledgeDrawer
+    (CheckMark rows, no checkbox modal) and the drawer's 确认 autosave, and
+    returns the update request payload so callers can verify tool and KB
+    identifiers. PW-FILE-01's entry failed because ChatPage.selectAgent
+    still used the retired 搜索智能体... placeholder: it now uses
+    搜索智能体名称, scopes the card by the exact agent name text instead of
+    the first name-containing button (the card accessible name mixes name,
+    description, tag and the 更多操作 menu), and waits for the discover
+    page to be replaced by a usable composer (the Lexical composer
+    placeholder is now 输入"/"快速引用技能及指令, also updated in
+    startMessage, newConversation and the Agent Debug selectors). Section
+    renames from the continuous-card editor (展示信息 to 基础信息,
+    协作智能体 to 添加子智能体, 会话引导 to 首页欢迎信息, guardrail now
+    behind the 更多配置 modal, tab-based openBasic/openAdvanced replaced
+    by section opens) are applied to the shared helpers and to the direct
+    section references in the minimum regression callers PW-AGENT-02 and
+    PW-PROMPT-01. bindInternalCollaborator now commits through the
+    AddAgentDrawer row toggle; the drawer no longer renders per-version
+    labels, so the expectedVersionName check moved to the committed chip
+    and may need product confirmation. All real business steps and
+    assertions (upload, processing, retrieval marker, autosave, debug RAG,
+    refresh persistence, attachment journey boundaries) are preserved.
+    Additional drift found and repaired while running the same cases against
+    the dockerized test deployment: the Agent Debug entry is now the header
+    toggle 智能体调试 with a data-testid=agent-debug-panel pane and the
+    single/compare switch moved into its header menu; the new-chat composer
+    hides attachments behind the ＋ panel whose 上传文件 row does not close
+    the panel (the helper dismisses it so it cannot intercept later clicks);
+    and after a page refresh the newchat route lands on the agent picker, so
+    reopening the conversation uses the sidebar agent selector, which
+    resumes the agent's most recent conversation. All repaired browser
+    journeys ran green against the dockerized stack; the remaining notes
+    about PW-CHAT-02/PW-MEDIA-STT-01 and the tool/skill helpers still stand.
+  affected_features:
+    existing: [F-168, V5-PW-KB-LOCAL-01, V5-PW-FILE-01]
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing: []
+    added: []
+    modified: [API-AUTO-FC03F18034CB0D51, PW-KB-LOCAL-01, PW-FILE-01, PW-AGENT-02, PW-PROMPT-01]
+    retired: []
+  notes: >-
+    The repaired D2 test passes offline (1 passed, monkeypatched
+    collaborators, no DB or network). Browser journeys need the authorized
+    product stack and are not claimed as executed. PW-CHAT-01/05 consume
+    the same ChatPage helpers and are the minimum browser regression set;
+    PW-CHAT-02 and PW-MEDIA-STT-01 still reference the retired composer
+    placeholder directly in their scripts and are known remaining drift
+    outside this change's approved scope, as are the tab-based
+    bindTool/bindSkill/openToolsSkills helpers.

@@ -1,3 +1,5 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 // @ts-nocheck
 import fs from "node:fs";
 import path from "node:path";
@@ -106,6 +108,9 @@ async function mockList(page, rows = agentRows()) {
   await page.route("**/api/groups/list", (route) =>
     json(route, { data: [], total: 0, message: "ok" }),
   );
+  // The page resolves the default resource tag library before it renders the
+  // list, so the catch-all stub above must be narrowed here.
+  await page.route("**/api/tag-libraries**", (route) => json(route, []));
   await page.route("**/api/agent/search_info", (route) => {
     const { agent_id } = route.request().postDataJSON();
     const agent = fixture.rows.find((row) => row.agent_id === agent_id);

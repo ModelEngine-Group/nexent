@@ -32,6 +32,8 @@ RUN if [ "$APK_MIRROR" = "tsinghua" ]; then \
         '    }' \
         '}' > /etc/nginx/conf.d/default.conf
 
+RUN apk add --no-cache curl vim procps-ng wget less
+
 COPY --from=builder /app/docs/.vitepress/dist /usr/share/nginx/html
 
 EXPOSE 4173

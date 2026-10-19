@@ -1,5 +1,8 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import { Button, Dropdown, type MenuProps } from "antd";
 import { Download, MoreHorizontal, Trash2 } from "lucide-react";
+import { useUserDisplayName } from "@/hooks/auth/useUserDisplayName";
 import { useTranslation } from "react-i18next";
 
 import ResourceCard from "@/components/resource/ResourceCard";
@@ -28,15 +31,18 @@ export default function RepositoryMcpCard({
   onOffline,
 }: RepositoryMcpCardProps) {
   const { t } = useTranslation("common");
+  const displayName = useUserDisplayName();
   const tags = service.tags || [];
   const deploymentType = resolveDeploymentType(service);
   const deploymentLabel = t(getDeploymentTypeLabelKey(deploymentType));
   const installCount = Number(service.installCount || 0);
   const toolCount = resolveToolCount(service);
-  const author =
+  const author = displayName(
+    service.authorCasUsername,
     service.authorDisplayName ||
-    service.authorName ||
-    t("mcpTools.repository.authorFallback");
+      service.authorName ||
+      t("mcpTools.repository.authorFallback")
+  );
   const actionItems: MenuProps["items"] = isAdmin
     ? [
         {

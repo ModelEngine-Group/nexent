@@ -12,3 +12,7 @@ acceptance_bindings:
   - '[CHAT-SIDEBAR-D1-001] renaming propagates normalized titles to the parent state'
   - '[CHAT-SIDEBAR-D1-001] batch deletion resolves server IDs and resets the deleted
     active conversation'
+  AC-02:
+  - '[CHAT-SIDEBAR-D1-001] selecting an agent group loads all pages and deletes only its conversations'
+  AC-03:
+  - '[CHAT-SIDEBAR-D1-001] agent-group page failures do not partially select or delete conversations'

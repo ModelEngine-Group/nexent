@@ -1,8 +1,12 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """
 Database operations for user tenant relationship management
 """
 import logging
 from typing import Any, List, Dict, Optional
+
+from sqlalchemy import exists, func, or_, text
 
 from consts.const import (
     DEFAULT_TENANT_ID,
@@ -11,9 +15,8 @@ from consts.const import (
     MAX_USERS_PER_TENANT,
 )
 from database.client import as_dict, get_db_session
-from database.db_models import TenantGroupInfo, TenantGroupUser, UserTenant
+from database.db_models import TenantGroupInfo, TenantGroupUser, UserOAuthAccount, UserTenant
 from consts.exceptions import TenantResourceLimitError
-from sqlalchemy import func, text
 
 logger = logging.getLogger(__name__)
 
@@ -272,7 +275,8 @@ def upsert_user_tenant(user_id: str, tenant_id: str, user_role: str = "USER", us
 def get_users_by_tenant_id(tenant_id: str, page: Optional[int] = 1, page_size: Optional[int] = 20,
                            sort_by: str = "created_at", sort_order: str = "desc",
                            email_required: bool = True, search: Optional[str] = None,
-                           roles: Optional[List[str]] = None, group_ids: Optional[List[int]] = None) -> Dict[str, Any]:
+                           roles: Optional[List[str]] = None, group_ids: Optional[List[int]] = None,
+                           *, search_cas_username: bool = False) -> Dict[str, Any]:
     """
     Get users belonging to a specific tenant with pagination and sorting
 
@@ -298,7 +302,18 @@ def get_users_by_tenant_id(tenant_id: str, page: Optional[int] = 1, page_size: O
             ])
 
         if search and search.strip():
-            filters.append(UserTenant.user_email.ilike(f"%{search.strip()}%"))
+            pattern = f"%{search.strip()}%"
+            email_match = UserTenant.user_email.ilike(pattern)
+            if search_cas_username:
+                cas_match = exists().where(
+                    UserOAuthAccount.user_id == UserTenant.user_id,
+                    UserOAuthAccount.provider == "cas",
+                    UserOAuthAccount.delete_flag == "N",
+                    UserOAuthAccount.provider_username.ilike(pattern),
+                )
+                filters.append(or_(email_match, cas_match))
+            else:
+                filters.append(email_match)
         if roles:
             filters.append(UserTenant.user_role.in_(roles))
         if group_ids:

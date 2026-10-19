@@ -1,4 +1,10 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 "use client";
+
+import { UserIdentity } from "@/components/auth/UserIdentity";
+
+import { useUserDisplayName } from "@/hooks/auth/useUserDisplayName";
 
 import React, { useMemo } from "react";
 import { useTranslation } from "react-i18next";
@@ -117,6 +123,7 @@ const AidpKnowledgeList: React.FC<AidpKnowledgeListProps> = ({
   onRetry,
 }) => {
   const { t } = useTranslation();
+  const displayName = useUserDisplayName();
   const { can } = usePermission();
   const { groupOptions, groupsError } = useAidpGroupOptions();
   const groupById = useMemo(() => {
@@ -321,7 +328,10 @@ const AidpKnowledgeList: React.FC<AidpKnowledgeListProps> = ({
             >
               <UserOutlined aria-hidden="true" />
               <span className={styles.metadataValue}>
-                {formatAidpCreator(kb.creator_name)}
+                <UserIdentity
+                  casUsername={kb.creator_cas_username}
+                  fallback={formatAidpCreator(kb.creator_name)}
+                />
               </span>
             </span>
           </div>
@@ -409,7 +419,13 @@ const AidpKnowledgeList: React.FC<AidpKnowledgeListProps> = ({
       creator: makeColumn("creator", {
         title: t("aidpKnowledge.columnCreator"),
         key: "creator",
-        render: (_value, kb) => renderText(formatAidpCreator(kb.creator_name)),
+        render: (_value, kb) =>
+          renderText(
+            displayName(
+              kb.creator_cas_username,
+              formatAidpCreator(kb.creator_name)
+            )
+          ),
       }),
       created_at: makeColumn("created_at", {
         title: t("aidpKnowledge.columnCreatedAt"),

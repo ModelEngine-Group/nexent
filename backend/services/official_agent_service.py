@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """Official agent bundle discovery, installation-status listing and install.
 
 Official agents mirror the official-skills mechanism: platform bundles live in
@@ -338,7 +340,7 @@ async def _first_available_embedding_model_id(tenant_id: str) -> Optional[int]:
     (model_type in embedding/multi_embedding and connect_status available).
     Returns None when the tenant has no usable embedding model.
     """
-    from services.model_management_service import list_models_for_tenant
+    from management.services.model.management import list_models_for_tenant
 
     models = await list_models_for_tenant(tenant_id)
     for model in models:
@@ -366,7 +368,7 @@ async def _missing_model_types(
     (when a KB search tool enables rerank). Returns a stable list of model type
     strings; empty when the tenant has everything the bundle needs.
     """
-    from services.model_management_service import list_models_for_tenant
+    from management.services.model.management import list_models_for_tenant
 
     models = await list_models_for_tenant(tenant_id)
     available = {
@@ -736,7 +738,7 @@ async def _index_binary_docs(
 
     from consts.model import ProcessParams
     from services.file_management_service import upload_files_impl
-    from utils.file_management_utils import trigger_data_process
+    from management.services.knowledge_base.ingestion import trigger_data_process
 
     files_to_process: List[Dict[str, str]] = []
     for doc in docs:
