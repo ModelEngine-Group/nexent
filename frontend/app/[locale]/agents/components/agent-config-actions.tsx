@@ -156,6 +156,15 @@ export default function AgentConfigActions({
         baseCopyDisplayName
       );
 
+      // Build skill_instances from source agent, preserving per-skill config_values.
+      const skillInstancesFromSource = (
+        Array.isArray(detail.skills) ? detail.skills : []
+      ).map((skill: any) => ({
+        skill_id: Number(skill.skill_id ?? skill.id),
+        enabled: true,
+        config_values: skill.config_values ?? undefined,
+      }));
+
       const createResult = await updateAgentMutation.mutateAsync({
         agent_id: undefined,
         name: copyNames.name,
@@ -178,6 +187,7 @@ export default function AgentConfigActions({
           detail.business_logic_model_name ?? undefined,
         business_logic_model_id: detail.business_logic_model_id ?? undefined,
         enabled_tool_ids: enabledToolIds,
+        skill_instances: skillInstancesFromSource,
         related_agent_ids: subAgentIds,
       });
 
