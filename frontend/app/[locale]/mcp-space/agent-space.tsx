@@ -1,8 +1,10 @@
-﻿"use client";
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
+"use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
-import { App, Button, Empty, Grid, Spin } from "antd";
+import { App, Button, Empty, Spin } from "antd";
 import { useTranslation } from "react-i18next";
 import { Tag } from "lucide-react";
 import { parseMcpReviewDeepLinkParams } from "@/lib/notificationNavigation";
@@ -25,6 +27,7 @@ import { useMyCommunityMcp } from "@/hooks/mcpTools/useMyCommunityMcp";
 import { useTagLibraries } from "@/hooks/useTagManagement";
 import { deleteCommunityMcpTool } from "@/services/mcpToolsService";
 import RepositoryTagFilter from "@/components/tag/RepositoryTagFilter";
+import { REPOSITORY_PAGE_SIZE } from "@/const/resource";
 import ResourceCardGrid from "@/components/resource/ResourceCardGrid";
 import TagDefinitionManagementModal from "@/components/tag/TagDefinitionManagementModal";
 import McpToolsSearchFilterBar from "./components/McpToolsSearchFilterBar";
@@ -41,10 +44,6 @@ import {
   PlaceholderBox,
 } from "./my-mcp";
 
-const CARD_GAP = 20;
-const MIN_CARD_HEIGHT = 240;
-const PAGINATION_HEIGHT = 60;
-
 export function McpSpace({
   browser,
   localServices,
@@ -53,7 +52,6 @@ export function McpSpace({
   onSelect,
   onInstall,
   onOffline,
-  onPageSizeChange,
 }: {
   browser: ReturnType<typeof useMcpCommunityBrowser>;
   localServices: McpServiceItem[];
@@ -62,72 +60,14 @@ export function McpSpace({
   onSelect: (service: CommunityMcpCard) => void;
   onInstall: (service: CommunityMcpCard) => void;
   onOffline: (service: CommunityMcpCard) => void;
-  onPageSizeChange: (pageSize: number) => void;
 }) {
   const { t } = useTranslation("common");
   const [deploymentType] = useState<DeploymentFilter>(FILTER_ALL);
-  const screens = Grid.useBreakpoint();
-  const gridRegionRef = useRef<HTMLDivElement>(null);
-  const [availableGridHeight, setAvailableGridHeight] = useState<number | null>(
-    null
-  );
-  const columns = screens.xxl
-    ? 4
-    : screens.xl
-      ? 3
-      : screens.lg || screens.md || screens.sm
-        ? 2
-        : screens.xs
-          ? 1
-          : 4;
-  const pageBottomPadding = screens.sm ? 40 : 32;
-  const rows = getRowCount(
-    Math.max(0, (availableGridHeight ?? 0) - PAGINATION_HEIGHT)
-  );
-  const pageSize = columns * rows;
-  const measureGridHeight = useCallback(() => {
-    if (!gridRegionRef.current) return;
-
-    const viewportHeight = window.visualViewport?.height ?? window.innerHeight;
-    const { top } = gridRegionRef.current.getBoundingClientRect();
-    setAvailableGridHeight(
-      Math.max(0, Math.floor(viewportHeight - top - pageBottomPadding - 8))
-    );
-  }, [pageBottomPadding]);
-
-  useEffect(() => {
-    const frame = window.requestAnimationFrame(measureGridHeight);
-    const observer = new ResizeObserver(measureGridHeight);
-    const visualViewport = window.visualViewport;
-    if (gridRegionRef.current) observer.observe(gridRegionRef.current);
-    window.addEventListener("resize", measureGridHeight);
-    visualViewport?.addEventListener("resize", measureGridHeight);
-
-    return () => {
-      window.cancelAnimationFrame(frame);
-      observer.disconnect();
-      window.removeEventListener("resize", measureGridHeight);
-      visualViewport?.removeEventListener("resize", measureGridHeight);
-    };
-  }, [measureGridHeight]);
-
-  useEffect(() => {
-    onPageSizeChange(pageSize);
-  }, [onPageSizeChange, pageSize]);
-
   const filteredServices = useMemo(() => {
     return filterByDeploymentType(browser.services, deploymentType).filter(
       (item) => matchesNameOrTag(item, browser.filters.search)
     );
   }, [browser.services, browser.filters.search, deploymentType]);
-  const gridHeight =
-    availableGridHeight === null
-      ? undefined
-      : Math.max(
-          0,
-          availableGridHeight - (browser.total > 0 ? PAGINATION_HEIGHT : 0)
-        );
-
   const isInstalled = (service: CommunityMcpCard) => {
     return localServices.some((localService) => {
       if (localService.permission !== "EDIT") return false;
@@ -161,7 +101,7 @@ export function McpSpace({
         onSearchChange={(value) => browser.updateFilter("search", value)}
       />
 
-      <div ref={gridRegionRef} className="min-h-0">
+      <div className="min-h-0">
         {browser.loading ? (
           <PlaceholderBox>
             <Spin />
@@ -176,9 +116,7 @@ export function McpSpace({
             page={browser.page}
             total={browser.total}
             onPageChange={browser.setPage}
-            columns={columns}
-            rows={rows}
-            gridHeight={gridHeight}
+            pageSize={REPOSITORY_PAGE_SIZE}
             paginateItems={false}
             showToolbar={false}
             renderItem={(service, index) => (
@@ -215,7 +153,6 @@ export function useMcpSpaceController() {
   const [tab, setTab] = useState<McpToolsServicesTab>(
     McpToolsServicesTab.REPOSITORY
   );
-  const [repositoryPageSize, setRepositoryPageSize] = useState(12);
   const [showAddModal, setShowAddModal] = useState(false);
   const [tagManagementOpen, setTagManagementOpen] = useState(false);
   const { data: tagLibraries } = useTagLibraries();
@@ -260,7 +197,7 @@ export function useMcpSpaceController() {
   );
   const repositoryBrowser = useMcpCommunityBrowser(
     tab === McpToolsServicesTab.REPOSITORY,
-    repositoryPageSize
+    REPOSITORY_PAGE_SIZE
   );
   const reviewBrowser = useMcpCommunityReview(isAdmin);
   const quickAdd = useMcpCommunityQuickAdd({
@@ -317,7 +254,10 @@ export function useMcpSpaceController() {
   };
 
   const handleTagsChanged = (mcpId: number) => {
-    setMineTagRefreshKeys((prev) => ({ ...prev, [mcpId]: (prev[mcpId] ?? 0) + 1 }));
+    setMineTagRefreshKeys((prev) => ({
+      ...prev,
+      [mcpId]: (prev[mcpId] ?? 0) + 1,
+    }));
   };
 
   const handleRepositoryOffline = (service: CommunityMcpCard) => {
@@ -457,7 +397,6 @@ export function useMcpSpaceController() {
       onSelect: setSelectedRepository,
       onInstall: quickAdd.open,
       onOffline: handleRepositoryOffline,
-      onPageSizeChange: setRepositoryPageSize,
     },
     mineProps: {
       localList,
@@ -478,15 +417,4 @@ export function useMcpSpaceController() {
     },
     dialogs,
   };
-}
-
-function getRowCount(availableHeight: number) {
-  if (availableHeight <= 0) return 3;
-  return Math.min(
-    3,
-    Math.max(
-      1,
-      Math.floor((availableHeight + CARD_GAP) / (MIN_CARD_HEIGHT + CARD_GAP))
-    )
-  );
 }

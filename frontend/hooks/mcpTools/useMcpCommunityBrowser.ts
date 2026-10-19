@@ -1,3 +1,5 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
@@ -48,6 +50,7 @@ export function useMcpCommunityBrowser(enabled: boolean, pageSize = 30) {
   }, [filters.search]);
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- Reset pagination when debounced filters change.
     setPage(1);
   }, [debouncedSearch, filters.transport, filters.tag]);
 
@@ -97,9 +100,11 @@ export function useMcpCommunityBrowser(enabled: boolean, pageSize = 30) {
   );
 
   useEffect(() => {
+    if (query.data === undefined) return;
     const lastPage = Math.max(1, Math.ceil(total / pageSize));
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- Reconcile pagination with a completed server response.
     if (page > lastPage) setPage(lastPage);
-  }, [page, pageSize, total]);
+  }, [page, pageSize, query.data, total]);
 
   const hasPrevPage = page > 1;
   const hasNextPage = page * pageSize < total;
