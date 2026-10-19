@@ -7,6 +7,8 @@ export interface RuntimeGenerationOverrides {
   deep_thinking?: boolean;
   thinking_effort?: ReasoningEffort;
   reasoning_budget_tokens?: number;
+  temperature?: number;
+  top_p?: number;
 }
 
 export interface TurnModelControls {
@@ -14,7 +16,7 @@ export interface TurnModelControls {
   generation_config: RuntimeGenerationOverrides;
 }
 
-/** Whitelist runtime controls; frontend sampling levels never cross this boundary. */
+/** Copy canonical runtime intent without introducing defaults or mutable references. */
 export function snapshotTurnModelControls(
   modelId: string | number,
   generation: RuntimeGenerationOverrides
@@ -22,6 +24,14 @@ export function snapshotTurnModelControls(
   const id = Number(modelId);
   if (!Number.isSafeInteger(id) || id <= 0)
     throw new Error("model_not_available");
+  for (const [key, max] of [
+    ["temperature", 2],
+    ["top_p", 1],
+  ] as const) {
+    const value = generation[key];
+    if (value != null && (!Number.isFinite(value) || value < 0 || value > max))
+      throw new Error("model_controls_invalid");
+  }
   return {
     model_id: id,
     generation_config: {
@@ -35,6 +45,10 @@ export function snapshotTurnModelControls(
       (generation.reasoning_budget_tokens ?? -1) >= 0
         ? { reasoning_budget_tokens: generation.reasoning_budget_tokens }
         : {}),
+      ...(generation.temperature != null
+        ? { temperature: generation.temperature }
+        : {}),
+      ...(generation.top_p != null ? { top_p: generation.top_p } : {}),
     },
   };
 }

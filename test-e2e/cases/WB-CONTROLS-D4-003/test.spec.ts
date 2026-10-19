@@ -164,12 +164,14 @@ journey("WB-CONTROLS-D4-003", async ({ page, contract }) => {
     expect(body.is_debug).toBe(false);
     expect(body).not.toHaveProperty("temperature");
     expect(body).not.toHaveProperty("top_p");
-    expect(body.generation_config ?? {}).not.toHaveProperty("temperature");
-    expect(body.generation_config ?? {}).not.toHaveProperty("top_p");
-    expect(body.workbench?.generation_config ?? {}).not.toHaveProperty(
-      "temperature",
-    );
-    expect(body.workbench?.generation_config ?? {}).not.toHaveProperty("top_p");
+    const generation = (body.workbench ?? body).generation_config ?? {};
+    if (modelId === 1) {
+      if (body.workbench && requests.length <= options.length) expect(generation.temperature).toBe(0.7);
+      else if (!body.workbench) expect(generation).toMatchObject({temperature:0,top_p:0.8});
+    } else {
+      expect(generation.temperature ?? null).toBeNull();
+      expect(generation.top_p ?? null).toBeNull();
+    }
     return body;
   };
   let workbenchLabels: string[] = [];
@@ -217,7 +219,7 @@ journey("WB-CONTROLS-D4-003", async ({ page, contract }) => {
     const temperature = page
       .getByRole("region", { name: "高级设置" })
       .getByRole("spinbutton", { name: "温度", exact: true });
-    await temperature.fill("73");
+    await temperature.fill("0.7");
     await temperature.press("Enter");
     for (const [value, label] of options) {
       await choose(label);
@@ -240,6 +242,14 @@ journey("WB-CONTROLS-D4-003", async ({ page, contract }) => {
     await setThinking(true);
     await expect(settings.getByRole("combobox")).toHaveText("高");
     expect(await assertOptions()).toEqual(workbenchLabels);
+    await settings.getByRole("button",{name:"高级设置",exact:true}).hover();
+    const panel = page.getByRole("region",{name:"高级设置",exact:true});
+    await panel.getByRole("spinbutton",{name:"温度",exact:true}).fill("0");
+    await panel.getByRole("spinbutton",{name:"温度",exact:true}).press("Enter");
+    await panel.getByRole("spinbutton",{name:"Top P",exact:true}).fill("0.8");
+    await panel.getByRole("spinbutton",{name:"Top P",exact:true}).press("Enter");
+    await page.keyboard.press("Escape");
+
     for (const [value, label] of options) {
       await choose(label);
       const body = await send(page.getByRole("textbox").last());

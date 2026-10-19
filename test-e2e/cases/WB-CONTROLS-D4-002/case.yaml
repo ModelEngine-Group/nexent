@@ -8,15 +8,16 @@ case:
   - WB-CONTROLS-20261013
   - WB-SHARED-PARAMS-20261014
   - WB-CREATION-TOGGLE-EXIT-20261015
+  - CHAT-SAMPLING-20261016
   business_rule_ids:
   - WB-CONTROLS-RULE-002
   - WB-CONTROLS-RULE-003
-  title: Creation recommendations and local advanced settings
+  title: Creation recommendations and runtime advanced settings
   type: E2E
   priority: P1
   status: active
   automation: automated
-  objective: Verify true creation modes and local-only parameter editing with real pointer and keyboard input.
+  objective: Verify true creation modes and presence-aware parameter editing with real pointer and keyboard input.
   preconditions:
   - Local frontend available with authorized mock user, newchat page access, selectable model and memory disabled.
   test_data:
@@ -28,19 +29,20 @@ case:
       active creation button restores the ordinary draft. Chinese Skill button reads 技能创建; composer and textarea keep their
       top positions during mode entry, recommendation fill and return.
   - order: 2
-    action: Hover Advanced settings below effort, drag and type integer values, test invalid input and restore defaults.
+    action: Hover Advanced settings below effort, drag and type decimal values, test invalid input and restore defaults.
     expected: Advanced settings has no gear and its label aligns with the other setting rows. Controls synchronize within
-      1-100, remain open during editing, and only local state changes. New Agent chat also exposes shared Advanced settings
-      with frontend-only numeric editing while real model/thinking controls remain available.
+      temperature 0-2 and Top P 0-1 with step 0.1, remain open during editing, and new-conversation settings change without
+      automatic generation or global model writes. New Agent chat also exposes shared Advanced settings with presence-aware
+      runtime numeric editing while real model/thinking controls remain available.
   - order: 3
     action: Reload with no creation permission, Agent only, Skill only and both permissions while retaining resource page
       access; enter each allowed mode.
     expected: Only agent:create and skill:create independently enable their matching creation buttons; allowed buttons enter
       the matching mode without generation.
   expected_results:
-  - Mode-specific recommendations and local parameter controls are usable through the browser.
+  - Mode-specific recommendations and runtime parameter controls are usable through the browser.
   forbidden_side_effects:
-  - No automatic generation or parameter API requests.
+  - No automatic generation or global model configuration API requests.
   actor: Authorized mock tenant user
   journey:
   - Open Workbench
@@ -48,7 +50,7 @@ case:
   - Fill recommendation
   - Return
   - Open advanced settings
-  - Edit local values
+  - Edit sampling overrides
   final_business_result:
   - User can prepare creation input and model settings without unintended backend writes.
   failure_evidence:

@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 from __future__ import annotations
 
 from copy import deepcopy
@@ -56,6 +58,10 @@ class ModelConfig(BaseModel):
     url: str = Field(description="Model endpoint URL")
     temperature: Optional[float] = Field(description="Temperature", default=0.1)
     top_p: Optional[float] = Field(description="Top P", default=0.95)
+    explicit_sampling: List[Literal["temperature", "top_p"]] = Field(
+        default_factory=list,
+        description="Request-scoped sampling intent that must not be dropped on provider retry",
+    )
     enable_thinking: bool = Field(
         description="Whether provider thinking is enabled",
         default=False,

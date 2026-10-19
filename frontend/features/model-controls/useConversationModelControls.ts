@@ -67,6 +67,8 @@ export function useConversationModelControls(
   const hasBudgetControl = Boolean(range);
   const value: ModelState = { enabled, effort, budget };
   const parameterScope = JSON.stringify([sessionKey, selectedId]);
+  const samplingValue =
+    sampling[parameterScope] ?? DEFAULT_MODEL_PARAMETER_VALUES;
   useEffect(
     () =>
       subscribeRejectedSelection((id) => {
@@ -82,9 +84,10 @@ export function useConversationModelControls(
             deep_thinking: enabled,
             thinking_effort: hasBudgetControl ? "auto" : effort,
             ...(hasBudgetControl ? { reasoning_budget_tokens: budget } : {}),
+            ...samplingValue,
           })
         : undefined,
-    [activeModelId, enabled, effort, hasBudgetControl, budget]
+    [activeModelId, enabled, effort, hasBudgetControl, budget, samplingValue]
   );
   const update = (patch: Partial<ModelState>) => {
     if (!selectedId || !model) return;
@@ -134,7 +137,7 @@ export function useConversationModelControls(
     canSend: Boolean(model) && !rejected[parameterScope],
     modelParameterSettings: {
       scopeKey: parameterScope,
-      value: sampling[parameterScope] ?? DEFAULT_MODEL_PARAMETER_VALUES,
+      value: samplingValue,
       defaultValue: DEFAULT_MODEL_PARAMETER_VALUES,
       onChange: (next: ModelParameterValue) =>
         setSampling((current) => ({ ...current, [parameterScope]: next })),

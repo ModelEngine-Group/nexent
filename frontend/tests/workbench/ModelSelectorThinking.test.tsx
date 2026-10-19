@@ -194,8 +194,8 @@ it("keeps an unknown provider effort's fallback label and raw value", async () =
 
 it("shared advanced settings remains available with and without controlled values, outside model context", () => {
   const parameterSettings = {
-    value: { temperatureLevel: 50, topPLevel: 90 },
-    defaultValue: { temperatureLevel: 50, topPLevel: 90 },
+    value: { temperature: 0.5, top_p: 0.9 },
+    defaultValue: { temperature: 0.5, top_p: 0.9 },
     onChange: vi.fn(),
   };
   const { rerender } = render(
@@ -214,8 +214,7 @@ it("shared advanced settings remains available with and without controlled value
   const config = register.mock.lastCall?.[0].getModelContext() as {
     config: Record<string, unknown>;
   };
-  expect(config.config).not.toHaveProperty("temperatureLevel");
-  expect(config.config).not.toHaveProperty("topPLevel");
+  expect(config.config).toMatchObject({ temperature: 0.5, top_p: 0.9 });
   rerender(<ModelSelector models={models} value="12" />);
   expect(
     screen.queryByRole("button", { name: "高级设置" })
@@ -343,27 +342,27 @@ it("default shared settings isolate local values by model and conversation witho
   };
   let panel = await openPanel();
   const temperature = panel.getByRole("spinbutton", { name: "温度" });
-  fireEvent.change(temperature, { target: { value: "73" } });
+  fireEvent.change(temperature, { target: { value: "0.7" } });
   fireEvent.keyDown(temperature, { key: "Enter" });
   expect(panel.getByRole("slider", { name: "温度 滑块" })).toHaveAttribute(
     "aria-valuenow",
-    "73"
+    "0.7"
   );
   rerender(view("13", "thread-a"));
   panel = await openPanel();
-  expect(panel.getByRole("spinbutton", { name: "温度" })).toHaveValue(50);
+  expect(panel.getByRole("spinbutton", { name: "温度" })).toHaveValue(null);
   rerender(view("12", "thread-b"));
   panel = await openPanel();
-  expect(panel.getByRole("spinbutton", { name: "温度" })).toHaveValue(50);
+  expect(panel.getByRole("spinbutton", { name: "温度" })).toHaveValue(null);
   rerender(view("12", "thread-a"));
   panel = await openPanel();
-  expect(panel.getByRole("spinbutton", { name: "温度" })).toHaveValue(73);
+  expect(panel.getByRole("spinbutton", { name: "温度" })).toHaveValue(0.7);
   const config = register.mock.lastCall?.[0].getModelContext() as {
     config: Record<string, unknown>;
   };
   expect(config.config.modelName).toBe("12");
-  for (const field of ["temperature", "top_p", "temperatureLevel", "topPLevel"])
-    expect(config.config).not.toHaveProperty(field);
+  expect(config.config).toMatchObject({ temperature: 0.7 });
+  expect(config.config).not.toHaveProperty("top_p");
   expect(requests).not.toHaveBeenCalled();
 });
 
@@ -371,8 +370,8 @@ it("shared parameter editing honors disabled state and controlled callers", asyn
   const changed = vi.fn();
   const control = {
     scopeKey: "controlled",
-    value: { temperatureLevel: 64, topPLevel: 81 },
-    defaultValue: { temperatureLevel: 50, topPLevel: 90 },
+    value: { temperature: 0.6, top_p: 0.8 },
+    defaultValue: { temperature: 0.5, top_p: 0.9 },
     onChange: changed,
   };
   const { rerender } = render(
@@ -380,12 +379,12 @@ it("shared parameter editing honors disabled state and controlled callers", asyn
   );
   fireEvent.focus(screen.getByRole("button", { name: "高级设置" }));
   const input = await screen.findByRole("spinbutton", { name: "温度" });
-  expect(input).toHaveValue(64);
-  fireEvent.change(input, { target: { value: "75" } });
+  expect(input).toHaveValue(0.6);
+  fireEvent.change(input, { target: { value: "0.8" } });
   fireEvent.keyDown(input, { key: "Enter" });
   expect(changed).toHaveBeenLastCalledWith({
-    temperatureLevel: 75,
-    topPLevel: 81,
+    temperature: 0.8,
+    top_p: 0.8,
   });
   rerender(
     <ModelSelector
@@ -393,11 +392,11 @@ it("shared parameter editing honors disabled state and controlled callers", asyn
       value="12"
       parameterSettings={{
         ...control,
-        value: { temperatureLevel: 75, topPLevel: 81 },
+        value: { temperature: 0.8, top_p: 0.8 },
       }}
     />
   );
-  expect(screen.getByRole("spinbutton", { name: "温度" })).toHaveValue(75);
+  expect(screen.getByRole("spinbutton", { name: "温度" })).toHaveValue(0.8);
   rerender(
     <ModelSelector
       models={models}

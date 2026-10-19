@@ -11,26 +11,28 @@ import type { ModelParameterSettingsControl } from "@/types/modelParameterSettin
 function ParameterLevel({
   label,
   value,
+  max,
   disabled,
   onChange,
 }: {
   label: string;
-  value: number;
+  value?: number;
+  max: number;
   disabled?: boolean;
   onChange: (value: number) => void;
 }) {
   const { t } = useTranslation();
-  const [text, setText] = useState(String(value));
+  const [text, setText] = useState(value == null ? "" : String(value));
   const [error, setError] = useState(false);
   const [previousValue, setPreviousValue] = useState(value);
   if (previousValue !== value) {
     setPreviousValue(value);
-    setText(String(value));
+    setText(value == null ? "" : String(value));
     setError(false);
   }
   const commit = () => {
     const next = Number(text);
-    if (!text.trim() || !Number.isInteger(next) || next < 1 || next > 100) {
+    if (!text.trim() || !Number.isFinite(next) || next < 0 || next > max) {
       setError(true);
       return;
     }
@@ -42,11 +44,13 @@ function ParameterLevel({
       <label className="text-sm">{label}</label>
       <div className="flex items-center gap-3">
         <Slider
-          min={1}
-          max={100}
-          step={1}
+          min={0}
+          max={max}
+          step={0.1}
           value={
-            Number(text) >= 1 && Number(text) <= 100 ? Number(text) : value
+            text.trim() && Number(text) >= 0 && Number(text) <= max
+              ? Number(text)
+              : (value ?? 0)
           }
           disabled={disabled}
           className="min-w-0 flex-1"
@@ -59,9 +63,10 @@ function ParameterLevel({
         />
         <input
           type="number"
-          min={1}
-          max={100}
-          step={1}
+          min={0}
+          max={max}
+          step={0.1}
+          placeholder={t("workbench.controls.inherit", "继承默认")}
           aria-label={label}
           aria-invalid={error}
           disabled={disabled}
@@ -80,7 +85,11 @@ function ParameterLevel({
       </div>
       {error && (
         <p role="alert" className="text-xs text-destructive">
-          {t("workbench.controls.integerRange", "请输入 1–100 的整数")}
+          {t("workbench.controls.numberRange", {
+            defaultValue: "请输入 {{min}}–{{max}} 的数字",
+            min: 0,
+            max,
+          })}
         </p>
       )}
     </div>
@@ -135,20 +144,20 @@ export function ModelParameterSettings(control: ModelParameterSettingsControl) {
           <ParameterLevel
             key={`temperature-${resetVersion}`}
             label={t("workbench.controls.temperature", "温度")}
-            value={control.value.temperatureLevel}
+            value={control.value.temperature}
+            max={2}
             disabled={control.disabled}
-            onChange={(temperatureLevel) =>
-              control.onChange({ ...control.value, temperatureLevel })
+            onChange={(temperature) =>
+              control.onChange({ ...control.value, temperature })
             }
           />
           <ParameterLevel
             key={`top-p-${resetVersion}`}
             label="Top P"
-            value={control.value.topPLevel}
+            value={control.value.top_p}
+            max={1}
             disabled={control.disabled}
-            onChange={(topPLevel) =>
-              control.onChange({ ...control.value, topPLevel })
-            }
+            onChange={(top_p) => control.onChange({ ...control.value, top_p })}
           />
           <Button
             size="small"

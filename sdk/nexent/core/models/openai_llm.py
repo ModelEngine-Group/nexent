@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 from ...monitor import get_monitoring_manager
 from ...monitor.monitoring import (
     _MonitoredClient,
@@ -91,6 +93,12 @@ class ReasoningConfigurationError(RuntimeError):
     """Raised when a provider rejects the configured reasoning parameters."""
 
     is_reasoning_configuration_error = True
+
+
+class SamplingConfigurationError(RuntimeError):
+    """Raised when a provider rejects explicit request-scoped sampling intent."""
+
+    is_sampling_configuration_error = True
 
 
 _REASONING_ERROR_MARKERS = (
@@ -205,6 +213,7 @@ class OpenAIModel(OpenAIServerModel):
                  read_timeout_seconds: Optional[float] = None,
                  write_timeout_seconds: float = 30.0,
                  pool_timeout_seconds: float = 10.0,
+                 explicit_sampling: Optional[List[str]] = None,
                  *args, **kwargs):
         """
         Initialize OpenAI Model with observer and SSL verification option.
@@ -251,6 +260,7 @@ class OpenAIModel(OpenAIServerModel):
         self.observer = observer
         self.temperature = temperature
         self.top_p = top_p
+        self.explicit_sampling = tuple(explicit_sampling or ())
         self.reasoning_effort = reasoning_effort
         self.reasoning_budget_tokens = reasoning_budget_tokens
         self.reasoning_capability = reasoning_capability or None
@@ -1097,6 +1107,14 @@ class OpenAIModel(OpenAIServerModel):
         """
         if "messages" in completion_kwargs:
             completion_kwargs["messages"] = merge_system_messages(completion_kwargs["messages"])
+        for key in ("temperature", "top_p"):
+            if completion_kwargs.get(key) is None:
+                completion_kwargs.pop(key, None)
+        if self.explicit_sampling and completion_kwargs.get("extra_body"):
+            completion_kwargs["extra_body"] = {
+                key: value for key, value in completion_kwargs["extra_body"].items()
+                if key not in self.explicit_sampling
+            }
         snapshot = self._coerce_context_budget_snapshot(context_budget_snapshot)
         if snapshot is not None:
             self._verify_w1_w2_consistency(
@@ -1393,6 +1411,11 @@ class OpenAIModel(OpenAIServerModel):
             return None
         if "temperature" not in completion_kwargs and "top_p" not in completion_kwargs:
             return None
+        if self.explicit_sampling:
+            logger.warning("event=explicit_sampling_rejected model_id=%s fields=%s", self.model_id, self.explicit_sampling)
+            raise SamplingConfigurationError(
+                "The provider rejected the selected temperature or top_p; restore defaults or change the settings"
+            ) from exc
         return {
             k: v
             for k, v in completion_kwargs.items()

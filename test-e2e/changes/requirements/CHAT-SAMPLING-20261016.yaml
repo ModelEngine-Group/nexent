@@ -1,0 +1,53 @@
+schema_version: '1.0'
+change:
+  change_id: CHAT-SAMPLING-20261016
+  change_type: requirement
+  requirement_id: CHAT-SAMPLING-20261016
+  title: 共享高级设置接入真实采样参数
+  description: Use actual temperature 0-2 and top_p 0-1 with inherited defaults and explicit root-only overrides on ordinary
+    and creator entries.
+  affected_features:
+    existing: []
+    added: []
+    modified:
+    - CHAT-MODEL-CONTROLS
+    - WB-CONTROLS
+    retired: []
+  affected_cases:
+    existing:
+    - CHAT-MODEL-CONTROLS-D4-001
+    - CHAT-MODEL-CONTROLS-D4-002
+    added: []
+    modified:
+    - CHAT-MODEL-CONTROLS-D2-001
+    - CHAT-MODEL-CONTROLS-D3-001
+    - CHAT-MODEL-CONTROLS-D4-003
+    - WB-CONTROLS-D4-002
+    - WB-CONTROLS-D4-003
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    behaviors:
+    - Validate finite strict numeric sampling, bounds, explicit zero, omitted/reset defaults and snapshot conflicts.
+    - Verify per-model/session isolation, immutable serialization and root-only override precedence while preserving reasoning
+      and children.
+    - Verify provider kwargs omit unset values and explicit sampling rejection does not silently retry without overrides.
+    reason: Existing UT proves reasoning/presence and legacy sampling fallback; existing D2/D3/D4 cover the actual API/runtime/browser
+      boundaries. Extend those owners; no new D1 duplicates unit proof.
+    test_selectors:
+    - test/backend/services/test_sampling_model_controls.py
+    - test/backend/services/test_run_model_controls.py
+    - test/sdk/core/models/test_openai_sampling_controls.py
+    - test/sdk/core/models/test_openai_llm.py
+    - test/backend/services/test_agent_service.py
+    - test/backend/services/test_nl2agent_service.py
+    - test/backend/services/test_nl2skill_service.py
+    - test/sdk/core/agents/test_nexent_agent.py
+    - frontend/tests/workbench/ModelParameterSettings.test.tsx
+    - frontend/tests/workbench/ConversationModelControls.test.tsx
+    - frontend/tests/workbench/ModelSelectorThinking.test.tsx
+    - frontend/tests/workbench/AgentModels.test.ts
+    - frontend/tests/workbench/Nl2AgentPanelControls.test.tsx
+  notes: Design precedes implementation. No SQL/schema version change. Existing Workbench generation_config JSON persists
+    values. Targeted API/runtime/browser Cases are strengthened; historical rules describing frontend-only levels are superseded
+    only for this capability.

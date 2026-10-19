@@ -111,3 +111,36 @@ def test_reasoning_variants_preserve_independent_configuration(runtime):
         assert response.status_code == 200
         wire = [row for row in runtime.provider.wire[before_wire:] if row["model"] == "fixture-selected-B"]
         assert wire and all("reasoning_effort" not in row for row in wire)
+
+
+@pytest.mark.parametrize("path,workbench", [
+    ("/api/agent/run", False), ("/api/agent/run", True),
+    ("/api/agent/nl2agent/run", False), ("/api/agent/nl2agent/run", True),
+    ("/api/skills/nl2skill/run", False), ("/api/skills/nl2skill/run", True),
+])
+def test_sampling_runtime_wire_and_persisted_intent(runtime, path, workbench):
+    before_models = runtime.model_records()
+    before_draft = runtime.draft()
+    response = runtime.post(path, generation={"deep_thinking": False, "temperature": 0, "top_p": 0.6},
+                            workbench=workbench, version_no=0)
+    assert response.status_code == 200, response.text
+    wire = [row for row in runtime.provider.wire if row["model"] == "fixture-selected-B"]
+    assert wire, response.text
+    assert all(row["temperature"] == 0 and row["top_p"] == 0.6 for row in wire)
+    assert not any('"type": "error"' in line for line in response.text.splitlines())
+    run = runtime.runs[-1]
+    root = next(m for m in run.model_config_list if m.cite_name == run.agent_config.model_name)
+    assert set(root.explicit_sampling) == {"temperature", "top_p"}
+    independent = next(m for m in run.model_config_list if m.cite_name == "business-C")
+    assert (independent.temperature, independent.top_p) == (0.43, 0.78)
+    assert independent.explicit_sampling == []
+    assert runtime.model_records() == before_models
+    assert runtime.draft()["model_params_override"] == before_draft["model_params_override"]
+    if workbench:
+        from sqlalchemy import select
+        from database.db_models import ConversationRecord
+        with runtime.storage["sessions"]() as session:
+            saved = session.scalar(select(ConversationRecord.workbench_config).where(
+                ConversationRecord.conversation_id == int(response.headers["conversation_id"])))
+            assert saved["generation_config"]["temperature"] == 0
+            assert saved["generation_config"]["top_p"] == 0.6

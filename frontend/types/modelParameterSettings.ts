@@ -1,9 +1,9 @@
 // Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
-/** Frontend levels only. A future integration adapter owns provider conversion. */
+/** Optional provider-scale overrides. Absence inherits the configured default. */
 export interface ModelParameterValue {
-  temperatureLevel: number;
-  topPLevel: number;
+  temperature?: number;
+  top_p?: number;
 }
 
 export interface ModelParameterSettingsControl {

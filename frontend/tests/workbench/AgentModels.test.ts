@@ -13,7 +13,7 @@ import type { Agent } from "@/types/agentConfig";
 import type { ModelOption } from "@/types/modelConfig";
 import { selectWorkbenchModel } from "@/features/model-controls/modelOptions";
 
-it("switches models without dropping existing sampling and output overrides", () => {
+it("switches models without leaking sampling overrides and retains output settings", () => {
   const config = {
     ...initialWorkbenchState.config,
     model_id: 11,
@@ -40,12 +40,16 @@ it("switches models without dropping existing sampling and output overrides", ()
   const next = selectWorkbenchModel(config, [model], 12);
   expect(next.generation_config).toMatchObject({
     deep_thinking: false,
-    temperature: 0.43,
-    top_p: 0.78,
+    temperature: undefined,
+    top_p: undefined,
     requested_output_tokens: 2048,
   });
   expect(next.generation_config.thinking_effort).toBe("auto");
   expect(config.model_id).toBe(11);
+  expect(
+    selectWorkbenchModel(next, [model], 11, config.generation_config)
+      .generation_config
+  ).toMatchObject({ temperature: 0.43, top_p: 0.78 });
 });
 
 const reasoningAgentFixture: Agent = {

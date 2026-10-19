@@ -56,25 +56,25 @@ journey("WB-CONTROLS-D4-002", async ({ page, contract }) => {
       await advanced.hover();
       const panel = page.getByRole("region", { name: "高级设置", exact: true });
       const temperature = panel.getByRole("spinbutton", { name: "温度", exact: true });
-      await expect(temperature).toHaveValue("50");
+      await expect(temperature).toHaveValue("");
       const slider = panel.getByRole("slider", { name: "温度 滑块", exact: true });
       await slider.focus();
       await slider.hover();
       const handle = await slider.boundingBox();
       await page.mouse.move(handle!.x + handle!.width / 2, handle!.y + handle!.height / 2);
       await page.mouse.down(); await page.mouse.move(handle!.x + 24, handle!.y + handle!.height / 2, { steps: 6 }); await page.mouse.up();
-      await expect(temperature).not.toHaveValue("50");
-      await temperature.fill("100"); await temperature.press("Enter");
-      await expect(slider).toHaveAttribute("aria-valuenow", "100");
+      await expect(temperature).not.toHaveValue("");
+      await temperature.fill("2"); await temperature.press("Enter");
+      await expect(slider).toHaveAttribute("aria-valuenow", "2");
       const topP = panel.getByRole("spinbutton", { name: "Top P", exact: true });
       await topP.fill("1"); await topP.press("Enter");
-      for (const invalid of ["0", "101", "1.5"]) {
+      for (const invalid of ["-0.1", "2.1", ""]) {
         await temperature.fill(invalid); await temperature.press("Enter");
         await expect(temperature).toHaveAttribute("aria-invalid", "true");
-        await expect(panel.getByRole("alert")).toHaveText("请输入 1–100 的整数");
+        await expect(panel.getByRole("alert")).toHaveText("请输入 0–2 的数字");
       }
       await panel.getByRole("button", { name: "恢复默认", exact: true }).click();
-      await expect(temperature).toHaveValue("50"); await expect(topP).toHaveValue("90");
+      await expect(temperature).toHaveValue(""); await expect(topP).toHaveValue("");
       await expect(input).toHaveValue("Ordinary conversation draft");
       await page.goto(`${process.env.NEXENT_BASE_URL}/zh/newchat`);
       await expect(page).toHaveURL(/\/zh\/newchat/);
@@ -89,13 +89,13 @@ journey("WB-CONTROLS-D4-002", async ({ page, contract }) => {
       await sharedAdvanced.hover();
       const sharedPanel = page.getByRole("region", { name: "高级设置", exact: true });
       const sharedTemperature = sharedPanel.getByRole("spinbutton", { name: "温度", exact: true });
-      await sharedTemperature.fill("73"); await sharedTemperature.press("Enter");
-      await expect(sharedPanel.getByRole("slider", { name: "温度 滑块" })).toHaveAttribute("aria-valuenow", "73");
+      await sharedTemperature.fill("0.7"); await sharedTemperature.press("Enter");
+      await expect(sharedPanel.getByRole("slider", { name: "温度 滑块" })).toHaveAttribute("aria-valuenow", "0.7");
       const sharedTopP = sharedPanel.getByRole("spinbutton", { name: "Top P", exact: true });
-      await sharedTopP.fill("42"); await sharedTopP.press("Enter");
-      await expect(sharedPanel.getByRole("slider", { name: "Top P 滑块" })).toHaveAttribute("aria-valuenow", "42");
+      await sharedTopP.fill("0.4"); await sharedTopP.press("Enter");
+      await expect(sharedPanel.getByRole("slider", { name: "Top P 滑块" })).toHaveAttribute("aria-valuenow", "0.4");
       await sharedPanel.getByRole("button", { name: "恢复默认", exact: true }).click();
-      await expect(sharedTemperature).toHaveValue("50"); await expect(sharedTopP).toHaveValue("90");
+      await expect(sharedTemperature).toHaveValue(""); await expect(sharedTopP).toHaveValue("");
       expect(state.writes).toEqual(writesBeforeParameters);
       await page.goto(`${process.env.NEXENT_BASE_URL}/zh/workbench`);
       await expect(input).toBeVisible();

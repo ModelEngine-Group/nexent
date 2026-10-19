@@ -59,8 +59,13 @@ def test_http_control_intents(api, path):
         assert submit(workbench_config=saved)["effort"] == "xhigh"
     else:
         assert submit(model_id=budget_id, reasoning_budget_tokens=1024)["budget"] == 1024
-    assert all("temperature" not in (r.get("generation_config") or {}) for r in api.calls)
-    assert all("top_p" not in (r.get("generation_config") or {}) for r in api.calls)
+    for temperature, top_p in [(0, 0), (0.7, 0.9), (2, 1)]:
+        result = submit(generation_config={"temperature": temperature, "top_p": top_p})
+        assert (result["temperature"], result["top_p"]) == (temperature, top_p)
+        assert api.calls[-1]["generation_config"] == {"temperature": temperature, "top_p": top_p}
+    assert submit(generation_config={})["temperature"] == 0.43
+    if "nl2" in path:
+        assert submit(workbench_config={"model_id": 1, "generation_config": {"temperature": 0}})["temperature"] == 0
 
 
 @pytest.mark.parametrize("path", ["/api/agent/run", "/api/agent/nl2agent/run", "/api/skills/nl2skill/run"])
@@ -70,6 +75,8 @@ def test_http_rejects_invalid_overlays_before_execution(api, path):
     if "nl2" in path:
         invalid += [{"deep_thinking": None}, {"thinking_effort": None}, {"reasoning_budget_tokens": None},
                     {"deep_thinking": "false"}, {"temperature": 73}, {"top_p": 90}]
+    invalid += [{"temperature": -0.1}, {"temperature": 2.1}, {"top_p": -0.1}, {"top_p": 1.1},
+                {"temperature": True}, {"top_p": "0.7"}]
     before = len(api.calls)
     for index, overlay in enumerate(invalid):
         model_id = api.records["plain" if index == 3 else "effort"]["model_id"]
@@ -84,8 +91,8 @@ def test_http_rejects_invalid_overlays_before_execution(api, path):
                                              generation_config={"deep_thinking": True, "reasoning_budget_tokens": budget}))
         assert response.status_code == 422, response.text
     if "nl2" in path:
-        for extra in [{"model_id": api.records["budget"]["model_id"]}, {"generation_config": {"thinking_effort": "high"}}]:
+        for extra in [{"model_id": api.records["budget"]["model_id"]}, {"generation_config": {"thinking_effort": "high"}}, {"generation_config": {"temperature": 0.7}}]:
             body = api.payload(path, workbench_config={"model_id": api.records["effort"]["model_id"],
-                                                      "generation_config": {"thinking_effort": "xhigh"}}, **extra)
+                                                      "generation_config": {"thinking_effort": "xhigh", "temperature": 0}}, **extra)
             assert api.post(path, body).status_code == 422
     assert len(api.calls) == before
