@@ -8,6 +8,7 @@ from nexent.core.models.volc_stt_model import VolcSTTConfig, VolcSTTModel
 from nexent.core.models.ali_stt_model import AliSTTConfig, AliSTTModel
 from nexent.core.models.volc_tts_model import VolcTTSConfig, VolcTTSModel
 from nexent.core.models.ali_tts_model import AliTTSConfig, AliTTSModel
+from nexent.core.models.minimax_tts_model import MiniMaxTTSConfig, MiniMaxTTSModel
 
 from consts.const import TEST_VOICE_PATH, TEST_PCM_PATH
 from consts.exceptions import (
@@ -51,6 +52,14 @@ class VoiceService:
         """
         # Default to Ali Cloud if model_factory is not specified or is dashscope
         use_volc = model_factory and model_factory.lower() in ["volc", "volcano", "volcengine", "火山引擎"]
+        use_minimax = model_factory and model_factory.lower() in ["minimax", "minimaxai"]
+
+        if use_minimax:
+            return MiniMaxTTSModel(MiniMaxTTSConfig(
+                api_key=api_key or "",
+                model=model or "speech-2.8-hd",
+                base_url=base_url or "https://api.minimax.io/v1/t2a_v2",
+            ))
 
         if use_volc:
             # Use Volcano Engine STT

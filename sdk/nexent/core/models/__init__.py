@@ -7,6 +7,7 @@ from .volc_stt_model import VolcSTTModel, VolcSTTConfig
 from .tts_model import BaseTTSModel
 from .ali_tts_model import AliTTSModel, AliTTSConfig
 from .volc_tts_model import VolcTTSModel, VolcTTSConfig
+from .minimax_tts_model import MiniMaxTTSModel, MiniMaxTTSConfig
 from .capacity_resolver import (
     CapabilityProfile,
     ModelCapacitySnapshot,
@@ -45,6 +46,8 @@ __all__ = [
     "AliTTSConfig",
     "VolcTTSModel",
     "VolcTTSConfig",
+    "MiniMaxTTSModel",
+    "MiniMaxTTSConfig",
     "CapabilityProfile",
     "ModelCapacitySnapshot",
     "ProfileKey",
