@@ -21,12 +21,10 @@ from ...utils.http_client_manager import http_client_manager
 from ..ext_components.aidp.retrieval_client import post_retrieval
 from ..ext_components.aidp.retrieval_client import time as time
 from ..ext_components.aidp.retrieval_config import (
+    ALL_CHANNELS,
     CONFIG_KEYS,
-    RERANK_MODES,
-    SEARCH_METHODS,
     build_payload,
-    normalize_method,
-    resolve_config,
+    validate_config,
 )
 from ..utils.observer import MessageObserver, ProcessType
 from ..utils.tools_common_message import (
@@ -40,8 +38,6 @@ from ..utils.tools_common_message import (
 
 logger = logging.getLogger("ind_aidp_search_tool")
 
-_VALID_SEARCH_METHODS = SEARCH_METHODS
-_VALID_RERANK_MODES = RERANK_MODES
 _MAX_KDS = 10
 _HTML_IMAGE_TAG_PATTERN = re.compile(r"<img\b[^>]*>", re.IGNORECASE)
 _IMAGE_MARKER_PATH = "/__aidp_image__/"
@@ -153,7 +149,7 @@ class IndependentAidpSearchTool(Tool):
         api_key: str = Field(description="Independent AIDP API key"),
         tenant_id: str = Field(default="aidp", description="AIDP tenant identifier"),
         kds_list: List[str] = Field(default_factory=list, description="Knowledge base IDs"),
-        search_method: str = Field(default="hybrid_search", description="Search method"),
+        search_method: str = Field(default=ALL_CHANNELS, description="Search method"),
         reranking_enable: bool = Field(default=True, description="Enable reranking"),
         reranking_mode: str = Field(default="performance", description="Reranking mode"),
         rewrite_enable: bool = Field(default=False, description="Enable query rewrite"),
@@ -184,12 +180,8 @@ class IndependentAidpSearchTool(Tool):
         self.tenant_id = resolved_tenant_id.strip()
         self.kds_list = _parse_kds_list(kds_list)
 
-        self.search_method = normalize_method(_field_default(search_method, "hybrid_search"))
-        if self.search_method not in _VALID_SEARCH_METHODS:
-            raise ValueError(f"search_method must be one of {sorted(_VALID_SEARCH_METHODS)}")
+        self.search_method = _field_default(search_method, ALL_CHANNELS)
         self.reranking_mode = _field_default(reranking_mode, "performance")
-        if self.reranking_mode not in _VALID_RERANK_MODES:
-            raise ValueError(f"reranking_mode must be one of {sorted(_VALID_RERANK_MODES)}")
         self.reranking_enable = bool(_field_default(reranking_enable, True))
         self.rewrite_enable = bool(_field_default(rewrite_enable, False))
         self.related_search_enable = bool(_field_default(related_search_enable, False))
@@ -208,12 +200,10 @@ class IndependentAidpSearchTool(Tool):
             "graph_reranking_enable": graph_reranking_enable,
             "query_expansion_enable": query_expansion_enable,
         })
-        resolved = resolve_config(config)
-        for key in CONFIG_KEYS:
-            setattr(self, key, resolved[key] if key not in {"vector_candidates", "full_text_candidates"} else config.get(key))
-        for key in ("vector_candidates", "full_text_candidates"):
-            if isinstance(getattr(self, key), FieldInfo):
-                setattr(self, key, None)
+        config = {key: _field_default(value, None) for key, value in config.items()}
+        resolved = validate_config(config)
+        for key, value in resolved.items():
+            setattr(self, key, value)
         self.observer = _field_default(observer, None)
         self.image_url_builder = _field_default(image_url_builder, None)
         self.record_ops = 1

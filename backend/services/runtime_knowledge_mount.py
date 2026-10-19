@@ -3,7 +3,7 @@
 from copy import deepcopy
 from math import isfinite
 
-from nexent.core.ext_components.aidp.retrieval_config import CONFIG_KEYS, merge_config, resolve_config
+from nexent.core.ext_components.aidp.retrieval_config import CONFIG_KEYS, merge_config
 
 from consts.const import ENABLE_AIDP_KNOWLEDGE
 from consts.exceptions import ValidationError
@@ -38,15 +38,8 @@ def mount_knowledge_records(records, scope, tenant_id):
     fields = {p["name"]: p for p in tool.get("params") or []}
     if kind == "AidpSearchTool":
         overrides = scope.retrieval_config or {}
-        for name in overrides:
-            if name in RESERVED or name not in CONFIG_KEYS:
-                raise ValidationError(f"Unsupported knowledge parameter: {name}")
         saved = {name: p.get("default") for name, p in fields.items() if name in CONFIG_KEYS}
         merged = merge_config(saved, overrides)
-        try:
-            resolve_config(merged)
-        except ValueError as exc:
-            raise ValidationError(str(exc)) from exc
         for name, value in merged.items():
             fields.setdefault(name, {"name": name})["default"] = deepcopy(value)
         tool["params"] = list(fields.values())

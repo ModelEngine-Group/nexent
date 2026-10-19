@@ -1,28 +1,30 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import logging
 from http import HTTPStatus
 from typing import Annotated, Any, Dict, Optional
 
 from fastapi import APIRouter, Header, HTTPException, Query, Request
-from consts.const import ENABLE_AGENT_WORKBENCH
 
+from consts.const import ENABLE_AGENT_WORKBENCH
+from consts.exceptions import (
+    AppException,
+    ConversationNotFoundError,
+    TokenExpiredError,
+    ValidationError,
+    WorkbenchConfigVersionConflict,
+    WorkbenchError,
+)
 from consts.model import (
     BatchDeleteConversationRequest,
     ConversationKnowledgeScopeUpdateRequest,
-    WorkbenchConfigUpdateRequest,
     ConversationRequest,
     ConversationResponse,
     GenerateTitleRequest,
     MessageIdRequest,
     OpinionRequest,
     RenameRequest,
-)
-from consts.exceptions import (
-    AppException,
-    ConversationNotFoundError,
-    ValidationError,
-    TokenExpiredError,
-    WorkbenchConfigVersionConflict,
-    WorkbenchError,
+    WorkbenchConfigUpdateRequest,
 )
 from database.conversation_db import get_conversation_list_page
 from services.conversation_management_service import (
@@ -31,13 +33,15 @@ from services.conversation_management_service import (
     delete_conversations_batch_service,
     generate_conversation_title_service,
     get_conversation_history_service,
+    get_message_id_by_index_impl,
     get_sources_service,
     rename_conversation_service,
     update_conversation_knowledge_scope_service,
     update_conversation_workbench_config_service,
-    update_message_opinion_service, get_message_id_by_index_impl,
+    update_message_opinion_service,
 )
 from utils.auth_utils import get_current_user_id, get_current_user_info
+
 
 router = APIRouter(prefix="/conversation")
 
@@ -272,12 +276,13 @@ async def update_conversation_workbench_config_endpoint(
         raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail={"code": "WORKBENCH_DISABLED"})
 
     try:
-        user_id, _ = get_current_user_id(authorization)
+        user_id, tenant_id = get_current_user_id(authorization)
         result = update_conversation_workbench_config_service(
             conversation_id=conversation_id,
             config=request.config.model_dump(mode="json"),
             expected_version=request.expected_version,
             user_id=user_id,
+            tenant_id=tenant_id,
         )
         return ConversationResponse(code=0, message="success", data=result)
     except ConversationNotFoundError as exc:
@@ -292,7 +297,7 @@ async def update_conversation_workbench_config_endpoint(
         ) from exc
     except WorkbenchError as exc:
         raise HTTPException(status_code=exc.status_code, detail={"code": exc.code}) from exc
-    except ValueError as exc:
+    except (ValueError, ValidationError) as exc:
         raise HTTPException(status_code=HTTPStatus.UNPROCESSABLE_ENTITY, detail={"code": "WORKBENCH_CONFIG_INVALID"}) from exc
 
 

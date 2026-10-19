@@ -91,14 +91,17 @@ def test_connection_credentials_cannot_be_saved_as_session_parameters():
 
 @pytest.mark.parametrize("override,expected", [({"top_k":7},30), ({"top_k":7,"vector_candidates":None},7)])
 def test_aidp_old_catalog_merged_following_without_mutation(mocker, override, expected):
-    from nexent.core.ext_components.aidp.retrieval_config import build_payload
+    from nexent.core.ext_components.aidp.retrieval_config import (
+        build_payload,
+        resolve_config,
+    )
     mocker.patch.object(service, "ENABLE_AIDP_KNOWLEDGE", True)
     original = tool("AidpSearchTool")
     original["params"] += [{"name":"vector_candidates","default":30}, {"name":"reranking_enable","default":False}]
     before = deepcopy(original)
     mounted = service.mount_knowledge_records([original],scope("aidp",params=override),"tenant")
     config = {p["name"]:p.get("default") for p in mounted[0]["params"]}
-    payload = build_payload(config,"q",["kb"])
+    payload = build_payload(resolve_config(config),"q",["kb"])
     assert payload["hybrid_search_config"]["vector_candidates"] == expected
     assert payload["hybrid_search_config"]["full_text_candidates"] == 7
     assert payload["graph_search_config"]["graph_reranking_enable"] is False
@@ -106,8 +109,9 @@ def test_aidp_old_catalog_merged_following_without_mutation(mocker, override, ex
     assert service.mount_knowledge_records([original],None,"tenant") == [before]
 
 
-@pytest.mark.parametrize("override", [{"unknown":1},{"api_key":"x"},{"hybrid_top_k":8,"graph_top_k":5},{"reranking_enable":False,"graph_reranking_enable":True}])
-def test_aidp_rejects_invalid_merged_policy(mocker, override):
-    mocker.patch.object(service,"ENABLE_AIDP_KNOWLEDGE",True)
-    with pytest.raises(service.ValidationError):
-        service.mount_knowledge_records([tool("AidpSearchTool")],scope("aidp",params=override),"tenant")
+def test_aidp_mount_does_not_repeat_input_validation(mocker):
+    mocker.patch.object(service, "ENABLE_AIDP_KNOWLEDGE", True)
+    check = mocker.patch("nexent.core.ext_components.aidp.retrieval_config.validate_config")
+    mounted = service.mount_knowledge_records([tool("AidpSearchTool")], scope("aidp", params={"top_k": 7}), "tenant")
+    assert mounted[0]["params"][0]["default"] == 7
+    check.assert_not_called()

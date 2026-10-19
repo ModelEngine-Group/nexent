@@ -11,6 +11,7 @@ import {
 } from "react";
 import { useTranslation } from "react-i18next";
 import {
+  aidpAllChannels,
   aidpChannels,
   aidpDefaults,
   aidpErrors,
@@ -391,28 +392,15 @@ export function AidpRetrievalParamsForm({
         ? t("aidpRetrieval.switch.on")
         : t("aidpRetrieval.switch.off");
 
-  const candidateNote = (key: "vector_candidates" | "full_text_candidates") => {
-    const following = values[key] == null;
-    return (
-      <div className={styles.followRow}>
-        {following ? (
-          t("aidpRetrieval.followHint")
-        ) : (
-          <>
-            {t("aidpRetrieval.fixedHint")}
-            <button
-              type="button"
-              className={styles.followLink}
-              disabled={disabled}
-              onClick={() => onChange({ [key]: null })}
-            >
-              {t("aidpRetrieval.resumeFollow")}
-            </button>
-          </>
-        )}
-      </div>
-    );
-  };
+  const candidateNote = (key: "vector_candidates" | "full_text_candidates") => (
+    <div className={styles.followRow}>
+      {t(
+        c[key] === c.top_k
+          ? "aidpRetrieval.followHint"
+          : "aidpRetrieval.fixedHint"
+      )}
+    </div>
+  );
 
   const candidateField = (
     key: "vector_candidates" | "full_text_candidates"
@@ -426,7 +414,9 @@ export function AidpRetrievalParamsForm({
       max={500}
       disabled={disabled}
       invalid={Boolean(errors[key])}
-      onChange={(value) => onChange({ [key]: value })}
+      onChange={(value) =>
+        onChange({ [key]: value === c.top_k ? null : value })
+      }
       note={candidateNote(key)}
     />
   );
@@ -501,7 +491,7 @@ export function AidpRetrievalParamsForm({
               onChange({
                 search_method:
                   event.target.value === "mixed"
-                    ? "hybrid_search"
+                    ? aidpAllChannels
                     : event.target.value,
               })
             }
@@ -531,7 +521,17 @@ export function AidpRetrievalParamsForm({
           max={100}
           disabled={disabled}
           invalid={Boolean(errors.top_k)}
-          onChange={(value) => onChange({ top_k: value })}
+          onChange={(value) =>
+            onChange({
+              top_k: value,
+              ...(c.vector_candidates === c.top_k
+                ? { vector_candidates: null }
+                : {}),
+              ...(c.full_text_candidates === c.top_k
+                ? { full_text_candidates: null }
+                : {}),
+            })
+          }
         />
         <NumberControl
           label={t("aidpRetrieval.fields.score_threshold")}
@@ -608,7 +608,7 @@ export function AidpRetrievalParamsForm({
                     onChange({
                       search_method:
                         next.length === 3
-                          ? "hybrid_search"
+                          ? aidpAllChannels
                           : next.length < 2
                             ? `${next.join("|")}|`
                             : next.join("|"),

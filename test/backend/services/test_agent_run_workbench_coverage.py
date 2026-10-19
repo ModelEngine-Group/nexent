@@ -276,6 +276,7 @@ async def test_run_agent_stream_resolves_and_persists_existing_workbench(monkeyp
     )
     apply_plan.assert_called_once_with(request, canonical, plan, "tenant-a")
     update_config.assert_called_once()
+    assert update_config.call_args.kwargs["validate_retrieval"] is False
     assert request.__dict__["_workbench_config_version"] == 3
     assert request.__dict__["_runtime_metadata_snapshot"] == {"existing": True}
     assert request.__dict__["_runtime_metadata_version"] == 4

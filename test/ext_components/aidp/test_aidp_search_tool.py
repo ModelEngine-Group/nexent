@@ -265,7 +265,7 @@ class TestAidpSearchToolInit:
                 observer=mock_observer,
             )
 
-        assert tool.search_method == "hybrid_search"
+        assert tool.search_method == "vector_search|full_text_search|graph_search"
         assert tool.reranking_mode == "performance"
 
 
@@ -292,7 +292,7 @@ class TestAidpSearchToolForward:
             json={
                 "query": "find images",
                 "kds_list": ["kb1", "kb2"],
-                "search_method": "hybrid_search",
+                "search_method": "vector_search|full_text_search|graph_search",
                 "reranking_enable": True,
                 "rewrite_enable": True,
                 "related_search_enable": True,

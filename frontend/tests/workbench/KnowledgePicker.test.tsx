@@ -150,7 +150,12 @@ it("AIDP conversation draft clears inherited candidates with null and cancels wi
       name: "aidpRetrieval.fields.initialCandidates",
     })
   ).toHaveValue(30);
-  await userEvent.click(vectorGroup.getByText("aidpRetrieval.resumeFollow"));
+  fireEvent.change(
+    vectorGroup.getByRole("spinbutton", {
+      name: "aidpRetrieval.fields.initialCandidates",
+    }),
+    { target: { value: "7" } }
+  );
   fireEvent.change(
     settings.getByRole("spinbutton", { name: "aidpRetrieval.fields.top_k" }),
     { target: { value: "9" } }
@@ -171,6 +176,7 @@ it("AIDP conversation draft clears inherited candidates with null and cancels wi
   expect(confirm.mock.calls[0][0].retrieval_config).toEqual({
     top_k: 9,
     vector_candidates: null,
+    full_text_candidates: null,
   });
   expect(saved.retrieval_config).toEqual({ top_k: 7 });
 });

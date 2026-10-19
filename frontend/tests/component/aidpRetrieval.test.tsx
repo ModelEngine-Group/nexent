@@ -120,7 +120,7 @@ describe("AIDP retrieval policy and controlled form", () => {
       })
     ).toEqual({});
   });
-  it("starts collapsed, follows until manually set and restores following", () => {
+  it("automatically follows only while the candidate equals the total limit", () => {
     render(<Controlled />);
     expect(
       screen.queryByRole("region", {
@@ -134,10 +134,12 @@ describe("AIDP retrieval policy and controlled form", () => {
     change("top_k", "40");
     expect(candidateField("vector_search")).toHaveValue(50);
     expect(candidateField("full_text_search")).toHaveValue(40);
-    fireEvent.click(
-      within(group("vector_search")).getByText("aidpRetrieval.resumeFollow")
-    );
-    expect(candidateField("vector_search")).toHaveValue(40);
+    expect(
+      screen.queryByRole("button", { name: "aidpRetrieval.resumeFollow" })
+    ).not.toBeInTheDocument();
+    changeCandidate("vector_search", "40");
+    change("top_k", "45");
+    expect(candidateField("vector_search")).toHaveValue(45);
     expect(
       JSON.parse(screen.getByTestId("config").textContent!).vector_candidates
     ).toBeNull();
@@ -215,6 +217,10 @@ describe("AIDP retrieval policy and controlled form", () => {
     fireEvent.click(
       within(screen.getByRole("dialog")).getByText("common.confirm")
     );
-    expect(confirm).toHaveBeenCalledWith({ top_k: 30 });
+    expect(confirm).toHaveBeenCalledWith({
+      top_k: 30,
+      vector_candidates: null,
+      full_text_candidates: null,
+    });
   });
 });

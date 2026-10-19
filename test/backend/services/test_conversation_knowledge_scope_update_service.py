@@ -1,3 +1,4 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -112,3 +113,24 @@ def test_update_rejects_inaccessible_conversation(_mock_get_conversation):
             user_id="user",
             tenant_id="tenant",
         )
+
+
+@pytest.mark.parametrize("policy", [{"top_k": 0}, {"hybrid_top_k": 8, "graph_top_k": 5}, {"vector_candidates": True}])
+def test_actual_workbench_save_rejects_invalid_retrieval_before_persistence(mocker, policy):
+    from management.services.agent.system import system_agent_provider
+    from services import conversation_management_service as conversations
+    from services import knowledge_scope_service as scopes
+
+    mocker.patch("consts.const.ENABLE_AIDP_KNOWLEDGE", True)
+    mocker.patch.object(system_agent_provider, "get_workbench_main_ref", return_value=SimpleNamespace(agent_id=7, version_no=3))
+    mocker.patch.object(scopes, "snapshot_runtime_knowledge_tree", return_value=[{"tools": [{
+        "class_name": "AidpSearchTool", "params": [{"name": "top_k", "default": 10}],
+    }]}])
+    persist = mocker.patch.object(conversations, "replace_conversation_workbench_config")
+    with pytest.raises(ValidationError):
+        conversations.update_conversation_workbench_config_service(
+            conversation_id=1,
+            config={"mode": "generic_chat", "knowledge_scope": {"retrieval_config": policy}},
+            expected_version=0, user_id="user", tenant_id="tenant",
+        )
+    persist.assert_not_called()

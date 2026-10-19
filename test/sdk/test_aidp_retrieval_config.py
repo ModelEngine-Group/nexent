@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 
 from nexent.core.ext_components.aidp.retrieval_config import (
-    CHANNELS, SEARCH_METHODS, active_channels, build_payload, merge_config, normalize_method, resolve_config,
+    ALL_CHANNELS, CHANNELS, SEARCH_METHODS, active_channels, build_payload, merge_config, normalize_method, prepare_config, resolve_config, validate_config,
 )
 
 
@@ -21,7 +21,7 @@ def test_shared_frontend_python_policy_fixtures(fixture):
 
 @pytest.mark.parametrize("method", sorted(SEARCH_METHODS))
 def test_complete_payload_filters_channels(method):
-    payload = build_payload({"search_method": method, "top_k": 7, "multi_modal": False}, "query", ["kb"])
+    payload = build_payload(validate_config({"search_method": method, "top_k": 7, "multi_modal": False}), "query", ["kb"])
     assert payload["topk"] == 7
     assert payload["multi_modal_enable"] is False
     assert not {"top_k", "multi_modal", "candidate_topk", "metadata_condition", "file_reorder_enable"} & payload.keys()
@@ -50,7 +50,7 @@ def test_follow_explicit_override_and_no_input_mutation():
     assert merged["vector_candidates"] is None
     assert resolve_config(merged)["full_text_candidates"] == 7
     assert resolve_config(merged)["graph_reranking_enable"] is False
-    payload = build_payload(merged, "q", ["kb"])
+    payload = build_payload(validate_config(merged), "q", ["kb"])
     assert "reranking_mode" not in payload
     assert payload["multi_modal_enable"] is False
     assert base == original
@@ -71,7 +71,7 @@ def test_follow_explicit_override_and_no_input_mutation():
 ])
 def test_strict_validation(config, field):
     with pytest.raises(ValueError, match=field):
-        resolve_config(config)
+        validate_config(config)
 
 
 @pytest.mark.parametrize("k", [1,100])
@@ -84,6 +84,29 @@ def test_boundary_zero_caps_and_jargon(k):
 
 def test_method_normalization_and_inactive_quota():
     assert normalize_method("graph_search|vector_search|graph_search") == "vector_search|graph_search"
-    assert normalize_method("graph_search|vector_search|full_text_search") == "hybrid_search"
-    p = build_payload({"search_method":"graph_search","hybrid_top_k":100,"vector_candidates":1},"q",["kb"])
+    assert normalize_method("graph_search|vector_search|full_text_search") == ALL_CHANNELS
+    p = build_payload(validate_config({"search_method":"graph_search","hybrid_top_k":100,"vector_candidates":1}),"q",["kb"])
     assert "hybrid_search_config" not in p
+
+
+def test_equal_candidates_follow_across_layers_and_prepare_for_save():
+    saved = {"top_k": 10, "vector_candidates": 10, "full_text_candidates": 30}
+    effective = validate_config(merge_config(saved, {"top_k": 7}))
+    assert effective["vector_candidates"] == 7
+    assert effective["full_text_candidates"] == 30
+    assert prepare_config({"vector_candidates": 30}, {"top_k": 30}) == {"vector_candidates": None}
+    assert prepare_config({"vector_candidates": 10}, {"top_k": 30}) == {"vector_candidates": 10}
+    assert prepare_config({"search_method": "hybrid_search"}, {})["search_method"] == ALL_CHANNELS
+
+
+def test_payload_uses_prepared_config_without_revalidation(monkeypatch):
+    from nexent.core.ext_components.aidp import retrieval_config as policy
+    effective = validate_config({"top_k": 7})
+    def unexpected(*args):
+        raise AssertionError("Payload must not validate or resolve configuration again")
+    monkeypatch.setattr(policy, "validate_config", unexpected)
+    monkeypatch.setattr(policy, "resolve_config", unexpected)
+    first = policy.build_payload(effective, "first", ["kb"])
+    second = policy.build_payload(effective, "second", ["kb"])
+    assert first["topk"] == second["topk"] == 7
+    assert first["search_method"] == second["search_method"] == ALL_CHANNELS

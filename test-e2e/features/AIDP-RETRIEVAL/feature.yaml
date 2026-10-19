@@ -12,7 +12,7 @@
     "business_rules": [
       {
         "rule_id": "AIDP-RETRIEVAL-RULE-01",
-        "description": "Preserve explicit values; resolve missing defaults and candidate following at runtime; send only active channels; retain identity, scope and response provenance."
+        "description": "Validate submitted policies at input boundaries; use explicit channel combinations; infer candidate following from equality with the total; build retrieval requests without repeated validation; retain scope and provenance."
       }
     ],
     "required_test_stages": [

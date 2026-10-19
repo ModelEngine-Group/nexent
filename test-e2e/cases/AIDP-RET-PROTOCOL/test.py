@@ -63,9 +63,10 @@ def test_wire_channels_and_sources(provider, method):
         assert path == "/KnowledgeBase/Tenants/fixture/Retrieval/FusionSearch"
         assert auth == "Bearer fixture-token"
         assert payload["kds_list"] == ["kb"]
+        assert payload["search_method"] == method
         assert payload["topk"] == 7 and payload["multi_modal_enable"] is False
         assert not {"top_k","multi_modal","reranking_mode","metadata_condition","file_reorder_enable"} & payload.keys()
-        enabled = {"vector_search","full_text_search","graph_search"} if method=="hybrid_search" else set(method.split("|"))
+        enabled = set(method.split("|"))
         assert ("graph_search_config" in payload) == ("graph_search" in enabled)
         assert ("hybrid_search_config" in payload) == bool(enabled & {"vector_search","full_text_search"})
         if "graph_search_config" in payload:

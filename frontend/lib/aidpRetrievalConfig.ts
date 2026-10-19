@@ -4,8 +4,9 @@ export const aidpChannels = [
   "full_text_search",
   "graph_search",
 ];
+export const aidpAllChannels = aidpChannels.join("|");
 export const aidpDefaults: Record<string, unknown> = {
-  search_method: "hybrid_search",
+  search_method: aidpAllChannels,
   top_k: 10,
   score_threshold: 0,
   reranking_enable: true,
@@ -31,11 +32,23 @@ export function mergeAidpConfig(
   ...layers: (Record<string, unknown> | undefined | null)[]
 ) {
   const result: Record<string, unknown> = {};
-  for (const layer of layers)
+  for (const layer of layers) {
     for (const [key, value] of Object.entries(layer ?? {})) {
-      if (key in aidpDefaults && (value != null || isAidpCandidate(key)))
+      if (
+        Object.hasOwn(aidpDefaults, key) &&
+        (value != null || isAidpCandidate(key))
+      )
         result[key] = value;
     }
+    for (const candidate of ["vector_candidates", "full_text_candidates"]) {
+      if (
+        result.top_k != null &&
+        Number.isInteger(result[candidate]) &&
+        result[candidate] === result.top_k
+      )
+        result[candidate] = null;
+    }
+  }
   return result;
 }
 export function aidpMethods(method: unknown): string[] {

@@ -17,6 +17,26 @@ from typing import (
     Dict,
 )
 
+from fastapi import (
+    Request,
+)
+from fastapi.responses import (
+    JSONResponse,
+    StreamingResponse,
+)
+from nexent.core.agents.run_agent import (
+    DeferredAgentRun,
+)
+from nexent.core.concurrency import (
+    ManagedTaskSpec,
+    ThreadCapacityExceeded,
+    ThreadQueueTimedOut,
+    run_blocking,
+)
+from nexent.monitor import (
+    agent_monitoring_context,
+)
+
 from agents.agent_run_manager import (
     AgentRunAlreadyActiveError,
     AgentRunConcurrencyExceededError,
@@ -56,13 +76,6 @@ from database.agent_db import (
 from database.conversation_db import (
     resolve_conversation_runtime_metadata,
 )
-from fastapi import (
-    Request,
-)
-from fastapi.responses import (
-    JSONResponse,
-    StreamingResponse,
-)
 from management.services.agent.context import (
     build_agent_run_context,
     prepend_current_time,
@@ -79,18 +92,6 @@ from management.services.agent.run import (
 )
 from management.services.agent.stream import (
     safe_agent_stream_error_chunk as _safe_agent_stream_error_chunk,
-)
-from nexent.core.agents.run_agent import (
-    DeferredAgentRun,
-)
-from nexent.core.concurrency import (
-    ManagedTaskSpec,
-    ThreadCapacityExceeded,
-    ThreadQueueTimedOut,
-    run_blocking,
-)
-from nexent.monitor import (
-    agent_monitoring_context,
 )
 from services.conversation_management_service import (
     create_new_conversation,
@@ -124,6 +125,7 @@ from utils.auth_utils import (
 from utils.runtime_metadata_utils import (
     validate_runtime_metadata,
 )
+
 
 logger = logging.getLogger(__name__)
 
@@ -326,6 +328,12 @@ async def run_agent_stream(
             is_debug=bool(agent_request.is_debug),
             user_id=resolved_user_id,
         )
+        if (conversation is None or agent_request.is_debug) and canonical_workbench.knowledge_scope is not None:
+            from services.knowledge_scope_service import (
+                validate_conversation_retrieval_config,
+            )
+
+            validate_conversation_retrieval_config(canonical_workbench.knowledge_scope, resolved_tenant_id)
         apply_workbench_runtime_plan(
             agent_request, canonical_workbench, resolved_tree, resolved_tenant_id
         )
@@ -389,6 +397,14 @@ async def run_agent_stream(
     if source_scope is None and stored_scope is not None and not resume:
         source_scope = ConversationKnowledgeScopeRequest.model_validate(stored_scope)
 
+    if request_scope is not None and request_scope.retrieval_config is not None and canonical_workbench is None and not resume:
+        from services.knowledge_scope_service import (
+            validate_conversation_retrieval_config,
+        )
+
+        validate_conversation_retrieval_config(
+            request_scope, resolved_tenant_id, agent_request.agent_id, agent_request.version_no,
+        )
     resolved_scope = None
     if source_scope is not None and not resume:
         if agent_request.agent_id is None:
@@ -481,6 +497,11 @@ async def run_agent_stream(
         )
 
     if not resume:
+        # Keep the atomic version check even when the stored policy is unchanged.
+        retrieval_changed = canonical_workbench is not None and (
+            canonical_workbench.model_dump(mode="json").get("knowledge_scope")
+            != (conversation or {}).get("knowledge_scope")
+        )
         joint_runtime_state = None
         if (
             canonical_workbench is not None
@@ -494,6 +515,8 @@ async def run_agent_stream(
                     user_id=resolved_user_id,
                     config=canonical_workbench.model_dump(mode="json"),
                     expected_config_version=agent_request.expected_workbench_config_version,
+                    tenant_id=resolved_tenant_id,
+                    validate_retrieval=retrieval_changed,
                     metadata=agent_request.metadata or {},
                     expected_metadata_version=agent_request.expected_metadata_version,
                 )
@@ -513,7 +536,9 @@ async def run_agent_stream(
                 user_id=resolved_user_id,
                 config=canonical_workbench.model_dump(mode="json"),
                 expected_version=agent_request.expected_workbench_config_version,
+                tenant_id=resolved_tenant_id,
                 only_if_changed=True,
+                validate_retrieval=retrieval_changed,
             )
             conversation = {**(conversation or {}), **updated}
 

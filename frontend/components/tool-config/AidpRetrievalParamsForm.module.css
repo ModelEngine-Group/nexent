@@ -223,16 +223,6 @@
   line-height: 18px;
 }
 
-.followLink {
-  padding: 0;
-  border: 0;
-  background: transparent;
-  color: #2673e5;
-  font-size: 12px;
-  line-height: 18px;
-  cursor: pointer;
-}
-
 .group + .group {
   margin-top: 18px;
   padding-top: 14px;

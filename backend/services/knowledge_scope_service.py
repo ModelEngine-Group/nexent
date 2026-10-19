@@ -1,3 +1,4 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 import hashlib
 import json
 import re
@@ -179,6 +180,36 @@ def snapshot_runtime_knowledge_tree(
 ) -> List[Dict[str, Any]]:
     """Freeze the knowledge-capable static tree for one request."""
     return deepcopy(_walk_agent_tree(agent_id, tenant_id, version_no))
+
+
+def validate_conversation_retrieval_config(scope, tenant_id, agent_id=None, version_no=None):
+    """Check a submitted AIDP policy against its inherited root before persistence."""
+    from nexent.core.ext_components.aidp.retrieval_config import (
+        CONFIG_KEYS,
+        prepare_config,
+    )
+
+    from consts.const import ENABLE_AIDP_KNOWLEDGE
+
+    if not ENABLE_AIDP_KNOWLEDGE or scope is None or scope.retrieval_config is None:
+        return
+    unknown = set(scope.retrieval_config) - CONFIG_KEYS
+    if unknown:
+        raise ValidationError(f"Unsupported knowledge parameter: {min(unknown)}")
+    if agent_id is None:
+        from management.services.agent.system import system_agent_provider
+
+        root = system_agent_provider.get_workbench_main_ref(tenant_id)
+        agent_id, version_no = int(root.agent_id), int(root.version_no)
+    elif version_no is None:
+        version_no = resolve_root_version(agent_id, tenant_id, None, False)
+    tree = snapshot_runtime_knowledge_tree(agent_id, tenant_id, version_no)
+    tool = next((tool for tool in tree[0]["tools"] if tool.get("class_name") == AIDP_TOOL_CLASS), None)
+    inherited = {param["name"]: param.get("default") for param in (tool or {}).get("params", [])}
+    try:
+        scope.retrieval_config = prepare_config(scope.retrieval_config, inherited)
+    except ValueError as exc:
+        raise ValidationError(str(exc)) from exc
 
 
 def get_agent_knowledge_capabilities(

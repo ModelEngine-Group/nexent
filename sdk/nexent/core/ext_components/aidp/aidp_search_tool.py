@@ -31,11 +31,12 @@ from .retrieval_client import RETRY_STATUSES as _AIDP_SEARCH_RETRY_STATUSES
 from .retrieval_client import post_retrieval
 from .retrieval_client import time as time
 from .retrieval_config import (
+    ALL_CHANNELS,
     CONFIG_KEYS,
     RERANK_MODES,
     build_payload,
     normalize_method,
-    resolve_config,
+    validate_config,
 )
 
 
@@ -127,7 +128,7 @@ class AidpSearchTool(Tool):
             "description_zh": "要检索的知识库 ID 列表",
         },
         "search_method": {
-            "description": "Search method: hybrid_search, vector_search, full_text_search",
+            "description": "Search methods: vector_search, full_text_search, graph_search, or a pipe-separated combination",
             "description_zh": (
                 "搜索方法：hybrid_search（融合检索）/"
                 "vector_search（向量检索）/"
@@ -182,7 +183,7 @@ class AidpSearchTool(Tool):
             description="Mapping from kds_name to kds_id for LLM parameter conversion",
         ),
         kds_list: str = Field(description="JSON string array of knowledge base IDs"),
-        search_method: str = Field(default="hybrid_search", description="Search method"),
+        search_method: str = Field(default=ALL_CHANNELS, description="Search method"),
         reranking_enable: bool = Field(default=True, description="Enable reranking"),
         reranking_mode: str = Field(default="performance", description="Reranking mode"),
         rewrite_enable: bool = Field(default=False, description="Enable query rewrite"),
@@ -216,9 +217,9 @@ class AidpSearchTool(Tool):
         if not self.tenant_id:
             raise ValueError("tenant_id is required and must be a non-empty string")
         try:
-            self.search_method = normalize_method(_resolve_field_default(search_method, "hybrid_search"))
+            self.search_method = normalize_method(_resolve_field_default(search_method, ALL_CHANNELS))
         except ValueError:
-            self.search_method = "hybrid_search"
+            self.search_method = ALL_CHANNELS
         self.reranking_mode = _coerce_choice(
             _resolve_field_default(reranking_mode, "performance"), _VALID_RERANK_MODES, "performance", "reranking_mode"
         )
@@ -243,12 +244,10 @@ class AidpSearchTool(Tool):
             "graph_reranking_enable": graph_reranking_enable,
             "query_expansion_enable": query_expansion_enable,
         })
-        resolved = resolve_config(config)
-        for key in CONFIG_KEYS:
-            setattr(self, key, resolved[key] if key not in {"vector_candidates", "full_text_candidates"} else config.get(key))
-        for key in ("vector_candidates", "full_text_candidates"):
-            if isinstance(getattr(self, key), FieldInfo):
-                setattr(self, key, None)
+        config = {key: _resolve_field_default(value, None) for key, value in config.items()}
+        resolved = validate_config(config)
+        for key, value in resolved.items():
+            setattr(self, key, value)
         self.observer = _resolve_field_default(observer, None)
         # Runtime whitelist populated by the backend (create_agent_info).
         # When the whitelist has been explicitly installed (even as an empty

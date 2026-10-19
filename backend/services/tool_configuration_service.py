@@ -1,19 +1,23 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
 import asyncio
-from contextlib import AsyncExitStack
 import importlib
 import inspect
 import json
 import logging
 import time
-from typing import Any, List, Optional, Dict
+from contextlib import AsyncExitStack
+from typing import Any, Dict, List, Optional
 from urllib.parse import urljoin
 
 import jsonref
 import requests
 from fastmcp import Client
 from fastmcp.client.transports import SSETransport, StreamableHttpTransport
+from mcpadapt.smolagents_adapter import _sanitize_function_name
+from nexent.core.concurrency import run_blocking
+from nexent.core.ext_components.aidp.retrieval_config import prepare_config, validate_config
+from nexent.monitor import set_monitoring_context, set_monitoring_operation
 from pydantic_core import PydanticUndefined
 
 from consts.const import (
@@ -27,56 +31,55 @@ from consts.const import (
     RUNTIME_MCP_TOOL_TIMEOUT_SECONDS,
     TOKEN,
 )
-from utils.mcp_url_utils import get_tenant_local_mcp_server
 from consts.error_message import ErrorMessage
 from consts.exceptions import MCPConnectionError, NotFoundException, ToolExecutionException, ValidationError
-from consts.model import ToolInstanceInfoRequest, ToolInfo, ToolSourceEnum, ToolValidateRequest
+from consts.model import ToolInfo, ToolInstanceInfoRequest, ToolSourceEnum, ToolValidateRequest
 from consts.tool_labels import SYSTEM_MANAGED_TOOL_NAMES
 from consts.tool_param_constraints import (
     TOOL_PARAM_CONSTRAINT_KEYS,
     TOOL_PARAM_CONSTRAINT_RULES,
 )
+from database.client import minio_client
+from database.knowledge_db import get_knowledge_name_map_by_index_names
 from database.outer_api_tool_db import (
-    upsert_openapi_service,
-    query_openapi_services_by_tenant,
     delete_openapi_service as db_delete_openapi_service,
+)
+from database.outer_api_tool_db import (
+    query_openapi_services_by_tenant,
+    upsert_openapi_service,
 )
 from database.remote_mcp_db import (
     get_mcp_authorization_token_by_name_and_url,
+    get_mcp_custom_headers_by_name_and_url,
     get_mcp_records_by_tenant,
     get_mcp_server_by_name_and_tenant,
-    get_mcp_custom_headers_by_name_and_url,
 )
 from database.tool_db import (
     check_tool_list_initialized,
     create_or_update_tool_by_tool_info,
     query_all_tools,
-    query_tools_by_labels,
-    query_tools_by_ids,
     query_tool_instances_by_id,
+    query_tools_by_ids,
+    query_tools_by_labels,
     search_last_tool_instance_by_tool_id,
     update_tool_table_from_scan_tool_list,
 )
-from database.knowledge_db import get_knowledge_name_map_by_index_names
 from database.user_tenant_db import get_user_email_map
-from mcpadapt.smolagents_adapter import _sanitize_function_name
+from management.services.knowledge_base.service import get_embedding_model_by_index_name, get_vector_db_core
+from management.services.model.adapter import get_llm_adapter, get_vlm_adapter
+from management.services.model.resolver import get_rerank_model
 from services.file_management_service import validate_urls_access
+from utils.http_client_utils import create_httpx_client
+from utils.langchain_utils import discover_langchain_modules
+from utils.mcp_url_utils import get_tenant_local_mcp_server
+from utils.tool_utils import get_local_tools_classes, get_local_tools_description_zh
+
 from .agent_draft_permission_service import (
     AgentDraftEditError,
     ResourceBindingError,
     require_agent_draft_edit,
 )
-from management.services.knowledge_base.service import get_embedding_model_by_index_name
-from management.services.model.resolver import get_rerank_model
-from utils.http_client_utils import create_httpx_client
-from database.client import minio_client
-from management.services.model.adapter import get_llm_adapter, get_vlm_adapter
-from nexent.monitor import set_monitoring_context, set_monitoring_operation
-from nexent.core.concurrency import run_blocking
-from nexent.core.ext_components.aidp.retrieval_config import resolve_config
-from management.services.knowledge_base.service import get_vector_db_core
-from utils.langchain_utils import discover_langchain_modules
-from utils.tool_utils import get_local_tools_classes, get_local_tools_description_zh
+
 
 logger = logging.getLogger("tool_configuration_service")
 
@@ -511,7 +514,7 @@ def _coerce_param_value(tool_name: str, param_name: str, value_type: str, raw_va
         return len(str(raw_value))
     elif value_type == "string":
         return str(raw_value)
-    
+
     try:
         numeric_value = float(raw_value)
     except (TypeError, ValueError):
@@ -622,7 +625,8 @@ def update_tool_info_impl(tool_info: ToolInstanceInfoRequest, tenant_id: str, us
 
     if tool.get("name") in {"aidp_search", "ind_aidp_search"}:
         try:
-            resolve_config(dict(tool_info.params or {}))
+            params = dict(tool_info.params or {})
+            tool_info.params = {**params, **prepare_config(params, {})}
         except ValueError as exc:
             raise ValidationError(str(exc)) from exc
 
@@ -1139,12 +1143,10 @@ def _validate_local_tool(
         if not tool_class:
             raise NotFoundException(f"Tool class not found for {tool_name}")
 
-        runtime_inputs = dict(inputs or {})
-
         # Parse instantiation parameters first
         instantiation_params = dict(params or {})
         if tool_name in {"aidp_search", "ind_aidp_search"}:
-            resolve_config(instantiation_params)
+            validate_config(instantiation_params)
         # Get signature and extract default values for all parameters
         sig = inspect.signature(tool_class.__init__)
 
@@ -1166,7 +1168,7 @@ def _validate_local_tool(
 
         if tool_name == "knowledge_base_search":
             index_names = instantiation_params.get("index_names", [])
-            is_multimodal = instantiation_params.pop("multimodal", False)
+            instantiation_params.pop("multimodal", False)
 
             # Must have embedding model for knowledge base search
             if not index_names or not tenant_id:

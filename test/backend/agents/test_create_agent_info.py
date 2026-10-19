@@ -7453,14 +7453,17 @@ class TestMergeToolParams:
     """Tests for _merge_tool_params function."""
 
     def test_aidp_null_candidates_clear_inheritance_but_ordinary_null_inherits(self):
-        from nexent.core.ext_components.aidp.retrieval_config import build_payload
+        from nexent.core.ext_components.aidp.retrieval_config import (
+            build_payload,
+            resolve_config,
+        )
         record={"class_name":"AidpSearchTool","params":[{"name":"top_k","default":10},
                 {"name":"vector_candidates","default":30},{"name":"multi_modal","default":False},
                 {"name":"reranking_enable","default":False}]}
         fixed=_merge_tool_params(record,{"top_k":7,"multi_modal":None})
         assert fixed["vector_candidates"]==30 and fixed["multi_modal"] is False
         following=_merge_tool_params(record,{"top_k":7,"vector_candidates":None})
-        payload=build_payload(following,"q",["kb"])
+        payload=build_payload(resolve_config(following),"q",["kb"])
         assert payload["hybrid_search_config"]["vector_candidates"]==7
         assert payload["graph_search_config"]["graph_reranking_enable"] is False
         assert record["params"][1]["default"]==30

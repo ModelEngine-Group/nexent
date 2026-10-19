@@ -1,3 +1,4 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 from unittest.mock import MagicMock
 
 import pytest
@@ -48,6 +49,7 @@ async def test_update_workbench_config_returns_new_state(monkeypatch):
         config=request.config.model_dump(mode="json"),
         expected_version=2,
         user_id="user-a",
+        tenant_id="tenant-a",
     )
 
 
@@ -78,6 +80,7 @@ async def test_update_workbench_config_is_hidden_when_disabled(monkeypatch):
             {"code": "AGENT_NOT_RUNNABLE"},
         ),
         (ValueError("invalid"), 422, {"code": "WORKBENCH_CONFIG_INVALID"}),
+        (conversation_app.ValidationError("top_k"), 422, {"code": "WORKBENCH_CONFIG_INVALID"}),
     ],
 )
 async def test_update_workbench_config_maps_domain_errors(

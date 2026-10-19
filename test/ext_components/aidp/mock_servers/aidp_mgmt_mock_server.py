@@ -908,7 +908,7 @@ class FusionSearchRequest(BaseModel):
 
     query: str = Field(min_length=1)
     kds_list: List[str] = Field(min_length=1, max_length=10)
-    search_method: str = "hybrid_search"
+    search_method: str = "vector_search|full_text_search|graph_search"
     reranking_enable: bool = False
     reranking_mode: Optional[Literal["performance", "high_accuracy", "jargon_coverage"]] = None
     rewrite_enable: bool = False
@@ -943,8 +943,6 @@ class FusionSearchRequest(BaseModel):
         unknown = channels - set(_RETRIEVAL_CHANNELS)
         if not channels or unknown:
             raise ValueError(f"search_method must combine {sorted(_RETRIEVAL_CHANNELS)}")
-        if len(channels) > 1 and self.search_method != "hybrid_search" and len(channels) == 3:
-            raise ValueError("three channels must be sent as hybrid_search")
         hybrid = bool(channels & {"vector_search", "full_text_search"})
         graph = "graph_search" in channels
         if hybrid and self.hybrid_search_config is None:
