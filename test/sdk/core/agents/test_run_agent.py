@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import asyncio
 import types
 import json
@@ -6,6 +8,7 @@ import pytest
 import importlib
 import sys
 from types import ModuleType
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 from threading import Event
 
@@ -223,6 +226,7 @@ mock_openai_chat_completion_message = MagicMock()
 
 # Mock nexent.skills module for run_skill_script_tool
 mock_nexent = ModuleType("nexent")
+mock_nexent.__path__ = [str(Path(__file__).resolve().parents[4] / "sdk" / "nexent")]
 mock_nexent.skills = ModuleType("nexent.skills")
 mock_nexent.skills.SkillManager = MagicMock(name="SkillManager")
 sys.modules["nexent"] = mock_nexent
