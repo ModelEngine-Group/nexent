@@ -5652,7 +5652,6 @@
   "aidpKnowledge.detailTaskUpdatedAt": "任务更新时间",
   "aidpKnowledge.detailTasksEmpty": "近 30 天没有上传任务",
   "aidpKnowledge.detailTasksLoadFailed": "读取上传任务失败",
-  "aidpKnowledge.detailUpdatedAt": "更新时间",
   "aidpKnowledge.detailVectorTopK": "向量检索 TOP K 值",
   "aidpKnowledge.detailVlmModel": "VLM 模型",
   "aidpKnowledge.failureDetails": "失败详情",

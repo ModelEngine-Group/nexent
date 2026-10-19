@@ -109,11 +109,6 @@ const AidpKnowledgeDetailInformation = ({
           <AidpDetailField label={t("aidpKnowledge.detailCreatedAt")}>
             {formatDateTime(detail.created_at)}
           </AidpDetailField>
-          {detail.updated_at ? (
-            <AidpDetailField label={t("aidpKnowledge.detailUpdatedAt")}>
-              {formatDateTime(detail.updated_at)}
-            </AidpDetailField>
-          ) : null}
           <AidpDetailField label={t("aidpKnowledge.detailCreator")}>
             {formatAidpCreator(detail.creator_name) || AIDP_UNKNOWN_VALUE}
           </AidpDetailField>

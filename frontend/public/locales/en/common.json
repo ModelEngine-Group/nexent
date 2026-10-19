@@ -5714,7 +5714,6 @@
   "aidpKnowledge.detailTaskUpdatedAt": "Task updated",
   "aidpKnowledge.detailTasksEmpty": "No upload tasks in the last 30 days",
   "aidpKnowledge.detailTasksLoadFailed": "Failed to load upload tasks",
-  "aidpKnowledge.detailUpdatedAt": "Updated",
   "aidpKnowledge.detailVectorTopK": "Vector retrieval TOP K",
   "aidpKnowledge.detailVlmModel": "VLM model",
   "aidpKnowledge.failureDetails": "Failure details",
