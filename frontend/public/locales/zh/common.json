@@ -1,4 +1,5 @@
 {
+  "toolConfig.deepseek.onlyHighQuality": "仅优质内容",
   "workbench.genericAgentName": "智能体工作台",
   "workbench.landingGreeting": "你好，我是 Nexent，需要我帮你做什么？",
   "workbench.landingGreetingHi": "你好，我是Nexent",

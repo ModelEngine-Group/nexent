@@ -1,0 +1,96 @@
+{
+  "schema_version": "1.0",
+  "stage": "D4",
+  "module": "SEARCH-WEB",
+  "case": {
+    "case_id": "SEARCH-DEEPSEEK-D4-001",
+    "feature_id": "SEARCH-DEEPSEEK",
+    "requirement_ids": [
+      "SEARCH-DEEPSEEK-20261019"
+    ],
+    "business_rule_ids": [
+      "SEARCH-DEEPSEEK-RULE-001",
+      "SEARCH-DEEPSEEK-RULE-002",
+      "SEARCH-DEEPSEEK-RULE-003"
+    ],
+    "title": "DeepSeek configuration switch and localized validation journey",
+    "type": "E2E",
+    "priority": "P1",
+    "status": "active",
+    "automation": "automated",
+    "objective": "Exercise the actual product boundary with deterministic external protocol fixtures; isolated unit coverage remains separate.",
+    "preconditions": [
+      "Product dependencies are installed; all test credentials are synthetic."
+    ],
+    "test_data": {
+      "profile": "mock",
+      "languages": [
+        "zh",
+        "en"
+      ],
+      "scores": [
+        1.49,
+        1.5,
+        3.0
+      ]
+    },
+    "steps": [
+      {
+        "order": 1,
+        "action": "Open the real DeepSeek config UI in Chinese and English; enable quality, save and submit actual frontend validation requests.",
+        "expected": "Default count is 10, switch starts off, enabling produces true in saved configuration and validation; each request carries the current page language."
+      },
+      {
+        "order": 2,
+        "action": "Reopen configuration, disable quality and submit validation again in English.",
+        "expected": "The real switch serializes false while language stays en; no requests reach real providers."
+      }
+    ],
+    "expected_results": [
+      "Actual frontend validation requests carry default count, selected quality and current page language.",
+      "Saving and reopening the tool configuration preserves switch state; subsequent validation reflects edits."
+    ],
+    "forbidden_side_effects": [
+      "No requests to real providers, no real credentials or unrelated persisted writes."
+    ],
+    "execution": {
+      "profiles": [
+        {
+          "name": "mock",
+          "required_services": []
+        }
+      ]
+    },
+    "acceptance": [
+      {
+        "id": "AC-01",
+        "description": "Actual product boundary preserves configured quality and run language with consistent results.",
+        "steps": [
+          1,
+          2
+        ],
+        "expected_results": [
+          1,
+          2
+        ],
+        "forbidden_side_effects": [
+          1
+        ]
+      }
+    ],
+    "actor": "Isolated tool administrator",
+    "journey": [
+      "Open real tool configuration",
+      "Toggle quality and save",
+      "Open test panel",
+      "Switch frontend language",
+      "Submit validation and inspect serialized request"
+    ],
+    "final_business_result": [
+      "Saved switch and validation language agree with visible controls."
+    ],
+    "failure_evidence": [
+      "Playwright trace and captured sanitized request bodies"
+    ]
+  }
+}

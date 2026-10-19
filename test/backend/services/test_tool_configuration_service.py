@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 from consts.exceptions import MCPConnectionError, NotFoundException, ToolExecutionException
 import asyncio
 import importlib
@@ -6009,3 +6011,78 @@ async def test_call_mcp_tool_enforces_runtime_timeout(monkeypatch):
             "slow_tool",
             {},
         )
+
+class TestDeepSeekSearchConfiguration:
+    class SearchStub:
+        def __init__(self, deepseek_api_key, only_high_quality=False, language="zh", observer=None):
+            self.language = language
+            self.only_high_quality = only_high_quality
+            self.observer = observer
+
+        def forward(self, query):
+            return "[]"
+
+    @pytest.mark.parametrize("language", ["zh", "en"])
+    def test_validation_injects_language_without_mutating_params(self, language):
+        from backend.services import tool_configuration_service as service
+        DeepSeekSearchTool = self.SearchStub
+
+        params = {"deepseek_api_key": "synthetic-key", "only_high_quality": True, "language": "en"}
+        before = dict(params)
+        with patch.object(service, "_get_tool_class_by_name", return_value=DeepSeekSearchTool), patch.object(
+            DeepSeekSearchTool, "forward", autospec=True, return_value="[]"
+        ) as forward:
+            assert service._validate_local_tool("deepseek_search", {"query": "topic"}, params,
+                                                "tenant", "user", language=language) == "[]"
+            instance = forward.call_args.args[0]
+            assert instance.language == language
+            assert instance.only_high_quality is True
+            assert instance.observer is None
+        assert params == before
+
+    async def test_dispatch_preserves_run_language(self):
+        from backend.services import tool_configuration_service as service
+
+        request = Mock(name="request")
+        request.name = "deepseek_search"
+        request.source = "local"
+        request.inputs = {"query": "topic"}
+        request.params = {"deepseek_api_key": "synthetic-key"}
+        request.usage = None
+        request.language = "en"
+        with patch.object(service, "run_blocking", new_callable=AsyncMock, return_value="[]") as run:
+            assert await service.validate_tool_impl(request, "tenant", "user") == "[]"
+        assert run.call_args.kwargs["language"] == "en"
+        assert run.call_args.args[2:7] == ("deepseek_search", request.inputs, request.params, "tenant", "user")
+
+    @pytest.mark.parametrize("params", [{}, {"deepseek_api_key": " "},
+                                       {"deepseek_api_key": "synthetic", "max_results": 51},
+                                       {"deepseek_api_key": "synthetic", "only_high_quality": "true"}])
+    def test_invalid_config_never_persists(self, params):
+        from backend.services import tool_configuration_service as service
+
+        request = Mock(agent_id=1, tool_id=2, version_no=0, params=params)
+        with patch.object(service, "require_agent_draft_edit"), patch.object(
+            service, "query_all_tools", return_value=[{"tool_id": 2, "name": "deepseek_search", "is_available": True}]
+        ), patch.object(service, "_get_tool_class_by_name", return_value=Mock(side_effect=ValueError("invalid"))), patch.object(
+            service, "create_or_update_tool_by_tool_info"
+        ) as persist:
+            with pytest.raises(service.ValidationError, match="DeepSeek"):
+                service.update_tool_info_impl(request, "tenant", "user")
+            persist.assert_not_called()
+
+    def test_valid_config_persists_without_runtime_fields(self):
+        from backend.services import tool_configuration_service as service
+
+        params = {"deepseek_api_key": "synthetic", "only_high_quality": True, "language": "en"}
+        request = Mock(agent_id=1, tool_id=2, version_no=0, params=params)
+        with patch.object(service, "require_agent_draft_edit"), patch.object(
+            service, "query_all_tools", return_value=[{"tool_id": 2, "name": "deepseek_search", "is_available": True}]
+        ), patch.object(service, "_get_tool_class_by_name", return_value=Mock()), patch.object(
+            service, "_validate_tool_param_ranges"
+        ), patch.object(
+            service, "create_or_update_tool_by_tool_info", return_value={"id": 7}
+        ) as persist:
+            assert service.update_tool_info_impl(request, "tenant", "user")["tool_instance"] == {"id": 7}
+            assert request.params == {"deepseek_api_key": "synthetic", "only_high_quality": True}
+            persist.assert_called_once()

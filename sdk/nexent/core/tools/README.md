@@ -9,6 +9,22 @@
 当前 SDK 包含以下工具类型：
 
 ### 搜索工具
+
+`deepseek_search` 使用 DeepSeek Search API，独立于对话模型。配置必填的
+`deepseek_api_key`，默认请求 `max_results=10`，支持 1～50 条。
+`only_high_quality` 为默认关闭的“仅优质内容”开关，开启后保留
+`rerank_score >= 1.5` 的结果，过滤后不补请求。`need_content` 默认关闭，
+使用长摘要；开启后优先使用正文。`max_content_chars` 默认 2000，限制每条模型文本。
+
+Agent 只传 `query`，支持 `site:`、`-site:`、`-关键词`、`-"排除短语"`、
+`"精确短语"`、`after:`、`before:` 以及用 `OR` 连接多个站点。
+平台按本次页面语言统一追加 `lang:zh` 或 `lang:en`，覆盖引号外已有的语言操作符。
+输入通常不超过 120 个 Unicode 码点，最终查询不超过 128。
+工具试运行使用当前页面语言；直接 SDK 调用可设置内部 `language`（默认 `zh`）。
+空结果和质量过滤后的空列表均正常返回 `[]`。升级后刷新工具列表以发现该工具。
+
+SDK 示例配置为 `DeepSeekSearchTool(deepseek_api_key=key, only_high_quality=True, language="en")`，
+再调用 `forward('DeepSeek site:github.com after:2025')`。密钥由调用方传入，SDK 不读取环境变量。
 - **EXASearchTool**: 基于 EXA API 的网络搜索工具
 - **TavilySearchTool**: 基于 Tavily API 的网络搜索工具  
 - **LinkupSearchTool**: 基于 Linkup API 的网络搜索工具

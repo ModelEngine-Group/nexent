@@ -1,4 +1,5 @@
 {
+  "toolConfig.deepseek.onlyHighQuality": "High-quality results only",
   "workbench.genericAgentName": "Agent Workbench",
   "workbench.landingGreeting": "Hi, I'm Nexent. What can I help you with?",
   "workbench.landingGreetingHi": "Hi, I'm Nexent",

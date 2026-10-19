@@ -5,6 +5,8 @@ from contextlib import AsyncExitStack
 import importlib
 import inspect
 import json
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import logging
 import time
 from typing import Any, List, Optional, Dict
@@ -659,6 +661,19 @@ def update_tool_info_impl(tool_info: ToolInstanceInfoRequest, tenant_id: str, us
                 params["kds_list"] = list(dict.fromkeys(hidden_existing + visible_submitted))
         tool_info.params = params
 
+    if tool.get("name") == "deepseek_search":
+        try:
+            params = dict(tool_info.params or {})
+            params.pop("language", None)
+            params.pop("observer", None)
+            tool_class = _get_tool_class_by_name("deepseek_search")
+            if tool_class is None:
+                raise ValueError("DeepSeek Search is unavailable.")
+            tool_class(**params)
+        except (TypeError, ValueError):
+            raise ValidationError("Invalid DeepSeek Search configuration; check the key and parameter ranges.") from None
+        tool_info.params = params
+
     _validate_tool_param_ranges(
         tool_info.tool_id,
         dict(getattr(tool_info, "params", None) or {}),
@@ -1100,7 +1115,8 @@ def _validate_local_tool(
     inputs: Optional[Dict[str, Any]] = None,
     params: Optional[Dict[str, Any]] = None,
     tenant_id: Optional[str] = None,
-    user_id: Optional[str] = None
+    user_id: Optional[str] = None,
+    language: str = "zh",
 ) -> Dict[str, Any]:
     """
     Validate local tool by actually instantiating and calling it.
@@ -1129,7 +1145,10 @@ def _validate_local_tool(
         runtime_inputs = dict(inputs or {})
 
         # Parse instantiation parameters first
-        instantiation_params = params or {}
+        instantiation_params = dict(params or {})
+        if tool_name == "deepseek_search":
+            instantiation_params["language"] = language
+            instantiation_params["observer"] = None
         # Get signature and extract default values for all parameters
         sig = inspect.signature(tool_class.__init__)
 
@@ -1417,6 +1436,13 @@ async def validate_tool_impl(
             else:
                 return await _validate_mcp_tool_remote(tool_name, inputs, usage, tenant_id)
         elif source == ToolSourceEnum.LOCAL.value:
+            if tool_name == "deepseek_search":
+                return await run_blocking(
+                    "validate-local-tool", _validate_local_tool,
+                    tool_name, inputs, params, tenant_id, user_id,
+                    language=request.language,
+                    lane="model-tool-io", owner="services.tool_configuration_service",
+                )
             return await run_blocking(
                 "validate-local-tool", _validate_local_tool,
                 tool_name, inputs, params, tenant_id, user_id,

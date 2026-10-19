@@ -8517,3 +8517,23 @@ class TestBuildSecurityHeaders:
         ):
             assert _select_agent_model_id([7, 8], None, "tenant") == 8
             assert _select_agent_model_id([7, 8], 9, "tenant") == 9
+
+class TestDeepSeekRuntimeLanguage:
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("language", ["zh", "en"])
+    async def test_runtime_language_overrides_instance_language(self, language):
+        from backend.agents import create_agent_info as module
+
+        records = [{"tool_id": 7, "name": "deepseek_search", "class_name": "DeepSeekSearchTool",
+                    "source": "local", "output_type": "string", "inputs": "{}"}]
+        params = {"language": "zh", "deepseek_api_key": "synthetic", "only_high_quality": True}
+        with patch.object(module, "discover_langchain_tools", new_callable=AsyncMock, return_value=[]), patch.object(
+            module, "_resolve_runtime_tool_records", return_value=records
+        ), patch.object(module, "search_agent_info_by_agent_id", return_value={"name": "Agent"}), patch.object(
+            module, "_merge_tool_params", return_value=dict(params)
+        ), patch.object(module, "ToolConfig") as config:
+            await module.create_tool_config_list(1, "tenant", "user", language=language)
+            actual = config.call_args.kwargs["params"]
+            assert actual["language"] == language
+            assert actual["only_high_quality"] is True
+            assert params["language"] == "zh"
