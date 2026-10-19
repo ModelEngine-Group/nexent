@@ -25,7 +25,7 @@ def test_deepseek_http_sources_and_language(monkeypatch):
             payload = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
             captured.append((self.path, payload, self.headers.get("Authorization")))
             rows = [{"title": f"Result {i}", "url": f"https://example.com/{i}", "summary": f"Summary {i}" * 5000,
-                     "rerank_score": score, "authority": 3} for i, score in enumerate([1.49, 1.5, 3])]
+                     "rerank_score": score, "authority": 3} for i, score in enumerate([1.49, 2, 3, 2, 1.5])]
             if payload["query"].startswith("filtered"):
                 for row in rows:
                     row["rerank_score"] = 1
@@ -53,19 +53,23 @@ def test_deepseek_http_sources_and_language(monkeypatch):
                 params={"deepseek_api_key": "synthetic", "only_high_quality": True, "language": language},
             ))
             results = json.loads(search.forward("topic site:example.com"))
-            assert [item["title"] for item in results] == ["Result 1", "Result 2"]
-            assert [item["reference_mark"] for item in results] == ["[[o1]]", "[[o2]]"]
+            expected_order = [2, 1, 3, 4]
+            assert [item["title"] for item in results] == [f"Result {i}" for i in expected_order]
+            assert [item["reference_mark"] for item in results] == [f"[[o{i}]]" for i in range(1, 5)]
             sources = json.loads(observer.add_message.call_args.args[2])
             assert observer.add_message.call_args.args[1] == ProcessType.SEARCH_CONTENT
             assert [f'o{item["cite_index"]}' for item in sources] == [item["index"] for item in results]
-            assert sources[0]["url"] == "https://example.com/1"
-            assert results[0]["text"] == sources[0]["text"] == "Summary 1" * 5000
+            assert [item["url"] for item in sources] == [f"https://example.com/{i}" for i in expected_order]
+            assert [item["score_details"]["deepseek"]["rerank_score"] for item in sources] == [3, 2, 2, 1.5]
+            assert results[0]["text"] == sources[0]["text"] == "Summary 2" * 5000
             assert captured[-1] == ("/v1/tools/search", {
                 "query": f"topic site:example.com lang:{language}", "count": 10, "need_content": False,
             }, "Bearer synthetic")
             assert "synthetic" not in json.dumps(results) + json.dumps(sources)
             search.only_high_quality = False
-            assert len(json.loads(search.forward("topic"))) == 3
+            unfiltered = json.loads(search.forward("topic"))
+            assert [item["title"] for item in unfiltered] == [f"Result {i}" for i in [2, 1, 3, 4, 0]]
+            assert [item["index"] for item in unfiltered] == [f"o{i}" for i in range(5, 10)]
         assert len(captured) == 4
         search.only_high_quality = True
         next_index = search.record_ops

@@ -20,7 +20,7 @@
       },
       {
         "rule_id": "SEARCH-DEEPSEEK-RULE-003",
-        "description": "Real Search HTTP responses produce matching model references and observer sources with bounded retries and no credential leakage."
+        "description": "Real Search HTTP responses are stably sorted by descending rerank_score before citation assignment, producing matching model references and observer sources with bounded retries and no credential leakage."
       }
     ],
     "required_test_stages": [

@@ -16,6 +16,7 @@ The `only_high_quality` switch defaults to false; when enabled it retains result
 `rerank_score >= 1.5`, without additional requests to fill the result count.
 `need_content` defaults to false (long summaries); enable it to prefer webpage content.
 Selected summaries and content are returned in full without truncation. No localization IP configuration is exposed.
+Filtered, deduplicated results are stably sorted by descending `rerank_score`, preserving input order for ties, before citation indices are assigned.
 
 The Agent supplies only `query`, with `site:`, `-site:`, `-keyword`, `-"excluded phrase"`,
 `"exact phrase"`, `after:`, `before:`, and multiple sites joined by `OR`.

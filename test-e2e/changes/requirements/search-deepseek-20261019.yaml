@@ -28,7 +28,8 @@
       "behaviors": [
         "Input and query syntax boundaries, quality filtering, response mapping, retries and redaction",
         "Configuration discovery, per-run language injection and frontend serialization",
-        "Full long-text preservation, retired-parameter compatibility, canonical tenant-scoped search tags and first-registration-only initialization"
+        "Full long-text preservation, retired-parameter compatibility, canonical tenant-scoped search tags and first-registration-only initialization",
+        "Stable descending rerank_score ordering before limiting results and assigning consistent model/source citation indices"
       ],
       "reason": "Existing Exa/Tavily UT do not prove the new provider contract; no duplicate D1 is added.",
       "test_selectors": [

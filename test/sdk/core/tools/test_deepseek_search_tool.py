@@ -100,6 +100,37 @@ def test_quality_precedes_deduplication(wire):
     assert json.loads(tool(only_high_quality=True).forward("topic"))[0]["text"] == "Retained"
 
 
+@pytest.mark.parametrize("only_high_quality", [False, True])
+def test_stable_score_order_precedes_citation_assignment(wire, only_high_quality):
+    rows = [result(score, f"https://example.com/{title}", title=title) for title, score in (
+        ("low", 1), ("tie-first", 2), ("highest", 3), ("tie-second", 2), ("boundary", 1.5),
+    )]
+    rows.insert(2, result(score="invalid", url="https://example.com/invalid"))
+    wire.post.return_value = httpx.Response(200, json={"results": rows})
+    observer = Mock()
+    search = tool(only_high_quality=only_high_quality, observer=observer)
+    titles = ["highest", "tie-first", "tie-second", "boundary"]
+    if not only_high_quality:
+        titles.append("low")
+    for start in (1, len(titles) + 1):
+        model = json.loads(search.forward("topic"))
+        sources = json.loads(observer.add_message.call_args.args[2])
+        indices = list(range(start, start + len(titles)))
+        assert [item["title"] for item in model] == titles
+        assert [item["title"] for item in sources] == titles
+        assert [item["url"] for item in sources] == [f"https://example.com/{title}" for title in titles]
+        assert [item["cite_index"] for item in sources] == indices
+        assert [item["index"] for item in model] == [f"o{index}" for index in indices]
+        assert [item["reference_mark"] for item in model] == [f"[[o{index}]]" for index in indices]
+
+
+def test_score_sort_precedes_result_limit(wire):
+    wire.post.return_value = httpx.Response(200, json={"results": [
+        result(score, f"https://example.com/{score}", title=str(score)) for score in (1, 2, 3)
+    ]})
+    assert [item["title"] for item in json.loads(tool(max_results=2).forward("topic"))] == ["3", "2"]
+
+
 @pytest.mark.parametrize("results", [[], [result(1.49)]])
 def test_empty_results_do_not_retry_or_consume_indices(wire, results):
     wire.post.return_value = httpx.Response(200, json={"results": results})

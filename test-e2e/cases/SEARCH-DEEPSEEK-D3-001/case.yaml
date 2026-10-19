@@ -30,15 +30,17 @@
       ],
       "scores": [
         1.49,
-        1.5,
-        3.0
+        2.0,
+        3.0,
+        2.0,
+        1.5
       ]
     },
     "steps": [
       {
         "order": 1,
         "action": "Configure DeepSeek with default count and quality enabled, execute Chinese then English search through the actual boundary.",
-        "expected": "Count is 10; quality filtering retains 1.5 and above; language follows each request; long text is returned in full with matching model and source references."
+        "expected": "Count is 10; quality filtering retains 1.5 and above; results use descending rerank_score with stable ties before citation assignment; language follows each request; long text is returned in full with matching model and source references."
       },
       {
         "order": 2,

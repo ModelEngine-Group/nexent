@@ -206,6 +206,7 @@ class DeepSeekSearchTool(Tool):
             })
         if results and not valid_count:
             raise RuntimeError("Invalid DeepSeek search response results.")
+        messages.sort(key=lambda item: item["score_details"]["deepseek"]["rerank_score"], reverse=True)
         return messages[:self.max_results]
 
     def forward(self, query: str) -> str:
