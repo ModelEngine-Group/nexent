@@ -33,6 +33,7 @@ import {
 import { ResourceCollection, ResourceItem } from "./ResourceItem";
 
 import { useResourceTagFilter } from "@/hooks/useResourceTagFilter";
+import { useToolTagAssignments } from "@/hooks/useToolTagAssignments";
 import { ResourceTagFilterControl } from "./ResourceTagFilterControl";
 import { ResourceAssignedTags } from "./ResourceAssignedTags";
 
@@ -300,6 +301,12 @@ export function ToolDrawer({
     () => filteredTools.slice((page - 1) * pageSize, page * pageSize),
     [filteredTools, page, pageSize]
   );
+  const toolAssignments = useToolTagAssignments(
+    open,
+    pagedTools.map((tool) => String(tool.id)),
+    resourceTags.revision,
+    tenantId
+  );
 
   // Auto-switch to first available tab when the active tab has no tools.
   const tabItems = useMemo(
@@ -543,7 +550,10 @@ export function ToolDrawer({
         onRemoveSelected={removeTool}
         onSelectAll={handleSelectAll}
         allSelected={allVisibleToolsSelected}
-        onRefresh={() => void invalidate()}
+        onRefresh={() => {
+          void invalidate();
+          if (open && pagedTools.length > 0) void toolAssignments.refetch();
+        }}
         onPageChange={setPage}
         pageSize={pageSize}
         onPageSizeChange={(size) => {
@@ -590,6 +600,9 @@ export function ToolDrawer({
                         resourceType="tool"
                         resourceId={String(tool.id)}
                         tags={getToolLabels(tool)}
+                        assignments={
+                          toolAssignments.data?.[String(tool.id)] ?? []
+                        }
                         refreshKey={resourceTags.revision}
                       />
                     ),

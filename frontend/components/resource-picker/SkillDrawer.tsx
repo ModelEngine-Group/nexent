@@ -2,7 +2,14 @@
 
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { useTranslation } from "react-i18next";
 import { Alert, Button } from "antd";
 import { Pencil, Settings, Tag } from "lucide-react";
@@ -18,6 +25,8 @@ import SkillConfigModal from "@/components/skill-config/SkillConfigModal";
 import { useResourceTagFilter } from "@/hooks/useResourceTagFilter";
 import { ResourceTagFilterControl } from "./ResourceTagFilterControl";
 import { ResourceAssignedTags } from "./ResourceAssignedTags";
+import { AuthorizationContext } from "@/components/providers/AuthorizationProvider";
+import { useResourceTagAssignments } from "@/hooks/useResourceTagAssignments";
 import { ResourceTagManagementModal } from "./ResourceTagManagementModal";
 
 import styles from "./ResourcePickerDrawer.module.css";
@@ -132,6 +141,7 @@ export function SkillDrawer({
     "skill",
     availableSkills.map((skill) => String(skill.skill_id))
   );
+  const authorization = useContext(AuthorizationContext);
   const invalidate = onRefresh ?? catalog.invalidate;
   const [search, setSearch] = useState("");
   const [activeTab, setActiveTab] = useState("");
@@ -243,6 +253,13 @@ export function SkillDrawer({
     const skills = activeGroup?.skills ?? [];
     return skills.slice((page - 1) * pageSize, page * pageSize);
   }, [activeGroup, page, pageSize]);
+  const assignments = useResourceTagAssignments(
+    "skill",
+    open,
+    pagedSkills.map((skill) => String(skill.skill_id)),
+    resourceTags.revision,
+    authorization?.user?.tenantId ?? null
+  );
 
   useEffect(() => {
     if (!open || groupedSkills.length === 0) return;
@@ -500,7 +517,10 @@ export function SkillDrawer({
       onRemoveSelected={removeSkill}
       onSelectAll={handleSelectAll}
       allSelected={allVisibleSkillsSelected}
-      onRefresh={() => void invalidate()}
+      onRefresh={() => {
+        void invalidate();
+        if (open && pagedSkills.length) void assignments.refetch();
+      }}
       onPageChange={setPage}
       pageSize={pageSize}
       onPageSizeChange={(size) => {
@@ -535,6 +555,9 @@ export function SkillDrawer({
                       resourceType="skill"
                       resourceId={String(skill.skill_id)}
                       tags={skill.tags}
+                      assignments={
+                        assignments.data?.[String(skill.skill_id)] ?? []
+                      }
                       refreshKey={resourceTags.revision}
                     />
                   ),

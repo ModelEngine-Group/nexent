@@ -4,6 +4,7 @@ import { fireEvent, screen, waitFor } from "@testing-library/react";
 import { expect, it, vi } from "vitest";
 import { render, changePageSize } from "./resourceDrawerTestUtils";
 import { KnowledgeDrawer } from "@/components/resource-picker/KnowledgeDrawer";
+import { tagManagementApi } from "@/services/tagManagementService";
 import type { KnowledgeBase } from "@/types/knowledgeBase";
 
 vi.mock("@/services/tagManagementService", () => ({
@@ -11,6 +12,7 @@ vi.mock("@/services/tagManagementService", () => ({
     listLibraries: vi.fn(async () => []),
     listDefinitions: vi.fn(async () => []),
     getAssignments: vi.fn(async () => ({ assignments: [] })),
+    getKnowledgeAssignmentsBatch: vi.fn(async () => []),
     filterResourceIds: vi.fn(async () => ({ matched_resource_ids: [] })),
   },
 }));
@@ -68,7 +70,20 @@ it("changes the actual page size, returns to page one and retains off-page selec
   }));
   render(<KnowledgeDrawer open onClose={vi.fn()} knowledgeBases={items} />);
   expect(screen.getAllByRole("option")).toHaveLength(10);
+  await waitFor(() =>
+    expect(
+      tagManagementApi.getKnowledgeAssignmentsBatch
+    ).toHaveBeenCalledExactlyOnceWith(
+      Array.from({ length: 10 }, (_, i) => `kb:${i + 1}`)
+    )
+  );
   fireEvent.click(screen.getByRole("button", { name: "3" }));
+  await waitFor(() =>
+    expect(
+      tagManagementApi.getKnowledgeAssignmentsBatch
+    ).toHaveBeenLastCalledWith(["kb:21"])
+  );
+  expect(tagManagementApi.getAssignments).not.toHaveBeenCalled();
   fireEvent.click(screen.getByRole("option", { name: "Knowledge 21" }));
   await changePageSize(20);
   expect(screen.getAllByRole("option")).toHaveLength(20);

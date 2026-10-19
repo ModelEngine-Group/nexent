@@ -32,6 +32,7 @@ import type { KnowledgeItem, SelectedItem } from "./types";
 import { useResourceTagFilter } from "@/hooks/useResourceTagFilter";
 import { ResourceTagFilterControl } from "./ResourceTagFilterControl";
 import { ResourceAssignedTags } from "./ResourceAssignedTags";
+import { useResourceTagAssignments } from "@/hooks/useResourceTagAssignments";
 import { ResourceTagManagementModal } from "./ResourceTagManagementModal";
 
 import styles from "./ResourcePickerDrawer.module.css";
@@ -465,6 +466,14 @@ export function KnowledgeDrawer({
     [filteredKbs, page, pageSize, isAidpSearch, groupNameById, t]
   );
 
+  const assignments = useResourceTagAssignments(
+    "knowledge_base",
+    open && !isLoading && !slots?.renderTags,
+    pagedItems.map((item) => item.id),
+    resourceTags.revision,
+    tenantId
+  );
+
   const selected: SelectedItem[] = useMemo(
     () =>
       knowledgeBases
@@ -478,6 +487,8 @@ export function KnowledgeDrawer({
     filteredKbs.every((kb) => selectedIdsSet.has(kb.id));
 
   const handleRefresh = () => {
+    if (open && pagedItems.length && !slots?.renderTags)
+      void assignments.refetch();
     if (onRefresh) onRefresh();
     else if (!controlled) void selfFetch.refetch();
   };
@@ -620,6 +631,7 @@ export function KnowledgeDrawer({
                             resourceType="knowledge_base"
                             resourceId={kb.id}
                             tags={kb.tags}
+                            assignments={assignments.data?.[kb.id] ?? []}
                             refreshKey={resourceTags.revision}
                           />
                         )),

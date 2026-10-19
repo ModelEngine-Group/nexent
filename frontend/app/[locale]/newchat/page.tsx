@@ -3,6 +3,10 @@
 "use client";
 
 import {
+  ComposerAttachment,
+  ComposerDictation,
+} from "@/app/newchat/assistant-ui/composer-tools";
+import {
   useCallback,
   useEffect,
   useMemo,
@@ -865,7 +869,12 @@ const HomeContent: FC<{
               onBack={handleThreadBack}
               chatMode={chatMode}
               onChatModeChange={handleChatModeChange}
-              isDictationConfigured={isDictationConfigured}
+              composerTools={
+                <>
+                  <ComposerAttachment />
+                  <ComposerDictation configured={isDictationConfigured} />
+                </>
+              }
               knowledgeScope={knowledgeScope}
               knowledgePreview={knowledgePreview}
               knowledgeCapabilities={knowledgeCapabilities}

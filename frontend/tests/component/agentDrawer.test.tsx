@@ -9,12 +9,14 @@ import {
 } from "@/components/resource-picker/AgentDrawer";
 import type { Agent } from "@/types/agentConfig";
 import { API_ENDPOINTS } from "@/services/api";
+import { tagManagementApi } from "@/services/tagManagementService";
 
 vi.mock("@/services/tagManagementService", () => ({
   tagManagementApi: {
     listLibraries: vi.fn(async () => []),
     listDefinitions: vi.fn(async () => []),
     getAssignments: vi.fn(async () => ({ assignments: [] })),
+    getAgentAssignmentsBatch: vi.fn(async () => []),
     filterResourceIds: vi.fn(async () => ({ matched_resource_ids: [] })),
   },
 }));
@@ -52,6 +54,59 @@ const categories = [
 ];
 
 describe("AgentDrawer controlled selection", () => {
+  it("batches only visible canonical tag IDs across pages and skips external cards", async () => {
+    const items = Array.from({ length: 21 }, (_, index) => ({
+      id: `repository:${index + 100}`,
+      tagResourceId: String(index + 1),
+      name: `Canonical agent ${index + 1}`,
+      description: "",
+    }));
+    render(
+      <AgentDrawer
+        open
+        onClose={vi.fn()}
+        onConfirm={vi.fn()}
+        selected={[]}
+        categories={[
+          { key: "repository", label: "Repository", items },
+          {
+            key: "external",
+            label: "External",
+            supportsTagFilter: false,
+            items: [{ id: "a2a:1", name: "External agent", description: "" }],
+          },
+        ]}
+      />
+    );
+    await waitFor(() =>
+      expect(
+        tagManagementApi.getAgentAssignmentsBatch
+      ).toHaveBeenCalledExactlyOnceWith(
+        Array.from({ length: 10 }, (_, index) => String(index + 1))
+      )
+    );
+    fireEvent.click(screen.getByRole("button", { name: "3" }));
+    await waitFor(() =>
+      expect(
+        tagManagementApi.getAgentAssignmentsBatch
+      ).toHaveBeenLastCalledWith(["21"])
+    );
+    await changePageSize(20);
+    await waitFor(() =>
+      expect(
+        tagManagementApi.getAgentAssignmentsBatch
+      ).toHaveBeenLastCalledWith(
+        Array.from({ length: 20 }, (_, index) => String(index + 1))
+      )
+    );
+    expect(tagManagementApi.getAgentAssignmentsBatch).toHaveBeenCalledTimes(3);
+    fireEvent.click(screen.getByRole("button", { name: "External" }));
+    expect(
+      screen.getByRole("option", { name: "External agent" })
+    ).toBeInTheDocument();
+    expect(tagManagementApi.getAgentAssignmentsBatch).toHaveBeenCalledTimes(3);
+    expect(tagManagementApi.getAssignments).not.toHaveBeenCalled();
+  });
   it("uses the chosen page size for agent cards without losing selection", async () => {
     const items = Array.from({ length: 21 }, (_, index) => ({
       id: String(index + 1),
@@ -125,13 +180,15 @@ describe("AgentDrawer controlled selection", () => {
     const version = screen.getByText("agent.version: 12");
     const description = screen.getByText("Agent description");
     expect(version).not.toHaveClass("ant-tag");
-    expect(version.parentElement).toContainElement(screen.getByText("Custom agent"));
+    expect(version.parentElement).toContainElement(
+      screen.getByText("Custom agent")
+    );
     expect(version.compareDocumentPosition(description)).toBe(
       Node.DOCUMENT_POSITION_FOLLOWING
     );
-    expect(description.compareDocumentPosition(screen.getByText("Finance"))).toBe(
-      Node.DOCUMENT_POSITION_FOLLOWING
-    );
+    expect(
+      description.compareDocumentPosition(screen.getByText("Finance"))
+    ).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
     expect(screen.queryByText("agentConfig.list.online")).toBeNull();
     expect(image).toHaveAttribute(
       "src",

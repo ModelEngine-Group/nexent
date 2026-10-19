@@ -2,6 +2,10 @@
 
 "use client";
 
+import {
+  ComposerAttachment,
+  ComposerDictation,
+} from "@/app/newchat/assistant-ui/composer-tools";
 import { DEFAULT_MODEL_PARAMETER_VALUES } from "@/const/modelParameterSettings";
 import { restoreKnowledgeDisplay } from "./knowledgeDisplay";
 
@@ -1404,7 +1408,12 @@ const HomeContent: FC = () => {
             onAgentSelected={handleAgentSelectedFromLanding}
             chatMode={chatMode}
             onChatModeChange={handleChatModeChange}
-            isDictationConfigured={isDictationConfigured}
+            composerTools={
+              <>
+                <ComposerAttachment />
+                <ComposerDictation configured={isDictationConfigured} />
+              </>
+            }
             knowledgeScope={isCreating ? null : knowledgeScope}
             knowledgePreview={isCreating ? null : knowledgePreview}
             knowledgeCapabilities={isCreating ? null : knowledgeCapabilities}
