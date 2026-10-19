@@ -42,7 +42,7 @@ class A2AServerSettings(BaseModel):
     card_overrides: Dict[str, Any] | None = None
 
 
-from management.services.agent.northbound import NorthboundContext
+from services.northbound_service import NorthboundContext
 from management.services.agent.a2a.service import (
     a2a_server_service,
     EndpointNotFoundError,

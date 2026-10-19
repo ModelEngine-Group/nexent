@@ -18,7 +18,7 @@ from fastapi.testclient import TestClient
 from apps import agent_app, skill_app
 from model_controls.database import database_fixture
 from model_controls.provider import Provider
-from management.services.agent import creation as nl2agent_service
+from services import nl2agent_service as nl2agent_service
 from services import nl2skill_service as nl2skill_service
 from infrastructure.concurrency import runtime_thread_manager
 from nexent.core.concurrency.helpers import shutdown_fallback_thread_manager

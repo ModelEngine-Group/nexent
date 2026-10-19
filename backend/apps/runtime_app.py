@@ -36,7 +36,7 @@ logger = logging.getLogger("runtime_app")
 async def start_agent_automation_scheduler():
     from management.services.automation.scheduler import agent_automation_scheduler
     from management.recovery import recover_runtime_tasks
-    from runtime.services.workspace_cleanup import cleanup_orphaned_agent_workspaces
+    from services.workspace_cleanup_service import cleanup_orphaned_agent_workspaces
 
     await runtime_thread_manager.run(
         "control-io",

@@ -18,7 +18,7 @@ with pytest.MonkeyPatch.context() as import_mocks:
     import_mocks.setitem(sys.modules, "management.services.agent.service", MagicMock())
     from apps.northbound_app import router
 
-from management.services.agent.northbound import NorthboundContext
+from services.northbound_service import NorthboundContext
 
 app = FastAPI()
 app.include_router(router)

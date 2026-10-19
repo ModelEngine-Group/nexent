@@ -789,7 +789,7 @@ async def search_installed_mcp_tools(keywords: list[str]) -> dict[str, Any]:
 
     try:
         # Keep NL2Agent runtime dependencies out of the MCP server startup path.
-        from management.services.agent.creation import search_installed_mcp_tools_by_query
+        from services.nl2agent_service import search_installed_mcp_tools_by_query
 
         authorization = get_http_request().headers.get("Authorization")
         _, tenant_id = get_current_user_id(authorization)
@@ -847,7 +847,7 @@ async def search_installed_resources(
     try:
         from consts.exceptions import AgentDraftEditError
         from management.services.agent.authorization import require_agent_draft_edit
-        from management.services.agent.creation import search_installed_resources_impl
+        from services.nl2agent_service import search_installed_resources_impl
 
         authorization = get_http_request().headers.get("Authorization")
         user_id, tenant_id = get_current_user_id(authorization)
@@ -899,7 +899,7 @@ async def search_uninstalled_resources(
     try:
         from consts.exceptions import AgentDraftEditError
         from management.services.agent.authorization import require_agent_draft_edit
-        from management.services.agent.creation import search_uninstalled_resources_impl
+        from services.nl2agent_service import search_uninstalled_resources_impl
 
         authorization = get_http_request().headers.get("Authorization")
         user_id, tenant_id = get_current_user_id(authorization)
@@ -952,7 +952,7 @@ async def recommend_resources(
     try:
         from consts.exceptions import AgentDraftEditError
         from management.services.agent.authorization import require_agent_draft_edit
-        from management.services.agent.creation import (
+        from services.nl2agent_service import (
             Nl2AgentResourceError,
             recommend_resources_impl,
         )
@@ -1037,7 +1037,7 @@ async def nl2a_wrapper(
                 resource_result=supplied,
             )
 
-        from management.services.agent.creation import recommend_resources_impl
+        from services.nl2agent_service import recommend_resources_impl
 
         sources = {resource.candidate.source for resource in supplied.resources}
         required_sources = (
@@ -1155,7 +1155,7 @@ async def save_agent_draft_fields(
         )
 
     try:
-        from management.services.agent.creation import (
+        from services.nl2agent_service import (
             Nl2AgentCompletionError,
             Nl2AgentDraftSaveError,
             save_agent_draft_fields_impl,

@@ -42,10 +42,10 @@ class NorthboundContext:
     authorization: str
     token_id: int = 0
 
-# management.services.agent.northbound - provides only NorthboundContext
-northbound_service_module = types.ModuleType("management.services.agent.northbound")
+# services.northbound_service - provides only NorthboundContext
+northbound_service_module = types.ModuleType("services.northbound_service")
 northbound_service_module.NorthboundContext = NorthboundContext
-sys.modules['management.services.agent.northbound'] = northbound_service_module
+sys.modules['services.northbound_service'] = northbound_service_module
 
 # management.services.agent.a2a.service - stub with a2a_server_service object and exceptions
 from unittest.mock import AsyncMock, MagicMock

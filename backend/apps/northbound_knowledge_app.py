@@ -23,7 +23,7 @@ from management.services.file.service import (
     get_file_stream_impl,
     check_file_access,
 )
-from management.services.agent.northbound import NorthboundContext
+from services.northbound_service import NorthboundContext
 from management.services.knowledge_base.task_state import get_redis_service
 from management.services.knowledge_base.service import (
     ElasticSearchService,

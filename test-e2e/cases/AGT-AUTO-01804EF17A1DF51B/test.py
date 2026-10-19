@@ -4,7 +4,7 @@
 NL2Agent run switched from _resolve_safe_input_budget to
 _resolve_context_budget. This test verifies ContextManagerConfig threshold
 resolution and the snapshot-missing fallback inside
-management.services.agent.creation.build_nl2agent_run_info.
+services.nl2agent_service.build_nl2agent_run_info.
 '''
 
 from __future__ import annotations
@@ -60,7 +60,7 @@ def _make_context_budget_snapshot(**overrides):
 
 
 def _patch_dependencies(monkeypatch, *, input_budget, capacity_monitoring, resolved_capacity_snapshot, context_budget_snapshot):
-    from management.services.agent import creation as nl2agent_service
+    from services import nl2agent_service as nl2agent_service
     from consts import const
 
     monkeypatch.setattr(nl2agent_service, 'LOCAL_MCP_SERVER', 'http://localhost:9999')

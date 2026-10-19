@@ -9,7 +9,7 @@ from types import SimpleNamespace
 
 import pytest
 
-import management.services.agent.creation as service
+import services.nl2agent_service as service
 
 
 @pytest.mark.stage("D5")

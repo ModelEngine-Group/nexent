@@ -321,7 +321,10 @@ change:
     - test/ext_components/ext_knowledge/test_idata_fidelity.py
     - test/ext_components/ext_knowledge/test_ragflow_fidelity.py
     - test/sdk/core/concurrency/test_thread_creation_gate.py
-  notes: Refactor baseline 0d9960d5; merged develop ab9d74813 on 2026-10-19. Preserve
+  notes: 'Refactor baseline 0d9960d5; merged develop ab9d74813 on 2026-10-19. Preserve
     upstream repository sorting, main-agent flags and batch tag reads. Skill business,
     SDK skills, Gateway and new remote execution protocols remain excluded. Existing
     D1 is regression execution; historical acceptance completeness remains unreviewed.
+    Scope narrowed by user on 2026-10-19: workspace cleanup, NL2Agent and Northbound
+    keep their original services owners; backend/runtime package is removed. NL2Skill
+    retains only the necessary relocated dependency imports as explicitly approved.'

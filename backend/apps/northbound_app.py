@@ -40,7 +40,7 @@ from management.services.permission.api_keys import (
     revoke_user_api_keys,
 )
 from management.services.monitor.audit import record_security_event
-from management.services.agent.northbound import (
+from services.northbound_service import (
     NorthboundContext,
     get_conversation_history,
     list_conversations,

@@ -463,7 +463,7 @@ async def start_streaming_chat(
                 "control-io",
                 ManagedTaskSpec(
                     task_name="northbound-save-user-message",
-                    owner="management.services.agent.northbound",
+                    owner="services.northbound_service",
                 ),
                 save_conversation_user,
                 agent_request,
@@ -766,7 +766,7 @@ async def get_agent_knowledge_bases_for_northbound(
             "control-io",
             ManagedTaskSpec(
                 task_name="northbound-resolve-aidp-access",
-                owner="management.services.agent.northbound",
+                owner="services.northbound_service",
             ),
             resolve_current_aidp_access,
             server_url=AIDP_SERVER_URL,
@@ -785,7 +785,7 @@ async def get_agent_knowledge_bases_for_northbound(
                     "control-io",
                     ManagedTaskSpec(
                         task_name="northbound-get-aidp-knowledge-base",
-                        owner="management.services.agent.northbound",
+                        owner="services.northbound_service",
                     ),
                     get_aidp_kb_impl,
                     AIDP_SERVER_URL,

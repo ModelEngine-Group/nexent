@@ -8,7 +8,7 @@ from fastmcp import FastMCP
 from mcp.types import Tool
 from pydantic import ValidationError
 
-import management.services.agent.creation as nl2agent_service
+import services.nl2agent_service as nl2agent_service
 import management.services.tool.configuration as tool_configuration_service
 import tool_collection.mcp.nl2agent_mcp_tools as nl2agent_mcp_tools_module
 from consts.exceptions import AgentDraftEditError

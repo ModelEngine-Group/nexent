@@ -9,12 +9,14 @@ ROOT = Path(__file__).resolve().parents[3]
 BACKEND = ROOT / "backend"
 
 
-def test_flat_service_exclusions_remain_skill_only():
+def test_flat_service_exclusions_match_deferred_scope():
     assert {p.name for p in (BACKEND / "services").rglob("*.py")} == {
         "__init__.py", "nl2skill_service.py", "skill_repository_service.py",
+        "nl2agent_service.py", "northbound_service.py", "workspace_cleanup_service.py",
     }
     assert not list((BACKEND / "utils").glob("*.py"))
     assert not (BACKEND / "gateway").exists()
+    assert not list((BACKEND / "runtime").rglob("*.py"))
 
 
 def test_production_imports_use_canonical_owners():
@@ -33,7 +35,11 @@ def test_production_imports_use_canonical_owners():
                 name = name.removeprefix("backend.")
                 if name.startswith("utils.") or (
                     name.startswith("services.")
-                    and name not in {"services.nl2skill_service", "services.skill_repository_service"}
+                    and name not in {
+                        "services.nl2skill_service", "services.skill_repository_service",
+                        "services.nl2agent_service", "services.northbound_service",
+                        "services.workspace_cleanup_service",
+                    }
                 ):
                     unexpected.append((path.relative_to(ROOT).as_posix(), name))
     assert unexpected == []

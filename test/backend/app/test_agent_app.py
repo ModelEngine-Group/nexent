@@ -35,7 +35,7 @@ from consts.exceptions import (
 )
 from consts.model import NL2AgentRunRequest
 from consts.exceptions import AgentDraftEditError
-from management.services.agent.creation import Nl2AgentDraftSaveError
+from services.nl2agent_service import Nl2AgentDraftSaveError
 
 # Filter out deprecation warnings from third-party libraries
 warnings.filterwarnings(

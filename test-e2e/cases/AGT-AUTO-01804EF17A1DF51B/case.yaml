@@ -23,7 +23,7 @@ case:
       - ${NEXENT_TEST_HOME}/config/secrets.env'
   steps:
   - order: 1
-    action: 在本地工作区构造最小有效 NL2AgentRunRequest（含 query、agent_id、history），调用 backend/management/services/agent/creation.py 的 build_nl2agent_run_info，使用返回非空
+    action: 在本地工作区构造最小有效 NL2AgentRunRequest（含 query、agent_id、history），调用 backend/services/nl2agent_service.py 的 build_nl2agent_run_info，使用返回非空
       context_budget_snapshot 的模型 A。
     expected: snapshot 非空时：effective_input_limit_tokens/compaction_trigger_threshold_tokens/compaction_target_tokens 与 context_budget_snapshot
       对应字段一致，token_threshold == compaction_trigger_threshold_tokens。

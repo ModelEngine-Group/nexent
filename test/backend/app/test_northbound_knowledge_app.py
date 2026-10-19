@@ -36,9 +36,9 @@ class NorthboundContext:
     token_id: int = 0
 
 
-northbound_service_module = types.ModuleType("management.services.agent.northbound")
+northbound_service_module = types.ModuleType("services.northbound_service")
 northbound_service_module.NorthboundContext = NorthboundContext
-sys.modules["management.services.agent.northbound"] = northbound_service_module
+sys.modules["services.northbound_service"] = northbound_service_module
 
 file_mgmt_module = types.ModuleType("management.services.file.service")
 file_mgmt_module.upload_files_impl = AsyncMock()
