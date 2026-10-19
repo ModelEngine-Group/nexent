@@ -17,8 +17,6 @@ from pydantic import (
 )
 from nexent.core.agents.agent_model import AgentVerificationConfig, ToolConfig
 
-from consts.prompt_template import PROMPT_GENERATE_TEMPLATE_FIELD_ALIAS_MAP
-
 
 def _validated_context_policy(value: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
     """Validate a partial request/agent policy while preserving its layer shape."""
@@ -1310,7 +1308,6 @@ class GeneratePromptRequest(BaseModel):
     task_description: str
     agent_id: int
     model_id: int
-    prompt_template_id: Optional[int] = None
     tool_ids: Optional[List[int]] = Field(
         None, description="Optional: tool IDs from frontend (takes precedence over database query)")
     sub_agent_ids: Optional[List[int]] = Field(
@@ -1328,50 +1325,6 @@ class GeneratePromptRequest(BaseModel):
         return value
 
 
-class PromptTemplateContentRequest(BaseModel):
-    model_config = ConfigDict(populate_by_name=True)
-
-    duty_system_prompt: str = Field(
-        alias=PROMPT_GENERATE_TEMPLATE_FIELD_ALIAS_MAP["duty_system_prompt"]
-    )
-    constraint_system_prompt: str = Field(
-        alias=PROMPT_GENERATE_TEMPLATE_FIELD_ALIAS_MAP["constraint_system_prompt"]
-    )
-    few_shots_system_prompt: str = Field(
-        alias=PROMPT_GENERATE_TEMPLATE_FIELD_ALIAS_MAP["few_shots_system_prompt"]
-    )
-    agent_variable_name_system_prompt: str = Field(
-        alias=PROMPT_GENERATE_TEMPLATE_FIELD_ALIAS_MAP["agent_variable_name_system_prompt"]
-    )
-    agent_display_name_system_prompt: str = Field(
-        alias=PROMPT_GENERATE_TEMPLATE_FIELD_ALIAS_MAP["agent_display_name_system_prompt"]
-    )
-    agent_description_system_prompt: str = Field(
-        alias=PROMPT_GENERATE_TEMPLATE_FIELD_ALIAS_MAP["agent_description_system_prompt"]
-    )
-    user_prompt: str = Field(
-        alias=PROMPT_GENERATE_TEMPLATE_FIELD_ALIAS_MAP["user_prompt"]
-    )
-    agent_name_regenerate_system_prompt: str = Field(
-        alias=PROMPT_GENERATE_TEMPLATE_FIELD_ALIAS_MAP["agent_name_regenerate_system_prompt"]
-    )
-    agent_name_regenerate_user_prompt: str = Field(
-        alias=PROMPT_GENERATE_TEMPLATE_FIELD_ALIAS_MAP["agent_name_regenerate_user_prompt"]
-    )
-    agent_display_name_regenerate_system_prompt: str = Field(
-        alias=PROMPT_GENERATE_TEMPLATE_FIELD_ALIAS_MAP["agent_display_name_regenerate_system_prompt"]
-    )
-    agent_display_name_regenerate_user_prompt: str = Field(
-        alias=PROMPT_GENERATE_TEMPLATE_FIELD_ALIAS_MAP["agent_display_name_regenerate_user_prompt"]
-    )
-
-
-class PromptTemplateRequest(BaseModel):
-    template_name: str
-    description: Optional[str] = None
-    template_type: str = "agent_generate"
-    template_content_zh: PromptTemplateContentRequest
-    template_content_en: Optional[PromptTemplateContentRequest] = None
 class OptimizePromptSectionRequest(BaseModel):
     task_description: str
     agent_id: int
@@ -1462,8 +1415,6 @@ class AgentInfoRequest(BaseModel):
     enabled: Optional[bool] = None
     business_logic_model_name: Optional[str] = None
     business_logic_model_id: Optional[int] = None
-    prompt_template_id: Optional[int] = None
-    prompt_template_name: Optional[str] = None
     enabled_tool_ids: Optional[List[int]] = None
     enabled_skill_ids: Optional[List[int]] = None
     skill_instances: Optional[List[AgentSkillInstanceRequest]] = None
@@ -1590,8 +1541,6 @@ class ExportAndImportAgentInfo(BaseModel):
     business_logic_model_id: Optional[int] = None
     business_logic_model_name: Optional[str] = None
     skill_names: Optional[List[str]] = None
-    prompt_template_id: Optional[int] = None
-    prompt_template_name: Optional[str] = None
     # v2.6.0 per-agent model inference param overrides (mirrors AgentInfo column).
     model_params_override: Optional[Dict[str, Any]] = None
     greeting_message: Optional[str] = None

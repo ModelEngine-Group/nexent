@@ -9,9 +9,9 @@ import httpx
 from consts.const import DATA_PROCESS_SERVICE
 from consts.model import ProcessParams
 from database.knowledge_db import get_knowledge_record
-from utils.auth_utils import get_current_user_id
-from utils.knowledge_ingestion_errors import classify_ingestion_exception
-from utils.knowledge_telemetry import (
+from management.services.permission.identity.authentication_helpers import get_current_user_id
+from infrastructure.ingestion.errors import classify_ingestion_exception
+from infrastructure.observability.knowledge import (
     inject_trace_context,
     set_span_attributes,
     trace_knowledge_operation,

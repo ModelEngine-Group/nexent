@@ -1,3 +1,4 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 import io
 import json
 import logging
@@ -9,7 +10,7 @@ from pydantic import BaseModel, Field, model_validator
 
 from consts.error_code import ErrorCode
 from consts.exceptions import AppException, UnauthorizedError
-from services.evaluator_service import (
+from management.services.evaluation.evaluators import (
     create_evaluator_impl,
     delete_evaluator_impl,
     delete_evaluator_version_impl,
@@ -23,7 +24,7 @@ from services.evaluator_service import (
     restore_evaluator_version_impl,
     update_evaluator_impl,
 )
-from utils.auth_utils import get_current_user_id
+from management.services.permission.identity.authentication_helpers import get_current_user_id
 
 
 logger = logging.getLogger("evaluator_app")

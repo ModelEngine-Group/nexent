@@ -52,20 +52,20 @@ from nexent.core.concurrency import (
 from nexent.monitor import (
     agent_monitoring_context,
 )
-from services.conversation_management_service import (
+from management.services.conversation.service import (
     get_current_run_user_message_id,
     get_latest_assistant_message,
     load_historical_context,
     persist_history_summary_candidate,
     save_conversation_user,
 )
-from services.memory_config_service import (
+from management.services.configuration.user.memory import (
     build_memory_context,
 )
-from services.streaming_channel import (
+from infrastructure.streaming.channels import (
     streaming_channel_manager,
 )
-from services.thread_lifecycle_service import (
+from infrastructure.concurrency import (
     runtime_thread_manager,
 )
 
@@ -76,8 +76,8 @@ def apply_workbench_runtime_plan(
     agent_request: AgentRequest, canonical_workbench, resolved_plan, tenant_id: str
 ) -> None:
     """Attach a validated Workbench plan to one in-memory run request."""
-    from services.knowledge_scope_service import snapshot_runtime_knowledge_tree
-    from services.workbench_service import (
+    from management.services.knowledge_base.scope import snapshot_runtime_knowledge_tree
+    from management.services.agent.workbench import (
         attach_runtime_knowledge_tree,
         runtime_skill_snapshot,
     )
@@ -88,7 +88,7 @@ def apply_workbench_runtime_plan(
         int(resolved_plan.root.identity.version_no),
     )
     if canonical_workbench.knowledge_scope is not None:
-        from services.runtime_knowledge_mount import mount_knowledge_records
+        from management.services.knowledge_base.mount import mount_knowledge_records
 
         knowledge_tree = knowledge_tree[:1]
         knowledge_tree[0]["tools"] = mount_knowledge_records(
@@ -201,7 +201,7 @@ async def prepare_agent_run(
         **create_run_kwargs,
     )
     if runtime_mount_plan is not None:
-        from services.workbench_service import compile_runtime_mount_plan
+        from management.services.agent.workbench import compile_runtime_mount_plan
 
         executable_tree = compile_runtime_mount_plan(
             runtime_mount_plan, agent_run_info.agent_config

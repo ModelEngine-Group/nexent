@@ -21,7 +21,7 @@ case:
     legacy_asset_declaration: '- 无额外本地资产；使用内存构造的 (agent, meta) 元组列表作为 filtered_agents 输入。'
   steps:
   - order: 1
-    action: 直接导入 backend/services/agent_repository_service.py 的 _paginate_mine_agents_with_optional_padding 函数，构造包含 3 个 (agent,
+    action: 直接导入 backend/management/services/repository/agent/listing.py 的 _paginate_mine_agents_with_optional_padding 函数，构造包含 3 个 (agent,
       meta) 元组的 filtered_agents 列表。
     expected: 'include_padding=True、page=1 时，返回首项为 {"new_agent_padding": true} 占位项，其后依次为 filtered_agents[0]、filtered_agents[1]…，total
       == len(filtered_agents)+1。'

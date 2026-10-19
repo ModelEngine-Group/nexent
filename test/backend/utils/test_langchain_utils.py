@@ -1,7 +1,8 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 import pytest
 from unittest.mock import MagicMock
 
-from backend.utils.langchain_utils import discover_langchain_modules, _is_langchain_tool
+from management.services.tool.langchain import discover_langchain_modules, _is_langchain_tool
 
 
 @pytest.fixture
@@ -11,7 +12,7 @@ def mock_logger():
 
 
 class TestLangchainUtils:
-    """Tests for backend.utils.langchain_utils functions"""
+    """Tests for management.services.tool.langchain functions"""
 
     def test_is_langchain_tool_with_base_tool(self, mocker):
         """Returns True for objects that are instances of BaseTool"""
@@ -21,7 +22,7 @@ class TestLangchainUtils:
 
         mocker.patch('langchain_core.tools.BaseTool',
                      mock_base_tool_class)
-        mocker.patch('backend.utils.langchain_utils.isinstance',
+        mocker.patch('management.services.tool.langchain.isinstance',
                      return_value=True)
 
         result = _is_langchain_tool(mock_tool_instance)
@@ -33,7 +34,7 @@ class TestLangchainUtils:
 
         mocker.patch('langchain_core.tools.BaseTool',
                      mock_base_tool_class)
-        mocker.patch('backend.utils.langchain_utils.isinstance',
+        mocker.patch('management.services.tool.langchain.isinstance',
                      return_value=False)
 
         result = _is_langchain_tool("not a tool")
@@ -100,7 +101,7 @@ class TestLangchainUtils:
         mocker.patch('os.path.isdir', return_value=True)
         mocker.patch('os.listdir', return_value=['error_module.py'])
         mock_spec = mocker.patch('importlib.util.spec_from_file_location')
-        mocker.patch('backend.utils.langchain_utils.logger', mock_logger)
+        mocker.patch('management.services.tool.langchain.logger', mock_logger)
 
         # 设置spec_from_file_location抛出异常
         mock_spec.side_effect = Exception("Module error")
@@ -122,7 +123,7 @@ class TestLangchainUtils:
         mocker.patch('os.listdir', return_value=['invalid_module.py'])
         mocker.patch('importlib.util.spec_from_file_location',
                      return_value=None)
-        mocker.patch('backend.utils.langchain_utils.logger', mock_logger)
+        mocker.patch('management.services.tool.langchain.logger', mock_logger)
 
         # 执行函数
         result = discover_langchain_modules()

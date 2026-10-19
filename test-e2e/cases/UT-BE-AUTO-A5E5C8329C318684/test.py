@@ -1,3 +1,4 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 '''BE-UT F-131 thread_lifecycle_service lane policies and cross-lane isolation.
 
 Case UT-BE-AUTO-A5E5C8329C318684 (D1).
@@ -25,7 +26,7 @@ from nexent.core.concurrency import (
     ManagerState,
     ThreadManager,
 )
-from services.thread_lifecycle_service import (
+from infrastructure.concurrency import (
     config_thread_manager,
     mcp_thread_manager,
     northbound_thread_manager,

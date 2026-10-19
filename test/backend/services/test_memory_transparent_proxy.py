@@ -1,3 +1,4 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 import sys
 import types
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -175,34 +176,34 @@ memory_pkg.service = memory_service_mod
 sys.modules["nexent.memory.service"] = memory_service_mod
 
 services_pkg = types.ModuleType("services")
-record_svc_mod = types.ModuleType("services.memory_record_service")
+record_svc_mod = types.ModuleType("management.services.memory.records")
 record_svc_mod._compute_content_embedding = MagicMock(return_value=None)
 record_svc_mod._resolve_tenant_embedding_model_info = MagicMock(return_value=None)
 record_svc_mod.get_memory_record_service = MagicMock()
 record_svc_mod.MemoryRecordError = type("MemoryRecordError", (Exception,), {})
 record_svc_mod.MemoryRecordService = MagicMock
-retrieval_svc_mod = types.ModuleType("services.memory_retrieval_service")
+retrieval_svc_mod = types.ModuleType("management.services.memory.retrieval")
 retrieval_svc_mod.MemoryRetrievalService = MagicMock
 retrieval_svc_mod.get_memory_retrieval_service = MagicMock()
-index_svc_mod = types.ModuleType("services.memory_index_service")
+index_svc_mod = types.ModuleType("management.services.memory.index")
 index_svc_mod.MemoryIndexService = MagicMock
 index_svc_mod.get_memory_index_service = MagicMock()
 index_svc_mod.reset_memory_index_service = MagicMock()
 knowledge_base_service_mod = types.ModuleType("management.services.knowledge_base.service")
 knowledge_base_service_mod.get_vector_db_core = MagicMock(return_value=MagicMock())
-external_provider_svc_mod = types.ModuleType("services.memory_external_provider_service")
+external_provider_svc_mod = types.ModuleType("management.services.memory.providers.service")
 external_provider_svc_mod.get_memory_external_provider_service = MagicMock()
-ingestion_event_svc_mod = types.ModuleType("services.memory_ingestion_event_service")
+ingestion_event_svc_mod = types.ModuleType("management.services.memory.ingestion")
 ingestion_event_svc_mod.MemoryIngestionEventService = MagicMock
 sys.modules["services"] = services_pkg
-sys.modules["services.memory_record_service"] = record_svc_mod
-sys.modules["services.memory_retrieval_service"] = retrieval_svc_mod
-sys.modules["services.memory_index_service"] = index_svc_mod
+sys.modules["management.services.memory.records"] = record_svc_mod
+sys.modules["management.services.memory.retrieval"] = retrieval_svc_mod
+sys.modules["management.services.memory.index"] = index_svc_mod
 sys.modules["management.services.knowledge_base.service"] = knowledge_base_service_mod
-sys.modules["services.memory_external_provider_service"] = external_provider_svc_mod
-sys.modules["services.memory_ingestion_event_service"] = ingestion_event_svc_mod
-sys.modules["backend.services.memory_external_provider_service"] = external_provider_svc_mod
-sys.modules["backend.services.memory_ingestion_event_service"] = ingestion_event_svc_mod
+sys.modules["management.services.memory.providers.service"] = external_provider_svc_mod
+sys.modules["management.services.memory.ingestion"] = ingestion_event_svc_mod
+sys.modules["management.services.memory.providers.service"] = external_provider_svc_mod
+sys.modules["management.services.memory.ingestion"] = ingestion_event_svc_mod
 
 database_pkg = types.ModuleType("database")
 database_pkg.memory_record_db = MagicMock(name="memory_record_db")
@@ -210,8 +211,8 @@ database_pkg.memory_long_term_db = MagicMock(name="memory_long_term_db")
 database_pkg.memory_retrieval_hit_db = MagicMock(name="memory_retrieval_hit_db")
 sys.modules["database"] = database_pkg
 
-from backend.services.memory_context_service import MemoryContextService
-from backend.services import memory_backend_adapter
+from management.services.memory.context import MemoryContextService
+from management.services.memory import provider as memory_backend_adapter
 
 
 @pytest.fixture
