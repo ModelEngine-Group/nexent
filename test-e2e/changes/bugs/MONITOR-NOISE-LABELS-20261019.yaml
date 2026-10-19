@@ -1,0 +1,41 @@
+schema_version: '1.0'
+change:
+  change_id: MONITOR-NOISE-LABELS-20261019
+  change_type: bugfix
+  bug_id: MONITOR-NOISE-LABELS-20261019
+  title: Filter Elasticsearch monitoring noise and localize built-in Agent trace names
+  description: Extend the existing export filter and set Chinese display names on request-scoped Workbench and NL2Skill configurations.
+  observed_behavior: Elasticsearch search, indices.stats and indices.get_settings spans dominate monitoring; built-in runs appear as Nexent Workbench and __skill_creator__.
+  expected_behavior: Omit these Elasticsearch spans alongside indices.get_alias; retain business tool spans and other database operations. Workbench and NL2Skill traces use 智能工作台 and 技能创建助手 while executable identifiers and published snapshots remain unchanged.
+  escaped_stage: production
+  feature_contract_changed: true
+  coverage_gap:
+    type: missing_assertion
+    description: Existing UT explicitly retains Elasticsearch search and lacks Chinese built-in runtime display assertions. The existing formal exporter Case tests configuration parsing only and is selected solely for regression.
+  affected_features:
+    existing: [F-078]
+    added: []
+    modified: [F-169]
+    retired: []
+  affected_cases:
+    existing: [UT-SDK-014]
+    added: []
+    modified: []
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    behaviors:
+      - Filter the four Elasticsearch operations on success and failure without changing requests, responses or errors.
+      - Retain other Elasticsearch operations, non-Elasticsearch spans, Agent runs and business search tools with their parent relationships.
+      - Provide Chinese built-in runtime display names for legacy and missing Workbench labels without mutating published snapshots or child identities.
+      - Preserve NL2Skill's executable name and existing runtime options while adding its Chinese display name.
+    reason: Strengthen existing production-path exporter UT and configuration UT; existing generic display-name tracing UT proves propagation. No new formal Case duplicates these bounded rules; UT-SDK-014 remains a separate configuration regression.
+    test_selectors:
+      - test/sdk/core/agents/observability/test_elasticsearch_spans.py
+      - test/sdk/core/agents/observability/test_trace_name.py
+      - test/sdk/core/agents/observability/test_agent_display_name.py
+      - test/backend/services/test_workbench_monitoring_labels.py
+      - test/backend/services/test_workbench_service.py
+      - test/backend/services/test_workbench_service_coverage.py
+      - test/backend/services/test_nl2skill_service.py
+  notes: 'Design and acceptance: test-e2e/changes/bugs/MONITOR-NOISE-LABELS-20261019/design.md. The sibling nexent-doc/nexent_SPEC document baseline is unavailable in this checkout; the local design records this limitation. No runtime model, HTTP, database schema, provisioning revision or deployment changes are required. Formal Case execution is reported separately from current-fix UT acceptance.'

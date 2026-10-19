@@ -1,4 +1,5 @@
-"""UT-SDK-TRACE-022: omit alias discovery spans without changing ES calls."""
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+"""Omit noisy Elasticsearch spans without changing calls or business tracing."""
 
 from types import SimpleNamespace
 
@@ -59,13 +60,68 @@ def test_ut_sdk_trace_022_alias_lookup_is_not_exported(telemetry, mocker, fails)
 
 @pytest.mark.parametrize("attributes", [
     {}, {"db.system": "postgresql", "db.operation": "indices.get_alias"},
-    {"db.system": "elasticsearch", "db.operation": "search"},
+    {"db.system": "elasticsearch", "db.operation": "msearch"},
 ])
 def test_ut_sdk_trace_022_other_operations_are_retained(telemetry, attributes):
     with telemetry.tracer.start_as_current_span("indices.get_alias", attributes=attributes):
         pass
     assert telemetry.provider.force_flush(timeout_millis=1000)
     assert len(telemetry.exporter.get_finished_spans()) == 1
+
+
+@pytest.mark.parametrize("operation,path", [
+    ("search", "/documents/_search"),
+    ("indices.stats", "/documents/_stats"),
+    ("indices.get_settings", "/documents/_settings"),
+])
+@pytest.mark.parametrize("fails", [False, True])
+def test_noisy_elasticsearch_operations_execute_without_export(telemetry, mocker, operation, path, fails):
+    client = ElasticSearchCore("http://elasticsearch.invalid:9200", api_key=None)
+    meta = ApiResponseMeta(
+        status=200, http_version="1.1", headers=HttpHeaders({"x-elastic-product": "Elasticsearch"}),
+        duration=0.01, node=NodeConfig("http", "elasticsearch.invalid", 9200),
+    )
+    body = {"documents": {"value": "preserved"}}
+    transport = mocker.patch.object(
+        client.client.transport, "perform_request",
+        side_effect=RuntimeError("unavailable") if fails else None,
+        return_value=TransportApiResponse(meta, body),
+    )
+    target = client.client.indices if operation.startswith("indices.") else client.client
+    request = getattr(target, operation.rsplit(".", 1)[-1])
+    try:
+        with telemetry.tracer.start_as_current_span("agent.run"):
+            if fails:
+                with pytest.raises(RuntimeError, match="unavailable"):
+                    request(index="documents")
+            else:
+                assert request(index="documents").body == body
+            with telemetry.tracer.start_as_current_span("agent.tool.search", attributes={"tool.name": "search"}):
+                pass
+            with telemetry.tracer.start_as_current_span("model.generate"):
+                pass
+        transport.assert_called_once()
+        assert transport.call_args.args[1] == path
+        assert telemetry.provider.force_flush(timeout_millis=1000)
+        spans = {span.name: span for span in telemetry.exporter.get_finished_spans()}
+        assert set(spans) == {"agent.run", "agent.tool.search", "model.generate"}
+        for name in ("agent.tool.search", "model.generate"):
+            assert spans[name].parent.span_id == spans["agent.run"].context.span_id
+    finally:
+        client.client.close()
+
+
+@pytest.mark.parametrize("operation", ["search", "indices.stats", "indices.get_settings", "indices.get_alias"])
+@pytest.mark.parametrize("database", [None, "postgresql"])
+def test_filtered_names_from_other_sources_remain_exported(telemetry, operation, database):
+    attributes = {"db.operation": operation}
+    if database:
+        attributes["db.system"] = database
+    with telemetry.tracer.start_as_current_span(operation, attributes=attributes):
+        pass
+    assert telemetry.provider.force_flush(timeout_millis=1000)
+    span, = telemetry.exporter.get_finished_spans()
+    assert span.name == operation
 
 
 def test_ut_sdk_trace_022_processor_preserves_lifecycle(mocker):

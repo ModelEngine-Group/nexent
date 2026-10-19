@@ -1,3 +1,4 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """Build the ephemeral NL2Skill agent configuration."""
 
 from nexent.core.agents.agent_model import AgentConfig
@@ -14,6 +15,7 @@ def create_nl2skill_agent_config(
 
     return AgentConfig(
         name=NL2SKILL_NAME,
+        display_name="技能创建助手",
         description="Ephemeral natural-language skill builder",
         prompt_templates=None,
         tools=[],

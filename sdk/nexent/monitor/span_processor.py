@@ -1,3 +1,4 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """Filter noisy infrastructure spans at the Nexent telemetry export boundary."""
 
 from __future__ import annotations
@@ -6,8 +7,16 @@ from opentelemetry.context import Context
 from opentelemetry.sdk.trace import ReadableSpan, Span, SpanProcessor
 
 
+_EXCLUDED_ELASTICSEARCH_OPERATIONS = frozenset({
+    "search",
+    "indices.stats",
+    "indices.get_settings",
+    "indices.get_alias",
+})
+
+
 class MonitoringSpanProcessor(SpanProcessor):
-    """Retain execution spans while omitting Elasticsearch alias discovery."""
+    """Retain business spans while omitting noisy Elasticsearch operations."""
 
     def __init__(self, delegate: SpanProcessor):
         self._delegate = delegate
@@ -19,7 +28,7 @@ class MonitoringSpanProcessor(SpanProcessor):
         attributes = span.attributes or {}
         if (
             attributes.get("db.system") == "elasticsearch"
-            and attributes.get("db.operation") == "indices.get_alias"
+            and attributes.get("db.operation") in _EXCLUDED_ELASTICSEARCH_OPERATIONS
         ):
             return
         self._delegate.on_end(span)
