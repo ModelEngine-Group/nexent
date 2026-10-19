@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import os
 import importlib
 import logging
@@ -496,7 +498,7 @@ def isolate_embedding_probe():
         yield
 
 
-def import_svc(module="management"):
+def import_svc(module="management", *, isolate_storage=True):
     """Import service under MinioClient patch to avoid real initialization."""
     minio_client_mock = mock.MagicMock()
     sys.modules["database"] = database_mod
@@ -506,6 +508,16 @@ def import_svc(module="management"):
     sys.modules.pop("management.services.model.management", None)
     with mock.patch("backend.database.client.MinioClient", return_value=minio_client_mock):
         svc = importlib.import_module("management.services.model." + module)
+    if not isolate_storage:
+        return svc
+    # These tests own legacy preprocessing/orchestration. The resolved storage
+    # translator has its own unit and database suites and is a collaborator here.
+    svc._create_model_configuration = lambda data, user, tenant: svc.create_model_record(data, user, tenant)
+    def update_configuration(record, changes, user, tenant, *, scope_update=False):
+        if scope_update:
+            return svc.update_model_record(record["model_id"], changes, user, tenant)
+        return svc.update_model_record(record["model_id"], changes, user)
+    svc._update_model_configuration = update_configuration
     return svc
 
 
@@ -3150,3 +3162,21 @@ def test_backfill_swap_pool_never_resurrects_old_models():
     # does not beat the fresh occupant (256K): nothing changes.
     assert result == []
     assert updated == []
+
+
+def test_saved_outlet_enrichment_uses_projection_without_legacy_normalization(monkeypatch):
+    svc = import_svc("reasoning")
+    projection_module = types.ModuleType("services.model_outlet_projection")
+    projection_module.project_saved_outlet = mock.Mock(return_value={
+        "extra_params": {"enable_thinking": False}, "migration_status": "migrated",
+        "migration_review_required": True})
+    monkeypatch.setitem(sys.modules, "services.model_outlet_projection", projection_module)
+    model = {"model_type": "llm", "profile_schema_version": 1,
+             "extra_params": {"parameter_values": {}, "api_parameters": []}}
+    with mock.patch.object(svc, "resolve_reasoning_capability") as old_lookup, \
+            mock.patch.object(svc, "normalize_reasoning_params") as old_normalize:
+        svc._enrich_model_reasoning_capability(model)
+    old_lookup.assert_not_called()
+    old_normalize.assert_not_called()
+    assert model["extra_params"] == {"enable_thinking": False}
+    assert model["migration_review_required"] is True

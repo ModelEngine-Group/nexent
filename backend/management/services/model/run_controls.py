@@ -75,7 +75,7 @@ def overlay_root_model(base: ModelConfig, values: dict[str, Any], alias: str) ->
         for key in ("temperature", "top_p"):
             if values.get(key) is not None:
                 setattr(root, key, values[key])
-        return root
+        return _bind_resolved_overlay(root, values)
     enabled = values.get("deep_thinking", base.enable_thinking)
     effort = values.get("thinking_effort")
     budget = values.get("reasoning_budget_tokens")
@@ -117,7 +117,7 @@ def overlay_root_model(base: ModelConfig, values: dict[str, Any], alias: str) ->
     for key in ("temperature", "top_p"):
         if values.get(key) is not None:
             setattr(root, key, values[key])
-    return root
+    return _bind_resolved_overlay(root, values)
 
 
 def resolve_creator_model(
@@ -182,3 +182,21 @@ def preflight_turn_controls(request, tenant_id: str, agent_record: dict | None =
                 raise RunModelControlsError("model_controls_invalid")
             values[key] = value
     overlay_root_model(base, values, "preflight_root")
+
+
+def _bind_resolved_overlay(root: ModelConfig, values: dict[str, Any]) -> ModelConfig:
+    """Apply explicit turn controls to the same immutable outlet used for HTTP."""
+    if getattr(getattr(root, "resolved_profile", None), "schema_version", None) != 1:
+        return root
+    from nexent.core.model_service.compatibility.invocation_options import LegacyInvocationOptions
+
+    parameters = {key: values[key] for key in ("temperature", "top_p") if values.get(key) is not None}
+    if "deep_thinking" in values:
+        parameters["enable_thinking"] = root.enable_thinking
+    if any(key in values for key in ("deep_thinking", "thinking_effort", "reasoning_budget_tokens")):
+        if root.reasoning_effort is not None:
+            parameters["reasoning_effort"] = root.reasoning_effort
+        if root.reasoning_budget_tokens is not None:
+            parameters["reasoning_budget_tokens"] = root.reasoning_budget_tokens
+    root.resolved_profile = LegacyInvocationOptions(parameters).resolve(root.resolved_profile)
+    return root
