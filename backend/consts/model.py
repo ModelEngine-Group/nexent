@@ -369,6 +369,28 @@ def _validate_tag_batch_ids(resource_ids: list[int]) -> list[int]:
     return list(dict.fromkeys(resource_ids))
 
 
+class SkillTagAssignmentBatchRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    skill_ids: list[int] = Field(..., min_length=1, max_length=500)
+
+    @field_validator("skill_ids")
+    @classmethod
+    def validate_skill_ids(cls, skill_ids: list[int]) -> list[int]:
+        return _validate_tag_batch_ids(skill_ids)
+
+
+class KnowledgeTagAssignmentBatchRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    index_names: list[str] = Field(..., min_length=1, max_length=500)
+
+    @field_validator("index_names")
+    @classmethod
+    def validate_index_names(cls, index_names: list[str]) -> list[str]:
+        if any(not name.strip() or len(name) > 1024 for name in index_names):
+            raise ValueError("index_names must contain nonempty bounded resource identifiers")
+        return list(dict.fromkeys(index_names))
+
+
 class AgentTagAssignmentBatchRequest(BaseModel):
     """Read at most one page of canonical agent assignments."""
 

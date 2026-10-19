@@ -11,6 +11,8 @@ from consts.exceptions import (
     ValidationError,
 )
 from consts.model import (
+    SkillTagAssignmentBatchRequest,
+    KnowledgeTagAssignmentBatchRequest,
     AgentTagAssignmentBatchRequest,
     TagAssignmentBulkOutcome,
     TagAssignmentBulkReplaceRequest,
@@ -99,6 +101,34 @@ async def get_document_tag_batch_status(
             status_code=409,
             detail={"message": str(error), "details": error.details},
         ) from error
+    except ValidationError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
+
+
+@router.post("/assignments/skill/batch_read", response_model=list[TagAssignmentResponse])
+def get_skill_tag_assignments_batch(
+    request: SkillTagAssignmentBatchRequest,
+    authorization: str | None = Header(None),
+):
+    caller = _assignment_caller(authorization)
+    try:
+        return TagManagementService.get_skill_assignments_batch(caller, request.skill_ids)
+    except TagManagementNotFoundError as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
+    except ValidationError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
+
+
+@router.post("/assignments/knowledge_base/batch_read", response_model=list[TagAssignmentResponse])
+def get_knowledge_tag_assignments_batch(
+    request: KnowledgeTagAssignmentBatchRequest,
+    authorization: str | None = Header(None),
+):
+    caller = _assignment_caller(authorization)
+    try:
+        return TagManagementService.get_knowledge_assignments_batch(caller, request.index_names)
+    except TagManagementNotFoundError as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
     except ValidationError as error:
         raise HTTPException(status_code=400, detail=str(error)) from error
 

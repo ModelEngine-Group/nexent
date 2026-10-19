@@ -174,6 +174,18 @@ export const tagManagementApi = {
       { method: "DELETE" }
     ),
 
+  getSkillAssignmentsBatch: (skillIds: string[]) =>
+    requestJson<TagAssignment[]>(API_ENDPOINTS.skillTagAssignmentsBatch, {
+      method: "POST",
+      ...jsonBody({ skill_ids: [...new Set(skillIds)] }),
+    }),
+
+  getKnowledgeAssignmentsBatch: (indexNames: string[]) =>
+    requestJson<TagAssignment[]>(API_ENDPOINTS.knowledgeTagAssignmentsBatch, {
+      method: "POST",
+      ...jsonBody({ index_names: [...new Set(indexNames)] }),
+    }),
+
   getAgentAssignmentsBatch: (agentIds: string[]) =>
     requestJson<TagAssignment[]>(API_ENDPOINTS.agentTagAssignmentsBatch, {
       method: "POST",

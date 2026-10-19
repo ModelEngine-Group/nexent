@@ -14,12 +14,16 @@ from consts.exceptions import (
 from database.tag_management_db import TagManagementDB
 from database.agent_db import query_agent_info_by_ids
 from database.tool_db import query_tenant_tools_by_ids
+from database.skill_db import get_skills_for_tag_read
+from database.knowledge_db import get_knowledge_records_for_tag_read
+from management.services.knowledge_base.permission import resolve_knowledge_base_permissions
 from services.asset_owner_visibility import resolve_agent_list_permission
 from services.tag_resource_adapters import (
     DEFAULT_RESOURCE_LIBRARY_CODE,
     DEFAULT_TAG_RESOURCE_ADAPTER_REGISTRY,
     AuthenticatedCaller,
     ResourceReference,
+    _tenant_scoped_capabilities,
     _encode_document_resource_id,
 )
 from sqlalchemy.exc import DBAPIError, IntegrityError
@@ -293,6 +297,33 @@ class TagManagementService:
         ):
             raise TagManagementNotFoundError("Resource not found")
         return resolved.identity
+
+    @classmethod
+    def _read_batch_assignments(cls, caller, resource_type: str, resource_ids: list[str]) -> list[dict]:
+        assignments = TagManagementDB.list_resource_assignments_batch(
+            caller.authenticated_tenant_id, resource_type, resource_ids, DEFAULT_RESOURCE_LIBRARY_CODE
+        )
+        return [{
+            "resource_type": resource_type, "resource_id": resource_id,
+            "assignment_count": len(assignments[resource_id]), "assignment_capacity": 100,
+            "assignments": assignments[resource_id],
+        } for resource_id in resource_ids]
+
+    @classmethod
+    def get_skill_assignments_batch(cls, caller: AuthenticatedCaller, skill_ids: list[int]) -> list[dict]:
+        ids = list(dict.fromkeys(skill_ids))
+        records = get_skills_for_tag_read(caller.authenticated_tenant_id, ids)
+        visible = {int(record["skill_id"]) for record in records
+                   if _tenant_scoped_capabilities(record, caller).can_read}
+        return cls._read_batch_assignments(caller, "skill", [str(i) for i in ids if i in visible])
+
+    @classmethod
+    def get_knowledge_assignments_batch(cls, caller: AuthenticatedCaller, index_names: list[str]) -> list[dict]:
+        ids = list(dict.fromkeys(index_names))
+        records = get_knowledge_records_for_tag_read(caller.authenticated_tenant_id, ids)
+        permissions = resolve_knowledge_base_permissions(records, caller.user_id, caller.authenticated_tenant_id)
+        visible = [i for i in ids if permissions.get(i) in {PERMISSION_READ, PERMISSION_EDIT, "CREATOR"}]
+        return cls._read_batch_assignments(caller, "knowledge_base", visible)
 
     @classmethod
     def get_agent_assignments_batch(cls, caller: AuthenticatedCaller, agent_ids: list[int]) -> list[dict]:

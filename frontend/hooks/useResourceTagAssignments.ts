@@ -5,7 +5,7 @@ import { tagManagementApi } from "@/services/tagManagementService";
 
 /** One assignment request for the visible canonical resource IDs. */
 export function useResourceTagAssignments(
-  resourceType: "tool" | "agent",
+  resourceType: "tool" | "agent" | "skill" | "knowledge_base",
   open: boolean,
   resourceIds: string[],
   revision: number,
@@ -23,9 +23,13 @@ export function useResourceTagAssignments(
     staleTime: 0,
     retry: false,
     queryFn: async () => {
-      const results = await (resourceType === "tool"
-        ? tagManagementApi.getToolAssignmentsBatch(resourceIds)
-        : tagManagementApi.getAgentAssignmentsBatch(resourceIds));
+      const loaders = {
+        tool: tagManagementApi.getToolAssignmentsBatch,
+        agent: tagManagementApi.getAgentAssignmentsBatch,
+        skill: tagManagementApi.getSkillAssignmentsBatch,
+        knowledge_base: tagManagementApi.getKnowledgeAssignmentsBatch,
+      };
+      const results = await loaders[resourceType](resourceIds);
       return Object.fromEntries(
         results.map((result) => [result.resource_id, result.assignments])
       );
