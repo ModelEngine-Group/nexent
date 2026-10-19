@@ -401,6 +401,11 @@ export const API_ENDPOINTS = {
       `${API_BASE_URL}/aidp-mgmt/knowledge-bases/${id}/documents/remove`,
     downloadKbDocument: (id: string) =>
       `${API_BASE_URL}/aidp-mgmt/knowledge-bases/${id}/documents/download`,
+    /** GET endpoint that streams one AIDP document for preview. AIDP serves
+     *  the original bytes for docx/xlsx/pptx/pdf/txt and a PDF conversion for
+     *  every other format, and reports the served name in `X-File-Name`. */
+    previewKbDocument: (id: string, fileUuid: string) =>
+      `${API_BASE_URL}/aidp-mgmt/knowledge-bases/${id}/documents/${encodeURIComponent(fileUuid)}/preview`,
     models: `${API_BASE_URL}/aidp-mgmt/models`,
     graphTemplate: `${API_BASE_URL}/aidp-mgmt/knowledge-bases/graph-template`,
     /** PATCH endpoint for the per-KB in-group permission. */
