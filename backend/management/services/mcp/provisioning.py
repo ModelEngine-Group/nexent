@@ -87,8 +87,7 @@ def check_runtime_host_port_available(port: int) -> bool:
                 bind_probe.setsockopt(socket.SOL_SOCKET, socket.SO_EXCLUSIVEADDRUSE, 1)
             else:
                 bind_probe.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 0)
-            bind_probe.bind(("0.0.0.0", port))
-            bind_probe.listen(1)
+            bind_probe.bind(("127.0.0.1", port))
         return True
     except OSError as exc:
         logger.info(f"Host port {port} is already in use: {exc}")

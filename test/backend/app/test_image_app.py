@@ -134,7 +134,7 @@ async def test_proxy_image_exception(monkeypatch):
         # Assertions
         assert response.status_code == 200
         assert response.json()["success"] is False
-        assert response.json()["error"] == "Connection error"
+        assert response.json()["error"] == "Failed to fetch image"
 
 
 @pytest.mark.asyncio
@@ -199,7 +199,7 @@ async def test_proxy_image_logging(monkeypatch):
         assert response.status_code == 200  # API should still return 200 status
         response_data = response.json()
         assert response_data["success"] is False
-        assert "Logging test error" in response_data["error"]
+        assert response_data["error"] == "Failed to fetch image"
 
         # Verify the mock was called with the expected URL
         mock_session.get.assert_called_once()
@@ -306,7 +306,7 @@ async def test_proxy_image_stream_format_exception(monkeypatch):
         await image_app.proxy_image(url=encoded_test_url, format="stream")
 
     assert exc_info.value.status_code == 502
-    assert "Unexpected error" in str(exc_info.value.detail)
+    assert exc_info.value.detail == "Failed to fetch image"
 
 
 @pytest.mark.asyncio
@@ -337,7 +337,7 @@ async def test_proxy_image_json_format_exception(monkeypatch):
     result = await image_app.proxy_image(url=encoded_test_url, format="json")
 
     assert result["success"] is False
-    assert "Service unavailable" in result["error"]
+    assert result["error"] == "Failed to fetch image"
 
 
 @pytest.mark.asyncio

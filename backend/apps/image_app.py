@@ -39,7 +39,7 @@ async def proxy_image(url: str, format: str = "json"):
             if not result.get("success"):
                 raise HTTPException(
                     status_code=HTTPStatus.BAD_GATEWAY,
-                    detail=result.get("error", "Failed to fetch image")
+                    detail="Failed to fetch image"
                 )
 
             # Decode base64 to bytes
@@ -57,13 +57,15 @@ async def proxy_image(url: str, format: str = "json"):
             )
         else:
             # Return JSON with base64 (default behavior for backward compatibility)
-            return await proxy_image_impl(decoded_url)
-    except Exception as e:
-        logger.error(
-            f"Error occurred while proxying image: {str(e)}, URL: {url[:50]}...")
+            result = await proxy_image_impl(decoded_url)
+            if not result.get("success"):
+                return {"success": False, "error": "Failed to fetch image"}
+            return result
+    except Exception:
+        logger.exception("Error occurred while proxying image")
         if format == "stream":
             raise HTTPException(
                 status_code=HTTPStatus.BAD_GATEWAY,
-                detail=str(e)
-            )
-        return {"success": False, "error": str(e)}
+                detail="Failed to fetch image"
+            ) from None
+        return {"success": False, "error": "Failed to fetch image"}

@@ -4380,8 +4380,7 @@ class TestFilterMcpServersAndTools:
 
         # Should contain the URLs of both servers
         assert len(result) == 2
-        assert "http://main.server" in result
-        assert "http://sub.server" in result
+        assert set(result) == {"http://main.server", "http://sub.server"}
 
     def test_filter_mcp_servers_unknown_server(self):
         """Test case for an unknown MCP server"""
