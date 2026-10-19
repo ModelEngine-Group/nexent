@@ -6302,7 +6302,16 @@
     "catalogChangedDetail": "This draft refers to an older profile version. Refresh profiles to retain your entries and selections, then review the revalidated draft before saving.",
     "refreshCatalog": "Refresh profiles",
     "retryPreview": "Retry validation",
-    "baseConfiguration": "Base model configuration"
+    "baseConfiguration": "Base model configuration",
+    "layout": {
+      "emptyTitle": "Enter a model name to load parameters",
+      "emptyDescription": "A profile is matched automatically. You can also select or adjust it.",
+      "source": "Profile",
+      "reset": "Restore profile defaults",
+      "advancedHint": "TLS, timeout, authentication and custom parameters",
+      "checkAfterSave": "Connectivity checked after saving",
+      "awaitingProfile": "Enter an endpoint to load configuration"
+    }
   },
   "modelMigration": {
     "pending": "Migrated · Review needed",
