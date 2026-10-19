@@ -66,7 +66,7 @@ export function AgentConfigHeader({
     <div
       ref={actionAreaRef}
       data-testid="agent-config-header"
-      className="relative flex min-h-[74px] shrink-0 flex-wrap items-center justify-between gap-x-4 gap-y-2 pl-4 pr-[18px] py-[10px] 2xl:grid 2xl:grid-cols-[1fr_auto_1fr]"
+      className="relative flex min-h-[74px] shrink-0 flex-wrap items-center justify-between gap-x-4 gap-y-2 px-4 py-7 2xl:grid 2xl:grid-cols-[1fr_auto_1fr]"
     >
       <span
         aria-hidden="true"

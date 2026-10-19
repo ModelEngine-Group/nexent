@@ -28,10 +28,11 @@ import ToolManagement from "./capability/ToolManagement";
 import SkillBuildModal from "../../components/capability/SkillBuildModal";
 import SelectedSkillManagement from "./capability/SelectedSkillManagement";
 import McpConfigModal from "./capability/McpConfigModal";
-import { AddToolDrawer } from "@/components/resource-picker/AddToolDrawer";
+import { ToolDrawer } from "@/components/resource-picker/ToolDrawer";
 import LabelManagementModal from "./capability/tool/LabelManagementModal";
-import { AddSkillDrawer } from "@/components/resource-picker/AddSkillDrawer";
-import SkillTagManagementModal from "./capability/skill/SkillTagManagementModal";
+import { SkillDrawer } from "@/components/resource-picker/SkillDrawer";
+
+const EMPTY_SELECTED_SKILLS: import("@/types/agentConfig").Skill[] = [];
 
 export function AgentToolCapability({
   highFidelity = false,
@@ -186,7 +187,7 @@ export function AgentToolCapability({
         onBeforeMcpDelete={prepareAgentForMcpDeletion}
         onMcpDeleted={refreshAgentAfterMcpDeletion}
       />
-      <AddToolDrawer
+      <ToolDrawer
         open={isToolSelectOpen}
         onClose={() => setIsToolSelectOpen(false)}
         onOpenManageLabels={() => setLabelModalOpen(true)}
@@ -211,8 +212,10 @@ export function AgentSkillCapability({
   const isReadOnly = useAgentReadOnly();
   const [isSkillModalOpen, setIsSkillModalOpen] = useState(false);
   const [isRefreshingSkill, setIsRefreshingSkill] = useState(false);
+  const selectedAgentSkills =
+    useAgentStore((state) => state.editedAgent?.skills) ??
+    EMPTY_SELECTED_SKILLS;
   const [isSkillSelectOpen, setIsSkillSelectOpen] = useState(false);
-  const [tagModalOpen, setTagModalOpen] = useState(false);
   const [editingSkill, setEditingSkill] = useState<MyEditableSkillItem | null>(
     null
   );
@@ -368,17 +371,18 @@ export function AgentSkillCapability({
           />
         </>
       )}
-      <AddSkillDrawer
+      <SkillDrawer
+        key={currentAgentId ?? "new"}
         open={isSkillSelectOpen}
+        selectedSkills={selectedAgentSkills}
+        onConfirm={(skills) => useAgentStore.getState().updateSkills(skills)}
         onClose={() => setIsSkillSelectOpen(false)}
-        onOpenManageTags={() => setTagModalOpen(true)}
+        enableTagManagement={!isReadOnly}
+        onEditSkill={handleOpenSkillEditor}
         currentAgentId={currentAgentId ?? undefined}
         isReadOnly={isReadOnly}
       />
-      <SkillTagManagementModal
-        open={tagModalOpen}
-        onClose={() => setTagModalOpen(false)}
-      />
+
       <SkillBuildModal
         isOpen={isSkillModalOpen}
         onCancel={handleCloseSkillModal}

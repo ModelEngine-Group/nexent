@@ -599,6 +599,9 @@ export const API_ENDPOINTS = {
         );
       }
       if (params?.tag?.trim()) queryParams.append("tag", params.tag.trim());
+      if (params?.sort_by_update_time) {
+        queryParams.append("sort_by_update_time", "true");
+      }
       const queryString = queryParams.toString();
       return `${API_BASE_URL}/repository/agent${queryString ? `?${queryString}` : ""}`;
     },

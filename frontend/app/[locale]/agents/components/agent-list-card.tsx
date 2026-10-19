@@ -8,6 +8,7 @@ import { useTranslation } from "react-i18next";
 
 import { StandardButton } from "@/components/common/StandardButton";
 import { getAgentRepositoryTagLabel } from "@/lib/agentRepositoryLabels";
+import { normalizeTags } from "@/services/agentConfigService";
 import type { Agent } from "@/types/agentConfig";
 
 import AgentAvatar from "./agent-avatar";
@@ -49,7 +50,7 @@ export default function AgentListCard({
 }: AgentListCardProps) {
   const { t } = useTranslation("common");
   const title = agent.display_name || agent.name;
-  const rawCategory = agent.tags?.[0];
+  const rawCategory = normalizeTags(agent.tags)[0];
   const category = rawCategory
     ? getAgentRepositoryTagLabel(rawCategory, t)
     : undefined;

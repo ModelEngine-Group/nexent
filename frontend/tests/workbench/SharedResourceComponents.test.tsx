@@ -80,3 +80,21 @@ it("text rows keep repository actions independent of selection and retain descri
   await userEvent.click(row);
   expect(select).toHaveBeenCalledOnce();
 });
+
+it("never caps the fixed header title column so title, subtitle and badge stay unclipped", () => {
+  render(
+    <ResourceCard
+      fixedHeaderLayout
+      title="Agent"
+      subtitle="Current version v1.0.0"
+      badge={<span>Main agent</span>}
+      description="Description"
+    />
+  );
+  const column = screen.getByRole("heading", { name: "Agent" }).parentElement;
+  expect(column).toHaveClass("min-h-11");
+  expect(column).not.toHaveClass("h-11");
+  expect(column).toHaveClass("flex-col");
+  expect(screen.getByText("Current version v1.0.0")).toBeInTheDocument();
+  expect(screen.getByText("Main agent")).toBeInTheDocument();
+});

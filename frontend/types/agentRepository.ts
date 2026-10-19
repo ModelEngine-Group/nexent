@@ -31,6 +31,8 @@ export interface AgentRepositoryListingItem {
   content?: string | null;
   /** Platform-provided template; readable/copyable but not tenant-editable. */
   is_official?: boolean;
+  /** Whether the bundle's root agent is a main agent; absent means main. */
+  is_main_agent?: boolean;
 }
 
 export type OfficialAgentManagementItem = AgentRepositoryListingItem;
@@ -56,6 +58,8 @@ export interface AgentRepositoryListingListParams {
   search_tag_predicates?: TagResourcePredicate[];
   tag_predicates?: TagResourcePredicate[];
   tag?: string;
+  /** Request latest-published-first ordering; omitted keeps the default order. */
+  sort_by_update_time?: boolean;
 }
 
 export interface AgentRepositoryListingDetail {
@@ -76,6 +80,8 @@ export interface AgentRepositoryListingDetail {
   duty_prompt?: string | null;
   tools?: string[];
   is_official?: boolean;
+  /** Whether the bundle's root agent is a main agent; absent means main. */
+  is_main_agent?: boolean;
 }
 
 export interface MyAgentRepositoryInfoItem {
@@ -100,6 +106,8 @@ export interface MyEditableAgentItem {
   current_version_no?: number | null;
   version_label?: string | null;
   version_create_time?: string | null;
+  /** Whether this agent is a main agent; absent means main. */
+  is_main_agent?: boolean;
   /** EDIT: editable, READ_ONLY: read-only (from /agent/list permission logic). */
   permission?: "EDIT" | "READ_ONLY";
   /** Total downloads summed across all repository listings for this agent_id. */

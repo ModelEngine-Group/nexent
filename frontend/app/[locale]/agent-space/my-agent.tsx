@@ -1,9 +1,11 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { App, Button, Empty, Grid, Input, Spin } from "antd";
+import { App, Button, Empty, Grid, Input, Select, Spin } from "antd";
 import { Search } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import CreateAgentModal, {
@@ -68,6 +70,7 @@ const MINE_OWNERSHIP_FILTERS: MineOwnershipFilter[] = [
   "created",
   "others",
 ];
+type MineSortOrder = "default" | "latest";
 const CARD_GAP = 20;
 const MIN_CARD_HEIGHT = 240;
 const PAGINATION_HEIGHT = 60;
@@ -136,6 +139,7 @@ export function MyAgent({
   }, [active, measureGridHeight]);
   const [ownership, setOwnership] = useState<MineOwnershipFilter>("all");
   const [searchQuery, setSearchQuery] = useState("");
+  const [sortOrder, setSortOrder] = useState<MineSortOrder>("default");
   const [tagPredicates, setTagPredicates] = useState<TagResourcePredicate[]>(
     []
   );
@@ -166,6 +170,7 @@ export function MyAgent({
       searchTagPredicates,
       createdBy: ownership === "created" ? user?.id : undefined,
       createdByNot: ownership === "others" ? user?.id : undefined,
+      sortByUpdateTime: sortOrder === "latest" || undefined,
     }),
     [
       active,
@@ -177,6 +182,7 @@ export function MyAgent({
       searchQuery,
       tagPredicates,
       searchTagPredicates,
+      sortOrder,
     ]
   );
   const {
@@ -241,6 +247,10 @@ export function MyAgent({
   }, [locale, router, usageGuideTarget]);
   const onOwnershipChange = (value: MineOwnershipFilter) => {
     setOwnership(value);
+    setPage(1);
+  };
+  const onSortOrderChange = (value: MineSortOrder) => {
+    setSortOrder(value);
     setPage(1);
   };
   const onSearchChange = (value: string) => {
@@ -681,6 +691,16 @@ export function MyAgent({
           value={tagPredicates}
           onChange={onTagPredicatesChange}
         />
+        <Select<MineSortOrder>
+          value={sortOrder}
+          onChange={onSortOrderChange}
+          className="w-44 shrink-0"
+          aria-label={t("agentRepository.sort.label")}
+          options={[
+            { value: "default", label: t("agentRepository.sort.default") },
+            { value: "latest", label: t("agentRepository.sort.latest") },
+          ]}
+        />
       </div>
 
       <div className="flex flex-wrap items-center gap-1.5">
@@ -878,6 +898,7 @@ function toMyAgentItem(agent: Agent): MyEditableAgentItem {
       (currentVersionNo > 0 ? `V${currentVersionNo}` : null),
     version_create_time: agent.version_create_time ?? null,
     permission: agent.permission,
+    is_main_agent: agent.is_main_agent,
     tags: agent.tags,
     repository_info: agent.repository_info ?? [],
   };
