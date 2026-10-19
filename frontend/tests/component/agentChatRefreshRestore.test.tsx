@@ -156,6 +156,24 @@ describe("newchat refresh restore wiring", () => {
     expect(capturedRuntimeOptions?.initialThreadId).toBe("77");
   });
 
+  it("starts on the landing when the user returns via navigation, not refresh", () => {
+    // First visit: the stored conversation is restored, like a refresh.
+    window.sessionStorage.setItem(CONVERSATION_KEY, "77");
+    const { unmount } = render(<Home />);
+    expect(capturedRuntimeOptions?.initialThreadId).toBe("77");
+
+    // Leaving the chat route (e.g. to the agent workbench) runs the unmount
+    // cleanup, unlike a browser refresh: the marker must not survive.
+    unmount();
+    expect(window.sessionStorage.getItem(CONVERSATION_KEY)).toBeNull();
+
+    // Returning through the menu therefore starts on the landing page.
+    capturedRuntimeOptions = undefined;
+    render(<Home />);
+    expect(capturedRuntimeOptions?.initialThreadId).toBeUndefined();
+    expect(screen.getByText("Agent list")).toBeInTheDocument();
+  });
+
   it("reopens a blank conversation of the stored agent when no conversation was saved", async () => {
     window.sessionStorage.setItem(AGENT_KEY, "41");
     render(<Home />);

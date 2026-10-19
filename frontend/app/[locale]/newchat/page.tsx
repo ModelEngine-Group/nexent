@@ -649,6 +649,16 @@ const HomeContent: FC<{
     writeLastChatViewAgent(String(selectedAgent.id));
   }, [selectedAgent, activeConversationId]);
 
+  // Leaving the chat route via navigation (e.g. to the agent workbench)
+  // ends the "return here" session the marker tracks: returning through
+  // the menu then starts on the agent landing page again. A browser
+  // refresh never runs this cleanup because the document is destroyed
+  // without unmounting, so only a refresh keeps the marker and restores
+  // the previous view.
+  useEffect(() => {
+    return () => clearLastChatView();
+  }, []);
+
   // Sync selected agent and active thread into composer's runConfig so the
   // ChatModelAdapter can forward both agent_id and conversation_id reliably.
   // `onServerConversationId` lets the adapter report back the server-issued
