@@ -113,9 +113,24 @@ def _generic_agent_stream_error_chunk() -> str:
 
 def safe_agent_stream_error_chunk(exception: Optional[BaseException] = None) -> str:
     """Return a sanitized SSE error chunk without internal exception details."""
+    sampling = sampling_configuration_error_payload(exception)
+    if sampling:
+        return f"data: {json.dumps(sampling, ensure_ascii=False)}\n\n"
     if _is_reasoning_configuration_error(exception):
         return _reasoning_configuration_error_chunk()
     return _generic_agent_stream_error_chunk()
+
+
+def sampling_configuration_error_payload(exception: Optional[BaseException]) -> Optional[dict]:
+    """Expose only actionable sampling intent errors, never raw provider details."""
+    seen = set()
+    while exception is not None and id(exception) not in seen:
+        seen.add(id(exception))
+        if getattr(exception, "is_sampling_configuration_error", False):
+            return {"type": "error", "code": "MODEL_SAMPLING_CONFIG_INVALID",
+                    "content": "The model provider rejected temperature or Top P. Restore defaults or change these settings."}
+        exception = exception.__cause__ or exception.__context__
+    return None
 
 
 def resolve_answer_completion(

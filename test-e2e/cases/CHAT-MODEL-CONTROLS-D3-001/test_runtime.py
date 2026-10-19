@@ -111,3 +111,78 @@ def test_reasoning_variants_preserve_independent_configuration(runtime):
         assert response.status_code == 200
         wire = [row for row in runtime.provider.wire[before_wire:] if row["model"] == "fixture-selected-B"]
         assert wire and all("reasoning_effort" not in row for row in wire)
+
+
+@pytest.mark.parametrize("path,workbench", [
+    ("/api/agent/run", False), ("/api/agent/run", True),
+    ("/api/agent/nl2agent/run", False), ("/api/agent/nl2agent/run", True),
+    ("/api/skills/nl2skill/run", False), ("/api/skills/nl2skill/run", True),
+])
+def test_sampling_runtime_wire_and_persisted_intent(runtime, path, workbench):
+    before_models = runtime.model_records()
+    before_draft = runtime.draft()
+    response = runtime.post(path, generation={"deep_thinking": False, "temperature": 0, "top_p": 0.6},
+                            workbench=workbench, version_no=0)
+    assert response.status_code == 200, response.text
+    wire = [row for row in runtime.provider.wire if row["model"] == "fixture-selected-B"]
+    assert wire, response.text
+    assert all(row["temperature"] == 0 and row["top_p"] == 0.6 for row in wire)
+    assert not any('"type": "error"' in line for line in response.text.splitlines())
+    run = runtime.runs[-1]
+    root = next(m for m in run.model_config_list if m.cite_name == run.agent_config.model_name)
+    assert set(root.explicit_sampling) == {"temperature", "top_p"}
+    independent = next(m for m in run.model_config_list if m.cite_name == "business-C")
+    assert (independent.temperature, independent.top_p) == (0.43, 0.78)
+    assert independent.explicit_sampling == []
+    assert runtime.model_records() == before_models
+    assert runtime.draft()["model_params_override"] == before_draft["model_params_override"]
+    if workbench:
+        from sqlalchemy import select
+        from database.db_models import ConversationRecord
+        with runtime.storage["sessions"]() as session:
+            saved = session.scalar(select(ConversationRecord.workbench_config).where(
+                ConversationRecord.conversation_id == int(response.headers["conversation_id"])))
+            assert saved["generation_config"]["temperature"] == 0
+            assert saved["generation_config"]["top_p"] == 0.6
+
+
+@pytest.mark.parametrize("path,workbench", [
+    ("/api/agent/run", False), ("/api/agent/run", True),
+    ("/api/agent/nl2agent/run", False), ("/api/agent/nl2agent/run", True),
+    ("/api/skills/nl2skill/run", False), ("/api/skills/nl2skill/run", True),
+])
+def test_null_sampling_inherits_shared_defaults_and_matches_display_metadata(runtime, path, workbench):
+    import asyncio
+
+    from sqlalchemy import update
+
+    from database.db_models import ModelRecord
+    from management.services.model.management import list_models_for_tenant
+
+    with runtime.storage["sessions"]() as session:
+        session.execute(update(ModelRecord).where(ModelRecord.model_id == runtime.models["selected-B"]).values(
+            temperature=None, top_p=None))
+    records_before, draft_before = runtime.model_records(), runtime.draft()
+    models = asyncio.run(list_models_for_tenant(runtime.storage["tenant"]))
+    metadata = next(row for row in models if row["model_id"] == runtime.models["selected-B"])
+    assert metadata["effective_sampling"] == {"temperature": 1.0, "top_p": 1.0}
+    assert metadata["temperature"] is None and metadata["top_p"] is None
+    expected_temperature = 0.56 if path == "/api/agent/run" and not workbench else 1.0
+    for sampling, expected in (
+        ({}, (expected_temperature, 1.0)),
+        ({"temperature": None, "top_p": None}, (expected_temperature, 1.0)),
+        ({"temperature": None, "top_p": 0.4}, (expected_temperature, 0.4)),
+        ({"temperature": 0, "top_p": 0}, (0, 0)),
+    ):
+        before_wire = len(runtime.provider.wire)
+        response = runtime.post(path, workbench=workbench, version_no=0,
+                                generation={"deep_thinking": True, "thinking_effort": "xhigh", **sampling})
+        assert response.status_code == 200 and '"type": "error"' not in response.text, response.text
+        wire = [row for row in runtime.provider.wire[before_wire:] if row["model"] == "fixture-selected-B"]
+        assert wire and all((row["temperature"], row["top_p"]) == expected for row in wire), wire
+        assert all(row.get("reasoning_effort") == "xhigh" and "fixture_custom" in str(row) for row in wire)
+        run = runtime.runs[-1]
+        independent = next(model for model in run.model_config_list if model.cite_name == "business-C")
+        assert (independent.temperature, independent.top_p) == (0.43, 0.78)
+        assert runtime.model_records() == records_before
+        assert runtime.draft()["model_params_override"] == draft_before["model_params_override"]

@@ -4,7 +4,7 @@ module: CHAT-MESSAGE
 case:
   case_id: CHAT-MODEL-CONTROLS-D2-001
   feature_id: CHAT-MODEL-CONTROLS
-  requirement_ids: [CHAT-MODEL-CONTROLS-20261014]
+  requirement_ids: [CHAT-MODEL-CONTROLS-20261014, CHAT-SAMPLING-20261016]
   business_rule_ids: [CHAT-MODEL-CONTROLS-RULE-002, CHAT-MODEL-CONTROLS-RULE-003, CHAT-MODEL-CONTROLS-RULE-006]
   title: 三运行端点的选模、思考部分覆盖与旧请求兼容契约
   type: API-IT
@@ -31,19 +31,19 @@ case:
       action: Select the budget model; submit zero auto, minimum and maximum budget; exercise existing ordinary top-level budget fields and compatible Workbench budget snapshots.
       expected: Valid budgets use budget controls without a conflicting concrete effort; zero means automatic rather than a zero provider limit and old budget requests are not overwritten by defaulted generation fields.
     - order: 4
-      action: Submit invalid enum/type/null reasoning fields, out-of-capability effort, out-of-range budget, enabled concrete effort plus budget, contradictory legacy fields/snapshots, and sampling keys in the new NL2 overlay.
-      expected: Each invalid input returns 422 before SSE headers/provider execution, with field validation or model_controls_invalid detail; new NL2 overlay rejects extra sampling keys while existing ordinary sampling fields remain compatible.
+      action: Submit invalid enum/type/null reasoning fields, out-of-capability effort, out-of-range budget, enabled concrete effort plus budget, contradictory legacy fields/snapshots, and invalid sampling types/ranges or conflicting sampling snapshots.
+      expected: Each invalid input returns 422 before SSE headers/provider execution, with field validation or model_controls_invalid detail; valid numeric sampling overrides including zero are accepted; bool/string/nonfinite/out-of-range sampling and conflicting snapshots are rejected.
   expected_results:
     - All three actual endpoints distinguish absence, disabled, automatic and concrete controls while preserving original successful stream contracts and model parameters.
     - Invalid or contradictory overrides fail at the API boundary before runtime mutation.
   forbidden_side_effects:
-    - No new UI sampling levels enter runtime or history payloads; no global model configuration mutation.
+    - Only explicitly selected provider-scale sampling enters runtime or history; no global model configuration mutation.
     - Invalid requests never call a provider, mutate a draft or silently replace an explicit model.
   contract:
     protocol: HTTP JSON request with existing SSE success and preflight JSON errors
     method: POST
     endpoint: /api/agent/run; /api/agent/nl2agent/run; /api/skills/nl2skill/run
-    request_expectations: [Preserve existing payload fields and route-specific schemas, Optional NL2 overrides have no implicit false or low values, Workbench snapshots and explicit runtime controls agree, Sampling UI levels are excluded]
+    request_expectations: [Preserve existing payload fields and route-specific schemas, Optional NL2 overrides have no implicit false or low values, Workbench snapshots and explicit runtime controls agree, Sampling overrides preserve optionality and explicit zero]
     response_expectations: [Valid requests retain existing 200 stream format, Invalid reasoning fields or conflicting controls return 422 before streaming]
   execution:
     profiles: [{name: mock, required_services: [http-fixture]}]

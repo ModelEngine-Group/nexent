@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """
 Unit tests for sdk.nexent.core.agents.agent_model module.
 
@@ -249,6 +251,13 @@ def _load_agent_model_module():
         fingerprint: str = "budget"
     capacity_budget.ContextBudgetSnapshot = ContextBudgetSnapshot
     sys.modules["sdk.nexent.core.models"] = models_package
+    sampling_spec = importlib.util.spec_from_file_location(
+        "sdk.nexent.core.models.sampling",
+        os.path.join(project_root, "sdk", "nexent", "core", "models", "sampling.py"),
+    )
+    sampling_module = importlib.util.module_from_spec(sampling_spec)
+    sampling_spec.loader.exec_module(sampling_module)
+    sys.modules["sdk.nexent.core.models.sampling"] = sampling_module
     sys.modules["sdk.nexent.core.models.capacity_budget"] = capacity_budget
     context_package = ModuleType("sdk.nexent.core.agents.context")
     context_package.__path__ = []
@@ -346,8 +355,8 @@ class TestModelConfig:
         )
         assert config.cite_name == "gpt-4"
         assert config.api_key == ""
-        assert config.temperature == 0.1
-        assert config.top_p == 0.95
+        assert config.temperature == 1.0
+        assert config.top_p == 1.0
         assert config.ssl_verify is True
         assert config.model_factory is None
         assert config.extra_body is None
@@ -363,8 +372,8 @@ class TestModelConfig:
             url="https://example.com"
         )
         assert config.api_key == ""
-        assert config.temperature == 0.1
-        assert config.top_p == 0.95
+        assert config.temperature == 1.0
+        assert config.top_p == 1.0
         assert config.ssl_verify is True
         assert config.model_factory is None
 
