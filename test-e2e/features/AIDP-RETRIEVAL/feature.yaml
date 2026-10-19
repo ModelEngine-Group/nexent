@@ -1,0 +1,24 @@
+{
+  "schema_version": "1.0",
+  "module": {
+    "id": "AIDP-KNOWLEDGE",
+    "name": "Knowledge retrieval"
+  },
+  "feature": {
+    "feature_id": "AIDP-RETRIEVAL",
+    "name": "AIDP graph and combined retrieval configuration",
+    "status": "active",
+    "description": "One retrieval policy across managed, independent and conversation settings.",
+    "business_rules": [
+      {
+        "rule_id": "AIDP-RETRIEVAL-RULE-01",
+        "description": "Preserve explicit values; resolve missing defaults and candidate following at runtime; send only active channels; retain identity, scope and response provenance."
+      }
+    ],
+    "required_test_stages": [
+      "D2",
+      "D3",
+      "D4"
+    ]
+  }
+}

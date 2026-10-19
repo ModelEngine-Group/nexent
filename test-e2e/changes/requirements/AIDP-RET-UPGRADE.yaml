@@ -1,0 +1,54 @@
+{
+  "schema_version": "1.0",
+  "change": {
+    "change_id": "AIDP-RET-UPGRADE",
+    "change_type": "requirement",
+    "requirement_id": "AIDP-RET",
+    "title": "AIDP graph and combined retrieval upgrade",
+    "description": "Implement the authorized local four-document contract; traditional UT owns validation arithmetic, component tests own controlled form state, protocol Case adds actual HTTP evidence. Existing UT and PW-KB-AIDP-01 do not cover advanced fields or candidate following.",
+    "affected_features": {
+      "existing": [],
+      "added": [
+        "AIDP-RETRIEVAL"
+      ],
+      "modified": [],
+      "retired": []
+    },
+    "affected_cases": {
+      "existing": [
+        "PW-KB-AIDP-01",
+        "AGT-AUTO-7A2120E630C381C7",
+        "API-AUTO-19E0779FED1B649A"
+      ],
+      "added": [
+        "AIDP-RET-PROTOCOL",
+        "AIDP-RET-REAL",
+        "AIDP-RET-JOURNEY",
+        "AIDP-RET-CONFIG-API",
+        "AIDP-RET-RUNTIME"
+      ],
+      "modified": [],
+      "retired": []
+    },
+    "traditional_ut": {
+      "decision": "strengthen",
+      "behaviors": [
+        "Seven methods and strict numeric/dependency validation",
+        "Historical missing/null defaults and following versus explicit values",
+        "Merged conversation overrides, two wrapper identities and response provenance"
+      ],
+      "reason": "Existing UT proves legacy wrapper and permissions but lacks advanced policy boundaries.",
+      "test_selectors": [
+        "test/sdk/test_aidp_retrieval_config.py",
+        "test/sdk/test_ind_aidp_search_tool.py",
+        "test/ext_components/aidp/test_aidp_search_tool.py",
+        "test/backend/services/test_runtime_knowledge_mount.py",
+        "test/backend/database/test_tool_db.py",
+        "test/backend/services/test_tool_configuration_service.py",
+        "test/backend/services/test_agent_transfer_utils.py",
+        "test/backend/agents/test_create_agent_info.py::TestMergeToolParams"
+      ]
+    },
+    "notes": "Real provider and browser evidence remain required and blocked until prerequisites are established. No new D1 quota; retain all historical D1. Local design/tasks are outside the product repository."
+  }
+}

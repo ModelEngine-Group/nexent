@@ -5,6 +5,8 @@
 from copy import deepcopy
 from typing import Any, Optional
 
+from nexent.core.ext_components.aidp.retrieval_config import CONFIG_KEYS, resolve_config
+
 from consts.exceptions import AgentToolImportError
 
 
@@ -110,6 +112,12 @@ def validate_import_tool_params(class_name, source, params, catalog_tool):
         raise AgentToolImportError(f"Cannot find tool {class_name} in {source}.")
     portable = portable_tool_params(class_name, params)
     allowed = {param["name"] for param in catalog_tool.get("params", [])}
+    if class_name in {"AidpSearchTool", "IndependentAidpSearchTool"}:
+        allowed |= CONFIG_KEYS
+        try:
+            resolve_config(portable)
+        except ValueError as exc:
+            raise AgentToolImportError(str(exc)) from exc
     for name in portable:
         if name not in allowed:
             raise AgentToolImportError(

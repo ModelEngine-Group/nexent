@@ -722,7 +722,13 @@ def _merge_tool_params(
         merged_params[param["name"]] = param.get("default")
 
     if override_params:
-        merged_params.update(override_params)
+        if tool_record.get("class_name") == "AidpSearchTool":
+            from nexent.core.ext_components.aidp.retrieval_config import CONFIG_KEYS, merge_config
+            policy = merge_config(merged_params, override_params)
+            merged_params.update({key: value for key, value in override_params.items() if key not in CONFIG_KEYS})
+            merged_params.update(policy)
+        else:
+            merged_params.update(override_params)
 
     # Extra params (e.g., internal access control params) always take precedence
     if extra_params:

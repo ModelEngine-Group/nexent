@@ -41,3 +41,13 @@ def test_unknown_business_parameter_is_not_silently_dropped():
 def test_missing_tool_reports_domain_error():
     with pytest.raises(AgentToolImportError, match="Cannot find tool"):
         validate_import_tool_params("AidpSearchTool", "local", {}, None)
+
+
+def test_advanced_policy_roundtrip_against_old_catalog():
+    config={"top_k":7,"vector_candidates":None,"full_text_candidates":30,
+            "graph_top_k":0,"query_expansion_enable":False,"reranking_mode":"jargon_coverage"}
+    result=validate_import_tool_params("AidpSearchTool","local",config,{"params":[]})
+    assert result==config
+    assert result is not config
+    with pytest.raises(AgentToolImportError,match="graph_reranking_enable"):
+        validate_import_tool_params("IndependentAidpSearchTool","local",{"reranking_enable":False,"graph_reranking_enable":True},{"params":[]})

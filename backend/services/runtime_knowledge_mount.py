@@ -1,10 +1,14 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """Request-local knowledge tool binding; never updates database records."""
 from copy import deepcopy
 from math import isfinite
 
+from nexent.core.ext_components.aidp.retrieval_config import CONFIG_KEYS, merge_config, resolve_config
+
 from consts.const import ENABLE_AIDP_KNOWLEDGE
 from consts.exceptions import ValidationError
 from database.tool_db import query_all_tools
+
 
 MANAGED_CLASSES = {"KnowledgeBaseSearchTool", "AidpSearchTool"}
 RESERVED = {"index_names", "kds_list", "display_names", "server_url", "api_key", "tenant_id",
@@ -32,6 +36,21 @@ def mount_knowledge_records(records, scope, tenant_id):
     if tool is None:
         raise ValidationError("Managed knowledge tool is unavailable")
     fields = {p["name"]: p for p in tool.get("params") or []}
+    if kind == "AidpSearchTool":
+        overrides = scope.retrieval_config or {}
+        for name in overrides:
+            if name in RESERVED or name not in CONFIG_KEYS:
+                raise ValidationError(f"Unsupported knowledge parameter: {name}")
+        saved = {name: p.get("default") for name, p in fields.items() if name in CONFIG_KEYS}
+        merged = merge_config(saved, overrides)
+        try:
+            resolve_config(merged)
+        except ValueError as exc:
+            raise ValidationError(str(exc)) from exc
+        for name, value in merged.items():
+            fields.setdefault(name, {"name": name})["default"] = deepcopy(value)
+        tool["params"] = list(fields.values())
+        return [*result, tool]
     for name, value in (scope.retrieval_config or {}).items():
         if name in RESERVED or name not in fields:
             raise ValidationError(f"Unsupported knowledge parameter: {name}")

@@ -73,6 +73,7 @@ from database.client import minio_client
 from management.services.model.adapter import get_llm_adapter, get_vlm_adapter
 from nexent.monitor import set_monitoring_context, set_monitoring_operation
 from nexent.core.concurrency import run_blocking
+from nexent.core.ext_components.aidp.retrieval_config import resolve_config
 from management.services.knowledge_base.service import get_vector_db_core
 from utils.langchain_utils import discover_langchain_modules
 from utils.tool_utils import get_local_tools_classes, get_local_tools_description_zh
@@ -258,6 +259,12 @@ def get_local_tools() -> List[ToolInfo]:
                 "description": param_description,
                 "description_zh": param_description_zh
             }
+
+            if getattr(tool_class, "name", "") in {"aidp_search", "ind_aidp_search"}:
+                if param_name in {"vector_candidates", "full_text_candidates"}:
+                    param_info["type"] = "integer"
+                elif param_name == "graph_reranking_enable":
+                    param_info["type"] = "boolean"
 
             # Handle both Pydantic FieldInfo and simple defaults
             if is_pydantic_field:
@@ -612,6 +619,12 @@ def update_tool_info_impl(tool_info: ToolInstanceInfoRequest, tenant_id: str, us
         or tool.get("name") in SYSTEM_MANAGED_TOOL_NAMES
     ):
         raise ResourceBindingError("resource_not_visible")
+
+    if tool.get("name") in {"aidp_search", "ind_aidp_search"}:
+        try:
+            resolve_config(dict(tool_info.params or {}))
+        except ValueError as exc:
+            raise ValidationError(str(exc)) from exc
 
     if _is_aidp_search_tool(tool_info.tool_id, tool.get("name")):
         existing = query_tool_instances_by_id(
@@ -1129,7 +1142,9 @@ def _validate_local_tool(
         runtime_inputs = dict(inputs or {})
 
         # Parse instantiation parameters first
-        instantiation_params = params or {}
+        instantiation_params = dict(params or {})
+        if tool_name in {"aidp_search", "ind_aidp_search"}:
+            resolve_config(instantiation_params)
         # Get signature and extract default values for all parameters
         sig = inspect.signature(tool_class.__init__)
 

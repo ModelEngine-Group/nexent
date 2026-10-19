@@ -1,14 +1,13 @@
-# Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
 """
 AIDP Search Tool
 Performs multimodal knowledge base retrieval via the AIDP FusionSearch API.
-Supports hybrid, vector, and full-text search with optional reranking.
+Supports vector, full-text, graph and combined retrieval with optional reranking.
 """
 import json
 import logging
 import re
-import time
 from typing import Any, Dict, List, Optional
 from urllib.parse import urljoin
 
@@ -17,6 +16,7 @@ from pydantic import Field
 from pydantic.fields import FieldInfo
 from smolagents.tools import Tool
 
+from ....utils.http_client_manager import http_client_manager
 from ...utils.observer import MessageObserver, ProcessType
 from ...utils.pydantic_utils import unwrap_field_info
 from ...utils.tools_common_message import (
@@ -26,22 +26,24 @@ from ...utils.tools_common_message import (
     build_knowledge_search_response,
     resolve_knowledge_search_scope,
 )
-from ....utils.http_client_manager import http_client_manager
+from .retrieval_client import MAX_ATTEMPTS as _AIDP_SEARCH_MAX_ATTEMPTS
+from .retrieval_client import RETRY_STATUSES as _AIDP_SEARCH_RETRY_STATUSES
+from .retrieval_client import post_retrieval
+from .retrieval_client import time as time
+from .retrieval_config import (
+    CONFIG_KEYS,
+    RERANK_MODES,
+    build_payload,
+    normalize_method,
+    resolve_config,
+)
+
 
 logger = logging.getLogger("aidp_search_tool")
 
-_VALID_SEARCH_METHODS = {"hybrid_search", "vector_search", "full_text_search"}
-_VALID_RERANK_MODES = {"performance", "high_accuracy"}
+_VALID_RERANK_MODES = RERANK_MODES
 _MAX_KDS = 10
 
-# Transient HTTP status codes that merit automatic retry. 502/503/504 per
-# HTTP spec indicate the upstream server was temporarily unavailable; a
-# short backoff and retry is the standard client-side mitigation. AIDP's
-# FusionSearch endpoint is observed to return 503 intermittently (e.g. cold
-# start or gateway-level instability), so this is the main consumer.
-_AIDP_SEARCH_RETRY_STATUSES = {502, 503, 504}
-_AIDP_SEARCH_MAX_ATTEMPTS = 3
-_AIDP_SEARCH_RETRY_BACKOFF = (0.5, 1.5)  # seconds between retry 1 and 2
 _HTML_IMAGE_TAG_PATTERN = re.compile(r"<img\b[^>]*>", re.IGNORECASE)
 _IMAGE_MARKER_PATH = "/__aidp_image__/"
 
@@ -162,6 +164,9 @@ class AidpSearchTool(Tool):
         },
     }
 
+    init_param_descriptions.update({key: {"description": key.replace("_", " "), "description_zh": key}
+                                    for key in CONFIG_KEYS - init_param_descriptions.keys()})
+
     output_type = "string"
     category = ToolCategory.SEARCH.value
     tool_sign = ToolSign.AIDP_SEARCH.value
@@ -185,6 +190,15 @@ class AidpSearchTool(Tool):
         score_threshold: float = Field(default=0.0, description="Score threshold 0-1", ge=0.0, le=1.0),
         top_k: int = Field(default=10, description="Top K results", ge=1, le=100),
         multi_modal: bool = Field(default=True, description="Return multimodal chunks"),
+        vector_candidates: Optional[int] = Field(default=None, ge=1, le=500, description="Vector candidates; null follows top_k"),
+        full_text_candidates: Optional[int] = Field(default=None, ge=1, le=500, description="Full-text candidates; null follows top_k"),
+        hybrid_top_k: int = Field(default=0, ge=0, le=100, description="Vector/full-text cap; zero is unlimited"),
+        graph_top_k: int = Field(default=0, ge=0, le=100, description="Graph cap; zero is unlimited"),
+        vector_score_threshold: float = Field(default=0.0, ge=0.0, le=1.0, description="Vector threshold"),
+        full_text_score_threshold: float = Field(default=0.0, ge=0.0, le=1.0, description="Full-text threshold"),
+        graph_score_threshold: float = Field(default=0.0, ge=0.0, le=1.0, description="Graph threshold"),
+        graph_reranking_enable: Optional[bool] = Field(default=None, description="Graph reranking follows global allowance when unset"),
+        query_expansion_enable: bool = Field(default=False, description="Enable query expansion"),
         observer: MessageObserver = Field(default=None, exclude=True),
     ):
         super().__init__()
@@ -201,11 +215,12 @@ class AidpSearchTool(Tool):
             raise ValueError("api_key is required and must be a non-empty string")
         if not self.tenant_id:
             raise ValueError("tenant_id is required and must be a non-empty string")
-        self.search_method = _coerce_choice(
-            search_method, _VALID_SEARCH_METHODS, "hybrid_search", "search_method"
-        )
+        try:
+            self.search_method = normalize_method(_resolve_field_default(search_method, "hybrid_search"))
+        except ValueError:
+            self.search_method = "hybrid_search"
         self.reranking_mode = _coerce_choice(
-            reranking_mode, _VALID_RERANK_MODES, "performance", "reranking_mode"
+            _resolve_field_default(reranking_mode, "performance"), _VALID_RERANK_MODES, "performance", "reranking_mode"
         )
         self.reranking_enable = bool(_resolve_field_default(reranking_enable, True))
         self.rewrite_enable = bool(_resolve_field_default(rewrite_enable, False))
@@ -216,7 +231,25 @@ class AidpSearchTool(Tool):
         self.score_threshold = max(0.0, min(float(resolved_score_threshold), 1.0))
         self.top_k = max(1, min(int(resolved_top_k), 100))
         self.multi_modal = bool(resolved_multi_modal)
-        self.observer = observer
+        config = {key: getattr(self, key) for key in CONFIG_KEYS if hasattr(self, key)}
+        config.update({
+            "vector_candidates": vector_candidates,
+            "full_text_candidates": full_text_candidates,
+            "hybrid_top_k": hybrid_top_k,
+            "graph_top_k": graph_top_k,
+            "vector_score_threshold": vector_score_threshold,
+            "full_text_score_threshold": full_text_score_threshold,
+            "graph_score_threshold": graph_score_threshold,
+            "graph_reranking_enable": graph_reranking_enable,
+            "query_expansion_enable": query_expansion_enable,
+        })
+        resolved = resolve_config(config)
+        for key in CONFIG_KEYS:
+            setattr(self, key, resolved[key] if key not in {"vector_candidates", "full_text_candidates"} else config.get(key))
+        for key in ("vector_candidates", "full_text_candidates"):
+            if isinstance(getattr(self, key), FieldInfo):
+                setattr(self, key, None)
+        self.observer = _resolve_field_default(observer, None)
         # Runtime whitelist populated by the backend (create_agent_info).
         # When the whitelist has been explicitly installed (even as an empty
         # set), both the configured ``kds_list`` and any LLM-supplied
@@ -251,20 +284,7 @@ class AidpSearchTool(Tool):
         return urljoin(self.base_url, path)
 
     def _build_retrieve_payload(self, query: str, kds_list: List[str]) -> Dict[str, Any]:
-        payload = {
-            "query": query,
-            "kds_list": kds_list,
-            "search_method": self.search_method,
-            "reranking_enable": self.reranking_enable,
-            "rewrite_enable": self.rewrite_enable,
-            "related_search_enable": self.related_search_enable,
-            "score_threshold": self.score_threshold,
-            "top_k": self.top_k,
-            "multi_modal": self.multi_modal,
-        }
-        if self.reranking_enable:
-            payload["reranking_mode"] = self.reranking_mode
-        return payload
+        return build_payload({key: getattr(self, key) for key in CONFIG_KEYS}, query, kds_list)
 
     def _parse_response(self, data: Dict[str, Any]) -> List[Dict[str, Any]]:
         records = data.get("result", [])
@@ -288,7 +308,7 @@ class AidpSearchTool(Tool):
         title = str(chunk.get("title") or "")
         text = str(chunk.get("text") or "")
         file_url = str(chunk.get("file_url") or "")
-        chunk_id = chunk.get("id")
+        chunk_id = chunk.get("id") if chunk.get("id") is not None else chunk.get("text_id")
         score = chunk.get("score")
         pages = chunk.get("pages", [])
         metadata = chunk.get("metadata", {})
@@ -410,40 +430,11 @@ class AidpSearchTool(Tool):
         url = self._build_retrieve_url()
         payload = self._build_retrieve_payload(query.strip(), kds_list)
 
-        last_status_error: Optional[httpx.HTTPStatusError] = None
-        for attempt in range(1, _AIDP_SEARCH_MAX_ATTEMPTS + 1):
-            resp = self._http_client.post(
-                url,
-                headers={
-                    "Content-Type": "application/json",
-                    "Authorization": f"Bearer {self.api_key}",
-                },
-                json=payload,
-            )
-            if resp.status_code not in _AIDP_SEARCH_RETRY_STATUSES:
-                # Non-retryable: raise_for_status will either succeed (2xx)
-                # or throw immediately for 4xx / other 5xx.
-                break
-
-            last_status_error = httpx.HTTPStatusError(
-                message=f"{resp.status_code} {resp.reason_phrase}",
-                request=resp.request,
-                response=resp,
-            )
-            if attempt >= _AIDP_SEARCH_MAX_ATTEMPTS:
-                break
-            wait = _AIDP_SEARCH_RETRY_BACKOFF[0] * (2 ** (attempt - 1))
-            logger.warning(
-                "AIDP FusionSearch returned %d on attempt %d/%d for query=%r, "
-                "retrying in %.1fs",
-                resp.status_code, attempt, _AIDP_SEARCH_MAX_ATTEMPTS,
-                query[:50], wait,
-            )
-            time.sleep(wait)
+        resp = post_retrieval(self._http_client, url, self.api_key, payload)
 
         # If we exhausted all retries on a transient status, surface it as
         # a domain-level AidpSearchError with a clearer message.
-        if last_status_error is not None and resp.status_code in _AIDP_SEARCH_RETRY_STATUSES:
+        if resp.status_code in _AIDP_SEARCH_RETRY_STATUSES:
             if resp.status_code == 503:
                 # AIDP 503 is almost always caused by the retrieval service
                 # being temporarily down, which in turn is almost always

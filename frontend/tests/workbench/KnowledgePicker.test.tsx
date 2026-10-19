@@ -1,7 +1,14 @@
 // Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
 import { beforeEach, expect, it, vi } from "vitest";
-import { act, render, screen, waitFor, within } from "@testing-library/react";
+import {
+  act,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+  within,
+} from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { ConversationKnowledgeScopeModal } from "@/app/newchat/assistant-ui/conversation-knowledge-scope-modal";
 import knowledgeBaseService from "@/services/knowledgeBaseService";
@@ -87,6 +94,81 @@ const selection: ConversationKnowledgeScope = {
   local: { mode: "override", knowledge_ids: ["1", "2"] },
   aidp: { mode: "disabled", kds_ids: [] },
 };
+
+it("AIDP conversation draft clears inherited candidates with null and cancels without mutation", async () => {
+  fixtures.deployment.enableAidpKnowledge = true;
+  const confirm = vi.fn();
+  const saved: ConversationKnowledgeScope = {
+    schema_version: 1,
+    local: { mode: "disabled", knowledge_ids: [] },
+    aidp: { mode: "inherit", kds_ids: [] },
+    retrieval_config: { top_k: 7 },
+  };
+  const inherited = {
+    ...capabilities,
+    sources: {
+      ...capabilities.sources,
+      aidp: {
+        ...capabilities.sources.aidp,
+        enabled: true,
+        default_retrieval_config: { top_k: 10, vector_candidates: 30 },
+      },
+    },
+  };
+  render(
+    <ConversationKnowledgeScopeModal
+      open
+      presentation="drawer"
+      value={saved}
+      capabilities={inherited}
+      onCancel={vi.fn()}
+      onConfirm={confirm}
+    />
+  );
+  await screen.findByRole("option", { name: /AIDP Catalog/ });
+  await userEvent.click(
+    screen.getByRole("button", {
+      name: "chat.knowledgeScope.retrievalSettings",
+    })
+  );
+  const settings = within(
+    (
+      await screen.findByText("agent.knowledge.configModal.title")
+    ).closest<HTMLElement>('[role="dialog"]')!
+  );
+  expect(
+    settings.getByRole("spinbutton", { name: "aidpRetrieval.fields.top_k" })
+  ).toHaveValue("7");
+  await userEvent.click(settings.getByText("aidpRetrieval.details"));
+  expect(
+    settings.getByRole("spinbutton", {
+      name: "aidpRetrieval.fields.vector_candidates",
+    })
+  ).toHaveValue("30");
+  await userEvent.click(settings.getAllByText("aidpRetrieval.follow")[0]);
+  fireEvent.change(
+    settings.getByRole("spinbutton", { name: "aidpRetrieval.fields.top_k" }),
+    { target: { value: "9" } }
+  );
+  expect(
+    settings.getByRole("spinbutton", {
+      name: "aidpRetrieval.fields.vector_candidates",
+    })
+  ).toHaveValue("9");
+  expect(confirm).not.toHaveBeenCalled();
+  await userEvent.click(
+    settings.getByRole("button", { name: "common.confirm" })
+  );
+  expect(confirm).not.toHaveBeenCalled();
+  await userEvent.click(
+    screen.getByRole("button", { name: "workbench.controls.confirm" })
+  );
+  expect(confirm.mock.calls[0][0].retrieval_config).toEqual({
+    top_k: 9,
+    vector_candidates: null,
+  });
+  expect(saved.retrieval_config).toEqual({ top_k: 7 });
+});
 beforeEach(() => {
   vi.clearAllMocks();
   fixtures.deployment.enableAidpKnowledge = false;

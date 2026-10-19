@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import json
 from unittest.mock import MagicMock
 
@@ -194,7 +196,7 @@ def test_payload_embeds_rerank_mode_when_reranking_enabled():
     payload = tool._payload("q", kds_list=["kb-2"])
     assert payload["kds_list"] == ["kb-2"]
     assert payload["reranking_mode"] == "performance"
-    assert payload["multi_modal"] is True
+    assert payload["multi_modal_enable"] is True
     assert 0.0 <= payload["score_threshold"] <= 1.0
 
 

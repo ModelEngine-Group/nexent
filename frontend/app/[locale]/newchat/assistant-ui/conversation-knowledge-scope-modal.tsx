@@ -37,6 +37,7 @@ import { DEFAULT_CONVERSATION_KNOWLEDGE_SCOPE } from "@/types/knowledgeScope";
 import { ResourceCard } from "@/features/workbench";
 import { ResourceSelectionRow } from "@/features/workbench/components/ResourceSelectionRow";
 import { useToolList } from "@/hooks/agent/useToolList";
+import { aidpErrors, mergeAidpConfig } from "@/lib/aidpRetrievalConfig";
 import { KnowledgeRetrievalParamsForm } from "@/components/tool-config/KnowledgeRetrievalParamsForm";
 import {
   AIDP_NON_PERSISTED_PARAM_NAMES,
@@ -83,6 +84,7 @@ const normalizeScopeForSource = (
   }
   if (source === "aidp" && scope.aidp.mode === "inherit") {
     return {
+      ...scope,
       schema_version: 1,
       local: { mode: "disabled", knowledge_ids: [] },
       aidp: { mode: "inherit", kds_ids: [] },
@@ -787,6 +789,16 @@ export const ConversationKnowledgeScopeModal: FC<
     );
   };
 
+  const aidpRetrievalValues = mergeAidpConfig(
+    Object.fromEntries(
+      retrievalParams.map((param: ToolParam) => [
+        param.name,
+        param.value ?? param.default,
+      ])
+    ),
+    capabilities?.sources[configuredSource ?? "local"].default_retrieval_config,
+    retrievalDraft
+  );
   return (
     <>
       <ResourcePickerPresentation
@@ -951,13 +963,26 @@ export const ConversationKnowledgeScopeModal: FC<
       </ResourcePickerPresentation>
       <Modal
         open={retrievalOpen && open}
+        width={configuredSource === "aidp" ? 480 : undefined}
         title={t("agent.knowledge.configModal.title")}
         onCancel={() => setRetrievalOpen(false)}
         okText={t("common.confirm", "确定")}
         cancelText={t("common.cancel", "取消")}
-        okButtonProps={{ disabled: toolsLoading || disabled }}
+        destroyOnHidden={configuredSource === "aidp"}
+        okButtonProps={{
+          disabled:
+            toolsLoading ||
+            disabled ||
+            (configuredSource === "aidp" &&
+              Object.keys(aidpErrors(aidpRetrievalValues)).length > 0),
+        }}
         onOk={() => {
-          if (disabled) return;
+          if (
+            disabled ||
+            (configuredSource === "aidp" &&
+              Object.keys(aidpErrors(aidpRetrievalValues)).length > 0)
+          )
+            return;
           setDraft((current) => ({
             ...current,
             retrieval_config: { ...retrievalDraft },
@@ -966,17 +991,26 @@ export const ConversationKnowledgeScopeModal: FC<
         }}
       >
         <KnowledgeRetrievalParamsForm
+          disabled={disabled}
+          toolName={configuredSource === "aidp" ? "aidp_search" : undefined}
+          onPatch={(patch) =>
+            setRetrievalDraft((current) => ({ ...current, ...patch }))
+          }
           params={retrievalParams}
-          values={Object.fromEntries(
-            retrievalParams.map((param: ToolParam) => [
-              param.name,
-              retrievalDraft[param.name] ??
-                capabilities?.sources[configuredSource ?? "local"]
-                  .default_retrieval_config?.[param.name] ??
-                param.value ??
-                param.default,
-            ])
-          )}
+          values={
+            configuredSource === "aidp"
+              ? aidpRetrievalValues
+              : Object.fromEntries(
+                  retrievalParams.map((param: ToolParam) => [
+                    param.name,
+                    retrievalDraft[param.name] ??
+                      capabilities?.sources[configuredSource ?? "local"]
+                        .default_retrieval_config?.[param.name] ??
+                      param.value ??
+                      param.default,
+                  ])
+                )
+          }
           onChange={(name, next) =>
             setRetrievalDraft((current) => {
               const value = { ...current };

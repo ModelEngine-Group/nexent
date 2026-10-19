@@ -1,0 +1,72 @@
+{
+  "schema_version": "1.0",
+  "stage": "D2",
+  "module": "AIDP-KNOWLEDGE",
+  "case": {
+    "case_id": "AIDP-RET-PROTOCOL",
+    "feature_id": "AIDP-RETRIEVAL",
+    "business_rule_ids": [
+      "AIDP-RETRIEVAL-RULE-01"
+    ],
+    "title": "FusionSearch consumer protocol for both tools",
+    "type": "CONTRACT",
+    "priority": "P1",
+    "status": "active",
+    "automation": "automated",
+    "objective": "FusionSearch consumer protocol for both tools",
+    "preconditions": [
+      "SDK dependencies available; local HTTP fixture binds an ephemeral loopback port."
+    ],
+    "test_data": {
+      "methods": "vector, full text, graph, all pairs and hybrid",
+      "legacy": "top_k=7, reranking_enable=false, multi_modal=false, candidates missing/null/fixed"
+    },
+    "steps": [
+      {
+        "order": 1,
+        "action": "Construct both actual SDK tools for seven method sets and legacy partial settings, then send via a local HTTP protocol fixture.",
+        "expected": "POST FusionSearch uses topk/multi_modal_enable, dynamic candidates, zero caps, channel-specific objects and no inactive fields."
+      },
+      {
+        "order": 2,
+        "action": "Return source, id/text_id, score zero, pages and transient/errors from the protocol fixture.",
+        "expected": "Both wrappers preserve scope and provenance; retries remain limited to three transient attempts; invalid configuration causes no HTTP."
+      }
+    ],
+    "expected_results": [
+      "POST FusionSearch uses topk/multi_modal_enable, dynamic candidates, zero caps, channel-specific objects and no inactive fields.",
+      "Both wrappers preserve scope and provenance; retries remain limited to three transient attempts; invalid configuration causes no HTTP."
+    ],
+    "forbidden_side_effects": [
+      "Do not mutate other configurations, expand managed scope, expose credentials or issue HTTP for invalid settings."
+    ],
+    "acceptance": [
+      {
+        "id": "AC-01",
+        "description": "POST FusionSearch uses topk/multi_modal_enable, dynamic candidates, zero caps, channel-specific objects and no inactive fields.; Both wrappers preserve scope and provenance; retries remain limited to three transient attempts; invalid configuration causes no HTTP.",
+        "steps": [
+          1,
+          2
+        ],
+        "expected_results": [
+          1,
+          2
+        ],
+        "forbidden_side_effects": [
+          1
+        ]
+      }
+    ],
+    "contract": {
+      "protocol": "HTTP JSON",
+      "method": "POST",
+      "endpoint": "/KnowledgeBase/Tenants/{tenant_id}/Retrieval/FusionSearch",
+      "request_expectations": [
+        "POST FusionSearch uses topk/multi_modal_enable, dynamic candidates, zero caps, channel-specific objects and no inactive fields."
+      ],
+      "response_expectations": [
+        "Both wrappers preserve scope and provenance; retries remain limited to three transient attempts; invalid configuration causes no HTTP."
+      ]
+    }
+  }
+}

@@ -1,3 +1,4 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """Independent AIDP FusionSearch tool.
 
 This tool deliberately owns its endpoint, credential, and default knowledge-base scope.
@@ -8,7 +9,6 @@ knowledge-scope selection.
 import json
 import logging
 import re
-import time
 from typing import Any, Callable, Dict, List, Optional
 from urllib.parse import urljoin, urlparse
 
@@ -17,6 +17,17 @@ from pydantic import Field
 from pydantic.fields import FieldInfo
 from smolagents.tools import Tool
 
+from ...utils.http_client_manager import http_client_manager
+from ..ext_components.aidp.retrieval_client import post_retrieval
+from ..ext_components.aidp.retrieval_client import time as time
+from ..ext_components.aidp.retrieval_config import (
+    CONFIG_KEYS,
+    RERANK_MODES,
+    SEARCH_METHODS,
+    build_payload,
+    normalize_method,
+    resolve_config,
+)
 from ..utils.observer import MessageObserver, ProcessType
 from ..utils.tools_common_message import (
     SearchResultTextMessage,
@@ -25,14 +36,12 @@ from ..utils.tools_common_message import (
     build_knowledge_search_response,
     resolve_knowledge_search_scope,
 )
-from ...utils.http_client_manager import http_client_manager
+
 
 logger = logging.getLogger("ind_aidp_search_tool")
 
-_VALID_SEARCH_METHODS = {"hybrid_search", "vector_search", "full_text_search"}
-_VALID_RERANK_MODES = {"performance", "high_accuracy"}
-_RETRY_STATUSES = {502, 503, 504}
-_MAX_ATTEMPTS = 3
+_VALID_SEARCH_METHODS = SEARCH_METHODS
+_VALID_RERANK_MODES = RERANK_MODES
 _MAX_KDS = 10
 _HTML_IMAGE_TAG_PATTERN = re.compile(r"<img\b[^>]*>", re.IGNORECASE)
 _IMAGE_MARKER_PATH = "/__aidp_image__/"
@@ -131,6 +140,9 @@ class IndependentAidpSearchTool(Tool):
         "top_k": {"description": "Number of results (1-100)", "description_zh": "返回结果数量（1-100）"},
         "multi_modal": {"description": "Return image/table chunks", "description_zh": "是否返回图片和表格块"},
     }
+    init_param_descriptions.update({key: {"description": key.replace("_", " "), "description_zh": key}
+                                    for key in CONFIG_KEYS - init_param_descriptions.keys()})
+
     output_type = "string"
     category = ToolCategory.SEARCH.value
     tool_sign = ToolSign.INDEPENDENT_AIDP_SEARCH.value
@@ -149,6 +161,15 @@ class IndependentAidpSearchTool(Tool):
         score_threshold: float = Field(default=0.0, description="Score threshold", ge=0.0, le=1.0),
         top_k: int = Field(default=10, description="Top K results", ge=1, le=100),
         multi_modal: bool = Field(default=True, description="Return multimodal chunks"),
+        vector_candidates: Optional[int] = Field(default=None, ge=1, le=500, description="Vector candidates; null follows top_k"),
+        full_text_candidates: Optional[int] = Field(default=None, ge=1, le=500, description="Full-text candidates; null follows top_k"),
+        hybrid_top_k: int = Field(default=0, ge=0, le=100, description="Vector/full-text cap; zero is unlimited"),
+        graph_top_k: int = Field(default=0, ge=0, le=100, description="Graph cap; zero is unlimited"),
+        vector_score_threshold: float = Field(default=0.0, ge=0.0, le=1.0, description="Vector threshold"),
+        full_text_score_threshold: float = Field(default=0.0, ge=0.0, le=1.0, description="Full-text threshold"),
+        graph_score_threshold: float = Field(default=0.0, ge=0.0, le=1.0, description="Graph threshold"),
+        graph_reranking_enable: Optional[bool] = Field(default=None, description="Graph reranking follows global allowance when unset"),
+        query_expansion_enable: bool = Field(default=False, description="Enable query expansion"),
         observer: MessageObserver = Field(default=None, exclude=True),
         image_url_builder: Optional[Callable[[str], str]] = Field(default=None, exclude=True),
     ):
@@ -163,7 +184,7 @@ class IndependentAidpSearchTool(Tool):
         self.tenant_id = resolved_tenant_id.strip()
         self.kds_list = _parse_kds_list(kds_list)
 
-        self.search_method = _field_default(search_method, "hybrid_search")
+        self.search_method = normalize_method(_field_default(search_method, "hybrid_search"))
         if self.search_method not in _VALID_SEARCH_METHODS:
             raise ValueError(f"search_method must be one of {sorted(_VALID_SEARCH_METHODS)}")
         self.reranking_mode = _field_default(reranking_mode, "performance")
@@ -175,6 +196,24 @@ class IndependentAidpSearchTool(Tool):
         self.score_threshold = max(0.0, min(float(_field_default(score_threshold, 0.0)), 1.0))
         self.top_k = max(1, min(int(_field_default(top_k, 10)), 100))
         self.multi_modal = bool(_field_default(multi_modal, True))
+        config = {key: getattr(self, key) for key in CONFIG_KEYS if hasattr(self, key)}
+        config.update({
+            "vector_candidates": vector_candidates,
+            "full_text_candidates": full_text_candidates,
+            "hybrid_top_k": hybrid_top_k,
+            "graph_top_k": graph_top_k,
+            "vector_score_threshold": vector_score_threshold,
+            "full_text_score_threshold": full_text_score_threshold,
+            "graph_score_threshold": graph_score_threshold,
+            "graph_reranking_enable": graph_reranking_enable,
+            "query_expansion_enable": query_expansion_enable,
+        })
+        resolved = resolve_config(config)
+        for key in CONFIG_KEYS:
+            setattr(self, key, resolved[key] if key not in {"vector_candidates", "full_text_candidates"} else config.get(key))
+        for key in ("vector_candidates", "full_text_candidates"):
+            if isinstance(getattr(self, key), FieldInfo):
+                setattr(self, key, None)
         self.observer = _field_default(observer, None)
         self.image_url_builder = _field_default(image_url_builder, None)
         self.record_ops = 1
@@ -191,39 +230,12 @@ class IndependentAidpSearchTool(Tool):
         )
 
     def _payload(self, query: str, kds_list: Optional[List[str]] = None) -> Dict[str, Any]:
-        payload = {
-            "query": query,
-            "kds_list": kds_list if kds_list is not None else self.kds_list,
-            "search_method": self.search_method,
-            "reranking_enable": self.reranking_enable,
-            "rewrite_enable": self.rewrite_enable,
-            "related_search_enable": self.related_search_enable,
-            "score_threshold": self.score_threshold,
-            "top_k": self.top_k,
-            "multi_modal": self.multi_modal,
-        }
-        if self.reranking_enable:
-            payload["reranking_mode"] = self.reranking_mode
-        return payload
+        return build_payload({key: getattr(self, key) for key in CONFIG_KEYS}, query, kds_list if kds_list is not None else self.kds_list)
 
     def _execute_request(
         self, query: str, kds_list: Optional[List[str]] = None
     ) -> List[Dict[str, Any]]:
-        response = None
-        for attempt in range(_MAX_ATTEMPTS):
-            response = self._http_client.post(
-                self._retrieve_url(),
-                headers={
-                    "Authorization": f"Bearer {self.api_key}",
-                    "Content-Type": "application/json",
-                },
-                json=self._payload(query, kds_list),
-            )
-            if response.status_code not in _RETRY_STATUSES or attempt == _MAX_ATTEMPTS - 1:
-                break
-            time.sleep(0.5 * (2**attempt))
-        if response is None:  # pragma: no cover - defensive
-            raise IndependentAidpSearchError("AIDP request was not sent")
+        response = post_retrieval(self._http_client, self._retrieve_url(), self.api_key, self._payload(query, kds_list))
         try:
             response.raise_for_status()
             data = response.json()
@@ -258,7 +270,8 @@ class IndependentAidpSearchTool(Tool):
                 filename=title,
                 score=str(chunk.get("score")) if chunk.get("score") is not None else None,
                 score_details={
-                    "chunk_id": chunk.get("id"),
+                    "chunk_id": chunk.get("id") if chunk.get("id") is not None else chunk.get("text_id"),
+                    "retrieval_source": chunk.get("retrieval_source"),
                     "chunk_type": chunk_type,
                     "pages": chunk.get("pages", []),
                     "file_url": file_url,
