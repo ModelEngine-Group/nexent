@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import os
 import importlib
 import logging
@@ -504,6 +506,14 @@ def import_svc(module="management"):
     setattr(database_mod, "model_management_db", db_mm_mod)
     sys.modules.pop("management.services.model.management", None)
     sys.modules.pop("management.services.model.management", None)
+    # Keep the new pure SDK default resolver real inside the isolated SDK shell.
+    sampling_spec = importlib.util.spec_from_file_location(
+        "nexent.core.models.sampling",
+        os.path.abspath(os.path.join(current_dir, "../../../sdk/nexent/core/models/sampling.py")),
+    )
+    sampling_module = importlib.util.module_from_spec(sampling_spec)
+    sampling_spec.loader.exec_module(sampling_module)
+    sys.modules["nexent.core.models.sampling"] = sampling_module
     with mock.patch("backend.database.client.MinioClient", return_value=minio_client_mock):
         svc = importlib.import_module("management.services.model." + module)
     return svc

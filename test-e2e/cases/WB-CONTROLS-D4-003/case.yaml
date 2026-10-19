@@ -10,6 +10,7 @@ case:
   - CHAT-WORKBENCH-REFINEMENTS-20261015
   - CHAT-WORKBENCH-HEADER-DEFAULTS-20261015
   - WB-RESOURCE-LISTS-20261015
+  - CHAT-SAMPLING-20261016
   business_rule_ids:
   - WB-CONTROLS-RULE-004
   title: Capability-driven reasoning controls and complete run parameters
@@ -28,10 +29,10 @@ case:
     action: Open Workbench and enable thinking for a model supporting all effort enum values; select each concrete level and
       explicitly send a message.
     expected: Localized options match capability values; each request retains its selected raw Workbench thinking_effort.
-      Sampling edits never enter run requests. Selected option text and checkmark do not overlap; the model panel and effort
-      popup remain anchored when switching among different-length levels. Effort trigger fits its current label and chevron
-      without fixed-width blank space. Shared reasoning and advanced-setting text rows remain compact, with at most 16px between
-      the effort label bottom and advanced label top.
+      Explicit sampling edits reach generation_config alongside unchanged reasoning values. Selected option text and checkmark
+      do not overlap; the model panel and effort popup remain anchored when switching among different-length levels. Effort
+      trigger fits its current label and chevron without fixed-width blank space. Shared reasoning and advanced-setting text
+      rows remain compact, with at most 16px between the effort label bottom and advanced label top.
   - order: 2
     action: Open Agent chat with the same model and disabled saved thinking; enable thinking and select each concrete effort
       before an explicit send.
@@ -50,7 +51,7 @@ case:
   expected_results:
   - Users can select the same model-supported effort levels and send their actual values from both routes.
   forbidden_side_effects:
-  - No real model calls or database mutations; no temperature or top_p submission from frontend-only settings; no unsupported
+  - No real model calls or database mutations; no implicit sampling override or global model configuration mutation; no unsupported
     effort submission.
   actor: Authorized mock tenant user
   journey:

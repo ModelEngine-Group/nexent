@@ -7,7 +7,7 @@ feature:
   name: 六入口共享模型选择与运行控制
   status: active
   description: Unified capability-derived selection, session state and root runtime controls across Workbench, Agent chat
-    and four creator entries; sampling controls remain frontend-only.
+    and four creator entries; sampling overrides use canonical provider-scale values.
   business_rules:
   - rule_id: CHAT-MODEL-CONTROLS-RULE-001
     description: Shared capability-derived reasoning choices preserve each entry's candidate model scope.
@@ -24,8 +24,11 @@ feature:
     description: Existing permissions and tenant/capability validation guard execution; locks, cancellation and errors preserve
       valid drafts without silent fallback.
   - rule_id: CHAT-MODEL-CONTROLS-RULE-006
-    description: Advanced temperature and Top P integer levels remain session/model-local frontend state and never enter run
-      or persistence payloads.
+    description: Shared advanced settings use temperature 0-2 and top_p 0-1 (step 0.1); untouched/reset values inherit defaults,
+      explicit zero survives immutable root-only runtime snapshots, and session/model scopes remain isolated. Explicit sampling
+      must not silently disappear on provider retry. Configured Agent/model defaults are displayed as numbers with exact slider
+      positions without creating overrides. Null inherits per field through Agent/model configuration to shared SDK defaults
+      temperature 1.0 and top_p 1.0; read-only model-list effective_sampling uses those same defaults without filling stored values.
   required_test_stages:
   - D2
   - D3
@@ -37,6 +40,8 @@ feature:
     - CHAT-WORKBENCH-HEADER-DEFAULTS-20261015
     - WB-CREATION-TOGGLE-EXIT-20261015
     - WB-RESOURCE-LISTS-20261015
+    - CHAT-SAMPLING-20261016
+    - CHAT-SAMPLING-DISPLAY-20261019
     spec_path: ../nexent-doc/nexent/agent-workbench/specs/model-controls/spec.md
     notes: Product and fixed tests implemented; execution and acceptance evidence are maintained separately in the SPEC task
       record. Existing WB-CONTROLS-D4-002/003 remain regression owners for the two ordinary chat entries.
