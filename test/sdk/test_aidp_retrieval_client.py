@@ -120,7 +120,8 @@ def test_wrappers_share_one_error_type_and_complete_parameter_descriptions():
             description = tool.init_param_descriptions[field]["description_zh"]
             assert any("\u4e00" <= character <= "\u9fff" for character in description), field
         for field in ("vector_candidates", "full_text_candidates"):
-            assert "跟随" in tool.init_param_descriptions[field]["description_zh"]
+            description = tool.init_param_descriptions[field]["description_zh"]
+            assert "固定整数" in description and "1–500" in description
         for field in ("hybrid_top_k", "graph_top_k"):
             description = tool.init_param_descriptions[field]["description_zh"]
             assert "0" in description and "总返回上限" in description

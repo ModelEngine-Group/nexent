@@ -1259,7 +1259,7 @@ def test_old_aidp_catalog_retains_new_instance_values_without_mutation(monkeypat
     values={p["name"]:p.get("default") for p in result["params"]}
     assert values["top_k"]==7
     assert values["vector_candidates"]==30
-    assert values["full_text_candidates"] is None
+    assert values["full_text_candidates"]==10
     assert values["multi_modal"] is False
     assert catalog.params==before
 

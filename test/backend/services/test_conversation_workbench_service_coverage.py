@@ -16,9 +16,9 @@ service = __import__(
 
 @pytest.fixture(autouse=True)
 def retrieval_validation(monkeypatch):
-    module = ModuleType("services.knowledge_scope_service")
+    module = ModuleType("management.services.knowledge_base.scope")
     module.validate_conversation_retrieval_config = MagicMock()
-    monkeypatch.setitem(sys.modules, "services.knowledge_scope_service", module)
+    monkeypatch.setitem(sys.modules, "management.services.knowledge_base.scope", module)
     return module.validate_conversation_retrieval_config
 
 
