@@ -15,6 +15,7 @@ class _FakeCursor:
         self.fetchone_calls = 0
 
     def execute(self, query, params=None):
+        assert "prompt_template_id" not in query
         self.last_query = query
 
     def fetchone(self):
@@ -33,7 +34,6 @@ class _FakeCursor:
             {},
             "Hello",
             [],
-            0,
             1,
         )
 
@@ -104,6 +104,8 @@ def test_export_agent_config_externalizes_tool_secrets(
 
     raw_output = output_path.read_text(encoding="utf-8")
     config = yaml.safe_load(raw_output)
+    assert "prompt_template_id" not in config["agent_config"]
+    assert config["agent_config"]["version_no"] == 1
     assert config["prompts"] == {"duty_prompt": "Duty\n\n# Constraints\nConstraint"}
     exa_params = config["tools"][0]["tool_params"]
     terminal_params = config["tools"][1]["tool_params"]

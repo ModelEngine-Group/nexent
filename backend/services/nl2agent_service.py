@@ -37,7 +37,7 @@ from consts.const import (
     MCP_REQUEST_TIMEOUT_SECONDS,
     MODEL_CONFIG_MAPPING,
 )
-from utils.mcp_url_utils import get_tenant_local_mcp_server
+from management.services.mcp.addressing import get_tenant_local_mcp_server
 from consts.model import HistoryItem, NL2AgentRunRequest, ToolSourceEnum
 from database.agent_db import (
     query_all_agent_info_by_tenant_id,
@@ -45,11 +45,9 @@ from database.agent_db import (
 )
 from database.skill_db import query_enabled_skill_instances
 from database.tool_db import query_all_enabled_tool_instances, query_all_tools
-from services.agent_draft_permission_service import (
-    AgentDraftEditError,
-    require_agent_draft_edit,
-)
-from services.thread_lifecycle_service import runtime_thread_manager
+from consts.exceptions import AgentDraftEditError
+from management.services.agent.authorization import require_agent_draft_edit
+from infrastructure.concurrency import runtime_thread_manager
 from management.services.model.run_controls import resolve_creator_model, preflight_turn_controls
 from tool_collection.mcp.nl2agent_mcp_tools import (
     AgentDraftFields,
@@ -67,12 +65,12 @@ from tool_collection.mcp.nl2agent_mcp_tools import (
     SEARCH_UNINSTALLED_RESOURCES_NAME,
     UNINSTALLED_RESOURCE_SOURCES,
 )
-from utils.auth_utils import get_current_user_id
-from utils.config_utils import tenant_config_manager
+from management.services.permission.identity.authentication_helpers import get_current_user_id
+from management.services.configuration.tenant.settings import tenant_config_manager
 from management.services.agent.context import (
     build_authorized_context_input,
 )
-from utils.http_client_utils import create_httpx_client
+from infrastructure.http.client import create_httpx_client
 
 logger = logging.getLogger(__name__)
 
@@ -470,7 +468,7 @@ async def _load_installed_resource_catalog(
     user_id: str,
 ) -> list[dict[str, Any]]:
     from management.services.skill.service import SkillService
-    from services.tool_configuration_service import list_all_tools
+    from management.services.tool.configuration import list_all_tools
 
     tools = await list_all_tools(tenant_id=tenant_id)
     skills = SkillService(tenant_id=tenant_id).list_visible_skills(
@@ -803,7 +801,7 @@ async def _load_internal_uninstalled_resource_catalog(
     tenant_id: str,
     user_id: str,
 ) -> list[dict[str, Any]]:
-    from services.mcp_management_service import list_community_mcp_services
+    from management.services.repository.mcp.service import list_community_mcp_services
     from services.skill_repository_service import (
         list_skill_repository_listings_impl,
     )

@@ -46,6 +46,7 @@ change:
       distinct disposable PostgreSQL D5 boundary.
     test_selectors:
     - test/backend/agents/test_agent_prompt_contract.py
+    - test/backend/app/test_tenant_app.py
     - test/backend/agents/test_nl2agent_agent.py
     - test/backend/agents/test_nl2agent_single_prompt.py
     - test/backend/services/test_nl2agent_service.py
@@ -91,4 +92,7 @@ change:
     in-place SQL update drops legacy columns after merging; existing D5 strengthened
     for removal and rollback. User clarification: no legacy-client support; compatibility
     is limited to decoding older exported Agent files. Historical sensitive fields
-    remain masked without adding removed fields to current responses.'
+    remain masked without adding removed fields to current responses.
+    PR 4137 develop integration (2026-10-20): preserve the infrastructure and management
+    service relocation, evaluation single-prompt policy, and updated test imports.
+    Reuse existing UT and formal contracts; no new behavior or formal Case is introduced.'

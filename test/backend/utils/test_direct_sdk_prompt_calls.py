@@ -23,17 +23,6 @@ def test_ut_be_fps_005_backend_has_no_generic_template_type_adapter():
         assert "get_prompt_template(" not in text, file
 
 
-def test_ut_be_fps_005_business_helpers_keep_field_merging():
-    """UT-BE-FPS-005: template-field merging remains Backend business logic."""
-    from management.services.agent.prompt import (
-        merge_prompt_generate_templates,
-    )
-
-    assert merge_prompt_generate_templates(
-        {"duty_system_prompt": "custom"}, {"duty_system_prompt": "default", "user_prompt": "user"},
-    )["duty_system_prompt"] == "custom"
-
-
 def test_ut_be_fps_006_production_prompt_loads_use_relative_paths():
     """UT-BE-FPS-006: each production call uses the two-argument API."""
     for root in (ROOT / "backend", ROOT / "sdk/nexent/core"):

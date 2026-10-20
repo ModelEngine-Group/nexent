@@ -40,7 +40,7 @@ case:
     expected: total_bytes、actual_bytes、used_bytes、total_actual_bytes 等配额计量字段等于源文件账本字节（get_committed_bytes_by_kb/get_tenant_committed_source_bytes），不包含
       es_physical_bytes。
   - order: 5
-    action: 对照 backend/services/quota_service.py 序列化实现逐字段核对 es_physical_bytes/es_physical_readable 的字段名与可空性，并核对 total_bytes/actual_bytes/used_bytes/total_actual_bytes
+    action: 对照 backend/management/services/knowledge_base/quota.py 序列化实现逐字段核对 es_physical_bytes/es_physical_readable 的字段名与可空性，并核对 total_bytes/actual_bytes/used_bytes/total_actual_bytes
       的取值语义。
     expected: usage_pct/usage_rate/available_bytes/is_over_quota 均仅以源文件字节计算，与 es_physical_bytes 互相独立。
   - order: 6
@@ -69,7 +69,7 @@ case:
     - 调用 GET /platform/quota/overview（SU/ASSET_OWNER/SPEED 角色），记录顶层汇总字段及 tenants[] 元素字段。
     - 以 kb.capacity:read 权限账号调用 GET /capacity/personal/me、GET /capacity/personal/users?page=1&page_size=20 及 GET /capacity/personal/summary，记录
       items[]/kbs[] 与汇总字段。
-    - 对照 backend/services/quota_service.py 序列化实现逐字段核对 es_physical_bytes/es_physical_readable 的字段名与可空性，并核对 total_bytes/actual_bytes/used_bytes/total_actual_bytes
+    - 对照 backend/management/services/knowledge_base/quota.py 序列化实现逐字段核对 es_physical_bytes/es_physical_readable 的字段名与可空性，并核对 total_bytes/actual_bytes/used_bytes/total_actual_bytes
       的取值语义。
     - 依据硬限额与返回的 total_bytes 反推 usage_pct、available_bytes 与 is_over_quota，确认计算仅基于源文件账本字节，es_physical_bytes 未参与。
     response_expectations:

@@ -72,24 +72,19 @@ from management.services.agent.read import (
 )
 from management.services.skill.service import SkillService
 from nexent.core.concurrency import run_blocking
-from services.agent_reasoning_service import (
+from management.services.agent.reasoning import (
     snapshot_agent_reasoning_config as build_reasoning_snapshot,
 )
-from services.asset_owner_visibility import resolve_agent_list_permission
-from services.conversation_management_service import (
+from management.services.permission.asset_owner import resolve_agent_list_permission
+from management.services.conversation.service import (
     generate_conversation_title_service,  # noqa: F401 - compatibility patch point
     save_message_unit,  # noqa: F401 - retained as a compatibility re-export
     update_unit_status,  # noqa: F401 - retained as a compatibility re-export
 )
-from services.prompt_template_service import (
-    SYSTEM_PROMPT_TEMPLATE_ID,
-    SYSTEM_PROMPT_TEMPLATE_NAME,
-    get_prompt_template_summary,
-)
-from services.user_identity_service import enrich_cas_usernames
-from utils.auth_utils import get_current_user_info
-from utils.config_utils import tenant_config_manager
-from utils.str_utils import convert_list_to_string, convert_string_to_list
+from management.services.permission.identity.display import enrich_cas_usernames
+from management.services.permission.identity.authentication_helpers import get_current_user_info
+from management.services.configuration.tenant.settings import tenant_config_manager
+from management.db.serialization import convert_list_to_string, convert_string_to_list
 
 # Monitoring utilities: bind Agent metadata once at the request boundary.
 
@@ -568,11 +563,6 @@ async def get_agent_info_impl(
     elif "business_logic_model_name" not in agent_info:
         agent_info["business_logic_model_name"] = None
 
-    if not agent_info.get("prompt_template_id"):
-        agent_info["prompt_template_id"] = SYSTEM_PROMPT_TEMPLATE_ID
-    if not agent_info.get("prompt_template_name"):
-        agent_info["prompt_template_name"] = SYSTEM_PROMPT_TEMPLATE_NAME
-
     if agent_info.get("group_ids") is not None:
         agent_info["group_ids"] = convert_string_to_list(agent_info.get("group_ids"))
 
@@ -736,12 +726,6 @@ async def update_agent_info_impl(
 
     _validate_requested_output_tokens_for_agent(request, tenant_id)
 
-    prompt_template_id, prompt_template_name = get_prompt_template_summary(
-        template_id=request.prompt_template_id,
-        tenant_id=tenant_id,
-        user_id=user_id,
-    )
-
     existing_agent = None
     if request.agent_id is not None:
         existing_agent = search_agent_info_by_agent_id(
@@ -810,8 +794,6 @@ async def update_agent_info_impl(
                     "model_ids": request.model_ids,
                     "business_logic_model_id": request.business_logic_model_id,
                     "business_logic_model_name": request.business_logic_model_name,
-                    "prompt_template_id": prompt_template_id,
-                    "prompt_template_name": prompt_template_name,
                     "max_steps": request.max_steps,
                     "requested_output_tokens": request.requested_output_tokens,
                     "is_main_agent": request.is_main_agent
@@ -844,8 +826,6 @@ async def update_agent_info_impl(
             agent_id = created["agent_id"]
         else:
             # Update agent
-            request.prompt_template_id = prompt_template_id
-            request.prompt_template_name = prompt_template_name
             request.model_params_override = model_params_override
             update_agent(agent_id, request, user_id)
     except TenantResourceLimitError:

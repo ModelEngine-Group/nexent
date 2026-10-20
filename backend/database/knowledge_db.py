@@ -18,7 +18,7 @@ from consts.exceptions import DuplicateError
 from consts.scheduler import VALID_SUMMARY_FREQUENCIES
 from database.client import as_dict, get_db_session
 from database.db_models import KnowledgeRecord
-from utils.str_utils import convert_list_to_string
+from management.db.serialization import convert_list_to_string
 
 logger = logging.getLogger("knowledge_db")
 

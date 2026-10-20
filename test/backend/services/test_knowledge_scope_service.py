@@ -7,7 +7,7 @@ import pytest
 
 from backend.consts.model import ConversationKnowledgeScopeRequest, ToolParamsRequest
 from consts.exceptions import ValidationError
-from backend.services.knowledge_scope_service import (
+from management.services.knowledge_base.scope import (
     ResolvedKnowledgeScope,
     STATIC_SCOPE_PATTERN,
     _merge_tool_params,
@@ -38,11 +38,11 @@ def test_executable_roots_use_runtime_refs_without_agent_repository_reads(mocker
     root = node("system:root", "root-index")
     root.worker_agents = [node("system:child", "child-index")]
     before = root.model_dump()
-    walk = mocker.patch("backend.services.knowledge_scope_service._walk_agent_tree")
-    version = mocker.patch("backend.services.knowledge_scope_service.resolve_root_version")
-    mocker.patch("backend.services.knowledge_scope_service.ElasticSearchService.filter_accessible_indices",
+    walk = mocker.patch("management.services.knowledge_base.scope._walk_agent_tree")
+    version = mocker.patch("management.services.knowledge_base.scope.resolve_root_version")
+    mocker.patch("management.services.knowledge_base.scope.ElasticSearchService.filter_accessible_indices",
                  side_effect=lambda indices, **_kwargs: indices)
-    mocker.patch("backend.services.knowledge_scope_service.get_knowledge_name_map_by_index_names", return_value={})
+    mocker.patch("management.services.knowledge_base.scope.get_knowledge_name_map_by_index_names", return_value={})
     scope = ConversationKnowledgeScopeRequest.model_validate({"local": {"mode": "inherit"}, "aidp": {"mode": "disabled"}})
     compiled, resolution = resolve_executable_knowledge_scope(root, scope, tenant_id="tenant", user_id="user")
     assert compiled.tools[0].params["index_names"] == ["root-index"]
@@ -69,7 +69,7 @@ def test_executable_knowledge_rejects_ambiguous_runtime_identity(child_ref, mock
 
     root = AgentConfig(runtime_ref="system:root", name="root", description="test", model_name="model", tools=[])
     root.worker_agents = [root.model_copy(update={"runtime_ref": child_ref})]
-    resolve = mocker.patch("backend.services.knowledge_scope_service.resolve_knowledge_scope")
+    resolve = mocker.patch("management.services.knowledge_base.scope.resolve_knowledge_scope")
     with pytest.raises(ValidationError):
         resolve_executable_knowledge_scope(root, ConversationKnowledgeScopeRequest(), tenant_id="tenant", user_id="user")
     resolve.assert_not_called()
@@ -95,8 +95,8 @@ def _agent_tree():
     }]
 
 
-@patch("backend.services.knowledge_scope_service._walk_agent_tree", return_value=_agent_tree())
-@patch("backend.services.knowledge_scope_service._resolve_local_override")
+@patch("management.services.knowledge_base.scope._walk_agent_tree", return_value=_agent_tree())
+@patch("management.services.knowledge_base.scope._resolve_local_override")
 def test_override_projects_only_selected_local_indices(mock_local_override, _mock_tree):
     mock_local_override.return_value = ([{
         "knowledge_id": 12,
@@ -126,9 +126,9 @@ def test_override_projects_only_selected_local_indices(mock_local_override, _moc
     assert resolved.aidp_disabled is True
 
 
-@patch("backend.services.knowledge_scope_service._walk_agent_tree", return_value=_agent_tree())
+@patch("management.services.knowledge_base.scope._walk_agent_tree", return_value=_agent_tree())
 @patch(
-    "backend.services.knowledge_scope_service._resolve_aidp_access_snapshot",
+    "management.services.knowledge_base.scope._resolve_aidp_access_snapshot",
     return_value=SimpleNamespace(
         accessible_id_set={"default-kds", "user-selected-kds"},
         name_to_id={
@@ -160,7 +160,7 @@ def test_aidp_override_can_select_accessible_kds_outside_agent_default(
     assert resolved.aidp_display_names == ["User selected"]
 
 
-@patch("backend.services.knowledge_scope_service._walk_agent_tree", return_value=_agent_tree())
+@patch("management.services.knowledge_base.scope._walk_agent_tree", return_value=_agent_tree())
 def test_disabled_projects_deny_all_whitelists(_mock_tree):
     scope = ConversationKnowledgeScopeRequest.model_validate({
         "local": {"mode": "disabled", "knowledge_ids": []},
@@ -183,7 +183,7 @@ def test_disabled_projects_deny_all_whitelists(_mock_tree):
     assert resolved.aidp_disabled is True
 
 
-@patch("backend.services.knowledge_scope_service._walk_agent_tree")
+@patch("management.services.knowledge_base.scope._walk_agent_tree")
 def test_ut_be_wb_016_runtime_tree_snapshot_prevents_repository_reread(mock_tree):
     """UT-BE-WB-016: Workbench knowledge resolution consumes its frozen tree."""
     runtime_tree = _agent_tree()
@@ -211,21 +211,21 @@ def test_ut_be_wb_016_runtime_tree_snapshot_prevents_repository_reread(mock_tree
     ]
 
 
-@patch("backend.services.knowledge_scope_service._walk_agent_tree", return_value=_agent_tree())
-@patch("backend.services.knowledge_scope_service.resolve_root_version", return_value=3)
+@patch("management.services.knowledge_base.scope._walk_agent_tree", return_value=_agent_tree())
+@patch("management.services.knowledge_base.scope.resolve_root_version", return_value=3)
 @patch(
-    "backend.services.knowledge_scope_service.get_knowledge_info_by_tenant_id",
+    "management.services.knowledge_base.scope.get_knowledge_info_by_tenant_id",
     return_value=[{
         "knowledge_id": 12,
         "index_name": "default-index",
     }],
 )
 @patch(
-    "backend.services.knowledge_scope_service.ElasticSearchService.filter_accessible_indices",
+    "management.services.knowledge_base.scope.ElasticSearchService.filter_accessible_indices",
     return_value=["default-index"],
 )
 @patch(
-    "backend.services.knowledge_scope_service._filter_accessible_aidp_ids",
+    "management.services.knowledge_base.scope._filter_accessible_aidp_ids",
     return_value=["default-kds"],
 )
 def test_capabilities_include_stable_revision(
@@ -244,13 +244,13 @@ def test_capabilities_include_stable_revision(
 
 
 @patch(
-    "backend.services.knowledge_scope_service._walk_agent_tree",
+    "management.services.knowledge_base.scope._walk_agent_tree",
     return_value=[{
         **_agent_tree()[0],
         "has_static_scope_reference": True,
     }],
 )
-@patch("backend.services.knowledge_scope_service.resolve_root_version", return_value=3)
+@patch("management.services.knowledge_base.scope.resolve_root_version", return_value=3)
 def test_capabilities_report_legacy_static_scope(_mock_version, _mock_tree):
     result = get_agent_knowledge_capabilities(7, "tenant", None)
 
@@ -288,7 +288,7 @@ def test_ut_be_fps_014_runtime_resource_names_are_sanitized_and_bounded():
     }
 
 
-@patch("backend.services.knowledge_scope_service.query_current_version_no", return_value=8)
+@patch("management.services.knowledge_base.scope.query_current_version_no", return_value=8)
 def test_root_version_resolution(mock_current_version):
     assert resolve_root_version(1, "tenant", 4, False) == 4
     assert resolve_root_version(1, "tenant", None, True) == 0
@@ -309,19 +309,19 @@ def test_list_and_tool_default_parsing_is_defensive():
 
 
 @patch(
-    "backend.services.knowledge_scope_service._resolve_runtime_tool_records",
+    "management.services.knowledge_base.scope._resolve_runtime_tool_records",
     side_effect=[[{"class_name": "root-tool"}], [{"class_name": "child-tool"}]],
 )
 @patch(
-    "backend.services.knowledge_scope_service.resolve_sub_agent_version_no",
+    "management.services.knowledge_base.scope.resolve_sub_agent_version_no",
     return_value=2,
 )
 @patch(
-    "backend.services.knowledge_scope_service.query_sub_agent_relations",
+    "management.services.knowledge_base.scope.query_sub_agent_relations",
     side_effect=[[{"selected_agent_id": 9}], []],
 )
 @patch(
-    "backend.services.knowledge_scope_service.search_agent_info_by_agent_id",
+    "management.services.knowledge_base.scope.search_agent_info_by_agent_id",
     side_effect=[
         {"name": "root", "duty_prompt": 'index_names: ["fixed"]'},
         {"name": "child"},
@@ -342,11 +342,11 @@ def test_walk_agent_tree_resolves_children_and_static_prompt(
 
 
 @patch(
-    "backend.services.knowledge_scope_service.ElasticSearchService.filter_accessible_indices",
+    "management.services.knowledge_base.scope.ElasticSearchService.filter_accessible_indices",
     return_value=["index-a"],
 )
 @patch(
-    "backend.services.knowledge_scope_service.get_knowledge_info_by_ids_and_tenant",
+    "management.services.knowledge_base.scope.get_knowledge_info_by_ids_and_tenant",
     return_value=[
         {"knowledge_id": 1, "index_name": "index-a", "embedding_model_id": 3},
         {"knowledge_id": 2, "index_name": "index-b", "embedding_model_id": 3},
@@ -363,11 +363,11 @@ def test_local_override_filters_inaccessible_and_invalid_ids(_mock_records, _moc
 
 
 @patch(
-    "backend.services.knowledge_scope_service.ElasticSearchService.filter_accessible_indices",
+    "management.services.knowledge_base.scope.ElasticSearchService.filter_accessible_indices",
     return_value=["index-a", "index-b"],
 )
 @patch(
-    "backend.services.knowledge_scope_service.get_knowledge_info_by_ids_and_tenant",
+    "management.services.knowledge_base.scope.get_knowledge_info_by_ids_and_tenant",
     return_value=[
         {"knowledge_id": 1, "index_name": "index-a", "embedding_model_id": 3},
         {"knowledge_id": 2, "index_name": "index-b", "embedding_model_name": "other"},
@@ -409,21 +409,21 @@ def test_merge_tool_params_preserves_non_scope_parameters():
 
 
 @patch(
-    "backend.services.knowledge_scope_service._resolve_aidp_access_snapshot",
+    "management.services.knowledge_base.scope._resolve_aidp_access_snapshot",
     return_value=SimpleNamespace(
         accessible_id_set={"default-kds"},
         name_to_id={"Default AIDP": "default-kds"},
     ),
 )
 @patch(
-    "backend.services.knowledge_scope_service.get_knowledge_name_map_by_index_names",
+    "management.services.knowledge_base.scope.get_knowledge_name_map_by_index_names",
     return_value={"default-index": "Default Local"},
 )
 @patch(
-    "backend.services.knowledge_scope_service.ElasticSearchService.filter_accessible_indices",
+    "management.services.knowledge_base.scope.ElasticSearchService.filter_accessible_indices",
     return_value=["default-index"],
 )
-@patch("backend.services.knowledge_scope_service._walk_agent_tree", return_value=_agent_tree())
+@patch("management.services.knowledge_base.scope._walk_agent_tree", return_value=_agent_tree())
 def test_inherit_resolves_each_tool_default_and_display_name(
     _mock_tree,
     _mock_local_filter,
@@ -447,7 +447,7 @@ def test_inherit_resolves_each_tool_default_and_display_name(
 
 
 @patch(
-    "backend.services.knowledge_scope_service._walk_agent_tree",
+    "management.services.knowledge_base.scope._walk_agent_tree",
     return_value=[
         {"agent_id": 1, "version_no": 1, "agent_name": None, "tools": []},
         {"agent_id": 2, "version_no": 1, "agent_name": "plain", "tools": []},
@@ -471,13 +471,13 @@ def test_missing_capabilities_do_not_warn_for_inherited_scope(_mock_tree):
 
 
 @patch(
-    "backend.services.knowledge_scope_service._walk_agent_tree",
+    "management.services.knowledge_base.scope._walk_agent_tree",
     return_value=[
         {"agent_id": 1, "version_no": 1, "agent_name": "plain", "tools": []},
     ],
 )
 @patch(
-    "backend.services.knowledge_scope_service._resolve_local_override",
+    "management.services.knowledge_base.scope._resolve_local_override",
     return_value=([], []),
 )
 def test_missing_capability_warns_for_explicit_override(_mock_local, _mock_tree):

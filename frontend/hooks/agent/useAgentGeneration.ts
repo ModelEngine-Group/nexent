@@ -62,8 +62,6 @@ export function useAgentGeneration({
     businessDescription: editedAgent.business_description,
     businessLogicModelId: editedAgent.business_logic_model_id,
     businessLogicModelName: editedAgent.business_logic_model_name,
-    promptTemplateId: editedAgent.prompt_template_id,
-    promptTemplateName: editedAgent.prompt_template_name,
   };
 
   const handleGenerateAgent = useCallback(async () => {
@@ -103,7 +101,6 @@ export function useAgentGeneration({
           agent_id: effectiveAgentId,
           task_description: businessInfo.businessDescription,
           model_id: businessInfo.businessLogicModelId,
-          prompt_template_id: businessInfo.promptTemplateId,
           sub_agent_ids: editedAgent.sub_agent_id_list,
           tool_ids: Array.isArray(editedAgent.tools)
             ? editedAgent.tools.map((tool: any) =>

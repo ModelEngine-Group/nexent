@@ -8,7 +8,7 @@ import pytest
 from pydantic import ValidationError
 
 from tool_collection.mcp import nl2agent_mcp_tools as tools
-from utils.agent_prompt import normalize_imported_agent_prompt
+from infrastructure.agent_prompt import normalize_imported_agent_prompt
 
 
 @pytest.mark.parametrize("fields", [

@@ -1056,7 +1056,7 @@ async def list_models_for_admin(
         paginated_models = normalized_models[start_index:end_index]
 
         # Get tenant name
-        from services.tenant_service import get_tenant_info
+        from management.services.permission.identity.tenants import get_tenant_info
 
         try:
             tenant_info = get_tenant_info(tenant_id)

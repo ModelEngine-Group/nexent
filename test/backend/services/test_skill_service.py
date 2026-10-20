@@ -203,13 +203,13 @@ sys.modules['consts.exceptions'] = consts_exceptions_mock
 
 # Skill deletion invokes tag cleanup after the skill record is removed.  Keep
 # this SkillService unit suite isolated from the tag service's separate graph.
-tag_management_service_mock = types.ModuleType('services.tag_management_service')
+tag_management_service_mock = types.ModuleType('management.services.tag.library')
 tag_management_service_mock.TagManagementService = type(
     'TagManagementService',
     (),
     {'cleanup_resource_assignments': staticmethod(lambda *_args, **_kwargs: 0)},
 )
-sys.modules['services.tag_management_service'] = tag_management_service_mock
+sys.modules['management.services.tag.library'] = tag_management_service_mock
 
 # Set up aiofiles mock for async file operations
 import aiofiles
@@ -267,7 +267,7 @@ utils_mock.__path__ = [os.path.abspath(os.path.join(os.path.dirname(__file__), "
 utils_prompt_template_utils_mock = types.ModuleType('management.services.agent.prompt')
 utils_prompt_template_utils_mock.get_nl2skill_prompt_template = MagicMock(return_value={"system_prompt": "", "user_prompt": ""})
 utils_content_classifier_utils_mock = types.ModuleType('management.services.skill.classifier')
-utils_str_utils_mock = types.ModuleType('utils.str_utils')
+utils_str_utils_mock = types.ModuleType('management.db.serialization')
 utils_str_utils_mock.convert_list_to_string = MagicMock(
     side_effect=lambda items: "" if items is None else ",".join(str(item) for item in items)
 )
@@ -286,7 +286,7 @@ sys.modules['utils'] = utils_mock
 
 sys.modules['management.services.agent.prompt'] = utils_prompt_template_utils_mock
 sys.modules['management.services.skill.classifier'] = utils_content_classifier_utils_mock
-sys.modules['utils.str_utils'] = utils_str_utils_mock
+sys.modules['management.db.serialization'] = utils_str_utils_mock
 sys.modules['management.services.skill.naming'] = utils_skill_import_utils_mock
 
 # Set up database mocks
@@ -1451,7 +1451,7 @@ class TestSkillServiceDeleteSkill:
             return_value=True,
         )
         cleanup = mocker.patch(
-            'services.tag_management_service.TagManagementService.cleanup_resource_assignments'
+            'management.services.tag.library.TagManagementService.cleanup_resource_assignments'
         )
         service = SkillService(tenant_id="test-tenant")
 

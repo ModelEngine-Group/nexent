@@ -10,7 +10,7 @@ from nexent.core.concurrency import run_blocking
 
 from consts.exceptions import AppException, MCPConnectionError, NotFoundException, ValidationError, TokenExpiredError
 from consts.model import ToolInstanceInfoRequest, ToolInstanceSearchRequest, ToolValidateRequest
-from services.tool_configuration_service import (
+from management.services.tool.configuration import (
     search_tool_info_impl,
     update_tool_info_impl,
     update_tool_list,
@@ -22,13 +22,10 @@ from services.tool_configuration_service import (
     delete_openapi_service,
     _refresh_openapi_services_in_mcp,
 )
-from services.agent_draft_permission_service import (
-    AgentDraftEditError,
-    ResourceBindingError,
-)
+from consts.exceptions import AgentDraftEditError, ResourceBindingError
 from database.user_tenant_db import get_user_email_map
-from services.audit_service import record_security_event
-from utils.auth_utils import get_current_user_id
+from management.services.monitor.audit import record_security_event
+from management.services.permission.identity.authentication_helpers import get_current_user_id
 
 router = APIRouter(prefix="/tool")
 logger = logging.getLogger("tool_config_app")
@@ -384,7 +381,7 @@ async def update_tool_labels_api(
                 detail="Tool not found or access denied"
             )
         updated_by_name = get_user_email_map([user_id]).get(user_id, "")
-        from services.user_identity_service import load_cas_identities
+        from management.services.permission.identity.display import load_cas_identities
 
         cas_identity = load_cas_identities([user_id]).get(user_id, {})
         return JSONResponse(

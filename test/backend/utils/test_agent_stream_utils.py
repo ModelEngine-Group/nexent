@@ -19,9 +19,9 @@ attachment_db.get_file_url = MagicMock()
 attachment_db.upload_fileobj = MagicMock()
 sys.modules["database.attachment_db"] = attachment_db
 
-file_management_service = types.ModuleType("services.file_management_service")
+file_management_service = types.ModuleType("management.services.file.service")
 file_management_service.is_allowed_skill_upload_path = MagicMock(return_value=True)
-sys.modules["services.file_management_service"] = file_management_service
+sys.modules["management.services.file.service"] = file_management_service
 
 from backend.management.services.agent import stream as agent_stream_utils
 from backend.management.services.agent import artifacts as agent_artifacts

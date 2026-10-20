@@ -220,16 +220,16 @@ services_mock.__path__ = [
 ]  # Keep real service submodules importable
 services_skill_service_mock = types.ModuleType('management.services.skill.service')
 services_nl2skill_service_mock = types.ModuleType('services.nl2skill_service')
-services_creation_history_mock = types.ModuleType('services.workbench_creation_history_service')
-services_asset_owner_visibility_mock = types.ModuleType('services.asset_owner_visibility')
-services_agent_draft_permission_mock = types.ModuleType('services.agent_draft_permission_service')
+services_creation_history_mock = types.ModuleType('management.services.conversation.creation_history')
+services_asset_owner_visibility_mock = types.ModuleType('management.services.permission.asset_owner')
+services_agent_draft_permission_mock = types.ModuleType('management.services.agent.authorization')
 sys.modules['services'] = services_mock
 sys.modules['management.services.skill.service'] = services_skill_service_mock
 sys.modules['management.services.skill.transfer'] = services_skill_service_mock
 sys.modules['services.nl2skill_service'] = services_nl2skill_service_mock
-sys.modules['services.workbench_creation_history_service'] = services_creation_history_mock
-sys.modules['services.asset_owner_visibility'] = services_asset_owner_visibility_mock
-sys.modules['services.agent_draft_permission_service'] = services_agent_draft_permission_mock
+sys.modules['management.services.conversation.creation_history'] = services_creation_history_mock
+sys.modules['management.services.permission.asset_owner'] = services_asset_owner_visibility_mock
+sys.modules['management.services.agent.authorization'] = services_agent_draft_permission_mock
 setattr(services_mock, 'skill_service', services_skill_service_mock)
 setattr(services_mock, 'nl2skill_service', services_nl2skill_service_mock)
 setattr(services_mock, 'workbench_creation_history_service', services_creation_history_mock)
@@ -248,6 +248,8 @@ class ResourceBindingError(Exception):
 
 services_agent_draft_permission_mock.AgentDraftEditError = AgentDraftEditError
 services_agent_draft_permission_mock.ResourceBindingError = ResourceBindingError
+consts_exceptions_mock.AgentDraftEditError = AgentDraftEditError
+consts_exceptions_mock.ResourceBindingError = ResourceBindingError
 services_agent_draft_permission_mock.require_agent_draft_edit = MagicMock()
 
 class MockSkillService:
@@ -273,24 +275,24 @@ def setup_function():
     sys.modules['management.services.skill.service'] = services_skill_service_mock
     sys.modules['management.services.skill.transfer'] = services_skill_service_mock
     sys.modules['services.nl2skill_service'] = services_nl2skill_service_mock
-    sys.modules['services.workbench_creation_history_service'] = services_creation_history_mock
-    sys.modules['services.asset_owner_visibility'] = services_asset_owner_visibility_mock
-    sys.modules['services.agent_draft_permission_service'] = services_agent_draft_permission_mock
+    sys.modules['management.services.conversation.creation_history'] = services_creation_history_mock
+    sys.modules['management.services.permission.asset_owner'] = services_asset_owner_visibility_mock
+    sys.modules['management.services.agent.authorization'] = services_agent_draft_permission_mock
 services_asset_owner_visibility_mock.can_view_skill = MagicMock(return_value=True)
 
 # Mock utils
 utils_mock = types.ModuleType('utils')
 utils_mock.__path__ = []  # Empty __path__ to make it a namespace package
-utils_auth_utils_mock = types.ModuleType('utils.auth_utils')
-utils_config_utils_mock = types.ModuleType('utils.config_utils')
+utils_auth_utils_mock = types.ModuleType('management.services.permission.identity.authentication_helpers')
+utils_config_utils_mock = types.ModuleType('management.services.configuration.tenant.settings')
 sys.modules['utils'] = utils_mock
-sys.modules['utils.auth_utils'] = utils_auth_utils_mock
-sys.modules['utils.config_utils'] = utils_config_utils_mock
+sys.modules['management.services.permission.identity.authentication_helpers'] = utils_auth_utils_mock
+sys.modules['management.services.configuration.tenant.settings'] = utils_config_utils_mock
 utils_auth_utils_mock.get_current_user_id = MagicMock(return_value=("user123", "tenant123"))
 utils_auth_utils_mock.get_current_user_info = MagicMock(return_value=("user123", "tenant123", "zh"))
 utils_config_utils_mock.tenant_config_manager = MagicMock()
 utils_config_utils_mock.get_model_name_from_config = MagicMock(return_value="gpt-4")
-# Set utils.config_utils as attribute for attribute-based imports
+# Set management.services.configuration.tenant.settings as attribute for attribute-based imports
 setattr(utils_mock, 'config_utils', utils_config_utils_mock)
 
 # Mock management.services.agent.prompt

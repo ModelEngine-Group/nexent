@@ -24,7 +24,7 @@ case:
       - ${NEXENT_TEST_HOME}/config/secrets.env'
   steps:
   - order: 1
-    action: 导入 backend/services/quota_service.py 的 QuotaService，构造 tenant 下含普通源与 datamate KB 的最小 kb_list，mock get_committed_bytes_by_kb
+    action: 导入 backend/management/services/knowledge_base/quota.py 的 QuotaService，构造 tenant 下含普通源与 datamate KB 的最小 kb_list，mock get_committed_bytes_by_kb
       返回已知 source bytes，mock ES indices_detail 返回已知 store_size/doc_count。
     expected: stats 与 total_bytes 以源文件账本为唯一计量口径；ES 物理容量仅存放于 store_size_bytes/es_physical_* 等观测字段，不参与 quota 计量。
   - order: 2

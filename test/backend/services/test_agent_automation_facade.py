@@ -1,3 +1,4 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 from datetime import datetime, timedelta, timezone
 import sys
 import types
@@ -6,17 +7,17 @@ from unittest.mock import MagicMock
 import pytest
 from sqlalchemy.exc import IntegrityError
 
-from services.agent_automation import facade as facade_module
-from services.agent_automation.errors import (
+from management.services.automation import service as facade_module
+from consts.exceptions import (
     AutomationCapabilityBindingInvalidError,
     AutomationCapabilityNotReadyError,
     AutomationConversationAlreadyBoundError,
     AutomationNotFoundError,
     AutomationScheduleInvalidError,
 )
-from services.agent_automation.facade import AgentAutomationFacade
-from services.agent_automation.intent_analyzer import AutomationIntentContext
-from services.agent_automation.models import (
+from management.services.automation.service import AgentAutomationFacade
+from management.services.automation.intent import AutomationIntentContext
+from contracts.automation import (
     AutomationProposalCreateRequest,
     AutomationProposalPatchRequest,
     AutomationProposalConfirmRequest,
@@ -31,15 +32,15 @@ from services.agent_automation.models import (
     ScheduleRuleType,
     ScheduleTrigger,
 )
-from services.agent_automation.prompt_generator import AutomationTaskContent
+from management.services.automation.prompt import AutomationTaskContent
 
 
 @pytest.fixture
 def automation_runner(monkeypatch):
     """Isolate runner calls while testing facade orchestration and failures."""
-    import services.agent_automation as automation_package
+    import management.services.automation as automation_package
 
-    module = types.ModuleType("services.agent_automation.runner")
+    module = types.ModuleType("management.services.automation.runner")
     module.agent_automation_runner = MagicMock()
     monkeypatch.setitem(sys.modules, module.__name__, module)
     monkeypatch.setattr(automation_package, "runner", module, raising=False)
@@ -1462,7 +1463,7 @@ async def test_task_management_methods_cover_successful_lifecycle(monkeypatch, a
         return {"run_id": 5, "trigger_type": trigger_type}
 
     monkeypatch.setattr(
-        "services.agent_automation.runner.agent_automation_runner.execute_task",
+        "management.services.automation.runner.agent_automation_runner.execute_task",
         fake_execute,
     )
 
@@ -1594,7 +1595,7 @@ def test_enrichment_and_cancellation_tolerate_optional_failures(monkeypatch, aut
     assert enriched[0]["is_running"] is False
 
     monkeypatch.setattr(
-        "services.agent_automation.runner.agent_automation_runner.cancel_for_conversation",
+        "management.services.automation.runner.agent_automation_runner.cancel_for_conversation",
         lambda *args: (_ for _ in ()).throw(RuntimeError("runner unavailable")),
     )
     monkeypatch.setattr(

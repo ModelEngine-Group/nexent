@@ -31,7 +31,7 @@ case:
       A 写入对应 MinIO 对象。
     expected: 记录 B：status 仍为 UPLOADING，未被标 FAILED，对象未受影响。
   - order: 3
-    action: 调用 fail_interrupted_uploads(cutoff, CONFIG_SERVICE_NAME)（backend/services/startup_recovery_service.py:106）。
+    action: 调用 fail_interrupted_uploads(cutoff, CONFIG_SERVICE_NAME)（backend/management/recovery.py:106）。
     expected: 记录 C（NULL 归属）：status 仍为 UPLOADING，未被误标 FAILED。
   - order: 4
     action: 重新查询记录 A/B/C/D 的 status/error_code/stage/version，并核对记录 A 的 MinIO 对象存在性。

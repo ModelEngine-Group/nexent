@@ -11,7 +11,7 @@ DEFAULT_KB_ID = "a8d68fbf-bd6e-5461-a9d1-cf1bb3522e38"
 
 
 def test_knowledge_sets_normalize_null_dataset_id(mock_base_url, require_real_nexent):
-    from services.haotian_service import fetch_haotian_knowledge_sets_impl
+    from management.services.knowledge_base.providers.haotian import fetch_haotian_knowledge_sets_impl
 
     result = asyncio.run(
         fetch_haotian_knowledge_sets_impl(

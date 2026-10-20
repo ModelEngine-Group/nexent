@@ -1,3 +1,4 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 '''D5 reliability: interrupted-upload recovery must stay scoped to the restarting service.'''
 
 from __future__ import annotations
@@ -18,7 +19,7 @@ from database.knowledge_file_lifecycle_db import (
     get_file_record,
     list_uploading_files_created_before,
 )
-from services.startup_recovery_service import fail_interrupted_uploads
+from management.recovery import fail_interrupted_uploads
 
 
 def _set_create_time(file_id: str, create_time: datetime) -> None:

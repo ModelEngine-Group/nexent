@@ -40,8 +40,6 @@ export type AgentDraft = Pick<
   | "duty_prompt"
   | "business_logic_model_name"
   | "business_logic_model_id"
-  | "prompt_template_id"
-  | "prompt_template_name"
   | "sub_agent_id_list"
   | "sub_agent_relations"
   | "external_sub_agent_id_list"
@@ -133,8 +131,6 @@ const toDraft = (agent: Agent): AgentDraft => ({
   duty_prompt: agent.duty_prompt || "",
   business_logic_model_name: agent.business_logic_model_name || "",
   business_logic_model_id: agent.business_logic_model_id || 0,
-  prompt_template_id: agent.prompt_template_id ?? 0,
-  prompt_template_name: agent.prompt_template_name || "system_default",
   sub_agent_id_list: agent.sub_agent_id_list || [],
   sub_agent_relations: agent.sub_agent_relations || [],
   external_sub_agent_id_list: agent.external_sub_agent_id_list || [],
@@ -311,12 +307,6 @@ const toAgentPayload = (agentId: number, patch: AgentDraftPatch) => ({
     : {}),
   ...(patch.business_logic_model_id !== undefined
     ? { business_logic_model_id: patch.business_logic_model_id }
-    : {}),
-  ...(patch.prompt_template_id !== undefined
-    ? { prompt_template_id: patch.prompt_template_id }
-    : {}),
-  ...(patch.prompt_template_name !== undefined
-    ? { prompt_template_name: patch.prompt_template_name }
     : {}),
   ...(patch.duty_prompt !== undefined
     ? { duty_prompt: patch.duty_prompt }

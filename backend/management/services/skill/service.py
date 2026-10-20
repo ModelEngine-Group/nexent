@@ -880,7 +880,7 @@ class SkillService(SkillArchiveOperations):
                 skill_name, effective_tenant_id, updated_by=user_id
             )
             if deleted and skill:
-                from services.tag_management_service import TagManagementService
+                from management.services.tag.library import TagManagementService
 
                 TagManagementService.cleanup_resource_assignments(
                     effective_tenant_id, "skill", str(skill["skill_id"]), user_id or ""

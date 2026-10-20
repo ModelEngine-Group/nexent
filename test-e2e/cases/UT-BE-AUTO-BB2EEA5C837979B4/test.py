@@ -1,10 +1,11 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 import json
 import logging
 from unittest.mock import Mock
 
 import pytest
 
-from services.redis_service import RedisService
+from management.services.knowledge_base.task_state import RedisService
 
 
 CASE_ID = 'UT-BE-AUTO-BB2EEA5C837979B4'
@@ -115,11 +116,11 @@ def test_document_delete_fence_tri_state_and_redis_unavailable_fallback(caplog):
     assert service.clear_document_delete_fence(file_id='doc-1') == 1
     assert service.is_document_delete_requested(file_id='doc-1') is False
 
-    with caplog.at_level(logging.INFO, logger='services.redis_service'):
+    with caplog.at_level(logging.INFO, logger='management.services.knowledge_base.task_state'):
         service.mark_document_delete_requested(file_id='doc-1', requested_by='user-1')
         service.clear_document_delete_fence(file_id='doc-1')
     for record in caplog.records:
-        if record.name != 'services.redis_service':
+        if record.name != 'management.services.knowledge_base.task_state':
             continue
         message = record.getMessage().lower()
         for secret in ('api_key', 'apikey', 'password', 'token', 'secret'):

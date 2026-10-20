@@ -1,9 +1,10 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """Unit tests for ``apps.evaluator_app``.
 
 Directly invoke each async endpoint function with the FastAPI
 ``Query/Header/Body`` defaults replaced by explicit values, patching the
-13 ``services.evaluator_service`` impls and ``utils.auth_utils`` identity
-resolution.  The heavy ``services.evaluator_service`` module is stubbed at
+13 ``management.services.evaluation.evaluators`` impls and ``management.services.permission.identity.authentication_helpers`` identity
+resolution.  The heavy ``management.services.evaluation.evaluators`` module is stubbed at
 ``sys.modules`` level (idempotent ``_register_package`` registration) so the
 app module can be loaded with ``spec_from_file_location`` without pulling in
 SQLAlchemy-heavy service dependencies.  ``consts`` is stubbed too so the
@@ -98,14 +99,14 @@ def _install_stubs():
     )
     _consts_pkg.exceptions = _ex_mod
 
-    # ---- services.evaluator_service --------------------------------------
+    # ---- management.services.evaluation.evaluators --------------------------------------
     _svc_pkg = _register_package("services")
-    _ev_mod = mk_mod("services.evaluator_service", **{n: MagicMock(name=n) for n in _IMPL_NAMES})
+    _ev_mod = mk_mod("management.services.evaluation.evaluators", **{n: MagicMock(name=n) for n in _IMPL_NAMES})
     _svc_pkg.evaluator_service = _ev_mod
 
-    # ---- utils.auth_utils ------------------------------------------------
+    # ---- management.services.permission.identity.authentication_helpers ------------------------------------------------
     _utils_pkg = _register_package("utils")
-    _au_mod = mk_mod("utils.auth_utils", get_current_user_id=MagicMock(name="get_current_user_id"))
+    _au_mod = mk_mod("management.services.permission.identity.authentication_helpers", get_current_user_id=MagicMock(name="get_current_user_id"))
     _utils_pkg.auth_utils = _au_mod
     return _ErrorCode, _AppException, _UnauthorizedError
 
@@ -126,10 +127,10 @@ def bundle():
     auth = MagicMock(name="get_current_user_id")
     auth.return_value = ("u1", "t1")
 
-    _svc_mod = sys.modules["services.evaluator_service"]
+    _svc_mod = sys.modules["management.services.evaluation.evaluators"]
     for n, m in impls.items():
         setattr(_svc_mod, n, m)
-    _au_mod = sys.modules["utils.auth_utils"]
+    _au_mod = sys.modules["management.services.permission.identity.authentication_helpers"]
     _au_mod.get_current_user_id = auth
 
     if MODULE_UNDER_TEST in sys.modules:
