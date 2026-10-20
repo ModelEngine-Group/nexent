@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 from __future__ import annotations
 
 import functools
@@ -338,6 +340,8 @@ class NexentAgent:
             prompt_cache=model_config.prompt_cache,
             reasoning_capability=model_config.reasoning_capability,
         )
+        if model_config.explicit_sampling:
+            model_kwargs["explicit_sampling"] = model_config.explicit_sampling
         if model_config.reasoning_budget_tokens is not None:
             model_kwargs["reasoning_budget_tokens"] = model_config.reasoning_budget_tokens
         if (

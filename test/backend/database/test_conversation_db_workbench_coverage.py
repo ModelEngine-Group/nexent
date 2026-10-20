@@ -1,10 +1,10 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 from contextlib import contextmanager
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
-
-from test.backend.database import test_conversation_db as legacy
 
 
 conversation_db = __import__(
@@ -25,6 +25,17 @@ def _session(monkeypatch):
 
 def test_create_conversation_persists_initial_workbench_version(monkeypatch):
     session = _session(monkeypatch)
+    insert_values = {}
+
+    class InsertStatement:
+        def values(self, **values):
+            insert_values.update(values)
+            return self
+
+        def returning(self, *_columns):
+            return self
+
+    monkeypatch.setattr(conversation_db, "insert", lambda _model: InsertStatement())
     record = SimpleNamespace(
         conversation_id=42,
         conversation_title="Workbench",
@@ -49,7 +60,11 @@ def test_create_conversation_persists_initial_workbench_version(monkeypatch):
 
     assert result["workbench_config_version"] == 1
     assert result["workbench_config"]["mode"] == "single_agent_chat"
-    assert legacy._captured_insert_values["workbench_config_version"] == 1
+    assert insert_values["workbench_config_version"] == 1
+    assert insert_values["workbench_config"] == {
+        "schema_version": 3,
+        "mode": "single_agent_chat",
+    }
 
 
 @pytest.mark.parametrize(

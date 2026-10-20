@@ -3,7 +3,7 @@
 """RAGFlow route set (root-mounted, real path shape).
 
 Contract mirrored from:
-  - backend/services/ragflow_service.py — GET {base}/api/v1/datasets with
+  - backend/management/services/knowledge_base/providers/ragflow.py — GET {base}/api/v1/datasets with
     Bearer; response ``{"code": 0, "data": [...]}``; a non-zero code is an
     error. Items are read as ``{id, name, description, doc_num, chunk_num,
     create_time, update_time}``.

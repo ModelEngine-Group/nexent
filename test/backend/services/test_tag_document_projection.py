@@ -1,6 +1,7 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 import pytest
-from services import tag_document_projection as projection_module
-from services.tag_document_projection import (
+from management.services.knowledge_base import tag_projection as projection_module
+from management.services.knowledge_base.tag_projection import (
     AIDP_DOCUMENT_PROVIDER,
     STATUS_FAILED,
     STATUS_SYNCED,
@@ -16,8 +17,8 @@ from services.tag_document_projection import (
     project_document_assignments,
     retry_pending_document_projections,
 )
-from services.tag_management_service import TagManagementService
-from services.tag_resource_adapters import (
+from management.services.tag.library import TagManagementService
+from management.services.tag.resources import (
     AuthenticatedCaller,
     CanonicalResourceIdentity,
     ResolvedTagResource,
@@ -570,10 +571,10 @@ async def test_replace_document_assignments_returns_projection_status(monkeypatc
         TagManagementService, "resource_adapter_registry", _Registry(_document_resource())
     )
     monkeypatch.setattr(
-        "services.tag_management_service.TagManagementDB.replace_resource_assignments",
+        "management.services.tag.library.TagManagementDB.replace_resource_assignments",
         lambda *args, **kwargs: [],
     )
-    monkeypatch.setattr("services.tag_management_service.TAG_DOCUMENT_PROJECTION_ENABLED", True)
+    monkeypatch.setattr("management.services.tag.library.TAG_DOCUMENT_PROJECTION_ENABLED", True)
     called = {}
 
     def fake_project(tenant_id, provider, kb, doc, actor, **kwargs):
@@ -583,7 +584,7 @@ async def test_replace_document_assignments_returns_projection_status(monkeypatc
         return {"status": STATUS_SYNCED, "version": 1, "tag_count": 0}
 
     monkeypatch.setattr(
-        "services.tag_document_projection.project_document_assignments", fake_project
+        "management.services.knowledge_base.tag_projection.project_document_assignments", fake_project
     )
 
     result = await TagManagementService.replace_resource_assignments(
@@ -616,7 +617,7 @@ async def test_replace_non_document_skips_projection(monkeypatch):
         TagManagementService, "resource_adapter_registry", _Registry(resource)
     )
     monkeypatch.setattr(
-        "services.tag_management_service.TagManagementDB.replace_resource_assignments",
+        "management.services.tag.library.TagManagementDB.replace_resource_assignments",
         lambda *args, **kwargs: [],
     )
     calls = []
@@ -626,7 +627,7 @@ async def test_replace_non_document_skips_projection(monkeypatch):
         return {"status": STATUS_SYNCED}
 
     monkeypatch.setattr(
-        "services.tag_document_projection.project_document_assignments", fake_project
+        "management.services.knowledge_base.tag_projection.project_document_assignments", fake_project
     )
 
     result = await TagManagementService.replace_resource_assignments(
@@ -636,7 +637,7 @@ async def test_replace_non_document_skips_projection(monkeypatch):
     assert result["projection_status"] is None
     assert calls == []
 
-from services.tag_document_projection import document_projection_status_dict
+from management.services.knowledge_base.tag_projection import document_projection_status_dict
 
 
 def test_document_projection_status_dict_formats_raw_state():

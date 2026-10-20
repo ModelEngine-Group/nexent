@@ -1,4 +1,4 @@
-// Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
 "use client";
 
@@ -15,6 +15,7 @@ export function UserMessageEditComposer() {
       aria-label={t("chat.thread.edit")}
       className="mx-auto flex w-full max-w-(--thread-max-width) flex-col gap-3 rounded-2xl border-0 bg-[#f3f3f3] p-4 dark:bg-muted"
       onKeyDown={(event) => {
+        if (event.defaultPrevented) return;
         if (event.key === "Escape" && !event.nativeEvent.isComposing) {
           event.preventDefault();
           aui.composer().cancel();

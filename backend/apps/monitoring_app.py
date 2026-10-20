@@ -1,3 +1,4 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """
 Model Monitoring API endpoints.
 
@@ -21,7 +22,7 @@ from consts.const import (
 from consts.model import ConversationResponse
 from consts.exceptions import TokenExpiredError
 from database.client import get_monitoring_db_session
-from utils.auth_utils import get_current_user_id
+from management.services.permission.identity.authentication_helpers import get_current_user_id
 
 logger = logging.getLogger("monitoring_app")
 

@@ -1,11 +1,12 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 from __future__ import annotations
 
 import asyncio
 
 import pytest
 
-import services.memory_external_provider_service as svc
-from services.memory_external_provider_service import MemoryExternalProviderService
+import management.services.memory.providers.service as svc
+from management.services.memory.providers.service import MemoryExternalProviderService
 from nexent.memory.models import (
     MemoryIngestRequest,
     MemoryIngestResult,

@@ -1,3 +1,4 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """
 Unit tests for config_app module.
 
@@ -142,7 +143,6 @@ class TestConfigAppRouterConfiguration:
             "apps.model_managment_app": {"router": APIRouter()},
             "apps.oauth_app": {"router": APIRouter()},
             "apps.prompt_app": {"router": APIRouter()},
-            "apps.prompt_template_app": {"router": APIRouter()},
             "apps.mcp_management_app": {"router": APIRouter()},
             "apps.remote_mcp_app": {"router": APIRouter()},
             "apps.skill_app": {"router": APIRouter()},
@@ -184,6 +184,11 @@ class TestConfigAppRouterConfiguration:
                 setattr(module, attribute, value)
             monkeypatch.setitem(sys.modules, module_name, module)
 
+        retired_router = APIRouter(prefix="/prompt-template")
+        retired_module = types.ModuleType("apps.prompt_template_app")
+        retired_module.router = retired_router
+        monkeypatch.setitem(sys.modules, "apps.prompt_template_app", retired_module)
+
         const_module = types.ModuleType("consts.const")
         const_module.AIDP_API_KEY = ""
         const_module.AIDP_SERVER_URL = ""
@@ -223,23 +228,21 @@ class TestConfigAppRouterConfiguration:
             sys.modules, "nexent.core.concurrency", concurrency_module
         )
         thread_lifecycle_module = types.ModuleType(
-            "services.thread_lifecycle_service"
+            "infrastructure.concurrency"
         )
         thread_lifecycle_module.config_thread_manager = ConfigThreadManager()
         monkeypatch.setitem(
             sys.modules,
-            "services.thread_lifecycle_service",
+            "infrastructure.concurrency",
             thread_lifecycle_module,
         )
-        prompt_service_module = types.ModuleType("services.prompt_template_service")
-        prompt_service_module.sync_system_default_prompt_template = MagicMock()
-        monkeypatch.setitem(sys.modules, "services.prompt_template_service", prompt_service_module)
 
         module_path = Path(backend_dir) / "apps" / "config_app.py"
         spec = importlib.util.spec_from_file_location("isolated_config_app", module_path)
         config_app = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(config_app)
 
+        assert all(router is not retired_router for router in config_app.app.included_routers)
         assert api_key_router in config_app.app.included_routers
         assert {route.path for route in api_key_router.routes} == {
             "/api-keys",
@@ -253,11 +256,16 @@ class TestConfigAppRouterConfiguration:
             "active_count": 0,
         }
 
+        asyncio.run(config_app.validate_external_service_configuration())
+        with patch.object(config_app, "ENABLE_AIDP_KNOWLEDGE", True):
+            with pytest.raises(RuntimeError, match="AIDP_SERVER_URL and AIDP_API_KEY"):
+                asyncio.run(config_app.validate_external_service_configuration())
+
         recover_config_tasks = MagicMock()
         schedule_upload_cleanup = AsyncMock()
         schedule_workbench_main_backfill = MagicMock()
         startup_recovery_module = types.ModuleType(
-            "services.startup_recovery_service"
+            "management.recovery"
         )
         startup_recovery_module.recover_config_tasks = recover_config_tasks
         startup_recovery_module.schedule_interrupted_upload_cleanup = (
@@ -268,19 +276,19 @@ class TestConfigAppRouterConfiguration:
         )
         monkeypatch.setitem(
             sys.modules,
-            "services.startup_recovery_service",
+            "management.recovery",
             startup_recovery_module,
         )
 
         start_evaluation_maintenance = MagicMock()
         evaluation_maintenance_module = types.ModuleType(
-            "services.evaluation_maintenance"
+            "management.services.evaluation.maintenance"
         )
         evaluation_maintenance_module.start = start_evaluation_maintenance
         evaluation_maintenance_module.stop = MagicMock()
         monkeypatch.setitem(
             sys.modules,
-            "services.evaluation_maintenance",
+            "management.services.evaluation.maintenance",
             evaluation_maintenance_module,
         )
 
@@ -288,16 +296,16 @@ class TestConfigAppRouterConfiguration:
         dreaming_scheduler.start = AsyncMock()
         dreaming_scheduler.stop = AsyncMock()
         dreaming_scheduler_module = types.ModuleType(
-            "services.memory_dreaming_scheduler"
+            "management.services.memory.dreaming.scheduler"
         )
         dreaming_scheduler_module.dreaming_scheduler = dreaming_scheduler
         monkeypatch.setitem(
             sys.modules,
-            "services.memory_dreaming_scheduler",
+            "management.services.memory.dreaming.scheduler",
             dreaming_scheduler_module,
         )
 
-        sync_defaults = AsyncMock()
+        validate_external = AsyncMock()
 
         async def exercise_lifespan():
             async with config_app.config_lifespan(None):
@@ -305,8 +313,8 @@ class TestConfigAppRouterConfiguration:
 
         with patch.object(
             config_app,
-            "sync_default_prompt_template_on_startup",
-            new=sync_defaults,
+            "validate_external_service_configuration",
+            new=validate_external,
         ), patch.object(config_app, "ENABLE_AGENT_WORKBENCH", True):
             asyncio.run(exercise_lifespan())
 
@@ -317,7 +325,7 @@ class TestConfigAppRouterConfiguration:
         )
         schedule_upload_cleanup.assert_awaited_once_with("nexent-config")
         schedule_workbench_main_backfill.assert_called_once_with()
-        sync_defaults.assert_awaited_once_with()
+        validate_external.assert_awaited_once_with()
         dreaming_scheduler.start.assert_awaited_once_with()
         dreaming_scheduler.stop.assert_awaited_once_with()
 
@@ -421,7 +429,7 @@ class TestConfigAppMonitoring:
         from unittest.mock import patch
 
         # Test with monitoring enabled but module not available
-        with patch.dict('sys.modules', {'utils.monitoring': None}):
+        with patch.dict('sys.modules', {'infrastructure.observability.bootstrap': None}):
             with patch('backend.apps.app_factory.logger') as mock_logger:
                 app = create_app(enable_monitoring=True)
                 assert app is not None

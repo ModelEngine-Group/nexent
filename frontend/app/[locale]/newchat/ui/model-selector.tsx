@@ -88,6 +88,8 @@ export type ModelOption = {
   budgetTokens?: { min: number; max: number };
   /** Persisted model/agent budget, when one was explicitly configured. */
   defaultBudgetTokens?: number;
+  /** Effective Agent/model sampling defaults, separate from turn overrides. */
+  defaultSampling?: ModelParameterValue;
   reasoningCapability?: ReasoningCapability;
 };
 
@@ -821,7 +823,11 @@ export type ModelSelectorProps = {
 
 /** Registers the selection with assistant-ui's ModelContext system. The
  * context's effort is already resolved against the selected model. */
-function ModelSelectorModelContext() {
+function ModelSelectorModelContext({
+  sampling,
+}: {
+  sampling?: ModelParameterValue;
+}) {
   const {
     selectedModel,
     value,
@@ -840,6 +846,10 @@ function ModelSelectorModelContext() {
         modelName: value,
         ...(showDeepThinkingControl ? { deepThinking } : undefined),
         reasoningCapability: selectedModel?.reasoningCapability,
+        ...(sampling?.temperature != null
+          ? { temperature: sampling.temperature }
+          : {}),
+        ...(sampling?.top_p != null ? { top_p: sampling.top_p } : {}),
         ...(deepThinking
           ? budgetPreferred
             ? budgetTokens !== undefined
@@ -862,6 +872,8 @@ function ModelSelectorModelContext() {
     budgetPreferred,
     showDeepThinkingControl,
     selectedModel?.reasoningCapability,
+    sampling?.temperature,
+    sampling?.top_p,
     value,
   ]);
 
@@ -874,7 +886,7 @@ export interface ModelSelectorAdvancedSettingsProps {
   disabled?: boolean;
 }
 
-/** Local sampling levels never enter assistant-ui's registered model context. */
+/** Controlled sampling settings with a scoped fallback for composed selectors. */
 function ModelSelectorAdvancedSettings({
   control,
   scopeKey,
@@ -899,12 +911,13 @@ function ModelSelectorAdvancedSettings({
     <ModelParameterSettings
       key={resolved.scopeKey ?? localScope}
       {...resolved}
+      inheritedValue={resolved.inheritedValue ?? selectedModel?.defaultSampling}
       disabled={disabled || Boolean(resolved.disabled) || !selectedModel}
     />
   );
 }
 
-const ModelSelectorImpl = ({
+const ModelSelectorBody = ({
   disabled = false,
   parameterSettings,
   parameterSettingsScopeKey,
@@ -915,11 +928,22 @@ const ModelSelectorImpl = ({
   size,
   className,
   contentClassName,
-  ...rootProps
 }: ModelSelectorProps) => {
+  const { value } = useModelSelectorContext();
+  const scope = JSON.stringify([parameterSettingsScopeKey ?? "default", value]);
+  const [sampling, setSampling] = useState<Record<string, ModelParameterValue>>(
+    {}
+  );
+  const resolved = parameterSettings ?? {
+    scopeKey: scope,
+    value: sampling[scope] ?? DEFAULT_MODEL_PARAMETER_VALUES,
+    defaultValue: DEFAULT_MODEL_PARAMETER_VALUES,
+    onChange: (next: ModelParameterValue) =>
+      setSampling((current) => ({ ...current, [scope]: next })),
+  };
   return (
-    <ModelSelectorRoot {...rootProps} open={disabled ? false : rootProps.open}>
-      <ModelSelectorModelContext />
+    <>
+      <ModelSelectorModelContext sampling={resolved.value} />
       <ModelSelectorTrigger
         disabled={disabled}
         variant={variant}
@@ -932,15 +956,21 @@ const ModelSelectorImpl = ({
         {searchable && <ModelSelectorSearch />}
         <ModelSelectorEffort className="border-b-0" />
         <ModelSelectorAdvancedSettings
-          control={parameterSettings}
+          control={resolved}
           scopeKey={parameterSettingsScopeKey}
           disabled={disabled || parameterSettingsDisabled}
         />
         <ModelSelectorList />
       </ModelSelectorContent>
-    </ModelSelectorRoot>
+    </>
   );
 };
+
+const ModelSelectorImpl = (props: ModelSelectorProps) => (
+  <ModelSelectorRoot {...props} open={props.disabled ? false : props.open}>
+    <ModelSelectorBody {...props} />
+  </ModelSelectorRoot>
+);
 
 type ModelSelectorComponent = typeof ModelSelectorImpl & {
   displayName?: string;

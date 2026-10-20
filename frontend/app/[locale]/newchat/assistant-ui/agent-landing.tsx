@@ -251,7 +251,6 @@ export const AgentLandingPage: FC<AgentLandingPageProps> = ({
           <span>
             {t("chat.agentLanding.totalCount", { count: totalCount })}
           </span>
-          <span>{t("chat.agentLanding.selectedCount", { count: 0 })}</span>
         </div>
         <ConfigProvider locale={antdLocale}>
           <StandardPaginator

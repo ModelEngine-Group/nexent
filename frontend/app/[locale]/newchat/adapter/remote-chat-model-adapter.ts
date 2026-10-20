@@ -1,7 +1,8 @@
-// Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
 "use client";
 
+import i18next from "i18next";
 import type { ReasoningEffort } from "@/types/modelConfig";
 import { isReasoningEffort } from "@/lib/modelReasoning";
 import {
@@ -199,8 +200,6 @@ export interface Nl2aAgentDraftPayload {
   display_name: string;
   description: string;
   duty_prompt: string;
-  constraint_prompt: string;
-  few_shots_prompt: string | null;
   greeting_message: string;
   example_questions: string[];
 }
@@ -272,8 +271,6 @@ export type Nl2aRecommendedResource =
 
 export type Nl2aPromptField =
   | "duty_prompt"
-  | "constraint_prompt"
-  | "few_shots_prompt"
   | "greeting_message"
   | "example_questions";
 
@@ -623,6 +620,15 @@ function parseSseChunk(line: string): SseChunk | HumanInteractionEvent | null {
   if (!jsonStr) return null;
   try {
     const parsed = JSON.parse(jsonStr) as Record<string, unknown>;
+    if (
+      parsed.type === "error" &&
+      parsed.code === "MODEL_SAMPLING_CONFIG_INVALID"
+    ) {
+      parsed.content = i18next.t("workbench.controls.providerRejected", {
+        defaultValue:
+          "The model provider rejected temperature or Top P. Restore defaults or change these settings.",
+      });
+    }
     if (typeof parsed.type === "string") {
       if (typeof parsed.content === "string") {
         parsed.content = stripAnsiControlSequences(parsed.content);
@@ -880,8 +886,6 @@ export function parseNl2AgentState(content: string): Nl2AgentStateEvent | null {
     }
     const promptFields = new Set<Nl2aPromptField>([
       "duty_prompt",
-      "constraint_prompt",
-      "few_shots_prompt",
       "greeting_message",
       "example_questions",
     ]);
@@ -1598,7 +1602,13 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
     }
     if (!workbenchConfig && (!isEphemeralRuntime || isNl2Agent || isNl2Skill)) {
       const modelContext = context.config as
-        { deepThinking?: boolean; reasoningEffort?: string } | undefined;
+        | {
+            deepThinking?: boolean;
+            reasoningEffort?: string;
+            temperature?: number;
+            top_p?: number;
+          }
+        | undefined;
       if (modelContext?.deepThinking !== undefined) {
         requestBody.generation_config = {
           deep_thinking: modelContext.deepThinking,
@@ -1610,6 +1620,19 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
           isReasoningEffort(modelContext.reasoningEffort)
             ? { thinking_effort: modelContext.reasoningEffort }
             : {}),
+        };
+      }
+      if (
+        !isResume &&
+        (modelContext?.temperature != null || modelContext?.top_p != null)
+      ) {
+        requestBody.generation_config = {
+          ...(requestBody.generation_config as
+            RuntimeGenerationOverrides | undefined),
+          ...snapshotTurnModelControls(
+            Number(requestBody.model_id),
+            modelContext
+          ).generation_config,
         };
       }
     }
@@ -2268,8 +2291,7 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
 
         const metadata = imageMetadata.find(
           (source) =>
-            source.url === imageUrl &&
-            !consumedImageMetadata.has(source)
+            source.url === imageUrl && !consumedImageMetadata.has(source)
         );
         if (metadata) consumedImageMetadata.add(metadata);
         const imageSource: SearchSource = {

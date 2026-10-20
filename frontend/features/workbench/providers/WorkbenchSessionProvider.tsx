@@ -4,7 +4,10 @@
 
 import { useQueryClient } from "@tanstack/react-query";
 import { conversationService } from "@/services/conversationService";
-import { workbenchPinsQueryKey } from "@/lib/workbenchPins";
+import {
+  removeDeletedWorkbenchPins,
+  workbenchPinsQueryKey,
+} from "@/lib/workbenchPins";
 import {
   createContext,
   useContext,
@@ -53,6 +56,7 @@ export type WorkbenchSession = {
   isDictationConfigured: boolean;
   workbenchState: WorkbenchState;
   workbenchBootstrap: WorkbenchBootstrap | null;
+  isLoadingWorkbenchBootstrap: boolean;
   onWorkbenchModeChange: (
     mode: "agent_create" | "skill_create" | "generic_chat"
   ) => void;
@@ -101,11 +105,16 @@ export function WorkbenchSessionProvider({
     : undefined;
   const threadListAdapter = useMemo(
     () =>
-      createConversationThreadListAdapter("workbench", pinStorageKey, () =>
-        queryClient.ensureQueryData({
-          queryKey: workbenchPinsQueryKey(pinStorageKey),
-          queryFn: () => conversationService.getWorkbenchPins(),
-        })
+      createConversationThreadListAdapter(
+        "workbench",
+        pinStorageKey,
+        () =>
+          queryClient.ensureQueryData({
+            queryKey: workbenchPinsQueryKey(pinStorageKey),
+            queryFn: () => conversationService.getWorkbenchPins(),
+          }),
+        (conversationId) =>
+          removeDeletedWorkbenchPins(queryClient, [conversationId])
       ),
     [pinStorageKey, queryClient]
   );
@@ -116,6 +125,8 @@ export function WorkbenchSessionProvider({
   );
   const [workbenchBootstrap, setWorkbenchBootstrap] =
     useState<WorkbenchBootstrap | null>(null);
+  const [isLoadingWorkbenchBootstrap, setIsLoadingWorkbenchBootstrap] =
+    useState(true);
   const [requestedThreadId, setRequestedThreadId] = useState<
     string | undefined
   >(undefined);
@@ -140,6 +151,9 @@ export function WorkbenchSessionProvider({
       })
       .catch((error) => {
         log.error("[Home] Failed to load Workbench capabilities:", error);
+      })
+      .finally(() => {
+        if (!cancelled) setIsLoadingWorkbenchBootstrap(false);
       });
     return () => {
       cancelled = true;
@@ -183,6 +197,7 @@ export function WorkbenchSessionProvider({
     onBack: handleBack,
     workbenchState,
     workbenchBootstrap,
+    isLoadingWorkbenchBootstrap,
     onWorkbenchModeChange: handleWorkbenchModeChange,
     dispatchWorkbench,
     isDictationConfigured: isDictationConfigured(modelConfig?.stt),

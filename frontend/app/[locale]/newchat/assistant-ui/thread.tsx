@@ -28,6 +28,10 @@ import { useTranslation } from "react-i18next";
 import { MarkdownText } from "../ui/markdown-text";
 import { UserMessageBubble } from "@/components/interaction/user-message-bubble";
 import { UserMessageEditComposer } from "../components/user-message-edit-composer";
+import {
+  ThreadMessageRenderProvider,
+  threadMessageRenderers,
+} from "./thread-message-renderers";
 import { ClarificationMessageCard } from "../components/clarification-message-card";
 import { Reasoning, GroupReasoningTrigger } from "../ui/reasoning";
 import { ExecutionCodeBlock } from "../ui/execution-code-block";
@@ -523,7 +527,7 @@ export const Thread: FC<ThreadProps> = ({
         welcomeContent={welcomeContent}
         onBack={onBack}
         models={models}
-        selectedModelId={effectiveSelectedModelId}
+        selectedModelId={modelIsValid ? effectiveSelectedModelId : ""}
         onModelChange={handleModelChange}
         deepThinking={deepThinking ?? controls.deepThinking}
         onDeepThinkingChange={
@@ -559,12 +563,7 @@ export const Thread: FC<ThreadProps> = ({
         onRuntimeMetadataChange={onRuntimeMetadataChange}
         readOnly={readOnly || (showModelSelector && !modelIsValid)}
         modelSelectionDisabled={readOnly}
-        readOnlyReason={
-          readOnlyReason ??
-          (showModelSelector && !modelIsValid
-            ? t("chat.modelSelector.invalidSelection")
-            : undefined)
-        }
+        readOnlyReason={readOnlyReason}
         showComposer={showComposer}
         configurationLayout={configurationLayout}
         debugLayout={debugLayout}
@@ -1000,7 +999,7 @@ const ThreadView: FC<ThreadViewProps> = ({
                 emptyFooterContent
               ))}
             <Composer
-              debugLayout={debugLayout}
+              hidePlan={debugLayout}
               models={models}
               selectedModelId={selectedModelId}
               onModelChange={onModelChange}
@@ -1155,27 +1154,23 @@ export const ThreadMessages: FC<{
 
   const messageComponents = useMemo(
     () => ({
-      UserMessage: () => (
-        <UserMessage
-          readOnly={readOnly}
-          enableSkillDirectives={enableSkillDirectives}
-        />
-      ),
-      AssistantMessage: () => (
-        <AssistantMessage
-          agent={agent}
-          readOnly={readOnly}
-          onSkillFileSelect={onSkillFileSelect}
-        />
-      ),
+      ...threadMessageRenderers,
       EditComposer: readOnly || shareMode ? undefined : UserMessageEditComposer,
     }),
-    [agent, enableSkillDirectives, onSkillFileSelect, readOnly, shareMode]
+    [readOnly, shareMode]
   );
+  const renderState = {
+    agent,
+    readOnly,
+    enableSkillDirectives,
+    onSkillFileSelect,
+    UserMessage,
+    AssistantMessage,
+  };
 
   if (shareMode) {
     return (
-      <>
+      <ThreadMessageRenderProvider {...renderState}>
         {shareMessageGroups.map((group) => {
           const shareSelected =
             group.userMessageId !== undefined &&
@@ -1214,11 +1209,15 @@ export const ThreadMessages: FC<{
             </div>
           );
         })}
-      </>
+      </ThreadMessageRenderProvider>
     );
   }
 
-  return <ThreadPrimitive.Messages components={messageComponents} />;
+  return (
+    <ThreadMessageRenderProvider {...renderState}>
+      <ThreadPrimitive.Messages components={messageComponents} />
+    </ThreadMessageRenderProvider>
+  );
 };
 
 const ThreadScrollToBottom: FC = () => {

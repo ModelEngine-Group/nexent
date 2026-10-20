@@ -1,3 +1,4 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 from __future__ import annotations
 
 import logging
@@ -13,7 +14,7 @@ from nexent.memory.models import (
     MemorySearchRequest,
     MemorySearchResult,
 )
-from services.memory_external_provider_service import MemoryExternalProviderService
+from management.services.memory.providers.service import MemoryExternalProviderService
 
 CASE_ID = "UT-BE-AUTO-DEEA64C99389DF98"
 
@@ -122,7 +123,7 @@ async def _passthrough_retry(operation, config, operation_name: str = "operation
 @pytest.mark.case_id(CASE_ID)
 @pytest.mark.stage("D1")
 async def test_external_provider_fanout_and_fault_isolation(monkeypatch, caplog):
-    import services.memory_external_provider_service as provider_module
+    import management.services.memory.providers.service as provider_module
 
     monkeypatch.setattr(provider_module, "execute_with_retry", _passthrough_retry)
     caplog.set_level(logging.WARNING, logger="memory_external_provider_service")

@@ -1,3 +1,4 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 import asyncio
 from types import SimpleNamespace
 from unittest.mock import MagicMock
@@ -8,8 +9,8 @@ from consts.exceptions import (
     TagManagementNotFoundError,
     ValidationError,
 )
-from services.tag_management_service import TagManagementService
-from services.tag_resource_adapters import AuthenticatedCaller
+from management.services.tag.library import TagManagementService
+from management.services.tag.resources import AuthenticatedCaller
 from sqlalchemy.exc import DBAPIError, IntegrityError
 
 
@@ -44,7 +45,7 @@ def test_database_error_translation_includes_capacity_schema_and_duplicate_branc
 
 def test_list_and_definition_operations_forward_tenant_and_actor(monkeypatch):
     db = MagicMock()
-    monkeypatch.setattr("services.tag_management_service.TagManagementDB", db)
+    monkeypatch.setattr("management.services.tag.library.TagManagementDB", db)
     db.list_libraries.return_value = [{"bucket_id": 1}]
     db.list_definitions.return_value = [{"definition_id": 9}]
     assert TagManagementService.list_libraries("tenant-a") == [{"bucket_id": 1}]
@@ -77,9 +78,9 @@ def test_list_and_definition_operations_forward_tenant_and_actor(monkeypatch):
 
 def test_create_definition_generates_a_key_when_the_client_omits_one(monkeypatch):
     db = MagicMock()
-    monkeypatch.setattr("services.tag_management_service.TagManagementDB", db)
+    monkeypatch.setattr("management.services.tag.library.TagManagementDB", db)
     monkeypatch.setattr(
-        "services.tag_management_service.uuid4",
+        "management.services.tag.library.uuid4",
         lambda: SimpleNamespace(hex="generatedkey"),
     )
     create_request = request(
@@ -106,7 +107,7 @@ def test_create_definition_generates_a_key_when_the_client_omits_one(monkeypatch
 
 def test_definition_update_conflict_and_delete_conflict_have_structured_details(monkeypatch):
     db = MagicMock()
-    monkeypatch.setattr("services.tag_management_service.TagManagementDB", db)
+    monkeypatch.setattr("management.services.tag.library.TagManagementDB", db)
     db.update_definition.return_value = (
         {"definition_id": 9, "definition_name": "Color"},
         3,
@@ -132,7 +133,7 @@ def test_definition_update_conflict_and_delete_conflict_have_structured_details(
 
 def test_definition_status_order_and_usage_delegate(monkeypatch):
     db = MagicMock()
-    monkeypatch.setattr("services.tag_management_service.TagManagementDB", db)
+    monkeypatch.setattr("management.services.tag.library.TagManagementDB", db)
     db.set_definition_status.return_value = {"status": "disabled"}
     db.set_definition_order.return_value = {"sort_order": 5}
     db.move_definition_to_top.return_value = {"sort_order": 0}
@@ -149,7 +150,7 @@ def test_definition_status_order_and_usage_delegate(monkeypatch):
 
 def test_value_operations_forward_values_and_translate_database_errors(monkeypatch):
     db = MagicMock()
-    monkeypatch.setattr("services.tag_management_service.TagManagementDB", db)
+    monkeypatch.setattr("management.services.tag.library.TagManagementDB", db)
     create_request = request(display_value="Red", sort_order=4)
     db.create_value.return_value = {"value_id": 11}
     assert TagManagementService.create_value("tenant-a", 1, 9, create_request, "user-1") == {"value_id": 11}
@@ -193,7 +194,7 @@ def test_value_operations_forward_values_and_translate_database_errors(monkeypat
 )
 def test_write_methods_translate_integrity_and_dbapi_errors(monkeypatch, method_name, error_message):
     db = MagicMock()
-    monkeypatch.setattr("services.tag_management_service.TagManagementDB", db)
+    monkeypatch.setattr("management.services.tag.library.TagManagementDB", db)
     db_method = getattr(db, method_name)
     db_method.side_effect = db_error(error_message)
     if method_name == "create_definition":
@@ -239,11 +240,11 @@ def test_get_resource_assignments_returns_canonical_summary(monkeypatch):
         return identity
 
     monkeypatch.setattr(
-        "services.tag_management_service.TagManagementService._resolve_assignment_resource",
+        "management.services.tag.library.TagManagementService._resolve_assignment_resource",
         resolve_mock,
     )
     monkeypatch.setattr(
-        "services.tag_management_service.TagManagementDB.list_resource_assignments",
+        "management.services.tag.library.TagManagementDB.list_resource_assignments",
         lambda *args, **kwargs: [{"definition_id": 1, "value_id": 2}],
     )
 
@@ -272,7 +273,7 @@ def test_replace_resource_assignments_includes_document_projection_status(monkey
         return identity
 
     monkeypatch.setattr(
-        "services.tag_management_service.TagManagementService._resolve_assignment_resource",
+        "management.services.tag.library.TagManagementService._resolve_assignment_resource",
         resolve_mock,
     )
     def fake_replace(*args, **kwargs):
@@ -280,11 +281,11 @@ def test_replace_resource_assignments_includes_document_projection_status(monkey
         return [{"definition_id": 1, "value_id": 2}]
 
     monkeypatch.setattr(
-        "services.tag_management_service.TagManagementDB.replace_resource_assignments",
+        "management.services.tag.library.TagManagementDB.replace_resource_assignments",
         fake_replace,
     )
     monkeypatch.setattr(
-        "services.tag_management_service.TAG_DOCUMENT_PROJECTION_ENABLED",
+        "management.services.tag.library.TAG_DOCUMENT_PROJECTION_ENABLED",
         True,
     )
     captured = {}
@@ -296,7 +297,7 @@ def test_replace_resource_assignments_includes_document_projection_status(monkey
         return {"status": "synced", "version": 1, "tag_count": 1}
 
     monkeypatch.setattr(
-        "services.tag_document_projection.project_document_assignments",
+        "management.services.knowledge_base.tag_projection.project_document_assignments",
         fake_project,
     )
 
@@ -320,7 +321,7 @@ def test_bulk_assignment_outcomes_cover_success_not_found_and_validation(monkeyp
         return {"resource_id": resource_id, "assignment_count": 1}
 
     monkeypatch.setattr(
-        "services.tag_management_service.TagManagementService.replace_resource_assignments",
+        "management.services.tag.library.TagManagementService.replace_resource_assignments",
         fake_replace,
     )
 
@@ -343,17 +344,17 @@ def test_bulk_assignment_outcomes_cover_success_not_found_and_validation(monkeyp
 
 def test_batch_status_respects_limit_and_encoding(monkeypatch):
     # Covers batch status: >200 validation, dedup, encode/decode, states dict, projection status
-    from services.tag_document_projection import _encode_document_resource_id
+    from management.services.knowledge_base.tag_projection import _encode_document_resource_id
 
     db = MagicMock()
-    monkeypatch.setattr("services.tag_management_service.TagManagementDB", db)
+    monkeypatch.setattr("management.services.tag.library.TagManagementDB", db)
     registry = MagicMock()
     monkeypatch.setattr(
-        "services.tag_management_service.TagManagementService.resource_adapter_registry",
+        "management.services.tag.library.TagManagementService.resource_adapter_registry",
         registry,
     )
     monkeypatch.setattr(
-        "services.tag_management_service.TAG_DOCUMENT_PROJECTION_ENABLED",
+        "management.services.tag.library.TAG_DOCUMENT_PROJECTION_ENABLED",
         True,
     )
     resolved = MagicMock()
@@ -400,7 +401,7 @@ def test_batch_status_respects_limit_and_encoding(monkeypatch):
 
 def test_filter_resource_ids_for_caller_rejects_documents_and_unknown(monkeypatch):
     monkeypatch.setattr(
-        "services.tag_management_service.TagManagementDB.filter_authorized_resource_ids",
+        "management.services.tag.library.TagManagementDB.filter_authorized_resource_ids",
         lambda *a, **k: ["r-1", "r-2"],
     )
     with pytest.raises(ValidationError, match="batch-status endpoint"):
@@ -419,15 +420,15 @@ def test_filter_resource_ids_for_caller_rejects_documents_and_unknown(monkeypatc
 
 def test_cleanup_resource_and_document_assignments(monkeypatch):
     db = MagicMock()
-    monkeypatch.setattr("services.tag_management_service.TagManagementDB", db)
+    monkeypatch.setattr("management.services.tag.library.TagManagementDB", db)
     db.soft_delete_resource_assignments.return_value = 2
     db.soft_delete_document_assignments_for_knowledge_base.return_value = 5
     monkeypatch.setattr(
-        "services.tag_document_projection.clear_document_projection",
+        "management.services.knowledge_base.tag_projection.clear_document_projection",
         lambda *a, **k: None,
     )
     monkeypatch.setattr(
-        "services.tag_document_projection.clear_projection_states_for_knowledge_base",
+        "management.services.knowledge_base.tag_projection.clear_projection_states_for_knowledge_base",
         lambda *a, **k: None,
     )
 
@@ -455,11 +456,11 @@ def test_get_document_projection_status_and_legacy_flat_tags(monkeypatch):
         return identity
 
     monkeypatch.setattr(
-        "services.tag_management_service.TagManagementService._resolve_assignment_resource",
+        "management.services.tag.library.TagManagementService._resolve_assignment_resource",
         resolve_mock,
     )
     monkeypatch.setattr(
-        "services.tag_document_projection.get_document_projection_status",
+        "management.services.knowledge_base.tag_projection.get_document_projection_status",
         lambda *a, **k: {"status": "synced", "version": 1},
     )
     result = asyncio.run(
@@ -470,7 +471,7 @@ def test_get_document_projection_status_and_legacy_flat_tags(monkeypatch):
     assert result == {"status": "synced", "version": 1}
 
     monkeypatch.setattr(
-        "services.tag_management_service.TagManagementDB.list_resource_assignments",
+        "management.services.tag.library.TagManagementDB.list_resource_assignments",
         lambda *a, **k: [
             {"display_value": "Red"},
             {"display_value": "Blue"},
@@ -498,7 +499,7 @@ def test_document_projection_status_requires_provider_document(monkeypatch):
         return identity
 
     monkeypatch.setattr(
-        "services.tag_management_service.TagManagementService._resolve_assignment_resource",
+        "management.services.tag.library.TagManagementService._resolve_assignment_resource",
         resolve_mock,
     )
     with pytest.raises(ValidationError, match="requires a provider document"):
@@ -511,14 +512,14 @@ def test_document_projection_status_requires_provider_document(monkeypatch):
 
 def test_projection_delegates_and_retry(monkeypatch):
     monkeypatch.setattr(
-        "services.tag_document_projection.filter_document_ids_by_predicates",
+        "management.services.knowledge_base.tag_projection.filter_document_ids_by_predicates",
         lambda *a, **k: ["doc-1"],
     )
     assert TagManagementService.filter_document_ids_by_predicates(
         "tenant-a", "local", "kb-1", [{"definition_id": 1}]
     ) == ["doc-1"]
     monkeypatch.setattr(
-        "services.tag_document_projection.retry_pending_document_projections",
+        "management.services.knowledge_base.tag_projection.retry_pending_document_projections",
         lambda tenant_id=None, limit=50: {"retried": limit, "tenant_id": tenant_id},
     )
     assert TagManagementService.retry_pending_document_projections("tenant-a", 10) == {
@@ -530,7 +531,7 @@ def test_projection_delegates_and_retry(monkeypatch):
 def test_resolve_requires_edit_permission_capability(monkeypatch):
     registry = MagicMock()
     monkeypatch.setattr(
-        "services.tag_management_service.TagManagementService.resource_adapter_registry",
+        "management.services.tag.library.TagManagementService.resource_adapter_registry",
         registry,
     )
     async def resolve_mock(*args, **kwargs):
@@ -552,10 +553,10 @@ def test_resolve_requires_edit_permission_capability(monkeypatch):
 
 def test_batch_status_empty_documents_and_predicates(monkeypatch):
     db = MagicMock()
-    monkeypatch.setattr("services.tag_management_service.TagManagementDB", db)
+    monkeypatch.setattr("management.services.tag.library.TagManagementDB", db)
     registry = MagicMock()
     monkeypatch.setattr(
-        "services.tag_management_service.TagManagementService.resource_adapter_registry",
+        "management.services.tag.library.TagManagementService.resource_adapter_registry",
         registry,
     )
     async def resolve_mock(*args, **kwargs):
@@ -574,7 +575,7 @@ def test_batch_status_empty_documents_and_predicates(monkeypatch):
     assert empty == []
 
     # predicates filter branch
-    from services.tag_document_projection import _encode_document_resource_id
+    from management.services.knowledge_base.tag_projection import _encode_document_resource_id
 
     encoded = _encode_document_resource_id("local", "kb-1", "doc-1")
     db.count_resource_assignments_by_ids.return_value = {encoded: 1}
@@ -592,13 +593,13 @@ def test_batch_status_empty_documents_and_predicates(monkeypatch):
 
 def test_cleanup_document_exception_branches(monkeypatch):
     db = MagicMock()
-    monkeypatch.setattr("services.tag_management_service.TagManagementDB", db)
+    monkeypatch.setattr("management.services.tag.library.TagManagementDB", db)
     db.soft_delete_resource_assignments.return_value = 1
     db.soft_delete_document_assignments_for_knowledge_base.return_value = 1
 
     # clear_document_projection raises
     monkeypatch.setattr(
-        "services.tag_document_projection.clear_document_projection",
+        "management.services.knowledge_base.tag_projection.clear_document_projection",
         lambda *a, **k: (_ for _ in ()).throw(RuntimeError("boom")),
     )
     result = TagManagementService.cleanup_document_assignments(
@@ -608,7 +609,7 @@ def test_cleanup_document_exception_branches(monkeypatch):
 
     # clear_projection_states_for_knowledge_base raises
     monkeypatch.setattr(
-        "services.tag_document_projection.clear_projection_states_for_knowledge_base",
+        "management.services.knowledge_base.tag_projection.clear_projection_states_for_knowledge_base",
         lambda *a, **k: (_ for _ in ()).throw(RuntimeError("boom")),
     )
     result2 = TagManagementService.cleanup_document_assignments_for_knowledge_base(

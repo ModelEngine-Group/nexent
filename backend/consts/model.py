@@ -17,7 +17,7 @@ from pydantic import (
 )
 from nexent.core.agents.agent_model import AgentVerificationConfig, ToolConfig
 
-from consts.prompt_template import PROMPT_GENERATE_TEMPLATE_FIELD_ALIAS_MAP
+from infrastructure.agent_prompt import normalize_imported_agent_prompt
 
 
 def _validated_context_policy(value: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
@@ -950,8 +950,8 @@ class WorkbenchGenerationConfig(BaseModel):
     deep_thinking: bool = False
     thinking_effort: Literal["auto", "none", "minimal", "low", "medium", "high", "xhigh", "max"] = "low"
     reasoning_budget_tokens: Optional[StrictInt] = Field(default=None, ge=0)
-    temperature: Optional[float] = Field(default=None, ge=0, le=2)
-    top_p: Optional[float] = Field(default=None, gt=0, le=1)
+    temperature: Optional[float] = Field(default=None, ge=0, le=2, strict=True, allow_inf_nan=False)
+    top_p: Optional[float] = Field(default=None, ge=0, le=1, strict=True, allow_inf_nan=False)
     requested_output_tokens: Optional[int] = Field(default=None, gt=0)
 
 
@@ -1091,12 +1091,14 @@ class AgentRequest(BaseModel):
 
 
 class RuntimeGenerationOverrides(BaseModel):
-    """Partial reasoning intent; absent fields never materialize defaults."""
+    """Partial generation intent; absent fields never materialize defaults."""
 
     model_config = ConfigDict(extra="forbid")
     deep_thinking: Optional[StrictBool] = None
     thinking_effort: Optional[Literal["auto", "none", "minimal", "low", "medium", "high", "xhigh", "max"]] = None
     reasoning_budget_tokens: Optional[StrictInt] = Field(default=None, ge=0)
+    temperature: Optional[float] = Field(default=None, ge=0, le=2, strict=True, allow_inf_nan=False)
+    top_p: Optional[float] = Field(default=None, ge=0, le=1, strict=True, allow_inf_nan=False)
 
     @field_validator("deep_thinking", "thinking_effort", "reasoning_budget_tokens", mode="before")
     @classmethod
@@ -1135,7 +1137,11 @@ class NL2ModelControlsRequest(BaseModel):
                 value["model_id"] = snapshot_model
             saved = snapshot.get("generation_config")
             if isinstance(saved, dict):
-                for key in ("deep_thinking", "thinking_effort", "reasoning_budget_tokens"):
+                for key in ("deep_thinking", "thinking_effort", "reasoning_budget_tokens", "temperature", "top_p"):
+                    if key in ("temperature", "top_p") and key in saved and saved[key] is None:
+                        if overlay.get(key) is not None:
+                            raise ValueError("model_controls_invalid: conflicting sampling snapshot")
+                        continue
                     if key not in saved or saved[key] is None:
                         continue
                     if key in overlay and overlay[key] != saved[key]:
@@ -1304,7 +1310,6 @@ class GeneratePromptRequest(BaseModel):
     task_description: str
     agent_id: int
     model_id: int
-    prompt_template_id: Optional[int] = None
     tool_ids: Optional[List[int]] = Field(
         None, description="Optional: tool IDs from frontend (takes precedence over database query)")
     sub_agent_ids: Optional[List[int]] = Field(
@@ -1322,50 +1327,6 @@ class GeneratePromptRequest(BaseModel):
         return value
 
 
-class PromptTemplateContentRequest(BaseModel):
-    model_config = ConfigDict(populate_by_name=True)
-
-    duty_system_prompt: str = Field(
-        alias=PROMPT_GENERATE_TEMPLATE_FIELD_ALIAS_MAP["duty_system_prompt"]
-    )
-    constraint_system_prompt: str = Field(
-        alias=PROMPT_GENERATE_TEMPLATE_FIELD_ALIAS_MAP["constraint_system_prompt"]
-    )
-    few_shots_system_prompt: str = Field(
-        alias=PROMPT_GENERATE_TEMPLATE_FIELD_ALIAS_MAP["few_shots_system_prompt"]
-    )
-    agent_variable_name_system_prompt: str = Field(
-        alias=PROMPT_GENERATE_TEMPLATE_FIELD_ALIAS_MAP["agent_variable_name_system_prompt"]
-    )
-    agent_display_name_system_prompt: str = Field(
-        alias=PROMPT_GENERATE_TEMPLATE_FIELD_ALIAS_MAP["agent_display_name_system_prompt"]
-    )
-    agent_description_system_prompt: str = Field(
-        alias=PROMPT_GENERATE_TEMPLATE_FIELD_ALIAS_MAP["agent_description_system_prompt"]
-    )
-    user_prompt: str = Field(
-        alias=PROMPT_GENERATE_TEMPLATE_FIELD_ALIAS_MAP["user_prompt"]
-    )
-    agent_name_regenerate_system_prompt: str = Field(
-        alias=PROMPT_GENERATE_TEMPLATE_FIELD_ALIAS_MAP["agent_name_regenerate_system_prompt"]
-    )
-    agent_name_regenerate_user_prompt: str = Field(
-        alias=PROMPT_GENERATE_TEMPLATE_FIELD_ALIAS_MAP["agent_name_regenerate_user_prompt"]
-    )
-    agent_display_name_regenerate_system_prompt: str = Field(
-        alias=PROMPT_GENERATE_TEMPLATE_FIELD_ALIAS_MAP["agent_display_name_regenerate_system_prompt"]
-    )
-    agent_display_name_regenerate_user_prompt: str = Field(
-        alias=PROMPT_GENERATE_TEMPLATE_FIELD_ALIAS_MAP["agent_display_name_regenerate_user_prompt"]
-    )
-
-
-class PromptTemplateRequest(BaseModel):
-    template_name: str
-    description: Optional[str] = None
-    template_type: str = "agent_generate"
-    template_content_zh: PromptTemplateContentRequest
-    template_content_en: Optional[PromptTemplateContentRequest] = None
 class OptimizePromptSectionRequest(BaseModel):
     task_description: str
     agent_id: int
@@ -1451,13 +1412,9 @@ class AgentInfoRequest(BaseModel):
     is_main_agent: Optional[bool] = None
     provide_run_summary: Optional[bool] = None
     duty_prompt: Optional[str] = None
-    constraint_prompt: Optional[str] = None
-    few_shots_prompt: Optional[str] = None
     enabled: Optional[bool] = None
     business_logic_model_name: Optional[str] = None
     business_logic_model_id: Optional[int] = None
-    prompt_template_id: Optional[int] = None
-    prompt_template_name: Optional[str] = None
     enabled_tool_ids: Optional[List[int]] = None
     enabled_skill_ids: Optional[List[int]] = None
     skill_instances: Optional[List[AgentSkillInstanceRequest]] = None
@@ -1574,8 +1531,6 @@ class ExportAndImportAgentInfo(BaseModel):
     verification_config: Optional[Dict[str, Any]] = None
     context_policy: Optional[Dict[str, Any]] = None
     duty_prompt: Optional[str] = None
-    constraint_prompt: Optional[str] = None
-    few_shots_prompt: Optional[str] = None
     enabled: bool
     tools: List[ToolConfig]
     managed_agents: List[int]
@@ -1584,12 +1539,17 @@ class ExportAndImportAgentInfo(BaseModel):
     business_logic_model_id: Optional[int] = None
     business_logic_model_name: Optional[str] = None
     skill_names: Optional[List[str]] = None
-    prompt_template_id: Optional[int] = None
-    prompt_template_name: Optional[str] = None
     # v2.6.0 per-agent model inference param overrides (mirrors AgentInfo column).
     model_params_override: Optional[Dict[str, Any]] = None
     greeting_message: Optional[str] = None
     example_questions: Optional[List[str]] = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def normalize_business_prompt(cls, values):
+        if isinstance(values, dict):
+            return normalize_imported_agent_prompt(values)
+        return values
 
     @field_validator("context_policy")
     @classmethod
@@ -1964,6 +1924,7 @@ class VoiceConnectivityResponse(BaseModel):
 
 class ToolValidateRequest(BaseModel):
     """Request model for tool validation"""
+    language: Literal["zh", "en"] = Field("zh", description="Current frontend language for this validation run")
     name: str = Field(..., description="Tool name to validate")
     source: str = Field(..., description="Tool source (local, mcp, langchain)")
     usage: Optional[str] = Field(None, description="Tool usage information")

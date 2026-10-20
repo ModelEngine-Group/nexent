@@ -179,6 +179,7 @@ export function ListHeader({
   onSelectAll,
   allSelected,
   onRefresh,
+  refreshLoading = false,
   extra,
   partiallySelected,
 }: {
@@ -186,6 +187,7 @@ export function ListHeader({
   onSelectAll?: (checked: boolean) => void;
   allSelected?: boolean;
   onRefresh?: () => void;
+  refreshLoading?: boolean;
   extra?: ReactNode;
   partiallySelected?: boolean;
 }) {
@@ -201,9 +203,14 @@ export function ListHeader({
           <button
             type="button"
             onClick={onRefresh}
+            disabled={refreshLoading}
+            aria-busy={refreshLoading}
             className="flex cursor-pointer items-center gap-1 border-0 bg-transparent p-0 text-[#2673E5]"
           >
-            <RefreshCw size={14} />
+            <RefreshCw
+              size={14}
+              className={refreshLoading ? "animate-spin" : undefined}
+            />
             {t("resourcePicker.refresh", "刷新")}
           </button>
         )}
@@ -471,6 +478,7 @@ export interface ResourceDrawerProps {
   onTabChange?: (key: string) => void;
   onSelectAll?: (checked: boolean) => void;
   onRefresh?: () => void;
+  refreshLoading?: boolean;
   allSelected?: boolean;
   partiallySelected?: boolean;
   selectedTrailing?: ReactNode;
@@ -532,6 +540,7 @@ export function ResourceDrawer({
   onTabChange,
   onSelectAll,
   onRefresh,
+  refreshLoading,
   allSelected,
   partiallySelected,
   selectedTrailing,
@@ -632,6 +641,7 @@ export function ResourceDrawer({
               allSelected={allSelected}
               partiallySelected={partiallySelected}
               onRefresh={onRefresh}
+              refreshLoading={refreshLoading}
               extra={
                 <>
                   {tagManagement && (

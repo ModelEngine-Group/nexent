@@ -38,7 +38,7 @@ case:
       返回 True，模拟删除失败且部分对象仍然存在。'
     expected: 清理后 list_uploading_files_created_before 不再返回该记录，无残留 UPLOADING 状态。
   - order: 3
-    action: 调用 backend/services/startup_recovery_service.py 的 fail_interrupted_uploads(cutoff, upload_owner_service=CONFIG_SERVICE_NAME)。
+    action: 调用 backend/management/recovery.py 的 fail_interrupted_uploads(cutoff, upload_owner_service=CONFIG_SERVICE_NAME)。
     expected: 记录可从 FAILED/UPLOAD_RECOVERY 状态被后续处理读取，不会重复进入 UPLOADING 或反复触发删除。
   - order: 4
     action: 断言第一次状态流转已发生：transition_file_record 将记录置为 status=FAILED、stage=UPLOAD、error_code=CONTAINER_RESTARTED。

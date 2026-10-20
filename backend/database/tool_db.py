@@ -1,14 +1,22 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
-import re
 import json
-from typing import List, Optional
-from database.agent_db import logger
-from database.client import get_db_session, filter_property, as_dict
-from database.db_models import ToolInstance, ToolInfo
+import logging
+import re
+from typing import Dict, List, Optional, Sequence, Set
+
+from sqlalchemy import cast, or_
+from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy.orm import Session
+
 from consts.model import ToolSourceEnum
 from consts.tool_labels import BUILTIN_LABEL_MAP
-from utils.tool_utils import get_local_tools_description_zh
+from database.client import as_dict, filter_property, get_db_session
+from database.db_models import ToolInfo, ToolInstance
+from management.services.tool.catalog import get_local_tools_description_zh
+
+
+logger = logging.getLogger(__name__)
 
 
 def create_tool(tool_info, version_no: int = 0):
@@ -356,6 +364,11 @@ def update_tool_table_from_scan_tool_list(
                     {"created_by": user_id, "updated_by": user_id, "author": tenant_id, "is_available": is_available})
                 new_tool = ToolInfo(**filtered_tool_data)
                 session.add(new_tool)
+                if tool.name == "deepseek_search" and tool.source == ToolSourceEnum.LOCAL.value:
+                    from database.tool_default_tags_db import initialize_search_tool_tags
+
+                    session.flush()
+                    initialize_search_tool_tags(session, tenant_id, new_tool.tool_id, user_id)
     logger.info("Updated tool table in PG database")
 
 
@@ -419,7 +432,7 @@ def add_tool_field(tool_info):
                 ele["default"] = instance_value
         tool_dict = as_dict(tool)
         tool_dict["params"] = tool_params
-        
+
         # Merge description_zh from SDK for local tools
         tool_name = tool_dict.get("name")
         if tool_dict.get("source") == "local":
@@ -427,7 +440,7 @@ def add_tool_field(tool_info):
             if tool_name in local_tool_descriptions:
                 sdk_info = local_tool_descriptions[tool_name]
                 tool_dict["description_zh"] = sdk_info.get("description_zh")
-                
+
                 # Merge params description_zh from SDK
                 for param in tool_params:
                     if not param.get("description_zh"):
@@ -435,7 +448,7 @@ def add_tool_field(tool_info):
                             if sdk_param.get("name") == param.get("name"):
                                 param["description_zh"] = sdk_param.get("description_zh")
                                 break
-                
+
                 # Merge inputs description_zh from SDK
                 inputs_str = tool_dict.get("inputs", "{}")
                 try:
@@ -449,7 +462,7 @@ def add_tool_field(tool_info):
                         tool_dict["inputs"] = json.dumps(inputs, ensure_ascii=False)
                 except (json.JSONDecodeError, TypeError):
                     pass
-        
+
         # combine tool_info and tool_dict
         tool_info.update(tool_dict)
         return tool_info
@@ -552,3 +565,41 @@ def search_last_tool_instance_by_tool_id(tool_id: int, tenant_id: str, user_id: 
         ).order_by(ToolInstance.update_time.desc())
         tool_instance = query.first()
         return as_dict(tool_instance) if tool_instance else None
+
+
+def _query_knowledge_tool_instances(session: Session, param_name: str, resource_ids: Set[str]):
+    """Select live tool configurations containing at least one requested ID."""
+    tool_name = {"index_names": "knowledge_base_search", "kds_list": "aidp_search"}[param_name]
+    return session.query(ToolInstance).join(
+        ToolInfo, ToolInfo.tool_id == ToolInstance.tool_id,
+    ).filter(
+        ToolInfo.name == tool_name,
+        ToolInfo.delete_flag != "Y",
+        ToolInstance.delete_flag != "Y",
+        or_(*(cast(ToolInstance.params[param_name], JSONB).contains([resource_id])
+              for resource_id in sorted(resource_ids))),
+    )
+
+
+def query_tool_knowledge_references(
+    session: Session, param_name: str, resource_ids: Set[str],
+) -> List[Dict[str, int]]:
+    """Return agent/version pairs whose tool configurations reference the IDs."""
+    rows = _query_knowledge_tool_instances(session, param_name, resource_ids).with_entities(
+        ToolInstance.agent_id, ToolInstance.version_no,
+    ).distinct().all()
+    return [{"agent_id": row.agent_id, "version_no": row.version_no} for row in rows]
+
+
+def remove_tool_knowledge_references(
+    session: Session, *, index_names: Sequence[str] = (), kds_ids: Sequence[str] = (),
+) -> None:
+    """Remove deleted IDs from draft and published tool configurations."""
+    for param_name, ids in (("index_names", index_names), ("kds_list", kds_ids)):
+        if not ids:
+            continue
+        deleted_ids = set(ids)
+        for instance in _query_knowledge_tool_instances(session, param_name, deleted_ids).all():
+            params = dict(instance.params)
+            params[param_name] = [item for item in params[param_name] if item not in deleted_ids]
+            instance.params = params

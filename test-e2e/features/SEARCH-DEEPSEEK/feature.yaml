@@ -1,0 +1,37 @@
+{
+  "schema_version": "1.0",
+  "module": {
+    "id": "SEARCH-WEB",
+    "name": "Web search"
+  },
+  "feature": {
+    "feature_id": "SEARCH-DEEPSEEK",
+    "name": "DeepSeek built-in web search",
+    "status": "active",
+    "description": "Selectable local search tool with configurable quality filtering and run-scoped frontend language.",
+    "business_rules": [
+      {
+        "rule_id": "SEARCH-DEEPSEEK-RULE-001",
+        "description": "Instance configuration controls count (default 10) and quality threshold (inclusive 1.5); selected text is returned in full without localization or length-limit parameters. New tool registration assigns unified Keywords=search."
+      },
+      {
+        "rule_id": "SEARCH-DEEPSEEK-RULE-002",
+        "description": "Every run and validation carries current frontend language and appends one normalized language token within 128 code points."
+      },
+      {
+        "rule_id": "SEARCH-DEEPSEEK-RULE-003",
+        "description": "Real Search HTTP responses are stably sorted by descending rerank_score before citation assignment, producing matching model references and observer sources with bounded retries and no credential leakage."
+      }
+    ],
+    "required_test_stages": [
+      "D3",
+      "D4"
+    ],
+    "source": {
+      "requirement_ids": [
+        "SEARCH-DEEPSEEK-20261019"
+      ],
+      "spec_path": "../nexent-doc/nexent/deepseek-search/specs/deepseek-search/spec.md"
+    }
+  }
+}

@@ -1,0 +1,39 @@
+schema_version: '1.0'
+change:
+  change_id: WB-PIN-BATCH-DELETE-20261019
+  change_type: bugfix
+  bug_id: WB-PIN-BATCH-DELETE-20261019
+  title: Remove batch-deleted Workbench pins before history hydration
+  description: Reconcile the shared pin cache before reloading sidebar history after successful batch deletion.
+  observed_behavior: Deleted pinned histories are rehydrated from cached pin metadata and fall into ordinary history until a full page refresh.
+  expected_behavior: Successfully deleted histories disappear without a page refresh; failed deletions retain their pin.
+  escaped_stage: D4
+  coverage_gap:
+    type: missing_assertion
+    description: Existing adapter and pin-sync tests cover preload and focus refresh, but not deletion followed by cached pin hydration.
+  feature_contract_changed: false
+  affected_features:
+    existing: [CHAT-SIDEBAR]
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing: [CHAT-SIDEBAR-D4-001]
+    added: [WB-PIN-DELETE-D4-001]
+    modified: []
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    behaviors:
+    - Deleted pins cannot reappear during adapter history reload
+    - Partial failures retain failed and unrelated pins
+    - In-flight refresh cannot overwrite deletion reconciliation
+    test_selectors:
+    - frontend/tests/workbench/WorkbenchPinDeletion.test.ts
+    - frontend/tests/workbench/WorkbenchThreadAdapter.test.ts
+    reason: Frontend cache and adapter regression; backend API and Python behavior are unchanged. No duplicate D1 case is needed.
+  notes: >-
+    Owner is CHAT-SIDEBAR rules 001 and 003. Existing D4 is adjacent regression only and does not prove batch deletion.
+    Referenced sibling nexent-doc repository is absent in this checkout, so SPEC update is blocked.
+    Current acceptance is immediate removal after confirmed deletion, partial-failure preservation and cancellation of stale refresh.
+    UT results are separate from browser acceptance; no deployment or full acceptance pass is implied by static validation.

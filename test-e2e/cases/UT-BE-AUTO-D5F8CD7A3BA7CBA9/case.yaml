@@ -21,10 +21,10 @@ case:
     legacy_asset_declaration: '- ${NEXENT_TEST_HOME}/config/environment.yaml（仅本地测试环境参数）'
   steps:
   - order: 1
-    action: 读取评测维护调度生命周期相关固定 fixture/配置；直接导入 backend/services/evaluation_maintenance.py 的 start/stop/_run_loop/_request_stop
+    action: 读取评测维护调度生命周期相关固定 fixture/配置；直接导入 backend/management/services/evaluation/maintenance.py 的 start/stop/_run_loop/_request_stop
       及模块级状态 _running/_thread_manager/_execution_id，构造最小 FakeThreadManager（记录 register_service/start_service/cancel 调用，register_service
       返回带固定 execution_id 的 execution 对象，并保留可供断言传入 ManagedThreadSpec 与目标函数）。
-    expected: start 后模块级 _running 为 True，register_service 恰好调用一次，传入的 ManagedThreadSpec 满足 task_name="evaluation-maintenance"、owner="services.evaluation_maintenance"、close_hook
+    expected: start 后模块级 _running 为 True，register_service 恰好调用一次，传入的 ManagedThreadSpec 满足 task_name="evaluation-maintenance"、owner="management.services.evaluation.maintenance"、close_hook
       为 _request_stop，register 的目标函数为 _run_loop；start_service 恰好以 execution.execution_id 调用一次。
   - order: 2
     action: 重置模块级状态（_running=False、_thread_manager=None、_execution_id=None）；monkeypatch list_dispatchable_pending_runs 返回空列表、get_db_session/reap_stale_runs/cleanup_aged_evaluations
@@ -53,7 +53,7 @@ case:
     action: 测试结束后恢复 monkeypatch 与模块级状态，确保可重复执行。
     expected: 功能结果与代码契约一致，无半写入/重复副作用/跨租户泄露；日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。
   expected_results:
-  - start 后模块级 _running 为 True，register_service 恰好调用一次，传入的 ManagedThreadSpec 满足 task_name="evaluation-maintenance"、owner="services.evaluation_maintenance"、close_hook
+  - start 后模块级 _running 为 True，register_service 恰好调用一次，传入的 ManagedThreadSpec 满足 task_name="evaluation-maintenance"、owner="management.services.evaluation.maintenance"、close_hook
     为 _request_stop，register 的目标函数为 _run_loop；start_service 恰好以 execution.execution_id 调用一次。
   - start 幂等：第二次 start 不增加 register_service 与 start_service 的调用次数。
   - stop 后模块级 _running 为 False；cancel 恰好以该 execution_id 调用一次且 reason="evaluation maintenance shutdown"；stop 后 _thread_manager
@@ -69,7 +69,7 @@ case:
   inputs:
   - '- ${NEXENT_TEST_HOME}/config/environment.yaml（仅本地测试环境参数）'
   assertions:
-  - start 后模块级 _running 为 True，register_service 恰好调用一次，传入的 ManagedThreadSpec 满足 task_name="evaluation-maintenance"、owner="services.evaluation_maintenance"、close_hook
+  - start 后模块级 _running 为 True，register_service 恰好调用一次，传入的 ManagedThreadSpec 满足 task_name="evaluation-maintenance"、owner="management.services.evaluation.maintenance"、close_hook
     为 _request_stop，register 的目标函数为 _run_loop；start_service 恰好以 execution.execution_id 调用一次。
   - start 幂等：第二次 start 不增加 register_service 与 start_service 的调用次数。
   - stop 后模块级 _running 为 False；cancel 恰好以该 execution_id 调用一次且 reason="evaluation maintenance shutdown"；stop 后 _thread_manager
