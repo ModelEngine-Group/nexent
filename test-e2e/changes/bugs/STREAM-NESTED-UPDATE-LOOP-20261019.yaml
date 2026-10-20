@@ -1,0 +1,83 @@
+schema_version: '1.0'
+change:
+  change_id: STREAM-NESTED-UPDATE-LOOP-20261019
+  change_type: bugfix
+  bug_id: STREAM-NESTED-UPDATE-LOOP-20261019
+  title: Upgrade assistant-ui stack to stop streaming nested-update crash (React #185)
+  description: >-
+    Bump @assistant-ui/react to 0.15.29 (core 0.3.29, store 0.3.21, tap 0.9.23)
+    so long NL2Agent reasoning streams no longer trip React's nested-update
+    limiter, and guard the floor with a dependency regression test.
+  observed_behavior: >-
+    In the agent-creation workbench, clicking the "recommend available
+    resources" suggestion makes the creation agent stream reasoning; after a
+    while of thinking output the whole newchat page crashes (Next.js
+    DefaultGlobalError) with React minified error #185 ("Maximum update depth
+    exceeded"). The console stack ends with setRef -> t -> Object.current ->
+    Proxy.t -> dispatch -> Object.dispatchUpdate -> react-dom internals, i.e.
+    a ref callback re-attached during commit synchronously dispatched a store
+    update and the nested update chain never settled. The earlier
+    index-stability fix (STREAM-PARTS-INDEX-REORDER-20261019) stopped the
+    reorder-driven remount storms but this crash survived it.
+  expected_behavior: >-
+    Long streaming runs (sustained reasoning, tool calls, sub-agent output)
+    render to completion without the page crashing. The resolved frontend
+    dependency tree stays at or above the assistant-ui versions containing
+    the streaming-stability fixes: @assistant-ui/react >= 0.15.25,
+    @assistant-ui/core >= 0.3.22, @assistant-ui/store >= 0.3.18 and
+    @assistant-ui/tap >= 0.9.22, with a single deduped copy of each package.
+  escaped_stage: D4
+  coverage_gap:
+    type: missing_assertion
+    description: No test pinned the resolved @assistant-ui dependency line, so the lockfile could sit on a version whose library internals crash during streaming while every adapter-level test passed.
+  feature_contract_changed: false
+  affected_features:
+    existing: []
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing: []
+    added: []
+    modified: []
+    retired: []
+  traditional_ut:
+    decision: add
+    behaviors:
+      - The resolved (installed) @assistant-ui/react is at least 0.15.25, the line with part-identity keys (#8684) and no wall-clock reads during render (#8760).
+      - The resolved @assistant-ui/core is at least 0.3.22, where a reloading running thread stopped notifying store subscribers during render (#8504).
+      - The resolved @assistant-ui/store is at least 0.3.18, with stable viewport observers (#9003) and per-client selector wake scoping (#9094).
+      - The resolved @assistant-ui/tap is at least 0.9.22, whose flushTapSync no longer flushes another root's queued update (#8441).
+      - Every floored package resolves to a version (no missing/broken install).
+    reason: >-
+      The defect is a set of nested-update loops inside the assistant-ui
+      runtime itself; the app's own useAuiState selectors were audited to
+      return stable primitives or references and the adapter keeps the parts
+      array append-only (StreamPartsIndexStability.test.ts), so the app-level
+      provable contract is "the shipped bundle is wired to the fixed library
+      line". The floor test was demonstrated red on the previous lockfile
+      (react 0.15.18 / core 0.3.17 / store 0.3.12 / tap 0.9.16) and green
+      after the upgrade.
+    test_selectors:
+      - frontend/tests/workbench/AssistantUiStreamStabilityFloor.test.ts
+  notes: >-
+    Root cause chain: tap 0.9.13+ useSyncExternalStore re-checks the selector
+    snapshot after commit and force-updates when the identity changed; on the
+    old line that loop was fed by library-internal instabilities - a running
+    thread reload notifying store subscribers during render (core #8504),
+    unstable viewport observer refs re-attaching every commit (store #9003),
+    every message/part selector re-running on every streamed token (store
+    #9094), wall-clock reads during render (react #8760) - and a
+    flushTapSync committing another root's queued update (tap #8441) chained
+    the updates into React's 50-nested-update limit. Sustained reasoning
+    streaming (the recommend-resources NL2Agent run) kept the store changing
+    between a render and its commit check, so the chain never settled.
+    Upgrade pulls all five fixes; @assistant-ui/react-lexical stays at 0.2.7
+    (0.2.18 requires lexical >= 0.51 while the app pins 0.48) and its loose
+    peer ranges accept the new core/store. No application code changes are
+    needed: the audited useAuiState selectors all return stable primitives
+    or references at runtime (the single object-literal selector,
+    useBranchCount, has no consumers and never runs). Residual bounded
+    one-shot part removals (reclassify_step, attempt rollback, label-only
+    flush) documented in STREAM-PARTS-INDEX-REORDER-20261019 remain
+    unchanged and are not loops.

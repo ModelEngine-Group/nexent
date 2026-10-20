@@ -287,6 +287,6 @@ it("replaces the history-summary card in place on idle instead of splicing it ou
     (part) => part.type === "data" && part.name === "history-summary"
   );
   expect(tombstone).toBeDefined();
-  expect(tombstone.data.status).toBe("idle");
-  expect(tombstone.data.summary).toBeUndefined();
+  expect(tombstone?.data?.status).toBe("idle");
+  expect(tombstone?.data?.summary).toBeUndefined();
 });
