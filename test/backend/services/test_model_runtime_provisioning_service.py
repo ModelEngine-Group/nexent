@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """Management provisioning and request snapshot guards with external I/O isolated."""
 
 import json
@@ -198,3 +200,32 @@ def test_record_factory_and_request_overlay_preserve_trusted_outlet(saved):
     assert base.temperature == 0.7
     assert base.resolved_profile.model_dump() == original
     assert overlay.resolved_profile.model_dump() == original
+
+
+@pytest.mark.parametrize("extra", [{}, {"reasoning_effort": "auto"}])
+def test_auto_effort_without_saved_rule_uses_shared_omission_semantics(saved, extra):
+    """Management's automatic reasoning default must not become an undeclared API field."""
+    profile = restore_runtime_model_snapshot(saved, "tenant")
+    original = profile.model_dump()
+    assert "reasoning_effort" not in {rule["key"] for rule in profile.parameter_rules}
+    model = ModelConfig(cite_name="outlet", model_name=profile.identity.request_model_id,
+        url=profile.connection.base_url, resolved_profile=profile, temperature=.7,
+        enable_thinking=True, reasoning_effort="auto", extra_body=extra)
+    effective = compile_model_runtime_profile(model, SimpleNamespace(
+        context_budget_snapshot=None, requested_output_tokens=None))
+    assert "reasoning_effort" not in effective.parameter_values
+    assert all(item["path"] != "/reasoning_effort" for item in effective.extra_api_parameters)
+    assert effective.parameter_values["enable_thinking"] is True
+    assert profile.model_dump() == original
+    assert model.reasoning_effort == "auto"
+
+
+@pytest.mark.parametrize("effort", ["low", "high", "none"])
+def test_explicit_effort_without_saved_rule_remains_rejected(saved, effort):
+    profile = restore_runtime_model_snapshot(saved, "tenant")
+    model = ModelConfig(cite_name="outlet", model_name=profile.identity.request_model_id,
+        url=profile.connection.base_url, resolved_profile=profile, temperature=.7,
+        enable_thinking=True, reasoning_effort=effort)
+    with pytest.raises(ValueError, match="MODEL_OUTLET_OVERRIDE_UNDECLARED"):
+        compile_model_runtime_profile(model, SimpleNamespace(
+            context_budget_snapshot=None, requested_output_tokens=None))

@@ -1,3 +1,4 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 import { journey } from "../../infra/automation/d4/runner/journey";
 import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
@@ -76,9 +77,17 @@ journey("JIUWEN-REAL-UI-D4-001", async ({ page, contract, expect }) => {
   const finalTexts = (row: any) => row.locator(".aui-md").evaluateAll((nodes: Element[]) => nodes
     .filter(node => !node.closest(".aui-reasoning-root") && !node.closest("[data-subagent-run-id]"))
     .map(node => (node as HTMLElement).innerText));
-  const send = async (core: string, upload: boolean, query: string) => {
+  const renderedFinal = async (row: any) => {
+    await expect.poll(async () => (await finalTexts(row)).some(text =>
+      text.includes(marker) && text.includes(input.expected_fact))).toBe(true);
+    const texts = await finalTexts(row);
+    expect(texts).toHaveLength(1);
+    expect(texts[0]).not.toMatch(/completed_action_history|historical_attachments|<\/?final_answer\b|MODEL_PRIVATE_HISTORY/);
+    return texts;
+  };
+  const send = async (core: string, upload: boolean, query: string, document = false) => {
     if (upload) {
-      const uploadButton = page.getByRole("button", { name: /^(添加附件|上传文件)$/ }).first();
+      const uploadButton = page.getByRole("button", { name: /^(添加附件|上传文件|上传附件)$/ }).first();
       if (!await uploadButton.isVisible()) await page.getByRole("button", { name: "添加", exact: true }).click();
       await expect(uploadButton).toBeVisible();
       const [chooser] = await Promise.all([page.waitForEvent("filechooser"), uploadButton.click()]);
@@ -131,13 +140,18 @@ journey("JIUWEN-REAL-UI-D4-001", async ({ page, contract, expect }) => {
       expect(results.length).toBeGreaterThan(0);
       expect(results.some(e => e.is_error === true)).toBe(false);
       expect(JSON.stringify(results)).toContain(input.expected_fact);
+    } else if (document) {
+      expect(events.some(e => e.type === "subagent_start")).toBe(true);
+      expect(final).toMatch(/s3:\/\/[^\s)]+\.docx/);
+      expect(fixture("verify-docx", String(conversation), marker).downloaded_docx_verified).toBe(true);
     } else expect(calls.filter(e => !["final_answer", "search_memory"].includes(e.tool_name))).toHaveLength(0);
+    expect(final).not.toMatch(/completed_action_history|historical_attachments|<\/?final_answer\b/);
     const number = outcomes.filter(e => e.kind === "turn").length + 1;
     await expect(roots()).toHaveCount(number, { timeout: 30000 });
     const row = roots().last();
     await expect(row.locator('[data-slot="aui_assistant-message-completion-indicator"]')).toBeVisible({ timeout: 30000 });
     await expect(page.locator("[data-runtime-output]")).toHaveCount(0);
-    const texts = await finalTexts(row);
+    const texts = await renderedFinal(row);
     expect(texts).toHaveLength(1); expect(texts[0]).toContain(marker); expect(texts[0]).toContain(input.expected_fact);
     await expect(row.locator('[data-token-usage="summary"]')).toHaveCount(0);
     const usageButton=row.getByRole("button",{name:/\d+%.*本轮/});
@@ -206,7 +220,7 @@ journey("JIUWEN-REAL-UI-D4-001", async ({ page, contract, expect }) => {
     await configure("jiuwen");await enableCM();await openHistory(6);await send("jiuwen",false,follow);
     await configure("smolagents");await openHistory(7);await send("smolagents",false,follow);await openHistory(8);
     for (let index = 0; index < 8; index++) {
-      const text = await finalTexts(roots().nth(index));
+      const text = await renderedFinal(roots().nth(index));
       expect(text).toHaveLength(1); expect(text[0]).toContain(marker); expect(text[0]).toContain(input.expected_fact);
       const row=roots().nth(index);await expect(row.locator('[data-token-usage="summary"]')).toHaveCount(0);
       const usage=row.getByRole("button",{name:/\d+%.*本轮/});await expect(usage).toBeVisible();await usage.click();
@@ -216,7 +230,17 @@ journey("JIUWEN-REAL-UI-D4-001", async ({ page, contract, expect }) => {
     expect(signatures).toHaveLength(2); expect(signatures[0]).toEqual(signatures[1]);
     outcomes.push({ kind: "ui", common_components: true, image_views: imageViews, history_reload: true, run_count: runCount }); save();
   });
+  await contract.step(steps[3], async () => {
+    await configure("jiuwen"); await openHistory(8);
+    await send("jiuwen", false, `请调用文件生成子智能体，实际生成并上传 protocol_ui.docx，包含标题及一段正文，正文必须包含验收编号${marker}。最终回答提供文件链接、该验收编号和之前图片的衣服颜色，不要重新分析图片。`, true);
+    await openHistory(9);
+    await send("jiuwen", false, `只根据之前已完成的任务，回复生成的文档名称、图片衣服颜色和验收编号${marker}。不要调用任何工具或重新生成文件。`);
+    await openHistory(10);
+    for (let index = 0; index < 10; index++) await renderedFinal(roots().nth(index));
+    outcomes.push({kind:"document",actual_docx_verified:true,clean_history:true,no_followup_replay:true}); save();
+  });
   const assertions = contract.expectedIds("assertions");
   await contract.assertion(assertions[0], async () => { expect(outcomes.filter(e => e.kind === "turn" && e.upload)).toHaveLength(2); });
-  await contract.assertion(assertions[1], async () => { expect(runCount).toBe(8); expect(previous).toHaveLength(16); await expect(page.locator("[data-runtime-output]")).toHaveCount(0); });
+  await contract.assertion(assertions[1], async () => { expect(runCount).toBe(10); expect(previous).toHaveLength(20); await expect(page.locator("[data-runtime-output]")).toHaveCount(0); });
+  await contract.assertion(assertions[2], async () => { expect(outcomes.some(e=>e.kind==="document"&&e.actual_docx_verified===true&&e.clean_history===true)).toBe(true); });
 });

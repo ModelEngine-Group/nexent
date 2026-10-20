@@ -2041,3 +2041,28 @@ def test_message_database_failure_preserves_unexpected_error():
 
 if __name__ == '__main__':
     unittest.main()
+
+
+def test_history_service_projects_old_jiuwen_answer_without_rewriting_user_or_stored_records():
+    import copy
+    import json
+    from backend.services import conversation_management_service as service
+
+    raw = '<completed_action_history>PRIVATE</completed_action_history><final_answer>Clean link</final_answer>'
+    envelope = {"schema_version": 1, "runtime_mode": "native_agent", "agent_core": "jiuwen",
+                "type": "run_terminal", "status": "completed", "final_content": raw, "final_block_ids": ["b"]}
+    history = {"conversation_id": 123, "create_time": "2026-10-20", "search_records": [], "image_records": [],
+               "message_records": [
+                   {"message_id": 1, "role": "user", "message_content": raw, "units": []},
+                   {"message_id": 2, "role": "assistant", "message_content": raw, "opinion_flag": None,
+                    "units": [{"unit_type": "run_terminal", "unit_content": json.dumps(envelope)}]},
+               ]}
+    original = copy.deepcopy(history)
+    with patch.object(service, "get_conversation_history", return_value=history):
+        result = service.get_conversation_history_service(123, "owner")[0]
+    assert result["message"][0]["message"] == raw
+    answer = result["message"][1]
+    assert answer["status"] == "completed"
+    assert next(u for u in answer["message"] if u["type"] == "final_answer")["content"] == "Clean link"
+    assert "PRIVATE" not in json.dumps(answer)
+    assert history == original

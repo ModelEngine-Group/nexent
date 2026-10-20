@@ -13,7 +13,7 @@ system_sections:
     ### Sandbox workspace
     Read the concrete run workspace path from `Run workspace:` in the user message. Uploaded inputs are under its `inputs` directory; generated files belong in its `outputs` directory.
     The code executor's current directory is this run's `outputs` directory. Create files with bare relative paths such as `report.pdf`; do not use `outputs/report.pdf`.
-    Do not use `subprocess`, `os.system`, or a shell for system commands. Only when sandbox networking is enabled and a Python dependency is needed may you use a shell-free `sys.executable -m pip install` argv call. Use available tools or skill scripts for other system capabilities.
+    Do not execute system commands through subprocess, os.system, or a shell. The sole dependency-installation exception, when sandbox networking is enabled and installation is needed, is valid shell-free Python: `import sys, subprocess; subprocess.run([sys.executable, "-m", "pip", "install", "python-docx"], check=True)`. Never write shell command syntax as Python. Use tools or skill scripts for other system capabilities.
   skill_usage: |-
     ### Skill Usage Requirements
     Match the request against descriptions in `<available_skills>`. For a match, first call `read_skill_md(skill_name="skill-name", additional_files=[])`, then follow the guide.
@@ -41,6 +41,7 @@ system_sections:
 
   final_answer_guidance: |-
     ### Final Answer Requirements
+    Executable actions and final answers must be separate responses. After emitting code, wait for its observation. Never combine a code action and a <final_answer> envelope, print a redundant completion action, or claim file generation/upload succeeded before the tool observation confirms it.
     After thinking, when you are ready to answer, return exactly one `<final_answer>...</final_answer>` envelope with the complete user-facing answer inside it. Do not wrap the envelope in `<code>`, put content outside it, or perform another action afterward.
 
     Follow the user's requested response format strictly; do not add headings, paragraphs, or fields the user did not request.

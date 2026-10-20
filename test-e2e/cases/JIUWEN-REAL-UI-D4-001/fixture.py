@@ -1,9 +1,12 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """Owned deployment fixtures; private state and credentials never enter test output."""
 
 import hashlib
 import json
+import re
 import sys
 import time
+import zipfile
 from pathlib import Path
 
 import httpx
@@ -46,6 +49,15 @@ def main():
                     "provide_run_summary", "enable_protocol_repair_retry", "verification_config", "model_params_override"]
             values = {k: getattr(published, k) for k in keys}
             assert values == {k: getattr(draft, k) for k in keys}, "Draft and published source differ"
+            from services.agent_reasoning_service import snapshot_agent_reasoning_config
+
+            # Match the management API's effective reasoning snapshot without writing the source.
+            values["model_params_override"] = snapshot_agent_reasoning_config(
+                model_ids=values["model_ids"],
+                requested_overrides=values["model_params_override"],
+                existing_overrides=values["model_params_override"],
+                tenant_id=published.tenant_id,
+            )
             state = {"source": source, "user": user, "source_conversation": image.conversation_id,
                      "source_agent_hash": digest(rows(session, AgentInfo, agent_id=source)),
                      "source_history_hash": digest(rows(session, ConversationMessage, conversation_id=image.conversation_id)),
@@ -107,6 +119,26 @@ def main():
                 print(json.dumps({"core": published.agent_core, "version": published.version_no,
                                   "messages": [{"id": m.message_id, "index": m.message_index, "role": m.message_role,
                                                 "status": m.status, "hash": digest(m.message_content)} for m in messages]}))
+        elif mode == "verify-docx":
+            conversation, marker = int(sys.argv[3]), sys.argv[4]
+            with get_db_session() as session:
+                owner = session.query(ConversationRecord).filter_by(conversation_id=conversation).one()
+                assert owner.agent_id == state["agent_id"] and owner.created_by == state["user"]
+                latest = session.query(ConversationMessage).filter_by(
+                    conversation_id=conversation, message_role="assistant").order_by(
+                        ConversationMessage.message_id.desc()).first()
+                refs = re.findall(r"s3://[^\s)\]<>\"']+\.docx", latest.message_content)
+                assert refs, "Generated docx link is missing"
+            bucket, key = refs[-1][5:].split("/", 1)
+            artifact = path.with_suffix(".docx")
+            try:
+                success, _ = minio_client.download_file(key, str(artifact), bucket=bucket)
+                assert success, "Generated docx download failed"
+                with zipfile.ZipFile(artifact) as document:
+                    assert marker in document.read("word/document.xml").decode(), "Document marker mismatch"
+            finally:
+                artifact.unlink(missing_ok=True)
+            print(json.dumps({"downloaded_docx_verified": True}))
         elif mode == "cleanup":
             with get_db_session() as session:
                 assert digest(rows(session, AgentInfo, agent_id=state["source"])) == state["source_agent_hash"], "Source assistant changed"

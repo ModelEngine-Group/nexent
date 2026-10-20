@@ -32,13 +32,15 @@ case:
     action: Run the actual Jiuwen adapter with a trusted snapshot and the selected
       protocol.
     expected: Text requests contain no native tools; actual tool observations reach
-      the next request; native provider IDs are preserved.
+      the next request; native provider IDs are preserved, including an empty-ID
+      continuation placeholder after the same call index is already bound.
   expected_results:
   - The actual factory/adapter/Jiuwen loop uses canonical ModelService and real local
     HTTP/SSE; native and text/unknown capability paths return one final result and
     one tool effect.
   - Text requests contain no native tools; actual tool observations reach the next
-    request; native provider IDs are preserved.
+    request; native provider IDs are preserved, including an empty-ID continuation
+    placeholder after the same call index is already bound.
   forbidden_side_effects:
   - No native Jiuwen provider HTTP or CodeAgent loop; no unauthorized executable bindings,
     credentials or duplicate effects.

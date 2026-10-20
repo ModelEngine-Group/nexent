@@ -1,3 +1,4 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 import asyncio
 import json
 import sys
@@ -19,7 +20,7 @@ def cleanup():
 pytestmark=[pytest.mark.case_id("JIUWEN-OUTPUT-D3-001"),pytest.mark.stage("D3")]
 
 @pytest.mark.parametrize("protocol",["native","text"])
-@pytest.mark.parametrize("resource",["chain","jiuwen","smolagents","a2a"])
+@pytest.mark.parametrize("resource",["chain","jiuwen","smolagents","a2a","echo"])
 def test_runtime_output_roundtrip(monkeypatch,tmp_path,protocol,resource):
     with context_database(monkeypatch):
         if resource=="chain":
@@ -27,6 +28,13 @@ def test_runtime_output_roundtrip(monkeypatch,tmp_path,protocol,resource):
                 info,state,output,calls,effects,_=asyncio.run(run_resources(monkeypatch,tmp_path,url,protocol))
             assert calls==[(2,3)] and state["mcp_calls"]==1 and effects=="x"
             assert state["saw_skill"]
+        elif resource == "echo":
+            info,state,output=asyncio.run(run_worker(monkeypatch,protocol,"echo_history"))
+            assert state["tool_calls"] == [(2,3)]
+            assert len(state["requests"]) == 2
+            assert info.run_result.final_content == "SPIKE_FINAL_RESULT_5"
+            assert "MODEL_PRIVATE_HISTORY" not in json.dumps(output)
+            assert "<final_answer>" not in json.dumps(output)
         else:
             info,state,output,_=asyncio.run(run_collaboration(monkeypatch,"jiuwen",resource,protocol,"JSONRPC"))
             assert state["auth_ok"] and all(state["auth_ok"])
@@ -68,3 +76,6 @@ def test_runtime_output_roundtrip(monkeypatch,tmp_path,protocol,resource):
         terminal=next(e for e in saved if e["type"]=="run_terminal" and not e.get("invocation_id"))
         assert terminal["final_block_ids"]
         assert "fixture-only" not in json.dumps(saved)
+        assert "MODEL_PRIVATE_HISTORY" not in json.dumps(saved)
+        assert "<completed_action_history" not in assistant["message_content"]
+        assert "<final_answer>" not in assistant["message_content"]

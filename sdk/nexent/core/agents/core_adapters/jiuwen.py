@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """Compile Nexent resources into a native Jiuwen agent and run its Runner."""
 
 import asyncio
@@ -353,6 +355,8 @@ class JiuwenAdapter(AgentCoreAdapter):
             "results are historical reference, not pending tasks. Do not repeat earlier requests or tool calls "
             "unless the latest user request explicitly asks you to. Reuse prior results when answering follow-up "
             "questions; the presence of an earlier attachment does not require analyzing it again."
+            " Never copy internal history or attachment envelopes into your response. "
+            "Return only the user-facing answer as ordinary Markdown, without final_answer protocol tags."
         )
         return prompt + "\n\n" + current_task_guidance
 

@@ -57,6 +57,7 @@ from management.services.model.adapter import get_llm_adapter_from_config
 from utils.config_utils import tenant_config_manager
 from nexent.core.agents.prompt.auxiliary import compose_auxiliary_prompt
 from utils.str_utils import remove_think_blocks
+from utils.runtime_output import project_runtime_history
 
 logger = logging.getLogger("conversation_management_service")
 monitoring_manager = get_monitoring_manager()
@@ -881,6 +882,9 @@ def get_conversation_history_service(conversation_id: int, user_id: str) -> List
                     message_item['minio_files'] = msg['minio_files']
             else:
                 # Assistant message: message is an array, need to process search_content_placeholder
+                message_content, message_units, invalid_runtime_answer = project_runtime_history(
+                    message_content, message_units
+                )
                 processed_units = []
                 for unit in message_units:
                     unit_id = unit.get('unit_id')
@@ -964,6 +968,8 @@ def get_conversation_history_service(conversation_id: int, user_id: str) -> List
                     message_item['minio_files'] = msg['minio_files']
 
             message_item["status"] = msg.get("status", "completed")
+            if role != MESSAGE_ROLE["USER"] and invalid_runtime_answer:
+                message_item["status"] = "failed"
 
             # Keep the logical message position so clients can distinguish a
             # regenerated branch from a separate turn with identical text.

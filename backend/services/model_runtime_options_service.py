@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """Compile legacy request options against a detached saved outlet."""
 
 from copy import deepcopy
@@ -25,6 +27,10 @@ def compile_model_runtime_profile(model_config, agent_config):
             # The legacy boolean default alone is not an explicit provider override.
             continue
         if key not in rules:
+            if key == "reasoning_effort" and value == "auto":
+                # Let the shared resolver interpret the legacy omission sentinel.
+                submitted[key] = value
+                continue
             if value is not None and (key not in {"enable_thinking"} or value is True):
                 raise ValueError("MODEL_OUTLET_OVERRIDE_UNDECLARED")
             continue

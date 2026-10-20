@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """Canonical ModelService through the real Nexent Jiuwen worker."""
 
 import asyncio
@@ -21,9 +23,11 @@ def cleanup():
     stop_infrastructure()
 
 
-@pytest.mark.parametrize("protocol", ["native", "text", "unknown"])
-def test_factory_service_protocol_loop(monkeypatch, protocol):
-    info, state, output = asyncio.run(run_worker(monkeypatch, protocol))
+@pytest.mark.parametrize("protocol,scenario", [
+    ("native", "normal"), ("native", "empty_call_id"), ("text", "normal"), ("unknown", "normal")
+])
+def test_factory_service_protocol_loop(monkeypatch, protocol, scenario):
+    info, state, output = asyncio.run(run_worker(monkeypatch, protocol, scenario))
     assert info.attempt_outcome == "completed", output[-1:]
     assert state["tool_calls"] == [(2, 3)]
     assert len(state["requests"]) == 2

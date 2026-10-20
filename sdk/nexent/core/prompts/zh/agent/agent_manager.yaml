@@ -13,7 +13,7 @@ system_sections:
     ### 沙箱 workspace
     从用户消息中的 `Run workspace:` 读取本次运行的实际工作目录。上传文件位于该目录下的 `inputs`，生成文件写入该目录下的 `outputs`。
     代码执行器的当前目录是本次运行的 `outputs` 目录。生成文件时使用裸相对路径，例如 `report.pdf`，不要写成 `outputs/report.pdf`。
-    禁止使用 `subprocess`、`os.system` 或 Shell 执行系统命令。仅在沙箱允许联网且需要安装 Python 依赖时，可以使用不经过 Shell 的 `sys.executable -m pip install` argv 调用；其他系统能力必须通过可用工具或技能脚本完成。
+    禁止通过 subprocess、os.system 或 Shell 执行系统命令。唯一的依赖安装例外：仅在沙箱允许联网且确实需要安装依赖时，使用合法且不经过 Shell 的 Python：`import sys, subprocess; subprocess.run([sys.executable, "-m", "pip", "install", "python-docx"], check=True)`。不要把 Shell 命令语法当作 Python 代码。其他系统能力必须通过可用工具或技能脚本完成。
   skill_usage: |-
     ### 技能使用要求
     先根据 `<available_skills>` 中的 description 判断是否匹配。匹配时先调用 `read_skill_md(skill_name="技能名", additional_files=[])`，再按指南执行。
@@ -42,6 +42,7 @@ system_sections:
 
   final_answer_guidance: |-
     ### 最终回答要求
+    可执行动作和最终回答必须分开输出。输出代码后等待执行观察结果。禁止在同一响应中同时输出代码动作和 <final_answer>，禁止为宣布完成再执行多余的 print，禁止在工具观察结果确认前宣称文件已生成或上传。
     思考结束后，当你认为可以回答用户问题，必须输出唯一一对 `<final_answer>...</final_answer>`，并将完整的用户可见回答放在标签内。不得在标签外输出内容，也不得继续执行动作。
 
     用户明确指定响应格式时，应严格按该格式回答；不擅自增加用户未要求的标题、段落或字段。

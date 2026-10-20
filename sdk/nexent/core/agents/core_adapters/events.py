@@ -1,3 +1,4 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """Translate Jiuwen facts to public observations and one explicit run result."""
 
 import json
@@ -5,6 +6,7 @@ import threading
 import time
 import uuid
 
+from ...agent_runtime_support.answer import AnswerBoundaryError, PublicTextFilter, normalize_public_answer
 from ...agent_runtime_support.output import RunResult, StepObservation
 from ...model_service.contracts import ModelError
 from ...utils.observer import ProcessType
@@ -42,7 +44,16 @@ class JiuwenEventAdapter:
             raise RuntimeError("Model step after Runner terminal")
         self.step_number += 1
         self.output(ProcessType.STEP_COUNT, str(self.step_number), step_number=self.step_number)
-        self.blocks.append({"id": uuid.uuid4().hex, "text": "", "reasoning": "", "started": time.monotonic()})
+        self.blocks.append({"id": uuid.uuid4().hex, "text": "", "reasoning": "", "started": time.monotonic(),
+                            "filters": {"text": PublicTextFilter(), "reasoning": PublicTextFilter()},
+                            "received": set()})
+
+    def _model_text(self, block, key, text, kind):
+        block["received"].add(key)
+        visible = block["filters"][key].push(text)
+        block[key] += visible
+        if visible:
+            self.output(kind, visible, block_id=block["id"], phase="partial")
 
     def model_event(self, event):
         if event.type == "error":
@@ -51,17 +62,15 @@ class JiuwenEventAdapter:
         block = self.blocks[-1]
         if event.type in {"text_delta", "reasoning_delta"}:
             reasoning = event.type == "reasoning_delta"
-            block["reasoning" if reasoning else "text"] += event.delta
-            self.output(ProcessType.MODEL_OUTPUT_DEEP_THINKING if reasoning else ProcessType.MODEL_OUTPUT,
-                        event.delta, block_id=block["id"], phase="partial")
+            self._model_text(block, "reasoning" if reasoning else "text", event.delta,
+                             ProcessType.MODEL_OUTPUT_DEEP_THINKING if reasoning else ProcessType.MODEL_OUTPUT)
         elif event.type == "message_completed":
             message = event.message
             for key, parts, kind in (("reasoning", message.reasoning_parts, ProcessType.MODEL_OUTPUT_DEEP_THINKING),
                                      ("text", message.content_parts, ProcessType.MODEL_OUTPUT)):
                 text = "".join(part.get("text", "") for part in parts if part.get("type") == "text")
-                if not block[key] and text:
-                    block[key] = text
-                    self.output(kind, text, block_id=block["id"], phase="partial")
+                if key not in block["received"] and text:
+                    self._model_text(block, key, text, kind)
             block["observed"] = True
             self.calls.extend(message.tool_calls)
             observation = StepObservation(turn_id=self.turn_id, block_id=block["id"],
@@ -117,7 +126,11 @@ class JiuwenEventAdapter:
             output = payload.get("output")
             if not isinstance(output, str) or not output.strip():
                 raise RuntimeError("Jiuwen returned no final answer")
-            self.final_answer = output
+            try:
+                self.final_answer = normalize_public_answer(output)
+            except AnswerBoundaryError:
+                self.last_error = self.error("JIUWEN_FINAL_OUTPUT_INVALID")
+                raise
         elif kind == "context.usage" and isinstance(payload, dict):
             self.observer.add_message(self.agent_name, ProcessType.TOKEN_COUNT, json.dumps(payload))
         # ModelService owns ordered content/reasoning; native llm_output would duplicate it.
@@ -130,7 +143,7 @@ class JiuwenEventAdapter:
         if self.result is not None:
             return self.result
         error = error or self.last_error
-        if status == "completed" and self.final_answer is None:
+        if status == "completed" and self.final_answer is None and error is None:
             error = self.error("JIUWEN_TERMINAL_MISSING")
         if error is not None and status == "completed":
             status = "failed"
@@ -138,7 +151,7 @@ class JiuwenEventAdapter:
             error = self.error("JIUWEN_EXECUTION_FAILED")
         final_ids = []
         if status == "completed":
-            matching = next((b for b in reversed(self.blocks) if b["text"] == self.final_answer), None)
+            matching = next((b for b in reversed(self.blocks) if b["text"].strip() == self.final_answer), None)
             if matching is None:
                 matching = {"id": uuid.uuid4().hex, "text": self.final_answer}
                 self.blocks.append(matching)

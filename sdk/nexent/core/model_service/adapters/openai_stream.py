@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """One-message OpenAI-compatible stream state, independent of HTTP execution."""
 
 import json
@@ -199,8 +201,11 @@ class OpenAIStreamDecoder:
         state = self._calls[index]
         if "type" in raw and raw["type"] != "function":
             self._fail("MODEL_TOOL_CALL_INVALID")
-        if raw.get("id") is not None:
-            value = raw["id"]
+        value = raw.get("id")
+        # Some providers repeat an empty placeholder after establishing the call identity.
+        if value == "" and state["id"] is not None:
+            value = None
+        if value is not None:
             if not isinstance(value, str) or not value.strip() or state["id"] is not None and state["id"] != value:
                 self._fail("MODEL_STREAM_IDENTITY_CONFLICT")
             state["id"] = value

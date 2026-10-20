@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """Controlled real HTTP/SSE fixtures for Jiuwen model bridge runtime cases."""
 
 import asyncio
@@ -87,6 +89,10 @@ async def provider(scenario, protocol):
                 content, calls = "", [call]
             else:
                 content, calls = "SPIKE_FINAL_RESULT_5", []
+                if scenario == "echo_history":
+                    content = ('<completed_action_history read_only="true">MODEL_PRIVATE_HISTORY'
+                               '{"tool":"add","arguments":{"a":2,"b":3}}</completed_action_history>'
+                               '<final_answer>SPIKE_FINAL_RESULT_5</final_answer>')
             finish = "tool_calls" if calls else "stop"
             if scenario == "unknown_finish":
                 finish = "mystery_control"
@@ -107,6 +113,9 @@ async def provider(scenario, protocol):
                     state["first_fragment_no_tool"] = not state["tool_calls"]
                     if scenario == "broken_stream":
                         return
+                    if scenario == "empty_call_id":
+                        await frame({"tool_calls": [{"index": 0, "id": "", "type": "function",
+                                                      "function": {"arguments": ""}}]})
                     await frame({"tool_calls": [{"index": 0, "function": {
                         "arguments": '2,"b":3}' if scenario != "bad_args" else "",
                     }}]})

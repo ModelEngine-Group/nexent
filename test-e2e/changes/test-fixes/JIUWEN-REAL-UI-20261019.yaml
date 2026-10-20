@@ -22,3 +22,16 @@ change:
     calls and config-side published switching together. New D4 proves this user journey;
     no duplicate D1/UT, no product code change. Global pre-existing F-111 reference
     is an independent blocker.
+    After merging develop, the shared Composer labels its upload
+    button with workbench.controls.uploadAttachment. Accept that observed localized
+    label alongside the legacy labels; retain the same filechooser upload and all
+    model/tool, capacity, history, no-replay and cleanup assertions. The initial
+    locator timeout remains separate failed evidence, with no model invocation.
+    The fixture computes the source's effective reasoning snapshot with the same
+    read-only canonicalizer used by the management API before cloning. It still
+    compares all published configuration fields exactly against that frozen
+    expectation and hashes the unmodified source configuration and history.
+    Poll the original Markdown renderer for the same required fact and marker
+    before inspecting its final text; the completion indicator precedes the end
+    of the shared typing animation. Retain exactly-one-final and history reload
+    checks, without changing the timeout or accepting partial output.

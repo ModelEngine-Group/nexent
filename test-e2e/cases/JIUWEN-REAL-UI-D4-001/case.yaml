@@ -52,6 +52,13 @@ case:
       use the same percentage/detail component, with identical model capacity and
       configured CM threshold; CM off retains capacity and CM on retains adaptive
       mode.
+  - order: 4
+    action: Switch the owned assistant back to Jiuwen, request a docx through its
+      configured file-generation child, follow up and reload history.
+    expected: The actual child generates and uploads a docx containing the random
+      marker; downloaded document content verifies, follow-up does not replay tools,
+      live and reloaded final answers contain no internal history or final protocol
+      tags.
   expected_results:
   - Real browser uploads and both Core image analyses use configured real models and
     return known visual facts, with completed persisted turns.
@@ -59,12 +66,16 @@ case:
     marker/fact without replay on follow-ups; common original UI components render
     both Core outputs. Usage presentation retains shared capacity with CM off/on,
     and legacy unknown history stays compatible.
+  - Child document generation, actual downloaded docx content and follow-up/history
+    rendering pass with no internal context or protocol wrappers.
   forbidden_side_effects:
   - No mutation of source assistant or source conversation, no injected model/tool
     results or engine request override, no credentials in public output; only owned
     fixture objects are cleaned.
   - No inferred success from HTTP 200, hidden rerun, lost historical rows, dedicated
     runtime renderer, duplicate final or tool execution on follow-up/history navigation.
+  - No internal history JSON/protocol envelopes in live or reloaded final answers;
+    no fabricated document success or follow-up tool replay.
   actor: Authorized Agent development user
   journey:
   - Upload and analyze with smolagents and follow up.
@@ -98,3 +109,11 @@ case:
     - 2
     forbidden_side_effects:
     - 2
+  - id: AC-03
+    description: Real child document generation and clean multi-turn history output.
+    steps:
+    - 4
+    expected_results:
+    - 3
+    forbidden_side_effects:
+    - 3

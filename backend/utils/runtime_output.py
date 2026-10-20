@@ -1,11 +1,73 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """Validate the explicit root result without inferring success from stream EOF."""
 
+import json
+
+from nexent.core.agent_runtime_support.answer import (
+    AnswerBoundaryError,
+    PublicTextFilter,
+    normalize_public_answer,
+)
 from nexent.core.agent_runtime_support.output import RunResult
 
 
 def is_runtime_event(event):
     return (event.get("schema_version") == 1 and event.get("runtime_mode") == "native_agent"
             and event.get("agent_core") == "jiuwen")
+
+
+def project_runtime_history(content, units):
+    """Clean proven runtime records for display without rewriting audit data or user messages."""
+    parsed = []
+    for unit in units:
+        try:
+            event = json.loads(unit.get("unit_content", ""))
+        except (ValueError, TypeError):
+            event = None
+        parsed.append(event if isinstance(event, dict) and is_runtime_event(event) else None)
+    if not any(parsed):
+        return content, units, False
+    native_invocations = {e.get("invocation_id") for e in parsed if e}
+    filters = {}
+    projected = []
+    invalid_root = False
+
+    def final(text):
+        try:
+            return normalize_public_answer(text), False
+        except AnswerBoundaryError:
+            return "", True
+
+    for unit, event in zip(units, parsed):
+        item = dict(unit)
+        if event:
+            event = dict(event)
+            kind = event.get("type")
+            if kind in {"model_output", "model_output_deep_thinking"}:
+                key = (event.get("turn_id"), event.get("invocation_id"), event.get("block_id"), kind)
+                event["content"] = filters.setdefault(key, PublicTextFilter()).push(event.get("content", ""))
+            elif kind == "run_terminal" and event.get("status") == "completed":
+                event["final_content"], invalid = final(event.get("final_content", ""))
+                if invalid:
+                    event.update(status="failed", final_block_ids=[], end_reason="JIUWEN_FINAL_OUTPUT_INVALID",
+                                 error={"category": "JIUWEN_FINAL_OUTPUT_INVALID", "scope": "protocol",
+                                        "retryable": False, "safe_message": "JIUWEN_FINAL_OUTPUT_INVALID"})
+                    invalid_root |= not event.get("invocation_id")
+                # Persisted terminal content also carries a serialized RunResult.
+                # Keep both representations consistent for all existing consumers.
+                if "content" in event:
+                    event["content"] = json.dumps({key: event[key] for key in (
+                        "turn_id", "status", "end_reason", "final_content", "final_block_ids", "error"
+                    ) if key in event}, ensure_ascii=False)
+            item["unit_content"] = json.dumps(event, ensure_ascii=False)
+        elif item.get("unit_type") == "final_answer" and item.get("invocation_id") in native_invocations:
+            item["unit_content"], invalid = final(item.get("unit_content", ""))
+            invalid_root |= invalid and not item.get("invocation_id")
+        projected.append(item)
+    if None in native_invocations:
+        content, invalid = final(content) if content else (content, False)
+        invalid_root |= invalid
+    return content, projected, invalid_root
 
 
 class RuntimeOutputState:

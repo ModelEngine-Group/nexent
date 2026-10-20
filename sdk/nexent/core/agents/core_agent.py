@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import ast
 import json
 import logging
@@ -1003,6 +1005,19 @@ Additional Args:
         """Keep the pre-whitelist CodeAgent response and ordinary step-error flow."""
 
         self._resolve_deferred_model_attempt(memory_step.model_output_message, accepted=True)
+        outside_final = re.sub(
+            r"<final_answer>.*?</final_answer>", "", str(model_output), flags=re.IGNORECASE | re.DOTALL
+        )
+        if re.search(r"<final_answer>", str(model_output), re.IGNORECASE) and re.search(
+            r"<code>|```", outside_final, re.IGNORECASE
+        ):
+            raise AgentExecutionError(
+                "Do not combine executable code and <final_answer> in one response. "
+                "Return only the action and wait for its observation, or return only "
+                "<final_answer>...</final_answer> when existing observations prove completion. "
+                "No code from this mixed response was executed.",
+                self.logger,
+            )
         if _looks_like_incomplete_legacy_action(
             model_output,
             available_tool_names=self._known_tool_names(),
@@ -1481,6 +1496,17 @@ Additional Args:
                 except ModelOutputProtocolError as protocol_error:
                     if not legacy_code_action:
                         raise
+                    try:
+                        ast.parse(code_action)
+                    except SyntaxError as syntax_error:
+                        raise AgentExecutionError(
+                            f"Invalid Python action at line {syntax_error.lineno}: {syntax_error.msg}. "
+                            "Return executable Python inside <code>...</code>. For an allowed "
+                            "dependency installation, use import sys, subprocess; "
+                            'subprocess.run([sys.executable, "-m", "pip", "install", "package"], check=True). '
+                            "Do not write shell command syntax as Python. Sandbox restrictions still apply.",
+                            self.logger,
+                        ) from protocol_error
                     raise AgentExecutionError(
                         "Legacy code action could not be parsed for optional clarification: "
                         f"{protocol_error.reason.value}",
