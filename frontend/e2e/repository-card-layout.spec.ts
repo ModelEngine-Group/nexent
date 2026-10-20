@@ -12,15 +12,27 @@ const json = (route: Route, data: unknown) =>
     body: JSON.stringify(data),
   });
 
-async function mockRepository(page: Page, kind: ResourceKind) {
+async function mockRepository(page: Page, kind: ResourceKind, mine = false) {
   const requests: ListingRequest[] = [];
   const writes: string[] = [];
-  const endpoint =
-    kind === "mcp" ? "/mcp-tools/community/list" : `/repository/${kind}`;
+  const endpoint = mine
+    ? kind === "agent"
+      ? "/agent/list/page"
+      : kind === "skill"
+        ? "/repository/skill/mine"
+        : "/mcp/list"
+    : kind === "mcp"
+      ? "/mcp-tools/community/list"
+      : `/repository/${kind}`;
   const items = Array.from({ length: 14 }, (_, index) => ({
     agent_repository_id: index + 1,
     skill_repository_id: index + 1,
     agent_id: index + 1,
+    skill_id: index + 1,
+    permission: "EDIT",
+    can_publish: false,
+    current_version_no: 1,
+    repository_info: [],
     communityId: index + 1,
     name: `Layout ${kind} ${index + 1} ${"LongName".repeat(8)}`,
     display_name: `Layout ${kind} ${index + 1} ${"LongName".repeat(8)}`,
@@ -57,7 +69,7 @@ async function mockRepository(page: Page, kind: ResourceKind) {
             user_id: "layout-test",
             tenant_id: "layout-test",
             user_email: "layout@test",
-            user_role: "SPEED",
+            user_role: "ADMIN",
             auth_provider: "local",
             group_ids: [],
             permissions: [],
@@ -68,14 +80,36 @@ async function mockRepository(page: Page, kind: ResourceKind) {
     if (path === "/tag-libraries") return json(route, []);
     if (path === "/groups/list")
       return json(route, { data: [], total: 0, message: "ok" });
+    if (path === "/repository/skill/mine/counts")
+      return json(route, {
+        counts: { all: items.length, created: items.length, others: 0 },
+      });
     if (path === endpoint) {
+      if (mine && kind === "mcp")
+        return json(route, {
+          status: "success",
+          remote_mcp_server_list: items.map((item) => ({
+            ...item,
+            mcp_id: item.agent_id,
+            remote_mcp_server_name: item.name,
+            remote_mcp_server: "https://example.test/mcp",
+            source: "local",
+            enabled: false,
+          })),
+        });
       const size = Number(
         url.searchParams.get(kind === "mcp" ? "limit" : "page_size")
       );
       const currentPage = Number(url.searchParams.get("page") ?? 1);
       // Tab counters request one item separately from the visible listing.
       if (size !== 1) requests.push({ size, page: currentPage });
-      const pageItems = items.slice(
+      const source =
+        mine &&
+        kind === "skill" &&
+        url.searchParams.get("new_skill_padding") === "true"
+          ? [{ new_skill_padding: true }, ...items]
+          : items;
+      const pageItems = source.slice(
         (currentPage - 1) * size,
         currentPage * size
       );
@@ -94,11 +128,13 @@ async function mockRepository(page: Page, kind: ResourceKind) {
       }
       return json(route, {
         items: pageItems,
+        counts: { all: items.length, created: items.length, others: 0 },
+        creator_counts: { all: items.length, created: items.length, others: 0 },
         pagination: {
           page: currentPage,
           page_size: size,
-          total: items.length,
-          total_pages: Math.ceil(items.length / size),
+          total: source.length,
+          total_pages: Math.ceil(source.length / size),
         },
       });
     }
@@ -120,56 +156,97 @@ async function mockRepository(page: Page, kind: ResourceKind) {
 }
 
 for (const kind of ["agent", "skill", "mcp"] as const) {
-  test(`${kind} repository keeps twelve cards, contains long text and scrolls to page two`, async ({
-    page,
-  }) => {
-    test.setTimeout(90_000);
-    const fixture = await mockRepository(page, kind);
-    await page.setViewportSize({ width: 1440, height: 900 });
-    await page.goto(`${baseUrl}/zh/${kind}-space`);
-    const headings = page
-      .getByRole("heading", { level: 2 })
-      .filter({ hasText: `Layout ${kind}` });
-    await expect(headings).toHaveCount(12);
-    for (const viewport of [
-      { width: 1440, height: 900 },
-      { width: 1024, height: 480 },
-    ]) {
-      await page.setViewportSize(viewport);
-      await expect(headings).toHaveCount(12);
-      await expect
-        .poll(() =>
-          headings.evaluateAll((nodes) =>
-            nodes.flatMap((heading) => {
-              const card = heading.closest(".group")!;
-              const box = card.getBoundingClientRect();
-              return [...card.querySelectorAll("span,button")]
-                .filter((element) => {
-                  const bounds = element.getBoundingClientRect();
-                  return (
-                    bounds.width > 0 &&
-                    bounds.height > 0 &&
-                    (bounds.bottom > box.bottom + 1 ||
-                      bounds.right > box.right + 1 ||
-                      bounds.left < box.left - 1)
-                  );
-                })
-                .map((element) => element.textContent);
-            })
+  for (const tab of ["repository", "mine"] as const) {
+    test(`${kind} ${tab} keeps fixed card slots and scrolls without moving its tabs`, async ({
+      page,
+    }) => {
+      test.setTimeout(90_000);
+      const mine = tab === "mine";
+      const fixture = await mockRepository(page, kind, mine);
+      await page.setViewportSize({ width: 1440, height: 900 });
+      await page.goto(`${baseUrl}/zh/${kind}-space?tab=${tab}`);
+      const content = page.getByTestId("repository-tab-content");
+      const headings = content
+        .getByRole("heading", { level: 2 })
+        .filter({ hasText: `Layout ${kind}` });
+      const expectedCount = mine ? 11 : 12;
+      await expect(headings).toHaveCount(expectedCount);
+      for (const viewport of [
+        { width: 1440, height: 900 },
+        { width: 1024, height: 480 },
+      ]) {
+        await page.setViewportSize(viewport);
+        await expect(headings).toHaveCount(expectedCount);
+        await expect
+          .poll(() =>
+            headings.evaluateAll((nodes) =>
+              nodes.flatMap((heading) => {
+                const card = heading.closest(".group")!;
+                const box = card.getBoundingClientRect();
+                return [...card.querySelectorAll("span,button")]
+                  .filter((element) => {
+                    const bounds = element.getBoundingClientRect();
+                    return (
+                      bounds.width > 0 &&
+                      bounds.height > 0 &&
+                      (bounds.bottom > box.bottom + 1 ||
+                        bounds.right > box.right + 1 ||
+                        bounds.left < box.left - 1)
+                    );
+                  })
+                  .map((element) => element.textContent);
+              })
+            )
           )
-        )
-        .toEqual([]);
-    }
-    const pagination = page.locator(".ant-pagination-item-2").last();
-    await expect(pagination).not.toBeInViewport();
-    await pagination.scrollIntoViewIfNeeded();
-    await expect(pagination).toBeInViewport();
-    await pagination.click();
-    await expect(headings.first()).toContainText(`Layout ${kind} 13`);
-    await expect(headings).toHaveCount(2);
-    expect(fixture.requests.length).toBeGreaterThanOrEqual(2);
-    expect(fixture.requests.every((request) => request.size === 12)).toBe(true);
-    expect(fixture.requests.some((request) => request.page === 2)).toBe(true);
-    expect(fixture.writes).toEqual([]);
-  });
+          .toEqual([]);
+      }
+      // The full page header and all three tabs must stay outside the scrolling list.
+      const tabs = page.getByRole("tablist");
+      const header = page.locator("section").filter({
+        has: page.getByRole("heading", { level: 1 }),
+      });
+      await expect(page.getByRole("tab")).toHaveCount(3);
+      const before = {
+        tabs: await tabs.boundingBox(),
+        title: await page.getByRole("heading", { level: 1 }).boundingBox(),
+        header: await header.boundingBox(),
+        firstCard: await headings.first().boundingBox(),
+      };
+      const pagination = content.locator(".ant-pagination-item-2").last();
+      await expect(pagination).not.toBeInViewport();
+      await pagination.scrollIntoViewIfNeeded();
+      await expect(pagination).toBeInViewport();
+      expect(
+        await content.evaluate((element) => element.scrollTop)
+      ).toBeGreaterThan(0);
+      expect((await tabs.boundingBox())?.y).toBeCloseTo(before.tabs!.y, 0);
+      expect(
+        (await page.getByRole("heading", { level: 1 }).boundingBox())?.y
+      ).toBeCloseTo(before.title!.y, 0);
+      const headerAfter = await header.boundingBox();
+      expect(headerAfter!.y).toBeCloseTo(before.header!.y, 0);
+      expect(headerAfter!.height).toBeCloseTo(before.header!.height, 0);
+      await expect(header).toBeInViewport();
+      expect((await headings.first().boundingBox())!.y).toBeLessThan(
+        before.firstCard!.y
+      );
+      await expect(tabs).toBeInViewport();
+      await pagination.click();
+      await expect(headings.first()).toContainText(
+        `Layout ${kind} ${mine ? 12 : 13} `
+      );
+      await expect(headings).toHaveCount(mine ? 3 : 2);
+      if (!(mine && kind === "mcp")) {
+        const expectedSize = mine && kind === "agent" ? 11 : 12;
+        expect(fixture.requests.length).toBeGreaterThanOrEqual(2);
+        expect(
+          fixture.requests.every((request) => request.size === expectedSize)
+        ).toBe(true);
+        expect(fixture.requests.some((request) => request.page === 2)).toBe(
+          true
+        );
+      }
+      expect(fixture.writes).toEqual([]);
+    });
+  }
 }

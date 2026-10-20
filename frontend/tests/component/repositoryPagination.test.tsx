@@ -71,6 +71,25 @@ describe("repository pagination", () => {
     });
   });
 
+  it("keeps twelve mine card slots including the create entry across viewport layouts", () => {
+    const props = {
+      items,
+      pageSize: REPOSITORY_PAGE_SIZE,
+      createCard: <button>Create</button>,
+      renderItem,
+    };
+    const { rerender, container } = render(
+      <ResourceCardGrid {...props} columns={4} rows={3} />
+    );
+    expect(screen.getAllByRole("heading")).toHaveLength(11);
+    rerender(<ResourceCardGrid {...props} columns={1} rows={1} />);
+    expect(screen.getAllByRole("heading")).toHaveLength(11);
+    expect(screen.getByRole("button", { name: "Create" })).toBeVisible();
+    expect(container.querySelector<HTMLElement>(".grid")?.style.height).toBe(
+      ""
+    );
+  });
+
   it("uses responsive flow layout and preserves the empty state", () => {
     const onPageChange = vi.fn();
     const { container } = render(
