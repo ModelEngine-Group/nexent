@@ -143,7 +143,16 @@ SET params = f.new_params::json
 FROM fixed_instances AS f
 WHERE i.ctid = f.ctid;
 
-UPDATE nexent.conversation_record_t
+DO $guard$
+BEGIN
+    IF EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = 'nexent'
+          AND table_name = 'conversation_record_t'
+          AND column_name = 'knowledge_scope'
+    ) THEN
+        EXECUTE $stmt$
+            UPDATE nexent.conversation_record_t
 SET knowledge_scope = jsonb_set(
         knowledge_scope,
         '{retrieval_config,search_method}',
@@ -153,7 +162,26 @@ SET knowledge_scope = jsonb_set(
 WHERE delete_flag = 'N'
   AND knowledge_scope->'retrieval_config'->>'search_method' = 'hybrid_search';
 
-WITH fixed_workbench AS (
+        $stmt$;
+    END IF;
+END
+$guard$;
+
+DO $guard$
+BEGIN
+    IF EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = 'nexent'
+          AND table_name = 'conversation_record_t'
+          AND column_name = 'workbench_config'
+    ) AND EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = 'nexent'
+          AND table_name = 'conversation_record_t'
+          AND column_name = 'workbench_config_version'
+    ) THEN
+        EXECUTE $stmt$
+            WITH fixed_workbench AS (
     SELECT conversation_id,
            jsonb_set(
                workbench_config,
@@ -172,3 +200,8 @@ SET workbench_config = f.new_workbench,
 FROM fixed_workbench AS f
 WHERE c.conversation_id = f.conversation_id
   AND c.delete_flag = 'N';
+
+        $stmt$;
+    END IF;
+END
+$guard$;
