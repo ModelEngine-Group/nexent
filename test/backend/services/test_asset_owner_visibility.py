@@ -1,4 +1,5 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """Unit tests for ASSET_OWNER visibility helpers."""
 
 import sys
@@ -107,6 +108,15 @@ class TestResolveAgentListPermission:
 
 
 class TestApplyAgentDetailPromptVisibility:
+    def test_current_agent_mask_does_not_add_removed_prompt_fields(self):
+        result = aov.apply_agent_detail_prompt_visibility("regular_tenant", {
+            "tenant_id": ASSET_OWNER_TENANT_ID, "duty_prompt": "Complete prompt",
+        })
+        assert result["duty_prompt"] is None
+        assert result[PROMPTS_HIDDEN_FLAG] is True
+        assert "constraint_prompt" not in result
+        assert "few_shots_prompt" not in result
+
     def test_masks_prompts_for_non_asset_owner_viewer(self):
         agent_info = {
             "tenant_id": ASSET_OWNER_TENANT_ID,

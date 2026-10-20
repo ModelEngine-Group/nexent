@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """Build and compare redacted AgentRunInfo parity snapshots."""
 
 from __future__ import annotations
@@ -11,7 +13,6 @@ from .experiment_manifest import _jsonable, sha256_value
 PROMPT_COMPONENT_IDS = {
     "basic_information": "system:header",
     "duty_prompt": "system:duty",
-    "constraint_prompt": "system:constraint",
     "execution_prompt": "system:execution_flow",
     "resource_prompt": "system:available_resources_header",
     "code_rules_prompt": "system:code_norms",

@@ -165,7 +165,7 @@ export interface ComposerProps {
   disabledReason?: string;
   modelSelectionDisabled?: boolean;
   configurationLayout?: boolean;
-  debugLayout?: boolean;
+  hidePlan?: boolean;
   workbenchPresentation?: import("@/features/workbench/types").WorkbenchComposerPresentation;
   workbenchResources?: import("@/features/workbench/types").WorkbenchResourceControls;
   onRemoveWorkbenchSkill?: (skillId: number) => void;
@@ -315,7 +315,7 @@ export const Composer: FC<ComposerProps> = ({
   disabledReason,
   modelSelectionDisabled,
   configurationLayout = false,
-  debugLayout = false,
+  hidePlan = false,
   workbenchPresentation,
   workbenchResources,
   onRemoveWorkbenchSkill,
@@ -574,19 +574,20 @@ export const Composer: FC<ComposerProps> = ({
     t,
   ]);
 
+  const fieldsetDisabled =
+    disabled && !disabledReason && modelSelectionDisabled !== false;
+
   return (
     <div className="relative w-full min-w-0 font-sans">
       {workbenchPresentation && workbenchPresentation.actions}
       <fieldset
-        disabled={disabled && !disabledReason}
-        aria-disabled={disabled && !disabledReason}
+        disabled={fieldsetDisabled}
+        aria-disabled={fieldsetDisabled}
         className={cn(
           "relative m-0 flex min-w-0 w-full flex-col overflow-visible gap-2 rounded-[20px] border-[0.5px] border-solid border-[#191919]/[0.08] bg-white px-4 pb-4 pt-5 shadow-[0_1px_6px_0_rgba(0,0,0,0.16)]",
-          disabled && !disabledReason && "cursor-not-allowed opacity-60",
+          fieldsetDisabled && "cursor-not-allowed opacity-60",
           configurationLayout &&
-            "min-h-[164px] rounded-[20px] border-[0.5px] border-[#191919]/[0.08] bg-white shadow-[0_1px_6px_rgba(0,0,0,0.16)]",
-          debugLayout &&
-            "min-h-[164px] rounded-[20px] border-0 p-4 outline-[0.5px] outline-[#191919]/[0.08] bg-white shadow-[0_1px_6px_rgba(0,0,0,0.16)]"
+            "min-h-[164px] rounded-[20px] border-[0.5px] border-[#191919]/[0.08] bg-white shadow-[0_1px_6px_rgba(0,0,0,0.16)]"
         )}
       >
         {disabled && disabledReason ? (
@@ -597,7 +598,7 @@ export const Composer: FC<ComposerProps> = ({
         {onChatModeChange &&
           !creationMode &&
           !configurationLayout &&
-          !debugLayout && <PlanView className="-mx-4" />}
+          !hidePlan && <PlanView className="-mx-4" />}
         {configurationLayout && (
           <div className="flex px-4 pt-4">
             <span className="inline-flex items-center gap-1 rounded-full bg-[#669fff]/[0.15] px-2 text-xs leading-[22px] text-[#477bd5]">
@@ -714,9 +715,7 @@ export const Composer: FC<ComposerProps> = ({
                   placeholder=""
                   className={cn(
                     "max-h-48 min-h-20 min-w-0 w-auto flex-1 resize-none bg-transparent px-0 py-0 text-sm text-[#191919] outline-none placeholder:text-muted-foreground",
-                    configurationLayout && "!min-h-[56px] !px-4",
-                    debugLayout &&
-                      "!mb-0 !min-h-[88px] !px-0 !py-0 !text-base !font-normal !leading-6 !text-[#191919] placeholder:!text-[#191919]/40"
+                    configurationLayout && "!min-h-[56px] !px-4"
                   )}
                   rows={1}
                   submitMode="enter"
@@ -757,12 +756,7 @@ export const Composer: FC<ComposerProps> = ({
                 }}
               />
             )}
-            <div
-              className={cn(
-                "relative flex min-h-8 flex-wrap items-center justify-between gap-2",
-                debugLayout && "!mx-0 !mb-0 !mt-1 !h-10"
-              )}
-            >
+            <div className="relative flex min-h-8 flex-wrap items-center justify-between gap-2">
               <div className="flex min-w-0 flex-wrap items-center gap-1">
                 {!creationMode && onChatModeChange && (
                   <WorkbenchPlanningMenu
@@ -844,20 +838,13 @@ export const Composer: FC<ComposerProps> = ({
                     }}
                     variant="ghost"
                     size="sm"
-                    className={cn(
-                      "min-w-0 text-xs text-muted-foreground [&_[data-slot=model-selector-value]]:text-muted-foreground",
-                      !debugLayout &&
-                        "text-sm font-normal leading-5 [&_[data-slot=model-selector-value]]:text-sm [&_[data-slot=model-selector-value]]:leading-5 [&_[data-slot=model-selector-value]_span]:font-normal",
-                      debugLayout &&
-                        "min-w-0 max-w-[180px] text-base text-[#191919] [&_[data-slot=model-selector-value]]:text-base [&_[data-slot=model-selector-value]]:text-[#191919]"
-                    )}
+                    className="min-w-0 text-sm font-normal leading-5 text-muted-foreground [&_[data-slot=model-selector-value]]:text-sm [&_[data-slot=model-selector-value]]:leading-5 [&_[data-slot=model-selector-value]]:text-muted-foreground [&_[data-slot=model-selector-value]_span]:font-normal"
                   />
                 )}
                 {children}
                 <ComposerSendOrCancel
                   onSend={prepareSend}
                   disabled={disabled || knowledgeSaving}
-                  debugLayout={debugLayout}
                 />
               </div>
             </div>
@@ -975,8 +962,7 @@ const WorkbenchPlanningMenu: FC<{
 const ComposerSendOrCancel: FC<{
   onSend: () => void;
   disabled?: boolean;
-  debugLayout?: boolean;
-}> = ({ onSend, disabled, debugLayout = false }) => {
+}> = ({ onSend, disabled }) => {
   const { t } = useTranslation();
   const hasText = useAuiState((state) => state.composer.text.trim().length > 0);
 
@@ -996,17 +982,9 @@ const ComposerSendOrCancel: FC<{
               size="icon"
               variant="outline"
               aria-label={t("chat.composer.stopGenerating")}
-              className={cn(
-                "size-8 rounded-full ml-2 border-border bg-background text-primary hover:bg-muted",
-                debugLayout &&
-                  "!ml-0 !size-10 !rounded-full !border-0 !bg-[#191919] !text-white"
-              )}
+              className="size-8 rounded-full ml-2 border-border bg-background text-primary hover:bg-muted"
             >
-              <Square
-                className={
-                  debugLayout ? "size-5 fill-current" : "size-4 fill-current"
-                }
-              />
+              <Square className="size-4 fill-current" />
             </Button>
           </ComposerPrimitive.Cancel>
         </TooltipWrapper>
@@ -1020,11 +998,7 @@ const ComposerSendOrCancel: FC<{
           <ComposerPrimitive.Send asChild onClick={onSend}>
             <Button
               size="icon"
-              className={cn(
-                "size-8 ml-0 rounded-md border-0 bg-transparent text-muted-foreground hover:bg-transparent hover:text-foreground disabled:bg-transparent disabled:text-muted-foreground disabled:opacity-50 aria-disabled:bg-transparent aria-disabled:text-muted-foreground [&_svg]:size-4",
-                debugLayout &&
-                  "size-10 rounded-[26px] bg-[#191919] text-white hover:bg-[#191919]/90 disabled:opacity-30 [&_svg]:size-6"
-              )}
+              className="size-8 ml-0 rounded-md border-0 bg-transparent text-muted-foreground hover:bg-transparent hover:text-foreground disabled:bg-transparent disabled:text-muted-foreground disabled:opacity-50 aria-disabled:bg-transparent aria-disabled:text-muted-foreground [&_svg]:size-4"
               disabled={disabled || !hasText}
               aria-label={t("chat.composer.send")}
             >
