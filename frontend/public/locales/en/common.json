@@ -6160,5 +6160,7 @@
   "mcpTools.publish.tagsInheritedHint": "Tags are inherited from the source MCP service",
   "notifications.deepLink.mcpNotFound": "The linked MCP service was not found",
   "a2a.security.requirementRequired": "Please select an authentication method",
-  "common.error.loadFailed": "Failed to load data. Please try again later."
+  "common.error.loadFailed": "Failed to load data. Please try again later.",
+  "workbench.import.precheckTitle": "Import precheck",
+  "workbench.import.importAndSelect": "Import and select"
 }

@@ -234,7 +234,6 @@ function AgentSetupContent({
     ready:
       !isRequestedAgentLoading &&
       currentAgentId === requestedAgentId &&
-      Boolean(agentInfo) &&
       isGenerationVisible &&
       !isDebugVisible,
     readOnly: permissionReadOnly,
