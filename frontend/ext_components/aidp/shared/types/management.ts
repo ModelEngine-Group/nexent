@@ -232,6 +232,8 @@ export interface AidpUpdateKbPayload {
   name?: string;
   description?: string;
   chunk_mode?: number;
+  chunk_token_num?: number;
+  chunk_overlap_num?: number;
   topk?: number;
   /** Caption (VLM) generation toggle; 1 enabled, 0 disabled. */
   caption_enable?: number;

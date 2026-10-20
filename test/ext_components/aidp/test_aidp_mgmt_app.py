@@ -134,7 +134,9 @@ def test_creation_requires_embedding_and_trims_description():
         CreateKbRequest(name="kb", description="test")
     body = CreateKbRequest(name="kb", description="  test  ", embedding_model="/models/bge-m3")
     assert body.description == "test"
-    assert body.similarity == 0.6
+    assert body.chunk_token_num == 512
+    assert body.chunk_overlap_num == 51
+    assert body.similarity == 0.0
     assert body.vlm_model == ""
 
 
@@ -2460,6 +2462,8 @@ class TestUpdateKbConfigurationFields:
 
         payload = {
             "chunk_mode": 1,
+            "chunk_token_num": 512,
+            "chunk_overlap_num": 51,
             "topk": 5,
             "caption_enable": 1,
             "vlm_model": "qwen2-vl-7b",
@@ -2483,14 +2487,22 @@ class TestUpdateKbConfigurationFields:
         client = _client()
         from ext_components.aidp.services import aidp_permission_service
 
+        payloads = [
+            {"chunk_mode": 2},
+            {"chunk_token_num": 255},
+            {"chunk_token_num": 4097},
+            {"chunk_overlap_num": 1.5},
+            {"chunk_token_num": 512, "chunk_overlap_num": 257},
+        ]
         with patch.object(aidp_permission_service, "require_permission",
                           return_value=MagicMock(permission="EDIT")):
-            response = client.put(
-                "/aidp-mgmt/knowledge-bases/kb-1",
-                headers=_bearer(),
-                json={"chunk_mode": 2},
-            )
-        assert response.status_code == HTTPStatus.UNPROCESSABLE_ENTITY
+            for payload in payloads:
+                response = client.put(
+                    "/aidp-mgmt/knowledge-bases/kb-1",
+                    headers=_bearer(),
+                    json=payload,
+                )
+                assert response.status_code == HTTPStatus.UNPROCESSABLE_ENTITY
 
     # ---- Knowledge graph settings (detail information tab) ----
 

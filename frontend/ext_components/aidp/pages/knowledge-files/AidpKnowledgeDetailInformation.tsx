@@ -8,7 +8,11 @@ import { Button, Switch, Tag, Tooltip } from "antd";
 import { EditOutlined } from "@ant-design/icons";
 
 import type { AidpKbDetail } from "@/ext_components/aidp/shared/types/management";
-import { AIDP_UNKNOWN_VALUE, formatAidpCreator } from "@/ext_components/aidp/shared/utils/aidpKnowledgeDisplay";
+import {
+  AIDP_UNKNOWN_VALUE,
+  formatAidpCreator,
+} from "@/ext_components/aidp/shared/utils/aidpKnowledgeDisplay";
+import { formatChunkOverlapPercent } from "@/ext_components/aidp/shared/utils/aidpChunking";
 import AidpGroupNamesDisplay from "@/ext_components/aidp/shared/components/AidpGroupNamesDisplay";
 
 export const AidpDetailField = ({
@@ -31,6 +35,8 @@ export const AidpDetailField = ({
 /** Editable detail settings owned by the information tab's edit modals. */
 export type AidpDetailSetting =
   | "chunk_mode"
+  | "chunk_token_num"
+  | "chunk_overlap_percent"
   | "topk"
   | "vlm"
   | "graph_llm"
@@ -79,6 +85,12 @@ const AidpKnowledgeDetailInformation = ({
       return value ? t("common.yes") : t("common.no");
     return String(value);
   };
+  const chunkTokenValue = displayValue(detail.chunk_token_num);
+  const chunkOverlapValue =
+    formatChunkOverlapPercent(
+      detail.chunk_token_num,
+      detail.chunk_overlap_num
+    ) || AIDP_UNKNOWN_VALUE;
   const editButton = (setting: AidpDetailSetting, label: string) =>
     canEdit && (
       <Tooltip title={label}>
@@ -126,6 +138,24 @@ const AidpKnowledgeDetailInformation = ({
                   : AIDP_UNKNOWN_VALUE}
             </span>
             {editButton("chunk_mode", t("aidpKnowledge.detailEditChunkMode"))}
+          </AidpDetailField>
+          <AidpDetailField label={t("aidpKnowledge.detailChunkTokenNum")}>
+            <span>
+              {chunkTokenValue === AIDP_UNKNOWN_VALUE
+                ? chunkTokenValue
+                : `${chunkTokenValue} Token`}
+            </span>
+            {editButton(
+              "chunk_token_num",
+              t("aidpKnowledge.detailEditChunkTokenNum")
+            )}
+          </AidpDetailField>
+          <AidpDetailField label={t("aidpKnowledge.detailChunkOverlapPercent")}>
+            <span>{chunkOverlapValue}</span>
+            {editButton(
+              "chunk_overlap_percent",
+              t("aidpKnowledge.detailEditChunkOverlapPercent")
+            )}
           </AidpDetailField>
           <AidpDetailField label={t("aidpKnowledge.detailEmbeddingModel")}>
             {embeddingModelLabel ||

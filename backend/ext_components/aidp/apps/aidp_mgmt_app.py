@@ -169,12 +169,12 @@ class CreateKbRequest(BaseModel):
         description="Knowledge base description (required)",
     )
     embedding_model: str = Field(..., min_length=1, description="Embedding model identifier")
-    chunk_token_num: int = Field(1024, ge=256, le=4096, strict=True, description="Chunk size in tokens")
-    chunk_overlap_num: int = Field(128, ge=0, strict=True, description="Chunk overlap in tokens")
+    chunk_token_num: int = Field(512, ge=256, le=4096, strict=True, description="Chunk size in tokens")
+    chunk_overlap_num: int = Field(51, ge=0, strict=True, description="Chunk overlap in tokens")
     vlm_model: str = Field("", description="VLM model identifier for caption generation")
     is_personal: int = Field(0, ge=0, le=1, description="Personal KB flag, int 0 or 1")
     topk: int = Field(10, ge=1, le=100, strict=True, description="Top-K retrieval count")
-    similarity: float = Field(0.6, ge=0, le=1, description="Similarity score threshold")
+    similarity: float = Field(0.0, ge=0, le=1, description="Similarity score threshold")
     caption_enable: int = Field(0, ge=0, le=1, strict=True, description="Caption generation toggle, int 0 or 1")
     chunk_mode: int = Field(
         0, ge=0, le=1, strict=True, description="Chunking mode: 0 smart splitting, 1 legal clauses"
@@ -227,6 +227,12 @@ class UpdateKbRequest(BaseModel):
     name: Optional[str] = Field(None, description="Knowledge base name")
     description: Optional[str] = Field(None, description="Knowledge base description")
     chunk_mode: Optional[int] = Field(None, ge=0, le=1, description="Chunk mode: 0 smart, 1 legal")
+    chunk_token_num: Optional[int] = Field(
+        None, ge=256, le=4096, strict=True, description="Chunk size in tokens"
+    )
+    chunk_overlap_num: Optional[int] = Field(
+        None, ge=0, strict=True, description="Chunk overlap in tokens"
+    )
     topk: Optional[int] = Field(None, ge=1, le=100, description="Vector retrieval Top K")
     caption_enable: Optional[int] = Field(
         None, ge=0, le=1, description="Caption (VLM) generation toggle, int 0 or 1"
@@ -249,6 +255,16 @@ class UpdateKbRequest(BaseModel):
             "graph_config string; requires the graph to be enabled."
         ),
     )
+
+    @model_validator(mode="after")
+    def validate_chunk_settings(self):
+        if (
+            self.chunk_token_num is not None
+            and self.chunk_overlap_num is not None
+            and self.chunk_overlap_num > self.chunk_token_num / 2
+        ):
+            raise ValueError("chunk_overlap_num must not exceed half of chunk_token_num")
+        return self
 
 
 class SetPermissionRequest(BaseModel):

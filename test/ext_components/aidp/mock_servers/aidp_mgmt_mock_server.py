@@ -703,8 +703,8 @@ def _public_kb_detail(kb: Dict[str, Any]) -> Dict[str, Any]:
     kms_config = kb.get("kms_config_str")
     if not (isinstance(kms_config, str) and kms_config.strip()):
         kms_config = {
-            "chunk_token_num": kb.get("chunk_token_num", 1024),
-            "chunk_overlap_num": kb.get("chunk_overlap_num", 128),
+            "chunk_token_num": kb.get("chunk_token_num", 512),
+            "chunk_overlap_num": kb.get("chunk_overlap_num", 51),
             "embedding_model": kb.get(
                 "embedding_model",
                 "/models/FileEmbeddingModel_v0_1_1/v1.0.0/FileEmbeddingModel_v0_1_1",
@@ -949,12 +949,12 @@ class CreateKbBody(BaseModel):
     embedding_model: Optional[str] = None
     is_multimodal: Optional[bool] = None
     vision_model: Optional[str] = None
-    chunk_token_num: int = 1024
-    chunk_overlap_num: int = 128
+    chunk_token_num: int = 512
+    chunk_overlap_num: int = 51
     chunk_mode: int = 0
     is_personal: int = 0
     topk: int = 10
-    similarity: float = 0.6
+    similarity: float = 0.0
     caption_enable: int = 0
     vlm_model: str = ""
     is_exist_graph: bool = False
@@ -965,6 +965,8 @@ class UpdateKbBody(BaseModel):
     name: Optional[str] = None
     description: Optional[str] = None
     chunk_mode: Optional[int] = None
+    chunk_token_num: Optional[int] = None
+    chunk_overlap_num: Optional[int] = None
     topk: Optional[int] = None
     caption_enable: Optional[int] = None
     vlm_model: Optional[str] = None
@@ -1425,6 +1427,10 @@ def update_knowledge_base(
         kb["description"] = body.description
     if body.chunk_mode is not None:
         kb["chunk_mode"] = body.chunk_mode
+    if body.chunk_token_num is not None:
+        kb["chunk_token_num"] = body.chunk_token_num
+    if body.chunk_overlap_num is not None:
+        kb["chunk_overlap_num"] = body.chunk_overlap_num
     if body.topk is not None:
         kb["topk"] = body.topk
     if body.caption_enable is not None:

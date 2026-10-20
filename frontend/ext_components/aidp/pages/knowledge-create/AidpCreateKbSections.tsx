@@ -7,7 +7,6 @@ import {
   Form,
   Input,
   InputNumber,
-  Radio,
   Select,
   Switch,
   Tooltip,
@@ -17,7 +16,14 @@ import { DownOutlined, QuestionCircleOutlined } from "@ant-design/icons";
 
 import { AIDP_KNOWLEDGE_BASE_NAME_PATTERN } from "@/ext_components/aidp/shared/const/knowledge";
 import { AidpKnowledgeBasePermissionFields } from "@/ext_components/aidp/shared/components/AidpKnowledgeBaseModalParts";
+import AidpChunkModeChoices from "@/ext_components/aidp/shared/components/AidpChunkModeChoices";
 import AidpSliderNumberField from "@/ext_components/aidp/pages/knowledge-create/AidpSliderNumberField";
+import {
+  AIDP_CHUNK_TOKEN_MAX,
+  AIDP_CHUNK_TOKEN_MIN,
+  AIDP_OVERLAP_PERCENT_MAX,
+  AIDP_OVERLAP_PERCENT_MIN,
+} from "@/ext_components/aidp/shared/utils/aidpChunking";
 import styles from "@/ext_components/aidp/pages/knowledge-create/AidpCreateKbSections.module.css";
 import typography from "@/ext_components/aidp/shared/styles/aidpKnowledgeTypography.module.css";
 import type { AidpGroupOption } from "@/ext_components/aidp/shared/hooks/useAidpGroupOptions";
@@ -29,10 +35,6 @@ import {
 } from "@/ext_components/aidp/pages/knowledge-create/utils/aidpGraphConfig";
 
 const GRAPH_PROMPT_MAX_CHARS = 4096;
-const CHUNK_TOKEN_MIN = 256;
-const CHUNK_TOKEN_MAX = 4096;
-const OVERLAP_PERCENT_MIN = 1;
-const OVERLAP_PERCENT_MAX = 40;
 
 interface AidpCreateKbSectionsProps {
   form: FormInstance;
@@ -75,7 +77,6 @@ const AidpCreateKbSections: React.FC<AidpCreateKbSectionsProps> = ({
 }) => {
   const graphEnabled = Form.useWatch("is_exist_graph", form) === true;
   const captionEnabled = Form.useWatch("caption_enable", form) === true;
-  const chunkMode = Form.useWatch("chunk_mode", form);
   const [expanded, setExpanded] = useState<Record<CollapsibleSection, boolean>>(
     {
       graph: false,
@@ -463,44 +464,16 @@ const AidpCreateKbSections: React.FC<AidpCreateKbSectionsProps> = ({
           t("aidpKnowledge.createSectionChunk"),
           t("aidpKnowledge.createChunkSectionHint")
         )}
-        <p className={styles.defaultsHint} hidden={!expanded.chunk}>
-          {t("aidpKnowledge.createDefaultsHint")}
-        </p>
         <div id="aidp-create-chunk-panel" hidden={!expanded.chunk}>
           <div className={styles.chunkModeSection}>
             <div className={styles.formGrid}>
               <Form.Item
                 name="chunk_mode"
                 label={t("aidpKnowledge.createChunkMode")}
-                className={`${styles.firstColumn} ${styles.chunkModeField}`}
+                className={styles.firstColumn}
                 rules={[{ required: true }]}
               >
-                <Radio.Group className="w-full">
-                  <div className={styles.chunkChoices}>
-                    <Radio
-                      value={0}
-                      className={`${styles.chunkOption} ${chunkMode === 0 ? styles.chunkOptionSelected : styles.chunkOptionUnselected}`}
-                    >
-                      <span className={styles.chunkOptionContent}>
-                        <span>{t("aidpKnowledge.createChunkModeSmart")}</span>
-                        <span className={styles.chunkOptionHint}>
-                          {t("aidpKnowledge.createChunkModeSmartHint")}
-                        </span>
-                      </span>
-                    </Radio>
-                    <Radio
-                      value={1}
-                      className={`${styles.chunkOption} ${chunkMode === 1 ? styles.chunkOptionSelected : styles.chunkOptionUnselected}`}
-                    >
-                      <span className={styles.chunkOptionContent}>
-                        <span>{t("aidpKnowledge.createChunkModeLegal")}</span>
-                        <span className={styles.chunkOptionHint}>
-                          {t("aidpKnowledge.createChunkModeLegalHint")}
-                        </span>
-                      </span>
-                    </Radio>
-                  </div>
-                </Radio.Group>
+                <AidpChunkModeChoices />
               </Form.Item>
             </div>
           </div>
@@ -518,23 +491,23 @@ const AidpCreateKbSections: React.FC<AidpCreateKbSectionsProps> = ({
                 },
                 {
                   type: "integer",
-                  min: CHUNK_TOKEN_MIN,
-                  max: CHUNK_TOKEN_MAX,
+                  min: AIDP_CHUNK_TOKEN_MIN,
+                  max: AIDP_CHUNK_TOKEN_MAX,
                   message: t("aidpKnowledge.createChunkTokenNumRange", {
-                    min: CHUNK_TOKEN_MIN,
-                    max: CHUNK_TOKEN_MAX,
+                    min: AIDP_CHUNK_TOKEN_MIN,
+                    max: AIDP_CHUNK_TOKEN_MAX,
                   }),
                 },
               ]}
             >
               <AidpSliderNumberField
-                min={CHUNK_TOKEN_MIN}
-                max={CHUNK_TOKEN_MAX}
+                min={AIDP_CHUNK_TOKEN_MIN}
+                max={AIDP_CHUNK_TOKEN_MAX}
                 step={1}
                 unit="Token"
                 marks={{
-                  [CHUNK_TOKEN_MIN]: String(CHUNK_TOKEN_MIN),
-                  [CHUNK_TOKEN_MAX]: String(CHUNK_TOKEN_MAX),
+                  [AIDP_CHUNK_TOKEN_MIN]: String(AIDP_CHUNK_TOKEN_MIN),
+                  [AIDP_CHUNK_TOKEN_MAX]: String(AIDP_CHUNK_TOKEN_MAX),
                 }}
                 ariaLabel={t("aidpKnowledge.createChunkTokenNum")}
               />
@@ -552,24 +525,24 @@ const AidpCreateKbSections: React.FC<AidpCreateKbSectionsProps> = ({
                 },
                 {
                   type: "number",
-                  min: OVERLAP_PERCENT_MIN,
-                  max: OVERLAP_PERCENT_MAX,
+                  min: AIDP_OVERLAP_PERCENT_MIN,
+                  max: AIDP_OVERLAP_PERCENT_MAX,
                   message: t("aidpKnowledge.createOverlapPercentRange", {
-                    min: OVERLAP_PERCENT_MIN,
-                    max: OVERLAP_PERCENT_MAX,
+                    min: AIDP_OVERLAP_PERCENT_MIN,
+                    max: AIDP_OVERLAP_PERCENT_MAX,
                   }),
                 },
               ]}
             >
               <AidpSliderNumberField
-                min={OVERLAP_PERCENT_MIN}
-                max={OVERLAP_PERCENT_MAX}
+                min={AIDP_OVERLAP_PERCENT_MIN}
+                max={AIDP_OVERLAP_PERCENT_MAX}
                 step={0.5}
                 unit="%"
                 precision={1}
                 marks={{
-                  [OVERLAP_PERCENT_MIN]: `${OVERLAP_PERCENT_MIN}%`,
-                  [OVERLAP_PERCENT_MAX]: `${OVERLAP_PERCENT_MAX}%`,
+                  [AIDP_OVERLAP_PERCENT_MIN]: `${AIDP_OVERLAP_PERCENT_MIN}%`,
+                  [AIDP_OVERLAP_PERCENT_MAX]: `${AIDP_OVERLAP_PERCENT_MAX}%`,
                 }}
                 ariaLabel={t("aidpKnowledge.createOverlapPercent")}
               />
@@ -584,9 +557,6 @@ const AidpCreateKbSections: React.FC<AidpCreateKbSectionsProps> = ({
           t("aidpKnowledge.createSectionVector"),
           t("aidpKnowledge.createVectorSectionHint")
         )}
-        <p className={styles.defaultsHint} hidden={!expanded.vector}>
-          {t("aidpKnowledge.createDefaultsHint")}
-        </p>
         <div id="aidp-create-vector-panel" hidden={!expanded.vector}>
           <div className={styles.formGrid}>
             <Form.Item
@@ -668,9 +638,6 @@ const AidpCreateKbSections: React.FC<AidpCreateKbSectionsProps> = ({
           t("aidpKnowledge.createSectionRetrieval"),
           t("aidpKnowledge.createRetrievalSectionHint")
         )}
-        <p className={styles.defaultsHint} hidden={!expanded.retrieval}>
-          {t("aidpKnowledge.createDefaultsHint")}
-        </p>
         <div id="aidp-create-retrieval-panel" hidden={!expanded.retrieval}>
           <div className={styles.formGrid}>
             <Form.Item
