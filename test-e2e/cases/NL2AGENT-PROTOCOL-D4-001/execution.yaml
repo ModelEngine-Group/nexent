@@ -7,3 +7,5 @@ implementations:
 acceptance_bindings:
   AC-01:
   - NL2AGENT-PROTOCOL-D4-001
+  AC-02:
+  - NL2AGENT-PROTOCOL-D4-001

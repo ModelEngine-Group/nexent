@@ -8,15 +8,15 @@ export class AgentPage {
 
   async open(): Promise<void> {
     await this.page.goto(appPath("/agents"), { waitUntil: "domcontentloaded" });
-    await expect(this.page.getByRole("button", { name: "新建" })).toBeVisible();
+    await expect(this.page.getByRole("button", { name: /^(新建|创建智能体)$/ }).first()).toBeVisible();
   }
 
   async create(displayName: string, variableName: string): Promise<number> {
-    await this.page.getByRole("button", { name: "新建" }).click();
+    await this.page.getByRole("button", { name: /^(新建|创建智能体)$/ }).first().click();
     const modal = this.page.getByRole("dialog", { name: "创建智能体" });
-    await modal.getByPlaceholder("请输入智能体名称").fill(displayName);
+    await modal.getByLabel("智能体名称", { exact: true }).fill(displayName);
     const responsePromise = this.page.waitForResponse((r) => r.url().includes("/api/agent/update") && r.request().method() === "POST");
-    await modal.getByRole("button", { name: /确\s*定/ }).click();
+    await modal.getByRole("button", { name: "创建", exact: true }).click();
     const response = await responsePromise;
     if (!response.ok()) throw new Error(`agent create returned ${response.status()}`);
     const body = await response.json();
@@ -48,6 +48,9 @@ export class AgentPage {
     // A newly-created Agent opens both the Ant Tour mask and the intelligent
     // generation panel. They are product guidance, not part of manual config,
     // and the Tour mask intentionally intercepts all config pointer events.
+    const skipTour = this.page.getByRole("button", { name: "全部跳过", exact: true });
+    await skipTour.waitFor({ state: "visible", timeout: 5000 }).catch(() => undefined);
+    if (await skipTour.isVisible()) await skipTour.click();
     const tourClose = this.page.locator(".ant-tour-close").first();
     await tourClose.waitFor({ state: "visible", timeout: 5000 }).catch(() => undefined);
     if (await tourClose.isVisible().catch(() => false)) await tourClose.click();
@@ -436,7 +439,7 @@ export class AgentPage {
     const updated = this.page.waitForResponse(
       (response) => response.request().method() === "POST" && response.url().includes("/api/agent/update"),
     );
-    await modal.getByRole("button", { name: /确\s*定/ }).click();
+    await modal.getByRole("button", { name: "创建", exact: true }).click();
     const response = await updated;
     if (!response.ok()) throw new Error(`expanded duty prompt autosave returned ${response.status()}`);
     await expect(this.page.getByPlaceholder(/请输入智能体的角色、职责和能力/)).toHaveValue(content);

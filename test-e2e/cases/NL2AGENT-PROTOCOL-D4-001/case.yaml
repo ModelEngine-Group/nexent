@@ -23,18 +23,24 @@ case:
   steps:
   - order: 1
     action: Create an editable Agent; use NL2Agent to enable then disable strict protocol
-      repair. Reload editor.
+      repair. Reload editor. Then fully generate the same draft with protocol repair
+      enabled, submit clarification without repeating the policy.
     expected: Shared endpoint and tool save exact booleans; persisted draft and editor
-      agree.
+      agree. Full generation preserves true through clarification and produces completed
+      configuration.
   - order: 2
     action: Use Workbench Agent creation to initialize draft and enable then disable
-      protocol repair; reopen conversation.
+      protocol repair; reopen conversation. Then fully generate the same draft with
+      protocol repair enabled and submit clarification without repeating the policy.
     expected: Same endpoint persists booleans on target draft; no Workbench policy
-      or unrelated change.
+      or unrelated change. Full generation preserves true through clarification and
+      reload.
   expected_results:
   - Both entries persist true and false through real model tool calls and survive
     reload.
   - Unrequested prompt and resource state remains unchanged; no false generation completion.
+  - Both full-generation entries save the enabled policy before clarification and
+    retain it through completion without repeated policy instructions.
   forbidden_side_effects:
   - No changes to published versions, unrelated Agents or Workbench execution policy.
   actor: Authorized tenant administrator
@@ -63,3 +69,11 @@ case:
     - 2
     forbidden_side_effects:
     - 1
+  - id: AC-02
+    description: Explicit full-generation policy survives clarification and completion
+      through both entries.
+    steps:
+    - 1
+    - 2
+    expected_results:
+    - 3

@@ -116,3 +116,17 @@ def test_creator_tool_schema_advertises_boolean_policy():
                   if tool.name == tools.SAVE_AGENT_DRAFT_FIELDS_NAME)
     assert json.loads(config.inputs)["fields"][FIELD] == "bool"
     assert FIELD in config.description
+
+
+@pytest.mark.parametrize("value", [True, False])
+@pytest.mark.asyncio
+async def test_real_policy_tool_result_reaches_sdk_state_channel(mocker, authorized_tool, value):
+    from nexent.core.utils.observer import MessageObserver, ProcessType
+
+    mocker.patch.object(service, "update_agent_draft_fields", return_value=1)
+    result = await tools.save_agent_draft_fields(42, {FIELD: value})
+    observer = MessageObserver(lang="zh", enable_nl2a_wrapper=True)
+    observer.add_message("nl2agent", ProcessType.EXECUTION_LOGS, result)
+    events = [json.loads(item) for item in observer.get_cached_message()]
+    states = [json.loads(item["content"]) for item in events if item["type"] == ProcessType.NL2A_STATE.value]
+    assert states == [{"event": "agent_draft_fields_saved", "agent_id": 42, "updated_fields": [FIELD]}]
