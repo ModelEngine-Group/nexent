@@ -1391,7 +1391,8 @@ export const validateTool = async (
   source: string,
   usage: string,
   inputs: Record<string, any> | null = null,
-  params: Record<string, any> | null = null
+  params: Record<string, any> | null = null,
+  language: "zh" | "en" = "zh"
 ) => {
   try {
     const requestBody = {
@@ -1400,6 +1401,7 @@ export const validateTool = async (
       usage: usage,
       inputs: inputs,
       params: params,
+      language,
     };
 
     const response = await fetch(API_ENDPOINTS.tool.validate, {

@@ -203,6 +203,7 @@ def _validate_local_tool(
     params: Optional[Dict[str, Any]] = None,
     tenant_id: Optional[str] = None,
     user_id: Optional[str] = None,
+    language: str = "zh",
 ) -> Dict[str, Any]:
     """
     Validate local tool by actually instantiating and calling it.
@@ -231,7 +232,12 @@ def _validate_local_tool(
         runtime_inputs = dict(inputs or {})
 
         # Parse instantiation parameters first
-        instantiation_params = params or {}
+        instantiation_params = dict(params or {})
+        if tool_name == "deepseek_search":
+            instantiation_params.pop("localization", None)
+            instantiation_params.pop("max_content_chars", None)
+            instantiation_params["language"] = language
+            instantiation_params["observer"] = None
         # Get signature and extract default values for all parameters
         sig = inspect.signature(tool_class.__init__)
 
@@ -543,6 +549,13 @@ async def validate_tool_impl(
                     tool_name, inputs, usage, tenant_id
                 )
         elif source == ToolSourceEnum.LOCAL.value:
+            if tool_name == "deepseek_search":
+                return await run_blocking(
+                    "validate-local-tool", _validate_local_tool,
+                    tool_name, inputs, params, tenant_id, user_id,
+                    language=request.language,
+                    lane="model-tool-io", owner="management.services.tool.configuration",
+                )
             return await run_blocking(
                 "validate-local-tool",
                 _validate_local_tool,

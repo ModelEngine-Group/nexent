@@ -1459,6 +1459,7 @@ async def create_agent_config(
         tool_params=normalized_tool_params,
         runtime_skill_snapshot=runtime_skill_snapshot,
         runtime_knowledge_tools=runtime_knowledge_tools,
+        language=language,
     )
     memory_tool_names = {"store_memory", "search_memory"}
     tool_list = [tool for tool in tool_list if tool.name not in memory_tool_names]
@@ -2054,6 +2055,7 @@ async def create_tool_config_list(
     tool_params: Optional[ToolParamsRequest | Dict[str, Any]] = None,
     runtime_skill_snapshot: Optional[List[Dict[str, Any]]] = None,
     runtime_knowledge_tools: Optional[List[Dict[str, Any]]] = None,
+    language: str = "zh",
 ):
     tool_config_list = []
     langchain_tools = await discover_langchain_tools()
@@ -2109,6 +2111,11 @@ async def create_tool_config_list(
             else override_params
         )
         param_dict = _merge_tool_params(tool, effective_override_params)
+        if tool.get("class_name") == "DeepSeekSearchTool":
+            param_dict.pop("localization", None)
+            param_dict.pop("max_content_chars", None)
+            # Run language is authoritative over persisted or request-level tool parameters.
+            param_dict["language"] = language
         if tool.get("class_name") == "AidpSearchTool":
             # Credentials are backend-owned since the v7.1 permission
             # redesign; populate them from the central constants (the

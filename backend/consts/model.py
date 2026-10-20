@@ -1919,6 +1919,7 @@ class VoiceConnectivityResponse(BaseModel):
 
 class ToolValidateRequest(BaseModel):
     """Request model for tool validation"""
+    language: Literal["zh", "en"] = Field("zh", description="Current frontend language for this validation run")
     name: str = Field(..., description="Tool name to validate")
     source: str = Field(..., description="Tool source (local, mcp, langchain)")
     usage: Optional[str] = Field(None, description="Tool usage information")

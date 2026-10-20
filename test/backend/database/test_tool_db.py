@@ -533,6 +533,28 @@ def test_update_tool_table_from_scan_tool_list_create_new_tool(monkeypatch, mock
     mock_tool_info_class.assert_called_once_with(**expected_call_args)
 
 
+@pytest.mark.parametrize("already_registered", [False, True])
+def test_deepseek_default_tags_initialize_only_on_first_registration(monkeypatch, mock_session, already_registered):
+    from types import SimpleNamespace
+
+    session, query = mock_session
+    existing = SimpleNamespace(name="deepseek_search", source="local", tool_id=220)
+    query.filter.return_value.all.return_value = [existing] if already_registered else []
+    context = MagicMock()
+    context.__enter__.return_value = session
+    monkeypatch.setattr("backend.database.tool_db.get_db_session", lambda: context)
+    monkeypatch.setattr("backend.database.tool_db.filter_property", lambda data, model: data)
+    monkeypatch.setattr("backend.database.tool_db.ToolInfo", MagicMock(return_value=existing))
+    initialize = MagicMock()
+    monkeypatch.setitem(sys.modules, "database.tool_default_tags_db", SimpleNamespace(initialize_search_tool_tags=initialize))
+    update_tool_table_from_scan_tool_list("tenant", "actor", [SimpleNamespace(name="deepseek_search", source="local")])
+    if already_registered:
+        initialize.assert_not_called()
+    else:
+        initialize.assert_called_once_with(session, "tenant", 220, "actor")
+        session.flush.assert_called_once()
+
+
 def test_update_tool_table_from_scan_tool_list_create_new_tool_invalid_name(monkeypatch, mock_session):
     """Test creating new tool with invalid name (is_available=False)"""
     session, query = mock_session

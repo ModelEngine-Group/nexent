@@ -16,6 +16,26 @@ vi.mock("react-i18next", () => ({
 }));
 
 describe("ResourceDrawer", () => {
+  it("disables refresh and exposes its busy state while discovery is running", () => {
+    const refresh = vi.fn();
+    render(
+      <ResourceDrawer
+        open
+        title="Tools"
+        listTitle="Results"
+        onClose={vi.fn()}
+        onRefresh={refresh}
+        refreshLoading
+      >
+        <p>Results</p>
+      </ResourceDrawer>
+    );
+    const button = screen.getByRole("button", { name: "刷新" });
+    expect(button).toBeDisabled();
+    expect(button).toHaveAttribute("aria-busy", "true");
+    fireEvent.click(button);
+    expect(refresh).not.toHaveBeenCalled();
+  });
   it("hides tag management by default and places the configured action beside refresh", () => {
     const manage = vi.fn();
     const props = {

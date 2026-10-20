@@ -328,6 +328,19 @@ def update_tool_info_impl(
                 )
         tool_info.params = params
 
+    if tool.get("name") == "deepseek_search":
+        try:
+            params = dict(tool_info.params or {})
+            for name in ("language", "observer", "localization", "max_content_chars"):
+                params.pop(name, None)
+            tool_class = _get_tool_class_by_name("deepseek_search")
+            if tool_class is None:
+                raise ValueError("DeepSeek Search is unavailable.")
+            tool_class(**params)
+        except (TypeError, ValueError):
+            raise ValidationError("Invalid DeepSeek Search configuration; check the key and parameter ranges.") from None
+        tool_info.params = params
+
     _validate_tool_param_ranges(
         tool_info.tool_id,
         dict(getattr(tool_info, "params", None) or {}),
@@ -444,6 +457,14 @@ async def list_all_tools(tenant_id: str, labels: Optional[List[str]] = None):
         # Always use SDK inputs for local tools to stay in sync with current tool code
         is_local = tool.get("source") == "local"
         sdk_info = local_tool_descriptions.get(tool_name) if is_local else None
+
+        if is_local and tool_name == "deepseek_search" and sdk_info:
+            tool = dict(tool)
+            current_params = {param["name"]: param for param in sdk_info.get("params", [])}
+            tool["params"] = [
+                {**param, "description_zh": current_params[param["name"]].get("description_zh")}
+                for param in tool.get("params", []) if param.get("name") in current_params
+            ]
 
         if is_local and sdk_info:
             description_zh = sdk_info.get("description_zh")

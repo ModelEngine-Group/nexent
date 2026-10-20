@@ -1,4 +1,5 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 from consts.exceptions import MCPConnectionError, NotFoundException, ToolExecutionException
 
 from test.backend.management.import_patching import patch_import_context, patch_imports, set_import_attribute
@@ -6012,3 +6013,98 @@ async def test_call_mcp_tool_enforces_runtime_timeout(monkeypatch):
             "slow_tool",
             {},
         )
+
+class TestDeepSeekSearchConfiguration:
+    @pytest.mark.asyncio
+    async def test_stale_catalog_uses_current_parameter_names_and_tooltip(self):
+        from management.services.tool import configuration as service
+
+        row = {"tool_id": 2, "name": "deepseek_search", "source": "local", "params": [
+            {"name": "localization"}, {"name": "max_content_chars"},
+            {"name": "only_high_quality", "description_zh": "仅优质内容，旧提示"},
+        ]}
+        descriptions = {"deepseek_search": {"params": [
+            {"name": "only_high_quality", "description_zh": "开启后仅返回排序分不低于 1.5 的结果"},
+        ]}}
+        with patch.object(service, "query_all_tools", return_value=[row]), patch.object(
+            service, "get_local_tools_description_zh", return_value=descriptions
+        ):
+            result = await service.list_all_tools("tenant")
+        assert result[0]["params"] == descriptions["deepseek_search"]["params"]
+        assert len(row["params"]) == 3
+
+    class SearchStub:
+        def __init__(self, deepseek_api_key, only_high_quality=False, language="zh", observer=None):
+            self.language = language
+            self.only_high_quality = only_high_quality
+            self.observer = observer
+
+        def forward(self, query):
+            return "[]"
+
+    @pytest.mark.parametrize("language", ["zh", "en"])
+    def test_validation_injects_language_without_mutating_params(self, language):
+        from management.services.tool import validation as service
+        DeepSeekSearchTool = self.SearchStub
+
+        params = {"deepseek_api_key": "synthetic-key", "only_high_quality": True, "language": "en",
+                  "localization": "::1", "max_content_chars": 200}
+        before = dict(params)
+        with patch.object(service, "_get_tool_class_by_name", return_value=DeepSeekSearchTool), patch.object(
+            DeepSeekSearchTool, "forward", autospec=True, return_value="[]"
+        ) as forward:
+            assert service._validate_local_tool("deepseek_search", {"query": "topic"}, params,
+                                                "tenant", "user", language=language) == "[]"
+            instance = forward.call_args.args[0]
+            assert instance.language == language
+            assert instance.only_high_quality is True
+            assert instance.observer is None
+        assert params == before
+
+    async def test_dispatch_preserves_run_language(self):
+        from management.services.tool import validation as service
+
+        request = Mock(name="request")
+        request.name = "deepseek_search"
+        request.source = "local"
+        request.inputs = {"query": "topic"}
+        request.params = {"deepseek_api_key": "synthetic-key"}
+        request.usage = None
+        request.language = "en"
+        with patch.object(service, "run_blocking", new_callable=AsyncMock, return_value="[]") as run:
+            assert await service.validate_tool_impl(request, "tenant", "user") == "[]"
+        assert run.call_args.kwargs["language"] == "en"
+        assert run.call_args.args[2:7] == ("deepseek_search", request.inputs, request.params, "tenant", "user")
+
+    @pytest.mark.parametrize("params", [{}, {"deepseek_api_key": " "},
+                                       {"deepseek_api_key": "synthetic", "max_results": 51},
+                                       {"deepseek_api_key": "synthetic", "only_high_quality": "true"}])
+    def test_invalid_config_never_persists(self, params):
+        from management.services.tool import configuration as service
+
+        request = Mock(agent_id=1, tool_id=2, version_no=0, params=params)
+        with patch.object(service, "require_agent_draft_edit"), patch.object(
+            service, "query_all_tools", return_value=[{"tool_id": 2, "name": "deepseek_search", "is_available": True}]
+        ), patch.object(service, "_get_tool_class_by_name", return_value=Mock(side_effect=ValueError("invalid"))), patch.object(
+            service, "create_or_update_tool_by_tool_info"
+        ) as persist:
+            with pytest.raises(service.ValidationError, match="DeepSeek"):
+                service.update_tool_info_impl(request, "tenant", "user")
+            persist.assert_not_called()
+
+    def test_valid_config_persists_without_runtime_fields(self):
+        from management.services.tool import configuration as service
+
+        params = {"deepseek_api_key": "synthetic", "only_high_quality": True, "language": "en",
+                  "localization": "::1", "max_content_chars": 200}
+        request = Mock(agent_id=1, tool_id=2, version_no=0, params=params)
+        with patch.object(service, "require_agent_draft_edit"), patch.object(
+            service, "query_all_tools", return_value=[{"tool_id": 2, "name": "deepseek_search", "is_available": True}]
+        ), patch.object(service, "_get_tool_class_by_name", return_value=Mock()), patch.object(
+            service, "_validate_tool_param_ranges"
+        ), patch.object(
+            service, "create_or_update_tool_by_tool_info", return_value={"id": 7}
+        ) as persist:
+            assert service.update_tool_info_impl(request, "tenant", "user")["tool_instance"] == {"id": 7}
+            assert request.params == {"deepseek_api_key": "synthetic", "only_high_quality": True}
+            persist.assert_called_once()
