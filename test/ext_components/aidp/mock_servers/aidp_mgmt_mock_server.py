@@ -1526,6 +1526,7 @@ async def upload_documents(
                 "file_size": len(content),
                 "file_type": (f.filename.rsplit(".", 1)[-1] if f.filename and "." in f.filename else "bin"),
                 "create_time": int(time.time()),
+                "update_time": int(time.time()),
                 # Uploaded files enter the ingestion pipeline immediately: the
                 # legacy list endpoint hides them until the timer elapses, while
                 # the history endpoint reports them as PROCESSING.
