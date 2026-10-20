@@ -148,6 +148,26 @@ describe("published agent access information", () => {
     ).not.toBeInTheDocument();
   });
 
+  it("shows not-enabled guidance when unregistered A2A settings return 404", async () => {
+    mocks.settings.mockResolvedValue({ success: false, statusCode: 404 });
+    setup();
+    expect(
+      await screen.findByText("agentUsageGuide.a2a.notEnabled")
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByText("agent.publication.loadFailed")
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "common.retry" })
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByLabelText("a2a.server.agentCardUrl")
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByLabelText("a2a.server.endpointId")
+    ).not.toBeInTheDocument();
+  });
+
   it("shows a retry action for a server-declared A2A failure", async () => {
     mocks.settings.mockResolvedValue({
       success: false,
