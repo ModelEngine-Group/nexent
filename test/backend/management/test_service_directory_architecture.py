@@ -15,6 +15,7 @@ MIGRATED_MODULES = {
     'agent/a2a/adapter.py',
     'agent/a2a/catalog.py',
     'agent/a2a/service.py',
+    'agent/a2a/validation.py',
     'agent/artifacts.py',
     'agent/authorization.py',
     'agent/context.py',
