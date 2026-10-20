@@ -561,7 +561,7 @@ def test_runtime_resources_only_describe_effective_source():
 ])
 def test_retrieval_input_rejects_invalid_config_against_inherited_root(mocker, patch):
     from management.services.knowledge_base import scope as service
-    mocker.patch("consts.const.ENABLE_AIDP_KNOWLEDGE", True)
+    mocker.patch.object(service, "ENABLE_AIDP_KNOWLEDGE", True)
     mocker.patch.object(service, "snapshot_runtime_knowledge_tree", return_value=[{"tools": [{
         "class_name": "AidpSearchTool", "params": [{"name": "top_k", "default": 10}],
     }]}])
@@ -572,7 +572,7 @@ def test_retrieval_input_rejects_invalid_config_against_inherited_root(mocker, p
 
 def test_retrieval_input_saves_fixed_candidate_values(mocker):
     from management.services.knowledge_base import scope as service
-    mocker.patch("consts.const.ENABLE_AIDP_KNOWLEDGE", True)
+    mocker.patch.object(service, "ENABLE_AIDP_KNOWLEDGE", True)
     mocker.patch.object(service, "snapshot_runtime_knowledge_tree", return_value=[{"tools": [{
         "class_name": "AidpSearchTool", "params": [{"name": "top_k", "default": 30}],
     }]}])

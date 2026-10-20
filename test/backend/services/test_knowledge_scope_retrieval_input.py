@@ -9,10 +9,10 @@ from management.services.knowledge_base import scope as service
 from consts.exceptions import ValidationError
 
 
-def request_with(params, *, plan=None):
+def request_with(params):
     return SimpleNamespace(
         tool_params=ToolParamsRequest(agents={"root": {"tools": {"aidp_search": params}}}),
-        agent_id=7, version_no=3, is_debug=False, _runtime_mount_plan=plan,
+        agent_id=7, version_no=3, is_debug=False,
     )
 
 
@@ -34,17 +34,15 @@ def test_request_override_is_rejected_before_runtime(mocker, params):
         service.prepare_retrieval_request("tenant", tool_params=request_with(params).tool_params, agent_id=7, version_no=3)
 
 
-def test_request_override_is_prepared_against_mounted_defaults_without_repository_read(mocker):
-    read = mocker.patch.object(service, "snapshot_runtime_knowledge_tree")
-    request = request_with(
-        {"vector_candidates": 10, "search_method": "hybrid_search"},
-        plan=SimpleNamespace(knowledge_tree=inherited_tree()),
+def test_request_override_is_prepared_against_actual_tool_defaults(mocker):
+    mocker.patch.object(service, "snapshot_runtime_knowledge_tree", return_value=inherited_tree())
+    request = request_with({"vector_candidates": 10, "search_method": "hybrid_search"})
+    service.prepare_retrieval_request(
+        "tenant", tool_params=request.tool_params, agent_id=7, version_no=3,
     )
-    service.prepare_retrieval_request("tenant", tool_params=request.tool_params, runtime_agent_tree=request._runtime_mount_plan.knowledge_tree)
     assert request.tool_params.agents["root"].tools["aidp_search"] == {
         "vector_candidates": 10, "search_method": "vector_search|full_text_search|graph_search",
     }
-    read.assert_not_called()
 
 
 @pytest.mark.parametrize("params", [{}, {"kds_list": ["kb"]}])
@@ -56,7 +54,7 @@ def test_no_submitted_policy_does_not_read_or_validate_saved_policy(mocker, para
 
 def test_debug_scope_uses_draft_inheritance_when_no_version_is_requested(mocker):
     from consts.model import ConversationKnowledgeScopeRequest
-    mocker.patch("consts.const.ENABLE_AIDP_KNOWLEDGE", True)
+    mocker.patch.object(service, "ENABLE_AIDP_KNOWLEDGE", True)
     mocker.patch.object(service, "query_current_version_no", return_value=3)
     def snapshot(agent_id, tenant_id, version):
         return [{"agent_name": "root", "tools": [{"class_name": "AidpSearchTool", "params": [
@@ -74,17 +72,16 @@ def test_debug_scope_uses_draft_inheritance_when_no_version_is_requested(mocker)
         )
 
 
-def test_scope_and_tool_overrides_share_one_inherited_snapshot(mocker):
+def test_tool_override_inherits_prepared_scope_policy(mocker):
     from consts.model import ConversationKnowledgeScopeRequest
-    mocker.patch("consts.const.ENABLE_AIDP_KNOWLEDGE", True)
+    mocker.patch.object(service, "ENABLE_AIDP_KNOWLEDGE", True)
     read = mocker.patch.object(service, "snapshot_runtime_knowledge_tree", return_value=inherited_tree())
     scope = ConversationKnowledgeScopeRequest(retrieval_config={"top_k": 20})
     request = request_with({"hybrid_top_k": 12, "vector_candidates": 30, "full_text_candidates": 30})
-    tree = service.prepare_retrieval_request(
+    service.prepare_retrieval_request(
         "tenant", scope=scope, tool_params=request.tool_params, agent_id=7, version_no=3,
     )
     read.assert_called_once_with(7, "tenant", 3)
-    assert tree is read.return_value
     assert scope.retrieval_config == {"top_k": 20}
     assert request.tool_params.agents["root"].tools["aidp_search"]["hybrid_top_k"] == 12
 
@@ -102,7 +99,7 @@ def test_new_override_uses_stored_workbench_policy_without_revalidating_it(mocke
     request = request_with(raw)
     service.prepare_retrieval_request(
         "tenant", tool_params=request.tool_params, agent_id=7, version_no=3,
-        inherited_policy={"top_k": 30},
+        stored_scope={"retrieval_config": {"top_k": 30}},
     )
     read.assert_called_once()
     assert calls == [raw]
@@ -110,9 +107,68 @@ def test_new_override_uses_stored_workbench_policy_without_revalidating_it(mocke
 
 def test_empty_scope_policy_does_not_revalidate_saved_values(mocker):
     from consts.model import ConversationKnowledgeScopeRequest
-    mocker.patch("consts.const.ENABLE_AIDP_KNOWLEDGE", True)
+    mocker.patch.object(service, "ENABLE_AIDP_KNOWLEDGE", True)
     read = mocker.patch.object(service, "snapshot_runtime_knowledge_tree")
     scope = ConversationKnowledgeScopeRequest(retrieval_config={})
     service.prepare_retrieval_request("tenant", scope=scope, agent_id=7, version_no=3)
     assert scope.retrieval_config == {}
     read.assert_not_called()
+
+
+def test_unchanged_scope_is_trusted_but_new_tool_override_is_checked(mocker):
+    from consts.model import ConversationKnowledgeScopeRequest
+
+    mocker.patch.object(service, "ENABLE_AIDP_KNOWLEDGE", True)
+    mocker.patch.object(service, "snapshot_runtime_knowledge_tree", return_value=inherited_tree())
+    prepare = mocker.patch.object(service, "prepare_config", wraps=service.prepare_config)
+    scope = ConversationKnowledgeScopeRequest(retrieval_config={"top_k": 30})
+    raw = {"hybrid_top_k": 12, "vector_candidates": 30, "full_text_candidates": 30}
+    service.prepare_retrieval_request(
+        "tenant", agent_id=7, version_no=3, scope=scope,
+        stored_scope={"retrieval_config": {"top_k": 30}},
+        tool_params=request_with(raw).tool_params,
+    )
+    assert prepare.call_count == 1
+    assert prepare.call_args.args[0] == raw
+    assert prepare.call_args.args[1]["top_k"] == 30
+
+
+def test_unchanged_scope_without_override_does_not_read_saved_tools(mocker):
+    from consts.model import ConversationKnowledgeScopeRequest
+
+    mocker.patch.object(service, "ENABLE_AIDP_KNOWLEDGE", True)
+    read = mocker.patch.object(service, "snapshot_runtime_knowledge_tree")
+    prepare = mocker.patch.object(service, "prepare_config", wraps=service.prepare_config)
+    scope = ConversationKnowledgeScopeRequest(retrieval_config={"top_k": 30})
+    service.prepare_retrieval_request(
+        "tenant", agent_id=7, scope=scope,
+        stored_scope={"retrieval_config": {"top_k": 30}},
+    )
+    read.assert_not_called()
+    prepare.assert_not_called()
+
+
+def test_other_tool_overrides_do_not_trigger_aidp_preparation(mocker):
+    read = mocker.patch.object(service, "snapshot_runtime_knowledge_tree")
+    tool_params = ToolParamsRequest(agents={"root": {"tools": {"other_search": {"top_k": 0}}}})
+    service.prepare_retrieval_request("tenant", agent_id=7, tool_params=tool_params)
+    read.assert_not_called()
+    assert tool_params.agents["root"].tools["other_search"] == {"top_k": 0}
+
+
+@pytest.mark.parametrize("tool_name", ["aidp_search", "AidpSearchTool"])
+def test_child_tool_override_uses_child_defaults_instead_of_root_policy(mocker, tool_name):
+    tree = inherited_tree()
+    tree.append({"agent_name": "child", "tools": [{
+        "name": "aidp_search", "class_name": "AidpSearchTool",
+        "params": [{"name": "top_k", "default": 10}],
+    }]})
+    mocker.patch.object(service, "snapshot_runtime_knowledge_tree", return_value=tree)
+    tool_params = ToolParamsRequest(agents={"child": {"tools": {tool_name: {
+        "hybrid_top_k": 12, "vector_candidates": 30, "full_text_candidates": 30,
+    }}}})
+    with pytest.raises(ValidationError, match="hybrid_top_k"):
+        service.prepare_retrieval_request(
+            "tenant", agent_id=7, version_no=3, tool_params=tool_params,
+            stored_scope={"retrieval_config": {"top_k": 30}},
+        )

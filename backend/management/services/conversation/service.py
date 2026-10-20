@@ -52,6 +52,8 @@ from database.conversation_db import (
     update_message_unit_status,
 )
 from database.model_management_db import get_model_by_model_id
+from management.services.agent.system import system_agent_provider
+from management.services.knowledge_base.scope import prepare_retrieval_request
 from management.services.model.adapter import get_llm_adapter_from_config
 from management.services.configuration.tenant.settings import tenant_config_manager
 from nexent.core.agents.prompt.auxiliary import compose_auxiliary_prompt
@@ -445,17 +447,19 @@ def prepare_conversation_retrieval_request(conversation_id, scope, user_id, tena
     """Prepare an external scope update before calling internal persistence."""
     if scope is None or scope.retrieval_config is None:
         return
-    from management.services.knowledge_base.scope import prepare_retrieval_request
-
-    conversation = get_conversation(
+    conversation = get_conversation_service(
         conversation_id=conversation_id, user_id=user_id, tenant_id=tenant_id,
     )
     if conversation is None:
         raise ConversationNotFoundError("Conversation is not accessible")
-    if scope.retrieval_config == (conversation.get("knowledge_scope") or {}).get("retrieval_config"):
-        return
-    agent_id = None if conversation.get("workbench_config") is not None else conversation.get("agent_id")
-    prepare_retrieval_request(tenant_id, scope=scope, agent_id=agent_id)
+    agent_id, version_no = conversation.get("agent_id"), None
+    if conversation.get("workbench_config") is not None:
+        root = system_agent_provider.get_workbench_main_ref(tenant_id)
+        agent_id, version_no = int(root.agent_id), int(root.version_no)
+    prepare_retrieval_request(
+        tenant_id, scope=scope, stored_scope=conversation.get("knowledge_scope"),
+        agent_id=agent_id, version_no=version_no,
+    )
 
 
 def update_conversation_workbench_config_service(

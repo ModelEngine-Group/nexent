@@ -106,6 +106,7 @@ from management.services.conversation.service import (
 )
 from management.services.knowledge_base.scope import (
     build_runtime_knowledge_resources,
+    prepare_retrieval_request,
     resolve_knowledge_scope,
 )
 from management.services.agent.run_state import (
@@ -343,33 +344,18 @@ async def run_agent_stream(
         )
     else:
         request_scope = None
-    prepared_knowledge_tree = None
     if not resume:
-        from management.services.knowledge_base.scope import prepare_retrieval_request
-
-        submitted_scope = request_scope
-        root_agent_id, root_version = agent_request.agent_id, agent_request.version_no
-        if canonical_workbench is not None:
-            submitted_scope = canonical_workbench.knowledge_scope
-            root_agent_id = int(resolved_tree.root.identity.agent_id)
-            root_version = int(resolved_tree.root.identity.version_no)
-        stored_scope = (conversation or {}).get("knowledge_scope")
-        if submitted_scope is not None and submitted_scope.model_dump(mode="json").get("retrieval_config") == (
-            stored_scope or {}
-        ).get("retrieval_config"):
-            submitted_scope = None
-        prepared_knowledge_tree = prepare_retrieval_request(
-            resolved_tenant_id, scope=submitted_scope, tool_params=agent_request.tool_params,
-            agent_id=root_agent_id, version_no=root_version, is_debug=bool(agent_request.is_debug),
-            inherited_policy=(
-                canonical_workbench.knowledge_scope.retrieval_config
-                if canonical_workbench is not None and canonical_workbench.knowledge_scope is not None else None
-            ),
+        retrieval_scope = canonical_workbench.knowledge_scope if canonical_workbench is not None else request_scope
+        root = resolved_tree.root.identity if canonical_workbench is not None else agent_request
+        prepare_retrieval_request(
+            resolved_tenant_id, scope=retrieval_scope,
+            stored_scope=(conversation or {}).get("knowledge_scope"),
+            tool_params=agent_request.tool_params, agent_id=root.agent_id,
+            version_no=root.version_no, is_debug=bool(agent_request.is_debug),
         )
         if canonical_workbench is not None:
             apply_workbench_runtime_plan(
                 agent_request, canonical_workbench, resolved_tree, resolved_tenant_id,
-                knowledge_tree=prepared_knowledge_tree,
             )
             request_scope = canonical_workbench.knowledge_scope
 
@@ -428,8 +414,6 @@ async def run_agent_stream(
                 (),
             )
         ]
-        if not runtime_knowledge_tree and prepared_knowledge_tree is not None:
-            runtime_knowledge_tree = prepared_knowledge_tree
         resolve_scope_kwargs = {}
         if runtime_knowledge_tree:
             resolve_scope_kwargs["runtime_agent_tree"] = runtime_knowledge_tree

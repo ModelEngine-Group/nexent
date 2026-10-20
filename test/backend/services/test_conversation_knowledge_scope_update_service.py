@@ -121,9 +121,9 @@ def test_actual_workbench_save_rejects_invalid_retrieval_before_persistence(mock
     from management.services.conversation import service as conversations
     from management.services.knowledge_base import scope as scopes
 
-    mocker.patch("consts.const.ENABLE_AIDP_KNOWLEDGE", True)
+    mocker.patch.object(scopes, "ENABLE_AIDP_KNOWLEDGE", True)
     mocker.patch.object(system_agent_provider, "get_workbench_main_ref", return_value=SimpleNamespace(agent_id=7, version_no=3))
-    mocker.patch.object(scopes, "snapshot_runtime_knowledge_tree", return_value=[{"tools": [{
+    snapshot = mocker.patch.object(scopes, "snapshot_runtime_knowledge_tree", return_value=[{"tools": [{
         "class_name": "AidpSearchTool", "params": [{"name": "top_k", "default": 10}],
     }]}])
     mocker.patch.object(conversations, "get_conversation", return_value={"workbench_config": {"mode": "generic_chat"}})
@@ -134,3 +134,36 @@ def test_actual_workbench_save_rejects_invalid_retrieval_before_persistence(mock
             1, ConversationKnowledgeScopeRequest(retrieval_config=policy), "user", "tenant",
         )
     persist.assert_not_called()
+    snapshot.assert_called_once_with(7, "tenant", 3)
+
+
+def test_scope_preparation_reuses_scoped_conversation_lookup(mocker):
+    from consts.model import ConversationKnowledgeScopeRequest
+    from management.services.conversation import service as conversations
+
+    lookup = mocker.patch.object(conversations, "get_conversation_service", return_value=None)
+    prepare = mocker.patch.object(conversations, "prepare_retrieval_request")
+    with pytest.raises(ConversationNotFoundError):
+        conversations.prepare_conversation_retrieval_request(
+            404, ConversationKnowledgeScopeRequest(retrieval_config={"top_k": 10}), "user", "tenant",
+        )
+    lookup.assert_called_once_with(conversation_id=404, user_id="user", tenant_id="tenant")
+    prepare.assert_not_called()
+
+
+def test_conversation_save_uses_shared_unchanged_policy_selection(mocker):
+    from consts.model import ConversationKnowledgeScopeRequest
+    from management.services.conversation import service as conversations
+    from management.services.knowledge_base import scope as scopes
+
+    mocker.patch.object(scopes, "ENABLE_AIDP_KNOWLEDGE", True)
+    mocker.patch.object(conversations, "get_conversation_service", return_value={
+        "agent_id": 7, "knowledge_scope": {"retrieval_config": {"top_k": 30}},
+    })
+    prepare = mocker.patch.object(scopes, "prepare_config", wraps=scopes.prepare_config)
+    snapshot = mocker.patch.object(scopes, "snapshot_runtime_knowledge_tree")
+    conversations.prepare_conversation_retrieval_request(
+        1, ConversationKnowledgeScopeRequest(retrieval_config={"top_k": 30}), "user", "tenant",
+    )
+    prepare.assert_not_called()
+    snapshot.assert_not_called()
