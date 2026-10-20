@@ -563,14 +563,14 @@ class TestDiscoverFromUrl:
         service = A2AClientService()
 
         mock_card = {
-            "name": "Test Agent",
+            "name": "Test-Agent",
             "description": "A test agent",
             "capabilities": {"streaming": True}
         }
 
         mock_result = {
             "id": 1,
-            "name": "Test Agent",
+            "name": "Test-Agent",
             "agent_url": "https://example.com"
         }
 
@@ -599,7 +599,7 @@ class TestDiscoverFromUrl:
 
         service = A2AClientService()
         custom_headers = {"Authorization": "Bearer secret", "X-Tenant-Key": "tenant-key"}
-        mock_card = {"name": "Authenticated Agent"}
+        mock_card = {"name": "Authenticated-Agent"}
 
         with patch("management.services.agent.a2a.catalog.A2AHttpClient") as MockClient:
             mock_client = MockClient.return_value.__aenter__.return_value
@@ -630,11 +630,11 @@ class TestDiscoverFromUrl:
 
         mock_card = {
             "agent_id": "agent-123",
-            "name": "Test Agent",
+            "name": "Test-Agent",
             "description": "A test agent"
         }
 
-        mock_result = {"id": 1, "name": "Test Agent"}
+        mock_result = {"id": 1, "name": "Test-Agent"}
 
         with patch("management.services.agent.a2a.catalog.A2AHttpClient") as MockClient:
             mock_client = MockClient.return_value.__aenter__.return_value
@@ -660,12 +660,12 @@ class TestDiscoverFromUrl:
         service = A2AClientService()
 
         mock_card = {
-            "name": "Test Agent",
+            "name": "Test-Agent",
             "description": "A test agent"
             # No agent_id, id, endpoint_id
         }
 
-        mock_result = {"id": 1, "name": "Test Agent"}
+        mock_result = {"id": 1, "name": "Test-Agent"}
 
         with patch("management.services.agent.a2a.catalog.A2AHttpClient") as MockClient:
             mock_client = MockClient.return_value.__aenter__.return_value
@@ -681,8 +681,8 @@ class TestDiscoverFromUrl:
                 )
 
                 call_kwargs = mock_db.create_external_agent_from_url.call_args[1]
-                # The name "Test Agent" is used as fallback for agent_id
-                assert call_kwargs["name"] == "Test Agent"
+                # The name "Test-Agent" is used as fallback for agent_id
+                assert call_kwargs["name"] == "Test-Agent"
 
     @pytest.mark.asyncio
     async def test_raises_agent_discovery_error_on_http_error(self):
@@ -1127,19 +1127,19 @@ class TestRefreshAgentCard:
 
         mock_agent = {
             "id": 1,
-            "name": "Old Name",
+            "name": "Old-Name",
             "source_url": "https://example.com/agent.json",
             "agent_card_headers": {"Authorization": "Bearer stored-card-token"},
         }
 
         mock_card = {
-            "name": "New Name",
+            "name": "New-Name",
             "description": "Updated description"
         }
 
         mock_result = {
             "id": 1,
-            "name": "New Name",
+            "name": "New-Name",
             "description": "Updated description"
         }
 
@@ -1175,7 +1175,7 @@ class TestRefreshAgentCard:
             "protocol_type": "HTTP+JSON",
         }
         card = {
-            "name": "Test Agent",
+            "name": "Test-Agent",
             "description": "Updated endpoint",
             "url": "https://example.com/rpc",
             "supportedInterfaces": [
@@ -1212,7 +1212,7 @@ class TestRefreshAgentCard:
             "protocol_type": "JSONRPC",
         }
         card = {
-            "name": "Test Agent",
+            "name": "Test-Agent",
             "description": "Updated endpoint",
             "url": "https://example.com/new",
             "supportedInterfaces": [],
@@ -1235,7 +1235,7 @@ class TestRefreshAgentCard:
             user_id="user-1",
             new_raw_card=card,
             new_agent_url=None,
-            new_name="Test Agent",
+            new_name="Test-Agent",
             new_description="Updated endpoint",
             new_supported_interfaces=[],
             new_security_schemes={},

@@ -63,7 +63,7 @@ class TestRegisterAgent:
             "endpoint_id": "a2a_1_abc123",
             "tenant_id": "tenant-1",
             "user_id": "user-1",
-            "name": "Test Agent",
+            "name": "Test-Agent",
             "is_enabled": False
         }
 
@@ -74,7 +74,7 @@ class TestRegisterAgent:
                 agent_id=1,
                 user_id="user-1",
                 tenant_id="tenant-1",
-                name="Test Agent"
+                name="Test-Agent"
             )
 
             assert result["agent_id"] == 1
@@ -89,7 +89,7 @@ class TestRegisterAgent:
         mock_result = {
             "agent_id": 1,
             "endpoint_id": "a2a_1_abc123",
-            "name": "Full Agent",
+            "name": "Full-Agent",
             "description": "A complete agent",
             "version": "2.0.0",
             "streaming": True
@@ -102,7 +102,7 @@ class TestRegisterAgent:
                 agent_id=1,
                 user_id="user-1",
                 tenant_id="tenant-1",
-                name="Full Agent",
+                name="Full-Agent",
                 description="A complete agent",
                 version="2.0.0",
                 agent_url="https://agent.example.com",
@@ -113,7 +113,7 @@ class TestRegisterAgent:
 
             mock_db.create_server_agent.assert_called_once()
             call_kwargs = mock_db.create_server_agent.call_args.kwargs
-            assert call_kwargs["name"] == "Full Agent"
+            assert call_kwargs["name"] == "Full-Agent"
             assert call_kwargs["version"] == "2.0.0"
             assert call_kwargs["streaming"] is True
 
@@ -294,7 +294,7 @@ class TestEnableA2A:
 
         mock_result = {
             "agent_id": 1,
-            "name": "Updated Agent",
+            "name": "Updated-Agent",
             "description": "Updated description",
             "is_enabled": True
         }
@@ -306,13 +306,13 @@ class TestEnableA2A:
                 agent_id=1,
                 tenant_id="tenant-1",
                 user_id="user-1",
-                name="Updated Agent",
+                name="Updated-Agent",
                 description="Updated description",
                 version="2.0.0"
             )
 
             call_kwargs = mock_db.enable_server_agent.call_args.kwargs
-            assert call_kwargs["name"] == "Updated Agent"
+            assert call_kwargs["name"] == "Updated-Agent"
 
 
 class TestDisableA2A:

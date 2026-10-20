@@ -1,10 +1,22 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import i18n from 'i18next';
 import log from '@/lib/logger';
-import { API_ENDPOINTS, fetchWithErrorHandling } from './api';
+import { API_ENDPOINTS, ApiError, fetchWithErrorHandling } from './api';
 
 const t = (key: string, options?: any): string => {
   return i18n.t(key, options) as string;
 };
+
+function discoveryErrorMessage(error: unknown, fallbackKey: string): string {
+  if (error instanceof ApiError && error.message) {
+    if (error.message.includes('A2A Agent name must not contain spaces or other whitespace')) {
+      return t('a2a.service.nameWhitespace');
+    }
+    return error.message;
+  }
+  return t(fallbackKey);
+}
 
 // =============================================================================
 // Types
@@ -137,7 +149,7 @@ export const a2aClientService = {
       return { success: false, message: data.detail || t('a2a.service.discoverFailed') };
     } catch (error) {
       log.error('Failed to discover from URL:', error);
-      return { success: false, message: t('a2a.service.discoverFailed') };
+      return { success: false, message: discoveryErrorMessage(error, 'a2a.service.discoverFailed') };
     }
   },
 
@@ -164,7 +176,7 @@ export const a2aClientService = {
       return { success: false, message: data.detail || t('a2a.service.discoverFailed') };
     } catch (error) {
       log.error('Failed to discover from Nacos:', error);
-      return { success: false, message: t('a2a.service.discoverFailed') };
+      return { success: false, message: discoveryErrorMessage(error, 'a2a.service.discoverFailed') };
     }
   },
 
@@ -250,7 +262,7 @@ export const a2aClientService = {
       return { success: false, message: data.detail || t('a2a.service.refreshFailed') };
     } catch (error) {
       log.error('Failed to refresh agent:', error);
-      return { success: false, message: t('a2a.service.refreshFailed') };
+      return { success: false, message: discoveryErrorMessage(error, 'a2a.service.refreshFailed') };
     }
   },
 
