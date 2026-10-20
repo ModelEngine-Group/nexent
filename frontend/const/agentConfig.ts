@@ -1,3 +1,5 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 // ========== Agent Configuration Constants ==========
 
 import type { LayoutConfig } from "../types/agentConfig";
@@ -48,8 +50,6 @@ export const TOOL_SOURCE_TYPES = {
 
 export const GENERATE_PROMPT_STREAM_TYPES = {
   DUTY: "duty",
-  CONSTRAINT: "constraint",
-  FEW_SHOTS: "few_shots",
   AGENT_VAR_NAME: "agent_var_name",
   AGENT_DESCRIPTION: "agent_description",
   AGENT_DISPLAY_NAME: "agent_display_name",

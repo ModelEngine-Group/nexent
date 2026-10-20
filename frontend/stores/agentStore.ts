@@ -1,3 +1,5 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import { create } from "zustand";
 
 import { safeStringify } from "@/lib/utils";
@@ -36,8 +38,6 @@ export type AgentDraft = Pick<
   | "verification_config"
   | "tools"
   | "duty_prompt"
-  | "constraint_prompt"
-  | "few_shots_prompt"
   | "business_logic_model_name"
   | "business_logic_model_id"
   | "prompt_template_id"
@@ -131,8 +131,6 @@ const toDraft = (agent: Agent): AgentDraft => ({
   tools: [...(agent.tools || [])],
   skills: [...(agent.skills || [])],
   duty_prompt: agent.duty_prompt || "",
-  constraint_prompt: agent.constraint_prompt || "",
-  few_shots_prompt: agent.few_shots_prompt || "",
   business_logic_model_name: agent.business_logic_model_name || "",
   business_logic_model_id: agent.business_logic_model_id || 0,
   prompt_template_id: agent.prompt_template_id ?? 0,
@@ -322,12 +320,6 @@ const toAgentPayload = (agentId: number, patch: AgentDraftPatch) => ({
     : {}),
   ...(patch.duty_prompt !== undefined
     ? { duty_prompt: patch.duty_prompt }
-    : {}),
-  ...(patch.constraint_prompt !== undefined
-    ? { constraint_prompt: patch.constraint_prompt }
-    : {}),
-  ...(patch.few_shots_prompt !== undefined
-    ? { few_shots_prompt: patch.few_shots_prompt }
     : {}),
   ...(patch.tools !== undefined
     ? {

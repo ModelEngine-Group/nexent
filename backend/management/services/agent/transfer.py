@@ -465,8 +465,6 @@ async def export_agent_by_agent_id(
         context_policy=agent_info.get("context_policy"),
         model_params_override=agent_info.get("model_params_override"),
         duty_prompt=agent_info.get("duty_prompt"),
-        constraint_prompt=agent_info.get("constraint_prompt"),
-        few_shots_prompt=agent_info.get("few_shots_prompt"),
         enabled=agent_info["enabled"],
         tools=tool_list,
         managed_agents=agent_relation_in_db,
@@ -656,8 +654,6 @@ async def import_agent_by_agent_id(
                 import_agent_info, "model_params_override", None
             ),
             "duty_prompt": import_agent_info.duty_prompt,
-            "constraint_prompt": import_agent_info.constraint_prompt,
-            "few_shots_prompt": import_agent_info.few_shots_prompt,
             "enabled": import_agent_info.enabled,
             "group_ids": user_group_ids,
             "greeting_message": getattr(import_agent_info, "greeting_message", None),

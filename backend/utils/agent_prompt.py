@@ -1,29 +1,23 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
-"""Normalize legacy prompt payloads at the persistence boundary."""
+"""Convert legacy prompt sections when decoding an exported Agent file."""
 
 from collections.abc import Mapping
 from typing import Any
 
 
-PROMPT_FIELDS = ("duty_prompt", "constraint_prompt", "few_shots_prompt")
-
-
-def normalize_agent_prompt_fields(fields: Mapping[str, Any], current_duty: str | None = None) -> dict[str, Any]:
-    """Preserve partial updates and convert explicitly supplied legacy sections once."""
-    patch = dict(fields)
-    if not any(key in patch and patch[key] is not None for key in PROMPT_FIELDS):
-        return patch
-    duty = patch.get("duty_prompt")
-    if duty is None:
-        duty = current_duty
-    constraint = patch.get("constraint_prompt") or ""
-    examples = patch.get("few_shots_prompt") or ""
+def normalize_imported_agent_prompt(fields: Mapping[str, Any]) -> dict[str, Any]:
+    """Consume old file fields once; current models and exports expose only duty_prompt."""
+    values = dict(fields)
+    for key in ("duty_prompt", "constraint_prompt", "few_shots_prompt"):
+        if values.get(key) is not None and not isinstance(values[key], str):
+            raise ValueError(f"{key} must be a string or null")
+    constraint = values.pop("constraint_prompt", None) or ""
+    examples = values.pop("few_shots_prompt", None) or ""
     if constraint.strip() or examples.strip():
-        parts = []
-        for title, content in (("Responsibilities", duty), ("Constraints", constraint), ("Examples", examples)):
-            if content and content.strip():
-                parts.append(f"# {title}\n{content}")
-        duty = "\n\n".join(parts)
-    patch.update(duty_prompt=duty or "", constraint_prompt="", few_shots_prompt="")
-    return patch
+        duty = values.get("duty_prompt") or ""
+        sections = (("Responsibilities", duty), ("Constraints", constraint), ("Examples", examples))
+        values["duty_prompt"] = "\n\n".join(
+            f"# {title}\n{content}" for title, content in sections if content and content.strip()
+        )
+    return values

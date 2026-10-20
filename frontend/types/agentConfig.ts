@@ -25,8 +25,6 @@ export type AgentConfigUpdate = Partial<
     | "enable_protocol_repair_retry"
     | "description"
     | "duty_prompt"
-    | "constraint_prompt"
-    | "few_shots_prompt"
     | "business_description"
     | "business_logic_model_id"
     | "business_logic_model_name"
@@ -186,8 +184,6 @@ export interface Agent {
   tools: Tool[];
   skills?: Skill[]; // Skills configured for this agent
   duty_prompt?: string;
-  constraint_prompt?: string;
-  few_shots_prompt?: string;
   business_description?: string;
   business_logic_model_name?: string;
   business_logic_model_id?: number;

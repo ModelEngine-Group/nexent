@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import hashlib
 import json
 import re
@@ -149,14 +151,7 @@ def _walk_agent_tree(
         "tools": _resolve_runtime_tool_records(agent_id, tenant_id, version_no),
         "has_static_scope_reference": bool(
             STATIC_SCOPE_PATTERN.search(
-                "\n".join(
-                    str(agent_info.get(field_name) or "")
-                    for field_name in (
-                        "duty_prompt",
-                        "constraint_prompt",
-                        "few_shots_prompt",
-                    )
-                )
+                str(agent_info.get("duty_prompt") or "")
             )
         ),
     }

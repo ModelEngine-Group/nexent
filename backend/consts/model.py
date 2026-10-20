@@ -18,7 +18,7 @@ from pydantic import (
 from nexent.core.agents.agent_model import AgentVerificationConfig, ToolConfig
 
 from consts.prompt_template import PROMPT_GENERATE_TEMPLATE_FIELD_ALIAS_MAP
-from utils.agent_prompt import normalize_agent_prompt_fields
+from utils.agent_prompt import normalize_imported_agent_prompt
 
 
 def _validated_context_policy(value: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
@@ -1458,8 +1458,6 @@ class AgentInfoRequest(BaseModel):
     is_main_agent: Optional[bool] = None
     provide_run_summary: Optional[bool] = None
     duty_prompt: Optional[str] = None
-    constraint_prompt: Optional[str] = None
-    few_shots_prompt: Optional[str] = None
     enabled: Optional[bool] = None
     business_logic_model_name: Optional[str] = None
     business_logic_model_id: Optional[int] = None
@@ -1581,8 +1579,6 @@ class ExportAndImportAgentInfo(BaseModel):
     verification_config: Optional[Dict[str, Any]] = None
     context_policy: Optional[Dict[str, Any]] = None
     duty_prompt: Optional[str] = None
-    constraint_prompt: Optional[str] = None
-    few_shots_prompt: Optional[str] = None
     enabled: bool
     tools: List[ToolConfig]
     managed_agents: List[int]
@@ -1598,16 +1594,12 @@ class ExportAndImportAgentInfo(BaseModel):
     greeting_message: Optional[str] = None
     example_questions: Optional[List[str]] = None
 
-    @model_validator(mode="after")
-    def normalize_business_prompt(self):
-        patch = normalize_agent_prompt_fields({
-            "duty_prompt": self.duty_prompt,
-            "constraint_prompt": self.constraint_prompt,
-            "few_shots_prompt": self.few_shots_prompt,
-        })
-        for key, value in patch.items():
-            setattr(self, key, value)
-        return self
+    @model_validator(mode="before")
+    @classmethod
+    def normalize_business_prompt(cls, values):
+        if isinstance(values, dict):
+            return normalize_imported_agent_prompt(values)
+        return values
 
     @field_validator("context_policy")
     @classmethod

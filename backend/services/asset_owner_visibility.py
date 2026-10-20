@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """ASSET_OWNER tenant visibility filters, feature flags, and response post-processing."""
 
 from typing import Any, Dict, List, Optional
@@ -95,7 +97,8 @@ def apply_agent_detail_prompt_visibility(
     if result.get("tenant_id") != ASSET_OWNER_TENANT_ID:
         return result
     for field in _PROMPT_FIELDS:
-        result[field] = None
+        if field in result:
+            result[field] = None
     result[AGENT_PROMPTS_HIDDEN_FLAG] = True
     return result
 

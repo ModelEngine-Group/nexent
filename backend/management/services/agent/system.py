@@ -491,8 +491,6 @@ class SystemAgentProvider:
             "allow_chat_metadata": False,
             "is_a2a": False,
             "duty_prompt": canonical_prompt,
-            "constraint_prompt": "",
-            "few_shots_prompt": "",
             "enabled": True,
         }
 

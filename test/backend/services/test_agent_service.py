@@ -8970,8 +8970,8 @@ async def test_import_agent_all_model_fields_in_database(
     assert agent_info_dict["max_steps"] == 5
     assert agent_info_dict["provide_run_summary"] is True
     assert agent_info_dict["duty_prompt"] == "# Responsibilities\nComplete duty\n\n# Constraints\nComplete constraints\n\n# Examples\nComplete examples"
-    assert agent_info_dict["constraint_prompt"] == ""
-    assert agent_info_dict["few_shots_prompt"] == ""
+    assert "constraint_prompt" not in agent_info_dict
+    assert "few_shots_prompt" not in agent_info_dict
     assert agent_info_dict["enabled"] is True
 
 

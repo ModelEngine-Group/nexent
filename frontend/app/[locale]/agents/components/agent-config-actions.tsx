@@ -1,3 +1,5 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 "use client";
 
 import { useState } from "react";
@@ -172,8 +174,6 @@ export default function AgentConfigActions({
         enabled: detail.enabled,
         business_description: detail.business_description,
         duty_prompt: detail.duty_prompt,
-        constraint_prompt: detail.constraint_prompt,
-        few_shots_prompt: detail.few_shots_prompt,
         business_logic_model_name:
           detail.business_logic_model_name ?? undefined,
         business_logic_model_id: detail.business_logic_model_id ?? undefined,

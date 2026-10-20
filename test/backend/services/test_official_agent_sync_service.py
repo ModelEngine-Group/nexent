@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
@@ -19,8 +21,6 @@ def _agent(agent_id: int = 101, managed_agents=None, **overrides):
         "verification_config": {"enabled": False},
         "context_policy": "default",
         "duty_prompt": "duty",
-        "constraint_prompt": "constraint",
-        "few_shots_prompt": [],
         "enabled": True,
         "model_ids": [1],
         "business_logic_model_id": 2,
@@ -53,8 +53,6 @@ def test_source_agent_payload_copies_agent_fields():
         "verification_config": {"enabled": False},
         "context_policy": "default",
         "duty_prompt": "duty",
-        "constraint_prompt": "constraint",
-        "few_shots_prompt": [],
         "enabled": True,
         "model_ids": [1],
         "business_logic_model_id": 2,

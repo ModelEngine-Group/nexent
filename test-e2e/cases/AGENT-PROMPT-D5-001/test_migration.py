@@ -71,7 +71,8 @@ def test_legacy_prompt_migration_preserves_rows_and_repeated_execution(postgres)
     for source, row in zip(variants, rows):
         assert [row[k] for k in ("id", "tenant_id", "version_no", "delete_flag")] == list(source[:4])
         assert row["description"] == source[7]
-        assert row["constraint_prompt"] == row["few_shots_prompt"] == ""
+        assert "constraint_prompt" not in row
+        assert "few_shots_prompt" not in row
     expected = [
         "# Responsibilities\n职责\n  原文\n\n# Constraints\n只能中文\n\n# Examples\n<code>\n  call('你好')\n</code>",
         "# Responsibilities\nPublished\n\n# Constraints\nRule\n\n# Examples\nExample",
@@ -80,9 +81,34 @@ def test_legacy_prompt_migration_preserves_rows_and_repeated_execution(postgres)
     assert [row["duty_prompt"] for row in rows] == expected
     postgres(MIGRATION.read_text(encoding="utf-8"))
     assert postgres(snapshot_sql) == after
-    # A missing column must abort the transaction without partially clearing legacy data.
-    postgres("ALTER TABLE nexent.ag_tenant_agent_t RENAME COLUMN few_shots_prompt TO missing_examples;")
-    before_failure = postgres(snapshot_sql)
-    with pytest.raises(subprocess.CalledProcessError):
+    assert postgres("SELECT count(*) FROM information_schema.columns WHERE table_schema = 'nexent' AND table_name = 'ag_tenant_agent_t' AND column_name IN ('constraint_prompt', 'few_shots_prompt');") == "0"
+
+
+@pytest.mark.parametrize("column", ["constraint_prompt", "few_shots_prompt"])
+def test_partial_legacy_schema_aborts_without_data_loss(postgres, column):
+    postgres("INSERT INTO nexent.ag_tenant_agent_t VALUES (1, 'tenant-a', 0, 'N', 'Duty', 'Rule', 'Example', 'Metadata');")
+    postgres(f"ALTER TABLE nexent.ag_tenant_agent_t RENAME COLUMN {column} TO missing_section;")
+    snapshot = "SELECT row_to_json(t) FROM nexent.ag_tenant_agent_t t;"
+    before = postgres(snapshot)
+    with pytest.raises(subprocess.CalledProcessError) as error:
         postgres(MIGRATION.read_text(encoding="utf-8"))
-    assert postgres(snapshot_sql) == before_failure
+    assert "Expected both legacy Agent prompt columns" in error.value.stderr.decode("utf-8")
+    assert postgres(snapshot) == before
+
+
+def test_drop_failure_rolls_back_consolidation_and_preserves_schema(postgres):
+    postgres("INSERT INTO nexent.ag_tenant_agent_t VALUES (1, 'tenant-a', 0, 'N', 'Duty', 'Rule', 'Example', 'Metadata');")
+    # A dependent view forces DROP COLUMN to fail after the UPDATE has run.
+    postgres("CREATE VIEW nexent.legacy_prompt_view AS SELECT constraint_prompt FROM nexent.ag_tenant_agent_t;")
+    snapshot = "SELECT row_to_json(t) FROM nexent.ag_tenant_agent_t t;"
+    before = postgres(snapshot)
+    with pytest.raises(subprocess.CalledProcessError) as error:
+        postgres(MIGRATION.read_text(encoding="utf-8"))
+    assert "depend" in error.value.stderr.decode("utf-8")
+    assert postgres(snapshot) == before
+    assert postgres("SELECT constraint_prompt FROM nexent.legacy_prompt_view;") == "Rule"
+    postgres("DROP VIEW nexent.legacy_prompt_view;")
+    postgres(MIGRATION.read_text(encoding="utf-8"))
+    row = json.loads(postgres(snapshot))
+    assert row["duty_prompt"] == "# Responsibilities\nDuty\n\n# Constraints\nRule\n\n# Examples\nExample"
+    assert "constraint_prompt" not in row and "few_shots_prompt" not in row

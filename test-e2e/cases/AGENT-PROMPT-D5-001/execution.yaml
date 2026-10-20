@@ -10,3 +10,5 @@ acceptance_bindings:
   - test_legacy_prompt_migration_preserves_rows_and_repeated_execution
   AC-02:
   - test_legacy_prompt_migration_preserves_rows_and_repeated_execution
+  - test_partial_legacy_schema_aborts_without_data_loss
+  - test_drop_failure_rolls_back_consolidation_and_preserves_schema

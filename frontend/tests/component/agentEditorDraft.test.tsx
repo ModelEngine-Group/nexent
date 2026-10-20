@@ -10,6 +10,11 @@ import {
 } from "@/services/agentConfigService";
 import { useAgentStore } from "@/stores/agentStore";
 import type { Agent } from "@/types/agentConfig";
+import {
+  clearAgentGenerationCache,
+  getAgentGenerationCache,
+  saveGeneratedField,
+} from "@/lib/agentGenerationCache";
 
 vi.mock("@/services/agentConfigService", () => ({
   searchAgentInfo: vi.fn(),
@@ -59,6 +64,36 @@ afterEach(() => {
 });
 
 describe("Agent editor entry draft synchronization", () => {
+  it("persists a complete prompt without legacy fields or unrelated edits", async () => {
+    useAgentStore.getState().initialize(draft());
+    vi.mocked(updateAgentInfo).mockResolvedValue({ success: true } as never);
+    const initial = useAgentStore.getState().editedAgent;
+    expect(initial).not.toHaveProperty("constraint_prompt");
+    expect(initial).not.toHaveProperty("few_shots_prompt");
+
+    act(() => {
+      useAgentStore.getState().updateDraft({ duty_prompt: "Complete updated prompt" });
+      useAgentStore.getState().flushDraft();
+    });
+    await waitFor(() => expect(updateAgentInfo).toHaveBeenCalledOnce());
+    expect(updateAgentInfo).toHaveBeenCalledWith({ agent_id: 42, duty_prompt: "Complete updated prompt" });
+    await waitFor(() => expect(useAgentStore.getState().savedAgent?.duty_prompt).toBe("Complete updated prompt"));
+    expect(useAgentStore.getState().editedAgent?.description).toBe(initial?.description);
+  });
+
+  it("caches only the unified generated prompt", () => {
+    clearAgentGenerationCache(42);
+    try {
+      saveGeneratedField(42, "dutyPrompt", "Generated complete prompt");
+      const cache = getAgentGenerationCache(42);
+      expect(cache?.dutyPrompt).toBe("Generated complete prompt");
+      expect(cache).not.toHaveProperty("constraintPrompt");
+      expect(cache).not.toHaveProperty("fewShotsPrompt");
+    } finally {
+      clearAgentGenerationCache(42);
+    }
+  });
+
   it("reloads a Workbench preloaded ID and replaces all generated fields without autosave", async () => {
     useAgentStore.getState().initialize({
       ...draft(),

@@ -11,7 +11,6 @@ from database.agent_version_db import query_current_version_no
 from database.tool_db import query_tool_knowledge_references
 from consts.const import ASSET_OWNER_TENANT_ID, MAX_AGENTS_PER_TENANT
 from consts.exceptions import AgentNotFoundError, TenantResourceLimitError
-from utils.agent_prompt import normalize_agent_prompt_fields
 from utils.str_utils import convert_list_to_string
 
 logger = logging.getLogger("agent_db")
@@ -270,7 +269,7 @@ def create_agent(agent_info, tenant_id: str, user_id: str):
     :param user_id:
     :return: Created agent object
     """
-    info_with_metadata = normalize_agent_prompt_fields(agent_info)
+    info_with_metadata = dict(agent_info)
     info_with_metadata.setdefault("max_steps", 15)
     info_with_metadata.setdefault("is_main_agent", True)
     info_with_metadata.setdefault("verification_config", None)
@@ -308,8 +307,6 @@ def create_agent(agent_info, tenant_id: str, user_id: str):
             "author": new_agent.author,
             "max_steps": new_agent.max_steps,
             "duty_prompt": new_agent.duty_prompt,
-            "constraint_prompt": new_agent.constraint_prompt,
-            "few_shots_prompt": new_agent.few_shots_prompt,
             "parent_agent_id": new_agent.parent_agent_id,
             "enabled": new_agent.enabled,
             "is_main_agent": new_agent.is_main_agent,
@@ -399,7 +396,6 @@ def update_agent(
         if fields_set is not None and "requested_output_tokens" not in fields_set:
             agent_data.pop("requested_output_tokens", None)
 
-        agent_data = normalize_agent_prompt_fields(agent_data, agent.duty_prompt)
         for key, value in filter_property(agent_data, AgentInfo).items():
             if value is None and key != "requested_output_tokens":
                 continue
@@ -466,7 +462,7 @@ def update_agent_draft_fields(
     if not fields:
         return 0
 
-    values = filter_property(normalize_agent_prompt_fields(fields), AgentInfo)
+    values = filter_property(fields, AgentInfo)
     with get_db_session() as session:
         result = session.execute(
             update(AgentInfo)
