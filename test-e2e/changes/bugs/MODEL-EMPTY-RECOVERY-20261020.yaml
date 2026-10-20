@@ -59,3 +59,6 @@ change:
     OpenAI SDK/HTTP SSE integration against a controlled loopback provider, not a
     UT wrapper. No new D1 duplicates unit assertions. Real-provider smoke is recorded
     separately; old failed upstream generation is not claimed reproducible.
+    PR 4145 CI follow-up replaces the synthetic Set-Cookie fixture with a non-authentication
+    response-header canary and asserts that neither its name nor value enters diagnostics.
+    Existing AC-PRIVACY and AC-RECOVERY contracts remain unchanged; no CodeQL suppression is added.

@@ -16,6 +16,7 @@ from nexent.core.utils.observer import MessageObserver
 
 pytestmark = [pytest.mark.case_id("MODEL-RECOVERY-D3-001"), pytest.mark.stage("D3")]
 SECRET = "SYNTHETIC_PRIVATE_CONTENT"
+HEADER_CANARY = "SYNTHETIC_UNAPPROVED_HEADER"
 
 
 @contextmanager
@@ -40,7 +41,7 @@ def provider(sequence):
             self.send_header("Content-Type", "text/event-stream")
             self.send_header("Content-Length", str(len(body)))
             self.send_header("x-request-id", "provider-safe-id")
-            self.send_header("set-cookie", SECRET)
+            self.send_header("x-diagnostic-test-marker", HEADER_CANARY)
             self.end_headers()
             self.wfile.write(body)
 
@@ -113,6 +114,7 @@ def test_terminal_bounds_and_private_diagnostics(caplog, finish, tools, expected
         assert diagnostics["provider_request_id"] == "provider-safe-id"
         assert len(diagnostics["request_fingerprint"]) == 64
         assert "event=empty_model_response_diagnostics" in caplog.text
-        for private in (SECRET, "PRIVATE_PROMPT", "synthetic-key", "set-cookie"):
+        for private in (SECRET, "PRIVATE_PROMPT", "synthetic-key", "set-cookie",
+                        HEADER_CANARY, "x-diagnostic-test-marker"):
             assert private not in caplog.text
         assert '"chunks"' in caplog.text

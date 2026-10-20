@@ -21,6 +21,7 @@ change:
     - Preserve legacy output, targeted writes, draft snapshots and model parameter forwarding.
     - Explicit model reasoning may quote control tags but never writes generated Skill files.
     test_selectors:
+    - test/backend/management/test_service_directory_architecture.py
     - test/backend/services/test_nl2skill_stream.py
     - test/backend/services/test_nl2skill_service.py
     - test/backend/utils/test_content_classifier_utils.py
@@ -42,3 +43,4 @@ change:
     modified: []
     retired: []
   notes: Direct update of nexent-doc/nexent/agent-workbench/design.md, section NL2SKILL-STREAM-20261019. No new formal Case duplicates isolated parser UT. AGT-040 is historical runtime inventory, not proof of file reconstruction. Separate browser-led real-model verification is recorded in the design; it is not counted as formal Case execution.
+    PR 4145 CI follow-up registers the existing Skill stream parser in the exact Management module inventory without weakening architecture assertions.
