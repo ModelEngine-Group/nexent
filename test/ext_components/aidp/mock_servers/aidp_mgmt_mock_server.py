@@ -523,7 +523,6 @@ def _ensure_chinese_demo_data() -> None:
         status: int,
         *,
         hours_since_update: int = 2,
-        error_code: str | None = None,
         failure_reason: str | None = None,
     ) -> dict[str, Any]:
         uploaded_at = now - days_ago * 24 * 60 * 60
@@ -539,11 +538,8 @@ def _ensure_chinese_demo_data() -> None:
             "update_time": updated_at,
             "status": status,
         }
-        if error_code:
-            item["error_code"] = error_code
         if failure_reason:
             item["extraction_failure_reason"] = failure_reason
-            item["reason"] = failure_reason
         return item
 
     vector_failure = json.dumps(
@@ -565,12 +561,12 @@ def _ensure_chinese_demo_data() -> None:
         demo_file(2, "城市运行管理制度汇编.docx", "docx", 3_276_800, 16, 1, hours_since_update=12),
         demo_file(
             3, "公共服务目录更新.docx", "docx", 482_304, 2, 3,
-            hours_since_update=1, error_code="VEC101", failure_reason=vector_failure,
+            hours_since_update=1, failure_reason=vector_failure,
         ),
         demo_file(4, "新市民服务政策手册.pdf", "pdf", 2_146_304, 0, 4, hours_since_update=0),
         demo_file(
             5, "城市设施关联关系数据.xlsx", "xlsx", 786_432, 1, 5,
-            hours_since_update=3, error_code="GRAPH201", failure_reason=graph_failure,
+            hours_since_update=3, failure_reason=graph_failure,
         ),
         demo_file(6, "医保异地办理流程说明.txt", "txt", 36_864, 0, 2, hours_since_update=0),
         demo_file(7, "公共服务事项清单.xlsx", "xlsx", 917_504, 14, 1, hours_since_update=48),
@@ -1854,6 +1850,15 @@ def knowledge_file_history(
     # so documents keep their insertion order inside each group.
     all_recent_items.sort(key=lambda item: item["status"] in _TERMINAL_STATUSES)
     items = list(all_recent_items)
+    normalized_keyword = body.keyword.strip().casefold() if isinstance(body.keyword, str) else ""
+    if normalized_keyword:
+        items = [
+            item for item in items
+            if normalized_keyword in str(item.get("file_name") or "").casefold()
+        ]
+    # The live service computes total_record_count after the keyword filter
+    # but before the status filter.
+    keyword_items = list(items)
     if body.status not in (None, 0):
         status_aliases = {
             1: {1, "1", STATUS_COMPLETED, "SUCCESS"},
@@ -1864,15 +1869,8 @@ def knowledge_file_history(
         }
         accepted = status_aliases.get(body.status, set())
         items = [item for item in items if item["status"] in accepted]
-    normalized_keyword = body.keyword.strip().casefold() if isinstance(body.keyword, str) else ""
-    if normalized_keyword:
-        items = [
-            item for item in items
-            if normalized_keyword in str(item.get("file_name") or "").casefold()
-        ]
-    # The live service reports total_record_count for the filtered set.
     stats = {
-        "total_record_count": len(items),
+        "total_record_count": len(keyword_items),
         "success_record_count": sum(1 for item in items if item["status"] == 1),
         "processing_record_count": sum(1 for item in items if item["status"] == 2),
         "failed_record_count": sum(1 for item in items if item["status"] in (3, 5)),
@@ -1897,7 +1895,7 @@ def knowledge_file_history(
     )
     return JSONResponse(content={
         "value": page_items,
-        "total_count": len(items),
+        "total_count": len(page_items),
         "next_link": next_link,
         **stats,
     })

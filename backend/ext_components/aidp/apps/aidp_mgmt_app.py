@@ -1285,16 +1285,17 @@ async def list_upload_tasks(
         )
     raw_items = history.get("value") if isinstance(history, dict) else None
     rows = [item for item in raw_items if isinstance(item, dict)] if isinstance(raw_items, list) else []
-    # AIDP History returns ``total_count`` as the current-page count and
-    # ``total_record_count`` as the keyword-filtered total. Only the unfiltered
-    # total is treated as reliable here because status filtering has not been
-    # verified; filtered pagination uses the row count. The live service also
+    # AIDP History computes ``total_record_count`` after the keyword filter but
+    # before the status filter. It is therefore an exact total for the
+    # unfiltered list and for keyword-only queries (status omitted/0), but it
+    # must not be used when a status filter is active. The live service also
     # returns a next_link on every page, so it is never used as a "more"
     # signal.
     filtered = bool(normalized_keyword) or status != 0
+    keyword_only = bool(normalized_keyword) and status == 0
     raw_global_total = history.get("total_record_count") if isinstance(history, dict) else None
     total_reliable = (
-        not filtered
+        (not filtered or keyword_only)
         and isinstance(raw_global_total, int)
         and not isinstance(raw_global_total, bool)
     )

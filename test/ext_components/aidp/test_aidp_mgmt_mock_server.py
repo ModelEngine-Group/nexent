@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import importlib.util
+import json
 import sys
 import time
 from pathlib import Path
@@ -304,5 +305,73 @@ def test_history_reports_the_filtered_total_and_keeps_next_link(
 
     body = response.json()
     assert [item["file_uuid"] for item in body["value"]] == ["f-1", "f-2"]
+    assert body["total_count"] == 2
     assert body["total_record_count"] == 2
     assert body["next_link"] is not None
+
+
+def test_history_total_count_is_page_local(mock_aidp_server):
+    server = mock_aidp_server
+    server._KNOWLEDGE_BASES["kb-1"] = {"kds_name": "测试知识库"}
+    server._DOCUMENTS_BY_KB["kb-1"] = [
+        {"file_uuid": f"f-{index}", "file_name": f"制度-{index}.pdf", "status": 1, "first_upload_time": time.time()}
+        for index in range(3)
+    ]
+    client = TestClient(server.app)
+    headers = {"Authorization": "Bearer mock-aidp-key"}
+    path = "/KnowledgeBase/Tenants/aidp/KnowledgeBases/kb-1/KnowledgeFiles/History"
+
+    first = client.post(
+        path, headers=headers,
+        json={"dir_path": "/aidp/knowledge/kb-1", "page": 1, "page_size": 2},
+    ).json()
+    second = client.post(
+        path, headers=headers,
+        json={"dir_path": "/aidp/knowledge/kb-1", "page": 2, "page_size": 2},
+    ).json()
+
+    assert len(first["value"]) == 2 and first["total_count"] == 2
+    assert len(second["value"]) == 1 and second["total_count"] == 1
+    assert first["total_record_count"] == second["total_record_count"] == 3
+    assert first["next_link"] is not None and second["next_link"] is not None
+
+
+def test_history_total_record_count_is_computed_before_status_filter(mock_aidp_server):
+    server = mock_aidp_server
+    server._KNOWLEDGE_BASES["kb-1"] = {"kds_name": "测试知识库"}
+    now = time.time()
+    server._DOCUMENTS_BY_KB["kb-1"] = [
+        {"file_uuid": "f-1", "file_name": "制度-第一章.pdf", "status": 1, "first_upload_time": now},
+        {"file_uuid": "f-2", "file_name": "制度-第二章.pdf", "status": 3, "first_upload_time": now},
+        {"file_uuid": "f-3", "file_name": "普通说明.txt", "status": 1, "first_upload_time": now},
+    ]
+    client = TestClient(server.app)
+    headers = {"Authorization": "Bearer mock-aidp-key"}
+
+    body = client.post(
+        "/KnowledgeBase/Tenants/aidp/KnowledgeBases/kb-1/KnowledgeFiles/History",
+        headers=headers,
+        json={
+            "dir_path": "/aidp/knowledge/kb-1",
+            "page": 1,
+            "page_size": 10,
+            "keyword": "制度",
+            "status": 1,
+        },
+    ).json()
+
+    assert [item["file_uuid"] for item in body["value"]] == ["f-1"]
+    assert body["total_count"] == 1
+    assert body["total_record_count"] == 2
+
+
+def test_chinese_demo_failure_reasons_are_json_without_top_level_code(
+    mock_aidp_server,
+):
+    docs = mock_aidp_server._DOCUMENTS_BY_KB["aidp-kb-faq"]
+    failed = [doc for doc in docs if doc.get("status") in (3, 5)]
+    assert failed
+    for doc in failed:
+        assert "error_code" not in doc
+        parsed = json.loads(doc["extraction_failure_reason"])
+        assert parsed["error_code"] and parsed["msg"]

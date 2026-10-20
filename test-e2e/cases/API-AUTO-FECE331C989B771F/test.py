@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import os
 import time
 
@@ -97,14 +98,13 @@ async def test_aidp_document_upload_list_contract(aidp_kb, tenant_a_admin, tenan
         assert payload['summary']['total'] == 3
         assert payload['summary']['success'] == len(payload['success_list'])
         assert payload['summary']['failed'] == len(payload['failed_list'])
+        success_names = {item['file_name'] for item in payload['success_list']}
+        assert valid_name in success_names
         failed_by_name = {item['file_name']: item for item in payload['failed_list']}
         assert big_a in failed_by_name
         assert big_b in failed_by_name
         assert failed_by_name[big_a]['reason_zh'] == SIZE_20MB_REASON_ZH
         assert failed_by_name[big_b]['reason_zh'] == SIZE_20MB_REASON_ZH
-        if valid_name in failed_by_name:
-            reason = failed_by_name[valid_name]
-            assert reason['reason_zh'] not in {SIZE_20MB_REASON_ZH, COUNT_REASON_ZH}
 
         resp = await api.get(files_path, params={'page': 1, 'page_size': 10})
         assert_status(resp, 200)
@@ -118,18 +118,36 @@ async def test_aidp_document_upload_list_contract(aidp_kb, tenant_a_admin, tenan
         if payload['total_count'] == 0:
             assert payload['has_more'] is False
 
-        # AIDP always returns next_link, including on the last page. A short
-        # filtered page must therefore disable "next" instead of trusting it.
-        filtered = await api.get(
-            files_path,
-            params={'page': 1, 'page_size': 10, 'keyword': valid_name},
-        )
-        assert_status(filtered, 200)
-        filtered_payload = filtered.json()
-        assert len(filtered_payload['value']) <= 10
+        # AIDP always returns next_link, including on the last page. Wait for
+        # the uploaded file to become visible in the ingested-files listing,
+        # then prove the keyword actually matched it and the short page stops.
+        filtered_payload = {}
+        for _ in range(60):
+            filtered = await api.get(
+                files_path,
+                params={'page': 1, 'page_size': 10, 'keyword': valid_name},
+            )
+            assert_status(filtered, 200)
+            filtered_payload = filtered.json()
+            if any(
+                item.get('file_name') == valid_name
+                for item in filtered_payload.get('value', [])
+            ):
+                break
+            await asyncio.sleep(1)
+        else:
+            raise AssertionError(
+                f'{valid_name} did not appear in /files within 60 seconds: '
+                f'{filtered_payload}'
+            )
+
+        filtered_names = {
+            item.get('file_name') for item in filtered_payload['value']
+        }
+        assert valid_name in filtered_names
+        assert len(filtered_payload['value']) == 1
         assert filtered_payload['total_reliable'] is False
-        if len(filtered_payload['value']) < 10:
-            assert filtered_payload['has_more'] is False
+        assert filtered_payload['has_more'] is False
 
     async with client('config') as anonymous:
         resp = await anonymous.post(documents_path, files=[_file('x.txt', b'x')])

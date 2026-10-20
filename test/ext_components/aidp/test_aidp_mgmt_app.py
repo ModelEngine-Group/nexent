@@ -2055,7 +2055,7 @@ class TestKnowledgeFilesEndpoint:
         list_docs.assert_called_once_with(SERVER_URL, API_KEY, "kb-1", 1, 10, None)
         count_docs.assert_called_once_with(SERVER_URL, API_KEY, "kb-1")
 
-    def test_file_list_degrades_when_count_api_fails(self):
+    def test_file_list_propagates_count_failure(self):
         client = _client()
         from ext_components.aidp.apps import aidp_mgmt_app
         from ext_components.aidp.services import aidp_permission_service
@@ -2071,8 +2071,8 @@ class TestKnowledgeFilesEndpoint:
                 headers=_bearer(),
             )
 
-        # Count failures propagate - the /files endpoint no longer swallows
-        # them with return_exceptions=True, matching the /documents contract.
+        # Count failures propagate; the endpoint does not degrade to a
+        # page-local total.
         assert response.status_code == AppException(ErrorCode.AIDP_SERVICE_ERROR).http_status
         assert response.json()["code"] == ErrorCode.AIDP_SERVICE_ERROR.value
 
@@ -2157,13 +2157,13 @@ class TestUploadTasksEndpoint:
         from ext_components.aidp.apps import aidp_mgmt_app
         from ext_components.aidp.services import aidp_permission_service
 
-        # A short filtered page is the last page. The live service always
-        # returns next_link, so only the row count can decide.
+        # Keyword-only queries (status omitted/0) can trust the filtered
+        # total_record_count; a short page is the last page.
         history = {
             "value": [{"file_uuid": "f-1", "file_name": "制度手册.pdf", "status": 1}],
             "total_count": 1,
             "next_link": "/next-page",
-            "total_record_count": 317,
+            "total_record_count": 1,
         }
         with patch.object(aidp_permission_service, "require_permission",
                           return_value=MagicMock(permission="READ_ONLY")), \
@@ -2178,11 +2178,10 @@ class TestUploadTasksEndpoint:
 
         assert response.status_code == HTTPStatus.OK
         body = response.json()
-        assert body["total_reliable"] is False
+        assert body["total_reliable"] is True
         assert body["has_more"] is False
         assert body["total_count"] == 1
-        # The global statistic survives in the summary stats.
-        assert body["stats"]["total"] == 317
+        assert body["stats"]["total"] == 1
 
     def test_unfiltered_upload_task_query_trusts_global_total(self):
         client = _client()
@@ -2246,8 +2245,38 @@ class TestUploadTasksEndpoint:
 
         assert response.status_code == HTTPStatus.OK
         body = response.json()
-        assert body["total_reliable"] is False
+        assert body["total_reliable"] is True
         assert body["has_more"] is True
+
+    def test_filtered_upload_task_exact_full_last_page_disables_next(self):
+        client = _client()
+        from ext_components.aidp.apps import aidp_mgmt_app
+        from ext_components.aidp.services import aidp_permission_service
+
+        history = {
+            "value": [
+                {"file_uuid": f"f-{index}", "file_name": "制度手册.pdf", "status": 1}
+                for index in range(10)
+            ],
+            "next_link": "/next-page",
+            "total_record_count": 10,
+        }
+        with patch.object(aidp_permission_service, "require_permission",
+                          return_value=MagicMock(permission="READ_ONLY")), \
+             patch.object(aidp_mgmt_app, "_resolve_doc_history_channel",
+                          return_value={"fs_id": "fs-1", "src_dir": "/aidp/knowledge/kb-1"}), \
+             patch.object(aidp_mgmt_app, "list_aidp_doc_history_impl",
+                          return_value=history):
+            response = client.get(
+                "/aidp-mgmt/knowledge-bases/kb-1/upload-tasks?page=1&page_size=10&keyword=%E5%88%B6%E5%BA%A6",
+                headers=_bearer(),
+            )
+
+        assert response.status_code == HTTPStatus.OK
+        body = response.json()
+        assert body["total_reliable"] is True
+        assert body["total_count"] == 10
+        assert body["has_more"] is False
 
     def test_unfiltered_upload_task_last_page_ignores_next_link(self):
         client = _client()
