@@ -5,7 +5,7 @@
 import pytest
 
 from consts.exceptions import ConversationNotFoundError, UnauthorizedError, ValidationError
-from services import workbench_pin_service as service
+from management.services.conversation import pins as service
 
 
 @pytest.mark.parametrize("user,tenant", [(None, "t"), ("u", None), ("", "t"), ("u", "")])

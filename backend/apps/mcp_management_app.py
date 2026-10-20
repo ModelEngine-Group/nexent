@@ -1,3 +1,4 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 import logging
 from typing import Annotated, Optional
 
@@ -20,7 +21,7 @@ from consts.model import (
     CommunityStatusUpdateRequest,
     CommunityUpdateRequest,
 )
-from services.mcp_management_service import (
+from management.services.repository.mcp.service import (
     list_community_mcp_services,
     list_community_mcp_tag_stats,
     approve_community_mcp_service,
@@ -33,8 +34,8 @@ from services.mcp_management_service import (
     delete_community_mcp_service,
 )
 from database.market_mcp_db import increment_mcp_market_download_count
-from services.audit_service import record_security_event
-from utils.auth_utils import get_current_user_info
+from management.services.monitor.audit import record_security_event
+from management.services.permission.identity.authentication_helpers import get_current_user_info
 
 router = APIRouter(prefix="/mcp-tools")
 logger = logging.getLogger("mcp_management_app")

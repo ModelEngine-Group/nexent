@@ -15,10 +15,10 @@ _request = base._request
 
 def _configure_early_workbench_run(monkeypatch, canonical, conversation):
     plan = SimpleNamespace(root=SimpleNamespace(identity=SimpleNamespace(agent_id=99)))
-    workbench_module = ModuleType("services.workbench_service")
+    workbench_module = ModuleType("management.services.agent.workbench")
     workbench_module.assert_workbench_version = MagicMock()
     workbench_module.resolve_workbench_config = MagicMock(return_value=(canonical, plan))
-    monkeypatch.setitem(sys.modules, "services.workbench_service", workbench_module)
+    monkeypatch.setitem(sys.modules, "management.services.agent.workbench", workbench_module)
     monkeypatch.setattr(agent_run, "ENABLE_AGENT_WORKBENCH", True)
     monkeypatch.setattr(
         agent_run,
@@ -166,7 +166,7 @@ async def test_submitted_tool_policy_is_rejected_at_request_boundary(monkeypatch
     _configure_early_workbench_run(monkeypatch, canonical, {
         "workbench_config": canonical.model_dump(mode="json"), "workbench_config_version": 2,
     })
-    knowledge_scope = __import__("services.knowledge_scope_service", fromlist=["snapshot_runtime_knowledge_tree"])
+    knowledge_scope = __import__("management.services.knowledge_base.scope", fromlist=["snapshot_runtime_knowledge_tree"])
     validate = MagicMock(side_effect=ValidationError("top_k: expected integer 1-100"))
     monkeypatch.setattr(knowledge_scope, "validate_request_retrieval_overrides", validate, raising=False)
     with pytest.raises(ValidationError, match="top_k"):

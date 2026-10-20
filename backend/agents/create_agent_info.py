@@ -8,6 +8,7 @@ import threading
 import uuid
 from pathlib import Path
 from typing import Any, Dict, List, Optional
+from urllib.parse import urljoin
 
 from nexent.core.agents.agent_model import (
     AgentConfig,
@@ -45,6 +46,55 @@ from nexent.core.utils.observer import MessageObserver
 from nexent.memory import models as memory_models
 
 from consts.capability_profiles import CATALOG as CAPABILITY_CATALOG
+
+from management.services.file.service import validate_urls_access
+from management.services.model.resolver import get_rerank_model, is_model_available
+from management.services.knowledge_base.service import (
+    ElasticSearchService,
+    get_vector_db_core,
+    get_embedding_model_by_index_name,
+)
+from management.services.mcp.service import get_remote_mcp_server_list
+from management.services.memory.providers.service import get_memory_external_provider_service
+
+from database.a2a_agent_db import PROTOCOL_JSONRPC
+from management.services.configuration.user.memory import build_memory_context
+from management.services.knowledge_base.providers.aidp import create_ind_aidp_image_url_builder
+from management.services.model.adapter import get_llm_adapter, get_vlm_adapter
+from database.agent_db import (
+    search_agent_info_by_agent_id,
+    query_sub_agent_relations,
+    resolve_sub_agent_version_no,
+)
+from database.agent_version_db import query_current_version_no, update_agent_snapshot
+from database import skill_db
+from database.tool_db import query_tools_by_ids, search_tools_for_sub_agent
+from database.model_management_db import get_model_records, get_model_by_model_id
+from database.knowledge_db import get_knowledge_name_map_by_index_names
+from database.client import minio_client
+from management.services.model.names import add_repo_to_name
+from management.services.agent.prompt import (
+    load_agent_prompt_bundle,
+)
+from nexent.core.agents.prompt import AgentPromptComposer, get_builtin_tool_descriptions
+from management.services.configuration.tenant.settings import (
+    tenant_config_manager,
+)
+from management.services.model.names import (
+    get_model_name_from_config,
+)
+from management.services.agent.prompt import (
+    should_enable_memory_tool_policy,
+)
+from management.services.agent.prompt import (
+    should_enable_automation_tool_policy,
+)
+from management.services.agent.context import (
+    build_context_inputs,
+)
+from infrastructure.http.client import create_httpx_client
+from management.services.mcp.addressing import get_tenant_local_mcp_server
+from infrastructure.redis import get_redis_client
 from consts.const import (
     AGENT_WORKSPACE_ROOT,
     AIDP_API_KEY,
@@ -102,17 +152,6 @@ from management.services.model.names import (
     get_model_name_from_config,
 )
 from management.services.model.resolver import get_rerank_model, is_model_available
-from services.file_management_service import validate_urls_access
-from services.ind_aidp_service import create_ind_aidp_image_url_builder
-from services.memory_config_service import build_memory_context
-from services.memory_external_provider_service import get_memory_external_provider_service
-from services.remote_mcp_service import get_remote_mcp_server_list
-from utils.config_utils import (
-    tenant_config_manager,
-)
-from utils.http_client_utils import create_httpx_client
-from utils.mcp_url_utils import get_tenant_local_mcp_server
-from utils.redis_utils import get_redis_client
 
 from .tool_user_context import resolve_tool_user_context
 
@@ -175,7 +214,7 @@ def _ensure_agent_reasoning_snapshot(
     version_no: int,
 ) -> None:
     """Backfill reasoning ownership for agents created before Scheme B."""
-    from services.agent_reasoning_service import snapshot_agent_reasoning_config
+    from management.services.agent.reasoning import snapshot_agent_reasoning_config
 
     try:
         agent_info = search_agent_info_by_agent_id(
@@ -1363,7 +1402,7 @@ async def create_agent_config(
         child_tool_params = normalized_tool_params.model_copy(deep=True)
         root_override = child_tool_params.agents.get(agent_info.get("name"))
         if root_override is not None:
-            from services.runtime_knowledge_mount import MANAGED_CLASSES
+            from management.services.knowledge_base.mount import MANAGED_CLASSES
 
             managed_names = MANAGED_CLASSES | {
                 tool.get("name") for tool in runtime_knowledge_tools
@@ -1465,6 +1504,7 @@ async def create_agent_config(
         tool_params=normalized_tool_params,
         runtime_skill_snapshot=runtime_skill_snapshot,
         runtime_knowledge_tools=runtime_knowledge_tools,
+        language=language,
     )
     memory_tool_names = {"store_memory", "search_memory"}
     tool_list = [tool for tool in tool_list if tool.name not in memory_tool_names]
@@ -1479,7 +1519,7 @@ async def create_agent_config(
         and conversation_id is not None
         and automation_user_message
     ):
-        from services.agent_automation.tool_adapter import (
+        from management.services.automation.proposal import (
             agent_loop_automation_tool_adapter,
         )
         tool_list.append(
@@ -1519,7 +1559,7 @@ async def create_agent_config(
     # The memory capability switch controls tenant, user, and agent memory.
     if memory_context.user_config.memory_switch:
         try:
-            from services.memory_record_service import (
+            from management.services.memory.records import (
                 _resolve_tenant_embedding_model_info,
             )
 
@@ -1544,11 +1584,11 @@ async def create_agent_config(
             # backend services via the adapter. The facade handles policy
             # enforcement, embedding lookup, and idempotency on its own
             # and dispatches persistence/retrieval to
-            # ``services.memory_record_service`` /
-            # ``services.memory_retrieval_service``.
+            # ``management.services.memory.records`` /
+            # ``management.services.memory.retrieval``.
             memory_service = None
             try:
-                from services.memory_backend_adapter import build_memory_service_for_agent
+                from management.services.memory.provider import build_memory_service_for_agent
 
                 memory_service = build_memory_service_for_agent(
                     tenant_id=memory_context.tenant_id,
@@ -1570,7 +1610,7 @@ async def create_agent_config(
 
             memory_context_service = None
             try:
-                from services.memory_context_service import get_memory_context_service
+                from management.services.memory.context import get_memory_context_service
 
                 memory_context_service = get_memory_context_service()
                 if memory_context_service is None:
@@ -2061,6 +2101,7 @@ async def create_tool_config_list(
     tool_params: Optional[ToolParamsRequest | Dict[str, Any]] = None,
     runtime_skill_snapshot: Optional[List[Dict[str, Any]]] = None,
     runtime_knowledge_tools: Optional[List[Dict[str, Any]]] = None,
+    language: str = "zh",
 ):
     tool_config_list = []
     langchain_tools = await discover_langchain_tools()
@@ -2075,7 +2116,7 @@ async def create_tool_config_list(
 
     # Look up agent name for use in error messages.
     if runtime_knowledge_tools is not None:
-        from services.runtime_knowledge_mount import MANAGED_CLASSES
+        from management.services.knowledge_base.mount import MANAGED_CLASSES
 
         tools_list = [tool for tool in tools_list if tool.get("class_name") not in MANAGED_CLASSES]
         tools_list.extend(copy.deepcopy([
@@ -2116,6 +2157,11 @@ async def create_tool_config_list(
             else override_params
         )
         param_dict = _merge_tool_params(tool, effective_override_params)
+        if tool.get("class_name") == "DeepSeekSearchTool":
+            param_dict.pop("localization", None)
+            param_dict.pop("max_content_chars", None)
+            # Run language is authoritative over persisted or request-level tool parameters.
+            param_dict["language"] = language
         if tool.get("class_name") == "AidpSearchTool":
             # Credentials are backend-owned since the v7.1 permission
             # redesign; populate them from the central constants (the
@@ -2385,7 +2431,7 @@ async def discover_langchain_tools():
     Returns:
         list: List of discovered LangChain tool instances
     """
-    from utils.langchain_utils import discover_langchain_modules
+    from management.services.tool.langchain import discover_langchain_modules
 
     langchain_tools = []
 

@@ -1,3 +1,4 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """Backend compatibility checks for SDK-owned prompt templates."""
 
 import json
@@ -43,8 +44,8 @@ def test_ut_be_fps_001_backend_prompt_files_are_migrated():
 
 def test_ut_be_fps_002_memory_services_load_sdk_prompt_resources():
     """UT-BE-FPS-002: direct memory consumers retain their original messages."""
-    from services.fa_memory_extractor import FaMemoryExtractor
-    from services.memory_dreaming_summarizer import _load_prompt
+    from management.services.memory.extraction import FaMemoryExtractor
+    from management.services.memory.dreaming.summarizer import _load_prompt
 
     extractor = FaMemoryExtractor(
         tenant_id="tenant", user_id="user", agent_id="1", conversation_id="conv",
@@ -58,8 +59,8 @@ def test_ut_be_fps_002_memory_services_load_sdk_prompt_resources():
 
 def test_ut_be_fps_002_memory_resource_failure_is_not_silenced(mocker):
     """UT-BE-FPS-002: missing SDK resources fail before model invocation."""
-    from services.fa_memory_extractor import FaMemoryExtractor
-    from services.memory_dreaming_summarizer import _load_prompt
+    from management.services.memory.extraction import FaMemoryExtractor
+    from management.services.memory.dreaming.summarizer import _load_prompt
 
     extractor = FaMemoryExtractor(
         tenant_id="tenant", user_id="user", agent_id="1", conversation_id="conv",

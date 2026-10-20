@@ -1,8 +1,9 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 import pytest
 from consts.exceptions import TagManagementNotFoundError
 from consts.model import TagAssignmentBulkTarget
-from services.tag_management_service import TagManagementService
-from services.tag_resource_adapters import (
+from management.services.tag.library import TagManagementService
+from management.services.tag.resources import (
     AuthenticatedCaller,
     CanonicalResourceIdentity,
     ResolvedTagResource,

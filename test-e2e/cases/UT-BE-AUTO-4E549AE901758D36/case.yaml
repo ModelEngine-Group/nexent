@@ -25,7 +25,7 @@ case:
     action: 在本地工作区读取与 fa_memory_extractor 相关的固定 fixture/配置；测试代码不得读取生产凭据。
     expected: 功能结果与代码契约一致，测试过程无未处理异常。
   - order: 2
-    action: 直接导入 backend/services/fa_memory_extractor.py 的 FaMemoryExtractor、ExtractionResult，构造 tenant_id/user_id/agent_id/conversation_id
+    action: 直接导入 backend/management/services/memory/extraction.py 的 FaMemoryExtractor、ExtractionResult，构造 tenant_id/user_id/agent_id/conversation_id
       及 mock model_client、mock memory_service。
     expected: 正常路径返回 ExtractionResult(reason=="ok")，items 的 content/memory_id 与 store_memory 返回值一致，store_memory 以 layer=MemoryLayer.AGENT、memory_type=MemoryType.SHORT_TERM
       调用。

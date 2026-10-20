@@ -5,7 +5,7 @@ from types import SimpleNamespace
 import pytest
 
 from backend.consts.model import ToolParamsRequest
-from backend.services import knowledge_scope_service as service
+from management.services.knowledge_base import scope as service
 from consts.exceptions import ValidationError
 
 

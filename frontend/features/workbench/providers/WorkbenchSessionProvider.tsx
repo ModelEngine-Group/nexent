@@ -4,7 +4,10 @@
 
 import { useQueryClient } from "@tanstack/react-query";
 import { conversationService } from "@/services/conversationService";
-import { workbenchPinsQueryKey } from "@/lib/workbenchPins";
+import {
+  removeDeletedWorkbenchPins,
+  workbenchPinsQueryKey,
+} from "@/lib/workbenchPins";
 import {
   createContext,
   useContext,
@@ -101,11 +104,16 @@ export function WorkbenchSessionProvider({
     : undefined;
   const threadListAdapter = useMemo(
     () =>
-      createConversationThreadListAdapter("workbench", pinStorageKey, () =>
-        queryClient.ensureQueryData({
-          queryKey: workbenchPinsQueryKey(pinStorageKey),
-          queryFn: () => conversationService.getWorkbenchPins(),
-        })
+      createConversationThreadListAdapter(
+        "workbench",
+        pinStorageKey,
+        () =>
+          queryClient.ensureQueryData({
+            queryKey: workbenchPinsQueryKey(pinStorageKey),
+            queryFn: () => conversationService.getWorkbenchPins(),
+          }),
+        (conversationId) =>
+          removeDeletedWorkbenchPins(queryClient, [conversationId])
       ),
     [pinStorageKey, queryClient]
   );

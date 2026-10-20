@@ -45,6 +45,8 @@ import {
   type ReactNode,
 } from "react";
 import { useTranslation } from "react-i18next";
+import { useQueryClient } from "@tanstack/react-query";
+import { removeDeletedWorkbenchPins } from "@/lib/workbenchPins";
 import { cn } from "@/lib/utils";
 import log from "@/lib/logger";
 import { conversationService } from "@/services/conversationService";
@@ -145,6 +147,7 @@ export const BatchSelectionProvider: FC<{
 }) => {
   const { t } = useTranslation();
   const aui = useAui();
+  const queryClient = useQueryClient();
   const { confirm } = useConfirmModal();
   const threadIds = useAuiState((s) => s.threads.threadIds);
   const threadItems = useAuiState((s) => s.threads.threadItems);
@@ -334,6 +337,13 @@ export const BatchSelectionProvider: FC<{
       onOk: async () => {
         try {
           const result = await conversationService.deleteBatch(conversationIds);
+          if (conversationType === "workbench") {
+            await removeDeletedWorkbenchPins(
+              queryClient,
+              conversationIds,
+              result?.failed_ids
+            );
+          }
           await aui.threads.reload();
           setAgentConversationIds(new Map());
           if (result?.failed_ids?.length) {
@@ -366,6 +376,8 @@ export const BatchSelectionProvider: FC<{
     t,
     aui,
     onNewConversation,
+    queryClient,
+    conversationType,
   ]);
 
   const value = useMemo<BatchSelectionValue>(
@@ -1207,13 +1219,11 @@ const ThreadListItem: FC<
   return (
     <ThreadListItemPrimitive.Root
       data-pinned={isPinned || undefined}
-      className={cn(
+      className={
         variant === "time"
           ? "group/item flex h-10 items-center gap-2 rounded-lg px-2 py-2 hover:bg-white data-[active=true]:bg-white"
-          : "group/item flex h-10 items-center rounded-lg hover:bg-white/70 data-[active=true]:bg-white",
-        isPinned &&
-          "bg-blue-50 hover:bg-blue-100/70 data-[active=true]:bg-blue-100 dark:bg-blue-950/30 dark:hover:bg-blue-950/50 dark:data-[active=true]:bg-blue-950/60"
-      )}
+          : "group/item flex h-10 items-center rounded-lg hover:bg-white/70 data-[active=true]:bg-white"
+      }
     >
       <ThreadListItemContent
         completedConversations={completedConversations}

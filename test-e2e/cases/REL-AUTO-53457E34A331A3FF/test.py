@@ -1,3 +1,4 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 '''D5 reliability special case for the config service lifespan.
 
 Covers F-156: config_app switched from on_event to lifespan. Verifies that a
@@ -36,8 +37,8 @@ def test_config_lifespan_startup_recovery_shutdown_capacity(case, monkeypatch, c
     from consts import const
     from consts.task_recovery import CONFIG_SERVICE_NAME
 
-    import services.evaluation_maintenance as evaluation_maintenance
-    import services.startup_recovery_service as startup_recovery
+    import management.services.evaluation.maintenance as evaluation_maintenance
+    import management.recovery as startup_recovery
 
     from fastapi.testclient import TestClient
 

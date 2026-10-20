@@ -28,7 +28,7 @@ case:
     expected: SU pending_review→rejected：返回 summary 且 status=rejected；create_repository_review_notification 以 review_status=rejected
       调用；因 current=pending_review，deactivate_notifications 被调用；reset_agent_repository_status 以 status=rejected 调用。
   - order: 2
-    action: 导入 backend/services/agent_repository_service.py 的 update_agent_repository_status_impl、_validate_repository_status_transition；对
+    action: 导入 backend/management/services/repository/agent/listing.py 的 update_agent_repository_status_impl、_validate_repository_status_transition；对
       get_agent_repository_by_id、update_agent_repository_status_by_id、reset_agent_repository_status、_get_user_role、create_repository_review_notification、deactivate_notifications
       使用 mock 替身。
     expected: SU pending_review→shared：返回 status=shared；审核通知 review_status=shared；待审核通知去活被调用；peer 重置 status=shared。

@@ -28,7 +28,7 @@ if BACKEND_ROOT not in sys.path:
     sys.path.append(BACKEND_ROOT)
 
 
-# Stub services.file_management_service to prevent importing the real service
+# Stub management.services.file.service to prevent importing the real service
 services_pkg = types.ModuleType("services")
 services_pkg.__path__ = []
 sys.modules.setdefault("services", services_pkg)
@@ -39,14 +39,14 @@ sys.modules.setdefault("services", services_pkg)
 import importlib.util
 
 _audit_spec = importlib.util.spec_from_file_location(
-    "services.audit_service",
-    os.path.join(BACKEND_ROOT, "services", "audit_service.py"),
+    "management.services.monitor.audit",
+    os.path.join(BACKEND_ROOT, "management", "services", "monitor", "audit.py"),
 )
 _audit_module = importlib.util.module_from_spec(_audit_spec)
-sys.modules["services.audit_service"] = _audit_module
+sys.modules["management.services.monitor.audit"] = _audit_module
 _audit_spec.loader.exec_module(_audit_module)
 
-sfms_stub = types.ModuleType("services.file_management_service")
+sfms_stub = types.ModuleType("management.services.file.service")
 
 async def _stub_upload_to_minio(files, folder, user_id=None):
     return []
@@ -146,7 +146,7 @@ sfms_stub.preprocess_files_generator = _stub_preprocess_files_generator
 sfms_stub.resolve_minio_upload_folder = _stub_resolve_minio_upload_folder
 sfms_stub.check_file_access = _stub_check_file_access
 sfms_stub.check_file_access_batch = _stub_check_file_access_batch
-sys.modules["services.file_management_service"] = sfms_stub
+sys.modules["management.services.file.service"] = sfms_stub
 setattr(services_pkg, "file_management_service", sfms_stub)
 
 vdb_service_stub = types.ModuleType("management.services.knowledge_base.service")
@@ -163,12 +163,12 @@ sys.modules["management.services.knowledge_base.service"] = vdb_service_stub
 setattr(services_pkg, "vectordatabase_service", vdb_service_stub)
 
 
-# Stub utils.auth_utils.get_current_user_id (the function actually used in the app)
+# Stub management.services.permission.identity.authentication_helpers.get_current_user_id (the function actually used in the app)
 utils_pkg = types.ModuleType("utils")
 utils_pkg.__path__ = [os.path.join(BACKEND_ROOT, "utils")]
 sys.modules.setdefault("utils", utils_pkg)
 
-auth_utils_stub = types.ModuleType("utils.auth_utils")
+auth_utils_stub = types.ModuleType("management.services.permission.identity.authentication_helpers")
 
 def _stub_get_current_user_id(authorization):
     """Stub for get_current_user_id - returns user_id and tenant_id tuple."""
@@ -178,7 +178,7 @@ def _stub_get_current_user_id(authorization):
     return ("user1", "tenant1")
 
 auth_utils_stub.get_current_user_id = _stub_get_current_user_id
-sys.modules["utils.auth_utils"] = auth_utils_stub
+sys.modules["management.services.permission.identity.authentication_helpers"] = auth_utils_stub
 setattr(utils_pkg, "auth_utils", auth_utils_stub)
 
 

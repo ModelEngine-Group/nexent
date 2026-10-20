@@ -1,3 +1,4 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 from unittest.mock import patch
 
 from services.workspace_cleanup_service import cleanup_orphaned_agent_workspaces

@@ -5,7 +5,7 @@ from unittest.mock import patch
 import pytest
 
 from consts.exceptions import ConversationNotFoundError, ValidationError
-from services.conversation_management_service import (
+from management.services.conversation.service import (
     update_conversation_knowledge_scope_service,
 )
 
@@ -17,9 +17,9 @@ SCOPE = {
 }
 
 
-@patch("services.conversation_management_service.update_conversation_knowledge_scope")
-@patch("services.conversation_management_service._resolve_knowledge_scope_for_update")
-@patch("services.conversation_management_service.get_conversation")
+@patch("management.services.conversation.service.update_conversation_knowledge_scope")
+@patch("management.services.conversation.service._resolve_knowledge_scope_for_update")
+@patch("management.services.conversation.service.get_conversation")
 def test_update_returns_effective_preview_and_warnings(
     mock_get_conversation, mock_resolve, mock_update
 ):
@@ -56,9 +56,9 @@ def test_update_returns_effective_preview_and_warnings(
     )
 
 
-@patch("services.conversation_management_service.update_conversation_knowledge_scope")
-@patch("services.conversation_management_service._resolve_knowledge_scope_for_update")
-@patch("services.conversation_management_service.get_conversation")
+@patch("management.services.conversation.service.update_conversation_knowledge_scope")
+@patch("management.services.conversation.service._resolve_knowledge_scope_for_update")
+@patch("management.services.conversation.service.get_conversation")
 def test_update_rejects_unavailable_items_before_save(
     mock_get_conversation, mock_resolve, mock_update
 ):
@@ -82,8 +82,8 @@ def test_update_rejects_unavailable_items_before_save(
     mock_update.assert_not_called()
 
 
-@patch("services.conversation_management_service.update_conversation_knowledge_scope")
-@patch("services.conversation_management_service.get_conversation")
+@patch("management.services.conversation.service.update_conversation_knowledge_scope")
+@patch("management.services.conversation.service.get_conversation")
 def test_update_without_agent_preserves_desired_scope(
     mock_get_conversation, mock_update
 ):
@@ -104,7 +104,7 @@ def test_update_without_agent_preserves_desired_scope(
     }]
 
 
-@patch("services.conversation_management_service.get_conversation", return_value=None)
+@patch("management.services.conversation.service.get_conversation", return_value=None)
 def test_update_rejects_inaccessible_conversation(_mock_get_conversation):
     with pytest.raises(ConversationNotFoundError):
         update_conversation_knowledge_scope_service(
@@ -118,8 +118,8 @@ def test_update_rejects_inaccessible_conversation(_mock_get_conversation):
 @pytest.mark.parametrize("policy", [{"top_k": 0}, {"hybrid_top_k": 8, "graph_top_k": 5}, {"vector_candidates": True}])
 def test_actual_workbench_save_rejects_invalid_retrieval_before_persistence(mocker, policy):
     from management.services.agent.system import system_agent_provider
-    from services import conversation_management_service as conversations
-    from services import knowledge_scope_service as scopes
+    from management.services.conversation import service as conversations
+    from management.services.knowledge_base import scope as scopes
 
     mocker.patch("consts.const.ENABLE_AIDP_KNOWLEDGE", True)
     mocker.patch.object(system_agent_provider, "get_workbench_main_ref", return_value=SimpleNamespace(agent_id=7, version_no=3))

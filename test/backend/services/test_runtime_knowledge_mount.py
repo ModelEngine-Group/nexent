@@ -4,7 +4,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from services import runtime_knowledge_mount as service
+from management.services.knowledge_base import mount as service
 
 
 def scope(source="local", mode="override", params=None):
@@ -58,7 +58,7 @@ def test_rejects_connection_range_and_invalid_parameters(mocker, params):
 
 def test_selected_range_replaces_defaults_before_tool_construction(mocker):
     from consts.model import ConversationKnowledgeScopeRequest
-    from services import knowledge_scope_service as scopes
+    from management.services.knowledge_base import scope as scopes
 
     mocker.patch.object(service, "ENABLE_AIDP_KNOWLEDGE", False)
     original = tool()

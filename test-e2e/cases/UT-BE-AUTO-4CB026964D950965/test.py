@@ -1,3 +1,4 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """D1 unit tests for ``get_provider_username`` in user_management_service.
 
 The function under test is a pure helper that resolves the non-empty username
@@ -10,11 +11,11 @@ import logging
 
 import pytest
 
-from services.user_management_service import get_provider_username
+from management.services.permission.identity.authentication import get_provider_username
 
 _CASE_ID = "UT-BE-AUTO-4CB026964D950965"
 
-_LIST_ACCOUNTS_PATH = "services.user_management_service.list_oauth_accounts_by_user_id"
+_LIST_ACCOUNTS_PATH = "management.services.permission.identity.authentication.list_oauth_accounts_by_user_id"
 
 
 def _patch_accounts(monkeypatch, accounts):

@@ -1,0 +1,68 @@
+schema_version: '1.0'
+change:
+  change_id: PR4134-SECURITY-CI-20261019
+  change_type: bugfix
+  bug_id: PR4134-SECURITY-CI-20261019
+  title: Fix CodeQL image errors and port probe exposure, and repair CI imports
+  description: Sanitize image failures, bind availability probes to loopback without
+    listening, compare complete MCP URL lists, and update stale test dependencies.
+  observed_behavior: Image failures return exception details; temporary port probe
+    binds all interfaces; six CI test files fail on stale imports or removed template
+    mocks.
+  expected_behavior: Keep image success/status contracts with generic errors, avoid
+    public listeners, support both configuration import contexts, and pass the six
+    failing CI suites.
+  escaped_stage: D1
+  coverage_gap:
+    type: missing_assertion
+    description: Existing image assertions expected leaked error messages, socket
+      bind/listen behavior lacked assertions, and the local runner injected backend
+      paths that masked CI subprocess imports. Stale removed-template mocks were not
+      included in the last merge test selection.
+  feature_contract_changed: false
+  affected_features:
+    existing:
+    - F-131
+    - V5-UT-BE-016
+    - V5-UT-BE-020
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing:
+    - UT-BE-016
+    - UT-BE-020
+    - UT-BE-AUTO-A5E5C8329C318684
+    added: []
+    modified: []
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    behaviors:
+    - Image failures never disclose exception or upstream failure details in JSON
+      or stream mode; successful image payloads and cache headers remain.
+    - MCP port probes use loopback binding without listening and reject occupied ports.
+    - Configuration imports work from the repository and backend directory without
+      inherited PYTHONPATH.
+    - CI evaluation and Agent boundary suites use current dependencies and retain
+      authorization, relationship validation and no-write assertions.
+    reason: Add boundary regressions that fail before the fix, strengthen complete
+      URL equality assertions, and reuse the actual CI runner for all six failing
+      files. Preserve existing formal D1 without duplicating unit proof.
+    test_selectors:
+    - test/backend/app/test_image_proxy_errors.py
+    - test/backend/app/test_image_app.py
+    - test/backend/services/test_mcp_port_availability.py
+    - test/backend/services/test_remote_mcp_service.py
+    - test/backend/agents/test_create_agent_info.py
+    - test/backend/app/test_evaluation_delete_app.py
+    - test/backend/consts/test_evaluation_set_limits.py
+    - test/backend/consts/test_runtime_thread_config.py
+    - test/backend/consts/test_workbench_deployment_defaults.py
+    - test/backend/consts/test_config_import_contexts.py
+    - test/backend/services/test_agent_relation_validation.py
+    - test/backend/services/test_agent_update_edit_boundary.py
+  notes: Evidence in sibling four-service-runtime-decoupling/changes/management-security-ci-fixes/design.md.
+    CodeQL alerts 157 and 216 are complete-URL membership assertions in tests, not
+    production URL sanitizers. No suppression or alert dismissal. No database or workflow
+    policy changes. Local UT does not certify remote CodeQL or full CI results.

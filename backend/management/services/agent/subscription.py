@@ -93,7 +93,19 @@ from management.services.agent.run import (
 from management.services.agent.stream import (
     safe_agent_stream_error_chunk as _safe_agent_stream_error_chunk,
 )
-from services.conversation_management_service import (
+from nexent.core.agents.run_agent import (
+    DeferredAgentRun,
+)
+from nexent.core.concurrency import (
+    ManagedTaskSpec,
+    ThreadCapacityExceeded,
+    ThreadQueueTimedOut,
+    run_blocking,
+)
+from nexent.monitor import (
+    agent_monitoring_context,
+)
+from management.services.conversation.service import (
     create_new_conversation,
     get_conversation_service,
     get_last_unit_for_message,
@@ -105,24 +117,24 @@ from services.conversation_management_service import (
     update_conversation_workbench_config_service,
     update_message_status,
 )
-from services.knowledge_scope_service import (
+from management.services.knowledge_base.scope import (
     build_runtime_knowledge_resources,
     resolve_knowledge_scope,
 )
-from services.runtime_state_service import (
+from management.services.agent.run_state import (
     runtime_state_service,
 )
-from services.streaming_channel import (
+from infrastructure.streaming.channels import (
     streaming_channel_manager,
 )
-from services.thread_lifecycle_service import (
+from infrastructure.concurrency import (
     runtime_thread_manager,
 )
-from utils.auth_utils import (
+from management.services.permission.identity.authentication_helpers import (
     get_current_user_info,
     get_user_language,
 )
-from utils.runtime_metadata_utils import (
+from infrastructure.serialization.runtime_metadata import (
     validate_runtime_metadata,
 )
 
@@ -290,7 +302,7 @@ async def run_agent_stream(
 
     canonical_workbench = None
     if agent_request.entrypoint == "workbench" and not resume:
-        from services.workbench_service import (
+        from management.services.agent.workbench import (
             assert_workbench_version,
             resolve_workbench_config,
         )
@@ -329,7 +341,7 @@ async def run_agent_stream(
             user_id=resolved_user_id,
         )
         if (conversation is None or agent_request.is_debug) and canonical_workbench.knowledge_scope is not None:
-            from services.knowledge_scope_service import (
+            from management.services.knowledge_base.scope import (
                 validate_conversation_retrieval_config,
             )
 
@@ -398,7 +410,7 @@ async def run_agent_stream(
         source_scope = ConversationKnowledgeScopeRequest.model_validate(stored_scope)
 
     if request_scope is not None and request_scope.retrieval_config is not None and canonical_workbench is None and not resume:
-        from services.knowledge_scope_service import (
+        from management.services.knowledge_base.scope import (
             validate_conversation_retrieval_config,
         )
 
@@ -406,7 +418,7 @@ async def run_agent_stream(
             request_scope, resolved_tenant_id, agent_request.agent_id, agent_request.version_no,
         )
     if not resume and agent_request.tool_params is not None:
-        from services.knowledge_scope_service import validate_request_retrieval_overrides
+        from management.services.knowledge_base.scope import validate_request_retrieval_overrides
 
         validate_request_retrieval_overrides(agent_request, resolved_tenant_id)
     resolved_scope = None

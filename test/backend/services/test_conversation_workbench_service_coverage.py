@@ -9,7 +9,7 @@ from test.backend.services import test_conversation_management_service as legacy
 
 
 service = __import__(
-    "backend.services.conversation_management_service",
+    "management.services.conversation.service",
     fromlist=["update_conversation_workbench_config_service"],
 )
 

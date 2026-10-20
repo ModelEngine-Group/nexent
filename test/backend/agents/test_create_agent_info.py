@@ -171,7 +171,7 @@ utils_mock.context_utils.build_context_inputs = MagicMock(return_value=[])
 
 # Add the mocked utils module to sys.modules
 sys.modules['utils'] = utils_mock
-sys.modules['utils.auth_utils'] = utils_mock.auth_utils
+sys.modules['management.services.permission.identity.authentication_helpers'] = utils_mock.auth_utils
 sys.modules['management.services.agent.context'] = utils_mock.context_utils
 
 # Provide a stub for the `boto3` module so that it can be imported safely even
@@ -273,7 +273,7 @@ sys.modules['nexent.core.models.prompt_cache'] = _create_stub_module(
 )
 sys.modules['smolagents.agents'] = MagicMock()
 sys.modules['smolagents.utils'] = MagicMock()
-sys.modules['services.remote_mcp_service'] = MagicMock()
+sys.modules['management.services.mcp.service'] = MagicMock()
 database_module = _create_stub_module("database")
 sys.modules['database'] = database_module
 skill_db_stub = MagicMock()
@@ -300,21 +300,21 @@ sys.modules['management.services.knowledge_base.service'].ElasticSearchService.f
     lambda index_names, **kwargs: list(index_names)
 sys.modules['services.tenant_config_service'] = MagicMock()
 sys.modules['management.services.agent.prompt'] = MagicMock()
-sys.modules['utils.config_utils'] = MagicMock()
-sys.modules['utils.http_client_utils'] = MagicMock()
-sys.modules['utils.langchain_utils'] = MagicMock()
+sys.modules['management.services.configuration.tenant.settings'] = MagicMock()
+sys.modules['infrastructure.http.client'] = MagicMock()
+sys.modules['management.services.tool.langchain'] = MagicMock()
 sys.modules['management.services.model.names'] = MagicMock()
 sys.modules['langchain_core.tools'] = MagicMock()
 # Build services module hierarchy with minimal functionality
 services_module = _create_stub_module("services")
 sys.modules['services'] = services_module
-sys.modules['services.image_service'] = _create_stub_module(
-    "services.image_service",
+sys.modules['management.services.file.image_proxy'] = _create_stub_module(
+    "management.services.file.image_proxy",
     get_vlm_model=MagicMock(return_value="stub_vlm"),
     get_video_understanding_model=MagicMock(return_value="stub_video_vlm"),
 )
-sys.modules['services.ind_aidp_service'] = _create_stub_module(
-    "services.ind_aidp_service",
+sys.modules['management.services.knowledge_base.providers.aidp'] = _create_stub_module(
+    "management.services.knowledge_base.providers.aidp",
     create_ind_aidp_image_url_builder=MagicMock(),
 )
 sys.modules['management.services.model.adapter'] = _create_stub_module(
@@ -322,19 +322,19 @@ sys.modules['management.services.model.adapter'] = _create_stub_module(
     get_llm_adapter=MagicMock(return_value="stub_llm_adapter"),
     get_vlm_adapter=MagicMock(return_value="stub_vlm_adapter"),
 )
-sys.modules['services.memory_config_service'] = MagicMock()
-sys.modules['services.memory_external_provider_service'] = _create_stub_module(
-    "services.memory_external_provider_service",
+sys.modules['management.services.configuration.user.memory'] = MagicMock()
+sys.modules['management.services.memory.providers.service'] = _create_stub_module(
+    "management.services.memory.providers.service",
     get_memory_external_provider_service=MagicMock(return_value=None),
 )
 # Extend services hierarchy with additional stubs
-sys.modules['services.file_management_service'] = _create_stub_module(
-    "services.file_management_service",
+sys.modules['management.services.file.service'] = _create_stub_module(
+    "management.services.file.service",
     get_llm_model=MagicMock(return_value="stub_llm_model"),
     validate_urls_access=MagicMock(),
 )
-sys.modules['services.tool_configuration_service'] = _create_stub_module(
-    "services.tool_configuration_service",
+sys.modules['management.services.tool.configuration'] = _create_stub_module(
+    "management.services.tool.configuration",
     initialize_tools_on_startup=AsyncMock(),
 )
 sys.modules['management.services.agent.service'] = _create_stub_module(
@@ -530,9 +530,9 @@ _utils_pkg.__path__ = [str((TEST_ROOT.parent) / "backend" / "utils")]
 sys.modules["utils"] = _utils_pkg
 
 # Mock all utils submodules that create_agent_info.py imports
-_redis_utils_mod = _create_stub_module("utils.redis_utils")
+_redis_utils_mod = _create_stub_module("infrastructure.redis")
 _redis_utils_mod.get_redis_client = MagicMock(return_value=MagicMock())
-sys.modules["utils.redis_utils"] = _redis_utils_mod
+sys.modules["infrastructure.redis"] = _redis_utils_mod
 setattr(_utils_pkg, "redis_utils", _redis_utils_mod)
 
 _model_name_utils_mod = _create_stub_module("management.services.model.names")
@@ -550,10 +550,10 @@ _prompt_loader_stub.should_enable_automation_tool_policy = (
 sys.modules["management.services.agent.prompt"] = _prompt_loader_stub
 setattr(_utils_pkg, "prompt_template_utils", _prompt_template_utils_mod)
 
-_config_utils_mod = _create_stub_module("utils.config_utils")
+_config_utils_mod = _create_stub_module("management.services.configuration.tenant.settings")
 _config_utils_mod.tenant_config_manager = MagicMock()
 _model_name_utils_mod.get_model_name_from_config = MagicMock(return_value="default")
-sys.modules["utils.config_utils"] = _config_utils_mod
+sys.modules["management.services.configuration.tenant.settings"] = _config_utils_mod
 setattr(_utils_pkg, "config_utils", _config_utils_mod)
 
 _context_utils_mod = _create_stub_module("management.services.agent.context")
@@ -561,9 +561,9 @@ _context_utils_mod.build_context_inputs = MagicMock(return_value=[])
 sys.modules["management.services.agent.context"] = _context_utils_mod
 setattr(_utils_pkg, "context_utils", _context_utils_mod)
 
-_langchain_utils_mod = _create_stub_module("utils.langchain_utils")
+_langchain_utils_mod = _create_stub_module("management.services.tool.langchain")
 _langchain_utils_mod.discover_langchain_modules = MagicMock(return_value=[])
-sys.modules["utils.langchain_utils"] = _langchain_utils_mod
+sys.modules["management.services.tool.langchain"] = _langchain_utils_mod
 setattr(_utils_pkg, "langchain_utils", _langchain_utils_mod)
 
 # Ensure real backend.agents.create_agent_info is available and uses our stubs
@@ -1054,7 +1054,7 @@ class TestDiscoverLangchainTools:
         with patch('backend.agents.create_agent_info.logger') as mock_logger:
             # Mock the import by patching the globals within the function scope
             with patch.dict('sys.modules', {
-                'utils.langchain_utils': Mock(discover_langchain_modules=mock_discover_func)
+                'management.services.tool.langchain': Mock(discover_langchain_modules=mock_discover_func)
             }):
                 # Execute the test
                 result = await discover_langchain_tools()
@@ -1078,7 +1078,7 @@ class TestDiscoverLangchainTools:
         mock_discover_func = Mock(return_value=[])
 
         with patch.dict('sys.modules', {
-            'utils.langchain_utils': Mock(discover_langchain_modules=mock_discover_func)
+            'management.services.tool.langchain': Mock(discover_langchain_modules=mock_discover_func)
         }):
             result = await discover_langchain_tools()
 
@@ -1093,7 +1093,7 @@ class TestDiscoverLangchainTools:
 
         with patch('backend.agents.create_agent_info.logger') as mock_logger:
             with patch.dict('sys.modules', {
-                'utils.langchain_utils': Mock(discover_langchain_modules=mock_discover_func)
+                'management.services.tool.langchain': Mock(discover_langchain_modules=mock_discover_func)
             }):
                 result = await discover_langchain_tools()
 
@@ -1120,7 +1120,7 @@ class TestDiscoverLangchainTools:
 
         with patch('backend.agents.create_agent_info.logger') as mock_logger:
             with patch.dict('sys.modules', {
-                'utils.langchain_utils': Mock(discover_langchain_modules=mock_discover_func)
+                'management.services.tool.langchain': Mock(discover_langchain_modules=mock_discover_func)
             }):
                 result = await discover_langchain_tools()
 
@@ -2213,10 +2213,10 @@ class TestCreateAgentConfig:
                 patch('backend.agents.create_agent_info._create_fixed_search_memory_tool') as mock_search_tool, \
                 patch('backend.agents.create_agent_info._get_skills_for_template', return_value=[]), \
                 patch.dict(sys.modules, {
-                    'services.memory_record_service': MagicMock(
+                    'management.services.memory.records': MagicMock(
                         _resolve_tenant_embedding_model_info=MagicMock(return_value=None),
                     ),
-                    'services.memory_context_service': MagicMock(
+                    'management.services.memory.context': MagicMock(
                         get_memory_context_service=MagicMock(
                             return_value=MagicMock(
                                 build_context=AsyncMock(return_value=types.SimpleNamespace(
@@ -2226,7 +2226,7 @@ class TestCreateAgentConfig:
                             )
                         ),
                     ),
-                    'services.memory_backend_adapter': MagicMock(
+                    'management.services.memory.provider': MagicMock(
                         build_memory_service_for_agent=MagicMock(return_value=None),
                     ),
                 }), \
@@ -2770,10 +2770,10 @@ class TestCreateAgentConfig:
                 patch('backend.agents.create_agent_info.prepare_prompt_templates') as mock_prepare_templates, \
                 patch('backend.agents.create_agent_info.get_model_by_model_id') as mock_get_model_by_id, \
                 patch.dict(sys.modules, {
-                    'services.memory_record_service': MagicMock(
+                    'management.services.memory.records': MagicMock(
                         _resolve_tenant_embedding_model_info=MagicMock(return_value=None),
                     ),
-                    'services.memory_context_service': MagicMock(
+                    'management.services.memory.context': MagicMock(
                         get_memory_context_service=MagicMock(
                             return_value=MagicMock(
                                 build_context=AsyncMock(return_value=types.SimpleNamespace(
@@ -2783,7 +2783,7 @@ class TestCreateAgentConfig:
                             )
                         ),
                     ),
-                    'services.memory_backend_adapter': MagicMock(
+                    'management.services.memory.provider': MagicMock(
                         build_memory_service_for_agent=MagicMock(return_value=None),
                     ),
                 }):
@@ -3035,10 +3035,10 @@ class TestCreateAgentConfig:
             patch.dict(sys.modules, {
                 'services': services_pkg,
                 'management.services.skill.service': skill_service_mod,
-                'services.memory_record_service': MagicMock(
+                'management.services.memory.records': MagicMock(
                     _resolve_tenant_embedding_model_info=MagicMock(return_value=None),
                 ),
-                'services.memory_context_service': MagicMock(
+                'management.services.memory.context': MagicMock(
                     get_memory_context_service=MagicMock(
                         return_value=MagicMock(
                             build_context=AsyncMock(return_value=types.SimpleNamespace(
@@ -3048,7 +3048,7 @@ class TestCreateAgentConfig:
                         )
                     ),
                 ),
-                'services.memory_backend_adapter': MagicMock(
+                'management.services.memory.provider': MagicMock(
                     build_memory_service_for_agent=MagicMock(return_value=None),
                 ),
             }),
@@ -3150,10 +3150,10 @@ class TestCreateAgentConfig:
                 "backend.agents.create_agent_info._get_skill_script_tools"
             ) as mock_get_skill_tools,
             patch.dict(sys.modules, {
-                'services.memory_record_service': MagicMock(
+                'management.services.memory.records': MagicMock(
                     _resolve_tenant_embedding_model_info=MagicMock(return_value=None),
                 ),
-                'services.memory_context_service': MagicMock(
+                'management.services.memory.context': MagicMock(
                     get_memory_context_service=MagicMock(
                         return_value=MagicMock(
                             build_context=AsyncMock(return_value=types.SimpleNamespace(
@@ -3163,7 +3163,7 @@ class TestCreateAgentConfig:
                         )
                     ),
                 ),
-                'services.memory_backend_adapter': MagicMock(
+                'management.services.memory.provider': MagicMock(
                     build_memory_service_for_agent=MagicMock(return_value=None),
                 ),
             }),
@@ -3262,10 +3262,10 @@ class TestCreateAgentConfig:
                 "backend.agents.create_agent_info._get_skill_script_tools"
             ) as mock_get_skill_tools,
             patch.dict(sys.modules, {
-                'services.memory_record_service': MagicMock(
+                'management.services.memory.records': MagicMock(
                     _resolve_tenant_embedding_model_info=MagicMock(return_value=None),
                 ),
-                'services.memory_context_service': MagicMock(
+                'management.services.memory.context': MagicMock(
                     get_memory_context_service=MagicMock(
                         return_value=MagicMock(
                             build_context=AsyncMock(return_value=types.SimpleNamespace(
@@ -3275,7 +3275,7 @@ class TestCreateAgentConfig:
                         )
                     ),
                 ),
-                'services.memory_backend_adapter': MagicMock(
+                'management.services.memory.provider': MagicMock(
                     build_memory_service_for_agent=MagicMock(return_value=None),
                 ),
             }),
@@ -3373,10 +3373,10 @@ class TestCreateAgentConfig:
                 "backend.agents.create_agent_info._get_skill_script_tools"
             ) as mock_get_skill_tools,
             patch.dict(sys.modules, {
-                'services.memory_record_service': MagicMock(
+                'management.services.memory.records': MagicMock(
                     _resolve_tenant_embedding_model_info=MagicMock(return_value=None),
                 ),
-                'services.memory_context_service': MagicMock(
+                'management.services.memory.context': MagicMock(
                     get_memory_context_service=MagicMock(
                         return_value=MagicMock(
                             build_context=AsyncMock(return_value=types.SimpleNamespace(
@@ -3386,7 +3386,7 @@ class TestCreateAgentConfig:
                         )
                     ),
                 ),
-                'services.memory_backend_adapter': MagicMock(
+                'management.services.memory.provider': MagicMock(
                     build_memory_service_for_agent=MagicMock(return_value=None),
                 ),
             }),
@@ -4381,8 +4381,7 @@ class TestFilterMcpServersAndTools:
 
         # Should contain the URLs of both servers
         assert len(result) == 2
-        assert "http://main.server" in result
-        assert "http://sub.server" in result
+        assert set(result) == {"http://main.server", "http://sub.server"}
 
     def test_filter_mcp_servers_unknown_server(self):
         """Test case for an unknown MCP server"""
@@ -7897,10 +7896,10 @@ class TestCreateAgentConfigMemoryBuildFailure:
              patch("backend.agents.create_agent_info.AgentConfig") as mock_agent_config, \
              patch("backend.agents.create_agent_info._get_skills_for_template", return_value=[]), \
              patch.dict(sys.modules, {
-                 "services.memory_record_service": MagicMock(
+                 "management.services.memory.records": MagicMock(
                      _resolve_tenant_embedding_model_info=MagicMock(return_value=None),
                  ),
-                 "services.memory_context_service": MagicMock(
+                 "management.services.memory.context": MagicMock(
                      get_memory_context_service=MagicMock(
                          return_value=MagicMock(
                              build_context=AsyncMock(
@@ -7909,7 +7908,7 @@ class TestCreateAgentConfigMemoryBuildFailure:
                          )
                      ),
                  ),
-                 "services.memory_backend_adapter": MagicMock(
+                 "management.services.memory.provider": MagicMock(
                      build_memory_service_for_agent=MagicMock(
                          side_effect=RuntimeError("DB connection lost")
                      ),
@@ -7967,15 +7966,15 @@ class TestCreateAgentConfigMemoryContextServiceFailure:
              patch("backend.agents.create_agent_info.AgentConfig") as mock_agent_config, \
              patch("backend.agents.create_agent_info._get_skills_for_template", return_value=[]), \
              patch.dict(sys.modules, {
-                 "services.memory_record_service": MagicMock(
+                 "management.services.memory.records": MagicMock(
                      _resolve_tenant_embedding_model_info=MagicMock(return_value=None),
                  ),
-                 "services.memory_context_service": MagicMock(
+                 "management.services.memory.context": MagicMock(
                      get_memory_context_service=MagicMock(
                          side_effect=RuntimeError("config missing")
                      ),
                  ),
-                 "services.memory_backend_adapter": MagicMock(
+                 "management.services.memory.provider": MagicMock(
                      build_memory_service_for_agent=MagicMock(return_value=None),
                  ),
              }):
@@ -8027,13 +8026,13 @@ class TestCreateAgentConfigMemoryProviderResults:
                 )
             )
         )
-        memory_record_service_mod = types.ModuleType("services.memory_record_service")
+        memory_record_service_mod = types.ModuleType("management.services.memory.records")
         memory_record_service_mod._resolve_tenant_embedding_model_info = MagicMock(return_value=None)
-        memory_context_service_mod = types.ModuleType("services.memory_context_service")
+        memory_context_service_mod = types.ModuleType("management.services.memory.context")
         memory_context_service_mod.get_memory_context_service = MagicMock(
             return_value=memory_context_service
         )
-        memory_backend_adapter_mod = types.ModuleType("services.memory_backend_adapter")
+        memory_backend_adapter_mod = types.ModuleType("management.services.memory.provider")
         memory_backend_adapter_mod.build_memory_service_for_agent = MagicMock(
             return_value=memory_service
         )
@@ -8053,9 +8052,9 @@ class TestCreateAgentConfigMemoryProviderResults:
              patch("backend.agents.create_agent_info.AgentConfig") as mock_agent_config, \
              patch("backend.agents.create_agent_info._get_skills_for_template", return_value=[]), \
              patch.dict(sys.modules, {
-                 "services.memory_record_service": memory_record_service_mod,
-                 "services.memory_context_service": memory_context_service_mod,
-                 "services.memory_backend_adapter": memory_backend_adapter_mod,
+                 "management.services.memory.records": memory_record_service_mod,
+                 "management.services.memory.context": memory_context_service_mod,
+                 "management.services.memory.provider": memory_backend_adapter_mod,
              }):
             mock_search_agent.return_value = {
                 "name": "test_agent", "description": "desc", "duty_prompt": "",
@@ -8083,11 +8082,11 @@ class TestCreateAgentConfigMemoryProviderResults:
     @pytest.mark.asyncio
     async def test_none_memory_providers_skip_store_and_presearch(self):
         """Provider None results are isolated as unavailable memory dependencies."""
-        memory_record_service_mod = types.ModuleType("services.memory_record_service")
+        memory_record_service_mod = types.ModuleType("management.services.memory.records")
         memory_record_service_mod._resolve_tenant_embedding_model_info = MagicMock(return_value=None)
-        memory_context_service_mod = types.ModuleType("services.memory_context_service")
+        memory_context_service_mod = types.ModuleType("management.services.memory.context")
         memory_context_service_mod.get_memory_context_service = MagicMock(return_value=None)
-        memory_backend_adapter_mod = types.ModuleType("services.memory_backend_adapter")
+        memory_backend_adapter_mod = types.ModuleType("management.services.memory.provider")
         memory_backend_adapter_mod.build_memory_service_for_agent = MagicMock(return_value=None)
 
         with patch("backend.agents.create_agent_info.search_agent_info_by_agent_id") as mock_search_agent, \
@@ -8105,9 +8104,9 @@ class TestCreateAgentConfigMemoryProviderResults:
              patch("backend.agents.create_agent_info.AgentConfig") as mock_agent_config, \
              patch("backend.agents.create_agent_info._get_skills_for_template", return_value=[]), \
              patch.dict(sys.modules, {
-                 "services.memory_record_service": memory_record_service_mod,
-                 "services.memory_context_service": memory_context_service_mod,
-                 "services.memory_backend_adapter": memory_backend_adapter_mod,
+                 "management.services.memory.records": memory_record_service_mod,
+                 "management.services.memory.context": memory_context_service_mod,
+                 "management.services.memory.provider": memory_backend_adapter_mod,
              }):
             mock_search_agent.return_value = {
                 "name": "test_agent", "description": "desc", "duty_prompt": "",
@@ -8538,3 +8537,26 @@ class TestBuildSecurityHeaders:
         ):
             assert _select_agent_model_id([7, 8], None, "tenant") == 8
             assert _select_agent_model_id([7, 8], 9, "tenant") == 9
+
+class TestDeepSeekRuntimeLanguage:
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("language", ["zh", "en"])
+    async def test_runtime_language_overrides_instance_language(self, language):
+        from backend.agents import create_agent_info as module
+
+        records = [{"tool_id": 7, "name": "deepseek_search", "class_name": "DeepSeekSearchTool",
+                    "source": "local", "output_type": "string", "inputs": "{}"}]
+        params = {"language": "zh", "deepseek_api_key": "synthetic", "only_high_quality": True,
+                  "localization": "::1", "max_content_chars": 200}
+        with patch.object(module, "discover_langchain_tools", new_callable=AsyncMock, return_value=[]), patch.object(
+            module, "_resolve_runtime_tool_records", return_value=records
+        ), patch.object(module, "search_agent_info_by_agent_id", return_value={"name": "Agent"}), patch.object(
+            module, "_merge_tool_params", return_value=dict(params)
+        ), patch.object(module, "ToolConfig") as config:
+            await module.create_tool_config_list(1, "tenant", "user", language=language)
+            actual = config.call_args.kwargs["params"]
+            assert actual["language"] == language
+            assert "localization" not in actual
+            assert "max_content_chars" not in actual
+            assert actual["only_high_quality"] is True
+            assert params["language"] == "zh"

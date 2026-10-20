@@ -1,3 +1,4 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """D1 backend policy tests for repository, sharing, runtime and memory."""
 
 from __future__ import annotations
@@ -24,7 +25,7 @@ STAGE = pytest.mark.stage("D1")
 @STAGE
 @pytest.mark.case_id("UT-BE-018")
 def test_selected_share_messages_form_an_independent_snapshot() -> None:
-    from services.conversation_share_service import _select_message_pairs
+    from management.services.conversation.sharing import _select_message_pairs
 
     original = [
         {"role": "user", "message_id": 1, "content": "q1"},
@@ -35,17 +36,3 @@ def test_selected_share_messages_form_an_independent_snapshot() -> None:
     selected = _select_message_pairs(original, [3])
     assert [item["message_id"] for item in selected] == [3, 4]
     assert _select_message_pairs(original, []) is original
-
-
-
-
-
-
-
-
-
-
-
-
-
-

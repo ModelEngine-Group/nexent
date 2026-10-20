@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import pytest
 from pydantic import ValidationError
 
@@ -629,7 +631,6 @@ def test_generate_prompt_request():
         task_description="Create an agent",
         agent_id=1,
         model_id=2,
-        prompt_template_id=3,
         tool_ids=[10, 20],
         sub_agent_ids=[100]
     )

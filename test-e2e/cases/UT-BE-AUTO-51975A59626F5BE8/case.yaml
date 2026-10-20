@@ -21,7 +21,7 @@ case:
     legacy_asset_declaration: '- 无固定本地资产；get_model_id_by_display_name / get_model_by_model_id 依赖以 mock 注入，不使用真实数据库或模型。'
   steps:
   - order: 1
-    action: 在本地工作区直接导入 backend/services/repository_import_precheck.py 的 _check_model_available 与 backend/management/services/model/resolver.py
+    action: 在本地工作区直接导入 backend/management/services/repository/precheck.py 的 _check_model_available 与 backend/management/services/model/resolver.py
       的 is_model_available，mock get_model_id_by_display_name 与 get_model_by_model_id，构造最小有效输入；测试代码不得读取生产凭据。
     expected: display_name 为 None/空/仅空白时返回 (True, None)，不产生模型不可用误报。
   - order: 2

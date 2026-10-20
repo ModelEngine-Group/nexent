@@ -14,7 +14,7 @@ from consts.model import ToolSourceEnum
 from consts.tool_labels import BUILTIN_LABEL_MAP
 from database.client import as_dict, filter_property, get_db_session
 from database.db_models import ToolInfo, ToolInstance
-from utils.tool_utils import get_local_tools_description_zh
+from management.services.tool.catalog import get_local_tools_description_zh
 
 
 logger = logging.getLogger(__name__)
@@ -365,6 +365,11 @@ def update_tool_table_from_scan_tool_list(
                     {"created_by": user_id, "updated_by": user_id, "author": tenant_id, "is_available": is_available})
                 new_tool = ToolInfo(**filtered_tool_data)
                 session.add(new_tool)
+                if tool.name == "deepseek_search" and tool.source == ToolSourceEnum.LOCAL.value:
+                    from database.tool_default_tags_db import initialize_search_tool_tags
+
+                    session.flush()
+                    initialize_search_tool_tags(session, tenant_id, new_tool.tool_id, user_id)
     logger.info("Updated tool table in PG database")
 
 
@@ -438,7 +443,7 @@ def add_tool_field(tool_info):
                 ele["default"] = instance_value
         tool_dict = dict(as_dict(tool))
         tool_dict["params"] = tool_params
-        
+
         # Merge description_zh from SDK for local tools
         tool_name = tool_dict.get("name")
         if tool_dict.get("source") == "local":
@@ -446,7 +451,7 @@ def add_tool_field(tool_info):
             if tool_name in local_tool_descriptions:
                 sdk_info = local_tool_descriptions[tool_name]
                 tool_dict["description_zh"] = sdk_info.get("description_zh")
-                
+
                 # Merge params description_zh from SDK
                 for param in tool_params:
                     if not param.get("description_zh"):
@@ -454,7 +459,7 @@ def add_tool_field(tool_info):
                             if sdk_param.get("name") == param.get("name"):
                                 param["description_zh"] = sdk_param.get("description_zh")
                                 break
-                
+
                 # Merge inputs description_zh from SDK
                 inputs_str = tool_dict.get("inputs", "{}")
                 try:
@@ -468,7 +473,7 @@ def add_tool_field(tool_info):
                         tool_dict["inputs"] = json.dumps(inputs, ensure_ascii=False)
                 except (json.JSONDecodeError, TypeError):
                     pass
-        
+
         # combine tool_info and tool_dict
         tool_info.update(tool_dict)
         return tool_info

@@ -11,7 +11,7 @@ from database.attachment_db import (
     get_file_url,
     upload_fileobj,
 )
-from services.file_management_service import is_allowed_skill_upload_path
+from management.services.file.service import is_allowed_skill_upload_path
 
 logger = logging.getLogger(__name__)
 
