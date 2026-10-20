@@ -26,7 +26,8 @@ import {
 
 async function renderSkillStream(
   events: SkillCreationEvent[],
-  onNl2SkillEvent?: (event: SkillCreationEvent) => void
+  onNl2SkillEvent?: (event: SkillCreationEvent) => void,
+  messages?: unknown[]
 ) {
   runAgent.mockImplementationOnce(async () =>
     new ReadableStream<Uint8Array>({
@@ -41,7 +42,7 @@ async function renderSkillStream(
     }).getReader()
   );
   const input = {
-    messages: [
+    messages: messages ?? [
       {
         id: "question",
         role: "user",
@@ -176,4 +177,31 @@ it("keeps real model thinking in a Skill creation stream", async () => {
       }),
     ])
   );
+});
+
+it("sends the original request when continuing after an empty failed response", async () => {
+  await renderSkillStream([{ type: "done", content: "" }], undefined, [
+    {
+      id: "original",
+      role: "user",
+      content: [{ type: "text", text: "创建会议纪要技能，支持导出 Markdown" }],
+    },
+    {
+      id: "failed",
+      role: "assistant",
+      content: [],
+      status: { type: "incomplete", reason: "error" },
+    },
+    {
+      id: "continue",
+      role: "user",
+      content: [{ type: "text", text: "继续" }],
+    },
+  ]);
+  const request = runAgent.mock.calls.at(-1)?.[0];
+  expect(request.query).toBe("继续");
+  expect(request.history).toEqual([
+    { role: "user", content: "创建会议纪要技能，支持导出 Markdown" },
+    { role: "assistant", content: "" },
+  ]);
 });
