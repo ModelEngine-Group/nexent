@@ -79,7 +79,7 @@ def test_wire_channels_and_sources(provider, method):
             for channel,prefix in (("vector_search","vector"),("full_text_search","full_text")):
                 assert (f"{prefix}_candidates" in h) == (channel in enabled)
                 if channel in enabled:
-                    assert h[f"{prefix}_candidates"]==7
+                    assert h[f"{prefix}_candidates"]==10
                     assert h[f"{prefix}_score_threshold"]==0
         assert result["results"][0]["text"] == "fixture"
         messages = [json.loads(raw) for raw in tool.observer.get_cached_message()]

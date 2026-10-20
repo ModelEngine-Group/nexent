@@ -882,8 +882,8 @@ class MetadataCondition(BaseModel):
 class HybridSearchConfig(BaseModel):
     """Per-channel knobs for the vector/full-text part of a FusionSearch call."""
 
-    vector_candidates: Optional[int] = Field(default=None, ge=1, le=500)
-    full_text_candidates: Optional[int] = Field(default=None, ge=1, le=500)
+    vector_candidates: int = Field(default=10, ge=1, le=500)
+    full_text_candidates: int = Field(default=10, ge=1, le=500)
     hybrid_top_k: int = Field(0, ge=0, le=100)
     vector_score_threshold: float = Field(0.0, ge=0.0, le=1.0)
     full_text_score_threshold: float = Field(0.0, ge=0.0, le=1.0)
@@ -894,7 +894,7 @@ class GraphSearchConfig(BaseModel):
 
     graph_top_k: int = Field(0, ge=0, le=100)
     graph_score_threshold: float = Field(0.0, ge=0.0, le=1.0)
-    graph_reranking_enable: Optional[bool] = None
+    graph_reranking_enable: bool = True
 
 
 class FusionSearchRequest(BaseModel):

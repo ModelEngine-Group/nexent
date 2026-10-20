@@ -414,9 +414,7 @@ export function AidpRetrievalParamsForm({
       max={500}
       disabled={disabled}
       invalid={Boolean(errors[key])}
-      onChange={(value) =>
-        onChange({ [key]: value === c.top_k ? null : value })
-      }
+      onChange={(value) => onChange({ [key]: value })}
       note={candidateNote(key)}
     />
   );
@@ -525,10 +523,10 @@ export function AidpRetrievalParamsForm({
             onChange({
               top_k: value,
               ...(c.vector_candidates === c.top_k
-                ? { vector_candidates: null }
+                ? { vector_candidates: value }
                 : {}),
               ...(c.full_text_candidates === c.top_k
-                ? { full_text_candidates: null }
+                ? { full_text_candidates: value }
                 : {}),
             })
           }

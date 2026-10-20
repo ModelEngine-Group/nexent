@@ -15,38 +15,25 @@ export const aidpDefaults: Record<string, unknown> = {
   query_expansion_enable: false,
   related_search_enable: false,
   multi_modal: true,
-  vector_candidates: null,
-  full_text_candidates: null,
+  vector_candidates: 10,
+  full_text_candidates: 10,
   hybrid_top_k: 0,
   graph_top_k: 0,
   vector_score_threshold: 0,
   full_text_score_threshold: 0,
   graph_score_threshold: 0,
-  graph_reranking_enable: null,
+  graph_reranking_enable: true,
 };
 export const isAidpTool = (name?: string | null) =>
   name === "aidp_search" || name === "ind_aidp_search";
-export const isAidpCandidate = (name: string) =>
-  name === "vector_candidates" || name === "full_text_candidates";
 export function mergeAidpConfig(
   ...layers: (Record<string, unknown> | undefined | null)[]
 ) {
   const result: Record<string, unknown> = {};
   for (const layer of layers) {
     for (const [key, value] of Object.entries(layer ?? {})) {
-      if (
-        Object.hasOwn(aidpDefaults, key) &&
-        (value != null || isAidpCandidate(key))
-      )
+      if (Object.hasOwn(aidpDefaults, key) && value != null)
         result[key] = value;
-    }
-    for (const candidate of ["vector_candidates", "full_text_candidates"]) {
-      if (
-        result.top_k != null &&
-        Number.isInteger(result[candidate]) &&
-        result[candidate] === result.top_k
-      )
-        result[candidate] = null;
     }
   }
   return result;
@@ -60,9 +47,7 @@ export function aidpMethods(method: unknown): string[] {
 }
 export function resolveAidpConfig(raw: Record<string, unknown>) {
   const result = { ...aidpDefaults, ...mergeAidpConfig(raw) };
-  for (const key of ["vector_candidates", "full_text_candidates"])
-    result[key] ??= result.top_k;
-  result.graph_reranking_enable ??= result.reranking_enable;
+  if (!result.reranking_enable) result.graph_reranking_enable = false;
   return result;
 }
 export function aidpErrors(

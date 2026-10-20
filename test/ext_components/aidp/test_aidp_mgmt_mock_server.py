@@ -213,7 +213,7 @@ def _fusion(server, **payload):
 
 
 def _hybrid(**overrides):
-    config = {"vector_candidates": None, "full_text_candidates": None, "hybrid_top_k": 0,
+    config = {"vector_candidates": 10, "full_text_candidates": 10, "hybrid_top_k": 0,
               "vector_score_threshold": 0.0, "full_text_score_threshold": 0.0}
     config.update(overrides)
     return config
@@ -287,7 +287,7 @@ def test_zero_caps_are_not_zero_quotas_and_candidates_truncate(mock_aidp_server)
     server = mock_aidp_server
     zero = _fusion(server, query="AIDP", kds_list=["aidp-kb-faq", "aidp-kb-product"],
                    search_method="vector_search", topk=10,
-                   hybrid_search_config=_hybrid(vector_candidates=None, hybrid_top_k=0))
+                   hybrid_search_config=_hybrid(vector_candidates=10, hybrid_top_k=0))
     assert zero.status_code == 200
     assert zero.json()["result"]
 

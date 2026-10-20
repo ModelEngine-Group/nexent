@@ -89,8 +89,8 @@ def test_connection_credentials_cannot_be_saved_as_session_parameters():
         ConversationKnowledgeScopeRequest.model_validate({"retrieval_config": {"api_key": "secret"}})
 
 
-@pytest.mark.parametrize("override,expected", [({"top_k":7},30), ({"top_k":7,"vector_candidates":None},7)])
-def test_aidp_old_catalog_merged_following_without_mutation(mocker, override, expected):
+@pytest.mark.parametrize("override,expected", [({"top_k":7},30), ({"top_k":7,"vector_candidates":30},30)])
+def test_aidp_old_catalog_merged_fixed_values_without_mutation(mocker, override, expected):
     from nexent.core.ext_components.aidp.retrieval_config import (
         build_payload,
         resolve_config,
@@ -103,7 +103,7 @@ def test_aidp_old_catalog_merged_following_without_mutation(mocker, override, ex
     config = {p["name"]:p.get("default") for p in mounted[0]["params"]}
     payload = build_payload(resolve_config(config),"q",["kb"])
     assert payload["hybrid_search_config"]["vector_candidates"] == expected
-    assert payload["hybrid_search_config"]["full_text_candidates"] == 7
+    assert payload["hybrid_search_config"]["full_text_candidates"] == 10
     assert payload["graph_search_config"]["graph_reranking_enable"] is False
     assert original == before
     assert service.mount_knowledge_records([original],None,"tenant") == [before]

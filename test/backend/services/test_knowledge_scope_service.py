@@ -570,15 +570,15 @@ def test_retrieval_input_rejects_invalid_config_against_inherited_root(mocker, p
         service.validate_conversation_retrieval_config(scope, "tenant", 7, 3)
 
 
-def test_retrieval_input_uses_inherited_limit_and_saves_automatic_following(mocker):
+def test_retrieval_input_saves_fixed_candidate_values(mocker):
     from management.services.knowledge_base import scope as service
     mocker.patch("consts.const.ENABLE_AIDP_KNOWLEDGE", True)
     mocker.patch.object(service, "snapshot_runtime_knowledge_tree", return_value=[{"tools": [{
         "class_name": "AidpSearchTool", "params": [{"name": "top_k", "default": 30}],
     }]}])
-    scope = ConversationKnowledgeScopeRequest(retrieval_config={"hybrid_top_k": 12, "vector_candidates": 30})
+    scope = ConversationKnowledgeScopeRequest(retrieval_config={"hybrid_top_k": 12, "vector_candidates": 30, "full_text_candidates": 30})
     service.validate_conversation_retrieval_config(scope, "tenant", 7, 3)
-    assert scope.retrieval_config == {"hybrid_top_k": 12, "vector_candidates": None}
+    assert scope.retrieval_config == {"hybrid_top_k": 12, "vector_candidates": 30, "full_text_candidates": 30}
     scope.retrieval_config = {"vector_candidates": 10}
     service.validate_conversation_retrieval_config(scope, "tenant", 7, 3)
     assert scope.retrieval_config == {"vector_candidates": 10}

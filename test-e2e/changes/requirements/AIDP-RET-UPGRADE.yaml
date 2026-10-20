@@ -5,7 +5,7 @@
     "change_type": "requirement",
     "requirement_id": "AIDP-RET",
     "title": "AIDP graph and combined retrieval upgrade",
-    "description": "Implement the authorized local four-document contract; traditional UT owns validation arithmetic, component tests own controlled form state, protocol Case adds actual HTTP evidence. Existing UT and PW-KB-AIDP-01 do not cover advanced fields or candidate following.",
+    "description": "Implement the authorized local four-document contract; traditional UT owns validation arithmetic, component tests own controlled form state, protocol Case adds actual HTTP evidence. Existing UT and PW-KB-AIDP-01 do not cover advanced fields or fixed candidate values.",
     "affected_features": {
       "existing": [],
       "added": [
@@ -36,9 +36,9 @@
       "decision": "strengthen",
       "behaviors": [
         "Seven explicit channel combinations and strict numeric/dependency validation at input boundaries",
-        "Historical missing/null defaults; equal candidates automatically follow while different candidates stay fixed",
+        "Candidates are fixed integers; the frontend only performs equal-value linkage when editing top_k",
         "Merged conversation overrides, two wrapper identities and response provenance",
-        "Trust saved policies during merging and SDK construction; validate raw submitted fields before following normalization",
+        "Trust saved policies during merging and SDK construction; validate raw submitted fields before normalization",
         "Unified transport/JSON/response errors, bounded retries and retry logs; complete SDK parameter descriptions"
       ],
       "reason": "Existing UT proves legacy wrapper and permissions but lacks advanced policy boundaries.",

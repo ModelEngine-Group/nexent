@@ -7,14 +7,13 @@ CHANNELS = ("vector_search", "full_text_search", "graph_search")
 ALL_CHANNELS = "|".join(CHANNELS)
 SEARCH_METHODS = frozenset((*CHANNELS, *("|".join(c) for c in combinations(CHANNELS, 2)), ALL_CHANNELS))
 RERANK_MODES = frozenset({"performance", "high_accuracy", "jargon_coverage"})
-CANDIDATES = frozenset({"vector_candidates", "full_text_candidates"})
 DEFAULTS = {
     "search_method": ALL_CHANNELS, "top_k": 10, "score_threshold": 0.0,
     "reranking_enable": True, "reranking_mode": "performance", "rewrite_enable": False,
     "query_expansion_enable": False, "related_search_enable": False, "multi_modal": True,
-    "vector_candidates": None, "full_text_candidates": None, "hybrid_top_k": 0,
+    "vector_candidates": 10, "full_text_candidates": 10, "hybrid_top_k": 0,
     "graph_top_k": 0, "vector_score_threshold": 0.0, "full_text_score_threshold": 0.0,
-    "graph_score_threshold": 0.0, "graph_reranking_enable": None,
+    "graph_score_threshold": 0.0, "graph_reranking_enable": True,
 }
 CONFIG_KEYS = frozenset(DEFAULTS)
 INTEGER_RANGES = {"top_k": (1, 100), "vector_candidates": (1, 500),
@@ -33,28 +32,21 @@ def active_channels(method):
 
 
 def merge_config(*layers):
-    """Ordinary null inherits; candidate null explicitly clears an inherited integer."""
+    """Apply later fixed values; missing or null leaves the earlier value in place."""
     merged = {}
     for layer in layers:
         for key, value in layer.items():
-            if key in CONFIG_KEYS and (value is not None or key in CANDIDATES):
+            if key in CONFIG_KEYS and value is not None:
                 merged[key] = value
-        for key in CANDIDATES:
-            value = merged.get(key)
-            if "top_k" in merged and value == merged["top_k"]:
-                merged[key] = None
     return merged
 
 
 def resolve_config(config):
-    """Fill defaults and following values without repeating input validation."""
+    """Fill defaults and normalize the method without validation side effects."""
     result = {**DEFAULTS, **merge_config(config)}
     result["search_method"] = normalize_method(result["search_method"])
-    for key in CANDIDATES:
-        if result[key] is None:
-            result[key] = result["top_k"]
-    if result["graph_reranking_enable"] is None:
-        result["graph_reranking_enable"] = result["reranking_enable"]
+    if not result["reranking_enable"]:
+        result["graph_reranking_enable"] = False
     return result
 
 
@@ -68,7 +60,7 @@ def validate_config(config, inherited=None):
     """Check submitted fields before merging them with trusted persisted values."""
     for key, value in config.items():
         if value is None:
-            continue
+            raise ValueError(f"{key}: fixed value required")
         if key == "search_method":
             if not isinstance(value, str) or (
                 value != "hybrid_search" and any(token not in CHANNELS for token in value.split("|"))
@@ -87,9 +79,13 @@ def validate_config(config, inherited=None):
         elif key in THRESHOLD_KEYS:
             if isinstance(value, bool) or not isinstance(value, (int, float)) or not 0 <= value <= 1:
                 raise ValueError(f"{key}: expected finite number 0-1")
-    result = resolve_config(merge_config(inherited or {}, config))
-    if result["graph_reranking_enable"] and not result["reranking_enable"]:
+    merged = merge_config(inherited or {}, config)
+    if (
+        config.get("graph_reranking_enable") is True
+        and merged.get("reranking_enable", DEFAULTS["reranking_enable"]) is False
+    ):
         raise ValueError("graph_reranking_enable: requires reranking_enable")
+    result = resolve_config(merged)
     channels = active_channels(result["search_method"])
     hybrid = bool(channels & {"vector_search", "full_text_search"})
     graph = "graph_search" in channels
@@ -107,14 +103,13 @@ def validate_config(config, inherited=None):
 
 
 def prepare_config(config, inherited):
-    """Validate an input patch and preserve automatic following when saving it."""
-    effective = validate_config(config, inherited)
+    """Validate submitted fields and return the fixed values to persist."""
+    validate_config(config, inherited)
     raw = merge_config(config)
     if "search_method" in raw:
-        raw["search_method"] = effective["search_method"]
-    for key in CANDIDATES:
-        if key in raw and effective[key] == effective["top_k"]:
-            raw[key] = None
+        raw["search_method"] = normalize_method(raw["search_method"])
+    if raw.get("reranking_enable") is False and "graph_reranking_enable" not in raw:
+        raw["graph_reranking_enable"] = False
     return raw
 
 

@@ -19,13 +19,13 @@
     ],
     "test_data": {
       "methods": "vector, full text, graph, all pairs and hybrid",
-      "legacy": "top_k=7, reranking_enable=false, multi_modal=false, candidates missing/null/fixed"
+      "legacy": "top_k=7, reranking_enable=false, multi_modal=false, candidates fixed/derived at the frontend"
     },
     "steps": [
       {
         "order": 1,
         "action": "Construct both actual SDK tools for seven method sets and legacy partial settings, then send via a local HTTP protocol fixture.",
-        "expected": "POST FusionSearch uses topk/multi_modal_enable, dynamic candidates, zero caps, channel-specific objects and no inactive fields."
+        "expected": "POST FusionSearch uses topk/multi_modal_enable, fixed candidate values, zero caps, channel-specific objects and no inactive fields."
       },
       {
         "order": 2,
@@ -34,7 +34,7 @@
       }
     ],
     "expected_results": [
-      "POST FusionSearch uses topk/multi_modal_enable, dynamic candidates, zero caps, channel-specific objects and no inactive fields.",
+      "POST FusionSearch uses topk/multi_modal_enable, fixed candidate values, zero caps, channel-specific objects and no inactive fields.",
       "Both wrappers preserve scope and provenance and share retrieval errors; missing/null/non-list result is rejected while an empty list is valid; retries remain limited to three transient attempts; invalid configuration causes no HTTP."
     ],
     "forbidden_side_effects": [
@@ -43,7 +43,7 @@
     "acceptance": [
       {
         "id": "AC-01",
-        "description": "POST FusionSearch uses topk/multi_modal_enable, dynamic candidates, zero caps, channel-specific objects and no inactive fields.; Both wrappers preserve scope and provenance and share retrieval errors; missing/null/non-list result is rejected while an empty list is valid; retries remain limited to three transient attempts; invalid configuration causes no HTTP.",
+        "description": "POST FusionSearch uses topk/multi_modal_enable, fixed candidate values, zero caps, channel-specific objects and no inactive fields.; Both wrappers preserve scope and provenance and share retrieval errors; missing/null/non-list result is rejected while an empty list is valid; retries remain limited to three transient attempts; invalid configuration causes no HTTP.",
         "steps": [
           1,
           2
@@ -62,7 +62,7 @@
       "method": "POST",
       "endpoint": "/KnowledgeBase/Tenants/{tenant_id}/Retrieval/FusionSearch",
       "request_expectations": [
-        "POST FusionSearch uses topk/multi_modal_enable, dynamic candidates, zero caps, channel-specific objects and no inactive fields."
+        "POST FusionSearch uses topk/multi_modal_enable, fixed candidate values, zero caps, channel-specific objects and no inactive fields."
       ],
       "response_expectations": [
         "Both wrappers preserve scope and provenance and share retrieval errors; missing/null/non-list result is rejected while an empty list is valid; retries remain limited to three transient attempts; invalid configuration causes no HTTP."

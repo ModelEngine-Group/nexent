@@ -7465,9 +7465,9 @@ class TestMergeToolParams:
                 {"name":"reranking_enable","default":False}]}
         fixed=_merge_tool_params(record,{"top_k":7,"multi_modal":None})
         assert fixed["vector_candidates"]==30 and fixed["multi_modal"] is False
-        following=_merge_tool_params(record,{"top_k":7,"vector_candidates":None})
-        payload=build_payload(resolve_config(following),"q",["kb"])
-        assert payload["hybrid_search_config"]["vector_candidates"]==7
+        ignored=_merge_tool_params(record,{"top_k":7,"vector_candidates":None})
+        payload=build_payload(resolve_config(ignored),"q",["kb"])
+        assert payload["hybrid_search_config"]["vector_candidates"]==30
         assert payload["graph_search_config"]["graph_reranking_enable"] is False
         assert record["params"][1]["default"]==30
 

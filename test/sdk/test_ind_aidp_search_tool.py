@@ -190,7 +190,7 @@ def test_init_reads_official_legacy_method_without_revalidation(monkeypatch):
     tool = make_tool(search_method="hybrid_search", top_k=7, reranking_enable=False)
     payload = tool._payload("q")
     assert payload["search_method"] == "vector_search|full_text_search|graph_search"
-    assert payload["hybrid_search_config"]["vector_candidates"] == 7
+    assert payload["hybrid_search_config"]["vector_candidates"] == 10
     assert payload["graph_search_config"]["graph_reranking_enable"] is False
     with pytest.raises(ValueError, match="tenant_id"):
         make_tool(tenant_id="")

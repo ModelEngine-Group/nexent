@@ -6040,7 +6040,7 @@ def test_aidp_policy_checked_once_before_persistence(mocker, params, rejected):
         persist.assert_not_called()
     else:
         _tool_cfg_service.update_tool_info_impl(request, "tenant", "user")
-        assert request.params == {"top_k": 10, "vector_candidates": None}
+        assert request.params == {"top_k": 10, "vector_candidates": 10}
         persist.assert_called_once()
     provider.assert_not_called()
     duplicate_check.assert_not_called()
@@ -6055,15 +6055,15 @@ def test_aidp_catalog_optional_candidates_are_numeric_and_following(mocker):
         inputs={}
         output_type="string"
         category="search"
-        def __init__(self, vector_candidates: Optional[int]=Field(default=None,ge=1,le=500),
-                     graph_reranking_enable: Optional[bool]=Field(default=None)):
+        def __init__(self, vector_candidates: int=Field(default=10,ge=1,le=500),
+                     graph_reranking_enable: bool=Field(default=True)):
             pass
     from management.services.tool import discovery
     mocker.patch.object(discovery, "get_local_tools_classes", return_value=[CatalogTool])
     records=discovery.get_local_tools()
     params={p["name"]:p for p in records[0].params}
     assert params["vector_candidates"]["type"]=="integer"
-    assert params["vector_candidates"]["default"] is None
+    assert params["vector_candidates"]["default"] == 10
     assert params["vector_candidates"]["constraints"]=={"ge":1,"le":500}
     assert params["graph_reranking_enable"]["type"]=="boolean"
 

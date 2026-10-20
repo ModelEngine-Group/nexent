@@ -12,7 +12,7 @@
     "business_rules": [
       {
         "rule_id": "AIDP-RETRIEVAL-RULE-01",
-        "description": "Validate submitted policies at input boundaries; use explicit channel combinations; infer candidate following from equality with the total; build retrieval requests without repeated validation; retain scope and provenance. Both wrappers share transport/JSON/response errors; require a list-valued result; retain retry status/count/delay logs without request secrets."
+        "description": "Validate submitted policies at input boundaries; use explicit channel combinations; keep candidate values fixed in the backend; build retrieval requests without repeated validation; retain scope and provenance. Both wrappers share transport/JSON/response errors; require a list-valued result; retain retry status/count/delay logs without request secrets."
       }
     ],
     "required_test_stages": [

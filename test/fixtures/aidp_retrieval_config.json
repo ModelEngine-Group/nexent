@@ -1,6 +1,6 @@
 [
-  {"name":"missing fields follow effective limit", "config":{"top_k":7,"reranking_enable":false,"multi_modal":false}, "expected":{"top_k":7,"vector_candidates":7,"full_text_candidates":7,"graph_reranking_enable":false,"multi_modal":false,"hybrid_top_k":0,"graph_top_k":0}},
-  {"name":"manual candidate survives total changes", "config":{"top_k":40,"vector_candidates":50}, "expected":{"vector_candidates":50,"full_text_candidates":40,"graph_reranking_enable":true}},
-  {"name":"null restores following", "config":{"top_k":40,"vector_candidates":null,"full_text_candidates":10}, "expected":{"vector_candidates":40,"full_text_candidates":10}},
-  {"name":"zero caps and jargon", "config":{"top_k":1,"hybrid_top_k":0,"graph_top_k":0,"reranking_mode":"jargon_coverage"}, "expected":{"vector_candidates":1,"full_text_candidates":1,"hybrid_top_k":0,"graph_top_k":0,"reranking_mode":"jargon_coverage"}}
+  {"name":"missing candidates use fixed default", "config":{"top_k":7,"reranking_enable":false,"multi_modal":false}, "expected":{"top_k":7,"vector_candidates":10,"full_text_candidates":10,"graph_reranking_enable":false,"multi_modal":false,"hybrid_top_k":0,"graph_top_k":0}},
+  {"name":"explicit candidates survive total changes", "config":{"top_k":40,"vector_candidates":50,"full_text_candidates":40}, "expected":{"vector_candidates":50,"full_text_candidates":40,"graph_reranking_enable":true}},
+  {"name":"graph inherits explicit global switch", "config":{"top_k":40,"vector_candidates":40,"full_text_candidates":10,"reranking_enable":false}, "expected":{"vector_candidates":40,"full_text_candidates":10,"graph_reranking_enable":false}},
+  {"name":"zero caps and jargon", "config":{"top_k":1,"hybrid_top_k":0,"graph_top_k":0,"reranking_mode":"jargon_coverage"}, "expected":{"vector_candidates":10,"full_text_candidates":10,"hybrid_top_k":0,"graph_top_k":0,"reranking_mode":"jargon_coverage"}}
 ]

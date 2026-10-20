@@ -95,7 +95,7 @@ const selection: ConversationKnowledgeScope = {
   aidp: { mode: "disabled", kds_ids: [] },
 };
 
-it("AIDP conversation draft clears inherited candidates with null and cancels without mutation", async () => {
+it("AIDP conversation draft saves fixed linked candidates and cancels without mutation", async () => {
   fixtures.deployment.enableAidpKnowledge = true;
   const confirm = vi.fn();
   const saved: ConversationKnowledgeScope = {
@@ -175,8 +175,7 @@ it("AIDP conversation draft clears inherited candidates with null and cancels wi
   );
   expect(confirm.mock.calls[0][0].retrieval_config).toEqual({
     top_k: 9,
-    vector_candidates: null,
-    full_text_candidates: null,
+    vector_candidates: 9,
   });
   expect(saved.retrieval_config).toEqual({ top_k: 7 });
 });

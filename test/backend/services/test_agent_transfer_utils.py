@@ -44,7 +44,7 @@ def test_missing_tool_reports_domain_error():
 
 
 def test_advanced_policy_roundtrip_against_old_catalog():
-    config={"top_k":7,"vector_candidates":None,"full_text_candidates":30,
+    config={"top_k":7,"vector_candidates":10,"full_text_candidates":30,
             "graph_top_k":0,"query_expansion_enable":False,"reranking_mode":"jargon_coverage"}
     result=validate_import_tool_params("AidpSearchTool","local",config,{"params":[]})
     assert result==config

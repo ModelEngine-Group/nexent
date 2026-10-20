@@ -32,7 +32,7 @@ def test_complete_payload_filters_channels(method):
         for channel, prefix in zip(CHANNELS, ("vector", "full_text")):
             assert (f"{prefix}_candidates" in hybrid) == (channel in channels)
             if channel in channels:
-                assert hybrid[f"{prefix}_candidates"] == 7
+                assert hybrid[f"{prefix}_candidates"] == 10
                 assert hybrid[f"{prefix}_score_threshold"] == 0
     else:
         assert "hybrid_search_config" not in payload
@@ -41,15 +41,15 @@ def test_complete_payload_filters_channels(method):
         assert payload["graph_search_config"] == {"graph_top_k": 0, "graph_score_threshold": 0, "graph_reranking_enable": True}
 
 
-def test_follow_explicit_override_and_no_input_mutation():
+def test_fixed_candidates_ignore_null_layers_and_do_not_mutate_input():
     base = {"top_k": 10, "vector_candidates": 30, "reranking_enable": False, "multi_modal": False}
     original = deepcopy(base)
-    assert resolve_config(merge_config(base, {"top_k": 7}))["vector_candidates"] == 30
     merged = merge_config(base, {"top_k": 7, "vector_candidates": None, "multi_modal": None})
-    assert resolve_config(merged)["vector_candidates"] == 7
-    assert merged["vector_candidates"] is None
-    assert resolve_config(merged)["full_text_candidates"] == 7
-    assert resolve_config(merged)["graph_reranking_enable"] is False
+    resolved = resolve_config(merged)
+    assert resolved["vector_candidates"] == 30
+    assert "vector_candidates" not in {k for k, v in merged.items() if v is None}
+    assert resolved["full_text_candidates"] == 10
+    assert resolved["graph_reranking_enable"] is False
     payload = build_payload(validate_config(merged), "q", ["kb"])
     assert "reranking_mode" not in payload
     assert payload["multi_modal_enable"] is False
@@ -89,14 +89,16 @@ def test_method_normalization_and_inactive_quota():
     assert "hybrid_search_config" not in p
 
 
-def test_equal_candidates_follow_across_layers_and_prepare_for_save():
+def test_fixed_candidates_are_not_followed_by_layer_equality():
     saved = {"top_k": 10, "vector_candidates": 10, "full_text_candidates": 30}
     effective = validate_config(merge_config(saved, {"top_k": 7}))
-    assert effective["vector_candidates"] == 7
+    assert effective["vector_candidates"] == 10
     assert effective["full_text_candidates"] == 30
-    assert prepare_config({"vector_candidates": 30}, {"top_k": 30}) == {"vector_candidates": None}
+    assert prepare_config({"vector_candidates": 30}, {"top_k": 30}) == {"vector_candidates": 30}
     assert prepare_config({"vector_candidates": 10}, {"top_k": 30}) == {"vector_candidates": 10}
     assert prepare_config({"search_method": "hybrid_search"}, {})["search_method"] == ALL_CHANNELS
+    with pytest.raises(ValueError, match="fixed value required"):
+        prepare_config({"vector_candidates": None}, {})
 
 
 def test_payload_uses_prepared_config_without_revalidation(monkeypatch):
@@ -117,7 +119,7 @@ def test_payload_uses_prepared_config_without_revalidation(monkeypatch):
     {"top_k": 10, "vector_candidates": 10.0},
     {"top_k": 10, "full_text_candidates": 10.0},
 ])
-def test_submission_types_are_checked_before_equal_candidates_become_following(patch):
+def test_submission_types_are_checked_before_candidate_values_are_saved(patch):
     with pytest.raises(ValueError, match="candidates"):
         prepare_config(patch, {})
 
@@ -126,4 +128,4 @@ def test_partial_submission_checks_relations_against_trusted_inheritance():
     inherited = {"top_k": 10, "search_method": "vector_search", "hybrid_top_k": 6}
     with pytest.raises(ValueError, match="vector_candidates"):
         prepare_config({"vector_candidates": 5}, inherited)
-    assert prepare_config({"vector_candidates": 10}, inherited) == {"vector_candidates": None}
+    assert prepare_config({"vector_candidates": 10}, inherited) == {"vector_candidates": 10}

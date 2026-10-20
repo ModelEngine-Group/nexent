@@ -75,7 +75,7 @@ describe("AIDP retrieval policy and controlled form", () => {
     expect(resolveAidpConfig(fixture.config)).toMatchObject(fixture.expected);
     expect(aidpErrors(fixture.config)).toEqual({});
   });
-  it("preserves explicit values, null inheritance clearing and candidate following", () => {
+  it("preserves explicit fixed values and ignores null inheritance markers", () => {
     const saved = {
       top_k: 10,
       vector_candidates: 30,
@@ -92,8 +92,8 @@ describe("AIDP retrieval policy and controlled form", () => {
         multi_modal: null,
       })
     );
-    expect(c.vector_candidates).toBe(7);
-    expect(c.full_text_candidates).toBe(7);
+    expect(c.vector_candidates).toBe(30);
+    expect(c.full_text_candidates).toBe(10);
     expect(c.multi_modal).toBe(false);
     expect(c.graph_reranking_enable).toBe(false);
     expect(saved.vector_candidates).toBe(30);
@@ -107,7 +107,6 @@ describe("AIDP retrieval policy and controlled form", () => {
       { graph_score_threshold: NaN },
       { hybrid_top_k: 8, graph_top_k: 5 },
       { hybrid_top_k: 6, full_text_candidates: 5 },
-      { reranking_enable: false, graph_reranking_enable: true },
       { search_method: "vector_search|" },
     ])
       expect(Object.keys(aidpErrors(config)).length).toBeGreaterThan(0);
@@ -142,7 +141,7 @@ describe("AIDP retrieval policy and controlled form", () => {
     expect(candidateField("vector_search")).toHaveValue(45);
     expect(
       JSON.parse(screen.getByTestId("config").textContent!).vector_candidates
-    ).toBeNull();
+    ).toBe(45);
   });
   it("disables graph reranking atomically with the global switch", () => {
     render(<Controlled />);
@@ -217,10 +216,6 @@ describe("AIDP retrieval policy and controlled form", () => {
     fireEvent.click(
       within(screen.getByRole("dialog")).getByText("common.confirm")
     );
-    expect(confirm).toHaveBeenCalledWith({
-      top_k: 30,
-      vector_candidates: null,
-      full_text_candidates: null,
-    });
+    expect(confirm).toHaveBeenCalledWith({ top_k: 30 });
   });
 });

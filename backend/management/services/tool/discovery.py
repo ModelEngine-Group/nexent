@@ -209,12 +209,6 @@ def get_local_tools() -> List[ToolInfo]:
                 "description_zh": param_description_zh,
             }
 
-            if getattr(tool_class, "name", "") in {"aidp_search", "ind_aidp_search"}:
-                if param_name in {"vector_candidates", "full_text_candidates"}:
-                    param_info["type"] = "integer"
-                elif param_name == "graph_reranking_enable":
-                    param_info["type"] = "boolean"
-
             # Handle both Pydantic FieldInfo and simple defaults
             if is_pydantic_field:
                 if param.default.default is PydanticUndefined:

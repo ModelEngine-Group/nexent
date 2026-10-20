@@ -42,7 +42,7 @@ def test_request_override_is_prepared_against_mounted_defaults_without_repositor
     )
     service.validate_request_retrieval_overrides(request, "tenant")
     assert request.tool_params.agents["root"].tools["aidp_search"] == {
-        "vector_candidates": None, "search_method": "vector_search|full_text_search|graph_search",
+        "vector_candidates": 10, "search_method": "vector_search|full_text_search|graph_search",
     }
     read.assert_not_called()
 
