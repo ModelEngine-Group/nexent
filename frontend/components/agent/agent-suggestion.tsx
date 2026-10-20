@@ -6,7 +6,6 @@ import type { ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { ArrowRight, Blocks, Library, Sparkles, Wrench } from "lucide-react";
 
-import { StandardCard } from "@/components/common/StandardCard";
 import { cn } from "@/lib/utils";
 import type {
   AgentSuggestionItem,
@@ -18,6 +17,7 @@ interface SuggestionListProps extends AgentSuggestionStyleProps {
   renderItem: (suggestion: AgentSuggestionItem) => ReactNode;
   itemClassName?: string;
   listClassName?: string;
+  headingClassName?: string;
 }
 
 function SuggestionList({
@@ -28,6 +28,7 @@ function SuggestionList({
   renderItem,
   itemClassName,
   listClassName,
+  headingClassName,
 }: SuggestionListProps) {
   const { t } = useTranslation("common");
   if (suggestions.length === 0) return null;
@@ -39,7 +40,12 @@ function SuggestionList({
         className
       )}
     >
-      <h2 className="mb-4 text-center text-base font-medium leading-6 text-foreground">
+      <h2
+        className={cn(
+          "mb-4 text-center text-base font-medium leading-6 text-foreground",
+          headingClassName
+        )}
+      >
         {t("agentSuggestion.heading")}
       </h2>
       <ul
@@ -100,8 +106,8 @@ export function CardSuggestion(props: AgentSuggestionStyleProps) {
   return (
     <SuggestionList
       {...props}
-      listClassName="grid grid-cols-1 gap-3 @[400px]:grid-cols-2"
-      itemClassName="transition-[translate,box-shadow] duration-200 motion-safe:enabled:hover:-translate-y-0.5 enabled:hover:shadow-md motion-reduce:transition-none"
+      headingClassName="mb-3 text-left text-sm font-semibold leading-normal"
+      itemClassName="flex items-start gap-3 rounded-xl px-3 py-3 enabled:hover:bg-accent/50 motion-reduce:transition-none"
       renderItem={({ id, title, description, icon }) => {
         const hash = Array.from(id).reduce(
           (value, character) =>
@@ -110,28 +116,21 @@ export function CardSuggestion(props: AgentSuggestionStyleProps) {
         );
         const Icon = icon ?? icons[hash % icons.length];
         return (
-          <StandardCard
-            bordered
-            borderRadius={14}
-            className="h-full w-full !bg-background text-left transition-colors duration-200 group-[:enabled:hover]:!border-primary/60 group-[:enabled:hover]:!bg-accent/40 group-focus-visible:!border-primary/60 motion-reduce:transition-none"
-            styles={{ body: { padding: 16, height: "100%" } }}
-          >
-            <span className="flex items-start gap-3">
-              <span className="flex size-9 shrink-0 items-center justify-center rounded-[10px] bg-accent text-primary">
-                <Icon className="size-[18px]" aria-hidden />
-              </span>
-              <span className="min-w-0 flex-1">
-                <span className="block break-words text-sm font-medium leading-[22px] text-foreground">
-                  {title}
-                </span>
-                {description && (
-                  <span className="mt-1 block break-words text-xs leading-5 text-muted-foreground">
-                    {description}
-                  </span>
-                )}
-              </span>
+          <>
+            <span className="mt-0.5 shrink-0 text-muted-foreground">
+              <Icon className="size-4" aria-hidden />
             </span>
-          </StandardCard>
+            <span className="min-w-0">
+              <span className="block break-words text-sm font-medium text-foreground">
+                {title}
+              </span>
+              {description && (
+                <span className="mt-1 block break-words text-xs leading-5 text-muted-foreground">
+                  {description}
+                </span>
+              )}
+            </span>
+          </>
         );
       }}
     />

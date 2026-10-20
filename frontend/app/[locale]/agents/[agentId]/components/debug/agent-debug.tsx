@@ -14,6 +14,7 @@ import {
   AssistantRuntimeProvider,
   useLocalRuntime,
   useAui,
+  useAuiState,
   type ChatModelAdapter,
 } from "@assistant-ui/react";
 
@@ -28,10 +29,7 @@ import { remoteChatModelAdapter } from "../../../../newchat/adapter/remote-chat-
 import { Thread } from "../../../../newchat/assistant-ui/thread";
 import type { ChatMode } from "../../../../newchat/assistant-ui/composer";
 import { AgentDebugComparePanel } from "./compare-panel";
-import {
-  AgentDebugSuggestions,
-  AgentDebugWelcome,
-} from "./agent-debug-welcome";
+import { AgentDebugWelcome } from "./agent-debug-welcome";
 import "./agent-debug.css";
 
 interface AgentDebugPanelProps {
@@ -90,6 +88,7 @@ function DebugConversation({
   dictationConfigured: boolean;
 }) {
   const aui = useAui();
+  const isRunning = useAuiState((state) => state.thread.isRunning);
   const { t } = useTranslation("common");
   return (
     <Thread
@@ -107,11 +106,11 @@ function DebugConversation({
           <ComposerDictation configured={dictationConfigured} />
         </>
       }
-      welcomeContent={<AgentDebugWelcome agent={agent} />}
-      emptyFooterContent={
-        <AgentDebugSuggestions
-          questions={agent.example_questions}
-          onSelect={(question) => aui.composer().setText(question)}
+      welcomeContent={
+        <AgentDebugWelcome
+          agent={agent}
+          disabled={isRunning}
+          onSelectQuestion={(question) => aui.composer().setText(question)}
         />
       }
       footerContent={
