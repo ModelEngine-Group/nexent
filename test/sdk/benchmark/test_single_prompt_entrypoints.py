@@ -2,15 +2,77 @@
 
 """Benchmark entrypoints expose the same single business prompt contract."""
 
-from pathlib import Path
+import logging
 import sys
+from pathlib import Path
 
 import pytest
 import yaml
 
 from sdk.benchmark import agent_runner
 from sdk.benchmark.generic import run_benchmark
+from sdk.benchmark.generic.integrations.langfuse import webhook_server
 from sdk.benchmark.generic.runtime.task_adapter import make_nexent_task
+
+
+@pytest.fixture(params=[
+    {"constraint_prompt": "Legacy rule"},
+    {"few_shots_prompt": "Legacy example"},
+    {"unknown_prompt": "Unsupported prompt"},
+    {"constraint_prompt": "Rule", "few_shots_prompt": "Example"},
+    {"constraint_prompt": ""},
+    {"few_shots_prompt": None},
+], ids=["constraint", "examples", "unknown", "both-legacy", "empty-legacy", "null-legacy"])
+def unsupported_prompt_config(request, tmp_path):
+    config_path = tmp_path / "agent.yaml"
+    config_path.write_text(
+        yaml.safe_dump({"prompts": {"duty_prompt": "Complete prompt", **request.param}}),
+        encoding="utf-8",
+    )
+    return config_path
+
+
+def test_benchmark_cli_rejects_unsupported_config_prompts_before_execution(
+    mocker, unsupported_prompt_config,
+):
+    langfuse = mocker.patch("langfuse.Langfuse")
+    run_experiment = mocker.patch.object(run_benchmark, "run_experiment")
+    mocker.patch.object(sys, "argv", [
+        "run_benchmark.py", "--dataset", "synthetic",
+        "--agent-config", str(unsupported_prompt_config),
+        "--duty-prompt", "CLI override cannot bypass validation",
+    ])
+
+    with pytest.raises(ValueError) as error:
+        run_benchmark.main()
+
+    assert str(error.value) == (
+        "Agent prompts only supports duty_prompt; migrate legacy configuration first"
+    )
+    langfuse.assert_not_called()
+    run_experiment.assert_not_called()
+
+
+def test_webhook_rejects_unsupported_config_prompts_before_execution(
+    mocker, caplog, unsupported_prompt_config,
+):
+    import evaluators
+    import runtime.task_adapter as runtime_task_adapter
+
+    langfuse = mocker.patch("langfuse.Langfuse").return_value
+    mocker.patch.object(evaluators, "resolve_evaluators", return_value=[])
+    make_task = mocker.patch.object(runtime_task_adapter, "make_nexent_task")
+
+    with caplog.at_level(logging.ERROR, logger="benchmark-webhook"):
+        webhook_server.run_experiment_task(
+            "synthetic", [], 5, "invalid-prompts", 0.0, "en",
+            str(unsupported_prompt_config),
+        )
+
+    assert caplog.messages == ["Experiment 'invalid-prompts' FAILED"]
+    langfuse.get_dataset.assert_not_called()
+    langfuse.trace.assert_not_called()
+    make_task.assert_not_called()
 
 
 @pytest.mark.parametrize("field", ["constraint_prompt", "few_shots_prompt"])
