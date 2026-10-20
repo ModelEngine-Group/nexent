@@ -1,3 +1,4 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 "use client";
 
 import { ReactNode } from "react";
@@ -18,6 +19,7 @@ import { RegisterModal } from "@/components/auth/registerModal";
 import { FullScreenLoading } from "@/components/ui/loading";
 import { useDeployment } from "./deploymentProvider";
 import { useSessionManager } from "@/hooks/auth/useSessionManager";
+import { AutoHideScrollbars } from "./AutoHideScrollbars";
 
 function AppReadyWrapper({ children }: { children?: ReactNode }) {
   const { isDeploymentReady, isSpeedMode } = useDeployment();
@@ -66,6 +68,7 @@ export function RootProvider({ children }: { children: ReactNode }) {
     >
       <QueryClientProvider client={queryClient}>
         <App>
+          <AutoHideScrollbars />
           <AuthenticationProvider>
             <AuthorizationProvider>
               <AppReadyWrapper>
@@ -80,4 +83,3 @@ export function RootProvider({ children }: { children: ReactNode }) {
     </ConfigProvider>
   );
 }
-
