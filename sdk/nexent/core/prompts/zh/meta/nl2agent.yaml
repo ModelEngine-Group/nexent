@@ -40,6 +40,7 @@ system_prompt: |-
   - 只修改策略时，无需描述、资源或 Prompt 完整；先遵守空变量名初始化规则，再保存策略，收到成功结果后用唯一一对 `<final_answer>...</final_answer>` 简洁确认实际修改。不得启动完整生成、资源搜索、改写其他字段或声称已完成生成。
   - 未明确请求修改时省略此字段，保留可信草稿当前值；缺省为关闭。用户只说“重试”而未明确协议修复时，使用 `requirement_clarification` 澄清具体含义，不得保存猜测值。
   - 歧义检查优先于 `update_execution_policy` 意图分类：例如“只关闭重试，不更改其他配置”仍未指明哪一种重试，即使当前草稿已开启协议修复，也必须先通过 `requirement_clarification` 询问是否指“严格输出协议与静默修复”。当前值、历史任务或“只关闭”均不能消除歧义；用户明确确认前禁止调用保存工具。
+  - 保存工具返回 `policy_clarification_required` 时，不得重试保存或结束为已更新；必须调用 `requirement_clarification` 询问具体重试含义，收到用户明确确认后再处理。
   - 完整生成或其他局部任务同时明确要求此策略时，在名称初始化后先保存策略，再继续原有任务；后续澄清轮次以可信草稿状态保留策略，不要重新设置默认值。仅策略保存不应等待或声称收到 `agent_generation_completed`。
   - 组合请求的主要意图仍是 `full_generation` 或用户指定的其他任务，策略写入只是准备动作，不构成需求确认。完整生成中，若可信草稿 `description` 为空且当前输入不是已提交的 `requirement_clarification` action，策略保存成功后的下一个业务动作必须输出澄清卡；即使本轮给了详细用途、对象和格式，也禁止直接保存 `description`。只有纯 `update_execution_policy` 任务才在策略保存后结束。
 

@@ -44,6 +44,7 @@ from services.nl2agent_service import (
 from tool_collection.mcp.nl2agent_mcp_tools import (
     AgentDraftFields,
     NL2AGENT_AGENT_ID_HEADER,
+    NL2AGENT_POLICY_CLARIFICATION_HEADER,
     NL2A_MCP_LEGACY_TOOL_NAMES,
     NL2A_MCP_TOOL_NAMES,
     ResourceCandidate,
@@ -1660,8 +1661,12 @@ async def test_validate_agent_generation_complete_requires_generated_name(mocker
     assert exc_info.value.failed_fields == ["name"]
 
 
+@pytest.mark.parametrize("query,clarification_required", [
+    ("Build an agent that summarizes weather risks.", "false"),
+    ("只关闭重试，不更改其他配置。", "true"),
+])
 @pytest.mark.asyncio
-async def test_build_run_info_is_ephemeral(mocker):
+async def test_build_run_info_is_ephemeral(mocker, query, clarification_required):
     """UT-BE-NCR-014 and UT-BE-NCR-015: verified headers and attachments."""
     default_model = {
         "model_factory": "openai",
@@ -1713,7 +1718,7 @@ async def test_build_run_info_is_ephemeral(mocker):
         return_value=verified_context,
     )
     request = NL2AgentRunRequest(
-        query="Build an agent that summarizes weather risks.",
+        query=query,
         agent_id=42,
         history=[
             HistoryItem(
@@ -1774,6 +1779,7 @@ async def test_build_run_info_is_ephemeral(mocker):
             "headers": {
                 "Authorization": "Bearer tenant-token",
                 NL2AGENT_AGENT_ID_HEADER: "42",
+                NL2AGENT_POLICY_CLARIFICATION_HEADER: clarification_required,
                 "X-Tenant-ID": "tenant-a",
                 "X-Nexent-Internal-Token": TOKEN,
             },
@@ -1787,7 +1793,7 @@ async def test_build_run_info_is_ephemeral(mocker):
     assert run_info.observer._boundary_stop_event is run_info.stop_event
     join_query.assert_awaited_once_with(
         minio_files=None,
-        query="Build an agent that summarizes weather risks.",
+        query=query,
         history=request.history,
         language="en",
     )
@@ -1978,6 +1984,7 @@ async def test_build_run_info_falls_back_without_capacity_snapshot(mocker):
             "bypass_proxy": True,
             "headers": {
                 NL2AGENT_AGENT_ID_HEADER: "42",
+                NL2AGENT_POLICY_CLARIFICATION_HEADER: "false",
                 "X-Tenant-ID": "tenant-a",
                 "X-Nexent-Internal-Token": TOKEN,
             },

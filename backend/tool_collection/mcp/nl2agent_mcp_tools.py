@@ -60,6 +60,7 @@ NL2A_MCP_LEGACY_TOOL_NAMES = (
     NL2A_WRAPPER_NAME,
 )
 NL2AGENT_AGENT_ID_HEADER = "X-Nexent-NL2Agent-Agent-ID"
+NL2AGENT_POLICY_CLARIFICATION_HEADER = "X-Nexent-NL2Agent-Policy-Clarification-Required"
 SEARCH_INSTALLED_MCP_TOOLS_DESCRIPTION = (
     "Search the current tenant's installed and available MCP tools using keywords. "
     "Returns JSON text ordered by relevance. Decode the result with json.loads "
@@ -451,6 +452,7 @@ class SaveAgentDraftFieldsError(BaseModel):
     updated_fields: list[str] = Field(default_factory=list)
     code: Literal[
         "invalid_agent_fields",
+        "policy_clarification_required",
         "agent_not_found",
         "agent_not_draft",
         "agent_deleted",
@@ -1172,6 +1174,17 @@ async def save_agent_draft_fields(
 
         authorization = get_http_request().headers.get("Authorization")
         user_id, tenant_id = get_current_user_id(authorization)
+        if (
+            payload.fields.enable_protocol_repair_retry is not None
+            and get_http_request().headers.get(NL2AGENT_POLICY_CLARIFICATION_HEADER) == "true"
+        ):
+            return _serialize_agent_draft_save_result(
+                SaveAgentDraftFieldsError(
+                    agent_id=resolved_agent_id,
+                    code="policy_clarification_required",
+                    retryable=False,
+                )
+            )
         result = save_agent_draft_fields_impl(
             agent_id=resolved_agent_id,
             fields=payload.fields,

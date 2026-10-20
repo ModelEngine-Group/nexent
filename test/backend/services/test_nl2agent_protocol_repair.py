@@ -146,3 +146,41 @@ def test_ambiguous_retry_is_checked_before_policy_intent(language):
     prompt = build_nl2agent_system_prompt(language)
     assert ("歧义检查优先于" in prompt or "Check ambiguity BEFORE" in prompt)
     assert ("当前值、历史任务" in prompt or "current value, past tasks" in prompt)
+
+
+@pytest.mark.parametrize("query,expected", [
+    ("只关闭重试，不更改其他配置。", True),
+    ("Turn off retries", True),
+    ("Retry generation", True),
+    ("开启严格协议与重试", False),
+    ("Disable protocol repair retry", False),
+    ("Enable silent repair retries", False),
+    ("修改欢迎语", False),
+    ('{"type":"nl2agent_card_action","agent_id":42,"answers":{"retry_scope":"yes"}}', False),
+])
+def test_ambiguous_retry_request_is_conservative(query, expected):
+    assert service._requires_policy_clarification(query) is expected
+
+
+@pytest.mark.parametrize("value", [True, False])
+@pytest.mark.asyncio
+async def test_ambiguous_retry_cannot_write_even_if_model_guesses(mocker, authorized_tool, value):
+    mocker.patch.object(tools, "get_http_request", return_value=SimpleNamespace(headers={
+        "Authorization": "Bearer test", tools.NL2AGENT_POLICY_CLARIFICATION_HEADER: "true",
+    }))
+    update = mocker.patch.object(service, "update_agent_draft_fields")
+    result = await tools.save_agent_draft_fields(42, {FIELD: value, "description": "Must stay unchanged"})
+    assert json.loads(result)["code"] == "policy_clarification_required"
+    assert "<nl2a_state>" not in result
+    update.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_ambiguous_retry_does_not_block_unrelated_patch(mocker, authorized_tool):
+    mocker.patch.object(tools, "get_http_request", return_value=SimpleNamespace(headers={
+        "Authorization": "Bearer test", tools.NL2AGENT_POLICY_CLARIFICATION_HEADER: "true",
+    }))
+    update = mocker.patch.object(service, "update_agent_draft_fields", return_value=1)
+    result = await tools.save_agent_draft_fields(42, {"description": "New purpose"})
+    assert json.loads(result.split("\n", 1)[0])["status"] == "success"
+    assert update.call_args.kwargs["fields"] == {"description": "New purpose"}

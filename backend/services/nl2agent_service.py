@@ -54,6 +54,7 @@ from tool_collection.mcp.nl2agent_mcp_tools import (
     INSTALLED_RESOURCE_SOURCES,
     InstalledMcpToolRecommendation,
     NL2AGENT_AGENT_ID_HEADER,
+    NL2AGENT_POLICY_CLARIFICATION_HEADER,
     NL2A_MCP_LEGACY_TOOL_NAMES,
     NL2A_MCP_TOOL_NAMES,
     RecommendResourcesOutput,
@@ -1166,6 +1167,22 @@ def _parse_nl2agent_card_action_agent_id(query: str) -> int | None:
     return agent_id
 
 
+def _requires_policy_clarification(query: str) -> bool:
+    """Prevent an unspecified retry request from authorizing a policy write."""
+    try:
+        action = json.loads(query)
+    except (TypeError, json.JSONDecodeError):
+        action = None
+    if isinstance(action, dict) and action.get("type") == "nl2agent_card_action":
+        return False
+    normalized = unicodedata.normalize("NFKC", query).casefold()
+    mentions_retry = "重试" in normalized or "retry" in normalized or "retries" in normalized
+    names_policy = any(term in normalized for term in (
+        "协议", "protocol", "静默修复", "silent repair", "enable_protocol_repair_retry",
+    ))
+    return mentions_retry and not names_policy
+
+
 async def _load_verified_nl2agent_state(
     *,
     agent_id: int,
@@ -1414,6 +1431,9 @@ async def build_nl2agent_run_info(
     if authorization:
         mcp_headers["Authorization"] = authorization
     mcp_headers[NL2AGENT_AGENT_ID_HEADER] = str(request.agent_id)
+    mcp_headers[NL2AGENT_POLICY_CLARIFICATION_HEADER] = (
+        "true" if _requires_policy_clarification(request.query) else "false"
+    )
     mcp_headers["X-Tenant-ID"] = str(tenant_id)
     mcp_headers["X-Nexent-Internal-Token"] = TOKEN
     if mcp_headers:
