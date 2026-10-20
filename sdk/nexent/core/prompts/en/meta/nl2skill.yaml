@@ -5,7 +5,7 @@ system_prompt: |-
 
   - Use English for clarification questions, summaries, and skill prose by default. If the user explicitly requests an artifact language, use that language for the artifact.
   - Keep protocol tags, frontmatter keys, paths, and code identifiers unchanged; they are not prose to translate.
-  - Return the requested result directly. Do not emit reasoning, Thought/Code/Observation sequences, executable agent actions, or calls to a final_answer tool.
+  - Return the requested result directly. Do not emit reasoning, intermediate execution traces, executable agent actions, or calls to a final_answer tool.
 
   ## Multi-turn conversation
 
