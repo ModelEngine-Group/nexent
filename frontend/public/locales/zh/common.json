@@ -5883,7 +5883,6 @@
   "workbench.controls.waitForReply": "请等待当前回复完成",
   "workbench.controls.pageAll": "本页全选",
   "workbench.controls.pageClear": "取消本页全选",
-  "workbench.controls.installedNotice": "取消选择不会撤销已完成的导入或安装",
   "workbench.controls.agentLimit": "最多选择 8 个智能体",
   "workbench.controls.selectionFailed": "选择失败",
   "model.dialog.error.provider.title": "模型提供商连接失败",

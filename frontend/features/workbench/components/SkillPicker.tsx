@@ -742,11 +742,6 @@ export function SkillPicker({
           tab !== "mine" ||
           filtered.length === 0,
         refreshDisabled: loading || saving || installing !== null,
-        controlsContent: (
-          <p className="text-xs text-muted-foreground">
-            {t("workbench.controls.installedNotice")}
-          </p>
-        ),
       }}
 
       title={t("chat.composer.skills", "Skills")}

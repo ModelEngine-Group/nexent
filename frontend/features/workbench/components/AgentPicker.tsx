@@ -460,11 +460,6 @@ export function AgentPicker({
           selectablePageAgents.length === 0 ||
           (!multiple && selectablePageAgents.length > 1),
         refreshDisabled: loading || saving,
-        controlsContent: (
-          <p className="text-xs text-muted-foreground">
-            {t("workbench.controls.installedNotice")}
-          </p>
-        ),
       }}
 
       open={open}

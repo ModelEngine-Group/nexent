@@ -5943,7 +5943,6 @@
   "workbench.controls.waitForReply": "Wait for the current response",
   "workbench.controls.pageAll": "Select page",
   "workbench.controls.pageClear": "Deselect page",
-  "workbench.controls.installedNotice": "Cancelling selection does not undo completed imports or installations",
   "workbench.controls.agentLimit": "Select up to 8 agents",
   "workbench.controls.selectionFailed": "Selection failed",
   "model.dialog.error.provider.title": "Model Provider Connection Failed",
