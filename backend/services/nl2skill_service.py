@@ -22,6 +22,7 @@ from agents.create_agent_info import (
     join_minio_file_description_to_query,
 )
 from agents.nl2skill_agent import create_nl2skill_agent_config
+from management.services.agent.context import build_authorized_context_input
 from consts.const import LANGUAGE, MODEL_CONFIG_MAPPING
 from consts.model import HistoryItem, NL2SkillRunRequest
 from database.model_management_db import get_model_by_model_id
@@ -81,6 +82,26 @@ def _convert_history(history: list[HistoryItem] | None) -> list[AgentHistory]:
         for item in history or []
         if item.role in {"user", "assistant"}
     ]
+
+
+def _skill_history_turns(history: list[AgentHistory]) -> list[dict[str, Any]]:
+    """Preserve failed or unanswered turns without restoring legacy AgentMemory."""
+    turns: list[dict[str, Any]] = []
+    pending_user = False
+    for index, entry in enumerate(history):
+        if entry.role == "assistant" and pending_user:
+            turns[-1]["assistant_final_answer"] = entry.content
+            pending_user = False
+            continue
+        turns.append({
+            "user_message": entry.content if entry.role == "user" else "",
+            "assistant_final_answer": entry.content if entry.role == "assistant" else "",
+            "attachments": [],
+            "user_message_id": -(index * 2 + 1),
+            "assistant_message_id": -(index * 2 + 2),
+        })
+        pending_user = entry.role == "user"
+    return turns
 
 
 def _assemble_draft_content(draft_snapshot: dict[str, Any]) -> str:
@@ -235,7 +256,7 @@ async def build_nl2skill_run_info(
         compaction_trigger_threshold_tokens=context_budget.compaction_trigger_threshold_tokens if context_budget else 0,
         compaction_target_tokens=context_budget.compaction_target_tokens if context_budget else 0,
     )
-    return AgentRunInfo(
+    run_info = AgentRunInfo(
         query=template.get("user_prompt") or final_query,
         model_config_list=model_config_list,
         observer=MessageObserver(lang=template_language),
@@ -248,6 +269,10 @@ async def build_nl2skill_run_info(
         sandbox_config=None,
         redis_client=None,
     )
+    run_info.context_input = build_authorized_context_input(
+        run_info, historical_context={"conversation_turns": _skill_history_turns(run_info.history)},
+    )
+    return run_info
 
 
 def _decorate_event(

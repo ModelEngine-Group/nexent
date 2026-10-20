@@ -30,7 +30,8 @@ def test_create_nl2skill_agent_config_sets_ephemeral_runtime_options():
     config = create_nl2skill_agent_config("system", "model")
     assert config.name == NL2SKILL_NAME
     assert config.model_name == "model"
-    assert config.instructions == "system"
+    assert config.instructions is None
+    assert config.context_items[0].content["text"] == "system"
     assert config.tools == []
     assert config.max_steps == 5
     assert config.output_protocol == "final_envelope"
