@@ -92,7 +92,15 @@ beforeEach(() => {
   fixtures.deployment.enableAidpKnowledge = false;
   fixtures.deployment.isDeploymentReady = true;
   vi.mocked(knowledgeBaseService.getAidpKnowledgeBasesAll).mockResolvedValue({
-    value: [{ id: "aidp-1", name: "AIDP Catalog", permission: "READ_ONLY" }],
+    value: [
+      {
+        id: "aidp-1",
+        name: "AIDP Catalog",
+        permission: "READ_ONLY",
+        documentCount: 9,
+        chunkCount: 27,
+      },
+    ],
   } as unknown as Awaited<
     ReturnType<typeof knowledgeBaseService.getAidpKnowledgeBasesAll>
   >);
@@ -157,9 +165,12 @@ it.each(
         onConfirm={confirm}
       />
     );
-    await userEvent.click(
-      await screen.findByRole("option", { name: /AIDP Catalog/ })
-    );
+    const row = await screen.findByRole("option", { name: /AIDP Catalog/ });
+    const item = presentation === "modal" ? row.parentElement : row;
+    expect(item).not.toHaveTextContent("resourcePicker.knowledge.documents");
+    expect(item).not.toHaveTextContent("resourcePicker.knowledge.chunks");
+    expect(item).not.toHaveTextContent("knowledgeBase.document");
+    await userEvent.click(row);
     expect(knowledgeBaseService.getKnowledgeBasesInfo).not.toHaveBeenCalled();
     expect(
       screen.queryByRole("option", { name: /Alpha/ })
@@ -194,7 +205,8 @@ it("waits for deployment settings and uses local catalog without an agent", asyn
   expect(knowledgeBaseService.getAidpKnowledgeBasesAll).not.toHaveBeenCalled();
   fixtures.deployment.isDeploymentReady = true;
   rerender(<ConversationKnowledgeScopeModal {...props} />);
-  await screen.findByRole("option", { name: /Alpha/ });
+  const row = await screen.findByRole("option", { name: /Alpha/ });
+  expect(row.parentElement).toHaveTextContent("2 knowledgeBase.document");
   expect(knowledgeBaseService.getAidpKnowledgeBasesAll).not.toHaveBeenCalled();
 });
 

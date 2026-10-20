@@ -33,10 +33,6 @@ export function toKnowledgeItem(
   ];
 
   if (isAidp) {
-    meta.push(
-      t("resourcePicker.knowledge.documents", { count: kb.documentCount })
-    );
-    meta.push(t("resourcePicker.knowledge.chunks", { count: kb.chunkCount }));
     options?.groupNames?.forEach((name) => meta.push(name));
     return {
       id: kb.id,

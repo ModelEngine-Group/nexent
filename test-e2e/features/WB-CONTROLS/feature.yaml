@@ -31,8 +31,12 @@ feature:
       Composer spacing is optically balanced
       with extra top padding and a taller input, while muted toolbar and creation labels match in font size.
       All shared composer inputs have no visible placeholder guidance and retain a neutral accessible label.
+      Ordinary-chat knowledge actions and editable mounts require the current Agent version's active-source retrieval
+      capability; absent, pending, failed or stale capabilities and saved scopes cannot expose the picker. Workbench
+      retains its existing independent knowledge entry, and creation modes hide resources.
   - rule_id: WB-CONTROLS-RULE-006
     description: Workbench reuses configuration resource controls and knowledge presentation; Agent/Skill tabs remain Mine/Repository,
+      AIDP knowledge selectors hide document/chunk counts across configuration, chat and Workbench; local selectors retain counts.
       Agent cards and Refresh/Select-all headers match configuration; footers use Close/Confirm only and page sizes default to 10 with exactly 10/20/50, tag management is absent, and AIDP string KDS scope, per-scene local identities and persistence remain intact.
   required_test_stages:
   - D4
@@ -52,4 +56,6 @@ feature:
     - WB-SHARED-SELECTORS-20261019
     - COMPOSER-EMPTY-HINT-20261019
     - COMPOSER-HIDE-CHAT-SKILL-20261019
+    - COMPOSER-KNOWLEDGE-CAPABILITY-20261020
+    - AIDP-PICKER-HIDE-COUNTS-20261020
     spec_path: ../nexent-doc/nexent/agent-workbench/changes/chat-workbench-resource-controls/proposal.md

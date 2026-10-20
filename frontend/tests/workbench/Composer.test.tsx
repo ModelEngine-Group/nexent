@@ -20,16 +20,18 @@ import {
   ComposerDictation,
 } from "@/app/newchat/assistant-ui/composer-tools";
 import { Composer } from "@/app/newchat/assistant-ui/composer";
+import type { KnowledgeCapabilities } from "@/types/knowledgeScope";
 
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ push: vi.fn() }),
   useParams: () => ({ locale: "zh" }),
 }));
+const deployment = vi.hoisted(() => ({
+  enableAidpKnowledge: false,
+  isDeploymentReady: true,
+}));
 vi.mock("@/components/providers/deploymentProvider", () => ({
-  useDeployment: () => ({
-    enableAidpKnowledge: false,
-    isDeploymentReady: true,
-  }),
+  useDeployment: () => deployment,
 }));
 const resourceQueries = vi.hoisted(() => ({
   knowledge: vi.fn(() => ({ data: [], isLoading: false })),
@@ -69,6 +71,8 @@ const runtime = vi.hoisted(() => ({
   cancel: vi.fn(),
 }));
 beforeEach(() => {
+  deployment.enableAidpKnowledge = false;
+  deployment.isDeploymentReady = true;
   runtime.thread.isRunning = false;
   runtime.composer.text = "question";
   runtime.cancel.mockReset();
@@ -245,11 +249,222 @@ vi.mock("@/components/ui/tooltip", () => ({
   TooltipContent: () => null,
 }));
 
+const capabilities: KnowledgeCapabilities = {
+  agent_id: 41,
+  version_no: 1,
+  sources: {
+    local: {
+      enabled: true,
+      max_select: 50,
+      requires_same_embedding_model: true,
+      default_summary: "",
+      default_knowledge_ids: [],
+      default_range_values: [],
+    },
+    aidp: {
+      enabled: false,
+      max_select: 10,
+      default_summary: "",
+      default_knowledge_ids: [],
+      default_range_values: [],
+    },
+  },
+};
+
 const base = {
   models: [],
   chatMode: "execution" as const,
   onChatModeChange: vi.fn(),
+  knowledgeCapabilities: capabilities,
 };
+
+it.each([
+  [false, true, false, true],
+  [true, false, true, true],
+  [false, false, true, false],
+  [true, true, false, false],
+  [false, false, false, false],
+  [true, false, false, false],
+])(
+  "knowledge action follows deployment=%s local=%s aidp=%s",
+  (aidp, local, remote, visible) => {
+    deployment.enableAidpKnowledge = aidp;
+    render(
+      <Composer
+        {...base}
+        onKnowledgeScopeChange={vi.fn()}
+        knowledgeCapabilities={{
+          ...capabilities,
+          sources: {
+            local: { ...capabilities.sources.local, enabled: local },
+            aidp: { ...capabilities.sources.aidp, enabled: remote },
+          },
+        }}
+      />
+    );
+    expect(
+      Boolean(
+        screen.queryByRole("button", { name: "chat.composer.knowledgeBase" })
+      )
+    ).toBe(visible);
+  }
+);
+
+it("unsupported or pending capability hides saved knowledge chips without mutating scope", () => {
+  const scope = {
+    schema_version: 1 as const,
+    local: { mode: "override" as const, knowledge_ids: ["1"] },
+    aidp: { mode: "disabled" as const, kds_ids: [] },
+  };
+  const save = vi.fn();
+  const view = render(
+    <Composer
+      {...base}
+      knowledgeScope={scope}
+      onKnowledgeScopeChange={save}
+      knowledgeCapabilities={null}
+    />
+  );
+  expect(
+    screen.queryByRole("button", { name: "chat.composer.knowledgeBase" })
+  ).toBeNull();
+  expect(screen.queryByRole("button", { name: "common.delete 1" })).toBeNull();
+  view.rerender(
+    <Composer {...base} knowledgeScope={scope} onKnowledgeScopeChange={save} />
+  );
+  expect(
+    screen.getByRole("button", { name: "chat.composer.knowledgeBase" })
+  ).toBeEnabled();
+  expect(scope.local.knowledge_ids).toEqual(["1"]);
+  expect(save).not.toHaveBeenCalled();
+  deployment.isDeploymentReady = false;
+  view.rerender(<Composer {...base} onKnowledgeScopeChange={save} />);
+  expect(
+    screen.queryByRole("button", { name: "chat.composer.knowledgeBase" })
+  ).toBeNull();
+});
+
+it("closes the knowledge drawer on capability loss and owner change without reopening or saving", async () => {
+  const save = vi.fn();
+  const view = render(<Composer {...base} onKnowledgeScopeChange={save} />);
+  await userEvent.click(
+    screen.getByRole("button", { name: "chat.composer.knowledgeBase" })
+  );
+  expect(screen.getByRole("dialog")).toBeInTheDocument();
+  view.rerender(
+    <Composer
+      {...base}
+      onKnowledgeScopeChange={save}
+      knowledgeCapabilities={null}
+    />
+  );
+  expect(screen.queryByRole("dialog")).toBeNull();
+  view.rerender(<Composer {...base} onKnowledgeScopeChange={save} />);
+  expect(screen.queryByRole("dialog")).toBeNull();
+  await userEvent.click(
+    screen.getByRole("button", { name: "chat.composer.knowledgeBase" })
+  );
+  view.rerender(
+    <Composer
+      {...base}
+      onKnowledgeScopeChange={save}
+      knowledgeCapabilities={{ ...capabilities, agent_id: 42 }}
+    />
+  );
+  expect(screen.queryByRole("dialog")).toBeNull();
+  await userEvent.click(
+    screen.getByRole("button", { name: "chat.composer.knowledgeBase" })
+  );
+  view.rerender(
+    <Composer
+      {...base}
+      onKnowledgeScopeChange={save}
+      knowledgeCapabilities={{ ...capabilities, agent_id: 42, version_no: 2 }}
+    />
+  );
+  expect(screen.queryByRole("dialog")).toBeNull();
+  expect(save).not.toHaveBeenCalled();
+});
+
+it("Workbench retains knowledge selection without ordinary-chat capabilities", async () => {
+  render(
+    <Composer
+      {...base}
+      knowledgeCapabilities={null}
+      onKnowledgeScopeChange={vi.fn()}
+      workbenchPresentation={{
+        mode: "generic_chat",
+        actions: null,
+        onExitCreation: vi.fn(),
+      }}
+    />
+  );
+  await userEvent.click(
+    screen.getByRole("button", { name: "chat.composer.knowledgeBase" })
+  );
+  expect(screen.getByRole("dialog")).toBeInTheDocument();
+});
+
+it("discards an open drawer when the deployment source changes", async () => {
+  const save = vi.fn();
+  const props = {
+    ...base,
+    onKnowledgeScopeChange: save,
+    knowledgeCapabilities: {
+      ...capabilities,
+      sources: {
+        ...capabilities.sources,
+        aidp: { ...capabilities.sources.aidp, enabled: true },
+      },
+    },
+  };
+  const view = render(<Composer {...props} />);
+  await userEvent.click(
+    screen.getByRole("button", { name: "chat.composer.knowledgeBase" })
+  );
+  deployment.enableAidpKnowledge = true;
+  view.rerender(<Composer {...props} />);
+  expect(screen.queryByRole("dialog")).toBeNull();
+  expect(
+    screen.getByRole("button", { name: "chat.composer.knowledgeBase" })
+  ).toBeEnabled();
+  deployment.enableAidpKnowledge = false;
+  view.rerender(<Composer {...props} />);
+  expect(screen.queryByRole("dialog")).toBeNull();
+  expect(save).not.toHaveBeenCalled();
+});
+
+it("hides knowledge controls when entering a Workbench creation mode", async () => {
+  const props = {
+    ...base,
+    onKnowledgeScopeChange: vi.fn(),
+    workbenchPresentation: {
+      mode: "generic_chat" as const,
+      actions: null,
+      onExitCreation: vi.fn(),
+    },
+  };
+  const view = render(<Composer {...props} />);
+  await userEvent.click(
+    screen.getByRole("button", { name: "chat.composer.knowledgeBase" })
+  );
+  view.rerender(
+    <Composer
+      {...props}
+      workbenchPresentation={{
+        ...props.workbenchPresentation,
+        mode: "agent_create",
+      }}
+    />
+  );
+  expect(screen.queryByRole("dialog")).toBeNull();
+  expect(
+    screen.queryByRole("button", { name: "chat.composer.knowledgeBase" })
+  ).toBeNull();
+  view.rerender(<Composer {...props} />);
+  expect(screen.queryByRole("dialog")).toBeNull();
+  expect(props.onKnowledgeScopeChange).not.toHaveBeenCalled();
+});
 
 const entryConfigurations = [
   { name: "default", props: {} },

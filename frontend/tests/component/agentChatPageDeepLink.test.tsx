@@ -108,6 +108,9 @@ vi.mock("@/hooks/agent/usePublishedAgentList", () => ({
 vi.mock("@/hooks/chat/useConversationAgentHistory", () => ({
   useConversationAgentHistory: () => ({ data: undefined }),
 }));
+vi.mock("@/hooks/chat/useComposerResources", () => ({
+  useComposerKnowledgeBases: () => ({ dataUpdatedAt: 0 }),
+}));
 vi.mock("../../app/[locale]/newchat/assistant-ui/agent-landing", () => ({
   AgentLandingPage: ({
     onSelectAgent,

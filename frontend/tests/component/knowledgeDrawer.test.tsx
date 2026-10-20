@@ -117,6 +117,32 @@ it("renders knowledge as an icon-free list by default with descriptive metadata"
   expect(row?.querySelector(".lucide-database, img, .ant-avatar")).toBeNull();
 });
 
+it.each(["list", "card"] as const)(
+  "hides AIDP count metadata in %s view and retains local counts",
+  (viewMode) => {
+    const props = {
+      open: true,
+      onClose: vi.fn(),
+      viewMode,
+      knowledgeBases,
+    };
+    const view = render(<KnowledgeDrawer {...props} isAidpSearch />);
+    const row = () =>
+      screen
+        .getByRole("option", { name: "Handbook" })
+        .closest("[data-resource-view]");
+    expect(row()).toHaveTextContent("Policies");
+    expect(row()).toHaveTextContent("bge-m3");
+    expect(row()).not.toHaveTextContent("128 documents");
+    expect(row()).not.toHaveTextContent("3420 chunks");
+    expect(knowledgeBases[0].documentCount).toBe(128);
+    expect(knowledgeBases[0].chunkCount).toBe(3420);
+    view.rerender(<KnowledgeDrawer {...props} isAidpSearch={false} />);
+    expect(row()).toHaveTextContent("128 documents");
+    expect(row()).toHaveTextContent("3420 chunks");
+  }
+);
+
 it("opens configurable tag management without committing knowledge selection", () => {
   const confirm = vi.fn();
   render(

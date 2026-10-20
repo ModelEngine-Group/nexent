@@ -788,7 +788,11 @@ export const ConversationKnowledgeScopeModal: FC<
                       title={name}
                       tags={knowledgeBase.tags || []}
                       description={knowledgeBase.description || undefined}
-                      subtitle={`${knowledgeBase.documentCount ?? 0} ${t("knowledgeBase.document", "篇文档")}`}
+                      subtitle={
+                        source === "local"
+                          ? `${knowledgeBase.documentCount ?? 0} ${t("knowledgeBase.document", "篇文档")}`
+                          : undefined
+                      }
                       selected={isSelected}
                       disabled={disabledByModel}
                       onClick={() => toggleKnowledgeBase(source, id)}
