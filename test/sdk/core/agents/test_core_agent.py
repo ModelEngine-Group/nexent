@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """
 Unit tests for sdk.nexent.core.agents.core_agent module.
 
@@ -3096,7 +3098,7 @@ class TestRunStreamRealExecution:
         assert response.model_attempt_commit_deferred is False
         agent.model.assert_called_once()
         assert agent.model.call_args.kwargs["stop_sequences"] == ["Observation:", "Calling tools:"]
-        assert agent.model.call_args.kwargs["_retry_empty_response"] is False
+        assert "_retry_empty_response" not in agent.model.call_args.kwargs
 
     @pytest.mark.parametrize("format_name", ["code", "run"])
     def test_cmsr_007_disabled_legacy_code_with_outer_text_is_nonterminal(self, monkeypatch, format_name):

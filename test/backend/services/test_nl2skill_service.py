@@ -422,7 +422,7 @@ async def test_stream_skips_malformed_chunks_and_emits_error_on_agent_failure(mo
 
 
 @pytest.mark.asyncio
-async def test_stream_classifies_final_answer_control_content_and_skips_later_tail(mocker):
+async def test_stream_classifies_final_answer_deltas_including_later_tail(mocker):
     stop_event = threading.Event()
     mocker.patch.object(
         nl2skill_service,
@@ -432,15 +432,15 @@ async def test_stream_classifies_final_answer_control_content_and_skips_later_ta
 
     async def fake_agent_run(_run_info, *, thread_manager):
         assert thread_manager is not None
-        yield json.dumps({"type": "final_answer", "content": "<skill>\n# Demo"})
-        yield json.dumps({"type": "final_answer", "content": "tail"})
+        yield json.dumps({"type": "final_answer", "content": "<skill>\n# Demo", "answer_phase": "delta"})
+        yield json.dumps({"type": "final_answer", "content": "tail\n</skill>", "answer_phase": "delta"})
 
     mocker.patch.object(nl2skill_service, "agent_run", fake_agent_run)
     stream = await create_nl2skill_stream(NL2SkillRunRequest(query="Create"), "tenant", "en")
     payloads = [json.loads(item.removeprefix("data: ").strip()) async for item in stream]
 
     assert any(item["type"] == "skill_body" and "# Demo" in item["content"] for item in payloads)
-    assert not any(item.get("content") == "tail" for item in payloads)
+    assert "".join(item["content"] for item in payloads if item["type"] == "skill_body") == "# Demotail\n"
     assert payloads[-1]["type"] == "done"
     assert stop_event.is_set()
 

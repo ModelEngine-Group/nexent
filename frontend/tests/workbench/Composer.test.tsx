@@ -20,16 +20,18 @@ import {
   ComposerDictation,
 } from "@/app/newchat/assistant-ui/composer-tools";
 import { Composer } from "@/app/newchat/assistant-ui/composer";
+import type { KnowledgeCapabilities } from "@/types/knowledgeScope";
 
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ push: vi.fn() }),
   useParams: () => ({ locale: "zh" }),
 }));
+const deployment = vi.hoisted(() => ({
+  enableAidpKnowledge: false,
+  isDeploymentReady: true,
+}));
 vi.mock("@/components/providers/deploymentProvider", () => ({
-  useDeployment: () => ({
-    enableAidpKnowledge: false,
-    isDeploymentReady: true,
-  }),
+  useDeployment: () => deployment,
 }));
 const resourceQueries = vi.hoisted(() => ({
   knowledge: vi.fn(() => ({ data: [], isLoading: false })),
@@ -69,6 +71,8 @@ const runtime = vi.hoisted(() => ({
   cancel: vi.fn(),
 }));
 beforeEach(() => {
+  deployment.enableAidpKnowledge = false;
+  deployment.isDeploymentReady = true;
   runtime.thread.isRunning = false;
   runtime.composer.text = "question";
   runtime.cancel.mockReset();
@@ -120,8 +124,23 @@ vi.mock("react-i18next", async (importOriginal) => ({
     i18n: { language: "zh-CN" },
   }),
 }));
+const lexicalInputProps = vi.hoisted(() => vi.fn());
 vi.mock("@assistant-ui/react-lexical", () => ({
-  LexicalComposerInput: () => null,
+  LexicalComposerInput: (props: {
+    placeholder?: string;
+    "aria-label"?: string;
+    formatter?: unknown;
+    submitMode?: string;
+  }) => {
+    lexicalInputProps(props);
+    return (
+      <textarea
+        aria-label={props["aria-label"]}
+        placeholder={props.placeholder}
+        defaultValue={runtime.composer.text}
+      />
+    );
+  },
 }));
 vi.mock("@/app/newchat/adapter/remote-chat-model-adapter", () => ({
   planRegistry: { subscribe: () => () => {}, data: null },
@@ -230,11 +249,222 @@ vi.mock("@/components/ui/tooltip", () => ({
   TooltipContent: () => null,
 }));
 
+const capabilities: KnowledgeCapabilities = {
+  agent_id: 41,
+  version_no: 1,
+  sources: {
+    local: {
+      enabled: true,
+      max_select: 50,
+      requires_same_embedding_model: true,
+      default_summary: "",
+      default_knowledge_ids: [],
+      default_range_values: [],
+    },
+    aidp: {
+      enabled: false,
+      max_select: 10,
+      default_summary: "",
+      default_knowledge_ids: [],
+      default_range_values: [],
+    },
+  },
+};
+
 const base = {
   models: [],
   chatMode: "execution" as const,
   onChatModeChange: vi.fn(),
+  knowledgeCapabilities: capabilities,
 };
+
+it.each([
+  [false, true, false, true],
+  [true, false, true, true],
+  [false, false, true, false],
+  [true, true, false, false],
+  [false, false, false, false],
+  [true, false, false, false],
+])(
+  "knowledge action follows deployment=%s local=%s aidp=%s",
+  (aidp, local, remote, visible) => {
+    deployment.enableAidpKnowledge = aidp;
+    render(
+      <Composer
+        {...base}
+        onKnowledgeScopeChange={vi.fn()}
+        knowledgeCapabilities={{
+          ...capabilities,
+          sources: {
+            local: { ...capabilities.sources.local, enabled: local },
+            aidp: { ...capabilities.sources.aidp, enabled: remote },
+          },
+        }}
+      />
+    );
+    expect(
+      Boolean(
+        screen.queryByRole("button", { name: "chat.composer.knowledgeBase" })
+      )
+    ).toBe(visible);
+  }
+);
+
+it("unsupported or pending capability hides saved knowledge chips without mutating scope", () => {
+  const scope = {
+    schema_version: 1 as const,
+    local: { mode: "override" as const, knowledge_ids: ["1"] },
+    aidp: { mode: "disabled" as const, kds_ids: [] },
+  };
+  const save = vi.fn();
+  const view = render(
+    <Composer
+      {...base}
+      knowledgeScope={scope}
+      onKnowledgeScopeChange={save}
+      knowledgeCapabilities={null}
+    />
+  );
+  expect(
+    screen.queryByRole("button", { name: "chat.composer.knowledgeBase" })
+  ).toBeNull();
+  expect(screen.queryByRole("button", { name: "common.delete 1" })).toBeNull();
+  view.rerender(
+    <Composer {...base} knowledgeScope={scope} onKnowledgeScopeChange={save} />
+  );
+  expect(
+    screen.getByRole("button", { name: "chat.composer.knowledgeBase" })
+  ).toBeEnabled();
+  expect(scope.local.knowledge_ids).toEqual(["1"]);
+  expect(save).not.toHaveBeenCalled();
+  deployment.isDeploymentReady = false;
+  view.rerender(<Composer {...base} onKnowledgeScopeChange={save} />);
+  expect(
+    screen.queryByRole("button", { name: "chat.composer.knowledgeBase" })
+  ).toBeNull();
+});
+
+it("closes the knowledge drawer on capability loss and owner change without reopening or saving", async () => {
+  const save = vi.fn();
+  const view = render(<Composer {...base} onKnowledgeScopeChange={save} />);
+  await userEvent.click(
+    screen.getByRole("button", { name: "chat.composer.knowledgeBase" })
+  );
+  expect(screen.getByRole("dialog")).toBeInTheDocument();
+  view.rerender(
+    <Composer
+      {...base}
+      onKnowledgeScopeChange={save}
+      knowledgeCapabilities={null}
+    />
+  );
+  expect(screen.queryByRole("dialog")).toBeNull();
+  view.rerender(<Composer {...base} onKnowledgeScopeChange={save} />);
+  expect(screen.queryByRole("dialog")).toBeNull();
+  await userEvent.click(
+    screen.getByRole("button", { name: "chat.composer.knowledgeBase" })
+  );
+  view.rerender(
+    <Composer
+      {...base}
+      onKnowledgeScopeChange={save}
+      knowledgeCapabilities={{ ...capabilities, agent_id: 42 }}
+    />
+  );
+  expect(screen.queryByRole("dialog")).toBeNull();
+  await userEvent.click(
+    screen.getByRole("button", { name: "chat.composer.knowledgeBase" })
+  );
+  view.rerender(
+    <Composer
+      {...base}
+      onKnowledgeScopeChange={save}
+      knowledgeCapabilities={{ ...capabilities, agent_id: 42, version_no: 2 }}
+    />
+  );
+  expect(screen.queryByRole("dialog")).toBeNull();
+  expect(save).not.toHaveBeenCalled();
+});
+
+it("Workbench retains knowledge selection without ordinary-chat capabilities", async () => {
+  render(
+    <Composer
+      {...base}
+      knowledgeCapabilities={null}
+      onKnowledgeScopeChange={vi.fn()}
+      workbenchPresentation={{
+        mode: "generic_chat",
+        actions: null,
+        onExitCreation: vi.fn(),
+      }}
+    />
+  );
+  await userEvent.click(
+    screen.getByRole("button", { name: "chat.composer.knowledgeBase" })
+  );
+  expect(screen.getByRole("dialog")).toBeInTheDocument();
+});
+
+it("discards an open drawer when the deployment source changes", async () => {
+  const save = vi.fn();
+  const props = {
+    ...base,
+    onKnowledgeScopeChange: save,
+    knowledgeCapabilities: {
+      ...capabilities,
+      sources: {
+        ...capabilities.sources,
+        aidp: { ...capabilities.sources.aidp, enabled: true },
+      },
+    },
+  };
+  const view = render(<Composer {...props} />);
+  await userEvent.click(
+    screen.getByRole("button", { name: "chat.composer.knowledgeBase" })
+  );
+  deployment.enableAidpKnowledge = true;
+  view.rerender(<Composer {...props} />);
+  expect(screen.queryByRole("dialog")).toBeNull();
+  expect(
+    screen.getByRole("button", { name: "chat.composer.knowledgeBase" })
+  ).toBeEnabled();
+  deployment.enableAidpKnowledge = false;
+  view.rerender(<Composer {...props} />);
+  expect(screen.queryByRole("dialog")).toBeNull();
+  expect(save).not.toHaveBeenCalled();
+});
+
+it("hides knowledge controls when entering a Workbench creation mode", async () => {
+  const props = {
+    ...base,
+    onKnowledgeScopeChange: vi.fn(),
+    workbenchPresentation: {
+      mode: "generic_chat" as const,
+      actions: null,
+      onExitCreation: vi.fn(),
+    },
+  };
+  const view = render(<Composer {...props} />);
+  await userEvent.click(
+    screen.getByRole("button", { name: "chat.composer.knowledgeBase" })
+  );
+  view.rerender(
+    <Composer
+      {...props}
+      workbenchPresentation={{
+        ...props.workbenchPresentation,
+        mode: "agent_create",
+      }}
+    />
+  );
+  expect(screen.queryByRole("dialog")).toBeNull();
+  expect(
+    screen.queryByRole("button", { name: "chat.composer.knowledgeBase" })
+  ).toBeNull();
+  view.rerender(<Composer {...props} />);
+  expect(screen.queryByRole("dialog")).toBeNull();
+  expect(props.onKnowledgeScopeChange).not.toHaveBeenCalled();
+});
 
 const entryConfigurations = [
   { name: "default", props: {} },
@@ -251,6 +481,65 @@ const entryConfigurations = [
     },
   },
 ];
+
+it.each([
+  ...entryConfigurations,
+  { name: "nl2agent configuration", props: { configurationLayout: true } },
+  { name: "debug and compare", props: { debugLayout: true } },
+  {
+    name: "workbench agent creation",
+    props: {
+      workbenchPresentation: {
+        mode: "agent_create" as const,
+        actions: null,
+        onExitCreation: vi.fn(),
+      },
+    },
+  },
+  {
+    name: "workbench skill creation",
+    props: {
+      workbenchPresentation: {
+        mode: "skill_create" as const,
+        actions: null,
+        onExitCreation: vi.fn(),
+      },
+    },
+  },
+  { name: "nl2skill Lexical", props: { skillFiles: [] } },
+  {
+    name: "workbench skill draft Lexical",
+    props: {
+      skillFiles: [{ path: "scripts/test.py", content: "print(1)" }],
+      workbenchPresentation: {
+        mode: "skill_create" as const,
+        actions: null,
+        onExitCreation: vi.fn(),
+      },
+    },
+  },
+])(
+  "$name has no visible hint and preserves editable drafts",
+  async ({ props }) => {
+    const view = render(<Composer {...base} {...props} />);
+    const input = screen.getByRole("textbox", {
+      name: "chat.composer.inputLabel",
+    });
+    expect(input).toHaveAttribute("placeholder", "");
+    expect(input).toHaveValue("question");
+    await userEvent.clear(input);
+    expect(input).toHaveValue("");
+    await userEvent.type(input, "A draft / @ reference");
+    expect(input).toHaveValue("A draft / @ reference");
+    expect(view.container).not.toHaveTextContent("chat.composer.placeholder");
+    if ("skillFiles" in props) {
+      expect(lexicalInputProps.mock.lastCall?.[0]).toMatchObject({
+        formatter: {},
+        submitMode: "enter",
+      });
+    }
+  }
+);
 
 it("shares the default shell, text input, model and paper-plane send presentation across entries", () => {
   const presentation = entryConfigurations.map(({ props }) => {
@@ -387,8 +676,8 @@ it("conversation controls enable resource queries and mode changes without an ag
     screen.getByRole("button", { name: "chat.composer.knowledgeBase" })
   ).toBeDisabled();
   expect(
-    screen.getByRole("button", { name: "chat.composer.skills" })
-  ).toBeDisabled();
+    screen.queryByRole("button", { name: "chat.composer.skills" })
+  ).toBeNull();
   expect(
     screen.queryByRole("button", { name: "chat.composer.plus" })
   ).toBeNull();
@@ -605,9 +894,12 @@ it("UT-FE-WB-004 stop remains reachable while running and input recovers when id
   ).toBeEnabled();
 });
 
-it("opens direct knowledge and skill drawers, applies confirmed skills and discards canceled selections", async () => {
+it("hides unconnected ordinary-chat skill selection and retains knowledge cancellation", async () => {
   const save = vi.fn();
-  render(<Composer {...base} onKnowledgeScopeChange={save} />);
+  const view = render(<Composer {...base} onKnowledgeScopeChange={save} />);
+  expect(
+    screen.queryByRole("button", { name: "chat.composer.skills" })
+  ).toBeNull();
   expect(
     screen.queryByRole("button", { name: "chat.composer.plus" })
   ).toBeNull();
@@ -620,33 +912,29 @@ it("opens direct knowledge and skill drawers, applies confirmed skills and disca
   );
   expect(screen.queryByRole("dialog")).toBeNull();
   expect(save).not.toHaveBeenCalled();
+  view.rerender(<Composer {...base} onKnowledgeScopeChange={save} disabled />);
+  expect(
+    screen.queryByRole("button", { name: "chat.composer.skills" })
+  ).toBeNull();
+});
+
+it("retains the Workbench skill action through its existing callback", async () => {
+  const open = vi.fn();
+  render(
+    <Composer
+      {...base}
+      workbenchPresentation={{
+        mode: "generic_chat",
+        actions: null,
+        onExitCreation: vi.fn(),
+      }}
+      onOpenWorkbenchSkillPicker={open}
+    />
+  );
   await userEvent.click(
     screen.getByRole("button", { name: "chat.composer.skills" })
   );
-  await userEvent.click(screen.getByRole("button", { name: "Cancel skills" }));
-  expect(screen.queryByText("Selected skill")).toBeNull();
-  await userEvent.click(
-    screen.getByRole("button", { name: "chat.composer.skills" })
-  );
-  await act(async () => {
-    await drawerProps.skills.mock.lastCall?.[0].onConfirm(
-      [{ skill_id: 12, config_values: { format: "text" } }],
-      [{ skill_id: "12", name: "Selected skill" }]
-    );
-  });
-  expect(screen.queryByRole("dialog")).toBeNull();
-  expect(screen.getByText("Selected skill")).toBeInTheDocument();
-  await userEvent.click(
-    screen.getByRole("button", { name: "chat.composer.skills" })
-  );
-  expect(drawerProps.skills.mock.lastCall?.[0].selected).toMatchObject([
-    { skill_id: 12, config_values: { format: "text" } },
-  ]);
-  await userEvent.click(screen.getByRole("button", { name: "Cancel skills" }));
-  await userEvent.click(
-    screen.getByRole("button", { name: "common.delete Selected skill" })
-  );
-  expect(screen.queryByText("Selected skill")).toBeNull();
+  expect(open).toHaveBeenCalledOnce();
 });
 
 it("forwards knowledge drafts and previews, keeps failed saves open, and closes after successful retry", async () => {

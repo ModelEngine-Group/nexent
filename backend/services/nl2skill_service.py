@@ -27,9 +27,7 @@ from consts.model import HistoryItem, NL2SkillRunRequest
 from database.model_management_db import get_model_by_model_id
 from management.services.configuration.tenant.settings import tenant_config_manager
 from management.services.model.names import get_model_name_from_config
-from management.services.skill.classifier import (
-    ContentClassifier,
-)
+from management.services.skill.stream_parser import SkillStreamParser
 from management.services.skill.prompt import (
     get_nl2skill_prompt_template,
 )
@@ -37,16 +35,6 @@ from infrastructure.concurrency import runtime_thread_manager
 from management.services.model.run_controls import resolve_creator_model, validate_selected_record, preflight_turn_controls
 
 logger = logging.getLogger(__name__)
-
-PARSABLE_MODEL_TYPES = frozenset(
-    {
-        "model_output",
-        "model_output_thinking",
-        "model_output_deep_thinking",
-        "model_output_code",
-        "model_thinking_output",
-    }
-)
 
 SKILL_FILE_DIRECTIVE_PATTERN = re.compile(
     r'<(?:reference|use_script)\b[^>]*\bpath\s*=\s*(["\'])(.*?)\1[^>]*/\s*>',
@@ -289,7 +277,7 @@ async def create_nl2skill_stream(
     target_file_set = set(target_files)
 
     async def generate() -> AsyncIterator[str]:
-        classifier = ContentClassifier()
+        parser = SkillStreamParser()
         sequence = 0
 
         def serialize(event: dict[str, Any]) -> str:
@@ -328,26 +316,11 @@ async def create_nl2skill_stream(
                 if not isinstance(chunk, dict):
                     continue
 
-                chunk_type = str(chunk.get("type") or "")
-                content = str(chunk.get("content") or "")
-                if chunk_type in PARSABLE_MODEL_TYPES:
-                    for event in classifier.classify(content, origin_type=chunk_type):
-                        if is_allowed_write(event):
-                            yield serialize(event)
-                    continue
+                for event in parser.process(chunk):
+                    if is_allowed_write(event):
+                        yield serialize(event)
 
-                if chunk_type == "final_answer" and classifier.saw_control_tag:
-                    continue
-
-                if chunk_type == "final_answer" and "<" in content:
-                    for event in classifier.classify(content, origin_type=chunk_type):
-                        if is_allowed_write(event):
-                            yield serialize(event)
-                    continue
-
-                yield serialize(chunk)
-
-            for event in classifier.flush():
+            for event in parser.flush():
                 if is_allowed_write(event):
                     yield serialize(event)
             yield serialize({"type": "done", "content": ""})

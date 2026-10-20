@@ -38,7 +38,6 @@
   "chat.composer.skills": "技能",
   "chat.composer.knowledgeBase": "知识库",
   "chat.composer.uploadFile": "上传文件",
-  "chat.composer.workbenchPlaceholder": "输入\"/\"快速引用技能及指令",
   "chat.threadList.justNow": "刚刚",
   "chat.threadList.pinServerFailed": "读取或保存置顶失败，请稍后重试",
   "chat.sidebar.searchHistory": "搜索历史对话",
@@ -215,7 +214,7 @@
   "chat.composer.planning": "规划",
   "chat.composer.execution": "执行",
   "chat.composer.plan": "执行计划",
-  "chat.composer.placeholder": "输入\"/\"快速引用技能及指令",
+  "chat.composer.inputLabel": "对话输入",
   "chat.composer.voiceInput": "开始语音输入",
   "chat.composer.stopVoiceInput": "停止语音输入",
   "chat.composer.voiceInputDisabled": "请配置语音识别模型",
@@ -5884,7 +5883,6 @@
   "workbench.controls.waitForReply": "请等待当前回复完成",
   "workbench.controls.pageAll": "本页全选",
   "workbench.controls.pageClear": "取消本页全选",
-  "workbench.controls.installedNotice": "取消选择不会撤销已完成的导入或安装",
   "workbench.controls.agentLimit": "最多选择 8 个智能体",
   "workbench.controls.selectionFailed": "选择失败",
   "model.dialog.error.provider.title": "模型提供商连接失败",
@@ -6172,6 +6170,8 @@
   "notifications.deepLink.mcpNotFound": "未找到链接对应的 MCP 服务",
   "a2a.security.requirementRequired": "请选择认证方式",
   "common.error.loadFailed": "加载失败，请稍后重试",
+  "workbench.controls.mineTab": "我的",
+  "workbench.controls.repositoryTab": "仓库",
   "workbench.import.precheckTitle": "导入预检",
   "workbench.import.importAndSelect": "导入并选择"
 }

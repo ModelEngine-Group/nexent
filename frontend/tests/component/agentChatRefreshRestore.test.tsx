@@ -2,11 +2,13 @@
 
 import React from "react";
 import { screen } from "@testing-library/dom";
-import { render } from "@testing-library/react";
+import { act, render, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import Home from "../../app/[locale]/newchat/page";
+import { conversationService } from "@/services/conversationService";
+import type { KnowledgeCapabilities } from "@/types/knowledgeScope";
 
 const switchToNewThread = vi.fn().mockResolvedValue(undefined);
 const reloadThreads = vi.fn().mockResolvedValue(undefined);
@@ -45,6 +47,12 @@ const agent = {
 type PageAgent = typeof agent;
 
 let capturedRuntimeOptions: Record<string, unknown> | undefined;
+let chatProps:
+  | {
+      knowledgeCapabilities?: KnowledgeCapabilities | null;
+      onAgentSelected: (agent: PageAgent) => void;
+    }
+  | undefined;
 
 vi.mock("@assistant-ui/react", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@assistant-ui/react")>();
@@ -80,25 +88,30 @@ vi.mock("../../app/[locale]/newchat/assistant-ui/chat", () => ({
     selectedAgent,
     onAgentSelected,
     onBack,
+    knowledgeCapabilities,
   }: {
     selectedAgent: PageAgent | null;
     onAgentSelected: (agent: PageAgent) => void;
     onBack: () => void;
-  }) => (
-    <>
-      {selectedAgent ? (
-        <div>
-          <div>Agent chat: {selectedAgent.display_name}</div>
-          <button onClick={onBack}>back to list</button>
-        </div>
-      ) : (
-        <div>
-          <div>Agent list</div>
-          <button onClick={() => onAgentSelected(agent)}>select agent</button>
-        </div>
-      )}
-    </>
-  ),
+    knowledgeCapabilities?: KnowledgeCapabilities | null;
+  }) => {
+    chatProps = { knowledgeCapabilities, onAgentSelected };
+    return (
+      <>
+        {selectedAgent ? (
+          <div>
+            <div>Agent chat: {selectedAgent.display_name}</div>
+            <button onClick={onBack}>back to list</button>
+          </div>
+        ) : (
+          <div>
+            <div>Agent list</div>
+            <button onClick={() => onAgentSelected(agent)}>select agent</button>
+          </div>
+        )}
+      </>
+    );
+  },
 }));
 
 vi.mock("../../app/[locale]/newchat/assistant-ui/threadlist-sidebar", () => ({
@@ -110,6 +123,9 @@ vi.mock("@/hooks/agent/usePublishedAgentList", () => ({
 }));
 vi.mock("@/hooks/chat/useConversationAgentHistory", () => ({
   useConversationAgentHistory: () => ({ data: undefined }),
+}));
+vi.mock("@/hooks/chat/useComposerResources", () => ({
+  useComposerKnowledgeBases: () => ({ dataUpdatedAt: 0 }),
 }));
 vi.mock("@/hooks/useConfig", () => ({
   useConfig: () => ({ modelConfig: undefined }),
@@ -136,6 +152,10 @@ describe("newchat refresh restore wiring", () => {
     initializeThread.mockClear();
     updateThreadCustom.mockClear();
     capturedRuntimeOptions = undefined;
+    chatProps = undefined;
+    vi.mocked(conversationService.getKnowledgeCapabilities)
+      .mockReset()
+      .mockResolvedValue(null as unknown as KnowledgeCapabilities);
     window.sessionStorage.clear();
     runtimeState = {
       threads: {
@@ -255,5 +275,70 @@ describe("newchat refresh restore wiring", () => {
     // stored — only the agent selection survives the refresh.
     expect(window.sessionStorage.getItem(CONVERSATION_KEY)).toBeNull();
     expect(window.sessionStorage.getItem(AGENT_KEY)).toBe("41");
+  });
+
+  it("never exposes another Agent's capability while loading, after failure or a late response", async () => {
+    const capability = {
+      agent_id: 41,
+      version_no: 1,
+      sources: { local: { enabled: true }, aidp: { enabled: false } },
+    } as KnowledgeCapabilities;
+    let finishPending!: (value: KnowledgeCapabilities) => void;
+    const getCapabilities = vi.mocked(
+      conversationService.getKnowledgeCapabilities
+    );
+    getCapabilities
+      .mockResolvedValueOnce(capability)
+      .mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            finishPending = resolve;
+          })
+      )
+      .mockRejectedValueOnce(new Error("capability unavailable"));
+    render(<Home />);
+    await userEvent.click(screen.getByText("select agent"));
+    await waitFor(() =>
+      expect(chatProps?.knowledgeCapabilities).toEqual(capability)
+    );
+    const second = {
+      ...agent,
+      id: "42",
+      agent_id: 42,
+      display_name: "Second Agent",
+    };
+    await act(async () => {
+      await chatProps!.onAgentSelected(second);
+    });
+    expect(chatProps?.knowledgeCapabilities).toBeNull();
+    await waitFor(() => expect(getCapabilities).toHaveBeenCalledWith(42, 1));
+    await act(async () => {
+      await chatProps!.onAgentSelected({ ...agent, current_version_no: 2 });
+    });
+    await waitFor(() => expect(getCapabilities).toHaveBeenCalledWith(41, 2));
+    await act(async () => {
+      finishPending({ ...capability, agent_id: 42 });
+    });
+    expect(chatProps?.knowledgeCapabilities).toBeNull();
+  });
+
+  it.each([
+    { agent_id: 99, version_no: 1 },
+    { agent_id: 41, version_no: 99 },
+  ])("rejects capability identity mismatch %j", async (identity) => {
+    vi.mocked(conversationService.getKnowledgeCapabilities).mockResolvedValue({
+      ...identity,
+      sources: { local: { enabled: true }, aidp: { enabled: false } },
+    } as KnowledgeCapabilities);
+    render(<Home />);
+    await userEvent.click(screen.getByText("select agent"));
+    await waitFor(() =>
+      expect(conversationService.getKnowledgeCapabilities).toHaveBeenCalledWith(
+        41,
+        1
+      )
+    );
+    await act(async () => {});
+    expect(chatProps?.knowledgeCapabilities).toBeNull();
   });
 });

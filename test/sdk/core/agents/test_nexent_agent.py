@@ -668,11 +668,13 @@ def test_nexent_agent_initialization_invalid_observer():
 # Tests for create_model function
 # ----------------------------------------------------------------------------
 
-def test_create_model_success(nexent_agent_with_models, mock_model_config):
+@pytest.mark.parametrize("diagnostic_enabled", [False, True])
+def test_create_model_success(nexent_agent_with_models, mock_model_config, diagnostic_enabled):
     """Test successful model creation with regular model."""
     # Use the existing mock that was set up at the top of the file
     mock_model_instance = MagicMock()
     mock_openai_model_class.return_value = mock_model_instance
+    mock_model_config.diagnostic_chunks_enabled = diagnostic_enabled
 
     # Call the method under test
     result = nexent_agent_with_models.create_model("test_model")
@@ -698,6 +700,7 @@ def test_create_model_success(nexent_agent_with_models, mock_model_config):
         timeout_seconds=mock_model_config.timeout_seconds,
         prompt_cache=mock_model_config.prompt_cache,
         reasoning_capability=None,
+        diagnostic_chunks_enabled=diagnostic_enabled,
     )
 
     # Verify stop_event was set
@@ -733,6 +736,7 @@ def test_create_model_deep_thinking_success(nexent_agent_with_models, mock_deep_
         timeout_seconds=mock_deep_thinking_model_config.timeout_seconds,
         prompt_cache=mock_deep_thinking_model_config.prompt_cache,
         reasoning_capability=None,
+        diagnostic_chunks_enabled=False,
     )
 
     # Verify stop_event was set
