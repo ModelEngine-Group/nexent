@@ -98,6 +98,7 @@ from consts.const import (
     DATA_PROCESS_SERVICE,
     LANGUAGE,
     LLM_INCLUDE_LOGPROBS,
+    MODEL_RESPONSE_DIAGNOSTIC_CHUNKS,
     LOCAL_MCP_SERVER,
     MCP_REQUEST_TIMEOUT_SECONDS,
     TOKEN,
@@ -1215,6 +1216,7 @@ def create_model_config_from_record(record):
         provider_hint=record.get("model_factory"),
     )
     return ModelConfig(cite_name=record["display_name"],
+                        diagnostic_chunks_enabled=MODEL_RESPONSE_DIAGNOSTIC_CHUNKS,
                         api_key=record.get("api_key", ""),
                         model_name=model_name,
                         url=record["base_url"],

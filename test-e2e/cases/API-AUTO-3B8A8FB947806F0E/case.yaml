@@ -31,7 +31,7 @@ case:
       与 kb_shared 两条权限 fixture，供后续 403 断言使用。
     expected: 全部管理端点对缺失 Authorization 头、非法 token 均返回 401，不进入业务处理，不泄漏 KB/权限数据。
   - order: 2
-    action: 对 /aidp-mgmt 全部管理端点（GET/knowledge-bases、GET/knowledge-bases/count、POST/knowledge-bases、GET/knowledge-bases/{kds_id}、PUT/knowledge-bases/{kds_id}、DELETE/knowledge-bases/{kds_id}、POST/knowledge-bases/{kds_id}/documents、GET/knowledge-bases/{kds_id}/documents、PATCH/aidp-permissions/{kds_id}、GET/models）逐一发送无
+    action: 对 /aidp-mgmt 全部管理端点（GET/knowledge-bases、GET/knowledge-bases/count、POST/knowledge-bases、GET/knowledge-bases/{kds_id}、PUT/knowledge-bases/{kds_id}、DELETE/knowledge-bases/{kds_id}、POST/knowledge-bases/{kds_id}/documents、GET/knowledge-bases/{kds_id}/files、PATCH/aidp-permissions/{kds_id}、GET/models）逐一发送无
       Authorization 头的请求，断言均返回 401。
     expected: 请求不存在 kds_id 的资源操作返回 404，与 AidpKbNotFoundError 语义一致。
   - order: 3
@@ -72,7 +72,7 @@ case:
     request_expectations:
     - 从 users.yaml/secrets.env 加载 SU/Admin/DEV/UserA/UserB 账号，各自获取 Authorization token；向 aidp_kb_permission_t 插入 kb_private
       与 kb_shared 两条权限 fixture，供后续 403 断言使用。
-    - 对 /aidp-mgmt 全部管理端点（GET/knowledge-bases、GET/knowledge-bases/count、POST/knowledge-bases、GET/knowledge-bases/{kds_id}、PUT/knowledge-bases/{kds_id}、DELETE/knowledge-bases/{kds_id}、POST/knowledge-bases/{kds_id}/documents、GET/knowledge-bases/{kds_id}/documents、PATCH/aidp-permissions/{kds_id}、GET/models）逐一发送无
+    - 对 /aidp-mgmt 全部管理端点（GET/knowledge-bases、GET/knowledge-bases/count、POST/knowledge-bases、GET/knowledge-bases/{kds_id}、PUT/knowledge-bases/{kds_id}、DELETE/knowledge-bases/{kds_id}、POST/knowledge-bases/{kds_id}/documents、GET/knowledge-bases/{kds_id}/files、PATCH/aidp-permissions/{kds_id}、GET/models）逐一发送无
       Authorization 头的请求，断言均返回 401。
     - 携带非法/过期 Authorization token 请求详情端点与列表端点，断言返回 401，且响应体不包含 KB 列表、权限或详情数据。
     - 用 UserB token 请求 GET /knowledge-bases/{不存在的 kds_id}，断言返回 404。

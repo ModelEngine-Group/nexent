@@ -8,4 +8,5 @@
 - D1 [CMSR-D1-004](../../cases/CMSR-D1-004/case.yaml) · active
 - D2 [CMSR-D2-001](../../cases/CMSR-D2-001/case.yaml) · active
 - D3 [CMSR-D3-001](../../cases/CMSR-D3-001/case.yaml) · active
+- D3 [MODEL-RECOVERY-D3-001](../../cases/MODEL-RECOVERY-D3-001/case.yaml) · active
 - D4 [CMSR-D4-001](../../cases/CMSR-D4-001/case.yaml) · active

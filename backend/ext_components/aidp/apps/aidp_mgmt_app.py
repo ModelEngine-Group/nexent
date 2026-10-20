@@ -169,12 +169,12 @@ class CreateKbRequest(BaseModel):
         description="Knowledge base description (required)",
     )
     embedding_model: str = Field(..., min_length=1, description="Embedding model identifier")
-    chunk_token_num: int = Field(1024, ge=256, le=4096, strict=True, description="Chunk size in tokens")
-    chunk_overlap_num: int = Field(128, ge=0, strict=True, description="Chunk overlap in tokens")
+    chunk_token_num: int = Field(512, ge=256, le=4096, strict=True, description="Chunk size in tokens")
+    chunk_overlap_num: int = Field(51, ge=0, strict=True, description="Chunk overlap in tokens")
     vlm_model: str = Field("", description="VLM model identifier for caption generation")
     is_personal: int = Field(0, ge=0, le=1, description="Personal KB flag, int 0 or 1")
     topk: int = Field(10, ge=1, le=100, strict=True, description="Top-K retrieval count")
-    similarity: float = Field(0.6, ge=0, le=1, description="Similarity score threshold")
+    similarity: float = Field(0.0, ge=0, le=1, description="Similarity score threshold")
     caption_enable: int = Field(0, ge=0, le=1, strict=True, description="Caption generation toggle, int 0 or 1")
     chunk_mode: int = Field(
         0, ge=0, le=1, strict=True, description="Chunking mode: 0 smart splitting, 1 legal clauses"
@@ -227,6 +227,12 @@ class UpdateKbRequest(BaseModel):
     name: Optional[str] = Field(None, description="Knowledge base name")
     description: Optional[str] = Field(None, description="Knowledge base description")
     chunk_mode: Optional[int] = Field(None, ge=0, le=1, description="Chunk mode: 0 smart, 1 legal")
+    chunk_token_num: Optional[int] = Field(
+        None, ge=256, le=4096, strict=True, description="Chunk size in tokens"
+    )
+    chunk_overlap_num: Optional[int] = Field(
+        None, ge=0, strict=True, description="Chunk overlap in tokens"
+    )
     topk: Optional[int] = Field(None, ge=1, le=100, description="Vector retrieval Top K")
     caption_enable: Optional[int] = Field(
         None, ge=0, le=1, description="Caption (VLM) generation toggle, int 0 or 1"
@@ -249,6 +255,16 @@ class UpdateKbRequest(BaseModel):
             "graph_config string; requires the graph to be enabled."
         ),
     )
+
+    @model_validator(mode="after")
+    def validate_chunk_settings(self):
+        if (
+            self.chunk_token_num is not None
+            and self.chunk_overlap_num is not None
+            and self.chunk_overlap_num > self.chunk_token_num / 2
+        ):
+            raise ValueError("chunk_overlap_num must not exceed half of chunk_token_num")
+        return self
 
 
 class SetPermissionRequest(BaseModel):
@@ -532,22 +548,6 @@ def _resolve_doc_history_channel(
             % (len(channels), sorted(channels[0].keys()) if channels else []),
         )
     return channel
-
-
-def _history_reports_more(payload: dict) -> bool | None:
-    """Whether the payload explicitly says another history page exists.
-
-    Only unambiguous signals are trusted: this endpoint family reports
-    ``total_count`` as the size of the current page elsewhere, so it cannot be
-    read as a grand total. ``None`` means the payload does not say, and the
-    caller has to ask for the next page to find out.
-    """
-    has_more = payload.get("has_more")
-    if isinstance(has_more, bool):
-        return has_more
-    if "next_link" in payload:
-        return bool(payload.get("next_link"))
-    return None
 
 
 @aidp_mgmt_router.get("/knowledge-bases/graph-template")
@@ -1045,60 +1045,6 @@ async def upload_documents(
     return JSONResponse(status_code=HTTPStatus.OK, content=result)
 
 
-@aidp_mgmt_router.get("/knowledge-bases/{kds_id}/documents")
-async def list_documents(
-    request: Request,
-    kds_id: Annotated[str, Path(description="Knowledge base ID")],
-    page: Annotated[int, Query(ge=1, description="Page number starting from 1")] = 1,
-    page_size: Annotated[int, Query(ge=1, le=100, description="Page size from 1 to 100")] = 10,
-    keyword: Annotated[str | None, Query(max_length=200)] = None,
-) -> JSONResponse:
-    """List ingested files; Count provides the unfiltered pagination total."""
-    user_id, tenant_id = await _auth(request)
-    perms.require_permission(kds_id, user_id, tenant_id, required="READ")
-    server_url, api_key = _credentials()
-    started_at = time.perf_counter()
-    normalized_keyword = (keyword or "").strip()
-
-    if normalized_keyword:
-        result = await run_blocking(
-            "aidp-list-documents", list_aidp_docs_impl, server_url, api_key,
-            kds_id, page, page_size, normalized_keyword,
-            lane="control-io", owner="config",
-        )
-        total_count = None
-    else:
-        result, total_count = await asyncio.gather(
-            run_blocking(
-                "aidp-list-documents", list_aidp_docs_impl, server_url, api_key,
-                kds_id, page, page_size,
-                lane="control-io", owner="config",
-            ),
-            run_blocking(
-                "aidp-document-count", count_aidp_docs_impl, server_url, api_key, kds_id,
-                lane="control-io", owner="config",
-            ),
-        )
-
-    if not isinstance(result, dict) or not isinstance(result.get("value"), list):
-        raise AppException(ErrorCode.AIDP_RESPONSE_ERROR, "Unexpected AIDP document list response format")
-    has_more = bool(result.get("next_link"))
-    # Count is queried fresh, never from the 30-second cache. Search has no
-    # filtered Count endpoint, so next_link drives its simple pagination.
-    result.update({
-        "total_count": total_count if total_count is not None else (page - 1) * page_size + len(result["value"]),
-        "has_more": has_more,
-        "total_reliable": total_count is not None,
-    })
-    logger.info(
-        "AIDP document list timing: total_ms=%.1f kb_id=%s page=%d page_size=%d "
-        "page_count=%d total_count=%s has_more=%s",
-        (time.perf_counter() - started_at) * 1000, kds_id, page, page_size,
-        len(result["value"]), total_count, has_more,
-    )
-    return JSONResponse(status_code=HTTPStatus.OK, content=result)
-
-
 @aidp_mgmt_router.post("/knowledge-bases/{kds_id}/documents/remove")
 async def remove_documents(
     request: Request,
@@ -1246,9 +1192,11 @@ async def list_ingested_files(
     server_url, api_key = _credentials()
     normalized_keyword = (keyword or "").strip()
 
-    # AIDP's list response exposes next_link as the authoritative paging signal;
-    # total_count can be page-local. The Count endpoint is unfiltered, so use it
-    # only for the unfiltered list and keep keyword results in simple paging mode.
+    # AIDP returns a next_link on every page, including the last and empty
+    # pages, so it cannot signal whether another page exists. The Count
+    # endpoint provides a reliable total for the unfiltered list; keyword
+    # filtering happens before AIDP paginates and never produces a short
+    # non-final page, so a short filtered page is the last page.
     if normalized_keyword:
         list_result = await run_blocking(
             "aidp-list-ingested-files",
@@ -1288,17 +1236,17 @@ async def list_ingested_files(
             ),
         )
     result = dict(list_result or {})
-    rows = result.get("value") if isinstance(result.get("value"), list) else []
+    if not isinstance(result.get("value"), list):
+        raise AppException(
+            ErrorCode.AIDP_RESPONSE_ERROR,
+            "Unexpected AIDP document list response format",
+        )
+    rows = result["value"]
     total_reliable = isinstance(count_result, int) and not isinstance(count_result, bool)
     total = int(count_result) if total_reliable else (page - 1) * page_size + len(rows)
-    reported_more = _history_reports_more(result)
-    # An explicit next_link/has_more is authoritative even when the page is
-    # short; the row count only infers the last page when AIDP provides no
-    # paging signal at all, matching the /documents paging contract.
     has_more = (
         total > page * page_size
         if total_reliable
-        else bool(reported_more) if reported_more is not None
         else len(rows) >= page_size
     )
     result.update({
@@ -1353,25 +1301,25 @@ async def list_upload_tasks(
         )
     raw_items = history.get("value") if isinstance(history, dict) else None
     rows = [item for item in raw_items if isinstance(item, dict)] if isinstance(raw_items, list) else []
-    # AIDP History returns ``total_count`` as the current-page count, while
-    # ``total_record_count`` is a global statistic computed before the
-    # keyword/status filters are applied. It can therefore drive pagination
-    # only for the unfiltered list; filtered queries keep
-    # ``total_reliable=false`` and follow the upstream paging signal, while
-    # the global count stays available in the summary statistics.
+    # AIDP History computes ``total_record_count`` after the keyword filter but
+    # before the status filter. It is therefore an exact total for the
+    # unfiltered list and for keyword-only queries (status omitted/0), but it
+    # must not be used when a status filter is active. The live service also
+    # returns a next_link on every page, so it is never used as a "more"
+    # signal.
     filtered = bool(normalized_keyword) or status != 0
+    keyword_only = bool(normalized_keyword) and status == 0
     raw_global_total = history.get("total_record_count") if isinstance(history, dict) else None
     total_reliable = (
-        not filtered
+        (not filtered or keyword_only)
         and isinstance(raw_global_total, int)
         and not isinstance(raw_global_total, bool)
     )
     total = int(raw_global_total) if total_reliable else (page - 1) * page_size + len(rows)
-    reported_more = _history_reports_more(history) if isinstance(history, dict) else None
     has_more = (
-        bool(reported_more)
-        if reported_more is not None
-        else total > page * page_size
+        total > page * page_size
+        if total_reliable
+        else len(rows) >= page_size
     )
 
     def _history_count(field: str, fallback: int = 0) -> int:

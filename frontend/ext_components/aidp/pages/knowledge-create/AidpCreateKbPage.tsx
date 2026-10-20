@@ -38,6 +38,13 @@ import {
   graphPrompt,
   modelOptions,
 } from "@/ext_components/aidp/pages/knowledge-create/utils/aidpGraphConfig";
+import {
+  AIDP_DEFAULT_CHUNK_OVERLAP_PERCENT,
+  AIDP_DEFAULT_CHUNK_TOKEN_NUM,
+  AIDP_DEFAULT_SIMILARITY,
+  AIDP_DEFAULT_TOPK,
+  chunkOverlapTokens,
+} from "@/ext_components/aidp/shared/utils/aidpChunking";
 
 import AidpCreateKbSections from "@/ext_components/aidp/pages/knowledge-create/AidpCreateKbSections";
 import styles from "@/ext_components/aidp/pages/knowledge-create/AidpCreateKbSections.module.css";
@@ -47,18 +54,18 @@ import { aidpKnowledgeTypographyTheme } from "@/ext_components/aidp/shared/style
 /**
  * Default AIDP knowledge base configuration.
  *
- * The creation screen uses the agreed product defaults (1024 tokens, 128 token
- * overlap, similarity 0.6, Top K 10 and captioning off). Model identifiers and
- * graph defaults come from AIDP's model and graph template endpoints.
+ * The creation screen uses AIDP's defaults (512 tokens, 10% overlap, similarity
+ * 0, Top K 10 and captioning off). Model identifiers and graph defaults come
+ * from AIDP's model and graph template endpoints.
  */
 const AIDP_CREATE_DEFAULTS = {
-  chunk_token_num: 1024,
-  /** Overlap as a percentage of the chunk size; 128/1024 = 12.5%. */
-  chunk_overlap_percent: 12.5,
+  chunk_token_num: AIDP_DEFAULT_CHUNK_TOKEN_NUM,
+  /** Overlap as a percentage of the chunk size; 10% of 512 = 51 tokens. */
+  chunk_overlap_percent: AIDP_DEFAULT_CHUNK_OVERLAP_PERCENT,
   chunk_mode: 0,
   is_personal: 0,
-  topk: 10,
-  similarity: 0.6,
+  topk: AIDP_DEFAULT_TOPK,
+  similarity: AIDP_DEFAULT_SIMILARITY,
   caption_enable: 0,
   is_exist_graph: false,
   graph_domain: "常规" as const,
@@ -243,8 +250,9 @@ const AidpCreateKbPage: React.FC = () => {
       const overlapPercent =
         values.chunk_overlap_percent ??
         AIDP_CREATE_DEFAULTS.chunk_overlap_percent;
-      const overlapTokens = Math.floor(
-        (chunkTokens * Number(overlapPercent)) / 100
+      const overlapTokens = chunkOverlapTokens(
+        chunkTokens,
+        Number(overlapPercent)
       );
 
       const graphConfig: AidpGraphConfig | undefined = values.is_exist_graph

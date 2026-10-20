@@ -8,7 +8,10 @@ import type {
   AidpKbDetail,
 } from "@/ext_components/aidp/shared/types/management";
 import { AIDP_UNKNOWN_VALUE } from "@/ext_components/aidp/shared/utils/aidpKnowledgeDisplay";
-import { AIDP_MIN_COLUMN_WIDTH } from "@/ext_components/aidp/pages/knowledge-list/utils/aidpKnowledgeColumnWidths";
+import {
+  AIDP_MIN_COLUMN_WIDTH,
+  resizeAidpColumnPair,
+} from "@/ext_components/aidp/pages/knowledge-list/utils/aidpKnowledgeColumnWidths";
 import type { AidpResizableTitleProps } from "@/ext_components/aidp/pages/knowledge-list/AidpResizableTitle";
 
 /** Default page size shared by the files and upload-task lists. */
@@ -97,6 +100,61 @@ export const statusCode = (
     : null;
 };
 
+/** Normalize an ingested file's delete status to its numeric contract.
+ *
+ * AIDP reports ``file_status`` as ``0`` (ingested), ``1`` (deleting) or
+ * ``2`` (delete failed); numeric strings are accepted because deployments
+ * have been observed to quote numbers. Any other value, including missing
+ * ones, falls back to ``0`` so the row still reads "ingested".
+ */
+export const fileDeleteStatusCode = (value: unknown): 0 | 1 | 2 => {
+  const code =
+    typeof value === "number"
+      ? value
+      : typeof value === "string" && /^\d+$/.test(value.trim())
+        ? Number(value.trim())
+        : null;
+  return code === 1 || code === 2 ? code : 0;
+};
+
+export interface AidpFailureReason {
+  code?: string | number;
+  message?: string;
+  raw: string;
+}
+
+/** Parse AIDP's JSON-encoded failure reason, falling back to its raw text. */
+export const parseAidpFailureReason = (
+  value: unknown
+): AidpFailureReason | null => {
+  if (typeof value !== "string" || !value.trim()) return null;
+  const raw = value.trim();
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+      const record = parsed as Record<string, unknown>;
+      const message = record.msg ?? record.message ?? record.reason;
+      const code = record.error_code ?? record.code;
+      if (message !== undefined || code !== undefined) {
+        return {
+          raw,
+          ...(message !== undefined &&
+          message !== null &&
+          String(message).trim()
+            ? { message: String(message) }
+            : {}),
+          ...(typeof code === "string" || typeof code === "number"
+            ? { code }
+            : {}),
+        };
+      }
+    }
+  } catch {
+    // Plain-text reasons are rendered as-is.
+  }
+  return { raw };
+};
+
 export const graphConfigOf = (
   detail: AidpKbDetail
 ): Record<string, unknown> => {
@@ -122,6 +180,7 @@ export const FILE_COLUMN_MIN_WIDTHS: Record<string, number> = {
   import_mode: 80,
   created_at: 100,
   updated_at: 100,
+  file_status: 90,
   actions: 120,
 };
 
@@ -135,21 +194,36 @@ export const TASK_COLUMN_MIN_WIDTHS: Record<string, number> = {
 };
 
 // Attach the resizable header cell to every column; the declared column width
-// acts as the baseline until the user drags a handle. The resize handle reports
-// a pointer delta plus a snapshot of the rendered widths, so the dragged
-// column's next width is derived from its rendered baseline and all other
-// columns are frozen at their rendered widths.
+// acts as the baseline until the user drags a handle. Dragging moves the
+// boundary between the column and its next visible neighbour, keeping the
+// table's total width stable - the same interaction as the knowledge-base list.
 export const withResizableHeaders = (
   columns: ColumnsType<AidpDocumentItem>,
   columnWidths: Record<string, number>,
   minWidths: Record<string, number>,
   setColumnWidths: React.Dispatch<React.SetStateAction<Record<string, number>>>
-): ColumnsType<AidpDocumentItem> =>
-  columns.map((column) => {
-    const key = String(column.key);
+): ColumnsType<AidpDocumentItem> => {
+  const keys = columns.map((column) => String(column.key));
+  return columns.map((column, index) => {
+    const key = keys[index];
+    const nextKey = keys[index + 1];
+    const nextColumn = columns[index + 1];
     const width =
       columnWidths[key] ??
       (typeof column.width === "number" ? column.width : undefined);
+    const nextWidth = nextKey
+      ? (columnWidths[nextKey] ??
+        (typeof nextColumn?.width === "number" ? nextColumn.width : undefined))
+      : undefined;
+    const nextMin = nextKey
+      ? (minWidths[nextKey] ?? AIDP_MIN_COLUMN_WIDTH)
+      : undefined;
+    const maxWidth =
+      typeof width === "number" &&
+      typeof nextWidth === "number" &&
+      typeof nextMin === "number"
+        ? width + nextWidth - nextMin
+        : undefined;
     return {
       ...column,
       width,
@@ -157,23 +231,39 @@ export const withResizableHeaders = (
         ({
           width,
           minWidth: minWidths[key] ?? AIDP_MIN_COLUMN_WIDTH,
+          maxWidth,
           "data-column-key": key,
-          onResize: (delta: number, renderedWidths: Record<string, number>) => {
-            setColumnWidths((current) => {
-              const base =
-                renderedWidths[key] ?? columnWidths[key] ?? width ?? 0;
-              const next = Math.max(
-                minWidths[key] ?? AIDP_MIN_COLUMN_WIDTH,
-                Math.round(base + delta)
-              );
-              // Freeze the rendered widths first so only the dragged column
-              // changes and the browser does not redistribute spare space.
-              return { ...current, ...renderedWidths, [key]: next };
-            });
-          },
+          onResize: nextKey
+            ? (delta: number, renderedWidths: Record<string, number>) => {
+                setColumnWidths((current) => {
+                  const base = {
+                    ...current,
+                    ...renderedWidths,
+                    [key]:
+                      renderedWidths[key] ?? columnWidths[key] ?? width ?? 0,
+                    [nextKey]:
+                      renderedWidths[nextKey] ??
+                      columnWidths[nextKey] ??
+                      nextWidth ??
+                      0,
+                  };
+                  const resized = resizeAidpColumnPair(
+                    base,
+                    key,
+                    nextKey,
+                    delta,
+                    minWidths
+                  );
+                  // Freeze every rendered width so the table does not
+                  // redistribute space after the adjacent pair moves.
+                  return { ...current, ...base, ...resized };
+                });
+              }
+            : undefined,
         }) as AidpResizableTitleProps,
     };
   });
+};
 
 export const sumColumnWidths = (
   columns: ColumnsType<AidpDocumentItem>
