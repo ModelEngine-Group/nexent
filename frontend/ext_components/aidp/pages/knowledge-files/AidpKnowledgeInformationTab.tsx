@@ -17,7 +17,18 @@ import type {
 import aidpKnowledgeService from "@/ext_components/aidp/shared/services/aidpKnowledgeService";
 import { getAidpErrorMessage } from "@/ext_components/aidp/shared/utils/aidpErrorUtils";
 import log from "@/lib/logger";
+import AidpChunkModeChoices from "@/ext_components/aidp/shared/components/AidpChunkModeChoices";
 import AidpSliderNumberField from "@/ext_components/aidp/pages/knowledge-create/AidpSliderNumberField";
+import {
+  AIDP_CHUNK_TOKEN_MAX,
+  AIDP_CHUNK_TOKEN_MIN,
+  AIDP_DEFAULT_CHUNK_OVERLAP_PERCENT,
+  AIDP_DEFAULT_CHUNK_TOKEN_NUM,
+  AIDP_OVERLAP_PERCENT_MAX,
+  AIDP_OVERLAP_PERCENT_MIN,
+  chunkOverlapPercent,
+  chunkOverlapTokens,
+} from "@/ext_components/aidp/shared/utils/aidpChunking";
 import AidpKnowledgeDetailInformation, {
   type AidpDetailSetting,
 } from "@/ext_components/aidp/pages/knowledge-files/AidpKnowledgeDetailInformation";
@@ -29,6 +40,8 @@ import {
 /** Modal title i18n keys for every editable detail setting. */
 const SETTING_MODAL_TITLE_KEYS: Record<AidpDetailSetting, string> = {
   chunk_mode: "aidpKnowledge.detailEditChunkMode",
+  chunk_token_num: "aidpKnowledge.detailEditChunkTokenNum",
+  chunk_overlap_percent: "aidpKnowledge.detailEditChunkOverlapPercent",
   topk: "aidpKnowledge.detailEditTopK",
   vlm: "aidpKnowledge.detailEditVlm",
   graph_llm: "aidpKnowledge.detailEditGraphModel",
@@ -165,6 +178,24 @@ const AidpKnowledgeInformationTab: React.FC<
       );
   }, [llmModelsData]);
 
+  // Display-only lookup: the live detail returns the embedding model as a
+  // canonical path, while ModelService exposes the user-facing display_name.
+  const { data: embeddingModelsData } = useQuery({
+    queryKey: ["aidp-models", "embedding", "KnowledgeBase"],
+    queryFn: () =>
+      aidpKnowledgeService.listModels("embedding", "KnowledgeBase"),
+    staleTime: 5 * 60 * 1000,
+    enabled: Boolean(detail.embedding_model),
+  });
+  const embeddingModelLabel = useMemo(() => {
+    const models: AidpModelItem[] = embeddingModelsData?.models ?? [];
+    const match = models.find((m) => m.model_name === detail.embedding_model);
+    if (match?.display_name) return match.display_name;
+    if (!detail.embedding_model) return undefined;
+    const segments = detail.embedding_model.split("/").filter(Boolean);
+    return segments[segments.length - 1] || detail.embedding_model;
+  }, [detail.embedding_model, embeddingModelsData]);
+
   useEffect(() => {
     if (!settingModal) return;
     if (settingModal === "vlm") {
@@ -178,6 +209,30 @@ const AidpKnowledgeInformationTab: React.FC<
     if (isGraphSetting(settingModal)) {
       graphForm.setFieldsValue({
         value: graphSettingInitialValue(settingModal, detail, graphConfig),
+      });
+      return;
+    }
+    if (settingModal === "chunk_token_num") {
+      settingForm.setFieldsValue({
+        value: Math.min(
+          AIDP_CHUNK_TOKEN_MAX,
+          Math.max(
+            AIDP_CHUNK_TOKEN_MIN,
+            detail.chunk_token_num ?? AIDP_DEFAULT_CHUNK_TOKEN_NUM
+          )
+        ),
+      });
+      return;
+    }
+    if (settingModal === "chunk_overlap_percent") {
+      const percent =
+        chunkOverlapPercent(detail.chunk_token_num, detail.chunk_overlap_num) ??
+        AIDP_DEFAULT_CHUNK_OVERLAP_PERCENT;
+      settingForm.setFieldsValue({
+        value: Math.min(
+          AIDP_OVERLAP_PERCENT_MAX,
+          Math.max(AIDP_OVERLAP_PERCENT_MIN, Number(percent.toFixed(1)))
+        ),
       });
       return;
     }
@@ -257,6 +312,53 @@ const AidpKnowledgeInformationTab: React.FC<
         message.success(t("aidpKnowledge.detailSettingSaved"));
       } catch (error) {
         log.error("Failed to save AIDP knowledge setting:", {
+          id: detail.kds_id,
+          setting: settingModal,
+          error,
+        });
+        message.error(
+          getAidpErrorMessage(
+            error,
+            t,
+            t("aidpKnowledge.detailSettingSaveFailed")
+          )
+        );
+      } finally {
+        setSavingSetting(false);
+      }
+      return;
+    }
+    if (
+      settingModal === "chunk_token_num" ||
+      settingModal === "chunk_overlap_percent"
+    ) {
+      // AIDP stores overlap as tokens. Send both values so editing one field
+      // preserves the percentage shown for the other.
+      const values = await settingForm.validateFields();
+      const currentToken =
+        detail.chunk_token_num ?? AIDP_DEFAULT_CHUNK_TOKEN_NUM;
+      const currentPercent =
+        chunkOverlapPercent(currentToken, detail.chunk_overlap_num) ??
+        AIDP_DEFAULT_CHUNK_OVERLAP_PERCENT;
+      const nextToken =
+        settingModal === "chunk_token_num"
+          ? Number(values.value)
+          : currentToken;
+      const nextPercent =
+        settingModal === "chunk_overlap_percent"
+          ? Number(values.value)
+          : currentPercent;
+      setSavingSetting(true);
+      try {
+        await aidpKnowledgeService.updateKb(detail.kds_id, {
+          chunk_token_num: nextToken,
+          chunk_overlap_num: chunkOverlapTokens(nextToken, nextPercent),
+        });
+        setSettingModal(null);
+        await onRefreshDetail();
+        message.success(t("aidpKnowledge.detailSettingSaved"));
+      } catch (error) {
+        log.error("Failed to save AIDP chunk setting:", {
           id: detail.kds_id,
           setting: settingModal,
           error,
@@ -353,6 +455,7 @@ const AidpKnowledgeInformationTab: React.FC<
           graphConfig={graphConfig}
           groupNames={groupNames}
           canConfigureGroupPermissions={canConfigureGroupPermissions}
+          embeddingModelLabel={embeddingModelLabel}
           formatDateTime={formatDetailDateTime}
           onEditPermissions={onEditPermissions}
           onEditSetting={setSettingModal}
@@ -369,6 +472,7 @@ const AidpKnowledgeInformationTab: React.FC<
         onCancel={() => setSettingModal(null)}
         onOk={() => void saveSetting()}
         confirmLoading={savingSetting}
+        width={640}
         destroyOnHidden
       >
         {settingModal === "vlm" ? (
@@ -471,6 +575,75 @@ const AidpKnowledgeInformationTab: React.FC<
               )}
             </Form.Item>
           </Form>
+        ) : settingModal === "chunk_token_num" ? (
+          <Form form={settingForm} layout="vertical">
+            <Form.Item
+              name="value"
+              label={t("aidpKnowledge.detailChunkTokenNum")}
+              rules={[
+                {
+                  required: true,
+                  message: t("aidpKnowledge.createChunkTokenNumRequired"),
+                },
+                {
+                  type: "integer",
+                  min: AIDP_CHUNK_TOKEN_MIN,
+                  max: AIDP_CHUNK_TOKEN_MAX,
+                  message: t("aidpKnowledge.createChunkTokenNumRange", {
+                    min: AIDP_CHUNK_TOKEN_MIN,
+                    max: AIDP_CHUNK_TOKEN_MAX,
+                  }),
+                },
+              ]}
+            >
+              <AidpSliderNumberField
+                min={AIDP_CHUNK_TOKEN_MIN}
+                max={AIDP_CHUNK_TOKEN_MAX}
+                step={1}
+                unit="Token"
+                marks={{
+                  [AIDP_CHUNK_TOKEN_MIN]: String(AIDP_CHUNK_TOKEN_MIN),
+                  [AIDP_CHUNK_TOKEN_MAX]: String(AIDP_CHUNK_TOKEN_MAX),
+                }}
+                ariaLabel={t("aidpKnowledge.detailChunkTokenNum")}
+              />
+            </Form.Item>
+          </Form>
+        ) : settingModal === "chunk_overlap_percent" ? (
+          <Form form={settingForm} layout="vertical">
+            <Form.Item
+              name="value"
+              label={t("aidpKnowledge.detailChunkOverlapPercent")}
+              rules={[
+                {
+                  required: true,
+                  message: t("aidpKnowledge.createOverlapPercentRequired"),
+                },
+                {
+                  type: "number",
+                  min: AIDP_OVERLAP_PERCENT_MIN,
+                  max: AIDP_OVERLAP_PERCENT_MAX,
+                  message: t("aidpKnowledge.createOverlapPercentRange", {
+                    min: AIDP_OVERLAP_PERCENT_MIN,
+                    max: AIDP_OVERLAP_PERCENT_MAX,
+                  }),
+                },
+              ]}
+            >
+              <AidpSliderNumberField
+                min={AIDP_OVERLAP_PERCENT_MIN}
+                max={AIDP_OVERLAP_PERCENT_MAX}
+                step={0.5}
+                unit="%"
+                precision={1}
+                marks={{
+                  [AIDP_OVERLAP_PERCENT_MIN]: `${AIDP_OVERLAP_PERCENT_MIN}%`,
+                  [AIDP_OVERLAP_PERCENT_MAX]: `${AIDP_OVERLAP_PERCENT_MAX}%`,
+                }}
+                ariaLabel={t("aidpKnowledge.detailChunkOverlapPercent")}
+              />
+            </Form.Item>
+          </Form>
         ) : settingModal ? (
           <Form
             form={settingForm}
@@ -487,12 +660,7 @@ const AidpKnowledgeInformationTab: React.FC<
               rules={[{ required: true }]}
             >
               {settingModal === "chunk_mode" ? (
-                <Select
-                  options={[
-                    { value: 0, label: t("aidpKnowledge.chunkModeSmart") },
-                    { value: 1, label: t("aidpKnowledge.chunkModeLegal") },
-                  ]}
-                />
+                <AidpChunkModeChoices />
               ) : (
                 <AidpSliderNumberField
                   min={1}
