@@ -73,7 +73,8 @@ logger = logging.getLogger(__name__)
 
 
 def apply_workbench_runtime_plan(
-    agent_request: AgentRequest, canonical_workbench, resolved_plan, tenant_id: str
+    agent_request: AgentRequest, canonical_workbench, resolved_plan, tenant_id: str,
+    *, knowledge_tree=None,
 ) -> None:
     """Attach a validated Workbench plan to one in-memory run request."""
     from management.services.knowledge_base.scope import snapshot_runtime_knowledge_tree
@@ -82,11 +83,12 @@ def apply_workbench_runtime_plan(
         runtime_skill_snapshot,
     )
 
-    knowledge_tree = snapshot_runtime_knowledge_tree(
-        int(resolved_plan.root.identity.agent_id),
-        tenant_id,
-        int(resolved_plan.root.identity.version_no),
-    )
+    if knowledge_tree is None:
+        knowledge_tree = snapshot_runtime_knowledge_tree(
+            int(resolved_plan.root.identity.agent_id),
+            tenant_id,
+            int(resolved_plan.root.identity.version_no),
+        )
     if canonical_workbench.knowledge_scope is not None:
         from management.services.knowledge_base.mount import mount_knowledge_records
 

@@ -5,7 +5,8 @@
 from copy import deepcopy
 from typing import Any, Optional
 
-from nexent.core.ext_components.aidp.retrieval_config import CONFIG_KEYS, prepare_config
+from nexent.core.ext_components.aidp.constants import AIDP_SEARCH_TOOL_CLASSES
+from nexent.core.ext_components.aidp.retrieval_config import prepare_config
 
 from consts.exceptions import AgentToolImportError
 
@@ -112,12 +113,6 @@ def validate_import_tool_params(class_name, source, params, catalog_tool):
         raise AgentToolImportError(f"Cannot find tool {class_name} in {source}.")
     portable = portable_tool_params(class_name, params)
     allowed = {param["name"] for param in catalog_tool.get("params", [])}
-    if class_name in {"AidpSearchTool", "IndependentAidpSearchTool"}:
-        allowed |= CONFIG_KEYS
-        try:
-            portable.update(prepare_config(portable, {}))
-        except ValueError as exc:
-            raise AgentToolImportError(str(exc)) from exc
     for name in portable:
         if name not in allowed:
             raise AgentToolImportError(
@@ -136,3 +131,15 @@ AIDP_RUNTIME_PARAMS = frozenset(
         "kds_name_to_id_map",
     }
 )
+
+
+def prepare_import_retrieval_params(agent_info):
+    """Prepare user-uploaded policies before creating any agents or skills."""
+    for agent in agent_info.agent_info.values():
+        for tool in agent.tools:
+            if tool.class_name in AIDP_SEARCH_TOOL_CLASSES:
+                try:
+                    portable = portable_tool_params(tool.class_name, tool.params)
+                    tool.params = {**portable, **prepare_config(portable, {})}
+                except ValueError as exc:
+                    raise AgentToolImportError(str(exc)) from exc

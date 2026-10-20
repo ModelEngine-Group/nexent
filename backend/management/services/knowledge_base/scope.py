@@ -167,68 +167,61 @@ def snapshot_runtime_knowledge_tree(
     return deepcopy(_walk_agent_tree(agent_id, tenant_id, version_no))
 
 
-def validate_request_retrieval_overrides(agent_request, tenant_id):
-    """Prepare explicitly submitted tool policies at the agent request boundary."""
+def prepare_retrieval_request(
+    tenant_id, *, scope=None, tool_params=None, agent_id=None, version_no=None,
+    is_debug=False, runtime_agent_tree=None, inherited_policy=None,
+):
+    """Prepare newly submitted policies once using the actual run inheritance.
+
+    Stored scopes are not inputs to this boundary. Return the resolved tree so
+    mounting and resource resolution can reuse it without querying it again.
+    """
     from nexent.core.ext_components.aidp.retrieval_config import CONFIG_KEYS, prepare_config
-
-    tool_params = agent_request.tool_params
-    if not any(
-        CONFIG_KEYS.intersection(params)
-        for agent in tool_params.agents.values() for params in agent.tools.values()
-    ):
-        return
-    plan = getattr(agent_request, "_runtime_mount_plan", None)
-    tree = getattr(plan, "knowledge_tree", None)
-    if tree is None:
-        version = resolve_root_version(
-            agent_request.agent_id, tenant_id, agent_request.version_no, agent_request.is_debug,
-        )
-        tree = snapshot_runtime_knowledge_tree(agent_request.agent_id, tenant_id, version)
-    for node in tree:
-        overrides = tool_params.agents.get(node["agent_name"])
-        if overrides is None:
-            continue
-        for tool in node["tools"]:
-            if tool.get("class_name") != AIDP_TOOL_CLASS:
-                continue
-            params = overrides.tools.get(tool.get("name"), overrides.tools.get(AIDP_TOOL_CLASS))
-            if params is None or not CONFIG_KEYS.intersection(params):
-                continue
-            inherited = {param["name"]: param.get("default") for param in tool.get("params", [])}
-            try:
-                params.update(prepare_config(params, inherited))
-            except ValueError as exc:
-                raise ValidationError(str(exc)) from exc
-
-
-def validate_conversation_retrieval_config(scope, tenant_id, agent_id=None, version_no=None):
-    """Check a submitted AIDP policy against its inherited root before persistence."""
-    from nexent.core.ext_components.aidp.retrieval_config import (
-        CONFIG_KEYS,
-        prepare_config,
-    )
-
     from consts.const import ENABLE_AIDP_KNOWLEDGE
 
-    if not ENABLE_AIDP_KNOWLEDGE or scope is None or scope.retrieval_config is None:
-        return
-    unknown = set(scope.retrieval_config) - CONFIG_KEYS
-    if unknown:
-        raise ValidationError(f"Unsupported knowledge parameter: {min(unknown)}")
-    if agent_id is None:
-        from management.services.agent.system import system_agent_provider
+    policy = scope.retrieval_config if ENABLE_AIDP_KNOWLEDGE and scope is not None else None
+    has_overrides = tool_params is not None and any(
+        CONFIG_KEYS.intersection(params)
+        for agent in tool_params.agents.values() for params in agent.tools.values()
+    )
+    if not policy and not has_overrides:
+        return runtime_agent_tree
+    if policy:
+        unknown = set(policy) - CONFIG_KEYS
+        if unknown:
+            raise ValidationError(f"Unsupported knowledge parameter: {min(unknown)}")
+    tree = runtime_agent_tree
+    if tree is None:
+        if agent_id is None:
+            from management.services.agent.system import system_agent_provider
 
-        root = system_agent_provider.get_workbench_main_ref(tenant_id)
-        agent_id, version_no = int(root.agent_id), int(root.version_no)
-    elif version_no is None:
-        version_no = resolve_root_version(agent_id, tenant_id, None, False)
-    tree = snapshot_runtime_knowledge_tree(agent_id, tenant_id, version_no)
-    tool = next((tool for tool in tree[0]["tools"] if tool.get("class_name") == AIDP_TOOL_CLASS), None)
-    inherited = {param["name"]: param.get("default") for param in (tool or {}).get("params", [])}
+            root = system_agent_provider.get_workbench_main_ref(tenant_id)
+            agent_id, version_no = int(root.agent_id), int(root.version_no)
+        version = resolve_root_version(agent_id, tenant_id, version_no, is_debug)
+        tree = snapshot_runtime_knowledge_tree(agent_id, tenant_id, version)
     try:
-        scope.retrieval_config = prepare_config(scope.retrieval_config, inherited)
+        if policy:
+            tool = next((tool for tool in tree[0]["tools"] if tool.get("class_name") == AIDP_TOOL_CLASS), None)
+            inherited = {param["name"]: param.get("default") for param in (tool or {}).get("params", [])}
+            scope.retrieval_config = prepare_config(policy, inherited)
+        if has_overrides:
+            for index, node in enumerate(tree):
+                overrides = tool_params.agents.get(node["agent_name"])
+                if overrides is None:
+                    continue
+                for tool in node["tools"]:
+                    if tool.get("class_name") != AIDP_TOOL_CLASS:
+                        continue
+                    params = overrides.tools.get(tool.get("name"), overrides.tools.get(AIDP_TOOL_CLASS))
+                    if params is None or not CONFIG_KEYS.intersection(params):
+                        continue
+                    inherited = {param["name"]: param.get("default") for param in tool.get("params", [])}
+                    if index == 0:
+                        inherited.update(scope.retrieval_config if policy else (inherited_policy or {}))
+                    params.update(prepare_config(params, inherited))
     except ValueError as exc:
         raise ValidationError(str(exc)) from exc
+    return tree
 
 
 def get_agent_knowledge_capabilities(

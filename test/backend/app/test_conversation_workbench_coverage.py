@@ -13,6 +13,13 @@ conversation_app = __import__(
 )
 
 
+@pytest.fixture(autouse=True)
+def preparation(monkeypatch):
+    prepare = MagicMock()
+    monkeypatch.setattr(conversation_app, "prepare_conversation_retrieval_request", prepare)
+    return prepare
+
+
 def _request():
     return conversation_app.WorkbenchConfigUpdateRequest.model_validate(
         {
@@ -49,7 +56,6 @@ async def test_update_workbench_config_returns_new_state(monkeypatch):
         config=request.config.model_dump(mode="json"),
         expected_version=2,
         user_id="user-a",
-        tenant_id="tenant-a",
     )
 
 

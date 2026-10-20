@@ -31,7 +31,7 @@ def inherited_tree():
 def test_request_override_is_rejected_before_runtime(mocker, params):
     mocker.patch.object(service, "snapshot_runtime_knowledge_tree", return_value=inherited_tree())
     with pytest.raises(ValidationError):
-        service.validate_request_retrieval_overrides(request_with(params), "tenant")
+        service.prepare_retrieval_request("tenant", tool_params=request_with(params).tool_params, agent_id=7, version_no=3)
 
 
 def test_request_override_is_prepared_against_mounted_defaults_without_repository_read(mocker):
@@ -40,7 +40,7 @@ def test_request_override_is_prepared_against_mounted_defaults_without_repositor
         {"vector_candidates": 10, "search_method": "hybrid_search"},
         plan=SimpleNamespace(knowledge_tree=inherited_tree()),
     )
-    service.validate_request_retrieval_overrides(request, "tenant")
+    service.prepare_retrieval_request("tenant", tool_params=request.tool_params, runtime_agent_tree=request._runtime_mount_plan.knowledge_tree)
     assert request.tool_params.agents["root"].tools["aidp_search"] == {
         "vector_candidates": 10, "search_method": "vector_search|full_text_search|graph_search",
     }
@@ -50,5 +50,69 @@ def test_request_override_is_prepared_against_mounted_defaults_without_repositor
 @pytest.mark.parametrize("params", [{}, {"kds_list": ["kb"]}])
 def test_no_submitted_policy_does_not_read_or_validate_saved_policy(mocker, params):
     read = mocker.patch.object(service, "snapshot_runtime_knowledge_tree")
-    service.validate_request_retrieval_overrides(request_with(params), "tenant")
+    service.prepare_retrieval_request("tenant", tool_params=request_with(params).tool_params, agent_id=7, version_no=3)
+    read.assert_not_called()
+
+
+def test_debug_scope_uses_draft_inheritance_when_no_version_is_requested(mocker):
+    from consts.model import ConversationKnowledgeScopeRequest
+    mocker.patch("consts.const.ENABLE_AIDP_KNOWLEDGE", True)
+    mocker.patch.object(service, "query_current_version_no", return_value=3)
+    def snapshot(agent_id, tenant_id, version):
+        return [{"agent_name": "root", "tools": [{"class_name": "AidpSearchTool", "params": [
+            {"name": "top_k", "default": 30 if version == 0 else 10},
+        ]}]}]
+    read = mocker.patch.object(service, "snapshot_runtime_knowledge_tree", side_effect=snapshot)
+    policy = {"hybrid_top_k": 12, "vector_candidates": 30, "full_text_candidates": 30}
+    scope = ConversationKnowledgeScopeRequest(retrieval_config=dict(policy))
+    service.prepare_retrieval_request("tenant", scope=scope, agent_id=7, is_debug=True)
+    read.assert_called_once_with(7, "tenant", 0)
+    assert scope.retrieval_config == policy
+    with pytest.raises(ValidationError, match="hybrid_top_k"):
+        service.prepare_retrieval_request(
+            "tenant", scope=ConversationKnowledgeScopeRequest(retrieval_config=dict(policy)), agent_id=7,
+        )
+
+
+def test_scope_and_tool_overrides_share_one_inherited_snapshot(mocker):
+    from consts.model import ConversationKnowledgeScopeRequest
+    mocker.patch("consts.const.ENABLE_AIDP_KNOWLEDGE", True)
+    read = mocker.patch.object(service, "snapshot_runtime_knowledge_tree", return_value=inherited_tree())
+    scope = ConversationKnowledgeScopeRequest(retrieval_config={"top_k": 20})
+    request = request_with({"hybrid_top_k": 12, "vector_candidates": 30, "full_text_candidates": 30})
+    tree = service.prepare_retrieval_request(
+        "tenant", scope=scope, tool_params=request.tool_params, agent_id=7, version_no=3,
+    )
+    read.assert_called_once_with(7, "tenant", 3)
+    assert tree is read.return_value
+    assert scope.retrieval_config == {"top_k": 20}
+    assert request.tool_params.agents["root"].tools["aidp_search"]["hybrid_top_k"] == 12
+
+
+def test_new_override_uses_stored_workbench_policy_without_revalidating_it(mocker, monkeypatch):
+    import nexent.core.ext_components.aidp.retrieval_config as policy
+    read = mocker.patch.object(service, "snapshot_runtime_knowledge_tree", return_value=inherited_tree())
+    original = policy.validate_config
+    calls = []
+    def check(config, inherited=None):
+        calls.append(dict(config))
+        return original(config, inherited)
+    monkeypatch.setattr(policy, "validate_config", check)
+    raw = {"hybrid_top_k": 12, "vector_candidates": 30, "full_text_candidates": 30}
+    request = request_with(raw)
+    service.prepare_retrieval_request(
+        "tenant", tool_params=request.tool_params, agent_id=7, version_no=3,
+        inherited_policy={"top_k": 30},
+    )
+    read.assert_called_once()
+    assert calls == [raw]
+
+
+def test_empty_scope_policy_does_not_revalidate_saved_values(mocker):
+    from consts.model import ConversationKnowledgeScopeRequest
+    mocker.patch("consts.const.ENABLE_AIDP_KNOWLEDGE", True)
+    read = mocker.patch.object(service, "snapshot_runtime_knowledge_tree")
+    scope = ConversationKnowledgeScopeRequest(retrieval_config={})
+    service.prepare_retrieval_request("tenant", scope=scope, agent_id=7, version_no=3)
+    assert scope.retrieval_config == {}
     read.assert_not_called()

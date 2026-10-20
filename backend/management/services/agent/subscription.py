@@ -17,26 +17,6 @@ from typing import (
     Dict,
 )
 
-from fastapi import (
-    Request,
-)
-from fastapi.responses import (
-    JSONResponse,
-    StreamingResponse,
-)
-from nexent.core.agents.run_agent import (
-    DeferredAgentRun,
-)
-from nexent.core.concurrency import (
-    ManagedTaskSpec,
-    ThreadCapacityExceeded,
-    ThreadQueueTimedOut,
-    run_blocking,
-)
-from nexent.monitor import (
-    agent_monitoring_context,
-)
-
 from agents.agent_run_manager import (
     AgentRunAlreadyActiveError,
     AgentRunConcurrencyExceededError,
@@ -75,6 +55,13 @@ from database.agent_db import (
 )
 from database.conversation_db import (
     resolve_conversation_runtime_metadata,
+)
+from fastapi import (
+    Request,
+)
+from fastapi.responses import (
+    JSONResponse,
+    StreamingResponse,
 )
 from management.services.agent.context import (
     build_agent_run_context,
@@ -137,7 +124,6 @@ from management.services.permission.identity.authentication_helpers import (
 from infrastructure.serialization.runtime_metadata import (
     validate_runtime_metadata,
 )
-
 
 logger = logging.getLogger(__name__)
 
@@ -340,20 +326,52 @@ async def run_agent_stream(
             is_debug=bool(agent_request.is_debug),
             user_id=resolved_user_id,
         )
-        if (conversation is None or agent_request.is_debug) and canonical_workbench.knowledge_scope is not None:
-            from management.services.knowledge_base.scope import (
-                validate_conversation_retrieval_config,
-            )
-
-            validate_conversation_retrieval_config(canonical_workbench.knowledge_scope, resolved_tenant_id)
-        apply_workbench_runtime_plan(
-            agent_request, canonical_workbench, resolved_tree, resolved_tenant_id
-        )
         if conversation is not None:
             assert_workbench_version(
                 conversation,
                 agent_request.expected_workbench_config_version,
             )
+
+    raw_request_scope = (
+        None if resume else getattr(agent_request, "knowledge_scope", None)
+    )
+    if isinstance(raw_request_scope, ConversationKnowledgeScopeRequest):
+        request_scope = raw_request_scope
+    elif isinstance(raw_request_scope, dict):
+        request_scope = ConversationKnowledgeScopeRequest.model_validate(
+            raw_request_scope
+        )
+    else:
+        request_scope = None
+    prepared_knowledge_tree = None
+    if not resume:
+        from management.services.knowledge_base.scope import prepare_retrieval_request
+
+        submitted_scope = request_scope
+        root_agent_id, root_version = agent_request.agent_id, agent_request.version_no
+        if canonical_workbench is not None:
+            submitted_scope = canonical_workbench.knowledge_scope
+            root_agent_id = int(resolved_tree.root.identity.agent_id)
+            root_version = int(resolved_tree.root.identity.version_no)
+        stored_scope = (conversation or {}).get("knowledge_scope")
+        if submitted_scope is not None and submitted_scope.model_dump(mode="json").get("retrieval_config") == (
+            stored_scope or {}
+        ).get("retrieval_config"):
+            submitted_scope = None
+        prepared_knowledge_tree = prepare_retrieval_request(
+            resolved_tenant_id, scope=submitted_scope, tool_params=agent_request.tool_params,
+            agent_id=root_agent_id, version_no=root_version, is_debug=bool(agent_request.is_debug),
+            inherited_policy=(
+                canonical_workbench.knowledge_scope.retrieval_config
+                if canonical_workbench is not None and canonical_workbench.knowledge_scope is not None else None
+            ),
+        )
+        if canonical_workbench is not None:
+            apply_workbench_runtime_plan(
+                agent_request, canonical_workbench, resolved_tree, resolved_tenant_id,
+                knowledge_tree=prepared_knowledge_tree,
+            )
+            request_scope = canonical_workbench.knowledge_scope
 
     if not resume:
         run_controls.preflight_agent_turn_controls(
@@ -387,17 +405,6 @@ async def run_agent_stream(
         if not bool(agent_record.get("allow_chat_metadata", False)):
             raise AppException(ErrorCode.CHAT_METADATA_NOT_ALLOWED)
 
-    raw_request_scope = (
-        None if resume else getattr(agent_request, "knowledge_scope", None)
-    )
-    if isinstance(raw_request_scope, ConversationKnowledgeScopeRequest):
-        request_scope = raw_request_scope
-    elif isinstance(raw_request_scope, dict):
-        request_scope = ConversationKnowledgeScopeRequest.model_validate(
-            raw_request_scope
-        )
-    else:
-        request_scope = None
     stored_scope = (
         conversation.get("knowledge_scope")
         if conversation and canonical_workbench is None
@@ -409,18 +416,6 @@ async def run_agent_stream(
     if source_scope is None and stored_scope is not None and not resume:
         source_scope = ConversationKnowledgeScopeRequest.model_validate(stored_scope)
 
-    if request_scope is not None and request_scope.retrieval_config is not None and canonical_workbench is None and not resume:
-        from management.services.knowledge_base.scope import (
-            validate_conversation_retrieval_config,
-        )
-
-        validate_conversation_retrieval_config(
-            request_scope, resolved_tenant_id, agent_request.agent_id, agent_request.version_no,
-        )
-    if not resume and agent_request.tool_params is not None:
-        from management.services.knowledge_base.scope import validate_request_retrieval_overrides
-
-        validate_request_retrieval_overrides(agent_request, resolved_tenant_id)
     resolved_scope = None
     if source_scope is not None and not resume:
         if agent_request.agent_id is None:
@@ -433,6 +428,8 @@ async def run_agent_stream(
                 (),
             )
         ]
+        if not runtime_knowledge_tree and prepared_knowledge_tree is not None:
+            runtime_knowledge_tree = prepared_knowledge_tree
         resolve_scope_kwargs = {}
         if runtime_knowledge_tree:
             resolve_scope_kwargs["runtime_agent_tree"] = runtime_knowledge_tree
@@ -513,11 +510,6 @@ async def run_agent_stream(
         )
 
     if not resume:
-        # Keep the atomic version check even when the stored policy is unchanged.
-        retrieval_changed = canonical_workbench is not None and (
-            canonical_workbench.model_dump(mode="json").get("knowledge_scope")
-            != (conversation or {}).get("knowledge_scope")
-        )
         joint_runtime_state = None
         if (
             canonical_workbench is not None
@@ -531,8 +523,6 @@ async def run_agent_stream(
                     user_id=resolved_user_id,
                     config=canonical_workbench.model_dump(mode="json"),
                     expected_config_version=agent_request.expected_workbench_config_version,
-                    tenant_id=resolved_tenant_id,
-                    validate_retrieval=retrieval_changed,
                     metadata=agent_request.metadata or {},
                     expected_metadata_version=agent_request.expected_metadata_version,
                 )
@@ -552,9 +542,7 @@ async def run_agent_stream(
                 user_id=resolved_user_id,
                 config=canonical_workbench.model_dump(mode="json"),
                 expected_version=agent_request.expected_workbench_config_version,
-                tenant_id=resolved_tenant_id,
                 only_if_changed=True,
-                validate_retrieval=retrieval_changed,
             )
             conversation = {**(conversation or {}), **updated}
 

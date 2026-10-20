@@ -3,6 +3,7 @@
 import copy
 import json
 import logging
+import os
 import re
 import threading
 import uuid
@@ -10,39 +11,30 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 from urllib.parse import urljoin
 
-from nexent.core.agents.agent_model import (
-    AgentConfig,
-    AgentHistory,
-    AgentRunInfo,
-    AgentVerificationConfig,
-    ExternalA2AAgentConfig,
-    ModelConfig,
-    ToolConfig,
-)
+from nexent.core.utils.observer import MessageObserver
+from nexent.core.agents.prompt.user_context import render_user_context
+from nexent.core.concurrency import run_blocking
+from nexent.core.agents.agent_model import AgentRunInfo, ModelConfig, AgentConfig, ToolConfig, ExternalA2AAgentConfig, AgentHistory, AgentVerificationConfig
 from nexent.core.agents.context import (
     ContextManagerConfig,
     PolicyLayers,
     resolve_policy,
 )
-from nexent.core.agents.nexent_agent import get_local_python_authorized_imports
-from nexent.core.agents.prompt import AgentPromptComposer, get_builtin_tool_descriptions
-from nexent.core.agents.prompt.user_context import render_user_context
-from nexent.core.concurrency import run_blocking
-from nexent.core.models.capacity_budget import (
-    ContextBudgetCalculator,
-    ContextBudgetSnapshot,
-    RequestBudgetOverrides,
-    UncertaintyReserveBasisUnknown,
-)
+from nexent.core.models.prompt_cache import resolve_prompt_cache_profile
 from nexent.core.models.capacity_resolver import (
     ModelCapacitySnapshot,
     ProviderCapabilityUnknown,
     ResolverError,
     resolve_capacity,
 )
-from nexent.core.models.prompt_cache import resolve_prompt_cache_profile
+from nexent.core.models.capacity_budget import (
+    ContextBudgetCalculator,
+    ContextBudgetSnapshot,
+    RequestBudgetOverrides,
+    UncertaintyReserveBasisUnknown,
+)
 from nexent.core.tools.parallel_executor import ParallelExecutorTool
-from nexent.core.utils.observer import MessageObserver
+from nexent.core.agents.nexent_agent import get_local_python_authorized_imports
 from nexent.memory import models as memory_models
 
 from consts.capability_profiles import CATALOG as CAPABILITY_CATALOG
@@ -97,64 +89,33 @@ from management.services.mcp.addressing import get_tenant_local_mcp_server
 from infrastructure.redis import get_redis_client
 from consts.const import (
     AGENT_WORKSPACE_ROOT,
+    NEXENT_SANDBOX_WORKSPACE_MODE,
+    NEXENT_SANDBOX_CONTAINER_WORKSPACE_ROOT,
+    NEXENT_SANDBOX_FAILURE_POLICY,
     AIDP_API_KEY,
     AIDP_SERVER_URL,
     AIDP_TENANT_ID,
     DATA_PROCESS_SERVICE,
     LANGUAGE,
     LLM_INCLUDE_LOGPROBS,
+    LOCAL_MCP_SERVER,
     MCP_REQUEST_TIMEOUT_SECONDS,
+    TOKEN,
     MINIO_DEFAULT_BUCKET,
     MODEL_CONFIG_MAPPING,
-    NEXENT_SANDBOX_CONTAINER_WORKSPACE_ROOT,
     NEXENT_SANDBOX_DEFAULT_LEVEL,
-    NEXENT_SANDBOX_FAILURE_POLICY,
-    NEXENT_SANDBOX_WORKSPACE_MODE,
     NEXENT_SANDBOX_WORKSPACE_VOLUME,
     NEXENT_TOOL_FASTPATH_ALLOWED_TOOLS,
     NEXENT_TOOL_FASTPATH_ENABLED,
     RUNTIME_MCP_CLOSE_TIMEOUT_SECONDS,
     RUNTIME_MCP_TOOL_TIMEOUT_SECONDS,
     RUNTIME_PARALLEL_EXECUTOR_TIMEOUT_SECONDS,
-    TOKEN,
 )
-from consts.exceptions import ValidationError, WorkbenchError
 from consts.model import ToolParamsRequest
+from consts.exceptions import ValidationError, WorkbenchError
 from consts.tool_labels import SYSTEM_MANAGED_TOOL_NAMES
-from database import skill_db
-from database.a2a_agent_db import PROTOCOL_JSONRPC
-from database.agent_db import (
-    query_sub_agent_relations,
-    resolve_sub_agent_version_no,
-    search_agent_info_by_agent_id,
-)
-from database.agent_version_db import query_current_version_no, update_agent_snapshot
-from database.client import minio_client
-from database.knowledge_db import get_knowledge_name_map_by_index_names
-from database.model_management_db import get_model_by_model_id, get_model_records
-from database.tool_db import query_tools_by_ids, search_tools_for_sub_agent
-from management.services.agent.context import (
-    build_context_inputs,
-)
-from management.services.agent.prompt import (
-    load_agent_prompt_bundle,
-    should_enable_automation_tool_policy,
-    should_enable_memory_tool_policy,
-)
-from management.services.knowledge_base.service import (
-    ElasticSearchService,
-    get_embedding_model_by_index_name,
-    get_vector_db_core,
-)
-from management.services.model.adapter import get_llm_adapter, get_vlm_adapter
-from management.services.model.names import (
-    add_repo_to_name,
-    get_model_name_from_config,
-)
-from management.services.model.resolver import get_rerank_model, is_model_available
 
 from .tool_user_context import resolve_tool_user_context
-
 
 logger = logging.getLogger("create_agent_info")
 logger.setLevel(logging.INFO)
@@ -761,7 +722,7 @@ def _merge_tool_params(
         merged_params[param["name"]] = param.get("default")
 
     if override_params:
-        merged_params.update({key: value for key, value in override_params.items() if value is not None})
+        merged_params.update(override_params)
 
     # Extra params (e.g., internal access control params) always take precedence
     if extra_params:
@@ -1826,8 +1787,7 @@ async def create_agent_config(
     prompt_tool_policy_snapshot = agent_info.get("prompt_tool_policy_snapshot")
     if prompt_tool_policy_snapshot is not None:
         from nexent.core.tools.prompt_registry import (
-            PromptToolPolicySnapshot,
-            filter_effective_prompt_tools,
+            PromptToolPolicySnapshot, filter_effective_prompt_tools,
         )
 
         policy = PromptToolPolicySnapshot.from_mapping(prompt_tool_policy_snapshot)

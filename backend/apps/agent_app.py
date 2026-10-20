@@ -790,6 +790,9 @@ async def import_agent_api(
                      "force_import": request.force_import,
                      "skills_count": len(request.skills) if request.skills else 0}
     try:
+        from management.services.agent.policy import prepare_import_retrieval_params
+
+        prepare_import_retrieval_params(request.agent_info)
         if request.skills:
             agent_id_mapping = await import_agent_with_skills_impl(
                 request.agent_info,

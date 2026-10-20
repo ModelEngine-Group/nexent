@@ -959,9 +959,9 @@ class TestUpdateToolInfoImpl:
         self, mock_create_update, mock_require_edit, mock_query_tools
     ):
         """Test update_tool_info_impl when version_no is 0"""
-        mock_request = Mock(spec=ToolInstanceInfoRequest)
-        mock_request.version_no = 0
-        mock_request.__dict__ = {"agent_id": 1, "tool_id": 1, "version_no": 0}
+        from types import SimpleNamespace
+
+        mock_request = SimpleNamespace(agent_id=1, tool_id=1, version_no=0, params={})
         mock_tool_instance = {"id": 1, "name": "test_tool"}
         mock_create_update.return_value = mock_tool_instance
         mock_query_tools.return_value = [
@@ -988,6 +988,7 @@ class TestUpdateToolInfoImpl:
             def __init__(self):
                 self.agent_id = 1
                 self.tool_id = 1
+                self.params = {}
                 # Explicitly do not set version_no
 
         mock_request = MockToolInfoWithoutVersion()

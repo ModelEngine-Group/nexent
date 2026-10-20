@@ -103,11 +103,11 @@ def validate_config(config, inherited=None):
 
 
 def prepare_config(config, inherited):
-    """Validate submitted fields and return the fixed values to persist."""
-    validate_config(config, inherited)
+    """Validate raw fields and return a normalized sparse override."""
+    effective = validate_config(config, inherited)
     raw = merge_config(config)
     if "search_method" in raw:
-        raw["search_method"] = normalize_method(raw["search_method"])
+        raw["search_method"] = effective["search_method"]
     if raw.get("reranking_enable") is False and "graph_reranking_enable" not in raw:
         raw["graph_reranking_enable"] = False
     return raw

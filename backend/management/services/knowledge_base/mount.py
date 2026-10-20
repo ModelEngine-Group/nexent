@@ -3,12 +3,9 @@
 from copy import deepcopy
 from math import isfinite
 
-from nexent.core.ext_components.aidp.retrieval_config import CONFIG_KEYS, merge_config
-
 from consts.const import ENABLE_AIDP_KNOWLEDGE
 from consts.exceptions import ValidationError
 from database.tool_db import query_all_tools
-
 
 MANAGED_CLASSES = {"KnowledgeBaseSearchTool", "AidpSearchTool"}
 RESERVED = {"index_names", "kds_list", "display_names", "server_url", "api_key", "tenant_id",
@@ -36,30 +33,23 @@ def mount_knowledge_records(records, scope, tenant_id):
     if tool is None:
         raise ValidationError("Managed knowledge tool is unavailable")
     fields = {p["name"]: p for p in tool.get("params") or []}
-    if kind == "AidpSearchTool":
-        overrides = scope.retrieval_config or {}
-        saved = {name: p.get("default") for name, p in fields.items() if name in CONFIG_KEYS}
-        merged = merge_config(saved, overrides)
-        for name, value in merged.items():
-            fields.setdefault(name, {"name": name})["default"] = deepcopy(value)
-        tool["params"] = list(fields.values())
-        return [*result, tool]
     for name, value in (scope.retrieval_config or {}).items():
-        if name in RESERVED or name not in fields:
-            raise ValidationError(f"Unsupported knowledge parameter: {name}")
-        field_type = fields[name].get("type")
-        expected = {"string": str, "number": (int, float), "integer": int,
-                    "boolean": bool, "array": list, "object": dict}.get(field_type)
-        if expected and (not isinstance(value, expected) or (
-            field_type in {"number", "integer"} and (isinstance(value, bool) or not isfinite(value))
-        )):
-            raise ValidationError(f"Invalid knowledge parameter: {name}")
-        choices = {"search_mode": {"hybrid", "accurate", "semantic"},
-                   "search_method": {"hybrid_search", "vector_search", "full_text_search"},
-                   "rerank_mode": {"performance", "high_accuracy"},
-                   "reranking_mode": {"performance", "high_accuracy"}}
-        if name in choices and value not in choices[name]:
-            raise ValidationError(f"Invalid knowledge parameter: {name}")
+        if kind != "AidpSearchTool":
+            if name in RESERVED or name not in fields:
+                raise ValidationError(f"Unsupported knowledge parameter: {name}")
+            field_type = fields[name].get("type")
+            expected = {"string": str, "number": (int, float), "integer": int,
+                        "boolean": bool, "array": list, "object": dict}.get(field_type)
+            if expected and (not isinstance(value, expected) or (
+                field_type in {"number", "integer"} and (isinstance(value, bool) or not isfinite(value))
+            )):
+                raise ValidationError(f"Invalid knowledge parameter: {name}")
+            choices = {"search_mode": {"hybrid", "accurate", "semantic"},
+                       "search_method": {"hybrid_search", "vector_search", "full_text_search"},
+                       "rerank_mode": {"performance", "high_accuracy"},
+                       "reranking_mode": {"performance", "high_accuracy"}}
+            if name in choices and value not in choices[name]:
+                raise ValidationError(f"Invalid knowledge parameter: {name}")
         fields[name]["default"] = deepcopy(value)
     tool["params"] = list(fields.values())
     return [*result, tool]

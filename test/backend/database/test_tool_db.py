@@ -1244,26 +1244,6 @@ def test_add_tool_field(monkeypatch, mock_session):
     assert result["source"] == "test_source"
 
 
-def test_old_aidp_catalog_retains_new_instance_values_without_mutation(monkeypatch, mock_session):
-    from copy import deepcopy
-    session,query=mock_session
-    catalog=MockToolInfo()
-    catalog.class_name="AidpSearchTool"
-    before=deepcopy(catalog.params)
-    query.filter.return_value.first.return_value=catalog
-    context=MagicMock()
-    context.__enter__.return_value=session
-    monkeypatch.setattr("backend.database.tool_db.get_db_session",lambda:context)
-    monkeypatch.setattr("backend.database.tool_db.as_dict",lambda obj:obj.__dict__)
-    result=add_tool_field({"tool_id":1,"params":{"top_k":7,"vector_candidates":30,"multi_modal":False}})
-    values={p["name"]:p.get("default") for p in result["params"]}
-    assert values["top_k"]==7
-    assert values["vector_candidates"]==30
-    assert values["full_text_candidates"]==10
-    assert values["multi_modal"] is False
-    assert catalog.params==before
-
-
 def test_search_tools_for_sub_agent(monkeypatch, mock_session):
     """Test searching tools for sub-agent"""
     session, query = mock_session

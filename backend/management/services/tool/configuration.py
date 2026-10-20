@@ -93,6 +93,7 @@ from management.services.tool.common import (
 from management.services.tool.langchain import discover_langchain_modules
 from mcpadapt.smolagents_adapter import _sanitize_function_name
 from nexent.core.concurrency import run_blocking
+from nexent.core.ext_components.aidp.constants import AIDP_SEARCH_TOOL_NAMES
 from nexent.core.ext_components.aidp.retrieval_config import prepare_config
 from nexent.monitor import set_monitoring_context, set_monitoring_operation
 from pydantic_core import PydanticUndefined
@@ -233,6 +234,17 @@ def _validate_tool_param_ranges(tool_id: int, params: Dict[str, Any]):
         )
 
 
+def prepare_tool_params(tool, params):
+    """Prepare submitted tool parameters once before persistence."""
+    if tool["name"] in AIDP_SEARCH_TOOL_NAMES:
+        try:
+            return {**params, **prepare_config(params, {})}
+        except ValueError as exc:
+            raise ValidationError(str(exc)) from exc
+    _validate_tool_param_ranges(tool["tool_id"], params)
+    return params
+
+
 def update_tool_info_impl(
     tool_info: ToolInstanceInfoRequest, tenant_id: str, user_id: str
 ):
@@ -272,13 +284,6 @@ def update_tool_info_impl(
         or tool.get("name") in SYSTEM_MANAGED_TOOL_NAMES
     ):
         raise ResourceBindingError("resource_not_visible")
-
-    if tool.get("name") in {"aidp_search", "ind_aidp_search"}:
-        try:
-            params = dict(tool_info.params or {})
-            tool_info.params = {**params, **prepare_config(params, {})}
-        except ValueError as exc:
-            raise ValidationError(str(exc)) from exc
 
     if _is_aidp_search_tool(tool_info.tool_id, tool.get("name")):
         existing = query_tool_instances_by_id(
@@ -349,11 +354,7 @@ def update_tool_info_impl(
             raise ValidationError("Invalid DeepSeek Search configuration; check the key and parameter ranges.") from None
         tool_info.params = params
 
-    if tool.get("name") not in {"aidp_search", "ind_aidp_search"}:
-        _validate_tool_param_ranges(
-            tool_info.tool_id,
-            dict(getattr(tool_info, "params", None) or {}),
-        )
+    tool_info.params = prepare_tool_params(tool, tool_info.params)
 
     tool_instance = create_or_update_tool_by_tool_info(
         tool_info, tenant_id, user_id, version_no=version_no

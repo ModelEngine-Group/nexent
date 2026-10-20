@@ -90,7 +90,7 @@ def test_connection_credentials_cannot_be_saved_as_session_parameters():
 
 
 @pytest.mark.parametrize("override,expected", [({"top_k":7},30), ({"top_k":7,"vector_candidates":30},30)])
-def test_aidp_old_catalog_merged_fixed_values_without_mutation(mocker, override, expected):
+def test_aidp_overrides_preserve_fixed_values_without_mutation(mocker, override, expected):
     from nexent.core.ext_components.aidp.retrieval_config import (
         build_payload,
         resolve_config,
@@ -115,3 +115,16 @@ def test_aidp_mount_does_not_repeat_input_validation(mocker):
     mounted = service.mount_knowledge_records([tool("AidpSearchTool")], scope("aidp", params={"top_k": 7}), "tenant")
     assert mounted[0]["params"][0]["default"] == 7
     check.assert_not_called()
+
+
+def test_prepared_aidp_methods_are_applied_without_old_enum_checks(mocker):
+    mocker.patch.object(service, "ENABLE_AIDP_KNOWLEDGE", True)
+    original = tool("AidpSearchTool")
+    original["params"] += [{"name": "search_method", "default": "hybrid_search"},
+                           {"name": "reranking_mode", "default": "performance"}]
+    mounted = service.mount_knowledge_records([original], scope("aidp", params={
+        "search_method": "vector_search|graph_search", "reranking_mode": "jargon_coverage",
+    }), "tenant")
+    values = {p["name"]: p["default"] for p in mounted[0]["params"]}
+    assert values["search_method"] == "vector_search|graph_search"
+    assert values["reranking_mode"] == "jargon_coverage"

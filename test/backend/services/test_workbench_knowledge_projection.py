@@ -31,7 +31,7 @@ def test_legacy_scope_endpoint_updates_canonical_config_only(mocker):
     result = service.update_conversation_knowledge_scope_service(12, scope, "user", "tenant", 4)
     replace.assert_called_once_with(
         conversation_id=12, config={**canonical, "knowledge_scope": scope}, expected_version=4,
-        user_id="user", tenant_id="tenant",
+        user_id="user",
     )
     assert result["desired_scope"] == scope
     assert result["workbench_config_version"] == 5

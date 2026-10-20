@@ -353,7 +353,6 @@ sys.modules['nexent.memory'].models = sys.modules['nexent.memory.models']
 
 # Create nested modules for nexent.core to satisfy imports safely
 sys.modules['nexent.core'] = _create_stub_module("nexent.core")
-sys.modules['nexent.core'].__path__ = [str(Path(__file__).parents[3] / "sdk/nexent/core")]
 _concurrency_mod = _create_stub_module("nexent.core.concurrency")
 
 
@@ -7450,26 +7449,6 @@ class TestBuildInternalS3Url:
 
 class TestMergeToolParams:
     """Tests for _merge_tool_params function."""
-
-    def test_aidp_null_candidates_clear_inheritance_but_ordinary_null_inherits(self, monkeypatch):
-        from nexent.core.ext_components.aidp.retrieval_config import (
-            build_payload,
-            resolve_config,
-        )
-        import nexent.core.ext_components.aidp.retrieval_config as policy
-        def unexpected(*args, **kwargs):
-            raise AssertionError("Internal merging must not revalidate prepared policies")
-        monkeypatch.setattr(policy, "validate_config", unexpected)
-        record={"class_name":"AidpSearchTool","params":[{"name":"top_k","default":10},
-                {"name":"vector_candidates","default":30},{"name":"multi_modal","default":False},
-                {"name":"reranking_enable","default":False}]}
-        fixed=_merge_tool_params(record,{"top_k":7,"multi_modal":None})
-        assert fixed["vector_candidates"]==30 and fixed["multi_modal"] is False
-        ignored=_merge_tool_params(record,{"top_k":7,"vector_candidates":None})
-        payload=build_payload(resolve_config(ignored),"q",["kb"])
-        assert payload["hybrid_search_config"]["vector_candidates"]==30
-        assert payload["graph_search_config"]["graph_reranking_enable"] is False
-        assert record["params"][1]["default"]==30
 
     def test_merge_with_override_params(self):
         """Test that override params update merged params."""

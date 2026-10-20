@@ -3,7 +3,6 @@
 import json
 import logging
 import re
-from copy import deepcopy
 from typing import Dict, List, Optional, Sequence, Set
 
 from sqlalchemy import cast, or_
@@ -423,17 +422,7 @@ def add_tool_field(tool_info):
             ToolInfo.tool_id == tool_info["tool_id"])
         tool = query.first()
         # add tool params
-        tool_params = deepcopy(tool.params)
-        if tool.class_name in {"AidpSearchTool", "IndependentAidpSearchTool"}:
-            from nexent.core.ext_components.aidp.retrieval_config import DEFAULTS, INTEGER_RANGES
-            known = {param["name"] for param in tool_params}
-            for name, default in DEFAULTS.items():
-                if name in known:
-                    continue
-                kind = "integer" if name in INTEGER_RANGES else "boolean" if (
-                    isinstance(default, bool) or name == "graph_reranking_enable"
-                ) else "string" if isinstance(default, str) else "float"
-                tool_params.append({"name": name, "type": kind, "default": default, "optional": True})
+        tool_params = tool.params
         for ele in tool_params:
             param_name = ele["name"]
             instance_value = tool_info["params"].get(param_name)
@@ -441,7 +430,7 @@ def add_tool_field(tool_info):
             # This prevents null values from being saved to database and returned as defaults
             if instance_value is not None:
                 ele["default"] = instance_value
-        tool_dict = dict(as_dict(tool))
+        tool_dict = as_dict(tool)
         tool_dict["params"] = tool_params
 
         # Merge description_zh from SDK for local tools

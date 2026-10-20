@@ -126,11 +126,11 @@ def test_actual_workbench_save_rejects_invalid_retrieval_before_persistence(mock
     mocker.patch.object(scopes, "snapshot_runtime_knowledge_tree", return_value=[{"tools": [{
         "class_name": "AidpSearchTool", "params": [{"name": "top_k", "default": 10}],
     }]}])
+    mocker.patch.object(conversations, "get_conversation", return_value={"workbench_config": {"mode": "generic_chat"}})
     persist = mocker.patch.object(conversations, "replace_conversation_workbench_config")
+    from consts.model import ConversationKnowledgeScopeRequest
     with pytest.raises(ValidationError):
-        conversations.update_conversation_workbench_config_service(
-            conversation_id=1,
-            config={"mode": "generic_chat", "knowledge_scope": {"retrieval_config": policy}},
-            expected_version=0, user_id="user", tenant_id="tenant",
+        conversations.prepare_conversation_retrieval_request(
+            1, ConversationKnowledgeScopeRequest(retrieval_config=policy), "user", "tenant",
         )
     persist.assert_not_called()

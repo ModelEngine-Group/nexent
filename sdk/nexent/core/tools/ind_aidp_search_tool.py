@@ -16,7 +16,8 @@ from pydantic import Field
 from pydantic.fields import FieldInfo
 from smolagents.tools import Tool
 
-from ...utils.http_client_manager import http_client_manager
+from ..ext_components.aidp.constants import INDEPENDENT_AIDP_SEARCH_TOOL_NAME
+
 from ..ext_components.aidp.retrieval_client import AidpRetrievalError, post_retrieval
 from ..ext_components.aidp.retrieval_config import (
     ALL_CHANNELS,
@@ -33,6 +34,7 @@ from ..utils.tools_common_message import (
     build_knowledge_search_response,
     resolve_knowledge_search_scope,
 )
+from ...utils.http_client_manager import http_client_manager
 
 
 logger = logging.getLogger("ind_aidp_search_tool")
@@ -79,7 +81,7 @@ def _validate_base_url(value: Any) -> str:
 class IndependentAidpSearchTool(Tool):
     """Search an independently configured AIDP knowledge-base scope."""
 
-    name = "ind_aidp_search"
+    name = INDEPENDENT_AIDP_SEARCH_TOOL_NAME
     is_user_selectable = True
     description = (
         "Searches independently configured AIDP knowledge bases using configured vector, full-text, graph or combined retrieval. "

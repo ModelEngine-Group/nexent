@@ -15,7 +15,8 @@ from pydantic import Field
 from pydantic.fields import FieldInfo
 from smolagents.tools import Tool
 
-from ....utils.http_client_manager import http_client_manager
+from .constants import AIDP_SEARCH_TOOL_NAME
+
 from ...utils.observer import MessageObserver, ProcessType
 from ...utils.pydantic_utils import unwrap_field_info
 from ...utils.tools_common_message import (
@@ -25,6 +26,7 @@ from ...utils.tools_common_message import (
     build_knowledge_search_response,
     resolve_knowledge_search_scope,
 )
+from ....utils.http_client_manager import http_client_manager
 from .retrieval_client import AidpRetrievalError, post_retrieval
 from .retrieval_config import (
     ALL_CHANNELS,
@@ -63,7 +65,7 @@ def _parse_kds_list(kds_list: str) -> List[str]:
 
 
 class AidpSearchTool(Tool):
-    name = "aidp_search"
+    name = AIDP_SEARCH_TOOL_NAME
     is_user_selectable: bool = False
     description = (
         "Searches AIDP knowledge bases using configured vector, full-text, graph or combined retrieval. "

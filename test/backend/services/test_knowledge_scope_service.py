@@ -567,7 +567,7 @@ def test_retrieval_input_rejects_invalid_config_against_inherited_root(mocker, p
     }]}])
     scope = ConversationKnowledgeScopeRequest(retrieval_config=patch)
     with pytest.raises(ValidationError):
-        service.validate_conversation_retrieval_config(scope, "tenant", 7, 3)
+        service.prepare_retrieval_request("tenant", scope=scope, agent_id=7, version_no=3)
 
 
 def test_retrieval_input_saves_fixed_candidate_values(mocker):
@@ -577,8 +577,8 @@ def test_retrieval_input_saves_fixed_candidate_values(mocker):
         "class_name": "AidpSearchTool", "params": [{"name": "top_k", "default": 30}],
     }]}])
     scope = ConversationKnowledgeScopeRequest(retrieval_config={"hybrid_top_k": 12, "vector_candidates": 30, "full_text_candidates": 30})
-    service.validate_conversation_retrieval_config(scope, "tenant", 7, 3)
+    service.prepare_retrieval_request("tenant", scope=scope, agent_id=7, version_no=3)
     assert scope.retrieval_config == {"hybrid_top_k": 12, "vector_candidates": 30, "full_text_candidates": 30}
     scope.retrieval_config = {"vector_candidates": 10}
-    service.validate_conversation_retrieval_config(scope, "tenant", 7, 3)
+    service.prepare_retrieval_request("tenant", scope=scope, agent_id=7, version_no=3)
     assert scope.retrieval_config == {"vector_candidates": 10}

@@ -14,7 +14,7 @@ _request = base._request
 
 
 def _configure_early_workbench_run(monkeypatch, canonical, conversation):
-    plan = SimpleNamespace(root=SimpleNamespace(identity=SimpleNamespace(agent_id=99)))
+    plan = SimpleNamespace(root=SimpleNamespace(identity=SimpleNamespace(agent_id=99, version_no=5)))
     workbench_module = ModuleType("management.services.agent.workbench")
     workbench_module.assert_workbench_version = MagicMock()
     workbench_module.resolve_workbench_config = MagicMock(return_value=(canonical, plan))
@@ -30,7 +30,7 @@ def _configure_early_workbench_run(monkeypatch, canonical, conversation):
     monkeypatch.setattr(
         agent_run,
         "apply_workbench_runtime_plan",
-        lambda request, *_args: request.__dict__.update({"agent_id": 99, "version_no": 5}),
+        lambda request, *_args, **_kwargs: request.__dict__.update({"agent_id": 99, "version_no": 5}),
     )
     monkeypatch.setattr(agent_run, "update_conversation_chat_mode_service", MagicMock())
     monkeypatch.setattr(
@@ -168,10 +168,12 @@ async def test_submitted_tool_policy_is_rejected_at_request_boundary(monkeypatch
     })
     knowledge_scope = __import__("management.services.knowledge_base.scope", fromlist=["snapshot_runtime_knowledge_tree"])
     validate = MagicMock(side_effect=ValidationError("top_k: expected integer 1-100"))
-    monkeypatch.setattr(knowledge_scope, "validate_request_retrieval_overrides", validate, raising=False)
+    monkeypatch.setattr(knowledge_scope, "prepare_retrieval_request", validate, raising=False)
     with pytest.raises(ValidationError, match="top_k"):
         await agent_run.run_agent_stream(
             request, Request(scope={"type": "http", "headers": []}), "Bearer token",
         )
-    validate.assert_called_once_with(request, "tenant-a")
+    validate.assert_called_once_with(
+        "tenant-a", scope=None, tool_params=request.tool_params, agent_id=99, version_no=5, is_debug=False, inherited_policy=None,
+    )
     agent_run.agent_run_manager.reserve_agent_capacity.assert_not_called()

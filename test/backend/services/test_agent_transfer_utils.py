@@ -4,6 +4,8 @@
 
 import sys
 from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -12,7 +14,11 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "backend"))
 from consts.exceptions import (
     AgentToolImportError,
 )
-from management.services.agent.policy import portable_tool_params, validate_import_tool_params
+from management.services.agent.policy import (
+    portable_tool_params,
+    prepare_import_retrieval_params,
+    validate_import_tool_params,
+)
 
 
 def test_aidp_runtime_fields_are_removed_without_mutating_snapshot():
@@ -43,11 +49,28 @@ def test_missing_tool_reports_domain_error():
         validate_import_tool_params("AidpSearchTool", "local", {}, None)
 
 
-def test_advanced_policy_roundtrip_against_old_catalog():
-    config={"top_k":7,"vector_candidates":10,"full_text_candidates":30,
-            "graph_top_k":0,"query_expansion_enable":False,"reranking_mode":"jargon_coverage"}
-    result=validate_import_tool_params("AidpSearchTool","local",config,{"params":[]})
-    assert result==config
-    assert result is not config
-    with pytest.raises(AgentToolImportError,match="graph_reranking_enable"):
-        validate_import_tool_params("IndependentAidpSearchTool","local",{"reranking_enable":False,"graph_reranking_enable":True},{"params":[]})
+def test_external_import_prepares_policy_once_and_snapshot_import_does_not(monkeypatch):
+    config = {"top_k": 7, "search_method": "hybrid_search"}
+    tool = SimpleNamespace(class_name="AidpSearchTool", params=config)
+    uploaded = SimpleNamespace(agent_info={"1": SimpleNamespace(tools=[tool])})
+    prepare_import_retrieval_params(uploaded)
+    assert tool.params["search_method"] == "vector_search|full_text_search|graph_search"
+    import management.services.agent.policy as policy
+    check = MagicMock()
+    monkeypatch.setattr(policy, "prepare_config", check)
+    catalog = {"params": [{"name": name} for name in config]}
+    assert validate_import_tool_params("AidpSearchTool", "local", config, catalog) == config
+    check.assert_not_called()
+
+
+@pytest.mark.parametrize("class_name", ["AidpSearchTool", "IndependentAidpSearchTool"])
+def test_external_import_rejects_invalid_raw_policy(class_name):
+    tool = SimpleNamespace(class_name=class_name, params={"reranking_enable": False, "graph_reranking_enable": True})
+    with pytest.raises(AgentToolImportError, match="graph_reranking_enable"):
+        prepare_import_retrieval_params(SimpleNamespace(agent_info={"1": SimpleNamespace(tools=[tool])}))
+
+
+def test_external_import_accepts_omitted_tool_params():
+    tool = SimpleNamespace(class_name="AidpSearchTool", params=None)
+    prepare_import_retrieval_params(SimpleNamespace(agent_info={"1": SimpleNamespace(tools=[tool])}))
+    assert tool.params == {}
