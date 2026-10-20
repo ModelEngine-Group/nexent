@@ -878,9 +878,9 @@ class MetadataCondition(BaseModel):
 class FusionSearchRequest(BaseModel):
     query: str = Field(min_length=1)
     kds_list: List[str] = Field(min_length=1, max_length=10)
-    search_method: Literal["hybrid_search", "vector_search", "full_text_search"] = "hybrid_search"
+    search_method: Literal["hybrid_search", "vector_search", "full_text_search", "graph_search"] = "hybrid_search"
     reranking_enable: bool = False
-    reranking_mode: Optional[Literal["performance", "high_accuracy"]] = None
+    reranking_mode: Optional[Literal["performance", "high_accuracy", "jargon_coverage"]] = None
     rewrite_enable: bool = False
     related_search_enable: bool = False
     score_threshold: float = Field(0.0, ge=0.0, le=1.0)
