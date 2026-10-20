@@ -506,3 +506,82 @@ it.each([true, false])(
     );
   }
 );
+
+it("preserves completion synchronization after supporting partial policy saves", async () => {
+  view.threadId = "local";
+  view.items = [{ id: "local", remoteId: "" }];
+  const page = render(<WorkbenchPage />);
+  await act(async () => {
+    (
+      view.props!.workbenchPresentation!.actions as React.ReactElement<{
+        onSelect: (mode: string) => void;
+      }>
+    ).props.onSelect("agent_create");
+  });
+  page.rerender(<WorkbenchPage />);
+  const agent = {
+    id: "42",
+    name: "policy_assistant",
+    enable_protocol_repair_retry: true,
+  };
+  vi.mocked(searchAgentInfo).mockResolvedValue({
+    success: true,
+    data: agent,
+  } as never);
+  vi.spyOn(useAgentStore.getState(), "replaceServerSnapshot").mockReturnValue(
+    true
+  );
+  await act(async () =>
+    runConfig().onNl2AgentState({
+      event: "agent_generation_completed",
+      agent_id: 42,
+    })
+  );
+  expect(view.markGenerationCompleted).toHaveBeenCalledExactlyOnceWith(42);
+  expect(view.markCompletionSynced).toHaveBeenCalledExactlyOnceWith(42);
+});
+
+it("serializes creator snapshot reads so delayed policy saves cannot overwrite the latest value", async () => {
+  view.threadId = "local";
+  view.items = [{ id: "local", remoteId: "" }];
+  const page = render(<WorkbenchPage />);
+  await act(async () => {
+    (
+      view.props!.workbenchPresentation!.actions as React.ReactElement<{
+        onSelect: (mode: string) => void;
+      }>
+    ).props.onSelect("agent_create");
+  });
+  page.rerender(<WorkbenchPage />);
+  const first = deferred<Awaited<ReturnType<typeof searchAgentInfo>>>();
+  const enabled = {
+    id: "42",
+    name: "policy_assistant",
+    enable_protocol_repair_retry: true,
+  };
+  const disabled = { ...enabled, enable_protocol_repair_retry: false };
+  vi.mocked(searchAgentInfo)
+    .mockReturnValueOnce(first.promise)
+    .mockResolvedValueOnce({ success: true, data: disabled } as never);
+  const replace = vi
+    .spyOn(useAgentStore.getState(), "replaceServerSnapshot")
+    .mockReturnValue(true);
+  const event = {
+    event: "agent_draft_fields_saved",
+    agent_id: 42,
+    updated_fields: ["enable_protocol_repair_retry"],
+  };
+  await act(async () => {
+    runConfig().onNl2AgentState(event);
+    runConfig().onNl2AgentState(event);
+  });
+  expect(searchAgentInfo).toHaveBeenCalledTimes(1);
+  await act(async () =>
+    first.resolve({ success: true, data: enabled } as never)
+  );
+  await waitFor(() => expect(replace).toHaveBeenCalledTimes(2));
+  expect(
+    replace.mock.calls.map((args) => args[1].enable_protocol_repair_retry)
+  ).toEqual([true, false]);
+  expect(view.markGenerationCompleted).not.toHaveBeenCalled();
+});

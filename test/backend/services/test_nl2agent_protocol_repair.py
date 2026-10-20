@@ -130,3 +130,12 @@ async def test_real_policy_tool_result_reaches_sdk_state_channel(mocker, authori
     events = [json.loads(item) for item in observer.get_cached_message()]
     states = [json.loads(item["content"]) for item in events if item["type"] == ProcessType.NL2A_STATE.value]
     assert states == [{"event": "agent_draft_fields_saved", "agent_id": 42, "updated_fields": [FIELD]}]
+
+
+@pytest.mark.parametrize("language", ["zh", "en"])
+def test_policy_preparation_does_not_confirm_full_generation_requirements(language):
+    prompt = build_nl2agent_system_prompt(language)
+    assert ("策略写入只是准备动作，不构成需求确认" in prompt
+            or "only a preparatory action, not confirmation of requirements" in prompt)
+    assert ("策略保存成功后的下一个业务动作必须输出澄清卡" in prompt
+            or "next business action after policy persistence MUST produce a clarification card" in prompt)

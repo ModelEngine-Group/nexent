@@ -9,7 +9,10 @@ import {
   configuredModel,
   runToken,
 } from "../../infra/automation/d4/runner/runtime-config";
-import { loginCurrent } from "../../infra/automation/d4/runner/sessions";
+import {
+  loginCurrent,
+  loginIsolated,
+} from "../../infra/automation/d4/runner/sessions";
 import { AgentPage } from "../../infra/automation/d4/pages/agent.page";
 
 journey("NL2AGENT-PROTOCOL-D4-001", async (context) => {
@@ -18,6 +21,8 @@ journey("NL2AGENT-PROTOCOL-D4-001", async (context) => {
   const ids: number[] = [];
   const generatedIds: number[] = [];
   let workbenchConversationId = "";
+  let fixtureModelId = 0;
+  const runtimeChecked: number[] = [];
   const observations: Array<{
     entry: string;
     enabled: boolean;
@@ -64,6 +69,7 @@ journey("NL2AGENT-PROTOCOL-D4-001", async (context) => {
         item.model_name === configuredModel("llm").model,
     );
     expect(model).toBeTruthy();
+    fixtureModelId = Number(model.model_id);
     const saved = await page.request.post("/api/agent/update", {
       data: { agent_id: id, model_ids: [model.model_id] },
     });
@@ -138,6 +144,20 @@ journey("NL2AGENT-PROTOCOL-D4-001", async (context) => {
       `${JSON.stringify({ entry, enabled, agentId, runId: response.headers()["run_id"], conversationId: response.headers()["conversation_id"] })}\n`,
     );
     return agentId;
+  };
+  const assertPolicyUI = async (enabled: boolean, screenshot?: string) => {
+    await agents.openAdvanced();
+    await page.getByRole("button", { name: "更多配置", exact: true }).click();
+    const dialog = page.getByRole("dialog", { name: "更多配置", exact: true });
+    const control = dialog
+      .locator(".ant-form-item")
+      .filter({ hasText: "严格输出协议与静默修复" })
+      .getByRole("switch");
+    if (enabled) await expect(control).toBeChecked();
+    else await expect(control).not.toBeChecked();
+    if (screenshot)
+      await page.screenshot({ path: join(contract.caseDir, screenshot) });
+    await dialog.locator(".ant-modal-close").click();
   };
   const fullGeneration = async (id: number) => {
     const send = async (action: () => Promise<unknown>) => {
@@ -230,31 +250,13 @@ journey("NL2AGENT-PROTOCOL-D4-001", async (context) => {
         expect(stable(await read(id))).toEqual(before);
         await page.reload({ waitUntil: "domcontentloaded" });
         await dismissGuide();
-        await agents.openAdvanced();
-        const label = page
-          .getByText("严格输出协议与静默修复", { exact: true })
-          .first();
-        await expect(
-          label
-            .locator('xpath=ancestor::*[.//button[@role="switch"]][1]')
-            .getByRole("switch"),
-        ).not.toBeChecked();
+        await assertPolicyUI(false);
         await ensureDirectCreator();
         await selectCreatorModel();
         await fullGeneration(id);
         await page.reload({ waitUntil: "domcontentloaded" });
         await dismissGuide();
-        await agents.openAdvanced();
-        await expect(
-          page
-            .getByText("严格输出协议与静默修复", { exact: true })
-            .first()
-            .locator('xpath=ancestor::*[.//button[@role="switch"]][1]')
-            .getByRole("switch"),
-        ).toBeChecked();
-        await page.screenshot({
-          path: join(contract.caseDir, "direct-policy-enabled.png"),
-        });
+        await assertPolicyUI(true, "direct-policy-enabled.png");
         return "Direct creator saves both boolean values; full generation preserves enabled policy across clarification.";
       },
       async () => {
@@ -305,18 +307,72 @@ journey("NL2AGENT-PROTOCOL-D4-001", async (context) => {
           waitUntil: "domcontentloaded",
         });
         await dismissGuide();
-        await agents.openAdvanced();
-        await expect(
-          page
-            .getByText("严格输出协议与静默修复", { exact: true })
-            .first()
-            .locator('xpath=ancestor::*[.//button[@role="switch"]][1]')
-            .getByRole("switch"),
-        ).toBeChecked();
-        await page.screenshot({
-          path: join(contract.caseDir, "workbench-created-policy-enabled.png"),
-        });
+        await assertPolicyUI(true, "workbench-created-policy-enabled.png");
         return "Workbench uses the shared chain; full generation preserves enabled target policy without a session switch.";
+      },
+      async () => {
+        for (const id of ids) {
+          const unclear = await page.request.post("/api/agent/nl2agent/run", {
+            data: {
+              agent_id: id,
+              model_id: fixtureModelId,
+              query: "只关闭重试，不更改其他配置。",
+            },
+            timeout: 180000,
+          });
+          expect(unclear.ok()).toBe(true);
+          const clarification = await unclear.text();
+          expect(clarification).toContain("requirement_clarification");
+          expect(clarification).not.toContain("agent_draft_fields_saved");
+          expect((await read(id)).enable_protocol_repair_retry).toBe(true);
+          const draft = await read(id);
+          if (!draft.model_ids?.length) {
+            const configured = await page.request.post("/api/agent/update", {
+              data: { agent_id: id, model_ids: [fixtureModelId] },
+            });
+            expect(configured.ok()).toBe(true);
+          }
+          const response = await page.request.post("/api/agent/run", {
+            data: {
+              agent_id: id,
+              version_no: 0,
+              is_debug: true,
+              query: "请把这三个词逐项列出：苹果、香蕉、梨。只整理原文。",
+            },
+            timeout: 180000,
+          });
+          expect(response.ok()).toBe(true);
+          const events = (await response.text())
+            .split("\n")
+            .filter((line) => line.startsWith("data:"))
+            .map((line) => JSON.parse(line.slice(5).trim()));
+          expect(events.some((event) => event.type === "error")).toBe(false);
+          const final = events
+            .filter((event) => event.type === "final_answer")
+            .map((event) => String(event.content))
+            .join("\n");
+          for (const word of ["苹果", "香蕉", "梨"])
+            expect(final).toContain(word);
+          expect((await read(id)).enable_protocol_repair_retry).toBe(true);
+          runtimeChecked.push(id);
+          appendFileSync(
+            join(contract.caseDir, "target-runs.jsonl"),
+            `${JSON.stringify({ agentId: id, conversationId: response.headers()["conversation_id"], result: "formatted-three-words", enabled: true })}\n`,
+          );
+        }
+        const other = await loginIsolated(page, "tenant_b_admin");
+        try {
+          const denied = await other.page.request.post(
+            "/api/agent/nl2agent/run",
+            { data: { agent_id: ids[0], query: "关闭严格协议与重试。" } },
+          );
+          expect(denied.status()).toBe(404);
+        } finally {
+          await other.context.close();
+        }
+        for (const id of ids)
+          expect((await read(id)).enable_protocol_repair_retry).toBe(true);
+        return "Both real target runs succeed; ambiguous retry and cross-tenant attempts preserve the saved policy.";
       },
     ],
     assertions: [
@@ -343,6 +399,10 @@ journey("NL2AGENT-PROTOCOL-D4-001", async (context) => {
         for (const id of generatedIds)
           expect((await read(id)).enable_protocol_repair_retry).toBe(true);
         return "Both complete generation flows preserve the requested policy through clarification and completion.";
+      },
+      async () => {
+        expect(runtimeChecked).toEqual(ids);
+        return "Runtime outputs, ambiguity and cross-tenant rejection were asserted for the generated drafts.";
       },
     ],
   });

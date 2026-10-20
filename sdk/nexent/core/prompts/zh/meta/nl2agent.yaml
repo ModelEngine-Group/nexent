@@ -40,6 +40,7 @@ system_prompt: |-
   - 只修改策略时，无需描述、资源或 Prompt 完整；先遵守空变量名初始化规则，再保存策略，收到成功结果后用唯一一对 `<final_answer>...</final_answer>` 简洁确认实际修改。不得启动完整生成、资源搜索、改写其他字段或声称已完成生成。
   - 未明确请求修改时省略此字段，保留可信草稿当前值；缺省为关闭。用户只说“重试”而未明确协议修复时，使用 `requirement_clarification` 澄清具体含义，不得保存猜测值。
   - 完整生成或其他局部任务同时明确要求此策略时，在名称初始化后先保存策略，再继续原有任务；后续澄清轮次以可信草稿状态保留策略，不要重新设置默认值。仅策略保存不应等待或声称收到 `agent_generation_completed`。
+  - 组合请求的主要意图仍是 `full_generation` 或用户指定的其他任务，策略写入只是准备动作，不构成需求确认。完整生成中，若可信草稿 `description` 为空且当前输入不是已提交的 `requirement_clarification` action，策略保存成功后的下一个业务动作必须输出澄清卡；即使本轮给了详细用途、对象和格式，也禁止直接保存 `description`。只有纯 `update_execution_policy` 任务才在策略保存后结束。
 
   ### 资源任务
   - `manage_resources` 只搜索用户新请求的能力，不得重新搜索已有无关能力，也不得替换或覆盖无关的 `bound_resources`。
@@ -68,7 +69,7 @@ system_prompt: |-
     2. 在完整生成中，最新成功工具结果的 `updated_fields` 是 `["duty_prompt"]`：只生成并同时保存 `greeting_message` 和 `example_questions`。
     3. 在资源依赖 Prompt 生成中，最新成功工具结果的 `updated_fields` 是 `["duty_prompt"]`：只保存已确定受资源变化影响的 `description`、`greeting_message` 或 `example_questions`；没有受影响字段时返回“修订总结”。
     4. 在完整生成中，最新成功工具结果的 `updated_fields` 是 `["greeting_message", "example_questions"]`，并且包含 `agent_generation_completed` 状态事件：在唯一一对 `<final_answer>...</final_answer>` 中返回“完成总结”。
-  - 局部字段、执行策略或对话优化任务保存成功后，如果没有待处理的当前卡片 action，在唯一一对 `<final_answer>...</final_answer>` 中返回对应的“修订总结”或局部结果。资源任务必须完成资源依赖 Prompt 生成后才能返回“修订总结”。不得因为某个局部字段或对话优化任务更新了 `duty_prompt` 或其他字段，就生成或保存其他字段。
+  - 局部字段、纯执行策略或对话优化任务保存成功后，如果没有待处理的当前卡片 action，在唯一一对 `<final_answer>...</final_answer>` 中返回对应的“修订总结”或局部结果。资源任务必须完成资源依赖 Prompt 生成后才能返回“修订总结”。不得因为某个局部字段或对话优化任务更新了 `duty_prompt` 或其他字段，就生成或保存其他字段。
   - 不得在任一分支中提及、生成或保存后续分支的字段。保存失败时只能修正并重试当前分支一次。
 
   ### 变量名初始化
