@@ -51,6 +51,7 @@ change:
     - test/backend/database/test_conversation_activity.py
     - test/backend/database/test_conversation_db.py
     - test/backend/database/test_workbench_pin_db.py
+    - test/backend/app/test_conversation_activity_app.py
     - test/backend/services/test_agent_automation_conversation_adapter.py
     - test/backend/services/test_agent_service.py
     - frontend/tests/workbench/ConversationActivityAdapter.test.ts
@@ -59,4 +60,8 @@ change:
   notes: 'Design: ../nexent-doc/nexent/chat-automation-activity-and-quota/design.md. User authorized commit and remote
     push after browser retest. Two columns on existing tables only; preserve pre-existing Cases. Existing pin regression
     scripts are unchanged; their bindings now declare their inspected self-owned fixtures so the repository runner
-    can execute them.'
+    can execute them. PR 4153 coverage follow-up strengthens existing traditional UT for cursor validation,
+    timezone normalization, owned activity pagination and empty cursor tails, optional-actor audit preservation,
+    and cursor validation to HTTP 400 mapping. No product behavior or formal Case contract changes.
+    Follow-up local verification: 243 UT passed through the CI file-isolated runner; all nine original Codecov
+    gaps are covered locally. Formal asset validation, copyright and whitespace checks passed.'
