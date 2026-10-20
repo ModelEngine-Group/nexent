@@ -22,9 +22,9 @@ const examples = {
   ],
   agent_create: [
     {
-      key: "healthReport",
-      title: "体检报告解读助手",
-      description: "识别报告，解释指标，生成解读文档",
+      key: "documentOrganizer",
+      title: "文档资料整理助手",
+      description: "识别文档，提取要点，生成结构化汇总",
       icon: Image,
     },
     {
@@ -34,9 +34,9 @@ const examples = {
       icon: Newspaper,
     },
     {
-      key: "patientEducation",
-      title: "患者宣教制作助手",
-      description: "编写宣教内容，生成配图与可打印材料",
+      key: "eventPromotion",
+      title: "活动宣传制作助手",
+      description: "编写宣传文案，生成配图与活动介绍材料",
       icon: BookOpen,
     },
   ],

@@ -68,7 +68,7 @@ it.each(["skill_create"] as const)(
     const key =
       mode === "skill_create"
         ? "workbench.creationExamples.skill.invoiceExtraction"
-        : "workbench.creationExamples.agent.healthReport";
+        : "workbench.creationExamples.agent.documentOrganizer";
     expect(state.setText).toHaveBeenCalledExactlyOnceWith(zh[key]);
     expect(select).not.toHaveBeenCalled();
     expect(modeChange).not.toHaveBeenCalled();
@@ -89,13 +89,16 @@ it.each(["skill_create"] as const)(
   }
 );
 
-const medicalKeys = ["healthReport", "medicalBriefing", "patientEducation"];
+const agentKeys = ["documentOrganizer", "medicalBriefing", "eventPromotion"];
 
 it.each(["zh", "en"])(
-  "%s medical cards show short localized copy and fill each complete prompt without sending",
+  "%s agent cards show short localized copy and fill each complete prompt without sending",
   async (locale) => {
     state.locale = locale;
-    const copy = (locale === "zh" ? zh : en) as unknown as Record<string, string>;
+    const copy = (locale === "zh" ? zh : en) as unknown as Record<
+      string,
+      string
+    >;
     render(
       <>
         <textarea data-workbench-composer />
@@ -103,7 +106,7 @@ it.each(["zh", "en"])(
       </>
     );
     expect(screen.getAllByRole("button")).toHaveLength(3);
-    for (const [index, key] of medicalKeys.entries()) {
+    for (const [index, key] of agentKeys.entries()) {
       const prefix = `workbench.creationExamples.agent.${key}`;
       const title = copy[`${prefix}.title`];
       const description = copy[`${prefix}.description`];
