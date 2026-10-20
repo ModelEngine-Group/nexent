@@ -5568,7 +5568,7 @@
   "aidpKnowledge.detailImportMode": "导入方式",
   "aidpKnowledge.detailFirstUploadTime": "首次上传时间",
   "aidpKnowledge.detailUpdateTime": "更新时间",
-  "aidpKnowledge.detailFileDeleteStatus": "删除状态",
+  "aidpKnowledge.detailFileDeleteStatus": "状态",
   "aidpKnowledge.fileDeleteStatusIngested": "已入库",
   "aidpKnowledge.fileDeleteStatusDeleting": "删除中",
   "aidpKnowledge.fileDeleteStatusFailed": "删除失败",

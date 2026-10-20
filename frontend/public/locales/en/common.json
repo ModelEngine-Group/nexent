@@ -5630,7 +5630,7 @@
   "aidpKnowledge.detailImportMode": "Import method",
   "aidpKnowledge.detailFirstUploadTime": "First uploaded",
   "aidpKnowledge.detailUpdateTime": "Updated",
-  "aidpKnowledge.detailFileDeleteStatus": "Delete status",
+  "aidpKnowledge.detailFileDeleteStatus": "Status",
   "aidpKnowledge.fileDeleteStatusIngested": "Stored",
   "aidpKnowledge.fileDeleteStatusDeleting": "Deleting",
   "aidpKnowledge.fileDeleteStatusFailed": "Delete failed",
