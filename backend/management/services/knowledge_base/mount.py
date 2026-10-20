@@ -34,21 +34,22 @@ def mount_knowledge_records(records, scope, tenant_id):
         raise ValidationError("Managed knowledge tool is unavailable")
     fields = {p["name"]: p for p in tool.get("params") or []}
     for name, value in (scope.retrieval_config or {}).items():
-        if name in RESERVED or name not in fields:
-            raise ValidationError(f"Unsupported knowledge parameter: {name}")
-        field_type = fields[name].get("type")
-        expected = {"string": str, "number": (int, float), "integer": int,
-                    "boolean": bool, "array": list, "object": dict}.get(field_type)
-        if expected and (not isinstance(value, expected) or (
-            field_type in {"number", "integer"} and (isinstance(value, bool) or not isfinite(value))
-        )):
-            raise ValidationError(f"Invalid knowledge parameter: {name}")
-        choices = {"search_mode": {"hybrid", "accurate", "semantic"},
-                   "search_method": {"hybrid_search", "vector_search", "full_text_search"},
-                   "rerank_mode": {"performance", "high_accuracy"},
-                   "reranking_mode": {"performance", "high_accuracy"}}
-        if name in choices and value not in choices[name]:
-            raise ValidationError(f"Invalid knowledge parameter: {name}")
+        if kind != "AidpSearchTool":
+            if name in RESERVED or name not in fields:
+                raise ValidationError(f"Unsupported knowledge parameter: {name}")
+            field_type = fields[name].get("type")
+            expected = {"string": str, "number": (int, float), "integer": int,
+                        "boolean": bool, "array": list, "object": dict}.get(field_type)
+            if expected and (not isinstance(value, expected) or (
+                field_type in {"number", "integer"} and (isinstance(value, bool) or not isfinite(value))
+            )):
+                raise ValidationError(f"Invalid knowledge parameter: {name}")
+            choices = {"search_mode": {"hybrid", "accurate", "semantic"},
+                       "search_method": {"hybrid_search", "vector_search", "full_text_search"},
+                       "rerank_mode": {"performance", "high_accuracy"},
+                       "reranking_mode": {"performance", "high_accuracy"}}
+            if name in choices and value not in choices[name]:
+                raise ValidationError(f"Invalid knowledge parameter: {name}")
         fields[name]["default"] = deepcopy(value)
     tool["params"] = list(fields.values())
     return [*result, tool]

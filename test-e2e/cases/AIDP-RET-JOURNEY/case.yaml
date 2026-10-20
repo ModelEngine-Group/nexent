@@ -1,0 +1,74 @@
+{
+  "schema_version": "1.0",
+  "stage": "D4",
+  "module": "AIDP-KNOWLEDGE",
+  "case": {
+    "case_id": "AIDP-RET-JOURNEY",
+    "feature_id": "AIDP-RETRIEVAL",
+    "business_rule_ids": [
+      "AIDP-RETRIEVAL-RULE-01"
+    ],
+    "title": "Three-entry retrieval settings persistence journey",
+    "type": "E2E",
+    "priority": "P1",
+    "status": "blocked",
+    "automation": "manual",
+    "objective": "Three-entry retrieval settings persistence journey",
+    "preconditions": [
+      "SDK/frontend dependencies available; use isolated run-owned resources.",
+      "Real provider and browser journeys require an authorized matching source environment."
+    ],
+    "test_data": {
+      "methods": "vector, full text, graph, all pairs and hybrid",
+      "legacy": "top_k=7, reranking_enable=false, multi_modal=false, candidates missing/null/fixed"
+    },
+    "steps": [
+      {
+        "order": 1,
+        "action": "Open conversation, agent and independent tool settings, inspect collapsed groups and select all seven methods.",
+        "expected": "Saved values and candidate following survive refresh with no other scope mutation."
+      },
+      {
+        "order": 2,
+        "action": "Edit total/candidate/follow values, toggle reranking, test, save, refresh and reopen; edit and cancel defaults.",
+        "expected": "Invalid combinations disable confirmation; cancel discards draft; all three groups reopen collapsed."
+      }
+    ],
+    "expected_results": [
+      "Saved values and candidate following survive refresh with no other scope mutation.",
+      "Invalid combinations disable confirmation; cancel discards draft; all three groups reopen collapsed."
+    ],
+    "forbidden_side_effects": [
+      "Do not mutate other configurations, expand managed scope, expose credentials or issue HTTP for invalid settings."
+    ],
+    "acceptance": [
+      {
+        "id": "AC-01",
+        "description": "Saved values and candidate following survive refresh with no other scope mutation.; Invalid combinations disable confirmation; cancel discards draft; all three groups reopen collapsed.",
+        "steps": [
+          1,
+          2
+        ],
+        "expected_results": [
+          1,
+          2
+        ],
+        "forbidden_side_effects": [
+          1
+        ]
+      }
+    ],
+    "actor": "Nexent user",
+    "journey": [
+      "Open conversation, agent and independent tool settings, inspect collapsed groups and select all seven methods.",
+      "Edit total/candidate/follow values, toggle reranking, test, save, refresh and reopen; edit and cancel defaults."
+    ],
+    "final_business_result": [
+      "Saved values and candidate following survive refresh with no other scope mutation.",
+      "Invalid combinations disable confirmation; cancel discards draft; all three groups reopen collapsed."
+    ],
+    "failure_evidence": [
+      "Sanitized network and assertion evidence; no retained original screenshots."
+    ]
+  }
+}

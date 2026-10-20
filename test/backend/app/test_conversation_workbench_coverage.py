@@ -1,3 +1,4 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 from unittest.mock import MagicMock
 
 import pytest
@@ -10,6 +11,13 @@ conversation_app = __import__(
     "backend.apps.conversation_management_app",
     fromlist=["update_conversation_workbench_config_endpoint"],
 )
+
+
+@pytest.fixture(autouse=True)
+def preparation(monkeypatch):
+    prepare = MagicMock()
+    monkeypatch.setattr(conversation_app, "prepare_conversation_retrieval_request", prepare)
+    return prepare
 
 
 def _request():
@@ -78,6 +86,7 @@ async def test_update_workbench_config_is_hidden_when_disabled(monkeypatch):
             {"code": "AGENT_NOT_RUNNABLE"},
         ),
         (ValueError("invalid"), 422, {"code": "WORKBENCH_CONFIG_INVALID"}),
+        (conversation_app.ValidationError("top_k"), 422, {"code": "WORKBENCH_CONFIG_INVALID"}),
     ],
 )
 async def test_update_workbench_config_maps_domain_errors(

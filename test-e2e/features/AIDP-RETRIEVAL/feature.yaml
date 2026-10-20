@@ -1,0 +1,24 @@
+{
+  "schema_version": "1.0",
+  "module": {
+    "id": "AIDP-KNOWLEDGE",
+    "name": "Knowledge retrieval"
+  },
+  "feature": {
+    "feature_id": "AIDP-RETRIEVAL",
+    "name": "AIDP graph and combined retrieval configuration",
+    "status": "active",
+    "description": "One retrieval policy across managed, independent and conversation settings.",
+    "business_rules": [
+      {
+        "rule_id": "AIDP-RETRIEVAL-RULE-01",
+        "description": "Validate submitted policies at input boundaries; use explicit channel combinations; keep candidate values fixed in the backend; build retrieval requests without repeated validation; retain scope and provenance. Both wrappers share transport/JSON/response errors; require a list-valued result; retain retry status/count/delay logs without request secrets."
+      }
+    ],
+    "required_test_stages": [
+      "D2",
+      "D3",
+      "D4"
+    ]
+  }
+}

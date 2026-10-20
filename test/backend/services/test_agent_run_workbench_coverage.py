@@ -74,7 +74,9 @@ def test_apply_workbench_runtime_plan_attaches_all_runtime_overrides(monkeypatch
     monkeypatch.setitem(sys.modules, "management.services.agent.workbench", workbench)
     monkeypatch.setitem(sys.modules, "management.services.knowledge_base.mount", runtime_mount)
 
-    agent_run.apply_workbench_runtime_plan(request, canonical, plan, "tenant-a")
+    agent_run.apply_workbench_runtime_plan(
+        request, canonical, plan, "tenant-a",
+    )
 
     snapshot.assert_called_once_with(9, "tenant-a", 3)
     mount.assert_called_once_with(
@@ -208,9 +210,9 @@ async def test_run_agent_stream_resolves_and_persists_existing_workbench(monkeyp
         "runtime_metadata_version": 4,
         "knowledge_scope": None,
     }
-    plan = SimpleNamespace(root=SimpleNamespace(identity=SimpleNamespace(agent_id=99)))
+    plan = SimpleNamespace(root=SimpleNamespace(identity=SimpleNamespace(agent_id=99, version_no=5)))
     apply_plan = MagicMock()
-    apply_plan.side_effect = lambda agent_request, *_args: agent_request.__dict__.update(
+    apply_plan.side_effect = lambda agent_request, *_args, **_kwargs: agent_request.__dict__.update(
         {"agent_id": 99, "version_no": 5}
     )
     update_config = MagicMock(
@@ -276,6 +278,7 @@ async def test_run_agent_stream_resolves_and_persists_existing_workbench(monkeyp
     )
     apply_plan.assert_called_once_with(request, canonical, plan, "tenant-a")
     update_config.assert_called_once()
+    assert "validate_retrieval" not in update_config.call_args.kwargs
     assert request.__dict__["_workbench_config_version"] == 3
     assert request.__dict__["_runtime_metadata_snapshot"] == {"existing": True}
     assert request.__dict__["_runtime_metadata_version"] == 4

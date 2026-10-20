@@ -553,3 +553,33 @@ def test_runtime_resources_only_describe_effective_source():
     assert "本地1" in content
     assert "AIDP 知识库" not in content
     assert "当前会话已禁用" not in content
+
+
+@pytest.mark.parametrize("patch", [
+    {"top_k": 0}, {"top_k": True}, {"vector_candidates": 1.5},
+    {"unknown": 1}, {"hybrid_top_k": 8, "graph_top_k": 5},
+    {"reranking_enable": False, "graph_reranking_enable": True},
+])
+def test_retrieval_input_rejects_invalid_config_against_inherited_root(mocker, patch):
+    from management.services.knowledge_base import scope as service
+    mocker.patch.object(service, "ENABLE_AIDP_KNOWLEDGE", True)
+    mocker.patch.object(service, "snapshot_runtime_knowledge_tree", return_value=[{"tools": [{
+        "class_name": "AidpSearchTool", "params": [{"name": "top_k", "default": 10}],
+    }]}])
+    scope = ConversationKnowledgeScopeRequest(retrieval_config=patch)
+    with pytest.raises(ValidationError):
+        service.prepare_retrieval_request("tenant", scope=scope, agent_id=7, version_no=3)
+
+
+def test_retrieval_input_saves_fixed_candidate_values(mocker):
+    from management.services.knowledge_base import scope as service
+    mocker.patch.object(service, "ENABLE_AIDP_KNOWLEDGE", True)
+    mocker.patch.object(service, "snapshot_runtime_knowledge_tree", return_value=[{"tools": [{
+        "class_name": "AidpSearchTool", "params": [{"name": "top_k", "default": 30}],
+    }]}])
+    scope = ConversationKnowledgeScopeRequest(retrieval_config={"hybrid_top_k": 12, "vector_candidates": 30, "full_text_candidates": 30})
+    service.prepare_retrieval_request("tenant", scope=scope, agent_id=7, version_no=3)
+    assert scope.retrieval_config == {"hybrid_top_k": 12, "vector_candidates": 30, "full_text_candidates": 30}
+    scope.retrieval_config = {"vector_candidates": 10}
+    service.prepare_retrieval_request("tenant", scope=scope, agent_id=7, version_no=3)
+    assert scope.retrieval_config == {"vector_candidates": 10}

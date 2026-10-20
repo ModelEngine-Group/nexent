@@ -34,6 +34,7 @@ from management.services.conversation.service import (
     get_conversation_history_service,
     get_sources_service,
     rename_conversation_service,
+    prepare_conversation_retrieval_request,
     update_conversation_knowledge_scope_service,
     update_conversation_workbench_config_service,
     update_message_opinion_service, get_message_id_by_index_impl,
@@ -224,6 +225,7 @@ async def update_conversation_knowledge_scope_endpoint(
     """Replace the desired knowledge scope for an existing conversation."""
     try:
         user_id, tenant_id = get_current_user_id(authorization)
+        prepare_conversation_retrieval_request(conversation_id, request.scope, user_id, tenant_id)
         scope = request.scope.model_dump(mode="json") if request.scope is not None else None
         version_kwargs = {}
         if request.expected_workbench_config_version is not None:
@@ -273,7 +275,10 @@ async def update_conversation_workbench_config_endpoint(
         raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail={"code": "WORKBENCH_DISABLED"})
 
     try:
-        user_id, _ = get_current_user_id(authorization)
+        user_id, tenant_id = get_current_user_id(authorization)
+        prepare_conversation_retrieval_request(
+            conversation_id, request.config.knowledge_scope, user_id, tenant_id,
+        )
         result = update_conversation_workbench_config_service(
             conversation_id=conversation_id,
             config=request.config.model_dump(mode="json"),
@@ -293,7 +298,7 @@ async def update_conversation_workbench_config_endpoint(
         ) from exc
     except WorkbenchError as exc:
         raise HTTPException(status_code=exc.status_code, detail={"code": exc.code}) from exc
-    except ValueError as exc:
+    except (ValueError, ValidationError) as exc:
         raise HTTPException(status_code=HTTPStatus.UNPROCESSABLE_ENTITY, detail={"code": "WORKBENCH_CONFIG_INVALID"}) from exc
 
 

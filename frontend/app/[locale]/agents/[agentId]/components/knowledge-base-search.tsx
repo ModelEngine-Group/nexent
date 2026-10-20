@@ -5,6 +5,8 @@
 import { SELECTED_RESOURCE_HOVER } from "@/const/selectedResourceStyles";
 import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
+import { AidpRetrievalDialog } from "@/components/tool-config/AidpRetrievalDialog";
+import { aidpDefaults } from "@/lib/aidpRetrievalConfig";
 import { KnowledgeRetrievalParamsForm } from "@/components/tool-config/KnowledgeRetrievalParamsForm";
 import { useTranslation } from "react-i18next";
 import { Button, Modal, Spin, Tag, Tooltip } from "antd";
@@ -158,6 +160,7 @@ interface KnowledgeBaseConfigState {
   refetch: () => Promise<unknown>;
   onKnowledgeBaseConfirm: (knowledgeBaseList: KnowledgeBase[]) => void;
   onKnowledgeBaseRemove: (knowledgeBaseId: string) => void;
+  onParamsChange: (patch: Record<string, unknown>) => void;
   onParamChange: (param: ToolParam, value: unknown) => void;
 }
 
@@ -319,6 +322,22 @@ function useKnowledgeBaseConfigState(): KnowledgeBaseConfigState | null {
     refetch,
     onKnowledgeBaseConfirm,
     onKnowledgeBaseRemove,
+    onParamsChange: (patch) => {
+      if (!configuredKnowledgeSearchTool || !selectedKnowledgeSearchTool)
+        return;
+      let updated = configuredKnowledgeSearchTool;
+      for (const [name, value] of Object.entries(patch)) {
+        const type =
+          typeof aidpDefaults[name] === "boolean" ||
+          name === "graph_reranking_enable"
+            ? "boolean"
+            : typeof value === "string"
+              ? "string"
+              : "number";
+        updated = updateParam(updated, name, value, type);
+      }
+      replaceManagedKnowledgeTool(updated);
+    },
     onParamChange,
   };
 }
@@ -381,28 +400,47 @@ export function KnowledgeBaseConfigActions() {
           void state.refetch();
         }}
       />
-      <Modal
-        open={configOpen}
-        title={t("agent.knowledge.configModal.title")}
-        onCancel={() => setConfigOpen(false)}
-        footer={null}
-      >
-        <KnowledgeRetrievalParamsForm
-          params={state.configurableParams}
-          values={Object.fromEntries(
-            state.configurableParams.map((param) => [
-              param.name,
-              getParamValue(state.knowledgeSearchTool, param.name),
-            ])
-          )}
-          onChange={(name, value) => {
-            const param = state.configurableParams.find(
-              (item) => item.name === name
-            );
-            if (param) state.onParamChange(param, value);
-          }}
-        />
-      </Modal>
+      {state.profile.toolName === "aidp_search" ? (
+        configOpen && (
+          <AidpRetrievalDialog
+            values={Object.fromEntries(
+              state.configurableParams.map((param) => [
+                param.name,
+                getParamValue(state.knowledgeSearchTool, param.name),
+              ])
+            )}
+            disabled={state.isReadOnly}
+            onCancel={() => setConfigOpen(false)}
+            onConfirm={(patch) => {
+              state.onParamsChange(patch);
+              setConfigOpen(false);
+            }}
+          />
+        )
+      ) : (
+        <Modal
+          open={configOpen}
+          title={t("agent.knowledge.configModal.title")}
+          onCancel={() => setConfigOpen(false)}
+          footer={null}
+        >
+          <KnowledgeRetrievalParamsForm
+            params={state.configurableParams}
+            values={Object.fromEntries(
+              state.configurableParams.map((param) => [
+                param.name,
+                getParamValue(state.knowledgeSearchTool, param.name),
+              ])
+            )}
+            onChange={(name, value) => {
+              const param = state.configurableParams.find(
+                (item) => item.name === name
+              );
+              if (param) state.onParamChange(param, value);
+            }}
+          />
+        </Modal>
+      )}
     </>
   );
 }
@@ -589,28 +627,47 @@ export default function KnowledgeBaseConfig({
                 void state.refetch();
               }}
             />
-            <Modal
-              open={configOpen}
-              title={t("agent.knowledge.configModal.title")}
-              onCancel={() => setConfigOpen(false)}
-              footer={null}
-            >
-              <KnowledgeRetrievalParamsForm
-                params={state.configurableParams}
-                values={Object.fromEntries(
-                  state.configurableParams.map((param) => [
-                    param.name,
-                    getParamValue(state.knowledgeSearchTool, param.name),
-                  ])
-                )}
-                onChange={(name, value) => {
-                  const param = state.configurableParams.find(
-                    (item) => item.name === name
-                  );
-                  if (param) state.onParamChange(param, value);
-                }}
-              />
-            </Modal>
+            {state.profile.toolName === "aidp_search" ? (
+              configOpen && (
+                <AidpRetrievalDialog
+                  values={Object.fromEntries(
+                    state.configurableParams.map((param) => [
+                      param.name,
+                      getParamValue(state.knowledgeSearchTool, param.name),
+                    ])
+                  )}
+                  disabled={state.isReadOnly}
+                  onCancel={() => setConfigOpen(false)}
+                  onConfirm={(patch) => {
+                    state.onParamsChange(patch);
+                    setConfigOpen(false);
+                  }}
+                />
+              )
+            ) : (
+              <Modal
+                open={configOpen}
+                title={t("agent.knowledge.configModal.title")}
+                onCancel={() => setConfigOpen(false)}
+                footer={null}
+              >
+                <KnowledgeRetrievalParamsForm
+                  params={state.configurableParams}
+                  values={Object.fromEntries(
+                    state.configurableParams.map((param) => [
+                      param.name,
+                      getParamValue(state.knowledgeSearchTool, param.name),
+                    ])
+                  )}
+                  onChange={(name, value) => {
+                    const param = state.configurableParams.find(
+                      (item) => item.name === name
+                    );
+                    if (param) state.onParamChange(param, value);
+                  }}
+                />
+              </Modal>
+            )}
           </>
         ) : null}
       </>

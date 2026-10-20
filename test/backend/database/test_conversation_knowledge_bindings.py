@@ -128,7 +128,7 @@ def test_stale_save_cannot_restore_deleted_binding(database, monkeypatch):
     monkeypatch.setattr(conversations, "replace_conversation_workbench_config", db.replace_conversation_workbench_config)
     with pytest.raises(WorkbenchConfigVersionConflict):
         conversations.update_conversation_workbench_config_service(
-            conversation_id=42, config=stale, expected_version=4, user_id="user",
+            conversation_id=42, config=stale, expected_version=4, user_id="user", tenant_id="tenant",
         )
     assert row.workbench_config["knowledge_scope"]["aidp"]["kds_ids"] == []
     save_session.flush.assert_not_called()

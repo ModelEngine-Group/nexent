@@ -1,0 +1,73 @@
+{
+  "schema_version": "1.0",
+  "stage": "D2",
+  "module": "AIDP-KNOWLEDGE",
+  "case": {
+    "case_id": "AIDP-RET-CONFIG-API",
+    "feature_id": "AIDP-RETRIEVAL",
+    "business_rule_ids": [
+      "AIDP-RETRIEVAL-RULE-01"
+    ],
+    "title": "Authenticated AIDP configuration API persistence and rejection",
+    "type": "CONTRACT",
+    "priority": "P1",
+    "status": "blocked",
+    "automation": "manual",
+    "objective": "Authenticated AIDP configuration API persistence and rejection",
+    "preconditions": [
+      "SDK/frontend dependencies available; use isolated run-owned resources.",
+      "Real provider and browser journeys require an authorized matching source environment."
+    ],
+    "test_data": {
+      "methods": "vector, full text, graph, all pairs and hybrid",
+      "legacy": "top_k=7, reranking_enable=false, multi_modal=false, candidates missing/null/fixed"
+    },
+    "steps": [
+      {
+        "order": 1,
+        "action": "Save and read managed/independent and conversation settings through authenticated product APIs, including null candidates and explicit false/zero.",
+        "expected": "Valid settings retain following and explicit values, catalog metadata exposes new fields, and tool test uses the saved effective policy."
+      },
+      {
+        "order": 2,
+        "action": "Submit invalid quota, dependency, unknown/reserved conversation fields and exercise import/export and tool test.",
+        "expected": "Invalid settings use existing 4xx contracts without persistence, provider HTTP, scope expansion or credential injection."
+      }
+    ],
+    "expected_results": [
+      "Valid settings retain following and explicit values, catalog metadata exposes new fields, and tool test uses the saved effective policy.",
+      "Invalid settings use existing 4xx contracts without persistence, provider HTTP, scope expansion or credential injection."
+    ],
+    "forbidden_side_effects": [
+      "Do not mutate other configurations, expand managed scope, expose credentials or issue HTTP for invalid settings."
+    ],
+    "acceptance": [
+      {
+        "id": "AC-01",
+        "description": "Valid settings retain following and explicit values, catalog metadata exposes new fields, and tool test uses the saved effective policy.; Invalid settings use existing 4xx contracts without persistence, provider HTTP, scope expansion or credential injection.",
+        "steps": [
+          1,
+          2
+        ],
+        "expected_results": [
+          1,
+          2
+        ],
+        "forbidden_side_effects": [
+          1
+        ]
+      }
+    ],
+    "contract": {
+      "protocol": "Authenticated Nexent HTTP APIs",
+      "request_expectations": [
+        "Save and read managed/independent and conversation settings through authenticated product APIs, including null candidates and explicit false/zero.",
+        "Submit invalid quota, dependency, unknown/reserved conversation fields and exercise import/export and tool test."
+      ],
+      "response_expectations": [
+        "Valid settings retain following and explicit values, catalog metadata exposes new fields, and tool test uses the saved effective policy.",
+        "Invalid settings use existing 4xx contracts without persistence, provider HTTP, scope expansion or credential injection."
+      ]
+    }
+  }
+}

@@ -75,6 +75,7 @@ from management.services.agent.service import (
     check_skill_conflicts_impl,
 )
 from management.services.agent.prompt_generation import generate_guardrail_rules_impl
+from management.services.agent.policy import prepare_import_retrieval_params
 from management.services.knowledge_base.scope import get_agent_knowledge_capabilities
 from management.services.agent.workbench import (
     build_workbench_capability_preview,
@@ -790,6 +791,7 @@ async def import_agent_api(
                      "force_import": request.force_import,
                      "skills_count": len(request.skills) if request.skills else 0}
     try:
+        prepare_import_retrieval_params(request.agent_info)
         if request.skills:
             agent_id_mapping = await import_agent_with_skills_impl(
                 request.agent_info,
