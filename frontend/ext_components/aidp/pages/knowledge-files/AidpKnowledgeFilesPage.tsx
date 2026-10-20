@@ -149,6 +149,21 @@ const AidpKnowledgeFilesPage: React.FC<AidpKnowledgeFilesPageProps> = ({
   const [fileColumnWidths, setFileColumnWidths] = useState<
     Record<string, number>
   >({});
+  // The batch action and its button must agree on the rows that can still be
+  // deleted. A selected row may have flipped to "deleting" between polls, so
+  // derive the real UUID set from the current page instead of the raw keys.
+  const selectedDeletableFileUuids = useMemo(
+    () =>
+      files
+        .filter(
+          (file) =>
+            selectedFileKeys.includes(file.file_uuid || file.file_ino_no) &&
+            !isFileDeleting(file.file_status)
+        )
+        .map((file) => file.file_uuid)
+        .filter((uuid): uuid is string => Boolean(uuid)),
+    [files, selectedFileKeys]
+  );
 
   const groupNames = useMemo(() => {
     const names = new Map(
@@ -300,18 +315,7 @@ const AidpKnowledgeFilesPage: React.FC<AidpKnowledgeFilesPageProps> = ({
   );
 
   const handleBatchDeleteFiles = useCallback(() => {
-    // Selection keys can fall back to file_ino_no; map them back to the
-    // current page records so only real file UUIDs are sent to AIDP.
-    const fileUuids = files
-      .filter(
-        (file) =>
-          selectedFileKeys.includes(file.file_uuid || file.file_ino_no) &&
-          // A stale selection can still hold a row that flipped to "deleting"
-          // between polls; it must not be removed again.
-          !isFileDeleting(file.file_status)
-      )
-      .map((file) => file.file_uuid)
-      .filter(Boolean);
+    const fileUuids = selectedDeletableFileUuids;
     if (fileUuids.length === 0) return;
     // AIDP rejects oversized batch removals; guard before confirming.
     if (fileUuids.length > AIDP_BATCH_DELETE_MAX) {
@@ -374,13 +378,12 @@ const AidpKnowledgeFilesPage: React.FC<AidpKnowledgeFilesPageProps> = ({
     ).catch(() => undefined);
   }, [
     detailQuery,
-    files,
     i18n.language,
     knowledgeBase.kds_id,
     message,
     modal,
     refreshFiles,
-    selectedFileKeys,
+    selectedDeletableFileUuids,
     t,
   ]);
 
@@ -585,7 +588,12 @@ const AidpKnowledgeFilesPage: React.FC<AidpKnowledgeFilesPageProps> = ({
               <div className="flex min-w-0 items-center gap-3">
                 <FileTextOutlined className="rounded-lg bg-violet-100 p-2 text-lg text-violet-600" />
                 <AidpDetailField label={t("aidpKnowledge.detailTabFiles")}>
-                  {formatAidpDocumentCount(detail.document_count ?? fileTotal)}
+                  {formatAidpDocumentCount(
+                    detail.document_count ??
+                      (!fileParams.keyword && filesQuery.data?.total_reliable
+                        ? fileTotal
+                        : undefined)
+                  )}
                 </AidpDetailField>
               </div>
               <div className="flex min-w-0 items-center gap-3">
@@ -686,7 +694,7 @@ const AidpKnowledgeFilesPage: React.FC<AidpKnowledgeFilesPageProps> = ({
               </Tooltip>
               {canEdit && (
                 <Button
-                  disabled={selectedFileKeys.length === 0}
+                  disabled={selectedDeletableFileUuids.length === 0}
                   onClick={handleBatchDeleteFiles}
                 >
                   {t("common.delete")}

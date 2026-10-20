@@ -484,9 +484,7 @@ const AidpKnowledgeTasksTab: React.FC<AidpKnowledgeTasksTabProps> = ({
                 {t("aidpKnowledge.detailErrorCode")}
               </div>
               <div className="text-sm leading-5 text-gray-900">
-                {descriptionValue(
-                  failureReason?.code ?? failureTask.error_code
-                )}
+                {descriptionValue(failureReason?.code)}
               </div>
             </div>
             <div className="space-y-1">

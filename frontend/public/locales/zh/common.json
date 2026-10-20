@@ -5665,7 +5665,7 @@
   "aidpKnowledge.taskQueued": "排队中",
   "aidpKnowledge.taskRetention": "上传任务记录仅保留近 {{days}} 天",
   "aidpKnowledge.taskStatExtracting": "提取中 {{count}}",
-  "aidpKnowledge.taskStatFailed": "入库失败 {{count}}",
+  "aidpKnowledge.taskStatFailed": "处理失败 {{count}}",
   "aidpKnowledge.taskStatSuccess": "成功 {{count}}",
   "aidpKnowledge.taskStatTotal": "总数 {{count}}",
   "aidpKnowledge.taskStatusSummary": "近 {{days}} 天的文件提取状态",

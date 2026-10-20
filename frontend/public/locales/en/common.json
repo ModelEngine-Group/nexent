@@ -5727,7 +5727,7 @@
   "aidpKnowledge.taskQueued": "Queued",
   "aidpKnowledge.taskRetention": "Upload task records are retained for {{days}} days",
   "aidpKnowledge.taskStatExtracting": "Extracting {{count}}",
-  "aidpKnowledge.taskStatFailed": "Ingestion failed {{count}}",
+  "aidpKnowledge.taskStatFailed": "Processing failed {{count}}",
   "aidpKnowledge.taskStatSuccess": "Succeeded {{count}}",
   "aidpKnowledge.taskStatTotal": "Total {{count}}",
   "aidpKnowledge.taskStatusSummary": "File extraction status, last {{days}} days",
