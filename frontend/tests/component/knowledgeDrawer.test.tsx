@@ -4,6 +4,7 @@ import { fireEvent, screen, waitFor } from "@testing-library/react";
 import { expect, it, vi } from "vitest";
 import { render, changePageSize } from "./resourceDrawerTestUtils";
 import { KnowledgeDrawer } from "@/components/resource-picker/KnowledgeDrawer";
+import { tagManagementApi } from "@/services/tagManagementService";
 import type { KnowledgeBase } from "@/types/knowledgeBase";
 
 vi.mock("@/services/tagManagementService", () => ({
@@ -11,6 +12,7 @@ vi.mock("@/services/tagManagementService", () => ({
     listLibraries: vi.fn(async () => []),
     listDefinitions: vi.fn(async () => []),
     getAssignments: vi.fn(async () => ({ assignments: [] })),
+    getKnowledgeAssignmentsBatch: vi.fn(async () => []),
     filterResourceIds: vi.fn(async () => ({ matched_resource_ids: [] })),
   },
 }));
@@ -68,7 +70,20 @@ it("changes the actual page size, returns to page one and retains off-page selec
   }));
   render(<KnowledgeDrawer open onClose={vi.fn()} knowledgeBases={items} />);
   expect(screen.getAllByRole("option")).toHaveLength(10);
+  await waitFor(() =>
+    expect(
+      tagManagementApi.getKnowledgeAssignmentsBatch
+    ).toHaveBeenCalledExactlyOnceWith(
+      Array.from({ length: 10 }, (_, i) => `kb:${i + 1}`)
+    )
+  );
   fireEvent.click(screen.getByRole("button", { name: "3" }));
+  await waitFor(() =>
+    expect(
+      tagManagementApi.getKnowledgeAssignmentsBatch
+    ).toHaveBeenLastCalledWith(["kb:21"])
+  );
+  expect(tagManagementApi.getAssignments).not.toHaveBeenCalled();
   fireEvent.click(screen.getByRole("option", { name: "Knowledge 21" }));
   await changePageSize(20);
   expect(screen.getAllByRole("option")).toHaveLength(20);
@@ -101,6 +116,32 @@ it("renders knowledge as an icon-free list by default with descriptive metadata"
   expect(row).toHaveClass("hover:bg-muted/50");
   expect(row?.querySelector(".lucide-database, img, .ant-avatar")).toBeNull();
 });
+
+it.each(["list", "card"] as const)(
+  "hides AIDP count metadata in %s view and retains local counts",
+  (viewMode) => {
+    const props = {
+      open: true,
+      onClose: vi.fn(),
+      viewMode,
+      knowledgeBases,
+    };
+    const view = render(<KnowledgeDrawer {...props} isAidpSearch />);
+    const row = () =>
+      screen
+        .getByRole("option", { name: "Handbook" })
+        .closest("[data-resource-view]");
+    expect(row()).toHaveTextContent("Policies");
+    expect(row()).toHaveTextContent("bge-m3");
+    expect(row()).not.toHaveTextContent("128 documents");
+    expect(row()).not.toHaveTextContent("3420 chunks");
+    expect(knowledgeBases[0].documentCount).toBe(128);
+    expect(knowledgeBases[0].chunkCount).toBe(3420);
+    view.rerender(<KnowledgeDrawer {...props} isAidpSearch={false} />);
+    expect(row()).toHaveTextContent("128 documents");
+    expect(row()).toHaveTextContent("3420 chunks");
+  }
+);
 
 it("opens configurable tag management without committing knowledge selection", () => {
   const confirm = vi.fn();
@@ -230,4 +271,39 @@ it("preserves knowledge selection across layouts and failed confirmation, with i
   await waitFor(() => expect(close).toHaveBeenCalledOnce());
   expect(confirm.mock.calls[0][0]).toEqual(knowledgeBases);
   expect(confirm.mock.calls[1][0]).toEqual(knowledgeBases);
+});
+
+it("AIDP configuration accepts string IDs without local model checks and caps selections at ten", async () => {
+  const confirm = vi.fn();
+  const aidpKnowledge = Array.from({ length: 11 }, (_, i) => ({
+    ...knowledgeBases[0],
+    id: `kds:${i}`,
+    name: `AIDP ${i}`,
+    source: "aidp",
+    embeddingModel: "unknown",
+    documentCount: 0,
+    chunkCount: 0,
+  }));
+  render(
+    <KnowledgeDrawer
+      open
+      isAidpSearch
+      maxSelect={10}
+      knowledgeBases={aidpKnowledge}
+      onClose={vi.fn()}
+      onConfirm={confirm}
+    />
+  );
+  await changePageSize(20);
+  for (const kb of aidpKnowledge)
+    fireEvent.click(screen.getByRole("option", { name: kb.name }));
+  expect(screen.getByRole("option", { name: "AIDP 10" })).toHaveAttribute(
+    "aria-selected",
+    "false"
+  );
+  fireEvent.click(screen.getByRole("button", { name: "确认" }));
+  await waitFor(() => expect(confirm).toHaveBeenCalledOnce());
+  expect(confirm.mock.calls[0][0].map((kb: KnowledgeBase) => kb.id)).toEqual(
+    aidpKnowledge.slice(0, 10).map((kb) => kb.id)
+  );
 });

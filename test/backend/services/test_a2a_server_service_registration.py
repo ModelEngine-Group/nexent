@@ -1,3 +1,4 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """
 Unit tests for A2A Server Service - Registration and Settings.
 
@@ -14,35 +15,35 @@ class TestA2AServerServiceExceptions:
 
     def test_base_exception_exists(self):
         """Test A2AServerServiceError exception exists."""
-        from backend.services.a2a_server_service import A2AServerServiceError
+        from management.services.agent.a2a.service import A2AServerServiceError
 
         exc = A2AServerServiceError("Test error")
         assert str(exc) == "Test error"
 
     def test_endpoint_not_found_error_exists(self):
         """Test EndpointNotFoundError exception exists."""
-        from backend.services.a2a_server_service import EndpointNotFoundError
+        from management.services.agent.a2a.service import EndpointNotFoundError
 
         exc = EndpointNotFoundError("Endpoint not found")
         assert str(exc) == "Endpoint not found"
 
     def test_agent_not_enabled_error_exists(self):
         """Test AgentNotEnabledError exception exists."""
-        from backend.services.a2a_server_service import AgentNotEnabledError
+        from management.services.agent.a2a.service import AgentNotEnabledError
 
         exc = AgentNotEnabledError("Agent not enabled")
         assert str(exc) == "Agent not enabled"
 
     def test_task_not_found_error_exists(self):
         """Test TaskNotFoundError exception exists."""
-        from backend.services.a2a_server_service import TaskNotFoundError
+        from management.services.agent.a2a.service import TaskNotFoundError
 
         exc = TaskNotFoundError("Task not found")
         assert str(exc) == "Task not found"
 
     def test_unsupported_operation_error_exists(self):
         """Test UnsupportedOperationError exception exists."""
-        from backend.services.a2a_server_service import UnsupportedOperationError
+        from management.services.agent.a2a.service import UnsupportedOperationError
 
         exc = UnsupportedOperationError("Unsupported operation")
         assert str(exc) == "Unsupported operation"
@@ -53,7 +54,7 @@ class TestRegisterAgent:
 
     def test_register_agent_success(self):
         """Test successful agent registration."""
-        from backend.services.a2a_server_service import A2AServerService
+        from management.services.agent.a2a.service import A2AServerService
 
         service = A2AServerService()
 
@@ -66,7 +67,7 @@ class TestRegisterAgent:
             "is_enabled": False
         }
 
-        with patch("backend.services.a2a_server_service.a2a_agent_db") as mock_db:
+        with patch("management.services.agent.a2a.service.a2a_agent_db") as mock_db:
             mock_db.create_server_agent.return_value = mock_result
 
             result = service.register_agent(
@@ -81,7 +82,7 @@ class TestRegisterAgent:
 
     def test_register_agent_with_all_params(self):
         """Test agent registration with all parameters."""
-        from backend.services.a2a_server_service import A2AServerService
+        from management.services.agent.a2a.service import A2AServerService
 
         service = A2AServerService()
 
@@ -94,7 +95,7 @@ class TestRegisterAgent:
             "streaming": True
         }
 
-        with patch("backend.services.a2a_server_service.a2a_agent_db") as mock_db:
+        with patch("management.services.agent.a2a.service.a2a_agent_db") as mock_db:
             mock_db.create_server_agent.return_value = mock_result
 
             result = service.register_agent(
@@ -122,11 +123,11 @@ class TestUnregisterAgent:
 
     def test_unregister_agent_success(self):
         """Test successful agent unregistration."""
-        from backend.services.a2a_server_service import A2AServerService
+        from management.services.agent.a2a.service import A2AServerService
 
         service = A2AServerService()
 
-        with patch("backend.services.a2a_server_service.a2a_agent_db") as mock_db:
+        with patch("management.services.agent.a2a.service.a2a_agent_db") as mock_db:
             mock_db.disable_server_agent.return_value = True
 
             result = service.unregister_agent(
@@ -140,11 +141,11 @@ class TestUnregisterAgent:
 
     def test_unregister_agent_not_found(self):
         """Test unregister when agent not found."""
-        from backend.services.a2a_server_service import A2AServerService
+        from management.services.agent.a2a.service import A2AServerService
 
         service = A2AServerService()
 
-        with patch("backend.services.a2a_server_service.a2a_agent_db") as mock_db:
+        with patch("management.services.agent.a2a.service.a2a_agent_db") as mock_db:
             mock_db.disable_server_agent.return_value = False
 
             result = service.unregister_agent(
@@ -161,7 +162,7 @@ class TestGetRegistration:
 
     def test_get_registration_found(self):
         """Test getting existing registration."""
-        from backend.services.a2a_server_service import A2AServerService
+        from management.services.agent.a2a.service import A2AServerService
 
         service = A2AServerService()
 
@@ -172,7 +173,7 @@ class TestGetRegistration:
             "is_enabled": True
         }
 
-        with patch("backend.services.a2a_server_service.a2a_agent_db") as mock_db:
+        with patch("management.services.agent.a2a.service.a2a_agent_db") as mock_db:
             mock_db.get_server_agent_by_agent_id.return_value = mock_registration
 
             result = service.get_registration(agent_id=1, tenant_id="tenant-1")
@@ -182,11 +183,11 @@ class TestGetRegistration:
 
     def test_get_registration_not_found(self):
         """Test getting non-existent registration."""
-        from backend.services.a2a_server_service import A2AServerService
+        from management.services.agent.a2a.service import A2AServerService
 
         service = A2AServerService()
 
-        with patch("backend.services.a2a_server_service.a2a_agent_db") as mock_db:
+        with patch("management.services.agent.a2a.service.a2a_agent_db") as mock_db:
             mock_db.get_server_agent_by_agent_id.return_value = None
 
             result = service.get_registration(agent_id=999, tenant_id="tenant-1")
@@ -199,7 +200,7 @@ class TestListRegistrations:
 
     def test_list_registrations_all(self):
         """Test listing all registrations for tenant."""
-        from backend.services.a2a_server_service import A2AServerService
+        from management.services.agent.a2a.service import A2AServerService
 
         service = A2AServerService()
 
@@ -208,7 +209,7 @@ class TestListRegistrations:
             {"agent_id": 2, "name": "Agent 2"}
         ]
 
-        with patch("backend.services.a2a_server_service.a2a_agent_db") as mock_db:
+        with patch("management.services.agent.a2a.service.a2a_agent_db") as mock_db:
             mock_db.list_server_agents.return_value = mock_list
 
             result = service.list_registrations(tenant_id="tenant-1")
@@ -218,7 +219,7 @@ class TestListRegistrations:
 
     def test_list_registrations_filtered_by_user(self):
         """Test listing registrations filtered by user."""
-        from backend.services.a2a_server_service import A2AServerService
+        from management.services.agent.a2a.service import A2AServerService
 
         service = A2AServerService()
 
@@ -226,7 +227,7 @@ class TestListRegistrations:
             {"agent_id": 1, "name": "Agent 1", "user_id": "user-1"}
         ]
 
-        with patch("backend.services.a2a_server_service.a2a_agent_db") as mock_db:
+        with patch("management.services.agent.a2a.service.a2a_agent_db") as mock_db:
             mock_db.list_server_agents.return_value = mock_list
 
             result = service.list_registrations(tenant_id="tenant-1", user_id="user-1")
@@ -239,7 +240,7 @@ class TestEnableA2A:
 
     def test_enable_a2a_success(self):
         """Test successful A2A enable."""
-        from backend.services.a2a_server_service import A2AServerService
+        from management.services.agent.a2a.service import A2AServerService
 
         service = A2AServerService()
 
@@ -250,10 +251,10 @@ class TestEnableA2A:
             "is_enabled": True
         }
 
-        with patch("backend.services.a2a_server_service.a2a_agent_db") as mock_db:
+        with patch("management.services.agent.a2a.service.a2a_agent_db") as mock_db:
             mock_db.enable_server_agent.return_value = mock_result
 
-            with patch("backend.services.a2a_server_service.logger") as mock_logger:
+            with patch("management.services.agent.a2a.service.logger") as mock_logger:
                 result = service.enable_a2a(
                     agent_id=1,
                     tenant_id="tenant-1",
@@ -266,14 +267,14 @@ class TestEnableA2A:
 
     def test_enable_a2a_not_found(self):
         """Test enable A2A when registration not found."""
-        from backend.services.a2a_server_service import (
+        from management.services.agent.a2a.service import (
             A2AServerService,
             EndpointNotFoundError
         )
 
         service = A2AServerService()
 
-        with patch("backend.services.a2a_server_service.a2a_agent_db") as mock_db:
+        with patch("management.services.agent.a2a.service.a2a_agent_db") as mock_db:
             mock_db.enable_server_agent.return_value = None
 
             with pytest.raises(EndpointNotFoundError) as exc_info:
@@ -287,7 +288,7 @@ class TestEnableA2A:
 
     def test_enable_a2a_with_custom_settings(self):
         """Test enable A2A with custom name and description."""
-        from backend.services.a2a_server_service import A2AServerService
+        from management.services.agent.a2a.service import A2AServerService
 
         service = A2AServerService()
 
@@ -298,7 +299,7 @@ class TestEnableA2A:
             "is_enabled": True
         }
 
-        with patch("backend.services.a2a_server_service.a2a_agent_db") as mock_db:
+        with patch("management.services.agent.a2a.service.a2a_agent_db") as mock_db:
             mock_db.enable_server_agent.return_value = mock_result
 
             result = service.enable_a2a(
@@ -319,14 +320,14 @@ class TestDisableA2A:
 
     def test_disable_a2a_success(self):
         """Test successful A2A disable."""
-        from backend.services.a2a_server_service import A2AServerService
+        from management.services.agent.a2a.service import A2AServerService
 
         service = A2AServerService()
 
-        with patch("backend.services.a2a_server_service.a2a_agent_db") as mock_db:
+        with patch("management.services.agent.a2a.service.a2a_agent_db") as mock_db:
             mock_db.disable_server_agent.return_value = True
 
-            with patch("backend.services.a2a_server_service.logger") as mock_logger:
+            with patch("management.services.agent.a2a.service.logger") as mock_logger:
                 result = service.disable_a2a(
                     agent_id=1,
                     tenant_id="tenant-1",
@@ -339,14 +340,14 @@ class TestDisableA2A:
 
     def test_disable_a2a_not_found(self):
         """Test disable A2A when registration not found."""
-        from backend.services.a2a_server_service import (
+        from management.services.agent.a2a.service import (
             A2AServerService,
             EndpointNotFoundError
         )
 
         service = A2AServerService()
 
-        with patch("backend.services.a2a_server_service.a2a_agent_db") as mock_db:
+        with patch("management.services.agent.a2a.service.a2a_agent_db") as mock_db:
             mock_db.disable_server_agent.return_value = False
 
             with pytest.raises(EndpointNotFoundError) as exc_info:
@@ -364,7 +365,7 @@ class TestUpdateSettings:
 
     def test_update_settings_enable(self):
         """Test update_settings to enable A2A."""
-        from backend.services.a2a_server_service import A2AServerService
+        from management.services.agent.a2a.service import A2AServerService
 
         service = A2AServerService()
 
@@ -380,7 +381,7 @@ class TestUpdateSettings:
             "is_enabled": True
         }
 
-        with patch("backend.services.a2a_server_service.a2a_agent_db") as mock_db:
+        with patch("management.services.agent.a2a.service.a2a_agent_db") as mock_db:
             mock_db.get_server_agent_by_agent_id.return_value = mock_current
             mock_db.enable_server_agent.return_value = mock_enabled
 
@@ -395,7 +396,7 @@ class TestUpdateSettings:
 
     def test_update_settings_disable(self):
         """Test update_settings to disable A2A."""
-        from backend.services.a2a_server_service import A2AServerService
+        from management.services.agent.a2a.service import A2AServerService
 
         service = A2AServerService()
 
@@ -405,7 +406,7 @@ class TestUpdateSettings:
             "is_enabled": True
         }
 
-        with patch("backend.services.a2a_server_service.a2a_agent_db") as mock_db:
+        with patch("management.services.agent.a2a.service.a2a_agent_db") as mock_db:
             mock_db.get_server_agent_by_agent_id.return_value = mock_current
             mock_db.disable_server_agent.return_value = True
 
@@ -420,14 +421,14 @@ class TestUpdateSettings:
 
     def test_update_settings_not_found(self):
         """Test update_settings when registration not found."""
-        from backend.services.a2a_server_service import (
+        from management.services.agent.a2a.service import (
             A2AServerService,
             EndpointNotFoundError
         )
 
         service = A2AServerService()
 
-        with patch("backend.services.a2a_server_service.a2a_agent_db") as mock_db:
+        with patch("management.services.agent.a2a.service.a2a_agent_db") as mock_db:
             mock_db.get_server_agent_by_agent_id.return_value = None
 
             with pytest.raises(EndpointNotFoundError):
@@ -439,7 +440,7 @@ class TestUpdateSettings:
 
     def test_update_settings_card_overrides_only(self):
         """Test update_settings with only card_overrides (no is_enabled change)."""
-        from backend.services.a2a_server_service import A2AServerService
+        from management.services.agent.a2a.service import A2AServerService
 
         service = A2AServerService()
 
@@ -457,10 +458,10 @@ class TestUpdateSettings:
             "card_overrides": {"provider": {"organization": "Custom Org"}}
         }
 
-        with patch("backend.services.a2a_server_service.a2a_agent_db") as mock_db:
+        with patch("management.services.agent.a2a.service.a2a_agent_db") as mock_db:
             mock_db.get_server_agent_by_agent_id.side_effect = [mock_current, mock_updated]
 
-            with patch("backend.services.a2a_server_service.get_db_session") as mock_session:
+            with patch("management.services.agent.a2a.service.get_db_session") as mock_session:
                 mock_agent = MagicMock()
                 mock_session.return_value.__enter__.return_value.query.return_value.filter.return_value.first.return_value = mock_agent
 

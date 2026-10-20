@@ -1,3 +1,4 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """D1 backend policy tests for repository, sharing, runtime and memory."""
 
 from __future__ import annotations
@@ -38,7 +39,7 @@ STAGE = pytest.mark.stage("D1")
 @STAGE
 @pytest.mark.case_id("UT-BE-025")
 def test_memory_pipeline_policy_uses_configured_scope_and_token_budget(monkeypatch: pytest.MonkeyPatch) -> None:
-    from services import memory_context_service as service
+    from management.services.memory import context as service
 
     monkeypatch.setattr(service, "MEMORY_TOKEN_BUDGET", 2048)
     monkeypatch.setattr(service, "MMR_FINAL_TOP_K", 7)

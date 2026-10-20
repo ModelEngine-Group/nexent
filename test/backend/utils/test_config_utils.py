@@ -1,5 +1,4 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
-
 import pytest
 import json
 import sys
@@ -32,7 +31,7 @@ sys.modules["nexent.core.models.capacity_budget"] = capacity_budget_mock
 
 # Patch storage factory before importing
 with patch_minio_client_initialization():
-    from backend.utils.config_utils import CONTEXT_COMPACTION_TRIGGER_RATIO_KEY, LEGACY_CONTEXT_SOFT_LIMIT_RATIO_KEY, CONTEXT_POLICY_KEY, safe_value, safe_list, get_env_key, TenantConfigManager
+    from management.services.configuration.tenant.settings import CONTEXT_COMPACTION_TRIGGER_RATIO_KEY, LEGACY_CONTEXT_SOFT_LIMIT_RATIO_KEY, CONTEXT_POLICY_KEY, safe_value, safe_list, get_env_key, TenantConfigManager
     from management.services.model.names import get_model_name_from_config
 
 
@@ -142,7 +141,7 @@ class TestTenantConfigManager:
         # _get_cache_key removed with cache removal; ensure attribute not present
         assert not hasattr(config_manager, "_get_cache_key")
 
-    @patch('backend.utils.config_utils.get_all_configs_by_tenant_id')
+    @patch('management.services.configuration.tenant.settings.get_all_configs_by_tenant_id')
     def test_load_config_success(self, mock_get_configs, config_manager, mock_configs):
         """Test successful config loading"""
         mock_get_configs.return_value = mock_configs
@@ -156,7 +155,7 @@ class TestTenantConfigManager:
         # No in-process cache expected
         assert not hasattr(config_manager, "config_cache")
 
-    @patch('backend.utils.config_utils.get_all_configs_by_tenant_id')
+    @patch('management.services.configuration.tenant.settings.get_all_configs_by_tenant_id')
     def test_load_config_no_configs(self, mock_get_configs, config_manager):
         """Test loading with no configs"""
         mock_get_configs.return_value = []
@@ -171,7 +170,7 @@ class TestTenantConfigManager:
         result = config_manager.load_config("")
         assert result == {}
 
-    @patch('backend.utils.config_utils.get_all_configs_by_tenant_id')
+    @patch('management.services.configuration.tenant.settings.get_all_configs_by_tenant_id')
     def test_load_config_cache_hit(self, mock_get_configs, config_manager, mock_configs):
         """Test cache hit"""
         mock_get_configs.return_value = mock_configs
@@ -188,7 +187,7 @@ class TestTenantConfigManager:
             "app_setting": "test_value"
         }
 
-    @patch('backend.utils.config_utils.get_all_configs_by_tenant_id')
+    @patch('management.services.configuration.tenant.settings.get_all_configs_by_tenant_id')
     def test_load_config_force_reload(self, mock_get_configs, config_manager, mock_configs):
         """Test force reload"""
         mock_get_configs.return_value = mock_configs
@@ -205,8 +204,8 @@ class TestTenantConfigManager:
             "app_setting": "test_value"
         }
 
-    @patch('backend.utils.config_utils.get_model_by_model_id')
-    @patch('backend.utils.config_utils.get_all_configs_by_tenant_id')
+    @patch('management.services.configuration.tenant.settings.get_model_by_model_id')
+    @patch('management.services.configuration.tenant.settings.get_all_configs_by_tenant_id')
     def test_get_model_config_success(self, mock_get_configs, mock_get_model, config_manager):
         """Test successful model config retrieval"""
         mock_get_configs.return_value = [
@@ -218,8 +217,8 @@ class TestTenantConfigManager:
 
         assert result == {"model_id": 123, "model_name": "test_model"}
 
-    @patch('backend.utils.config_utils.get_model_by_model_id')
-    @patch('backend.utils.config_utils.get_all_configs_by_tenant_id')
+    @patch('management.services.configuration.tenant.settings.get_model_by_model_id')
+    @patch('management.services.configuration.tenant.settings.get_all_configs_by_tenant_id')
     def test_get_model_config_invalid_model_id(self, mock_get_configs, mock_get_model, config_manager):
         """Test with invalid model ID"""
         mock_get_configs.return_value = [
@@ -235,7 +234,7 @@ class TestTenantConfigManager:
         result = config_manager.get_model_config("key")
         assert result == {}
 
-    @patch('backend.utils.config_utils.get_all_configs_by_tenant_id')
+    @patch('management.services.configuration.tenant.settings.get_all_configs_by_tenant_id')
     def test_get_app_config_success(self, mock_get_configs, config_manager):
         """Test successful app config retrieval"""
         mock_get_configs.return_value = [
@@ -250,7 +249,7 @@ class TestTenantConfigManager:
         result = config_manager.get_app_config("key")
         assert result == ""
 
-    @patch('backend.utils.config_utils.get_all_configs_by_tenant_id')
+    @patch('management.services.configuration.tenant.settings.get_all_configs_by_tenant_id')
     def test_get_capacity_reserve_policy_default(self, mock_get_configs, config_manager):
         """Missing W2 soft-limit config should use policy default."""
         mock_get_configs.return_value = []
@@ -260,7 +259,7 @@ class TestTenantConfigManager:
         assert policy.compaction_trigger_ratio == 0.8
         assert policy.compaction_trigger_ratio_source == "code_default"
 
-    @patch('backend.utils.config_utils.get_all_configs_by_tenant_id')
+    @patch('management.services.configuration.tenant.settings.get_all_configs_by_tenant_id')
     def test_get_capacity_reserve_policy_tenant_override(self, mock_get_configs, config_manager):
         """Valid tenant W2 soft-limit config should be parsed and sourced."""
         mock_get_configs.return_value = [
@@ -272,7 +271,7 @@ class TestTenantConfigManager:
         assert policy.compaction_trigger_ratio == 0.75
         assert policy.compaction_trigger_ratio_source == "tenant_config"
 
-    @patch('backend.utils.config_utils.get_all_configs_by_tenant_id')
+    @patch('management.services.configuration.tenant.settings.get_all_configs_by_tenant_id')
     def test_get_capacity_reserve_policy_reads_legacy_key_at_boundary(self, mock_get_configs, config_manager):
         mock_get_configs.return_value = [
             {"config_key": LEGACY_CONTEXT_SOFT_LIMIT_RATIO_KEY, "config_value": "0.7"}
@@ -283,7 +282,7 @@ class TestTenantConfigManager:
         assert policy.compaction_trigger_ratio == 0.7
         assert policy.compaction_trigger_ratio_source == "legacy_payload"
 
-    @patch('backend.utils.config_utils.get_all_configs_by_tenant_id')
+    @patch('management.services.configuration.tenant.settings.get_all_configs_by_tenant_id')
     def test_get_capacity_reserve_policy_invalid_override(self, mock_get_configs, config_manager):
         """Invalid W2 soft-limit config should fail closed."""
         mock_get_configs.return_value = [
@@ -293,7 +292,7 @@ class TestTenantConfigManager:
         with pytest.raises(Exception, match=CONTEXT_COMPACTION_TRIGGER_RATIO_KEY):
             config_manager.get_capacity_reserve_policy("tenant1")
 
-    @patch('backend.utils.config_utils.get_all_configs_by_tenant_id')
+    @patch('management.services.configuration.tenant.settings.get_all_configs_by_tenant_id')
     def test_get_context_policy_parses_tenant_json(self, mock_get_configs, config_manager):
         mock_get_configs.return_value = [{
             "config_key": CONTEXT_POLICY_KEY,
@@ -304,7 +303,7 @@ class TestTenantConfigManager:
             "processing_mode": "adaptive_compact",
         }
 
-    @patch('backend.utils.config_utils.get_all_configs_by_tenant_id')
+    @patch('management.services.configuration.tenant.settings.get_all_configs_by_tenant_id')
     def test_get_context_policy_rejects_non_object_json(self, mock_get_configs, config_manager):
         mock_get_configs.return_value = [{
             "config_key": CONTEXT_POLICY_KEY,
@@ -314,8 +313,8 @@ class TestTenantConfigManager:
         with pytest.raises(ValueError, match=CONTEXT_POLICY_KEY):
             config_manager.get_context_policy("tenant1")
 
-    @patch('backend.utils.config_utils.insert_config')
-    @patch('backend.utils.config_utils.get_all_configs_by_tenant_id')
+    @patch('management.services.configuration.tenant.settings.insert_config')
+    @patch('management.services.configuration.tenant.settings.get_all_configs_by_tenant_id')
     def test_set_single_config_success(self, mock_get_configs, mock_insert, config_manager):
         """Test successful single config setting"""
         mock_get_configs.return_value = []
@@ -331,9 +330,9 @@ class TestTenantConfigManager:
         config_manager.set_single_config("user1", None, "key1", "value1")
         # Should not raise exception
 
-    @patch('backend.utils.config_utils.delete_config_by_tenant_config_id')
-    @patch('backend.utils.config_utils.get_single_config_info')
-    @patch('backend.utils.config_utils.get_all_configs_by_tenant_id')
+    @patch('management.services.configuration.tenant.settings.delete_config_by_tenant_config_id')
+    @patch('management.services.configuration.tenant.settings.get_single_config_info')
+    @patch('management.services.configuration.tenant.settings.get_all_configs_by_tenant_id')
     def test_delete_single_config_success(self, mock_get_configs, mock_get_single, mock_delete, config_manager):
         """Test successful single config deletion"""
         mock_get_configs.return_value = []
@@ -349,9 +348,9 @@ class TestTenantConfigManager:
         config_manager.delete_single_config(None, "key1")
         # Should not raise exception
 
-    @patch('backend.utils.config_utils.update_config_by_tenant_config_id_and_data')
-    @patch('backend.utils.config_utils.get_single_config_info')
-    @patch('backend.utils.config_utils.get_all_configs_by_tenant_id')
+    @patch('management.services.configuration.tenant.settings.update_config_by_tenant_config_id_and_data')
+    @patch('management.services.configuration.tenant.settings.get_single_config_info')
+    @patch('management.services.configuration.tenant.settings.get_all_configs_by_tenant_id')
     def test_update_single_config_success(self, mock_get_configs, mock_get_single, mock_update, config_manager):
         """Test successful single config update"""
         mock_get_configs.return_value = []

@@ -46,6 +46,7 @@ import {
 import { useAgentStore } from "@/stores/agentStore";
 import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
 import { useAgentInfo } from "@/hooks/agent/useAgentInfo";
+import { useAgentEditorDraft } from "@/hooks/agent/useAgentEditorDraft";
 import { useAgentVersionDetail } from "@/hooks/agent/useAgentVersionDetail";
 import { useAgentVersionList } from "@/hooks/agent/useAgentVersionList";
 import { searchAgentInfo } from "@/services/agentConfigService";
@@ -65,12 +66,6 @@ function resolveDraftFocusTarget(
     updatedFields.includes("example_questions")
   ) {
     return { section: "conversation_guide" };
-  }
-  if (updatedFields.includes("few_shots_prompt")) {
-    return { section: "role_model", promptTab: "few-shots" };
-  }
-  if (updatedFields.includes("constraint_prompt")) {
-    return { section: "role_model", promptTab: "constraint" };
   }
   if (updatedFields.includes("duty_prompt")) {
     return { section: "role_model", promptTab: "duty" };
@@ -234,7 +229,6 @@ function AgentSetupContent({
     ready:
       !isRequestedAgentLoading &&
       currentAgentId === requestedAgentId &&
-      Boolean(agentInfo) &&
       isGenerationVisible &&
       !isDebugVisible,
     readOnly: permissionReadOnly,
@@ -642,11 +636,12 @@ export default function AgentEditor() {
   const isValidAgentId =
     Number.isInteger(requestedAgentId) && requestedAgentId > 0;
   const currentAgentId = useAgentStore((state) => state.currentAgentId);
-  const initialize = useAgentStore((state) => state.initialize);
   const reset = useAgentStore((state) => state.reset);
   const [isVersionManageOpen, setIsVersionManageOpen] = useState(false);
   const isReturningRef = useRef(false);
   const { agentInfo, refetch: refetchAgentInfo } = useAgentInfo(currentAgentId);
+  const { isLoading: isDraftLoading, error: draftLoadError } =
+    useAgentEditorDraft(requestedAgentId);
 
   useEffect(() => {
     if (isReturningRef.current) return;
@@ -655,31 +650,25 @@ export default function AgentEditor() {
       router.replace(`/${locale}/agents`);
       return;
     }
-    if (currentAgentId === requestedAgentId) return;
-
-    void (async () => {
-      const result = await searchAgentInfo(requestedAgentId);
-      if (!result.success || !result.data) {
-        message.error(
-          result.message || t("agentConfig.agents.detailsLoadFailed")
-        );
-        router.replace(`/${locale}/agents`);
-        return;
-      }
-      initialize(result.data);
-    })();
-  }, [
-    currentAgentId,
-    initialize,
-    isValidAgentId,
-    locale,
-    message,
-    requestedAgentId,
-    router,
-    t,
-  ]);
+    if (draftLoadError) {
+      message.error(t("agentConfig.agents.detailsLoadFailed"));
+      router.replace(`/${locale}/agents`);
+    }
+  }, [draftLoadError, isValidAgentId, locale, message, router, t]);
 
   if (!isValidAgentId) return null;
+
+  if (isDraftLoading || draftLoadError) {
+    return (
+      <div
+        className="flex h-full items-center justify-center gap-3"
+        role="status"
+      >
+        <Spin size="large" />
+        <span>{t("common.loading")}</span>
+      </div>
+    );
+  }
 
   return (
     <div className="flex h-full min-h-0 flex-col bg-[var(--navigation-surface)]">

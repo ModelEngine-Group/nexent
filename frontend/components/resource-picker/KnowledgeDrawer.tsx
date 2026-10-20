@@ -2,9 +2,8 @@
 
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
 import { Alert, Empty, Spin } from "antd";
-import type { TFunction } from "i18next";
 import { useTranslation } from "react-i18next";
 import { useEmbeddingModelDialog } from "@/hooks/knowledge/useEmbeddingModelDialog";
 import { KnowledgeModelMismatchModal } from "@/components/tool-config/KnowledgeModelMismatchModal";
@@ -23,67 +22,21 @@ import {
   isMultimodalConstraintMismatch as isMultimodalConstraintMismatchBase,
 } from "@/lib/knowledgeBaseCompatibility";
 import { ResourceDrawer } from "./ResourceDrawer";
-import { ResourceCollection, ResourceItem } from "./ResourceItem";
+import {
+  KnowledgeSelectionList,
+  toKnowledgeItem,
+} from "./KnowledgeSelectionList";
 import type {
   ResourceItemSlots,
   ResourceViewMode,
 } from "@/types/resourcePicker";
-import type { KnowledgeItem, SelectedItem } from "./types";
+import type { SelectedItem } from "./types";
 import { useResourceTagFilter } from "@/hooks/useResourceTagFilter";
 import { ResourceTagFilterControl } from "./ResourceTagFilterControl";
-import { ResourceAssignedTags } from "./ResourceAssignedTags";
+import { useResourceTagAssignments } from "@/hooks/useResourceTagAssignments";
 import { ResourceTagManagementModal } from "./ResourceTagManagementModal";
 
 import styles from "./ResourcePickerDrawer.module.css";
-
-function toKnowledgeItem(
-  kb: KnowledgeBase,
-  t: TFunction,
-  options?: { isAidp?: boolean; groupNames?: string[] }
-): KnowledgeItem {
-  const isAidp = options?.isAidp ?? false;
-  const description = kb.description?.trim() ?? "";
-  const displayDescription = /^elasticsearch index$/i.test(description)
-    ? ""
-    : description;
-  const meta: string[] = [
-    `${t("knowledgeBase.create.field.embeddingModel")}: ${
-      kb.embeddingModel && kb.embeddingModel !== "unknown"
-        ? kb.embeddingModel
-        : t("common.unknown")
-    }`,
-  ];
-
-  if (isAidp) {
-    meta.push(
-      t("resourcePicker.knowledge.documents", { count: kb.documentCount })
-    );
-    meta.push(t("resourcePicker.knowledge.chunks", { count: kb.chunkCount }));
-    options?.groupNames?.forEach((name) => meta.push(name));
-    return {
-      id: kb.id,
-      name: kb.display_name || kb.name,
-      category:
-        kb.ingroup_permission === "PRIVATE"
-          ? t("resourcePicker.knowledge.private")
-          : options?.groupNames?.[0],
-      description: displayDescription,
-      meta,
-    };
-  }
-
-  meta.push(
-    t("resourcePicker.knowledge.documents", { count: kb.documentCount })
-  );
-  meta.push(t("resourcePicker.knowledge.chunks", { count: kb.chunkCount }));
-  return {
-    id: kb.id,
-    name: kb.display_name || kb.name,
-    category: kb.source || undefined,
-    description: displayDescription,
-    meta,
-  };
-}
 
 export interface KnowledgeDrawerProps {
   open: boolean;
@@ -136,10 +89,6 @@ export function KnowledgeDrawer({
   const { t } = useTranslation("common");
   const [tagManagementOpen, setTagManagementOpen] = useState(false);
   const [previousOpen, setPreviousOpen] = useState(open);
-  if (previousOpen !== open) {
-    setPreviousOpen(open);
-    if (!open) setTagManagementOpen(false);
-  }
   const { user } = useAuthorizationContext();
   const tenantId = user?.tenantId ?? null;
 
@@ -161,7 +110,10 @@ export function KnowledgeDrawer({
   );
 
   const controlled = knowledgeBasesProp !== undefined;
-  const knowledgeBases = knowledgeBasesProp ?? selfFetch.data ?? [];
+  const knowledgeBases = useMemo(
+    () => knowledgeBasesProp ?? selfFetch.data ?? [],
+    [knowledgeBasesProp, selfFetch.data]
+  );
   const resourceTags = useResourceTagFilter(
     open,
     "knowledge_base",
@@ -176,7 +128,7 @@ export function KnowledgeDrawer({
 
   // ---- Selection state (seeded from props on open) ----
   const [selectedIdsSet, setSelectedIdsSet] = useState<Set<string>>(
-    () => new Set()
+    () => new Set(open ? selectedIdsProp : [])
   );
   const confirming = useRef(false);
   const [saving, setSaving] = useState(false);
@@ -210,8 +162,10 @@ export function KnowledgeDrawer({
     Set<string>
   >(new Set());
 
-  useEffect(() => {
-    if (open) {
+  if (previousOpen !== open) {
+    setPreviousOpen(open);
+    if (!open) setTagManagementOpen(false);
+    else {
       setSelectedIdsSet(new Set(selectedIdsProp ?? []));
       setConfirmError(undefined);
       setKeyword("");
@@ -225,8 +179,7 @@ export function KnowledgeDrawer({
       setPendingSelection(null);
       setModelMismatchInfo(null);
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open]);
+  }
 
   // ---- Selection validation (parity with KnowledgeSelectorDrawer) ----
   const checkCanSelect = useCallback(
@@ -318,7 +271,7 @@ export function KnowledgeDrawer({
   }, []);
 
   const handleEmbeddingModelConfigComplete = useCallback(
-    (indexNames: string, _modelId: string, _modelDisplayName?: string) => {
+    (indexNames: string) => {
       const indexNameList = indexNames.split(",").filter(Boolean);
       setConfiguredKbIndexNames((prev) => {
         const next = new Set(prev);
@@ -449,9 +402,17 @@ export function KnowledgeDrawer({
     return filtered;
   }, [knowledgeBases, keyword, resourceTags.matchedIds]);
 
-  useEffect(() => {
+  const [previousFilter, setPreviousFilter] = useState({
+    keyword,
+    matchedIds: resourceTags.matchedIds,
+  });
+  if (
+    previousFilter.keyword !== keyword ||
+    previousFilter.matchedIds !== resourceTags.matchedIds
+  ) {
+    setPreviousFilter({ keyword, matchedIds: resourceTags.matchedIds });
     setPage(1);
-  }, [keyword, resourceTags.matchedIds]);
+  }
 
   const pagedItems = useMemo(
     () =>
@@ -463,6 +424,14 @@ export function KnowledgeDrawer({
       ),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [filteredKbs, page, pageSize, isAidpSearch, groupNameById, t]
+  );
+
+  const assignments = useResourceTagAssignments(
+    "knowledge_base",
+    open && !isLoading && !slots?.renderTags,
+    pagedItems.map((item) => item.id),
+    resourceTags.revision,
+    tenantId
   );
 
   const selected: SelectedItem[] = useMemo(
@@ -478,6 +447,8 @@ export function KnowledgeDrawer({
     filteredKbs.every((kb) => selectedIdsSet.has(kb.id));
 
   const handleRefresh = () => {
+    if (open && pagedItems.length && !slots?.renderTags)
+      void assignments.refetch();
     if (onRefresh) onRefresh();
     else if (!controlled) void selfFetch.refetch();
   };
@@ -563,87 +534,23 @@ export function KnowledgeDrawer({
         ) : filteredKbs.length === 0 ? (
           <Empty description={t("resourcePicker.empty", "暂无数据")} />
         ) : (
-          <ResourceCollection
+          <KnowledgeSelectionList
+            knowledgeBases={filteredKbs.slice(
+              (page - 1) * pageSize,
+              page * pageSize
+            )}
+            selection={{
+              ids: selectedIdsSet,
+              toggle: toggleSelection,
+              canSelect: checkCanSelect,
+            }}
             viewMode={viewMode}
-            className={viewMode === "list" ? "gap-0" : undefined}
-          >
-            {pagedItems.map((item) => {
-              const kb = filteredKbs.find((k) => k.id === item.id);
-              const selected_ = selectedIdsSet.has(item.id);
-              const canSelect = kb ? checkCanSelect(kb) : true;
-              if (kb) {
-                return (
-                  <ResourceItem
-                    key={item.id}
-                    item={{
-                      key: item.id,
-                      name: item.name,
-                      description: [item.description, ...item.meta]
-                        .filter(Boolean)
-                        .join(" · "),
-                      badges: [
-                        ...(isAidpSearch && item.category
-                          ? [item.category]
-                          : []),
-                        ...(kb.is_multimodal === true
-                          ? [t("resourcePicker.knowledge.multimodal", "多模态")]
-                          : kb.is_multimodal === false
-                            ? [t("resourcePicker.knowledge.textOnly", "仅文本")]
-                            : []),
-                      ],
-                      tags: kb.tags,
-                      metadata: item.meta.map((value, index) => ({
-                        key: String(index),
-                        value,
-                        label: "",
-                      })),
-                      raw: kb,
-                    }}
-                    viewMode={viewMode}
-                    slots={{
-                      ...slots,
-                      renderDescription:
-                        slots?.renderDescription ??
-                        (() => (
-                          <span className="flex flex-wrap items-center gap-x-3 gap-y-1">
-                            {[item.description, ...item.meta]
-                              .filter(Boolean)
-                              .map((text, index) => (
-                                <span key={index}>{text}</span>
-                              ))}
-                          </span>
-                        )),
-                      renderTags:
-                        slots?.renderTags ??
-                        (() => (
-                          <ResourceAssignedTags
-                            resourceType="knowledge_base"
-                            resourceId={kb.id}
-                            tags={kb.tags}
-                            refreshKey={resourceTags.revision}
-                          />
-                        )),
-                      renderTitleTrailing:
-                        slots?.renderTitleTrailing ??
-                        (() => (
-                          <span
-                            className="truncate rounded-full border border-border bg-muted px-2 text-xs leading-5 text-muted-foreground"
-                            title={kb.source || t("common.unknown")}
-                          >
-                            {kb.source || t("common.unknown")}
-                          </span>
-                        )),
-                      renderMetadata: slots?.renderMetadata ?? (() => null),
-                    }}
-                    selected={selected_}
-                    disabled={!canSelect}
-                    onToggle={() => toggleSelection(kb.id)}
-                  />
-                );
-              }
-              return null;
-            })}
-          </ResourceCollection>
+            slots={slots}
+            isAidpSearch={isAidpSearch}
+            groupNamesFor={groupNamesFor}
+            assignments={assignments.data}
+            refreshKey={resourceTags.revision}
+          />
         )}
       </ResourceDrawer>
 

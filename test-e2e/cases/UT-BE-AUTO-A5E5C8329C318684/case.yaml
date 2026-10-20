@@ -16,13 +16,13 @@ case:
   - 本地依赖/组件测试环境可运行；不要求外部模型服务在线。
   - 设置 NEXENT_TEST_HOME，目录不位于 Nexent Git 仓库内。
   - 当次 run_id 已生成；测试基线固定为 develop 当前批次锁定的产品提交；执行时另记录实际被测 commit。
-  - 可正常导入 backend/services/thread_lifecycle_service.py 及 nexent.core.concurrency（LanePolicy/ThreadManager/ManagerState/ManagedTaskSpec），不依赖
+  - 可正常导入 backend/infrastructure/concurrency.py 及 nexent.core.concurrency（LanePolicy/ThreadManager/ManagerState/ManagedTaskSpec），不依赖
     Redis、外部模型或外部服务。
   test_data:
-    legacy_asset_declaration: '- 无额外本地文件资产；lane policy 参数硬编码于 backend/services/thread_lifecycle_service.py，常量派生参数来自 backend/consts/const.py（导入时解析）。'
+    legacy_asset_declaration: '- 无额外本地文件资产；lane policy 参数硬编码于 backend/infrastructure/concurrency.py，常量派生参数来自 backend/consts/const.py（导入时解析）。'
   steps:
   - order: 1
-    action: 导入 backend/services/thread_lifecycle_service.py，获取 runtime_thread_manager、config_thread_manager、northbound_thread_manager、mcp_thread_manager，并导入
+    action: 导入 backend/infrastructure/concurrency.py，获取 runtime_thread_manager、config_thread_manager、northbound_thread_manager、mcp_thread_manager，并导入
       LanePolicy/ThreadManager/ManagerState/ManagedTaskSpec。
     expected: 四个 ThreadManager 模块级实例存在且唯一，service_name 依次为 runtime、config、northbound、api-to-mcp。
   - order: 2
@@ -88,7 +88,7 @@ case:
     legacy_row: 410
   unit_boundary: 线程生命周期与 lane 隔离
   inputs:
-  - '- 无额外本地文件资产；lane policy 参数硬编码于 backend/services/thread_lifecycle_service.py，常量派生参数来自 backend/consts/const.py（导入时解析）。'
+  - '- 无额外本地文件资产；lane policy 参数硬编码于 backend/infrastructure/concurrency.py，常量派生参数来自 backend/consts/const.py（导入时解析）。'
   assertions:
   - 四个 ThreadManager 模块级实例存在且唯一，service_name 依次为 runtime、config、northbound、api-to-mcp。
   - 各 lane policy 的 worker 上限/队列大小/queue_timeout/cancel_grace/shutdown_grace 与功能契约一致：硬编码值精确匹配，常量派生值与 consts.const 对应常量相等。

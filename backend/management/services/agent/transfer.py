@@ -51,15 +51,11 @@ from management.services.agent.naming import (
     generate_unique_agent_value,
 )
 from management.services.skill.service import SkillService
-from services.agent_version_service import publish_version_impl
-from services.prompt_template_service import (
-    SYSTEM_PROMPT_TEMPLATE_ID,
-    SYSTEM_PROMPT_TEMPLATE_NAME,
-)
-from utils.auth_utils import get_current_user_info
-from utils.config_utils import tenant_config_manager
+from management.services.agent.versions import publish_version_impl
+from management.services.permission.identity.authentication_helpers import get_current_user_info
+from management.services.configuration.tenant.settings import tenant_config_manager
 from management.services.skill.naming import generate_available_copy_skill_name
-from utils.str_utils import convert_list_to_string
+from management.db.serialization import convert_list_to_string
 
 logger = logging.getLogger(__name__)
 
@@ -465,8 +461,6 @@ async def export_agent_by_agent_id(
         context_policy=agent_info.get("context_policy"),
         model_params_override=agent_info.get("model_params_override"),
         duty_prompt=agent_info.get("duty_prompt"),
-        constraint_prompt=agent_info.get("constraint_prompt"),
-        few_shots_prompt=agent_info.get("few_shots_prompt"),
         enabled=agent_info["enabled"],
         tools=tool_list,
         managed_agents=agent_relation_in_db,
@@ -475,8 +469,6 @@ async def export_agent_by_agent_id(
         business_logic_model_id=business_logic_model_id,
         business_logic_model_name=business_logic_model_display_name,
         skill_names=skill_names,
-        prompt_template_id=agent_info.get("prompt_template_id"),
-        prompt_template_name=agent_info.get("prompt_template_name"),
         greeting_message=agent_info.get("greeting_message"),
         example_questions=agent_info.get("example_questions"),
     )
@@ -636,10 +628,6 @@ async def import_agent_by_agent_id(
                 business_logic_model_id[0] if business_logic_model_id else None
             ),
             "business_logic_model_name": import_agent_info.business_logic_model_name,
-            "prompt_template_id": import_agent_info.prompt_template_id
-            or SYSTEM_PROMPT_TEMPLATE_ID,
-            "prompt_template_name": import_agent_info.prompt_template_name
-            or SYSTEM_PROMPT_TEMPLATE_NAME,
             "max_steps": import_agent_info.max_steps,
             "requested_output_tokens": import_agent_info.requested_output_tokens,
             "is_main_agent": getattr(import_agent_info, "is_main_agent", True),
@@ -656,8 +644,6 @@ async def import_agent_by_agent_id(
                 import_agent_info, "model_params_override", None
             ),
             "duty_prompt": import_agent_info.duty_prompt,
-            "constraint_prompt": import_agent_info.constraint_prompt,
-            "few_shots_prompt": import_agent_info.few_shots_prompt,
             "enabled": import_agent_info.enabled,
             "group_ids": user_group_ids,
             "greeting_message": getattr(import_agent_info, "greeting_message", None),

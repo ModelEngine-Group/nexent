@@ -1,6 +1,7 @@
 // Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
 import { Children, type HTMLAttributes } from "react";
+import { ResourceCollection } from "@/components/resource-picker/ResourceItem";
 import ResourceCardGrid from "@/components/resource/ResourceCardGrid";
 import { cn } from "@/lib/utils";
 import { Empty } from "antd";
@@ -21,8 +22,7 @@ export function ResourceSelectionGrid({
 }) {
   if (layout === "list") {
     return (
-      <div
-        role="listbox"
+      <ResourceCollection
         {...props}
         className={cn(
           fillAvailable ? "min-h-full" : RESOURCE_SELECTION_AREA_CLASS,
@@ -34,7 +34,7 @@ export function ResourceSelectionGrid({
         ) : (
           <Empty className="py-12" image={Empty.PRESENTED_IMAGE_SIMPLE} />
         )}
-      </div>
+      </ResourceCollection>
     );
   }
   return (

@@ -1,9 +1,10 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 import asyncio
 
 import pytest
 
-from backend.services import runtime_state_service as runtime_state_module
-from backend.services.runtime_state_service import RuntimeStateService
+from management.services.agent import run_state as runtime_state_module
+from management.services.agent.run_state import RuntimeStateService
 
 
 class FakeRedisClient:

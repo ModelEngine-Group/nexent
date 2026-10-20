@@ -24,11 +24,16 @@ const fixture = vi.hoisted(() => {
       reasoningBudgetTokens: 2048,
       onReasoningBudgetTokensChange: vi.fn(),
       modelParameterSettings: {
-        value: { temperatureLevel: 73, topPLevel: 90 },
+        value: { temperature: 0.7, top_p: 0.9 },
       },
       snapshot: {
         model_id: 3,
-        generation_config: { deep_thinking: true, thinking_effort: "xhigh" },
+        generation_config: {
+          deep_thinking: true,
+          thinking_effort: "xhigh",
+          temperature: 0.7,
+          top_p: 0.9,
+        },
       },
       canCreate: true,
       canSend: true,
@@ -111,6 +116,9 @@ it("keeps tenant model controls connected while shared suggestions only fill inp
       fixture.controls.onReasoningBudgetTokensChange,
     modelParameterSettings: fixture.controls.modelParameterSettings,
   });
+  expect(props.composerTools).toBeUndefined();
+  expect(props.onChatModeChange).toBeUndefined();
+  expect(props.workbenchResources).toBeUndefined();
   expect(screen.getByText("nl2agent.configuration.title")).toBeInTheDocument();
   fireEvent.click(
     screen.getByRole("button", {
@@ -137,7 +145,7 @@ it.each(["permission", "disabled", "running"])(
   }
 );
 
-it("retains per-turn model snapshots in the creation adapter without adding UI sampling", async () => {
+it("retains per-turn model snapshots in the creation adapter including canonical sampling", async () => {
   render(<Nl2AgentChatPanel agentId={42} />);
   const result = fixture.adapter!.run({
     messages: [],
@@ -158,9 +166,7 @@ it("retains per-turn model snapshots in the creation adapter without adding UI s
       },
     })
   );
-  expect(JSON.stringify(fixture.remoteRun.mock.calls)).not.toContain(
-    "temperatureLevel"
-  );
+  expect(JSON.stringify(fixture.remoteRun.mock.calls)).toContain("temperature");
 });
 
 it("blocks invalid-model sends and imperative prompts without a creation target", async () => {

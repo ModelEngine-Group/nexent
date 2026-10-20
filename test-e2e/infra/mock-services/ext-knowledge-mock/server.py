@@ -17,11 +17,11 @@ disjoint, so one port hosts them all):
     /health /_reset /_mock/* /_wire-log               unified control plane
 
 The AIDP protocol family MUST stay at the root (no prefix):
-backend/services/image_service.py reconstructs AIDP image URLs keeping only
+backend/management/services/file/image_proxy.py reconstructs AIDP image URLs keeping only
 scheme+netloc from AIDP_SERVER_URL (dropping any base path) and allowlists
 paths starting with /KnowledgeBase/Tenants/, so a prefixed AIDP base would
 break the image flow entirely. The same applies to the independent-AIDP
-image fetch in backend/services/ind_aidp_service.py — which conveniently
+image fetch in backend/management/services/knowledge_base/providers/aidp.py — which conveniently
 means managed AIDP and ind-AIDP share these root routes, distinguished only
 by credentials (ind-AIDP tests point server_url at this service and reuse
 tenant "aidp" + the AIDP mock key).

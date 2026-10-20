@@ -1,3 +1,4 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """
 Unit tests for VoiceService.
 
@@ -60,8 +61,8 @@ _shared_tts = None
 
 def _reset_singleton():
     """Reset the voice service singleton between tests."""
-    import services.voice_service
-    services.voice_service._voice_service_instance = None
+    import management.services.model.voice
+    management.services.model.voice._voice_service_instance = None
 
 
 def _mock_all_models(stt_success=True, tts_success=True, stt_exc=None, tts_exc=None):
@@ -84,10 +85,10 @@ def _mock_all_models(stt_success=True, tts_success=True, stt_exc=None, tts_exc=N
         _shared_tts.generate_speech = AsyncMock(side_effect=tts_exc)
 
     patches = [
-        patch("services.voice_service.VolcSTTModel", return_value=_shared_stt),
-        patch("services.voice_service.AliSTTModel", return_value=_shared_stt),
-        patch("services.voice_service.VolcTTSModel", return_value=_shared_tts),
-        patch("services.voice_service.AliTTSModel", return_value=_shared_tts),
+        patch("management.services.model.voice.VolcSTTModel", return_value=_shared_stt),
+        patch("management.services.model.voice.AliSTTModel", return_value=_shared_stt),
+        patch("management.services.model.voice.VolcTTSModel", return_value=_shared_tts),
+        patch("management.services.model.voice.AliTTSModel", return_value=_shared_tts),
     ]
     return patches, _shared_stt, _shared_tts
 
@@ -95,8 +96,8 @@ def _mock_all_models(stt_success=True, tts_success=True, stt_exc=None, tts_exc=N
 # ---------------------------------------------------------------------------
 # Import voice_service (before any patches)
 # ---------------------------------------------------------------------------
-import services.voice_service
-from services.voice_service import VoiceService, get_voice_service
+import management.services.model.voice
+from management.services.model.voice import VoiceService, get_voice_service
 
 
 # ---------------------------------------------------------------------------
@@ -333,10 +334,10 @@ class TestStreamTTSToWebSocket:
         _shared_tts = DisconnectingTTS()
 
         patches = [
-            patch("services.voice_service.VolcSTTModel", return_value=_shared_stt),
-            patch("services.voice_service.AliSTTModel", return_value=_shared_stt),
-            patch("services.voice_service.VolcTTSModel", return_value=_shared_tts),
-            patch("services.voice_service.AliTTSModel", return_value=_shared_tts),
+            patch("management.services.model.voice.VolcSTTModel", return_value=_shared_stt),
+            patch("management.services.model.voice.AliSTTModel", return_value=_shared_stt),
+            patch("management.services.model.voice.VolcTTSModel", return_value=_shared_tts),
+            patch("management.services.model.voice.AliTTSModel", return_value=_shared_tts),
         ]
         for p in patches:
             p.start()

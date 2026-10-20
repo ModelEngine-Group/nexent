@@ -1,0 +1,45 @@
+schema_version: '1.0'
+change:
+  change_id: NL2SKILL-PROMPT-20261020
+  change_type: bugfix
+  bug_id: NL2SKILL-PROMPT-20261020
+  title: Use only localized skill creation system instructions
+  description: Disable default CodeAgent templates and supply the localized NL2Skill prompt as an authoritative system context item; align bilingual output instructions.
+  observed_behavior: The skill creator passes prompt_templates=None and appends localized instructions to the default English CodeAgent prompt.
+  expected_behavior: Chinese and English requests use only their selected skill creation system prompt, preserve literal draft content, and follow the final envelope and targeted-file output contract.
+  escaped_stage: production
+  coverage_gap:
+    type: missing_assertion
+    description: Existing configuration UT checks instructions but not model-visible system messages. AGT-040/041 cover generation and invalid input, not localized prompt assembly.
+  feature_contract_changed: false
+  affected_features:
+    existing: [F-078]
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing: []
+    added: []
+    modified: []
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    behaviors:
+      - Both interface languages select only the localized NL2Skill system prompt, without loading default CodeAgent resources.
+      - Literal template syntax in existing skill content survives context assembly and invalid empty prompts fail closed.
+      - Create, update, clarification and targeted-file output instructions remain consistent in both languages.
+      - Built-in skill prompts omit legacy execution markers and retain reviewed LF-normalized resource digests after intentional bilingual prompt edits.
+    reason: Deterministic configuration and message assembly are tested with real SDK context rendering and controlled model boundaries. Existing service and classifier tests retain stream event and output parsing regressions.
+    test_selectors:
+      - test/backend/services/test_nl2skill_prompt.py
+      - test/backend/services/test_nl2skill_service.py
+      - test/backend/utils/test_content_classifier_utils.py
+      - test/backend/utils/test_prompt_template_utils.py
+      - test/sdk/core/agents/test_output_protocol.py
+      - test/backend/services/test_prompt_templates_knowledge_agnostic.py
+      - test/sdk/core/agents/test_prompt_resource_layout.py
+      - test/sdk/core/agents/test_sdk_prompt_template_catalog.py
+      - test/sdk/core/agents/test_direct_prompt_resources.py
+      - test/backend/utils/test_sdk_prompt_template_migration.py
+  no_case_change_reason: No API, browser or external-provider contract changes. The missing proof is deterministic prompt assembly; no duplicate formal D1 is added. Historical D3 cases remain unchanged and are not claimed as executed.
+  notes: Reuse ../nexent-doc/nexent/agent-workbench/design.md, NL2SKILL-PROMPT-20261020 appendix. Searched docs/Developing and nexent baselines; F-078 and AGT-040/041 scripts do not assert model-visible system text. Real-model output compliance remains a separate execution boundary.

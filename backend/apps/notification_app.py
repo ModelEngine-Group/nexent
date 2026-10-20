@@ -1,3 +1,4 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """Notification API endpoints."""
 import logging
 from http import HTTPStatus
@@ -7,8 +8,8 @@ from fastapi import APIRouter, Body, Header, HTTPException, Query
 from starlette.responses import JSONResponse
 
 from consts.exceptions import NotFoundException, UnauthorizedError
-from services.notification_service import list_notifications, mark_notifications_read
-from utils.auth_utils import get_current_user_id
+from management.services.notification.service import list_notifications, mark_notifications_read
+from management.services.permission.identity.authentication_helpers import get_current_user_id
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/notifications", tags=["notifications"])

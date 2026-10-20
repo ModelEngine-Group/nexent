@@ -54,6 +54,7 @@ import AidpPagination from "@/ext_components/aidp/shared/components/AidpPaginati
 import AidpImportDrawer from "@/ext_components/aidp/features/file-import/AidpImportDrawer";
 import AidpUpdateKbModal from "@/ext_components/aidp/pages/knowledge-files/AidpUpdateKbModal";
 import AidpGroupNamesDisplay from "@/ext_components/aidp/shared/components/AidpGroupNamesDisplay";
+import { FilePreviewDrawer } from "@/components/common/filePreviewDrawer";
 import AidpResizableTitle from "@/ext_components/aidp/pages/knowledge-list/AidpResizableTitle";
 import { AidpDetailField } from "@/ext_components/aidp/pages/knowledge-files/AidpKnowledgeDetailInformation";
 import AidpKnowledgeTasksTab from "@/ext_components/aidp/pages/knowledge-files/AidpKnowledgeTasksTab";
@@ -61,6 +62,7 @@ import AidpKnowledgeInformationTab from "@/ext_components/aidp/pages/knowledge-f
 import {
   AIDP_DETAIL_PAGE_SIZE,
   FILE_COLUMN_MIN_WIDTHS,
+  fileDeleteStatusCode,
   formatDetailDateTime,
   formatFileSize,
   sumColumnWidths,
@@ -80,6 +82,10 @@ type DetailTab = "files" | "tasks" | "information";
 // AIDP caps a single batch document removal request at 10 files.
 const AIDP_BATCH_DELETE_MAX = 10;
 const UNKNOWN = AIDP_UNKNOWN_VALUE;
+
+/** A file whose deletion is already in progress must not be deleted again. */
+const isFileDeleting = (status: AidpDocumentItem["file_status"]): boolean =>
+  fileDeleteStatusCode(status) === 1;
 
 const AidpKnowledgeFilesPage: React.FC<AidpKnowledgeFilesPageProps> = ({
   knowledgeBase,
@@ -108,6 +114,7 @@ const AidpKnowledgeFilesPage: React.FC<AidpKnowledgeFilesPageProps> = ({
     "metadata" | "permissions" | null
   >(null);
   const [importOpen, setImportOpen] = useState(false);
+  const [previewFile, setPreviewFile] = useState<AidpDocumentItem | null>(null);
   const [fileKeyword, setFileKeyword] = useState("");
   const [fileParams, setFileParams] = useState({
     page: 1,
@@ -142,6 +149,21 @@ const AidpKnowledgeFilesPage: React.FC<AidpKnowledgeFilesPageProps> = ({
   const [fileColumnWidths, setFileColumnWidths] = useState<
     Record<string, number>
   >({});
+  // The batch action and its button must agree on the rows that can still be
+  // deleted. A selected row may have flipped to "deleting" between polls, so
+  // derive the real UUID set from the current page instead of the raw keys.
+  const selectedDeletableFileUuids = useMemo(
+    () =>
+      files
+        .filter(
+          (file) =>
+            selectedFileKeys.includes(file.file_uuid || file.file_ino_no) &&
+            !isFileDeleting(file.file_status)
+        )
+        .map((file) => file.file_uuid)
+        .filter((uuid): uuid is string => Boolean(uuid)),
+    [files, selectedFileKeys]
+  );
 
   const groupNames = useMemo(() => {
     const names = new Map(
@@ -266,6 +288,7 @@ const AidpKnowledgeFilesPage: React.FC<AidpKnowledgeFilesPageProps> = ({
             }
             message.success(t("aidpKnowledge.deleteDocSuccess"));
             void refreshFiles();
+            void detailQuery.refetch();
           } catch (error) {
             log.error("Failed to delete AIDP file:", {
               id: knowledgeBase.kds_id,
@@ -280,18 +303,19 @@ const AidpKnowledgeFilesPage: React.FC<AidpKnowledgeFilesPageProps> = ({
         },
       });
     },
-    [refreshFiles, i18n.language, knowledgeBase.kds_id, message, modal, t]
+    [
+      detailQuery,
+      refreshFiles,
+      i18n.language,
+      knowledgeBase.kds_id,
+      message,
+      modal,
+      t,
+    ]
   );
 
   const handleBatchDeleteFiles = useCallback(() => {
-    // Selection keys can fall back to file_ino_no; map them back to the
-    // current page records so only real file UUIDs are sent to AIDP.
-    const fileUuids = files
-      .filter((file) =>
-        selectedFileKeys.includes(file.file_uuid || file.file_ino_no)
-      )
-      .map((file) => file.file_uuid)
-      .filter(Boolean);
+    const fileUuids = selectedDeletableFileUuids;
     if (fileUuids.length === 0) return;
     // AIDP rejects oversized batch removals; guard before confirming.
     if (fileUuids.length > AIDP_BATCH_DELETE_MAX) {
@@ -354,13 +378,12 @@ const AidpKnowledgeFilesPage: React.FC<AidpKnowledgeFilesPageProps> = ({
     ).catch(() => undefined);
   }, [
     detailQuery,
-    files,
     i18n.language,
     knowledgeBase.kds_id,
     message,
     modal,
     refreshFiles,
-    selectedFileKeys,
+    selectedDeletableFileUuids,
     t,
   ]);
 
@@ -372,8 +395,19 @@ const AidpKnowledgeFilesPage: React.FC<AidpKnowledgeFilesPageProps> = ({
       fixed: "left",
       width: 220,
       ellipsis: true,
-      render: (value: string) => (
-        <span className="text-blue-600">{value || UNKNOWN}</span>
+      // The name itself opens the document: a reader who wants to look at a
+      // file clicks its name, while the action column keeps the operations
+      // that change the file.
+      render: (value: string, record) => (
+        <Tooltip title={t("common.preview")}>
+          <button
+            type="button"
+            className="max-w-full truncate text-left text-blue-600 hover:text-blue-700 hover:underline"
+            onClick={() => setPreviewFile(record)}
+          >
+            {value || UNKNOWN}
+          </button>
+        </Tooltip>
       ),
     },
     {
@@ -414,6 +448,33 @@ const AidpKnowledgeFilesPage: React.FC<AidpKnowledgeFilesPageProps> = ({
       render: (value?: string) => formatDetailDateTime(value),
     },
     {
+      title: t("aidpKnowledge.detailFileDeleteStatus"),
+      dataIndex: "file_status",
+      key: "file_status",
+      width: 100,
+      render: (value: AidpDocumentItem["file_status"]) => {
+        const code = fileDeleteStatusCode(value);
+        const labelKey =
+          code === 1
+            ? "aidpKnowledge.fileDeleteStatusDeleting"
+            : code === 2
+              ? "aidpKnowledge.fileDeleteStatusFailed"
+              : "aidpKnowledge.fileDeleteStatusIngested";
+        const dotColor =
+          code === 2
+            ? "bg-red-500"
+            : code === 1
+              ? "bg-blue-500"
+              : "bg-green-500";
+        return (
+          <span className="inline-flex items-center gap-2 whitespace-nowrap text-gray-700">
+            <i className={`h-2 w-2 shrink-0 rounded-full ${dotColor}`} />
+            {t(labelKey)}
+          </span>
+        );
+      },
+    },
+    {
       title: t("aidpKnowledge.detailOperation"),
       key: "actions",
       fixed: "right",
@@ -433,6 +494,7 @@ const AidpKnowledgeFilesPage: React.FC<AidpKnowledgeFilesPageProps> = ({
               type="link"
               size="small"
               className="px-0"
+              disabled={isFileDeleting(record.file_status)}
               onClick={() => handleDeleteFile(record)}
             >
               {t("common.delete")}
@@ -527,9 +589,10 @@ const AidpKnowledgeFilesPage: React.FC<AidpKnowledgeFilesPageProps> = ({
                 <FileTextOutlined className="rounded-lg bg-violet-100 p-2 text-lg text-violet-600" />
                 <AidpDetailField label={t("aidpKnowledge.detailTabFiles")}>
                   {formatAidpDocumentCount(
-                    !fileParams.keyword && filesQuery.isSuccess
-                      ? fileTotal
-                      : detail.document_count
+                    detail.document_count ??
+                      (!fileParams.keyword && filesQuery.data?.total_reliable
+                        ? fileTotal
+                        : undefined)
                   )}
                 </AidpDetailField>
               </div>
@@ -631,7 +694,7 @@ const AidpKnowledgeFilesPage: React.FC<AidpKnowledgeFilesPageProps> = ({
               </Tooltip>
               {canEdit && (
                 <Button
-                  disabled={selectedFileKeys.length === 0}
+                  disabled={selectedDeletableFileUuids.length === 0}
                   onClick={handleBatchDeleteFiles}
                 >
                   {t("common.delete")}
@@ -662,6 +725,11 @@ const AidpKnowledgeFilesPage: React.FC<AidpKnowledgeFilesPageProps> = ({
                   ? {
                       selectedRowKeys: selectedFileKeys,
                       onChange: (keys) => setSelectedFileKeys(keys),
+                      // Rows already being deleted cannot be selected for
+                      // another removal.
+                      getCheckboxProps: (record) => ({
+                        disabled: isFileDeleting(record.file_status),
+                      }),
                     }
                   : undefined
               }
@@ -738,6 +806,29 @@ const AidpKnowledgeFilesPage: React.FC<AidpKnowledgeFilesPageProps> = ({
           void refreshFiles();
         }}
       />
+
+      {/* Preview opens AIDP's own stream as a full-screen page with a back
+          arrow. `rawStream` tells the preview that AIDP decides the served
+          format (it converts anything it cannot render to PDF), so the renderer
+          comes from the `X-File-Name` response header. */}
+      {previewFile && (
+        <FilePreviewDrawer
+          open
+          source="remote"
+          objectName={previewFile.file_uuid}
+          fileName={previewFile.file_name}
+          fileType={previewFile.file_type}
+          fileSize={previewFile.file_size}
+          previewUrl={aidpKnowledgeService.getPreviewUrl(
+            knowledgeBase.kds_id,
+            previewFile.file_uuid
+          )}
+          rawStream
+          presentation="fullscreen"
+          previewContext="knowledgeBase"
+          onClose={() => setPreviewFile(null)}
+        />
+      )}
     </div>
   );
 };

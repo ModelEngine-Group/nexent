@@ -3,6 +3,7 @@
 """Resolve request-scoped root controls without mutating independent models."""
 
 from collections.abc import Callable
+import math
 from typing import Any
 
 from nexent.core.agents.agent_model import AgentConfig, ModelConfig
@@ -71,10 +72,20 @@ def overlay_root_model(base: ModelConfig, values: dict[str, Any], alias: str) ->
     """Apply only present fields and validate active effort/budget intent."""
     root = base.model_copy(deep=True)
     root.cite_name = alias
+    explicit_sampling = []
+    for key, maximum in (("temperature", 2), ("top_p", 1)):
+        value = values.get(key)
+        if value is None:
+            continue
+        if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value) or not 0 <= value <= maximum:
+            raise RunModelControlsError("model_controls_invalid")
+        explicit_sampling.append(key)
+        setattr(root, key, value)
+    if explicit_sampling:
+        root.explicit_sampling = explicit_sampling
+        # OpenAI's extra_body can otherwise shadow the canonical keyword values.
+        root.extra_body = {k: v for k, v in (root.extra_body or {}).items() if k not in explicit_sampling} or None
     if not any(k in values for k in ("deep_thinking", "thinking_effort", "reasoning_budget_tokens")):
-        for key in ("temperature", "top_p"):
-            if values.get(key) is not None:
-                setattr(root, key, values[key])
         return root
     enabled = values.get("deep_thinking", base.enable_thinking)
     effort = values.get("thinking_effort")
@@ -114,9 +125,6 @@ def overlay_root_model(base: ModelConfig, values: dict[str, Any], alias: str) ->
         extra.pop("reasoning_effort", None)
         extra.pop("reasoning_budget_tokens", None)
     root.extra_body = extra or None
-    for key in ("temperature", "top_p"):
-        if values.get(key) is not None:
-            setattr(root, key, values[key])
     return root
 
 
@@ -158,7 +166,7 @@ def preflight_turn_controls(request, tenant_id: str, agent_record: dict | None =
             model_id = configured[0]
         else:
             from consts.const import MODEL_CONFIG_MAPPING
-            from utils.config_utils import tenant_config_manager
+            from management.services.configuration.tenant.settings import tenant_config_manager
             default_record = tenant_config_manager.get_model_config(MODEL_CONFIG_MAPPING["llm"], tenant_id)
             model_id = (default_record or {}).get("model_id")
         if model_id is None:

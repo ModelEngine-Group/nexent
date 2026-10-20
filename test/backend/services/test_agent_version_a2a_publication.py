@@ -1,8 +1,9 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """Sequential publication preserves the last A2A publication version."""
 
 
 def test_ordinary_publish_preserves_last_a2a_version(mocker):
-    from backend.services import agent_version_service as module
+    from management.services.agent import versions as module
     from database import a2a_agent_db
 
     draft = {"agent_id": 7, "tenant_id": "tenant", "name": "Agent", "is_a2a": True}

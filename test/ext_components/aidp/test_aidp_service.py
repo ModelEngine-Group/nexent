@@ -60,6 +60,11 @@ def aidp_service_module():
     register_module(module_name, module)
     spec.loader.exec_module(module)
 
+    # Remote API tests isolate binding persistence, covered by cascade tests.
+    module.get_db_session = MagicMock()
+    module.remove_tool_knowledge_references = MagicMock()
+    module.remove_conversation_knowledge_bindings = MagicMock()
+
     try:
         yield module
     finally:
@@ -1397,6 +1402,18 @@ def _setup_mock_async_client(aidp_service_module, response=None, side_effect=Non
     return mock_client
 
 
+class _UnreadableResponse(httpx.Response):
+    """A streamed error response whose body cannot be read.
+
+    Reading the body of an error response is itself a network operation, so it can
+    fail after the response object already exists. That is the case where the
+    service has to close the response before mapping the failure.
+    """
+
+    async def aread(self) -> bytes:
+        raise httpx.ReadError("connection lost while reading the preview body")
+
+
 def _make_http_error(status_code, method="GET"):
     """Create an httpx.HTTPStatusError with given status code."""
     request = httpx.Request(method, "http://127.0.0.1:30081")
@@ -1836,6 +1853,12 @@ class TestUpdateAidpKbImpl:
 class TestDeleteAidpKbImpl:
     """Tests for delete_aidp_kb_impl (DELETE KB endpoint)."""
 
+    @pytest.fixture(autouse=True)
+    def binding_session(self, aidp_service_module):
+        context = aidp_service_module.get_db_session.return_value
+        context.__exit__.return_value = False
+        return context.__enter__.return_value
+
     @pytest.mark.parametrize(
         "server_url,api_key",
         [("", "token"), ("ftp://bad", "token"), ("http://ok", "")],
@@ -1847,7 +1870,7 @@ class TestDeleteAidpKbImpl:
             )
         assert exc_info.value.error_code == ErrorCode.AIDP_CONFIG_INVALID
 
-    def test_success(self, aidp_service_module):
+    def test_success(self, aidp_service_module, binding_session):
         mock_resp = MagicMock()
         mock_resp.raise_for_status.return_value = None
         _setup_mock_client(aidp_service_module, method="delete", response=mock_resp)
@@ -1856,6 +1879,12 @@ class TestDeleteAidpKbImpl:
             server_url="http://127.0.0.1:30081", api_key="jwt-token", kds_id="kb-1"
         )
         assert result is True
+        aidp_service_module.remove_tool_knowledge_references.assert_called_once_with(
+            binding_session, kds_ids=["kb-1"]
+        )
+        aidp_service_module.remove_conversation_knowledge_bindings.assert_called_once_with(
+            binding_session, kds_ids=["kb-1"]
+        )
 
     @pytest.mark.parametrize("status_code", [401, 403])
     def test_auth_error(self, aidp_service_module, status_code):
@@ -1865,6 +1894,7 @@ class TestDeleteAidpKbImpl:
                 server_url="http://127.0.0.1:30081", api_key="jwt-token", kds_id="kb-1"
             )
         assert exc_info.value.error_code == ErrorCode.AIDP_AUTH_ERROR
+        aidp_service_module.get_db_session.assert_not_called()
 
     def test_rate_limit_error(self, aidp_service_module):
         _setup_mock_client(aidp_service_module, method="delete", side_effect=_make_http_error(429, "DELETE"))
@@ -1873,6 +1903,7 @@ class TestDeleteAidpKbImpl:
                 server_url="http://127.0.0.1:30081", api_key="jwt-token", kds_id="kb-1"
             )
         assert exc_info.value.error_code == ErrorCode.AIDP_RATE_LIMIT
+        aidp_service_module.get_db_session.assert_not_called()
 
     def test_service_error(self, aidp_service_module):
         _setup_mock_client(aidp_service_module, method="delete", side_effect=_make_http_error(500, "DELETE"))
@@ -1881,6 +1912,7 @@ class TestDeleteAidpKbImpl:
                 server_url="http://127.0.0.1:30081", api_key="jwt-token", kds_id="kb-1"
             )
         assert exc_info.value.error_code == ErrorCode.AIDP_SERVICE_ERROR
+        aidp_service_module.get_db_session.assert_not_called()
 
     def test_connection_error(self, aidp_service_module):
         request = httpx.Request("DELETE", "http://127.0.0.1:30081")
@@ -1893,6 +1925,37 @@ class TestDeleteAidpKbImpl:
                 server_url="http://127.0.0.1:30081", api_key="jwt-token", kds_id="kb-1"
             )
         assert exc_info.value.error_code == ErrorCode.AIDP_CONNECTION_ERROR
+        aidp_service_module.get_db_session.assert_not_called()
+
+    def test_already_absent_still_cleans_bindings(self, aidp_service_module, binding_session):
+        _setup_mock_client(aidp_service_module, method="delete", side_effect=_make_http_error(404, "DELETE"))
+        assert aidp_service_module.delete_aidp_kb_impl("http://aidp.test", "test-key", "kb-1") is True
+        aidp_service_module.remove_tool_knowledge_references.assert_called_once_with(
+            binding_session, kds_ids=["kb-1"]
+        )
+        aidp_service_module.remove_conversation_knowledge_bindings.assert_called_once_with(
+            binding_session, kds_ids=["kb-1"]
+        )
+
+    @pytest.mark.parametrize("failed_step", ["tool", "conversation", "commit"])
+    def test_binding_failure_does_not_fail_deletion(self, aidp_service_module, caplog, failed_step):
+        response = MagicMock()
+        response.raise_for_status.return_value = None
+        _setup_mock_client(aidp_service_module, method="delete", response=response)
+        if failed_step == "commit":
+            aidp_service_module.get_db_session.return_value.__exit__.side_effect = RuntimeError("commit failed")
+        else:
+            cleanup = (aidp_service_module.remove_tool_knowledge_references if failed_step == "tool"
+                       else aidp_service_module.remove_conversation_knowledge_bindings)
+            cleanup.side_effect = RuntimeError("cleanup failed")
+        with caplog.at_level(logging.WARNING):
+            assert aidp_service_module.delete_aidp_kb_impl("http://aidp.test", "test-key", "kb-1") is True
+        assert any(
+            record.levelno == logging.WARNING
+            and "Failed to clean up bindings" in record.message
+            and "kb-1" in record.message
+            for record in caplog.records
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -2548,6 +2611,115 @@ class TestAidpDocumentFileOperations:
                 "http://127.0.0.1:30081", "jwt-token", "kb-1", "uuid-1"
             )
         assert exc_info.value.error_code == ErrorCode.AIDP_SERVICE_ERROR
+
+    @pytest.mark.asyncio
+    async def test_preview_uses_ocr_annotate_endpoint(self, aidp_service_module):
+        mock_response = httpx.Response(
+            200,
+            headers={
+                "Content-Type": "application/pdf",
+                "X-File-Name": "report.pdf",
+                "X-File-Size": "19",
+            },
+            content=b"converted pdf bytes",
+            request=httpx.Request("GET", "http://127.0.0.1:30081"),
+        )
+        mock_client = _setup_mock_async_client(
+            aidp_service_module, response=mock_response
+        )
+
+        response = await aidp_service_module.stream_aidp_preview_impl(
+            "http://127.0.0.1:30081", "jwt-token", "kb-1", "uuid-1"
+        )
+        chunks = [chunk async for chunk in response.aiter_bytes()]
+
+        assert b"".join(chunks) == b"converted pdf bytes"
+        # AIDP reveals the name it served in this header; for a converted file
+        # it is a PDF name, which is how the frontend knows to render a PDF.
+        assert response.headers["X-File-Name"] == "report.pdf"
+        assert response.headers["X-File-Size"] == "19"
+        request = mock_client.build_request.call_args
+        assert request.args[0] == "GET"
+        assert request.args[1].endswith(
+            "/KnowledgeBase/Tenants/aidp/KnowledgeBases/kb-1/OcrAnnotate/uuid-1"
+        )
+        # The file is addressed in the path, so the request carries no body.
+        assert "json" not in request.kwargs
+        await response.aclose()
+        assert mock_response.is_closed
+
+    @pytest.mark.asyncio
+    async def test_preview_maps_request_error(self, aidp_service_module):
+        request = httpx.Request("GET", "http://127.0.0.1:30081")
+        _setup_mock_async_client(
+            aidp_service_module,
+            side_effect=httpx.RequestError("network down", request=request),
+        )
+
+        with pytest.raises(AppException) as exc_info:
+            await aidp_service_module.stream_aidp_preview_impl(
+                "http://127.0.0.1:30081", "jwt-token", "kb-1", "uuid-1"
+            )
+        assert exc_info.value.error_code == ErrorCode.AIDP_CONNECTION_ERROR
+
+    @pytest.mark.asyncio
+    async def test_preview_closes_the_response_when_reading_it_fails(
+        self, aidp_service_module
+    ):
+        # The body is never read: aread() fails with a transport error instead.
+        response = _UnreadableResponse(
+            502,
+            stream=httpx.ByteStream(b""),
+            request=httpx.Request("GET", "http://127.0.0.1:30081"),
+        )
+        _setup_mock_async_client(aidp_service_module, response=response)
+
+        with pytest.raises(AppException) as exc_info:
+            await aidp_service_module.stream_aidp_preview_impl(
+                "http://127.0.0.1:30081", "jwt-token", "kb-1", "uuid-1"
+            )
+        assert exc_info.value.error_code == ErrorCode.AIDP_CONNECTION_ERROR
+        # The response already existed when the failure surfaced, so it must not be
+        # leaked: a streamed AIDP response keeps the connection open until closed.
+        assert response.is_closed
+
+    @pytest.mark.asyncio
+    async def test_preview_maps_upstream_http_error(self, aidp_service_module):
+        response = httpx.Response(
+            404,
+            json={"error": "file not found"},
+            request=httpx.Request("GET", "http://127.0.0.1:30081"),
+        )
+        _setup_mock_async_client(
+            aidp_service_module,
+            response=response,
+        )
+
+        with pytest.raises(AppException) as exc_info:
+            await aidp_service_module.stream_aidp_preview_impl(
+                "http://127.0.0.1:30081", "jwt-token", "kb-1", "uuid-1"
+            )
+        assert exc_info.value.error_code == ErrorCode.AIDP_SERVICE_ERROR
+
+    @pytest.mark.asyncio
+    async def test_preview_maps_a_status_error_raised_by_the_client(
+        self, aidp_service_module
+    ):
+        # A client can surface the status error itself, in which case the handler
+        # runs without a response of its own and has to map the exception.
+        request = httpx.Request("GET", "http://127.0.0.1:30081")
+        error = httpx.HTTPStatusError(
+            "upstream rejected the request",
+            request=request,
+            response=httpx.Response(403, request=request),
+        )
+        _setup_mock_async_client(aidp_service_module, side_effect=error)
+
+        with pytest.raises(AppException) as exc_info:
+            await aidp_service_module.stream_aidp_preview_impl(
+                "http://127.0.0.1:30081", "jwt-token", "kb-1", "uuid-1"
+            )
+        assert exc_info.value.error_code == ErrorCode.AIDP_AUTH_ERROR
 
 
 # ---------------------------------------------------------------------------

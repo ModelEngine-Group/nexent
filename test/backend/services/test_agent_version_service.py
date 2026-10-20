@@ -77,8 +77,8 @@ utils_mock.skill_params_utils.strip_params_comments_for_db = MagicMock(
 )
 
 sys.modules['utils'] = utils_mock
-sys.modules['utils.auth_utils'] = utils_mock.auth_utils
-sys.modules['utils.str_utils'] = utils_mock.str_utils
+sys.modules['management.services.permission.identity.authentication_helpers'] = utils_mock.auth_utils
+sys.modules['management.db.serialization'] = utils_mock.str_utils
 sys.modules['management.services.skill.params'] = utils_mock.skill_params_utils
 
 # Mock boto3
@@ -165,8 +165,8 @@ sys.modules['database.a2a_agent_db'] = a2a_agent_db_mock
 sys.modules['backend.database.a2a_agent_db'] = a2a_agent_db_mock
 
 # Now import the service module
-import backend.services.agent_version_service as agent_version_service_module
-from backend.services.agent_version_service import (
+import management.services.agent.versions as agent_version_service_module
+from management.services.agent.versions import (
     publish_version_impl,
     get_version_list_impl,
     get_version_impl,
@@ -865,13 +865,13 @@ def test_rollback_version_impl_success(monkeypatch):
     assert result["version_no"] == 1
     assert result["version_name"] == "v1.0"
     assert "Successfully rolled back" in result["message"]
-    
+
     mock_search.assert_called_once_with(1, "tenant1", 1)
     mock_query_snapshot.assert_called_once_with(1, "tenant1", 1)
     mock_query_draft.assert_called_once_with(1, "tenant1")  # Verify it was called
     mock_restore.assert_called_once()
     assert mock_restore.call_args.kwargs["target_agent_snapshot"]["enable_protocol_repair_retry"] is False
-    
+
 
 def test_rollback_version_impl_version_not_found(monkeypatch):
     """Test rolling back when version doesn't exist"""
@@ -909,8 +909,8 @@ def test_rollback_version_impl_snapshot_not_found(monkeypatch):
             tenant_id="tenant1",
             target_version_no=1,
         )
-        
-        
+
+
 def test_rollback_version_impl_draft_not_found(monkeypatch):
     """Test rolling back when draft doesn't exist"""
     mock_version = {"version_no": 1}
@@ -925,8 +925,8 @@ def test_rollback_version_impl_draft_not_found(monkeypatch):
     )
     monkeypatch.setattr(agent_version_service_module, "query_agent_snapshot", mock_query_snapshot)
     mock_query_draft = MagicMock(return_value=(None, [], []))
-    monkeypatch.setattr(agent_version_service_module, "query_agent_draft", mock_query_draft) 
-    
+    monkeypatch.setattr(agent_version_service_module, "query_agent_draft", mock_query_draft)
+
     with pytest.raises(ValueError, match="Agent draft not found"):
         rollback_version_impl(
             agent_id=1,
@@ -1223,7 +1223,7 @@ def test_compare_versions_impl_success(monkeypatch):
         "skills": [],
     }
 
-    with patch('backend.services.agent_version_service._get_version_detail_or_draft') as mock_get_detail:
+    with patch('management.services.agent.versions._get_version_detail_or_draft') as mock_get_detail:
         mock_get_detail.side_effect = [version_a, version_b]
 
         result = compare_versions_impl(
@@ -1260,7 +1260,7 @@ def test_compare_versions_impl_no_differences(monkeypatch):
         "skills": [],
     }
 
-    with patch('backend.services.agent_version_service._get_version_detail_or_draft') as mock_get_detail:
+    with patch('management.services.agent.versions._get_version_detail_or_draft') as mock_get_detail:
         mock_get_detail.side_effect = [version, version]
 
         result = compare_versions_impl(
@@ -1300,7 +1300,7 @@ def test_compare_versions_impl_skills_count_difference(monkeypatch):
         "skills": [{"skill_id": 1}, {"skill_id": 2}],
     }
 
-    with patch('backend.services.agent_version_service._get_version_detail_or_draft') as mock_get_detail:
+    with patch('management.services.agent.versions._get_version_detail_or_draft') as mock_get_detail:
         mock_get_detail.side_effect = [version_a, version_b]
 
         result = compare_versions_impl(
@@ -1341,7 +1341,7 @@ def test_compare_versions_impl_sub_agents_count_difference(monkeypatch):
         "skills": [],
     }
 
-    with patch('backend.services.agent_version_service._get_version_detail_or_draft') as mock_get_detail:
+    with patch('management.services.agent.versions._get_version_detail_or_draft') as mock_get_detail:
         mock_get_detail.side_effect = [version_a, version_b]
 
         result = compare_versions_impl(
@@ -3084,7 +3084,7 @@ def test_compare_versions_impl_model_ids_difference(monkeypatch):
         "skills": [],
     }
 
-    with patch('backend.services.agent_version_service._get_version_detail_or_draft') as mock_get_detail:
+    with patch('management.services.agent.versions._get_version_detail_or_draft') as mock_get_detail:
         mock_get_detail.side_effect = [version_a, version_b]
 
         result = compare_versions_impl(
@@ -3125,7 +3125,7 @@ def test_compare_versions_impl_model_ids_same(monkeypatch):
         "skills": [],
     }
 
-    with patch('backend.services.agent_version_service._get_version_detail_or_draft') as mock_get_detail:
+    with patch('management.services.agent.versions._get_version_detail_or_draft') as mock_get_detail:
         mock_get_detail.side_effect = [version_a, version_b]
 
         result = compare_versions_impl(
@@ -3167,7 +3167,7 @@ def test_compare_versions_impl_model_ids_order_difference(monkeypatch):
         "skills": [],
     }
 
-    with patch('backend.services.agent_version_service._get_version_detail_or_draft') as mock_get_detail:
+    with patch('management.services.agent.versions._get_version_detail_or_draft') as mock_get_detail:
         mock_get_detail.side_effect = [version_a, version_b]
 
         result = compare_versions_impl(
@@ -3742,7 +3742,7 @@ def test_compare_versions_impl_model_ids_none(monkeypatch):
         "skills": [],
     }
 
-    with patch('backend.services.agent_version_service._get_version_detail_or_draft') as mock_get_detail:
+    with patch('management.services.agent.versions._get_version_detail_or_draft') as mock_get_detail:
         mock_get_detail.side_effect = [version_a, version_b]
 
         result = compare_versions_impl(
@@ -3783,7 +3783,7 @@ def test_compare_versions_impl_both_model_ids_empty(monkeypatch):
         "skills": [],
     }
 
-    with patch('backend.services.agent_version_service._get_version_detail_or_draft') as mock_get_detail:
+    with patch('management.services.agent.versions._get_version_detail_or_draft') as mock_get_detail:
         mock_get_detail.side_effect = [version_a, version_b]
 
         result = compare_versions_impl(

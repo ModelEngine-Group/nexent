@@ -4,12 +4,13 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Tooltip } from "antd";
+import { App, Tooltip } from "antd";
 import { Settings } from "lucide-react";
 import i18n from "i18next";
 
 import { ResourceDrawer } from "./ResourceDrawer";
 import { useToolList } from "@/hooks/agent/useToolList";
+import { useScanToolList } from "@/hooks/agent/useScanToolList";
 import { useMcpServerList } from "@/hooks/mcp/useMcpServerList";
 import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
 import { useAgentStore } from "@/stores/agentStore";
@@ -33,6 +34,7 @@ import {
 import { ResourceCollection, ResourceItem } from "./ResourceItem";
 
 import { useResourceTagFilter } from "@/hooks/useResourceTagFilter";
+import { useToolTagAssignments } from "@/hooks/useToolTagAssignments";
 import { ResourceTagFilterControl } from "./ResourceTagFilterControl";
 import { ResourceAssignedTags } from "./ResourceAssignedTags";
 
@@ -118,9 +120,11 @@ export function ToolDrawer({
   currentAgentId,
 }: ToolDrawerProps) {
   const { t } = useTranslation("common");
+  const { message } = App.useApp();
   const { confirm } = useConfirmModal();
 
-  const { selectableTools, invalidate } = useToolList({ enabled: open });
+  const { selectableTools } = useToolList({ enabled: open });
+  const scanTools = useScanToolList();
   const { user } = useAuthorizationContext();
   const tenantId = user?.tenantId || null;
   const { serverList: rawServers } = useMcpServerList({
@@ -299,6 +303,12 @@ export function ToolDrawer({
   const pagedTools = useMemo(
     () => filteredTools.slice((page - 1) * pageSize, page * pageSize),
     [filteredTools, page, pageSize]
+  );
+  const toolAssignments = useToolTagAssignments(
+    open,
+    pagedTools.map((tool) => String(tool.id)),
+    resourceTags.revision,
+    tenantId
   );
 
   // Auto-switch to first available tab when the active tab has no tools.
@@ -543,7 +553,18 @@ export function ToolDrawer({
         onRemoveSelected={removeTool}
         onSelectAll={handleSelectAll}
         allSelected={allVisibleToolsSelected}
-        onRefresh={() => void invalidate()}
+        refreshLoading={scanTools.isPending}
+        onRefresh={() => {
+          if (scanTools.isPending) return;
+          scanTools.mutate(undefined, {
+            onSuccess: () => {
+              message.success(t("toolManagement.message.refreshSuccess"));
+            },
+            onError: () => {
+              message.error(t("toolManagement.message.refreshFailedRetry"));
+            },
+          });
+        }}
         onPageChange={setPage}
         pageSize={pageSize}
         onPageSizeChange={(size) => {
@@ -590,6 +611,9 @@ export function ToolDrawer({
                         resourceType="tool"
                         resourceId={String(tool.id)}
                         tags={getToolLabels(tool)}
+                        assignments={
+                          toolAssignments.data?.[String(tool.id)] ?? []
+                        }
                         refreshKey={resourceTags.revision}
                       />
                     ),

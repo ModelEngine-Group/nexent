@@ -18,13 +18,13 @@ from fastapi import Depends, Path, Query
 from management.services.knowledge_base.common import get_vector_db_core, logger
 from management.services.knowledge_base.status import get_all_files_status
 from nexent.vector_database.base import VectorDatabaseCore
-from services.knowledge_storage_service import (
+from management.services.knowledge_base.storage import (
     release_storage_charge,
     resolve_storage_reference,
 )
-from services.redis_service import get_redis_service
-from utils.file_management_utils import get_file_size
-from utils.storage_key_utils import build_preview_pdf_object_key
+from management.services.knowledge_base.task_state import get_redis_service
+from management.services.file.upload import get_file_size
+from management.services.file.preview import build_preview_pdf_object_key
 
 KNOWLEDGE_BASE_DELETE_BLOCKING_STATUSES = frozenset(
     {

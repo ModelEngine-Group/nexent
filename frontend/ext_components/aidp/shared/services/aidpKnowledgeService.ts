@@ -1,5 +1,6 @@
 // Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
+import type { KnowledgeBaseDeletionPreview } from "@/types/knowledgeBase";
 /**
  * AIDP Knowledge Base Management Service
  *
@@ -49,6 +50,24 @@ function buildUrl(
 // ---------- Service class ----------
 
 class AidpKnowledgeService {
+  async previewBoundAgents(
+    id: string
+  ): Promise<KnowledgeBaseDeletionPreview | null> {
+    try {
+      const response = await fetchWithErrorHandling(
+        API_ENDPOINTS.aidpMgmt.boundAgents(id),
+        {
+          method: "GET",
+          headers: getAuthHeaders(),
+        }
+      );
+      return await response.json();
+    } catch (error) {
+      log.warn("Knowledge base deletion preview unavailable:", error);
+      return null;
+    }
+  }
+
   /**
    * List knowledge bases (paginated), optionally filtered by name.
    *
@@ -278,29 +297,6 @@ class AidpKnowledgeService {
   }
 
   /**
-   * List documents for a knowledge base.
-   */
-  async listDocs(
-    id: string,
-    page: number = 1,
-    pageSize: number = 10,
-    keyword: string = "",
-    signal?: AbortSignal
-  ): Promise<AidpDocumentListResponse> {
-    const url = buildUrl(API_ENDPOINTS.aidpMgmt.kbDocuments(id), {
-      page,
-      page_size: pageSize,
-      keyword,
-    });
-    const response = await fetchWithErrorHandling(url, {
-      method: "GET",
-      headers: getAuthHeaders(),
-      signal,
-    });
-    return response.json();
-  }
-
-  /**
    * List only files AIDP confirms as ingested; upload history stays separate.
    * Backed by the /files endpoint (not the legacy /documents view).
    */
@@ -434,6 +430,20 @@ class AidpKnowledgeService {
       },
       body: JSON.stringify({ file_uuid: fileUuid }),
     });
+  }
+
+  /**
+   * Build the URL that streams one document for preview.
+   *
+   * A URL is returned rather than a request because the preview surface loads it
+   * directly (fetch, `<img>`, `<a download>`); authentication travels in the
+   * HttpOnly cookie, so no authorisation header is needed. AIDP serves the
+   * original bytes for docx/xlsx/pptx/pdf/txt and a PDF conversion for every
+   * other format, and reports the served name in the `X-File-Name` header the
+   * preview reads to pick a renderer.
+   */
+  getPreviewUrl(id: string, fileUuid: string): string {
+    return API_ENDPOINTS.aidpMgmt.previewKbDocument(id, fileUuid);
   }
 }
 

@@ -23,6 +23,7 @@ vi.mock("@/services/tagManagementService", () => ({
     listDefinitions: vi.fn(),
     filterResourceIds: vi.fn(),
     getAssignments: vi.fn(),
+    getAgentAssignmentsBatch: vi.fn(async () => []),
   },
 }));
 

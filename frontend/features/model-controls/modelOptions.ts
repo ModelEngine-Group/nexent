@@ -22,14 +22,18 @@ function configuredEffort(
   return isReasoningEffort(value) ? value : "auto";
 }
 
-/** Switch reasoning defaults without changing existing non-reasoning overrides. */
+/** Restore per-model overrides while keeping unrelated generation settings. */
 export function selectWorkbenchModel(
   config: WorkbenchSessionConfig,
   models: readonly CatalogModelOption[],
   modelId: number,
   remembered?: Pick<
     WorkbenchSessionConfig["generation_config"],
-    "deep_thinking" | "thinking_effort" | "reasoning_budget_tokens"
+    | "deep_thinking"
+    | "thinking_effort"
+    | "reasoning_budget_tokens"
+    | "temperature"
+    | "top_p"
   >
 ): WorkbenchSessionConfig {
   const model = models.find((item) => item.id === modelId);
@@ -39,6 +43,14 @@ export function selectWorkbenchModel(
       model_id: modelId,
       generation_config: {
         ...config.generation_config,
+        temperature:
+          config.model_id === modelId
+            ? config.generation_config.temperature
+            : undefined,
+        top_p:
+          config.model_id === modelId
+            ? config.generation_config.top_p
+            : undefined,
         deep_thinking: model?.enableThinking ?? false,
         thinking_effort: configuredEffort(model),
         reasoning_budget_tokens:
@@ -156,6 +168,14 @@ export const deriveModelOptions = (
       scope === "agent"
         ? typedAgent.model_params_override?.[id]?.extra_params
         : undefined;
+    const sampling =
+      scope === "agent" ? typedAgent.model_params_override?.[id] : undefined;
+    const temperature =
+      sampling?.temperature ??
+      model?.temperature ??
+      model?.effectiveSampling?.temperature;
+    const topP =
+      sampling?.top_p ?? model?.topP ?? model?.effectiveSampling?.top_p;
     const capability = model?.reasoningCapability;
     const effortControl =
       capability?.status === "supported"
@@ -195,6 +215,14 @@ export const deriveModelOptions = (
     return {
       id,
       name: fallbackName,
+      ...(temperature != null || topP != null
+        ? {
+            defaultSampling: {
+              ...(temperature != null ? { temperature } : {}),
+              ...(topP != null ? { top_p: topP } : {}),
+            },
+          }
+        : {}),
       reasoningCapability: capability,
       defaultDeepThinking:
         typeof extra?.enable_thinking === "boolean"

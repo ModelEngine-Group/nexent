@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """HTTP endpoints for managing fixed tenant tag libraries."""
 
 from typing import Annotated
@@ -9,6 +11,9 @@ from consts.exceptions import (
     ValidationError,
 )
 from consts.model import (
+    SkillTagAssignmentBatchRequest,
+    KnowledgeTagAssignmentBatchRequest,
+    AgentTagAssignmentBatchRequest,
     TagAssignmentBulkOutcome,
     TagAssignmentBulkReplaceRequest,
     TagAssignmentReplaceRequest,
@@ -32,12 +37,13 @@ from consts.model import (
     TagValueResponse,
     TagValueUpdateRequest,
     TagValueUsageResponse,
+    ToolTagAssignmentBatchRequest,
 )
 from database.role_permission_db import check_role_permission
 from fastapi import APIRouter, Header, HTTPException, Query
-from services.tag_management_service import TagManagementService
-from services.tag_resource_adapters import AuthenticatedCaller
-from utils.auth_utils import get_current_user_context
+from management.services.tag.library import TagManagementService
+from management.services.tag.resources import AuthenticatedCaller
+from management.services.permission.identity.authentication_helpers import get_current_user_context
 
 router = APIRouter(prefix="/tag-libraries", tags=["tag-libraries"])
 TAG_CONFLICT_RESPONSES = {409: {"model": TagHTTPConflictResponse}}
@@ -95,6 +101,64 @@ async def get_document_tag_batch_status(
             status_code=409,
             detail={"message": str(error), "details": error.details},
         ) from error
+    except ValidationError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
+
+
+@router.post("/assignments/skill/batch_read", response_model=list[TagAssignmentResponse])
+def get_skill_tag_assignments_batch(
+    request: SkillTagAssignmentBatchRequest,
+    authorization: str | None = Header(None),
+):
+    caller = _assignment_caller(authorization)
+    try:
+        return TagManagementService.get_skill_assignments_batch(caller, request.skill_ids)
+    except TagManagementNotFoundError as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
+    except ValidationError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
+
+
+@router.post("/assignments/knowledge_base/batch_read", response_model=list[TagAssignmentResponse])
+def get_knowledge_tag_assignments_batch(
+    request: KnowledgeTagAssignmentBatchRequest,
+    authorization: str | None = Header(None),
+):
+    caller = _assignment_caller(authorization)
+    try:
+        return TagManagementService.get_knowledge_assignments_batch(caller, request.index_names)
+    except TagManagementNotFoundError as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
+    except ValidationError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
+
+
+@router.post("/assignments/agent/batch_read", response_model=list[TagAssignmentResponse])
+def get_agent_tag_assignments_batch(
+    request: AgentTagAssignmentBatchRequest,
+    authorization: str | None = Header(None),
+):
+    """Return readable canonical agents without exposing unavailable IDs."""
+    caller = _assignment_caller(authorization)
+    try:
+        return TagManagementService.get_agent_assignments_batch(caller, request.agent_ids)
+    except TagManagementNotFoundError as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
+    except ValidationError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
+
+
+@router.post("/assignments/tool/batch_read", response_model=list[TagAssignmentResponse])
+def get_tool_tag_assignments_batch(
+    request: ToolTagAssignmentBatchRequest,
+    authorization: str | None = Header(None),
+):
+    """Read visible tools only; unavailable IDs are omitted without disclosing existence."""
+    caller = _assignment_caller(authorization)
+    try:
+        return TagManagementService.get_tool_assignments_batch(caller, request.tool_ids)
+    except TagManagementNotFoundError as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
     except ValidationError as error:
         raise HTTPException(status_code=400, detail=str(error)) from error
 

@@ -1,3 +1,4 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """Audit entries recorded on successful northbound API key operations.
 
 Feature-scoped companion to ``test_northbound_app.py``.

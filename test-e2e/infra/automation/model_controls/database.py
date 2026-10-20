@@ -110,7 +110,7 @@ def database_fixture(monkeypatch, provider):
             session.add(db_models.AgentRelation(parent_agent_id=agent_id, selected_agent_id=child.agent_id,
                                                 selected_agent_version_no=0, version_no=0, tenant_id=tenant,
                                                 created_by=owner, updated_by=owner))
-            from management.services.agent.system_agent_provider import system_agent_provider
+            from management.services.agent.system import system_agent_provider
             for version in (0, 1):
                 session.add(db_models.AgentInfo(
                     agent_id=agent_id + 1000, version_no=version, current_version_no=1,

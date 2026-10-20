@@ -57,6 +57,7 @@ export function CheckMark({
 /** Search input plus optional tag dropdown (hidden when no tag options provided). */
 export function SearchRow({
   placeholder,
+  searchInputType = "text",
   tagOptions,
   tagFilter,
   onSearch,
@@ -66,6 +67,7 @@ export function SearchRow({
   disabled = false,
 }: {
   placeholder: string;
+  searchInputType?: "text" | "search";
   tagOptions?: TagOption[];
   tagFilter?: ReactNode;
   onSearch?: (keyword: string) => void;
@@ -78,6 +80,7 @@ export function SearchRow({
   return (
     <div data-picker-part="search" className="flex shrink-0 items-center gap-4">
       <Input
+        type={searchInputType}
         disabled={disabled}
         value={keyword}
         allowClear
@@ -179,15 +182,21 @@ export function ListHeader({
   onSelectAll,
   allSelected,
   onRefresh,
+  refreshLoading = false,
   extra,
   partiallySelected,
+  selectAllDisabled,
+  refreshDisabled,
 }: {
   title: string;
   onSelectAll?: (checked: boolean) => void;
   allSelected?: boolean;
   onRefresh?: () => void;
+  refreshLoading?: boolean;
   extra?: ReactNode;
   partiallySelected?: boolean;
+  selectAllDisabled?: boolean;
+  refreshDisabled?: boolean;
 }) {
   const { t } = useTranslation("common");
   return (
@@ -201,9 +210,14 @@ export function ListHeader({
           <button
             type="button"
             onClick={onRefresh}
+            disabled={refreshDisabled || refreshLoading}
+            aria-busy={refreshLoading}
             className="flex cursor-pointer items-center gap-1 border-0 bg-transparent p-0 text-[#2673E5]"
           >
-            <RefreshCw size={14} />
+            <RefreshCw
+              size={14}
+              className={refreshLoading ? "animate-spin" : undefined}
+            />
             {t("resourcePicker.refresh", "刷新")}
           </button>
         )}
@@ -212,6 +226,7 @@ export function ListHeader({
             <CheckMark
               checked={allSelected ?? false}
               indeterminate={partiallySelected}
+              disabled={selectAllDisabled}
               onToggle={() => onSelectAll(!allSelected)}
               ariaLabel={t("resourcePicker.selectAll", "全选")}
             />
@@ -277,18 +292,26 @@ export function ResourceTabs({
   tabs,
   activeKey,
   onChange,
+  semanticTabs = false,
 }: {
+  semanticTabs?: boolean;
   tabs: ResourcePickerTab[];
   activeKey: string;
   onChange?: (key: string) => void;
 }) {
   return (
-    <div data-picker-part="tabs" className="flex shrink-0 items-center gap-3">
+    <div
+      role={semanticTabs ? "tablist" : undefined}
+      data-picker-part="tabs"
+      className="flex shrink-0 items-center gap-3"
+    >
       {tabs.map((tab, index) => (
         <Fragment key={tab.key}>
           {index > 0 && <span className="h-[14px] w-px bg-[#D9D9D9]" />}
           <button
             type="button"
+            role={semanticTabs ? "tab" : undefined}
+            aria-selected={semanticTabs ? activeKey === tab.key : undefined}
             onClick={() => onChange?.(tab.key)}
             className={cn(
               "cursor-pointer border-0 bg-transparent p-0 text-[14px] leading-[20px]",
@@ -307,6 +330,7 @@ export function ResourceTabs({
 export function ResourcePagination({
   total,
   pageSize = 10,
+  pageSizeOptions = [10, 20, 50],
   current,
   onPageChange,
   onPageSizeChange,
@@ -314,6 +338,7 @@ export function ResourcePagination({
 }: {
   total: number;
   pageSize?: number;
+  pageSizeOptions?: number[];
   current: number;
   onPageChange: (page: number) => void;
   onPageSizeChange?: (pageSize: number) => void;
@@ -356,7 +381,7 @@ export function ResourcePagination({
           value={pageSize}
           disabled={disabled || !onPageSizeChange}
           onChange={onPageSizeChange}
-          options={[...new Set([pageSize, 10, 20, 50])]
+          options={[...new Set([pageSize, ...pageSizeOptions])]
             .sort((left, right) => left - right)
             .map((size) => ({
               value: size,
@@ -444,6 +469,7 @@ export interface ResourceDrawerProps {
   disabled?: boolean;
   title: ReactNode;
   searchPlaceholder?: string;
+  searchInputType?: "text" | "search";
   keyword?: string;
   tag?: string;
   selected?: SelectedItem[];
@@ -451,11 +477,13 @@ export interface ResourceDrawerProps {
   tagFilter?: ReactNode;
   listTitle?: string;
   tabs?: ResourcePickerTab[];
+  semanticTabs?: boolean;
   activeTab?: string;
   showConfirm?: boolean;
   total?: number;
   page?: number;
   pageSize?: number;
+  pageSizeOptions?: number[];
   onPageSizeChange?: (pageSize: number) => void;
   onPageChange?: (page: number) => void;
   onClose: () => void;
@@ -471,8 +499,11 @@ export interface ResourceDrawerProps {
   onTabChange?: (key: string) => void;
   onSelectAll?: (checked: boolean) => void;
   onRefresh?: () => void;
+  refreshLoading?: boolean;
   allSelected?: boolean;
   partiallySelected?: boolean;
+  selectAllDisabled?: boolean;
+  refreshDisabled?: boolean;
   selectedTrailing?: ReactNode;
   children: ReactNode;
   /** Fixed controls above the scrollable resource content. */
@@ -505,6 +536,7 @@ export function ResourceDrawer({
   disabled = false,
   title,
   searchPlaceholder,
+  searchInputType,
   keyword,
   tag,
   selected,
@@ -512,11 +544,13 @@ export function ResourceDrawer({
   tagFilter,
   listTitle,
   tabs,
+  semanticTabs = false,
   activeTab,
   showConfirm = true,
   total,
   page = 1,
   pageSize = 10,
+  pageSizeOptions,
   onPageSizeChange,
   onPageChange,
   onClose,
@@ -532,8 +566,11 @@ export function ResourceDrawer({
   onTabChange,
   onSelectAll,
   onRefresh,
+  refreshLoading,
   allSelected,
   partiallySelected,
+  selectAllDisabled,
+  refreshDisabled,
   selectedTrailing,
   children,
   controlsContent,
@@ -601,6 +638,7 @@ export function ResourceDrawer({
         ) : searchPlaceholder !== undefined ? (
           <SearchRow
             placeholder={searchPlaceholder}
+            searchInputType={searchInputType}
             keyword={keyword}
             tag={tag}
             disabled={disabled || confirmLoading}
@@ -631,7 +669,10 @@ export function ResourceDrawer({
               onSelectAll={onSelectAll}
               allSelected={allSelected}
               partiallySelected={partiallySelected}
+              selectAllDisabled={selectAllDisabled}
+              refreshDisabled={refreshDisabled}
               onRefresh={onRefresh}
+              refreshLoading={refreshLoading}
               extra={
                 <>
                   {tagManagement && (
@@ -656,6 +697,7 @@ export function ResourceDrawer({
           {tabs && activeTab !== undefined && (
             <ResourceTabs
               tabs={tabs}
+              semanticTabs={semanticTabs}
               activeKey={activeTab}
               onChange={onTabChange}
             />
@@ -686,6 +728,7 @@ export function ResourceDrawer({
                 total={total ?? 0}
                 current={page}
                 pageSize={pageSize}
+                pageSizeOptions={pageSizeOptions}
                 onPageSizeChange={onPageSizeChange}
                 disabled={disabled || confirmLoading}
                 onPageChange={onPageChange ?? (() => {})}

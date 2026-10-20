@@ -1,9 +1,10 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """Unit tests for ``apps.evaluation_annotation_app``.
 
 Directly invoke each async endpoint, patching the 8
 ``database.evaluation_annotation_db`` helpers plus the lazily-imported
 ``database.agent_evaluation_db.count_active_runs_using_schema`` and the
-``utils.auth_utils`` identity resolver.  ``consts`` and the two database
+``management.services.permission.identity.authentication_helpers`` identity resolver.  ``consts`` and the two database
 modules are stubbed at ``sys.modules`` level (idempotent
 ``_register_package`` registration); the app module is loaded with
 ``spec_from_file_location`` so the FastAPI decorators run against the real
@@ -104,9 +105,9 @@ def _install_stubs():
     )
     _db_pkg.agent_evaluation_db = _aedb_mod
 
-    # ---- utils.auth_utils ------------------------------------------------
+    # ---- management.services.permission.identity.authentication_helpers ------------------------------------------------
     _utils_pkg = _register_package("utils")
-    _au_mod = mk_mod("utils.auth_utils", get_current_user_id=MagicMock(name="get_current_user_id"))
+    _au_mod = mk_mod("management.services.permission.identity.authentication_helpers", get_current_user_id=MagicMock(name="get_current_user_id"))
     _utils_pkg.auth_utils = _au_mod
     return _ErrorCode, _AppException, _UnauthorizedError
 
@@ -132,7 +133,7 @@ def bundle():
     for n, m in db_impls.items():
         setattr(_eadb, n, m)
     sys.modules["database.agent_evaluation_db"].count_active_runs_using_schema = in_use
-    sys.modules["utils.auth_utils"].get_current_user_id = auth
+    sys.modules["management.services.permission.identity.authentication_helpers"].get_current_user_id = auth
 
     if MODULE_UNDER_TEST in sys.modules:
         del sys.modules[MODULE_UNDER_TEST]

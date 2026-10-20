@@ -13,6 +13,7 @@ vi.mock("@/services/tagManagementService", () => ({
     listLibraries: vi.fn(async () => []),
     listDefinitions: vi.fn(async () => []),
     getAssignments: vi.fn(async () => ({ assignments: [] })),
+    getSkillAssignmentsBatch: vi.fn(async () => []),
     filterResourceIds: vi.fn(async () => ({ matched_resource_ids: [] })),
   },
 }));
@@ -58,7 +59,19 @@ describe("SkillDrawer external selection", () => {
       />
     );
     expect(screen.getAllByRole("option")).toHaveLength(10);
+    await waitFor(() =>
+      expect(
+        tagManagementApi.getSkillAssignmentsBatch
+      ).toHaveBeenCalledExactlyOnceWith(
+        Array.from({ length: 10 }, (_, i) => String(i + 1))
+      )
+    );
     fireEvent.click(screen.getByRole("button", { name: "3" }));
+    await waitFor(() =>
+      expect(
+        tagManagementApi.getSkillAssignmentsBatch
+      ).toHaveBeenLastCalledWith(["21"])
+    );
     fireEvent.click(screen.getByRole("option", { name: "Skill 21" }));
     await changePageSize(20);
     expect(screen.getAllByRole("option")).toHaveLength(20);
@@ -71,19 +84,22 @@ describe("SkillDrawer external selection", () => {
   });
 
   it("loads unified assignments even when the catalog has no flat tags", async () => {
-    vi.mocked(tagManagementApi.getAssignments).mockResolvedValueOnce({
-      assignments: [
-        {
-          definition_id: 8,
-          definition_key: "keywords",
-          definition_name: "Keywords",
-          selection_mode: "multi_select",
-          value_id: 9,
-          display_value: "Finance",
-          value_status: "active",
-        },
-      ],
-    } as TagAssignment);
+    vi.mocked(tagManagementApi.getSkillAssignmentsBatch).mockResolvedValueOnce([
+      {
+        resource_id: "1",
+        assignments: [
+          {
+            definition_id: 8,
+            definition_key: "keywords",
+            definition_name: "Keywords",
+            selection_mode: "multi_select",
+            value_id: 9,
+            display_value: "Finance",
+            value_status: "active",
+          },
+        ],
+      } as TagAssignment,
+    ]);
     render(
       <SkillDrawer
         open
@@ -94,11 +110,10 @@ describe("SkillDrawer external selection", () => {
       />
     );
     expect(await screen.findByText("Finance")).toBeInTheDocument();
-    expect(tagManagementApi.getAssignments).toHaveBeenCalledWith(
-      "skill",
+    expect(tagManagementApi.getSkillAssignmentsBatch).toHaveBeenCalledWith([
       "1",
-      {}
-    );
+    ]);
+    expect(tagManagementApi.getAssignments).not.toHaveBeenCalled();
   });
   it("forwards edit without selecting and keeps unsupported configuration visible but disabled", () => {
     const edit = vi.fn();

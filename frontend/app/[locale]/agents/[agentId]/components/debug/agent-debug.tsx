@@ -1,5 +1,11 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 "use client";
 
+import {
+  ComposerAttachment,
+  ComposerDictation,
+} from "@/app/newchat/assistant-ui/composer-tools";
 import { useEffect, useMemo, useState, type FC } from "react";
 import { Button, Dropdown, Tooltip } from "antd";
 import { Brush, Maximize2, Minimize2 } from "lucide-react";
@@ -95,7 +101,12 @@ function DebugConversation({
       showModelSelector
       showConversationTitle={false}
       debugLayout
-      isDictationConfigured={dictationConfigured}
+      composerTools={
+        <>
+          <ComposerAttachment />
+          <ComposerDictation configured={dictationConfigured} />
+        </>
+      }
       welcomeContent={<AgentDebugWelcome agent={agent} />}
       emptyFooterContent={
         <AgentDebugSuggestions

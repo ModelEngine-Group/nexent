@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import json
 import sys
 from pathlib import Path
@@ -497,7 +499,6 @@ agent_info:
 agent_config:
   max_steps: 8
   version_no: 3
-  prompt_template_id: prompt-v1
 prompts:
   duty_prompt: Solve carefully
 tools:

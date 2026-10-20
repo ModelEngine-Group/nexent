@@ -5,7 +5,7 @@ module:
 feature:
   feature_id: F-049
   name: 模板 list/detail/create/update/delete、重复名与租户/用户可见性
-  status: active
+  status: retired
   description: '智能体配置 / Prompt模板: 模板 list/detail/create/update/delete、重复名与租户/用户可见性'
   business_rules:
   - rule_id: F-049-RULE-01
@@ -13,4 +13,4 @@ feature:
   required_test_stages:
   - D3
   source:
-    notes: Migrated from V5 01_代码功能清单 without changing the functional description.
+    notes: Retired on 2026-10-19 at user request. Private prompt-template management and Agent bindings were removed; generation uses SDK defaults.

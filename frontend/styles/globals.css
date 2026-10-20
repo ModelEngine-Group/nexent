@@ -271,6 +271,16 @@ button svg,
 }
 
 /* Scrollbar styles */
+:root {
+  --scrollbar-thumb: rgba(0, 0, 0, 0.14);
+  --scrollbar-thumb-hover: rgba(0, 0, 0, 0.24);
+}
+
+.dark {
+  --scrollbar-thumb: rgba(255, 255, 255, 0.14);
+  --scrollbar-thumb-hover: rgba(255, 255, 255, 0.24);
+}
+
 /* For Webkit browsers (Chrome, Safari, Edge, etc.) */
 ::-webkit-scrollbar {
   width: 16px;
@@ -282,15 +292,43 @@ button svg,
 }
 
 ::-webkit-scrollbar-thumb {
-  background-color: rgba(0, 0, 0, 0.4);
+  background-color: var(--scrollbar-thumb);
   border-radius: 5px;
   border: 2px solid transparent;
   background-clip: content-box;
 }
 
-/* For Firefox */
+::-webkit-scrollbar-thumb:hover {
+  background-color: var(--scrollbar-thumb-hover);
+}
+
+/* For browsers supporting standard scrollbar colors */
 * {
-  scrollbar-color: rgba(0, 0, 0, 0.4) transparent;
+  scrollbar-color: var(--scrollbar-thumb) transparent;
+}
+
+/* Keep native scrollbar geometry stable while only revealing active containers.
+   Important overrides also cover component-specific and inline scrollbar colors. */
+.auto-hide-scrollbars,
+.auto-hide-scrollbars * {
+  --scrollbar-visible-thumb: transparent;
+  scrollbar-color: var(--scrollbar-visible-thumb) transparent !important;
+}
+
+.auto-hide-scrollbars[data-scrollbar-scrolling],
+.auto-hide-scrollbars [data-scrollbar-scrolling] {
+  --scrollbar-visible-thumb: var(--scrollbar-thumb);
+}
+
+.auto-hide-scrollbars::-webkit-scrollbar-thumb,
+.auto-hide-scrollbars *::-webkit-scrollbar-thumb {
+  background: var(--scrollbar-visible-thumb) !important;
+  background-clip: content-box !important;
+}
+
+.auto-hide-scrollbars[data-scrollbar-scrolling]::-webkit-scrollbar-thumb:hover,
+.auto-hide-scrollbars [data-scrollbar-scrolling]::-webkit-scrollbar-thumb:hover {
+  background-color: var(--scrollbar-thumb-hover) !important;
 }
 
 /* Tool Pool Tabs scroll fix */
