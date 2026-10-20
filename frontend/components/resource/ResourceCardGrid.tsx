@@ -1,3 +1,5 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 "use client";
 
 import { useEffect, useMemo } from "react";
@@ -29,7 +31,10 @@ export interface ResourceCardGridProps<T> {
   createCard?: ReactNode;
   createCardTitle?: string;
   onCreate?: () => void;
+  /** Defaults to responsive columns matching the agent configuration list. */
   columns?: number;
+  /** Override paging independently of the visual column and row counts. */
+  pageSize?: number;
   rows?: number;
   /** Constrain the card grid to this height and distribute cards across rows. */
   gridHeight?: number;
@@ -58,6 +63,7 @@ export default function ResourceCardGrid<T>({
   createCardTitle,
   onCreate,
   columns,
+  pageSize,
   rows,
   gridHeight,
   headerItem,
@@ -67,7 +73,10 @@ export default function ResourceCardGrid<T>({
 }: ResourceCardGridProps<T>) {
   const columnCount = normalizePositiveInteger(columns, 4);
   const rowCount = normalizePositiveInteger(rows, 3);
-  const slotsPerPage = columnCount * rowCount;
+  const slotsPerPage = normalizePositiveInteger(
+    pageSize,
+    columnCount * rowCount
+  );
   const createEnabled =
     showCreateCard ?? Boolean(createCard || (createCardTitle && onCreate));
   const itemsPerPage = createEnabled
@@ -140,7 +149,11 @@ export default function ResourceCardGrid<T>({
         </div>
       ) : null}
       <div
-        className={`grid grid-cols-1 gap-5 min-[576px]:grid-cols-2 lg:[grid-template-columns:repeat(var(--resource-card-columns),minmax(0,1fr))] ${
+        className={`grid gap-5 ${
+          columns === undefined
+            ? "grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4"
+            : "grid-cols-1 min-[576px]:grid-cols-2 lg:[grid-template-columns:repeat(var(--resource-card-columns),minmax(0,1fr))]"
+        } ${
           gridHeight !== undefined
             ? "grid-rows-[repeat(var(--resource-card-rows),minmax(0,1fr))]"
             : ""

@@ -98,6 +98,7 @@ from consts.const import (
     DATA_PROCESS_SERVICE,
     LANGUAGE,
     LLM_INCLUDE_LOGPROBS,
+    MODEL_RESPONSE_DIAGNOSTIC_CHUNKS,
     LOCAL_MCP_SERVER,
     MCP_REQUEST_TIMEOUT_SECONDS,
     TOKEN,
@@ -1215,6 +1216,7 @@ def create_model_config_from_record(record):
         provider_hint=record.get("model_factory"),
     )
     return ModelConfig(cite_name=record["display_name"],
+                        diagnostic_chunks_enabled=MODEL_RESPONSE_DIAGNOSTIC_CHUNKS,
                         api_key=record.get("api_key", ""),
                         model_name=model_name,
                         url=record["base_url"],
@@ -1494,8 +1496,6 @@ async def create_agent_config(
 
     # Build system prompt: prioritize segmented fields, fallback to original prompt field if not available
     duty_prompt = agent_info.get("duty_prompt", "")
-    constraint_prompt = agent_info.get("constraint_prompt", "")
-    few_shots_prompt = agent_info.get("few_shots_prompt", "")
 
     is_manager = len(worker_agents) > 0 or len(external_a2a_agents) > 0
 
@@ -1859,9 +1859,7 @@ async def create_agent_config(
     )
 
     context_items = build_context_inputs(
-        duty=duty_prompt,
-        constraint=constraint_prompt,
-        few_shots=few_shots_prompt,
+        duty_prompt=duty_prompt,
         language=language,
         is_manager=is_manager,
         enable_planning=enable_planning,

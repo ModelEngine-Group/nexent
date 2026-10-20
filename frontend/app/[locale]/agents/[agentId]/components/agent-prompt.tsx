@@ -4,17 +4,7 @@
 
 import { SELECTED_RESOURCE_HOVER } from "@/const/selectedResourceStyles";
 import { useTranslation } from "react-i18next";
-import {
-  Button,
-  Col,
-  Form,
-  Input,
-  Modal,
-  Popover,
-  Row,
-  Select,
-  Tooltip,
-} from "antd";
+import { Button, Col, Form, Input, Popover, Row, Select, Tooltip } from "antd";
 import {
   GripVertical,
   ListOrdered,
@@ -64,7 +54,6 @@ import { useDeployment } from "@/components/providers/deploymentProvider";
 import { useNl2AgentFlow } from "@/contexts/nl2AgentFlow";
 import { useAgentReadOnly } from "@/hooks/agent/useAgentReadOnly";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import ExpandEditModal from "@/components/common/ExpandEditModal";
 import {
   reorderModelIds,
@@ -75,7 +64,7 @@ import HighFidelityPromptEditModal from "./HighFidelityPromptEditModal";
 
 const { TextArea } = Input;
 
-type PromptTab = "duty" | "constraint" | "few-shots";
+type PromptTab = "duty";
 
 type SortableModelItemProps = {
   disabled: boolean;
@@ -387,7 +376,6 @@ export default function AgentPrompt({
   const isReadOnly = useAgentReadOnly();
   const editedAgent = useAgentStore((state) => state.editedAgent!);
   const updateDraft = useAgentStore((state) => state.updateDraft);
-  const flushDraft = useAgentStore((state) => state.flushDraft);
   const updateAgent = useAgentStore((state) => state.updateAgentConfig);
   const reconcileUnavailableModels = useAgentStore(
     (state) => state.reconcileUnavailableModels
@@ -397,38 +385,20 @@ export default function AgentPrompt({
   const { configFocusRequest } = useNl2AgentFlow();
 
   const [expandedPrompt, setExpandedPrompt] = useState<PromptTab | null>(null);
-  const [activePromptTab, setActivePromptTab] = useState<PromptTab>("duty");
   const [isModelPriorityOpen, setIsModelPriorityOpen] = useState(false);
   const [isModelSelectionOpen, setIsModelSelectionOpen] = useState(false);
-  const [additionalPromptsOpen, setAdditionalPromptsOpen] = useState(false);
-  const requestedPromptTab =
-    configFocusRequest?.agentId === agentId &&
-    configFocusRequest.target.section === "role_model"
-      ? configFocusRequest.target.promptTab
-      : null;
-
   useEffect(() => {
-    setActivePromptTab("duty");
     setIsModelSelectionOpen(false);
-    setAdditionalPromptsOpen(false);
   }, [agentId]);
 
   useEffect(() => {
-    if (requestedPromptTab) {
-      setActivePromptTab(requestedPromptTab);
-      if (requestedPromptTab !== "duty") setAdditionalPromptsOpen(true);
+    if (
+      configFocusRequest?.agentId === agentId &&
+      configFocusRequest.target.section === "role_model"
+    ) {
+      document.getElementById("agent-primary-prompt")?.focus();
     }
-  }, [requestedPromptTab]);
-
-  const handlePromptTabChange = useCallback(
-    (value: string) => {
-      flushDraft();
-      if (value === "duty" || value === "constraint" || value === "few-shots") {
-        setActivePromptTab(value);
-      }
-    },
-    [flushDraft]
-  );
+  }, [agentId, configFocusRequest]);
 
   const modelOptions = useMemo(() => {
     return (availableLlmModels ?? []).map((m) => ({
@@ -686,16 +656,6 @@ export default function AgentPrompt({
       content: editedAgent.duty_prompt ?? "",
       save: (content: string) => updateDraft({ duty_prompt: content }),
     },
-    constraint: {
-      title: t("agent.field.constraintPrompt"),
-      content: editedAgent.constraint_prompt ?? "",
-      save: (content: string) => updateDraft({ constraint_prompt: content }),
-    },
-    "few-shots": {
-      title: t("agent.field.fewShotsPrompt"),
-      content: editedAgent.few_shots_prompt ?? "",
-      save: (content: string) => updateDraft({ few_shots_prompt: content }),
-    },
   };
 
   const renderExpandButton = (prompt: PromptTab) => (
@@ -847,73 +807,32 @@ export default function AgentPrompt({
     </Row>
   );
 
-  const promptTabs = (
-    <Tabs
-      value={activePromptTab}
-      onValueChange={handlePromptTabChange}
-      className="relative z-0 w-full"
-    >
-      <TabsList className="grid w-full grid-cols-3">
-        <TabsTrigger value="duty">{t("agent.field.dutyPrompt")}</TabsTrigger>
-        <TabsTrigger value="constraint">
-          {t("agent.field.constraintPrompt")}
-        </TabsTrigger>
-        <TabsTrigger value="few-shots">
-          {t("agent.field.fewShotsPrompt")}
-        </TabsTrigger>
-      </TabsList>
-
-      <TabsContent value="duty" className="mt-3">
-        <Form.Item className="mb-0">
-          <div className="relative">
-            {highFidelity ? (
-              <HighFidelityTextArea
-                limit={1000}
-                placeholder={t("agent.field.dutyPromptPlaceholder")}
-                rows={6}
-                value={editedAgent.duty_prompt ?? ""}
-                disabled={isReadOnly}
-                classNames={{
-                  textarea: "!py-2 !pl-3 !pr-5",
-                  count:
-                    "!bottom-2 !right-3 !text-xs !leading-[22px] !text-[#808080]",
-                }}
-                onChange={(event) =>
-                  updateDraft({ duty_prompt: event.target.value })
-                }
-              />
-            ) : (
-              <TextArea
-                placeholder={t("agent.field.dutyPromptPlaceholder")}
-                disabled={isReadOnly}
-                rows={6}
-                value={editedAgent.duty_prompt}
-                style={{
-                  paddingTop: 8,
-                  paddingBottom: 8,
-                  paddingLeft: 12,
-                  paddingRight: 20,
-                }}
-                onChange={(event) =>
-                  updateDraft({ duty_prompt: event.target.value })
-                }
-              />
-            )}
-            <div className="absolute right-1 top-2 z-10">
-              {renderExpandButton("duty")}
-            </div>
-          </div>
-        </Form.Item>
-      </TabsContent>
-
-      <TabsContent value="constraint" className="mt-3">
-        <Form.Item className="mb-0">
-          <div className="relative">
+  const promptEditor = (
+    <div>
+      <Form.Item className="mb-0">
+        <div className="relative">
+          {highFidelity ? (
+            <HighFidelityTextArea
+              limit={1000}
+              placeholder={t("agent.field.dutyPromptPlaceholder")}
+              rows={6}
+              value={editedAgent.duty_prompt ?? ""}
+              disabled={isReadOnly}
+              classNames={{
+                textarea: "!py-2 !pl-3 !pr-5",
+                count:
+                  "!bottom-2 !right-3 !text-xs !leading-[22px] !text-[#808080]",
+              }}
+              onChange={(event) =>
+                updateDraft({ duty_prompt: event.target.value })
+              }
+            />
+          ) : (
             <TextArea
-              placeholder={t("agent.field.constraintPromptPlaceholder")}
+              placeholder={t("agent.field.dutyPromptPlaceholder")}
               disabled={isReadOnly}
               rows={6}
-              value={editedAgent.constraint_prompt}
+              value={editedAgent.duty_prompt}
               style={{
                 paddingTop: 8,
                 paddingBottom: 8,
@@ -921,41 +840,16 @@ export default function AgentPrompt({
                 paddingRight: 20,
               }}
               onChange={(event) =>
-                updateDraft({ constraint_prompt: event.target.value })
+                updateDraft({ duty_prompt: event.target.value })
               }
             />
-            <div className="absolute right-1 top-2 z-10">
-              {renderExpandButton("constraint")}
-            </div>
+          )}
+          <div className="absolute right-1 top-2 z-10">
+            {renderExpandButton("duty")}
           </div>
-        </Form.Item>
-      </TabsContent>
-
-      <TabsContent value="few-shots" className="mt-3">
-        <Form.Item className="mb-0">
-          <div className="relative">
-            <TextArea
-              placeholder={t("agent.field.fewShotsPromptPlaceholder")}
-              disabled={isReadOnly}
-              rows={6}
-              value={editedAgent.few_shots_prompt}
-              style={{
-                paddingTop: 8,
-                paddingBottom: 8,
-                paddingLeft: 12,
-                paddingRight: 20,
-              }}
-              onChange={(event) =>
-                updateDraft({ few_shots_prompt: event.target.value })
-              }
-            />
-            <div className="absolute right-1 top-2 z-10">
-              {renderExpandButton("few-shots")}
-            </div>
-          </div>
-        </Form.Item>
-      </TabsContent>
-    </Tabs>
+        </div>
+      </Form.Item>
+    </div>
   );
 
   return (
@@ -1028,16 +922,6 @@ export default function AgentPrompt({
               }
             />
           </div>
-          <Modal
-            open={additionalPromptsOpen}
-            title={t("agent.highFidelity.additionalPrompts")}
-            onCancel={() => setAdditionalPromptsOpen(false)}
-            footer={null}
-            centered
-            forceRender
-          >
-            {promptTabs}
-          </Modal>
           <ModelDrawer
             open={isModelSelectionOpen}
             onClose={() => setIsModelSelectionOpen(false)}
@@ -1054,7 +938,7 @@ export default function AgentPrompt({
       ) : (
         <>
           {modelSelection}
-          {promptTabs}
+          {promptEditor}
         </>
       )}
 

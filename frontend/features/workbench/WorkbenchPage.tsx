@@ -12,6 +12,8 @@ import { restoreKnowledgeDisplay } from "./knowledgeDisplay";
 import {
   useCallback,
   useEffect,
+  useEffectEvent,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -19,7 +21,6 @@ import {
 } from "react";
 import { useAuiState } from "@assistant-ui/react";
 import { Chat } from "@/app/newchat/assistant-ui/chat";
-import { remoteChatModelAdapter } from "@/app/newchat/adapter/remote-chat-model-adapter";
 import type {
   Nl2AgentStateEvent,
   Nl2SkillStreamEvent,
@@ -37,11 +38,13 @@ import {
 } from "@/app/newchat/adapter/conversation-thread-list-adapter";
 import { applyComposerRunConfig } from "@/app/newchat/adapter/composer-run-config";
 import { useConversationResume } from "./hooks/useConversationResume";
+import { useConversationScopedState } from "./hooks/useConversationScopedState";
 import { SidebarProvider } from "@/components/ui/sidebar";
 import { message } from "antd";
 import type { Agent } from "@/types/agentConfig";
 import { useModelList } from "@/hooks/model/useModelList";
 import { withDefaultWorkbenchModel } from "./modelOptions";
+import { WorkbenchLoadingBoundary } from "./components/WorkbenchLoadingBoundary";
 import { selectWorkbenchModel } from "@/features/model-controls/modelOptions";
 import log from "@/lib/logger";
 import { ConversationTitleGuard } from "@/lib/conversationTitle";
@@ -58,6 +61,7 @@ import {
   returnFromCreation,
 } from "./conversationTransitions";
 import { CreationActions } from "./components/CreationActions";
+import { WorkbenchGreeting } from "./components/WorkbenchGreeting";
 import { SkillCreationResultCard } from "./components/CreationResultCards";
 import {
   applySkillCreationEvent,
@@ -121,6 +125,7 @@ const HomeContent: FC = () => {
     isDictationConfigured,
     workbenchState,
     workbenchBootstrap,
+    isLoadingWorkbenchBootstrap,
     onWorkbenchModeChange,
     dispatchWorkbench,
   } = useWorkbenchSession();
@@ -139,17 +144,6 @@ const HomeContent: FC = () => {
     isComposerDisabled: nl2AgentComposerDisabled,
   } = useNl2AgentFlow();
   const [chatMode, setChatMode] = useState<ChatMode>("execution");
-  const [knowledgeScope, setKnowledgeScope] =
-    useState<ConversationKnowledgeScope | null>(null);
-  const [knowledgePreview, setKnowledgePreview] =
-    useState<KnowledgeScopeEffectivePreview | null>(null);
-  const [knowledgeCapabilities, setKnowledgeCapabilities] =
-    useState<KnowledgeCapabilities | null>(null);
-  const [runtimeMetadata, setRuntimeMetadata] = useState<
-    Record<string, unknown>
-  >({});
-  const [runtimeMetadataVersion, setRuntimeMetadataVersion] = useState(0);
-  const [runtimeMetadataDirty, setRuntimeMetadataDirty] = useState(false);
   const [skillPickerOpen, setSkillPickerOpen] = useState(false);
   const [agentPickerOpen, setAgentPickerOpen] = useState(false);
   const [isSavingModel, setIsSavingModel] = useState(false);
@@ -171,7 +165,7 @@ const HomeContent: FC = () => {
   const [skillDraft, setSkillDraft] = useState(initialSkillCreationDraft);
   const [savedSkillName, setSavedSkillName] = useState<string | null>(null);
   const creationReturnRef = useRef<string | null>(null);
-  const localThreadSnapshots = useRef(
+  const [localThreadSnapshots, setLocalThreadSnapshots] = useState(
     new Map<
       string,
       {
@@ -185,12 +179,40 @@ const HomeContent: FC = () => {
     >()
   );
   const resumedConversationIdsRef = useRef(new Set<number>());
-  const knowledgeScopesRef = useRef<
-    Map<string, ConversationKnowledgeScope | null>
-  >(new Map());
-  const knowledgePreviewsRef = useRef<
-    Map<string, KnowledgeScopeEffectivePreview | null>
-  >(new Map());
+  const [knowledgeCache, setKnowledgeCache] = useState(
+    new Map<
+      string,
+      {
+        scope: ConversationKnowledgeScope | null;
+        preview: KnowledgeScopeEffectivePreview | null;
+      }
+    >()
+  );
+  const cacheKnowledge = useCallback(
+    (
+      threadId: string,
+      patch: Partial<{
+        scope: ConversationKnowledgeScope | null;
+        preview: KnowledgeScopeEffectivePreview | null;
+      }>
+    ) => {
+      setKnowledgeCache((cache) =>
+        new Map(cache).set(threadId, {
+          scope: null,
+          preview: null,
+          ...cache.get(threadId),
+          ...patch,
+        })
+      );
+    },
+    []
+  );
+  const readLocalSnapshot = useEffectEvent((threadId: string) =>
+    localThreadSnapshots.get(threadId)
+  );
+  const readKnowledgeCache = useEffectEvent((threadId: string) =>
+    knowledgeCache.get(threadId)
+  );
 
   // All hooks must be called before any early returns
   const runtimeMainThreadId = useAuiState((s) => s.threads.mainThreadId);
@@ -201,15 +223,7 @@ const HomeContent: FC = () => {
   const ready =
     runtimeMainThreadId !== undefined && !isLoading && !isThreadLoading;
 
-  // Maintain thread ID state to pass conversation_id to the adapter reliably
-  const [activeThreadId, setActiveThreadId] = useState<string | undefined>(
-    runtimeMainThreadId
-  );
-
-  // Update local state when the runtime's active thread changes
-  useEffect(() => {
-    setActiveThreadId(runtimeMainThreadId);
-  }, [runtimeMainThreadId]);
+  const activeThreadId = runtimeMainThreadId;
 
   // Server-side conversation IDs, keyed by assistant-ui thread id.
   //
@@ -323,18 +337,72 @@ const HomeContent: FC = () => {
   );
   const activeAgentId = activeThread?.custom?.agentId;
   const serverConversationIdForActiveThread = activeThreadId
-    ? serverConversationIdsRef.current.get(activeThreadId)
+    ? serverConversationIds.get(activeThreadId)
     : undefined;
   // Prefer the server-issued id (set after the backend auto-creates the
   // conversation), then fall back to the thread's `remoteId` (used when the
   // user opens an existing conversation from the sidebar), then finally the
   // local assistant-ui thread id as a temporary placeholder.
-  const activeConversationId =
+  const rawConversationId =
     serverConversationIdForActiveThread ??
     activeThread?.remoteId ??
     activeThreadId;
+  const activeConversationId =
+    rawConversationId == null ? undefined : String(rawConversationId);
   const activeConversationIdRef = useRef(activeConversationId);
-  activeConversationIdRef.current = activeConversationId;
+  useLayoutEffect(() => {
+    activeConversationIdRef.current = activeConversationId;
+  }, [activeConversationId]);
+
+  const numericConversationId = Number(activeConversationId);
+  const isPersistedConversation =
+    Number.isInteger(numericConversationId) && numericConversationId > 0;
+  const localSnapshot =
+    activeThreadId && !isPersistedConversation
+      ? localThreadSnapshots.get(activeThreadId)
+      : undefined;
+  const cachedKnowledge = activeThreadId
+    ? knowledgeCache.get(activeThreadId)
+    : undefined;
+  const scopeKey = JSON.stringify([activeThreadId, activeConversationId]);
+  const [knowledgeScope, setKnowledgeScope] =
+    useConversationScopedState<ConversationKnowledgeScope | null>(
+      scopeKey,
+      (isPersistedConversation
+        ? cachedKnowledge?.scope
+        : localSnapshot?.scope) ?? null
+    );
+  const [knowledgePreview, setKnowledgePreview] =
+    useConversationScopedState<KnowledgeScopeEffectivePreview | null>(
+      scopeKey,
+      (isPersistedConversation
+        ? cachedKnowledge?.preview
+        : localSnapshot?.preview) ?? null
+    );
+  const [runtimeMetadata, setRuntimeMetadata] = useConversationScopedState<
+    Record<string, unknown>
+  >(activeConversationId ?? "", {});
+  const [runtimeMetadataVersion, setRuntimeMetadataVersion] =
+    useConversationScopedState(activeConversationId ?? "", 0);
+  const [runtimeMetadataDirty, setRuntimeMetadataDirty] =
+    useConversationScopedState(activeConversationId ?? "", false);
+  const genericAgentId = workbenchBootstrap?.generic_agent?.agent_id;
+  const genericAgentVersion = workbenchBootstrap?.generic_agent?.version_no;
+  const [knowledgeCapabilities, setKnowledgeCapabilities] =
+    useConversationScopedState<KnowledgeCapabilities | null>(
+      JSON.stringify([genericAgentId, genericAgentVersion]),
+      null
+    );
+
+  const [restoredLocalSnapshot, setRestoredLocalSnapshot] =
+    useState(localSnapshot);
+  if (restoredLocalSnapshot !== localSnapshot) {
+    setRestoredLocalSnapshot(localSnapshot);
+    if (localSnapshot) {
+      setSkillDraft(localSnapshot.skillDraft);
+      setSavedSkillName(localSnapshot.savedSkillName);
+    }
+  }
   const creationAgent = activeThreadId
     ? creationAgentsByThread[activeThreadId]
     : undefined;
@@ -381,14 +449,11 @@ const HomeContent: FC = () => {
   );
 
   useEffect(() => {
-    const agentId = workbenchBootstrap?.generic_agent?.agent_id;
-    if (!agentId) {
-      setKnowledgeCapabilities(null);
-      return;
-    }
+    const agentId = genericAgentId;
+    if (!agentId) return;
 
     let cancelled = false;
-    const versionNo = workbenchBootstrap?.generic_agent?.version_no;
+    const versionNo = genericAgentVersion;
     void conversationService
       .getKnowledgeCapabilities(agentId, versionNo)
       .then((capabilities) => {
@@ -405,24 +470,17 @@ const HomeContent: FC = () => {
     return () => {
       cancelled = true;
     };
-  }, [
-    workbenchBootstrap?.generic_agent?.agent_id,
-    workbenchBootstrap?.generic_agent?.version_no,
-  ]);
+  }, [genericAgentId, genericAgentVersion, setKnowledgeCapabilities]);
 
   useEffect(() => {
-    if (!activeThreadId) {
-      setKnowledgeScope(null);
-      setKnowledgePreview(null);
-      return;
-    }
+    if (!activeThreadId) return;
 
     const numericConversationId = Number(activeConversationId);
     if (
       !Number.isInteger(numericConversationId) ||
       numericConversationId <= 0
     ) {
-      const cached = localThreadSnapshots.current.get(activeThreadId);
+      const cached = readLocalSnapshot(activeThreadId);
       if (cached) {
         dispatchWorkbench({
           type: "restore",
@@ -435,20 +493,12 @@ const HomeContent: FC = () => {
         });
         onRestoreAgent(cached.selectedAgent);
         skillDraftRef.current = cached.skillDraft;
-        setSkillDraft(cached.skillDraft);
-        setSavedSkillName(cached.savedSkillName);
       }
-      setKnowledgeScope(cached?.scope ?? null);
-      setKnowledgePreview(cached?.preview ?? null);
       return;
     }
 
     let cancelled = false;
     dispatchWorkbench({ type: "restore-start" });
-    setKnowledgeScope(knowledgeScopesRef.current.get(activeThreadId) ?? null);
-    setKnowledgePreview(
-      knowledgePreviewsRef.current.get(activeThreadId) ?? null
-    );
     void conversationService
       .getById(String(numericConversationId))
       .then(async (conversation) => {
@@ -481,8 +531,8 @@ const HomeContent: FC = () => {
             if (!result.success || !result.data) {
               // The historical Agent may have been deleted. Keep its messages,
               // but let the next send create a fresh draft in this conversation.
-              const { [activeThreadId]: _removed, ...remaining } =
-                creationAgentsByThreadRef.current;
+              const remaining = { ...creationAgentsByThreadRef.current };
+              delete remaining[activeThreadId];
               creationAgentsByThreadRef.current = remaining;
               setCreationAgentsByThread(remaining);
               setRecoverableCreationThreads((threads) =>
@@ -515,15 +565,17 @@ const HomeContent: FC = () => {
         }
         const restoredScope = restored.config.knowledge_scope ?? null;
         let restoredPreview =
-          knowledgePreviewsRef.current.get(activeThreadId) ?? null;
+          readKnowledgeCache(activeThreadId)?.preview ?? null;
         try {
           restoredPreview = await restoreKnowledgeDisplay(restoredScope);
         } catch (error) {
           log.warn("Knowledge display lookup failed", error);
         }
         if (cancelled) return;
-        knowledgeScopesRef.current.set(activeThreadId, restoredScope);
-        knowledgePreviewsRef.current.set(activeThreadId, restoredPreview);
+        cacheKnowledge(activeThreadId, {
+          scope: restoredScope,
+          preview: restoredPreview,
+        });
         setKnowledgeScope(restoredScope);
         setKnowledgePreview(restoredPreview);
       })
@@ -546,13 +598,13 @@ const HomeContent: FC = () => {
     dispatchWorkbench,
     resetNl2AgentFlow,
     onRestoreAgent,
+    cacheKnowledge,
+    setKnowledgeScope,
+    setKnowledgePreview,
   ]);
 
   useEffect(() => {
     const numericConversationId = Number(activeConversationId);
-    setRuntimeMetadata({});
-    setRuntimeMetadataVersion(0);
-    setRuntimeMetadataDirty(false);
     if (
       !Number.isInteger(numericConversationId) ||
       numericConversationId <= 0
@@ -577,24 +629,27 @@ const HomeContent: FC = () => {
     return () => {
       cancelled = true;
     };
-  }, [activeConversationId]);
+  }, [activeConversationId, setRuntimeMetadata, setRuntimeMetadataVersion]);
 
   const handleRuntimeMetadataChange = useCallback(
     (value: Record<string, unknown>) => {
       setRuntimeMetadata(value);
       setRuntimeMetadataDirty(true);
     },
-    []
+    [setRuntimeMetadata, setRuntimeMetadataDirty]
   );
 
-  const handleRuntimeMetadataSent = useCallback((version?: number) => {
-    setRuntimeMetadataDirty(false);
-    if (version !== undefined) {
-      setRuntimeMetadataVersion(version);
-    } else {
-      setRuntimeMetadataVersion((currentVersion) => currentVersion + 1);
-    }
-  }, []);
+  const handleRuntimeMetadataSent = useCallback(
+    (version?: number) => {
+      setRuntimeMetadataDirty(false);
+      if (version !== undefined) {
+        setRuntimeMetadataVersion(version);
+      } else {
+        setRuntimeMetadataVersion((currentVersion) => currentVersion + 1);
+      }
+    },
+    [setRuntimeMetadataDirty, setRuntimeMetadataVersion]
+  );
 
   const showKnowledgeScopeWarnings = useCallback(
     (warnings: KnowledgeScopeWarning[]) => {
@@ -670,7 +725,12 @@ const HomeContent: FC = () => {
         throw error;
       }
     },
-    [dispatchWorkbench, workbenchState.configVersion]
+    [
+      dispatchWorkbench,
+      workbenchState.configVersion,
+      setKnowledgeScope,
+      setKnowledgePreview,
+    ]
   );
 
   const handleKnowledgeScopeChange = useCallback(
@@ -705,8 +765,7 @@ const HomeContent: FC = () => {
           throw new Error("创建模式不支持挂载知识库");
         }
         if (activeThreadId) {
-          knowledgeScopesRef.current.set(activeThreadId, scope);
-          knowledgePreviewsRef.current.set(activeThreadId, nextPreview);
+          cacheKnowledge(activeThreadId, { scope, preview: nextPreview });
         }
         setKnowledgeScope(scope);
         setKnowledgePreview(nextPreview);
@@ -723,18 +782,26 @@ const HomeContent: FC = () => {
       saveWorkbenchConfig,
       t,
       workbenchState,
+      cacheKnowledge,
+      setKnowledgeScope,
+      setKnowledgePreview,
     ]
   );
 
   const handleKnowledgeScopeResolved = useCallback(
     (resolution: KnowledgeScopeResolution) => {
       if (activeThreadId) {
-        knowledgePreviewsRef.current.set(activeThreadId, resolution.effective);
+        cacheKnowledge(activeThreadId, { preview: resolution.effective });
       }
       setKnowledgePreview(resolution.effective);
       showKnowledgeScopeWarnings(resolution.warnings);
     },
-    [activeThreadId, showKnowledgeScopeWarnings]
+    [
+      activeThreadId,
+      showKnowledgeScopeWarnings,
+      cacheKnowledge,
+      setKnowledgePreview,
+    ]
   );
 
   const handleChatModeChange = useCallback((mode: ChatMode) => {
@@ -1099,6 +1166,8 @@ const HomeContent: FC = () => {
     workbenchState,
     effectiveWorkbenchConfig,
     dispatchWorkbench,
+    setKnowledgeScope,
+    setKnowledgePreview,
   ]);
 
   // Restore historical plan and chat mode from the same conversation detail
@@ -1251,19 +1320,23 @@ const HomeContent: FC = () => {
       }
       if (mode === workbenchState.config.mode) return true;
       const currentId = runtime.threads.getState().mainThreadId;
-      if (currentId)
-        localThreadSnapshots.current.set(currentId, {
+      if (currentId) {
+        const snapshot = {
           state: structuredClone(workbenchState),
           skillDraft: structuredClone(skillDraftRef.current),
           savedSkillName,
           selectedAgent,
           scope: knowledgeScope,
           preview: knowledgePreview,
-        });
+        };
+        setLocalThreadSnapshots((snapshots) =>
+          new Map(snapshots).set(currentId, snapshot)
+        );
+      }
       if (mode === "generic_chat" && creationReturnRef.current) {
         const returnId = creationReturnRef.current;
         await returnFromCreation(runtime, returnId, () => {
-          const cached = localThreadSnapshots.current.get(returnId);
+          const cached = localThreadSnapshots.get(returnId);
           if (cached) {
             dispatchWorkbench({
               type: "restore",
@@ -1309,16 +1382,7 @@ const HomeContent: FC = () => {
     message.success("Skill 已保存到我的 Skills");
   };
 
-  // Conditional rendering must happen after all hooks
-  if (!ready) {
-    return (
-      <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
-        Loading conversation…
-      </div>
-    );
-  }
-
-  return (
+  const content = (
     <div className="flex w-full h-full">
       <div className="shrink-0 h-full">
         <SidebarProvider className="w-auto h-full">
@@ -1367,18 +1431,7 @@ const HomeContent: FC = () => {
             selectedAgent={null}
             modelSelectionScope="tenant"
             fallbackAgentName={t("workbench.genericAgentName", "智能体工作台")}
-            landingContent={
-              <div className="flex w-full flex-col items-center text-center">
-                <h1 className="text-[36px] leading-[54px] text-[#191919]">
-                  <span className="font-bold">
-                    {t("workbench.landingGreetingHi", "你好，我是Nexent")}
-                  </span>{" "}
-                  <span className="font-normal">
-                    {t("workbench.landingGreetingAsk", "需要我帮你做什么")}
-                  </span>
-                </h1>
-              </div>
-            }
+            landingContent={<WorkbenchGreeting />}
             selectedModelId={effectiveWorkbenchConfig.model_id?.toString()}
             deepThinking={
               effectiveWorkbenchConfig.generation_config.deep_thinking
@@ -1525,11 +1578,6 @@ const HomeContent: FC = () => {
           disabled={isThreadRunning}
           open={skillPickerOpen}
           selected={workbenchState.config.skill_mounts}
-          loadDefaults={async () =>
-            (
-              workbenchBootstrap?.generic_agent?.default_skill_resources ?? []
-            ).map((skill) => ({ skill_id: skill.skill_id, config_values: {} }))
-          }
           onCancel={() => setSkillPickerOpen(false)}
           onConfirm={handleReplaceWorkbenchSkills}
         />
@@ -1582,5 +1630,16 @@ const HomeContent: FC = () => {
         />
       </div>
     </div>
+  );
+
+  return (
+    <WorkbenchLoadingBoundary
+      conversationReady={ready}
+      modelsLoading={isLoadingModels}
+      bootstrapLoading={isLoadingWorkbenchBootstrap}
+      resourcesResolving={workbenchState.resolving}
+    >
+      {content}
+    </WorkbenchLoadingBoundary>
   );
 };

@@ -1,4 +1,5 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """Synchronize external official agent bundles into the platform repository."""
 
 from __future__ import annotations
@@ -40,8 +41,6 @@ def _source_agent_payload(agent: Any) -> dict[str, Any]:
         "verification_config": agent.verification_config,
         "context_policy": agent.context_policy,
         "duty_prompt": agent.duty_prompt,
-        "constraint_prompt": agent.constraint_prompt,
-        "few_shots_prompt": agent.few_shots_prompt,
         "enabled": agent.enabled,
         "model_ids": agent.model_ids,
         "business_logic_model_id": agent.business_logic_model_id,

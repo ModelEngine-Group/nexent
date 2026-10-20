@@ -1,17 +1,11 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 "use client";
 
 import { useState, type FC } from "react";
-import {
-  CheckIcon,
-  ChevronDownIcon,
-  FileCode2Icon,
-  FileTextIcon,
-  PlayIcon,
-} from "lucide-react";
-import { useTranslation } from "react-i18next";
+import { ChevronDownIcon, FileCode2Icon, FileTextIcon } from "lucide-react";
 
 import { MarkdownRenderer } from "@/components/common/markdownRenderer";
-import { Button } from "@/components/ui/button";
 import {
   Collapsible,
   CollapsibleContent,
@@ -25,7 +19,6 @@ export const SkillFileCard: FC<{
   data: Nl2SkillFileCardData;
   onSkillFileSelect?: (path: string) => void;
 }> = ({ data, onSkillFileSelect }) => {
-  const { t } = useTranslation();
   const [open, setOpen] = useState(false);
   const pathParts = data.path.split("/");
   const filename = pathParts.pop() || data.path;
@@ -84,18 +77,6 @@ export const SkillFileCard: FC<{
               {data.content}
             </pre>
           )}
-        </div>
-        <div className="flex justify-end gap-2 border-t px-3 py-2">
-          {isCode ? (
-            <Button type="button" size="sm" variant="outline" disabled>
-              <PlayIcon className="size-3.5" />
-              {t("skillManagement.fileCard.run")}
-            </Button>
-          ) : null}
-          <Button type="button" size="sm" disabled>
-            <CheckIcon className="size-3.5" />
-            {t("common.confirm")}
-          </Button>
         </div>
       </CollapsibleContent>
     </Collapsible>

@@ -94,7 +94,7 @@ export default function RepositoryMcpCard({
         </>
       }
       meta={
-        <span className="truncate" title={author}>
+        <span className="block truncate" title={author}>
           {author}
         </span>
       }

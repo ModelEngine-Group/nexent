@@ -2,6 +2,7 @@
 
 import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
+import { App } from "antd";
 import { render, changePageSize } from "./resourceDrawerTestUtils";
 import { ToolDrawer } from "@/components/resource-picker/ToolDrawer";
 import { tagManagementApi } from "@/services/tagManagementService";
@@ -27,6 +28,13 @@ const state = vi.hoisted(() => ({
       initParams: [],
     },
   ],
+}));
+vi.mock("@/services/mcpService", () => ({
+  updateToolList: vi.fn(async () => ({
+    success: true,
+    data: {},
+    message: "ok",
+  })),
 }));
 vi.mock("@/services/tagManagementService", () => ({
   tagManagementApi: {
@@ -90,7 +98,11 @@ describe("ToolDrawer shared rows", () => {
       name: `Tool ${String(index + 1).padStart(2, "0")}`,
     }));
     try {
-      render(<ToolDrawer open onClose={vi.fn()} />);
+      render(
+        <App>
+          <ToolDrawer open onClose={vi.fn()} />
+        </App>
+      );
       expect(screen.getAllByRole("option")).toHaveLength(10);
       await waitFor(() =>
         expect(

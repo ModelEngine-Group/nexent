@@ -1,0 +1,12 @@
+schema_version: '1.0'
+case_id: EVAL-LEGACY-D5-001
+implementations:
+- framework: pytest
+  file: test_migration.py
+  selector: test_
+timeout_seconds: 180
+acceptance_bindings:
+  AC-01:
+  - test_cleanup_preserves_modern_permissions_and_is_transactional_and_repeatable
+  AC-02:
+  - test_cleanup_preserves_modern_permissions_and_is_transactional_and_repeatable

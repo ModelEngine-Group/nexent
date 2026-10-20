@@ -307,8 +307,6 @@ def create_agent(agent_info, tenant_id: str, user_id: str):
             "author": new_agent.author,
             "max_steps": new_agent.max_steps,
             "duty_prompt": new_agent.duty_prompt,
-            "constraint_prompt": new_agent.constraint_prompt,
-            "few_shots_prompt": new_agent.few_shots_prompt,
             "parent_agent_id": new_agent.parent_agent_id,
             "enabled": new_agent.enabled,
             "is_main_agent": new_agent.is_main_agent,
