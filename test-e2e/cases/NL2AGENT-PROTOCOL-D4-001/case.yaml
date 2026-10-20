@@ -1,0 +1,65 @@
+schema_version: '1.0'
+stage: D4
+module: AGENT-CREATION
+case:
+  case_id: NL2AGENT-PROTOCOL-D4-001
+  feature_id: NL2AGENT-PROTOCOL
+  requirement_ids:
+  - NL2AGENT-PROTOCOL-20261020
+  business_rule_ids:
+  - NL2AGENT-PROTOCOL-RULE-001
+  title: Both creator entries persist target protocol policy
+  type: E2E
+  priority: P1
+  status: active
+  automation: automated
+  objective: Verify actual model tool calls save and preserve target Agent policy
+    through both browser entries.
+  preconditions:
+  - Authorized tenant administrator, real generation model and Langfuse tracing are
+    configured.
+  test_data:
+    profile: real
+  steps:
+  - order: 1
+    action: Create an editable Agent; use NL2Agent to enable then disable strict protocol
+      repair. Reload editor.
+    expected: Shared endpoint and tool save exact booleans; persisted draft and editor
+      agree.
+  - order: 2
+    action: Use Workbench Agent creation to initialize draft and enable then disable
+      protocol repair; reopen conversation.
+    expected: Same endpoint persists booleans on target draft; no Workbench policy
+      or unrelated change.
+  expected_results:
+  - Both entries persist true and false through real model tool calls and survive
+    reload.
+  - Unrequested prompt and resource state remains unchanged; no false generation completion.
+  forbidden_side_effects:
+  - No changes to published versions, unrelated Agents or Workbench execution policy.
+  actor: Authorized tenant administrator
+  journey:
+  - Direct creator policy
+  - Workbench creator policy
+  - Persistence and isolation
+  final_business_result:
+  - Target policy configurable through both shared creator entries.
+  failure_evidence:
+  - Sanitized trace IDs, browser assertions and persisted values.
+  execution:
+    profiles:
+    - name: real_smoke
+      required_services:
+      - model-provider
+      - mcp-server
+  acceptance:
+  - id: AC-01
+    description: Both entries save booleans and preserve unrelated state.
+    steps:
+    - 1
+    - 2
+    expected_results:
+    - 1
+    - 2
+    forbidden_side_effects:
+    - 1

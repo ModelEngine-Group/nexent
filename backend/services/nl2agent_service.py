@@ -99,6 +99,7 @@ AGENT_DRAFT_FIELD_ORDER = (
     "name",
     "display_name",
     "description",
+    "enable_protocol_repair_retry",
     "duty_prompt",
     "greeting_message",
     "example_questions",
@@ -1244,9 +1245,13 @@ async def _build_verified_bound_resources_context(
         "agent_id": agent_id,
         "draft_fields": (
             {
-                field_name: draft.get(field_name)
+                field_name: (
+                    draft.get(field_name) is True
+                    if field_name == "enable_protocol_repair_retry"
+                    else draft.get(field_name)
+                )
                 for field_name in AGENT_DRAFT_FIELD_ORDER
-                if draft.get(field_name) is not None
+                if field_name == "enable_protocol_repair_retry" or draft.get(field_name) is not None
             }
             if isinstance(draft, dict)
             else {}

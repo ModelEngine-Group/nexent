@@ -1,0 +1,9 @@
+schema_version: '1.0'
+case_id: NL2AGENT-PROTOCOL-D4-001
+implementations:
+- framework: playwright
+  file: test.spec.ts
+  selector: NL2AGENT-PROTOCOL-D4-001
+acceptance_bindings:
+  AC-01:
+  - NL2AGENT-PROTOCOL-D4-001

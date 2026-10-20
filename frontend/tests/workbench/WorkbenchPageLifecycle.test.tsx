@@ -15,6 +15,8 @@ import {
   initialWorkbenchState,
   workbenchReducer,
 } from "@/features/workbench/state";
+import { searchAgentInfo } from "@/services/agentConfigService";
+import { useAgentStore } from "@/stores/agentStore";
 import WorkbenchPage from "@/features/workbench/WorkbenchPage";
 import { conversationService } from "@/services/conversationService";
 
@@ -27,6 +29,8 @@ const view = vi.hoisted(() => ({
   props: null as ComponentProps<typeof Chat> | null,
   setRunConfig: vi.fn(),
   restoreAgent: vi.fn(),
+  markGenerationCompleted: vi.fn(),
+  markCompletionSynced: vi.fn(),
   back: vi.fn(),
   nextThread: 0,
   bootstrap: null as {
@@ -147,8 +151,8 @@ vi.mock("@/contexts/nl2AgentFlow", () => {
     Nl2AgentFlowProvider: ({ children }: { children: ReactNode }) => children,
     useNl2AgentFlow: () => ({
       resetFlow: noop,
-      markGenerationCompleted: noop,
-      markCompletionSynced: noop,
+      markGenerationCompleted: view.markGenerationCompleted,
+      markCompletionSynced: view.markCompletionSynced,
       markPromptGenerationFailed: noop,
       isComposerDisabled: false,
     }),
@@ -459,3 +463,46 @@ it("clears unavailable capabilities and ignores a removed Agent's delayed respon
   );
   expect(view.props?.knowledgeCapabilities).toBeNull();
 });
+
+it.each([true, false])(
+  "refreshes a policy-only creator save without changing session policy (%s)",
+  async (enabled) => {
+    view.threadId = "local";
+    view.items = [{ id: "local", remoteId: "" }];
+    const page = render(<WorkbenchPage />);
+    await act(async () => {
+      (
+        view.props!.workbenchPresentation!.actions as React.ReactElement<{
+          onSelect: (mode: string) => void;
+        }>
+      ).props.onSelect("agent_create");
+    });
+    page.rerender(<WorkbenchPage />);
+    const agent = {
+      id: "42",
+      name: "policy_assistant",
+      enable_protocol_repair_retry: enabled,
+    };
+    vi.mocked(searchAgentInfo).mockResolvedValue({
+      success: true,
+      data: agent,
+    } as never);
+    const replace = vi
+      .spyOn(useAgentStore.getState(), "replaceServerSnapshot")
+      .mockReturnValue(true);
+    await act(async () => {
+      runConfig().onNl2AgentState({
+        event: "agent_draft_fields_saved",
+        agent_id: 42,
+        updated_fields: ["enable_protocol_repair_retry"],
+      });
+    });
+    expect(searchAgentInfo).toHaveBeenCalledWith(42, undefined, 0);
+    expect(replace).toHaveBeenCalledWith(42, agent);
+    expect(view.markGenerationCompleted).not.toHaveBeenCalled();
+    expect(view.markCompletionSynced).not.toHaveBeenCalled();
+    expect(runConfig().creationWorkbenchConfig).not.toHaveProperty(
+      "execution_config"
+    );
+  }
+);

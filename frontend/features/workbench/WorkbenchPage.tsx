@@ -417,15 +417,17 @@ const HomeContent: FC = () => {
     }
   }, []);
 
+  const nl2AgentSnapshotRefresh = useRef<Promise<void>>(Promise.resolve());
   const handleNl2AgentState = useCallback(
     (event: Nl2AgentStateEvent) => {
       if (event.event === "prompt_generation_failed") {
         markPromptGenerationFailed(event.agent_id, event.failed_fields);
         return;
       }
-      if (event.event !== "agent_generation_completed") return;
-      markGenerationCompleted(event.agent_id);
-      void searchAgentInfo(event.agent_id, undefined, 0)
+      const completed = event.event === "agent_generation_completed";
+      if (completed) markGenerationCompleted(event.agent_id);
+      nl2AgentSnapshotRefresh.current = nl2AgentSnapshotRefresh.current
+        .then(() => searchAgentInfo(event.agent_id, undefined, 0))
         .then((result) => {
           if (!result.success || !result.data) {
             throw new Error(result.message || "Failed to refresh Agent draft");
@@ -437,12 +439,12 @@ const HomeContent: FC = () => {
           ) {
             throw new Error("Agent context changed during synchronization");
           }
-          markCompletionSynced(event.agent_id);
+          if (completed) markCompletionSynced(event.agent_id);
         })
         .catch((error) => {
           log.warn("[Workbench] Failed to refresh generated Agent", error);
           // The generated Agent remains available; do not permanently lock the composer.
-          markCompletionSynced(event.agent_id);
+          if (completed) markCompletionSynced(event.agent_id);
         });
     },
     [markCompletionSynced, markGenerationCompleted, markPromptGenerationFailed]
