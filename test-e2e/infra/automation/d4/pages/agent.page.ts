@@ -57,7 +57,7 @@ export class AgentPage {
 
   async select(displayName: string): Promise<void> {
     await this.open();
-    const search = this.page.getByPlaceholder("按名称或描述搜索", { exact: true });
+    const search = this.page.getByPlaceholder("按名称、描述或标签搜索", { exact: true });
     await search.fill(displayName);
     // The card body opens details, not the editor. The editor entry is the
     // card's 配置 action, revealed only on hover/focus-within, scoped to the
@@ -246,10 +246,10 @@ export class AgentPage {
 
   async bindInternalCollaborator(displayName: string, expectedVersionName?: string): Promise<void> {
     await this.openAdvanced();
-    // Sub-agent binding lives in the 添加子智能体 section; selection goes
+    // Sub-agent binding lives in the collaborating-agent management section; selection goes
     // through the AddAgentDrawer and commits per row toggle (the drawer has
     // no confirm button) through the agent update autosave.
-    await this.openSection("添加子智能体");
+    await this.openSection("协作智能体管理");
     await this.page.getByRole("button", { name: "点击添加智能体", exact: true }).click();
     const drawer = this.page.getByRole("dialog");
     await expect(drawer).toBeVisible();
@@ -283,7 +283,7 @@ export class AgentPage {
   }
 
   async setConversationGuide(opening: string, exampleQuestion: string): Promise<void> {
-    await this.openSection("首页欢迎信息");
+    await this.openSection("开场白与示例问题");
     // The config surface renders the high-fidelity conversation guide: the
     // greeting textarea keeps aria-label 开场白 in both rendering modes (its
     // visible placeholder differs), the preset-question button is 添加问题
@@ -514,7 +514,7 @@ export class AgentPage {
 
   async exportSelected(displayName: string): Promise<Download> {
     await this.open();
-    await this.page.getByPlaceholder("按名称或描述搜索", { exact: true }).fill(displayName);
+    await this.page.getByPlaceholder("按名称、描述或标签搜索", { exact: true }).fill(displayName);
     const card = this.page.getByRole("button", { name: displayName, exact: true }).locator("xpath=..");
     await expect(card).toHaveCount(1);
     await card.getByRole("button", { name: "更多操作", exact: true }).click();
@@ -525,7 +525,7 @@ export class AgentPage {
 
   async copyAgent(displayName: string): Promise<number> {
     await this.open();
-    await this.page.getByPlaceholder("按名称或描述搜索", { exact: true }).fill(displayName);
+    await this.page.getByPlaceholder("按名称、描述或标签搜索", { exact: true }).fill(displayName);
     const card = this.page.getByRole("button", { name: displayName, exact: true }).locator("xpath=..");
     await expect(card).toHaveCount(1);
     await card.getByRole("button", { name: "更多操作", exact: true }).click();

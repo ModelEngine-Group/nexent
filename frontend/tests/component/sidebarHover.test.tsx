@@ -91,7 +91,7 @@ test("collapsed icons retain accessible names and hover displays inline labels",
   expect(rail.querySelector("[data-sidebar-divider]")).not.toBeNull();
   fireEvent.mouseEnter(rail);
   expect(rail).toHaveAttribute("data-sidebar-expanded", "true");
-  expect(rail.querySelector("[data-sidebar-divider]")).toBeNull();
+  expect(rail.querySelector("[data-sidebar-divider]")).not.toBeNull();
   expect(item).toHaveTextContent("sidebar.agentConfig");
   fireEvent.click(item);
   expect(state.push).toHaveBeenCalledWith("/zh/agents");

@@ -1,3 +1,4 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """Unit tests for ``backend.apps.memory_record_app`` (Phase 2).
 
 Tests use FastAPI's ``TestClient`` against the app router with stubbed
@@ -36,9 +37,9 @@ sys.modules["backend.database"] = database_pkg
 sys.modules["database.user_tenant_db"] = user_tenant_db_mod
 
 services_pkg = types.ModuleType("services")
-record_service_mod = types.ModuleType("services.memory_record_service")
-retrieval_service_mod = types.ModuleType("services.memory_retrieval_service")
-context_service_mod = types.ModuleType("services.memory_context_service")
+record_service_mod = types.ModuleType("management.services.memory.records")
+retrieval_service_mod = types.ModuleType("management.services.memory.retrieval")
+context_service_mod = types.ModuleType("management.services.memory.context")
 
 
 class _MemoryRecordError(Exception):
@@ -56,9 +57,9 @@ context_service_mod.get_memory_context_service = MagicMock(
     name="get_memory_context_service"
 )
 sys.modules["services"] = services_pkg
-sys.modules["services.memory_record_service"] = record_service_mod
-sys.modules["services.memory_retrieval_service"] = retrieval_service_mod
-sys.modules["services.memory_context_service"] = context_service_mod
+sys.modules["management.services.memory.records"] = record_service_mod
+sys.modules["management.services.memory.retrieval"] = retrieval_service_mod
+sys.modules["management.services.memory.context"] = context_service_mod
 
 
 # Stub SDK nexent.memory
@@ -103,10 +104,10 @@ sys.modules["nexent.memory"] = memory_pkg
 
 
 # Stub auth utils
-auth_utils_mod = types.ModuleType("utils.auth_utils")
+auth_utils_mod = types.ModuleType("management.services.permission.identity.authentication_helpers")
 auth_utils_mod.get_current_user_id = MagicMock(return_value=("u1", "t1"))
-sys.modules["utils.auth_utils"] = auth_utils_mod
-sys.modules["backend.utils.auth_utils"] = auth_utils_mod
+sys.modules["management.services.permission.identity.authentication_helpers"] = auth_utils_mod
+sys.modules["management.services.permission.identity.authentication_helpers"] = auth_utils_mod
 
 
 # Stub exceptions

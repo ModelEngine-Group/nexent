@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """Unit tests for the ``agent_evaluation_service`` pure-logic helpers.
 
 Targets
@@ -378,12 +380,12 @@ def _install_sys_modules_stubs() -> None:
     _as_mod = _mk_mod("management.services.agent.service", prepare_agent_run=MagicMock())
     _services_pkg.agent_service = _as_mod
     _ess_mod = _mk_mod(
-        "services.evaluation_set_service",
+        "management.services.evaluation.sets",
         resolve_latest_published_version_no=MagicMock(),
     )
     _services_pkg.evaluation_set_service = _ess_mod
     _tls_mod = _mk_mod(
-        "services.thread_lifecycle_service",
+        "infrastructure.concurrency",
         config_thread_manager=MagicMock(),
         runtime_thread_manager=MagicMock(),
     )
@@ -392,7 +394,7 @@ def _install_sys_modules_stubs() -> None:
     _utils_pkg = _register_package("utils")
     _lu_mod = _mk_mod("management.services.model.invocation", call_llm_for_system_prompt=MagicMock())
     _utils_pkg.llm_utils = _lu_mod
-    _ptu_mod = _mk_mod("utils.prompt_template_utils", get_prompt_template=MagicMock())
+    _ptu_mod = _mk_mod("management.services.agent.prompt", get_prompt_template=MagicMock())
     _utils_pkg.prompt_template_utils = _ptu_mod
     _tu_mod = _mk_mod("utils.thread_utils", pool=MagicMock())
     _utils_pkg.thread_utils = _tu_mod
@@ -411,7 +413,7 @@ _apply_module_state(_BASE_MODULE_STATE)
 # 4. Fixture – fresh import of the real agent_evaluation_service module
 # ---------------------------------------------------------------------------
 
-SERVICE_PATH = "services.agent_evaluation_service"
+SERVICE_PATH = "management.services.evaluation.runs"
 
 
 @pytest.fixture(scope="module")

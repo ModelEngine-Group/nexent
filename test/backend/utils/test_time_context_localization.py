@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """The request-time marker follows the page language and remains removable."""
 
 import importlib.util
@@ -39,7 +41,19 @@ def time_context(monkeypatch):
     monkeypatch.setitem(sys.modules, "nexent.core.prompts", prompt_package)
     user_spec.loader.exec_module(user_module)
 
-    spec = importlib.util.spec_from_file_location("_time_context_test_module", root / "backend/utils/time_context_utils.py")
+    for name, values in {
+        "nexent.core.agents.context": {"ContextItemInput": object},
+        "nexent.core.agents.context_input": {"ContextInput": object},
+        "nexent.monitor": {"AgentRunMetadata": object},
+        "management.services.configuration.user.memory": {"build_memory_context": lambda *args, **kwargs: None},
+        "infrastructure.observability.bootstrap": {"monitoring_manager": object()},
+        "management.services.monitor.identity": {"resolve_monitoring_user_email": lambda *args: None},
+    }.items():
+        dependency = types.ModuleType(name)
+        dependency.__dict__.update(values)
+        monkeypatch.setitem(sys.modules, name, dependency)
+
+    spec = importlib.util.spec_from_file_location("_time_context_test_module", root / "backend/management/services/agent/context.py")
     assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)

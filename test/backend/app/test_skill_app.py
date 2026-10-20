@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """
 Unit tests for backend.apps.skill_app module.
 """
@@ -140,6 +142,12 @@ class AppException(Exception):
 consts_exceptions_mock.AppException = AppException
 consts_exceptions_mock.SkillException = SkillException
 consts_exceptions_mock.ForbiddenError = type('ForbiddenError', (Exception,), {})
+class RunModelControlsError(ValueError):
+    def __init__(self, code):
+        self.code = code
+        super().__init__(code)
+
+consts_exceptions_mock.RunModelControlsError = RunModelControlsError
 consts_exceptions_mock.UnauthorizedError = type('UnauthorizedError', (Exception,), {})
 
 # Use real Pydantic model for SkillInstanceInfoRequest
@@ -212,15 +220,16 @@ services_mock.__path__ = [
 ]  # Keep real service submodules importable
 services_skill_service_mock = types.ModuleType('management.services.skill.service')
 services_nl2skill_service_mock = types.ModuleType('services.nl2skill_service')
-services_creation_history_mock = types.ModuleType('services.workbench_creation_history_service')
-services_asset_owner_visibility_mock = types.ModuleType('services.asset_owner_visibility')
-services_agent_draft_permission_mock = types.ModuleType('services.agent_draft_permission_service')
+services_creation_history_mock = types.ModuleType('management.services.conversation.creation_history')
+services_asset_owner_visibility_mock = types.ModuleType('management.services.permission.asset_owner')
+services_agent_draft_permission_mock = types.ModuleType('management.services.agent.authorization')
 sys.modules['services'] = services_mock
 sys.modules['management.services.skill.service'] = services_skill_service_mock
+sys.modules['management.services.skill.transfer'] = services_skill_service_mock
 sys.modules['services.nl2skill_service'] = services_nl2skill_service_mock
-sys.modules['services.workbench_creation_history_service'] = services_creation_history_mock
-sys.modules['services.asset_owner_visibility'] = services_asset_owner_visibility_mock
-sys.modules['services.agent_draft_permission_service'] = services_agent_draft_permission_mock
+sys.modules['management.services.conversation.creation_history'] = services_creation_history_mock
+sys.modules['management.services.permission.asset_owner'] = services_asset_owner_visibility_mock
+sys.modules['management.services.agent.authorization'] = services_agent_draft_permission_mock
 setattr(services_mock, 'skill_service', services_skill_service_mock)
 setattr(services_mock, 'nl2skill_service', services_nl2skill_service_mock)
 setattr(services_mock, 'workbench_creation_history_service', services_creation_history_mock)
@@ -239,6 +248,8 @@ class ResourceBindingError(Exception):
 
 services_agent_draft_permission_mock.AgentDraftEditError = AgentDraftEditError
 services_agent_draft_permission_mock.ResourceBindingError = ResourceBindingError
+consts_exceptions_mock.AgentDraftEditError = AgentDraftEditError
+consts_exceptions_mock.ResourceBindingError = ResourceBindingError
 services_agent_draft_permission_mock.require_agent_draft_edit = MagicMock()
 
 class MockSkillService:
@@ -262,30 +273,31 @@ def setup_function():
     """Restore module-level service stubs after tests that isolate imports."""
     sys.modules['services'] = services_mock
     sys.modules['management.services.skill.service'] = services_skill_service_mock
+    sys.modules['management.services.skill.transfer'] = services_skill_service_mock
     sys.modules['services.nl2skill_service'] = services_nl2skill_service_mock
-    sys.modules['services.workbench_creation_history_service'] = services_creation_history_mock
-    sys.modules['services.asset_owner_visibility'] = services_asset_owner_visibility_mock
-    sys.modules['services.agent_draft_permission_service'] = services_agent_draft_permission_mock
+    sys.modules['management.services.conversation.creation_history'] = services_creation_history_mock
+    sys.modules['management.services.permission.asset_owner'] = services_asset_owner_visibility_mock
+    sys.modules['management.services.agent.authorization'] = services_agent_draft_permission_mock
 services_asset_owner_visibility_mock.can_view_skill = MagicMock(return_value=True)
 
 # Mock utils
 utils_mock = types.ModuleType('utils')
 utils_mock.__path__ = []  # Empty __path__ to make it a namespace package
-utils_auth_utils_mock = types.ModuleType('utils.auth_utils')
-utils_config_utils_mock = types.ModuleType('utils.config_utils')
+utils_auth_utils_mock = types.ModuleType('management.services.permission.identity.authentication_helpers')
+utils_config_utils_mock = types.ModuleType('management.services.configuration.tenant.settings')
 sys.modules['utils'] = utils_mock
-sys.modules['utils.auth_utils'] = utils_auth_utils_mock
-sys.modules['utils.config_utils'] = utils_config_utils_mock
+sys.modules['management.services.permission.identity.authentication_helpers'] = utils_auth_utils_mock
+sys.modules['management.services.configuration.tenant.settings'] = utils_config_utils_mock
 utils_auth_utils_mock.get_current_user_id = MagicMock(return_value=("user123", "tenant123"))
 utils_auth_utils_mock.get_current_user_info = MagicMock(return_value=("user123", "tenant123", "zh"))
 utils_config_utils_mock.tenant_config_manager = MagicMock()
 utils_config_utils_mock.get_model_name_from_config = MagicMock(return_value="gpt-4")
-# Set utils.config_utils as attribute for attribute-based imports
+# Set management.services.configuration.tenant.settings as attribute for attribute-based imports
 setattr(utils_mock, 'config_utils', utils_config_utils_mock)
 
-# Mock utils.prompt_template_utils
-utils_prompt_template_utils_mock = types.ModuleType('utils.prompt_template_utils')
-sys.modules['utils.prompt_template_utils'] = utils_prompt_template_utils_mock
+# Mock management.services.agent.prompt
+utils_prompt_template_utils_mock = types.ModuleType('management.services.agent.prompt')
+sys.modules['management.services.agent.prompt'] = utils_prompt_template_utils_mock
 utils_prompt_template_utils_mock.get_nl2skill_prompt_template = MagicMock(return_value={
     "system_prompt": "You are a skill creator",
     "user_prompt": "Create a skill"
@@ -2598,7 +2610,7 @@ class TestScanSkillEndpoint:
         """Test scanning skills with error."""
         with patch('backend.apps.skill_app.get_current_user_id') as mock_auth:
             mock_auth.return_value = ("user123", "tenant123")
-            with patch('management.services.skill.service.update_skill_list', new_callable=AsyncMock) as mock_update:
+            with patch('management.services.skill.transfer.update_skill_list', new_callable=AsyncMock) as mock_update:
                 mock_update.side_effect = Exception("Scan failed")
 
                 app = FastAPI()

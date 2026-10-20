@@ -3,7 +3,7 @@ case_id: CAS-DISPLAY-D2-001
 implementations:
 - framework: pytest
   file: test.py
-  selector: test_cas_display_d2_001
+  selector: test_cas
   profiles: [mock]
 preparation:
   families: []
@@ -12,3 +12,4 @@ preparation:
   d4_groups: []
 acceptance_bindings:
   AC-01: [test_cas_display_d2_001]
+  AC-02: [test_cas_username_search]

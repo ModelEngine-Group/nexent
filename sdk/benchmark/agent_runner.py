@@ -1,4 +1,6 @@
 # -*- coding: utf-8 -*-
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """
 Shared utilities for building and running nexent agents in benchmarks.
 
@@ -24,8 +26,12 @@ from dotenv import load_dotenv  # noqa: E402
 # injects them into sys.path automatically - no manual path manipulation needed.
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import paths  # noqa: E402, F401 - side-effect: adds sdk/, backend/ to sys.path
-from management.services.agent.prompt_template_loader import load_agent_prompt_bundle  # noqa: E402
-from utils.context_utils import build_context_inputs  # noqa: E402
+from management.services.agent.prompt import (
+    load_agent_prompt_bundle,
+)
+from management.services.agent.context import (
+    build_context_inputs,
+)
 
 from nexent.core.agents.agent_model import (  # noqa: E402
     AgentConfig,
@@ -65,13 +71,12 @@ THINKING_OFF_EXTRA_BODY = {
 DEFAULT_DUTY_PROMPT = """You are an intelligent assistant focused on helping users solve problems. You need to:
 1. Understand the user's needs and provide accurate answers
 2. Maintain a friendly and professional attitude
-3. Remember key information from the conversation"""
+3. Remember key information from the conversation
 
-DEFAULT_CONSTRAINT_PROMPT = """1. Do not generate harmful content
+# Constraints
+1. Do not generate harmful content
 2. Comply with laws and regulations
 3. Be honest with users when uncertain"""
-
-DEFAULT_FEW_SHOTS_PROMPT = ""
 
 # ============ Message Type Constants ============
 TRACKED_MESSAGE_TYPES = {
@@ -103,8 +108,6 @@ def build_agent_run_info(
     query: str,
     history: list[AgentHistory],
     duty_prompt: str = "",
-    constraint_prompt: str = "",
-    few_shots_prompt: str = "",
     fallback_prompt: str = "",
     tools: list = None,
     managed_agents: list = None,
@@ -128,11 +131,9 @@ def build_agent_run_info(
     Args:
         query: User query
         history: Conversation history
-        duty_prompt: Duty prompt (empty uses default)
-        constraint_prompt: Constraint prompt (empty uses default)
-        few_shots_prompt: Few-shot prompt
+        duty_prompt: Complete business prompt, including constraints and examples (empty uses default)
         fallback_prompt: Optional single custom system component used when no
-                         segmented prompt fields are supplied
+                         business prompt is supplied
         tools: Tool list
         managed_agents: Managed sub-agent list
         max_steps: Max execution steps
@@ -154,9 +155,7 @@ def build_agent_run_info(
         AgentRunInfo object
     """
     # Use defaults
-    duty = duty_prompt or DEFAULT_DUTY_PROMPT
-    constraint = constraint_prompt or DEFAULT_CONSTRAINT_PROMPT
-    few_shots = few_shots_prompt or DEFAULT_FEW_SHOTS_PROMPT
+    complete_prompt = duty_prompt or DEFAULT_DUTY_PROMPT
     tools = tools or []
     managed_agents = managed_agents or []
 
@@ -177,9 +176,7 @@ def build_agent_run_info(
         language=language,
     )
     context_items = build_context_inputs(
-        duty=duty,
-        constraint=constraint,
-        few_shots=few_shots,
+        duty_prompt=complete_prompt,
         language=language,
         is_manager=is_manager,
         tools={tool.name: tool for tool in tools},
@@ -194,7 +191,6 @@ def build_agent_run_info(
         component_item_ids = {
             "basic_information": "system:header",
             "duty_prompt": "system:duty",
-            "constraint_prompt": "system:constraint",
             "execution_prompt": "system:execution_flow",
             "resource_prompt": "system:available_resources_header",
             "code_rules_prompt": "system:code_norms",
@@ -217,7 +213,7 @@ def build_agent_run_info(
             else item
             for item in context_items
         ]
-    if fallback_prompt and not any((duty_prompt, constraint_prompt, few_shots_prompt)):
+    if fallback_prompt and not duty_prompt:
         context_items = [ContextItemInput(
             id="system:fallback",
             type="system",

@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """Static boundary checks for the main-Agent production prompt path."""
 
 from pathlib import Path
@@ -10,11 +12,9 @@ def test_ut_be_fps_015_main_agent_backend_does_not_load_prompt_fragments():
         relative: (root / relative).read_text(encoding="utf-8")
         for relative in (
             "backend/agents/create_agent_info.py",
-            "backend/services/knowledge_scope_service.py",
-            "backend/utils/context_utils.py",
-            "backend/utils/memory_tool_prompt.py",
-            "backend/utils/automation_tool_prompt.py",
-            "backend/management/services/agent/prompt_template_loader.py",
+            "backend/management/services/knowledge_base/scope.py",
+            "backend/management/services/agent/context.py",
+            "backend/management/services/agent/prompt.py",
         )
     }
     assert all("load_prompt(" not in source for source in sources.values())

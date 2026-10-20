@@ -1,4 +1,5 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """Tests for the ephemeral NL2Skill runtime stream."""
 
 import asyncio
@@ -153,7 +154,7 @@ def test_resolve_model_for_nl2skill_selects_requested_configured_or_fallback(
 
 def test_resolve_model_for_nl2skill_rejects_missing_requested_or_any_model(mocker):
     mocker.patch.object(nl2skill_service, "get_model_by_model_id", return_value=None)
-    with pytest.raises(ValueError, match="Requested model_id"):
+    with pytest.raises(ValueError, match="model_not_available"):
         _resolve_model_for_nl2skill("tenant", 9, [])
 
     mocker.patch.object(nl2skill_service.tenant_config_manager, "get_model_config", return_value=None)

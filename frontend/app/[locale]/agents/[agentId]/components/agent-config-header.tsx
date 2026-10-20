@@ -2,16 +2,18 @@
 
 "use client";
 
-import { useState } from "react";
+import { createElement, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Avatar, Button, Tooltip } from "antd";
 import { LockOpen, Send } from "lucide-react";
 
 import { StandardButton } from "@/components/common/StandardButton";
 import { API_ENDPOINTS } from "@/services/api";
-import { getAgentUploadedIconRevision } from "@/lib/chat/agentIconUtils";
+import {
+  getAgentIcon,
+  getAgentUploadedIconRevision,
+} from "@/lib/chat/agentIconUtils";
 import { useAgentStore, type AgentDraft } from "@/stores/agentStore";
-import { DefaultAgentAvatar } from "./DefaultAgentAvatar";
 
 interface AgentConfigHeaderProps {
   agent: AgentDraft;
@@ -64,7 +66,7 @@ export function AgentConfigHeader({
     <div
       ref={actionAreaRef}
       data-testid="agent-config-header"
-      className="relative flex min-h-[74px] shrink-0 flex-wrap items-center justify-between gap-x-4 gap-y-2 pl-4 pr-[18px] py-[10px] 2xl:grid 2xl:grid-cols-[1fr_auto_1fr]"
+      className="relative flex min-h-[74px] shrink-0 flex-wrap items-center justify-between gap-x-4 gap-y-2 px-4 py-7 2xl:grid 2xl:grid-cols-[1fr_auto_1fr]"
     >
       <span
         aria-hidden="true"
@@ -76,8 +78,10 @@ export function AgentConfigHeader({
           size={50}
           shape="square"
           src={iconSource !== failedIcon ? iconSource : undefined}
-          icon={<DefaultAgentAvatar size={38} />}
-          className="shrink-0 !flex !items-center !justify-center !rounded-lg !bg-white !border !border-solid !border-[#c9c9c9]"
+          icon={createElement(getAgentIcon({ agent_id: agentId ?? 0 }), {
+            size: 28,
+          })}
+          className="shrink-0 !flex !items-center !justify-center !rounded-lg !bg-primary/10 !text-primary !border !border-solid !border-[#c9c9c9]"
           onError={() => {
             setFailedIcon(iconSource);
             return false;

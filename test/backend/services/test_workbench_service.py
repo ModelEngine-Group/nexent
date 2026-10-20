@@ -1,3 +1,4 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """Unit tests for request-scoped Workbench root resolution."""
 
 from copy import deepcopy
@@ -7,7 +8,7 @@ import pytest
 
 from consts.exceptions import ValidationError, WorkbenchConfigVersionConflict
 from consts.model import WorkbenchSessionConfig
-from services import workbench_service
+from management.services.agent import workbench as workbench_service
 from nexent.core.agents.agent_model import AgentConfig
 from nexent.core.agents.agent_model import ToolConfig
 from threading import local
@@ -354,7 +355,7 @@ def test_skill_config_rejects_missing_invalid_and_undeclared_values(runtime):
 
 def test_ut_be_wb_004_locked_version_does_not_query_latest(mocker):
     """UT-BE-WB-004: a pinned conversation never queries the latest version."""
-    latest = mocker.patch("services.knowledge_scope_service.query_current_version_no", return_value=4)
+    latest = mocker.patch("management.services.knowledge_base.scope.query_current_version_no", return_value=4)
     lookup = mocker.patch.object(workbench_service, "search_agent_info_by_agent_id", return_value={"name": "Root"})
     canonical, _ = workbench_service.resolve_workbench_config(_config(3), tenant_id="tenant")
     latest.assert_not_called()
@@ -365,7 +366,7 @@ def test_ut_be_wb_004_locked_version_does_not_query_latest(mocker):
 
 def test_ut_be_wb_005_missing_pinned_version_has_no_fallback(mocker):
     """UT-BE-WB-005: an unavailable pinned version has no fallback."""
-    latest = mocker.patch("services.knowledge_scope_service.query_current_version_no", return_value=4)
+    latest = mocker.patch("management.services.knowledge_base.scope.query_current_version_no", return_value=4)
     mocker.patch.object(workbench_service, "search_agent_info_by_agent_id", side_effect=ValueError("private details"))
     skills = mocker.patch.object(workbench_service.skill_db, "get_skill_by_id")
     with pytest.raises(workbench_service.WorkbenchError) as error:

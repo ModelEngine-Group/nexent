@@ -103,3 +103,21 @@ No formal Case is added or relabeled. Existing UT supplies the required unit pro
 
 No deployed Langfuse session is claimed. Changes apply to newly emitted telemetry;
 existing stored traces are not modified.
+
+## Merge verification — 2026-10-20
+
+Merged `origin/develop` at `a2f53b39d` into `dev/monitor-name`. Both textual
+conflicts were copyright-header whitespace. Keep the upstream move from
+`backend/services/workbench_service.py` to
+`backend/management/services/agent/workbench.py`, retain the Chinese runtime
+label and NL2Skill display-name assertions, and update the branch-local Workbench
+label test to import `management.services.agent.workbench`.
+
+The same seven-file UT command above passed again: **131 passed in 5.03s**.
+Copyright checks for the three resolved/adapted Python files and
+`git diff --check` passed. Generated formal views needed refreshing after the
+upstream asset merge; implementation validation with generation and its subsequent
+read-only check both passed.
+The separate `UT-SDK-014` runner could not start because the existing machine-local
+test home's `config/daily.env` is missing. Its prior PASS remains historical
+evidence; no new formal Case execution PASS is claimed for this merge.

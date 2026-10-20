@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import copy
 import json
 import logging
@@ -37,19 +39,19 @@ from nexent.memory import models as memory_models
 
 from consts.capability_profiles import CATALOG as CAPABILITY_CATALOG
 
-from services.file_management_service import validate_urls_access
+from management.services.file.service import validate_urls_access
 from management.services.model.resolver import get_rerank_model, is_model_available
 from management.services.knowledge_base.service import (
     ElasticSearchService,
     get_vector_db_core,
     get_embedding_model_by_index_name,
 )
-from services.remote_mcp_service import get_remote_mcp_server_list
-from services.memory_external_provider_service import get_memory_external_provider_service
+from management.services.mcp.service import get_remote_mcp_server_list
+from management.services.memory.providers.service import get_memory_external_provider_service
 
 from database.a2a_agent_db import PROTOCOL_JSONRPC
-from services.memory_config_service import build_memory_context
-from services.ind_aidp_service import create_ind_aidp_image_url_builder
+from management.services.configuration.user.memory import build_memory_context
+from management.services.knowledge_base.providers.aidp import create_ind_aidp_image_url_builder
 from management.services.model.adapter import get_llm_adapter, get_vlm_adapter
 from database.agent_db import (
     search_agent_info_by_agent_id,
@@ -63,20 +65,28 @@ from database.model_management_db import get_model_records, get_model_by_model_i
 from database.knowledge_db import get_knowledge_name_map_by_index_names
 from database.client import minio_client
 from management.services.model.names import add_repo_to_name
-from management.services.agent.prompt_template_loader import load_agent_prompt_bundle
+from management.services.agent.prompt import (
+    load_agent_prompt_bundle,
+)
 from nexent.core.agents.prompt import AgentPromptComposer, get_builtin_tool_descriptions
-from utils.config_utils import (
+from management.services.configuration.tenant.settings import (
     tenant_config_manager,
 )
 from management.services.model.names import (
     get_model_name_from_config,
 )
-from utils.memory_tool_prompt import should_enable_memory_tool_policy
-from utils.automation_tool_prompt import should_enable_automation_tool_policy
-from utils.context_utils import build_context_inputs
-from utils.http_client_utils import create_httpx_client
-from utils.mcp_url_utils import get_tenant_local_mcp_server
-from utils.redis_utils import get_redis_client
+from management.services.agent.prompt import (
+    should_enable_memory_tool_policy,
+)
+from management.services.agent.prompt import (
+    should_enable_automation_tool_policy,
+)
+from management.services.agent.context import (
+    build_context_inputs,
+)
+from infrastructure.http.client import create_httpx_client
+from management.services.mcp.addressing import get_tenant_local_mcp_server
+from infrastructure.redis import get_redis_client
 from consts.const import (
     AGENT_WORKSPACE_ROOT,
     NEXENT_SANDBOX_WORKSPACE_MODE,
@@ -165,7 +175,7 @@ def _ensure_agent_reasoning_snapshot(
     version_no: int,
 ) -> None:
     """Backfill reasoning ownership for agents created before Scheme B."""
-    from services.agent_reasoning_service import snapshot_agent_reasoning_config
+    from management.services.agent.reasoning import snapshot_agent_reasoning_config
 
     try:
         agent_info = search_agent_info_by_agent_id(
@@ -1193,22 +1203,18 @@ def _get_skill_script_tools(
         return []
 
 
-async def create_model_config_list(tenant_id):
-    records = get_model_records({"model_type": "llm"}, tenant_id)
-    model_list = []
-    extra_body = {"logprobs": True} if LLM_INCLUDE_LOGPROBS else None
-    for record in records:
-        model_name = add_repo_to_name(
-            model_repo=record["model_repo"],
-            model_name=record["model_name"],
-        )
-        reasoning_capability = _resolve_reasoning_capability(
-            model_name=model_name,
-            base_url=record.get("base_url"),
-            provider_hint=record.get("model_factory"),
-        )
-        model_list.append(
-            ModelConfig(cite_name=record["display_name"],
+def create_model_config_from_record(record):
+    """Build a complete provider binding from one exact tenant model record."""
+    model_name = add_repo_to_name(
+        model_repo=record["model_repo"],
+        model_name=record["model_name"],
+    )
+    reasoning_capability = _resolve_reasoning_capability(
+        model_name=model_name,
+        base_url=record.get("base_url"),
+        provider_hint=record.get("model_factory"),
+    )
+    return ModelConfig(cite_name=record["display_name"],
                         api_key=record.get("api_key", ""),
                         model_name=model_name,
                         url=record["base_url"],
@@ -1240,7 +1246,13 @@ async def create_model_config_list(tenant_id):
                         reasoning_budget_tokens=_resolve_model_reasoning_budget(
                             record.get("extra_params"), reasoning_capability
                         ),
-                        extra_body=_build_extra_body(record.get("extra_params"))))
+                        extra_body=_build_extra_body(record.get("extra_params")))
+
+
+async def create_model_config_list(tenant_id):
+    records = get_model_records({"model_type": "llm"}, tenant_id)
+    model_list = [create_model_config_from_record(record) for record in records]
+    extra_body = {"logprobs": True} if LLM_INCLUDE_LOGPROBS else None
     # fit for old version, main_model and sub_model use default model
     main_model_config = tenant_config_manager.get_model_config(
         key=MODEL_CONFIG_MAPPING["llm"], tenant_id=tenant_id)
@@ -1345,7 +1357,7 @@ async def create_agent_config(
         child_tool_params = normalized_tool_params.model_copy(deep=True)
         root_override = child_tool_params.agents.get(agent_info.get("name"))
         if root_override is not None:
-            from services.runtime_knowledge_mount import MANAGED_CLASSES
+            from management.services.knowledge_base.mount import MANAGED_CLASSES
 
             managed_names = MANAGED_CLASSES | {
                 tool.get("name") for tool in runtime_knowledge_tools
@@ -1447,6 +1459,7 @@ async def create_agent_config(
         tool_params=normalized_tool_params,
         runtime_skill_snapshot=runtime_skill_snapshot,
         runtime_knowledge_tools=runtime_knowledge_tools,
+        language=language,
     )
     memory_tool_names = {"store_memory", "search_memory"}
     tool_list = [tool for tool in tool_list if tool.name not in memory_tool_names]
@@ -1461,7 +1474,7 @@ async def create_agent_config(
         and conversation_id is not None
         and automation_user_message
     ):
-        from services.agent_automation.tool_adapter import (
+        from management.services.automation.proposal import (
             agent_loop_automation_tool_adapter,
         )
         tool_list.append(
@@ -1481,8 +1494,6 @@ async def create_agent_config(
 
     # Build system prompt: prioritize segmented fields, fallback to original prompt field if not available
     duty_prompt = agent_info.get("duty_prompt", "")
-    constraint_prompt = agent_info.get("constraint_prompt", "")
-    few_shots_prompt = agent_info.get("few_shots_prompt", "")
 
     is_manager = len(worker_agents) > 0 or len(external_a2a_agents) > 0
 
@@ -1501,7 +1512,7 @@ async def create_agent_config(
     # The memory capability switch controls tenant, user, and agent memory.
     if memory_context.user_config.memory_switch:
         try:
-            from services.memory_record_service import (
+            from management.services.memory.records import (
                 _resolve_tenant_embedding_model_info,
             )
 
@@ -1526,11 +1537,11 @@ async def create_agent_config(
             # backend services via the adapter. The facade handles policy
             # enforcement, embedding lookup, and idempotency on its own
             # and dispatches persistence/retrieval to
-            # ``services.memory_record_service`` /
-            # ``services.memory_retrieval_service``.
+            # ``management.services.memory.records`` /
+            # ``management.services.memory.retrieval``.
             memory_service = None
             try:
-                from services.memory_backend_adapter import build_memory_service_for_agent
+                from management.services.memory.provider import build_memory_service_for_agent
 
                 memory_service = build_memory_service_for_agent(
                     tenant_id=memory_context.tenant_id,
@@ -1552,7 +1563,7 @@ async def create_agent_config(
 
             memory_context_service = None
             try:
-                from services.memory_context_service import get_memory_context_service
+                from management.services.memory.context import get_memory_context_service
 
                 memory_context_service = get_memory_context_service()
                 if memory_context_service is None:
@@ -1846,9 +1857,7 @@ async def create_agent_config(
     )
 
     context_items = build_context_inputs(
-        duty=duty_prompt,
-        constraint=constraint_prompt,
-        few_shots=few_shots_prompt,
+        duty_prompt=duty_prompt,
         language=language,
         is_manager=is_manager,
         enable_planning=enable_planning,
@@ -2042,6 +2051,7 @@ async def create_tool_config_list(
     tool_params: Optional[ToolParamsRequest | Dict[str, Any]] = None,
     runtime_skill_snapshot: Optional[List[Dict[str, Any]]] = None,
     runtime_knowledge_tools: Optional[List[Dict[str, Any]]] = None,
+    language: str = "zh",
 ):
     tool_config_list = []
     langchain_tools = await discover_langchain_tools()
@@ -2056,7 +2066,7 @@ async def create_tool_config_list(
 
     # Look up agent name for use in error messages.
     if runtime_knowledge_tools is not None:
-        from services.runtime_knowledge_mount import MANAGED_CLASSES
+        from management.services.knowledge_base.mount import MANAGED_CLASSES
 
         tools_list = [tool for tool in tools_list if tool.get("class_name") not in MANAGED_CLASSES]
         tools_list.extend(copy.deepcopy([
@@ -2097,6 +2107,11 @@ async def create_tool_config_list(
             else override_params
         )
         param_dict = _merge_tool_params(tool, effective_override_params)
+        if tool.get("class_name") == "DeepSeekSearchTool":
+            param_dict.pop("localization", None)
+            param_dict.pop("max_content_chars", None)
+            # Run language is authoritative over persisted or request-level tool parameters.
+            param_dict["language"] = language
         if tool.get("class_name") == "AidpSearchTool":
             # Credentials are backend-owned since the v7.1 permission
             # redesign; populate them from the central constants (the
@@ -2366,7 +2381,7 @@ async def discover_langchain_tools():
     Returns:
         list: List of discovered LangChain tool instances
     """
-    from utils.langchain_utils import discover_langchain_modules
+    from management.services.tool.langchain import discover_langchain_modules
 
     langchain_tools = []
 
@@ -2576,38 +2591,12 @@ def apply_root_generation_overlay(
     """Add a root-only model alias without changing child Agent aliases."""
     if not generation_config:
         return
+    from management.services.model.run_controls import overlay_root_model
     for model_config in model_list:
         if model_config.cite_name != agent_config.model_name:
             continue
-        extra_body = dict(model_config.extra_body or {})
-        deep_thinking = bool(generation_config.get("deep_thinking"))
-        extra_body["enable_thinking"] = deep_thinking
-        # Effort is a dedicated ModelConfig field, not an extra_body override.
-        # Clear inherited model settings so the Workbench choice is authoritative.
-        extra_body.pop("reasoning_effort", None)
-        extra_body.pop("reasoning_budget_tokens", None)
-        root_model = model_config.model_copy(
-            deep=True,
-            update={
-                "cite_name": "workbench_root_model",
-                "enable_thinking": deep_thinking,
-                "reasoning_effort": (
-                    (generation_config.get("thinking_effort") or "low")
-                    if deep_thinking else None
-                ),
-                "reasoning_budget_tokens": None,
-                "temperature": (
-                    generation_config.get("temperature")
-                    if generation_config.get("temperature") is not None
-                    else model_config.temperature
-                ),
-                "top_p": (
-                    generation_config.get("top_p")
-                    if generation_config.get("top_p") is not None
-                    else model_config.top_p
-                ),
-                "extra_body": extra_body,
-            },
+        root_model = overlay_root_model(
+            model_config, generation_config, "workbench_root_model",
         )
         model_list.append(root_model)
         agent_config.model_name = root_model.cite_name
@@ -2640,6 +2629,9 @@ async def create_agent_run_info(
     runtime_generation_config: Optional[Dict[str, Any]] = None,
     runtime_sub_agent_mounts: Optional[List[Dict[str, Any]]] = None,
 ):
+    if override_model_id is not None:
+        from management.services.model.run_controls import validate_selected_record
+        validate_selected_record(get_model_by_model_id(override_model_id, tenant_id=tenant_id))
     workspace_run_id = uuid.uuid4().hex
     workspace_path = _build_run_workspace(user_id, workspace_run_id)
     if runtime_skill_snapshot is not None:
@@ -2804,61 +2796,21 @@ async def create_agent_run_info(
         runtime_generation_config,
     )
 
-    # A request-level effort is valid only when the selected model's switch is
-    # enabled. Known capabilities use their declared levels. Unknown/custom
-    # models use the common generic profile and let the provider reject an
-    # unsupported concrete value through the normal reasoning error path.
-    # ``auto`` is represented by an omitted per-request effort. The selected
-    # model keeps reasoning enabled, but the provider chooses the depth.
-    if reasoning_effort == "auto":
-        reasoning_effort = None
-    if reasoning_effort is not None:
-        selected_config = next(
-            (mc for mc in model_list if mc.cite_name == agent_config.model_name),
-            None,
-        )
-        capability = selected_config.reasoning_capability if selected_config else None
-        if not selected_config or not selected_config.enable_thinking:
-            raise ValidationError(
-                "The selected model does not support the requested reasoning effort"
-            )
-        if isinstance(capability, dict) and capability.get("status") == "supported":
-            supported_levels = capability.get("levels") or list(COMMON_REASONING_LEVELS)
-        else:
-            supported_levels = list(COMMON_REASONING_LEVELS)
-        if reasoning_effort not in supported_levels:
-            raise ValidationError(
-                "The selected model does not support the requested reasoning effort"
-            )
-        selected_config.reasoning_effort = reasoning_effort
-
-    if reasoning_budget_tokens is not None:
-        selected_config = next(
-            (mc for mc in model_list if mc.cite_name == agent_config.model_name),
-            None,
-        )
-        capability = selected_config.reasoning_capability if selected_config else None
-        if not selected_config or not selected_config.enable_thinking:
-            raise ValidationError(
-                "The selected model does not support the requested reasoning budget"
-            )
-        controls = capability.get("controls") if isinstance(capability, dict) else None
-        budget_control = next(
-            (control for control in controls or []
-             if isinstance(control, dict) and control.get("type") == "budget_tokens"),
-            None,
-        )
-        minimum = budget_control.get("min") if isinstance(budget_control, dict) else None
-        maximum = budget_control.get("max") if isinstance(budget_control, dict) else None
-        if not isinstance(minimum, int) or not isinstance(maximum, int):
-            raise ValidationError(
-                "The selected model does not support the requested reasoning budget"
-            )
-        if reasoning_budget_tokens < minimum or reasoning_budget_tokens > maximum:
-            raise ValidationError(
-                f"Reasoning budget must be between {minimum} and {maximum} tokens"
-            )
-        selected_config.reasoning_budget_tokens = reasoning_budget_tokens
+    # Legacy top-level fields use the same capability policy as generation overlays.
+    if reasoning_effort is not None or reasoning_budget_tokens is not None:
+        from management.services.model.run_controls import overlay_root_model
+        selected_config = next((m for m in model_list if m.cite_name == agent_config.model_name), None)
+        if selected_config is None:
+            from consts.exceptions import RunModelControlsError
+            raise RunModelControlsError("model_not_available")
+        legacy = {}
+        if reasoning_effort is not None:
+            legacy["thinking_effort"] = reasoning_effort
+        if reasoning_budget_tokens is not None:
+            legacy["reasoning_budget_tokens"] = reasoning_budget_tokens
+        overlay = overlay_root_model(selected_config, legacy, selected_config.cite_name)
+        index = model_list.index(selected_config)
+        model_list[index] = overlay
 
     remote_mcp_list = await get_remote_mcp_server_list(tenant_id=tenant_id, is_need_auth=True)
     default_mcp_url = get_tenant_local_mcp_server(tenant_id)

@@ -1,3 +1,5 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 "use client";
 
 import { useState } from "react";
@@ -156,6 +158,23 @@ export default function AgentConfigActions({
         baseCopyDisplayName
       );
 
+      // Build skill_instances from source agent. Only carry config_values
+      // (which may hold secrets such as API keys) when the caller has EDIT
+      // permission on the source agent; read-only copies fall back to skill
+      // defaults so secrets are not persisted into the new agent.
+      const canEditSource = detail.permission === "EDIT";
+      const skillInstancesFromSource = (
+        Array.isArray(detail.skills) ? detail.skills : []
+      )
+        .map((skill: any) => ({
+          skill_id: Number(skill.skill_id ?? skill.id),
+          enabled: true,
+          config_values: canEditSource
+            ? (skill.config_values ?? undefined)
+            : undefined,
+        }))
+        .filter((inst) => Number.isFinite(inst.skill_id));
+
       const createResult = await updateAgentMutation.mutateAsync({
         agent_id: undefined,
         name: copyNames.name,
@@ -172,12 +191,11 @@ export default function AgentConfigActions({
         enabled: detail.enabled,
         business_description: detail.business_description,
         duty_prompt: detail.duty_prompt,
-        constraint_prompt: detail.constraint_prompt,
-        few_shots_prompt: detail.few_shots_prompt,
         business_logic_model_name:
           detail.business_logic_model_name ?? undefined,
         business_logic_model_id: detail.business_logic_model_id ?? undefined,
         enabled_tool_ids: enabledToolIds,
+        skill_instances: skillInstancesFromSource,
         related_agent_ids: subAgentIds,
       });
 
@@ -209,6 +227,10 @@ export default function AgentConfigActions({
 
       queryClient.invalidateQueries({ queryKey: ["agents"] });
       message.success(t("agentConfig.agents.copySuccess"));
+
+      if (!canEditSource && skillInstancesFromSource.length > 0) {
+        message.info(t("agentConfig.agents.copySkillConfigsSkipped"));
+      }
 
       if (unavailableTools.length > 0) {
         const names =

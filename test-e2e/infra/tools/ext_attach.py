@@ -22,11 +22,6 @@ exporting the runner/product URLs. Design contract:
   the next attach refuses until an operator confirms ownership and runs
   ``python ext_attach.py --test-home <home> recover`` (identity check, full
   reset, state cleared).
-- Multi-profile cases (``profile_selection`` in execution.yaml) resolve
-  their effective dependencies from a machine-local profile config, e.g.
-  ``config/aidp-journey.yaml`` selecting mock or real_smoke for the AIDP
-  journey; the selection is recorded into the case evidence and exported
-  as ``NEXENT_TEST_SELECTED_PROFILE``.
 
 Every dependency failure is recorded through shared.preparation_evidence
 (the worker then reports BLOCKED / BLOCKED_BY_DEPENDENCY) — a missing
@@ -287,91 +282,6 @@ class _FileLock:
 
 
 # ---------------------------------------------------------------------------
-# profile selection (multi-profile cases, e.g. the AIDP journey)
-# ---------------------------------------------------------------------------
-
-def _load_profile_config(home: Path, repo: Path, key: str, case_id: str) -> dict:
-    config_path = home / "config" / f"{key}.yaml"
-    if not config_path.is_file():
-        raise _dependency_failure(
-            case_id, f"profile selection config config/{key}.yaml is missing"
-        )
-    try:
-        payload = yaml.safe_load(config_path.read_text(encoding="utf-8")) or {}
-    except yaml.YAMLError:
-        raise _dependency_failure(case_id, f"config/{key}.yaml is not valid YAML") from None
-    schema_path = repo / "test-e2e/infra/config" / f"{key}.schema.json"
-    if schema_path.is_file():
-        schema = json.loads(schema_path.read_text(encoding="utf-8"))
-        errors = sorted(Draft202012Validator(schema).iter_errors(payload), key=str)
-        if errors:
-            raise _dependency_failure(
-                case_id, f"config/{key}.yaml is invalid at " + ", ".join(str(list(e.path)) for e in errors)
-            )
-    if not isinstance(payload, dict):
-        raise _dependency_failure(case_id, f"config/{key}.yaml must contain a mapping")
-    return payload
-
-
-def resolve_profile_selection(repo: Path, home: Path, record: dict) -> dict | None:
-    """Resolve a multi-profile case's selected profile and effective services.
-
-    Returns None for single-profile cases (the plain required_mock_services
-    path). Raises AssetDependencyError (after recording the receipt) when a
-    declared profile selection cannot be resolved.
-    """
-    execution = record.get("execution") or {}
-    key = execution.get("profile_selection")
-    if not key:
-        return None
-    case_id = record["case_id"]
-    declared = (execution.get("implementations") or [{}])[0].get("profiles") or []
-    if len(declared) < 2:
-        raise _dependency_failure(
-            case_id, "profile_selection requires an implementation with multiple profiles"
-        )
-    payload = _load_profile_config(home, repo, str(key), case_id)
-    selected = payload.get("selected_profile")
-    if selected not in declared:
-        raise _dependency_failure(
-            case_id,
-            f"config/{key}.yaml selects profile {selected!r} which the case does not declare ({sorted(declared)})",
-        )
-    case_path = repo / "test-e2e/cases" / case_id / "case.yaml"
-    try:
-        case_document = yaml.safe_load(case_path.read_text(encoding="utf-8"))
-    except (OSError, yaml.YAMLError) as exc:
-        # A declared profile selection must be backed by a readable case
-        # contract: a silent empty fallback would skip the mock dependency
-        # (identity, lock, reset) while the batch report still looks clean.
-        raise _dependency_failure(
-            case_id,
-            f"cannot read the case contract test-e2e/cases/{case_id}/case.yaml "
-            f"to resolve profile {selected!r}: {exc}",
-        ) from None
-    entries = ((case_document or {}).get("case", {}).get("execution") or {}).get("profiles") or []
-    entry = next(
-        (item for item in entries if isinstance(item, dict) and item.get("name") == selected),
-        None,
-    )
-    if entry is None:
-        declared_entries = [str(item.get("name")) for item in entries if isinstance(item, dict)]
-        raise _dependency_failure(
-            case_id,
-            f"the case contract declares no execution.profiles entry for profile {selected!r} "
-            f"(entries: {sorted(declared_entries) or 'none'}); refusing to attach with an "
-            "empty dependency set",
-        )
-    required = list(entry.get("required_services") or [])
-    return {
-        "selection_key": str(key),
-        "selected_profile": str(selected),
-        "config": payload,
-        "required_services": required,
-    }
-
-
-# ---------------------------------------------------------------------------
 # attach context
 # ---------------------------------------------------------------------------
 
@@ -387,7 +297,6 @@ class ExtKnowledgeAttach:
         self.required_services = list(required_services or [])
         self.case_id = case_id
         self.record = record or {}
-        self.profile: dict | None = None
         self.config: dict | None = None
         self.attached = False
         self._identity: dict = {}
@@ -403,20 +312,12 @@ class ExtKnowledgeAttach:
         Raises AssetDependencyError (receipt recorded) on any dependency
         failure; the worker maps that to BLOCKED/BLOCKED_BY_DEPENDENCY.
         """
-        self.profile = resolve_profile_selection(self.repo, self.home, self.record)
-        if self.profile:
-            self.env["NEXENT_TEST_SELECTED_PROFILE"] = self.profile["selected_profile"]
-            required = self.profile["required_services"]
-            self._export_profile_values(self.profile)
-        else:
-            required = self.required_services
+        required = self.required_services
         needed = [service for service in required if service in EXT_LOGICAL_SERVICES]
         if not needed:
-            # Nothing this instance serves: no attach, no lock, no reset. The
-            # selected profile (if any) is still recorded as case evidence.
+            # Nothing this instance serves: no attach, no lock, no reset.
             self._write_evidence({
                 "attached": False,
-                "selected_profile": self.profile["selected_profile"] if self.profile else None,
                 "required_services": required,
             })
             return
@@ -428,7 +329,6 @@ class ExtKnowledgeAttach:
         self.attached = True
         self._write_evidence({
             "attached": True,
-            "selected_profile": self.profile["selected_profile"] if self.profile else None,
             "required_services": required,
             "served_services": needed,
             "identity": self._identity,
@@ -529,40 +429,6 @@ class ExtKnowledgeAttach:
 
         self.env["NEXENT_EXT_KNOWLEDGE_RUNNER_URL"] = str(config["runner_url"])
         self.env["NEXENT_EXT_KNOWLEDGE_PRODUCT_URL"] = str(config["product_url"])
-
-    def _export_profile_values(self, profile: dict) -> None:
-        """Export the selected profile's machine-local values for the script.
-
-        The AIDP journey's real_smoke profile needs the real KB identity,
-        retrieval query and oracle; the mock profile's oracle is fixed by
-        the seed contract and needs no extra values.
-        """
-        if profile["selected_profile"] != "real_smoke":
-            return
-        values = profile["config"].get("real_smoke") or {}
-        mapping = {
-            "kb_id": "NEXENT_TEST_AIDP_REAL_KB_ID",
-            "kb_name": "NEXENT_TEST_AIDP_REAL_KB_NAME",
-            "doc_name": "NEXENT_TEST_AIDP_REAL_DOC_NAME",
-            "query": "NEXENT_TEST_AIDP_REAL_QUERY",
-            "expected_text": "NEXENT_TEST_AIDP_REAL_EXPECTED_TEXT",
-            "expected_source": "NEXENT_TEST_AIDP_REAL_EXPECTED_SOURCE",
-        }
-        # doc_name is optional (the file-management view check); the rest are
-        # required by the aidp-journey schema, so an empty value here means
-        # the schema file and this mapping drifted apart.
-        optional = {"doc_name"}
-        for source, env_name in mapping.items():
-            value = str(values.get(source) or "").strip()
-            if not value:
-                if source in optional:
-                    continue
-                raise _dependency_failure(
-                    self.case_id,
-                    f"config/{profile['selection_key']}.yaml real_smoke.{source} is required "
-                    "for the real_smoke profile",
-                )
-            self.env[env_name] = value
 
     def collect_evidence(self) -> None:
         """Save wire/control evidence; best-effort, never masks the result."""

@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """D5 special-case reliability test.
 
 Case ID: REL-AUTO-1FAFCA5A681580F5
@@ -23,6 +25,7 @@ import time
 import pytest
 
 from shared.cases import special_case_params
+import management.services.agent.execution as agent_execution
 
 CASE_ID = "REL-AUTO-1FAFCA5A681580F5"
 
@@ -51,8 +54,8 @@ _PENDING_TASK_NAMES = ("hang-task-1", "hang-task-2")
 def _install_shutdown_collaborators(monkeypatch, *, raise_thread_shutdown: bool):
     """Patch every shutdown collaborator so the test isolates the ordering contract."""
     import apps.runtime_app as runtime_app
-    from services.thread_lifecycle_service import runtime_thread_manager
-    from services.runtime_state_service import runtime_state_service
+    from infrastructure.concurrency import runtime_thread_manager
+    from management.services.agent.run_state import runtime_state_service
     import management.services.agent.run as agent_run
     import nexent.core.agents.sandbox as sandbox_mod
 
@@ -88,7 +91,7 @@ def _install_shutdown_collaborators(monkeypatch, *, raise_thread_shutdown: bool)
     monkeypatch.setattr(runtime_state_service, "set_thread_manager", lambda manager: None)
     monkeypatch.setattr(runtime_thread_manager, "start", lambda: None)
     monkeypatch.setattr(runtime_thread_manager, "shutdown", shutdown_thread_manager)
-    monkeypatch.setattr(agent_run, "shutdown_agent_stream_tasks", shutdown_stream_tasks)
+    monkeypatch.setattr(agent_execution, "shutdown_agent_stream_tasks", shutdown_stream_tasks)
     monkeypatch.setattr(sandbox_mod.SandboxPoolManager, "_instance", _FakeSandboxPool())
 
     return runtime_app, events

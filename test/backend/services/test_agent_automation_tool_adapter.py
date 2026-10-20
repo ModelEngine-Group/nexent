@@ -1,10 +1,14 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import json
 
 import pytest
-from utils.time_context_utils import strip_current_time_prefix
+from management.services.agent.context import (
+    strip_current_time_prefix,
+)
 
-from services.agent_automation import tool_adapter as adapter_module
-from services.agent_automation.tool_adapter import (
+from management.services.automation import proposal as adapter_module
+from management.services.automation.proposal import (
     AgentLoopAutomationToolAdapter,
     AutomationToolRuntimeContext,
     link_persisted_proposal_card,
@@ -13,7 +17,7 @@ from services.agent_automation.tool_adapter import (
 
 def test_build_tool_config_registers_scheduled_task_as_builtin(monkeypatch):
     monkeypatch.setattr(
-        "services.conversation_management_service.get_current_run_user_message_id",
+        "management.services.conversation.service.get_current_run_user_message_id",
         lambda conversation_id, user_id: 101,
     )
 

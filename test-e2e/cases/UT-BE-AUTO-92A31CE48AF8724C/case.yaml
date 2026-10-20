@@ -25,7 +25,7 @@ case:
     expected: 只有 unit_type 命中全局白名单 EXTERNAL_MEMORY_DEFAULT_ALLOWED_UNIT_TYPES 的 unit 进入 provider_service.ingest；未命中的被过滤；过滤后为空时返回
       status="ok"、accepted_count=0 且不调用 provider_service.ingest。
   - order: 2
-    action: 直接导入 backend/services/memory_ingestion_event_service.py 的 MemoryIngestionEventService，注入 mock 的 MemoryProviderConfigService、MemoryExternalProviderService，并
+    action: 直接导入 backend/management/services/memory/ingestion.py 的 MemoryIngestionEventService，注入 mock 的 MemoryProviderConfigService、MemoryExternalProviderService，并
       mock memory_provider_config_param_db.get_params 与 memory_external_ingest_event_log_db.insert_event_log。
     expected: 幂等键严格等于 "nexent:{tenant}:{agent}:{user}:{conversation}:{event_type}:{event_id}"，相同入参产生稳定且唯一的键。
   - order: 3

@@ -1,3 +1,4 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 import json
 import os
 import sys
@@ -88,7 +89,7 @@ sys.modules["backend.database.client"] = MagicMock()
 sys.modules["backend.database.db_models"] = MagicMock()
 sys.modules["utils"] = MagicMock()
 sys.modules["utils.token_encryption"] = MagicMock()
-sys.modules["utils.config_utils"] = MagicMock()
+sys.modules["management.services.configuration.tenant.settings"] = MagicMock()
 
 auth_utils_mock = MagicMock()
 auth_utils_mock.get_current_user_id = MagicMock(return_value=("user-1", "t-1"))
@@ -96,7 +97,7 @@ auth_utils_mock.get_jwt_expiry_seconds = MagicMock(return_value=3600)
 auth_utils_mock.calculate_expires_at = MagicMock(return_value=1735689600)
 auth_utils_mock.get_supabase_admin_client = MagicMock()
 auth_utils_mock.generate_session_jwt = MagicMock(return_value="eyJ.mock.jwt.token")
-sys.modules["utils.auth_utils"] = auth_utils_mock
+sys.modules["management.services.permission.identity.authentication_helpers"] = auth_utils_mock
 
 oauth_service_mock = MagicMock()
 oauth_service_mock.parse_state = MagicMock(
@@ -121,10 +122,10 @@ oauth_service_mock.get_oauth_config = MagicMock(
     }
 )
 sys.modules["services"] = MagicMock()
-sys.modules["services.oauth_service"] = oauth_service_mock
-# apps.oauth_app imports services.audit_service; the blanket `services` MagicMock
+sys.modules["management.services.permission.identity.oauth"] = oauth_service_mock
+# apps.oauth_app imports management.services.monitor.audit; the blanket `services` MagicMock
 # above is not a package, so the audit submodule must be pre-registered.
-sys.modules["services.audit_service"] = MagicMock()
+sys.modules["management.services.monitor.audit"] = MagicMock()
 
 nexent_mock = MagicMock()
 sys.modules["nexent"] = nexent_mock

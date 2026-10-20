@@ -8,6 +8,10 @@ from unittest.mock import MagicMock, call
 import pytest
 
 
+from test.common.module_stubs import capture_module_stubs
+
+_modules_before_stubs = sys.modules.copy()
+
 # Ensure backend imports resolve
 sys.path.insert(0, __import__("os").path.join(__import__("os").path.dirname(__file__), "../../.."))
 
@@ -30,6 +34,12 @@ sa_mod.desc = MagicMock(name="desc")
 sa_mod.func = MagicMock(name="func")
 sa_mod.select = MagicMock(name="select")
 sa_mod.text = MagicMock(name="text")
+sa_mod.String = MagicMock(name="String")
+sa_mod.cast = MagicMock(name="cast")
+sa_mod.or_ = MagicMock(name="or_")
+orm_mod = types.ModuleType("sqlalchemy.orm")
+orm_mod.Session = MagicMock(name="Session")
+sys.modules["sqlalchemy.orm"] = orm_mod
 
 
 def _create_insert_mock():
@@ -174,6 +184,7 @@ db_models_mod.ConversationMessageUnit = ConversationMessageUnit
 db_models_mod.ConversationSourceSearch = ConversationSourceSearch
 db_models_mod.ConversationSourceImage = ConversationSourceImage
 db_models_mod.AgentAutomationProposal = AgentAutomationProposal
+db_models_mod.KnowledgeRecord = MagicMock(name="KnowledgeRecord")
 
 sys.modules["database.db_models"] = db_models_mod
 sys.modules["backend.database.db_models"] = db_models_mod
@@ -3752,3 +3763,11 @@ def test_update_conversation_knowledge_scope_missing_row(monkeypatch, mock_sessi
 
     assert ok is False
     session.execute.assert_called_once()
+
+
+_install_module_stubs = capture_module_stubs(_modules_before_stubs)
+
+
+@pytest.fixture(autouse=True)
+def _isolated_imports(monkeypatch):
+    _install_module_stubs(monkeypatch)

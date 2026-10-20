@@ -21,14 +21,14 @@ case:
     - 本地测试数据库 fixture：多条 status=PENDING、evaluation_set_id>0、delete_flag=''N'' 的 AgentEvaluation 记录（create_time 错开；包含缺 tenant_id、缺
     created_by 的异常记录）
 
-    - mock services.runtime_proxy_service.dispatch_agent_evaluation_run 记录调用参数'
+    - mock management.services.agent.runtime_client.dispatch_agent_evaluation_run 记录调用参数'
   test_data:
     legacy_asset_declaration: '- ${NEXENT_TEST_HOME}/config/secrets.env（本地组件测试环境参数，不含生产凭据）
 
       - 本地测试数据库 fixture：多条 status=PENDING、evaluation_set_id>0、delete_flag=''N'' 的 AgentEvaluation 记录（create_time 错开；包含缺 tenant_id、缺
       created_by 的异常记录）
 
-      - mock services.runtime_proxy_service.dispatch_agent_evaluation_run 记录调用参数'
+      - mock management.services.agent.runtime_client.dispatch_agent_evaluation_run 记录调用参数'
   steps:
   - order: 1
     action: 准备本地测试数据库，写入多条持久 PENDING 运行：AgentEvaluation status=PENDING、evaluation_set_id>0、delete_flag='N'，create_time 错开，其中至少一条缺
@@ -39,7 +39,7 @@ case:
       的行，且按 create_time 升序排列，不包含 no-set 行。
     expected: 字段完整运行按要求被重派发；缺 tenant_id/created_by 运行被跳过且不中断本轮调度。
   - order: 3
-    action: mock services.runtime_proxy_service.dispatch_agent_evaluation_run 记录调用参数，将第 2 步结果传入 services.evaluation_maintenance._dispatch_pending_runs()。
+    action: mock management.services.agent.runtime_client.dispatch_agent_evaluation_run 记录调用参数，将第 2 步结果传入 management.services.evaluation.maintenance._dispatch_pending_runs()。
     expected: 派发异常被捕获，运行保持 PENDING，下轮可重试；不出现半写入或状态丢失。
   - order: 4
     action: 断言 tenant_id 与 created_by 均完整的运行以 agent_evaluation_id=int、user_id=str、tenant_id=str 调用 dispatch_agent_evaluation_run；缺
@@ -74,7 +74,7 @@ case:
     - 本地测试数据库 fixture：多条 status=PENDING、evaluation_set_id>0、delete_flag=''N'' 的 AgentEvaluation 记录（create_time 错开；包含缺 tenant_id、缺
     created_by 的异常记录）
 
-    - mock services.runtime_proxy_service.dispatch_agent_evaluation_run 记录调用参数'
+    - mock management.services.agent.runtime_client.dispatch_agent_evaluation_run 记录调用参数'
   metrics:
   - list_dispatchable_pending_runs 仅返回 status=PENDING、evaluation_set_id>0、delete_flag='N' 的运行，并按 create_time 升序。
   - 字段完整运行按要求被重派发；缺 tenant_id/created_by 运行被跳过且不中断本轮调度。

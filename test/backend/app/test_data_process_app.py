@@ -1,3 +1,4 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 import sys
 import types
 from http import HTTPStatus
@@ -197,11 +198,11 @@ def stub_modules(monkeypatch):
     app_mod.app = _CeleryAppStub()
     monkeypatch.setitem(sys.modules, "data_process.app", app_mod)
 
-    # services.data_process_service
+    # data_process.services.tasks
     service_stub = _ServiceStub()
-    svc_mod = types.ModuleType("services.data_process_service")
+    svc_mod = types.ModuleType("data_process.services.tasks")
     svc_mod.get_data_process_service = lambda: service_stub
-    monkeypatch.setitem(sys.modules, "services.data_process_service", svc_mod)
+    monkeypatch.setitem(sys.modules, "data_process.services.tasks", svc_mod)
 
     # data_process.utils
     utils_mod = types.ModuleType("data_process.utils")

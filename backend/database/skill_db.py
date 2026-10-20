@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """Skill instance and skill info database operations."""
 
 import json
@@ -12,8 +14,8 @@ from database.db_models import SkillInfo, SkillToolRelation, SkillInstance, Tool
 from consts.const import MAX_SKILLS_PER_TENANT
 from consts.error_code import ErrorCode
 from consts.exceptions import AppException
-from utils.skill_params_utils import strip_params_comments_for_db
-from utils.str_utils import convert_list_to_string, convert_string_to_list
+from management.db.skill_params import strip_params_comments_for_db
+from management.db.serialization import convert_list_to_string, convert_string_to_list
 
 logger = logging.getLogger(__name__)
 
@@ -427,6 +429,19 @@ def get_skill_by_name(skill_name: str, tenant_id: str) -> Optional[Dict[str, Any
             result["tool_ids"] = _get_tool_ids(session, skill.skill_id)
             return result
         return None
+
+
+def get_skills_for_tag_read(tenant_id: str, skill_ids: list[int]) -> list[dict]:
+    """Read tenant skill visibility metadata without per-skill tool relations."""
+    if not skill_ids:
+        return []
+    with get_db_session() as session:
+        records = session.query(SkillInfo).filter(
+            SkillInfo.tenant_id == tenant_id,
+            SkillInfo.delete_flag != 'Y',
+            SkillInfo.skill_id.in_(skill_ids),
+        ).all()
+        return [_to_dict(record) for record in records]
 
 
 def get_skill_by_id(skill_id: int, tenant_id: str) -> Optional[Dict[str, Any]]:

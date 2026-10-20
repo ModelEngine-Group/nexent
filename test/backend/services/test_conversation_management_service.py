@@ -1,4 +1,4 @@
-# Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
 from pathlib import Path
 import sys
@@ -162,10 +162,10 @@ class _DummySessionCM:
 db_client_stub.get_db_session = lambda *a, **k: _DummySessionCM()
 sys.modules["database.client"] = db_client_stub
 
-# Stub utils.prompt_template_utils to avoid requiring PyYAML
-prompt_mod = types.ModuleType("utils.prompt_template_utils")
+# Stub management.services.agent.prompt to avoid requiring PyYAML
+prompt_mod = types.ModuleType("management.services.agent.prompt")
 prompt_mod.load_prompt = lambda language="zh": {"USER_PROMPT":"{{question}}", "SYSTEM_PROMPT":"SYS"}
-sys.modules["utils.prompt_template_utils"] = prompt_mod
+sys.modules["management.services.agent.prompt"] = prompt_mod
 
 # Stub storage components
 storage_factory_mod = types.ModuleType("nexent.storage.storage_client_factory")
@@ -201,7 +201,7 @@ from unittest.mock import patch, MagicMock
 
 # Environment variables are now configured in conftest.py
 
-from backend.services.conversation_management_service import (
+from management.services.conversation.service import (
         save_message,
         save_message_unit,
         save_conversation_user,
@@ -235,7 +235,7 @@ class TestConversationManagementService(unittest.TestCase):
         # Reset all mocks before each test
         minio_client_mock.reset_mock()
 
-    @patch('backend.services.conversation_management_service.create_conversation_message')
+    @patch('management.services.conversation.service.create_conversation_message')
     def test_save_message_picture_web_invalid_json(self, mock_create_msg):
         mock_create_msg.return_value = 1
         message_request = MessageRequest(
@@ -257,7 +257,7 @@ class TestConversationManagementService(unittest.TestCase):
         self.assertEqual(result['code'], 400)
         self.assertEqual(result['message'], "Must provide conversation_id or message_id parameter")
 
-    @patch('backend.services.conversation_management_service.create_conversation_message')
+    @patch('management.services.conversation.service.create_conversation_message')
     def test_save_message_with_string_content(self, mock_create_conversation_message):
         # Setup
         mock_create_conversation_message.return_value = 123  # message_id
@@ -287,7 +287,7 @@ class TestConversationManagementService(unittest.TestCase):
         self.assertEqual(call_args['role'], "user")
         self.assertEqual(call_args['content'], "Hello, this is a test message")
 
-    @patch('backend.services.conversation_management_service.create_conversation_message')
+    @patch('management.services.conversation.service.create_conversation_message')
     def test_save_message_with_string_content_returns_message_id(self, mock_create_conversation_message):
         """After the refactor, save_message only creates the message row and returns message_id."""
         mock_create_conversation_message.return_value = 123
@@ -308,7 +308,7 @@ class TestConversationManagementService(unittest.TestCase):
         # The new save_message forwards the status kwarg (default "completed")
         self.assertEqual(mock_create_conversation_message.call_args.kwargs.get('status'), 'completed')
 
-    @patch('backend.services.conversation_management_service.create_message_unit')
+    @patch('management.services.conversation.service.create_message_unit')
     def test_save_message_unit_inserts_single_row(self, mock_create_message_unit):
         """save_message_unit wraps create_message_unit and returns the new unit_id."""
         mock_create_message_unit.return_value = 555
@@ -335,10 +335,10 @@ class TestConversationManagementService(unittest.TestCase):
             invocation_id="subagent-invocation-1",
         )
 
-    @patch('backend.services.conversation_management_service.persist_assistant_run_batch_db')
+    @patch('management.services.conversation.service.persist_assistant_run_batch_db')
     def test_persist_assistant_run_batch_forwards_all_fields(self, mock_persist_batch):
         """The service boundary forwards the complete atomic batch contract."""
-        from backend.services.conversation_management_service import persist_assistant_run_batch
+        from management.services.conversation.service import persist_assistant_run_batch
 
         expected = {0: 555}
         mock_persist_batch.return_value = expected
@@ -361,7 +361,7 @@ class TestConversationManagementService(unittest.TestCase):
         self.assertEqual(result, expected)
         mock_persist_batch.assert_called_once_with(**params)
 
-    @patch('backend.services.conversation_management_service.create_source_image')
+    @patch('management.services.conversation.service.create_source_image')
     def test_save_source_image_passes_through(self, mock_create_source_image):
         """save_source_image is a thin pass-through to create_source_image."""
         mock_create_source_image.return_value = 42
@@ -373,7 +373,7 @@ class TestConversationManagementService(unittest.TestCase):
         self.assertEqual(save_source_image(image_data), 42)
         mock_create_source_image.assert_called_once_with(image_data)
 
-    @patch('backend.services.conversation_management_service.create_source_search')
+    @patch('management.services.conversation.service.create_source_search')
     def test_save_source_search_passes_through(self, mock_create_source_search):
         """save_source_search is a thin pass-through to create_source_search."""
         mock_create_source_search.return_value = 7
@@ -381,7 +381,7 @@ class TestConversationManagementService(unittest.TestCase):
         self.assertEqual(save_source_search(search_data, user_id="u"), 7)
         mock_create_source_search.assert_called_once_with(search_data, user_id="u")
 
-    @patch('backend.services.conversation_management_service.save_message')
+    @patch('management.services.conversation.service.save_message')
     def test_save_conversation_user(self, mock_save_message):
         """User messages only create a message row, no unit records are created."""
         mock_save_message.return_value = 999
@@ -422,7 +422,7 @@ class TestConversationManagementService(unittest.TestCase):
             save_conversation_assistant(
                 agent_request, [], self.user_id, self.tenant_id)
 
-    @patch('backend.services.conversation_management_service.save_message')
+    @patch('management.services.conversation.service.save_message')
     def test_save_conversation_user_strips_runtime_time_marker(self, mock_save_message):
         """Remove the appended runtime time marker before persisting the user request."""
         mock_save_message.return_value = 1001
@@ -439,7 +439,7 @@ class TestConversationManagementService(unittest.TestCase):
         request_arg = mock_save_message.call_args[0][0]
         self.assertEqual(request_arg.message[0].content, "What is the weather?")
 
-    @patch('backend.services.conversation_management_service.save_message')
+    @patch('management.services.conversation.service.save_message')
     def test_save_conversation_user_without_prefix_unchanged(self, mock_save_message):
         """When query has no [Current time: ...] prefix, it should be persisted as-is."""
         mock_save_message.return_value = 1002
@@ -456,7 +456,7 @@ class TestConversationManagementService(unittest.TestCase):
         request_arg = mock_save_message.call_args[0][0]
         self.assertEqual(request_arg.message[0].content, "What is machine learning?")
 
-    @patch('backend.services.conversation_management_service.save_message')
+    @patch('management.services.conversation.service.save_message')
     def test_save_conversation_user_empty_query(self, mock_save_message):
         """When query is empty, it should be persisted as-is without errors."""
         mock_save_message.return_value = 1003
@@ -473,7 +473,7 @@ class TestConversationManagementService(unittest.TestCase):
         request_arg = mock_save_message.call_args[0][0]
         self.assertEqual(request_arg.message[0].content, "")
 
-    @patch('backend.services.conversation_management_service.save_message')
+    @patch('management.services.conversation.service.save_message')
     def test_save_conversation_user_malformed_prefix_no_bracket(self, mock_save_message):
         """When query has [Current time: prefix but no closing bracket, persist as-is."""
         mock_save_message.return_value = 1004
@@ -490,9 +490,9 @@ class TestConversationManagementService(unittest.TestCase):
         request_arg = mock_save_message.call_args[0][0]
         self.assertEqual(request_arg.message[0].content, "[Current time: no closing bracket here")
 
-    @patch('backend.services.conversation_management_service.get_llm_adapter_from_config')
-    @patch('backend.services.conversation_management_service.compose_auxiliary_prompt')
-    @patch('backend.services.conversation_management_service.tenant_config_manager.get_model_config')
+    @patch('management.services.conversation.service.get_llm_adapter_from_config')
+    @patch('management.services.conversation.service.compose_auxiliary_prompt')
+    @patch('management.services.conversation.service.tenant_config_manager.get_model_config')
     def test_call_llm_for_title(self, mock_get_model_config, mock_get_prompt_template, mock_openai):
         # Setup
         mock_get_model_config.return_value = {
@@ -524,10 +524,10 @@ class TestConversationManagementService(unittest.TestCase):
             'zh', 'chat_title', {'question': 'What is AI? AI stands for Artificial Intelligence.'}
         )
 
-    @patch('backend.services.conversation_management_service.get_llm_adapter_from_config')
-    @patch('backend.services.conversation_management_service.compose_auxiliary_prompt')
-    @patch('backend.services.conversation_management_service.tenant_config_manager.get_model_config')
-    @patch('backend.services.conversation_management_service.get_model_by_model_id')
+    @patch('management.services.conversation.service.get_llm_adapter_from_config')
+    @patch('management.services.conversation.service.compose_auxiliary_prompt')
+    @patch('management.services.conversation.service.tenant_config_manager.get_model_config')
+    @patch('management.services.conversation.service.get_model_by_model_id')
     def test_call_llm_for_title_uses_selected_tenant_model(
             self, mock_get_model, mock_get_default_model, mock_get_prompt, mock_adapter):
         selected_config = {
@@ -560,8 +560,8 @@ class TestConversationManagementService(unittest.TestCase):
             display_name="Selected LLM",
         )
 
-    @patch('backend.services.conversation_management_service.get_llm_adapter_from_config')
-    @patch('backend.services.conversation_management_service.get_model_by_model_id')
+    @patch('management.services.conversation.service.get_llm_adapter_from_config')
+    @patch('management.services.conversation.service.get_model_by_model_id')
     def test_call_llm_for_title_rejects_unavailable_selected_model(
             self, mock_get_model, mock_adapter):
         mock_get_model.return_value = None
@@ -571,8 +571,8 @@ class TestConversationManagementService(unittest.TestCase):
 
         mock_adapter.assert_not_called()
 
-    @patch('backend.services.conversation_management_service.get_llm_adapter_from_config')
-    @patch('backend.services.conversation_management_service.get_model_by_model_id')
+    @patch('management.services.conversation.service.get_llm_adapter_from_config')
+    @patch('management.services.conversation.service.get_model_by_model_id')
     def test_call_llm_for_title_rejects_non_llm_selected_model(
             self, mock_get_model, mock_adapter):
         mock_get_model.return_value = {"model_id": 7, "model_type": "embedding"}
@@ -582,7 +582,7 @@ class TestConversationManagementService(unittest.TestCase):
 
         mock_adapter.assert_not_called()
 
-    @patch('backend.services.conversation_management_service.rename_conversation')
+    @patch('management.services.conversation.service.rename_conversation')
     def test_update_conversation_title(self, mock_rename_conversation):
         # Setup
         mock_rename_conversation.return_value = True
@@ -595,7 +595,7 @@ class TestConversationManagementService(unittest.TestCase):
         mock_rename_conversation.assert_called_once_with(
             123, "New Title", self.user_id)
 
-    @patch('backend.services.conversation_management_service.create_conversation')
+    @patch('management.services.conversation.service.create_conversation')
     def test_create_new_conversation(self, mock_create_conversation):
         # Setup
         mock_create_conversation.return_value = {
@@ -610,7 +610,7 @@ class TestConversationManagementService(unittest.TestCase):
         mock_create_conversation.assert_called_once_with(
             "New Chat", self.user_id, agent_id=None, chat_mode=None)
 
-    @patch('backend.services.conversation_management_service.create_conversation')
+    @patch('management.services.conversation.service.create_conversation')
     def test_create_new_conversation_with_agent_id(self, mock_create_conversation):
         # Setup
         mock_create_conversation.return_value = {
@@ -629,7 +629,7 @@ class TestConversationManagementService(unittest.TestCase):
         mock_create_conversation.assert_called_once_with(
             "New Chat", self.user_id, agent_id=7, chat_mode=None)
 
-    @patch('backend.services.conversation_management_service.create_conversation')
+    @patch('management.services.conversation.service.create_conversation')
     def test_create_new_conversation_with_chat_mode(self, mock_create_conversation):
         mock_create_conversation.return_value = {
             "conversation_id": 123,
@@ -646,7 +646,7 @@ class TestConversationManagementService(unittest.TestCase):
             "New Chat", self.user_id, agent_id=7, chat_mode="planning"
         )
 
-    @patch('backend.services.conversation_management_service.create_conversation')
+    @patch('management.services.conversation.service.create_conversation')
     def test_create_new_conversation_with_runtime_metadata(self, mock_create_conversation):
         mock_create_conversation.return_value = {
             "conversation_id": 123,
@@ -671,7 +671,7 @@ class TestConversationManagementService(unittest.TestCase):
             runtime_metadata={"session": "s1"},
         )
 
-    @patch('backend.services.conversation_management_service.update_conversation_agent_id')
+    @patch('management.services.conversation.service.update_conversation_agent_id')
     def test_update_conversation_agent_id_service_success(self, mock_update_conversation_agent_id):
         # Setup
         mock_update_conversation_agent_id.return_value = True
@@ -684,7 +684,7 @@ class TestConversationManagementService(unittest.TestCase):
         mock_update_conversation_agent_id.assert_called_once_with(
             123, 7, self.user_id)
 
-    @patch('backend.services.conversation_management_service.update_conversation_agent_id')
+    @patch('management.services.conversation.service.update_conversation_agent_id')
     def test_update_conversation_agent_id_service_not_found(self, mock_update_conversation_agent_id):
         # Setup
         mock_update_conversation_agent_id.return_value = False
@@ -697,7 +697,7 @@ class TestConversationManagementService(unittest.TestCase):
         mock_update_conversation_agent_id.assert_called_once_with(
             123, 7, self.user_id)
 
-    @patch('backend.services.conversation_management_service.update_conversation_agent_id')
+    @patch('management.services.conversation.service.update_conversation_agent_id')
     def test_update_conversation_agent_id_service_database_error(self, mock_update_conversation_agent_id):
         # Setup
         mock_update_conversation_agent_id.side_effect = Exception("database down")
@@ -710,7 +710,7 @@ class TestConversationManagementService(unittest.TestCase):
         mock_update_conversation_agent_id.assert_called_once_with(
             123, 7, self.user_id)
 
-    @patch('backend.services.conversation_management_service.update_conversation_chat_mode')
+    @patch('management.services.conversation.service.update_conversation_chat_mode')
     def test_update_conversation_chat_mode_service_success(self, mock_update_conversation_chat_mode):
         mock_update_conversation_chat_mode.return_value = True
 
@@ -723,7 +723,7 @@ class TestConversationManagementService(unittest.TestCase):
             user_id=self.user_id,
         )
 
-    @patch('backend.services.conversation_management_service.update_conversation_chat_mode')
+    @patch('management.services.conversation.service.update_conversation_chat_mode')
     def test_update_conversation_chat_mode_service_not_found(self, mock_update_conversation_chat_mode):
         mock_update_conversation_chat_mode.return_value = False
 
@@ -737,7 +737,7 @@ class TestConversationManagementService(unittest.TestCase):
             user_id=self.user_id,
         )
 
-    @patch('backend.services.conversation_management_service.update_conversation_chat_mode')
+    @patch('management.services.conversation.service.update_conversation_chat_mode')
     def test_update_conversation_chat_mode_service_database_error(self, mock_update_conversation_chat_mode):
         mock_update_conversation_chat_mode.side_effect = Exception("database down")
 
@@ -751,7 +751,7 @@ class TestConversationManagementService(unittest.TestCase):
             user_id=self.user_id,
         )
 
-    @patch('backend.services.conversation_management_service.update_conversation_chat_mode')
+    @patch('management.services.conversation.service.update_conversation_chat_mode')
     def test_update_conversation_chat_mode_service_propagates_value_error(
         self, mock_update_conversation_chat_mode
     ):
@@ -770,7 +770,7 @@ class TestConversationManagementService(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "Invalid chat_mode 'invalid'"):
             update_conversation_chat_mode_service(123, "invalid", self.user_id)
 
-    @patch('backend.services.conversation_management_service.get_conversation')
+    @patch('management.services.conversation.service.get_conversation')
     def test_get_conversation_service_preserves_authorization_scope(self, mock_get_conversation):
         mock_get_conversation.return_value = {"conversation_id": 123}
 
@@ -783,7 +783,7 @@ class TestConversationManagementService(unittest.TestCase):
             tenant_id="tenant-1",
         )
 
-    @patch('backend.services.conversation_management_service.rename_conversation')
+    @patch('management.services.conversation.service.rename_conversation')
     def test_rename_conversation_service(self, mock_rename_conversation):
         # Setup
         mock_rename_conversation.return_value = True
@@ -795,7 +795,7 @@ class TestConversationManagementService(unittest.TestCase):
         mock_rename_conversation.assert_called_once_with(
             123, "Updated Title", self.user_id)
 
-    @patch('backend.services.conversation_management_service.delete_conversation')
+    @patch('management.services.conversation.service.delete_conversation')
     def test_delete_conversation_service(self, mock_delete_conversation):
         # Setup
         mock_delete_conversation.return_value = True
@@ -806,7 +806,7 @@ class TestConversationManagementService(unittest.TestCase):
         # Assert
         mock_delete_conversation.assert_called_once_with(123, self.user_id)
 
-    @patch('backend.services.conversation_management_service.get_conversation_history')
+    @patch('management.services.conversation.service.get_conversation_history')
     def test_get_conversation_history_service(self, mock_get_conversation_history):
         # Setup
         mock_history = {
@@ -874,7 +874,7 @@ class TestConversationManagementService(unittest.TestCase):
         self.assertEqual(
             assistant_message["message"][0]["content"], "AI stands for Artificial Intelligence.")
 
-    @patch('backend.services.conversation_management_service.get_conversation_history')
+    @patch('management.services.conversation.service.get_conversation_history')
     def test_get_conversation_history_service_no_duplicate_final_answer(self, mock_get_conversation_history):
         """When final_answer unit already exists in DB, it should not be duplicated."""
         # Setup: assistant message already has a final_answer unit in DB
@@ -908,7 +908,7 @@ class TestConversationManagementService(unittest.TestCase):
         self.assertEqual(
             final_answer_units[0]["content"], "The capital of France is Paris.")
 
-    @patch('backend.services.conversation_management_service.get_conversation_history')
+    @patch('management.services.conversation.service.get_conversation_history')
     def test_get_conversation_history_service_returns_history_summary_unit(
             self, mock_get_conversation_history):
         """History API preserves summary units for frontend event rendering."""
@@ -939,7 +939,7 @@ class TestConversationManagementService(unittest.TestCase):
             "invocation_id": None,
         }])
 
-    @patch('backend.services.conversation_management_service.get_conversation_history')
+    @patch('management.services.conversation.service.get_conversation_history')
     def test_get_conversation_history_service_skips_misplaced_history_summary_unit(
             self, mock_get_conversation_history):
         """Display-only duplicates attached after their coverage are ignored."""
@@ -966,7 +966,7 @@ class TestConversationManagementService(unittest.TestCase):
             if unit["type"] == "history_summary"]
         self.assertEqual(summary_units, [])
 
-    @patch('backend.services.conversation_management_service.get_conversation_history')
+    @patch('management.services.conversation.service.get_conversation_history')
     def test_get_conversation_history_service_restores_tool_metadata(
             self, mock_get_conversation_history):
         """Tool units should expose persisted metadata needed by the history UI."""
@@ -1001,7 +1001,7 @@ class TestConversationManagementService(unittest.TestCase):
         self.assertEqual(tool_unit["unit_index"], 2)
         self.assertEqual(tool_unit["unit_status"], "completed")
 
-    @patch('backend.services.conversation_management_service.get_conversation_history')
+    @patch('management.services.conversation.service.get_conversation_history')
     def test_get_conversation_history_service_preserves_invalid_tool_json(
             self, mock_get_conversation_history):
         """Tool units with invalid JSON should retain their original content."""
@@ -1031,9 +1031,9 @@ class TestConversationManagementService(unittest.TestCase):
         self.assertNotIn("tool_name", tool_unit)
         self.assertNotIn("tool_arguments", tool_unit)
 
-    @patch('backend.services.conversation_management_service.get_conversation')
-    @patch('backend.services.conversation_management_service.get_source_searches_by_message')
-    @patch('backend.services.conversation_management_service.get_source_images_by_message')
+    @patch('management.services.conversation.service.get_conversation')
+    @patch('management.services.conversation.service.get_source_searches_by_message')
+    @patch('management.services.conversation.service.get_source_images_by_message')
     def test_get_sources_service_by_message(self, mock_get_images, mock_get_searches, mock_get_conversation):
         # Setup
         mock_get_conversation.return_value = {
@@ -1087,7 +1087,7 @@ class TestConversationManagementService(unittest.TestCase):
         self.assertEqual(result["data"]["images"][0],
                          "https://example.com/image.jpg")
 
-    @patch('backend.services.conversation_management_service.update_message_opinion')
+    @patch('management.services.conversation.service.update_message_opinion')
     def test_update_message_opinion_service(self, mock_update_opinion):
         # Setup
         mock_update_opinion.return_value = True
@@ -1098,7 +1098,7 @@ class TestConversationManagementService(unittest.TestCase):
         # Assert
         mock_update_opinion.assert_called_once_with(123, "Y")
 
-    @patch('backend.services.conversation_management_service.update_message_opinion')
+    @patch('management.services.conversation.service.update_message_opinion')
     def test_update_message_opinion_service_failure(self, mock_update_opinion):
         """Ensure service raises exception when DB update fails (returns False)."""
         # Setup failure
@@ -1110,7 +1110,7 @@ class TestConversationManagementService(unittest.TestCase):
         self.assertIn("Message does not exist", str(context.exception))
         mock_update_opinion.assert_called_once_with(123, "Y")
 
-    @patch('backend.services.conversation_management_service.get_message_id_by_index')
+    @patch('management.services.conversation.service.get_message_id_by_index')
     def test_get_message_id_by_index_impl_success(self, mock_get_message):
         """Should return message_id when found."""
         mock_get_message.return_value = 999
@@ -1119,7 +1119,7 @@ class TestConversationManagementService(unittest.TestCase):
         self.assertEqual(result, 999)
         mock_get_message.assert_called_once_with(123, 2)
 
-    @patch('backend.services.conversation_management_service.get_message_id_by_index')
+    @patch('management.services.conversation.service.get_message_id_by_index')
     def test_get_message_id_by_index_impl_not_found(self, mock_get_message):
         """Should raise Exception when message_id not found."""
         mock_get_message.return_value = None
@@ -1130,9 +1130,9 @@ class TestConversationManagementService(unittest.TestCase):
         mock_get_message.assert_called_once_with(123, 2)
 
     # Tests for generate_conversation_title_service
-    @patch('backend.services.conversation_management_service.get_conversation', return_value={"conversation_title": "New Conversation", "update_time": None})
-    @patch('backend.services.conversation_management_service.call_llm_for_title')
-    @patch('backend.services.conversation_management_service.update_conversation_title')
+    @patch('management.services.conversation.service.get_conversation', return_value={"conversation_title": "New Conversation", "update_time": None})
+    @patch('management.services.conversation.service.call_llm_for_title')
+    @patch('management.services.conversation.service.update_conversation_title')
     def test_generate_conversation_title_service(self, mock_update_title, mock_call_llm, mock_read):
         """Test generate_conversation_title_service generates title from question."""
         # Setup
@@ -1151,9 +1151,9 @@ class TestConversationManagementService(unittest.TestCase):
         mock_update_title.assert_called_once_with(
             123, "Python Tips", self.user_id, expected_snapshot={"conversation_title": "New Conversation", "update_time": None})
 
-    @patch('backend.services.conversation_management_service.get_conversation', return_value={"conversation_title": "New Conversation", "update_time": None})
-    @patch('backend.services.conversation_management_service.call_llm_for_title')
-    @patch('backend.services.conversation_management_service.update_conversation_title')
+    @patch('management.services.conversation.service.get_conversation', return_value={"conversation_title": "New Conversation", "update_time": None})
+    @patch('management.services.conversation.service.call_llm_for_title')
+    @patch('management.services.conversation.service.update_conversation_title')
     def test_generate_conversation_title_service_forwards_model_id(
             self, mock_update_title, mock_call_llm, mock_read):
         mock_call_llm.return_value = "Python Tips"
@@ -1167,9 +1167,9 @@ class TestConversationManagementService(unittest.TestCase):
             "How to use Python?", self.tenant_id, "en", 7)
         mock_update_title.assert_called_once_with(123, "Python Tips", self.user_id, expected_snapshot={"conversation_title": "New Conversation", "update_time": None})
 
-    @patch('backend.services.conversation_management_service.get_conversation', return_value={"conversation_title": "New Conversation", "update_time": None})
-    @patch('backend.services.conversation_management_service.call_llm_for_title')
-    @patch('backend.services.conversation_management_service.update_conversation_title')
+    @patch('management.services.conversation.service.get_conversation', return_value={"conversation_title": "New Conversation", "update_time": None})
+    @patch('management.services.conversation.service.call_llm_for_title')
+    @patch('management.services.conversation.service.update_conversation_title')
     def test_generate_conversation_title_service_does_not_persist_validation_failure(
             self, mock_update_title, mock_call_llm, mock_read):
         mock_call_llm.side_effect = ValidationError("Selected model is unavailable")
@@ -1184,10 +1184,10 @@ class TestConversationManagementService(unittest.TestCase):
 class TestCallLlmForTitleMonitoring(unittest.TestCase):
     """Verify call_llm_for_title sets monitoring context and operation."""
 
-    @patch('backend.services.conversation_management_service.get_llm_adapter_from_config')
-    @patch('backend.services.conversation_management_service.tenant_config_manager')
-    @patch('backend.services.conversation_management_service.set_monitoring_operation')
-    @patch('backend.services.conversation_management_service.set_monitoring_context')
+    @patch('management.services.conversation.service.get_llm_adapter_from_config')
+    @patch('management.services.conversation.service.tenant_config_manager')
+    @patch('management.services.conversation.service.set_monitoring_operation')
+    @patch('management.services.conversation.service.set_monitoring_context')
     def test_sets_monitoring_context_with_tenant_id(
             self, mock_ctx, mock_op, mock_config_mgr, mock_model_cls):
         mock_config_mgr.get_model_config.return_value = {
@@ -1203,10 +1203,10 @@ class TestCallLlmForTitleMonitoring(unittest.TestCase):
 
         mock_ctx.assert_called_once_with(tenant_id="tenant-123", user_id=None)
 
-    @patch('backend.services.conversation_management_service.get_llm_adapter_from_config')
-    @patch('backend.services.conversation_management_service.tenant_config_manager')
-    @patch('backend.services.conversation_management_service.set_monitoring_operation')
-    @patch('backend.services.conversation_management_service.set_monitoring_context')
+    @patch('management.services.conversation.service.get_llm_adapter_from_config')
+    @patch('management.services.conversation.service.tenant_config_manager')
+    @patch('management.services.conversation.service.set_monitoring_operation')
+    @patch('management.services.conversation.service.set_monitoring_context')
     def test_sets_monitoring_operation_with_display_name(
             self, mock_ctx, mock_op, mock_config_mgr, mock_model_cls):
         mock_config_mgr.get_model_config.return_value = {
@@ -1242,7 +1242,7 @@ class TestSaveMessageEdgeCases(unittest.TestCase):
 
     def test_save_message_with_final_answer_type(self):
         """Should extract content from final_answer unit type."""
-        with patch('backend.services.conversation_management_service.create_conversation_message') as mock_create:
+        with patch('management.services.conversation.service.create_conversation_message') as mock_create:
             mock_create.return_value = 1
             message_request = MessageRequest(
                 conversation_id=456,
@@ -1258,7 +1258,7 @@ class TestSaveMessageEdgeCases(unittest.TestCase):
 
     def test_save_message_empty_units_returns_empty_string(self):
         """Should return empty string content when no string/final_answer units."""
-        with patch('backend.services.conversation_management_service.create_conversation_message') as mock_create:
+        with patch('management.services.conversation.service.create_conversation_message') as mock_create:
             mock_create.return_value = 1
             message_request = MessageRequest(
                 conversation_id=456,
@@ -1274,7 +1274,7 @@ class TestSaveMessageEdgeCases(unittest.TestCase):
 
     def test_save_message_no_units_returns_empty_content(self):
         """Should return empty string when message_units is empty list."""
-        with patch('backend.services.conversation_management_service.create_conversation_message') as mock_create:
+        with patch('management.services.conversation.service.create_conversation_message') as mock_create:
             mock_create.return_value = 1
             message_request = MessageRequest(
                 conversation_id=456,
@@ -1292,31 +1292,31 @@ class TestSaveMessageEdgeCases(unittest.TestCase):
 class TestUpdateFunctions(unittest.TestCase):
     """Test update pass-through functions."""
 
-    @patch('backend.services.conversation_management_service.update_conversation_message_status')
+    @patch('management.services.conversation.service.update_conversation_message_status')
     def test_update_message_status(self, mock_update):
         """Should call update_conversation_message_status with correct params."""
-        from backend.services.conversation_management_service import update_message_status
+        from management.services.conversation.service import update_message_status
         update_message_status(123, "completed", "user-1")
         mock_update.assert_called_once_with(123, "completed", user_id="user-1")
 
-    @patch('backend.services.conversation_management_service.update_message_unit_status')
+    @patch('management.services.conversation.service.update_message_unit_status')
     def test_update_unit_status(self, mock_update):
         """Should call update_message_unit_status with correct params."""
-        from backend.services.conversation_management_service import update_unit_status
+        from management.services.conversation.service import update_unit_status
         update_unit_status(456, "streaming", "user-1")
         mock_update.assert_called_once_with(456, "streaming", user_id="user-1")
 
-    @patch('backend.services.conversation_management_service.update_message_unit_content')
+    @patch('management.services.conversation.service.update_message_unit_content')
     def test_update_unit_content(self, mock_update):
         """Should call update_message_unit_content with correct params."""
-        from backend.services.conversation_management_service import update_unit_content
+        from management.services.conversation.service import update_unit_content
         update_unit_content(789, "new content", "user-1")
         mock_update.assert_called_once_with(789, "new content", user_id="user-1")
 
-    @patch('backend.services.conversation_management_service.update_conversation_message_content')
+    @patch('management.services.conversation.service.update_conversation_message_content')
     def test_update_message_content(self, mock_update):
         """Should call update_conversation_message_content with correct params."""
-        from backend.services.conversation_management_service import update_message_content
+        from management.services.conversation.service import update_message_content
         update_message_content(101, "updated message", "user-1")
         mock_update.assert_called_once_with(101, "updated message", user_id="user-1")
 
@@ -1324,9 +1324,9 @@ class TestUpdateFunctions(unittest.TestCase):
 class TestCallLlmForTitleEdgeCases(unittest.TestCase):
     """Test edge cases for call_llm_for_title."""
 
-    @patch('backend.services.conversation_management_service.get_llm_adapter_from_config')
-    @patch('backend.services.conversation_management_service.compose_auxiliary_prompt')
-    @patch('backend.services.conversation_management_service.tenant_config_manager.get_model_config')
+    @patch('management.services.conversation.service.get_llm_adapter_from_config')
+    @patch('management.services.conversation.service.compose_auxiliary_prompt')
+    @patch('management.services.conversation.service.tenant_config_manager.get_model_config')
     def test_modelengine_factory_uses_flat_messages(self, mock_get_config, mock_get_prompt, mock_model):
         """Should flatten messages when model_factory is modelengine."""
         mock_get_config.return_value = {
@@ -1351,9 +1351,9 @@ class TestCallLlmForTitleEdgeCases(unittest.TestCase):
             self.assertIn("role", msg)
             self.assertIn("content", msg)
 
-    @patch('backend.services.conversation_management_service.get_llm_adapter_from_config')
-    @patch('backend.services.conversation_management_service.compose_auxiliary_prompt')
-    @patch('backend.services.conversation_management_service.tenant_config_manager.get_model_config')
+    @patch('management.services.conversation.service.get_llm_adapter_from_config')
+    @patch('management.services.conversation.service.compose_auxiliary_prompt')
+    @patch('management.services.conversation.service.tenant_config_manager.get_model_config')
     def test_empty_response_returns_default_zh_title(self, mock_get_config, mock_get_prompt, mock_model):
         """Should return default Chinese title when response is empty."""
         mock_get_config.return_value = {
@@ -1372,9 +1372,9 @@ class TestCallLlmForTitleEdgeCases(unittest.TestCase):
         self.assertEqual(result, "新对话")  # DEFAULT_ZH_TITLE
         self.assertIn("title_generation: unknown -> 新对话", "\n".join(logs.output))
 
-    @patch('backend.services.conversation_management_service.get_llm_adapter_from_config')
-    @patch('backend.services.conversation_management_service.compose_auxiliary_prompt')
-    @patch('backend.services.conversation_management_service.tenant_config_manager.get_model_config')
+    @patch('management.services.conversation.service.get_llm_adapter_from_config')
+    @patch('management.services.conversation.service.compose_auxiliary_prompt')
+    @patch('management.services.conversation.service.tenant_config_manager.get_model_config')
     def test_none_response_returns_default_zh_title(self, mock_get_config, mock_get_prompt, mock_model):
         """Should return default Chinese title when response is None."""
         mock_get_config.return_value = {
@@ -1391,9 +1391,9 @@ class TestCallLlmForTitleEdgeCases(unittest.TestCase):
         result = call_llm_for_title("test", "tenant-1", "zh")
         self.assertEqual(result, "新对话")
 
-    @patch('backend.services.conversation_management_service.get_llm_adapter_from_config')
-    @patch('backend.services.conversation_management_service.compose_auxiliary_prompt')
-    @patch('backend.services.conversation_management_service.tenant_config_manager.get_model_config')
+    @patch('management.services.conversation.service.get_llm_adapter_from_config')
+    @patch('management.services.conversation.service.compose_auxiliary_prompt')
+    @patch('management.services.conversation.service.tenant_config_manager.get_model_config')
     def test_english_title_response(self, mock_get_config, mock_get_prompt, mock_model):
         """Should return default English title for English language."""
         mock_get_config.return_value = {
@@ -1410,9 +1410,9 @@ class TestCallLlmForTitleEdgeCases(unittest.TestCase):
         result = call_llm_for_title("test", "tenant-1", "en")
         self.assertEqual(result, "New Conversation")  # DEFAULT_EN_TITLE
 
-    @patch('backend.services.conversation_management_service.get_llm_adapter_from_config')
-    @patch('backend.services.conversation_management_service.compose_auxiliary_prompt')
-    @patch('backend.services.conversation_management_service.tenant_config_manager.get_model_config')
+    @patch('management.services.conversation.service.get_llm_adapter_from_config')
+    @patch('management.services.conversation.service.compose_auxiliary_prompt')
+    @patch('management.services.conversation.service.tenant_config_manager.get_model_config')
     def test_remove_think_blocks(self, mock_get_config, mock_get_prompt, mock_model):
         """Should remove think blocks from title."""
         mock_get_config.return_value = {
@@ -1429,9 +1429,9 @@ class TestCallLlmForTitleEdgeCases(unittest.TestCase):
         result = call_llm_for_title("test", "tenant-1", "zh")
         self.assertEqual(result, "Actual Title")
 
-    @patch('backend.services.conversation_management_service.get_llm_adapter_from_config')
-    @patch('backend.services.conversation_management_service.compose_auxiliary_prompt')
-    @patch('backend.services.conversation_management_service.tenant_config_manager.get_model_config')
+    @patch('management.services.conversation.service.get_llm_adapter_from_config')
+    @patch('management.services.conversation.service.compose_auxiliary_prompt')
+    @patch('management.services.conversation.service.tenant_config_manager.get_model_config')
     def test_no_model_config_returns_empty_display_name(self, mock_get_config, mock_get_prompt, mock_model):
         """Should handle None model_config gracefully."""
         mock_get_config.return_value = None
@@ -1450,11 +1450,11 @@ class TestCallLlmForTitleEdgeCases(unittest.TestCase):
 class TestUpdateConversationTitle(unittest.TestCase):
     """Test update_conversation_title function."""
 
-    @patch('backend.services.conversation_management_service.rename_conversation')
+    @patch('management.services.conversation.service.rename_conversation')
     def test_conversation_not_found_raises_error(self, mock_rename):
         """Should raise ConversationNotFoundError when conversation doesn't exist."""
         mock_rename.return_value = False
-        from backend.services.conversation_management_service import update_conversation_title
+        from management.services.conversation.service import update_conversation_title
         from consts.exceptions import ConversationNotFoundError
 
         with self.assertRaises(ConversationNotFoundError):
@@ -1464,11 +1464,11 @@ class TestUpdateConversationTitle(unittest.TestCase):
 class TestCreateNewConversation(unittest.TestCase):
     """Test create_new_conversation function."""
 
-    @patch('backend.services.conversation_management_service.create_conversation')
+    @patch('management.services.conversation.service.create_conversation')
     def test_create_conversation_exception(self, mock_create):
         """Should re-raise exception from database layer."""
         mock_create.side_effect = Exception("DB error")
-        from backend.services.conversation_management_service import create_new_conversation
+        from management.services.conversation.service import create_new_conversation
 
         with self.assertRaises(Exception) as ctx:
             create_new_conversation("Title", "user-1")
@@ -1478,21 +1478,21 @@ class TestCreateNewConversation(unittest.TestCase):
 class TestRenameConversationService(unittest.TestCase):
     """Test rename_conversation_service function."""
 
-    @patch('backend.services.conversation_management_service.rename_conversation')
+    @patch('management.services.conversation.service.rename_conversation')
     def test_rename_not_found_raises(self, mock_rename):
         """Should raise exception when conversation not found."""
         mock_rename.return_value = False
-        from backend.services.conversation_management_service import rename_conversation_service
+        from management.services.conversation.service import rename_conversation_service
 
         with self.assertRaises(Exception) as ctx:
             rename_conversation_service(123, "New Title", "user-1")
         self.assertIn("Conversation 123", str(ctx.exception))
 
-    @patch('backend.services.conversation_management_service.rename_conversation')
+    @patch('management.services.conversation.service.rename_conversation')
     def test_rename_exception(self, mock_rename):
         """Should re-raise exception from database layer."""
         mock_rename.side_effect = Exception("DB error")
-        from backend.services.conversation_management_service import rename_conversation_service
+        from management.services.conversation.service import rename_conversation_service
 
         with self.assertRaises(Exception) as ctx:
             rename_conversation_service(123, "Title", "user-1")
@@ -1502,31 +1502,31 @@ class TestRenameConversationService(unittest.TestCase):
 class TestDeleteConversationService(unittest.TestCase):
     """Test delete_conversation_service function."""
 
-    @patch('backend.services.conversation_management_service.delete_conversation')
+    @patch('management.services.conversation.service.delete_conversation')
     def test_delete_not_found_raises(self, mock_delete):
         """Should raise exception when conversation not found."""
         mock_delete.return_value = False
-        from backend.services.conversation_management_service import delete_conversation_service
+        from management.services.conversation.service import delete_conversation_service
 
         with self.assertRaises(Exception) as ctx:
             delete_conversation_service(123, "user-1")
         self.assertIn("Conversation 123", str(ctx.exception))
 
-    @patch('backend.services.conversation_management_service.delete_conversation')
+    @patch('management.services.conversation.service.delete_conversation')
     def test_delete_succeeds_without_runtime_context_cleanup(self, mock_delete):
         """Run-scoped ContextManagers require no conversation deletion cleanup."""
         mock_delete.return_value = True
-        from backend.services.conversation_management_service import delete_conversation_service
+        from management.services.conversation.service import delete_conversation_service
 
         result = delete_conversation_service(123, "user-1")
 
         self.assertTrue(result)
 
-    @patch('backend.services.conversation_management_service.delete_conversation')
+    @patch('management.services.conversation.service.delete_conversation')
     def test_delete_exception(self, mock_delete):
         """Should re-raise exception from database layer."""
         mock_delete.side_effect = Exception("DB error")
-        from backend.services.conversation_management_service import delete_conversation_service
+        from management.services.conversation.service import delete_conversation_service
 
         with self.assertRaises(Exception) as ctx:
             delete_conversation_service(123, "user-1")
@@ -1536,11 +1536,11 @@ class TestDeleteConversationService(unittest.TestCase):
 class TestDeleteConversationsBatchService(unittest.TestCase):
     """Test delete_conversations_batch_service function."""
 
-    @patch('backend.services.conversation_management_service.delete_conversations_batch')
+    @patch('management.services.conversation.service.delete_conversations_batch')
     def test_batch_delete_success(self, mock_delete_batch):
         """Returns deleted_count and failed_ids when some ids are not owned."""
         mock_delete_batch.return_value = [101, 102]
-        from backend.services.conversation_management_service import delete_conversations_batch_service
+        from management.services.conversation.service import delete_conversations_batch_service
 
         result = delete_conversations_batch_service([101, 102, 999], "user-1")
 
@@ -1548,29 +1548,29 @@ class TestDeleteConversationsBatchService(unittest.TestCase):
         self.assertEqual(result["failed_ids"], [999])
         mock_delete_batch.assert_called_once_with([101, 102, 999], "user-1")
 
-    @patch('backend.services.conversation_management_service.delete_conversations_batch')
+    @patch('management.services.conversation.service.delete_conversations_batch')
     def test_batch_delete_none_owned(self, mock_delete_batch):
         """Returns 0 deleted and all ids as failed when none owned."""
         mock_delete_batch.return_value = []
-        from backend.services.conversation_management_service import delete_conversations_batch_service
+        from management.services.conversation.service import delete_conversations_batch_service
 
         result = delete_conversations_batch_service([999], "user-1")
 
         self.assertEqual(result["deleted_count"], 0)
         self.assertEqual(result["failed_ids"], [999])
 
-    @patch('backend.services.conversation_management_service.delete_conversations_batch')
+    @patch('management.services.conversation.service.delete_conversations_batch')
     def test_batch_delete_db_exception_propagates(self, mock_delete_batch):
         """Should re-raise exception from database layer."""
         mock_delete_batch.side_effect = Exception("DB error")
-        from backend.services.conversation_management_service import delete_conversations_batch_service
+        from management.services.conversation.service import delete_conversations_batch_service
 
         with self.assertRaises(RuntimeError) as ctx:
             delete_conversations_batch_service([101], "user-1")
         self.assertIn("DB error", str(ctx.exception))
 
 
-    @patch('backend.services.conversation_management_service.delete_conversations_batch')
+    @patch('management.services.conversation.service.delete_conversations_batch')
     def test_batch_delete_invokes_automation_hook_per_id(self, mock_delete_batch):
         """on_conversation_deleted is called for each requested conversation id."""
         mock_delete_batch.return_value = [101, 102]
@@ -1580,17 +1580,17 @@ class TestDeleteConversationsBatchService(unittest.TestCase):
             def on_conversation_deleted(self, conversation_id, user_id):
                 calls.append((conversation_id, user_id))
 
-        facade_module = types.ModuleType("services.agent_automation.facade")
+        facade_module = types.ModuleType("management.services.automation.service")
         facade_module.agent_automation_facade = _Facade()
-        from backend.services.conversation_management_service import delete_conversations_batch_service
-        with patch.dict(sys.modules, {"services.agent_automation.facade": facade_module}):
+        from management.services.conversation.service import delete_conversations_batch_service
+        with patch.dict(sys.modules, {"management.services.automation.service": facade_module}):
             result = delete_conversations_batch_service([101, 102, 999], "user-1")
 
         self.assertEqual(calls, [(101, "user-1"), (102, "user-1"), (999, "user-1")])
         self.assertEqual(result, {"deleted_count": 2, "failed_ids": [999]})
         mock_delete_batch.assert_called_once_with([101, 102, 999], "user-1")
 
-    @patch('backend.services.conversation_management_service.delete_conversations_batch')
+    @patch('management.services.conversation.service.delete_conversations_batch')
     def test_batch_delete_automation_error_does_not_block(self, mock_delete_batch):
         """A failing automation cleanup is logged but does not block deletion."""
         mock_delete_batch.return_value = [101]
@@ -1599,23 +1599,23 @@ class TestDeleteConversationsBatchService(unittest.TestCase):
             def on_conversation_deleted(self, conversation_id, user_id):
                 raise RuntimeError("automation boom")
 
-        facade_module = types.ModuleType("services.agent_automation.facade")
+        facade_module = types.ModuleType("management.services.automation.service")
         facade_module.agent_automation_facade = _Facade()
-        from backend.services.conversation_management_service import delete_conversations_batch_service
-        with patch.dict(sys.modules, {"services.agent_automation.facade": facade_module}):
+        from management.services.conversation.service import delete_conversations_batch_service
+        with patch.dict(sys.modules, {"management.services.automation.service": facade_module}):
             result = delete_conversations_batch_service([101, 102], "user-1")
 
         self.assertEqual(result, {"deleted_count": 1, "failed_ids": [102]})
         mock_delete_batch.assert_called_once_with([101, 102], "user-1")
 
-    @patch('backend.services.conversation_management_service.delete_conversations_batch')
+    @patch('management.services.conversation.service.delete_conversations_batch')
     def test_batch_delete_automation_import_failure_does_not_block(self, mock_delete_batch):
         """If the automation facade cannot be imported, deletion still proceeds."""
         mock_delete_batch.return_value = [101]
-        facade_module = types.ModuleType("services.agent_automation.facade")
+        facade_module = types.ModuleType("management.services.automation.service")
         # No agent_automation_facade attribute -> `from ... import` raises AttributeError
-        from backend.services.conversation_management_service import delete_conversations_batch_service
-        with patch.dict(sys.modules, {"services.agent_automation.facade": facade_module}):
+        from management.services.conversation.service import delete_conversations_batch_service
+        with patch.dict(sys.modules, {"management.services.automation.service": facade_module}):
             result = delete_conversations_batch_service([101], "user-1")
 
         self.assertEqual(result, {"deleted_count": 1, "failed_ids": []})
@@ -1627,7 +1627,7 @@ class TestBuildStreamingMessage(unittest.TestCase):
 
     def test_returns_streaming_assistant_message(self):
         """Should return streaming message info when found."""
-        from backend.services.conversation_management_service import _build_streaming_message
+        from management.services.conversation.service import _build_streaming_message
         messages = [
             {"message_id": 1, "message_index": 0, "role": "user", "status": "completed", "message_content": "Hi"},
             {"message_id": 2, "message_index": 1, "role": "assistant", "status": "streaming",
@@ -1644,7 +1644,7 @@ class TestBuildStreamingMessage(unittest.TestCase):
 
     def test_no_streaming_message_returns_none(self):
         """Should return None when no streaming assistant message."""
-        from backend.services.conversation_management_service import _build_streaming_message
+        from management.services.conversation.service import _build_streaming_message
         messages = [
             {"message_id": 1, "role": "user", "status": "completed", "message_content": "Hi"},
             {"message_id": 2, "role": "assistant", "status": "completed", "message_content": "Done"}
@@ -1654,7 +1654,7 @@ class TestBuildStreamingMessage(unittest.TestCase):
 
     def test_empty_units_handled(self):
         """Should handle message with empty units."""
-        from backend.services.conversation_management_service import _build_streaming_message
+        from management.services.conversation.service import _build_streaming_message
         messages = [
             {"message_id": 2, "message_index": 1, "role": "assistant", "status": "streaming",
              "message_content": "Hi", "units": []}
@@ -1673,7 +1673,7 @@ def test_history_preserves_workbench_config_and_version(mocker):
         "knowledge_scope": {"local": {"mode": "override", "knowledge_ids": [11, 12]}},
     }
     mock_get = mocker.patch(
-        "backend.services.conversation_management_service.get_conversation_history",
+        "management.services.conversation.service.get_conversation_history",
         return_value={
             "conversation_id": 110, "create_time": "2026-09-08",
             "message_records": [], "search_records": [], "image_records": [],
@@ -1689,7 +1689,7 @@ def test_history_preserves_workbench_config_and_version(mocker):
 
 def test_legacy_history_has_no_workbench_config_and_version_zero(mocker):
     mocker.patch(
-        "backend.services.conversation_management_service.get_conversation_history",
+        "management.services.conversation.service.get_conversation_history",
         return_value={
             "conversation_id": 110, "create_time": "2026-09-08",
             "message_records": [], "search_records": [], "image_records": [],
@@ -1703,7 +1703,7 @@ def test_legacy_history_has_no_workbench_config_and_version_zero(mocker):
 class TestGetConversationHistoryServiceEdgeCases(unittest.TestCase):
     """Test edge cases for get_conversation_history_service."""
 
-    @patch('backend.services.conversation_management_service.get_conversation_history')
+    @patch('management.services.conversation.service.get_conversation_history')
     def test_empty_history_returns_empty_list(self, mock_get):
         """Should return list with conversation info even when message_records is empty."""
         mock_get.return_value = {
@@ -1713,14 +1713,14 @@ class TestGetConversationHistoryServiceEdgeCases(unittest.TestCase):
             "search_records": [],
             "image_records": []
         }
-        from backend.services.conversation_management_service import get_conversation_history_service
+        from management.services.conversation.service import get_conversation_history_service
         result = get_conversation_history_service(123, "user-1")
         # Returns list with conversation data even if no messages
         self.assertEqual(len(result), 1)
         self.assertEqual(result[0]["conversation_id"], "123")
         self.assertEqual(result[0]["message"], [])
 
-    @patch('backend.services.conversation_management_service.get_conversation_history')
+    @patch('management.services.conversation.service.get_conversation_history')
     def test_with_search_records(self, mock_get):
         """Should properly group search records by unit_id and message_id."""
         mock_get.return_value = {
@@ -1748,7 +1748,7 @@ class TestGetConversationHistoryServiceEdgeCases(unittest.TestCase):
             ],
             "image_records": []
         }
-        from backend.services.conversation_management_service import get_conversation_history_service
+        from management.services.conversation.service import get_conversation_history_service
         result = get_conversation_history_service(123, "user-1")
 
         # Check search is grouped by message
@@ -1768,7 +1768,7 @@ class TestGetConversationHistoryServiceEdgeCases(unittest.TestCase):
         self.assertIn("searchByUnitId", msg)
         self.assertIn("10", msg["searchByUnitId"])
 
-    @patch('backend.services.conversation_management_service.get_conversation_history')
+    @patch('management.services.conversation.service.get_conversation_history')
     def test_with_image_records(self, mock_get):
         """Should properly handle image records."""
         mock_get.return_value = {
@@ -1784,14 +1784,14 @@ class TestGetConversationHistoryServiceEdgeCases(unittest.TestCase):
                 {"message_id": 2, "image_url": "http://x.com/img2.jpg"}
             ]
         }
-        from backend.services.conversation_management_service import get_conversation_history_service
+        from management.services.conversation.service import get_conversation_history_service
         result = get_conversation_history_service(123, "user-1")
 
         msg = result[0]["message"][0]
         self.assertIn("picture", msg)
         self.assertEqual(len(msg["picture"]), 2)
 
-    @patch('backend.services.conversation_management_service.get_conversation_history')
+    @patch('management.services.conversation.service.get_conversation_history')
     def test_with_search_content_placeholder(self, mock_get):
         """Should convert search_content_placeholder units correctly."""
         mock_get.return_value = {
@@ -1806,7 +1806,7 @@ class TestGetConversationHistoryServiceEdgeCases(unittest.TestCase):
             "search_records": [],
             "image_records": []
         }
-        from backend.services.conversation_management_service import get_conversation_history_service
+        from management.services.conversation.service import get_conversation_history_service
         result = get_conversation_history_service(123, "user-1")
 
         msg = result[0]["message"][0]
@@ -1817,7 +1817,7 @@ class TestGetConversationHistoryServiceEdgeCases(unittest.TestCase):
         self.assertTrue(content["placeholder"])
         self.assertEqual(content["unit_id"], 10)
 
-    @patch('backend.services.conversation_management_service.get_conversation_history')
+    @patch('management.services.conversation.service.get_conversation_history')
     def test_with_string_published_date(self, mock_get):
         """Should handle string published_date in search records."""
         mock_get.return_value = {
@@ -1836,14 +1836,14 @@ class TestGetConversationHistoryServiceEdgeCases(unittest.TestCase):
             ],
             "image_records": []
         }
-        from backend.services.conversation_management_service import get_conversation_history_service
+        from management.services.conversation.service import get_conversation_history_service
         result = get_conversation_history_service(123, "user-1")
 
         msg = result[0]["message"][0]
         search = msg["search"][0]
         self.assertEqual(search["published_date"], "2023-06-15")
 
-    @patch('backend.services.conversation_management_service.get_conversation_history')
+    @patch('management.services.conversation.service.get_conversation_history')
     def test_includes_streaming_message(self, mock_get):
         """Should include streaming_message in result."""
         mock_get.return_value = {
@@ -1859,14 +1859,14 @@ class TestGetConversationHistoryServiceEdgeCases(unittest.TestCase):
             "search_records": [],
             "image_records": []
         }
-        from backend.services.conversation_management_service import get_conversation_history_service
+        from management.services.conversation.service import get_conversation_history_service
         result = get_conversation_history_service(123, "user-1")
 
         self.assertIn("streaming_message", result[0])
         self.assertEqual(result[0]["streaming_message"]["message_id"], 2)
         self.assertEqual(result[0]["streaming_message"]["status"], "streaming")
 
-    @patch('backend.services.conversation_management_service.get_conversation_history')
+    @patch('management.services.conversation.service.get_conversation_history')
     def test_user_message_with_minio_files(self, mock_get):
         """Should include minio_files in user messages."""
         mock_get.return_value = {
@@ -1879,14 +1879,14 @@ class TestGetConversationHistoryServiceEdgeCases(unittest.TestCase):
             "search_records": [],
             "image_records": []
         }
-        from backend.services.conversation_management_service import get_conversation_history_service
+        from management.services.conversation.service import get_conversation_history_service
         result = get_conversation_history_service(123, "user-1")
 
         msg = result[0]["message"][0]
         self.assertIn("minio_files", msg)
         self.assertEqual(msg["minio_files"], ["file1.pdf"])
 
-    @patch('backend.services.conversation_management_service.get_conversation_history')
+    @patch('management.services.conversation.service.get_conversation_history')
     def test_assistant_message_with_minio_files(self, mock_get):
         """Should include minio_files in assistant messages."""
         mock_get.return_value = {
@@ -1899,7 +1899,7 @@ class TestGetConversationHistoryServiceEdgeCases(unittest.TestCase):
             "search_records": [],
             "image_records": []
         }
-        from backend.services.conversation_management_service import get_conversation_history_service
+        from management.services.conversation.service import get_conversation_history_service
         result = get_conversation_history_service(123, "user-1")
 
         msg = result[0]["message"][0]
@@ -1910,17 +1910,17 @@ class TestGetConversationHistoryServiceEdgeCases(unittest.TestCase):
 class TestGetSourcesServiceEdgeCases(unittest.TestCase):
     """Test edge cases for get_sources_service."""
 
-    @patch('backend.services.conversation_management_service.get_conversation')
+    @patch('management.services.conversation.service.get_conversation')
     def test_conversation_not_found_returns_404(self, mock_get_conv):
         """Should return 404 when conversation doesn't exist."""
         mock_get_conv.return_value = None
-        from backend.services.conversation_management_service import get_sources_service
+        from management.services.conversation.service import get_sources_service
         result = get_sources_service(123, None, user_id="user-1")
         self.assertEqual(result["code"], 404)
         self.assertIn("Conversation 123", result["message"])
 
-    @patch('backend.services.conversation_management_service.get_source_images_by_conversation')
-    @patch('backend.services.conversation_management_service.get_conversation')
+    @patch('management.services.conversation.service.get_source_images_by_conversation')
+    @patch('management.services.conversation.service.get_conversation')
     def test_get_images_by_conversation(self, mock_get_conv, mock_get_images):
         """Should get images by conversation_id."""
         mock_get_conv.return_value = {"conversation_id": 123}
@@ -1928,13 +1928,13 @@ class TestGetSourcesServiceEdgeCases(unittest.TestCase):
             {"message_id": 1, "image_url": "http://x.com/img1.jpg"},
             {"message_id": 2, "image_url": "http://x.com/img2.jpg"}
         ]
-        from backend.services.conversation_management_service import get_sources_service
+        from management.services.conversation.service import get_sources_service
         result = get_sources_service(123, None, source_type="image", user_id="user-1")
         self.assertEqual(result["code"], 0)
         self.assertEqual(len(result["data"]["images"]), 2)
 
-    @patch('backend.services.conversation_management_service.get_source_searches_by_conversation')
-    @patch('backend.services.conversation_management_service.get_conversation')
+    @patch('management.services.conversation.service.get_source_searches_by_conversation')
+    @patch('management.services.conversation.service.get_conversation')
     def test_get_searches_by_conversation_includes_message_id(self, mock_get_conv, mock_get_searches):
         """Should include message_id in search items when querying by conversation."""
         mock_get_conv.return_value = {"conversation_id": 123}
@@ -1944,31 +1944,31 @@ class TestGetSourcesServiceEdgeCases(unittest.TestCase):
              "published_date": datetime(2023, 1, 1), "score_overall": 0.9,
              "score_accuracy": None, "score_semantic": None}
         ]
-        from backend.services.conversation_management_service import get_sources_service
+        from management.services.conversation.service import get_sources_service
         result = get_sources_service(123, None, source_type="search", user_id="user-1")
 
         search_item = result["data"]["searches"][0]
         self.assertIn("message_id", search_item)
         self.assertEqual(search_item["message_id"], 1)
 
-    @patch('backend.services.conversation_management_service.get_conversation')
-    @patch('backend.services.conversation_management_service.get_source_searches_by_conversation')
-    @patch('backend.services.conversation_management_service.get_source_images_by_conversation')
+    @patch('management.services.conversation.service.get_conversation')
+    @patch('management.services.conversation.service.get_source_searches_by_conversation')
+    @patch('management.services.conversation.service.get_source_images_by_conversation')
     def test_no_message_id_uses_conversation_id(self, mock_get_images, mock_get_searches, mock_get_conv):
         """When message_id is None but conversation_id is provided."""
         mock_get_conv.return_value = {"conversation_id": 123}
         mock_get_images.return_value = []
         mock_get_searches.return_value = []
-        from backend.services.conversation_management_service import get_sources_service
+        from management.services.conversation.service import get_sources_service
         # Just ensure it doesn't raise
         result = get_sources_service(conversation_id=123, message_id=None, source_type="all", user_id="user-1")
         self.assertEqual(result["code"], 0)
 
-    @patch('backend.services.conversation_management_service.get_source_searches_by_message')
+    @patch('management.services.conversation.service.get_source_searches_by_message')
     def test_get_sources_exception_handling(self, mock_get):
         """Should handle exceptions and return code 500."""
         mock_get.side_effect = Exception("DB error")
-        from backend.services.conversation_management_service import get_sources_service
+        from management.services.conversation.service import get_sources_service
         result = get_sources_service(None, 123, source_type="search", user_id="user-1")
         self.assertEqual(result["code"], 500)
         self.assertIn("DB error", result["message"])
@@ -1977,13 +1977,13 @@ class TestGetSourcesServiceEdgeCases(unittest.TestCase):
 class TestGenerateConversationTitleServiceEdgeCases(unittest.TestCase):
     """Test edge cases for generate_conversation_title_service."""
 
-    @patch('backend.services.conversation_management_service.get_conversation', return_value={"conversation_title": "New Conversation", "update_time": None})
-    @patch('backend.services.conversation_management_service.update_conversation_title')
-    @patch('backend.services.conversation_management_service.call_llm_for_title')
+    @patch('management.services.conversation.service.get_conversation', return_value={"conversation_title": "New Conversation", "update_time": None})
+    @patch('management.services.conversation.service.update_conversation_title')
+    @patch('management.services.conversation.service.call_llm_for_title')
     def test_title_generation_exception(self, mock_call_llm, mock_update_title, mock_read):
         """Should re-raise exception when title generation fails."""
         mock_call_llm.side_effect = Exception("LLM error")
-        from backend.services.conversation_management_service import generate_conversation_title_service
+        from management.services.conversation.service import generate_conversation_title_service
         import asyncio
 
         with self.assertRaises(Exception) as ctx:
@@ -1996,38 +1996,38 @@ class TestSaveSkillFilesToConversation(unittest.TestCase):
 
     def test_empty_file_list_returns_false(self):
         """Should return False when skill_file_uploads is empty."""
-        from backend.services.conversation_management_service import save_skill_files_to_conversation
+        from management.services.conversation.service import save_skill_files_to_conversation
         result = save_skill_files_to_conversation(123, [], "user-1")
         self.assertFalse(result)
 
-    @patch('backend.services.conversation_management_service.update_message_minio_files')
-    @patch('backend.services.conversation_management_service.get_latest_assistant_message_id')
+    @patch('management.services.conversation.service.update_message_minio_files')
+    @patch('management.services.conversation.service.get_latest_assistant_message_id')
     def test_no_assistant_message_returns_false(self, mock_get_msg_id, mock_update):
         """Should return False when no assistant message found."""
         mock_get_msg_id.return_value = None
-        from backend.services.conversation_management_service import save_skill_files_to_conversation
+        from management.services.conversation.service import save_skill_files_to_conversation
         result = save_skill_files_to_conversation(123, [{"name": "file.pdf"}], "user-1")
         self.assertFalse(result)
         mock_update.assert_not_called()
 
-    @patch('backend.services.conversation_management_service.update_message_minio_files')
-    @patch('backend.services.conversation_management_service.get_latest_assistant_message_id')
+    @patch('management.services.conversation.service.update_message_minio_files')
+    @patch('management.services.conversation.service.get_latest_assistant_message_id')
     def test_success_returns_true(self, mock_get_msg_id, mock_update):
         """Should return True on successful update."""
         mock_get_msg_id.return_value = 456
         mock_update.return_value = True
-        from backend.services.conversation_management_service import save_skill_files_to_conversation
+        from management.services.conversation.service import save_skill_files_to_conversation
         result = save_skill_files_to_conversation(123, [{"name": "file.pdf"}], "user-1")
         self.assertTrue(result)
         mock_update.assert_called_once_with(456, [{"name": "file.pdf"}])
 
-    @patch('backend.services.conversation_management_service.update_message_minio_files')
-    @patch('backend.services.conversation_management_service.get_latest_assistant_message_id')
+    @patch('management.services.conversation.service.update_message_minio_files')
+    @patch('management.services.conversation.service.get_latest_assistant_message_id')
     def test_exception_returns_false(self, mock_get_msg_id, mock_update):
         """Should return False when update raises exception."""
         mock_get_msg_id.return_value = 456
         mock_update.side_effect = Exception("DB error")
-        from backend.services.conversation_management_service import save_skill_files_to_conversation
+        from management.services.conversation.service import save_skill_files_to_conversation
         result = save_skill_files_to_conversation(123, [{"name": "file.pdf"}], "user-1")
         self.assertFalse(result)
 
@@ -2036,10 +2036,10 @@ def test_missing_message_raises_not_found_domain_error():
     import pytest
     from consts.exceptions import ConversationNotFoundError
 
-    with patch('backend.services.conversation_management_service.update_message_opinion', return_value=False):
+    with patch('management.services.conversation.service.update_message_opinion', return_value=False):
         with pytest.raises(ConversationNotFoundError):
             update_message_opinion_service(123, "Y")
-    with patch('backend.services.conversation_management_service.get_message_id_by_index', return_value=None):
+    with patch('management.services.conversation.service.get_message_id_by_index', return_value=None):
         with pytest.raises(ConversationNotFoundError):
             asyncio.run(get_message_id_by_index_impl(123, 0))
 
@@ -2048,7 +2048,7 @@ def test_message_database_failure_preserves_unexpected_error():
     import pytest
 
     failure = RuntimeError("database unavailable")
-    with patch('backend.services.conversation_management_service.update_message_opinion', side_effect=failure):
+    with patch('management.services.conversation.service.update_message_opinion', side_effect=failure):
         with pytest.raises(RuntimeError) as error:
             update_message_opinion_service(123, "Y")
     assert error.value is failure

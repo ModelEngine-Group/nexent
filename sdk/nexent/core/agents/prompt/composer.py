@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """Run-scoped Agent prompt rendering and context composition."""
 
 from dataclasses import dataclass
@@ -95,9 +97,7 @@ class AgentPromptComposer:
 
     def compose_context_inputs(
         self,
-        duty: Optional[str] = None,
-        constraint: Optional[str] = None,
-        few_shots: Optional[str] = None,
+        duty_prompt: Optional[str] = None,
         language: str = "zh",
         is_manager: bool = True,
         enable_planning: bool = False,
@@ -125,7 +125,7 @@ class AgentPromptComposer:
         include_app_context: bool = True,
         sandbox_workspace_enabled: bool = False,
     ) -> List[ContextItemInput]:
-        """Build an authorized, naturally granular SDK context input snapshot."""
+        """Compose one complete business prompt with authorized platform and resource context."""
         inputs: List[ContextItemInput] = []
         if self.bundle.role != ("manager" if is_manager else "managed") or self.bundle.language != language:
             raise ValueError("Agent prompt composer role or language does not match this run")
@@ -203,8 +203,8 @@ class AgentPromptComposer:
                     },
                 ))
 
-        if duty:
-            duty_text = composer.render_system_section("duty", duty=duty)
+        if duty_prompt:
+            duty_text = composer.render_system_section("duty", duty_prompt=duty_prompt)
             if not include_app_context:
                 duty_text = composer.render_system_section("outline_identity") + "\n" + duty_text
             add_system("duty", duty_text, 80, 10)
@@ -331,13 +331,6 @@ class AgentPromptComposer:
                         "authority": "agent",
                     },
                 ))
-        if constraint:
-            add_system(
-                "constraint",
-                composer.render_system_section("outline_constraints") + "\n"
-                + composer.render_system_section("constraint", constraint=constraint),
-                30, 30,
-            )
         if not sandbox_workspace_enabled and restricted_python_authorized_imports is not None:
             add_system(
                 "restricted_python_execution",
@@ -345,12 +338,11 @@ class AgentPromptComposer:
                 25, 32,
                 "platform",
             )
-        code_norms = composer.render_system_section("code_norms")
-        if not constraint:
-            code_norms = composer.render_system_section("outline_constraints") + "\n" + code_norms
+        code_norms = (
+            composer.render_system_section("outline_constraints") + "\n"
+            + composer.render_system_section("code_norms")
+        )
         add_system("code_norms", code_norms, 20, 31, "platform")
-        if few_shots:
-            add_system("footer", composer.render_system_section("footer", few_shots=few_shots), 10, 40)
         return inputs
 
     def compatibility_templates(self) -> dict[str, Any]:

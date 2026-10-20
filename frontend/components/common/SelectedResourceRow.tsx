@@ -1,9 +1,12 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 "use client";
 
 import { Tooltip } from "antd";
 import type { HTMLAttributes, ReactNode } from "react";
 
 import { cn } from "@/lib/utils";
+import { SELECTED_RESOURCE_HOVER } from "@/const/selectedResourceStyles";
 
 export interface SelectedResourceRowProps extends HTMLAttributes<HTMLDivElement> {
   icon: ReactNode;
@@ -27,6 +30,7 @@ export function SelectedResourceRow({
       {...props}
       className={cn(
         "flex h-12 min-w-0 items-center rounded-[4px] border border-solid border-[#dfdfdf] bg-white px-3 py-2 shadow-[0_2px_8px_rgba(0,0,0,0.08)]",
+        SELECTED_RESOURCE_HOVER,
         className
       )}
     >

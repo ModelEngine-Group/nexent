@@ -1,6 +1,7 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """Batch tag projections preserve the resource catalog authorization boundary."""
 
-from services.resource_tag_projection import project_authorized_resource_tags, TagManagementDB
+from management.services.tag.projection import project_authorized_resource_tags, TagManagementDB
 
 
 def test_tag_projection_batches_authorized_ids_and_never_expands_resources(mocker):

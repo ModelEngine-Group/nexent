@@ -215,7 +215,7 @@ def test_aidp_unified_reset_restores_knobs_and_failures(http_client):
         json={"dir_path": "/aidp/knowledge/aidp-kb-faq", "page": 1},
     )
     assert history.status_code == 200
-    assert len(history.json()["value"]) == 2
+    assert len(history.json()["value"]) == 4
     assert history.json()["next_link"] is None
 
 

@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """Unit tests for backend.apps.agent_repository_app module."""
 
 import importlib
@@ -19,9 +21,9 @@ sys.path.insert(0, backend_dir)
 
 # Load the real sync module before this API test installs shared dependency stubs.
 # Otherwise its MagicMock remains in sys.modules when sync service tests collect.
-importlib.import_module("services.official_agent_sync_service")
-sys.modules.setdefault("services.agent_repository_service", MagicMock())
-sys.modules.setdefault("utils.auth_utils", MagicMock())
+importlib.import_module("management.services.repository.agent.sync")
+sys.modules.setdefault("management.services.repository.agent.listing", MagicMock())
+sys.modules.setdefault("management.services.permission.identity.authentication_helpers", MagicMock())
 
 consts_model = types.ModuleType("consts.model")
 
@@ -63,6 +65,7 @@ consts_exceptions_mock.NotFoundException = type('NotFoundException', (Exception,
 consts_exceptions_mock.ValidationError = type('ValidationError', (Exception,), {})
 consts_exceptions_mock.AppException = type('AppException', (Exception,), {})
 consts_exceptions_mock.ForbiddenError = type('ForbiddenError', (Exception,), {})
+consts_exceptions_mock.AgentToolImportError = type("AgentToolImportError", (ValueError,), {})
 sys.modules["consts.exceptions"] = consts_exceptions_mock
 
 consts_pkg = sys.modules.get("consts")
@@ -211,6 +214,7 @@ def test_list_agent_repository_listings_api_success(
         page=1,
         page_size=10,
         search=None,
+        sort_by_update_time=False,
     )
 
 
@@ -242,6 +246,7 @@ def test_list_agent_repository_listings_api_passes_agent_id(
         page=1,
         page_size=10,
         search=None,
+        sort_by_update_time=False,
     )
 
 
@@ -273,6 +278,7 @@ def test_list_agent_repository_listings_api_passes_pending_review_status(
         page=1,
         page_size=10,
         search=None,
+        sort_by_update_time=False,
     )
 
 
@@ -312,6 +318,7 @@ def test_list_agent_repository_listings_api_passes_pagination_and_search(
         page=2,
         page_size=6,
         search="alpha",
+        sort_by_update_time=False,
     )
 
 
@@ -340,6 +347,7 @@ def test_list_agent_repository_listings_api_passes_tag_filter(
         page_size=10,
         search=None,
         tag="operations",
+        sort_by_update_time=False,
     )
 
 
@@ -402,6 +410,49 @@ def test_list_agent_repository_listings_api_passes_tag_predicates(
     assert mock_list.call_args.kwargs["tag_predicates"] == [
         _TagAssignmentFilter(definition_id=1, value_ids=[2])
     ]
+
+
+def test_list_agent_repository_listings_api_passes_sort_selector(
+    mocker,
+    mock_auth_header,
+):
+    """Test listing API forwards the latest-first sort selector to the service."""
+    mocker.patch(
+        "apps.agent_repository_app.get_current_user_id",
+        return_value=("test_user_id", "test_tenant_id"),
+    )
+    mock_list = mocker.patch(
+        "apps.agent_repository_app.list_agent_repository_listings_impl",
+        return_value={"items": []},
+    )
+
+    response = client.get(
+        "/repository/agent?sort_by_update_time=true",
+        headers=mock_auth_header,
+    )
+
+    assert response.status_code == 200
+    assert mock_list.call_args.kwargs["sort_by_update_time"] is True
+
+
+def test_list_agent_repository_listings_api_returns_main_agent_flag(
+    mocker,
+    mock_auth_header,
+):
+    """Test listing API response carries the main-agent flag through to the client."""
+    mocker.patch(
+        "apps.agent_repository_app.get_current_user_id",
+        return_value=("test_user_id", "test_tenant_id"),
+    )
+    mocker.patch(
+        "apps.agent_repository_app.list_agent_repository_listings_impl",
+        return_value={"items": [{"agent_repository_id": 1, "is_main_agent": False}]},
+    )
+
+    response = client.get("/repository/agent", headers=mock_auth_header)
+
+    assert response.status_code == 200
+    assert response.json()["items"][0]["is_main_agent"] is False
 
 
 def test_list_agent_repository_tag_stats_api(mocker, mock_auth_header):
@@ -997,11 +1048,13 @@ def test_get_agent_repository_listing_detail_api_passes_tenant_id(
     mock_get_detail.return_value = {
         "agent_repository_id": 42,
         "name": "agent_one",
+        "is_main_agent": False,
     }
 
     response = client.get("/repository/agent/42", headers=mock_auth_header)
 
     assert response.status_code == 200
+    assert response.json()["is_main_agent"] is False
     mock_get_detail.assert_called_once_with(42, "test_tenant_id")
 
 
@@ -1041,7 +1094,9 @@ def test_import_agent_from_repository_api_passes_tenant_id(
 
 
 def test_import_tool_parameter_error_returns_400(mocker, mock_auth_header):
-    from utils.agent_transfer_utils import AgentToolImportError
+    from consts.exceptions import (
+        AgentToolImportError,
+    )
 
     mocker.patch("apps.agent_repository_app.get_current_user_id", return_value=("user", "test_tenant_id"))
     mocker.patch(

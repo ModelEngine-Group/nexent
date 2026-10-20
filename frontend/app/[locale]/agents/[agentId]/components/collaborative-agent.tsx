@@ -13,7 +13,7 @@ import { useTranslation } from "react-i18next";
 import { App, Avatar, Button, Col } from "antd";
 import { ExternalLink, Plus, Search, Trash2, X } from "lucide-react";
 
-import { AddAgentDrawer } from "@/components/resource-picker/AddAgentDrawer";
+import { AgentConfigurationDrawer } from "./AgentConfigurationDrawer";
 import A2AAgentDiscoveryModal from "./a2a/A2AAgentDiscoveryModal";
 import { useExternalAgents } from "@/hooks/agent/useExternalAgents";
 import { usePublishedAgentList } from "@/hooks/agent/usePublishedAgentList";
@@ -132,7 +132,7 @@ export function CollaborativeAgentActions({
 
   const content = (
     <div
-      className="grid grid-cols-1 gap-2 sm:grid-cols-2"
+      className={`grid grid-cols-1 ${highFidelity ? "gap-4 @min-[640px]/agent-config:grid-cols-2" : "gap-2 sm:grid-cols-2"}`}
       data-testid="agent-selected-child-grid"
     >
       {children}
@@ -196,7 +196,7 @@ export function CollaborativeAgentActions({
         onAgentDiscovered={handleAgentDiscovered}
         localAgentId={currentAgentId ? Number(currentAgentId) : undefined}
       />
-      <AddAgentDrawer
+      <AgentConfigurationDrawer
         open={selectorOpen}
         onClose={() => setSelectorOpen(false)}
       />

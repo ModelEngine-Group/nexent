@@ -3,6 +3,7 @@
 "use client";
 
 import {
+  createElement,
   useCallback,
   useEffect,
   useRef,
@@ -24,7 +25,8 @@ import {
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 
 import AgentConfig from "./agent-config";
-import { DefaultAgentAvatar } from "./components/DefaultAgentAvatar";
+import AgentAvatar from "../components/agent-avatar";
+import { getAgentIcon } from "@/lib/chat/agentIconUtils";
 import { AgentCreationGuide } from "./components/agent-creation-guide";
 import {
   agentCreationGuideKey,
@@ -44,6 +46,7 @@ import {
 import { useAgentStore } from "@/stores/agentStore";
 import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
 import { useAgentInfo } from "@/hooks/agent/useAgentInfo";
+import { useAgentEditorDraft } from "@/hooks/agent/useAgentEditorDraft";
 import { useAgentVersionDetail } from "@/hooks/agent/useAgentVersionDetail";
 import { useAgentVersionList } from "@/hooks/agent/useAgentVersionList";
 import { searchAgentInfo } from "@/services/agentConfigService";
@@ -63,12 +66,6 @@ function resolveDraftFocusTarget(
     updatedFields.includes("example_questions")
   ) {
     return { section: "conversation_guide" };
-  }
-  if (updatedFields.includes("few_shots_prompt")) {
-    return { section: "role_model", promptTab: "few-shots" };
-  }
-  if (updatedFields.includes("constraint_prompt")) {
-    return { section: "role_model", promptTab: "constraint" };
   }
   if (updatedFields.includes("duty_prompt")) {
     return { section: "role_model", promptTab: "duty" };
@@ -109,7 +106,7 @@ function PanelCard({
   return (
     <section
       ref={panelRef}
-      className={`flex min-h-0 min-w-0 flex-col overflow-hidden ${frameless ? "bg-[#f3f3f3]" : "border-l border-[#dfdfdf] bg-white"} ${className}`}
+      className={`flex min-h-0 min-w-0 flex-col overflow-hidden ${frameless ? "bg-[var(--navigation-surface)]" : "border-l border-[#dfdfdf] bg-white"} ${className}`}
     >
       {showHeader && (
         <div
@@ -119,7 +116,7 @@ function PanelCard({
           <div
             className={
               headerTestId === "agent-config-page-tabs"
-                ? "flex h-10 min-w-[140px] max-w-full items-center gap-1 rounded-lg bg-white px-3 [font-family:'HarmonyOS_Sans_SC',sans-serif]"
+                ? "flex h-10 min-w-[140px] max-w-full items-center gap-2 rounded-lg bg-white px-3 [font-family:'HarmonyOS_Sans_SC',sans-serif]"
                 : "flex min-w-0 items-center gap-2"
             }
           >
@@ -184,6 +181,7 @@ function AgentSetupContent({
     setIsDebugVisible(false);
   };
   const currentAgentId = useAgentStore((state) => state.currentAgentId);
+  const draftIconUrl = useAgentStore((state) => state.editedAgent?.icon_url);
   const resetAgentStore = useAgentStore((state) => state.reset);
   const { user } = useAuthorizationContext();
   const tenantId = user?.tenantId ?? null;
@@ -231,7 +229,6 @@ function AgentSetupContent({
     ready:
       !isRequestedAgentLoading &&
       currentAgentId === requestedAgentId &&
-      Boolean(agentInfo) &&
       isGenerationVisible &&
       !isDebugVisible,
     readOnly: permissionReadOnly,
@@ -367,7 +364,7 @@ function AgentSetupContent({
   return (
     <div
       ref={workspaceRef}
-      className="flex h-full w-full min-h-0 flex-col bg-[#f3f3f3]"
+      className="flex h-full w-full min-h-0 flex-col bg-[var(--navigation-surface)]"
     >
       {showCreationGuide && user?.id && tenantId && (
         <AgentCreationGuide
@@ -452,15 +449,30 @@ function AgentSetupContent({
           <PanelCard
             frameless
             headerTestId="agent-config-page-tabs"
-            icon={<DefaultAgentAvatar size={16} />}
+            icon={
+              agentInfo ? (
+                <AgentAvatar
+                  agent={{
+                    ...agentInfo,
+                    icon_url: draftIconUrl ?? agentInfo.icon_url,
+                  }}
+                  size={16}
+                  iconSize={12}
+                />
+              ) : (
+                createElement(getAgentIcon({ agent_id: currentAgentId ?? 0 }), {
+                  size: 16,
+                })
+              )
+            }
             title={t("agent.highFidelity.pageTab", {
               name:
                 agentInfo?.display_name ||
                 agentInfo?.name ||
                 t("agent.page.panel.config"),
             })}
-            className={"flex-1"}
-            headerClassName="min-h-16 flex-wrap gap-x-3 gap-y-2 border-[#dfdfdf] pl-4 pr-[18px] py-3"
+            className="ml-2 flex-1 xl:ml-3"
+            headerClassName="min-h-16 flex-wrap gap-x-3 gap-y-2 border-[#dfdfdf] px-4 py-3"
             leftAction={
               <Button
                 type="text"
@@ -624,11 +636,12 @@ export default function AgentEditor() {
   const isValidAgentId =
     Number.isInteger(requestedAgentId) && requestedAgentId > 0;
   const currentAgentId = useAgentStore((state) => state.currentAgentId);
-  const initialize = useAgentStore((state) => state.initialize);
   const reset = useAgentStore((state) => state.reset);
   const [isVersionManageOpen, setIsVersionManageOpen] = useState(false);
   const isReturningRef = useRef(false);
   const { agentInfo, refetch: refetchAgentInfo } = useAgentInfo(currentAgentId);
+  const { isLoading: isDraftLoading, error: draftLoadError } =
+    useAgentEditorDraft(requestedAgentId);
 
   useEffect(() => {
     if (isReturningRef.current) return;
@@ -637,34 +650,28 @@ export default function AgentEditor() {
       router.replace(`/${locale}/agents`);
       return;
     }
-    if (currentAgentId === requestedAgentId) return;
-
-    void (async () => {
-      const result = await searchAgentInfo(requestedAgentId);
-      if (!result.success || !result.data) {
-        message.error(
-          result.message || t("agentConfig.agents.detailsLoadFailed")
-        );
-        router.replace(`/${locale}/agents`);
-        return;
-      }
-      initialize(result.data);
-    })();
-  }, [
-    currentAgentId,
-    initialize,
-    isValidAgentId,
-    locale,
-    message,
-    requestedAgentId,
-    router,
-    t,
-  ]);
+    if (draftLoadError) {
+      message.error(t("agentConfig.agents.detailsLoadFailed"));
+      router.replace(`/${locale}/agents`);
+    }
+  }, [draftLoadError, isValidAgentId, locale, message, router, t]);
 
   if (!isValidAgentId) return null;
 
+  if (isDraftLoading || draftLoadError) {
+    return (
+      <div
+        className="flex h-full items-center justify-center gap-3"
+        role="status"
+      >
+        <Spin size="large" />
+        <span>{t("common.loading")}</span>
+      </div>
+    );
+  }
+
   return (
-    <div className="flex h-full min-h-0 flex-col bg-[#f3f3f3]">
+    <div className="flex h-full min-h-0 flex-col bg-[var(--navigation-surface)]">
       <div className="min-h-0 flex-1">
         <Nl2AgentFlowProvider>
           <AgentSetupContent

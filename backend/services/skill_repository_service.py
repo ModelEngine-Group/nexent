@@ -38,15 +38,15 @@ from database.skill_repository_db import (
 )
 from database.skill_db import get_skill_by_name
 from database.user_tenant_db import get_user_tenant_by_user_id
-from services.notification_service import (
+from management.services.notification.service import (
     create_repository_pending_review_notification,
     create_repository_review_notification,
     deactivate_notifications,
 )
 from management.services.skill.service import SkillService
-from utils.skill_import_utils import generate_available_copy_skill_name
+from management.services.skill.naming import generate_available_copy_skill_name
 
-from services.user_identity_service import enrich_repository_identities, repository_identity_fields
+from management.services.permission.identity.display import enrich_repository_identities, repository_identity_fields
 
 logger = logging.getLogger("skill_repository_service")
 _REPOSITORY_LISTING_NOT_FOUND = "Repository listing not found"

@@ -2,7 +2,7 @@
 
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { App, Empty, InputNumber, Modal, Select, Spin } from "antd";
 import {
@@ -20,22 +20,25 @@ import CreateAgentModal from "@/components/agent/CreateAgentModal";
 import { StandardButton } from "@/components/common/StandardButton";
 import { StandardInput } from "@/components/common/StandardInput";
 import { StandardPaginator } from "@/components/common/StandardPaginator";
+import TagFilterPopover from "@/components/tag/TagFilterPopover";
 import { useAgentList } from "@/hooks/agent/useAgentList";
+import { useTagDefinitions, useTagLibraries } from "@/hooks/useTagManagement";
 import {
   openImportWizardWithFile,
   type ImportAgentData,
 } from "@/lib/agentImportUtils";
 import log from "@/lib/logger";
-import { AgentDetail } from "@/components/agent/agent-detail";
-import { mapAgentInfoDetail } from "@/lib/myAgentDetail";
-import AgentAvatar from "./components/agent-avatar";
+import { getTagSearchPredicates } from "@/lib/systemTagLabels";
 import { searchAgentInfo } from "@/services/agentConfigService";
 import { useAgentStore } from "@/stores/agentStore";
 import type { Agent } from "@/types/agentConfig";
+import type { TagResourcePredicate } from "@/types/tagManagement";
 
 import AgentConfigurationGuide from "./components/agent-configuration-guide";
 import AgentListCard from "./components/agent-list-card";
-import AgentListTable from "./components/agent-list-table";
+import AgentListTable, {
+  DEFAULT_AGENT_COLUMN_WIDTHS,
+} from "./components/agent-list-table";
 import AgentVersion from "./agent-version";
 import "./agent-list.css";
 
@@ -47,11 +50,16 @@ export default function AgentsPage() {
   const initialize = useAgentStore((state) => state.initialize);
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(1);
-  const [pageSize, setPageSize] = useState(10);
+  const [pageSize, setPageSize] = useState(12);
   const [jumpPage, setJumpPage] = useState<number | null>(null);
+  const [tableColumnWidths, setTableColumnWidths] = useState(
+    DEFAULT_AGENT_COLUMN_WIDTHS
+  );
   const [view, setView] = useState<"grid" | "list">("grid");
-  const [detailOpen, setDetailOpen] = useState(false);
   const [selectedAgent, setSelectedAgent] = useState<Agent | null>(null);
+  const [tagPredicates, setTagPredicates] = useState<TagResourcePredicate[]>(
+    []
+  );
   const [isVersionManageOpen, setIsVersionManageOpen] = useState(false);
   const [isCreateOpen, setIsCreateOpen] = useState(false);
   const [importData, setImportData] = useState<ImportAgentData | null>(null);
@@ -103,16 +111,31 @@ export default function AgentsPage() {
     [initialize, message, t]
   );
 
+  const { data: tagLibraries } = useTagLibraries();
+  const defaultTagLibrary =
+    tagLibraries?.find(
+      (library) => library.bucket_key === "default_resource"
+    ) ?? null;
+  const { data: tagDefinitions } = useTagDefinitions(
+    defaultTagLibrary?.bucket_id ?? null
+  );
+  const searchTagPredicates = useMemo(
+    () => getTagSearchPredicates(tagDefinitions, search, t),
+    [tagDefinitions, search, t]
+  );
   const { agents, pagination, isLoading, isError, refetch } = useAgentList({
     search,
     page,
     pageSize,
     includeRepositoryInfo: true,
+    ...(searchTagPredicates.length > 0 ? { searchTagPredicates } : {}),
+    ...(tagPredicates.length > 0 ? { tagPredicates } : {}),
   });
   const isEmptyAgentList =
     !isLoading &&
     !isError &&
     !search.trim() &&
+    tagPredicates.length === 0 &&
     agents.length === 0 &&
     (pagination?.total ?? 0) === 0;
   const updateUrl = useCallback(
@@ -128,14 +151,9 @@ export default function AgentsPage() {
     [pathname, router]
   );
 
-  const handleOpenDetail = useCallback(
-    async (agent: Agent) => {
-      const loadedAgent = await loadAgent(Number(agent.id));
-      if (!loadedAgent) return;
-      setSelectedAgent(loadedAgent);
-      setDetailOpen(true);
-    },
-    [loadAgent]
+  const handleOpenAgent = useCallback(
+    (agent: Agent) => updateUrl(Number(agent.id)),
+    [updateUrl]
   );
 
   const handleManageVersions = useCallback(
@@ -273,7 +291,7 @@ export default function AgentsPage() {
 
               <div className="mt-3 flex h-auto w-full shrink-0 flex-col items-start justify-between gap-3 lg:h-8 lg:flex-row lg:items-center lg:gap-4">
                 <div
-                  className={`w-full max-w-full shrink-0 ${view === "list" ? "lg:w-[296px]" : "lg:w-[360px]"}`}
+                  className={`flex w-full max-w-full shrink-0 items-center gap-2 ${view === "list" ? "lg:w-[296px]" : "lg:w-[360px]"}`}
                 >
                   <StandardInput
                     allowClear
@@ -285,6 +303,15 @@ export default function AgentsPage() {
                       setPage(1);
                     }}
                     className="!h-8 !w-full"
+                  />
+                  <TagFilterPopover
+                    definitions={tagDefinitions ?? []}
+                    value={tagPredicates}
+                    onChange={(value) => {
+                      setTagPredicates(value);
+                      setPage(1);
+                    }}
+                    buttonClassName="!h-8 shrink-0"
                   />
                 </div>
                 <div className="flex h-auto flex-wrap items-center gap-2 lg:h-8 lg:shrink-0 lg:flex-nowrap">
@@ -360,7 +387,9 @@ export default function AgentsPage() {
                       view === "list" ? (
                         <AgentListTable
                           agents={agents}
-                          onOpen={(agent) => void handleOpenDetail(agent)}
+                          columnWidths={tableColumnWidths}
+                          onColumnWidthsChange={setTableColumnWidths}
+                          onOpen={handleOpenAgent}
                           onConfigure={updateUrl}
                           onPublish={openPublishFlow}
                           onManageVersions={handleManageVersions}
@@ -371,7 +400,7 @@ export default function AgentsPage() {
                             <AgentListCard
                               key={agent.id}
                               agent={agent}
-                              onOpen={(agent) => void handleOpenDetail(agent)}
+                              onOpen={handleOpenAgent}
                               onConfigure={updateUrl}
                               onPublish={openPublishFlow}
                               onManageVersions={handleManageVersions}
@@ -392,7 +421,7 @@ export default function AgentsPage() {
                         <Select
                           aria-label={t("agentConfig.list.pageSize")}
                           value={pageSize}
-                          options={[10, 20, 50].map((size) => ({
+                          options={[10, 12, 20, 50].map((size) => ({
                             value: size,
                             label: t("agentConfig.list.perPage", {
                               count: size,
@@ -454,18 +483,6 @@ export default function AgentsPage() {
         </div>
       </section>
 
-      <AgentDetail
-        detail={selectedAgent ? mapAgentInfoDetail(selectedAgent) : null}
-        agentIcon={
-          selectedAgent ? (
-            <AgentAvatar agent={selectedAgent} size={48} iconSize={24} />
-          ) : undefined
-        }
-        open={detailOpen}
-        onClose={() => setDetailOpen(false)}
-        onEdit={() => selectedAgent && updateUrl(Number(selectedAgent.id))}
-        published={Boolean(selectedAgent?.current_version_no)}
-      />
       <Modal
         centered
         width={900}

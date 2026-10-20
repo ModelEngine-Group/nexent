@@ -1,3 +1,4 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 import logging
 from http import HTTPStatus
 from typing import Any, Dict, List, Optional
@@ -33,12 +34,12 @@ from consts.model import (
 )
 from database.token_db import log_token_usage
 from database.user_tenant_db import get_user_role_by_tenant
-from services.api_key_service import (
+from management.services.permission.api_keys import (
     create_api_users_batch,
     refresh_user_api_key,
     revoke_user_api_keys,
 )
-from services.audit_service import record_security_event
+from management.services.monitor.audit import record_security_event
 from services.northbound_service import (
     NorthboundContext,
     get_conversation_history,
@@ -54,7 +55,7 @@ from services.northbound_service import (
     upload_files_for_northbound,
 )
 
-from utils.auth_utils import (
+from management.services.permission.identity.authentication_helpers import (
     get_user_and_tenant_by_access_key,
     get_user_language,
     validate_bearer_token,

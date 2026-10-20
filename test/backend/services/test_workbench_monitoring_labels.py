@@ -7,7 +7,7 @@ from types import SimpleNamespace
 import pytest
 
 from consts.model import WorkbenchSessionConfig
-from services import workbench_service
+from management.services.agent import workbench as workbench_service
 
 
 @pytest.mark.parametrize("display_name", [None, "", "Nexent Workbench", "智能工作台"])

@@ -1,3 +1,4 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 from consts.error_code import ErrorCode
 from consts.exceptions import (
     AppException,
@@ -6,7 +7,7 @@ from consts.exceptions import (
     QuotaExceededError,
     UnsupportedFileTypeException,
 )
-from utils.knowledge_ingestion_errors import classify_ingestion_exception
+from infrastructure.ingestion.errors import classify_ingestion_exception
 
 
 def test_disk_watermark_is_a_non_retryable_storage_write_block():

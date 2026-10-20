@@ -32,18 +32,22 @@ const agent: AgentDraft = {
   max_step: 10,
   provide_run_summary: false,
 };
-function setup(readOnly: boolean, agentId: number | null = 42) {
+function setup(
+  readOnly: boolean,
+  agentId: number | null = 42,
+  displayedAgent: AgentDraft = agent
+) {
   const callbacks = {
     onConfigure: vi.fn(),
     onDebug: vi.fn(),
     onPublish: vi.fn(),
     onManualUnlock: vi.fn(),
   };
-  render(
+  const { container } = render(
     <Form component="div" disabled={readOnly}>
       <Input aria-label="Protected field" />
       <AgentConfigHeader
-        agent={agent}
+        agent={displayedAgent}
         agentId={agentId}
         readOnly={readOnly}
         debugVisible
@@ -52,7 +56,7 @@ function setup(readOnly: boolean, agentId: number | null = 42) {
       />
     </Form>
   );
-  return callbacks;
+  return { ...callbacks, container };
 }
 
 describe("AgentConfigHeader workflow navigation", () => {
@@ -107,5 +111,34 @@ describe("AgentConfigHeader workflow navigation", () => {
     expect(
       screen.getByRole("button", { name: "agent.highFidelity.configureMode" })
     ).toBeEnabled();
+  });
+});
+
+describe("AgentConfigHeader legacy avatar fallback", () => {
+  it.each([
+    [41, "bot"],
+    [42, "wand"],
+    [43, "lightbulb"],
+    [44, "zap"],
+    [45, "sparkles"],
+  ])("renders the legacy icon for agent %s", (agentId, icon) => {
+    const { container } = setup(false, agentId as number);
+    expect(
+      container.querySelector(`.ant-avatar svg.lucide-${icon}`)
+    ).toBeInTheDocument();
+    expect(container.querySelector(".ant-avatar img")).toBeNull();
+  });
+  it("prefers the saved image and falls back to the ID icon if loading fails", () => {
+    const { container } = setup(false, 42, {
+      ...agent,
+      icon_url: "/api/agent/42/icon?v=saved",
+    });
+    const image = container.querySelector(".ant-avatar img")!;
+    expect(image).toHaveAttribute("src", "/unused-icon");
+    fireEvent.error(image);
+    expect(
+      container.querySelector(".ant-avatar svg.lucide-wand")
+    ).toBeInTheDocument();
+    expect(container.querySelector(".ant-avatar img")).toBeNull();
   });
 });

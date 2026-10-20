@@ -20,9 +20,14 @@ export interface TagOption {
 /** Card entry for the "add agent" drawer. */
 export interface AgentCardItem {
   id: string;
+  /** Original numeric identity, independent of caller-defined selection keys. */
+  agentId?: number;
+  tagResourceId?: string;
+  iconUrl?: string;
   name: string;
   description: string;
-  iconBg: string;
+  iconBg?: string;
+  version?: string;
   updatedAt?: string;
   online?: boolean;
   tags?: string[];
@@ -34,7 +39,6 @@ export interface KnowledgeItem {
   name: string;
   category?: string;
   description: string;
-  iconBg: string;
   meta: string[];
 }
 

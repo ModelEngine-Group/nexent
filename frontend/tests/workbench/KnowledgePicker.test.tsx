@@ -1,5 +1,7 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import { beforeEach, expect, it, vi } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { ConversationKnowledgeScopeModal } from "@/app/newchat/assistant-ui/conversation-knowledge-scope-modal";
 import knowledgeBaseService from "@/services/knowledgeBaseService";
@@ -183,12 +185,115 @@ it("waits for deployment settings and uses local catalog without an agent", asyn
   expect(knowledgeBaseService.getAidpKnowledgeBasesAll).not.toHaveBeenCalled();
 });
 
-it("knowledge selection preserves retrieval configuration on confirmation", async () => {
-  const confirm = vi.fn();
-  const configuredSelection = { ...selection, retrieval_config: { top_k: 8 } };
+it.each(["modal", "drawer"] as const)(
+  "%s knowledge selection preserves retrieval configuration on confirmation",
+  async (presentation) => {
+    const confirm = vi.fn();
+    const configuredSelection = {
+      ...selection,
+      retrieval_config: { top_k: 8 },
+    };
+    render(
+      <ConversationKnowledgeScopeModal
+        open
+        presentation={presentation}
+        value={configuredSelection}
+        capabilities={capabilities}
+        onCancel={vi.fn()}
+        onConfirm={confirm}
+      />
+    );
+    await screen.findByRole("option", { name: /Alpha/ });
+    await userEvent.click(screen.getByRole("option", { name: /Alpha/ }));
+    await userEvent.click(
+      screen.getByRole("button", {
+        name: "chat.knowledgeScope.retrievalSettings",
+      })
+    );
+    const dialog = (
+      await screen.findByText("agent.knowledge.configModal.title")
+    ).closest<HTMLElement>('[role="dialog"]')!;
+    const input = within(dialog).getByRole("spinbutton");
+    await userEvent.tripleClick(input);
+    await userEvent.keyboard("8");
+    await userEvent.click(
+      within(dialog).getByRole("button", { name: "common.confirm" })
+    );
+    expect(confirm).not.toHaveBeenCalled();
+    await userEvent.click(
+      screen.getByRole("button", {
+        name:
+          presentation === "drawer"
+            ? "workbench.controls.confirm"
+            : "chat.knowledgeScope.confirm",
+      })
+    );
+    expect(confirm.mock.calls[0][0].retrieval_config).toEqual({ top_k: 8 });
+    expect(confirm.mock.calls[0][0].local.knowledge_ids).toEqual(["2"]);
+    expect(configuredSelection.local.knowledge_ids).toEqual(["1", "2"]);
+    expect(configuredSelection.retrieval_config).toEqual({ top_k: 8 });
+  }
+);
+
+it("discarding retrieval edits and canceling the drawer restores the saved draft on reopening", async () => {
+  const configuredSelection = { ...selection, retrieval_config: { top_k: 6 } };
+  const confirm = vi.fn(),
+    cancel = vi.fn();
+  const props = {
+    presentation: "drawer" as const,
+    value: configuredSelection,
+    capabilities,
+    onConfirm: confirm,
+    onCancel: cancel,
+  };
+  const view = render(<ConversationKnowledgeScopeModal {...props} open />);
+  await screen.findByRole("option", { name: /Alpha/ });
+  const openSettings = async () => {
+    await userEvent.click(
+      screen.getByRole("button", {
+        name: "chat.knowledgeScope.retrievalSettings",
+      })
+    );
+    return within(
+      (
+        await screen.findByText("agent.knowledge.configModal.title")
+      ).closest<HTMLElement>('[role="dialog"]')!
+    );
+  };
+  let settings = await openSettings();
+  await userEvent.tripleClick(settings.getByRole("spinbutton"));
+  await userEvent.keyboard("8");
+  await userEvent.click(
+    settings.getByRole("button", { name: "common.cancel" })
+  );
+  settings = await openSettings();
+  expect(settings.getByRole("spinbutton")).toHaveValue("6");
+  await userEvent.tripleClick(settings.getByRole("spinbutton"));
+  await userEvent.keyboard("9");
+  await userEvent.click(
+    settings.getByRole("button", { name: "common.confirm" })
+  );
+  await userEvent.click(screen.getByRole("button", { name: "common.cancel" }));
+  expect(cancel).toHaveBeenCalledOnce();
+  expect(confirm).not.toHaveBeenCalled();
+  view.rerender(<ConversationKnowledgeScopeModal {...props} open={false} />);
+  view.rerender(<ConversationKnowledgeScopeModal {...props} open />);
+  await screen.findByRole("option", { name: /Alpha/ });
+  settings = await openSettings();
+  expect(settings.getByRole("spinbutton")).toHaveValue("6");
+  expect(configuredSelection.retrieval_config).toEqual({ top_k: 6 });
+});
+
+it("retains retrieval and knowledge drafts after a failed drawer save and permits retry", async () => {
+  const configuredSelection = { ...selection, retrieval_config: { top_k: 6 } };
+  const confirm = vi
+    .fn()
+    .mockRejectedValueOnce(new Error("save unavailable"))
+    .mockResolvedValueOnce(undefined);
   render(
     <ConversationKnowledgeScopeModal
       open
+      presentation="drawer"
       value={configuredSelection}
       capabilities={capabilities}
       onCancel={vi.fn()}
@@ -196,15 +301,38 @@ it("knowledge selection preserves retrieval configuration on confirmation", asyn
     />
   );
   await screen.findByRole("option", { name: /Alpha/ });
-  await userEvent.click(screen.getByRole("option", { name: /Alpha/ }));
+  await userEvent.click(
+    screen.getByRole("button", {
+      name: "chat.knowledgeScope.retrievalSettings",
+    })
+  );
+  const settings = within(
+    (
+      await screen.findByText("agent.knowledge.configModal.title")
+    ).closest<HTMLElement>('[role="dialog"]')!
+  );
+  await userEvent.tripleClick(settings.getByRole("spinbutton"));
+  await userEvent.keyboard("8");
+  await userEvent.click(
+    settings.getByRole("button", { name: "common.confirm" })
+  );
   expect(confirm).not.toHaveBeenCalled();
   await userEvent.click(
-    screen.getByRole("button", { name: "chat.knowledgeScope.confirm" })
+    screen.getByRole("button", { name: "workbench.controls.confirm" })
   );
-  expect(confirm.mock.calls[0][0].retrieval_config).toEqual({ top_k: 8 });
-  expect(confirm.mock.calls[0][0].local.knowledge_ids).toEqual(["2"]);
-  expect(configuredSelection.local.knowledge_ids).toEqual(["1", "2"]);
-  expect(configuredSelection.retrieval_config).toEqual({ top_k: 8 });
+  await waitFor(() => expect(confirm).toHaveBeenCalledOnce());
+  await waitFor(() =>
+    expect(
+      screen.getByRole("button", { name: "workbench.controls.confirm" })
+    ).toBeEnabled()
+  );
+  await userEvent.click(
+    screen.getByRole("button", { name: "workbench.controls.confirm" })
+  );
+  await waitFor(() => expect(confirm).toHaveBeenCalledTimes(2));
+  expect(confirm.mock.calls[1][0].retrieval_config).toEqual({ top_k: 8 });
+  expect(confirm.mock.calls[1][0].local.knowledge_ids).toEqual(["1", "2"]);
+  expect(configuredSelection.retrieval_config).toEqual({ top_k: 6 });
 });
 
 it("UT-FE-WB-025 uses one authorized catalog and disables incompatible embeddings", async () => {
@@ -307,5 +435,95 @@ it("failed catalog loading cannot be confirmed as an empty replacement", async (
       screen.getByRole("button", { name: "chat.knowledgeScope.confirm" })
     ).toBeDisabled()
   );
+  expect(confirm).not.toHaveBeenCalled();
+});
+
+it("reopening knowledge selection ignores the unfinished catalog from the previous session", async () => {
+  type Result = Awaited<
+    ReturnType<typeof knowledgeBaseService.getKnowledgeBasesInfo>
+  >;
+  let finishOld!: (result: Result) => void;
+  vi.mocked(knowledgeBaseService.getKnowledgeBasesInfo).mockImplementationOnce(
+    () =>
+      new Promise((resolve) => {
+        finishOld = resolve;
+      })
+  );
+  const props = {
+    value: null,
+    capabilities: null,
+    onCancel: vi.fn(),
+    onConfirm: vi.fn(),
+  };
+  const { rerender } = render(
+    <ConversationKnowledgeScopeModal {...props} open />
+  );
+  expect(
+    screen.getByRole("button", { name: "chat.knowledgeScope.confirm" })
+  ).toBeDisabled();
+  rerender(<ConversationKnowledgeScopeModal {...props} open={false} />);
+  rerender(<ConversationKnowledgeScopeModal {...props} open />);
+  await screen.findByRole("option", { name: /Alpha/ });
+  await act(async () => {
+    finishOld({
+      knowledgeBases: [
+        {
+          id: "outdated",
+          knowledge_id: 99,
+          name: "Outdated catalog",
+          permission: "READ_ONLY",
+        },
+      ],
+    } as Result);
+  });
+  expect(
+    screen.queryByRole("option", { name: /Outdated catalog/ })
+  ).not.toBeInTheDocument();
+  expect(screen.getByRole("option", { name: /Alpha/ })).toBeInTheDocument();
+  expect(
+    screen.getByRole("button", { name: "chat.knowledgeScope.confirm" })
+  ).toBeEnabled();
+});
+
+it("uses text-only knowledge rows in the Workbench drawer and preserves cancellation", async () => {
+  const cancel = vi.fn(),
+    confirm = vi.fn();
+  vi.mocked(knowledgeBaseService.getKnowledgeBasesInfo).mockResolvedValue({
+    knowledgeBases: [
+      {
+        id: "index-a",
+        knowledge_id: 1,
+        name: "Alpha",
+        description: "Knowledge details",
+        tags: ["Finance"],
+        embeddingModel: "model-a",
+        permission: "READ_ONLY",
+        documentCount: 2,
+      },
+    ] as KnowledgeBase[],
+  });
+  render(
+    <ConversationKnowledgeScopeModal
+      open
+      presentation="drawer"
+      value={selection}
+      capabilities={capabilities}
+      onCancel={cancel}
+      onConfirm={confirm}
+    />
+  );
+  const row = await screen.findByRole("option", { name: "Alpha" });
+  expect(row).toHaveTextContent("Knowledge details");
+  expect(row).toHaveTextContent("Finance");
+  expect(row.querySelector(".lucide-book-open")).toBeNull();
+  expect(row).not.toHaveTextContent("READ_ONLY");
+  expect(row).not.toHaveTextContent("model-a");
+  expect(
+    screen.queryByRole("button", { name: "编辑" })
+  ).not.toBeInTheDocument();
+  await userEvent.click(row);
+  expect(row).toHaveAttribute("aria-selected", "false");
+  await userEvent.click(screen.getByRole("button", { name: "common.cancel" }));
+  expect(cancel).toHaveBeenCalledOnce();
   expect(confirm).not.toHaveBeenCalled();
 });

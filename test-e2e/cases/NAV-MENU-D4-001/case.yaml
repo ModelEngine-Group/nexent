@@ -10,6 +10,8 @@ case:
   - NAV-MENU-REQ-003
   - NAV-MENU-REQ-004
   - NAV-MENU-REQ-005
+  - NAV-MENU-REQ-006
+  - NAV-MENU-REQ-007
   business_rule_ids:
   - NAV-MENU-RULE-001
   - NAV-MENU-RULE-002
@@ -17,6 +19,8 @@ case:
   - NAV-MENU-RULE-004
   - NAV-MENU-RULE-005
   - NAV-MENU-RULE-006
+  - NAV-MENU-RULE-007
+  - NAV-MENU-RULE-008
   title: Preserve functional navigation while hiding inert controls
   type: E2E
   priority: P1
@@ -55,11 +59,36 @@ case:
     expected: Workbench appears immediately after Home with the requested localized
       label and opens the same localized /workbench route.
   - order: 4
-    action: Open a shared page outside agents/newchat, click account, inspect transferred entries, hover language and select English.
-    expected: Global header/footer are absent; identity, version, copyright, gated links and selected-language submenu match design and English preserves the route.
+    action: Open a shared page outside agents/newchat, click account, inspect transferred
+      entries, hover language and select English.
+    expected: Global header/footer are absent. The account menu retains identity,
+      profile, gated external links and locale navigation. Its width is256px with6px
+      padding,60px identity and36px avatar. Primary rows are28px with default menu
+      typography; link rows are24px with11px/16.5px text. The localized About header
+      is22.5px with60% muted color and monospace version. Language icon, title, locale
+      and chevron centers align within1px; the title aligns horizontally with Profile.
+      Copyright is absent. Logout uses the reference destructive color and10% hover
+      background and preserves confirmation. Profile, language setting and language-option
+      hover match demo accent lab(94.1288% -2.23359 -10.9012); readonly About remains
+      transparent and logout retains danger hover. Profile and language setting inherit
+      default menu font family, size and line height; secondary About styling remains.
   - order: 5
-    action: Inspect collapsed icons, hover sidebar, compare content position, inspect inline/truncated labels, pin and unpin the header control, leave and reopen account popup.
-    expected: 'Unpinned rail expands64 to240px without content movement; header toggle appears only when expanded, pins at240px with content shrink, and unpins to64px without immediate hover reopening; a0.5px solid right divider with #191919 at15% opacity is visible when collapsed or pinned and hidden during hover-only expansion; interactive sidebar items show a pointer cursor and all sidebar icons and labels have an8px visual gap while preserving icon and font sizes; collapsed text is absent, long brand title is16px bold and clipped with a full-name tooltip, long menu text tooltip works, exit collapses and account popup holds expansion without profile-route prefetch requests.'
+    action: Inspect collapsed icons, hover sidebar, compare content position, inspect
+      inline/truncated labels, pin and unpin the header control, leave and reopen
+      account popup.
+    expected: 'The unpinned rail expands from64px to240px without moving content.
+      The expanded-only header control pins at240px and shrinks content; unpinning
+      collapses to64px without immediate hover reopening. A0.5px right divider in
+      #191919 at15% opacity remains visible in all states. Menu icons retain20px size
+      and8px label gaps. The40px logo has a4px gap to the18px bold brand title, which
+      truncates with a full-name tooltip. Header bottom spacing is8px. Selected navigation
+      icons are #2673e5. Pin/PinOff, Sparkles and FolderCog identify pin, Skill and
+      resource management. Pinned toggle is blue on transparent background. Popup
+      holds expansion without profile-route prefetch requests; existing navigation
+      and close behavior remain usable. Sidebar background matches lab(97.0939% -.108689
+      -.749958); unselected hover uses70% sidebar accent and selected items use full
+      lab(92.4476% -.214785 -1.49835) even on hover. Open account/notification triggers
+      use selection.'
   expected_results:
   - Both inert section buttons are absent; authorized children remain and denied routes
     stay hidden. Chat navigates to localized newchat and child pages remain usable.
@@ -68,8 +97,13 @@ case:
     is 工作台 / Workbench.
   - Enabled permitted workbench follows Home and precedes Start Chat; localized label
     is 工作台 / Workbench.
-  - Shared shell has no global header/footer; account menu matches 280px/40px geometry, retains gated links/version/copyright and changes locale on the same route without appearance settings.
-  - Hover expansion overlays content; the expanded-only header control pins and shrinks content, unpins and collapses without immediate hover reopening; localized navigation, popup usability and zero unsolicited profile-route requests are preserved.
+  - Account popup matches measured v0 compact geometry:256px width,6px padding,60px
+    identity,28px primary,24px links,22.5px About header,11px secondary type and16.5px
+    line height; copyright absent, logout destructive, language switching and visibility
+    rules retained.
+  - Hover expansion overlays content; the expanded-only header control pins and shrinks
+    content, unpins and collapses without immediate hover reopening; localized navigation,
+    popup usability and zero unsolicited profile-route requests are preserved.
   forbidden_side_effects:
   - No unrequested business writes or agent/provider execution.
   execution:
@@ -101,12 +135,23 @@ case:
     forbidden_side_effects:
     - 1
   - id: AC-02
-    description: Account menu replaces global bars while retaining visibility policies, information and real language navigation.
-    steps: [4]
-    expected_results: [4]
-    forbidden_side_effects: [1]
+    description: Account menu replaces global bars while retaining visibility policies,
+      information and real language navigation.
+    steps:
+    - 4
+    expected_results:
+    - 4
+    forbidden_side_effects:
+    - 1
   - id: AC-03
-    description: Hover overlays content, pinning resizes content, and unpinning collapses while preserving navigation and popup access.
-    steps: [5]
-    expected_results: [5]
-    forbidden_side_effects: [1]
+    description: Hover overlays content, pinning resizes content, and unpinning collapses
+      while preserving navigation and popup access. Verify18px brand,8px header gap,
+      persistent divider, selected blue icons, specified pin/Skill/resource glyphs
+      and secondary account typography. Verify40px logo and blue transparent pinned
+      toggle; account popup uses compact grouped aligned layout.
+    steps:
+    - 5
+    expected_results:
+    - 5
+    forbidden_side_effects:
+    - 1

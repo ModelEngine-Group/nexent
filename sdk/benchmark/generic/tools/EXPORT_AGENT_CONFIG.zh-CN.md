@@ -9,7 +9,7 @@
 - 导出完整的 Agent 配置到 YAML 文件，包括：
   - 基本信息（名称、描述、问候语、示例问题）
   - Agent 配置（max_steps、context_manager、verification_config 等）
-  - Prompts（duty_prompt、constraint_prompt、few_shots_prompt）
+  - 完整提示词（仅 duty_prompt，包含职责、约束和示例）
   - 工具、子 Agent、技能配置
 
 ## 数据库连接
@@ -77,7 +77,6 @@ agent_config:
   max_steps: 15
   enable_context_manager: true
   provide_run_summary: false
-  prompt_template_id: 0
   version_no: 1
   verification_config:
     enabled: false
@@ -99,8 +98,6 @@ agent_config:
 prompts:
   duty_prompt: |
     你是一个专业的数学解题助手，负责解答各类数学计算问题。你具备出色的逻辑推理与数值计算能力...
-  constraint_prompt: ''
-  few_shots_prompt: ''
 
 tools: []
 sub_agents: []

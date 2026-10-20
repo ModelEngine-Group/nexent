@@ -1,17 +1,18 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """Shared tenant-scoped Agent naming rules and LLM regeneration."""
 
 import logging
-from typing import Optional
-
 
 from consts.const import LANGUAGE
 from database.agent_db import query_all_agent_info_by_tenant_id
+from management.services.agent.prompt import (
+    load_default_generation_prompt,
+)
 from management.services.model.invocation import call_llm_for_system_prompt
 from nexent.core.agents.prompt.meta import (
-    compose_name_regeneration, load_generation_template,
-    render_name_template as _render_prompt_template,
+    compose_name_regeneration,
 )
-from utils.prompt_template_utils import normalize_prompt_generate_template_content
 
 logger = logging.getLogger(__name__)
 
@@ -26,7 +27,11 @@ def check_agent_value_duplicate(
     """Check either naming field, optionally excluding the edited Agent."""
     if not value:
         return False
-    agents = agents_cache if agents_cache is not None else query_all_agent_info_by_tenant_id(tenant_id)
+    agents = (
+        agents_cache
+        if agents_cache is not None
+        else query_all_agent_info_by_tenant_id(tenant_id)
+    )
     return any(
         agent.get(field_key) == value
         for agent in agents
@@ -62,25 +67,16 @@ def regenerate_agent_value(
     language: str = LANGUAGE["ZH"],
     agents_cache: list[dict] | None = None,
     exclude_agent_id: int | None = None,
-    prompt_template_id: Optional[int] = None,
-    user_id: Optional[str] = None,
 ) -> str:
     """Regenerate one naming field with five attempts and suffix fallback."""
-    if user_id is not None:
-        from services.prompt_template_service import resolve_prompt_generate_template
-
-        template = resolve_prompt_generate_template(
-            tenant_id=tenant_id, user_id=user_id, language=language,
-            prompt_template_id=prompt_template_id,
-        )
-    else:
-        template = normalize_prompt_generate_template_content(
-            load_generation_template(language)
-        )
+    template = load_default_generation_prompt(language)
     values = {value for value in existing_values if value}
-    empty_values = "无" if (language or "").lower().startswith(LANGUAGE["ZH"]) else "None"
+    empty_values = (
+        "无" if (language or "").lower().startswith(LANGUAGE["ZH"]) else "None"
+    )
     prompt = compose_name_regeneration(
-        language, template,
+        language,
+        template,
         field_key=field_key,
         task_description=task_description or "",
         original_value=original_value,
@@ -90,8 +86,11 @@ def regenerate_agent_value(
     for attempt in range(1, 6):
         try:
             value = call_llm_for_system_prompt(
-                model_id=model_id, user_prompt=prompt.user, system_prompt=prompt.system,
-                callback=None, tenant_id=tenant_id,
+                model_id=model_id,
+                user_prompt=prompt.user,
+                system_prompt=prompt.system,
+                callback=None,
+                tenant_id=tenant_id,
             )
             candidate = (value or "").strip().splitlines()[0].strip()
             if candidate in values:
@@ -100,7 +99,10 @@ def regenerate_agent_value(
         except Exception as exc:
             last_error = exc
             logger.warning("Attempt %s/5 to regenerate value failed: %s", attempt, exc)
-    logger.error("Failed to regenerate agent value with LLM after maximum retries", exc_info=last_error)
+    logger.error(
+        "Failed to regenerate agent value with LLM after maximum retries",
+        exc_info=last_error,
+    )
     return generate_unique_agent_value(
         field_key, original_value, tenant_id, agents_cache, exclude_agent_id
     )

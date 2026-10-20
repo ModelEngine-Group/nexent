@@ -1,0 +1,89 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
+"""Personal Workbench pin timestamps, independent of conversation activity."""
+
+import json
+from typing import Any
+
+from sqlalchemy import func, select, text, update
+
+from consts.exceptions import ConversationNotFoundError
+from database.client import get_db_session
+from database.db_models import ConversationRecord
+
+
+def _owned_workbench(user_id: str):
+    return (
+        ConversationRecord.created_by == user_id,
+        ConversationRecord.delete_flag == "N",
+        ConversationRecord.workbench_config.is_not(None),
+        ConversationRecord.workbench_config != text("'null'::jsonb"),
+    )
+
+
+def _list_pins(session, user_id: str) -> list[dict[str, Any]]:
+    rows = session.execute(
+        select(
+            ConversationRecord,
+            func.extract("epoch", ConversationRecord.create_time) * 1000,
+            func.extract("epoch", ConversationRecord.update_time) * 1000,
+        )
+        .where(*_owned_workbench(user_id), ConversationRecord.workbench_pinned_at.is_not(None))
+        .order_by(ConversationRecord.workbench_pinned_at.desc(), ConversationRecord.conversation_id.desc())
+    )
+    return [
+        {
+            "conversation_id": conversation.conversation_id,
+            "conversation_title": conversation.conversation_title,
+            "agent_id": conversation.agent_id,
+            "create_time": int(created_ms),
+            "update_time": int(updated_ms),
+            "pinned_at": conversation.workbench_pinned_at.isoformat(),
+        }
+        for conversation, created_ms, updated_ms in rows
+    ]
+
+
+def list_workbench_pins(user_id: str, tenant_id: str) -> list[dict[str, Any]]:
+    """Identity is authenticated by the service; preferences follow personal ownership."""
+    with get_db_session() as session:
+        return _list_pins(session, user_id)
+
+
+def set_workbench_pin(conversation_id: int, pinned: bool, user_id: str, tenant_id: str) -> list[dict[str, Any]]:
+    """Serialize personal pin writers without changing conversation activity/audit."""
+    with get_db_session() as session:
+        scope = json.dumps([user_id], separators=(",", ":"))
+        session.execute(
+            text("SELECT pg_advisory_xact_lock(hashtextextended(:scope, 0))"),
+            {"scope": f"workbench-pins:{scope}"},
+        )
+        conversation = session.scalar(
+            select(ConversationRecord).where(
+                ConversationRecord.conversation_id == conversation_id,
+                *_owned_workbench(user_id),
+            ).with_for_update()
+        )
+        if conversation is None:
+            raise ConversationNotFoundError("Workbench conversation not found")
+
+        if pinned != (conversation.workbench_pinned_at is not None):
+            pinned_at = None
+            if pinned:
+                newest = select(func.max(ConversationRecord.workbench_pinned_at)).where(
+                    *_owned_workbench(user_id),
+                ).scalar_subquery()
+                pinned_at = session.scalar(select(func.greatest(
+                    func.clock_timestamp(), newest + text("INTERVAL '1 microsecond'"),
+                )))
+            session.execute(
+                update(ConversationRecord).where(
+                    ConversationRecord.conversation_id == conversation_id,
+                    *_owned_workbench(user_id),
+                ).values(
+                    workbench_pinned_at=pinned_at,
+                    # Explicitly suppress TableBase.onupdate for a personal preference.
+                    update_time=ConversationRecord.update_time,
+                )
+            )
+        return _list_pins(session, user_id)

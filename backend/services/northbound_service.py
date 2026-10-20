@@ -1,3 +1,4 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 import asyncio
 import hashlib
 import json
@@ -38,18 +39,18 @@ from database.token_db import get_latest_usage_metadata, log_token_usage
 from management.services.agent.service import (
     get_agent_by_name_impl,
 )
-from services.runtime_proxy_service import forward_agent_run, forward_agent_stop
-from services.thread_lifecycle_service import northbound_thread_manager
-from services.runtime_state_service import runtime_state_service
-from services.agent_version_service import list_published_agents_impl
-from services.knowledge_scope_service import (
+from management.services.agent.runtime_client import forward_agent_run, forward_agent_stop
+from infrastructure.concurrency import northbound_thread_manager
+from management.services.agent.run_state import runtime_state_service
+from management.services.agent.versions import list_published_agents_impl
+from management.services.knowledge_base.scope import (
     AIDP_TOOL_CLASS,
     LOCAL_TOOL_CLASS,
     get_agent_knowledge_capabilities,
 )
 from management.services.knowledge_base.service import ElasticSearchService
 from management.services.model.resolver import get_model_descriptor
-from services.conversation_management_service import (
+from management.services.conversation.service import (
     save_conversation_user,
     create_new_conversation,
     generate_conversation_title_service,
@@ -57,11 +58,11 @@ from services.conversation_management_service import (
     update_conversation_title as update_conversation_title_service,
 )
 from management.services.model.management import list_models_for_tenant
-from utils.runtime_metadata_utils import (
+from infrastructure.serialization.runtime_metadata import (
     runtime_metadata_hash,
     validate_runtime_metadata,
 )
-from services.file_management_service import upload_to_minio, resolve_minio_upload_folder, validate_urls_access
+from management.services.file.service import upload_to_minio, resolve_minio_upload_folder, validate_urls_access
 from database.attachment_db import get_file_url, get_file_size_from_minio
 from nexent.multi_modal.utils import parse_s3_url
 

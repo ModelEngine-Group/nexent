@@ -25,6 +25,7 @@ import {
   CONVERSATION_PAGE_SIZE,
   conversationService,
 } from "@/services/conversationService";
+import type { WorkbenchPins } from "@/types/conversation";
 import { getConversationDateBoundaries } from "@/lib/conversationViewport";
 import { toMessageCreatedAt } from "@/lib/messageDate";
 import { buildHistoricalMessageTiming } from "@/lib/messageTiming";
@@ -353,7 +354,7 @@ export class RemoteConversationHistoryAdapter implements ThreadHistoryAdapter {
         planRegistry.data ? "set" : "null"
       }`
     );
-    if (!remoteId) {
+    if (!remoteId || remoteId.startsWith("workbench-draft:")) {
       if (loadGeneration === this.loadGeneration) {
         historicalPlanCache.delete("");
       }
@@ -1185,7 +1186,14 @@ export class RemoteConversationHistoryAdapter implements ThreadHistoryAdapter {
             flushReasoning(part.invocation_id);
             if (part.content) {
               const meta = buildMetadata(part.invocation_id);
-              finalAnswers.apply({ ...part, content: unwrapFinalAnswer(part.content), answer_phase: "delta" }, meta);
+              finalAnswers.apply(
+                {
+                  ...part,
+                  content: unwrapFinalAnswer(part.content),
+                  answer_phase: "delta",
+                },
+                meta
+              );
             }
           }
         }
@@ -1705,122 +1713,167 @@ const waitForServerConversationId = async (
 };
 
 export const createConversationThreadListAdapter = (
-  conversationType: "agent_chat" | "workbench"
-): RemoteThreadListAdapter => ({
-  unstable_Provider: createHistoryProvider(),
+  conversationType: "agent_chat" | "workbench",
+  pinStorageKey?: string,
+  loadPins: () => Promise<WorkbenchPins> = () =>
+    conversationService.getWorkbenchPins(),
+  onDeleted?: (conversationId: number) => Promise<void>
+): RemoteThreadListAdapter => {
+  const prefetchedConversationIds = new Set<string>();
+  return {
+    unstable_Provider: createHistoryProvider(),
 
-  async list({ after } = {}): Promise<RemoteThreadListResponse> {
-    const { todayStartMs, weekStartMs } = getConversationDateBoundaries();
-    const offset = parseConversationListOffset(after);
-    const limit =
-      offset === 0 ? INITIAL_CONVERSATION_PAGE_SIZE : CONVERSATION_PAGE_SIZE;
-    const data = await conversationService.getList({
-      offset,
-      limit,
-      todayStartMs,
-      weekStartMs,
-      conversationType,
-    });
-    const nextOffset = offset + data.items.length;
+    async list({ after } = {}): Promise<RemoteThreadListResponse> {
+      const { todayStartMs, weekStartMs } = getConversationDateBoundaries();
+      const offset = parseConversationListOffset(after);
+      const limit =
+        offset === 0 ? INITIAL_CONVERSATION_PAGE_SIZE : CONVERSATION_PAGE_SIZE;
+      const data = await conversationService.getList({
+        offset,
+        limit,
+        todayStartMs,
+        weekStartMs,
+        conversationType,
+      });
+      const nextOffset = offset + data.items.length;
 
-    return {
-      threads: data.items.map(toRemoteThreadMetadata),
-      nextCursor:
-        nextOffset < data.metadata.total ? String(nextOffset) : undefined,
-    };
-  },
+      let pinnedMetadata: RemoteThreadMetadata[] = [];
+      if (offset === 0) {
+        prefetchedConversationIds.clear();
+        if (conversationType === "workbench" && pinStorageKey) {
+          const loadedIds = new Set(
+            data.items.map((item) => String(item.conversation_id))
+          );
+          try {
+            const pins = await loadPins();
+            pinnedMetadata = pins.items
+              .filter((item) => !loadedIds.has(String(item.conversation_id)))
+              .map(toRemoteThreadMetadata);
+            for (const item of pinnedMetadata)
+              prefetchedConversationIds.add(item.remoteId);
+          } catch (error) {
+            // Pin availability must not block ordinary conversation history.
+            log.error("Failed to preload Workbench pins", error);
+          }
+        }
+      }
 
-  async initialize(_threadId: string): Promise<RemoteThreadInitializeResponse> {
-    // Conversation creation is now handled lazily by `POST /api/agent/run`:
-    // when the request omits `conversation_id`, the backend auto-creates the
-    // conversation and returns the new id via the `conversation_id` response
-    // header. The remote-chat-model-adapter forwards that id back to the page
-    // state, which then rebinds it as `runConfig.custom.threadId` for later
-    // messages in the same thread.
-    //
-    // We intentionally do NOT call `conversationService.create()` here —
-    // doing so would create a second, empty conversation that the agent
-    // run never reuses (see commit history for details).
-    //
-    return {
-      remoteId: "",
-      externalId: "",
-    };
-  },
+      return {
+        threads: [
+          ...data.items
+            .filter(
+              (item) =>
+                !prefetchedConversationIds.has(String(item.conversation_id))
+            )
+            .map(toRemoteThreadMetadata),
+          ...pinnedMetadata,
+        ],
+        nextCursor:
+          nextOffset < data.metadata.total ? String(nextOffset) : undefined,
+      };
+    },
 
-  // New conversations do not have a backend ID until their first agent run.
-  // Accept metadata updates so assistant-ui can retain the selected agent in
-  // its local thread state while users switch between conversations.
-  async updateCustom(
-    _remoteId: string,
-    _custom: Record<string, unknown> | undefined
-  ): Promise<void> {
-    return;
-  },
+    async initialize(
+      _threadId: string
+    ): Promise<RemoteThreadInitializeResponse> {
+      // Conversation creation is now handled lazily by `POST /api/agent/run`:
+      // when the request omits `conversation_id`, the backend auto-creates the
+      // conversation and returns the new id via the `conversation_id` response
+      // header. The remote-chat-model-adapter forwards that id back to the page
+      // state, which then rebinds it as `runConfig.custom.threadId` for later
+      // messages in the same thread.
+      //
+      // We intentionally do NOT call `conversationService.create()` here —
+      // doing so would create a second, empty conversation that the agent
+      // run never reuses (see commit history for details).
+      //
+      return {
+        // Each reserved Workbench draft needs a distinct local identity so
+        // assistant-ui cannot merge unsent conversations under the empty ID.
+        remoteId:
+          conversationType === "workbench"
+            ? `workbench-draft:${_threadId}`
+            : "",
+        externalId: "",
+      };
+    },
 
-  async rename(remoteId: string, newTitle: string): Promise<void> {
-    const candidateId = await waitForServerConversationId(remoteId);
-    const conversationId = Number(candidateId);
-    if (
-      !candidateId ||
-      !Number.isInteger(conversationId) ||
-      conversationId <= 0
-    ) {
-      throw new Error(
-        "Cannot rename a conversation without a backend conversation ID."
+    // New conversations do not have a backend ID until their first agent run.
+    // Accept metadata updates so assistant-ui can retain the selected agent in
+    // its local thread state while users switch between conversations.
+    async updateCustom(
+      _remoteId: string,
+      _custom: Record<string, unknown> | undefined
+    ): Promise<void> {
+      return;
+    },
+
+    async rename(remoteId: string, newTitle: string): Promise<void> {
+      const candidateId = await waitForServerConversationId(remoteId);
+      const conversationId = Number(candidateId);
+      if (
+        !candidateId ||
+        !Number.isInteger(conversationId) ||
+        conversationId <= 0
+      ) {
+        throw new Error(
+          "Cannot rename a conversation without a backend conversation ID."
+        );
+      }
+      await conversationService.rename(conversationId, newTitle);
+    },
+
+    // The backend currently has no archive/unarchive endpoints, so these are
+    // intentionally no-ops. Keeping the implementations lets the runtime call
+    // them safely (e.g. from sidebar actions) without crashing the page.
+    async archive(_remoteId: string): Promise<void> {
+      log.warn(
+        "[adapter] archive is not supported by the backend yet; ignoring."
       );
-    }
-    await conversationService.rename(conversationId, newTitle);
-  },
+    },
 
-  // The backend currently has no archive/unarchive endpoints, so these are
-  // intentionally no-ops. Keeping the implementations lets the runtime call
-  // them safely (e.g. from sidebar actions) without crashing the page.
-  async archive(_remoteId: string): Promise<void> {
-    log.warn(
-      "[adapter] archive is not supported by the backend yet; ignoring."
-    );
-  },
-
-  async unarchive(_remoteId: string): Promise<void> {
-    log.warn(
-      "[adapter] unarchive is not supported by the backend yet; ignoring."
-    );
-  },
-
-  async delete(remoteId: string): Promise<void> {
-    const candidateId = await waitForServerConversationId(remoteId);
-    const conversationId = Number(candidateId);
-    if (
-      !candidateId ||
-      !Number.isInteger(conversationId) ||
-      conversationId <= 0
-    ) {
-      throw new Error(
-        "Cannot delete a conversation without a backend conversation ID."
+    async unarchive(_remoteId: string): Promise<void> {
+      log.warn(
+        "[adapter] unarchive is not supported by the backend yet; ignoring."
       );
-    }
-    await conversationService.delete(conversationId);
-  },
+    },
 
-  async fetch(threadId: string): Promise<RemoteThreadMetadata> {
-    const detail = await conversationService.getById(threadId);
+    async delete(remoteId: string): Promise<void> {
+      const candidateId = await waitForServerConversationId(remoteId);
+      const conversationId = Number(candidateId);
+      if (
+        !candidateId ||
+        !Number.isInteger(conversationId) ||
+        conversationId <= 0
+      ) {
+        throw new Error(
+          "Cannot delete a conversation without a backend conversation ID."
+        );
+      }
+      await conversationService.delete(conversationId);
+      await onDeleted?.(conversationId);
+    },
 
-    return toRemoteThreadMetadata({
-      conversation_id: Number(detail.conversation_id),
-      conversation_title: detail.conversation_title ?? "Untitled conversation",
-      agent_id: detail.agent_id,
-      create_time: detail.create_time,
-      update_time: detail.create_time,
-    });
-  },
+    async fetch(threadId: string): Promise<RemoteThreadMetadata> {
+      const detail = await conversationService.getById(threadId);
 
-  async generateTitle(_remoteId, _messages) {
-    // Title generation is initiated by the page after agent/run returns the
-    // real backend conversation ID. This avoids racing the first run.
-    return createAssistantStream(() => {});
-  },
-});
+      return toRemoteThreadMetadata({
+        conversation_id: Number(detail.conversation_id),
+        conversation_title:
+          detail.conversation_title ?? "Untitled conversation",
+        agent_id: detail.agent_id,
+        create_time: detail.create_time,
+        update_time: detail.create_time,
+      });
+    },
+
+    async generateTitle(_remoteId, _messages) {
+      // Title generation is initiated by the page after agent/run returns the
+      // real backend conversation ID. This avoids racing the first run.
+      return createAssistantStream(() => {});
+    },
+  };
+};
 
 export const conversationThreadListAdapter =
   createConversationThreadListAdapter("agent_chat");

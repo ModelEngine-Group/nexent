@@ -1,20 +1,13 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
-import asyncio
 import logging
 from collections import deque
 from typing import Optional
 from uuid import uuid4
 
-from fastapi import Header
-from nexent.core.concurrency import run_blocking
-from management.services.agent.naming import (
-    check_agent_value_duplicate,
-    generate_unique_agent_value,
-    regenerate_agent_value,
-)
-
-from consts.const import LANGUAGE, MODEL_CONFIG_MAPPING, CAN_EDIT_ALL_USER_ROLES
+from consts.agent_unavailable_reasons import AgentUnavailableReason
+from consts.const import CAN_EDIT_ALL_USER_ROLES, LANGUAGE, MODEL_CONFIG_MAPPING
+from consts.error_code import ErrorCode
 from consts.exceptions import (
     AgentNotFoundError,
     AgentRelationValidationError,
@@ -22,8 +15,6 @@ from consts.exceptions import (
     ForbiddenError,
     TenantResourceLimitError,
 )
-from consts.error_code import ErrorCode
-from consts.agent_unavailable_reasons import AgentUnavailableReason
 from consts.model import (
     AgentInfoRequest,
     AgentNameBatchCheckRequest,
@@ -31,13 +22,8 @@ from consts.model import (
     SkillInstanceInfoRequest,
     ToolInstanceInfoRequest,
 )
-from services.asset_owner_visibility import resolve_agent_list_permission
-from management.services.agent.read import (
-    apply_deleted_model_reason,
-    check_agent_availability,
-    project_agent_models,
-    tool_has_deleted_model,
-)
+from database import a2a_agent_db, skill_db
+from database.a2a_agent_db import query_external_sub_agents
 from database.agent_db import (
     batch_search_agent_display_names,
     create_agent,
@@ -50,109 +36,116 @@ from database.agent_db import (
     update_agent_icon,
     update_related_agents,
 )
-from database import a2a_agent_db
+from database.agent_version_db import (
+    batch_query_current_version_nos,
+    batch_search_version_names,
+    query_current_version_no,
+)
 from database.model_management_db import (
     get_model_by_model_id,
 )
 from database.tool_db import (
     create_or_update_tool_by_tool_info,
     query_all_enabled_tool_instances,
-    query_tool_instances_by_id,  # noqa: F401 - compatibility patch point
     query_tool_instances_by_agent_id,
+    query_tool_instances_by_id,  # noqa: F401 - compatibility patch point
     query_tools_by_ids,
     search_tools_for_sub_agent,
 )
-from database import skill_db
-from management.services.agent.icon_storage import (
-    ICON_MAX_BYTES,
+from database.user_tenant_db import get_user_tenant_by_user_id
+from fastapi import Header
+from management.services.agent.icon import (
     read_icon_image,
     upload_icon_image,
     validate_icon_image,
 )
+from management.services.agent.naming import (
+    check_agent_value_duplicate,
+    generate_unique_agent_value,
+    regenerate_agent_value,
+)
+from management.services.agent.read import (
+    apply_deleted_model_reason,
+    check_agent_availability,
+    project_agent_models,
+    tool_has_deleted_model,
+)
 from management.services.skill.service import SkillService
-from database.agent_version_db import (
-    query_current_version_no,
-    batch_search_version_names,
-    batch_query_current_version_nos,
+from nexent.core.concurrency import run_blocking
+from management.services.agent.reasoning import (
+    snapshot_agent_reasoning_config as build_reasoning_snapshot,
 )
-from database.user_tenant_db import get_user_tenant_by_user_id
-from database.a2a_agent_db import query_external_sub_agents
-from services.prompt_template_service import (
-    SYSTEM_PROMPT_TEMPLATE_ID,
-    SYSTEM_PROMPT_TEMPLATE_NAME,
-    get_prompt_template_summary,
-)
-from services.user_identity_service import enrich_cas_usernames
-from utils.str_utils import convert_list_to_string, convert_string_to_list
-from services.conversation_management_service import (
+from management.services.permission.asset_owner import resolve_agent_list_permission
+from management.services.conversation.service import (
     generate_conversation_title_service,  # noqa: F401 - compatibility patch point
     save_message_unit,  # noqa: F401 - retained as a compatibility re-export
     update_unit_status,  # noqa: F401 - retained as a compatibility re-export
 )
-from utils.auth_utils import get_current_user_info
-from utils.config_utils import tenant_config_manager
-from services.agent_reasoning_service import (
-    snapshot_agent_reasoning_config as build_reasoning_snapshot,
-)
+from management.services.permission.identity.display import enrich_cas_usernames
+from management.services.permission.identity.authentication_helpers import get_current_user_info
+from management.services.configuration.tenant.settings import tenant_config_manager
+from management.db.serialization import convert_list_to_string, convert_string_to_list
 
 # Monitoring utilities: bind Agent metadata once at the request boundary.
 
 # Import monitoring utilities
 
 logger = logging.getLogger(__name__)
-AGENT_ICON_MAX_BYTES = ICON_MAX_BYTES
-_channel_cleanup_tasks: set[asyncio.Task[None]] = set()
-_agent_stream_producer_tasks: set[asyncio.Task[None]] = set()
 
 
-from management.services.agent.management import (
-    _get_user_group_ids,
-    _resolve_model_ids_with_fallback,
-    delete_agent_impl,
-    _export_agent_dict_core,
-    export_agent_dict_impl,
-    export_agent_dict_for_repository_impl,
-    export_agent_impl,
-    _collect_skill_names_from_tree,
-    collect_skill_zip_entries,
-    export_agent_by_agent_id,
-    import_agent_impl,
-    import_agent_by_agent_id,
-    load_default_agents_json_file,
-    clear_agent_new_mark_impl,
-    list_all_agent_info_impl,
-    list_agent_page_impl,
-    insert_related_agent_impl,
-    get_agent_id_by_name,
-    get_agent_by_name_impl,
-    delete_related_agent_impl,
-    get_agent_call_relationship_impl,
-    export_agent_with_skills_impl,
-    import_agent_with_skills_impl,
-    build_skill_import_conflicts,
-    check_skill_conflicts_impl,
-    build_sandbox_policy,
-    get_sandbox_minio_client,
-)
-
-from management.services.agent.run import (
-    _finalize_buffered_unit_fragments,
+from management.services.agent.execution import (
+    _agent_run_identifier,
+    _cancel_task_on_runtime_signal,
     _cleanup_channel_later,
     _consume_agent_stream_producer,
     _poll_runtime_cancel_signal,
-    _cancel_task_on_runtime_signal,
-    _resolve_user_tenant_language,
     _stream_agent_chunks,
-    _agent_run_identifier,
-    prepare_agent_run,
-    save_messages,
-    generate_stream,
-    _detect_resume_position,
-    run_agent_stream,
-    run_agent_background,
     shutdown_agent_stream_tasks,
-    stop_agent_tasks,
+)
+from management.services.agent.management import (
+    clear_agent_new_mark_impl,
+    delete_agent_impl,
+    get_agent_by_name_impl,
+    get_agent_call_relationship_impl,
+    list_agent_page_impl,
+    list_all_agent_info_impl,
+)
+from management.services.agent.policy import (
+    build_sandbox_policy,
+    get_sandbox_minio_client,
+)
+from management.services.agent.run import (
+    generate_stream,
     is_agent_running,
+    prepare_agent_run,
+    run_agent_background,
+    save_messages,
+    stop_agent_tasks,
+)
+from management.services.agent.stream import (
+    finalize_buffered_unit_fragments as _finalize_buffered_unit_fragments,
+)
+from management.services.agent.subscription import (
+    _detect_resume_position,
+    _resolve_user_tenant_language,
+    run_agent_stream,
+)
+from management.services.agent.transfer import (
+    _collect_skill_names_from_tree,
+    _export_agent_dict_core,
+    _get_user_group_ids,
+    _resolve_model_ids_with_fallback,
+    build_skill_import_conflicts,
+    check_skill_conflicts_impl,
+    collect_skill_zip_entries,
+    export_agent_by_agent_id,
+    export_agent_dict_for_repository_impl,
+    export_agent_dict_impl,
+    export_agent_impl,
+    export_agent_with_skills_impl,
+    import_agent_by_agent_id,
+    import_agent_impl,
+    import_agent_with_skills_impl,
 )
 
 __all__ = (
@@ -168,14 +161,10 @@ __all__ = (
     "export_agent_by_agent_id",
     "import_agent_impl",
     "import_agent_by_agent_id",
-    "load_default_agents_json_file",
     "clear_agent_new_mark_impl",
     "list_all_agent_info_impl",
     "list_agent_page_impl",
-    "insert_related_agent_impl",
-    "get_agent_id_by_name",
     "get_agent_by_name_impl",
-    "delete_related_agent_impl",
     "get_agent_call_relationship_impl",
     "export_agent_with_skills_impl",
     "import_agent_with_skills_impl",
@@ -574,11 +563,6 @@ async def get_agent_info_impl(
     elif "business_logic_model_name" not in agent_info:
         agent_info["business_logic_model_name"] = None
 
-    if not agent_info.get("prompt_template_id"):
-        agent_info["prompt_template_id"] = SYSTEM_PROMPT_TEMPLATE_ID
-    if not agent_info.get("prompt_template_name"):
-        agent_info["prompt_template_name"] = SYSTEM_PROMPT_TEMPLATE_NAME
-
     if agent_info.get("group_ids") is not None:
         agent_info["group_ids"] = convert_string_to_list(agent_info.get("group_ids"))
 
@@ -687,7 +671,9 @@ def _validate_agent_relationships(request: AgentInfoRequest, tenant_id: str):
         request.related_agent_ids is not None
         and len(request.related_agent_ids) != len(set(request.related_agent_ids))
     ):
-        raise AgentRelationValidationError("Related Agent IDs must not contain duplicates")
+        raise AgentRelationValidationError(
+            "Related Agent IDs must not contain duplicates"
+        )
 
     for relation in relations:
         search_agent_info_by_agent_id(
@@ -739,12 +725,6 @@ async def update_agent_info_impl(
         )
 
     _validate_requested_output_tokens_for_agent(request, tenant_id)
-
-    prompt_template_id, prompt_template_name = get_prompt_template_summary(
-        template_id=request.prompt_template_id,
-        tenant_id=tenant_id,
-        user_id=user_id,
-    )
 
     existing_agent = None
     if request.agent_id is not None:
@@ -814,8 +794,6 @@ async def update_agent_info_impl(
                     "model_ids": request.model_ids,
                     "business_logic_model_id": request.business_logic_model_id,
                     "business_logic_model_name": request.business_logic_model_name,
-                    "prompt_template_id": prompt_template_id,
-                    "prompt_template_name": prompt_template_name,
                     "max_steps": request.max_steps,
                     "requested_output_tokens": request.requested_output_tokens,
                     "is_main_agent": request.is_main_agent
@@ -833,8 +811,6 @@ async def update_agent_info_impl(
                     "context_policy": request.context_policy,
                     "model_params_override": model_params_override,
                     "duty_prompt": request.duty_prompt,
-                    "constraint_prompt": request.constraint_prompt,
-                    "few_shots_prompt": request.few_shots_prompt,
                     "greeting_message": request.greeting_message,
                     "example_questions": request.example_questions,
                     "icon_url": request.icon_url,
@@ -850,8 +826,6 @@ async def update_agent_info_impl(
             agent_id = created["agent_id"]
         else:
             # Update agent
-            request.prompt_template_id = prompt_template_id
-            request.prompt_template_name = prompt_template_name
             request.model_params_override = model_params_override
             update_agent(agent_id, request, user_id)
     except TenantResourceLimitError:

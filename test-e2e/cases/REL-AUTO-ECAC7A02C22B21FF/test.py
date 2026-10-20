@@ -1,3 +1,4 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -16,11 +17,11 @@ async def test_northbound_startup_recovery_and_shutdown_contract():
     with (
         patch.object(nba, 'northbound_thread_manager', manager),
         patch(
-            'services.startup_recovery_service.recover_northbound_tasks',
+            'management.recovery.recover_northbound_tasks',
             recover,
         ),
         patch(
-            'services.startup_recovery_service.schedule_interrupted_upload_cleanup',
+            'management.recovery.schedule_interrupted_upload_cleanup',
             cleanup,
         ),
     ):
@@ -46,11 +47,11 @@ async def test_northbound_startup_recovery_and_shutdown_contract():
     with (
         patch.object(nba, 'northbound_thread_manager', manager),
         patch(
-            'services.startup_recovery_service.recover_northbound_tasks',
+            'management.recovery.recover_northbound_tasks',
             recover,
         ),
         patch(
-            'services.startup_recovery_service.schedule_interrupted_upload_cleanup',
+            'management.recovery.schedule_interrupted_upload_cleanup',
             cleanup,
         ),
         patch.object(nba, 'set_default_thread_manager') as set_default,
@@ -83,11 +84,11 @@ async def test_northbound_startup_recovery_and_shutdown_contract():
     with (
         patch.object(nba, 'northbound_thread_manager', manager),
         patch(
-            'services.startup_recovery_service.recover_northbound_tasks',
+            'management.recovery.recover_northbound_tasks',
             _failing_recover,
         ),
         patch(
-            'services.startup_recovery_service.schedule_interrupted_upload_cleanup',
+            'management.recovery.schedule_interrupted_upload_cleanup',
             AsyncMock(return_value=None),
         ),
         patch.object(nba, 'set_default_thread_manager'),

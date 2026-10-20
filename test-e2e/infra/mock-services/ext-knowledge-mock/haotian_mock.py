@@ -3,7 +3,7 @@
 """Haotian (昊天) route set (mounted at /haotian).
 
 Contract mirrored from:
-  - backend/services/haotian_service.py — GET list_url with the raw
+  - backend/management/services/knowledge_base/providers/haotian.py — GET list_url with the raw
     Authorization header forwarded verbatim (follow_redirects=True);
     response ``{"knowledge_sets": [{"name": ..., "knowledge_bases":
     [{"dify_dataset_id": ..., "name": ...}]}]}``. A ``dify_dataset_id`` of

@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import json
 import logging
 from http import HTTPStatus
@@ -48,8 +50,8 @@ from consts.exceptions import (
 )
 from permissions.depends import require
 from permissions.models import CurrentUser
-from services.asset_owner_visibility import apply_agent_detail_prompt_visibility
-from services.audit_service import AUDIT_DETAIL_LIST_LIMIT, record_security_event
+from management.services.permission.asset_owner import apply_agent_detail_prompt_visibility
+from management.services.monitor.audit import AUDIT_DETAIL_LIST_LIMIT, record_security_event
 
 from management.services.agent.service import (
     get_agent_info_impl,
@@ -72,20 +74,23 @@ from management.services.agent.service import (
     import_agent_with_skills_impl,
     check_skill_conflicts_impl,
 )
-from services.prompt_service import generate_guardrail_rules_impl
-from services.knowledge_scope_service import get_agent_knowledge_capabilities
-from services.workbench_service import (
+from management.services.agent.prompt_generation import generate_guardrail_rules_impl
+from management.services.knowledge_base.scope import get_agent_knowledge_capabilities
+from management.services.agent.workbench import (
     build_workbench_capability_preview,
     build_workbench_main_profile,
 )
-from management.services.agent.system_agent_provider import ensure_workbench_main_agent
-from services.agent_draft_permission_service import AgentDraftEditError
+from management.services.agent.system import (
+    ensure_workbench_main_agent,
+)
+from consts.exceptions import AgentDraftEditError
 from services.nl2agent_service import Nl2AgentDraftSaveError, create_nl2agent_stream
-from services.workbench_creation_history_service import (
+from consts.exceptions import RunModelControlsError
+from management.services.conversation.creation_history import (
     prepare_creation_history,
     persist_creation_stream,
 )
-from services.agent_version_service import (
+from management.services.agent.versions import (
     publish_version_impl,
     get_version_list_impl,
     get_version_impl,
@@ -99,7 +104,7 @@ from services.agent_version_service import (
     compare_versions_impl,
     list_published_agents_impl,
 )
-from utils.auth_utils import (
+from management.services.permission.identity.authentication_helpers import (
     get_current_user_info,
     get_current_user_id,
     verify_internal_runtime_jwt,
@@ -258,6 +263,9 @@ async def agent_run_api(
         raise HTTPException(status_code=HTTPStatus.FORBIDDEN, detail=str(e)) from e
     except WorkbenchError as e:
         raise HTTPException(status_code=e.status_code, detail={"code": e.code}) from e
+    except RunModelControlsError as e:
+        status = {"model_not_available": 404, "model_unavailable": 409, "model_type_invalid": 400}.get(e.code, 422)
+        raise HTTPException(status_code=status, detail={"code": e.code}) from e
     except ValidationError as e:
         raise HTTPException(
             status_code=HTTPStatus.UNPROCESSABLE_ENTITY,
@@ -313,6 +321,9 @@ async def northbound_agent_run_api(
             status_code=HTTPStatus.FORBIDDEN,
             detail=str(exc),
         ) from exc
+    except RunModelControlsError as exc:
+        status = {"model_not_available": 404, "model_unavailable": 409, "model_type_invalid": 400}.get(exc.code, 422)
+        raise HTTPException(status_code=status, detail={"code": exc.code}) from exc
     except ValidationError as exc:
         raise HTTPException(
             status_code=HTTPStatus.UNPROCESSABLE_ENTITY,
@@ -395,6 +406,9 @@ async def nl2agent_run_api(
             status_code=status_code,
             detail={"code": exc.code, "message": "Agent draft cannot be reused."},
         ) from exc
+    except RunModelControlsError as exc:
+        status = {"model_not_available": 404, "model_unavailable": 409, "model_type_invalid": 400}.get(exc.code, 422)
+        raise HTTPException(status_code=status, detail={"code": exc.code}) from exc
     except Nl2AgentDraftSaveError as exc:
         raise HTTPException(
             status_code=HTTPStatus.BAD_REQUEST,
@@ -926,6 +940,9 @@ async def list_agent_page_api(
     search_tag_predicates: Optional[str] = Query(None, description="Text-search tag predicates as JSON"),
     page: int = Query(1, ge=1, description="Page number starting from 1"),
     page_size: int = Query(20, ge=1, le=100, description="Items per page"),
+    sort_by_update_time: bool = Query(
+        False, description="Order by latest published version time"
+    ),
     include_repository_info: bool = Query(
         False, description="Include repository listings for agents on this page"
     ),
@@ -950,6 +967,7 @@ async def list_agent_page_api(
             "search": search,
             "page": page,
             "page_size": page_size,
+            "sort_by_update_time": sort_by_update_time,
             "include_repository_info": include_repository_info,
         }
         if created_by:

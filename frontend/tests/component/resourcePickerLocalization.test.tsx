@@ -1,3 +1,5 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { act, fireEvent, render, screen } from "@testing-library/react";
@@ -6,7 +8,7 @@ import { I18nextProvider, initReactI18next } from "react-i18next";
 import { describe, expect, it, vi } from "vitest";
 
 import { ParamDialog } from "@/components/resource-picker/ParamDialog";
-import { SearchRow } from "@/components/resource-picker/AddResourceDrawer";
+import { SearchRow } from "@/components/resource-picker/ResourceDrawer";
 
 const catalogs = Object.fromEntries(
   ["zh", "en"].map((language) => [
@@ -42,9 +44,9 @@ describe("resource picker localization", () => {
       const instance = await locale(language);
       const files = [
         "components/resource-picker/ModelParamsModal.tsx",
-        "components/resource-picker/AddKnowledgeDrawer.tsx",
-        "components/resource-picker/AddModelDrawer.tsx",
-        "components/resource-picker/AddResourceDrawer.tsx",
+        "components/resource-picker/KnowledgeDrawer.tsx",
+        "components/resource-picker/ModelDrawer.tsx",
+        "components/resource-picker/ResourceDrawer.tsx",
         "features/workbench/components/KnowledgePopoverContent.tsx",
         "features/workbench/components/SkillPopoverContent.tsx",
         "features/workbench/WorkbenchPage.tsx",

@@ -155,7 +155,7 @@ export function NotificationBell({
     <Button
       type="text"
       aria-label={t("notifications.bell.label")}
-      className="!flex !h-11 !w-full cursor-pointer !justify-start !gap-0 overflow-hidden rounded-lg !p-0 !pr-2 text-[#191919]"
+      className={`group !flex !h-11 !w-full cursor-pointer !justify-start !gap-0 overflow-hidden rounded-lg !p-0 !pr-2 !text-[var(--navigation-muted)] transition-colors duration-150 ease-out hover:!bg-[var(--navigation-hover)] hover:!text-[var(--navigation-foreground)] focus-visible:!text-[var(--navigation-foreground)] ${dropdownOpen ? "!bg-[var(--navigation-selected)] !text-[var(--navigation-foreground)]" : ""}`}
     >
       <span className="flex h-11 w-12 shrink-0 items-center justify-center">
         <Badge
@@ -181,6 +181,7 @@ export function NotificationBell({
       <NavigationRailLabel
         expanded={expanded}
         label={t("notifications.bell.label")}
+        selected={dropdownOpen}
       />
     </Button>
   ) : (

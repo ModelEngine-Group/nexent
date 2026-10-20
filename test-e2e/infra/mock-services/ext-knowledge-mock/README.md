@@ -18,7 +18,7 @@ disjoint, so one port hosts them all):
 | AIDP protocol | `/KnowledgeBase/*`, `/ModelService/*` | Managed AIDP **and** independent AIDP | `Authorization: Bearer mock-aidp-key`, tenant `aidp` |
 
 Root mounting is not cosmetic: the product drops base paths in two places —
-`backend/services/image_service.py` and `ind_aidp_service.py` rebuild AIDP
+`backend/management/services/file/image_proxy.py` and `ind_aidp_service.py` rebuild AIDP
 image URLs from scheme+netloc only, and the SDK's
 `DataMateSearchTool._parse_server_url` rebuilds its base from
 scheme+host+port only — so a path-prefixed base can never work for the AIDP
@@ -200,6 +200,11 @@ into the suite worker; cases declare their dependency through
 `knowledge-provider`, `http-fixture`, `model-provider`). The suite never
 starts or stops the Compose stack itself — deployment and teardown are
 explicit operator steps.
+
+Profile-selected cases were removed together with the mock/real split:
+PW-KB-AIDP-01 attaches this instance directly through its plain
+`knowledge-provider` dependency, and there is no machine-local journey file
+to create.
 
 ## Deliberate quirks (do not "fix" without checking the adapters)
 

@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """Business logic for the ephemeral NL2Agent runtime."""
 
 import ast
@@ -35,7 +37,7 @@ from consts.const import (
     MCP_REQUEST_TIMEOUT_SECONDS,
     MODEL_CONFIG_MAPPING,
 )
-from utils.mcp_url_utils import get_tenant_local_mcp_server
+from management.services.mcp.addressing import get_tenant_local_mcp_server
 from consts.model import HistoryItem, NL2AgentRunRequest, ToolSourceEnum
 from database.agent_db import (
     query_all_agent_info_by_tenant_id,
@@ -43,11 +45,10 @@ from database.agent_db import (
 )
 from database.skill_db import query_enabled_skill_instances
 from database.tool_db import query_all_enabled_tool_instances, query_all_tools
-from services.agent_draft_permission_service import (
-    AgentDraftEditError,
-    require_agent_draft_edit,
-)
-from services.thread_lifecycle_service import runtime_thread_manager
+from consts.exceptions import AgentDraftEditError
+from management.services.agent.authorization import require_agent_draft_edit
+from infrastructure.concurrency import runtime_thread_manager
+from management.services.model.run_controls import resolve_creator_model, preflight_turn_controls
 from tool_collection.mcp.nl2agent_mcp_tools import (
     AgentDraftFields,
     INSTALLED_RESOURCE_SOURCES,
@@ -64,10 +65,12 @@ from tool_collection.mcp.nl2agent_mcp_tools import (
     SEARCH_UNINSTALLED_RESOURCES_NAME,
     UNINSTALLED_RESOURCE_SOURCES,
 )
-from utils.auth_utils import get_current_user_id
-from utils.config_utils import tenant_config_manager
-from utils.context_utils import build_authorized_context_input
-from utils.http_client_utils import create_httpx_client
+from management.services.permission.identity.authentication_helpers import get_current_user_id
+from management.services.configuration.tenant.settings import tenant_config_manager
+from management.services.agent.context import (
+    build_authorized_context_input,
+)
+from infrastructure.http.client import create_httpx_client
 
 logger = logging.getLogger(__name__)
 
@@ -97,8 +100,6 @@ AGENT_DRAFT_FIELD_ORDER = (
     "display_name",
     "description",
     "duty_prompt",
-    "constraint_prompt",
-    "few_shots_prompt",
     "greeting_message",
     "example_questions",
 )
@@ -467,7 +468,7 @@ async def _load_installed_resource_catalog(
     user_id: str,
 ) -> list[dict[str, Any]]:
     from management.services.skill.service import SkillService
-    from services.tool_configuration_service import list_all_tools
+    from management.services.tool.configuration import list_all_tools
 
     tools = await list_all_tools(tenant_id=tenant_id)
     skills = SkillService(tenant_id=tenant_id).list_visible_skills(
@@ -800,11 +801,11 @@ async def _load_internal_uninstalled_resource_catalog(
     tenant_id: str,
     user_id: str,
 ) -> list[dict[str, Any]]:
-    from services.mcp_management_service import list_community_mcp_services
+    from management.services.repository.mcp.service import list_community_mcp_services
     from services.skill_repository_service import (
         list_skill_repository_listings_impl,
     )
-    from management.services.skill.service import get_official_skills_with_status
+    from management.services.skill.transfer import get_official_skills_with_status
 
     catalog: list[dict[str, Any]] = []
     for skill in get_official_skills_with_status(tenant_id=tenant_id):
@@ -1273,7 +1274,7 @@ async def validate_agent_generation_complete_impl(
 ) -> None:
     """Verify the final NL2Agent fields directly from persisted database state."""
 
-    draft, facts = await _load_verified_nl2agent_state(
+    draft, _facts = await _load_verified_nl2agent_state(
         agent_id=agent_id,
         tenant_id=tenant_id,
         user_id=user_id,
@@ -1289,8 +1290,6 @@ async def validate_agent_generation_complete_impl(
         raise Nl2AgentCompletionError("draft_fields_incomplete", ["description"])
 
     required_prompt_fields = ["duty_prompt", "greeting_message"]
-    if facts:
-        required_prompt_fields.extend(["constraint_prompt", "few_shots_prompt"])
     missing_prompts = [
         field_name
         for field_name in required_prompt_fields
@@ -1335,6 +1334,7 @@ async def build_nl2agent_run_info(
     user_id, authenticated_tenant_id = get_current_user_id(authorization)
     if authenticated_tenant_id != tenant_id:
         raise PermissionError("tenant mismatch")
+    preflight_turn_controls(request, tenant_id)
     binding_context = await _build_verified_bound_resources_context(
         agent_id=request.agent_id,
         tenant_id=tenant_id,
@@ -1356,6 +1356,12 @@ async def build_nl2agent_run_info(
         key=MODEL_CONFIG_MAPPING["llm"],
         tenant_id=tenant_id,
     )
+    if request.model_id is not None or request.generation_config is not None:
+        default_model = resolve_creator_model(
+            model_config_list, agent_config, tenant_id, request.model_id,
+            request.generation_config.model_dump(exclude_unset=True) if request.generation_config else None,
+            default_model,
+        )
     input_budget, capacity_snapshot, resolved_capacity_snapshot = (
         _resolve_input_budget(default_model)
     )
@@ -1464,10 +1470,12 @@ async def create_nl2agent_stream(
                     boundary_delivered = False
         except asyncio.CancelledError:
             raise
-        except Exception:
+        except Exception as exc:
             logger.exception("NL2Agent execution failed")
+            from management.services.agent.stream import sampling_configuration_error_payload
+            sampling_error = sampling_configuration_error_payload(exc)
             error_payload = json.dumps(
-                {
+                sampling_error or {
                     "type": "error",
                     "content": "NL2Agent execution failed.",
                 },

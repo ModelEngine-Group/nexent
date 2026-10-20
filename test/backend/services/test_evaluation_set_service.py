@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """Unit tests for evaluation_set_service focusing on the new
 delete-with-reference-count behavior."""
 
@@ -217,19 +219,19 @@ sys.modules["management.services.model.invocation"] = _utils_llm_mock
 _utils_pkg.llm_utils = _utils_llm_mock
 
 _utils_prompt_mock = MagicMock()
-sys.modules["utils.prompt_template_utils"] = _utils_prompt_mock
+sys.modules["management.services.agent.prompt"] = _utils_prompt_mock
 _utils_pkg.prompt_template_utils = _utils_prompt_mock
 
 # Function-body imports used by the KB / LLM / export helpers.
-sys.modules["utils.evaluation_set_excel_utils"] = MagicMock()
+sys.modules["management.services.evaluation.spreadsheet"] = MagicMock()
 sys.modules["management.services.knowledge_base.service"] = MagicMock()
-sys.modules["utils.agent_profile_utils"] = MagicMock()
+sys.modules["management.services.agent.profile"] = MagicMock()
 
 
 @pytest.fixture
 def service_module(monkeypatch):
-    if "services.evaluation_set_service" in sys.modules:
-        del sys.modules["services.evaluation_set_service"]
+    if "management.services.evaluation.sets" in sys.modules:
+        del sys.modules["management.services.evaluation.sets"]
     # Clear the package attribute so the ``from services`` below triggers a
     # fresh import (and therefore repopulates ``sys.modules``). Without this,
     # Python's attribute-on-package lookup returns the previous module object
@@ -260,7 +262,7 @@ def service_module(monkeypatch):
     sys.modules["database.client"] = db_client_mock
     _db_pkg.client = db_client_mock
 
-    from services import evaluation_set_service
+    from management.services.evaluation import sets as evaluation_set_service
 
     # Patch the names bound at module load time so the test exercises the
     # mocked implementations.
@@ -685,7 +687,7 @@ class TestExportEvaluationSet:
             MagicMock(return_value={"name": "my set"}),
         )
         monkeypatch.setattr(service, "get_evaluation_set_cases_all", MagicMock(return_value=[]))
-        excel_mock = sys.modules["utils.evaluation_set_excel_utils"]
+        excel_mock = sys.modules["management.services.evaluation.spreadsheet"]
         excel_mock.build_evaluation_set_export_bytes = MagicMock(return_value=b"xlsx")
 
         filename, payload = service.export_evaluation_set_impl(1, "t1")
@@ -1414,21 +1416,21 @@ class TestBuildAgentContextBlock:
 
     def test_returns_formatted_profile(self, service_module, monkeypatch):
         service, _ = service_module
-        profile_mock = sys.modules["utils.agent_profile_utils"]
+        profile_mock = sys.modules["management.services.agent.profile"]
         profile_mock.fetch_agent_profile = MagicMock(return_value="profile")
         profile_mock.format_agent_profile_context = MagicMock(return_value="agent ctx")
         assert service._build_agent_context_block(7, "t1") == "agent ctx"
 
     def test_returns_empty_when_profile_context_empty(self, service_module, monkeypatch):
         service, _ = service_module
-        profile_mock = sys.modules["utils.agent_profile_utils"]
+        profile_mock = sys.modules["management.services.agent.profile"]
         profile_mock.fetch_agent_profile = MagicMock(return_value="profile")
         profile_mock.format_agent_profile_context = MagicMock(return_value="")
         assert service._build_agent_context_block(7, "t1") == ""
 
     def test_returns_empty_on_error(self, service_module, monkeypatch):
         service, _ = service_module
-        profile_mock = sys.modules["utils.agent_profile_utils"]
+        profile_mock = sys.modules["management.services.agent.profile"]
         profile_mock.fetch_agent_profile = MagicMock(side_effect=RuntimeError("x"))
         assert service._build_agent_context_block(7, "t1") == ""
 

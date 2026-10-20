@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """Skill management HTTP endpoints."""
 
 import logging
@@ -18,26 +20,19 @@ from consts.model import (
 )
 from permissions.depends import require
 from permissions.models import CurrentUser
-from services.asset_owner_visibility import can_view_skill
-from services.audit_service import AUDIT_DETAIL_LIST_LIMIT, record_security_event
-from services.agent_draft_permission_service import (
-    AgentDraftEditError,
-    ResourceBindingError,
-    require_agent_draft_edit,
-)
+from consts.exceptions import RunModelControlsError
+from management.services.permission.asset_owner import can_view_skill
+from management.services.monitor.audit import AUDIT_DETAIL_LIST_LIMIT, record_security_event
+from consts.exceptions import AgentDraftEditError, ResourceBindingError
+from management.services.agent.authorization import require_agent_draft_edit
 from services.nl2skill_service import create_nl2skill_stream
-from services.workbench_creation_history_service import (
+from management.services.conversation.creation_history import (
     prepare_creation_history,
     persist_creation_stream,
 )
-from management.services.skill.service import (
-    SkillService,
-    UnsupportedSkillFilePreview,
-    get_official_skills_with_status,
-    install_skills_from_zip_for_tenant,
-    update_skill_list,
-)
-from utils.auth_utils import get_current_user_id, get_current_user_info
+from management.services.skill.service import SkillService, UnsupportedSkillFilePreview
+from management.services.skill.transfer import get_official_skills_with_status, install_skills_from_zip_for_tenant, update_skill_list
+from management.services.permission.identity.authentication_helpers import get_current_user_id, get_current_user_info
 
 ASSET_OWNER_SKILL_VIEW_DENIED = {"content": "您无权限查看"}
 
@@ -851,6 +846,9 @@ async def nl2skill_run_api(
                 headers={"conversation_id": str(conversation_id)},
             )
         return StreamingResponse(stream, media_type="text/event-stream")
+    except RunModelControlsError as exc:
+        status = {"model_not_available": 404, "model_unavailable": 409, "model_type_invalid": 400}.get(exc.code, 422)
+        raise HTTPException(status_code=status, detail={"code": exc.code}) from exc
     except ValueError as exc:
         raise HTTPException(status_code=400, detail="Invalid Workbench creation session.") from exc
     except HTTPException:

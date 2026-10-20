@@ -39,7 +39,7 @@ import {
 } from "@/components/resource-picker/ParamDialog";
 import ToolTestPanel from "./ToolTestPanel";
 import { updateToolConfig } from "@/services/agentConfigService";
-import KnowledgeBaseSelectorModal from "@/components/tool-config/KnowledgeBaseSelectorModal";
+import KnowledgeSelectorDrawer from "@/components/tool-config/KnowledgeSelectorDrawer";
 import HaotianKnowledgeSelectorModal, {
   HaotianKnowledgeSet,
 } from "@/components/tool-config/HaotianKnowledgeSelectorModal";
@@ -2470,7 +2470,12 @@ export default function ToolConfigModal({
                       colon={false}
                       label={
                         <ParamLabel
-                          label={param.name}
+                          label={
+                            (tool.origin_name || tool.name) === "deepseek_search" &&
+                            param.name === "only_high_quality"
+                              ? t("toolConfig.deepseek.onlyHighQuality")
+                              : param.name
+                          }
                           required={param.required}
                           info={Boolean(
                             getLocalizedDescription(
@@ -2632,7 +2637,7 @@ export default function ToolConfigModal({
           }
         />
       ) : (
-        <KnowledgeBaseSelectorModal
+        <KnowledgeSelectorDrawer
           isOpen={kbSelectorVisible}
           onClose={() => setKbSelectorVisible(false)}
           onConfirm={handleKbConfirm}
