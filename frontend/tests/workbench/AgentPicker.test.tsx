@@ -1,7 +1,11 @@
 // Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
 import { beforeEach, expect, it, vi } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
+import { createInstance } from "i18next";
+import { I18nextProvider } from "react-i18next";
+import zh from "@/public/locales/zh/common.json";
+import en from "@/public/locales/en/common.json";
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { AgentPicker } from "@/features/workbench/components/AgentPicker";
@@ -31,6 +35,49 @@ vi.mock("@/features/workbench/hooks/useResourceTags", () => ({
 const routerPush = vi.hoisted(() => vi.fn());
 vi.mock("next/navigation", () => ({ useRouter: () => ({ push: routerPush }) }));
 const empty = vi.hoisted(() => []);
+
+it.each([
+  ["zh", "导入预检", "取消", "导入并选择"],
+  ["en", "Import precheck", "Cancel", "Import and select"],
+])(
+  "localizes import precheck actions in %s and cancels without importing",
+  async (language, title, cancel, confirm) => {
+    const i18n = createInstance();
+    await i18n.init({
+      lng: language,
+      fallbackLng: "zh",
+      defaultNS: "common",
+      keySeparator: false,
+      resources: { zh: { common: zh }, en: { common: en } },
+    });
+    const client = new QueryClient();
+    render(
+      <I18nextProvider i18n={i18n}>
+        <QueryClientProvider client={client}>
+          <AgentPicker open agents={[]} onSelect={vi.fn()} onCancel={vi.fn()} />
+        </QueryClientProvider>
+      </I18nextProvider>
+    );
+    await userEvent.click(screen.getByRole("tab", { name: "仓库" }));
+    await userEvent.click(
+      await screen.findByRole("option", { name: /Repository A/ })
+    );
+    const dialog = await screen.findByRole("dialog", { name: title });
+    expect(within(dialog).getByRole("button", { name: confirm })).toBeEnabled();
+    await userEvent.click(
+      within(dialog).getByRole("button", {
+        name: language === "zh" ? /^取\s*消$/ : cancel,
+      })
+    );
+    await waitFor(() =>
+      expect(
+        screen.queryByRole("dialog", { name: title })
+      ).not.toBeInTheDocument()
+    );
+    expect(importAgentFromRepository).not.toHaveBeenCalled();
+    client.clear();
+  }
+);
 const agent = {
   id: "8",
   name: "Agent A",

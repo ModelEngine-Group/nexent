@@ -1,3 +1,4 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """Formal model service relocation contracts."""
 
 import ast
@@ -88,7 +89,7 @@ def test_msrf_d1_001():
                             | {"llm_utils", "model_name_utils", "reasoning"}
                             for a in node.names
                         ), path
-                    if module == "utils.config_utils":
+                    if module == "management.services.configuration.tenant.settings":
                         assert not any(
                             a.name == "get_model_name_from_config" for a in node.names
                         ), path

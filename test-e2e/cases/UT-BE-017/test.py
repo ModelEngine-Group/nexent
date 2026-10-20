@@ -1,3 +1,4 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """D1 backend policy tests for repository, sharing, runtime and memory."""
 
 from __future__ import annotations
@@ -22,7 +23,7 @@ STAGE = pytest.mark.stage("D1")
 @STAGE
 @pytest.mark.case_id("UT-BE-017")
 def test_a2a_security_requirement_maps_credentials_to_wire_parts() -> None:
-    from services.a2a_client_service import A2AClientService, AgentCallError
+    from management.services.agent.a2a.catalog import A2AClientService, AgentCallError
 
     service = object.__new__(A2AClientService)
     agent = {
@@ -40,19 +41,3 @@ def test_a2a_security_requirement_maps_credentials_to_wire_parts() -> None:
     agent["security_credentials"] = {"jwt": "signed-token"}
     with pytest.raises(AgentCallError, match="do not satisfy"):
         service._build_security_request_parts(agent)
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-

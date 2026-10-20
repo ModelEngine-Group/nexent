@@ -2470,7 +2470,12 @@ export default function ToolConfigModal({
                       colon={false}
                       label={
                         <ParamLabel
-                          label={param.name}
+                          label={
+                            (tool.origin_name || tool.name) === "deepseek_search" &&
+                            param.name === "only_high_quality"
+                              ? t("toolConfig.deepseek.onlyHighQuality")
+                              : param.name
+                          }
                           required={param.required}
                           info={Boolean(
                             getLocalizedDescription(

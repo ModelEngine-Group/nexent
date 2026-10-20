@@ -1,3 +1,4 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """Unit tests for ASSET_OWNER visibility helpers."""
 
 import sys
@@ -19,30 +20,30 @@ from consts.const import (
 
 PROMPTS_HIDDEN_FLAG = "prompts_hidden"
 from consts.exceptions import ValidationError
-from backend.services import asset_owner_visibility as aov
+from management.services.permission import asset_owner as aov
 
 ASSET_OWNER_RESOURCES_ROUTE = aov.ASSET_OWNER_RESOURCES_ROUTE
 OWNER_MANAGE_ROUTE = aov.OWNER_MANAGE_ROUTE
 
 
 class TestRequireAssetOwnerEnabled:
-    @patch("backend.services.asset_owner_visibility.ENABLE_ASSET_OWNER_ROLE", False)
+    @patch("management.services.permission.asset_owner.ENABLE_ASSET_OWNER_ROLE", False)
     def test_raises_when_feature_disabled(self):
         with pytest.raises(ValidationError, match="ASSET_OWNER feature is not enabled"):
             aov.require_asset_owner_enabled()
 
-    @patch("backend.services.asset_owner_visibility.ENABLE_ASSET_OWNER_ROLE", True)
+    @patch("management.services.permission.asset_owner.ENABLE_ASSET_OWNER_ROLE", True)
     def test_no_op_when_feature_enabled(self):
         aov.require_asset_owner_enabled()
 
 
 class TestFilterAccessibleRoutes:
-    @patch("backend.services.asset_owner_visibility.ENABLE_ASSET_OWNER_ROLE", True)
+    @patch("management.services.permission.asset_owner.ENABLE_ASSET_OWNER_ROLE", True)
     def test_returns_routes_unchanged_when_enabled(self):
         routes = ["/home", ASSET_OWNER_RESOURCES_ROUTE, OWNER_MANAGE_ROUTE, "/settings"]
         assert aov.filter_accessible_routes_for_asset_owner_feature(routes) == routes
 
-    @patch("backend.services.asset_owner_visibility.ENABLE_ASSET_OWNER_ROLE", False)
+    @patch("management.services.permission.asset_owner.ENABLE_ASSET_OWNER_ROLE", False)
     def test_removes_asset_owner_routes_when_disabled(self):
         routes = ["/home", ASSET_OWNER_RESOURCES_ROUTE, OWNER_MANAGE_ROUTE, "/settings"]
         result = aov.filter_accessible_routes_for_asset_owner_feature(routes)

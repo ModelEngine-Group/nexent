@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """
 Unified benchmark runner for Nexent Agent evaluation.
 
@@ -947,7 +949,6 @@ def main():
         tools=tools,
         model_factory=model_factory,
         user_id="user_id",
-        prompt_template_version=str(agent_cfg.get("prompt_template_id", "")),
         prompt_template_source=(
             str(Path(args.agent_config).resolve()) if args.agent_config else "benchmark_cli"
         ),

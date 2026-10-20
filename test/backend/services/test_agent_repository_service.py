@@ -2,6 +2,8 @@
 
 """Unit tests for agent marketplace repository service."""
 
+from test.backend.management.import_patching import patch_import_context, patch_import_object_context, set_import_attribute
+
 import sys
 import types
 from datetime import datetime
@@ -64,7 +66,7 @@ sys.modules.setdefault("database.model_management_db", MagicMock())
 sys.modules.setdefault("database.remote_mcp_db", MagicMock())
 sys.modules.setdefault("database.tool_db", MagicMock())
 sys.modules.setdefault("management.services.model.adapter", MagicMock())
-sys.modules.setdefault("utils.config_utils", MagicMock())
+sys.modules.setdefault("management.services.configuration.tenant.settings", MagicMock())
 
 
 class _SkillZipEntryMock:
@@ -167,13 +169,13 @@ _agent_service_mock.list_all_agent_info_impl = AsyncMock(return_value=[])
 sys.modules["management.services.agent.service"] = _agent_service_mock
 
 _notification_service_mock = MagicMock()
-sys.modules["services.notification_service"] = _notification_service_mock
+sys.modules["management.services.notification.service"] = _notification_service_mock
 
 from consts.const import ASSET_OWNER_TENANT_ID
 from consts.exceptions import UnauthorizedError
 from consts.notification import EVENT_TYPE_REPOSITORY_REVIEW_PENDING, RESOURCE_TYPE_AGENT_REPOSITORY
 
-from backend.services import agent_repository_service as ars
+from management.services.repository.agent import listing as ars
 
 
 @pytest.fixture(autouse=True)
@@ -228,7 +230,7 @@ def _pending_review_reset_calls(
 
 
 def test_list_repository_listings_passes_agent_id_to_db():
-    with patch.object(
+    with patch_import_object_context(
         ars,
         "list_agent_repository_summaries",
         return_value=[_repository_record(agent_repository_id=1, agent_id=123)],
@@ -281,7 +283,7 @@ def test_list_repository_listings_filters_by_search_before_pagination():
         },
     ]
 
-    with patch.object(ars, "list_agent_repository_summaries", return_value=records):
+    with patch_import_object_context(ars, "list_agent_repository_summaries", return_value=records):
         result = ars.list_agent_repository_listings_impl(
             "tenant_a",
             status="shared",
@@ -305,9 +307,9 @@ def test_list_repository_listings_searches_structured_tags():
         _repository_record(agent_repository_id=2, agent_id=11, status="shared"),
     ]
 
-    with patch.object(
+    with patch_import_object_context(
         ars, "list_agent_repository_summaries", return_value=records
-    ), patch.object(
+    ), patch_import_object_context(
         ars,
         "_find_agent_ids_matching_any_tag_predicate",
         return_value={"11"},
@@ -329,9 +331,9 @@ def test_list_repository_listings_filters_all_matching_structured_tags():
     ]
     predicate = object()
 
-    with patch.object(
+    with patch_import_object_context(
         ars, "list_agent_repository_summaries", return_value=records
-    ), patch.object(
+    ), patch_import_object_context(
         ars,
         "_filter_agent_ids_by_tag_predicates",
         return_value=["10", "11"],
@@ -355,7 +357,7 @@ def test_tag_predicate_helpers_delegate_to_authorized_resource_filter(monkeypatc
             calls.append((tenant_id, resource_type, resource_ids, predicates))
             return [resource_ids[-1]]
 
-    monkeypatch.setattr(ars, "TagManagementDB", TagManagementDB)
+    set_import_attribute(monkeypatch, ars, "TagManagementDB", TagManagementDB)
 
     assert ars._find_agent_ids_matching_any_tag_predicate(
         "tenant_a", [1, 2], ["first", "second"]
@@ -385,7 +387,7 @@ def test_list_repository_listings_paginates_filtered_records():
         for index in range(1, 8)
     ]
 
-    with patch.object(ars, "list_agent_repository_summaries", return_value=records):
+    with patch_import_object_context(ars, "list_agent_repository_summaries", return_value=records):
         result = ars.list_agent_repository_listings_impl(
             "tenant_a",
             status="shared",
@@ -414,7 +416,7 @@ def test_list_repository_listings_search_matches_tags():
         },
     ]
 
-    with patch.object(ars, "list_agent_repository_summaries", return_value=records):
+    with patch_import_object_context(ars, "list_agent_repository_summaries", return_value=records):
         by_tag = ars.list_agent_repository_listings_impl(
             "tenant_a",
             status="shared",
@@ -425,7 +427,7 @@ def test_list_repository_listings_search_matches_tags():
 
 
 def test_list_repository_listings_rejects_invalid_status_with_agent_id():
-    with patch.object(ars, "list_agent_repository_summaries") as mock_list:
+    with patch_import_object_context(ars, "list_agent_repository_summaries") as mock_list:
         with pytest.raises(ValueError, match="Invalid status"):
             ars.list_agent_repository_listings_impl(
                 "tenant_a",
@@ -651,9 +653,9 @@ def test_repository_icon_urls_are_scoped_to_agent_version_and_upload():
 
 
 def test_repository_icon_read_requires_matching_listing_url():
-    with patch.object(
+    with patch_import_object_context(
         ars, "get_agent_repository_by_agent_id", return_value={"icon_url": None}
-    ), patch.object(ars, "read_icon_image") as read_image:
+    ), patch_import_object_context(ars, "read_icon_image") as read_image:
         with pytest.raises(FileNotFoundError):
             ars.get_agent_repository_icon_impl(
                 4, 2, "d0b11a53-1808-4c79-9a04-e466f938f96a", "tenant_a"
@@ -663,11 +665,11 @@ def test_repository_icon_read_requires_matching_listing_url():
 
 def test_repository_icon_read_returns_matching_listing_image():
     image_id = "d0b11a53-1808-4c79-9a04-e466f938f96a"
-    with patch.object(
+    with patch_import_object_context(
         ars,
         "get_agent_repository_by_agent_id",
         return_value={"icon_url": ars._repository_icon_url(4, 2, image_id)},
-    ), patch.object(
+    ), patch_import_object_context(
         ars, "read_icon_image", return_value=(b"image", "image/png")
     ) as read_image:
         result = ars.get_agent_repository_icon_impl(4, 2, image_id, "tenant_a")
@@ -680,13 +682,13 @@ def test_repository_icon_read_returns_matching_listing_image():
 @pytest.mark.asyncio
 async def test_repository_icon_upload_keeps_separate_object_and_agent_record():
     image_id = "d0b11a53-1808-4c79-9a04-e466f938f96a"
-    with patch.object(
+    with patch_import_object_context(
         ars, "search_agent_info_by_agent_id", return_value={"name": "agent_one"}
-    ), patch.object(
+    ), patch_import_object_context(
         ars, "_validate_create_listing_permission"
-    ), patch.object(
+    ), patch_import_object_context(
         ars.uuid, "uuid4", return_value=image_id
-    ), patch.object(
+    ), patch_import_object_context(
         ars, "upload_icon_image", return_value="image/png"
     ) as upload:
         result = await ars.upload_agent_repository_icon_impl(
@@ -741,11 +743,11 @@ async def test_list_my_editable_agents_impl_returns_items_and_counts():
         2: _mine_metadata_record(agent_id=2, created_by="user_b"),
     }
 
-    with patch.object(
+    with patch_import_object_context(
         ars, "list_all_agent_info_impl", new_callable=AsyncMock, return_value=agents
-    ) as mock_list_all, patch.object(
+    ) as mock_list_all, patch_import_object_context(
         ars, "fetch_draft_agent_mine_metadata", return_value=meta_by_id
-    ) as mock_meta, patch.object(
+    ) as mock_meta, patch_import_object_context(
         ars, "list_agent_repository_by_agent_ids", return_value=[]
     ) as mock_repo_list:
         result = await ars.list_my_editable_agents_impl(
@@ -791,11 +793,11 @@ async def test_list_my_editable_agents_impl_includes_rejected_repository_info():
         "create_time": "2026-06-01T00:00:00",
     }
 
-    with patch.object(
+    with patch_import_object_context(
         ars, "list_all_agent_info_impl", new_callable=AsyncMock, return_value=agents
-    ), patch.object(
+    ), patch_import_object_context(
         ars, "fetch_draft_agent_mine_metadata", return_value=meta_by_id
-    ), patch.object(
+    ), patch_import_object_context(
         ars, "list_agent_repository_by_agent_ids", return_value=[rejected_record]
     ):
         result = await ars.list_my_editable_agents_impl(
@@ -813,11 +815,11 @@ async def test_list_my_editable_agents_impl_includes_rejected_repository_info():
 
 @pytest.mark.asyncio
 async def test_list_my_editable_agents_impl_returns_empty_items_with_counts():
-    with patch.object(
+    with patch_import_object_context(
         ars, "list_all_agent_info_impl", new_callable=AsyncMock, return_value=[]
-    ), patch.object(
+    ), patch_import_object_context(
         ars, "fetch_draft_agent_mine_metadata", return_value={}
-    ), patch.object(
+    ), patch_import_object_context(
         ars, "list_agent_repository_by_agent_ids"
     ) as mock_repo_list:
         result = await ars.list_my_editable_agents_impl(
@@ -855,11 +857,11 @@ async def test_list_my_editable_agents_impl_includes_read_only_agents():
         2: _mine_metadata_record(agent_id=2, created_by="user_b"),
     }
 
-    with patch.object(
+    with patch_import_object_context(
         ars, "list_all_agent_info_impl", new_callable=AsyncMock, return_value=agents
-    ), patch.object(
+    ), patch_import_object_context(
         ars, "fetch_draft_agent_mine_metadata", return_value=meta_by_id
-    ), patch.object(
+    ), patch_import_object_context(
         ars, "list_agent_repository_by_agent_ids", return_value=[]
     ):
         result = await ars.list_my_editable_agents_impl(
@@ -884,11 +886,11 @@ async def test_list_my_editable_agents_impl_filters_others_ownership():
         2: _mine_metadata_record(agent_id=2, created_by="user_b"),
     }
 
-    with patch.object(
+    with patch_import_object_context(
         ars, "list_all_agent_info_impl", new_callable=AsyncMock, return_value=agents
-    ), patch.object(
+    ), patch_import_object_context(
         ars, "fetch_draft_agent_mine_metadata", return_value=meta_by_id
-    ), patch.object(
+    ), patch_import_object_context(
         ars, "list_agent_repository_by_agent_ids", return_value=[]
     ):
         result = await ars.list_my_editable_agents_impl(
@@ -913,11 +915,11 @@ async def test_list_my_editable_agents_impl_paginates_filtered_agents():
         for index in range(1, 6)
     }
 
-    with patch.object(
+    with patch_import_object_context(
         ars, "list_all_agent_info_impl", new_callable=AsyncMock, return_value=agents
-    ), patch.object(
+    ), patch_import_object_context(
         ars, "fetch_draft_agent_mine_metadata", return_value=meta_by_id
-    ), patch.object(
+    ), patch_import_object_context(
         ars, "list_agent_repository_by_agent_ids", return_value=[]
     ) as mock_repo_list:
         result = await ars.list_my_editable_agents_impl(
@@ -950,11 +952,11 @@ async def test_list_my_editable_agents_impl_page1_with_new_agent_padding():
         for index in range(1, 6)
     }
 
-    with patch.object(
+    with patch_import_object_context(
         ars, "list_all_agent_info_impl", new_callable=AsyncMock, return_value=agents
-    ), patch.object(
+    ), patch_import_object_context(
         ars, "fetch_draft_agent_mine_metadata", return_value=meta_by_id
-    ), patch.object(
+    ), patch_import_object_context(
         ars, "list_agent_repository_by_agent_ids", return_value=[]
     ) as mock_repo_list:
         result = await ars.list_my_editable_agents_impl(
@@ -990,11 +992,11 @@ async def test_list_my_editable_agents_impl_page2_with_new_agent_padding():
         for index in range(1, 7)
     }
 
-    with patch.object(
+    with patch_import_object_context(
         ars, "list_all_agent_info_impl", new_callable=AsyncMock, return_value=agents
-    ), patch.object(
+    ), patch_import_object_context(
         ars, "fetch_draft_agent_mine_metadata", return_value=meta_by_id
-    ), patch.object(
+    ), patch_import_object_context(
         ars, "list_agent_repository_by_agent_ids", return_value=[]
     ) as mock_repo_list:
         result = await ars.list_my_editable_agents_impl(
@@ -1019,11 +1021,11 @@ async def test_list_my_editable_agents_impl_page2_with_new_agent_padding():
 
 @pytest.mark.asyncio
 async def test_list_my_editable_agents_impl_zero_agents_with_new_agent_padding():
-    with patch.object(
+    with patch_import_object_context(
         ars, "list_all_agent_info_impl", new_callable=AsyncMock, return_value=[]
-    ), patch.object(
+    ), patch_import_object_context(
         ars, "fetch_draft_agent_mine_metadata", return_value={}
-    ), patch.object(
+    ), patch_import_object_context(
         ars, "list_agent_repository_by_agent_ids", return_value=[]
     ) as mock_repo_list:
         result = await ars.list_my_editable_agents_impl(
@@ -1051,11 +1053,11 @@ async def test_list_my_editable_agents_impl_ignores_padding_with_search():
     agents = [_list_all_agent_record(agent_id=1)]
     meta_by_id = {1: _mine_metadata_record(agent_id=1, created_by="user_a")}
 
-    with patch.object(
+    with patch_import_object_context(
         ars, "list_all_agent_info_impl", new_callable=AsyncMock, return_value=agents
-    ), patch.object(
+    ), patch_import_object_context(
         ars, "fetch_draft_agent_mine_metadata", return_value=meta_by_id
-    ), patch.object(
+    ), patch_import_object_context(
         ars, "list_agent_repository_by_agent_ids", return_value=[]
     ):
         result = await ars.list_my_editable_agents_impl(
@@ -1077,11 +1079,11 @@ async def test_list_my_editable_agents_impl_ignores_padding_with_created_ownersh
     agents = [_list_all_agent_record(agent_id=1)]
     meta_by_id = {1: _mine_metadata_record(agent_id=1, created_by="user_a")}
 
-    with patch.object(
+    with patch_import_object_context(
         ars, "list_all_agent_info_impl", new_callable=AsyncMock, return_value=agents
-    ), patch.object(
+    ), patch_import_object_context(
         ars, "fetch_draft_agent_mine_metadata", return_value=meta_by_id
-    ), patch.object(
+    ), patch_import_object_context(
         ars, "list_agent_repository_by_agent_ids", return_value=[]
     ):
         result = await ars.list_my_editable_agents_impl(
@@ -1110,11 +1112,11 @@ async def test_list_my_editable_agents_impl_filters_by_search_before_pagination(
         3: _mine_metadata_record(agent_id=3, created_by="user_a"),
     }
 
-    with patch.object(
+    with patch_import_object_context(
         ars, "list_all_agent_info_impl", new_callable=AsyncMock, return_value=agents
-    ), patch.object(
+    ), patch_import_object_context(
         ars, "fetch_draft_agent_mine_metadata", return_value=meta_by_id
-    ), patch.object(
+    ), patch_import_object_context(
         ars, "list_agent_repository_by_agent_ids", return_value=[]
     ):
         result = await ars.list_my_editable_agents_impl(
@@ -1149,15 +1151,15 @@ async def test_list_my_editable_agents_impl_searches_structured_and_listing_tags
         }
     ]
 
-    with patch.object(
+    with patch_import_object_context(
         ars, "list_all_agent_info_impl", new_callable=AsyncMock, return_value=agents
-    ), patch.object(
+    ), patch_import_object_context(
         ars, "fetch_draft_agent_mine_metadata", return_value=meta_by_id
-    ), patch.object(
+    ), patch_import_object_context(
         ars,
         "list_agent_repository_by_agent_ids",
         return_value=repository_records,
-    ), patch.object(
+    ), patch_import_object_context(
         ars,
         "_merge_agent_tag_values",
         return_value={1: ["Structured Finance"], 2: ["Published Category"]},
@@ -1188,15 +1190,15 @@ async def test_list_my_editable_agents_impl_searches_localized_structured_tags()
         2: _mine_metadata_record(agent_id=2, created_by="user_a"),
     }
 
-    with patch.object(
+    with patch_import_object_context(
         ars, "list_all_agent_info_impl", new_callable=AsyncMock, return_value=agents
-    ), patch.object(
+    ), patch_import_object_context(
         ars, "fetch_draft_agent_mine_metadata", return_value=meta_by_id
-    ), patch.object(
+    ), patch_import_object_context(
         ars, "list_agent_repository_by_agent_ids", return_value=[]
-    ), patch.object(
+    ), patch_import_object_context(
         ars, "_merge_agent_tag_values", return_value={1: [], 2: []}
-    ), patch.object(
+    ), patch_import_object_context(
         ars,
         "_find_agent_ids_matching_any_tag_predicate",
         return_value={"2"},
@@ -1216,13 +1218,13 @@ async def test_list_my_editable_agents_impl_includes_tags_without_search():
     agents = [_list_all_agent_record(agent_id=1, display_name="Alpha Agent")]
     meta_by_id = {1: _mine_metadata_record(agent_id=1, created_by="user_a")}
 
-    with patch.object(
+    with patch_import_object_context(
         ars, "list_all_agent_info_impl", new_callable=AsyncMock, return_value=agents
-    ), patch.object(
+    ), patch_import_object_context(
         ars, "fetch_draft_agent_mine_metadata", return_value=meta_by_id
-    ), patch.object(
+    ), patch_import_object_context(
         ars, "list_agent_repository_by_agent_ids", return_value=[]
-    ), patch.object(
+    ), patch_import_object_context(
         ars, "_merge_agent_tag_values", return_value={1: ["Analyst"]}
     ):
         result = await ars.list_my_editable_agents_impl(
@@ -1235,7 +1237,7 @@ async def test_list_my_editable_agents_impl_includes_tags_without_search():
 
 @pytest.mark.asyncio
 async def test_list_my_editable_agents_impl_rejects_invalid_ownership():
-    with patch.object(
+    with patch_import_object_context(
         ars, "list_all_agent_info_impl", new_callable=AsyncMock
     ) as mock_list_all:
         with pytest.raises(ValueError, match="Invalid ownership filter"):
@@ -1250,11 +1252,11 @@ async def test_list_my_editable_agents_impl_rejects_invalid_ownership():
 
 @pytest.fixture
 def mock_status_update_deps():
-    with patch.object(ars, "get_user_tenant_by_user_id") as mock_get_role, patch.object(
+    with patch_import_object_context(ars, "get_user_tenant_by_user_id") as mock_get_role, patch_import_object_context(
         ars, "get_agent_repository_by_id"
-    ) as mock_get_by_id, patch.object(
+    ) as mock_get_by_id, patch_import_object_context(
         ars, "update_agent_repository_status_by_id"
-    ) as mock_update_status, patch.object(
+    ) as mock_update_status, patch_import_object_context(
         ars, "reset_agent_repository_status"
     ) as mock_reset_status:
         yield {
@@ -1266,7 +1268,7 @@ def mock_status_update_deps():
 
 
 def test_reset_repository_peer_statuses_pending_review_also_clears_rejected():
-    with patch.object(ars, "reset_agent_repository_status") as mock_reset:
+    with patch_import_object_context(ars, "reset_agent_repository_status") as mock_reset:
         ars._reset_repository_peer_statuses(
             agent_repository_id=1,
             agent_id=10,
@@ -1278,7 +1280,7 @@ def test_reset_repository_peer_statuses_pending_review_also_clears_rejected():
 
 
 def test_reset_repository_peer_statuses_non_pending_single_reset():
-    with patch.object(ars, "reset_agent_repository_status") as mock_reset:
+    with patch_import_object_context(ars, "reset_agent_repository_status") as mock_reset:
         ars._reset_repository_peer_statuses(
             agent_repository_id=1,
             agent_id=10,
@@ -1439,7 +1441,7 @@ def test_update_status_admin_not_shared_to_pending_review(mock_status_update_dep
     deps["get_by_id"].side_effect = [record, {**record, "status": "pending_review"}]
     deps["update_status"].return_value = 1
 
-    with patch.object(ars, "_resolve_submitter_email", return_value="admin@example.com"):
+    with patch_import_object_context(ars, "_resolve_submitter_email", return_value="admin@example.com"):
         result = ars.update_agent_repository_status_impl(
             agent_repository_id=1,
             status="pending_review",
@@ -1468,7 +1470,7 @@ def test_update_status_admin_rejected_to_pending_review(mock_status_update_deps)
     deps["get_by_id"].side_effect = [record, {**record, "status": "pending_review"}]
     deps["update_status"].return_value = 1
 
-    with patch.object(ars, "_resolve_submitter_email", return_value="admin@example.com"):
+    with patch_import_object_context(ars, "_resolve_submitter_email", return_value="admin@example.com"):
         result = ars.update_agent_repository_status_impl(
             agent_repository_id=1,
             status="pending_review",
@@ -1733,14 +1735,14 @@ def test_update_status_uses_official_fallback_listing(mock_status_update_deps):
 def test_check_repository_import_precheck_rejects_snapshotless_listing():
     record = _repository_record(agent_repository_id=42, status="shared")
 
-    with patch.object(ars, "get_agent_repository_by_id", return_value=record):
+    with patch_import_object_context(ars, "get_agent_repository_by_id", return_value=record):
         with pytest.raises(ValueError, match="Repository listing has no agent snapshot"):
             ars.check_repository_import_precheck_impl(42, "tenant_a")
 
 
 @pytest.mark.asyncio
 async def test_import_agent_from_repository_rejects_missing_listing():
-    with patch.object(ars, "get_agent_repository_by_id", return_value=None):
+    with patch_import_object_context(ars, "get_agent_repository_by_id", return_value=None):
         with pytest.raises(ValueError, match="Repository listing not found"):
             await ars.import_agent_from_repository_impl(
                 agent_repository_id=42,
@@ -1753,7 +1755,7 @@ async def test_import_agent_from_repository_rejects_missing_listing():
 async def test_import_agent_from_repository_rejects_snapshotless_listing():
     record = _repository_record(agent_repository_id=42, status="shared")
 
-    with patch.object(ars, "get_agent_repository_by_id", return_value=record):
+    with patch_import_object_context(ars, "get_agent_repository_by_id", return_value=record):
         with pytest.raises(ValueError, match="Repository listing has no agent snapshot"):
             await ars.import_agent_from_repository_impl(
                 agent_repository_id=42,
@@ -1765,7 +1767,7 @@ async def test_import_agent_from_repository_rejects_snapshotless_listing():
 def test_list_official_agent_management_marks_records_as_official():
     records = [_repository_record(agent_repository_id=42, status="shared")]
 
-    with patch.object(ars, "list_agent_repository_summaries", return_value=records) as mock_list:
+    with patch_import_object_context(ars, "list_agent_repository_summaries", return_value=records) as mock_list:
         result = ars.list_official_agent_management_impl()
 
     mock_list.assert_called_once_with(
@@ -1799,9 +1801,9 @@ def test_delete_official_agent_removes_bundle_sources_and_listing(tmp_path):
         "agent_info_json": {"agent_info": {"10": {}, "child": {}, "11": {}}},
     }
 
-    with patch("consts.const.OFFICIAL_AGENTS_PATH", str(tmp_path)), patch.object(
+    with patch("consts.const.OFFICIAL_AGENTS_PATH", str(tmp_path)), patch_import_object_context(
         ars, "get_agent_repository_by_id", return_value=record
-    ), patch.object(ars, "delete_agent_by_id") as mock_delete_agent, patch.object(
+    ), patch_import_object_context(ars, "delete_agent_by_id") as mock_delete_agent, patch_import_object_context(
         ars, "soft_delete_agent_repository_record", return_value=1
     ) as mock_soft_delete:
         result = ars.delete_official_agent_impl(42, "su_user")
@@ -1823,7 +1825,7 @@ def test_delete_official_agent_removes_bundle_sources_and_listing(tmp_path):
 
 
 def test_delete_official_agent_rejects_missing_listing():
-    with patch.object(ars, "get_agent_repository_by_id", return_value=None):
+    with patch_import_object_context(ars, "get_agent_repository_by_id", return_value=None):
         with pytest.raises(ValueError, match="Official agent repository listing not found"):
             ars.delete_official_agent_impl(42, "su_user")
 
@@ -1838,7 +1840,7 @@ def test_delete_official_agent_rejects_invalid_bundle_name(name):
         "name": name,
     }
 
-    with patch.object(ars, "get_agent_repository_by_id", return_value=record):
+    with patch_import_object_context(ars, "get_agent_repository_by_id", return_value=record):
         with pytest.raises(ValueError, match="Official agent bundle name is invalid"):
             ars.delete_official_agent_impl(42, "su_user")
 
@@ -1852,9 +1854,9 @@ def test_delete_official_agent_rejects_already_deleted_listing(tmp_path):
         "name": "medical-assistant",
     }
 
-    with patch("consts.const.OFFICIAL_AGENTS_PATH", str(tmp_path)), patch.object(
+    with patch("consts.const.OFFICIAL_AGENTS_PATH", str(tmp_path)), patch_import_object_context(
         ars, "get_agent_repository_by_id", return_value=record
-    ), patch.object(
+    ), patch_import_object_context(
         ars, "soft_delete_agent_repository_record", return_value=0
     ):
         with pytest.raises(ValueError, match="Official agent repository listing was already deleted"):
@@ -1874,7 +1876,7 @@ def test_list_repository_listings_includes_submitted_by():
         }
     ]
 
-    with patch.object(ars, "list_agent_repository_summaries", return_value=records):
+    with patch_import_object_context(ars, "list_agent_repository_summaries", return_value=records):
         result = ars.list_agent_repository_listings_impl(
             "tenant_a",
             status="pending_review",
@@ -1900,7 +1902,7 @@ def test_get_agent_repository_listing_detail_impl_scopes_by_tenant():
         "create_time": None,
     }
 
-    with patch.object(
+    with patch_import_object_context(
         ars,
         "get_agent_repository_by_id",
         return_value=record,
@@ -1913,7 +1915,7 @@ def test_get_agent_repository_listing_detail_impl_scopes_by_tenant():
 
 
 def test_get_agent_repository_listing_detail_impl_not_found_for_other_tenant():
-    with patch.object(
+    with patch_import_object_context(
         ars,
         "get_agent_repository_by_id",
         return_value=None,
@@ -1923,7 +1925,7 @@ def test_get_agent_repository_listing_detail_impl_not_found_for_other_tenant():
 
 
 def test_resolve_submitter_email_uses_user_tenant_email():
-    with patch.object(
+    with patch_import_object_context(
         ars,
         "get_user_tenant_by_user_id",
         return_value={"user_email": "  dev@example.com "},
@@ -1979,19 +1981,19 @@ async def test_build_repository_data_from_agent_merges_card_fields():
         "tags": [" 数据 ", "数据", "自定义标签"],
         "downloads": 10,
     }
-    with patch.object(
+    with patch_import_object_context(
         ars, "search_agent_info_by_agent_id", return_value={"name": "agent_one", "author": "author@example.com"}
-    ), patch.object(
+    ), patch_import_object_context(
         ars, "_validate_create_listing_permission"
-    ), patch.object(
+    ), patch_import_object_context(
         ars, "_build_agent_info_json", new_callable=AsyncMock, return_value={
             "agent_id": 1,
             "agent_info": {"1": {"agent_id": 1}},
             "mcp_info": [],
         }
-    ), patch.object(
+    ), patch_import_object_context(
         ars, "search_version_by_version_no", return_value={"version_name": "v1"}
-    ), patch.object(
+    ), patch_import_object_context(
         ars, "_resolve_submitter_email", return_value="submitter@example.com"
     ):
         repository_data = await ars._build_repository_data_from_agent(
@@ -2018,15 +2020,15 @@ async def test_build_repository_data_from_agent_computes_tool_count():
         },
         "mcp_info": [],
     }
-    with patch.object(
+    with patch_import_object_context(
         ars, "search_agent_info_by_agent_id", return_value={"name": "agent_one", "author": "author@example.com"}
-    ), patch.object(
+    ), patch_import_object_context(
         ars, "_validate_create_listing_permission"
-    ), patch.object(
+    ), patch_import_object_context(
         ars, "_build_agent_info_json", new_callable=AsyncMock, return_value=agent_info_json
-    ), patch.object(
+    ), patch_import_object_context(
         ars, "search_version_by_version_no", return_value={"version_name": "v1"}
-    ), patch.object(
+    ), patch_import_object_context(
         ars, "_resolve_submitter_email", return_value="submitter@example.com"
     ):
         repository_data = await ars._build_repository_data_from_agent(
@@ -2046,15 +2048,15 @@ async def test_build_repository_data_from_agent_card_fields_override_tool_count(
         "agent_info": {"1": {"agent_id": 1, "tools": [{"name": "tool_a"}]}},
         "mcp_info": [],
     }
-    with patch.object(
+    with patch_import_object_context(
         ars, "search_agent_info_by_agent_id", return_value={"name": "agent_one", "author": "author@example.com"}
-    ), patch.object(
+    ), patch_import_object_context(
         ars, "_validate_create_listing_permission"
-    ), patch.object(
+    ), patch_import_object_context(
         ars, "_build_agent_info_json", new_callable=AsyncMock, return_value=agent_info_json
-    ), patch.object(
+    ), patch_import_object_context(
         ars, "search_version_by_version_no", return_value={"version_name": "v1"}
-    ), patch.object(
+    ), patch_import_object_context(
         ars, "_resolve_submitter_email", return_value="submitter@example.com"
     ):
         repository_data = await ars._build_repository_data_from_agent(
@@ -2070,19 +2072,19 @@ async def test_build_repository_data_from_agent_card_fields_override_tool_count(
 
 @pytest.mark.asyncio
 async def test_build_repository_data_from_agent_sets_submitted_by():
-    with patch.object(
+    with patch_import_object_context(
         ars, "search_agent_info_by_agent_id", return_value={"name": "agent_one", "author": "author@example.com"}
-    ), patch.object(
+    ), patch_import_object_context(
         ars, "_validate_create_listing_permission"
-    ), patch.object(
+    ), patch_import_object_context(
         ars, "_build_agent_info_json", new_callable=AsyncMock, return_value={
             "agent_id": 1,
             "agent_info": {"1": {"agent_id": 1}},
             "mcp_info": [],
         }
-    ), patch.object(
+    ), patch_import_object_context(
         ars, "search_version_by_version_no", return_value={"version_name": "v1"}
-    ), patch.object(
+    ), patch_import_object_context(
         ars, "_resolve_submitter_email", return_value="submitter@example.com"
     ):
         repository_data = await ars._build_repository_data_from_agent(
@@ -2104,15 +2106,15 @@ async def test_create_agent_repository_listing_impl_success():
         "mcp_info": [],
         "skills": None,
     }
-    with patch.object(
+    with patch_import_object_context(
         ars, "_build_repository_data_from_agent", new_callable=AsyncMock
-    ) as mock_build_data, patch.object(
+    ) as mock_build_data, patch_import_object_context(
         ars, "get_agent_repository_by_agent_id"
-    ) as mock_get_by_agent_id, patch.object(
+    ) as mock_get_by_agent_id, patch_import_object_context(
         ars, "insert_agent_repository_record"
-    ) as mock_insert, patch.object(
+    ) as mock_insert, patch_import_object_context(
         ars, "get_agent_repository_by_id"
-    ) as mock_get_by_id, patch.object(
+    ) as mock_get_by_id, patch_import_object_context(
         ars, "reset_agent_repository_status"
     ) as mock_reset_status:
         mock_build_data.return_value = {
@@ -2179,15 +2181,15 @@ async def test_create_agent_repository_listing_impl_updates_existing():
         "mcp_info": [],
         "skills": None,
     }
-    with patch.object(
+    with patch_import_object_context(
         ars, "_build_repository_data_from_agent", new_callable=AsyncMock
-    ) as mock_build_data, patch.object(
+    ) as mock_build_data, patch_import_object_context(
         ars, "get_agent_repository_by_agent_id"
-    ) as mock_get_by_agent_id, patch.object(
+    ) as mock_get_by_agent_id, patch_import_object_context(
         ars, "update_agent_repository_by_id"
-    ) as mock_update_by_id, patch.object(
+    ) as mock_update_by_id, patch_import_object_context(
         ars, "get_agent_repository_by_id"
-    ) as mock_get_by_id, patch.object(
+    ) as mock_get_by_id, patch_import_object_context(
         ars, "reset_agent_repository_status"
     ) as mock_reset_status:
         mock_build_data.return_value = {
@@ -2251,15 +2253,15 @@ async def test_create_agent_repository_listing_impl_accepts_draft_version():
         "mcp_info": [],
         "skills": None,
     }
-    with patch.object(
+    with patch_import_object_context(
         ars, "_build_repository_data_from_agent", new_callable=AsyncMock
-    ) as mock_build_data, patch.object(
+    ) as mock_build_data, patch_import_object_context(
         ars, "get_agent_repository_by_agent_id"
-    ) as mock_get_by_agent_id, patch.object(
+    ) as mock_get_by_agent_id, patch_import_object_context(
         ars, "insert_agent_repository_record"
-    ) as mock_insert, patch.object(
+    ) as mock_insert, patch_import_object_context(
         ars, "get_agent_repository_by_id"
-    ) as mock_get_by_id, patch.object(
+    ) as mock_get_by_id, patch_import_object_context(
         ars, "reset_agent_repository_status"
     ) as mock_reset_status:
         mock_build_data.return_value = {
@@ -2315,7 +2317,7 @@ async def test_create_agent_repository_listing_impl_rejects_negative_version():
 
 
 def test_validate_create_listing_permission_admin():
-    with patch.object(
+    with patch_import_object_context(
         ars,
         "get_user_tenant_by_user_id",
         return_value={"user_role": "ADMIN", "user_email": "admin@example.com"},
@@ -2327,7 +2329,7 @@ def test_validate_create_listing_permission_admin():
 
 
 def test_validate_create_listing_permission_dev_matching_created_by():
-    with patch.object(
+    with patch_import_object_context(
         ars,
         "get_user_tenant_by_user_id",
         return_value={"user_role": "DEV"},
@@ -2339,7 +2341,7 @@ def test_validate_create_listing_permission_dev_matching_created_by():
 
 
 def test_validate_create_listing_permission_dev_mismatch():
-    with patch.object(
+    with patch_import_object_context(
         ars,
         "get_user_tenant_by_user_id",
         return_value={"user_role": "DEV"},
@@ -2352,7 +2354,7 @@ def test_validate_create_listing_permission_dev_mismatch():
 
 
 def test_validate_create_listing_permission_user_rejected():
-    with patch.object(
+    with patch_import_object_context(
         ars,
         "get_user_tenant_by_user_id",
         return_value={"user_role": "USER", "user_email": "user@example.com"},
@@ -2365,7 +2367,7 @@ def test_validate_create_listing_permission_user_rejected():
 
 
 def test_validate_create_listing_permission_su_rejected():
-    with patch.object(
+    with patch_import_object_context(
         ars,
         "get_user_tenant_by_user_id",
         return_value={"user_role": "SU", "user_email": "su@example.com"},
@@ -2379,18 +2381,18 @@ def test_validate_create_listing_permission_su_rejected():
 
 @pytest.mark.asyncio
 async def test_create_listing_impl_rejects_unauthorized_before_export():
-    with patch.object(
+    with patch_import_object_context(
         ars,
         "get_user_tenant_by_user_id",
         return_value={"user_role": "USER", "user_email": "user@example.com"},
-    ), patch.object(
+    ), patch_import_object_context(
         ars,
         "search_agent_info_by_agent_id",
         return_value={
             "name": "agent_one",
             "author": "user@example.com",
         },
-    ), patch.object(
+    ), patch_import_object_context(
         ars, "_build_agent_info_json", new_callable=AsyncMock
     ) as mock_build_json:
         with pytest.raises(UnauthorizedError, match="not authorized"):
@@ -2456,7 +2458,7 @@ async def test_build_repository_data_from_agent_includes_skills():
         "version_name": "v1.0"
     }
 
-    with patch.object(
+    with patch_import_object_context(
         ars,
         "get_user_tenant_by_user_id",
         return_value={"user_role": "ADMIN", "user_email": "admin@example.com"},
@@ -2516,7 +2518,7 @@ async def test_build_repository_data_from_agent_allows_asset_owner_sub_agent():
         "version_name": "v1.0"
     }
 
-    with patch.object(
+    with patch_import_object_context(
         ars,
         "get_user_tenant_by_user_id",
         return_value={"user_role": "ADMIN", "user_email": "admin@example.com"},
@@ -2540,9 +2542,9 @@ def test_list_repository_listings_includes_tool_count():
         }
     ]
 
-    with patch.object(
+    with patch_import_object_context(
         ars, "list_agent_repository_summaries", return_value=records
-    ), patch.object(
+    ), patch_import_object_context(
         ars,
         "sum_agent_repository_downloads_by_agent_ids",
         return_value={10: 0},
@@ -2555,9 +2557,9 @@ def test_list_repository_listings_includes_tool_count():
 def test_list_repository_listings_defaults_null_tool_count_to_zero():
     records = [_repository_record(agent_repository_id=1, agent_id=10, status="shared")]
 
-    with patch.object(
+    with patch_import_object_context(
         ars, "list_agent_repository_summaries", return_value=records
-    ), patch.object(
+    ), patch_import_object_context(
         ars,
         "sum_agent_repository_downloads_by_agent_ids",
         return_value={10: 0},
@@ -2575,9 +2577,9 @@ def test_list_repository_listings_returns_agent_level_download_totals():
         }
     ]
 
-    with patch.object(
+    with patch_import_object_context(
         ars, "list_agent_repository_summaries", return_value=records
-    ), patch.object(
+    ), patch_import_object_context(
         ars,
         "sum_agent_repository_downloads_by_agent_ids",
         return_value={10: 7},
@@ -2602,11 +2604,11 @@ def test_get_agent_repository_listing_detail_returns_agent_level_downloads():
         "create_time": None,
     }
 
-    with patch.object(
+    with patch_import_object_context(
         ars,
         "get_agent_repository_by_id",
         return_value=record,
-    ), patch.object(
+    ), patch_import_object_context(
         ars,
         "sum_agent_repository_downloads_by_agent_ids",
         return_value={10: 9},
@@ -2622,13 +2624,13 @@ async def test_list_my_editable_agents_includes_agent_level_downloads():
     agents = [_list_all_agent_record(agent_id=1, permission="EDIT")]
     meta_by_id = {1: _mine_metadata_record(agent_id=1, created_by="user_a")}
 
-    with patch.object(
+    with patch_import_object_context(
         ars, "list_all_agent_info_impl", new_callable=AsyncMock, return_value=agents
-    ), patch.object(
+    ), patch_import_object_context(
         ars, "fetch_draft_agent_mine_metadata", return_value=meta_by_id
-    ), patch.object(
+    ), patch_import_object_context(
         ars, "list_agent_repository_by_agent_ids", return_value=[]
-    ), patch.object(
+    ), patch_import_object_context(
         ars,
         "sum_agent_repository_downloads_by_agent_ids",
         return_value={1: 12},
@@ -2658,16 +2660,16 @@ async def test_check_repository_import_precheck_loads_official_bundle_from_fallb
     precheck = MagicMock()
     precheck.model_dump.return_value = {"agent_repository_id": 42, "has_abnormal": False}
 
-    with patch.object(
+    with patch_import_object_context(
         ars,
         "get_agent_repository_by_id",
         side_effect=[None, record],
     ) as get_record:
-        with patch(
-            "services.official_agent_service._load_bundle",
+        with patch_import_context(
+            "management.services.repository.agent.official._load_bundle",
             return_value=bundle,
         ) as load_bundle:
-            with patch.object(
+            with patch_import_object_context(
                 ars,
                 "build_repository_import_precheck",
                 return_value=precheck,
@@ -2699,8 +2701,8 @@ def test_check_repository_import_precheck_rejects_missing_official_bundle():
         "name": "missing-agent",
     }
 
-    with patch.object(ars, "get_agent_repository_by_id", side_effect=[None, record]):
-        with patch("services.official_agent_service._load_bundle", return_value=None):
+    with patch_import_object_context(ars, "get_agent_repository_by_id", side_effect=[None, record]):
+        with patch_import_context("management.services.repository.agent.official._load_bundle", return_value=None):
             with pytest.raises(ValueError, match="Official agent bundle not found: missing-agent"):
                 ars.check_repository_import_precheck_impl(42, "tenant_a")
 
@@ -2718,13 +2720,13 @@ async def test_import_agent_from_repository_installs_official_bundle_from_fallba
     }
     install_result = types.SimpleNamespace(status="success", message=None, agent_id=100)
 
-    with patch.object(ars, "get_agent_repository_by_id", side_effect=[None, record]) as get_record:
-        with patch(
-            "services.official_agent_service.install_official_agents",
+    with patch_import_object_context(ars, "get_agent_repository_by_id", side_effect=[None, record]) as get_record:
+        with patch_import_context(
+            "management.services.repository.agent.official.install_official_agents",
             new_callable=AsyncMock,
             return_value=[install_result],
         ) as install:
-            with patch.object(ars, "increment_agent_repository_downloads", return_value=1) as increment:
+            with patch_import_object_context(ars, "increment_agent_repository_downloads", return_value=1) as increment:
                 result = await ars.import_agent_from_repository_impl(
                     agent_repository_id=42,
                     tenant_id="tenant_a",
@@ -2775,13 +2777,13 @@ async def test_import_agent_from_repository_rejects_failed_official_install(
     }
     install_result = types.SimpleNamespace(status=status, message=message, agent_id=None)
 
-    with patch.object(ars, "get_agent_repository_by_id", side_effect=[None, record]):
-        with patch(
-            "services.official_agent_service.install_official_agents",
+    with patch_import_object_context(ars, "get_agent_repository_by_id", side_effect=[None, record]):
+        with patch_import_context(
+            "management.services.repository.agent.official.install_official_agents",
             new_callable=AsyncMock,
             return_value=[install_result],
         ):
-            with patch.object(ars, "increment_agent_repository_downloads") as increment:
+            with patch_import_object_context(ars, "increment_agent_repository_downloads") as increment:
                 with pytest.raises(ValueError, match=expected_message):
                     await ars.import_agent_from_repository_impl(
                         agent_repository_id=42,
@@ -2803,9 +2805,9 @@ async def test_import_agent_from_repository_rejects_empty_official_install_resul
         "name": "medical-assistant",
     }
 
-    with patch.object(ars, "get_agent_repository_by_id", side_effect=[None, record]):
-        with patch(
-            "services.official_agent_service.install_official_agents",
+    with patch_import_object_context(ars, "get_agent_repository_by_id", side_effect=[None, record]):
+        with patch_import_context(
+            "management.services.repository.agent.official.install_official_agents",
             new_callable=AsyncMock,
             return_value=[],
         ):
@@ -2830,13 +2832,13 @@ async def test_import_agent_from_repository_warns_when_official_download_increme
     }
     install_result = types.SimpleNamespace(status="success", message=None, agent_id=100)
 
-    with patch.object(ars, "get_agent_repository_by_id", side_effect=[None, record]):
-        with patch(
-            "services.official_agent_service.install_official_agents",
+    with patch_import_object_context(ars, "get_agent_repository_by_id", side_effect=[None, record]):
+        with patch_import_context(
+            "management.services.repository.agent.official.install_official_agents",
             new_callable=AsyncMock,
             return_value=[install_result],
         ):
-            with patch.object(ars, "increment_agent_repository_downloads", return_value=0):
+            with patch_import_object_context(ars, "increment_agent_repository_downloads", return_value=0):
                 result = await ars.import_agent_from_repository_impl(
                     agent_repository_id=42,
                     tenant_id="tenant_a",
@@ -2857,16 +2859,16 @@ async def test_import_agent_from_repository_increments_downloads():
         },
     }
 
-    with patch.object(
+    with patch_import_object_context(
         ars,
         "get_agent_repository_by_id",
         return_value=record,
-    ), patch.object(
+    ), patch_import_object_context(
         ars,
         "import_agent_impl",
         new_callable=AsyncMock,
         return_value={1: 100},
-    ) as mock_import, patch.object(
+    ) as mock_import, patch_import_object_context(
         ars,
         "increment_agent_repository_downloads",
         return_value=1,
@@ -2888,9 +2890,9 @@ async def test_workbench_import_response_identifies_root_not_first_child():
         **_repository_record(agent_repository_id=42, agent_id=10, status="shared"),
         "agent_info_json": {"agent_id": 10, "agent_info": {"10": {"name": "root"}}, "mcp_info": []},
     }
-    with patch.object(ars, "get_agent_repository_by_id", return_value=record), \
-            patch.object(ars, "import_agent_impl", new_callable=AsyncMock, return_value={2: 102, 10: 110}), \
-            patch.object(ars, "increment_agent_repository_downloads", return_value=1):
+    with patch_import_object_context(ars, "get_agent_repository_by_id", return_value=record), \
+            patch_import_object_context(ars, "import_agent_impl", new_callable=AsyncMock, return_value={2: 102, 10: 110}), \
+            patch_import_object_context(ars, "increment_agent_repository_downloads", return_value=1):
         result = await ars.import_agent_from_repository_impl(42, "tenant_a", "Bearer token", return_root_id=True)
     assert result == {"agent_id": 110}
 
@@ -2906,16 +2908,16 @@ async def test_import_agent_from_repository_skips_increment_on_import_failure():
         },
     }
 
-    with patch.object(
+    with patch_import_object_context(
         ars,
         "get_agent_repository_by_id",
         return_value=record,
-    ), patch.object(
+    ), patch_import_object_context(
         ars,
         "import_agent_impl",
         new_callable=AsyncMock,
         side_effect=ValueError("import failed"),
-    ), patch.object(
+    ), patch_import_object_context(
         ars,
         "increment_agent_repository_downloads",
     ) as mock_increment:
@@ -2945,16 +2947,16 @@ async def test_import_agent_from_repository_passes_skill_resolutions():
         {"skill_name": "test_skill", "action": "rename", "new_name": "test_skill 副本"}
     ]
 
-    with patch.object(
+    with patch_import_object_context(
         ars,
         "get_agent_repository_by_id",
         return_value=record,
-    ), patch.object(
+    ), patch_import_object_context(
         ars,
         "import_agent_with_skills_impl",
         new_callable=AsyncMock,
         return_value={10: 100},
-    ) as mock_import, patch.object(
+    ) as mock_import, patch_import_object_context(
         ars,
         "increment_agent_repository_downloads",
         return_value=1,
@@ -2984,16 +2986,16 @@ async def test_import_agent_from_repository_defaults_skill_resolutions_to_none()
         },
     }
 
-    with patch.object(
+    with patch_import_object_context(
         ars,
         "get_agent_repository_by_id",
         return_value=record,
-    ), patch.object(
+    ), patch_import_object_context(
         ars,
         "import_agent_with_skills_impl",
         new_callable=AsyncMock,
         return_value={10: 100},
-    ) as mock_import, patch.object(
+    ) as mock_import, patch_import_object_context(
         ars,
         "increment_agent_repository_downloads",
         return_value=1,

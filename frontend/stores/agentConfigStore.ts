@@ -1,3 +1,5 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 /**
  * agentConfigStore
  *
@@ -49,8 +51,6 @@ export type EditableAgent = Pick<
   | "business_description"
   | "business_logic_model_name"
   | "business_logic_model_id"
-  | "prompt_template_id"
-  | "prompt_template_name"
   | "verification_config"
   | "sub_agent_id_list"
   | "sub_agent_relations"
@@ -221,8 +221,6 @@ function createEmptyEditableAgent(llmConfig?: {
     business_description: "",
     business_logic_model_name: llmConfig?.name || "",
     business_logic_model_id: llmConfig?.id || 0,
-    prompt_template_id: 0,
-    prompt_template_name: "system_default",
     verification_config: {
       ...DEFAULT_AGENT_VERIFICATION_CONFIG,
       guardrail_config: { ...DEFAULT_GUARDRAIL_CONFIG },
@@ -264,8 +262,6 @@ const toEditable = (agent: Agent | null): EditableAgent =>
         business_description: agent.business_description || "",
         business_logic_model_name: agent.business_logic_model_name || "",
         business_logic_model_id: agent.business_logic_model_id || 0,
-        prompt_template_id: agent.prompt_template_id ?? 0,
-        prompt_template_name: agent.prompt_template_name || "system_default",
         verification_config: agent.verification_config || {
           ...DEFAULT_AGENT_VERIFICATION_CONFIG,
         },
@@ -403,9 +399,6 @@ const isDirty = (
       editedAgent.business_description !== "" ||
       editedAgent.business_logic_model_name !== "" ||
       editedAgent.business_logic_model_id !== 0 ||
-      (editedAgent.prompt_template_id ?? 0) !== 0 ||
-      (editedAgent.prompt_template_name || "system_default") !==
-        "system_default" ||
       JSON.stringify(
         editedAgent.verification_config || DEFAULT_AGENT_VERIFICATION_CONFIG
       ) !== JSON.stringify(DEFAULT_AGENT_VERIFICATION_CONFIG) ||
@@ -448,10 +441,6 @@ const isDirty = (
       editedAgent.business_logic_model_name ||
     baselineAgent.business_logic_model_id !==
       editedAgent.business_logic_model_id ||
-    (baselineAgent.prompt_template_id ?? 0) !==
-      (editedAgent.prompt_template_id ?? 0) ||
-    (baselineAgent.prompt_template_name || "system_default") !==
-      (editedAgent.prompt_template_name || "system_default") ||
     JSON.stringify(
       baselineAgent.verification_config || DEFAULT_AGENT_VERIFICATION_CONFIG
     ) !==

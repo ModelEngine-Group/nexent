@@ -1,3 +1,4 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """Shared model records, capabilities and uncached modality adapters."""
 
 import logging
@@ -7,7 +8,7 @@ from consts.model import ModelConnectStatusEnum
 from contracts.model import ModelDescriptor
 from database.model_management_db import get_model_by_model_id, get_model_records
 from management.services.model.adapter import build_adapter_fresh
-from utils.config_utils import tenant_config_manager
+from management.services.configuration.tenant.settings import tenant_config_manager
 
 logger = logging.getLogger(__name__)
 
@@ -146,3 +147,22 @@ def get_rerank_model(tenant_id: str, model_name: Optional[str] = None):
         return build_adapter_fresh(model_config, "rerank", "rerank", tenant_id)
     else:
         return None
+
+from typing import Optional
+from database.model_management_db import get_model_by_model_id
+from management.services.configuration.tenant.settings import tenant_config_manager
+
+
+
+
+
+
+
+
+
+
+
+
+from typing import Optional
+from database.model_management_db import get_model_by_model_id
+from management.services.configuration.tenant.settings import tenant_config_manager

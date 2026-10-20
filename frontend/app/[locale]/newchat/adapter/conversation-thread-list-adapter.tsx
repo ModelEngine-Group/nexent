@@ -1715,7 +1715,9 @@ const waitForServerConversationId = async (
 export const createConversationThreadListAdapter = (
   conversationType: "agent_chat" | "workbench",
   pinStorageKey?: string,
-  loadPins: () => Promise<WorkbenchPins> = () => conversationService.getWorkbenchPins()
+  loadPins: () => Promise<WorkbenchPins> = () =>
+    conversationService.getWorkbenchPins(),
+  onDeleted?: (conversationId: number) => Promise<void>
 ): RemoteThreadListAdapter => {
   const prefetchedConversationIds = new Set<string>();
   return {
@@ -1849,6 +1851,7 @@ export const createConversationThreadListAdapter = (
         );
       }
       await conversationService.delete(conversationId);
+      await onDeleted?.(conversationId);
     },
 
     async fetch(threadId: string): Promise<RemoteThreadMetadata> {
