@@ -1,4 +1,4 @@
-{
+﻿{
   "workbench.genericAgentName": "智能体工作台",
   "workbench.landingGreeting": "你好，我是 Nexent，需要我帮你做什么？",
   "workbench.landingGreetingHi": "你好，我是Nexent",
@@ -299,6 +299,8 @@
   "chat.sources.rawJson": "原始 JSON",
   "chat.sources.showAttributes": "查看完整来源属性",
   "chat.sources.closeAttributes": "关闭来源属性",
+  "chat.sources.attributeCount_one": "{{count}} 项",
+  "chat.sources.attributeCount_other": "{{count}} 项",
   "chat.sources.attributeCount": "{{count}} 项",
   "chat.attachments.preview": "预览 {{name}}",
   "chat.attachments.remove": "移除 {{name}}",
@@ -1931,6 +1933,8 @@
   "agentConfig.agents.defaultDisplayName": "智能体",
   "agentConfig.agents.copyConfirmTitle": "确认复制",
   "agentConfig.agents.copyConfirmContent": "确定要复制 {{name}} 吗？",
+  "agentConfig.agents.copySkillConfigsSkipped": "没有源智能体的编辑权限，技能配置未被复制，请在新智能体中重新配置",
+
   "agentConfig.agents.copySuccess": "智能体复制成功",
   "agentConfig.agents.copyUnavailableTools": "已忽略{{count}}个不可用工具：{{names}}",
   "agentConfig.agents.copyFailed": "智能体复制失败",

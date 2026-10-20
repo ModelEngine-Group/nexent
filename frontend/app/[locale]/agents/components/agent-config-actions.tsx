@@ -156,14 +156,22 @@ export default function AgentConfigActions({
         baseCopyDisplayName
       );
 
-      // Build skill_instances from source agent, preserving per-skill config_values.
+      // Build skill_instances from source agent. Only carry config_values
+      // (which may hold secrets such as API keys) when the caller has EDIT
+      // permission on the source agent; read-only copies fall back to skill
+      // defaults so secrets are not persisted into the new agent.
+      const canEditSource = detail.permission === "EDIT";
       const skillInstancesFromSource = (
         Array.isArray(detail.skills) ? detail.skills : []
-      ).map((skill: any) => ({
-        skill_id: Number(skill.skill_id ?? skill.id),
-        enabled: true,
-        config_values: skill.config_values ?? undefined,
-      }));
+      )
+        .map((skill: any) => ({
+          skill_id: Number(skill.skill_id ?? skill.id),
+          enabled: true,
+          config_values: canEditSource
+            ? (skill.config_values ?? undefined)
+            : undefined,
+        }))
+        .filter((inst) => Number.isFinite(inst.skill_id));
 
       const createResult = await updateAgentMutation.mutateAsync({
         agent_id: undefined,
@@ -219,6 +227,10 @@ export default function AgentConfigActions({
 
       queryClient.invalidateQueries({ queryKey: ["agents"] });
       message.success(t("agentConfig.agents.copySuccess"));
+
+      if (!canEditSource && skillInstancesFromSource.length > 0) {
+        message.info(t("agentConfig.agents.copySkillConfigsSkipped"));
+      }
 
       if (unavailableTools.length > 0) {
         const names =
