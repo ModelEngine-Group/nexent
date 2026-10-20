@@ -1,5 +1,8 @@
 // Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
+import i18n from "i18next";
+import { initReactI18next } from "react-i18next";
+import zh from "@/public/locales/zh/common.json";
 import { beforeEach, expect, it, vi } from "vitest";
 import {
   act,
@@ -471,4 +474,14 @@ it("overlapping skill repository requests keep confirmation blocked until the cu
   });
   await screen.findByRole("option", { name: /Latest result/ });
   expect(confirm).toBeEnabled();
+});
+
+beforeEach(async () => {
+  await i18n.use(initReactI18next).init({
+    lng: "zh",
+    defaultNS: "common",
+    keySeparator: false,
+    resources: { zh: { common: zh } },
+    interpolation: { escapeValue: false },
+  });
 });

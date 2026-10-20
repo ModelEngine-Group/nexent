@@ -1,3 +1,5 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 "use client";
 
 import { useEffect, useState } from "react";
@@ -271,6 +273,15 @@ export default function SkillDraftPanel({
                 style={{ marginBottom: 10 }}
               >
                 <Select
+                  labelRender={({ label, value }) => {
+                    if (value === "official" || value === "官方") {
+                      return t("skillPool.group.official");
+                    }
+                    if (value === "custom" || value === "自定义") {
+                      return t("skillPool.group.custom");
+                    }
+                    return label ?? value;
+                  }}
                   options={[
                     { label: t("skillPool.group.custom"), value: "custom" },
                   ]}

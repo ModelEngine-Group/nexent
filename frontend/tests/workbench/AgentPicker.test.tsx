@@ -1,5 +1,7 @@
 // Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
+import i18n from "i18next";
+import { initReactI18next } from "react-i18next";
 import { beforeEach, expect, it, vi } from "vitest";
 import { render, screen, waitFor, within } from "@testing-library/react";
 import { createInstance } from "i18next";
@@ -58,7 +60,11 @@ it.each([
         </QueryClientProvider>
       </I18nextProvider>
     );
-    await userEvent.click(screen.getByRole("tab", { name: "仓库" }));
+    await userEvent.click(
+      screen.getByRole("tab", {
+        name: language === "en" ? "Repository" : "仓库",
+      })
+    );
     await userEvent.click(
       await screen.findByRole("option", { name: /Repository A/ })
     );
@@ -511,4 +517,14 @@ it("reopening restores committed agents and clears unsaved search and pagination
   expect(screen.getAllByRole("option")).toHaveLength(6);
   await userEvent.click(screen.getByRole("button", { name: "确认选择" }));
   expect(confirm.mock.calls[0][0].map((item: Agent) => item.id)).toEqual(["8"]);
+});
+
+beforeEach(async () => {
+  await i18n.use(initReactI18next).init({
+    lng: "zh",
+    defaultNS: "common",
+    keySeparator: false,
+    resources: { zh: { common: zh } },
+    interpolation: { escapeValue: false },
+  });
 });

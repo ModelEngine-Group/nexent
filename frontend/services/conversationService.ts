@@ -1,5 +1,6 @@
 // Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
+import { t as translate } from "i18next";
 import type { RuntimeGenerationOverrides } from "@/features/model-controls/turnControls";
 import { API_ENDPOINTS, ApiError } from "./api";
 
@@ -260,7 +261,11 @@ export const conversationService = {
 
       // If the signal is aborted before the request returns, return early
       if (signal?.aborted) {
-        return { code: -1, message: "请求已取消", data: [] };
+        return {
+          code: -1,
+          message: translate("ui.localization.requestCancelled"),
+          data: [],
+        };
       }
 
       const data = await response.json();
@@ -276,7 +281,11 @@ export const conversationService = {
         (error instanceof Error && error.name === "AbortError") ||
         signal?.aborted
       ) {
-        return { code: -1, message: "请求已取消", data: [] };
+        return {
+          code: -1,
+          message: translate("ui.localization.requestCancelled"),
+          data: [],
+        };
       }
       throw error;
     }
@@ -379,7 +388,7 @@ export const conversationService = {
 
     throw new ApiError(
       data.code || -1,
-      data.message || data.detail || "停止失败"
+      data.message || data.detail || translate("ui.localization.stopFailed")
     );
   },
 
@@ -1319,7 +1328,7 @@ export const conversationService = {
       // If the error is caused by canceling the request, return a specific response instead of throwing an error
       if (error instanceof Error && error.name === "AbortError") {
         log.log("Agent请求已被取消");
-        throw new Error("请求已被取消");
+        throw new Error(translate("ui.localization.requestWasCancelled"));
       }
       // Other errors are thrown normally
       throw error;

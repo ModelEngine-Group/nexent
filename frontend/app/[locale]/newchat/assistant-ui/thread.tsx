@@ -197,6 +197,8 @@ export type WelcomeSuggestion = AgentSuggestionItem;
 export interface ThreadProps {
   agent: Agent | PublishedAgent;
   generatedTitle?: string;
+  headerLeading?: ReactNode;
+  headerTrailing?: ReactNode;
   welcomeTitle?: string;
   welcomeSuggestions?: readonly WelcomeSuggestion[];
   welcomeContent?: ReactNode;
@@ -263,6 +265,8 @@ const useAgentModels = (
 export const Thread: FC<ThreadProps> = ({
   agent,
   generatedTitle,
+  headerLeading,
+  headerTrailing,
   welcomeTitle,
   welcomeSuggestions,
   welcomeContent,
@@ -551,6 +555,8 @@ export const Thread: FC<ThreadProps> = ({
           modelParameterSettings ?? controls.modelParameterSettings
         }
         showConversationTitle={showConversationTitle}
+        headerLeading={headerLeading}
+        headerTrailing={headerTrailing}
         composerTools={composerTools}
         knowledgeScope={knowledgeScope}
         knowledgePreview={knowledgePreview}
@@ -673,6 +679,8 @@ interface ThreadViewProps {
   showModelSelector: boolean;
   modelParameterSettings?: ModelParameterSettingsControl;
   showConversationTitle: boolean;
+  headerLeading?: ReactNode;
+  headerTrailing?: ReactNode;
   composerTools?: ReactNode;
   knowledgeScope: ConversationKnowledgeScope | null;
   knowledgePreview: KnowledgeScopeEffectivePreview | null;
@@ -738,6 +746,8 @@ const ThreadView: FC<ThreadViewProps> = ({
   showModelSelector,
   modelParameterSettings,
   showConversationTitle,
+  headerLeading,
+  headerTrailing,
   composerTools,
   knowledgeScope,
   knowledgePreview,
@@ -830,6 +840,7 @@ const ThreadView: FC<ThreadViewProps> = ({
                 </>
               ) : (
                 <>
+                  {headerLeading}
                   {onBack && (
                     <Button variant="ghost" size="icon" onClick={onBack}>
                       <ArrowLeft className="size-4" />
@@ -854,6 +865,7 @@ const ThreadView: FC<ThreadViewProps> = ({
                         </span>
                       )}
                   </div>
+                  {headerTrailing}
                   {hasMessages && conversationId && (
                     <Button
                       variant="ghost"

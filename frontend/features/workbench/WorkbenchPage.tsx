@@ -37,7 +37,8 @@ import {
 } from "@/app/newchat/adapter/conversation-thread-list-adapter";
 import { applyComposerRunConfig } from "@/app/newchat/adapter/composer-run-config";
 import { useConversationResume } from "./hooks/useConversationResume";
-import { SidebarProvider } from "@/components/ui/sidebar";
+import { ConversationHeaderActions } from "@/components/common/ConversationHeaderActions";
+import { WorkbenchConversationLayout } from "./components/WorkbenchConversationLayout";
 import { message } from "antd";
 import type { Agent } from "@/types/agentConfig";
 import { useModelList } from "@/hooks/model/useModelList";
@@ -531,7 +532,7 @@ const HomeContent: FC = () => {
         if (!cancelled) {
           dispatchWorkbench({
             type: "resolve-agent-error",
-            message: "会话资源恢复失败，请重新打开会话",
+            message: t("ui.localization.resourceRestoreFailed"),
           });
           log.error("[HomeContent] Failed to restore knowledge scope:", error);
         }
@@ -546,6 +547,7 @@ const HomeContent: FC = () => {
     dispatchWorkbench,
     resetNl2AgentFlow,
     onRestoreAgent,
+    t,
   ]);
 
   useEffect(() => {
@@ -638,7 +640,7 @@ const HomeContent: FC = () => {
           workbenchState.configVersion
         );
         if (Number(activeConversationIdRef.current) !== conversationId) {
-          throw new Error("原会话配置已保存；当前会话已切换，请重新打开选择器");
+          throw new Error(t("ui.localization.conversationChanged"));
         }
         dispatchWorkbench({
           type: "restore",
@@ -665,12 +667,12 @@ const HomeContent: FC = () => {
             setKnowledgeScope(current.workbench_config.knowledge_scope ?? null);
             setKnowledgePreview(null);
           }
-          message.warning("配置已在其他页面更新，已加载最新版本");
+          message.warning(t("ui.localization.configurationUpdated"));
         }
         throw error;
       }
     },
-    [dispatchWorkbench, workbenchState.configVersion]
+    [dispatchWorkbench, t, workbenchState.configVersion]
   );
 
   const handleKnowledgeScopeChange = useCallback(
@@ -702,7 +704,7 @@ const HomeContent: FC = () => {
             });
           }
         } else {
-          throw new Error("创建模式不支持挂载知识库");
+          throw new Error(t("ui.localization.creationKnowledgeUnavailable"));
         }
         if (activeThreadId) {
           knowledgeScopesRef.current.set(activeThreadId, scope);
@@ -858,7 +860,9 @@ const HomeContent: FC = () => {
       }
     } catch (error) {
       message.error(
-        error instanceof Error ? error.message : "模型配置保存失败"
+        error instanceof Error
+          ? error.message
+          : t("ui.localization.modelSaveFailed")
       );
     } finally {
       modelSavePending.current = false;
@@ -903,7 +907,9 @@ const HomeContent: FC = () => {
       }
     } catch (error) {
       message.error(
-        error instanceof Error ? error.message : "思考配置保存失败"
+        error instanceof Error
+          ? error.message
+          : t("ui.localization.reasoningSaveFailed")
       );
       // Discard only the failed numeric edit; never display it as saved intent.
       setModelSettingsRevision((current) => current + 1);
@@ -1001,7 +1007,7 @@ const HomeContent: FC = () => {
         }
         if (!runtime.thread.composer.getState().text)
           runtime.thread.composer.setText(query);
-        message.warning("配置已更新，已重新加载并保留输入；请确认后重新发送");
+        message.warning(t("ui.localization.reloadRetainedInput"));
       },
       onKnowledgeScopeResolved: handleKnowledgeScopeResolved,
       onGenerationStopped: handleGenerationStopped,
@@ -1099,6 +1105,7 @@ const HomeContent: FC = () => {
     workbenchState,
     effectiveWorkbenchConfig,
     dispatchWorkbench,
+    t,
   ]);
 
   // Restore historical plan and chat mode from the same conversation detail
@@ -1210,11 +1217,13 @@ const HomeContent: FC = () => {
         );
       } catch (error) {
         message.error(
-          error instanceof Error ? error.message : "智能体切换失败"
+          error instanceof Error
+            ? error.message
+            : t("ui.localization.agentSwitchFailed")
         );
       }
     },
-    [applyAgentMounts, runtime]
+    [applyAgentMounts, runtime, t]
   );
 
   const workbenchSendability = getWorkbenchSendability(
@@ -1228,7 +1237,11 @@ const HomeContent: FC = () => {
     try {
       await changeAgentTopology(runtime, () => applyAgentMounts(mounts));
     } catch (error) {
-      message.error(error instanceof Error ? error.message : "智能体移除失败");
+      message.error(
+        error instanceof Error
+          ? error.message
+          : t("ui.localization.agentRemoveFailed")
+      );
     }
   };
   const isCreating =
@@ -1246,7 +1259,7 @@ const HomeContent: FC = () => {
       )
         return false;
       if (runtime.thread.getState().isRunning) {
-        message.warning("请等待当前回复完成后再开始创建");
+        message.warning(t("ui.localization.waitReplyCreation"));
         return false;
       }
       if (mode === workbenchState.config.mode) return true;
@@ -1292,7 +1305,11 @@ const HomeContent: FC = () => {
       resetNl2AgentFlow(null);
       return true;
     } catch (error) {
-      message.error(error instanceof Error ? error.message : "创建会话失败");
+      message.error(
+        error instanceof Error
+          ? error.message
+          : t("ui.localization.conversationCreateFailed")
+      );
       return false;
     }
   };
@@ -1302,43 +1319,44 @@ const HomeContent: FC = () => {
   ) => {
     const result = await createSkill(payload);
     if (!result.success) {
-      message.error(result.message || "Skill 保存失败");
+      message.error(result.message || t("ui.localization.skillSaveFailed"));
       return;
     }
     setSavedSkillName(payload.name);
-    message.success("Skill 已保存到我的 Skills");
+    message.success(t("ui.localization.skillSaved"));
   };
 
-  // Conditional rendering must happen after all hooks
-  if (!ready) {
-    return (
-      <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
-        Loading conversation…
-      </div>
-    );
-  }
-
   return (
-    <div className="flex w-full h-full">
+    <WorkbenchConversationLayout ready={ready}>
       <div className="shrink-0 h-full">
-        <SidebarProvider className="w-auto h-full">
-          <ThreadListSidebar
-            pinStorageKey={
-              user ? getWorkbenchPinStorageKey(user.id, user.tenantId) : null
-            }
-            showLegacySwitch={false}
-            generatedTitles={generatedTitles}
-            serverConversationIds={serverConversationIds}
-            onRenameSuccess={handleConversationRenamed}
-            onPrepareNewConversation={handlePrepareNewConversation}
-            onNewConversation={handleNewConversation}
-          />
-        </SidebarProvider>
+        <ThreadListSidebar
+          collapseToHeader
+          pinStorageKey={
+            user ? getWorkbenchPinStorageKey(user.id, user.tenantId) : null
+          }
+          generatedTitles={generatedTitles}
+          serverConversationIds={serverConversationIds}
+          onRenameSuccess={handleConversationRenamed}
+          onPrepareNewConversation={handlePrepareNewConversation}
+          onNewConversation={handleNewConversation}
+        />
       </div>
 
       <div className="flex min-h-0 flex-1 min-w-0 flex-col">
         <div className="min-h-0 flex-1">
           <Chat
+            headerLeading={
+              <ConversationHeaderActions
+                position="leading"
+                onNewConversation={handleNewConversation}
+              />
+            }
+            headerTrailing={
+              <ConversationHeaderActions
+                position="trailing"
+                onNewConversation={handleNewConversation}
+              />
+            }
             generatedTitle={
               activeThreadId ? generatedTitles.get(activeThreadId) : undefined
             }
@@ -1455,11 +1473,11 @@ const HomeContent: FC = () => {
             }
             readOnlyReason={
               isSavingModel
-                ? "正在保存模型配置"
+                ? t("ui.localization.savingModel")
                 : !isCreating && effectiveWorkbenchConfig.model_id == null
                   ? isLoadingModels
-                    ? "正在加载模型"
-                    : "暂无可用模型"
+                    ? t("ui.localization.loadingModels")
+                    : t("ui.localization.noModels")
                   : workbenchSendability.reason
             }
             skillFiles={
@@ -1560,7 +1578,8 @@ const HomeContent: FC = () => {
               )
             )
               return;
-            if (selected.length > 8) throw new Error("最多选择 8 个智能体");
+            if (selected.length > 8)
+              throw new Error(t("ui.localization.agentLimit"));
             const previews = await Promise.all(
               selected.map((agent) =>
                 previewWorkbenchAgent(
@@ -1581,6 +1600,6 @@ const HomeContent: FC = () => {
           onSelect={(agent) => void handleAgentSelectedFromLanding(agent)}
         />
       </div>
-    </div>
+    </WorkbenchConversationLayout>
   );
 };

@@ -1,0 +1,42 @@
+schema_version: '1.0'
+stage: D4
+module: CHAT-SIDEBAR
+case:
+  case_id: CHAT-SIDEBAR-D4-002
+  feature_id: CHAT-SIDEBAR
+  requirement_ids: [CHAT-SIDEBAR-COLLAPSE-20261020]
+  business_rule_ids: [CHAT-SIDEBAR-RULE-004]
+  title: Conversation lists collapse without a permanent rail
+  type: E2E
+  priority: P2
+  status: manual
+  automation: manual
+  objective: Inspect zero-width collapse and original conversation operations on the real Workbench and Agent-chat pages.
+  preconditions:
+  - Authorized local frontend with saved histories and no running reply.
+  test_data:
+    routes: [/zh/workbench, /zh/newchat]
+  steps:
+  - order: 1
+    action: On both routes, collapse the expanded conversation list, including Agent chat discovery and an existing conversation.
+    expected: The entire conversation rail disappears; content starts beside the primary navigation; Workbench exposes header expand/new-conversation actions; Agent chat exposes only one floating expand action, without adding a header or covering the discovery title or message text.
+  - order: 2
+    action: Expand via the available button and inspect search, history and Agent selection; collapse again.
+    expected: Existing list operations return, duplicate header actions disappear, and the active conversation/composer remain unchanged.
+  - order: 3
+    action: Start a new conversation through the collapsed header; verify the existing Workbench blank-conversation behavior.
+    expected: Existing new-conversation and Agent navigation semantics are preserved without generation or lost saved history; the collapsed list stays collapsed through loading and the expanded list stays expanded.
+  - order: 4
+    action: Repeat collapse and expansion at a mobile viewport, then close the sheet.
+    expected: The mobile sheet opens and closes; no permanent rail remains and desktop state does not prevent reopening.
+  - order: 5
+    action: Collapse Workbench, visit Agent chat and another route, then return. Set different visibility on Agent chat, navigate back, and finally reload the browser document.
+    expected: Each page independently retains its chosen state across route navigation; full reload restores the expanded default. Main navigation behavior remains unchanged.
+  expected_results:
+  - Both routes reclaim collapsed rail width with their specified controls and preserve conversation semantics.
+  forbidden_side_effects:
+  - Do not send messages, delete history, change stored Agent configuration or modify authentication.
+  actor: Authenticated conversation user
+  journey: [Collapse list, expand list, start blank conversation, toggle mobile sheet]
+  final_business_result: [Conversation navigation remains reachable without wasting content width.]
+  failure_evidence: [Screenshot and route, viewport, active conversation and observed action result]

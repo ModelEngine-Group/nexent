@@ -1,3 +1,5 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 "use client";
 
 import React, { useEffect, useMemo, useState } from "react";
@@ -519,13 +521,17 @@ export default function AgentList({ tenantId }: { tenantId: string | null }) {
               danger
               icon={<Trash2 className="h-4 w-4" />}
               size="small"
-              onClick={() => confirm({
-                title: t("businessLogic.config.modal.deleteTitle"),
-                content: t("businessLogic.config.modal.deleteContent", { name: record.display_name }),
-                okText: t("common.confirm"),
-                cancelText: t("common.cancel"),
-                onOk: () => handleDelete(record),
-              })}
+              onClick={() =>
+                confirm({
+                  title: t("businessLogic.config.modal.deleteTitle"),
+                  content: t("businessLogic.config.modal.deleteContent", {
+                    name: record.display_name,
+                  }),
+                  okText: t("common.confirm"),
+                  cancelText: t("common.cancel"),
+                  onOk: () => handleDelete(record),
+                })
+              }
             />
           </Tooltip>
         </div>
@@ -580,8 +586,11 @@ export default function AgentList({ tenantId }: { tenantId: string | null }) {
           className="w-48"
         />
         {canManageOfficialAgents && (
-          <Button className="ml-auto" onClick={() => setOfficialModalOpen(true)}>
-            管理官方智能体
+          <Button
+            className="ml-auto"
+            onClick={() => setOfficialModalOpen(true)}
+          >
+            {t("ui.localization.manageOfficialAgents")}
           </Button>
         )}
       </div>

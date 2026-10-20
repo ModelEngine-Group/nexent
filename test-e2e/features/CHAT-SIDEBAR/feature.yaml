@@ -9,6 +9,8 @@ feature:
   description: Persisted visibility, normalized rename, agent-group batch selection
     and server-ID batch deletion preserve sidebar state.
   business_rules:
+  - rule_id: CHAT-SIDEBAR-RULE-004
+    description: Workbench collapse uses existing header actions. Agent chat collapse uses exactly one floating expand button and no new header or configuration controls. Neither reserves rail width; expanded operations are retained and mobile uses its sheet state.
   - rule_id: CHAT-SIDEBAR-RULE-003
     description: Workbench pin/unpin persists on the owning personal conversation for the authenticated user,
       using persisted conversation IDs. Tenant changes retain that personal preference. Focus/reconnect refresh hydrates missing pinned histories beyond the loaded page. Pins are newest first across devices;
@@ -31,6 +33,7 @@ feature:
   - D5
   source:
     requirement_ids:
+    - CHAT-SIDEBAR-COLLAPSE-20261020
     - CHAT-SIDEBAR-REQ-001
     - WB-HISTORY-PINS-20261014
     - WB-PIN-ORDER-20261014

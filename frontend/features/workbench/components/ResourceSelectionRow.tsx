@@ -27,7 +27,7 @@ export function ResourceSelectionRow({
   return (
     <div
       className={cn(
-        "flex min-w-0 items-center gap-3 border-b border-border last:border-b-0",
+        "flex min-w-0 items-center gap-3 border-b border-border",
         selected && "bg-primary/5"
       )}
     >

@@ -158,7 +158,8 @@ export function AgentPicker({
         }
       })
       .catch(() => {
-        if (!cancelled) message.error("仓库加载失败");
+        if (!cancelled)
+          message.error(t("workbench.controls.repositoryLoadFailed"));
       })
       .finally(() => {
         if (!cancelled) setSettledRepositoryRequest(repositoryRequest);
@@ -166,7 +167,7 @@ export function AgentPicker({
     return () => {
       cancelled = true;
     };
-  }, [open, tab, repositoryRequest]);
+  }, [open, tab, repositoryRequest, t]);
   const check = async (item: AgentRepositoryListingItem) => {
     const operation = ++operationRef.current;
     setOperationLoading(true);
@@ -189,7 +190,7 @@ export function AgentPicker({
       );
     } catch {
       if (operation === operationRef.current)
-        message.error("导入预检失败，请重试");
+        message.error(t("ui.localization.importPrecheckFailed"));
     } finally {
       if (operation === operationRef.current) setOperationLoading(false);
     }
@@ -224,11 +225,11 @@ export function AgentPicker({
         : await importAgentFromRepository(precheck.agent_repository_id);
       if (operation !== operationRef.current) return;
       if (!Number.isInteger(result.agent_id) || result.agent_id <= 0)
-        throw new Error("导入响应缺少根 Agent ID，请刷新列表检查结果");
+        throw new Error(t("ui.localization.importMissingAgent"));
       const refreshed = await fetchPublishedAgentList();
       if (operation !== operationRef.current) return;
       if (!refreshed.success)
-        throw new Error("导入成功，刷新资源失败，请重新打开选择器");
+        throw new Error(t("ui.localization.importRefreshFailed"));
       const freshAgents = (refreshed.data ?? []) as Agent[];
       queryClient.setQueryData(["publishedAgentsList"], freshAgents);
       const imported = freshAgents.find(
@@ -241,9 +242,7 @@ export function AgentPicker({
         imported.is_available === false ||
         !imported.current_version_no
       ) {
-        message.warning(
-          "智能体已导入，但尚未发布或依赖不完整；完善后才能选择运行"
-        );
+        message.warning(t("ui.localization.importAgentNotReady"));
         return;
       }
       if (
@@ -263,7 +262,11 @@ export function AgentPicker({
       );
     } catch (error) {
       if (operation === operationRef.current)
-        message.error(error instanceof Error ? error.message : "导入失败");
+        message.error(
+          error instanceof Error
+            ? error.message
+            : t("ui.localization.importFailed")
+        );
     } finally {
       if (operation === operationRef.current) setImporting(false);
     }
@@ -286,7 +289,11 @@ export function AgentPicker({
           spinning={loading}
           className="h-full [&>.ant-spin-container]:min-h-full"
         >
-          <div role="listbox" aria-label="智能体资源" className="min-h-full">
+          <div
+            role="listbox"
+            aria-label={t("ui.localization.agentResources")}
+            className="min-h-full"
+          >
             {(tab === "mine" ? visible.length : repository.length) === 0 && (
               <Empty className="py-12" image={Empty.PRESENTED_IMAGE_SIMPLE} />
             )}
@@ -304,7 +311,8 @@ export function AgentPicker({
                         ? getUnavailableReasonLabels(
                             agent.unavailable_reasons || [],
                             t
-                          ).join("；") || "智能体不可用，服务端未提供具体原因"
+                          ).join("；") ||
+                          t("ui.localization.agentUnavailableWithoutReason")
                         : undefined
                     }
                     onClick={() => toggle(agent)}
@@ -323,7 +331,7 @@ export function AgentPicker({
                         disabled={loading || importing}
                         onClick={() => void check(item)}
                       >
-                        预检并导入
+                        {t("ui.localization.precheckImport")}
                       </Button>
                     }
                     onClick={() => void check(item)}
@@ -391,8 +399,8 @@ export function AgentPicker({
           setPage(1);
         }}
         items={[
-          { key: "mine", label: "我的" },
-          { key: "repository", label: "仓库" },
+          { key: "mine", label: t("workbench.controls.mine") },
+          { key: "repository", label: t("workbench.controls.repository") },
         ]}
       />
       <ResourceTagFilter
@@ -405,7 +413,7 @@ export function AgentPicker({
               setSearch(event.target.value);
               setPage(1);
             }}
-            placeholder="搜索智能体名称或描述"
+            placeholder={t("workbench.controls.searchAgents")}
             allowClear
           />
         }
@@ -504,13 +512,18 @@ export function AgentPicker({
         }}
       >
         {unresolvedDependencies.length > 0 && (
-          <Alert type="warning" title="依赖不完整，暂不能导入运行" />
+          <Alert
+            type="warning"
+            title={t("ui.localization.importDependenciesMissing")}
+          />
         )}
         <ul>
           {precheck?.items.map((item) => (
             <li key={`${item.type}:${item.key}`}>
               {item.name}：
-              {item.available ? "可用" : item.reason_code || "不可用"}
+              {item.available
+                ? t("ui.localization.available")
+                : item.reason_code || t("ui.localization.unavailable")}
               {item.type === "skill" &&
                 item.reason_code === "skill_duplicate" && (
                   <span className="ml-3 inline-flex gap-3">
@@ -528,7 +541,8 @@ export function AgentPicker({
                           }))
                         }
                       />
-                      重命名为 {item.suggested_new_name || `${item.name} 副本`}
+                      {t("ui.localization.renameTo")}{" "}
+                      {item.suggested_new_name || `${item.name} 副本`}
                     </label>
                     <label>
                       <input
@@ -542,7 +556,7 @@ export function AgentPicker({
                           }))
                         }
                       />
-                      使用已有 Skill
+                      {t("ui.localization.reuseSkill")}
                     </label>
                   </span>
                 )}
