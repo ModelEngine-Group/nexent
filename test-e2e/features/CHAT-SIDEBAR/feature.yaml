@@ -27,6 +27,11 @@ feature:
   - rule_id: CHAT-SIDEBAR-RULE-004
     description: Visible messages update dedicated activity; activity-based pagination and automatic metadata
       refresh preserve composer, runtime and pin semantics.
+  - rule_id: CHAT-SIDEBAR-RULE-005
+    description: Workbench sidebar selection updates the URL to the selected saved
+      conversation without document navigation or runtime replacement. New and
+      unsaved conversations remove stale conversation parameters; unrelated query
+      parameters and hashes remain. Reload restores the selected saved conversation.
   required_test_stages:
   - D1
   - D4
