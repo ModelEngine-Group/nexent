@@ -247,9 +247,15 @@ export default function AgentConfig({
 
   const isReadOnly = useAgentReadOnly();
   const editedAgent = useAgentStore((state) => state.editedAgent);
+  const configuredModelIds = editedAgent?.model_ids ?? [];
   const unavailableReasonLabels = getUnavailableReasonLabels(
     Array.isArray(editedAgent?.unavailable_reasons)
-      ? editedAgent.unavailable_reasons.filter(Boolean)
+      ? editedAgent.unavailable_reasons.filter(
+          (reason) =>
+            Boolean(reason) &&
+            (reason !== "model_not_configured" ||
+              configuredModelIds.length === 0)
+        )
       : [],
     t
   );
