@@ -27,15 +27,15 @@ from nexent.core.concurrency import (
     clear_default_thread_manager,
     set_default_thread_manager,
 )
-from services.thread_lifecycle_service import runtime_thread_manager
-from services.runtime_state_service import runtime_state_service
+from infrastructure.concurrency import runtime_thread_manager
+from management.services.agent.run_state import runtime_state_service
 
 logger = logging.getLogger("runtime_app")
 
 
 async def start_agent_automation_scheduler():
-    from services.agent_automation.scheduler import agent_automation_scheduler
-    from services.startup_recovery_service import recover_runtime_tasks
+    from management.services.automation.scheduler import agent_automation_scheduler
+    from management.recovery import recover_runtime_tasks
     from services.workspace_cleanup_service import cleanup_orphaned_agent_workspaces
 
     await runtime_thread_manager.run(
@@ -51,7 +51,7 @@ async def start_agent_automation_scheduler():
 
 
 async def stop_agent_automation_scheduler():
-    from services.agent_automation.scheduler import agent_automation_scheduler
+    from management.services.automation.scheduler import agent_automation_scheduler
 
     await agent_automation_scheduler.stop()
 

@@ -43,6 +43,7 @@ change:
       distinct disposable PostgreSQL D5 boundary.
     test_selectors:
     - test/backend/agents/test_agent_prompt_contract.py
+    - test/backend/app/test_tenant_app.py
     - test/backend/agents/test_nl2agent_agent.py
     - test/backend/agents/test_nl2agent_single_prompt.py
     - test/backend/services/test_nl2agent_service.py
@@ -79,4 +80,9 @@ change:
     - test/sdk/core/agents/test_fixed_system_prompts.py
     - test/sdk/core/agents/test_direct_prompt_resources.py
   notes: 'Design: ../nexent-doc/nexent/nl2agent-resource-recommendation-flow/design.md,
-    2026-10-19 storage/runtime section. No live database migration.'
+    2026-10-19 storage/runtime section. No live database migration.
+    PR 4137 develop integration (2026-10-20): relocate prompt normalization to
+    infrastructure.agent_prompt, preserve evaluation single-prompt policy in
+    management.services.evaluation.case_generation and remove the obsolete utils
+    package stub in tenant endpoint tests. Reuse existing UT and formal contracts;
+    no new behavior or formal Case is introduced.'

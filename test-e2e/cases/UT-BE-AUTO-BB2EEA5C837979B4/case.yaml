@@ -23,7 +23,7 @@ case:
     legacy_asset_declaration: '- ${NEXENT_TEST_HOME}/config/environment.yaml（仅本地测试环境参数）'
   steps:
   - order: 1
-    action: 在本地工作区导入 backend/services/redis_service.py 的 RedisService，构造实例并将 self._client（或 self.client）替换为 mock Redis 客户端；测试代码不读取生产凭据。
+    action: 在本地工作区导入 backend/management/services/knowledge_base/task_state.py 的 RedisService，构造实例并将 self._client（或 self.client）替换为 mock Redis 客户端；测试代码不读取生产凭据。
     expected: _document_fence_key 对空 file_id 返回 None，否则返回 kb:delete:fence:file:{file_id}。
   - order: 2
     action: 验证 _document_fence_key：传入 file_id="doc-1" 断言返回 "kb:delete:fence:file:doc-1"；传入 None、"" 断言返回 None。

@@ -11,8 +11,8 @@ from database.agent_version_db import query_current_version_no
 from database.tool_db import query_tool_knowledge_references
 from consts.const import ASSET_OWNER_TENANT_ID, MAX_AGENTS_PER_TENANT
 from consts.exceptions import AgentNotFoundError, TenantResourceLimitError
-from utils.agent_prompt import normalize_agent_prompt_fields
-from utils.str_utils import convert_list_to_string
+from infrastructure.agent_prompt import normalize_agent_prompt_fields
+from management.db.serialization import convert_list_to_string
 
 logger = logging.getLogger("agent_db")
 
@@ -319,8 +319,6 @@ def create_agent(agent_info, tenant_id: str, user_id: str):
             "business_description": new_agent.business_description,
             "business_logic_model_id": new_agent.business_logic_model_id,
             "business_logic_model_name": new_agent.business_logic_model_name,
-            "prompt_template_id": new_agent.prompt_template_id,
-            "prompt_template_name": new_agent.prompt_template_name,
             "group_ids": new_agent.group_ids,
             "is_new": new_agent.is_new,
             "enable_context_manager": new_agent.enable_context_manager,

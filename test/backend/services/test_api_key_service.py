@@ -6,7 +6,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from backend.services import api_key_service
+from management.services.permission import api_keys as api_key_service
 from consts.exceptions import ForbiddenError, NotFoundException, ValidationError
 
 
@@ -14,9 +14,9 @@ from consts.exceptions import ForbiddenError, NotFoundException, ValidationError
     "operation",
     [api_key_service.refresh_user_api_key, api_key_service.revoke_user_api_keys],
 )
-@patch("backend.services.api_key_service.create_token")
-@patch("backend.services.api_key_service.soft_delete_tokens_by_user")
-@patch("backend.services.api_key_service.get_user_tenant_in_tenant")
+@patch("management.services.permission.api_keys.create_token")
+@patch("management.services.permission.api_keys.soft_delete_tokens_by_user")
+@patch("management.services.permission.api_keys.get_user_tenant_in_tenant")
 def test_user_id_outside_admin_tenant_is_rejected_before_key_mutation(
     mock_get_target,
     mock_soft_delete,
@@ -45,9 +45,9 @@ def test_user_id_outside_admin_tenant_is_rejected_before_key_mutation(
     "operation",
     [api_key_service.refresh_user_api_key, api_key_service.revoke_user_api_keys],
 )
-@patch("backend.services.api_key_service.create_token")
-@patch("backend.services.api_key_service.soft_delete_tokens_by_user")
-@patch("backend.services.api_key_service.get_user_tenant_in_tenant")
+@patch("management.services.permission.api_keys.create_token")
+@patch("management.services.permission.api_keys.soft_delete_tokens_by_user")
+@patch("management.services.permission.api_keys.get_user_tenant_in_tenant")
 def test_mismatched_tenant_record_is_rejected_before_key_mutation(
     mock_get_target,
     mock_soft_delete,
@@ -87,7 +87,7 @@ def test_require_tenant_admin_requires_tenant_context():
         api_key_service._require_tenant_admin("", "SU")
 
 
-@patch("backend.services.api_key_service.get_user_tenant_by_email")
+@patch("management.services.permission.api_keys.get_user_tenant_by_email")
 def test_resolve_target_by_email_returns_tenant_user(mock_by_email):
     target = {"user_id": "user-1", "tenant_id": "tenant-a", "user_email": "api@example.com"}
     mock_by_email.return_value = target
@@ -102,18 +102,18 @@ def test_resolve_target_requires_target(user_id, email):
         api_key_service._resolve_target("tenant-a", user_id, email)
 
 
-@patch("backend.services.api_key_service.query_groups")
-@patch("backend.services.api_key_service.get_tenant_default_group_id")
+@patch("management.services.permission.api_keys.query_groups")
+@patch("management.services.permission.api_keys.get_tenant_default_group_id")
 def test_create_api_users_batch_allows_superuser_and_uses_default_group(mock_default_group, mock_groups):
     session = MagicMock()
     mock_default_group.return_value = 7
     mock_groups.return_value = {"group_id": 7, "tenant_id": "tenant-a", "group_name": "Default"}
-    with patch("backend.services.api_key_service.get_db_session") as mock_session, \
-            patch("backend.services.api_key_service.uuid.uuid4", side_effect=["user-1", "user-2"]), \
-            patch("backend.services.api_key_service.insert_user_tenant") as mock_insert, \
-            patch("backend.services.api_key_service.add_user_to_group") as mock_add_group, \
-            patch("backend.services.api_key_service.generate_access_key", side_effect=["key-1", "key-2"]), \
-            patch("backend.services.api_key_service.create_token", side_effect=[
+    with patch("management.services.permission.api_keys.get_db_session") as mock_session, \
+            patch("management.services.permission.api_keys.uuid.uuid4", side_effect=["user-1", "user-2"]), \
+            patch("management.services.permission.api_keys.insert_user_tenant") as mock_insert, \
+            patch("management.services.permission.api_keys.add_user_to_group") as mock_add_group, \
+            patch("management.services.permission.api_keys.generate_access_key", side_effect=["key-1", "key-2"]), \
+            patch("management.services.permission.api_keys.create_token", side_effect=[
                 {"access_key": "key-1"}, {"access_key": "key-2"},
             ]):
         mock_session.return_value.__enter__.return_value = session
@@ -131,14 +131,14 @@ def test_create_api_users_batch_allows_superuser_and_uses_default_group(mock_def
     assert mock_add_group.call_count == 2
 
 
-@patch("backend.services.api_key_service.get_user_tenant_in_tenant")
+@patch("management.services.permission.api_keys.get_user_tenant_in_tenant")
 def test_refresh_user_api_key_revokes_then_creates_in_shared_session(mock_target):
     session = MagicMock()
     mock_target.return_value = {"user_id": "user-1", "tenant_id": "tenant-a", "user_email": "api@example.com"}
-    with patch("backend.services.api_key_service.get_db_session") as mock_session, \
-            patch("backend.services.api_key_service.soft_delete_tokens_by_user", return_value=3) as mock_revoke, \
-            patch("backend.services.api_key_service.generate_access_key", return_value="new-key"), \
-            patch("backend.services.api_key_service.create_token", return_value={"access_key": "new-key"}) as mock_create:
+    with patch("management.services.permission.api_keys.get_db_session") as mock_session, \
+            patch("management.services.permission.api_keys.soft_delete_tokens_by_user", return_value=3) as mock_revoke, \
+            patch("management.services.permission.api_keys.generate_access_key", return_value="new-key"), \
+            patch("management.services.permission.api_keys.create_token", return_value={"access_key": "new-key"}) as mock_create:
         mock_session.return_value.__enter__.return_value = session
         result = api_key_service.refresh_user_api_key(
             actor_user_id="admin-1",
@@ -154,10 +154,10 @@ def test_refresh_user_api_key_revokes_then_creates_in_shared_session(mock_target
     mock_create.assert_called_once_with("new-key", "user-1", created_by="admin-1", db_session=session)
 
 
-@patch("backend.services.api_key_service.get_user_tenant_in_tenant")
+@patch("management.services.permission.api_keys.get_user_tenant_in_tenant")
 def test_revoke_user_api_keys_reports_missing_active_key(mock_target):
     mock_target.return_value = {"user_id": "user-1", "tenant_id": "tenant-a"}
-    with patch("backend.services.api_key_service.soft_delete_tokens_by_user", return_value=0):
+    with patch("management.services.permission.api_keys.soft_delete_tokens_by_user", return_value=0):
         with pytest.raises(NotFoundException, match="no active API key"):
             api_key_service.revoke_user_api_keys(
                 actor_user_id="admin-1",
@@ -167,7 +167,7 @@ def test_revoke_user_api_keys_reports_missing_active_key(mock_target):
             )
 
 
-@patch("backend.services.api_key_service.list_active_tokens_by_tenant")
+@patch("management.services.permission.api_keys.list_active_tokens_by_tenant")
 def test_list_tenant_api_keys_allows_superuser_and_forwards_pagination(mock_list):
     mock_list.return_value = {"items": [], "total": 0}
 
@@ -188,7 +188,7 @@ def test_list_tenant_api_keys_rejects_other_tenant():
 
 @pytest.mark.parametrize("lookup_failed", [False, True])
 def test_api_key_display_metadata_keeps_owners_creators_and_ordering(monkeypatch, lookup_failed):
-    from services import user_identity_service
+    from management.services.permission.identity import display as user_identity_service
 
     rows = [{"token_id": 1, "user_id": "owner", "created_by": "creator",
              "owner_email": "owner@test", "creator_email": "creator@test"}]

@@ -92,7 +92,7 @@ from nexent.core.concurrency import (
 from nexent.monitor import (
     agent_monitoring_context,
 )
-from services.conversation_management_service import (
+from management.services.conversation.service import (
     create_new_conversation,
     get_conversation_service,
     get_last_unit_for_message,
@@ -104,24 +104,24 @@ from services.conversation_management_service import (
     update_conversation_workbench_config_service,
     update_message_status,
 )
-from services.knowledge_scope_service import (
+from management.services.knowledge_base.scope import (
     build_runtime_knowledge_resources,
     resolve_knowledge_scope,
 )
-from services.runtime_state_service import (
+from management.services.agent.run_state import (
     runtime_state_service,
 )
-from services.streaming_channel import (
+from infrastructure.streaming.channels import (
     streaming_channel_manager,
 )
-from services.thread_lifecycle_service import (
+from infrastructure.concurrency import (
     runtime_thread_manager,
 )
-from utils.auth_utils import (
+from management.services.permission.identity.authentication_helpers import (
     get_current_user_info,
     get_user_language,
 )
-from utils.runtime_metadata_utils import (
+from infrastructure.serialization.runtime_metadata import (
     validate_runtime_metadata,
 )
 
@@ -288,7 +288,7 @@ async def run_agent_stream(
 
     canonical_workbench = None
     if agent_request.entrypoint == "workbench" and not resume:
-        from services.workbench_service import (
+        from management.services.agent.workbench import (
             assert_workbench_version,
             resolve_workbench_config,
         )

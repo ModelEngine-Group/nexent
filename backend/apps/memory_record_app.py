@@ -1,3 +1,4 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """HTTP endpoints for managing internal memory records (Phase 2).
 
 These endpoints are intentionally restricted to manual management of
@@ -31,13 +32,13 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
 from database.user_tenant_db import get_user_tenant_by_user_id
-from services.memory_context_service import get_memory_context_service
-from services.memory_record_service import (
+from management.services.memory.context import get_memory_context_service
+from management.services.memory.records import (
     MemoryRecordError,
     get_memory_record_service,
 )
-from services.memory_retrieval_service import get_memory_retrieval_service
-from utils.auth_utils import get_current_user_id
+from management.services.memory.retrieval import get_memory_retrieval_service
+from management.services.permission.identity.authentication_helpers import get_current_user_id
 
 
 logger = logging.getLogger("memory_record_app")

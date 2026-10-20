@@ -1,9 +1,10 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """Northbound title-generation thread admission regressions."""
 
 import pytest
 
 from nexent.core.concurrency import ManagedTaskSpec
-from services.thread_lifecycle_service import northbound_thread_manager
+from infrastructure.concurrency import northbound_thread_manager
 
 
 @pytest.mark.asyncio

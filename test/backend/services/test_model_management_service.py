@@ -186,7 +186,7 @@ consts_const_mod.ES_USERNAME = ""
 consts_const_mod.ES_PASSWORD = ""
 sys.modules["consts.const"] = consts_const_mod
 
-# Stub sqlalchemy.sql.func used by utils.config_utils
+# Stub sqlalchemy.sql.func used by management.services.configuration.tenant.settings
 sqlalchemy_sql_mod = types.ModuleType("sqlalchemy.sql")
 
 
@@ -323,9 +323,9 @@ utils_name_mod.split_repo_name = _split_repo_name
 utils_name_mod.sort_models_by_id = _sort_models_by_id
 sys.modules["management.services.model.names"] = utils_name_mod
 
-# Stub utils.file_management_utils so file_management_service can be imported
+# Stub management.services.file.upload so file_management_service can be imported
 # by other tests in the same pytest process without pulling auth/database deps.
-utils_file_mgmt_mod = types.ModuleType("utils.file_management_utils")
+utils_file_mgmt_mod = types.ModuleType("management.services.file.upload")
 
 
 async def _save_upload_file(*args, **kwargs):
@@ -333,7 +333,7 @@ async def _save_upload_file(*args, **kwargs):
 
 
 utils_file_mgmt_mod.save_upload_file = _save_upload_file
-sys.modules["utils.file_management_utils"] = utils_file_mgmt_mod
+sys.modules["management.services.file.upload"] = utils_file_mgmt_mod
 
 # Stub database.model_management_db to avoid importing heavy DB client
 database_mod = types.ModuleType("database")
@@ -406,7 +406,7 @@ for _attachment_func in [
 sys.modules["database.attachment_db"] = db_attachment_mod
 setattr(database_mod, "attachment_db", db_attachment_mod)
 
-# Stub database.tenant_config_db required by utils.config_utils
+# Stub database.tenant_config_db required by management.services.configuration.tenant.settings
 db_tenant_cfg_mod = types.ModuleType("database.tenant_config_db")
 
 
@@ -467,8 +467,8 @@ async def _clear_model_memories(**kwargs):
 nexent_memory_mod.clear_model_memories = _clear_model_memories
 sys.modules["nexent.memory.memory_service"] = nexent_memory_mod
 
-# Stub services.tenant_service required by list_models_for_admin BEFORE any imports
-services_tenant_mod = types.ModuleType("services.tenant_service")
+# Stub management.services.permission.identity.tenants required by list_models_for_admin BEFORE any imports
+services_tenant_mod = types.ModuleType("management.services.permission.identity.tenants")
 
 
 def _get_tenant_info(tenant_id):
@@ -480,7 +480,7 @@ def _get_tenant_info(tenant_id):
 
 
 services_tenant_mod.get_tenant_info = _get_tenant_info
-sys.modules["services.tenant_service"] = services_tenant_mod
+sys.modules["management.services.permission.identity.tenants"] = services_tenant_mod
 
 
 def _add_repo_to_name(model_repo, model_name):

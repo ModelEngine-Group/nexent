@@ -27,7 +27,7 @@ case:
   steps:
   - order: 1
     action: 设置 NEXENT_TEST_HOME，导入 backend/apps/northbound_base_app 的 northbound_lifespan、recover_northbound_tasks_on_startup
-      与 /internal/thread-capacity 端点，以及 services.thread_lifecycle_service.northbound_thread_manager。
+      与 /internal/thread-capacity 端点，以及 infrastructure.concurrency.northbound_thread_manager。
     expected: lifespan 进入后 northbound_thread_manager 完成启动，状态由 CREATED 迁移至 RUNNING，默认线程管理器指向该实例。
   - order: 2
     action: 以 asynccontextmanager 进入 northbound_lifespan（或启动 northbound 应用），断言 manager 处于 ManagerState.CREATED 时调用 start()

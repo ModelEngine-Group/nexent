@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+from test.backend.management.import_patching import set_import_attribute
 from backend.consts.exceptions import (
     AppException,
     AgentRunException,
@@ -216,7 +218,7 @@ sys.modules['sqlalchemy'] = MagicMock()
 sys.modules['sqlalchemy.orm'] = MagicMock()
 
 # Now import the module under test
-from backend.utils import auth_utils as au
+from management.services.permission.identity import authentication_helpers as au
 
 # Ensure exceptions in module under test are real exception classes, not mocks
 au.UnauthorizedError = UnauthorizedError
@@ -261,7 +263,7 @@ def test_extract_aksk_headers_missing():
 
 def test_verify_aksk_signature_success(monkeypatch):
     # Arrange matching ak and computed signature
-    monkeypatch.setattr(au, "get_aksk_config", lambda tenant_id: ("ak", "sk"))
+    set_import_attribute(monkeypatch, au, "get_aksk_config", lambda tenant_id: ("ak", "sk"))
     ts = str(int(time.time()))
     expected = au.calculate_hmac_signature("sk", "ak", ts, "body")
     ok = au.verify_aksk_signature("ak", ts, expected, "body")
@@ -269,13 +271,13 @@ def test_verify_aksk_signature_success(monkeypatch):
 
 
 def test_verify_aksk_signature_invalid(monkeypatch):
-    monkeypatch.setattr(au, "get_aksk_config", lambda tenant_id: ("ak", "sk"))
+    set_import_attribute(monkeypatch, au, "get_aksk_config", lambda tenant_id: ("ak", "sk"))
     ts = str(int(time.time()))
     assert au.verify_aksk_signature("wrong", ts, "sig", "") is False
 
 
 def test_validate_aksk_authentication(monkeypatch):
-    monkeypatch.setattr(au, "verify_aksk_signature", lambda a, b, c, d: True)
+    set_import_attribute(monkeypatch, au, "verify_aksk_signature", lambda a, b, c, d: True)
     ok = au.validate_aksk_authentication({
         "X-Access-Key": "ak",
         "X-Timestamp": str(int(time.time())),
@@ -285,7 +287,7 @@ def test_validate_aksk_authentication(monkeypatch):
 
 
 def test_validate_aksk_authentication_invalid(monkeypatch):
-    monkeypatch.setattr(au, "verify_aksk_signature", lambda a, b, c, d: False)
+    set_import_attribute(monkeypatch, au, "verify_aksk_signature", lambda a, b, c, d: False)
     with pytest.raises(SignatureValidationError):
         au.validate_aksk_authentication({
             "X-Access-Key": "ak",
@@ -297,17 +299,17 @@ def test_validate_aksk_authentication_invalid(monkeypatch):
 def test_generate_test_jwt_and_get_expiry_seconds(monkeypatch):
     token = au.generate_test_jwt("user-1", expires_in=1234)
     # ensure not in speed mode and no DEBUG_JWT_EXPIRE_SECONDS was set for this test
-    monkeypatch.setattr(au, "IS_SPEED_MODE", False)
-    monkeypatch.setattr(au, "DEBUG_JWT_EXPIRE_SECONDS", 0)
-    monkeypatch.setattr(au, "SUPABASE_JWT_SECRET", au.MOCK_JWT_SECRET_KEY)
+    set_import_attribute(monkeypatch, au, "IS_SPEED_MODE", False)
+    set_import_attribute(monkeypatch, au, "DEBUG_JWT_EXPIRE_SECONDS", 0)
+    set_import_attribute(monkeypatch, au, "SUPABASE_JWT_SECRET", au.MOCK_JWT_SECRET_KEY)
     seconds = au.get_jwt_expiry_seconds(token)
     assert seconds == 1234
 
 
 def test_generate_session_jwt_uses_runtime_configured_expiry(monkeypatch):
-    monkeypatch.setattr(au, "JWT_EXPIRY_SECONDS", 5432)
-    monkeypatch.setattr(au, "SUPABASE_JWT_SECRET", au.MOCK_JWT_SECRET_KEY)
-    monkeypatch.setattr(au, "SUPABASE_URL", "http://localhost:54321")
+    set_import_attribute(monkeypatch, au, "JWT_EXPIRY_SECONDS", 5432)
+    set_import_attribute(monkeypatch, au, "SUPABASE_JWT_SECRET", au.MOCK_JWT_SECRET_KEY)
+    set_import_attribute(monkeypatch, au, "SUPABASE_URL", "http://localhost:54321")
 
     token = au.generate_session_jwt("user-1")
     claims = au.jwt.decode(
@@ -321,7 +323,7 @@ def test_generate_session_jwt_uses_runtime_configured_expiry(monkeypatch):
 
 
 def test_internal_runtime_jwt_round_trip(monkeypatch):
-    monkeypatch.setattr(au, "SUPABASE_JWT_SECRET", au.MOCK_JWT_SECRET_KEY)
+    set_import_attribute(monkeypatch, au, "SUPABASE_JWT_SECRET", au.MOCK_JWT_SECRET_KEY)
 
     token = au.generate_internal_runtime_jwt("user-1", "tenant-1")
 
@@ -332,7 +334,7 @@ def test_internal_runtime_jwt_round_trip(monkeypatch):
 
 
 def test_internal_runtime_jwt_rejects_expired_token(monkeypatch):
-    monkeypatch.setattr(au, "SUPABASE_JWT_SECRET", au.MOCK_JWT_SECRET_KEY)
+    set_import_attribute(monkeypatch, au, "SUPABASE_JWT_SECRET", au.MOCK_JWT_SECRET_KEY)
     token = au.generate_internal_runtime_jwt(
         "user-1",
         "tenant-1",
@@ -344,7 +346,7 @@ def test_internal_runtime_jwt_rejects_expired_token(monkeypatch):
 
 
 def test_internal_runtime_jwt_rejects_wrong_scope(monkeypatch):
-    monkeypatch.setattr(au, "SUPABASE_JWT_SECRET", au.MOCK_JWT_SECRET_KEY)
+    set_import_attribute(monkeypatch, au, "SUPABASE_JWT_SECRET", au.MOCK_JWT_SECRET_KEY)
     now = int(time.time())
     token = au.jwt.encode(
         {
@@ -376,7 +378,7 @@ def test_internal_runtime_jwt_rejects_wrong_issuer_or_audience(
     claim_name,
     claim_value,
 ):
-    monkeypatch.setattr(au, "SUPABASE_JWT_SECRET", au.MOCK_JWT_SECRET_KEY)
+    set_import_attribute(monkeypatch, au, "SUPABASE_JWT_SECRET", au.MOCK_JWT_SECRET_KEY)
     now = int(time.time())
     claims = {
         "sub": "user-1",
@@ -399,7 +401,7 @@ def test_internal_runtime_jwt_rejects_wrong_issuer_or_audience(
 
 
 def test_internal_runtime_jwt_rejects_tampered_signature(monkeypatch):
-    monkeypatch.setattr(au, "SUPABASE_JWT_SECRET", au.MOCK_JWT_SECRET_KEY)
+    set_import_attribute(monkeypatch, au, "SUPABASE_JWT_SECRET", au.MOCK_JWT_SECRET_KEY)
     now = int(time.time())
     token = au.jwt.encode(
         {
@@ -420,9 +422,9 @@ def test_internal_runtime_jwt_rejects_tampered_signature(monkeypatch):
 
 
 def test_internal_runtime_jwt_rejects_regular_session_token(monkeypatch):
-    monkeypatch.setattr(au, "SUPABASE_JWT_SECRET", au.MOCK_JWT_SECRET_KEY)
-    monkeypatch.setattr(au, "SUPABASE_URL", "http://localhost:54321")
-    monkeypatch.setattr(au, "JWT_EXPIRY_SECONDS", 3600)
+    set_import_attribute(monkeypatch, au, "SUPABASE_JWT_SECRET", au.MOCK_JWT_SECRET_KEY)
+    set_import_attribute(monkeypatch, au, "SUPABASE_URL", "http://localhost:54321")
+    set_import_attribute(monkeypatch, au, "JWT_EXPIRY_SECONDS", 3600)
     token = au.generate_session_jwt("user-1")
 
     with pytest.raises(UnauthorizedError, match="Invalid internal runtime token"):
@@ -430,7 +432,7 @@ def test_internal_runtime_jwt_rejects_regular_session_token(monkeypatch):
 
 
 def test_internal_runtime_jwt_requires_configured_secret(monkeypatch):
-    monkeypatch.setattr(au, "SUPABASE_JWT_SECRET", "")
+    set_import_attribute(monkeypatch, au, "SUPABASE_JWT_SECRET", "")
 
     with pytest.raises(ValueError, match="not configured"):
         au.generate_internal_runtime_jwt("user-1", "tenant-1")
@@ -450,7 +452,7 @@ def test_internal_runtime_jwt_requires_user_and_tenant(
     user_id,
     tenant_id,
 ):
-    monkeypatch.setattr(au, "SUPABASE_JWT_SECRET", au.MOCK_JWT_SECRET_KEY)
+    set_import_attribute(monkeypatch, au, "SUPABASE_JWT_SECRET", au.MOCK_JWT_SECRET_KEY)
 
     with pytest.raises(ValueError, match="user_id and tenant_id are required"):
         au.generate_internal_runtime_jwt(user_id, tenant_id)
@@ -461,7 +463,7 @@ def test_verify_internal_runtime_jwt_requires_authorization(
     monkeypatch,
     authorization,
 ):
-    monkeypatch.setattr(au, "SUPABASE_JWT_SECRET", au.MOCK_JWT_SECRET_KEY)
+    set_import_attribute(monkeypatch, au, "SUPABASE_JWT_SECRET", au.MOCK_JWT_SECRET_KEY)
 
     with pytest.raises(UnauthorizedError, match="No authorization header provided"):
         au.verify_internal_runtime_jwt(authorization)
@@ -482,7 +484,7 @@ def test_verify_internal_runtime_jwt_requires_string_identities(
     claim_value,
     expected_message,
 ):
-    monkeypatch.setattr(au, "SUPABASE_JWT_SECRET", au.MOCK_JWT_SECRET_KEY)
+    set_import_attribute(monkeypatch, au, "SUPABASE_JWT_SECRET", au.MOCK_JWT_SECRET_KEY)
     now = int(time.time())
     claims = {
         "sub": "user-1",
@@ -494,7 +496,7 @@ def test_verify_internal_runtime_jwt_requires_string_identities(
         "exp": now + 60,
     }
     claims[claim_name] = claim_value
-    monkeypatch.setattr(au.jwt, "decode", lambda *args, **kwargs: claims)
+    set_import_attribute(monkeypatch, au.jwt, "decode", lambda *args, **kwargs: claims)
 
     with pytest.raises(UnauthorizedError, match=expected_message):
         au.verify_internal_runtime_jwt("internal-token")
@@ -514,10 +516,10 @@ def test_get_jwt_expiry_seconds_rejects_forged_far_future_token(monkeypatch):
         algorithm="HS256",
     )
 
-    monkeypatch.setattr(au, "IS_SPEED_MODE", False)
-    monkeypatch.setattr(au, "DEBUG_JWT_EXPIRE_SECONDS", 0)
-    monkeypatch.setattr(au, "SUPABASE_JWT_SECRET", au.MOCK_JWT_SECRET_KEY)
-    monkeypatch.setattr(au, "JWT_EXPIRY_SECONDS", 5432)
+    set_import_attribute(monkeypatch, au, "IS_SPEED_MODE", False)
+    set_import_attribute(monkeypatch, au, "DEBUG_JWT_EXPIRE_SECONDS", 0)
+    set_import_attribute(monkeypatch, au, "SUPABASE_JWT_SECRET", au.MOCK_JWT_SECRET_KEY)
+    set_import_attribute(monkeypatch, au, "JWT_EXPIRY_SECONDS", 5432)
 
     seconds = au.get_jwt_expiry_seconds(forged_token)
 
@@ -525,8 +527,8 @@ def test_get_jwt_expiry_seconds_rejects_forged_far_future_token(monkeypatch):
 
 
 def test_get_jwt_expiry_seconds_uses_debug_override(monkeypatch):
-    monkeypatch.setattr(au, "IS_SPEED_MODE", False)
-    monkeypatch.setattr(au, "DEBUG_JWT_EXPIRE_SECONDS", 77)
+    set_import_attribute(monkeypatch, au, "IS_SPEED_MODE", False)
+    set_import_attribute(monkeypatch, au, "DEBUG_JWT_EXPIRE_SECONDS", 77)
 
     assert au.get_jwt_expiry_seconds("Bearer ignored-token") == 77
 
@@ -544,16 +546,16 @@ def test_get_jwt_expiry_seconds_rejects_non_positive_lifetime(monkeypatch):
         algorithm="HS256",
     )
 
-    monkeypatch.setattr(au, "IS_SPEED_MODE", False)
-    monkeypatch.setattr(au, "DEBUG_JWT_EXPIRE_SECONDS", 0)
-    monkeypatch.setattr(au, "SUPABASE_JWT_SECRET", au.MOCK_JWT_SECRET_KEY)
-    monkeypatch.setattr(au, "JWT_EXPIRY_SECONDS", 5432)
+    set_import_attribute(monkeypatch, au, "IS_SPEED_MODE", False)
+    set_import_attribute(monkeypatch, au, "DEBUG_JWT_EXPIRE_SECONDS", 0)
+    set_import_attribute(monkeypatch, au, "SUPABASE_JWT_SECRET", au.MOCK_JWT_SECRET_KEY)
+    set_import_attribute(monkeypatch, au, "JWT_EXPIRY_SECONDS", 5432)
 
     assert au.get_jwt_expiry_seconds(token) == 5432
 
 
 def test_decode_jwt_token_for_expiry_requires_secret(monkeypatch):
-    monkeypatch.setattr(au, "SUPABASE_JWT_SECRET", "")
+    set_import_attribute(monkeypatch, au, "SUPABASE_JWT_SECRET", "")
 
     with pytest.raises(UnauthorizedError, match="JWT verification is not configured"):
         au._decode_jwt_token_for_expiry("any-token")
@@ -561,9 +563,9 @@ def test_decode_jwt_token_for_expiry_requires_secret(monkeypatch):
 
 def test_calculate_expires_at_uses_verified_token_lifetime(monkeypatch):
     token = au.generate_test_jwt("user-1", expires_in=120)
-    monkeypatch.setattr(au, "IS_SPEED_MODE", False)
-    monkeypatch.setattr(au, "DEBUG_JWT_EXPIRE_SECONDS", 0)
-    monkeypatch.setattr(au, "SUPABASE_JWT_SECRET", au.MOCK_JWT_SECRET_KEY)
+    set_import_attribute(monkeypatch, au, "IS_SPEED_MODE", False)
+    set_import_attribute(monkeypatch, au, "DEBUG_JWT_EXPIRE_SECONDS", 0)
+    set_import_attribute(monkeypatch, au, "SUPABASE_JWT_SECRET", au.MOCK_JWT_SECRET_KEY)
 
     expires_at = au.calculate_expires_at(token)
 
@@ -571,15 +573,15 @@ def test_calculate_expires_at_uses_verified_token_lifetime(monkeypatch):
 
 
 def test_calculate_expires_at_speed_mode(monkeypatch):
-    monkeypatch.setattr(au, "IS_SPEED_MODE", True)
+    set_import_attribute(monkeypatch, au, "IS_SPEED_MODE", True)
     exp = au.calculate_expires_at("irrelevant")
     # far future (> 1 year)
     assert exp > int(time.time()) + 3600 * 24 * 365
 
 
 def test_extract_user_id_from_jwt_token(monkeypatch):
-    monkeypatch.setattr(au, "IS_SPEED_MODE", False)
-    monkeypatch.setattr(au, "SUPABASE_JWT_SECRET", au.MOCK_JWT_SECRET_KEY)
+    set_import_attribute(monkeypatch, au, "IS_SPEED_MODE", False)
+    set_import_attribute(monkeypatch, au, "SUPABASE_JWT_SECRET", au.MOCK_JWT_SECRET_KEY)
     token = au.generate_test_jwt("user-xyz", expires_in=3600)
     uid = au._extract_user_id_from_jwt_token("Bearer " + token)
     assert uid == "user-xyz"
@@ -587,8 +589,8 @@ def test_extract_user_id_from_jwt_token(monkeypatch):
 
 def test_extract_user_id_no_jwt_secret_raises(monkeypatch):
     """Test that missing SUPABASE_JWT_SECRET raises UnauthorizedError"""
-    monkeypatch.setattr(au, "IS_SPEED_MODE", False)
-    monkeypatch.setattr(au, "SUPABASE_JWT_SECRET", "")
+    set_import_attribute(monkeypatch, au, "IS_SPEED_MODE", False)
+    set_import_attribute(monkeypatch, au, "SUPABASE_JWT_SECRET", "")
     token = au.generate_test_jwt("user-xyz", expires_in=3600)
 
     with pytest.raises(UnauthorizedError, match="JWT verification is not configured"):
@@ -597,8 +599,8 @@ def test_extract_user_id_no_jwt_secret_raises(monkeypatch):
 
 def test_extract_user_id_invalid_signature_raises(monkeypatch):
     """Test that token signed with wrong secret raises UnauthorizedError"""
-    monkeypatch.setattr(au, "IS_SPEED_MODE", False)
-    monkeypatch.setattr(au, "SUPABASE_JWT_SECRET", "wrong-secret")
+    set_import_attribute(monkeypatch, au, "IS_SPEED_MODE", False)
+    set_import_attribute(monkeypatch, au, "SUPABASE_JWT_SECRET", "wrong-secret")
     token = au.generate_test_jwt("user-xyz", expires_in=3600)
 
     with pytest.raises(UnauthorizedError, match="Invalid or expired"):
@@ -607,8 +609,8 @@ def test_extract_user_id_invalid_signature_raises(monkeypatch):
 
 def test_extract_user_id_expired_token_raises(monkeypatch):
     """Test that expired token raises UnauthorizedError (ExpiredSignatureError path)"""
-    monkeypatch.setattr(au, "IS_SPEED_MODE", False)
-    monkeypatch.setattr(au, "SUPABASE_JWT_SECRET", au.MOCK_JWT_SECRET_KEY)
+    set_import_attribute(monkeypatch, au, "IS_SPEED_MODE", False)
+    set_import_attribute(monkeypatch, au, "SUPABASE_JWT_SECRET", au.MOCK_JWT_SECRET_KEY)
     # Token expired 1 hour ago
     token = au.generate_test_jwt("user-xyz", expires_in=-3600)
 
@@ -618,8 +620,8 @@ def test_extract_user_id_expired_token_raises(monkeypatch):
 
 def test_extract_user_id_malformed_token_raises(monkeypatch):
     """Test that malformed JWT raises UnauthorizedError (InvalidTokenError path)"""
-    monkeypatch.setattr(au, "IS_SPEED_MODE", False)
-    monkeypatch.setattr(au, "SUPABASE_JWT_SECRET", au.MOCK_JWT_SECRET_KEY)
+    set_import_attribute(monkeypatch, au, "IS_SPEED_MODE", False)
+    set_import_attribute(monkeypatch, au, "SUPABASE_JWT_SECRET", au.MOCK_JWT_SECRET_KEY)
 
     with pytest.raises(UnauthorizedError, match="Invalid or expired"):
         au._extract_user_id_from_jwt_token("Bearer invalid.jwt.here")
@@ -627,13 +629,13 @@ def test_extract_user_id_malformed_token_raises(monkeypatch):
 
 def test_extract_user_id_unauthorized_error_re_raised(monkeypatch):
     """Test that UnauthorizedError from inner code is re-raised without wrapping"""
-    monkeypatch.setattr(au, "SUPABASE_JWT_SECRET", "any-secret")
+    set_import_attribute(monkeypatch, au, "SUPABASE_JWT_SECRET", "any-secret")
 
     def mock_decode_raises_unauthorized(*args, **kwargs):
         raise UnauthorizedError("Inner auth error")
 
     # Patch only jwt.decode to preserve real exception classes for except clauses
-    monkeypatch.setattr(au.jwt, "decode", mock_decode_raises_unauthorized)
+    set_import_attribute(monkeypatch, au.jwt, "decode", mock_decode_raises_unauthorized)
 
     with pytest.raises(UnauthorizedError, match="Inner auth error"):
         au._extract_user_id_from_jwt_token("Bearer fake-token")
@@ -641,40 +643,40 @@ def test_extract_user_id_unauthorized_error_re_raised(monkeypatch):
 
 def test_extract_user_id_generic_exception_raises(monkeypatch):
     """Test that generic Exception during decode raises UnauthorizedError"""
-    monkeypatch.setattr(au, "SUPABASE_JWT_SECRET", au.MOCK_JWT_SECRET_KEY)
+    set_import_attribute(monkeypatch, au, "SUPABASE_JWT_SECRET", au.MOCK_JWT_SECRET_KEY)
 
     def mock_decode_raises_value_error(*args, **kwargs):
         raise ValueError("Unexpected decode error")
 
     # Patch only jwt.decode to preserve real exception classes for except clauses
-    monkeypatch.setattr(au.jwt, "decode", mock_decode_raises_value_error)
+    set_import_attribute(monkeypatch, au.jwt, "decode", mock_decode_raises_value_error)
 
     with pytest.raises(UnauthorizedError, match="Invalid or expired authentication token"):
         au._extract_user_id_from_jwt_token("Bearer any-token")
 
 
 def test_get_current_user_id_speed_mode(monkeypatch):
-    monkeypatch.setattr(au, "IS_SPEED_MODE", True)
+    set_import_attribute(monkeypatch, au, "IS_SPEED_MODE", True)
     uid, tid = au.get_current_user_id("Bearer anything")
     assert uid == au.DEFAULT_USER_ID and tid == au.DEFAULT_TENANT_ID
 
 
 def test_get_current_user_id_with_mapping(monkeypatch):
-    monkeypatch.setattr(au, "IS_SPEED_MODE", False)
-    monkeypatch.setattr(au, "SUPABASE_JWT_SECRET", au.MOCK_JWT_SECRET_KEY)
+    set_import_attribute(monkeypatch, au, "IS_SPEED_MODE", False)
+    set_import_attribute(monkeypatch, au, "SUPABASE_JWT_SECRET", au.MOCK_JWT_SECRET_KEY)
     token = au.generate_test_jwt("user-a", 1000)
     # user->tenant mapping
-    monkeypatch.setattr(au, "get_user_tenant_by_user_id",
+    set_import_attribute(monkeypatch, au, "get_user_tenant_by_user_id",
                         lambda u: {"tenant_id": "tenant-a"})
     uid, tid = au.get_current_user_id(token)
     assert uid == "user-a" and tid == "tenant-a"
 
 
 def test_get_current_user_id_rejects_revoked_cas_session(monkeypatch):
-    monkeypatch.setattr(au, "IS_SPEED_MODE", False)
-    monkeypatch.setattr(au, "SUPABASE_JWT_SECRET", au.MOCK_JWT_SECRET_KEY)
-    monkeypatch.setattr(au, "SUPABASE_URL", "http://localhost:54321")
-    monkeypatch.setattr(au, "get_user_tenant_by_user_id",
+    set_import_attribute(monkeypatch, au, "IS_SPEED_MODE", False)
+    set_import_attribute(monkeypatch, au, "SUPABASE_JWT_SECRET", au.MOCK_JWT_SECRET_KEY)
+    set_import_attribute(monkeypatch, au, "SUPABASE_URL", "http://localhost:54321")
+    set_import_attribute(monkeypatch, au, "get_user_tenant_by_user_id",
                         lambda u: {"tenant_id": "tenant-a"})
     sys.modules["database.cas_session_db"] = MagicMock(
         is_cas_session_active=MagicMock(return_value=False)
@@ -697,9 +699,9 @@ def test_get_user_language_from_cookie():
 def test_get_supabase_client_success(monkeypatch):
     """Test successful Supabase client creation"""
     mock_client = MagicMock()
-    monkeypatch.setattr(au, "create_client", lambda url, key, options=None: mock_client)
-    monkeypatch.setattr(au, "SUPABASE_URL", "https://test.supabase.co")
-    monkeypatch.setattr(au, "SUPABASE_KEY", "test_key")
+    set_import_attribute(monkeypatch, au, "create_client", lambda url, key, options=None: mock_client)
+    set_import_attribute(monkeypatch, au, "SUPABASE_URL", "https://test.supabase.co")
+    set_import_attribute(monkeypatch, au, "SUPABASE_KEY", "test_key")
 
     result = au.get_supabase_client()
     assert result == mock_client
@@ -710,9 +712,9 @@ def test_get_supabase_client_failure(monkeypatch):
     def mock_create_client(url, key, options=None):
         raise Exception("Connection failed")
 
-    monkeypatch.setattr(au, "create_client", mock_create_client)
-    monkeypatch.setattr(au, "SUPABASE_URL", "https://test.supabase.co")
-    monkeypatch.setattr(au, "SUPABASE_KEY", "test_key")
+    set_import_attribute(monkeypatch, au, "create_client", mock_create_client)
+    set_import_attribute(monkeypatch, au, "SUPABASE_URL", "https://test.supabase.co")
+    set_import_attribute(monkeypatch, au, "SUPABASE_KEY", "test_key")
 
     result = au.get_supabase_client()
     assert result is None
@@ -721,9 +723,9 @@ def test_get_supabase_client_failure(monkeypatch):
 def test_get_supabase_admin_client_success(monkeypatch):
     """Test successful Supabase admin client creation using SERVICE_ROLE_KEY"""
     mock_client = MagicMock()
-    monkeypatch.setattr(au, "create_client", lambda url, key, options=None: mock_client)
-    monkeypatch.setattr(au, "SUPABASE_URL", "https://test.supabase.co")
-    monkeypatch.setattr(au, "SERVICE_ROLE_KEY", "svc_key")
+    set_import_attribute(monkeypatch, au, "create_client", lambda url, key, options=None: mock_client)
+    set_import_attribute(monkeypatch, au, "SUPABASE_URL", "https://test.supabase.co")
+    set_import_attribute(monkeypatch, au, "SERVICE_ROLE_KEY", "svc_key")
 
     result = au.get_supabase_admin_client()
     assert result == mock_client
@@ -734,9 +736,9 @@ def test_get_supabase_admin_client_failure(monkeypatch):
     def mock_create_client(url, key, options=None):
         raise Exception("Connection failed")
 
-    monkeypatch.setattr(au, "create_client", mock_create_client)
-    monkeypatch.setattr(au, "SUPABASE_URL", "https://test.supabase.co")
-    monkeypatch.setattr(au, "SERVICE_ROLE_KEY", "svc_key")
+    set_import_attribute(monkeypatch, au, "create_client", mock_create_client)
+    set_import_attribute(monkeypatch, au, "SUPABASE_URL", "https://test.supabase.co")
+    set_import_attribute(monkeypatch, au, "SERVICE_ROLE_KEY", "svc_key")
 
     result = au.get_supabase_admin_client()
     assert result is None
@@ -747,14 +749,14 @@ def test_delete_supabase_user_returns_false_for_empty_id():
 
 
 def test_delete_supabase_user_returns_false_without_admin_client(monkeypatch):
-    monkeypatch.setattr(au, "get_supabase_admin_client", lambda: None)
+    set_import_attribute(monkeypatch, au, "get_supabase_admin_client", lambda: None)
 
     assert au.delete_supabase_user("user-1") is False
 
 
 def test_delete_supabase_user_deletes_user(monkeypatch):
     admin_client = MagicMock()
-    monkeypatch.setattr(au, "get_supabase_admin_client", lambda: admin_client)
+    set_import_attribute(monkeypatch, au, "get_supabase_admin_client", lambda: admin_client)
 
     assert au.delete_supabase_user("user-1") is True
     admin_client.auth.admin.delete_user.assert_called_once_with("user-1")
@@ -763,7 +765,7 @@ def test_delete_supabase_user_deletes_user(monkeypatch):
 def test_delete_supabase_user_returns_false_when_delete_fails(monkeypatch):
     admin_client = MagicMock()
     admin_client.auth.admin.delete_user.side_effect = RuntimeError("delete failed")
-    monkeypatch.setattr(au, "get_supabase_admin_client", lambda: admin_client)
+    set_import_attribute(monkeypatch, au, "get_supabase_admin_client", lambda: admin_client)
 
     assert au.delete_supabase_user("user-1") is False
 
@@ -773,7 +775,7 @@ def test_validate_aksk_authentication_unexpected_error(monkeypatch):
     def mock_verify_aksk_signature(*args):
         raise Exception("Unexpected error")
 
-    monkeypatch.setattr(au, "verify_aksk_signature",
+    set_import_attribute(monkeypatch, au, "verify_aksk_signature",
                         mock_verify_aksk_signature)
 
     with pytest.raises(UnauthorizedError, match="Authentication failed"):
@@ -786,14 +788,14 @@ def test_validate_aksk_authentication_unexpected_error(monkeypatch):
 
 def test_get_jwt_expiry_seconds_exception(monkeypatch):
     """Test JWT expiry seconds calculation with exception"""
-    monkeypatch.setattr(au, "IS_SPEED_MODE", False)
-    monkeypatch.setattr(au, "DEBUG_JWT_EXPIRE_SECONDS", 0)
+    set_import_attribute(monkeypatch, au, "IS_SPEED_MODE", False)
+    set_import_attribute(monkeypatch, au, "DEBUG_JWT_EXPIRE_SECONDS", 0)
 
     # Mock jwt.decode to raise exception
-    monkeypatch.setattr(au, "jwt", MagicMock())
+    set_import_attribute(monkeypatch, au, "jwt", MagicMock())
     au.jwt.decode.side_effect = Exception("JWT decode failed")
 
-    monkeypatch.setattr(au, "JWT_EXPIRY_SECONDS", 5432)
+    set_import_attribute(monkeypatch, au, "JWT_EXPIRY_SECONDS", 5432)
 
     result = au.get_jwt_expiry_seconds("invalid_token")
     assert result == 5432
@@ -801,12 +803,12 @@ def test_get_jwt_expiry_seconds_exception(monkeypatch):
 
 def test_get_current_user_id_no_tenant_mapping(monkeypatch):
     """Test get_current_user_id when no tenant mapping found"""
-    monkeypatch.setattr(au, "IS_SPEED_MODE", False)
-    monkeypatch.setattr(au, "SUPABASE_JWT_SECRET", au.MOCK_JWT_SECRET_KEY)
+    set_import_attribute(monkeypatch, au, "IS_SPEED_MODE", False)
+    set_import_attribute(monkeypatch, au, "SUPABASE_JWT_SECRET", au.MOCK_JWT_SECRET_KEY)
     token = au.generate_test_jwt("user-a", 1000)
 
     # Mock get_user_tenant_by_user_id to return None
-    monkeypatch.setattr(au, "get_user_tenant_by_user_id", lambda u: None)
+    set_import_attribute(monkeypatch, au, "get_user_tenant_by_user_id", lambda u: None)
 
     uid, tid = au.get_current_user_id(token)
     assert uid == "user-a" and tid == au.DEFAULT_TENANT_ID
@@ -814,10 +816,10 @@ def test_get_current_user_id_no_tenant_mapping(monkeypatch):
 
 def test_get_current_user_id_exception(monkeypatch):
     """Test get_current_user_id with exception"""
-    monkeypatch.setattr(au, "IS_SPEED_MODE", False)
+    set_import_attribute(monkeypatch, au, "IS_SPEED_MODE", False)
 
     # Mock _extract_user_id_from_jwt_token to raise exception
-    monkeypatch.setattr(au, "_extract_user_id_from_jwt_token",
+    set_import_attribute(monkeypatch, au, "_extract_user_id_from_jwt_token",
                         lambda token: (_ for _ in ()).throw(Exception("Token parsing failed")))
 
     with pytest.raises(UnauthorizedError, match="Invalid or expired authentication token"):
@@ -839,7 +841,7 @@ class TestValidateBearerToken:
             "user_id": "user123",
             "delete_flag": "N"
         }
-        monkeypatch.setattr(au, "get_token_by_access_key", lambda key: mock_token_info)
+        set_import_attribute(monkeypatch, au, "get_token_by_access_key", lambda key: mock_token_info)
 
         is_valid, token_info = au.validate_bearer_token("Bearer nexent-abc123")
 
@@ -855,7 +857,7 @@ class TestValidateBearerToken:
             "user_id": "user123",
             "delete_flag": "N"
         }
-        monkeypatch.setattr(au, "get_token_by_access_key", lambda key: mock_token_info)
+        set_import_attribute(monkeypatch, au, "get_token_by_access_key", lambda key: mock_token_info)
 
         is_valid, token_info = au.validate_bearer_token("nexent-abc123")
 
@@ -885,7 +887,7 @@ class TestValidateBearerToken:
 
     def test_validate_bearer_token_invalid_token(self, monkeypatch):
         """Test Bearer token validation with non-existent token."""
-        monkeypatch.setattr(au, "get_token_by_access_key", lambda key: None)
+        set_import_attribute(monkeypatch, au, "get_token_by_access_key", lambda key: None)
 
         is_valid, token_info = au.validate_bearer_token("Bearer nexent-nonexistent")
 
@@ -900,7 +902,7 @@ class TestValidateBearerToken:
             "user_id": "user123",
             "delete_flag": "Y"
         }
-        monkeypatch.setattr(au, "get_token_by_access_key", lambda key: mock_token_info)
+        set_import_attribute(monkeypatch, au, "get_token_by_access_key", lambda key: mock_token_info)
 
         is_valid, token_info = au.validate_bearer_token("Bearer nexent-deleted")
 
@@ -912,7 +914,7 @@ class TestValidateBearerToken:
         def mock_get_token_raises(key):
             raise Exception("Database error")
 
-        monkeypatch.setattr(au, "get_token_by_access_key", mock_get_token_raises)
+        set_import_attribute(monkeypatch, au, "get_token_by_access_key", mock_get_token_raises)
 
         is_valid, token_info = au.validate_bearer_token("Bearer nexent-error")
 
@@ -933,8 +935,8 @@ class TestGetUserAndTenantByAccessKey:
         }
         mock_user_tenant = {"tenant_id": "tenant456"}
 
-        monkeypatch.setattr(au, "get_token_by_access_key", lambda key: mock_token_info)
-        monkeypatch.setattr(au, "get_user_tenant_by_user_id", lambda uid: mock_user_tenant)
+        set_import_attribute(monkeypatch, au, "get_token_by_access_key", lambda key: mock_token_info)
+        set_import_attribute(monkeypatch, au, "get_user_tenant_by_user_id", lambda uid: mock_user_tenant)
 
         result = au.get_user_and_tenant_by_access_key("nexent-abc123")
 
@@ -951,8 +953,8 @@ class TestGetUserAndTenantByAccessKey:
             "delete_flag": "N"
         }
 
-        monkeypatch.setattr(au, "get_token_by_access_key", lambda key: mock_token_info)
-        monkeypatch.setattr(au, "get_user_tenant_by_user_id", lambda uid: None)
+        set_import_attribute(monkeypatch, au, "get_token_by_access_key", lambda key: mock_token_info)
+        set_import_attribute(monkeypatch, au, "get_user_tenant_by_user_id", lambda uid: None)
 
         with pytest.raises(au.UnauthorizedError, match="No active tenant relationship"):
             au.get_user_and_tenant_by_access_key("nexent-abc123")
@@ -967,8 +969,8 @@ class TestGetUserAndTenantByAccessKey:
         }
         mock_user_tenant = {"tenant_id": ""}
 
-        monkeypatch.setattr(au, "get_token_by_access_key", lambda key: mock_token_info)
-        monkeypatch.setattr(au, "get_user_tenant_by_user_id", lambda uid: mock_user_tenant)
+        set_import_attribute(monkeypatch, au, "get_token_by_access_key", lambda key: mock_token_info)
+        set_import_attribute(monkeypatch, au, "get_user_tenant_by_user_id", lambda uid: mock_user_tenant)
 
         with pytest.raises(au.UnauthorizedError, match="No active tenant relationship"):
             au.get_user_and_tenant_by_access_key("nexent-abc123")
@@ -985,7 +987,7 @@ class TestGetUserAndTenantByAccessKey:
 
     def test_get_user_and_tenant_token_not_found(self, monkeypatch):
         """Test when token is not found."""
-        monkeypatch.setattr(au, "get_token_by_access_key", lambda key: None)
+        set_import_attribute(monkeypatch, au, "get_token_by_access_key", lambda key: None)
 
         with pytest.raises(UnauthorizedError, match="Invalid or inactive access key"):
             au.get_user_and_tenant_by_access_key("nexent-nonexistent")
@@ -998,7 +1000,7 @@ class TestGetUserAndTenantByAccessKey:
             "user_id": "user123",
             "delete_flag": "Y"
         }
-        monkeypatch.setattr(au, "get_token_by_access_key", lambda key: mock_token_info)
+        set_import_attribute(monkeypatch, au, "get_token_by_access_key", lambda key: mock_token_info)
 
         with pytest.raises(UnauthorizedError, match="Invalid or inactive access key"):
             au.get_user_and_tenant_by_access_key("nexent-deleted")
@@ -1011,7 +1013,7 @@ class TestGetUserAndTenantByAccessKey:
             "user_id": None,
             "delete_flag": "N"
         }
-        monkeypatch.setattr(au, "get_token_by_access_key", lambda key: mock_token_info)
+        set_import_attribute(monkeypatch, au, "get_token_by_access_key", lambda key: mock_token_info)
 
         with pytest.raises(UnauthorizedError, match="No user associated with this access key"):
             au.get_user_and_tenant_by_access_key("nexent-abc123")
@@ -1041,9 +1043,9 @@ class TestGetCurrentUserContext:
     """Tests for authenticated tenant and role resolution."""
 
     def test_returns_normalized_role_and_tenant(self, monkeypatch):
-        monkeypatch.setattr(au, "IS_SPEED_MODE", False)
-        monkeypatch.setattr(au, "get_current_user_id", lambda authorization: ("user-1", "tenant-fallback"))
-        monkeypatch.setattr(
+        set_import_attribute(monkeypatch, au, "IS_SPEED_MODE", False)
+        set_import_attribute(monkeypatch, au, "get_current_user_id", lambda authorization: ("user-1", "tenant-fallback"))
+        set_import_attribute(monkeypatch,
             au,
             "get_user_tenant_by_user_id",
             lambda user_id: {"tenant_id": "tenant-1", "user_role": "admin"},
@@ -1052,23 +1054,23 @@ class TestGetCurrentUserContext:
         assert au.get_current_user_context("Bearer token") == ("user-1", "tenant-1", "ADMIN")
 
     def test_rejects_user_without_tenant_record(self, monkeypatch):
-        monkeypatch.setattr(au, "IS_SPEED_MODE", False)
-        monkeypatch.setattr(au, "get_current_user_id", lambda authorization: ("user-1", "tenant-fallback"))
-        monkeypatch.setattr(au, "get_user_tenant_by_user_id", lambda user_id: None)
+        set_import_attribute(monkeypatch, au, "IS_SPEED_MODE", False)
+        set_import_attribute(monkeypatch, au, "get_current_user_id", lambda authorization: ("user-1", "tenant-fallback"))
+        set_import_attribute(monkeypatch, au, "get_user_tenant_by_user_id", lambda user_id: None)
 
         with pytest.raises(UnauthorizedError, match="relationship not found"):
             au.get_current_user_context("Bearer token")
 
     def test_speed_mode_does_not_require_tenant_record(self, monkeypatch):
-        monkeypatch.setattr(au, "IS_SPEED_MODE", True)
-        monkeypatch.setattr(au, "get_current_user_id", lambda authorization: ("speed-user", "speed-tenant"))
+        set_import_attribute(monkeypatch, au, "IS_SPEED_MODE", True)
+        set_import_attribute(monkeypatch, au, "get_current_user_id", lambda authorization: ("speed-user", "speed-tenant"))
 
         assert au.get_current_user_context(None) == ("speed-user", "speed-tenant", "SPEED")
 
     def test_rejects_user_without_role(self, monkeypatch):
-        monkeypatch.setattr(au, "IS_SPEED_MODE", False)
-        monkeypatch.setattr(au, "get_current_user_id", lambda authorization: ("user-1", "tenant-1"))
-        monkeypatch.setattr(
+        set_import_attribute(monkeypatch, au, "IS_SPEED_MODE", False)
+        set_import_attribute(monkeypatch, au, "get_current_user_id", lambda authorization: ("user-1", "tenant-1"))
+        set_import_attribute(monkeypatch,
             au,
             "get_user_tenant_by_user_id",
             lambda user_id: {"tenant_id": "tenant-1", "user_role": ""},
@@ -1083,7 +1085,7 @@ def test_validate_timestamp_rejects_non_numeric_value():
 
 
 def test_verify_aksk_signature_returns_false_when_configuration_fails(monkeypatch):
-    monkeypatch.setattr(
+    set_import_attribute(monkeypatch,
         au,
         "get_aksk_config",
         lambda tenant_id: (_ for _ in ()).throw(RuntimeError("not configured")),
@@ -1101,12 +1103,12 @@ def test_extract_session_id_from_authorization_handles_valid_and_invalid_tokens(
 
 
 def test_get_current_user_id_rejects_blank_and_subjectless_tokens(monkeypatch):
-    monkeypatch.setattr(au, "IS_SPEED_MODE", False)
+    set_import_attribute(monkeypatch, au, "IS_SPEED_MODE", False)
 
     with pytest.raises(UnauthorizedError, match="No authorization header provided"):
         au.get_current_user_id("   ")
 
-    monkeypatch.setattr(au, "_decode_jwt_token", lambda authorization: {})
+    set_import_attribute(monkeypatch, au, "_decode_jwt_token", lambda authorization: {})
     with pytest.raises(UnauthorizedError, match="Invalid or expired authentication token"):
         au.get_current_user_id("Bearer token")
 
@@ -1121,8 +1123,8 @@ def test_get_user_language_falls_back_when_cookies_are_malformed():
 
 
 def test_get_current_user_info_combines_authentication_and_language(monkeypatch):
-    monkeypatch.setattr(au, "get_current_user_id", lambda authorization: ("user-1", "tenant-1"))
-    monkeypatch.setattr(au, "get_user_language", lambda request: "en")
+    set_import_attribute(monkeypatch, au, "get_current_user_id", lambda authorization: ("user-1", "tenant-1"))
+    set_import_attribute(monkeypatch, au, "get_user_language", lambda request: "en")
 
     assert au.get_current_user_info("Bearer token", object()) == ("user-1", "tenant-1", "en")
 
@@ -1149,7 +1151,7 @@ def test_validate_aksk_authentication_unexpected_error(monkeypatch):
     def boom(*args, **kwargs):
         raise RuntimeError("boom")
 
-    monkeypatch.setattr(au, "validate_timestamp", boom)
+    set_import_attribute(monkeypatch, au, "validate_timestamp", boom)
     with pytest.raises(TokenExpiredError, match="Authentication failed"):
         au.validate_aksk_authentication({
             "X-Access-Key": "ak",

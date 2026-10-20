@@ -1,3 +1,4 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 import logging
 from http import HTTPStatus
 from typing import Annotated, Any, Dict, Optional
@@ -25,7 +26,7 @@ from consts.exceptions import (
     WorkbenchError,
 )
 from database.conversation_db import get_conversation_list_page
-from services.conversation_management_service import (
+from management.services.conversation.service import (
     create_new_conversation,
     delete_conversation_service,
     delete_conversations_batch_service,
@@ -37,7 +38,7 @@ from services.conversation_management_service import (
     update_conversation_workbench_config_service,
     update_message_opinion_service, get_message_id_by_index_impl,
 )
-from utils.auth_utils import get_current_user_id, get_current_user_info
+from management.services.permission.identity.authentication_helpers import get_current_user_id, get_current_user_info
 
 router = APIRouter(prefix="/conversation")
 

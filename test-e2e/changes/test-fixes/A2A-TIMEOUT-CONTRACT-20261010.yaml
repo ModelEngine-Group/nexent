@@ -9,7 +9,7 @@ change:
     retaining product behavior and changing the test contract. Assert HTTP 500
     and message "Failed to chat with external agent", as currently returned by
     the generic exception handler in backend/apps/a2a_client_app.py when
-    TimeoutError escapes backend/services/a2a_client_service.py. This supersedes
+    TimeoutError escapes backend/management/services/agent/a2a/catalog.py. This supersedes
     the CTR-043 status expectation in A2A-PROTOCOL-TIMEOUT-20261009, not the
     expectations of other Cases. HTTP 504 remains a possible future product
     contract change, not an implemented requirement. Preserve three actual

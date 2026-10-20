@@ -13,8 +13,8 @@ from consts.exceptions import ValidationError as DomainValidationError
 from consts.model import ToolTagAssignmentBatchRequest
 from database.tag_management_db import TagManagementDB
 from database.tool_db import query_tenant_tools_by_ids
-from services.tag_management_service import TagManagementService
-from services.tag_resource_adapters import AuthenticatedCaller
+from management.services.tag.library import TagManagementService
+from management.services.tag.resources import AuthenticatedCaller
 
 
 @pytest.mark.parametrize("ids", [[], [0], [-1], [2**63], list(range(1, 502))])
@@ -49,7 +49,7 @@ def test_http_batch_route_validates_body_and_accepts_frontend_string_ids(monkeyp
 def test_batch_service_uses_two_bulk_calls_and_omits_invisible_ids(monkeypatch):
     tools = MagicMock(return_value=[{"tool_id": 2}, {"tool_id": 1}])
     assignments = MagicMock(return_value={"2": [{"value_id": 7}], "1": []})
-    monkeypatch.setattr("services.tag_management_service.query_tenant_tools_by_ids", tools)
+    monkeypatch.setattr("management.services.tag.library.query_tenant_tools_by_ids", tools)
     monkeypatch.setattr(TagManagementDB, "list_resource_assignments_batch", assignments)
     monkeypatch.setattr(
         TagManagementDB, "list_resource_assignments",
@@ -66,7 +66,7 @@ def test_batch_service_uses_two_bulk_calls_and_omits_invisible_ids(monkeypatch):
 
 def test_empty_batch_avoids_database(monkeypatch):
     tools = MagicMock()
-    monkeypatch.setattr("services.tag_management_service.query_tenant_tools_by_ids", tools)
+    monkeypatch.setattr("management.services.tag.library.query_tenant_tools_by_ids", tools)
     assert TagManagementService.get_tool_assignments_batch(AuthenticatedCaller("u", "t"), []) == []
     tools.assert_not_called()
 
