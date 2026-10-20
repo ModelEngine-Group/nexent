@@ -11,10 +11,18 @@ import {
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import KnowledgeBaseList from "../../app/[locale]/knowledges/components/knowledge/KnowledgeBaseList";
+const menuPermissions = vi.hoisted(() => new Set(["kb:update", "kb:delete"]));
+vi.mock("@/hooks/permission/usePermission", () => ({
+  usePermission: () => ({
+    isReady: true,
+    can: (permission: string) => menuPermissions.has(permission),
+  }),
+}));
 import knowledgeBaseService from "@/services/knowledgeBaseService";
 import { tagManagementApi } from "@/services/tagManagementService";
 import type { KnowledgeBase } from "@/types/knowledgeBase";
 
+vi.mock("../../app/[locale]/i18n", () => ({ default: { language: "zh" } }));
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({
     t: (key: string, args?: { count?: number }) =>
@@ -62,11 +70,11 @@ vi.mock("@/components/tag/TagDefinitionManagementModal", () => ({
   default: () => null,
 }));
 vi.mock(
-  "@/app/[locale]/knowledges/components/knowledge/KnowledgeBaseEditModal",
+  "../../app/[locale]/knowledges/components/knowledge/KnowledgeBaseEditModal",
   () => ({ KnowledgeBaseEditModal: () => null })
 );
 vi.mock(
-  "@/app/[locale]/knowledges/components/knowledge/PersonalKnowledgeBaseCapacityBar",
+  "../../app/[locale]/knowledges/components/knowledge/PersonalKnowledgeBaseCapacityBar",
   () => ({ default: () => null })
 );
 
@@ -96,7 +104,51 @@ const baseProps = () => ({
 });
 
 describe("local knowledge catalog", () => {
-  beforeEach(() => vi.clearAllMocks());
+  it("removes toolbar tag management while retaining synchronization and resource actions", () => {
+    render(<KnowledgeBaseList {...baseProps()} />);
+    expect(
+      screen.getByRole("button", { name: /knowledgeBase.button.sync/ })
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", {
+        name: "knowledgeBase.button.tagManagement",
+      })
+    ).not.toBeInTheDocument();
+    expect(
+      screen.getAllByRole("button", {
+        name: "skillRepository.common.moreActions",
+      })
+    ).toHaveLength(2);
+  });
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    menuPermissions.clear();
+    menuPermissions.add("kb:update");
+    menuPermissions.add("kb:delete");
+  });
+
+  it("hides menu actions without the corresponding permission", async () => {
+    menuPermissions.delete("kb:update");
+    const props = { ...baseProps(), knowledgeBases: [knowledge(1)] };
+    render(<KnowledgeBaseList {...props} />);
+    fireEvent.click(
+      screen.getByRole("button", { name: "skillRepository.common.moreActions" })
+    );
+    await waitFor(() =>
+      expect(
+        screen.getByRole("menuitem", { name: "common.delete" })
+      ).toBeVisible()
+    );
+    expect(
+      screen.queryByRole("menuitem", { name: "common.edit" })
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("menuitem", {
+        name: "knowledgeBase.action.assignTags",
+      })
+    ).not.toBeInTheDocument();
+  });
 
   it("has one create entry and independent card/document/menu interactions", async () => {
     const props = baseProps();
@@ -123,12 +175,11 @@ describe("local knowledge catalog", () => {
         name: "skillRepository.common.moreActions",
       })
     );
-    fireEvent.click(
-      await screen.findByRole("button", { name: "common.delete" })
-    );
-    expect(
-      screen.getByRole("button", { name: "common.delete" }).querySelector("svg")
-    ).toBeNull();
+    const deleteItem = await screen.findByRole("menuitem", {
+      name: "common.delete",
+    });
+    expect(deleteItem.querySelector("svg")).toBeNull();
+    fireEvent.click(deleteItem);
     expect(within(card).getAllByText("|")).toHaveLength(2);
     expect(within(card).getByText("model").className).not.toContain("rounded");
     expect(props.onDelete).toHaveBeenCalledWith("1");
@@ -189,13 +240,13 @@ describe("local knowledge catalog", () => {
       screen.getByRole("button", { name: "skillRepository.common.moreActions" })
     );
     expect(
-      screen.queryByRole("button", { name: "common.delete" })
+      screen.queryByRole("menuitem", { name: "common.delete" })
     ).not.toBeInTheDocument();
     expect(
-      screen.queryByRole("button", { name: "common.edit" })
+      screen.queryByRole("menuitem", { name: "common.edit" })
     ).not.toBeInTheDocument();
     fireEvent.click(
-      await screen.findByRole("button", {
+      await screen.findByRole("menuitem", {
         name: "knowledgeBase.action.assignTags",
       })
     );

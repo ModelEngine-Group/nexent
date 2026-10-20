@@ -371,7 +371,6 @@ export function KnowledgeBaseConfigActions() {
           state.onKnowledgeBaseConfirm(knowledgeBaseList);
           setSelectorOpen(false);
         }}
-        enableTagManagement={!state.isReadOnly}
         selectedIds={state.selectedIds}
         maxSelect={state.profile.maxSelect}
         isAidpSearch={state.profile.selectorType === "aidp_search"}
@@ -579,7 +578,6 @@ export default function KnowledgeBaseConfig({
                 state.onKnowledgeBaseConfirm(knowledgeBaseList);
                 setSelectorOpen(false);
               }}
-              enableTagManagement={!state.isReadOnly}
               selectedIds={state.selectedIds}
               maxSelect={state.profile.maxSelect}
               isAidpSearch={state.profile.selectorType === "aidp_search"}

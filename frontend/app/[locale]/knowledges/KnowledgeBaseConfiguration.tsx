@@ -1257,7 +1257,7 @@ function DataConfig({ isActive }: DataConfigProps) {
                 }
                 width={640}
                 centered
-                maskClosable={false}
+                mask={{ closable: false }}
                 destroyOnHidden
                 onCancel={handleCloseCreateModal}
                 styles={{
