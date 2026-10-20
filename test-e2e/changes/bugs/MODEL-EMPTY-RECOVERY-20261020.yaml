@@ -1,0 +1,61 @@
+schema_version: '1.0'
+change:
+  change_id: MODEL-EMPTY-RECOVERY-20261020
+  change_type: bugfix
+  bug_id: MODEL-EMPTY-RECOVERY-20261020
+  title: Explicit gateway reasoning wire and bounded empty-response recovery
+  description: Restore verified gateway toggle semantics, recover one empty stop response
+    and correlate failures with content-free bounded diagnostics.
+  observed_behavior: Generic gateway capability omits its toggle transport and thinking-off
+    remains enabled upstream; legacy CodeAgent stops after the first reasoning-only
+    stop with no visible answer.
+  expected_behavior: Explicit exact endpoint/model profiles select the existing thinking-object
+    adapter; one eligible empty stop may retry with unchanged controls, and privacy-safe
+    failure diagnostics correlate attempts.
+  escaped_stage: D3
+  coverage_gap:
+    type: missing_boundary
+    description: Existing SDK UT covers retry-disabled and shared-budget empty responses
+      but not a one-retry cap, gateway override matching or structural redaction.
+      Existing CMSR-D3-001 proves exception/repair streaming, not this empty-stop
+      HTTP boundary.
+  feature_contract_changed: true
+  traditional_ut:
+    decision: strengthen
+    reason: Add deterministic unit regressions for protocol profile selection, bounded
+      retry guards, immutable requests and content-free diagnostics; retain existing
+      snapshot and sampling suites.
+    behaviors:
+    - Exact endpoint/model opt-in applies only the declared toggle format; malformed/ambiguous
+      profiles do not affect other models.
+    - One empty stop may recover; repeated empty, tool calls, length, filtering, cancellation
+      and total-budget exhaustion do not exceed the declared recovery bound.
+    - Retries retain original controls and diagnostics never disclose prompts, generated
+      content, credentials, tool arguments or unapproved headers.
+    test_selectors:
+    - test/backend/configs/test_model_catalog_loader.py
+    - test/sdk/core/models/test_openai_llm.py
+    - test/sdk/core/models/test_response_diagnostics.py
+    - test/sdk/core/agents/test_core_agent.py
+    - test/sdk/core/agents/test_nexent_agent.py
+    - test/backend/agents/test_create_agent_info.py
+    - test/backend/agents/test_create_agent_info_workbench_coverage.py
+    - test/sdk/core/agents/test_nexent_agent_context_runtime_factory.py
+  affected_features:
+    existing:
+    - CHAT-MODEL-CONTROLS
+    added: []
+    modified:
+    - CMSR-005
+    retired: []
+  affected_cases:
+    existing: []
+    added:
+    - MODEL-RECOVERY-D3-001
+    modified: []
+    retired: []
+  notes: Direct updates of nexent-doc/nexent/agent-workbench/changes/chat-unified-model-controls/design.md
+    and task.md plus chat-message-model-silent-retry baseline. New D3 proves real
+    OpenAI SDK/HTTP SSE integration against a controlled loopback provider, not a
+    UT wrapper. No new D1 duplicates unit assertions. Real-provider smoke is recorded
+    separately; old failed upstream generation is not claimed reproducible.

@@ -1,3 +1,6 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
+from copy import deepcopy
 import sys
 import types
 import importlib.util
@@ -1325,14 +1328,11 @@ def test_call_with_reasoning_content_only(openai_model_instance):
 
 @pytest.mark.parametrize("content_preview_enabled", [False, True])
 def test_call_rejects_reasoning_only_response_and_records_diagnostics(
-    openai_model_instance, caplog, monkeypatch, content_preview_enabled
+    openai_model_instance, caplog, content_preview_enabled
 ):
     """A reasoning stream that exhausts its budget must not become an empty success."""
     messages = [{"role": "user", "content": [{"text": "Hello"}]}]
-    if content_preview_enabled:
-        monkeypatch.setenv("NEXENT_PROTOCOL_DIAGNOSTIC_CONTENT", "1")
-    else:
-        monkeypatch.delenv("NEXENT_PROTOCOL_DIAGNOSTIC_CONTENT", raising=False)
+    openai_model_instance.diagnostic_chunks_enabled = content_preview_enabled
 
     reasoning_chunk = MagicMock()
     reasoning_chunk.choices = [MagicMock()]
@@ -1375,10 +1375,9 @@ def test_call_rejects_reasoning_only_response_and_records_diagnostics(
     assert "event=empty_model_response" in caplog.text
     assert f"attempt_id={openai_model_instance.last_attempt_id}" in caplog.text
     assert "output_tokens=20" in caplog.text
-    if content_preview_enabled:
-        assert 'reasoning_preview="Internal reasoning"' in caplog.text
-    else:
-        assert "Internal reasoning" not in caplog.text
+    assert "Internal reasoning" not in caplog.text
+    assert ('"chunks"' in caplog.text) is content_preview_enabled
+    assert "request_fingerprint" in caplog.text
 
 
 def test_call_with_reasoning_content_and_content_together(openai_model_instance):
@@ -2599,8 +2598,9 @@ def test_cmsr_002_retry_after_controls_retry_wait(openai_model_instance):
     wait_event.wait.assert_called_once_with(3.5)
 
 
-def test_reasoning_only_stop_response_exhausts_shared_attempt_budget(openai_model_instance):
-    """A reasoning-only stop response uses the configured shared attempt budget."""
+@pytest.mark.parametrize("max_attempts", [1, 3, 5])
+def test_reasoning_only_stop_response_has_one_retry_within_shared_budget(openai_model_instance, max_attempts):
+    """An empty stop gets at most one retry within the configured total budget."""
     calls = {"n": 0}
 
     def fake_create(stream=True, **kwargs):
@@ -2611,14 +2611,27 @@ def test_reasoning_only_stop_response_exhausts_shared_attempt_budget(openai_mode
         chunk.usage = MagicMock(prompt_tokens=1, completion_tokens=1)
         return [chunk]
 
-    openai_model_instance.retry_config = _retry_model_config()
+    openai_model_instance.retry_config = _retry_model_config(max_attempts=max_attempts)
     openai_model_instance.client.chat.completions.create.side_effect = fake_create
 
     with pytest.raises(openai_llm_module.ModelInvocationTerminalError) as exc_info:
         openai_model_instance.__call__([{"role": "user", "content": "hello"}])
 
     assert exc_info.value.error_code is openai_llm_module.ModelErrorCode.EMPTY_RESPONSE_EXHAUSTED
-    assert calls["n"] == openai_model_instance.retry_config.max_attempts
+    assert calls["n"] == min(2, max_attempts)
+
+
+@pytest.mark.parametrize("provider_id", ["OpenAI-API-Compatible", "deepseek", "openai"])
+def test_explicit_toggle_wire_overrides_models_dev_without_changing_effort(openai_model_instance, provider_id):
+    openai_model_instance.reasoning_capability = {
+        "source": "models_dev", "provider_id": provider_id,
+        "wire_format": "reasoning_effort", "toggle_wire_format": "thinking_object",
+    }
+    profile = openai_model_instance._reasoning_wire_profile()
+    assert profile == {"effort": "reasoning_effort", "budget": None, "toggle": "thinking_object"}
+    assert openai_model_instance._translate_thinking_flag({"enable_thinking": False}) == {
+        "thinking": {"type": "disabled"},
+    }
 
 
 def test_reasoning_only_stop_response_recovers_on_retry(openai_model_instance):
@@ -3384,3 +3397,24 @@ def test_reasoning_control_handles_missing_wire_adapters(openai_model_instance):
         completion_kwargs = {}
         openai_model_instance._apply_reasoning_control(completion_kwargs)
     assert completion_kwargs == {}
+
+
+@pytest.mark.parametrize("finish_reason,tool_calls,expected_calls", [("stop", None, 2), ("length", None, 1), ("content_filter", None, 1), (None, None, 1), ("stop", [{"secret": "DO_NOT_LOG"}], 1)])
+def test_empty_recovery_has_one_retry_and_terminal_guards(openai_model_instance, finish_reason, tool_calls, expected_calls):
+    seen = []
+    def create(**kwargs):
+        seen.append(deepcopy(kwargs))
+        chunk = _make_content_chunk("")
+        chunk.choices[0].delta.reasoning = None
+        chunk.choices[0].delta.reasoning_content = "private reasoning"
+        chunk.choices[0].delta.tool_calls = tool_calls
+        chunk.choices[0].finish_reason = finish_reason
+        return [chunk]
+    openai_model_instance.retry_config = _retry_model_config(max_attempts=5)
+    openai_model_instance.client.chat.completions.create.side_effect = create
+    with pytest.raises(openai_llm_module.ModelInvocationTerminalError):
+        openai_model_instance([{"role": "user", "content": "private input"}])
+    assert len(seen) == expected_calls
+    assert all(body == seen[0] for body in seen)
+    assert openai_model_instance.observer.commit_model_attempt.call_count == 0
+    assert openai_model_instance.observer.rollback_model_attempt.call_count == expected_calls
