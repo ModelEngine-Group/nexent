@@ -11,7 +11,7 @@ on:
   workflow_dispatch:
     inputs:
       runner_label_json:
-        description: 'Optional JSON runner labels; leave blank for automatic self-hosted selection with hosted fallback'
+        description: 'JSON runner labels; blank uses self-hosted, or use ["ubuntu-24.04"] for GitHub-hosted'
         required: false
         default: ''
       pytest_workers:
@@ -52,79 +52,8 @@ on:
       - '.github/workflows/**'
 
 jobs:
-  select-runner:
-    runs-on: ubuntu-24.04
-    timeout-minutes: 5
-    outputs:
-      labels: ${{ steps.select.outputs.labels }}
-    steps:
-      - name: Select available UT runner
-        id: select
-        uses: actions/github-script@v7
-        env:
-          RUNNER_STATUS_TOKEN: ${{ secrets.RUNNER_STATUS_TOKEN }}
-          RUNNER_LABEL_JSON: ${{ inputs.runner_label_json }}
-        with:
-          github-token: ${{ secrets.RUNNER_STATUS_TOKEN || github.token }}
-          script: |
-            const hosted = ['ubuntu-24.04'];
-            const selfHosted = ['self-hosted', 'linux', 'x64'];
-            const emit = (labels) => {
-              core.info(`Selected runner labels: ${JSON.stringify(labels)}`);
-              core.setOutput('labels', JSON.stringify(labels));
-            };
-
-            // Fork PRs must not execute untrusted code on persistent runners.
-            const pr = context.payload.pull_request;
-            if (pr && pr.head.repo.full_name !== `${context.repo.owner}/${context.repo.repo}`) {
-              core.info('Fork PR: using a GitHub-hosted runner.');
-              emit(hosted);
-              return;
-            }
-
-            const override = process.env.RUNNER_LABEL_JSON?.trim();
-            if (context.eventName === 'workflow_dispatch' && override) {
-              let labels;
-              try {
-                labels = JSON.parse(override);
-              } catch {
-                throw new Error('runner_label_json must be a JSON array of nonempty strings.');
-              }
-              if (!Array.isArray(labels) || labels.length === 0 ||
-                  labels.some(label => typeof label !== 'string' || !label.trim())) {
-                throw new Error('runner_label_json must be a JSON array of nonempty strings.');
-              }
-              emit(labels.map(label => label.trim()));
-              return;
-            }
-
-            if (!process.env.RUNNER_STATUS_TOKEN) {
-              core.info('RUNNER_STATUS_TOKEN is unavailable; using a GitHub-hosted runner.');
-              emit(hosted);
-              return;
-            }
-
-            try {
-              const runners = await github.paginate(
-                github.rest.actions.listSelfHostedRunnersForRepo,
-                { ...context.repo, per_page: 100 }
-              );
-              const available = runners.some(runner =>
-                runner.status === 'online' && runner.busy === false &&
-                selfHosted.every(label => runner.labels.some(
-                  candidate => candidate.name.toLowerCase() === label
-                ))
-              );
-              emit(available ? selfHosted : hosted);
-            } catch (error) {
-              // Do not log API response bodies, which may contain sensitive data.
-              core.warning(`Runner lookup failed (status ${error.status || 'unknown'}); using a GitHub-hosted runner.`);
-              emit(hosted);
-            }
-
   test:
-    needs: select-runner
-    runs-on: ${{ fromJson(needs.select-runner.outputs.labels) }}
+    runs-on: ${{ fromJson(inputs.runner_label_json || '["self-hosted", "linux", "x64"]') }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
