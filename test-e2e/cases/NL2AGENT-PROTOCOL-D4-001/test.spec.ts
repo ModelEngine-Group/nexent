@@ -322,6 +322,28 @@ journey("NL2AGENT-PROTOCOL-D4-001", async (context) => {
           });
           expect(unclear.ok()).toBe(true);
           const clarification = await unclear.text();
+          const clarificationEvents = clarification
+            .split("\n")
+            .filter((line) => line.startsWith("data:"))
+            .map((line) => {
+              const value = JSON.parse(line.slice(5).trim());
+              return typeof value === "string" ? JSON.parse(value) : value;
+            });
+          appendFileSync(
+            join(contract.caseDir, "ambiguity-runs.jsonl"),
+            JSON.stringify({
+              agentId: id,
+              eventTypes: [
+                ...new Set(clarificationEvents.map((event) => event.type)),
+              ],
+              policyToolCalls: clarificationEvents
+                .filter((event) => event.type === "tool")
+                .map((event) => ({
+                  name: event.tool_name,
+                  arguments: event.tool_arguments,
+                })),
+            }) + "\n",
+          );
           expect(clarification).toContain("requirement_clarification");
           expect(clarification).not.toContain("agent_draft_fields_saved");
           expect((await read(id)).enable_protocol_repair_retry).toBe(true);
