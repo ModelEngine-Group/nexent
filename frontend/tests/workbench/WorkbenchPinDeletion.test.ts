@@ -17,6 +17,57 @@ const history = (id: number) => ({
   pinned_at: "2026-10-19T00:00:00Z",
 });
 
+it("single deletion prunes cached pins before the caller reloads history", async () => {
+  const client = new QueryClient();
+  const queryKey = workbenchPinsQueryKey("single-delete");
+  client.setQueryData(queryKey, { items: [history(42), history(43)] });
+  const remove = vi
+    .spyOn(conversationService, "delete")
+    .mockResolvedValue(true);
+  vi.spyOn(conversationService, "getList").mockResolvedValue({
+    items: [],
+    metadata: { total: 0, today: 0, last_7_days: 0, older: 0 },
+  });
+  const adapter = createConversationThreadListAdapter(
+    "workbench",
+    "single-delete",
+    () =>
+      client.ensureQueryData({
+        queryKey,
+        queryFn: () => conversationService.getWorkbenchPins(),
+      }),
+    (id) => removeDeletedWorkbenchPins(client, [id])
+  );
+  await adapter.delete("42");
+  expect(remove).toHaveBeenCalledWith(42);
+  expect((await adapter.list({})).threads.map((item) => item.remoteId)).toEqual(
+    ["43"]
+  );
+  client.clear();
+});
+
+it("single deletion failure preserves the confirmed pin cache", async () => {
+  const client = new QueryClient();
+  const queryKey = workbenchPinsQueryKey("failed-single-delete");
+  client.setQueryData(queryKey, { items: [history(42)] });
+  vi.spyOn(conversationService, "delete").mockRejectedValue(
+    new Error("Delete failed")
+  );
+  const onDeleted = vi.fn((id: number) =>
+    removeDeletedWorkbenchPins(client, [id])
+  );
+  const adapter = createConversationThreadListAdapter(
+    "workbench",
+    "failed-single-delete",
+    undefined,
+    onDeleted
+  );
+  await expect(adapter.delete("42")).rejects.toThrow("Delete failed");
+  expect(onDeleted).not.toHaveBeenCalled();
+  expect(client.getQueryData(queryKey)).toEqual({ items: [history(42)] });
+  client.clear();
+});
+
 it("does not rehydrate a deleted pin when history reload uses the shared cache", async () => {
   const client = new QueryClient();
   const queryKey = workbenchPinsQueryKey("owner");

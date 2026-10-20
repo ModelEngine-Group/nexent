@@ -34,7 +34,7 @@ export function AgentCreationGuide({
   const [open, setOpen] = useState(false);
   const [current, setCurrent] = useState(0);
   // The local anchor is available before the parent's workspace ref is attached.
-  const anchorRef = useRef<HTMLSpanElement>(null);
+  const anchorRef = useRef<HTMLSpanElement | null>(null);
   const findTarget = useCallback(
     (name: (typeof TARGETS)[number]) =>
       (
