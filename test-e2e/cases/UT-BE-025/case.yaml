@@ -26,7 +26,7 @@ case:
     action: 在本地工作区准备固定 fixture/配置，测试代码不得读取生产凭据；NEXENT_TEST_HOME 指向仓库外目录。
     expected: build_context 正常路径与代码契约一致，tenant/user/agent/external 分桶正确，无未处理异常。
   - order: 2
-    action: 导入 backend/services/memory_context_service.py 的 MemoryContextService，注入 fake retrieval_service，pipeline_enabled=True。
+    action: 导入 backend/management/services/memory/context.py 的 MemoryContextService，注入 fake retrieval_service，pipeline_enabled=True。
     expected: 未显式传 external_results 且 hook 存在时，hook 被调用一次，外部结果并入 Phase4 管线 final 结果。
   - order: 3
     action: 正常路径：构造 MemorySearchResult 列表调用 build_context，断言返回 MemorySearchContext 且 tenant/user/agent/external 分桶正确。

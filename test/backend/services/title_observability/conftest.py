@@ -1,3 +1,4 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """Real tracing and worker contexts with isolated external dependencies."""
 
 import asyncio
@@ -35,7 +36,7 @@ def service(mocker):
     mocker.patch("nexent.storage.storage_client_factory.create_storage_client_from_config")
     mocker.patch("nexent.storage.minio_config.MinIOStorageConfig.validate")
     mocker.patch("elasticsearch.Elasticsearch")
-    return importlib.import_module("services.conversation_management_service")
+    return importlib.import_module("management.services.conversation.service")
 
 
 @pytest.fixture

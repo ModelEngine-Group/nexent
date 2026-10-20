@@ -1,9 +1,10 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 import types
 from unittest.mock import MagicMock, patch
 
 import pytest
 
-from backend.utils import knowledge_telemetry
+from infrastructure.observability import knowledge as knowledge_telemetry
 
 
 def test_span_kind_distinguishes_storage_tools_from_chains():

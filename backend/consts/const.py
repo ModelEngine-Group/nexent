@@ -5,11 +5,12 @@ from pathlib import Path
 from dotenv import load_dotenv
 
 try:
-    from backend.utils.config_validation import parse_positive_float, parse_positive_int
-except ModuleNotFoundError:
-    # The production service runs with ``backend`` as the working directory,
-    # where backend-local modules are imported from the top-level package.
-    from utils.config_validation import parse_positive_float, parse_positive_int
+    from infrastructure.config_validation import parse_positive_float, parse_positive_int
+except ModuleNotFoundError as exc:
+    if exc.name != "infrastructure":
+        raise
+    # Repository-root callers import this module through the backend namespace.
+    from backend.infrastructure.config_validation import parse_positive_float, parse_positive_int
 
 # Load environment variables
 # Explicitly sourced deployment variables take precedence over a nearby

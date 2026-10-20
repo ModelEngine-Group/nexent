@@ -49,7 +49,7 @@ from tool_collection.mcp.nl2agent_mcp_tools import (
     ResourceCandidate,
     ResourceRequirement,
 )
-from utils.http_client_utils import create_httpx_client
+from infrastructure.http.client import create_httpx_client
 
 
 def _context_budget_snapshot() -> ContextBudgetSnapshot:
@@ -157,7 +157,7 @@ def test_update_agent_draft_changes_only_explicit_fields_and_allows_empty_list(
     mocker,
 ):
     mocker.patch(
-        "services.agent_draft_permission_service.query_agent_records_for_nl2agent",
+        "management.services.agent.authorization.query_agent_records_for_nl2agent",
         return_value=[
             {
                 "agent_id": 22,
@@ -169,7 +169,7 @@ def test_update_agent_draft_changes_only_explicit_fields_and_allows_empty_list(
         ],
     )
     mocker.patch(
-        "services.agent_draft_permission_service.get_user_role_by_tenant",
+        "management.services.agent.authorization.get_user_role_by_tenant",
         return_value="MEMBER",
     )
     update_fields = mocker.patch(
@@ -198,7 +198,7 @@ def test_update_agent_draft_changes_only_explicit_fields_and_allows_empty_list(
 
 def test_update_agent_draft_initializes_generated_name_once(mocker):
     mocker.patch(
-        "services.agent_draft_permission_service.query_agent_records_for_nl2agent",
+        "management.services.agent.authorization.query_agent_records_for_nl2agent",
         return_value=[
             {
                 "agent_id": 22,
@@ -212,7 +212,7 @@ def test_update_agent_draft_initializes_generated_name_once(mocker):
         ],
     )
     mocker.patch(
-        "services.agent_draft_permission_service.get_user_role_by_tenant",
+        "management.services.agent.authorization.get_user_role_by_tenant",
         return_value="MEMBER",
     )
     mocker.patch(
@@ -241,7 +241,7 @@ def test_update_agent_draft_initializes_generated_name_once(mocker):
 
 def test_workbench_placeholder_can_be_named_from_user_requirements_once(mocker):
     mocker.patch(
-        "services.agent_draft_permission_service.query_agent_records_for_nl2agent",
+        "management.services.agent.authorization.query_agent_records_for_nl2agent",
         return_value=[{
             "agent_id": 22, "tenant_id": "tenant-a", "version_no": 0,
             "delete_flag": "N", "created_by": "user-a", "name": None,
@@ -249,7 +249,7 @@ def test_workbench_placeholder_can_be_named_from_user_requirements_once(mocker):
         }],
     )
     mocker.patch(
-        "services.agent_draft_permission_service.get_user_role_by_tenant",
+        "management.services.agent.authorization.get_user_role_by_tenant",
         return_value="MEMBER",
     )
     mocker.patch(
@@ -275,7 +275,7 @@ def test_workbench_placeholder_can_be_named_from_user_requirements_once(mocker):
 
 def test_nl2agent_cannot_rename_existing_display_name(mocker):
     mocker.patch(
-        "services.agent_draft_permission_service.query_agent_records_for_nl2agent",
+        "management.services.agent.authorization.query_agent_records_for_nl2agent",
         return_value=[{
             "agent_id": 22, "tenant_id": "tenant-a", "version_no": 0,
             "delete_flag": "N", "created_by": "user-a", "name": None,
@@ -283,7 +283,7 @@ def test_nl2agent_cannot_rename_existing_display_name(mocker):
         }],
     )
     mocker.patch(
-        "services.agent_draft_permission_service.get_user_role_by_tenant",
+        "management.services.agent.authorization.get_user_role_by_tenant",
         return_value="MEMBER",
     )
     update_fields = mocker.patch("services.nl2agent_service.update_agent_draft_fields")
@@ -319,7 +319,7 @@ def test_update_agent_draft_rejects_overwrite_or_duplicate_generated_name(
     retryable,
 ):
     mocker.patch(
-        "services.agent_draft_permission_service.query_agent_records_for_nl2agent",
+        "management.services.agent.authorization.query_agent_records_for_nl2agent",
         return_value=[
             {
                 "agent_id": 22,
@@ -332,7 +332,7 @@ def test_update_agent_draft_rejects_overwrite_or_duplicate_generated_name(
         ],
     )
     mocker.patch(
-        "services.agent_draft_permission_service.get_user_role_by_tenant",
+        "management.services.agent.authorization.get_user_role_by_tenant",
         return_value="MEMBER",
     )
     mocker.patch(
@@ -407,11 +407,11 @@ def test_update_agent_draft_rejects_invalid_identity_or_permission(
     expected_code,
 ):
     mocker.patch(
-        "services.agent_draft_permission_service.query_agent_records_for_nl2agent",
+        "management.services.agent.authorization.query_agent_records_for_nl2agent",
         return_value=records,
     )
     mocker.patch(
-        "services.agent_draft_permission_service.get_user_role_by_tenant",
+        "management.services.agent.authorization.get_user_role_by_tenant",
         return_value=role,
     )
     update_fields = mocker.patch(
@@ -432,7 +432,7 @@ def test_update_agent_draft_rejects_invalid_identity_or_permission(
 
 def test_agent_draft_database_failures_are_stable_and_retryable(mocker):
     mocker.patch(
-        "services.agent_draft_permission_service.query_agent_records_for_nl2agent",
+        "management.services.agent.authorization.query_agent_records_for_nl2agent",
         return_value=[
             {
                 "agent_id": 22,
@@ -444,7 +444,7 @@ def test_agent_draft_database_failures_are_stable_and_retryable(mocker):
         ],
     )
     mocker.patch(
-        "services.agent_draft_permission_service.get_user_role_by_tenant",
+        "management.services.agent.authorization.get_user_role_by_tenant",
         return_value="MEMBER",
     )
     mocker.patch(
@@ -466,7 +466,7 @@ def test_agent_draft_database_failures_are_stable_and_retryable(mocker):
 
 def test_agent_draft_update_rejects_unexpected_row_count(mocker):
     mocker.patch(
-        "services.agent_draft_permission_service.query_agent_records_for_nl2agent",
+        "management.services.agent.authorization.query_agent_records_for_nl2agent",
         return_value=[
             {
                 "agent_id": 22,
@@ -478,7 +478,7 @@ def test_agent_draft_update_rejects_unexpected_row_count(mocker):
         ],
     )
     mocker.patch(
-        "services.agent_draft_permission_service.get_user_role_by_tenant",
+        "management.services.agent.authorization.get_user_role_by_tenant",
         return_value="MEMBER",
     )
     mocker.patch(
@@ -693,7 +693,7 @@ def test_search_skips_unsearchable_tools_and_sanitizes_malformed_inputs(mocker):
 @pytest.mark.asyncio
 async def test_search_installed_resources_covers_visible_tools_and_skills(mocker):
     mocker.patch(
-        "services.tool_configuration_service.list_all_tools",
+        "management.services.tool.configuration.list_all_tools",
         new=AsyncMock(
             return_value=[
                 {
@@ -861,7 +861,7 @@ async def test_installed_resource_catalog_filters_knowledge_tools_by_deployment(
     expected_knowledge_tools,
 ):
     mocker.patch(
-        "services.tool_configuration_service.list_all_tools",
+        "management.services.tool.configuration.list_all_tools",
         new=AsyncMock(
             return_value=[
                 {
@@ -998,7 +998,7 @@ async def test_search_internal_uninstalled_resources_aggregates_sources_and_excl
         },
     )
     mocker.patch(
-        "services.mcp_management_service.list_community_mcp_services",
+        "management.services.repository.mcp.service.list_community_mcp_services",
         new=AsyncMock(
             return_value={
                 "items": [
@@ -1175,7 +1175,7 @@ async def test_uninstalled_catalog_paginates_and_filters_invalid_entries(mocker,
         ],
     )
     list_community = mocker.patch(
-        "services.mcp_management_service.list_community_mcp_services",
+        "management.services.repository.mcp.service.list_community_mcp_services",
         new=AsyncMock(
             side_effect=[
                 {

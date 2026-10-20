@@ -1,8 +1,11 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 "use client";
 
 import { ReactNode } from "react";
 import { ConfigProvider, App } from "antd";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { QueryClientProvider } from "@tanstack/react-query";
+import { queryClient } from "@/lib/queryClient";
 
 import {
   AuthenticationProvider,
@@ -55,8 +58,6 @@ function AppReadyWrapper({ children }: { children?: ReactNode }) {
  * RootProvider Component
  * Integrates all necessary providers for the application
  */
-const queryClient = new QueryClient();
-
 export function RootProvider({ children }: { children: ReactNode }) {
   return (
     <ConfigProvider
@@ -80,4 +81,3 @@ export function RootProvider({ children }: { children: ReactNode }) {
     </ConfigProvider>
   );
 }
-

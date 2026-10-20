@@ -77,7 +77,6 @@ agent_config:
   max_steps: 15
   enable_context_manager: true
   provide_run_summary: false
-  prompt_template_id: 0
   version_no: 1
   verification_config:
     enabled: false

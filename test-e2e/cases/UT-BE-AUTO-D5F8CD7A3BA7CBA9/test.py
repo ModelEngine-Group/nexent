@@ -1,3 +1,4 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 '''D1 unit tests for the evaluation-maintenance scheduler lifecycle.'''
 
 import logging
@@ -10,7 +11,7 @@ import pytest
 
 from nexent.core.concurrency import ManagedThreadSpec
 
-import services.evaluation_maintenance as em
+import management.services.evaluation.maintenance as em
 
 
 _SECRET_RE = re.compile(
@@ -54,7 +55,7 @@ def test_evaluation_maintenance_lifecycle(monkeypatch, caplog):
 
     fake_tm = FakeThreadManager()
 
-    with caplog.at_level(logging.INFO, logger='services.evaluation_maintenance'):
+    with caplog.at_level(logging.INFO, logger='management.services.evaluation.maintenance'):
         em.start(fake_tm)
         assert em._running is True
         assert em._thread_manager is fake_tm
@@ -63,7 +64,7 @@ def test_evaluation_maintenance_lifecycle(monkeypatch, caplog):
         spec, target = fake_tm.register_calls[0]
         assert isinstance(spec, ManagedThreadSpec)
         assert spec.task_name == 'evaluation-maintenance'
-        assert spec.owner == 'services.evaluation_maintenance'
+        assert spec.owner == 'management.services.evaluation.maintenance'
         assert spec.close_hook is em._request_stop
         assert target is em._run_loop
         assert fake_tm.start_calls == [fake_tm.execution_id]

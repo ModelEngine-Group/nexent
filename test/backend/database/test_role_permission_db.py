@@ -1,3 +1,4 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 import sys
 import pytest
 from unittest.mock import MagicMock
@@ -29,7 +30,7 @@ utils_mock.auth_utils.get_current_user_id_from_token = MagicMock(return_value="t
 
 # Add the mocked utils module to sys.modules
 sys.modules['utils'] = utils_mock
-sys.modules['utils.auth_utils'] = utils_mock.auth_utils
+sys.modules['management.services.permission.identity.authentication_helpers'] = utils_mock.auth_utils
 
 # Provide a stub for the `boto3` module so that it can be imported safely even
 # if the testing environment does not have it available.

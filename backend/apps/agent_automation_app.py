@@ -1,3 +1,4 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 import logging
 from http import HTTPStatus
 from typing import Annotated, Optional
@@ -5,20 +6,20 @@ from typing import Annotated, Optional
 from fastapi import APIRouter, Header, HTTPException, Query
 
 from consts.exceptions import UnauthorizedError
-from services.agent_automation.errors import (
+from consts.exceptions import (
     AgentAutomationError,
     AutomationConversationAlreadyBoundError,
     AutomationNotFoundError,
 )
-from services.agent_automation.facade import agent_automation_facade
-from services.agent_automation.models import (
+from management.services.automation.service import agent_automation_facade
+from contracts.automation import (
     AutomationProposalConfirmRequest,
     AutomationProposalCreateRequest,
     AutomationProposalPatchRequest,
     AutomationResponse,
     AutomationTaskPatchRequest,
 )
-from utils.auth_utils import get_current_user_id
+from management.services.permission.identity.authentication_helpers import get_current_user_id
 
 logger = logging.getLogger("agent_automation_app")
 

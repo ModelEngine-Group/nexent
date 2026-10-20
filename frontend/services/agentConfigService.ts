@@ -644,8 +644,6 @@ export interface UpdateAgentInfoPayload {
   business_description?: string;
   business_logic_model_name?: string;
   business_logic_model_id?: number;
-  prompt_template_id?: number;
-  prompt_template_name?: string;
   enabled_tool_ids?: number[];
   enabled_skill_ids?: number[];
   skill_instances?: Array<{
@@ -1144,8 +1142,6 @@ export const searchAgentInfo = async (
       business_description: data.business_description,
       business_logic_model_name: data.business_logic_model_name,
       business_logic_model_id: data.business_logic_model_id,
-      prompt_template_id: data.prompt_template_id ?? 0,
-      prompt_template_name: data.prompt_template_name ?? "system_default",
       provide_run_summary: data.provide_run_summary,
       is_a2a: data.is_a2a ?? false,
       verification_config: data.verification_config,
@@ -1395,7 +1391,8 @@ export const validateTool = async (
   source: string,
   usage: string,
   inputs: Record<string, any> | null = null,
-  params: Record<string, any> | null = null
+  params: Record<string, any> | null = null,
+  language: "zh" | "en" = "zh"
 ) => {
   try {
     const requestBody = {
@@ -1404,6 +1401,7 @@ export const validateTool = async (
       usage: usage,
       inputs: inputs,
       params: params,
+      language,
     };
 
     const response = await fetch(API_ENDPOINTS.tool.validate, {

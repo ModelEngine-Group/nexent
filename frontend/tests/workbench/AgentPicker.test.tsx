@@ -1,7 +1,18 @@
 // Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
 import { beforeEach, expect, it, vi } from "vitest";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import {
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+  within,
+} from "@testing-library/react";
+import { createInstance } from "i18next";
+import { I18nextProvider } from "react-i18next";
+import zh from "@/public/locales/zh/common.json";
+import en from "@/public/locales/en/common.json";
+import { ConfigProvider } from "antd";
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { AgentPicker } from "@/features/workbench/components/AgentPicker";
@@ -31,6 +42,67 @@ vi.mock("@/features/workbench/hooks/useResourceTags", () => ({
 const routerPush = vi.hoisted(() => vi.fn());
 vi.mock("next/navigation", () => ({ useRouter: () => ({ push: routerPush }) }));
 const empty = vi.hoisted(() => []);
+
+it.each([
+  ["zh", "导入预检", "取消", "导入并选择"],
+  ["en", "Import precheck", "Cancel", "Import and select"],
+])(
+  "localizes import precheck actions in %s and cancels without importing",
+  async (language, title, cancel, confirm) => {
+    const i18n = createInstance();
+    await i18n.init({
+      lng: language,
+      fallbackLng: "zh",
+      defaultNS: "common",
+      keySeparator: false,
+      resources: { zh: { common: zh }, en: { common: en } },
+    });
+    const client = new QueryClient();
+    render(
+      <ConfigProvider theme={{ token: { motion: false } }}>
+        <I18nextProvider i18n={i18n}>
+          <QueryClientProvider client={client}>
+            <AgentPicker
+              open
+              agents={[]}
+              onSelect={vi.fn()}
+              onCancel={vi.fn()}
+            />
+          </QueryClientProvider>
+        </I18nextProvider>
+      </ConfigProvider>
+    );
+    await userEvent.click(
+      screen.getByRole("tab", {
+        name: language === "zh" ? "仓库" : "Repository",
+      })
+    );
+    const repositoryCard = await screen.findByRole("option", {
+      name: /Repository A/,
+    });
+    await waitFor(() =>
+      expect(repositoryCard).toHaveAttribute("aria-disabled", "false")
+    );
+    await userEvent.click(repositoryCard);
+    await waitFor(() =>
+      expect(fetchRepositoryImportPrecheck).toHaveBeenCalledWith(20)
+    );
+    const modalTitle = await screen.findByText(title);
+    // AntD's test-only IDs collide between the pagination Select and Modal.
+    const dialog = modalTitle.closest('[role="dialog"]') as HTMLElement;
+    expect(dialog).not.toBeNull();
+    await waitFor(() => expect(dialog).toBeVisible());
+    expect(within(dialog).getByRole("button", { name: confirm })).toBeEnabled();
+    await userEvent.click(
+      within(dialog).getByRole("button", {
+        name: language === "zh" ? /^取\s*消$/ : cancel,
+      })
+    );
+    await waitFor(() => expect(dialog).not.toBeVisible());
+    expect(importAgentFromRepository).not.toHaveBeenCalled();
+    client.clear();
+  }
+);
 const agent = {
   id: "8",
   name: "Agent A",

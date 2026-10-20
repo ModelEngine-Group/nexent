@@ -1,3 +1,4 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """D1 backend policy tests for repository, sharing, runtime and memory."""
 
 from __future__ import annotations
@@ -26,8 +27,8 @@ STAGE = pytest.mark.stage("D1")
 @STAGE
 @pytest.mark.case_id("UT-BE-019")
 def test_automation_fifth_failure_auto_pauses_and_releases_lock(monkeypatch: pytest.MonkeyPatch) -> None:
-    from services.agent_automation import runner
-    from services.agent_automation.models import AutomationRunStatus
+    from management.services.automation import runner as runner
+    from contracts.automation import AutomationRunStatus
 
     now = datetime.now(timezone.utc)
     task = {
@@ -45,15 +46,3 @@ def test_automation_fifth_failure_auto_pauses_and_releases_lock(monkeypatch: pyt
     assert captured["consecutive_failures"] == 5
     assert captured["status"] == "PAUSED_BY_SYSTEM"
     assert captured["lock_owner"] is None and captured["lock_until"] is None
-
-
-
-
-
-
-
-
-
-
-
-

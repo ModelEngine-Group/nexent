@@ -1,3 +1,4 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """
 Unit tests for backend/apps/remote_mcp_app.py
 
@@ -27,18 +28,18 @@ sys.modules['elasticsearch'] = elasticsearch_module
 # These patches must be started before any imports that use MinioClient
 import services as _services_mod
 import types as _types
-_mcp_container_svc_stub = _types.ModuleType('services.mcp_container_service')
+_mcp_container_svc_stub = _types.ModuleType('management.services.mcp.containers')
 _mcp_container_svc_stub.create_container_client_from_config = MagicMock()
 _mcp_container_svc_stub.DockerContainerConfig = MagicMock()
 _mcp_container_svc_stub.MCPContainerManager = MagicMock()
 _services_mod.mcp_container_service = _mcp_container_svc_stub
-sys.modules['services.mcp_container_service'] = _mcp_container_svc_stub
+sys.modules['management.services.mcp.containers'] = _mcp_container_svc_stub
 
 # Pre-register stubs for service modules that remote_mcp_app.py imports at module
 # level but whose full import chain pulls in unavailable third-party packages
 # (docker SDK, jieba, mcpadapt, …).
-sys.modules['services.tool_configuration_service'] = MagicMock()
-sys.modules['services.file_management_service'] = MagicMock()
+sys.modules['management.services.tool.configuration'] = MagicMock()
+sys.modules['management.services.file.service'] = MagicMock()
 sys.modules['management.services.knowledge_base.service'] = MagicMock()
 storage_client_mock = MagicMock()
 minio_mock = MagicMock()
@@ -52,8 +53,8 @@ patch('database.client.MinioClient', return_value=minio_mock).start()
 patch('backend.database.client.minio_client', minio_mock).start()
 patch('elasticsearch.Elasticsearch', return_value=MagicMock()).start()
 patch('consts.const.ENABLE_UPLOAD_IMAGE', True).start()
-patch('services.mcp_container_service.create_container_client_from_config').start()
-patch('services.mcp_container_service.DockerContainerConfig').start()
+patch('management.services.mcp.containers.create_container_client_from_config').start()
+patch('management.services.mcp.containers.DockerContainerConfig').start()
 
 from backend.consts.exceptions import (
     MCPConnectionError, MCPNameIllegal, MCPContainerError,

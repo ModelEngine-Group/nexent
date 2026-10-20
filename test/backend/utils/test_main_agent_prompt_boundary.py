@@ -12,7 +12,7 @@ def test_ut_be_fps_015_main_agent_backend_does_not_load_prompt_fragments():
         relative: (root / relative).read_text(encoding="utf-8")
         for relative in (
             "backend/agents/create_agent_info.py",
-            "backend/services/knowledge_scope_service.py",
+            "backend/management/services/knowledge_base/scope.py",
             "backend/management/services/agent/context.py",
             "backend/management/services/agent/prompt.py",
         )

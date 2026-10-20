@@ -508,7 +508,7 @@ export function AgentPicker({
     >
       <Modal
         open={!!precheck}
-        title="导入预检"
+        title={t("workbench.import.precheckTitle", "导入预检")}
         onCancel={() => {
           operationRef.current += 1;
           setPrecheck(null);
@@ -518,7 +518,8 @@ export function AgentPicker({
         }}
         onOk={() => void importAgent()}
         confirmLoading={importing}
-        okText="导入并选择"
+        cancelText={t("common.cancel", "取消")}
+        okText={t("workbench.import.importAndSelect", "导入并选择")}
         okButtonProps={{
           disabled: !precheck || unresolvedDependencies.length > 0,
         }}

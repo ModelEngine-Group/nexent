@@ -1,3 +1,4 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 from __future__ import annotations
 
 import asyncio
@@ -5,7 +6,7 @@ import logging
 
 import pytest
 
-from services import agent_repository_service as service
+from management.services.repository.agent import listing as service
 
 
 AGENT_ID = 101

@@ -3,11 +3,6 @@
 import pytest
 from jinja2 import Environment, meta
 from nexent.core.prompts import load_prompt
-from management.services.agent.prompt import (
-    get_prompt_generate_template_keys,
-    merge_prompt_generate_templates,
-    normalize_prompt_generate_template_content,
-)
 from management.services.skill.prompt import (
     get_nl2skill_prompt_template,
 )
@@ -16,12 +11,6 @@ from management.services.skill.prompt import (
 class TestPromptTemplateUtils:
     """Test cases for prompt_template_utils module"""
 
-    def test_get_prompt_generate_template_keys_returns_an_independent_list(self):
-        template_keys = get_prompt_generate_template_keys()
-
-        assert "duty_system_prompt" in template_keys
-        template_keys.clear()
-        assert get_prompt_generate_template_keys()
 
     @pytest.mark.parametrize(
         ("language", "expected"),
@@ -32,45 +21,8 @@ class TestPromptTemplateUtils:
 
         assert expected in template["system_prompt"]
 
-    @pytest.mark.parametrize("template_content", [None, [], "invalid"])
-    def test_normalize_prompt_generate_template_content_rejects_non_mappings(
-        self, template_content
-    ):
-        assert normalize_prompt_generate_template_content(template_content) == {}
 
-    def test_normalize_prompt_generate_template_content_supports_aliases(self):
-        template_content = {
-            "duty_system_prompt": "Current duty prompt",
-            "DUTY_SYSTEM_PROMPT": "Legacy duty prompt",
-            "CONSTRAINT_SYSTEM_PROMPT": "Legacy constraint prompt",
-            "few_shots_system_prompt": "   ",
-            "AGENT_VARIABLE_NAME_SYSTEM_PROMPT": 42,
-        }
 
-        assert normalize_prompt_generate_template_content(template_content) == {
-            "duty_system_prompt": "Current duty prompt",
-            "constraint_system_prompt": "Legacy constraint prompt",
-        }
-
-    def test_merge_prompt_generate_templates_uses_first_valid_value(self):
-        merged = merge_prompt_generate_templates(
-            None,
-            {
-                "duty_system_prompt": "Primary duty prompt",
-                "constraint_system_prompt": "",
-            },
-            {
-                "DUTY_SYSTEM_PROMPT": "Fallback duty prompt",
-                "CONSTRAINT_SYSTEM_PROMPT": "Fallback constraint prompt",
-                "USER_PROMPT": "Fallback user prompt",
-            },
-        )
-
-        assert merged == {
-            "duty_system_prompt": "Primary duty prompt",
-            "constraint_system_prompt": "Fallback constraint prompt",
-            "user_prompt": "Fallback user prompt",
-        }
 
     @pytest.mark.parametrize("language", ["zh", "en"])
     def test_nl2agent_prompt_templates_define_runtime_variables(self, language):

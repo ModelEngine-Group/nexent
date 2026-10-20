@@ -657,11 +657,11 @@ class ElasticSearchService(KnowledgeBaseDocumentDeletionService):
         index_names: List[str],
         tag_predicates: List[Dict[str, Any]],
     ) -> List[Dict[str, Any]]:
-        from services.tag_document_projection import (
+        from management.services.knowledge_base.tag_projection import (
             LOCAL_DOCUMENT_PROVIDER,
             decode_document_resource_id,
         )
-        from services.tag_management_service import TagManagementService
+        from management.services.tag.library import TagManagementService
 
         allowed_paths_by_index: Dict[str, set] = {}
         for index in index_names:

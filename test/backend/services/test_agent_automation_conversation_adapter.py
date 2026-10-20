@@ -1,7 +1,8 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 import json
 
-from services.agent_automation import conversation_adapter as adapter_module
-from services.agent_automation.conversation_adapter import AutomationConversationAdapter
+from management.services.automation import conversation as adapter_module
+from management.services.automation.conversation import AutomationConversationAdapter
 
 
 def test_run_prompt_appends_new_message_to_existing_conversation(monkeypatch):

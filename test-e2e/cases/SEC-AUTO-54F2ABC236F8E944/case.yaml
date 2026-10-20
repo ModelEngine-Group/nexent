@@ -19,7 +19,7 @@ case:
 
     - backend/memory_provider_plugins/aidp_mem_plugin/plugin.yaml（api_key 字段 type=secret）
 
-    - 掩码规则实现 backend/services/memory_provider_config_service.py 的 _mask_params/_mask_value
+    - 掩码规则实现 backend/management/services/memory/providers/configuration.py 的 _mask_params/_mask_value
 
     - 前端编辑回显 frontend/app/[locale]/memory/ProviderConfigDialog.tsx 的 SECRET_MASK 占位符'
   test_data:
@@ -27,7 +27,7 @@ case:
 
       - backend/memory_provider_plugins/aidp_mem_plugin/plugin.yaml（api_key 字段 type=secret）
 
-      - 掩码规则实现 backend/services/memory_provider_config_service.py 的 _mask_params/_mask_value
+      - 掩码规则实现 backend/management/services/memory/providers/configuration.py 的 _mask_params/_mask_value
 
       - 前端编辑回显 frontend/app/[locale]/memory/ProviderConfigDialog.tsx 的 SECRET_MASK 占位符'
   steps:
@@ -70,7 +70,7 @@ case:
 
     - backend/memory_provider_plugins/aidp_mem_plugin/plugin.yaml（api_key 字段 type=secret）
 
-    - 掩码规则实现 backend/services/memory_provider_config_service.py 的 _mask_params/_mask_value
+    - 掩码规则实现 backend/management/services/memory/providers/configuration.py 的 _mask_params/_mask_value
 
     - 前端编辑回显 frontend/app/[locale]/memory/ProviderConfigDialog.tsx 的 SECRET_MASK 占位符'
   metrics:

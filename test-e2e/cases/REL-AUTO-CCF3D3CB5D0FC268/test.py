@@ -1,3 +1,4 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 from __future__ import annotations
 
 import logging
@@ -13,8 +14,8 @@ from database.agent_evaluation_db import (
 )
 from database.client import get_db_session
 from database.db_models import AgentEvaluation
-from services import evaluation_maintenance
-from services import runtime_proxy_service
+from management.services.evaluation import maintenance as evaluation_maintenance
+from management.services.agent import runtime_client as runtime_proxy_service
 
 
 def _insert_run(session, *, tenant_id, created_by, evaluation_set_id, status, delete_flag, create_time):
