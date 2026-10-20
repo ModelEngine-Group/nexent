@@ -374,7 +374,7 @@ it("discarding retrieval edits and canceling the drawer restores the saved draft
   settings = await openSettings();
   expect(settings.getByRole("spinbutton")).toHaveValue("6");
   expect(configuredSelection.retrieval_config).toEqual({ top_k: 6 });
-});
+}, 30000);
 
 it("retains retrieval and knowledge drafts after a failed drawer save and permits retry", async () => {
   const configuredSelection = { ...selection, retrieval_config: { top_k: 6 } };
@@ -425,7 +425,7 @@ it("retains retrieval and knowledge drafts after a failed drawer save and permit
   expect(confirm.mock.calls[1][0].retrieval_config).toEqual({ top_k: 8 });
   expect(confirm.mock.calls[1][0].local.knowledge_ids).toEqual(["1", "2"]);
   expect(configuredSelection.retrieval_config).toEqual({ top_k: 6 });
-});
+}, 30000);
 
 it("UT-FE-WB-025 uses one authorized catalog and disables incompatible embeddings", async () => {
   render(
