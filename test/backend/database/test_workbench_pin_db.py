@@ -37,7 +37,7 @@ def session(monkeypatch):
 
 def conversation(stamp=STAMP):
     return SimpleNamespace(conversation_id=42, conversation_title="History", agent_id=3,
-                           workbench_pinned_at=stamp, created_by="user", update_time=STAMP)
+                           workbench_pinned_at=stamp, created_by="user", update_time=STAMP, last_activity_time=None)
 
 
 def result_row(record):
@@ -48,7 +48,7 @@ def test_list_serializes_metadata_and_filters_owned_active_workbench_pins(sessio
     session.execute.return_value = [result_row(conversation())]
     assert pins.list_workbench_pins("user", "tenant") == [{
         "conversation_id": 42, "conversation_title": "History", "agent_id": 3,
-        "create_time": 1234, "update_time": 4567, "pinned_at": STAMP.isoformat(),
+        "create_time": 1234, "update_time": 4567, "last_activity_time": 1234, "pinned_at": STAMP.isoformat(),
     }]
     query = sql(session.execute.call_args.args[0])
     for predicate in ("created_by = 'user'", "workbench_config IS NOT NULL",

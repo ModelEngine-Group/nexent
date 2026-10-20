@@ -38,6 +38,10 @@ def _list_pins(session, user_id: str) -> list[dict[str, Any]]:
             "agent_id": conversation.agent_id,
             "create_time": int(created_ms),
             "update_time": int(updated_ms),
+            "last_activity_time": (
+                int(conversation.last_activity_time.timestamp() * 1000)
+                if conversation.last_activity_time is not None else int(created_ms)
+            ),
             "pinned_at": conversation.workbench_pinned_at.isoformat(),
         }
         for conversation, created_ms, updated_ms in rows

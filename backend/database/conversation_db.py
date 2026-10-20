@@ -1,11 +1,11 @@
-# Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
 import json
 from copy import deepcopy
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Sequence, Set, TypedDict
 
-from sqlalchemy import asc, desc, func, insert, or_, select, text, update
+from sqlalchemy import and_, asc, desc, func, insert, or_, select, text, update
 from sqlalchemy.orm import Session
 
 from consts.const import (
@@ -21,6 +21,7 @@ from consts.exceptions import (
     WorkbenchConfigVersionConflict,
     WorkbenchError,
 )
+from contracts.conversation import MessageSource, decode_activity_cursor, encode_activity_cursor
 from database.db_models import KnowledgeRecord
 
 from .client import as_dict, db_client, get_db_session
@@ -174,15 +175,17 @@ def _enforce_conversation_turn_limit(
     conversation_id: int,
     message_role: str,
     user_id: Optional[str],
+    message_source: MessageSource = MessageSource.CHAT,
 ) -> None:
     """Reject a new user message when the conversation turn quota is reached."""
-    if not user_id or message_role != MESSAGE_ROLE["USER"]:
+    if not user_id or message_role != MESSAGE_ROLE["USER"] or message_source == MessageSource.AUTOMATION:
         return
 
     _lock_conversation_limit_scope(session, f"conversation-turn-limit:{conversation_id}")
     statement = select(func.count(ConversationMessage.message_id)).where(
         ConversationMessage.conversation_id == conversation_id,
         ConversationMessage.message_role == MESSAGE_ROLE["USER"],
+        ConversationMessage.message_source == MessageSource.CHAT.value,
         ConversationMessage.delete_flag == "N",
     )
     turn_count = int(session.scalar(statement) or 0)
@@ -282,8 +285,32 @@ def create_conversation(conversation_title: str, user_id: Optional[str] = None,
         return result_dict
 
 
+def _activity_time_expression():
+    """Use UTC creation for empty or pre-backfill conversations."""
+    return func.coalesce(
+        ConversationRecord.last_activity_time,
+        func.timezone("UTC", ConversationRecord.create_time),
+    )
+
+
+def _touch_conversation_activity(session, conversation_id: int, user_id: Optional[str]) -> None:
+    """Advance activity in the same transaction as the visible message write."""
+    statement = update(ConversationRecord).where(
+        ConversationRecord.conversation_id == conversation_id,
+        ConversationRecord.delete_flag == "N",
+    )
+    if user_id:
+        statement = statement.where(ConversationRecord.created_by == user_id)
+    session.execute(statement.values(
+        last_activity_time=func.greatest(ConversationRecord.last_activity_time, func.clock_timestamp()),
+        update_time=func.clock_timestamp(),
+        **({"updated_by": user_id} if user_id else {}),
+    ))
+
+
 def create_conversation_message(message_data: Dict[str, Any], user_id: Optional[str] = None,
-                                 status: str = 'completed') -> int:
+                                 status: str = 'completed', *,
+                                 message_source: MessageSource = MessageSource.CHAT) -> int:
     """
     Create a conversation message record
 
@@ -300,6 +327,7 @@ def create_conversation_message(message_data: Dict[str, Any], user_id: Optional[
     Returns:
         int: Newly created message ID (auto-increment ID)
     """
+    message_source = MessageSource(message_source)
     with get_db_session() as session:
         # Ensure conversation_id is integer type
         conversation_id = int(message_data['conversation_id'])
@@ -310,6 +338,7 @@ def create_conversation_message(message_data: Dict[str, Any], user_id: Optional[
             conversation_id=conversation_id,
             message_role=message_role,
             user_id=user_id,
+            message_source=message_source,
         )
 
         minio_files = message_data.get('minio_files')
@@ -322,7 +351,7 @@ def create_conversation_message(message_data: Dict[str, Any], user_id: Optional[
         # Prepare data dictionary
         data = {"conversation_id": conversation_id, "message_index": message_idx, "message_role": message_role,
                 "message_content": message_data['content'], "minio_files": minio_files, "opinion_flag": None,
-                "delete_flag": 'N', "status": status}
+                "delete_flag": 'N', "status": status, "message_source": message_source.value}
         if user_id:
             data = add_creation_tracking(data, user_id)
 
@@ -331,6 +360,10 @@ def create_conversation_message(message_data: Dict[str, Any], user_id: Optional[
             **data).returning(ConversationMessage.message_id)
         result = session.execute(stmt)
         message_id = result.scalar()
+        if message_role == MESSAGE_ROLE["USER"] or (
+            message_role == MESSAGE_ROLE["ASSISTANT"] and message_data["content"] and status != "streaming"
+        ):
+            _touch_conversation_activity(session, conversation_id, user_id)
         return message_id
 
 
@@ -552,6 +585,13 @@ def persist_assistant_run_batch(
         parent.status = terminal_status
         parent.updated_by = user_id
         parent.update_time = func.current_timestamp()
+
+        if message_content or any(
+            unit.get("unit_type") not in {HISTORY_SUMMARY_UNIT_TYPE, "history_summary_candidate"}
+            and unit.get("unit_content")
+            for unit in message_units
+        ):
+            _touch_conversation_activity(session, conversation_id, user_id)
 
         return unit_id_by_index
 
@@ -1061,56 +1101,33 @@ def get_conversation_list(
     limit: Optional[int] = None,
     offset: int = 0,
 ) -> List[Dict[str, Any]]:
-    """
-    Get list of all undeleted conversations, sorted by creation time in descending order
-
-    Args:
-        user_id: Reserved parameter for filtering conversations created by this user
-        limit: Maximum number of conversations to return. None returns all conversations.
-        offset: Number of conversations to skip when limit is provided.
-
-    Returns:
-        List[Dict[str, Any]]: List of conversations, each containing id, title and timestamp information
-    """
+    """Return owned live histories ordered by committed message activity."""
     with get_db_session() as session:
-        # Build the query statement
-        stmt = select(
+        activity = _activity_time_expression()
+        statement = select(
             ConversationRecord.conversation_id,
             ConversationRecord.conversation_title,
             ConversationRecord.agent_id,
             ConversationRecord.chat_mode,
-            (func.extract('epoch', ConversationRecord.create_time)
-             * 1000).label('create_time'),
-            (func.extract('epoch', ConversationRecord.update_time)
-             * 1000).label('update_time')
-        ).where(
-            ConversationRecord.delete_flag == 'N'
-        ).order_by(
-            desc(ConversationRecord.create_time),
-            desc(ConversationRecord.conversation_id),
+            (func.extract("epoch", ConversationRecord.create_time) * 1000).label("create_time"),
+            (func.extract("epoch", ConversationRecord.update_time) * 1000).label("update_time"),
+            (func.extract("epoch", activity) * 1000).label("last_activity_time"),
+        ).where(ConversationRecord.delete_flag == "N").order_by(
+            desc(activity), desc(ConversationRecord.conversation_id),
         )
-
-        # If user_id is provided, additional filter conditions can be added here
         if user_id:
-            stmt = stmt.where(ConversationRecord.created_by == user_id)
-
+            statement = statement.where(ConversationRecord.created_by == user_id)
         if limit is not None:
-            stmt = stmt.limit(limit)
+            statement = statement.limit(limit)
         if offset:
-            stmt = stmt.offset(offset)
-
-        # Execute the query
-        records = session.execute(stmt)
-
-        # Convert query results to a list of dictionaries and ensure timestamps are integers
+            statement = statement.offset(offset)
         result = []
-        for record in records:
-            conversation = as_dict(record)
-            conversation['create_time'] = int(conversation['create_time'])
-            conversation['update_time'] = int(conversation['update_time'])
-            conversation['chat_mode'] = conversation.get('chat_mode') or 'execution'
-            result.append(conversation)
-
+        for row in session.execute(statement):
+            item = as_dict(row)
+            for field in ("create_time", "update_time", "last_activity_time"):
+                item[field] = int(item.get(field) or item["create_time"])
+            item["chat_mode"] = item.get("chat_mode") or "execution"
+            result.append(item)
         return result
 
 
@@ -1121,60 +1138,83 @@ def get_conversation_list_page(
     limit: Optional[int] = None,
     offset: int = 0,
     conversation_type: Optional[str] = None,
+    cursor: Optional[str] = None,
 ) -> Dict[str, Any]:
-    """Return a conversation page and bucket counts, optionally scoped by origin."""
+    """Return activity-ordered histories with full-scope bucket counts.
+
+    An optional keyset cursor avoids offset drift as older conversations gain
+    new activity. The legacy offset contract remains available.
+    """
     if conversation_type not in (None, "agent_chat", "workbench"):
         raise ValueError("Invalid conversation type")
+    if cursor is not None and offset:
+        raise ValueError("Conversation cursor cannot be combined with offset")
+    boundary = decode_activity_cursor(cursor) if cursor is not None else None
     with get_db_session() as session:
-        created_ms = func.extract('epoch', ConversationRecord.create_time) * 1000
-        stmt = select(
+        activity = _activity_time_expression()
+        activity_ms = func.extract("epoch", activity) * 1000
+        scope = select(
             ConversationRecord.conversation_id,
             ConversationRecord.conversation_title,
             ConversationRecord.agent_id,
             ConversationRecord.chat_mode,
-            created_ms.label('create_time'),
-            (func.extract('epoch', ConversationRecord.update_time) * 1000).label('update_time'),
-            func.count().over().label('total'),
-            func.count().filter(created_ms >= today_start_ms).over().label('today'),
-            func.count().filter(
-                created_ms < today_start_ms,
-                created_ms >= week_start_ms,
-            ).over().label('last_7_days'),
-            func.count().filter(created_ms < week_start_ms).over().label('older'),
+            activity.label("activity_time"),
+            activity_ms.label("last_activity_time"),
+            (func.extract("epoch", ConversationRecord.create_time) * 1000).label("create_time"),
+            (func.extract("epoch", ConversationRecord.update_time) * 1000).label("update_time"),
+            func.count().over().label("total"),
+            func.count().filter(activity_ms >= today_start_ms).over().label("today"),
+            func.count().filter(activity_ms < today_start_ms, activity_ms >= week_start_ms).over().label("last_7_days"),
+            func.count().filter(activity_ms < week_start_ms).over().label("older"),
         ).where(
-            ConversationRecord.delete_flag == 'N',
+            ConversationRecord.delete_flag == "N",
             ConversationRecord.created_by == user_id,
-        ).order_by(
-            desc(ConversationRecord.create_time),
-            desc(ConversationRecord.conversation_id),
         )
         if conversation_type == "workbench":
-            stmt = stmt.where(ConversationRecord.workbench_config.is_not(None))
+            scope = scope.where(ConversationRecord.workbench_config.is_not(None))
         elif conversation_type == "agent_chat":
-            stmt = stmt.where(ConversationRecord.workbench_config.is_(None))
+            scope = scope.where(ConversationRecord.workbench_config.is_(None))
+        rows = scope.subquery()
+        statement = select(rows).order_by(rows.c.activity_time.desc(), rows.c.conversation_id.desc())
+        if boundary:
+            moment, identity = boundary
+            statement = statement.where(or_(
+                rows.c.activity_time < moment,
+                and_(rows.c.activity_time == moment, rows.c.conversation_id < identity),
+            ))
         if limit is not None:
-            stmt = stmt.limit(limit)
+            statement = statement.limit(limit + 1)
         if offset:
-            stmt = stmt.offset(offset)
-
-        records = list(session.execute(stmt))
+            statement = statement.offset(offset)
+        records = list(session.execute(statement))
         metadata = {
-            'total': int(records[0].total or 0) if records else 0,
-            'today': int(records[0].today or 0) if records else 0,
-            'last_7_days': int(records[0].last_7_days or 0) if records else 0,
-            'older': int(records[0].older or 0) if records else 0,
+            name: int(getattr(records[0], name) or 0) if records else 0
+            for name in ("total", "today", "last_7_days", "older")
         }
-        items = []
-        for record in records:
-            items.append({
-                'conversation_id': record.conversation_id,
-                'conversation_title': record.conversation_title,
-                'agent_id': record.agent_id,
-                'chat_mode': record.chat_mode or 'execution',
-                'create_time': int(record.create_time),
-                'update_time': int(record.update_time),
-            })
-        return {'items': items, 'metadata': metadata}
+        if not records and (boundary or offset):
+            # A live cursor can be exhausted after histories move to the head.
+            # Counts still describe the authenticated scope, not the empty tail.
+            counts = session.execute(select(*(
+                func.coalesce(func.max(getattr(rows.c, name)), 0).label(name)
+                for name in metadata
+            ))).one()
+            metadata = {name: int(getattr(counts, name)) for name in metadata}
+        has_more = limit is not None and len(records) > limit
+        visible = records[:limit] if limit is not None else records
+        items = [{
+            "conversation_id": row.conversation_id,
+            "conversation_title": row.conversation_title,
+            "agent_id": row.agent_id,
+            "chat_mode": row.chat_mode or "execution",
+            "create_time": int(row.create_time),
+            "update_time": int(row.update_time),
+            "last_activity_time": int(row.last_activity_time),
+        } for row in visible]
+        next_cursor = (
+            encode_activity_cursor(visible[-1].activity_time, visible[-1].conversation_id)
+            if has_more and visible else None
+        )
+        return {"items": items, "metadata": metadata, "next_cursor": next_cursor}
 
 
 def update_conversation_agent_id(conversation_id: int, agent_id: int, user_id: Optional[str] = None) -> bool:

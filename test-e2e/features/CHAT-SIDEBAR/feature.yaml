@@ -24,6 +24,9 @@ feature:
     description: In agent-chat batch mode, selecting an agent selects or clears every
       persisted conversation for that agent across paginated list results, updates the
       selected/total state, and leaves conversations from other agents unchanged.
+  - rule_id: CHAT-SIDEBAR-RULE-004
+    description: Visible messages update dedicated activity; activity-based pagination and automatic metadata
+      refresh preserve composer, runtime and pin semantics.
   required_test_stages:
   - D1
   - D4

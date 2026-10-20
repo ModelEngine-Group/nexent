@@ -3,6 +3,8 @@
 import json
 import logging
 
+from contracts.conversation import MessageSource
+
 from management.services.agent.context import (
     strip_current_time_prefix,
 )
@@ -62,7 +64,7 @@ monitoring_manager = get_monitoring_manager()
 
 
 def save_message(request: MessageRequest, user_id: str, tenant_id: str,
-                  status: str = 'completed') -> int:
+                  status: str = 'completed', *, message_source: MessageSource = MessageSource.CHAT) -> int:
     """
     Insert only the ConversationMessage row for a new message.
 
@@ -113,7 +115,9 @@ def save_message(request: MessageRequest, user_id: str, tenant_id: str,
         'content': string_content or "",
         'minio_files': message_data.get('minio_files'),
     }
-    return create_conversation_message(message_data_copy, user_id, status=status)
+    return create_conversation_message(
+        message_data_copy, user_id, status=status, message_source=message_source,
+    )
 
 
 def save_message_unit(message_id: int, conversation_id: int, unit_index: int,
@@ -295,7 +299,9 @@ def save_conversation_user(request: AgentRequest, user_id: str, tenant_id: str) 
         minio_files=request.minio_files,
     )
     save_message(
-        conversation_req, user_id=user_id, tenant_id=tenant_id)
+        conversation_req, user_id=user_id, tenant_id=tenant_id,
+        message_source=MessageSource(getattr(request, "_message_source", MessageSource.CHAT)),
+    )
 
 
 def save_conversation_assistant(request: AgentRequest, messages: List[str], user_id: str, tenant_id: str):

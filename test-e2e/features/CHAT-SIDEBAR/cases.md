@@ -4,6 +4,8 @@
 
 - D1 [CHAT-SIDEBAR-D1-001](../../cases/CHAT-SIDEBAR-D1-001/case.yaml) · active
 - D3 [CHAT-SIDEBAR-D3-001](../../cases/CHAT-SIDEBAR-D3-001/case.yaml) · active
+- D4 [CHAT-ACTIVITY-D4-001](../../cases/CHAT-ACTIVITY-D4-001/case.yaml) · active
 - D4 [CHAT-SIDEBAR-D4-001](../../cases/CHAT-SIDEBAR-D4-001/case.yaml) · active
 - D4 [WB-PIN-DELETE-D4-001](../../cases/WB-PIN-DELETE-D4-001/case.yaml) · active
+- D5 [CHAT-ACTIVITY-D5-001](../../cases/CHAT-ACTIVITY-D5-001/case.yaml) · active
 - D5 [CHAT-SIDEBAR-D5-001](../../cases/CHAT-SIDEBAR-D5-001/case.yaml) · active
