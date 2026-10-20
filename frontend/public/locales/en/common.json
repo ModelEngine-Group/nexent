@@ -1,4 +1,4 @@
-{
+﻿{
   "toolConfig.deepseek.onlyHighQuality": "High-quality results only",
   "workbench.genericAgentName": "Agent Workbench",
   "workbench.landingGreeting": "Hi, I'm Nexent. What can I help you with?",
@@ -2003,6 +2003,8 @@
   "agentConfig.agents.defaultDisplayName": "Agent",
   "agentConfig.agents.copyConfirmTitle": "Confirm Copy",
   "agentConfig.agents.copyConfirmContent": "Create a duplicate of {{name}}?",
+  "agentConfig.agents.copySkillConfigsSkipped": "Skill configurations were not copied because you do not have edit permission on the source agent",
+
   "agentConfig.agents.copySuccess": "Agent copied successfully",
   "agentConfig.agents.copyUnavailableTools": "Ignored {{count}} unavailable tools: {{names}}",
   "agentConfig.agents.copyFailed": "Failed to copy Agent",
