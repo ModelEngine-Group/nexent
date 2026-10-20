@@ -49,6 +49,7 @@ import {
 } from "../../../models/components/model/ModelAdvancedSettings";
 import type { ModelOverrideMap } from "../../../models/components/model/ModelOverrideModal";
 import { canManageModels } from "@/lib/auth";
+import { formatModelTokenLabel } from "@/lib/modelTokenLabel";
 import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
 import { useDeployment } from "@/components/providers/deploymentProvider";
 import { useNl2AgentFlow } from "@/contexts/nl2AgentFlow";
@@ -163,10 +164,7 @@ function SelectedModelCard({
   ).toLowerCase();
   const logo = MODEL_PROVIDER_LOGOS[provider];
   const contextTokens = model.contextWindowTokens ?? model.maxInputTokens;
-  const contextSize =
-    contextTokens && contextTokens > 0
-      ? `${Math.round(contextTokens / 1000)}k`
-      : null;
+  const contextSize = formatModelTokenLabel(contextTokens);
   const capabilities = [
     model.type === "llm" ? textInferenceLabel : null,
     model.reasoningCapability?.status === "supported"
