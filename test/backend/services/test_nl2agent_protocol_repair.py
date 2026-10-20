@@ -139,3 +139,10 @@ def test_policy_preparation_does_not_confirm_full_generation_requirements(langua
             or "only a preparatory action, not confirmation of requirements" in prompt)
     assert ("策略保存成功后的下一个业务动作必须输出澄清卡" in prompt
             or "next business action after policy persistence MUST produce a clarification card" in prompt)
+
+
+@pytest.mark.parametrize("language", ["zh", "en"])
+def test_ambiguous_retry_is_checked_before_policy_intent(language):
+    prompt = build_nl2agent_system_prompt(language)
+    assert ("歧义检查优先于" in prompt or "Check ambiguity BEFORE" in prompt)
+    assert ("当前值、历史任务" in prompt or "current value, past tasks" in prompt)
