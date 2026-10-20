@@ -53,6 +53,9 @@ PROTOCOL_GRPC = "GRPC"
 
 
 class ModelConfig(BaseModel):
+    diagnostic_chunks_enabled: bool = Field(
+        default=False, description="Capture bounded content-free response chunk structure"
+    )
     cite_name: str = Field(description="Model alias")
     api_key: str = Field(description="API key", default="")
     model_name: str = Field(description="Model call name")

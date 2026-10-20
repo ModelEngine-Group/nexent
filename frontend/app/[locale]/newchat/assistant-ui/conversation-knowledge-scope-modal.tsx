@@ -18,7 +18,7 @@ import {
   resourcePage,
 } from "@/features/workbench/components/ResourcePagination";
 
-import { useEffect, useMemo, useState, type FC } from "react";
+import { useEffect, useMemo, useRef, useState, type FC } from "react";
 import { useTranslation } from "react-i18next";
 import { useRouter } from "next/navigation";
 import { Alert, Button, Empty, Input, Modal, Spin, message } from "antd";
@@ -35,7 +35,9 @@ import type {
 } from "@/types/knowledgeScope";
 import { DEFAULT_CONVERSATION_KNOWLEDGE_SCOPE } from "@/types/knowledgeScope";
 import { ResourceCard } from "@/features/workbench";
-import { ResourceSelectionRow } from "@/features/workbench/components/ResourceSelectionRow";
+import { KnowledgeSelectionList } from "@/components/resource-picker/KnowledgeSelectionList";
+import { WorkbenchResourceDrawer } from "@/features/workbench/components/WorkbenchResourceDrawer";
+import { RESOURCE_PAGE_SIZE } from "@/features/workbench/components/ResourcePagination";
 import { useToolList } from "@/hooks/agent/useToolList";
 import { KnowledgeRetrievalParamsForm } from "@/components/tool-config/KnowledgeRetrievalParamsForm";
 import {
@@ -174,6 +176,7 @@ export const ConversationKnowledgeScopeModal: FC<
       !AIDP_NON_PERSISTED_PARAM_NAMES.has(param.name)
   );
   const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(RESOURCE_PAGE_SIZE);
   const tags = useResourceTags(
     open && presentation === "drawer" && configuredSource === "local",
     "knowledge_base",
@@ -183,13 +186,19 @@ export const ConversationKnowledgeScopeModal: FC<
     () => ({ open, value, source: configuredSource, capabilities, t }),
     [open, value, configuredSource, capabilities, t]
   );
+  const [refreshRevision, setRefreshRevision] = useState(0);
+  const initializedCatalogRequest = useRef<typeof catalogRequest | null>(null);
+  const catalogLoadRequest = useMemo(
+    () => ({ catalogRequest, refreshRevision }),
+    [catalogRequest, refreshRevision]
+  );
   const [settledCatalogRequest, setSettledCatalogRequest] = useState<
-    typeof catalogRequest | null
+    typeof catalogLoadRequest | null
   >(null);
   const loading =
     open &&
     Boolean(configuredSource) &&
-    settledCatalogRequest !== catalogRequest;
+    settledCatalogRequest !== catalogLoadRequest;
   const [previousInputs, setPreviousInputs] = useState({
     open,
     search,
@@ -224,6 +233,7 @@ export const ConversationKnowledgeScopeModal: FC<
     }
   }
   useEffect(() => {
+    const { catalogRequest } = catalogLoadRequest;
     const configuredSource = catalogRequest.source;
     if (!open || !configuredSource) return;
     const { value, capabilities, t } = catalogRequest;
@@ -256,6 +266,8 @@ export const ConversationKnowledgeScopeModal: FC<
           );
         setLocalKnowledgeBases(localItems);
         setAidpKnowledgeBases(aidpItems);
+        if (initializedCatalogRequest.current === catalogRequest) return;
+        initializedCatalogRequest.current = catalogRequest;
         const availableIds = new Set(
           configuredSource === "local"
             ? localItems.map((kb: KnowledgeBase) => String(kb.knowledge_id))
@@ -317,12 +329,12 @@ export const ConversationKnowledgeScopeModal: FC<
         }
       })
       .finally(() => {
-        if (!cancelled) setSettledCatalogRequest(catalogRequest);
+        if (!cancelled) setSettledCatalogRequest(catalogLoadRequest);
       });
     return () => {
       cancelled = true;
     };
-  }, [open, catalogRequest]);
+  }, [open, catalogLoadRequest]);
 
   const localOptions = useMemo(
     () =>
@@ -560,10 +572,7 @@ export const ConversationKnowledgeScopeModal: FC<
         )
     );
 
-  const renderSource = (
-    source: "local" | "aidp",
-    section: "all" | "controls" | "list" = "all"
-  ) => {
+  const getSourceSelection = (source: "local" | "aidp") => {
     const values =
       source === "local" ? draft.local.knowledge_ids : draft.aidp.kds_ids;
     const allKnowledgeBases =
@@ -587,7 +596,7 @@ export const ConversationKnowledgeScopeModal: FC<
     const knowledgeBases = filteredKnowledgeBases;
     const selectableKnowledgeBases = (
       presentation === "drawer"
-        ? resourcePage(knowledgeBases, page)
+        ? resourcePage(knowledgeBases, page, pageSize)
         : knowledgeBases
     ).filter(isCompatible);
     const selectableIds = selectableKnowledgeBases.map((knowledgeBase) =>
@@ -637,6 +646,74 @@ export const ConversationKnowledgeScopeModal: FC<
       updateSelectedValues(source, nextValues);
     };
 
+    return {
+      values,
+      selectedSet,
+      selectedKnowledgeBases,
+      selectedLocalModel,
+      knowledgeBases,
+      isCompatible,
+      allSelected,
+      selectableIds,
+      handleSelectAll,
+    };
+  };
+  const renderSource = (
+    source: "local" | "aidp",
+    section: "all" | "controls" | "list" = "all"
+  ) => {
+    const {
+      values,
+      selectedSet,
+      selectedKnowledgeBases,
+      selectedLocalModel,
+      knowledgeBases,
+      isCompatible,
+      allSelected,
+      selectableIds,
+      handleSelectAll,
+    } = getSourceSelection(source);
+    if (presentation === "drawer") {
+      return (
+        <KnowledgeSelectionList
+          knowledgeBases={resourcePage(knowledgeBases, page, pageSize).map(
+            (kb) => ({
+              ...kb,
+              id: getKnowledgeBaseId(source, kb),
+            })
+          )}
+          isAidpSearch={source === "aidp"}
+          groupNamesFor={(kb) =>
+            (kb.group_ids ?? [])
+              .map((id) => groupNameById.get(id))
+              .filter((name): name is string => Boolean(name))
+          }
+          selection={{
+            ids: selectedSet,
+            toggle: (id) => toggleKnowledgeBase(source, id),
+            canSelect: (kb) => selectedSet.has(kb.id) || isCompatible(kb),
+            disabledReason: (kb) =>
+              !isCompatible(kb)
+                ? t("chat.knowledgeScope.embeddingMismatch")
+                : undefined,
+          }}
+          slots={{
+            renderTags: (item) => (
+              <>
+                {(item.tags ?? []).map((tag) => (
+                  <span
+                    key={tag}
+                    className="rounded bg-muted px-1.5 text-xs text-muted-foreground"
+                  >
+                    {tag}
+                  </span>
+                ))}
+              </>
+            ),
+          }}
+        />
+      );
+    }
     return (
       <div
         className={
@@ -658,7 +735,7 @@ export const ConversationKnowledgeScopeModal: FC<
                 onRemove={(id) => toggleKnowledgeBase(source, id)}
               />
               <ResourceSelectionActions
-                pageOnly={presentation === "drawer"}
+                pageOnly={false}
                 allSelected={allSelected}
                 hasSelection={values.length > 0}
                 disabled={loading || saving || listError}
@@ -681,98 +758,86 @@ export const ConversationKnowledgeScopeModal: FC<
             </div>
           ) : (
             <ResourceSelectionGrid
-              layout={presentation === "drawer" ? "list" : "grid"}
+              layout="grid"
               aria-label={t("chat.knowledgeScope.title")}
               fillAvailable={section === "list"}
-              columns={presentation === "drawer" ? 2 : 3}
+              columns={3}
               className="p-1"
             >
-              {resourcePage(knowledgeBases, page).map((knowledgeBase) => {
-                const id = getKnowledgeBaseId(source, knowledgeBase);
-                const isSelected = selectedSet.has(id);
-                const modelIdentity = getEmbeddingIdentity(knowledgeBase);
-                const disabledByModel =
-                  source === "local" &&
-                  !isSelected &&
-                  Boolean(selectedLocalModel) &&
-                  Boolean(modelIdentity) &&
-                  modelIdentity !== selectedLocalModel;
-                const name = knowledgeBase.display_name || knowledgeBase.name;
-                if (presentation === "drawer") {
+              {resourcePage(knowledgeBases, page, pageSize).map(
+                (knowledgeBase) => {
+                  const id = getKnowledgeBaseId(source, knowledgeBase);
+                  const isSelected = selectedSet.has(id);
+                  const modelIdentity = getEmbeddingIdentity(knowledgeBase);
+                  const disabledByModel =
+                    source === "local" &&
+                    !isSelected &&
+                    Boolean(selectedLocalModel) &&
+                    Boolean(modelIdentity) &&
+                    modelIdentity !== selectedLocalModel;
+                  const name = knowledgeBase.display_name || knowledgeBase.name;
+                  const groupNames = (knowledgeBase.group_ids ?? [])
+                    .map((groupId) => groupNameById.get(groupId))
+                    .filter((groupName): groupName is string =>
+                      Boolean(groupName)
+                    );
                   return (
-                    <ResourceSelectionRow
+                    <ResourceCard
+                      resourceType="knowledge"
                       key={id}
                       title={name}
-                      description={knowledgeBase.description || undefined}
                       tags={knowledgeBase.tags || []}
+                      description={knowledgeBase.description || undefined}
+                      subtitle={
+                        source === "local"
+                          ? `${knowledgeBase.documentCount ?? 0} ${t("knowledgeBase.document", "篇文档")}`
+                          : undefined
+                      }
                       selected={isSelected}
                       disabled={disabledByModel}
+                      onClick={() => toggleKnowledgeBase(source, id)}
+                      actions={
+                        <Button
+                          size="small"
+                          aria-label="编辑"
+                          onClick={() => router.push("/knowledges")}
+                        >
+                          编辑
+                        </Button>
+                      }
+                      badges={[
+                        source === "local" ? "本地" : "AIDP",
+                        knowledgeBase.permission,
+                        ...(source === "local" &&
+                        knowledgeBase.embeddingModel &&
+                        knowledgeBase.embeddingModel !== "unknown"
+                          ? [
+                              t("knowledgeBase.tag.model", {
+                                model: knowledgeBase.embeddingModel,
+                              }),
+                            ]
+                          : []),
+                        ...(knowledgeBase.ingroup_permission === "PRIVATE"
+                          ? [t("knowledgeBase.ingroup.permission.PRIVATE")]
+                          : groupNames),
+                        ...(knowledgeBase.is_multimodal ? ["multimodal"] : []),
+                      ]}
                       disabledReason={
                         disabledByModel
                           ? t("chat.knowledgeScope.embeddingMismatch")
                           : undefined
                       }
-                      onClick={() => toggleKnowledgeBase(source, id)}
+                      footer={
+                        disabledByModel
+                          ? t("chat.knowledgeScope.embeddingMismatch")
+                          : isSelected
+                            ? t("common.selected", "已选择")
+                            : t("common.select", "选择")
+                      }
                     />
                   );
                 }
-                const groupNames = (knowledgeBase.group_ids ?? [])
-                  .map((groupId) => groupNameById.get(groupId))
-                  .filter((groupName): groupName is string =>
-                    Boolean(groupName)
-                  );
-                return (
-                  <ResourceCard
-                    resourceType="knowledge"
-                    key={id}
-                    title={name}
-                    tags={knowledgeBase.tags || []}
-                    description={knowledgeBase.description || undefined}
-                    subtitle={`${knowledgeBase.documentCount ?? 0} ${t("knowledgeBase.document", "篇文档")}`}
-                    selected={isSelected}
-                    disabled={disabledByModel}
-                    onClick={() => toggleKnowledgeBase(source, id)}
-                    actions={
-                      <Button
-                        size="small"
-                        aria-label="编辑"
-                        onClick={() => router.push("/knowledges")}
-                      >
-                        编辑
-                      </Button>
-                    }
-                    badges={[
-                      source === "local" ? "本地" : "AIDP",
-                      knowledgeBase.permission,
-                      ...(source === "local" &&
-                      knowledgeBase.embeddingModel &&
-                      knowledgeBase.embeddingModel !== "unknown"
-                        ? [
-                            t("knowledgeBase.tag.model", {
-                              model: knowledgeBase.embeddingModel,
-                            }),
-                          ]
-                        : []),
-                      ...(knowledgeBase.ingroup_permission === "PRIVATE"
-                        ? [t("knowledgeBase.ingroup.permission.PRIVATE")]
-                        : groupNames),
-                      ...(knowledgeBase.is_multimodal ? ["multimodal"] : []),
-                    ]}
-                    disabledReason={
-                      disabledByModel
-                        ? t("chat.knowledgeScope.embeddingMismatch")
-                        : undefined
-                    }
-                    footer={
-                      disabledByModel
-                        ? t("chat.knowledgeScope.embeddingMismatch")
-                        : isSelected
-                          ? t("common.selected", "已选择")
-                          : t("common.select", "选择")
-                    }
-                  />
-                );
-              })}
+              )}
             </ResourceSelectionGrid>
           ))}
         {section === "all" && (
@@ -787,168 +852,254 @@ export const ConversationKnowledgeScopeModal: FC<
     );
   };
 
-  return (
+  const source = configuredSource;
+  const drawerKnowledge =
+    source === "local" ? localKnowledgeBases : aidpKnowledgeBases;
+  const selectedScopeIds =
+    source === "local" ? draft.local.knowledge_ids : draft.aidp.kds_ids;
+  const knowledgeWarnings = (
     <>
-      <ResourcePickerPresentation
-        presentation={presentation}
-        drawerListContent={
-          presentation === "drawer" ? (
-            configuredSource ? (
-              <Spin
-                spinning={loading || !isDeploymentReady}
-                className="h-full [&>.ant-spin-container]:min-h-full"
-              >
-                {renderSource(configuredSource, "list")}
-              </Spin>
-            ) : (
-              <Empty description={t("chat.knowledgeScope.noTool")} />
-            )
-          ) : undefined
-        }
-        drawerPagination={
-          presentation === "drawer" && configuredSource ? (
-            <ResourcePagination
-              current={page}
-              total={filterKnowledgeBases(configuredSource).length}
-              onChange={setPage}
-              disabled={loading || saving}
-            />
-          ) : undefined
-        }
-        disabled={disabled}
-        title={t("chat.knowledgeScope.title")}
-        open={open}
-        onCancel={onCancel}
-        onOk={() => {
-          if (!disabled) void handleConfirm();
-        }}
-        okText={t("chat.knowledgeScope.confirm")}
-        cancelText={t("chat.knowledgeScope.cancel")}
-        confirmLoading={saving}
-        okButtonProps={{
-          disabled:
-            loading ||
-            listError ||
-            !configuredSource ||
-            (!!tags.predicates.length && tags.loading),
-        }}
-        width={920}
-        centered
-        footer={(_, { OkBtn, CancelBtn }) => (
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-3">
-              <Button
-                disabled={disabled || saving || loading}
-                onClick={() => {
-                  setRetrievalDraft(
-                    structuredClone(draft.retrieval_config ?? {})
-                  );
-                  setRetrievalOpen(true);
-                }}
-              >
-                {t("chat.knowledgeScope.retrievalSettings", "检索设置")}
-              </Button>
-              <RestoreDefaultsButton
-                disabled={loading || listError || saving || !configuredSource}
-                onClick={() => {
-                  if (!configuredSource) return;
-                  setDraft(
-                    configuredSource === "local"
-                      ? {
-                          schema_version: 1,
-                          local: {
-                            mode: "override",
-                            knowledge_ids: defaultSelectedIds,
-                          },
-                          aidp: { mode: "disabled", kds_ids: [] },
-                        }
-                      : {
-                          schema_version: 1,
-                          local: { mode: "disabled", knowledge_ids: [] },
-                          aidp: {
-                            mode: "override",
-                            kds_ids: defaultSelectedIds,
-                          },
-                        }
-                  );
-                  setSelectionTouched(true);
-                  setRestoreDefaultClicked(true);
-                }}
-              >
-                {t("chat.knowledgeScope.restoreDefault")}
-              </RestoreDefaultsButton>
-            </div>
-            <div className="flex gap-2">
-              <CancelBtn />
-              <OkBtn />
-            </div>
-          </div>
-        )}
-      >
-        {value &&
-          ((value.local.mode === "override" && configuredSource === "aidp") ||
-            (value.aidp.mode === "override" &&
-              configuredSource === "local")) && (
-            <Alert
-              className="mb-3"
-              type="warning"
-              showIcon
-              title={t("chat.knowledgeScope.incompatible")}
-            />
-          )}
-        {capabilities?.legacy_prompt_warning?.detected && (
+      {value &&
+        ((value.local.mode === "override" && configuredSource === "aidp") ||
+          (value.aidp.mode === "override" && configuredSource === "local")) && (
           <Alert
             className="mb-3"
             type="warning"
             showIcon
-            title={t("chat.knowledgeScope.legacyPromptWarning")}
-            description={t("chat.knowledgeScope.affectedAgents", {
-              ids: capabilities.legacy_prompt_warning.affected_agent_ids.join(
-                ", "
-              ),
-            })}
-            action={
-              <Button
-                size="small"
-                onClick={() => {
-                  onCancel();
-                  router.push("/agents");
-                }}
-              >
-                {t("chat.knowledgeScope.goToAgentConfig")}
-              </Button>
-            }
+            title={t("chat.knowledgeScope.incompatible")}
           />
         )}
-        <Spin spinning={loading || !isDeploymentReady}>
-          {configuredSource ? (
-            <div className="space-y-3 py-2">
-              <ResourceTagFilter
-                filter={tags}
-                onChange={() => setPage(1)}
-                showFilter={
-                  presentation === "drawer" && configuredSource === "local"
+      {capabilities?.legacy_prompt_warning?.detected && (
+        <Alert
+          className="mb-3"
+          type="warning"
+          showIcon
+          title={t("chat.knowledgeScope.legacyPromptWarning")}
+          description={t("chat.knowledgeScope.affectedAgents", {
+            ids: capabilities.legacy_prompt_warning.affected_agent_ids.join(
+              ", "
+            ),
+          })}
+          action={
+            <Button
+              size="small"
+              onClick={() => {
+                onCancel();
+                router.push("/agents");
+              }}
+            >
+              {t("chat.knowledgeScope.goToAgentConfig")}
+            </Button>
+          }
+        />
+      )}
+    </>
+  );
+  const drawerFooter = (
+    <div className="flex items-center gap-3">
+      <Button
+        disabled={disabled || saving || loading}
+        onClick={() => {
+          setRetrievalDraft(structuredClone(draft.retrieval_config ?? {}));
+          setRetrievalOpen(true);
+        }}
+      >
+        {t("chat.knowledgeScope.retrievalSettings", "检索设置")}
+      </Button>
+      <RestoreDefaultsButton
+        disabled={loading || listError || saving || !configuredSource}
+        onClick={() => {
+          if (!configuredSource) return;
+          setDraft(
+            configuredSource === "local"
+              ? {
+                  schema_version: 1,
+                  local: {
+                    mode: "override",
+                    knowledge_ids: defaultSelectedIds,
+                  },
+                  aidp: { mode: "disabled", kds_ids: [] },
                 }
-                search={
-                  <Input.Search
-                    aria-label="搜索知识库"
-                    value={search}
-                    onChange={(event) => setSearch(event.target.value)}
-                    placeholder="搜索名称或描述"
-                    allowClear
-                  />
+              : {
+                  schema_version: 1,
+                  local: { mode: "disabled", knowledge_ids: [] },
+                  aidp: {
+                    mode: "override",
+                    kds_ids: defaultSelectedIds,
+                  },
                 }
-              />
-              {renderSource(
-                configuredSource,
-                presentation === "drawer" ? "controls" : "all"
+          );
+          setSelectionTouched(true);
+          setRestoreDefaultClicked(true);
+        }}
+      >
+        {t("chat.knowledgeScope.restoreDefault")}
+      </RestoreDefaultsButton>
+    </div>
+  );
+  const drawerSelection = source ? getSourceSelection(source) : null;
+  const scopeDrawer = (
+    <WorkbenchResourceDrawer
+      open={open}
+      title={t("chat.knowledgeScope.title")}
+      onCancel={onCancel}
+      onConfirm={() => {
+        if (!disabled) void handleConfirm();
+      }}
+      saving={saving}
+      disabled={disabled}
+      confirmDisabled={
+        loading ||
+        listError ||
+        !source ||
+        (!!tags.predicates.length && tags.loading)
+      }
+      picker={{
+        keyword: search,
+        searchPlaceholder: t(
+          "resourcePicker.search.knowledge",
+          "搜索知识库名称及描述"
+        ),
+        onSearch: setSearch,
+        tagFilter:
+          source === "local" ? (
+            <ResourceTagFilter filter={tags} onChange={() => setPage(1)} />
+          ) : undefined,
+        listTitle: t("resourcePicker.list.knowledge", "知识库列表"),
+        selected: drawerKnowledge
+          .filter((kb) =>
+            selectedScopeIds.includes(getKnowledgeBaseId(source ?? "local", kb))
+          )
+          .map((kb) => ({
+            id: getKnowledgeBaseId(source ?? "local", kb),
+            label: kb.display_name || kb.name,
+          })),
+        onRemoveSelected: (id) => {
+          if (source) toggleKnowledgeBase(source, id);
+        },
+        total: source ? filterKnowledgeBases(source).length : 0,
+        page,
+        pageSize,
+        onPageSizeChange: (size) => {
+          setPageSize(size);
+          setPage(1);
+        },
+        onPageChange: setPage,
+        onSelectAll: drawerSelection
+          ? drawerSelection.handleSelectAll
+          : undefined,
+        allSelected: drawerSelection?.allSelected,
+        partiallySelected: Boolean(
+          drawerSelection &&
+          !drawerSelection.allSelected &&
+          drawerSelection.selectableIds.some((id) =>
+            drawerSelection.selectedSet.has(id)
+          )
+        ),
+        selectAllDisabled:
+          loading ||
+          saving ||
+          listError ||
+          !drawerSelection?.selectableIds.length,
+        onRefresh: () => {
+          if (loading || saving) return;
+          setListError(false);
+          tags.retry?.();
+          setRefreshRevision((value) => value + 1);
+        },
+        refreshDisabled: loading || saving || !source,
+        controlsContent:
+          listError ||
+          capabilities?.legacy_prompt_warning?.detected ||
+          (value &&
+            ((value.local.mode === "override" && source === "aidp") ||
+              (value.aidp.mode === "override" && source === "local"))) ? (
+            <>
+              {knowledgeWarnings}
+              {listError && (
+                <Alert
+                  type="error"
+                  title={t("chat.knowledgeScope.listLoadFailed")}
+                />
               )}
-            </div>
+            </>
+          ) : undefined,
+      }}
+      listContent={
+        <Spin spinning={loading || !isDeploymentReady}>
+          {source ? (
+            renderSource(source, "list")
           ) : (
             <Empty description={t("chat.knowledgeScope.noTool")} />
           )}
         </Spin>
-      </ResourcePickerPresentation>
+      }
+    >
+      {null}
+    </WorkbenchResourceDrawer>
+  );
+  return (
+    <>
+      {presentation === "drawer" ? (
+        scopeDrawer
+      ) : (
+        <ResourcePickerPresentation
+          presentation={presentation}
+          disabled={disabled}
+          title={t("chat.knowledgeScope.title")}
+          open={open}
+          onCancel={onCancel}
+          onOk={() => {
+            if (!disabled) void handleConfirm();
+          }}
+          okText={t("chat.knowledgeScope.confirm")}
+          cancelText={t("chat.knowledgeScope.cancel")}
+          confirmLoading={saving}
+          okButtonProps={{
+            disabled:
+              loading ||
+              listError ||
+              !configuredSource ||
+              (!!tags.predicates.length && tags.loading),
+          }}
+          width={920}
+          centered
+          footer={(_, { OkBtn, CancelBtn }) => (
+            <div className="flex items-center justify-between">
+              {drawerFooter}
+              <div className="flex gap-2">
+                <CancelBtn />
+                <OkBtn />
+              </div>
+            </div>
+          )}
+        >
+          {knowledgeWarnings}
+          <Spin spinning={loading || !isDeploymentReady}>
+            {configuredSource ? (
+              <div className="space-y-3 py-2">
+                <ResourceTagFilter
+                  filter={tags}
+                  onChange={() => setPage(1)}
+                  showFilter={false}
+                  search={
+                    <Input.Search
+                      aria-label="搜索知识库"
+                      value={search}
+                      onChange={(event) => setSearch(event.target.value)}
+                      placeholder="搜索名称或描述"
+                      allowClear
+                    />
+                  }
+                />
+                {renderSource(configuredSource, "all")}
+              </div>
+            ) : (
+              <Empty description={t("chat.knowledgeScope.noTool")} />
+            )}
+          </Spin>
+        </ResourcePickerPresentation>
+      )}
       <Modal
         open={retrievalOpen && open}
         title={t("agent.knowledge.configModal.title")}

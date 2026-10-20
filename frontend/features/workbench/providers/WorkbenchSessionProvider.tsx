@@ -56,6 +56,7 @@ export type WorkbenchSession = {
   isDictationConfigured: boolean;
   workbenchState: WorkbenchState;
   workbenchBootstrap: WorkbenchBootstrap | null;
+  isLoadingWorkbenchBootstrap: boolean;
   onWorkbenchModeChange: (
     mode: "agent_create" | "skill_create" | "generic_chat"
   ) => void;
@@ -124,6 +125,8 @@ export function WorkbenchSessionProvider({
   );
   const [workbenchBootstrap, setWorkbenchBootstrap] =
     useState<WorkbenchBootstrap | null>(null);
+  const [isLoadingWorkbenchBootstrap, setIsLoadingWorkbenchBootstrap] =
+    useState(true);
   const [requestedThreadId, setRequestedThreadId] = useState<
     string | undefined
   >(undefined);
@@ -148,6 +151,9 @@ export function WorkbenchSessionProvider({
       })
       .catch((error) => {
         log.error("[Home] Failed to load Workbench capabilities:", error);
+      })
+      .finally(() => {
+        if (!cancelled) setIsLoadingWorkbenchBootstrap(false);
       });
     return () => {
       cancelled = true;
@@ -191,6 +197,7 @@ export function WorkbenchSessionProvider({
     onBack: handleBack,
     workbenchState,
     workbenchBootstrap,
+    isLoadingWorkbenchBootstrap,
     onWorkbenchModeChange: handleWorkbenchModeChange,
     dispatchWorkbench,
     isDictationConfigured: isDictationConfigured(modelConfig?.stt),

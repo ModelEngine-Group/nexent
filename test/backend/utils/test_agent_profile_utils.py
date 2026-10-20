@@ -458,7 +458,7 @@ class TestFetchAgentProfile:
         assert profile["name"] == "AgentA"
         assert profile["description"] == "desc"
         assert profile["duty_prompt"] == "duty"
-        assert profile["constraint_prompt"] == "cons"
+        assert "constraint_prompt" not in profile
         assert profile["business_description"] == "biz"
         assert profile["tools"] == [{"name": "weather", "description": "w", "source": "local"}]
         assert profile["skills"] == [{"name": "s1", "description": "d1"}]
@@ -480,7 +480,7 @@ class TestFetchAgentProfile:
         assert profile["name"] == "OnlyName"
         assert len(profile["description"]) == profile_mod._DESC_AGENT_MAX
         assert len(profile["duty_prompt"]) == profile_mod._DUTY_PROMPT_MAX
-        assert profile["constraint_prompt"] == ""
+        assert "constraint_prompt" not in profile
         assert profile["business_description"] == ""
         assert profile["tools"] == []
         assert profile["skills"] == []
@@ -574,7 +574,6 @@ class TestFormatAgentProfileContext:
             "### Agent: AgentA",
             "Description: desc",
             "Duty: duty",
-            "Constraints: cons",
             "Business Context: biz",
             "Tools: t1 [API]: d1",
             "Skills: s1 (sd)",
@@ -597,7 +596,6 @@ class TestFormatAgentProfileContext:
         expected = "\n".join([
             "## Agent Configuration",
             "### Agent: A",
-            "Constraints: c",
             "Skills: s",
         ])
         assert profile_mod.format_agent_profile_context(profile) == expected

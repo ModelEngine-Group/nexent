@@ -5,6 +5,10 @@
 import type { ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { AddResourceDrawer } from "@/components/resource-picker/AddResourceDrawer";
+import {
+  ResourceDrawer,
+  type ResourceDrawerProps,
+} from "@/components/resource-picker/ResourceDrawer";
 
 /** Presentation only: the owning controller manages drafts and persistence. */
 export function WorkbenchResourceDrawer({
@@ -19,6 +23,7 @@ export function WorkbenchResourceDrawer({
   children,
   listContent,
   pagination,
+  picker,
 }: {
   open: boolean;
   title: ReactNode;
@@ -28,11 +33,43 @@ export function WorkbenchResourceDrawer({
   disabled?: boolean;
   confirmDisabled?: boolean;
   footerLeading?: ReactNode;
-  children: ReactNode;
+  children?: ReactNode;
   listContent?: ReactNode;
   pagination?: ReactNode;
+  picker?: Omit<
+    ResourceDrawerProps,
+    "children" | "open" | "title" | "onClose" | "onConfirm" | "tagManagement"
+  >;
 }) {
   const { t } = useTranslation();
+  if (picker)
+    return (
+      <>
+        <ResourceDrawer
+          {...picker}
+          semanticTabs
+          pageSizeOptions={[10, 20, 50]}
+          searchInputType="search"
+          open={open}
+          title={title}
+          width="min(768px, 100vw)"
+          disabled={disabled}
+          tagManagement={undefined}
+          onClose={() => {
+            if (!saving) onCancel();
+          }}
+          onConfirm={onConfirm}
+          confirmLoading={saving}
+          confirmDisabled={confirmDisabled}
+          closeText={undefined}
+          confirmText={undefined}
+          footerLeading={undefined}
+        >
+          {listContent}
+        </ResourceDrawer>
+        {children}
+      </>
+    );
   return (
     <AddResourceDrawer
       size="min(760px, 100vw)"

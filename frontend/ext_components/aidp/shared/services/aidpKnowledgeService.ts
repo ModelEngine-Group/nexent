@@ -297,29 +297,6 @@ class AidpKnowledgeService {
   }
 
   /**
-   * List documents for a knowledge base.
-   */
-  async listDocs(
-    id: string,
-    page: number = 1,
-    pageSize: number = 10,
-    keyword: string = "",
-    signal?: AbortSignal
-  ): Promise<AidpDocumentListResponse> {
-    const url = buildUrl(API_ENDPOINTS.aidpMgmt.kbDocuments(id), {
-      page,
-      page_size: pageSize,
-      keyword,
-    });
-    const response = await fetchWithErrorHandling(url, {
-      method: "GET",
-      headers: getAuthHeaders(),
-      signal,
-    });
-    return response.json();
-  }
-
-  /**
    * List only files AIDP confirms as ingested; upload history stays separate.
    * Backed by the /files endpoint (not the legacy /documents view).
    */

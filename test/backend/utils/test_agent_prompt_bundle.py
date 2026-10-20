@@ -24,7 +24,7 @@ def test_ut_be_dpr_001_system_sections_keep_existing_context_metadata(language, 
     items = build_context_inputs(
         language=language,
         is_manager=is_manager,
-        duty="configured duty",
+        duty_prompt="configured duty",
         prompt_bundle=bundle,
     )
 
@@ -279,8 +279,6 @@ def test_ut_be_dpr_008_common_role_sections_are_synchronized(language):
         "sandbox_workspace_guidance",
         "skill_usage",
         "duty",
-        "constraint",
-        "footer",
         "knowledge_guidance_scoped",
         "knowledge_guidance_unscoped",
     }
