@@ -13,7 +13,6 @@ import { useState } from "react";
 import { message } from "antd";
 import { StandardInput } from "@/components/common/StandardInput";
 import { StandardButton } from "@/components/common/StandardButton";
-import { ConversationExpandButton } from "@/components/common/ConversationExpandButton";
 import {
   Sidebar,
   SidebarContent,
@@ -58,8 +57,6 @@ interface ThreadListSidebarProps extends SidebarProps {
   onRenameSuccess?: RenameSuccessHandler;
   onAgentSelected?: (agent: Agent) => void;
   newChatDesign?: boolean;
-  collapseToHeader?: boolean;
-  collapseToFloatingButton?: boolean;
   /** Accepted for backward compatibility; the design removed the legacy switch. */
   showLegacySwitch?: boolean;
   /** Workbench uses user-scoped server IDs; undefined retains Agent-chat pins. */
@@ -76,35 +73,19 @@ export function ThreadListSidebar({
   onAgentSelected,
   onRenameSuccess,
   newChatDesign = false,
-  collapseToHeader = false,
-  collapseToFloatingButton = false,
   pinStorageKey,
   ...props
 }: ThreadListSidebarProps) {
-  const { state, openMobile, toggleSidebar } = useSidebar();
+  const { state, toggleSidebar } = useSidebar();
   const { t } = useTranslation();
   const isMobile = useIsMobile();
-  const compactCollapse = collapseToHeader || collapseToFloatingButton;
-  const isCollapsed =
-    compactCollapse && isMobile
-      ? !openMobile
-      : state === "collapsed" || isMobile;
+  const isCollapsed = state === "collapsed" || isMobile;
   const [searchOpen, setSearchOpen] = useState(false);
   const [conversationSearch, setConversationSearch] = useState("");
   const [legacySearchQuery, setLegacySearchQuery] = useState("");
   // Sidebar frame follows the new-chat page; the workbench mirrors it so the
   // left panel stays aligned when switching pages.
   const sidebarBackground = "#f0f0f0";
-
-  if (isCollapsed && collapseToFloatingButton) {
-    return (
-      <div data-floating-sidebar-trigger className="absolute left-3 top-3 z-20">
-        <ConversationExpandButton />
-      </div>
-    );
-  }
-
-  if (isCollapsed && collapseToHeader) return null;
 
   if (isCollapsed) {
     return (
@@ -150,10 +131,7 @@ export function ThreadListSidebar({
   return (
     <ThreadListPrimitive.Root asChild>
       <div
-        className={cn(
-          "h-full w-[296px] min-w-[296px] max-w-[296px] p-2",
-          compactCollapse && isMobile && "absolute z-30"
-        )}
+        className={cn("h-full w-[296px] min-w-[296px] max-w-[296px] p-2")}
         style={{ backgroundColor: sidebarBackground }}
       >
         <PinnedThreadsProvider
@@ -175,7 +153,7 @@ export function ThreadListSidebar({
           >
             <Sidebar
               {...props}
-              collapsible={compactCollapse && isMobile ? "offcanvas" : "none"}
+              collapsible="none"
               variant="inset"
               className={cn(props.className, "!h-full !w-full min-w-0")}
               style={{ backgroundColor: sidebarBackground, ...props.style }}

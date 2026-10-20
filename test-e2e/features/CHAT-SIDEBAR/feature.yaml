@@ -10,7 +10,7 @@ feature:
     and server-ID batch deletion preserve sidebar state.
   business_rules:
   - rule_id: CHAT-SIDEBAR-RULE-004
-    description: Workbench collapse uses existing header actions. Agent chat collapse uses exactly one floating expand button and no new header or configuration controls. Neither reserves rail width; expanded operations are retained and mobile uses its sheet state.
+    description: Retired on 2026-10-20 at user request. The compact Workbench header and Agent-chat floating collapse experiment is withdrawn; both pages use the develop collapsed rail and local provider state.
   - rule_id: CHAT-SIDEBAR-RULE-003
     description: Workbench pin/unpin persists on the owning personal conversation for the authenticated user,
       using persisted conversation IDs. Tenant changes retain that personal preference. Focus/reconnect refresh hydrates missing pinned histories beyond the loaded page. Pins are newest first across devices;

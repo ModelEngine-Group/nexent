@@ -9,7 +9,7 @@ case:
   title: Conversation lists collapse without a permanent rail
   type: E2E
   priority: P2
-  status: manual
+  status: retired
   automation: manual
   objective: Inspect zero-width collapse and original conversation operations on the real Workbench and Agent-chat pages.
   preconditions:

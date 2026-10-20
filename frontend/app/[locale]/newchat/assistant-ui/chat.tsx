@@ -21,8 +21,6 @@ import type { SkillFileContent } from "@/types/skill";
 
 export interface ChatProps {
   generatedTitle?: string;
-  headerLeading?: ReactNode;
-  headerTrailing?: ReactNode;
   welcomeTitle?: string;
   welcomeSuggestions?: readonly WelcomeSuggestion[];
   conversationId?: number;
@@ -87,8 +85,6 @@ const AgentsLoadingState: FC = () => {
 
 export const Chat: FC<ChatProps> = ({
   generatedTitle,
-  headerLeading,
-  headerTrailing,
   welcomeTitle,
   welcomeSuggestions,
   conversationId,
@@ -160,8 +156,6 @@ export const Chat: FC<ChatProps> = ({
         <Thread
           agent={workbenchPlaceholderAgent}
           generatedTitle={generatedTitle}
-          headerLeading={headerLeading}
-          headerTrailing={headerTrailing}
           conversationId={conversationId}
           newChatDesign={newChatDesign}
           welcomeContent={landingContent}
@@ -206,8 +200,6 @@ export const Chat: FC<ChatProps> = ({
     <Thread
       agent={selectedAgent}
       generatedTitle={generatedTitle}
-      headerLeading={headerLeading}
-      headerTrailing={headerTrailing}
       welcomeTitle={welcomeTitle}
       welcomeSuggestions={welcomeSuggestions}
       conversationId={conversationId}

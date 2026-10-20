@@ -48,7 +48,7 @@ import {
   writeLastChatViewConversation,
   type LastChatViewState,
 } from "./last-chat-view";
-import { ConversationSidebarProvider } from "@/components/common/ConversationSidebarProvider";
+import { SidebarProvider } from "@/components/ui/sidebar";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { message } from "antd";
 import type { Agent } from "@/types/agentConfig";
@@ -964,14 +964,10 @@ const HomeContent: FC<{
   );
 
   return (
-    <div className="relative flex w-full h-full [&:has([data-floating-sidebar-trigger])_[data-agent-landing-title]]:pl-10">
+    <div className="flex w-full h-full">
       <div className="shrink-0 h-full">
-        <ConversationSidebarProvider
-          scope="agent-chat"
-          className="w-auto h-full"
-        >
+        <SidebarProvider className="w-auto h-full">
           <ThreadListSidebar
-            collapseToFloatingButton
             newChatDesign
             activeThreadId={selectedAgent ? runtimeMainThreadId : undefined}
             generatedTitles={generatedTitles}
@@ -982,7 +978,7 @@ const HomeContent: FC<{
             selectedAgent={selectedAgent}
             onAgentSelected={handleAgentSwitched}
           />
-        </ConversationSidebarProvider>
+        </SidebarProvider>
       </div>
 
       <div className="flex min-h-0 flex-1 min-w-0 flex-col">

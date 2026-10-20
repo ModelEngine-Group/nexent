@@ -16,11 +16,9 @@ change:
     modified: []
     retired: []
   traditional_ut:
-    decision: add
+    decision: reuse
     behaviors:
-    - Dispatch expand and new conversation independently and exactly once.
-    - Hide duplicate header actions when expanded; honor mobile drawer state.
-    - Agent chat collapsed mode renders one floating expand control, without a rail or header.
-    reason: Frontend-only interaction change; Python UT is irrelevant. Existing restoration suites require fixture repair and are not counted as passing.
-    test_selectors: [frontend/tests/component/conversationHeaderActions.test.tsx, frontend/tests/component/threadSidebarFloating.test.tsx, frontend/tests/component/workbenchConversationLayout.test.tsx, frontend/tests/component/conversationSidebarMemory.test.tsx]
-  notes: Local preview only. Manual D4 visual journey is distinct from unit callbacks; full acceptance remains pending mobile and conversation-state checks.
+    - Restore the develop collapsed rail on Workbench and Agent chat, retaining expand and Workbench new-conversation callbacks.
+    reason: User withdrew the compact collapse experiment; its implementation-specific unit tests are removed and replaced by develop behavior regression coverage. No Python changes.
+    test_selectors: [frontend/tests/component/conversationSidebarDevelop.test.tsx]
+  notes: Withdrawn on 2026-10-20 at user request; product reverted to develop sidebar behavior and CHAT-SIDEBAR-D4-002 retired. Local preview only. Manual D4 visual journey is distinct from unit callbacks; full acceptance remains pending mobile and conversation-state checks.
