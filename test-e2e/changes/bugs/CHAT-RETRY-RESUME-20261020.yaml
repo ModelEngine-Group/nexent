@@ -1,0 +1,38 @@
+schema_version: "1.0"
+change:
+  change_id: CHAT-RETRY-RESUME-20261020
+  change_type: bugfix
+  bug_id: CHAT-RETRY-RESUME-20261020
+  title: Preserve retry branches when restoring an in-progress conversation
+  description: Use one shared resume hook for newchat and Workbench, restoring the persisted streaming answer under its originating user.
+  observed_behavior: Refreshing during a third answer shows 2/2 followed by an assistant without a query; reload after completion shows 3/3.
+  expected_behavior: Empty and partial streaming answers resume as the third sibling under the original query, preserving the two older answers.
+  escaped_stage: production
+  coverage_gap:
+    type: missing_assertion
+    description: Resume hook UT mocks the runtime; UT-FE-040 checks completed turn ownership but not restoration into a real branching runtime.
+  feature_contract_changed: false
+  affected_features:
+    existing: [F-179, F-056]
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing: []
+    added: []
+    modified: [UT-FE-040]
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    behaviors:
+      - Resume exactly once under the originating user and preserve retry siblings
+      - Empty and partially persisted third answers survive refresh and repeated re-entry
+      - Late responses, active runs, stopped conversations and failed lookups cannot start an orphan answer
+    test_selectors:
+      - frontend/tests/workbench/ConversationResume.test.tsx
+      - frontend/tests/workbench/ConversationResumeBranch.test.tsx
+    reason: Frontend-only changes; strengthen hook UT and the existing component-contract case. Python code and API behavior are unchanged.
+  notes: >-
+    Design is in sibling nexent-doc/docs/Developing/chat-retry-branch-resume/design.md.
+    Strengthen UT-FE-040 rather than duplicate D1; real history adapter, shared hook and assistant-ui runtime collaborate across a controlled transport boundary.
+    AGT-016/017 cover backend transport semantics and are unaffected. No backend, model, deployment or protocol changes. Live browser journey remains separately reported.

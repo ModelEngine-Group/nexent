@@ -1,3 +1,5 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import path from "node:path";
 import { defineConfig } from "vitest/config";
 import react from "@vitejs/plugin-react";
@@ -43,6 +45,7 @@ export default defineConfig({
       { find: /^@dnd-kit\/sortable$/, replacement: path.join(testNodeModules, "@dnd-kit/sortable") },
       { find: /^@dnd-kit\/utilities$/, replacement: path.join(testNodeModules, "@dnd-kit/utilities") },
       { find: /^react-shiki$/, replacement: path.join(testNodeModules, "react-shiki") },
+      { find: /^@assistant-ui\/core\/internal$/, replacement: path.join(testNodeModules, "@assistant-ui/core/dist/internal.js") },
       { find: /^@assistant-ui\/react$/, replacement: path.join(testNodeModules, "@assistant-ui/react") },
       { find: /^@assistant-ui\/react-markdown$/, replacement: path.join(testNodeModules, "@assistant-ui/react-markdown") },
       // Next is a product runtime dependency. Resolve its subpath exports from

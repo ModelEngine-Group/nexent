@@ -63,6 +63,7 @@ import { ServerDictationAdapter } from "./adapter/server-dictation-adapter";
 import type { STTModelConfig } from "@/types/modelConfig";
 import { conversationService } from "@/services/conversationService";
 import { useTranslation } from "react-i18next";
+import { useConversationResume } from "@/hooks/chat/useConversationResume";
 import { useConversationRouteGuard } from "@/features/workbench/hooks/useConversationRouteGuard";
 import type {
   ConversationKnowledgeScope,
@@ -823,85 +824,17 @@ const HomeContent: FC<{
     restoreHistoricalChatMode(conversationId);
   }, [activeConversationId, activeThreadId]);
 
-  // A route change tears down the local stream, while the backend keeps the
-  // conversation marked as streaming. Reconnect the assistant-ui runtime when
-  // the historical load reports that state.
-  useEffect(() => {
-    const numericConversationId = Number(activeConversationId);
-    if (
-      !ready ||
-      isThreadRunning ||
-      !activeThreadId ||
-      !Number.isInteger(numericConversationId) ||
-      numericConversationId <= 0 ||
-      resumedConversationIdsRef.current.has(numericConversationId)
-    ) {
-      return;
-    }
-
-    let cancelled = false;
-    void conversationService
-      .getById(String(numericConversationId))
-      .then((conversation) => {
-        if (
-          cancelled ||
-          conversation.streaming_message?.status !== "streaming" ||
-          resumedConversationIdsRef.current.has(numericConversationId)
-        ) {
-          return;
-        }
-
-        resumedConversationIdsRef.current.add(numericConversationId);
-        const messages = runtime.thread.getState().messages;
-        const parentId = messages.at(-1)?.id ?? null;
-        runtime.thread.resumeRun({
-          parentId,
-          sourceId: null,
-          runConfig: {
-            custom: {
-              threadId: String(numericConversationId),
-              ...(selectedAgent?.id ? { agentId: selectedAgent.id } : {}),
-              ...(selectedAgent?.current_version_no
-                ? { agentVersionNo: selectedAgent.current_version_no }
-                : {}),
-              onGenerationStopped: handleGenerationStopped,
-              enablePlan: chatMode === "planning",
-              resume: true,
-            },
-          },
-          stream: async function* (options) {
-            const resumedRun = remoteChatModelAdapter.run(options);
-            if (Symbol.asyncIterator in resumedRun) {
-              yield* resumedRun;
-            } else {
-              yield await resumedRun;
-            }
-          },
-        });
-      })
-      .catch((error) => {
-        if (!cancelled) {
-          resumedConversationIdsRef.current.delete(numericConversationId);
-          log.error(
-            `[HomeContent] Failed to resume conversation ${numericConversationId}:`,
-            error
-          );
-        }
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [
+  useConversationResume({
+    runtime,
     activeConversationId,
     activeThreadId,
-    chatMode,
-    isThreadRunning,
     ready,
-    runtime,
+    isThreadRunning,
     selectedAgent,
+    chatMode,
+    resumedConversationIdsRef,
     handleGenerationStopped,
-  ]);
+  });
 
   // Publish the server conversation id registry to the thread-list adapter so
   // `generateTitle` can wait for the real backend id before issuing its
