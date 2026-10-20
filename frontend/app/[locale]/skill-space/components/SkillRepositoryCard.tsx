@@ -124,7 +124,13 @@ export function SkillRepositoryCard({
           </Dropdown>
         ) : undefined
       }
-      meta={author ? <span className="truncate">{author}</span> : undefined}
+      meta={
+        author ? (
+          <span className="block truncate" title={author}>
+            {author}
+          </span>
+        ) : undefined
+      }
       footer={action}
       onClick={onDetailClick}
     />

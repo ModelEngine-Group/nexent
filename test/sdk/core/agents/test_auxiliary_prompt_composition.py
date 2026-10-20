@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """Auxiliary model requests are assembled from SDK-owned resources."""
 
 import importlib
@@ -201,12 +203,13 @@ def test_evaluation_set_system_matches_complete_sdk_request():
 def test_structured_profile_formats_only_available_resources():
     profile = {
         "name": "Example", "description": "", "duty_prompt": "Help",
-        "constraint_prompt": "", "business_description": "",
+        "constraint_prompt": "LEGACY_POISON", "business_description": "",
         "tools": [{"name": "search", "source": "remote", "description": "Finds pages"}],
         "skills": [{"name": "research", "description": ""}],
         "sub_agents": [], "knowledge_bases": [],
     }
     result = format_agent_profile_context(profile)
+    assert "LEGACY_POISON" not in result
     assert result.startswith("## Agent Configuration\n### Agent: Example")
     assert "Tools: search [REMOTE]: Finds pages" in result
     assert "Skills: research" in result

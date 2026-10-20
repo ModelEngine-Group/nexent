@@ -1494,8 +1494,6 @@ async def create_agent_config(
 
     # Build system prompt: prioritize segmented fields, fallback to original prompt field if not available
     duty_prompt = agent_info.get("duty_prompt", "")
-    constraint_prompt = agent_info.get("constraint_prompt", "")
-    few_shots_prompt = agent_info.get("few_shots_prompt", "")
 
     is_manager = len(worker_agents) > 0 or len(external_a2a_agents) > 0
 
@@ -1859,9 +1857,7 @@ async def create_agent_config(
     )
 
     context_items = build_context_inputs(
-        duty=duty_prompt,
-        constraint=constraint_prompt,
-        few_shots=few_shots_prompt,
+        duty_prompt=duty_prompt,
         language=language,
         is_manager=is_manager,
         enable_planning=enable_planning,

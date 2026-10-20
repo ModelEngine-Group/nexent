@@ -128,12 +128,6 @@ export function useAgentGeneration({
             case GENERATE_PROMPT_STREAM_TYPES.DUTY:
               saveGeneratedField(generationAgentId, 'dutyPrompt', data.content);
               break;
-            case GENERATE_PROMPT_STREAM_TYPES.CONSTRAINT:
-              saveGeneratedField(generationAgentId, 'constraintPrompt', data.content);
-              break;
-            case GENERATE_PROMPT_STREAM_TYPES.FEW_SHOTS:
-              saveGeneratedField(generationAgentId, 'fewShotsPrompt', data.content);
-              break;
             case GENERATE_PROMPT_STREAM_TYPES.AGENT_VAR_NAME:
               // Only save to cache if user hasn't filled in agent name themselves
               if (!editedAgent.name) {
@@ -205,13 +199,12 @@ export function useAgentGeneration({
 
           // User is still on the same agent, apply the generated content
           // AI-generated fields come from cache, other fields come from editedAgent
+          const dutyPrompt = cached?.dutyPrompt || editedAgent.duty_prompt || "";
           const configUpdates: AgentConfigUpdate = {
             name: cached?.agentName || editedAgent.name || "",
             display_name: cached?.agentDisplayName || editedAgent.display_name || "",
             description: cached?.agentDescription || editedAgent.description || "",
-            duty_prompt: cached?.dutyPrompt || editedAgent.duty_prompt || "",
-            constraint_prompt: cached?.constraintPrompt || editedAgent.constraint_prompt || "",
-            few_shots_prompt: cached?.fewShotsPrompt || editedAgent.few_shots_prompt || "",
+            duty_prompt: dutyPrompt,
             greeting_message: cached?.greetingMessage || editedAgent.greeting_message || "",
             example_questions: cached?.exampleQuestions
               ? (typeof cached.exampleQuestions === "string"

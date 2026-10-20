@@ -1,3 +1,5 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 "use client";
 
 import { ConfigProvider } from "antd";
@@ -31,17 +33,17 @@ export default function McpToolsPage() {
   return (
     <ConfigProvider theme={mcpToolsTheme}>
       <div className="flex h-full min-h-0 w-full min-w-0 flex-col">
-        <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden [scrollbar-gutter:stable]">
+        <div className="min-h-0 flex-1 overflow-hidden">
           <motion.div
             initial="initial"
             animate="in"
             exit="out"
             variants={pageVariants}
             transition={pageTransition}
-            className="w-full h-full px-4 py-8 sm:px-6 sm:py-10 xl:px-16"
+            className="flex h-full min-h-0 w-full flex-col px-4 py-8 sm:px-6 sm:py-10 xl:px-16"
           >
-            <div className="flex flex-col gap-6">
-              <section className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+            <div className="flex min-h-0 flex-1 flex-col gap-6">
+              <section className="flex shrink-0 flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
                 <div className="flex items-start gap-4">
                   <div className="flex size-14 shrink-0 items-center justify-center rounded-2xl bg-primary/10 text-primary shadow-sm">
                     <Puzzle className="size-7" />
@@ -60,7 +62,7 @@ export default function McpToolsPage() {
               <Tabs
                 value={tab}
                 onValueChange={(value) => setTab(value as McpToolsServicesTab)}
-                className="w-full"
+                className="w-full shrink-0"
               >
                 <TabsList className="flex h-auto w-full justify-start gap-6 overflow-x-auto rounded-none border-b border-slate-200 bg-transparent p-0 dark:border-slate-700">
                   <TabsTrigger
@@ -100,17 +102,22 @@ export default function McpToolsPage() {
                 </TabsList>
               </Tabs>
 
-              {tab === McpToolsServicesTab.REPOSITORY ? (
-                <McpSpace {...controller.repositoryProps} />
-              ) : null}
-              {tab === McpToolsServicesTab.MINE ? (
-                <MyMcp {...controller.mineProps} />
-              ) : null}
-              {tab === McpToolsServicesTab.REVIEW && isAdmin ? (
-                <ReviewCenter {...controller.reviewProps} />
-              ) : null}
+              <div
+                data-testid="repository-tab-content"
+                className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden px-px pb-1 [scrollbar-gutter:stable]"
+              >
+                {tab === McpToolsServicesTab.REPOSITORY ? (
+                  <McpSpace {...controller.repositoryProps} />
+                ) : null}
+                {tab === McpToolsServicesTab.MINE ? (
+                  <MyMcp {...controller.mineProps} />
+                ) : null}
+                {tab === McpToolsServicesTab.REVIEW && isAdmin ? (
+                  <ReviewCenter {...controller.reviewProps} />
+                ) : null}
 
-              {controller.dialogs}
+                {controller.dialogs}
+              </div>
             </div>
           </motion.div>
         </div>

@@ -1,6 +1,7 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
 import sys
+from pathlib import Path
 import types
 import pytest
 from types import SimpleNamespace
@@ -67,7 +68,8 @@ exceptions_mock.AgentNotFoundError = AgentNotFoundError
 sys.modules["consts.exceptions"] = exceptions_mock
 
 # 模拟utils模块
-utils_mock = MagicMock()
+utils_mock = types.ModuleType("utils")
+utils_mock.__path__ = [str(Path(__file__).resolve().parents[3] / "backend/utils")]
 utils_mock.auth_utils = MagicMock()
 utils_mock.auth_utils.get_current_user_id_from_token = MagicMock(return_value="test_user_id")
 
@@ -442,6 +444,8 @@ def test_create_agent_success(monkeypatch, mock_session, requested_policy, expec
     session.flush = MagicMock()
 
     mock_agent = MockAgent()
+    del mock_agent.constraint_prompt
+    del mock_agent.few_shots_prompt
 
     mock_ctx = MagicMock()
     mock_ctx.__enter__.return_value = session
@@ -451,12 +455,16 @@ def test_create_agent_success(monkeypatch, mock_session, requested_policy, expec
     monkeypatch.setattr("backend.database.agent_db.as_dict", lambda obj: obj.__dict__)
     monkeypatch.setattr("backend.database.agent_db._enforce_tenant_agent_limit", lambda *_args: None)
     def make_agent(**kwargs):
+        assert "constraint_prompt" not in kwargs
+        assert "few_shots_prompt" not in kwargs
+        assert kwargs["duty_prompt"] == "Complete prompt"
         mock_agent.enable_protocol_repair_retry = kwargs["enable_protocol_repair_retry"]
         return mock_agent
 
     monkeypatch.setattr("backend.database.agent_db.AgentInfo", make_agent)
 
-    agent_info = {"name": "new_agent", "description": "test description"}
+    agent_info = {"name": "new_agent", "description": "test description",
+                  "duty_prompt": "Complete prompt"}
     if requested_policy is not None:
         agent_info["enable_protocol_repair_retry"] = requested_policy
     result = create_agent(agent_info, "tenant1", "user1")
@@ -552,10 +560,19 @@ def test_create_system_agent_skips_tenant_quota(monkeypatch, mock_session):
     session.add.assert_called_once()
 
 
-def test_update_agent_success(monkeypatch, mock_session):
+@pytest.mark.parametrize("fields,expected", [
+    ({"description": "updated description"}, "Existing"),
+    ({"duty_prompt": "Replacement"}, "Replacement"),
+    ({"duty_prompt": ""}, ""),
+    ({"duty_prompt": None}, "Existing"),
+])
+def test_update_agent_success(monkeypatch, mock_session, fields, expected):
     """测试成功更新agent"""
     session, query = mock_session
     mock_agent = MockAgent()
+    mock_agent.duty_prompt = "Existing"
+    del mock_agent.constraint_prompt
+    del mock_agent.few_shots_prompt
 
     mock_first = MagicMock()
     mock_first.return_value = mock_agent
@@ -570,11 +587,15 @@ def test_update_agent_success(monkeypatch, mock_session):
     monkeypatch.setattr("backend.database.agent_db.filter_property", lambda data, model: data)
 
     agent_info = MagicMock()
-    agent_info.__dict__ = {"name": "updated_agent", "description": "updated description"}
+    agent_info.__dict__ = fields
 
     update_agent(1, agent_info, "user1")
 
     assert mock_agent.updated_by == "user1"
+
+    assert mock_agent.duty_prompt == expected
+    assert not hasattr(mock_agent, "constraint_prompt")
+    assert not hasattr(mock_agent, "few_shots_prompt")
 
 
 def test_cmsr_006_update_preserves_explicitly_disabled_protocol_repair(monkeypatch, mock_session):

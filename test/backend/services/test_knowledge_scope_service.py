@@ -1,4 +1,5 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 from unittest.mock import patch
 from types import SimpleNamespace
 
@@ -322,7 +323,7 @@ def test_list_and_tool_default_parsing_is_defensive():
 @patch(
     "management.services.knowledge_base.scope.search_agent_info_by_agent_id",
     side_effect=[
-        {"name": "root", "constraint_prompt": 'index_names: ["fixed"]'},
+        {"name": "root", "duty_prompt": 'index_names: ["fixed"]'},
         {"name": "child"},
     ],
 )

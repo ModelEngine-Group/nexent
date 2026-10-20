@@ -42,6 +42,7 @@ import { message } from "antd";
 import type { Agent } from "@/types/agentConfig";
 import { useModelList } from "@/hooks/model/useModelList";
 import { withDefaultWorkbenchModel } from "./modelOptions";
+import { WorkbenchLoadingBoundary } from "./components/WorkbenchLoadingBoundary";
 import { selectWorkbenchModel } from "@/features/model-controls/modelOptions";
 import log from "@/lib/logger";
 import { ConversationTitleGuard } from "@/lib/conversationTitle";
@@ -58,6 +59,7 @@ import {
   returnFromCreation,
 } from "./conversationTransitions";
 import { CreationActions } from "./components/CreationActions";
+import { WorkbenchGreeting } from "./components/WorkbenchGreeting";
 import { SkillCreationResultCard } from "./components/CreationResultCards";
 import {
   applySkillCreationEvent,
@@ -121,6 +123,7 @@ const HomeContent: FC = () => {
     isDictationConfigured,
     workbenchState,
     workbenchBootstrap,
+    isLoadingWorkbenchBootstrap,
     onWorkbenchModeChange,
     dispatchWorkbench,
   } = useWorkbenchSession();
@@ -1309,16 +1312,7 @@ const HomeContent: FC = () => {
     message.success("Skill 已保存到我的 Skills");
   };
 
-  // Conditional rendering must happen after all hooks
-  if (!ready) {
-    return (
-      <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
-        Loading conversation…
-      </div>
-    );
-  }
-
-  return (
+  const content = (
     <div className="flex w-full h-full">
       <div className="shrink-0 h-full">
         <SidebarProvider className="w-auto h-full">
@@ -1367,18 +1361,7 @@ const HomeContent: FC = () => {
             selectedAgent={null}
             modelSelectionScope="tenant"
             fallbackAgentName={t("workbench.genericAgentName", "智能体工作台")}
-            landingContent={
-              <div className="flex w-full flex-col items-center text-center">
-                <h1 className="text-[36px] leading-[54px] text-[#191919]">
-                  <span className="font-bold">
-                    {t("workbench.landingGreetingHi", "你好，我是Nexent")}
-                  </span>{" "}
-                  <span className="font-normal">
-                    {t("workbench.landingGreetingAsk", "需要我帮你做什么")}
-                  </span>
-                </h1>
-              </div>
-            }
+            landingContent={<WorkbenchGreeting />}
             selectedModelId={effectiveWorkbenchConfig.model_id?.toString()}
             deepThinking={
               effectiveWorkbenchConfig.generation_config.deep_thinking
@@ -1582,5 +1565,16 @@ const HomeContent: FC = () => {
         />
       </div>
     </div>
+  );
+
+  return (
+    <WorkbenchLoadingBoundary
+      conversationReady={ready}
+      modelsLoading={isLoadingModels}
+      bootstrapLoading={isLoadingWorkbenchBootstrap}
+      resourcesResolving={workbenchState.resolving}
+    >
+      {content}
+    </WorkbenchLoadingBoundary>
   );
 };
