@@ -867,7 +867,11 @@ export default function McpList({ tenantId }: { tenantId: string | null }) {
                       onChange={(e) => setContainerConfigJson(e.target.value)}
                       rows={6}
                       disabled={actionsLocked}
-                      style={{ fontFamily: "monospace", fontSize: 12 }}
+                      style={{
+                        fontFamily:
+                          "'HarmonyOS Sans SC', 'Huawei Sans', sans-serif",
+                        fontSize: 12,
+                      }}
                     />
                     <div className="flex items-center gap-2">
                       <Text style={{ minWidth: 80 }}>{t("mcpConfig.addContainer.serviceName")}:</Text>
