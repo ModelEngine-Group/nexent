@@ -12,6 +12,8 @@ import threading
 import asyncio
 import time
 import json
+from copy import deepcopy
+from dataclasses import asdict, dataclass, is_dataclass, replace
 from typing import List, Optional, Dict, Any
 
 from openai.types.chat.chat_completion_message import ChatCompletionMessage
@@ -21,6 +23,33 @@ from smolagents.models import OpenAIServerModel, ChatMessage, MessageRole
 from ..utils.observer import MessageObserver, ProcessType
 
 logger = logging.getLogger("openai_llm")
+
+
+@dataclass
+class _MiniMaxChatMessage(ChatMessage):
+    # A dataclass field survives smolagents' dict/model_dump_json history export.
+    reasoning_content: Optional[str] = None
+
+    def dict(self):
+        # An HTTP stream cannot be deep-copied into persisted message history.
+        data = asdict(replace(self, raw=None))
+        data.pop("raw", None)
+        return data
+
+    def model_dump_json(self):
+        return json.dumps(self.dict())
+
+
+def _tool_call_dict(tool_call):
+    if isinstance(tool_call, dict):
+        call = deepcopy(tool_call)
+    elif is_dataclass(tool_call):
+        call = asdict(tool_call)
+    else:
+        call = tool_call.model_dump(exclude_none=True)
+    # smolagents adds a schema-only description field to function calls.
+    call["function"].pop("description", None)
+    return call
 
 
 class OpenAIModel(OpenAIServerModel):
@@ -91,6 +120,50 @@ ssl_verify=True, model_factory: Optional[str] = None,
         if self.display_name:
             _monitoring_display_name.set(self.display_name)
 
+    def _prepare_completion_kwargs(self, messages, *args, **kwargs):
+        if self.model_factory != "minimax":
+            return super()._prepare_completion_kwargs(messages, *args, **kwargs)
+
+        # smolagents 1.23 drops reasoning/tool fields and merges adjacent roles.
+        # Clean content one message at a time, retaining OpenAI history boundaries.
+        completion_kwargs = super()._prepare_completion_kwargs([], *args, **kwargs)
+        history = []
+        for message in messages:
+            get = message.get if isinstance(message, dict) else lambda key, default=None: getattr(message, key, default)
+            role = get("role")
+            content = get("content")
+            tool_call_id = get("tool_call_id")
+            is_tool_response = role == "tool" or (role == "tool-response" and tool_call_id is not None)
+            cleaned = super()._prepare_completion_kwargs(
+                [{"role": "user" if is_tool_response else role, "content": content}],
+                *args, **kwargs,
+            )["messages"][0]
+            if is_tool_response:
+                cleaned["role"] = "tool"
+                cleaned["tool_call_id"] = tool_call_id
+            if cleaned["role"] == "assistant":
+                reasoning = get("reasoning_content")
+                if reasoning is not None:
+                    cleaned["reasoning_content"] = reasoning
+                if get("tool_calls"):
+                    cleaned["tool_calls"] = [_tool_call_dict(call) for call in get("tool_calls")]
+            history.append(cleaned)
+        completion_kwargs["messages"] = history
+        return completion_kwargs
+
+    def generate(self, messages, *args, **kwargs):
+        message = super().generate(messages, *args, **kwargs)
+        if self.model_factory != "minimax":
+            return message
+        response_message = message.raw.choices[0].message
+        preserved = _MiniMaxChatMessage.from_dict({
+            "role": message.role,
+            "content": message.content,
+            "tool_calls": [_tool_call_dict(call) for call in message.tool_calls] if message.tool_calls else None,
+        }, raw=message.raw, token_usage=message.token_usage)
+        preserved.reasoning_content = getattr(response_message, "reasoning_content", None)
+        return preserved
+
     def __call__(self, messages: List[Dict[str, Any]], stop_sequences: Optional[List[str]] = None,
                  response_format: dict[str, str] | None = None, tools_to_call_from: Optional[List[Tool]] = None, _token_tracker=None, **kwargs, ) -> ChatMessage:
         _monitoring_operation.set("chat_completion")
@@ -133,7 +206,7 @@ ssl_verify=True, model_factory: Optional[str] = None,
 
         # Normalize incoming messages so we can accept plain dict payloads like
         # {"role": "user", "content": "..."} alongside ChatMessage instances.
-        normalized_messages: List[ChatMessage] = []
+        normalized_messages: List[ChatMessage | Dict[str, Any]] = []
         for msg in messages or []:
             if isinstance(msg, ChatMessage):
                 normalized_messages.append(msg)
@@ -141,11 +214,14 @@ ssl_verify=True, model_factory: Optional[str] = None,
                 if "role" not in msg or "content" not in msg:
                     raise ValueError(
                         "Each message dict must include 'role' and 'content'.")
-                normalized_messages.append(ChatMessage.from_dict({
-                    "role": msg["role"],
-                    "content": msg["content"],
-                    "tool_calls": msg.get("tool_calls"),
-                }))
+                if self.model_factory == "minimax":
+                    normalized_messages.append(msg)
+                else:
+                    normalized_messages.append(ChatMessage.from_dict({
+                        "role": msg["role"],
+                        "content": msg["content"],
+                        "tool_calls": msg.get("tool_calls"),
+                    }))
             else:
                 raise TypeError(
                     "Messages must be ChatMessage or dict objects.")
@@ -196,6 +272,8 @@ ssl_verify=True, model_factory: Optional[str] = None,
 
         chunk_list = []
         token_join = []
+        reasoning_join = []
+        tool_calls = {}
         role = None
 
         # Reset output mode
@@ -225,8 +303,23 @@ ssl_verify=True, model_factory: Optional[str] = None,
                 reasoning_content = getattr(
                     chunk.choices[0].delta, 'reasoning_content', None)
 
+                if self.model_factory == "minimax":
+                    for delta in getattr(chunk.choices[0].delta, "tool_calls", None) or []:
+                        call = tool_calls.setdefault(delta.index, {
+                            "id": "", "type": "function", "function": {"name": "", "arguments": ""},
+                        })
+                        if delta.id:
+                            call["id"] = delta.id
+                        if delta.type:
+                            call["type"] = delta.type
+                        if delta.function:
+                            call["function"]["name"] += delta.function.name or ""
+                            call["function"]["arguments"] += delta.function.arguments or ""
+
                 # Handle reasoning_content if it exists and is not null
                 if reasoning_content is not None:
+                    if self.model_factory == "minimax":
+                        reasoning_join.append(reasoning_content)
                     self.observer.add_model_reasoning_content(
                         reasoning_content)
                     if token_tracker and not first_token_received:
@@ -258,6 +351,7 @@ ssl_verify=True, model_factory: Optional[str] = None,
             # Send end marker
             self.observer.flush_remaining_tokens()
             model_output = "".join(token_join)
+            reasoning_output = "".join(reasoning_join)
 
             # Extract token usage
             input_tokens = 0
@@ -272,8 +366,8 @@ ssl_verify=True, model_factory: Optional[str] = None,
             else:
                 input_text = ""
                 for msg in normalized_messages:
-                    if hasattr(msg, 'content'):
-                        content = msg.content
+                    if isinstance(msg, dict) or hasattr(msg, 'content'):
+                        content = msg.get("content") if isinstance(msg, dict) else msg.content
                         if isinstance(content, str):
                             input_text += content
                         elif isinstance(content, list):
@@ -303,9 +397,17 @@ ssl_verify=True, model_factory: Optional[str] = None,
                     "chunk_count": len(chunk_list)
                 })
 
-            message = ChatMessage.from_dict(
-                ChatCompletionMessage(role=role if role else "assistant",  # If there is no explicit role, default to "assistant"
-                                      content=model_output).model_dump(include={"role", "content", "tool_calls"}))
+            if self.model_factory == "minimax":
+                message = _MiniMaxChatMessage.from_dict({
+                    "role": role if role else "assistant",
+                    "content": model_output,
+                    "tool_calls": list(tool_calls.values()) or None,
+                })
+                message.reasoning_content = reasoning_output if reasoning_join else None
+            else:
+                message = ChatMessage.from_dict(
+                    ChatCompletionMessage(role=role if role else "assistant", content=model_output)
+                    .model_dump(include={"role", "content", "tool_calls"}))
 
             from smolagents.monitoring import TokenUsage
 
