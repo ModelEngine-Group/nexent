@@ -9,7 +9,7 @@ case:
   title: Conversation lists collapse without a permanent rail
   type: E2E
   priority: P2
-  status: retired
+  status: manual
   automation: manual
   objective: Inspect zero-width collapse and original conversation operations on the real Workbench and Agent-chat pages.
   preconditions:
@@ -19,19 +19,25 @@ case:
   steps:
   - order: 1
     action: On both routes, collapse the expanded conversation list, including Agent chat discovery and an existing conversation.
-    expected: The entire conversation rail disappears; content starts beside the primary navigation; Workbench exposes header expand/new-conversation actions; Agent chat exposes only one floating expand action, without adding a header or covering the discovery title or message text.
+    expected: The entire conversation rail disappears; content starts beside the primary navigation. Workbench has no conversation header and exposes floating expand and compose controls. Agent discovery exposes one expand action. Selected-Agent chat uses floating responsive controls without adding a header, reserved space or padding to the conversation region.
   - order: 2
     action: Expand via the available button and inspect search, history and Agent selection; collapse again.
     expected: Existing list operations return, duplicate header actions disappear, and the active conversation/composer remain unchanged.
   - order: 3
-    action: Start a new conversation through the collapsed header; verify the existing Workbench blank-conversation behavior.
+    action: Start a new conversation through the collapsed floating compose action; verify the existing Workbench blank-conversation behavior.
     expected: Existing new-conversation and Agent navigation semantics are preserved without generation or lost saved history; the collapsed list stays collapsed through loading and the expanded list stays expanded.
   - order: 4
     action: Repeat collapse and expansion at a mobile viewport, then close the sheet.
     expected: The mobile sheet opens and closes; no permanent rail remains and desktop state does not prevent reopening.
   - order: 5
     action: Collapse Workbench, visit Agent chat and another route, then return. Set different visibility on Agent chat, navigate back, and finally reload the browser document.
-    expected: Each page independently retains its chosen state across route navigation; full reload restores the expanded default. Main navigation behavior remains unchanged.
+    expected: Both pages restore the expanded default after leaving and returning; no cross-page visibility state is retained. New conversations within the current Workbench page retain the current visibility. The discovery expand button is vertically aligned with its title. Main navigation behavior remains unchanged.
+  - order: 6
+    action: Expand the Agent-chat discovery sidebar, then select an Agent and return to discovery without sending a message.
+    expected: Discovery shows an Agent Chat title, search and collapse controls, without the current-Agent dropdown or new-conversation action. Selecting an Agent restores conversation actions. Returning to discovery hides them again. The discovery page never displays model selection or a composer.
+  - order: 7
+    action: With a selected Agent and collapsed history, resize or zoom the page through available chat widths 1900px, 1500px, 1340px, 1188px, 1106px, 1034px and 400px; then restore the original width.
+    expected: The name first shortens, then hides at 1340px; back and its separator hide at 1188px; compose hides at 1106px. At 1034px or below the sole panel-expand button docks fully on the right side of the menu border. Controls remain within the centered message column's left gutter at wider sizes and never cover scrolling replies. Hidden controls cannot receive keyboard focus. Floating controls do not change conversation positioning or dimensions; widening restores controls without losing the conversation.
   expected_results:
   - Both routes reclaim collapsed rail width with their specified controls and preserve conversation semantics.
   forbidden_side_effects:

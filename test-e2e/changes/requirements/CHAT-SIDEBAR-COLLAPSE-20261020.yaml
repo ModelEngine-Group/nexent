@@ -3,8 +3,8 @@ change:
   change_id: CHAT-SIDEBAR-COLLAPSE-20261020
   change_type: requirement
   requirement_id: CHAT-SIDEBAR-COLLAPSE-20261020
-  title: Collapse Workbench into header actions and Agent chat into one floating action
-  description: Local visual preview with no persistent collapsed rail and preserved conversation callbacks.
+  title: Responsive conversation sidebars on Workbench and Agent chat
+  description: Responsive floating controls preserve the conversation layout and existing navigation callbacks.
   affected_features:
     existing: []
     added: []
@@ -16,9 +16,13 @@ change:
     modified: []
     retired: []
   traditional_ut:
-    decision: reuse
+    decision: add
     behaviors:
-    - Restore the develop collapsed rail on Workbench and Agent chat, retaining expand and Workbench new-conversation callbacks.
-    reason: User withdrew the compact collapse experiment; its implementation-specific unit tests are removed and replaced by develop behavior regression coverage. No Python changes.
-    test_selectors: [frontend/tests/component/conversationSidebarDevelop.test.tsx]
-  notes: Withdrawn on 2026-10-20 at user request; product reverted to develop sidebar behavior and CHAT-SIDEBAR-D4-002 retired. Local preview only. Manual D4 visual journey is distinct from unit callbacks; full acceptance remains pending mobile and conversation-state checks.
+    - Dispatch expand and new conversation independently and exactly once.
+    - Hide floating controls when expanded; honor mobile drawer state.
+    - Agent discovery collapse renders one expand control. Selected-Agent collapse retains independently dispatched compose and back actions in a transparent responsive toolbar.
+    - Both pages reset to expanded after leaving and returning, while Workbench loading retains same-page visibility.
+    - Discovery hides current-Agent selection and new-conversation actions; selecting an Agent restores them.
+    reason: Frontend-only interaction change; Python UT is irrelevant. Component callbacks, docking and visibility are unit proof; the manual D4 case owns the runtime layout journey.
+    test_selectors: [frontend/tests/component/threadSidebarFloating.test.tsx, frontend/tests/component/workbenchConversationLayout.test.tsx, frontend/tests/component/conversationSidebarMemory.test.tsx]
+  notes: Updated on 2026-10-21 for the final responsive floating controls, sidebar presentation and nonpersistent cross-page visibility. Workbench has no conversation header. Titles truncate with overflow-only tooltips before hiding; controls hide as whole items and the final expand button docks on the right side of the menu border. Manual D4 visual acceptance is separate from component UT; complete mobile journey acceptance remains pending.
