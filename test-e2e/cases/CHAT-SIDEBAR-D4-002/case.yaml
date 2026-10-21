@@ -7,7 +7,7 @@ case:
   requirement_ids:
   - CHAT-SIDEBAR-COLLAPSE-20261020
   business_rule_ids:
-  - CHAT-SIDEBAR-RULE-004
+  - CHAT-SIDEBAR-RULE-008
   title: Conversation lists collapse without a permanent rail
   type: E2E
   priority: P2

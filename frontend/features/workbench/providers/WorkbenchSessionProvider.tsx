@@ -143,6 +143,24 @@ export function WorkbenchSessionProvider({
     setRequestedThreadId(threadId || undefined);
   }, []);
 
+  const handleThreadIdChange = useCallback((threadId: string | undefined) => {
+    setRequestedThreadId(threadId);
+    const url = new URL(window.location.href);
+    url.searchParams.delete("thread_id");
+    url.searchParams.delete("conversation_id");
+    if (threadId && /^[1-9]\d*$/.test(threadId)) {
+      url.searchParams.set("conversation_id", threadId);
+    }
+    const nextUrl = `${url.pathname}${url.search}${url.hash}`;
+    if (
+      nextUrl !==
+      `${window.location.pathname}${window.location.search}${window.location.hash}`
+    ) {
+      // Keep the current document and its per-thread composer state mounted.
+      window.history.replaceState(window.history.state, "", nextUrl);
+    }
+  }, []);
+
   useEffect(() => {
     let cancelled = false;
     void fetchWorkbenchBootstrap()
@@ -166,6 +184,7 @@ export function WorkbenchSessionProvider({
     },
     adapter: threadListAdapter,
     threadId: requestedThreadId,
+    onThreadIdChange: handleThreadIdChange,
   });
 
   const { isLoading: isLoadingAgents, agents } = usePublishedAgentList();

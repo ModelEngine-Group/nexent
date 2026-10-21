@@ -87,6 +87,7 @@ export const conversationService = {
     if (params.conversationType) {
       query.set("conversation_type", params.conversationType);
     }
+    if (params.cursor) query.set("cursor", params.cursor);
     const response = await fetch(
       `${API_ENDPOINTS.conversation.list}?${query.toString()}`
     );

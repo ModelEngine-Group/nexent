@@ -9,6 +9,8 @@ import {
   XIcon,
 } from "lucide-react";
 import { WorkbenchPinHistorySync } from "./workbench-pin-history-sync";
+import { useConversationActivitySync } from "@/hooks/chat/useConversationActivitySync";
+import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
 import { useEffect, useRef, useState } from "react";
 import { message, Typography } from "antd";
 import { StandardInput } from "@/components/common/StandardInput";
@@ -80,6 +82,11 @@ export function ThreadListSidebar({
   pinStorageKey,
   ...props
 }: ThreadListSidebarProps) {
+  const { user } = useAuthorizationContext();
+  useConversationActivitySync(
+    user ? `${user.id}:${user.tenantId}` : null,
+    newChatDesign ? "agent_chat" : "workbench"
+  );
   const { state, openMobile, toggleSidebar } = useSidebar();
   const { t } = useTranslation();
   const isMobile = useIsMobile();

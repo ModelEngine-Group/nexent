@@ -1,0 +1,79 @@
+schema_version: '1.0'
+stage: D4
+module: CHAT-SIDEBAR
+case:
+  case_id: CHAT-ACTIVITY-D4-001
+  feature_id: CHAT-SIDEBAR
+  requirement_ids:
+  - CHAT-AUTOMATION-ACTIVITY-20261020
+  business_rule_ids:
+  - CHAT-SIDEBAR-RULE-004
+  title: Background conversation activity refresh preserves the active composer
+  type: E2E
+  priority: P1
+  status: active
+  automation: automated
+  objective: Background conversation activity refresh preserves the active composer
+  preconditions:
+  - Repository dependencies and the declared controlled profile are available; fixtures are isolated.
+  test_data:
+    profile: mock
+    identities:
+    - owner
+    - other
+    histories:
+    - ordinary
+    - automation
+    - mixed
+    - deleted
+    - older
+    - newer
+  steps:
+  - order: 1
+    action: Open Workbench with newer and older histories, type an unsent draft, then change the controlled backend
+      activity of the older history.
+    expected: The older history appears first without a page reload and the draft remains.
+  - order: 2
+    action: Wait for visible polling and exercise focus/network refresh while preserving the active conversation
+      and pins.
+    expected: Duplicate/late requests do not duplicate rows or switch/reset the current runtime.
+  expected_results:
+  - The older history appears first without a page reload and the draft remains.
+  - Duplicate/late requests do not duplicate rows or switch/reset the current runtime.
+  forbidden_side_effects:
+  - No production data/schema mutation, quota bypass by ordinary requests, loss of composer/stream state or changes
+    to unrelated histories.
+  observations:
+  - Persisted source/activity, API order and errors, visible browser state or migration output.
+  cleanup:
+  - Dispose only the fixture schema, browser context and temporary test data.
+  execution:
+    profiles:
+    - name: mock
+      required_services: []
+  acceptance:
+  - id: AC-01
+    description: The older history appears first without a page reload and the draft remains.
+    steps:
+    - 1
+    expected_results:
+    - 1
+    forbidden_side_effects:
+    - 1
+  - id: AC-02
+    description: Duplicate/late requests do not duplicate rows or switch/reset the current runtime.
+    steps:
+    - 2
+    expected_results:
+    - 2
+    forbidden_side_effects:
+    - 1
+  actor: Authenticated Workbench user
+  journey:
+  - Open and retain a draft
+  - Observe background activity without reload
+  - Refocus and recover network
+  final_business_result:
+  - The newly active conversation fronts the list without changing the active composer or stream.
+  failure_evidence:
+  - Playwright trace and screenshot on assertion failure

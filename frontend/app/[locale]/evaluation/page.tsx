@@ -76,6 +76,26 @@ const EVALUATION_DELETE_ALL_ROLES = new Set<string>([
 ]);
 
 /**
+ * A required `expected` input means the evaluator grades against a reference
+ * answer. Code evaluators may declare it without using it, so the input
+ * declaration is the only signal considered here.
+ */
+type EvaluatorInputField = {
+  name?: string;
+  required?: boolean;
+};
+
+function evaluatorRequiresExpectedAnswer(
+  evaluator: { input_fields?: EvaluatorInputField[] | null } | null | undefined
+): boolean {
+  const fields = evaluator?.input_fields;
+  return (
+    Array.isArray(fields) &&
+    fields.some((field) => field.name === "expected" && field.required === true)
+  );
+}
+
+/**
  * Fire a body-less mutating request (DELETE / POST) and surface backend
  * errors as a toast. Returns true only on success so callers can skip
  * their success path (local row removal / list refresh).
@@ -443,6 +463,23 @@ function RunsTab() {
     },
   ];
 
+  // no_set mode generates questions only, so evaluators that need a golden
+  // answer stay visible but disabled, after the selectable ones.
+  const publishedEvaluators = evaluators.filter(
+    (e) => e.status === "PUBLISHED"
+  );
+  const evaluatorOptions =
+    evalMode === "no_set"
+      ? [
+          ...publishedEvaluators.filter(
+            (e) => !evaluatorRequiresExpectedAnswer(e)
+          ),
+          ...publishedEvaluators.filter((e) =>
+            evaluatorRequiresExpectedAnswer(e)
+          ),
+        ]
+      : publishedEvaluators;
+
   return (
     <div>
       <Flex justify="space-between" align="center" style={{ marginBottom: 16 }}>
@@ -659,6 +696,11 @@ function RunsTab() {
               }
             >
               <Flex vertical gap={8}>
+                {evalMode === "no_set" && (
+                  <Text type="secondary" className="text-xs">
+                    {t("agentEvaluation.noSetEvaluatorHint")}
+                  </Text>
+                )}
                 <Select
                   mode="multiple"
                   maxCount={5}
@@ -684,9 +726,9 @@ function RunsTab() {
                     });
                     setMappings(newM);
                   }}
-                  options={evaluators
-                    .filter((e: any) => e.status === "PUBLISHED")
-                    .map((e: any) => ({
+                  options={evaluatorOptions.map((e) => {
+                    const needsExpected = evaluatorRequiresExpectedAnswer(e);
+                    return {
                       label:
                         currentLang === "en"
                           ? e.name_en || e.name
@@ -696,10 +738,34 @@ function RunsTab() {
                         currentLang === "en"
                           ? e.description_en || e.description || ""
                           : e.description || e.description_en || "",
-                    }))}
+                      needsExpected,
+                      disabled: evalMode === "no_set" && needsExpected,
+                    };
+                  })}
                   optionRender={(opt: any) => (
                     <Flex vertical gap={2}>
-                      <Text strong>{opt.label}</Text>
+                      <Flex align="center" gap={6} wrap>
+                        <Text
+                          strong
+                          type={opt.data.disabled ? "secondary" : undefined}
+                        >
+                          {opt.label}
+                        </Text>
+                        {evalMode === "no_set" && (
+                          <Tag
+                            color={
+                              opt.data.needsExpected ? "default" : "success"
+                            }
+                            style={{ margin: 0 }}
+                          >
+                            {opt.data.needsExpected
+                              ? t("agentEvaluation.evaluatorRequiresExpected")
+                              : t(
+                                  "agentEvaluation.evaluatorNoExpectedRequired"
+                                )}
+                          </Tag>
+                        )}
+                      </Flex>
                       {opt.data.desc && (
                         <Text
                           type="secondary"

@@ -1,0 +1,35 @@
+schema_version: '1.0'
+change:
+  change_id: AUTO-RESULT-EXPAND-20261020
+  change_type: bugfix
+  bug_id: AUTO-RESULT-EXPAND-20261020
+  title: Keep a single automation result viewing control
+  description: Remove the redundant table expansion column and retain the original View Result loading logic unchanged.
+  observed_behavior: The table arrow opens an empty result panel without requesting the run or conversation.
+  expected_behavior: Only View Result expands or collapses the result, preserving loading, cache and retry behavior; no left expansion column is displayed.
+  escaped_stage: D4
+  coverage_gap:
+    type: missing_boundary
+    description: PW-TASK-01 covers the History drawer lifecycle but never opens the inline result using the table arrow. No existing frontend UT exercises this page.
+  feature_contract_changed: false
+  affected_features:
+    existing: [F-126]
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing: []
+    added: [AUTO-RESULT-D4-001]
+    modified: []
+    retired: []
+  traditional_ut:
+    decision: add
+    behaviors:
+    - View Result is the sole entry and loads the latest run and its assistant message when first opened.
+    - The left expansion control and empty column are absent.
+    - Collapse never fetches; reopening reuses cached results, including an empty successful response.
+    - A failed request is reported and can be retried using View Result.
+    reason: Frontend component regression complements the real browser journey. Python, D1, D2, D3 and D5 add no necessary proof for this UI callback wiring fix.
+    test_selectors:
+    - frontend/tests/workbench/AutomationResultExpansion.test.tsx
+  notes: Lightweight design in nexent-doc/nexent/automation-result-expansion; preserve PW-TASK-01 lifecycle coverage. No backend or schema change. User authorized commit and remote push after browser retest.

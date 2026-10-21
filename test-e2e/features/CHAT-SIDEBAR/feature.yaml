@@ -9,7 +9,7 @@ feature:
   description: Persisted visibility, normalized rename, agent-group batch selection
     and server-ID batch deletion preserve sidebar state.
   business_rules:
-  - rule_id: CHAT-SIDEBAR-RULE-004
+  - rule_id: CHAT-SIDEBAR-RULE-008
     description: Workbench uses a localized sidebar title above a full-width new-conversation action, without a conversation header. Its collapse uses responsive floating expand and compose actions. Agent discovery collapse uses one expand button. Selected-Agent collapse uses floating transparent controls, progressively hiding the title, back action and compose action at available content widths of 1340px, 1188px and 1106px. At 1034px or less only the panel-expand icon remains, retaining its original 12px left/top inset and 32px target. No header is added. Narrow mode reserves a 32px additional gutters on both sides combined with existing message padding for the original button; wider modes preserve conversation spacing. Navigation hover expansion renders above the floating button; expanded operations and mobile sheet state are retained.
   - rule_id: CHAT-SIDEBAR-RULE-003
     description: Workbench pin/unpin persists on the owning personal conversation for the authenticated user,
@@ -17,7 +17,9 @@ feature:
       repinning moves first. Workbench rows show localized relative times when timestamps
       are available; recency/search/rename/paging
       and Agent-chat pins are preserved. Failed saves do not report success; drafts
-      and inaccessible/non-Workbench conversations cannot be pinned.
+      and inaccessible/non-Workbench conversations cannot be pinned. Pin times use
+      UTC TIMESTAMP storage and explicit UTC ISO responses independently of the
+      database or application timezone.
   - rule_id: CHAT-SIDEBAR-RULE-001
     description: Persisted conversations remain visible; unsent drafts stay hidden;
       rename propagates normalized title and remote identity; batch deletion resolves
@@ -26,6 +28,26 @@ feature:
     description: In agent-chat batch mode, selecting an agent selects or clears every
       persisted conversation for that agent across paginated list results, updates the
       selected/total state, and leaves conversations from other agents unchanged.
+  - rule_id: CHAT-SIDEBAR-RULE-004
+    description: Visible messages update dedicated activity; activity-based pagination and automatic metadata
+      refresh preserve composer, runtime and pin semantics. Activity is stored as
+      a UTC TIMESTAMP without time zone; database/session timezone changes cannot
+      shift writes, cursor boundaries, pin metadata or public epoch timestamps.
+  - rule_id: CHAT-SIDEBAR-RULE-005
+    description: Workbench sidebar selection updates the URL to the selected saved
+      conversation without document navigation or runtime replacement. New and
+      unsaved conversations remove stale conversation parameters; unrelated query
+      parameters and hashes remain. Reload restores the selected saved conversation.
+  - rule_id: CHAT-SIDEBAR-RULE-006
+    description: Assistant finalization locks its owned live conversation before
+      the message. Concurrent single or batch deletion follows conversation-first
+      ordering, with batch conversation locks ordered by ID. Finalization cannot
+      write after deletion wins; activity and message finalization remain atomic.
+  - rule_id: CHAT-SIDEBAR-RULE-007
+    description: Automatic titles use an owned live title revision, independent of
+      message activity and unrelated audit updates. Every stored rename advances
+      that revision, including same-title renames, so manual changes and the first
+      successful competing title save win without holding locks during model calls.
   required_test_stages:
   - D1
   - D4

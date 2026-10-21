@@ -7,6 +7,15 @@ import { beforeEach, expect, test, vi } from "vitest";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { ThreadListSidebar } from "@/app/newchat/assistant-ui/threadlist-sidebar";
 
+const activitySync = vi.hoisted(() => vi.fn());
+vi.mock("@/hooks/chat/useConversationActivitySync", () => ({
+  useConversationActivitySync: activitySync,
+}));
+vi.mock("@/components/providers/AuthorizationProvider", () => ({
+  useAuthorizationContext: () => ({
+    user: { id: "sidebar-user", tenantId: "sidebar-tenant" },
+  }),
+}));
 const sidebar = vi.hoisted(() => ({
   state: "collapsed",
   isMobile: false,
@@ -47,10 +56,29 @@ vi.mock("@assistant-ui/react", () => ({
 }));
 
 beforeEach(() => {
+  activitySync.mockClear();
   sidebar.state = "collapsed";
   sidebar.isMobile = false;
   sidebar.openMobile = false;
 });
+
+test.each([false, true])(
+  "collapsed sidebar retains account-scoped activity synchronization (agentChat=%s)",
+  (newChatDesign) => {
+    render(
+      <TooltipProvider>
+        <ThreadListSidebar
+          collapseToFloatingButton
+          newChatDesign={newChatDesign}
+        />
+      </TooltipProvider>
+    );
+    expect(activitySync).toHaveBeenCalledWith(
+      "sidebar-user:sidebar-tenant",
+      newChatDesign ? "agent_chat" : "workbench"
+    );
+  }
+);
 
 test("floating Agent-chat collapse renders one expand action with no rail, header or new-conversation action", () => {
   const create = vi.fn();
