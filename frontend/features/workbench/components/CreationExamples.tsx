@@ -36,8 +36,7 @@ export function CreationExamples({
     const prompt = t(translationKey, CREATION_PROMPTS[mode][index]);
     return {
       id: key,
-      title:
-        mode === "agent_create" ? t(`${translationKey}.title`, title) : title,
+      title: t(`${translationKey}.title`, title),
       description:
         "description" in example
           ? t(`${translationKey}.description`, example.description)
@@ -48,7 +47,12 @@ export function CreationExamples({
   });
   return (
     <section
-      aria-label={mode === "skill_create" ? "Skill 创建示例" : "Agent创建示例"}
+      aria-label={t(
+        mode === "skill_create"
+          ? "workbench.creationExamples.skillSectionLabel"
+          : "workbench.creationExamples.agentSectionLabel",
+        mode === "skill_create" ? "Skill 创建示例" : "Agent 创建示例"
+      )}
       className="px-1"
     >
       <CardSuggestion

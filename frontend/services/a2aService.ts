@@ -670,6 +670,7 @@ export const a2aClientService = {
     success: boolean;
     data?: A2AServerAgent;
     message?: string;
+    statusCode?: number;
   }> {
     try {
       const response = await fetchWithErrorHandling(API_ENDPOINTS.a2a.serverAgentSettings(agentId));
@@ -682,7 +683,11 @@ export const a2aClientService = {
       return { success: false, message: data.detail || t('a2a.service.getServerSettingsFailed') };
     } catch (error) {
       log.error('Failed to get server settings:', error);
-      return { success: false, message: t('a2a.service.getServerSettingsFailed') };
+      return {
+        success: false,
+        message: t('a2a.service.getServerSettingsFailed'),
+        statusCode: error instanceof ApiError && typeof error.code === 'number' ? error.code : undefined,
+      };
     }
   },
 
