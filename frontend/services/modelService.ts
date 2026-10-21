@@ -1376,6 +1376,10 @@ export const modelService = {
     temperature?: number;
     topP?: number;
     extraParams?: Record<string, unknown>;
+    // Type change: sent only when the operator re-typed the model. The
+    // backend manage/update request carries model_type through to the
+    // record (multi_embedding pairs deliberately keep their type).
+    type?: ModelType;
   }): Promise<void> => {
     try {
       const response = await authedFetch(
@@ -1393,6 +1397,7 @@ export const modelService = {
             ...(params.displayName !== undefined
               ? { display_name: params.displayName }
               : {}),
+            ...(params.type !== undefined ? { model_type: params.type } : {}),
             base_url: params.url,
             ...(params.apiKey?.trim() ? { api_key: params.apiKey } : {}),
             ...(params.maxTokens !== undefined

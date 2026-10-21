@@ -4,14 +4,7 @@
 
 import React, { useState, useMemo } from "react";
 import { useTranslation } from "react-i18next";
-import {
-  Table,
-  Button,
-  message,
-  Tag,
-  Segmented,
-  Tooltip,
-} from "antd";
+import { Table, Button, message, Tag, Segmented, Tooltip } from "antd";
 import {
   CheckCircle,
   CircleEllipsis,
@@ -35,6 +28,7 @@ import type { ModelMonitoringItem } from "@/types/monitoring";
 import { MODEL_TYPES } from "@/const/modelConfig";
 import { useConfirmModal } from "@/hooks/useConfirmModal";
 import { ModelAddDialogV2 } from "../../../models/components/model/ModelAddDialogV2";
+import { ModelEditDialog } from "../../../models/components/model/ModelEditDialog";
 import ModelCapacityCoverageWidget from "./ModelCapacityCoverageWidget";
 interface UnifiedModelRow extends ModelOption {
   request_count?: number;
@@ -75,7 +69,6 @@ export default function ModelList({ tenantId }: { tenantId: string | null }) {
 
   const [editingModel, setEditingModel] = useState<ModelOption | null>(null);
   const [addDialogVisible, setAddDialogVisible] = useState(false);
-  const [editDialogVisible, setEditDialogVisible] = useState(false);
 
   const [checkingConnectivity, setCheckingConnectivity] = useState<Set<string>>(
     new Set()
@@ -118,19 +111,16 @@ export default function ModelList({ tenantId }: { tenantId: string | null }) {
   };
 
   const handleEditDialogClose = () => {
-    setEditDialogVisible(false);
     setEditingModel(null);
   };
 
   const handleEditDialogSuccess = async () => {
     await refetch();
-    setEditDialogVisible(false);
     setEditingModel(null);
   };
 
   const openEdit = (model: ModelOption) => {
     setEditingModel(model);
-    setEditDialogVisible(true);
   };
 
   const handleDelete = async (displayName: string, _provider?: string) => {
@@ -556,12 +546,11 @@ export default function ModelList({ tenantId }: { tenantId: string | null }) {
         tenantId={tenantId || undefined}
       />
 
-      <ModelAddDialogV2
-        isOpen={editDialogVisible}
+      <ModelEditDialog
         model={editingModel}
+        tenantId={tenantId || undefined}
         onClose={handleEditDialogClose}
         onSuccess={handleEditDialogSuccess}
-        tenantId={tenantId || undefined}
       />
     </div>
   );
