@@ -4,9 +4,9 @@
   container: agent-chat / inline-size;
 }
 
-/* Keep the original 32px control at a 12px inset, clear of the replies. */
+/* Existing message padding supplies the right inset beside the 32px control. */
 .page:has([data-expand-gutter="true"]) {
-  padding-left: 56px;
+  padding-left: 32px;
 }
 
 .discovery [data-active="true"]:not(:hover) {
