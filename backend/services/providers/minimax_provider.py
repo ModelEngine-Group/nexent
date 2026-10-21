@@ -2,15 +2,13 @@ import httpx
 from typing import Dict, List
 
 from consts.const import DEFAULT_LLM_MAX_TOKENS
-from consts.provider import MINIMAX_GET_URL
+from consts.provider import MINIMAX_GET_URL, MINIMAX_TEXT_MODELS
 from services.providers.base import AbstractModelProvider, _classify_provider_error
-
 
 # MiniMax known model context windows (tokens)
 MINIMAX_MODEL_CONTEXT = {
-    "MiniMax-M3": 512000,
-    "MiniMax-M2.7": 192000,
-    "MiniMax-M2.7-highspeed": 192000,
+    "MiniMax-M3.1-Flash": 1000000,
+    "MiniMax-M3": 1000000,
 }
 
 
@@ -103,7 +101,8 @@ class MiniMaxModelProvider(AbstractModelProvider):
 
             # Return the specific list based on the requested target_model_type
             if target_model_type == "llm":
-                return categorized_models["chat"]
+                models_by_id = {model["id"]: model for model in categorized_models["chat"]}
+                return [models_by_id[model_id] for model_id in MINIMAX_TEXT_MODELS if model_id in models_by_id]
             elif target_model_type in ("embedding", "multi_embedding"):
                 return categorized_models["embedding"]
             elif target_model_type in categorized_models:

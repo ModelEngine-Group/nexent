@@ -203,6 +203,8 @@ def merge_existing_model_attributes(
     for existing_model in existing_model_list:
         model_full_name = existing_model["model_repo"] + \
             "/" + existing_model["model_name"]
+        if provider == ProviderEnum.MINIMAX.value and model_type == "llm":
+            model_full_name = add_repo_to_name(existing_model["model_repo"], existing_model["model_name"])
         existing_model_map[model_full_name] = existing_model
 
     # Iterate through the model list, merge specified fields from existing models

@@ -154,6 +154,7 @@ class _ProviderEnum:
     MODELENGINE = _EnumItem("modelengine")
     DASHSCOPE = _EnumItem("dashscope")
     TOKENPONY = _EnumItem("tokenpony")
+    MINIMAX = _EnumItem("minimax")
 
 
 consts_provider_mod.ProviderEnum = _ProviderEnum
@@ -162,6 +163,8 @@ consts_provider_mod.DASHSCOPE_BASE_URL = "https://dashscope.aliyuncs.com/compati
 consts_provider_mod.DASHSCOPE_REALTIME_BASE_URL = "wss://dashscope.aliyuncs.com/api-ws/v1/realtime"
 consts_provider_mod.DASHSCOPE_STT_BASE_URL = consts_provider_mod.DASHSCOPE_REALTIME_BASE_URL
 consts_provider_mod.TOKENPONY_BASE_URL = "https://api.tokenpony.cn/v1/"
+consts_provider_mod.MINIMAX_BASE_URL = "https://api.minimax.io/v1/"
+consts_provider_mod.MINIMAX_TEXT_MODELS = ("MiniMax-M3.1-Flash", "MiniMax-M3")
 sys.modules["consts.provider"] = consts_provider_mod
 
 # Stub services.model_provider_service used by service
@@ -883,6 +886,30 @@ async def test_batch_create_models_for_tenant_flow():
             "keep-id", {"max_tokens": 4096}, "u1")
         mock_prep.assert_awaited()
         mock_create.assert_called_once()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("selected", [[], [{"id": "MiniMax-M3.1-Flash", "max_tokens": 8192}]])
+async def test_minimax_text_refresh_preserves_hidden_saved_models(selected):
+    svc = import_svc()
+    existing = [
+        {"model_id": "legacy", "model_repo": "", "model_name": "MiniMax-M2.7", "max_tokens": 4096},
+        {"model_id": "custom", "model_repo": "team", "model_name": "custom-text", "max_tokens": 4096},
+        {"model_id": "flash", "model_repo": "", "model_name": "MiniMax-M3.1-Flash", "max_tokens": 8192},
+    ]
+    with mock.patch.object(svc, "get_models_by_tenant_factory_type", return_value=existing), \
+            mock.patch.object(svc, "delete_model_record") as delete, \
+            mock.patch.object(svc, "update_model_record") as update, \
+            mock.patch.object(svc, "create_model_record") as create:
+        await svc.batch_create_models_for_tenant("u1", "t1", {
+            "provider": "minimax", "type": "llm", "models": selected,
+        })
+    if selected:
+        delete.assert_not_called()
+    else:
+        delete.assert_called_once_with("flash", "u1", "t1")
+    update.assert_not_called()
+    create.assert_not_called()
 
 
 @pytest.mark.asyncio

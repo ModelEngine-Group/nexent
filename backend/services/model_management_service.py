@@ -10,6 +10,7 @@ from consts.provider import (
     DASHSCOPE_REALTIME_BASE_URL,
     TOKENPONY_BASE_URL,
     MINIMAX_BASE_URL,
+    MINIMAX_TEXT_MODELS,
 )
 
 from database.model_management_db import (
@@ -211,9 +212,13 @@ async def batch_create_models_for_tenant(user_id: str, tenant_id: str, batch_pay
             for model in existing_model_list
         }
 
-        # Delete existing models not present
+        # Hidden legacy/custom MiniMax text models must survive catalog refreshes.
         for model in existing_model_list:
             model_full_name = model["model_repo"] + "/" + model["model_name"]
+            if provider == ProviderEnum.MINIMAX.value and model_type == "llm":
+                model_full_name = add_repo_to_name(model["model_repo"], model["model_name"])
+                if model_full_name not in MINIMAX_TEXT_MODELS:
+                    continue
             if model_full_name not in model_list_ids:
                 delete_model_record(model["model_id"], user_id, tenant_id)
 

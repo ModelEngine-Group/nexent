@@ -16,6 +16,27 @@ class TestMiniMaxModelProvider:
     """Tests for MiniMaxModelProvider class."""
 
     @pytest.mark.asyncio
+    async def test_catalog_transport_filters_only_text_choices(self, mocker: MockFixture):
+        requests = []
+
+        def handle(request):
+            requests.append(request)
+            return httpx.Response(200, json={"data": [
+                {"id": model_id} for model_id in [
+                    "MiniMax-M2.7", "MiniMax-M3", "custom-text", "speech-2.8-hd",
+                    "MiniMax-M3.1-Flash", "MiniMax-M3.1-Flash[1m]", "MiniMax-M2.7-highspeed",
+                ]
+            ]})
+
+        client = httpx.AsyncClient(transport=httpx.MockTransport(handle))
+        mocker.patch("backend.services.providers.minimax_provider.httpx.AsyncClient", return_value=client)
+        result = await MiniMaxModelProvider().get_models({"model_type": "llm", "api_key": "test-only"})
+        assert [model["id"] for model in result] == ["MiniMax-M3.1-Flash", "MiniMax-M3"]
+        assert requests[0].method == "GET"
+        assert str(requests[0].url) == "https://api.minimax.io/v1/models"
+        assert requests[0].headers["Authorization"] == "Bearer test-only"
+
+    @pytest.mark.asyncio
     async def test_get_models_llm_success(self, mocker: MockFixture):
         """Test successful model retrieval for LLM models."""
         mock_response = MagicMock()
@@ -28,7 +49,7 @@ class TestMiniMaxModelProvider:
                     "owned_by": "minimax"
                 },
                 {
-                    "id": "MiniMax-M2.7",
+                    "id": "MiniMax-M3.1-Flash",
                     "object": "model",
                     "owned_by": "minimax"
                 },
@@ -69,12 +90,10 @@ class TestMiniMaxModelProvider:
 
         result = await provider.get_models(provider_config)
 
-        assert len(result) == 3
-        assert result[0]["id"] == "MiniMax-M3"
+        assert [model["id"] for model in result] == ["MiniMax-M3.1-Flash", "MiniMax-M3"]
         assert result[0]["model_type"] == "llm"
         assert result[0]["model_tag"] == "chat"
-        # M3 has 512K context window
-        assert result[0]["max_tokens"] == 512000
+        assert result[0]["max_tokens"] == 1000000
 
     @pytest.mark.asyncio
     async def test_get_models_llm_known_context_windows(self, mocker: MockFixture):
@@ -84,7 +103,7 @@ class TestMiniMaxModelProvider:
         mock_response.json.return_value = {
             "data": [
                 {"id": "MiniMax-M3", "object": "model", "owned_by": "minimax"},
-                {"id": "MiniMax-M2.7", "object": "model", "owned_by": "minimax"},
+                {"id": "MiniMax-M3.1-Flash", "object": "model", "owned_by": "minimax"},
                 {"id": "MiniMax-M2.7-highspeed", "object": "model", "owned_by": "minimax"},
             ]
         }
@@ -112,9 +131,9 @@ class TestMiniMaxModelProvider:
         result = await provider.get_models(provider_config)
 
         model_map = {m["id"]: m for m in result}
-        assert model_map["MiniMax-M3"]["max_tokens"] == 512000
-        assert model_map["MiniMax-M2.7"]["max_tokens"] == 192000
-        assert model_map["MiniMax-M2.7-highspeed"]["max_tokens"] == 192000
+        assert model_map["MiniMax-M3"]["max_tokens"] == 1000000
+        assert model_map["MiniMax-M3.1-Flash"]["max_tokens"] == 1000000
+        assert "MiniMax-M2.7-highspeed" not in model_map
 
     @pytest.mark.asyncio
     async def test_get_models_embedding_success(self, mocker: MockFixture):
@@ -529,7 +548,7 @@ class TestMiniMaxModelProvider:
         mock_response.json.return_value = {
             "data": [
                 {
-                    "id": "MiniMax-M2.7",
+                    "id": "MiniMax-M3.1-Flash",
                     "object": "model",
                     "owned_by": "minimax"
                 }
@@ -574,7 +593,7 @@ class TestMiniMaxModelProvider:
         mock_response.json.return_value = {
             "data": [
                 {
-                    "id": "MiniMax-M2.7",
+                    "id": "MiniMax-M3.1-Flash",
                     "object": "model",
                     "owned_by": "minimax"
                 }
@@ -615,7 +634,7 @@ class TestMiniMaxModelProvider:
         mock_response.status_code = 200
         mock_response.json.return_value = {
             "data": [
-                {"id": "MiniMax-M2.7", "object": "model", "owned_by": "minimax"},
+                {"id": "MiniMax-M3.1-Flash", "object": "model", "owned_by": "minimax"},
                 {"id": "embo-01", "object": "model", "owned_by": "minimax"},
                 {"id": "speech-2.8-hd", "object": "model", "owned_by": "minimax"},
                 {"id": "rerank-v1", "object": "model", "owned_by": "minimax"},
@@ -644,7 +663,7 @@ class TestMiniMaxModelProvider:
         # Request LLM - should only return chat models
         result = await provider.get_models({"model_type": "llm", "api_key": "test"})
         assert len(result) == 1
-        assert result[0]["id"] == "MiniMax-M2.7"
+        assert result[0]["id"] == "MiniMax-M3.1-Flash"
 
     @pytest.mark.asyncio
     async def test_get_models_preserves_original_id(self, mocker: MockFixture):
@@ -653,7 +672,7 @@ class TestMiniMaxModelProvider:
         mock_response.status_code = 200
         mock_response.json.return_value = {
             "data": [
-                {"id": "MiniMax-M2.7", "object": "model", "owned_by": "minimax"},
+                {"id": "MiniMax-M3.1-Flash", "object": "model", "owned_by": "minimax"},
             ]
         }
         mock_response.raise_for_status = MagicMock()
@@ -678,7 +697,7 @@ class TestMiniMaxModelProvider:
         result = await provider.get_models({"model_type": "llm", "api_key": "test"})
 
         # ID should be preserved as-is (not lowercased)
-        assert result[0]["id"] == "MiniMax-M2.7"
+        assert result[0]["id"] == "MiniMax-M3.1-Flash"
 
     @pytest.mark.asyncio
     async def test_get_models_ssl_verify_defaults_to_true(self, mocker: MockFixture):

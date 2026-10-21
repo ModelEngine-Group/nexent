@@ -169,6 +169,7 @@ class _ProviderEnumStub:
     MODELENGINE = mock.Mock(value="modelengine")
     DASHSCOPE = mock.Mock(value="dashscope")
     TOKENPONY = mock.Mock(value="tokenpony")
+    MINIMAX = mock.Mock(value="minimax")
 
 
 sys.modules["consts.provider"].ProviderEnum = _ProviderEnumStub
@@ -209,6 +210,18 @@ from backend.services.model_provider_service import (
     merge_existing_model_tokens,
     get_provider_models,
 )
+
+
+def test_minimax_catalog_keeps_saved_context_override():
+    from backend.services.model_provider_service import merge_existing_model_attributes
+
+    saved = [{"model_repo": "", "model_name": "MiniMax-M3", "max_tokens": 8192}]
+    models = [{"id": "MiniMax-M3", "max_tokens": 1000000}]
+    with mock.patch("backend.services.model_provider_service.get_models_by_tenant_factory_type", return_value=saved), \
+            mock.patch("backend.services.model_provider_service.add_repo_to_name", return_value="MiniMax-M3"):
+        result = merge_existing_model_attributes(models, "tenant", "minimax", "llm")
+    assert result[0]["id"] == "MiniMax-M3"
+    assert result[0]["max_tokens"] == 8192
 
 
 # ============================================================================
