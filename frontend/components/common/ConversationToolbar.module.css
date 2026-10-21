@@ -1,0 +1,46 @@
+/* Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved. */
+
+.page {
+  container: agent-chat / inline-size;
+}
+
+.discovery [data-active="true"]:not(:hover) {
+  background-color: transparent;
+}
+
+.toolbar {
+  /* ThreadView caps its centered message viewport at 922px. */
+  max-width: max(32px, calc((100cqw - 922px) / 2 - 24px));
+}
+
+.toolbar .name {
+  flex: 0 1 240px;
+  width: 240px;
+  min-width: 64px;
+  max-width: 240px;
+}
+
+@container agent-chat (max-width: 1340px) {
+  .toolbar .name {
+    display: none;
+  }
+}
+
+@container agent-chat (max-width: 1188px) {
+  .back,
+  .separator {
+    display: none;
+  }
+}
+
+@container agent-chat (max-width: 1106px) {
+  .compose {
+    display: none;
+  }
+}
+
+@container agent-chat (max-width: 1034px) {
+  .toolbar {
+    left: 0;
+  }
+}

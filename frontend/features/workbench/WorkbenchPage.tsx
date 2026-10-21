@@ -37,7 +37,7 @@ import {
 } from "@/app/newchat/adapter/conversation-thread-list-adapter";
 import { applyComposerRunConfig } from "@/app/newchat/adapter/composer-run-config";
 import { useConversationResume } from "./hooks/useConversationResume";
-import { SidebarProvider } from "@/components/ui/sidebar";
+import { WorkbenchConversationLayout } from "./components/WorkbenchConversationLayout";
 import { message } from "antd";
 import type { Agent } from "@/types/agentConfig";
 import { useModelList } from "@/hooks/model/useModelList";
@@ -1325,36 +1325,26 @@ const HomeContent: FC = () => {
     message.success(t("ui.localization.skillSaved"));
   };
 
-  // Conditional rendering must happen after all hooks
-  if (!ready) {
-    return (
-      <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
-        Loading conversation…
-      </div>
-    );
-  }
-
   return (
-    <div className="flex w-full h-full">
+    <WorkbenchConversationLayout ready={ready}>
       <div className="shrink-0 h-full">
-        <SidebarProvider className="w-auto h-full">
-          <ThreadListSidebar
-            pinStorageKey={
-              user ? getWorkbenchPinStorageKey(user.id, user.tenantId) : null
-            }
-            showLegacySwitch={false}
-            generatedTitles={generatedTitles}
-            serverConversationIds={serverConversationIds}
-            onRenameSuccess={handleConversationRenamed}
-            onPrepareNewConversation={handlePrepareNewConversation}
-            onNewConversation={handleNewConversation}
-          />
-        </SidebarProvider>
+        <ThreadListSidebar
+          collapseToFloatingButton
+          pinStorageKey={
+            user ? getWorkbenchPinStorageKey(user.id, user.tenantId) : null
+          }
+          generatedTitles={generatedTitles}
+          serverConversationIds={serverConversationIds}
+          onRenameSuccess={handleConversationRenamed}
+          onPrepareNewConversation={handlePrepareNewConversation}
+          onNewConversation={handleNewConversation}
+        />
       </div>
 
       <div className="flex min-h-0 flex-1 min-w-0 flex-col">
         <div className="min-h-0 flex-1">
           <Chat
+            showConversationTitle={false}
             generatedTitle={
               activeThreadId ? generatedTitles.get(activeThreadId) : undefined
             }
@@ -1598,6 +1588,6 @@ const HomeContent: FC = () => {
           onSelect={(agent) => void handleAgentSelectedFromLanding(agent)}
         />
       </div>
-    </div>
+    </WorkbenchConversationLayout>
   );
 };
