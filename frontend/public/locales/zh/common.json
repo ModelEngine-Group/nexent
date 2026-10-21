@@ -5431,7 +5431,7 @@
   "tagManagement.form.noValue": "无值",
   "tagManagement.form.noValueHint": "勾选即可添加此标签",
   "tagManagement.form.noValueDirectHint": "请点击左侧无值标签添加或移除",
-  "tagManagement.form.searchTags": "搜索标签名称或标识",
+  "tagManagement.form.searchTags": "搜索标签名称、标识或显示值",
   "tagManagement.form.selectionMode": "选择模式",
   "tagManagement.form.multiSelect": "多选",
   "tagManagement.form.singleSelect": "单选",

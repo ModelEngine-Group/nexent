@@ -2,7 +2,7 @@
 
 "use client";
 
-import { useCallback, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 
 import {
   Alert,
@@ -25,6 +25,7 @@ import { useTranslation } from "react-i18next";
 
 import { useTagDefinitions } from "@/hooks/useTagManagement";
 import {
+  getMatchingTagDefinitionIds,
   getTagDefinitionDisplayName,
   getTagValueDisplayName,
 } from "@/lib/systemTagLabels";
@@ -432,6 +433,25 @@ export default function TagDefinitionManagementPanel({
       ),
     },
   ];
+
+  // The table renders localized names and expands into per-value rows, so the
+  // search has to run over the same localized texts plus each value. Matching on
+  // the raw definition_name/definition_key fields alone hides rows the user can
+  // see, for example the translated "关键词" name or a value such as "Cache".
+  const hasDefinitionSearch = definitionSearch.trim().length > 0;
+  const filteredDefinitions = useMemo(() => {
+    const allDefinitions = definitions ?? [];
+    const matchedIds = getMatchingTagDefinitionIds(
+      allDefinitions,
+      definitionSearch,
+      t
+    );
+    if (!matchedIds) return allDefinitions;
+    return allDefinitions.filter((definition) =>
+      matchedIds.has(definition.definition_id)
+    );
+  }, [definitions, definitionSearch, t]);
+
   return (
     <div className="min-w-0">
       {error && (
@@ -469,17 +489,14 @@ export default function TagDefinitionManagementPanel({
       />
       <Table
         rowKey="definition_id"
-        dataSource={(definitions ?? []).filter((definition) => {
-          const search = definitionSearch.trim().toLocaleLowerCase();
-          return (
-            !search ||
-            definition.definition_name.toLocaleLowerCase().includes(search) ||
-            definition.definition_key.toLocaleLowerCase().includes(search)
-          );
-        })}
+        dataSource={filteredDefinitions}
         columns={columns}
         loading={loading}
-        locale={{ emptyText: t("tagManagement.empty.noDefinitions") }}
+        locale={{
+          emptyText: hasDefinitionSearch
+            ? t("tagManagement.empty.noMatchingDefinitions")
+            : t("tagManagement.empty.noDefinitions"),
+        }}
         size="small"
         expandable={{
           rowExpandable: (definition) =>

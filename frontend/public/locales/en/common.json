@@ -5491,7 +5491,7 @@
   "tagManagement.form.noValue": "No value",
   "tagManagement.form.noValueHint": "Select to add this tag",
   "tagManagement.form.noValueDirectHint": "Click a no-value tag on the left to add or remove it",
-  "tagManagement.form.searchTags": "Search tag names or keys",
+  "tagManagement.form.searchTags": "Search tag names, keys, or values",
   "tagManagement.form.selectionMode": "Selection Mode",
   "tagManagement.form.multiSelect": "Multi-select",
   "tagManagement.form.singleSelect": "Single-select",
