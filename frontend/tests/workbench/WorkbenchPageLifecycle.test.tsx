@@ -15,6 +15,8 @@ import {
   initialWorkbenchState,
   workbenchReducer,
 } from "@/features/workbench/state";
+import { searchAgentInfo } from "@/services/agentConfigService";
+import { useAgentStore } from "@/stores/agentStore";
 import WorkbenchPage from "@/features/workbench/WorkbenchPage";
 import { conversationService } from "@/services/conversationService";
 
@@ -27,6 +29,8 @@ const view = vi.hoisted(() => ({
   props: null as ComponentProps<typeof Chat> | null,
   setRunConfig: vi.fn(),
   restoreAgent: vi.fn(),
+  markGenerationCompleted: vi.fn(),
+  markCompletionSynced: vi.fn(),
   back: vi.fn(),
   nextThread: 0,
   bootstrap: null as {
@@ -147,8 +151,8 @@ vi.mock("@/contexts/nl2AgentFlow", () => {
     Nl2AgentFlowProvider: ({ children }: { children: ReactNode }) => children,
     useNl2AgentFlow: () => ({
       resetFlow: noop,
-      markGenerationCompleted: noop,
-      markCompletionSynced: noop,
+      markGenerationCompleted: view.markGenerationCompleted,
+      markCompletionSynced: view.markCompletionSynced,
       markPromptGenerationFailed: noop,
       isComposerDisabled: false,
     }),
@@ -458,4 +462,126 @@ it("clears unavailable capabilities and ignores a removed Agent's delayed respon
     )
   );
   expect(view.props?.knowledgeCapabilities).toBeNull();
+});
+
+it.each([true, false])(
+  "refreshes a policy-only creator save without changing session policy (%s)",
+  async (enabled) => {
+    view.threadId = "local";
+    view.items = [{ id: "local", remoteId: "" }];
+    const page = render(<WorkbenchPage />);
+    await act(async () => {
+      (
+        view.props!.workbenchPresentation!.actions as React.ReactElement<{
+          onSelect: (mode: string) => void;
+        }>
+      ).props.onSelect("agent_create");
+    });
+    page.rerender(<WorkbenchPage />);
+    const agent = {
+      id: "42",
+      name: "policy_assistant",
+      enable_protocol_repair_retry: enabled,
+    };
+    vi.mocked(searchAgentInfo).mockResolvedValue({
+      success: true,
+      data: agent,
+    } as never);
+    const replace = vi
+      .spyOn(useAgentStore.getState(), "replaceServerSnapshot")
+      .mockReturnValue(true);
+    await act(async () => {
+      runConfig().onNl2AgentState({
+        event: "agent_draft_fields_saved",
+        agent_id: 42,
+        updated_fields: ["enable_protocol_repair_retry"],
+      });
+    });
+    expect(searchAgentInfo).toHaveBeenCalledWith(42, undefined, 0);
+    expect(replace).toHaveBeenCalledWith(42, agent);
+    expect(view.markGenerationCompleted).not.toHaveBeenCalled();
+    expect(view.markCompletionSynced).not.toHaveBeenCalled();
+    expect(runConfig().creationWorkbenchConfig).not.toHaveProperty(
+      "execution_config"
+    );
+  }
+);
+
+it("preserves completion synchronization after supporting partial policy saves", async () => {
+  view.threadId = "local";
+  view.items = [{ id: "local", remoteId: "" }];
+  const page = render(<WorkbenchPage />);
+  await act(async () => {
+    (
+      view.props!.workbenchPresentation!.actions as React.ReactElement<{
+        onSelect: (mode: string) => void;
+      }>
+    ).props.onSelect("agent_create");
+  });
+  page.rerender(<WorkbenchPage />);
+  const agent = {
+    id: "42",
+    name: "policy_assistant",
+    enable_protocol_repair_retry: true,
+  };
+  vi.mocked(searchAgentInfo).mockResolvedValue({
+    success: true,
+    data: agent,
+  } as never);
+  vi.spyOn(useAgentStore.getState(), "replaceServerSnapshot").mockReturnValue(
+    true
+  );
+  await act(async () =>
+    runConfig().onNl2AgentState({
+      event: "agent_generation_completed",
+      agent_id: 42,
+    })
+  );
+  expect(view.markGenerationCompleted).toHaveBeenCalledExactlyOnceWith(42);
+  expect(view.markCompletionSynced).toHaveBeenCalledExactlyOnceWith(42);
+});
+
+it("serializes creator snapshot reads so delayed policy saves cannot overwrite the latest value", async () => {
+  view.threadId = "local";
+  view.items = [{ id: "local", remoteId: "" }];
+  const page = render(<WorkbenchPage />);
+  await act(async () => {
+    (
+      view.props!.workbenchPresentation!.actions as React.ReactElement<{
+        onSelect: (mode: string) => void;
+      }>
+    ).props.onSelect("agent_create");
+  });
+  page.rerender(<WorkbenchPage />);
+  const first = deferred<Awaited<ReturnType<typeof searchAgentInfo>>>();
+  const enabled = {
+    id: "42",
+    name: "policy_assistant",
+    enable_protocol_repair_retry: true,
+  };
+  const disabled = { ...enabled, enable_protocol_repair_retry: false };
+  vi.mocked(searchAgentInfo)
+    .mockReturnValueOnce(first.promise)
+    .mockResolvedValueOnce({ success: true, data: disabled } as never);
+  const replace = vi
+    .spyOn(useAgentStore.getState(), "replaceServerSnapshot")
+    .mockReturnValue(true);
+  const event = {
+    event: "agent_draft_fields_saved",
+    agent_id: 42,
+    updated_fields: ["enable_protocol_repair_retry"],
+  };
+  await act(async () => {
+    runConfig().onNl2AgentState(event);
+    runConfig().onNl2AgentState(event);
+  });
+  expect(searchAgentInfo).toHaveBeenCalledTimes(1);
+  await act(async () =>
+    first.resolve({ success: true, data: enabled } as never)
+  );
+  await waitFor(() => expect(replace).toHaveBeenCalledTimes(2));
+  expect(
+    replace.mock.calls.map((args) => args[1].enable_protocol_repair_retry)
+  ).toEqual([true, false]);
+  expect(view.markGenerationCompleted).not.toHaveBeenCalled();
 });

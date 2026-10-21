@@ -141,7 +141,11 @@ export interface Nl2AgentCardAction {
 }
 
 export type Nl2AgentDraftField =
-  "name" | "display_name" | "description" | Nl2aPromptField;
+  | "name"
+  | "display_name"
+  | "description"
+  | "enable_protocol_repair_retry"
+  | Nl2aPromptField;
 
 export type Nl2AgentStateEvent =
   | {
@@ -270,9 +274,7 @@ export type Nl2aRecommendedResource =
     };
 
 export type Nl2aPromptField =
-  | "duty_prompt"
-  | "greeting_message"
-  | "example_questions";
+  "duty_prompt" | "greeting_message" | "example_questions";
 
 export type Nl2aPayload =
   | Nl2aRequirementClarificationPayload
@@ -915,6 +917,7 @@ export function parseNl2AgentState(content: string): Nl2AgentStateEvent | null {
       "name",
       "display_name",
       "description",
+      "enable_protocol_repair_retry",
       ...promptFields,
     ]);
     if (

@@ -491,6 +491,7 @@ async def test_create_nl2agent_agent_config_has_only_current_runtime_tools(langu
     save_inputs = json.loads(config.tools[3].inputs)
     assert save_inputs["agent_id"] == "int"
     assert set(save_inputs["fields"]) == {
+        "enable_protocol_repair_retry",
         "name",
         "description",
         "duty_prompt",
