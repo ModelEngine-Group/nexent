@@ -103,6 +103,7 @@ exclude = ["tests*", "examples*"]
 namespaces = true
 
 [tool.setuptools.package-data]
+"nexent.core.model_service.profiles" = ["**/*.toml", "README.md", "LICENSE"]
 "nexent.core.prompts" = ["zh/*/*.yaml", "en/*/*.yaml"]
 "nexent.assets" = ["*.png", "*.jpg", "*.gif", "*.webp"]
 
