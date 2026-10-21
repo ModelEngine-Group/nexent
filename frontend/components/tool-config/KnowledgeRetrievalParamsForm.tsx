@@ -1,3 +1,5 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 "use client";
 import { Input, InputNumber, Select, Switch, Tooltip } from "antd";
 import { Info } from "lucide-react";
@@ -55,6 +57,10 @@ function renderParamInput(
             label: "full_text_search",
             value: "full_text_search",
           },
+          {
+            label: "graph_search",
+            value: "graph_search",
+          },
         ]}
       />
     );
@@ -74,6 +80,10 @@ function renderParamInput(
           {
             label: "high_accuracy",
             value: "high_accuracy",
+          },
+          {
+            label: "jargon_coverage",
+            value: "jargon_coverage",
           },
         ]}
       />

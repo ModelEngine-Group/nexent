@@ -339,6 +339,7 @@ class NexentAgent:
             timeout_seconds=model_config.timeout_seconds,
             prompt_cache=model_config.prompt_cache,
             reasoning_capability=model_config.reasoning_capability,
+            diagnostic_chunks_enabled=model_config.diagnostic_chunks_enabled,
         )
         if model_config.explicit_sampling:
             model_kwargs["explicit_sampling"] = model_config.explicit_sampling

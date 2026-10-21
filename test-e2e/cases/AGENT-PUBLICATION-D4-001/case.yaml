@@ -1,0 +1,67 @@
+schema_version: '1.0'
+stage: D4
+module: AGENT-PUBLICATION
+case:
+  case_id: AGENT-PUBLICATION-D4-001
+  feature_id: AGENT-PUBLICATION
+  business_rule_ids:
+  - AGENT-PUBLICATION-RULE-001
+  title: Publication empty state, preserved workflow context and expanded access sections
+  type: E2E
+  priority: P0
+  status: active
+  automation: automated
+  objective: Publication empty state, preserved workflow context and expanded access sections
+  preconditions:
+  - Real Nexent editor and tenant administrator login are available.
+  - Configured LLM is available; the case creates and deletes only its own agent.
+  test_data:
+    configuration: config/environment.yaml; config/models.yaml; config/users.yaml
+    ownership: Dynamic owned agent and version; no fixed resource IDs or credentials.
+  steps:
+  - order: 1
+    action: Open the saved draft publication tab.
+    expected: Only the unpublished empty state is visible; no access links are offered.
+  - order: 2
+    action: Switch back to configure, then debug and publication, and finally configure.
+    expected: Saved description remains present and exactly one workflow tab is selected throughout.
+  - order: 3
+    action: Publish an owned version and inspect the publication page.
+    expected: The current editor URL remains unchanged; all three access sections and the curl example start expanded.
+  - order: 4
+    action: Collapse and reopen each access section.
+    expected: Each section independently toggles aria-expanded and content visibility; the curl example remains
+      expanded.
+  expected_results: &id001
+  - Draft empty state and workflow context are correct.
+  - Published sections toggle independently and the example starts expanded.
+  forbidden_side_effects:
+  - Do not invoke the agent, generate or rotate API keys, or mutate unrelated resources.
+  actor: Tenant administrator using the real browser UI
+  journey:
+  - Open the saved draft publication tab.
+  - Switch back to configure, then debug and publication, and finally configure.
+  - Publish an owned version and inspect the publication page.
+  - Collapse and reopen each access section.
+  final_business_result: *id001
+  failure_evidence:
+  - Case-local assertions.json, failure screenshot and trace under the machine-local test home.
+  acceptance:
+  - id: AC-01
+    description: Draft empty state and workflow context are correct.
+    steps:
+    - 1
+    - 2
+    expected_results:
+    - 1
+    forbidden_side_effects:
+    - 1
+  - id: AC-02
+    description: Published sections toggle independently and the example starts expanded.
+    steps:
+    - 3
+    - 4
+    expected_results:
+    - 2
+    forbidden_side_effects:
+    - 1

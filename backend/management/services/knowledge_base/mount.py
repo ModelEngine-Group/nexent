@@ -44,9 +44,9 @@ def mount_knowledge_records(records, scope, tenant_id):
         )):
             raise ValidationError(f"Invalid knowledge parameter: {name}")
         choices = {"search_mode": {"hybrid", "accurate", "semantic"},
-                   "search_method": {"hybrid_search", "vector_search", "full_text_search"},
-                   "rerank_mode": {"performance", "high_accuracy"},
-                   "reranking_mode": {"performance", "high_accuracy"}}
+                   "search_method": {"hybrid_search", "vector_search", "full_text_search", "graph_search"},
+                   "rerank_mode": {"performance", "high_accuracy", "jargon_coverage"},
+                   "reranking_mode": {"performance", "high_accuracy", "jargon_coverage"}}
         if name in choices and value not in choices[name]:
             raise ValidationError(f"Invalid knowledge parameter: {name}")
         fields[name]["default"] = deepcopy(value)

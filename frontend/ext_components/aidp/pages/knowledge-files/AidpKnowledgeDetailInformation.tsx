@@ -8,7 +8,11 @@ import { Button, Switch, Tag, Tooltip } from "antd";
 import { EditOutlined } from "@ant-design/icons";
 
 import type { AidpKbDetail } from "@/ext_components/aidp/shared/types/management";
-import { AIDP_UNKNOWN_VALUE, formatAidpCreator } from "@/ext_components/aidp/shared/utils/aidpKnowledgeDisplay";
+import {
+  AIDP_UNKNOWN_VALUE,
+  formatAidpCreator,
+} from "@/ext_components/aidp/shared/utils/aidpKnowledgeDisplay";
+import { formatChunkOverlapPercent } from "@/ext_components/aidp/shared/utils/aidpChunking";
 import AidpGroupNamesDisplay from "@/ext_components/aidp/shared/components/AidpGroupNamesDisplay";
 
 export const AidpDetailField = ({
@@ -31,6 +35,8 @@ export const AidpDetailField = ({
 /** Editable detail settings owned by the information tab's edit modals. */
 export type AidpDetailSetting =
   | "chunk_mode"
+  | "chunk_token_num"
+  | "chunk_overlap_percent"
   | "topk"
   | "vlm"
   | "graph_llm"
@@ -44,6 +50,8 @@ interface AidpKnowledgeDetailInformationProps {
   graphConfig: Record<string, unknown>;
   groupNames: string[];
   canConfigureGroupPermissions: boolean;
+  /** Friendly embedding model label resolved from AIDP ModelService. */
+  embeddingModelLabel?: string;
   formatDateTime: (value: unknown) => string;
   onEditSetting: (setting: AidpDetailSetting) => void;
   onEditPermissions: () => void;
@@ -59,6 +67,7 @@ const AidpKnowledgeDetailInformation = ({
   graphConfig,
   groupNames,
   canConfigureGroupPermissions,
+  embeddingModelLabel,
   formatDateTime,
   onEditSetting,
   onEditPermissions,
@@ -76,6 +85,12 @@ const AidpKnowledgeDetailInformation = ({
       return value ? t("common.yes") : t("common.no");
     return String(value);
   };
+  const chunkTokenValue = displayValue(detail.chunk_token_num);
+  const chunkOverlapValue =
+    formatChunkOverlapPercent(
+      detail.chunk_token_num,
+      detail.chunk_overlap_num
+    ) || AIDP_UNKNOWN_VALUE;
   const editButton = (setting: AidpDetailSetting, label: string) =>
     canEdit && (
       <Tooltip title={label}>
@@ -103,9 +118,6 @@ const AidpKnowledgeDetailInformation = ({
           <AidpDetailField label={t("aidpKnowledge.detailCreatedAt")}>
             {formatDateTime(detail.created_at)}
           </AidpDetailField>
-          <AidpDetailField label={t("aidpKnowledge.detailUpdatedAt")}>
-            {formatDateTime(detail.updated_at)}
-          </AidpDetailField>
           <AidpDetailField label={t("aidpKnowledge.detailCreator")}>
             {formatAidpCreator(detail.creator_name) || AIDP_UNKNOWN_VALUE}
           </AidpDetailField>
@@ -127,8 +139,28 @@ const AidpKnowledgeDetailInformation = ({
             </span>
             {editButton("chunk_mode", t("aidpKnowledge.detailEditChunkMode"))}
           </AidpDetailField>
+          <AidpDetailField label={t("aidpKnowledge.detailChunkTokenNum")}>
+            <span>
+              {chunkTokenValue === AIDP_UNKNOWN_VALUE
+                ? chunkTokenValue
+                : `${chunkTokenValue} Token`}
+            </span>
+            {editButton(
+              "chunk_token_num",
+              t("aidpKnowledge.detailEditChunkTokenNum")
+            )}
+          </AidpDetailField>
+          <AidpDetailField label={t("aidpKnowledge.detailChunkOverlapPercent")}>
+            <span>{chunkOverlapValue}</span>
+            {editButton(
+              "chunk_overlap_percent",
+              t("aidpKnowledge.detailEditChunkOverlapPercent")
+            )}
+          </AidpDetailField>
           <AidpDetailField label={t("aidpKnowledge.detailEmbeddingModel")}>
-            {detail.embedding_model || AIDP_UNKNOWN_VALUE}
+            {embeddingModelLabel ||
+              detail.embedding_model ||
+              AIDP_UNKNOWN_VALUE}
           </AidpDetailField>
           <AidpDetailField label={t("aidpKnowledge.detailVlmModel")}>
             {multimodalEnabled ? (
@@ -142,9 +174,6 @@ const AidpKnowledgeDetailInformation = ({
               <Tag color="default">{t("common.disabled")}</Tag>
             )}
             {editButton("vlm", t("aidpKnowledge.detailEditVlm"))}
-          </AidpDetailField>
-          <AidpDetailField label={t("aidpKnowledge.detailRerankModel")}>
-            {detail.rerank_model || AIDP_UNKNOWN_VALUE}
           </AidpDetailField>
           <AidpDetailField label={t("aidpKnowledge.detailSimilarity")}>
             {displayValue(detail.similarity)}
@@ -188,9 +217,6 @@ const AidpKnowledgeDetailInformation = ({
             </AidpDetailField>
             <AidpDetailField label={t("aidpKnowledge.detailGraphDomain")}>
               {displayValue(graphConfig.domain)}
-            </AidpDetailField>
-            <AidpDetailField label={t("aidpKnowledge.detailGraphTopK")}>
-              {displayValue(graphConfig.retrieve_default_topk)}
             </AidpDetailField>
             <AidpDetailField label={t("aidpKnowledge.detailGraphThinking")}>
               <span>

@@ -2,66 +2,25 @@
 
 "use client";
 
-import {
-  createElement,
-  useContext,
-  useEffect,
-  useRef,
-  useState,
-  type ReactNode,
-} from "react";
+import { useContext, useEffect, useRef, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
-import { Alert, Avatar, Empty, Spin } from "antd";
-import { Bot, Clock } from "lucide-react";
+import { Alert, Empty, Spin } from "antd";
+import { Bot } from "lucide-react";
 
 import { cn } from "@/lib/utils";
 import { formatDate } from "@/lib/date";
-import {
-  getAgentIcon,
-  getAgentUploadedIconRevision,
-} from "@/lib/chat/agentIconUtils";
-import { API_ENDPOINTS } from "@/services/api";
-import type { Agent } from "@/types/agentConfig";
 import type { A2AExternalAgent } from "@/services/a2aService";
-import { ResourceDrawer, CheckMark } from "./ResourceDrawer";
+import { ResourceDrawer } from "./ResourceDrawer";
 import type { AgentCardItem, SelectedItem } from "./types";
 import { useResourceTagFilter } from "@/hooks/useResourceTagFilter";
 import { ResourceTagFilterControl } from "./ResourceTagFilterControl";
-import { ResourceAssignedTags } from "./ResourceAssignedTags";
+import { AgentSelectionCard, AgentSelectionGrid } from "./AgentSelectionCard";
 import { AuthorizationContext } from "@/components/providers/AuthorizationProvider";
 import { useResourceTagAssignments } from "@/hooks/useResourceTagAssignments";
-import type { TagAssignmentValue } from "@/types/tagManagement";
 
 import styles from "./ResourcePickerDrawer.module.css";
 
-export function toLocalCard(agent: Agent): AgentCardItem {
-  const updatedAt =
-    agent.update_time || agent.create_time
-      ? formatDate(agent.update_time ?? agent.create_time)
-      : undefined;
-  return {
-    id: String(agent.id),
-    agentId: Number(agent.id),
-    tagResourceId: String(agent.id),
-    iconUrl:
-      agent.icon_url?.trim() && Number(agent.id) > 0
-        ? API_ENDPOINTS.agent.icon(
-            Number(agent.id),
-            getAgentUploadedIconRevision(agent.icon_url)
-          )
-        : undefined,
-    name: agent.display_name || agent.name,
-    description: agent.description ?? "",
-    updatedAt,
-    version:
-      agent.version_name?.trim() ||
-      agent.version_label?.trim() ||
-      (agent.current_version_no != null
-        ? String(agent.current_version_no)
-        : undefined),
-    tags: agent.tags ?? [],
-  };
-}
+export { toLocalCard } from "./AgentSelectionCard";
 
 export function toExternalCard(agent: A2AExternalAgent): AgentCardItem {
   return {
@@ -73,126 +32,6 @@ export function toExternalCard(agent: A2AExternalAgent): AgentCardItem {
     version: agent.version,
     tags: [],
   };
-}
-
-function AgentCard({
-  item,
-  selected,
-  onToggle,
-  icon,
-  disabled = false,
-  refreshKey,
-  assignments,
-}: {
-  item: AgentCardItem;
-  selected: boolean;
-  onToggle: () => void;
-  icon: ReactNode;
-  disabled?: boolean;
-  refreshKey?: number;
-  assignments: TagAssignmentValue[];
-}) {
-  const { t } = useTranslation("common");
-  const [failedIconSource, setFailedIconSource] = useState<string>();
-  const iconSource =
-    failedIconSource === item.iconUrl ? undefined : item.iconUrl;
-  const agentId = item.agentId ?? Number(item.id);
-  const fallbackIcon =
-    Number.isInteger(agentId) && agentId >= 0
-      ? createElement(getAgentIcon({ agent_id: agentId }), {
-          size: 20,
-          "aria-hidden": true,
-        })
-      : icon;
-  return (
-    <div
-      role="option"
-      aria-label={item.name}
-      aria-selected={selected}
-      aria-disabled={disabled}
-      tabIndex={disabled ? -1 : 0}
-      onClick={() => {
-        if (!disabled) onToggle();
-      }}
-      onKeyDown={(event) => {
-        if (
-          !disabled &&
-          event.target === event.currentTarget &&
-          (event.key === "Enter" || event.key === " ")
-        ) {
-          event.preventDefault();
-          onToggle();
-        }
-      }}
-      className={cn(
-        styles.agentCard,
-        !disabled &&
-          "cursor-pointer hover:!shadow-[inset_0_0_0_1px_#0067d1] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary",
-        selected ? styles.agentCardSelected : "bg-white"
-      )}
-    >
-      <div
-        className="absolute right-6 top-7"
-        onClick={(event) => event.stopPropagation()}
-      >
-        <CheckMark
-          checked={selected}
-          disabled={disabled}
-          onToggle={onToggle}
-          ariaLabel={item.name}
-        />
-      </div>
-      <div className="flex min-h-10 shrink-0 items-start gap-3 pr-6">
-        <Avatar
-          shape="square"
-          size={40}
-          src={iconSource}
-          onError={() => {
-            setFailedIconSource(item.iconUrl);
-            return false;
-          }}
-          icon={fallbackIcon}
-          className={cn(
-            "shrink-0 !rounded-[8px]",
-            iconSource ? "!bg-white" : "!bg-primary/10 !text-primary"
-          )}
-        />
-        <div className="flex min-w-0 flex-1 flex-col gap-1">
-          <span className="min-w-0 truncate text-[16px] font-medium leading-[24px] text-[#191919]">
-            {item.name}
-          </span>
-          {item.version && (
-            <span
-              className={styles.agentVersion}
-              title={`${t("agent.version")}: ${item.version}`}
-            >
-              {t("agent.version")}: {item.version}
-            </span>
-          )}
-        </div>
-      </div>
-      <p className="line-clamp-2 h-[42px] shrink-0 text-[12px] font-normal leading-[20px] text-[#777777]">
-        {item.description}
-      </p>
-      {item.tagResourceId && (
-        <ResourceAssignedTags
-          resourceType="agent"
-          resourceId={item.tagResourceId}
-          tags={item.tags}
-          refreshKey={refreshKey}
-          assignments={assignments}
-        />
-      )}
-      <div className={styles.agentMetadata}>
-        {item.updatedAt && (
-          <span className={styles.agentUpdatedAt}>
-            <Clock size={14} className="shrink-0" />
-            {t("agentConfig.list.updatedAt", { date: item.updatedAt })}
-          </span>
-        )}
-      </div>
-    </div>
-  );
 }
 
 export interface AgentDrawerCategory {
@@ -402,13 +241,9 @@ export function AgentDrawer({
       ) : filtered.length === 0 ? (
         <Empty description={t("agent.collaborative.selector.empty")} />
       ) : (
-        <div
-          role="listbox"
-          aria-multiselectable="true"
-          className={styles.agentGrid}
-        >
+        <AgentSelectionGrid>
           {paged.map((item) => (
-            <AgentCard
+            <AgentSelectionCard
               key={item.id}
               item={item}
               disabled={saving}
@@ -419,7 +254,7 @@ export function AgentDrawer({
               icon={category?.icon ?? <Bot size={20} />}
             />
           ))}
-        </div>
+        </AgentSelectionGrid>
       )}
     </ResourceDrawer>
   );

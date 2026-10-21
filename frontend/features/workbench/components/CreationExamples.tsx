@@ -56,7 +56,12 @@ export function CreationExamples({
   if (!visible) return null;
   return (
     <section
-      aria-label={mode === "skill_create" ? "Skill 创建示例" : "Agent创建示例"}
+      aria-label={t(
+        mode === "skill_create"
+          ? "workbench.creationExamples.skillSectionLabel"
+          : "workbench.creationExamples.agentSectionLabel",
+        mode === "skill_create" ? "Skill 创建示例" : "Agent 创建示例"
+      )}
       className="px-1"
     >
       <div className="mb-3 flex items-center gap-2">
@@ -69,10 +74,7 @@ export function CreationExamples({
           const { key, title, icon: Icon } = example;
           const translationKey = `workbench.creationExamples.${mode === "skill_create" ? "skill" : "agent"}.${key}`;
           const prompt = t(translationKey, CREATION_PROMPTS[mode][index]);
-          const cardTitle =
-            mode === "agent_create"
-              ? t(`${translationKey}.title`, title)
-              : title;
+          const cardTitle = t(`${translationKey}.title`, title);
           const description =
             "description" in example
               ? t(`${translationKey}.description`, example.description)

@@ -1600,7 +1600,7 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
       delete requestBody.reasoning_effort;
       delete requestBody.reasoning_budget_tokens;
     }
-    if (!workbenchConfig && (!isEphemeralRuntime || isNl2Agent || isNl2Skill)) {
+    if (!workbenchConfig) {
       const modelContext = context.config as
         | {
             deepThinking?: boolean;
@@ -1623,6 +1623,7 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
         };
       }
       if (
+        !isAgentDebug &&
         !isResume &&
         (modelContext?.temperature != null || modelContext?.top_p != null)
       ) {

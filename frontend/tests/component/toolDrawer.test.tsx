@@ -29,6 +29,13 @@ const state = vi.hoisted(() => ({
     },
   ],
 }));
+vi.mock("@/services/mcpService", () => ({
+  updateToolList: vi.fn(async () => ({
+    success: true,
+    data: {},
+    message: "ok",
+  })),
+}));
 vi.mock("@/services/tagManagementService", () => ({
   tagManagementApi: {
     listLibraries: vi.fn(async () => []),
@@ -37,9 +44,6 @@ vi.mock("@/services/tagManagementService", () => ({
     getToolAssignmentsBatch: vi.fn(async () => []),
     filterResourceIds: vi.fn(async () => ({ matched_resource_ids: [] })),
   },
-}));
-vi.mock("@/services/mcpService", () => ({
-  updateToolList: vi.fn(async () => ({ success: true })),
 }));
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({
