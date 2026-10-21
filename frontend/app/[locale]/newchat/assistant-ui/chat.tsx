@@ -3,7 +3,6 @@
 "use client";
 
 import type { ReasoningEffort } from "@/types/modelConfig";
-import type { ModelParameterSettingsControl } from "@/types/modelParameterSettings";
 
 import type { FC, ReactNode } from "react";
 import { useCallback, useMemo } from "react";
@@ -31,17 +30,10 @@ export interface ChatProps {
   chatMode?: ChatMode;
   onChatModeChange?: (mode: ChatMode) => void;
   showModelSelector?: boolean;
-  modelParameterSettings?: ModelParameterSettingsControl;
   modelSelectionScope?: "agent" | "tenant";
   fallbackAgentName?: string;
   selectedModelId?: string;
   onModelChange?: (modelId: string) => void;
-  deepThinking?: boolean;
-  onDeepThinkingChange?: (enabled: boolean) => void;
-  thinkingEffort?: ReasoningEffort;
-  onThinkingEffortChange?: (effort: ReasoningEffort) => void;
-  reasoningBudgetTokens?: number;
-  onReasoningBudgetTokensChange?: (budget: number) => void;
   showConversationTitle?: boolean;
   composerTools?: ReactNode;
   knowledgeScope?: ConversationKnowledgeScope | null;
@@ -95,17 +87,10 @@ export const Chat: FC<ChatProps> = ({
   chatMode = "execution",
   onChatModeChange,
   showModelSelector = true,
-  modelParameterSettings,
   modelSelectionScope = "agent",
   fallbackAgentName = "Nexent Workbench",
   selectedModelId,
   onModelChange,
-  deepThinking,
-  onDeepThinkingChange,
-  thinkingEffort,
-  onThinkingEffortChange,
-  reasoningBudgetTokens,
-  onReasoningBudgetTokensChange,
   showConversationTitle = true,
   composerTools,
   knowledgeScope = null,
@@ -161,14 +146,7 @@ export const Chat: FC<ChatProps> = ({
           welcomeContent={landingContent}
           selectedModelId={selectedModelId}
           onModelChange={onModelChange}
-          deepThinking={deepThinking}
-          onDeepThinkingChange={onDeepThinkingChange}
-          thinkingEffort={thinkingEffort}
-          onThinkingEffortChange={onThinkingEffortChange}
-          reasoningBudgetTokens={reasoningBudgetTokens}
-          onReasoningBudgetTokensChange={onReasoningBudgetTokensChange}
           showModelSelector={showModelSelector}
-          modelParameterSettings={modelParameterSettings}
           modelSelectionScope={modelSelectionScope}
           chatMode={chatMode}
           onChatModeChange={onChatModeChange}
@@ -208,16 +186,9 @@ export const Chat: FC<ChatProps> = ({
       chatMode={chatMode}
       onChatModeChange={onChatModeChange}
       showModelSelector={showModelSelector}
-      modelParameterSettings={modelParameterSettings}
       modelSelectionScope={modelSelectionScope}
       selectedModelId={selectedModelId}
       onModelChange={onModelChange}
-      deepThinking={deepThinking}
-      onDeepThinkingChange={onDeepThinkingChange}
-      thinkingEffort={thinkingEffort}
-      onThinkingEffortChange={onThinkingEffortChange}
-      reasoningBudgetTokens={reasoningBudgetTokens}
-      onReasoningBudgetTokensChange={onReasoningBudgetTokensChange}
       showConversationTitle={showConversationTitle}
       composerTools={composerTools}
       knowledgeScope={knowledgeScope}

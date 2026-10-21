@@ -57,8 +57,6 @@ interface ThreadListSidebarProps extends SidebarProps {
   onRenameSuccess?: RenameSuccessHandler;
   onAgentSelected?: (agent: Agent) => void;
   newChatDesign?: boolean;
-  /** Accepted for backward compatibility; the design removed the legacy switch. */
-  showLegacySwitch?: boolean;
   /** Workbench uses user-scoped server IDs; undefined retains Agent-chat pins. */
   pinStorageKey?: string | null;
 }

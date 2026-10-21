@@ -1,5 +1,6 @@
 // Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
+import { agentParameterValues } from "@/lib/modelParameterLayers";
 import type { Agent, PublishedAgent } from "@/types/agentConfig";
 import type {
   ModelOption as CatalogModelOption,
@@ -11,144 +12,6 @@ import { isReasoningEffort } from "@/lib/modelReasoning";
 import type { WorkbenchSessionConfig } from "@/features/workbench/types";
 
 export type ModelSelectionScope = "agent" | "tenant";
-
-function configuredEffort(
-  model?: Pick<
-    CatalogModelOption,
-    "defaultReasoningEffort" | "reasoningCapability"
-  >
-): ReasoningEffort {
-  const value = model?.defaultReasoningEffort;
-  return isReasoningEffort(value) ? value : "auto";
-}
-
-/** Restore per-model overrides while keeping unrelated generation settings. */
-export function selectWorkbenchModel(
-  config: WorkbenchSessionConfig,
-  models: readonly CatalogModelOption[],
-  modelId: number,
-  remembered?: Pick<
-    WorkbenchSessionConfig["generation_config"],
-    | "deep_thinking"
-    | "thinking_effort"
-    | "reasoning_budget_tokens"
-    | "temperature"
-    | "top_p"
-  >
-): WorkbenchSessionConfig {
-  const model = models.find((item) => item.id === modelId);
-  return withDefaultWorkbenchModel(
-    {
-      ...config,
-      model_id: modelId,
-      generation_config: {
-        ...config.generation_config,
-        temperature:
-          config.model_id === modelId
-            ? config.generation_config.temperature
-            : undefined,
-        top_p:
-          config.model_id === modelId
-            ? config.generation_config.top_p
-            : undefined,
-        deep_thinking: model?.enableThinking ?? false,
-        thinking_effort: configuredEffort(model),
-        reasoning_budget_tokens:
-          typeof model?.extraParams?.reasoning_budget_tokens === "number"
-            ? model.extraParams.reasoning_budget_tokens
-            : undefined,
-        ...remembered,
-      },
-    },
-    models
-  );
-}
-
-/** Keep the model displayed in Workbench identical to the model sent at run time. */
-export function withDefaultWorkbenchModel(
-  config: WorkbenchSessionConfig,
-  availableLlmModels: readonly Pick<
-    CatalogModelOption,
-    | "id"
-    | "reasoningCapability"
-    | "defaultReasoningEffort"
-    | "enableThinking"
-    | "extraParams"
-  >[]
-): WorkbenchSessionConfig {
-  const modelId = config.model_id ?? availableLlmModels[0]?.id;
-  if (modelId == null) return config;
-  const model = availableLlmModels.find((item) => item.id === modelId);
-  if (!model) return config;
-  const generation =
-    config.model_id == null
-      ? {
-          ...config.generation_config,
-          deep_thinking: model.enableThinking ?? false,
-          thinking_effort: configuredEffort(model),
-          reasoning_budget_tokens:
-            typeof model.extraParams?.reasoning_budget_tokens === "number"
-              ? model.extraParams.reasoning_budget_tokens
-              : undefined,
-        }
-      : config.generation_config;
-  const capability = model?.reasoningCapability;
-  const budgetControl =
-    capability?.status === "supported"
-      ? capability.controls?.find((control) => control.type === "budget_tokens")
-      : undefined;
-  const effortControl =
-    capability?.status === "supported"
-      ? capability.controls?.find((control) => control.type === "effort")
-      : undefined;
-  const levels =
-    effortControl?.type === "effort"
-      ? effortControl.values.filter(isReasoningEffort)
-      : capability?.status === "supported"
-        ? capability.levels.filter(isReasoningEffort)
-        : [];
-  // Unknown capabilities never invent an effort; auto keeps provider defaults.
-  const effort = generation.thinking_effort;
-  const defaultCandidates: (ReasoningEffort | null | undefined)[] = [
-    model.defaultReasoningEffort,
-    DEFAULT_REASONING_EFFORT,
-  ];
-  const resolvedEffort = budgetControl
-    ? "auto"
-    : effort === "auto" || (effort && levels.includes(effort))
-      ? effort
-      : (defaultCandidates.find(
-          (candidate) =>
-            candidate === "auto" ||
-            (candidate != null && levels.includes(candidate))
-        ) ?? DEFAULT_REASONING_EFFORT);
-  const enabled =
-    capability?.status === "supported" ? generation.deep_thinking : false;
-  const rawBudget = generation.reasoning_budget_tokens;
-  const budget =
-    budgetControl?.type === "budget_tokens"
-      ? rawBudget && rawBudget > 0
-        ? Math.min(budgetControl.max, Math.max(budgetControl.min, rawBudget))
-        : 0
-      : undefined;
-  if (
-    modelId === config.model_id &&
-    resolvedEffort === effort &&
-    enabled === config.generation_config.deep_thinking &&
-    budget === rawBudget
-  )
-    return config;
-  return {
-    ...config,
-    model_id: modelId,
-    generation_config: {
-      ...generation,
-      thinking_effort: resolvedEffort,
-      deep_thinking: enabled,
-      reasoning_budget_tokens: budget,
-    },
-  };
-}
 
 export const deriveModelOptions = (
   agent: Agent | PublishedAgent,
@@ -164,6 +27,19 @@ export const deriveModelOptions = (
       (item) =>
         String(item.id) === id || item.name === id || item.displayName === id
     );
+    if (model?.profileSchemaVersion) {
+      return {
+        id,
+        name: fallbackName,
+        profileSchemaVersion: model.profileSchemaVersion,
+        agentParameterDefaults:
+          scope === "agent"
+            ? agentParameterValues({
+                ...typedAgent.model_params_override?.[id],
+              })
+            : {},
+      };
+    }
     const extra =
       scope === "agent"
         ? typedAgent.model_params_override?.[id]?.extra_params

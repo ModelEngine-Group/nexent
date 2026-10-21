@@ -5,52 +5,9 @@ import {
   initialWorkbenchState,
   workbenchReducer,
 } from "@/features/workbench/state";
-import {
-  deriveModelOptions,
-  withDefaultWorkbenchModel,
-} from "@/features/workbench/modelOptions";
+import { deriveModelOptions } from "@/features/workbench/modelOptions";
 import type { Agent } from "@/types/agentConfig";
 import type { ModelOption } from "@/types/modelConfig";
-import { selectWorkbenchModel } from "@/features/model-controls/modelOptions";
-
-it("switches models without leaking sampling overrides and retains output settings", () => {
-  const config = {
-    ...initialWorkbenchState.config,
-    model_id: 11,
-    generation_config: {
-      deep_thinking: true,
-      thinking_effort: "xhigh" as const,
-      temperature: 0.43,
-      top_p: 0.78,
-      requested_output_tokens: 2048,
-    },
-  };
-  const model: ModelOption = {
-    ...reasoningModelFixture,
-    id: 12,
-    name: "B",
-    enableThinking: false,
-    reasoningCapability: {
-      status: "supported",
-      control: "effort",
-      levels: ["low", "xhigh"],
-      source: "catalog",
-    },
-  };
-  const next = selectWorkbenchModel(config, [model], 12);
-  expect(next.generation_config).toMatchObject({
-    deep_thinking: false,
-    temperature: undefined,
-    top_p: undefined,
-    requested_output_tokens: 2048,
-  });
-  expect(next.generation_config.thinking_effort).toBe("auto");
-  expect(config.model_id).toBe(11);
-  expect(
-    selectWorkbenchModel(next, [model], 11, config.generation_config)
-      .generation_config
-  ).toMatchObject({ temperature: 0.43, top_p: 0.78 });
-});
 
 const reasoningAgentFixture: Agent = {
   id: "7",
@@ -127,26 +84,8 @@ it("resolves stale defaults while retaining valid overrides and other Workbench 
   const config = {
     ...initialWorkbenchState.config,
     model_id: 11,
-    generation_config: {
-      deep_thinking: true,
-      thinking_effort: "high" as const,
-      temperature: 0.7,
-      top_p: 0.81,
-      requested_output_tokens: 2000,
-    },
+    requested_output_tokens: 2000,
   };
-  expect(withDefaultWorkbenchModel(config, [model]).generation_config).toEqual({
-    ...config.generation_config,
-    thinking_effort: "auto",
-  });
-  const valid = {
-    ...config,
-    generation_config: {
-      ...config.generation_config,
-      thinking_effort: "xhigh" as const,
-    },
-  };
-  expect(withDefaultWorkbenchModel(valid, [model])).toBe(valid);
   const agent: Agent = {
     ...reasoningAgentFixture,
     id: "7",
@@ -237,54 +176,14 @@ const preview = {
   knowledge: {},
 };
 
-it("uses the first available tenant model as Workbench default without replacing an explicit choice", () => {
-  expect(initialWorkbenchState.config.generation_config.thinking_effort).toBe(
-    "low"
-  );
-  const available = [{ id: 11 }, { id: 12 }];
-  expect(
-    withDefaultWorkbenchModel(initialWorkbenchState.config, available).model_id
-  ).toBe(11);
-  const explicit = { ...initialWorkbenchState.config, model_id: 12 };
-  expect(withDefaultWorkbenchModel(explicit, available).model_id).toBe(12);
-  expect(withDefaultWorkbenchModel(initialWorkbenchState.config, [])).toBe(
-    initialWorkbenchState.config
-  );
-});
-it("does not replace the Workbench model with the mounted Agent model", () => {
+it("SU-AC-01 resource changes do not introduce a separate Workbench selection", () => {
   const next = workbenchReducer(initialWorkbenchState, {
     type: "resolve-agent-success",
     preview,
     modelIds: [8, 9],
   });
-  expect(next.config.model_id).toBeUndefined();
-});
-it("preserves a tenant model across changes to mounted Agents", () => {
-  const state = {
-    ...initialWorkbenchState,
-    config: { ...initialWorkbenchState.config, model_id: 9 },
-  };
-  expect(
-    workbenchReducer(state, {
-      type: "resolve-agent-success",
-      preview,
-      modelIds: [8, 9],
-    }).config.model_id
-  ).toBe(9);
-  expect(
-    workbenchReducer(state, {
-      type: "resolve-agent-success",
-      preview,
-      modelIds: [3],
-    }).config.model_id
-  ).toBe(9);
-  expect(
-    workbenchReducer(state, {
-      type: "resolve-agent-success",
-      preview,
-      modelIds: [],
-    }).config.model_id
-  ).toBe(9);
+  expect(next.config).not.toHaveProperty("model_id");
+  expect(next.config).not.toHaveProperty("generation_config");
 });
 
 it("lists every available tenant LLM for the generic workbench agent", () => {
@@ -501,10 +400,6 @@ it("inherits model effort when Agent only overrides the toggle, and prefers an e
   expect(deriveModelOptions(agent, [model], "tenant")[0].defaultEffort).toBe(
     "medium"
   );
-  expect(
-    withDefaultWorkbenchModel(initialWorkbenchState.config, [model])
-      .generation_config
-  ).toMatchObject({ deep_thinking: true, thinking_effort: "medium" });
 });
 
 it("preserves automatic defaults when no persisted model effort exists", () => {
@@ -522,17 +417,6 @@ it("preserves automatic defaults when no persisted model effort exists", () => {
   expect(
     deriveModelOptions(reasoningAgentFixture, [model], "tenant")[0]
       .defaultEffort
-  ).toBe("auto");
-  expect(
-    withDefaultWorkbenchModel(initialWorkbenchState.config, [model])
-      .generation_config.thinking_effort
-  ).toBe("auto");
-  expect(
-    selectWorkbenchModel(
-      { ...initialWorkbenchState.config, model_id: 12 },
-      [model],
-      11
-    ).generation_config.thinking_effort
   ).toBe("auto");
 });
 
@@ -564,26 +448,8 @@ it("keeps unconfigured reasoning automatic instead of substituting a capability 
   const config = {
     ...initialWorkbenchState.config,
     model_id: 11,
-    generation_config: {
-      deep_thinking: false,
-      thinking_effort: "xhigh" as const,
-      temperature: 0.43,
-      top_p: 0.78,
-      requested_output_tokens: 2048,
-    },
-  };
-  expect(
-    selectWorkbenchModel(config, [model], 11).generation_config
-  ).toMatchObject({
-    thinking_effort: "auto",
-    temperature: 0.43,
-    top_p: 0.78,
     requested_output_tokens: 2048,
-  });
-  expect(
-    withDefaultWorkbenchModel(initialWorkbenchState.config, [model])
-      .generation_config.thinking_effort
-  ).toBe("auto");
+  };
   expect(
     deriveModelOptions(
       agent,

@@ -256,9 +256,12 @@ describe("workbench new conversation", () => {
 
   it("reloads the conversation list after starting a new conversation", async () => {
     const user = userEvent.setup();
-    const queryClient = new QueryClient();
     render(
-      <QueryClientProvider client={queryClient}>
+      <QueryClientProvider
+        client={
+          new QueryClient({ defaultOptions: { queries: { retry: false } } })
+        }
+      >
         <WorkbenchPage />
       </QueryClientProvider>
     );

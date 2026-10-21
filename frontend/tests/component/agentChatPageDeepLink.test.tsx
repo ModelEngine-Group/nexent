@@ -1,3 +1,4 @@
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 // Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
 import React from "react";
@@ -152,7 +153,15 @@ describe("newchat Agent deep-link page wiring", () => {
     switchToNewThread.mockImplementation(
       () => new Promise<void>(() => undefined)
     );
-    render(<Home />);
+    render(
+      <QueryClientProvider
+        client={
+          new QueryClient({ defaultOptions: { queries: { retry: false } } })
+        }
+      >
+        <Home />
+      </QueryClientProvider>
+    );
 
     expect(
       await screen.findByText("Agent chat: Fixed Agent")
@@ -163,7 +172,15 @@ describe("newchat Agent deep-link page wiring", () => {
   it("consumes the deep link once and keeps manual selection working", async () => {
     switchToNewThread.mockResolvedValue(undefined);
     const user = userEvent.setup();
-    render(<Home />);
+    render(
+      <QueryClientProvider
+        client={
+          new QueryClient({ defaultOptions: { queries: { retry: false } } })
+        }
+      >
+        <Home />
+      </QueryClientProvider>
+    );
 
     expect(
       await screen.findByText("Agent chat: Fixed Agent")
@@ -207,7 +224,15 @@ describe("newchat Agent deep-link page wiring", () => {
         })
     );
     const user = userEvent.setup();
-    render(<Home />);
+    render(
+      <QueryClientProvider
+        client={
+          new QueryClient({ defaultOptions: { queries: { retry: false } } })
+        }
+      >
+        <Home />
+      </QueryClientProvider>
+    );
     await screen.findByText("Agent chat: Fixed Agent");
 
     await user.click(screen.getByRole("button", { name: "back to list" }));

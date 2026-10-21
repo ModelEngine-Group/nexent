@@ -5,7 +5,6 @@
 import { useConversationModelControls } from "@/features/model-controls/useConversationModelControls";
 import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
 import type { ReasoningEffort } from "@/types/modelConfig";
-import type { ModelParameterSettingsControl } from "@/types/modelParameterSettings";
 
 import type { SourceAttributes } from "@/types/source";
 import {
@@ -205,16 +204,9 @@ export interface ThreadProps {
   onBack?: () => void;
   selectedModelId?: string;
   onModelChange?: (modelId: string) => void;
-  deepThinking?: boolean;
-  onDeepThinkingChange?: (enabled: boolean) => void;
-  thinkingEffort?: ReasoningEffort;
-  onThinkingEffortChange?: (effort: ReasoningEffort) => void;
-  reasoningBudgetTokens?: number;
-  onReasoningBudgetTokensChange?: (budget: number) => void;
   chatMode: ChatMode;
   onChatModeChange?: (mode: ChatMode) => void;
   showModelSelector?: boolean;
-  modelParameterSettings?: ModelParameterSettingsControl;
   modelSelectionScope?: ModelSelectionScope;
   showConversationTitle?: boolean;
   composerTools?: ReactNode;
@@ -271,16 +263,9 @@ export const Thread: FC<ThreadProps> = ({
   onBack,
   selectedModelId,
   onModelChange,
-  deepThinking,
-  onDeepThinkingChange,
-  thinkingEffort,
-  onThinkingEffortChange,
-  reasoningBudgetTokens,
-  onReasoningBudgetTokensChange,
   chatMode,
   onChatModeChange,
   showModelSelector = true,
-  modelParameterSettings,
   modelSelectionScope = "agent",
   showConversationTitle = true,
   composerTools,
@@ -314,7 +299,8 @@ export const Thread: FC<ThreadProps> = ({
     models,
     `${user?.tenantId ?? ""}:${user?.id ?? ""}:${agent.id}:${threadKey ?? "new"}`,
     selectedModelId,
-    onModelChange ? (selectedModelId ?? "") : undefined
+    onModelChange ? (selectedModelId ?? "") : undefined,
+    conversationId
   );
   const effectiveSelectedModelId = onModelChange
     ? (selectedModelId ?? "")
@@ -529,27 +515,9 @@ export const Thread: FC<ThreadProps> = ({
         models={models}
         selectedModelId={modelIsValid ? effectiveSelectedModelId : ""}
         onModelChange={handleModelChange}
-        deepThinking={deepThinking ?? controls.deepThinking}
-        onDeepThinkingChange={
-          onDeepThinkingChange ?? controls.onDeepThinkingChange
-        }
-        thinkingEffort={thinkingEffort ?? controls.thinkingEffort}
-        onThinkingEffortChange={
-          onThinkingEffortChange ?? controls.onThinkingEffortChange
-        }
-        reasoningBudgetTokens={
-          reasoningBudgetTokens ?? controls.reasoningBudgetTokens
-        }
-        onReasoningBudgetTokensChange={
-          onReasoningBudgetTokensChange ??
-          controls.onReasoningBudgetTokensChange
-        }
         chatMode={chatMode}
         onChatModeChange={onChatModeChange}
         showModelSelector={showModelSelector}
-        modelParameterSettings={
-          modelParameterSettings ?? controls.modelParameterSettings
-        }
         showConversationTitle={showConversationTitle}
         composerTools={composerTools}
         knowledgeScope={knowledgeScope}
@@ -563,7 +531,9 @@ export const Thread: FC<ThreadProps> = ({
         onRuntimeMetadataChange={onRuntimeMetadataChange}
         readOnly={readOnly || (showModelSelector && !modelIsValid)}
         modelSelectionDisabled={readOnly}
-        readOnlyReason={readOnlyReason}
+        readOnlyReason={
+          readOnlyReason ?? (showModelSelector ? controls.error : undefined)
+        }
         showComposer={showComposer}
         configurationLayout={configurationLayout}
         debugLayout={debugLayout}
@@ -657,16 +627,9 @@ interface ThreadViewProps {
   models: readonly ModelOption[];
   selectedModelId?: string;
   onModelChange?: (modelId: string) => void;
-  deepThinking?: boolean;
-  onDeepThinkingChange?: (enabled: boolean) => void;
-  thinkingEffort?: ReasoningEffort;
-  onThinkingEffortChange?: (effort: ReasoningEffort) => void;
-  reasoningBudgetTokens?: number;
-  onReasoningBudgetTokensChange?: (budget: number) => void;
   chatMode: ChatMode;
   onChatModeChange?: (mode: ChatMode) => void;
   showModelSelector: boolean;
-  modelParameterSettings?: ModelParameterSettingsControl;
   showConversationTitle: boolean;
   composerTools?: ReactNode;
   knowledgeScope: ConversationKnowledgeScope | null;
@@ -722,16 +685,9 @@ const ThreadView: FC<ThreadViewProps> = ({
   models,
   selectedModelId,
   onModelChange,
-  deepThinking,
-  onDeepThinkingChange,
-  thinkingEffort,
-  onThinkingEffortChange,
-  reasoningBudgetTokens,
-  onReasoningBudgetTokensChange,
   chatMode,
   onChatModeChange,
   showModelSelector,
-  modelParameterSettings,
   showConversationTitle,
   composerTools,
   knowledgeScope,
@@ -999,20 +955,14 @@ const ThreadView: FC<ThreadViewProps> = ({
                 emptyFooterContent
               ))}
             <Composer
+              conversationId={conversationId}
               hidePlan={debugLayout}
               models={models}
               selectedModelId={selectedModelId}
               onModelChange={onModelChange}
-              deepThinking={deepThinking}
-              onDeepThinkingChange={onDeepThinkingChange}
-              thinkingEffort={thinkingEffort}
-              onThinkingEffortChange={onThinkingEffortChange}
-              reasoningBudgetTokens={reasoningBudgetTokens}
-              onReasoningBudgetTokensChange={onReasoningBudgetTokensChange}
               chatMode={chatMode}
               onChatModeChange={onChatModeChange}
               showModelSelector={showModelSelector}
-              modelParameterSettings={modelParameterSettings}
               knowledgeScope={knowledgeScope}
               knowledgePreview={knowledgePreview}
               knowledgeCapabilities={knowledgeCapabilities}

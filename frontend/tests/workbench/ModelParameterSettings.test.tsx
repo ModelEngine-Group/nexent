@@ -280,3 +280,15 @@ it("restoring discards an uncommitted numeric draft without submitting or saving
   );
   expect(screen.getByRole("spinbutton", { name: "温度" })).toHaveValue(0.6);
 });
+
+it("UI-SESSION-15 keeps the submenu open when focus and click target the same trigger", async () => {
+  render(<Harness changed={vi.fn()} />);
+  const trigger = screen.getByRole("button", { name: "高级设置" });
+  await userEvent.click(trigger);
+  await waitFor(() => expect(trigger).toHaveAttribute("aria-expanded", "true"));
+  expect(
+    await screen.findByRole("spinbutton", { name: "温度" })
+  ).toBeInTheDocument();
+  fireEvent.keyDown(trigger, { key: "Escape" });
+  expect(trigger).toHaveAttribute("aria-expanded", "false");
+});
