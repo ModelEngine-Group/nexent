@@ -1,19 +1,22 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """Tests for FastAPI authentication and permission dependencies."""
 
+import gateway.authentication.dependencies as depends_dependencies
 import pytest
 from fastapi import HTTPException
 from fastapi.security import HTTPAuthorizationCredentials
-from permissions import depends
+import permissions.depends as depends
 
 
 def test_authenticate_uses_authorization_header(mocker, monkeypatch):
-    monkeypatch.setattr(depends, "IS_SPEED_MODE", False)
+    monkeypatch.setattr(depends_dependencies, "IS_SPEED_MODE", False)
     mocker.patch(
-        "permissions.depends.get_current_user_context",
+        "gateway.authentication.identity.get_current_user_context",
         return_value=("user-1", "tenant-1", "USER"),
     )
 
-    current_user = depends.authenticate("Bearer token", None)
+    current_user = depends_dependencies.authenticate("Bearer token", None)
 
     assert current_user.user_id == "user-1"
     assert current_user.tenant_id == "tenant-1"
@@ -21,38 +24,38 @@ def test_authenticate_uses_authorization_header(mocker, monkeypatch):
 
 
 def test_authenticate_uses_bearer_credentials_when_header_is_missing(mocker, monkeypatch):
-    monkeypatch.setattr(depends, "IS_SPEED_MODE", False)
+    monkeypatch.setattr(depends_dependencies, "IS_SPEED_MODE", False)
     get_context = mocker.patch(
-        "permissions.depends.get_current_user_context",
+        "gateway.authentication.identity.get_current_user_context",
         return_value=("user-1", "tenant-1", "DEV"),
     )
     credentials = HTTPAuthorizationCredentials(
         scheme="Bearer", credentials="token"
     )
 
-    current_user = depends.authenticate(None, credentials)
+    current_user = depends_dependencies.authenticate(None, credentials)
 
     get_context.assert_called_once_with("token")
     assert current_user.normalized_role == "DEV"
 
 
 def test_authenticate_rejects_missing_token_outside_speed_mode(monkeypatch):
-    monkeypatch.setattr(depends, "IS_SPEED_MODE", False)
+    monkeypatch.setattr(depends_dependencies, "IS_SPEED_MODE", False)
 
     with pytest.raises(HTTPException) as raised:
-        depends.authenticate(None, None)
+        depends_dependencies.authenticate(None, None)
 
     assert raised.value.status_code == 401
 
 
 def test_authenticate_allows_missing_token_in_speed_mode(mocker, monkeypatch):
-    monkeypatch.setattr(depends, "IS_SPEED_MODE", True)
+    monkeypatch.setattr(depends_dependencies, "IS_SPEED_MODE", True)
     get_context = mocker.patch(
-        "permissions.depends.get_current_user_context",
+        "gateway.authentication.identity.get_current_user_context",
         return_value=("speed-user", "tenant-1", "SPEED"),
     )
 
-    current_user = depends.authenticate(None, None)
+    current_user = depends_dependencies.authenticate(None, None)
 
     get_context.assert_called_once_with(None)
     assert current_user.normalized_role == "SPEED"

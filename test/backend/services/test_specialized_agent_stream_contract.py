@@ -2,6 +2,7 @@
 
 """Exercise the active factories instead of an unused adapter registry."""
 
+from contracts.authentication import AuthenticatedIdentity
 import json
 from types import SimpleNamespace
 from unittest.mock import MagicMock
@@ -34,6 +35,7 @@ async def test_active_factory_awaits_builder_and_returns_async_iterator(mocker, 
     arguments = dict(request=request, tenant_id="tenant-a", language="en")
     if kind == "nl2agent":
         arguments["authorization"] = "Bearer token"
+        arguments["identity"] = AuthenticatedIdentity("user-a", "tenant-a")
 
     stream = await getattr(module, f"create_{kind}_stream")(**arguments)
     assert hasattr(stream, "__aiter__")
@@ -63,6 +65,7 @@ async def test_active_factory_propagates_preparation_failure(mocker, kind):
     arguments = dict(request=request, tenant_id="tenant-a", language="en")
     if kind == "nl2agent":
         arguments["authorization"] = None
+        arguments["identity"] = AuthenticatedIdentity("user-a", "tenant-a")
 
     with pytest.raises(ValueError, match="unauthorized input"):
         await getattr(module, f"create_{kind}_stream")(**arguments)

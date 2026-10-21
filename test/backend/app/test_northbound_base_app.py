@@ -316,12 +316,12 @@ database_a2a_module.PROTOCOL_HTTP_JSON = "http+json"
 database_a2a_module.PROTOCOL_JSONRPC = "jsonrpc"
 sys.modules['management.db.a2a.repository'] = database_a2a_module
 
-# Mock management.services.permission.identity.authentication_helpers (referenced by northbound_app._get_northbound_context)
-auth_utils_module = types.ModuleType("management.services.permission.identity.authentication_helpers")
+# Mock gateway.authentication.identity (referenced by northbound_app._get_northbound_context)
+auth_utils_module = types.ModuleType("gateway.authentication.identity")
 auth_utils_module.validate_bearer_token = MagicMock(return_value=(True, {"user_id": "test", "tenant_id": "test"}))
 auth_utils_module.generate_session_jwt = MagicMock(return_value="jwt-token")
 auth_utils_module.get_current_user_id = MagicMock(return_value=("test", "test"))
-sys.modules['management.services.permission.identity.authentication_helpers'] = auth_utils_module
+sys.modules['gateway.authentication.identity'] = auth_utils_module
 
 # Mock management.services.knowledge_base.ingestion to avoid database/storage imports
 file_management_utils_module = types.ModuleType("management.services.knowledge_base.ingestion")

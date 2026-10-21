@@ -1,5 +1,6 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
+from contracts.authentication import AuthenticatedIdentity
 import logging
 from http import HTTPStatus
 from typing import Optional
@@ -24,8 +25,8 @@ from contracts.exceptions import AgentDraftEditError
 from services.nl2agent_service import Nl2AgentDraftSaveError, create_nl2agent_stream
 from contracts.exceptions import RunModelControlsError
 from management.services.conversation.creation_history import prepare_creation_history, persist_creation_stream
-from management.services.permission.identity.authentication_helpers import get_current_user_info, get_current_user_id
-from infrastructure.security.internal_tokens import verify_internal_runtime_jwt
+from gateway.authentication.identity import get_current_user_info, get_current_user_id
+from gateway.authentication.internal import verify_internal_runtime_jwt
 
 agent_runtime_router = APIRouter(prefix="/agent")
 
@@ -64,10 +65,12 @@ async def agent_run_api(
     If resume=true, attempts to continue streaming from where it left off after a tab switch.
     """
     try:
+        user_id, tenant_id = get_current_user_id(authorization)
         return await run_agent_stream(
             agent_request=agent_request,
             http_request=http_request,
-            authorization=authorization,
+            user_id=user_id,
+            tenant_id=tenant_id,
             resume=resume,
         )
     except ForbiddenError as e:
@@ -116,7 +119,6 @@ async def northbound_agent_run_api(
         return await run_agent_stream(
             agent_request=agent_request,
             http_request=None,
-            authorization=authorization,
             user_id=user_id,
             tenant_id=tenant_id,
             skip_user_save=True,
@@ -165,15 +167,15 @@ async def nl2agent_run_api(
         raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail={"code": "WORKBENCH_DISABLED"})
 
     try:
-        _, tenant_id, language = get_current_user_info(authorization, http_request)
+        user_id, tenant_id, language = get_current_user_info(authorization, http_request)
         stream = await create_nl2agent_stream(
             request=nl2agent_request,
             tenant_id=tenant_id,
             language=language,
+            identity=AuthenticatedIdentity(user_id, tenant_id),
             authorization=authorization,
         )
         if nl2agent_request.persist_history:
-            user_id, _ = get_current_user_id(authorization)
             conversation_id, assistant_index = prepare_creation_history(
                 conversation_id=nl2agent_request.conversation_id,
                 mode="agent_create",

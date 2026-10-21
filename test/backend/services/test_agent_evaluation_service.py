@@ -399,7 +399,7 @@ _adapters_pkg.jiuwen_sdk_adapter = _jiuwen_module
 
 # Make sure pre-existing real utils package is in sys.modules so
 # the app test (and any sibling tests) can resolve doted paths like
-# ``management.services.permission.identity.authentication_helpers`` without hitting a stubbed package.
+# ``gateway.authentication.identity`` without hitting a stubbed package.
 _existing_utils = sys.modules.get("utils")
 if _existing_utils is None or not hasattr(_existing_utils, "__path__"):
     _utils_pkg = _register_package("utils")
@@ -494,8 +494,8 @@ _agent_service_module.list_model_providers_impl = MagicMock(return_value=[])
 # an attribute on the ``utils`` package, so doted ``patch`` resolution in
 # sibling tests can find it.
 try:
-    importlib.import_module("management.services.permission.identity.authentication_helpers")
-    _utils_pkg.auth_utils = sys.modules["management.services.permission.identity.authentication_helpers"]
+    importlib.import_module("gateway.authentication.identity")
+    _utils_pkg.auth_utils = sys.modules["gateway.authentication.identity"]
 except Exception:  # noqa: BLE001
     pass
 

@@ -9,7 +9,7 @@ from fastapi.responses import StreamingResponse
 from consts.const import RUNTIME_SERVICE_URL
 from contracts.exceptions import RuntimeServiceTimeoutError, RuntimeServiceUnavailableError, RuntimeUpstreamError
 from contracts.models import AgentRequest
-from management.services.permission.identity.authentication_helpers import generate_internal_runtime_jwt
+from gateway.authentication.identity import generate_internal_runtime_jwt
 from infrastructure.http.client import create_httpx_client
 
 

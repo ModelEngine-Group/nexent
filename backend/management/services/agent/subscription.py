@@ -4,6 +4,7 @@
 
 import asyncio
 import json
+from contracts.exceptions import UnauthorizedError
 import logging
 import uuid
 from copy import (
@@ -89,10 +90,7 @@ from infrastructure.streaming.channels import (
 from infrastructure.concurrency import (
     runtime_thread_manager,
 )
-from management.services.permission.identity.authentication_helpers import (
-    get_current_user_info,
-    get_user_language,
-)
+from management.utils.request_context import get_user_language
 from infrastructure.serialization.runtime_metadata import (
     validate_runtime_metadata,
 )
@@ -101,19 +99,14 @@ logger = logging.getLogger(__name__)
 
 
 def _resolve_user_tenant_language(
-    authorization: str,
     http_request: Request | None = None,
     user_id: str | None = None,
     tenant_id: str | None = None,
 ):
-    """Resolve user_id, tenant_id, language with optional overrides.
-
-    If user_id and tenant_id are provided, do not parse from authorization again.
-    """
-    if user_id is None or tenant_id is None:
-        return get_current_user_info(authorization, http_request)
-    else:
-        return user_id, tenant_id, get_user_language(http_request)
+    """Require established identity and read the request language preference."""
+    if not user_id or not tenant_id:
+        raise UnauthorizedError("Authenticated user and tenant are required")
+    return user_id, tenant_id, get_user_language(http_request)
 
 
 def _detect_resume_position(
@@ -193,7 +186,6 @@ def _detect_resume_position(
 async def run_agent_stream(
     agent_request: AgentRequest,
     http_request: Request,
-    authorization: str,
     user_id: str = None,
     tenant_id: str = None,
     skip_user_save: bool = False,
@@ -201,7 +193,7 @@ async def run_agent_stream(
 ):
     """
     Start an agent run and stream responses.
-    If user_id or tenant_id is provided, authorization will be overridden. (Useful in northbound apis)
+    The gateway must supply the authenticated user and tenant for every entrypoint.
 
     Args:
         resume: If True, check for existing streaming message and continue from where it left off
@@ -210,7 +202,6 @@ async def run_agent_stream(
         raise WorkbenchError("WORKBENCH_DISABLED", status_code=404)
 
     resolved_user_id, resolved_tenant_id, language = _resolve_user_tenant_language(
-        authorization=authorization,
         http_request=http_request,
         user_id=user_id,
         tenant_id=tenant_id,

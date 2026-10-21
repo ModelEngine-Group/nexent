@@ -107,6 +107,7 @@ def test_oauth_login_success_records_audit_entry(caplog, mocker, oauth_callback_
 
 def test_oauth_signup_success_records_audit_entry(caplog, mocker):
     """Completing a pending OAuth signup records the created user, never the password."""
+    mocker.patch.object(oauth_app_module, "parse_pending_oauth_token", return_value={"provider": "github", "provider_user_id": "provider-user", "provider_email": "", "provider_username": "octocat"})
     mocker.patch.object(
         oauth_app_module,
         "complete_pending_oauth_account",

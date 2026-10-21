@@ -27,7 +27,7 @@ from management.services.evaluation.evaluators import (
     restore_evaluator_version_impl,
     update_evaluator_impl,
 )
-from management.services.permission.identity.authentication_helpers import get_current_user_id
+from gateway.authentication.identity import get_current_user_id
 
 
 logger = logging.getLogger("evaluator_app")

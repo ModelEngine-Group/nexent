@@ -41,7 +41,7 @@ def _profile(version: str = "2026-01") -> SimpleNamespace:
 @STAGE
 @pytest.mark.case_id("UT-BE-006")
 def test_auth_helpers_trust_only_validated_credentials(monkeypatch: pytest.MonkeyPatch) -> None:
-    from management.services.permission.identity import authentication_helpers as auth_utils
+    import gateway.authentication.identity as auth_utils
 
     monkeypatch.setattr(auth_utils, "get_token_by_access_key", lambda key: None)
     assert auth_utils.validate_bearer_token("Bearer unsigned.payload.claims") == (False, None)

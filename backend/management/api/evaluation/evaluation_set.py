@@ -41,7 +41,7 @@ from management.services.evaluation.sets import (
     update_evaluation_set_case_impl,
 )
 from infrastructure.concurrency import config_thread_manager
-from management.services.permission.identity.authentication_helpers import get_current_user_id
+from gateway.authentication.identity import get_current_user_id
 from management.services.evaluation.spreadsheet import (
     build_evaluation_set_excel_template_bytes,
     parse_evaluation_cases_from_excel,

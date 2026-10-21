@@ -25,14 +25,13 @@ from management.db.identity.group import query_group_ids_by_user
 from management.db.model.repository import get_model_by_model_id, get_model_id_by_display_name
 from management.db.mcp.remote import get_mcp_server_by_name_and_tenant
 from management.db.tool.repository import create_or_update_tool_by_tool_info, query_all_tools
-from fastapi import Header
 from management.services.agent.naming import (
     check_agent_value_duplicate,
     generate_unique_agent_value,
 )
 from management.services.skill.service import SkillService
 from management.services.agent.versions import publish_version_impl
-from management.services.permission.identity.authentication_helpers import get_current_user_info
+from contracts.authentication import AuthenticatedIdentity
 from management.services.configuration.tenant.settings import tenant_config_manager
 from management.services.skill.naming import generate_available_copy_skill_name
 from management.utils.serialization import convert_list_to_string
@@ -225,7 +224,7 @@ async def _export_agent_dict_core(
 
 async def export_agent_dict_impl(
     agent_id: int,
-    authorization: str = Header(None),
+    identity: AuthenticatedIdentity,
     version_no: int = 0,
 ) -> dict:
     """
@@ -233,13 +232,13 @@ async def export_agent_dict_impl(
 
     Args:
         agent_id (int): The ID of the agent to export.
-        authorization (str): User authentication information, obtained from the Header.
+        identity (AuthenticatedIdentity): User and tenant established by Gateway.
         version_no (int): Version to export. Default 0 = draft.
 
     Returns:
         dict: ExportAndImportDataFormat as a plain dict (via model_dump).
     """
-    user_id, tenant_id, _ = get_current_user_info(authorization)
+    user_id, tenant_id = identity.user_id, identity.tenant_id
     return await _export_agent_dict_core(
         root_agent_id=agent_id,
         tenant_id=tenant_id,
@@ -265,12 +264,12 @@ async def export_agent_dict_for_repository_impl(
 
 async def export_agent_impl(
     agent_id: int,
-    authorization: str = Header(None),
+    identity: AuthenticatedIdentity,
     version_no: int = 0,
 ) -> str:
     """Serialize export_agent_dict_impl output to a JSON string for download or ZIP embedding."""
     agent_dict = await export_agent_dict_impl(
-        agent_id, authorization, version_no=version_no
+        agent_id, identity, version_no=version_no
     )
     return json.dumps(agent_dict)
 
@@ -457,7 +456,7 @@ async def export_agent_by_agent_id(
 
 async def import_agent_impl(
     agent_info: ExportAndImportDataFormat,
-    authorization: str = Header(None),
+    identity: AuthenticatedIdentity,
     force_import: bool = False,
     skill_name_to_id: Optional[Dict[str, int]] = None,
     resolve_name_conflicts: bool = False,
@@ -471,7 +470,7 @@ async def import_agent_impl(
         The backend import logic only consumes the tools that already
         exist for the current tenant.
     """
-    user_id, tenant_id, _ = get_current_user_info(authorization)
+    user_id, tenant_id = identity.user_id, identity.tenant_id
     agent_id = agent_info.agent_id
 
     agent_stack = deque([agent_id])
@@ -657,7 +656,7 @@ async def import_agent_by_agent_id(
 
 async def export_agent_with_skills_impl(
     agent_id: int,
-    authorization: str,
+    identity: AuthenticatedIdentity,
     version_no: int = 0,
 ) -> dict:
     """Export an agent, returning a ZIP if it has skill instances, otherwise a plain dict.
@@ -666,7 +665,7 @@ async def export_agent_with_skills_impl(
       - A dict with {"_zip": True, "data": bytes, "filename": str} when the agent has skills
       - ExportAndImportDataFormat as a plain dict when the agent has no skills
     """
-    user_id, tenant_id, _ = get_current_user_info(authorization)
+    user_id, tenant_id = identity.user_id, identity.tenant_id
     if is_system_agent(agent_id, tenant_id) is True:
         raise ForbiddenError("System Agent cannot be exported")
 
@@ -676,11 +675,11 @@ async def export_agent_with_skills_impl(
 
     if not skill_zip_entries:
         return await export_agent_dict_impl(
-            agent_id, authorization, version_no=version_no
+            agent_id, identity, version_no=version_no
         )
 
     agent_json_str = await export_agent_impl(
-        agent_id, authorization, version_no=version_no
+        agent_id, identity, version_no=version_no
     )
 
     zip_buffer = io.BytesIO()
@@ -710,7 +709,7 @@ async def export_agent_with_skills_impl(
 async def import_agent_with_skills_impl(
     agent_info: "ExportAndImportDataFormat",
     skills: List[SkillZipEntry],
-    authorization: str,
+    identity: AuthenticatedIdentity,
     force_import: bool = False,
     skill_resolutions: Optional[List[SkillResolution]] = None,
     resolve_name_conflicts: bool = False,
@@ -721,7 +720,7 @@ async def import_agent_with_skills_impl(
     and renamed skills share the same ZIP creation path, while imported agent
     skill names are resolved to tenant-local skill IDs before creating instances.
     """
-    user_id, tenant_id, _ = get_current_user_info(authorization)
+    user_id, tenant_id = identity.user_id, identity.tenant_id
 
     # Validate every agent before creating any dependency skills.
     catalog = {
@@ -810,7 +809,7 @@ async def import_agent_with_skills_impl(
 
     agent_id_mapping = await import_agent_impl(
         agent_info,
-        authorization,
+        identity,
         force_import,
         skill_name_to_id=skill_name_to_id,
         resolve_name_conflicts=resolve_name_conflicts,
@@ -868,10 +867,10 @@ def build_skill_import_conflicts(
 
 def check_skill_conflicts_impl(
     skill_names: List[str],
-    authorization: str,
+    identity: AuthenticatedIdentity,
 ) -> List[Dict[str, str]]:
     """Check agent import skill names against the current tenant."""
-    _, tenant_id, _ = get_current_user_info(authorization)
+    tenant_id = identity.tenant_id
     existing_skill_names = {
         skill.get("name")
         for skill in skill_db.list_skills(tenant_id)

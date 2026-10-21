@@ -181,9 +181,9 @@ class VectorDatabaseType:
 consts_const_module.VectorDatabaseType = VectorDatabaseType
 sys.modules["consts.const"] = consts_const_module
 
-utils_auth_module = types.ModuleType("management.services.permission.identity.authentication_helpers")
+utils_auth_module = types.ModuleType("gateway.authentication.identity")
 utils_auth_module.generate_session_jwt = MagicMock(return_value="jwt-token")
-sys.modules["management.services.permission.identity.authentication_helpers"] = utils_auth_module
+sys.modules["gateway.authentication.identity"] = utils_auth_module
 
 utils_fm_module = types.ModuleType("management.services.knowledge_base.ingestion")
 utils_fm_module.trigger_data_process = AsyncMock(return_value={"status": "ok"})

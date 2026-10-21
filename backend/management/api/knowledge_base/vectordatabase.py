@@ -37,7 +37,7 @@ from management.services.monitor.audit import record_security_event
 from management.services.file.service import check_file_access
 from management.services.knowledge_base.quota import QuotaService
 from management.services.knowledge_base.task_state import get_redis_service
-from management.services.permission.identity.authentication_helpers import get_current_user_context, get_current_user_id
+from gateway.authentication.identity import get_current_user_context, get_current_user_id
 
 
 router = APIRouter(prefix="/indices")

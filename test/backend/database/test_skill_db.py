@@ -94,7 +94,7 @@ utils_str_utils_mock.convert_string_to_list = (
     lambda items: [] if not items else [int(item.strip()) for item in items.split(",") if item.strip().isdigit()]
 )
 sys.modules['utils'] = MagicMock()
-sys.modules['management.services.permission.identity.authentication_helpers'] = MagicMock()
+sys.modules['gateway.authentication.identity'] = MagicMock()
 sys.modules['management.services.skill.params'] = utils_skill_params_mock
 sys.modules['management.utils.serialization'] = utils_str_utils_mock
 sys.modules['backend.utils'] = MagicMock()

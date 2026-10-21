@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """D1 backend unit contracts derived from the functional baseline.
 
 These tests import production modules directly and never import Nexent's old
@@ -7,6 +9,7 @@ boundary; assertions describe user-visible policy, not implementation calls.
 
 from __future__ import annotations
 
+import gateway.authentication.dependencies as depends_dependencies
 from types import SimpleNamespace
 
 import pytest
@@ -21,13 +24,13 @@ STAGE = pytest.mark.stage("D1")
 @STAGE
 @pytest.mark.case_id("UT-BE-002")
 def test_permission_rejects_missing_auth_and_cross_tenant(monkeypatch: pytest.MonkeyPatch) -> None:
-    from permissions import depends
+    import permissions.depends as depends
     from permissions.models import CurrentUser
     from permissions.tenant_scope import resolve_personal_target_tenant
 
     monkeypatch.setattr(depends, "IS_SPEED_MODE", False)
     with pytest.raises(HTTPException) as unauthenticated:
-        depends.authenticate(None, None)
+        depends_dependencies.authenticate(None, None)
     assert unauthenticated.value.status_code == 401
 
     monkeypatch.setattr(depends, "has_permission", lambda role, permission: False)
@@ -49,23 +52,3 @@ def _profile(version: str = "2026-01") -> SimpleNamespace:
         tokenizer_family="openai",
         capability_profile_version=version,
     )
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-

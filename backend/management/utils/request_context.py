@@ -1,6 +1,8 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
 
+import logging
+from contracts.localization import LANGUAGE
 from typing import Optional
 from fastapi import Request
 
@@ -21,3 +23,28 @@ def get_client_ip(request: Optional[Request]) -> str:
     if real_ip:
         return real_ip
     return request.client.host if request.client else ""
+
+
+def get_user_language(request: Request = None) -> str:
+    """
+    Get user language preference from request
+
+    Args:
+        request: FastAPI request object, used to get cookie
+
+    Returns:
+        str: Language code ('zh' or 'en'), default to 'zh'
+    """
+    default_language = LANGUAGE["ZH"]
+
+    # Read language setting from cookie
+    if request:
+        try:
+            if hasattr(request, "cookies") and request.cookies:
+                cookie_locale = request.cookies.get("NEXT_LOCALE")
+                if cookie_locale and cookie_locale in [LANGUAGE["ZH"], LANGUAGE["EN"]]:
+                    return cookie_locale
+        except (AttributeError, TypeError) as e:
+            logging.warning(f"Error reading language from cookies: {e}")
+
+    return default_language

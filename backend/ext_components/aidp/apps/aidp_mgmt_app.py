@@ -78,7 +78,7 @@ from ext_components.aidp.services.aidp_service import (
     update_aidp_kb_impl,
     upload_aidp_docs_impl,
 )
-from management.services.permission.identity import authentication_helpers as auth_utils_module
+import gateway.authentication.identity as auth_utils_module
 
 
 aidp_mgmt_router = APIRouter(prefix="/aidp-mgmt")

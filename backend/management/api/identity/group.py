@@ -35,7 +35,7 @@ from management.services.permission.identity.groups import (
     get_groups_by_tenant, update_group_members
 )
 from management.services.permission.identity.tenants import get_tenant_info
-from management.services.permission.identity.authentication_helpers import get_current_user_id
+from gateway.authentication.identity import get_current_user_id
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/groups", tags=["groups"])

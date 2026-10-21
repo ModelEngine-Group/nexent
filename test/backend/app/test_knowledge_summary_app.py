@@ -101,10 +101,10 @@ consts_model_mock.ChangeSummaryRequest = ChangeSummaryRequest
 sys.modules['contracts.models'] = consts_model_mock
 
 # Mock utils modules used by knowledge_summary_app to avoid deep DB/storage import chains
-utils_auth_utils_mock = types.ModuleType('management.services.permission.identity.authentication_helpers')
+utils_auth_utils_mock = types.ModuleType('gateway.authentication.identity')
 utils_auth_utils_mock.get_current_user_id = MagicMock(return_value=("test_user_id", "test_tenant_id"))
 utils_auth_utils_mock.get_current_user_info = MagicMock(return_value=("test_user_id", "test_tenant_id", "en"))
-sys.modules['management.services.permission.identity.authentication_helpers'] = utils_auth_utils_mock
+sys.modules['gateway.authentication.identity'] = utils_auth_utils_mock
 
 utils_config_utils_mock = types.ModuleType('management.services.configuration.tenant.settings')
 mock_tenant_config_manager = MagicMock()

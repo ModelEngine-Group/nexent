@@ -6,7 +6,7 @@ from typing import List, Optional
 from fastapi import APIRouter, File, Form, Header, HTTPException, Request, UploadFile
 from management.services.file.service import resolve_minio_upload_folder, upload_to_minio
 from management.services.monitor.audit import AUDIT_DETAIL_LIST_LIMIT, record_security_event
-from management.services.permission.identity.authentication_helpers import get_current_user_id
+from gateway.authentication.identity import get_current_user_id
 
 logger = logging.getLogger("file_management_app")
 

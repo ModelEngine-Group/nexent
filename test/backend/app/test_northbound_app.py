@@ -104,11 +104,11 @@ def test_get_northbound_context_logs_non_service_request_usage():
         "server": ("testserver", 80),
         "client": ("testclient", 50000),
     })
-    with patch("gateway.api.northbound.routes.validate_bearer_token", return_value=(True, {"sub": "user-1"})), \
-            patch("gateway.api.northbound.routes.get_user_and_tenant_by_access_key", return_value={
+    with patch("gateway.authentication.identity.validate_bearer_token", return_value=(True, {"sub": "user-1"})), \
+            patch("gateway.authentication.identity.get_user_and_tenant_by_access_key", return_value={
                 "user_id": "user-1", "tenant_id": "tenant-1", "token_id": 9,
             }), \
-            patch("gateway.api.northbound.routes.log_token_usage") as mock_log:
+            patch("gateway.authentication.dependencies.log_token_usage") as mock_log:
         context = __import__("asyncio").run(_get_northbound_context(request))
 
     assert context.request_id == "req-1"
@@ -137,11 +137,11 @@ def test_get_northbound_context_skips_usage_log_for_service_logged_paths():
         "server": ("testserver", 80),
         "client": ("testclient", 50000),
     })
-    with patch("gateway.api.northbound.routes.validate_bearer_token", return_value=(True, {"sub": "user-1"})), \
-            patch("gateway.api.northbound.routes.get_user_and_tenant_by_access_key", return_value={
+    with patch("gateway.authentication.identity.validate_bearer_token", return_value=(True, {"sub": "user-1"})), \
+            patch("gateway.authentication.identity.get_user_and_tenant_by_access_key", return_value={
                 "user_id": "user-1", "tenant_id": "tenant-1", "token_id": 9,
             }), \
-            patch("gateway.api.northbound.routes.log_token_usage") as mock_log:
+            patch("gateway.authentication.dependencies.log_token_usage") as mock_log:
         __import__("asyncio").run(_get_northbound_context(request))
 
     mock_log.assert_not_called()
@@ -1448,8 +1448,8 @@ def test_get_northbound_context_rejects_invalid_identity(
 ):
     from gateway.api.northbound.routes import _get_northbound_context
 
-    with patch("gateway.api.northbound.routes.validate_bearer_token", return_value=token_result), \
-            patch("gateway.api.northbound.routes.get_user_and_tenant_by_access_key", return_value=lookup_result):
+    with patch("gateway.authentication.identity.validate_bearer_token", return_value=token_result), \
+            patch("gateway.authentication.identity.get_user_and_tenant_by_access_key", return_value=lookup_result):
         with pytest.raises(Exception) as raised:
             __import__("asyncio").run(_get_northbound_context(_request()))
 
@@ -1464,7 +1464,7 @@ def test_get_northbound_context_rejects_invalid_identity(
 def test_get_northbound_context_maps_authentication_errors(error):
     from gateway.api.northbound.routes import _get_northbound_context
 
-    with patch("gateway.api.northbound.routes.validate_bearer_token", side_effect=error):
+    with patch("gateway.authentication.identity.validate_bearer_token", side_effect=error):
         with pytest.raises(Exception) as raised:
             __import__("asyncio").run(_get_northbound_context(_request()))
 
@@ -1474,10 +1474,10 @@ def test_get_northbound_context_maps_authentication_errors(error):
 def test_get_northbound_context_generates_request_id_and_survives_usage_log_failure():
     from gateway.api.northbound.routes import _get_northbound_context
 
-    with patch("gateway.api.northbound.routes.validate_bearer_token", return_value=(True, {"sub": "user"})), \
-            patch("gateway.api.northbound.routes.get_user_and_tenant_by_access_key", return_value={
+    with patch("gateway.authentication.identity.validate_bearer_token", return_value=(True, {"sub": "user"})), \
+            patch("gateway.authentication.identity.get_user_and_tenant_by_access_key", return_value={
                 "user_id": "user", "tenant_id": "tenant", "token_id": 2,
-            }), patch("gateway.api.northbound.routes.log_token_usage", side_effect=RuntimeError("db")):
+            }), patch("gateway.authentication.dependencies.log_token_usage", side_effect=RuntimeError("db")):
         context = __import__("asyncio").run(_get_northbound_context(_request()))
 
     assert context.request_id
@@ -1487,10 +1487,10 @@ def test_get_northbound_context_generates_request_id_and_survives_usage_log_fail
 def test_get_northbound_context_does_not_log_non_positive_token_id():
     from gateway.api.northbound.routes import _get_northbound_context
 
-    with patch("gateway.api.northbound.routes.validate_bearer_token", return_value=(True, {"sub": "user"})), \
-            patch("gateway.api.northbound.routes.get_user_and_tenant_by_access_key", return_value={
+    with patch("gateway.authentication.identity.validate_bearer_token", return_value=(True, {"sub": "user"})), \
+            patch("gateway.authentication.identity.get_user_and_tenant_by_access_key", return_value={
                 "user_id": "user", "tenant_id": "tenant", "token_id": 0,
-            }), patch("gateway.api.northbound.routes.log_token_usage") as mock_log:
+            }), patch("gateway.authentication.dependencies.log_token_usage") as mock_log:
         __import__("asyncio").run(_get_northbound_context(_request()))
 
     mock_log.assert_not_called()

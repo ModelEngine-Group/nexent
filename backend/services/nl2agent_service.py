@@ -5,6 +5,7 @@
 import ast
 import asyncio
 import json
+from contracts.authentication import AuthenticatedIdentity
 import logging
 import re
 import threading
@@ -57,7 +58,6 @@ from tool_collection.mcp.nl2agent_mcp_tools import (
     SEARCH_UNINSTALLED_RESOURCES_NAME,
     UNINSTALLED_RESOURCE_SOURCES,
 )
-from management.services.permission.identity.authentication_helpers import get_current_user_id
 from management.services.configuration.tenant.settings import tenant_config_manager
 from management.services.agent.context import (
     build_authorized_context_input,
@@ -1337,16 +1337,20 @@ async def build_nl2agent_run_info(
     request: NL2AgentRunRequest,
     tenant_id: str,
     language: str,
-    authorization: str | None,
+    authorization: str | None = None,
+    *,
+    identity: AuthenticatedIdentity,
 ) -> AgentRunInfo:
     """Build all request-scoped NL2Agent runtime objects in memory."""
 
     action_agent_id = _parse_nl2agent_card_action_agent_id(request.query)
     if action_agent_id is not None and request.agent_id != action_agent_id:
         raise Nl2AgentDraftSaveError("agent_context_mismatch")
-    user_id, authenticated_tenant_id = get_current_user_id(authorization)
-    if authenticated_tenant_id != tenant_id:
+    if identity.tenant_id != tenant_id:
         raise PermissionError("tenant mismatch")
+    user_id = identity.user_id
+    if not user_id or not tenant_id:
+        raise PermissionError("Authenticated user and tenant are required")
     preflight_turn_controls(request, tenant_id)
     binding_context = await _build_verified_bound_resources_context(
         agent_id=request.agent_id,
@@ -1457,7 +1461,9 @@ async def create_nl2agent_stream(
     request: NL2AgentRunRequest,
     tenant_id: str,
     language: str,
-    authorization: str | None,
+    authorization: str | None = None,
+    *,
+    identity: AuthenticatedIdentity,
 ) -> AsyncIterator[str]:
     """Create an SSE-compatible stream for one ephemeral NL2Agent run."""
 
@@ -1465,6 +1471,7 @@ async def create_nl2agent_stream(
         request=request,
         tenant_id=tenant_id,
         language=language,
+        identity=identity,
         authorization=authorization,
     )
 

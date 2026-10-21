@@ -5,6 +5,7 @@ Unit tests for management.api.agent.agent module.
 
 Tests all agent management API endpoints including runtime and configuration operations.
 """
+from contracts.authentication import AuthenticatedIdentity
 import atexit
 from http import HTTPStatus
 from unittest.mock import AsyncMock, patch, Mock, MagicMock, ANY
@@ -131,7 +132,8 @@ install_serialization_stub(sys.modules["management.db.client"])
 sys.modules['management.db.agent.repository'] = MagicMock()
 sys.modules['agents.create_agent_info'] = MagicMock()
 sys.modules['nexent.core.agents.run_agent'] = MagicMock()
-sys.modules['management.services.permission.identity.authentication_helpers'] = MagicMock()
+sys.modules['gateway.authentication.identity'] = MagicMock()
+sys.modules['gateway.authentication.identity'].get_current_user_id.return_value = ('test_user', 'test_tenant')
 sys.modules['management.services.configuration.tenant.settings'] = MagicMock()
 sys.modules['utils.thread_utils'] = MagicMock()
 sys.modules['infrastructure.observability.bootstrap'] = MagicMock()
@@ -1348,7 +1350,7 @@ def test_export_agent_api_success(mocker, mock_auth_header):
 
     assert response.status_code == 200
     mock_export_agent.assert_called_once_with(
-        123, mock_auth_header["Authorization"])
+        123, AuthenticatedIdentity("test_user", "test_tenant"))
     assert response.json()["code"] == 0
     assert response.json()["message"] == "success"
 
@@ -1462,7 +1464,7 @@ def test_check_skills_api_returns_conflicts(mocker, mock_auth_header):
     }
     mock_check.assert_called_once_with(
         ["SkillA", "SkillB"],
-        mock_auth_header["Authorization"],
+        AuthenticatedIdentity("test_user", "test_tenant"),
     )
 
 
@@ -2005,7 +2007,7 @@ async def test_export_agent_api_detailed(mocker, mock_auth_header):
     # Assertions
     assert response.status_code == 200
     mock_export_agent.assert_called_once_with(
-        456, mock_auth_header["Authorization"])
+        456, AuthenticatedIdentity("test_user", "test_tenant"))
 
     # Verify correct construction of ConversationResponse
     response_data = response.json()
@@ -2034,7 +2036,7 @@ async def test_export_agent_api_empty_response(mocker, mock_auth_header):
     # Verify
     assert response.status_code == 200
     mock_export_agent.assert_called_once_with(
-        789, mock_auth_header["Authorization"])
+        789, AuthenticatedIdentity("test_user", "test_tenant"))
 
     # Verify empty data can also be correctly wrapped in ConversationResponse
     response_data = response.json()

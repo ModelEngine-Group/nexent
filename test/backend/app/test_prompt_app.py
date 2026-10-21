@@ -18,10 +18,10 @@ prompt_service_stub.PromptOptimizationService = MagicMock()
 sys.modules["management.services.agent.prompt_generation"] = prompt_service_stub
 sys.modules["management.services.agent.prompt_generation"] = prompt_service_stub
 
-auth_utils_stub = type(sys)("management.services.permission.identity.authentication_helpers")
+auth_utils_stub = type(sys)("gateway.authentication.identity")
 auth_utils_stub.get_current_user_info = MagicMock()
-sys.modules["management.services.permission.identity.authentication_helpers"] = auth_utils_stub
-sys.modules["management.services.permission.identity.authentication_helpers"] = auth_utils_stub
+sys.modules["gateway.authentication.identity"] = auth_utils_stub
+sys.modules["gateway.authentication.identity"] = auth_utils_stub
 
 from management.api.prompt.prompt import router
 

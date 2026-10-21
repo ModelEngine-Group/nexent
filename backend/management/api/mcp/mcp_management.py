@@ -37,7 +37,7 @@ from management.services.repository.mcp.service import (
 )
 from management.db.mcp.market import increment_mcp_market_download_count
 from management.services.monitor.audit import record_security_event
-from management.services.permission.identity.authentication_helpers import get_current_user_info
+from gateway.authentication.identity import get_current_user_info
 
 router = APIRouter(prefix="/mcp-tools")
 logger = logging.getLogger("mcp_management_app")

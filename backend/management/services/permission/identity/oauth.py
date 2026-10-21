@@ -1,4 +1,5 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+from contracts.authentication import OAUTH_PENDING_EXPIRE_SECONDS, OAUTH_PENDING_PURPOSE, PendingOAuthIdentity
 import json
 import logging
 import os
@@ -21,8 +22,6 @@ from management.db.identity.user_tenant import get_user_tenant_by_user_id, inser
 
 logger = logging.getLogger(__name__)
 
-OAUTH_PENDING_EXPIRE_SECONDS = 10 * 60
-OAUTH_PENDING_PURPOSE = "oauth_account_completion"
 _EMAIL_ADAPTER = TypeAdapter(EmailStr)
 
 
@@ -40,15 +39,6 @@ def _build_ssl_context() -> ssl.SSLContext:
 _SSL_CTX = _build_ssl_context()
 
 
-def parse_state(state: str) -> Dict[str, str]:
-    parts = state.split(":", 2)
-    if len(parts) >= 2:
-        return {
-            "provider": parts[0],
-            "token": parts[1],
-            "link_user_id": parts[2] if len(parts) > 2 else "",
-        }
-    return {"provider": state, "token": "", "link_user_id": ""}
 
 
 def _resolve_field(data: dict, field_path: str) -> Any:
@@ -295,39 +285,9 @@ def generate_pending_oauth_token(
     return jwt.encode(payload, SUPABASE_JWT_SECRET, algorithm="HS256")
 
 
-def parse_pending_oauth_token(pending_token: str) -> Dict[str, str]:
-    if not pending_token:
-        raise OAuthLinkError("OAuth account completion session is missing")
-    if not SUPABASE_JWT_SECRET:
-        raise OAuthProviderError("JWT verification is not configured")
-
-    try:
-        payload = jwt.decode(
-            pending_token,
-            SUPABASE_JWT_SECRET,
-            algorithms=["HS256"],
-            options={"verify_exp": True, "verify_aud": False},
-        )
-    except jwt.ExpiredSignatureError as exc:
-        raise OAuthLinkError("OAuth account completion session has expired") from exc
-    except jwt.InvalidTokenError as exc:
-        raise OAuthLinkError("OAuth account completion session is invalid") from exc
-
-    if payload.get("purpose") != OAUTH_PENDING_PURPOSE:
-        raise OAuthLinkError("OAuth account completion session is invalid")
-    if not payload.get("provider") or not payload.get("provider_user_id"):
-        raise OAuthLinkError("OAuth account completion session is incomplete")
-
-    return {
-        "provider": str(payload.get("provider", "")),
-        "provider_user_id": str(payload.get("provider_user_id", "")),
-        "provider_email": str(payload.get("provider_email", "")),
-        "provider_username": str(payload.get("provider_username", "")),
-    }
 
 
-def get_pending_oauth_info(pending_token: str) -> Dict[str, Any]:
-    payload = parse_pending_oauth_token(pending_token)
+def get_pending_oauth_info(payload: PendingOAuthIdentity) -> Dict[str, Any]:
     provider_email = payload.get("provider_email") or ""
     return {
         "provider": payload["provider"],
@@ -381,7 +341,7 @@ def _role_from_invitation_type(code_type: str) -> str:
 
 
 async def complete_pending_oauth_account(
-    pending_token: str,
+    pending_identity: PendingOAuthIdentity,
     password: str,
     invite_code: str,
     email: Optional[str] = None,
@@ -393,9 +353,9 @@ async def complete_pending_oauth_account(
         use_invitation_code,
     )
     from management.services.tool.configuration import init_tool_list_for_tenant
-    from management.services.permission.identity.authentication_helpers import calculate_expires_at, generate_session_jwt
+    from gateway.authentication.identity import calculate_expires_at, generate_session_jwt
 
-    pending = parse_pending_oauth_token(pending_token)
+    pending = pending_identity
     provider = pending["provider"]
     provider_user_id = pending["provider_user_id"]
     provider_email = pending.get("provider_email") or ""
@@ -419,7 +379,7 @@ async def complete_pending_oauth_account(
 
     admin_client = None
     try:
-        from management.services.permission.identity.authentication_helpers import get_supabase_admin_client
+        from gateway.authentication.identity import get_supabase_admin_client
 
         admin_client = get_supabase_admin_client()
     except Exception:
@@ -462,7 +422,7 @@ async def complete_pending_oauth_account(
         )
     except TenantResourceLimitError:
         # The Supabase identity was created before the local tenant-limit check.
-        from management.services.permission.identity.authentication_helpers import delete_supabase_user
+        from gateway.authentication.identity import delete_supabase_user
 
         delete_supabase_user(supabase_user_id)
         raise

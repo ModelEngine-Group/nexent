@@ -2,6 +2,7 @@
 
 """Actual router/DTO/RBAC contracts with an isolated service boundary."""
 
+import gateway.authentication.dependencies as depends_dependencies
 import json
 from dataclasses import dataclass, field
 
@@ -17,7 +18,8 @@ from agents import create_agent_info
 from contracts.exceptions import ForbiddenError
 from management.services.model import run_controls
 from nexent.core.agents.agent_model import AgentConfig
-from permissions import depends, rbac
+import permissions.depends as depends
+from permissions import rbac
 from permissions.models import CurrentUser
 
 EFFORTS = ["none", "minimal", "low", "medium", "high", "xhigh", "max"]
@@ -68,7 +70,7 @@ def api_fixture(monkeypatch):
         role = authorization.removeprefix("Bearer ").upper()
         return CurrentUser("fixture-owner", "tenant", role)
 
-    app.dependency_overrides[depends.authenticate] = authenticate
+    app.dependency_overrides[depends_dependencies.authenticate] = authenticate
     monkeypatch.setattr(rbac, "_INITIALIZED", True)
     monkeypatch.setattr(rbac, "_ROLE_PERMISSIONS", {
         "CREATOR": {"agent:create", "skill:create"}, "NO-AGENT-CREATE": {"skill:create"},

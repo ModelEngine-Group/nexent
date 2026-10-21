@@ -163,12 +163,12 @@ sys.modules["management.services.knowledge_base.service"] = vdb_service_stub
 setattr(services_pkg, "vectordatabase_service", vdb_service_stub)
 
 
-# Stub management.services.permission.identity.authentication_helpers.get_current_user_id (the function actually used in the app)
+# Stub gateway.authentication.identity.get_current_user_id (the function actually used in the app)
 utils_pkg = types.ModuleType("utils")
 utils_pkg.__path__ = [os.path.join(BACKEND_ROOT, "utils")]
 sys.modules.setdefault("utils", utils_pkg)
 
-auth_utils_stub = types.ModuleType("management.services.permission.identity.authentication_helpers")
+auth_utils_stub = types.ModuleType("gateway.authentication.identity")
 
 def _stub_get_current_user_id(authorization):
     """Stub for get_current_user_id - returns user_id and tenant_id tuple."""
@@ -178,13 +178,13 @@ def _stub_get_current_user_id(authorization):
     return ("user1", "tenant1")
 
 auth_utils_stub.get_current_user_id = _stub_get_current_user_id
-sys.modules["management.services.permission.identity.authentication_helpers"] = auth_utils_stub
+sys.modules["gateway.authentication.identity"] = auth_utils_stub
 setattr(utils_pkg, "auth_utils", auth_utils_stub)
 
 
 # Stub management.services.knowledge_base.ingestion.trigger_data_process
 fmu_stub = types.ModuleType("management.services.knowledge_base.ingestion")
-async def _stub_trigger_data_process(files: List[dict], params: Any):
+async def _stub_trigger_data_process(files: List[dict], params: Any, *, tenant_id: str):
     return [{"task_id": 1}]
 fmu_stub.trigger_data_process = _stub_trigger_data_process
 sys.modules["management.services.knowledge_base.ingestion"] = fmu_stub
@@ -427,7 +427,8 @@ async def test_get_storage_file_maps_unauthorized_error(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_process_files_success(monkeypatch):
-    async def fake_trigger(files, params):
+    async def fake_trigger(files, params, *, tenant_id):
+        assert tenant_id == "tenant1"
         return [{"task_id": 123}]
 
     monkeypatch.setattr(file_management_app, "trigger_data_process", fake_trigger)
@@ -445,7 +446,8 @@ async def test_process_files_success(monkeypatch):
 @pytest.mark.asyncio
 async def test_process_files_persists_parent_chain_id(monkeypatch):
     """A queued chain remains cancellable before its process task starts."""
-    async def fake_trigger(files, params):
+    async def fake_trigger(files, params, *, tenant_id):
+        assert tenant_id == "tenant1"
         return {"task_id": "chain-1"}
 
     lifecycle_module = types.ModuleType("management.db.knowledge_base.file_lifecycle")
@@ -476,7 +478,8 @@ async def test_process_files_persists_parent_chain_id(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_process_files_error_none(monkeypatch):
-    async def fake_trigger(files, params):
+    async def fake_trigger(files, params, *, tenant_id):
+        assert tenant_id == "tenant1"
         return None
 
     monkeypatch.setattr(file_management_app, "trigger_data_process", fake_trigger)
@@ -493,7 +496,8 @@ async def test_process_files_error_none(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_process_files_error_message(monkeypatch):
-    async def fake_trigger(files, params):
+    async def fake_trigger(files, params, *, tenant_id):
+        assert tenant_id == "tenant1"
         return {"status": "error", "message": "boom"}
 
     monkeypatch.setattr(file_management_app, "trigger_data_process", fake_trigger)
@@ -511,7 +515,8 @@ async def test_process_files_error_message(monkeypatch):
 @pytest.mark.asyncio
 async def test_process_files_persists_submit_failure(monkeypatch):
     """A process-submit error is persisted on the durable lifecycle record."""
-    async def fake_trigger(files, params):
+    async def fake_trigger(files, params, *, tenant_id):
+        assert tenant_id == "tenant1"
         return {"status": "error", "message": "queue unavailable"}
 
     lifecycle_module = types.ModuleType("management.db.knowledge_base.file_lifecycle")
@@ -544,7 +549,8 @@ async def test_process_files_persists_submit_failure(monkeypatch):
 @pytest.mark.asyncio
 async def test_process_files_persists_only_failed_item_for_partial_batch(monkeypatch):
     """Partial task submission keeps successful files running and fails only the omitted file."""
-    async def fake_trigger(files, params):
+    async def fake_trigger(files, params, *, tenant_id):
+        assert tenant_id == "tenant1"
         return {
             "status": "partial_success",
             "task_ids": ["task-a"],
@@ -592,7 +598,8 @@ async def test_process_files_persists_only_failed_item_for_partial_batch(monkeyp
 @pytest.mark.asyncio
 async def test_process_files_all_batch_submissions_failed(monkeypatch):
     """All failed submissions retain failure details and preserve the 500 contract."""
-    async def fake_trigger(files, params):
+    async def fake_trigger(files, params, *, tenant_id):
+        assert tenant_id == "tenant1"
         return {
             "status": "failed",
             "task_ids": [],
@@ -633,7 +640,8 @@ async def test_process_files_all_batch_submissions_failed(monkeypatch):
 @pytest.mark.asyncio
 async def test_process_files_legacy_empty_task_ids_mark_all_failed(monkeypatch):
     """Old data-process responses with no task ids must not leave UPLOADED rows behind."""
-    async def fake_trigger(files, params):
+    async def fake_trigger(files, params, *, tenant_id):
+        assert tenant_id == "tenant1"
         return {"task_ids": []}
 
     lifecycle_module = types.ModuleType("management.db.knowledge_base.file_lifecycle")
@@ -660,7 +668,8 @@ async def test_process_files_legacy_empty_task_ids_mark_all_failed(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_process_files_skips_persisting_missing_task_id(monkeypatch):
-    async def fake_trigger(_files, _params):
+    async def fake_trigger(_files, _params, *, tenant_id):
+        assert tenant_id == "tenant1"
         return {
             "results": [{"status": "SUBMITTED", "source": "knowledge_base/a.txt"}],
             "submitted_count": 1,
@@ -685,7 +694,8 @@ async def test_process_files_skips_persisting_missing_task_id(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_process_files_matches_submitted_result_by_source(monkeypatch):
-    async def fake_trigger(_files, _params):
+    async def fake_trigger(_files, _params, *, tenant_id):
+        assert tenant_id == "tenant1"
         return {
             "results": [{
                 "status": "SUBMITTED", "file_id": "unknown", "source": "knowledge_base/a.txt",
@@ -714,7 +724,8 @@ async def test_process_files_matches_submitted_result_by_source(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_process_files_swallows_lifecycle_task_persistence_error(monkeypatch):
-    async def fake_trigger(_files, _params):
+    async def fake_trigger(_files, _params, *, tenant_id):
+        assert tenant_id == "tenant1"
         return {"task_id": "task-a"}
 
     lifecycle_module = types.ModuleType("management.db.knowledge_base.file_lifecycle")

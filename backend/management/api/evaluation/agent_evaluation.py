@@ -24,7 +24,7 @@ from management.services.evaluation.runs import (
 )
 from management.services.evaluation.reporting.report import generate_agent_evaluation_report_impl
 from management.services.agent.runtime_client import forward_agent_evaluation_trial_run
-from management.services.permission.identity.authentication_helpers import get_current_user_id, get_current_user_info
+from gateway.authentication.identity import get_current_user_id, get_current_user_info
 
 
 logger = logging.getLogger("agent_evaluation_app")
@@ -592,7 +592,7 @@ def _safe_extract_language(request: Request | None) -> str:
     if request is None:
         return "zh"
     try:
-        from management.services.permission.identity.authentication_helpers import parse_language_from_request
+        from gateway.authentication.identity import parse_language_from_request
 
         return str(parse_language_from_request(request) or "zh")
     except Exception:

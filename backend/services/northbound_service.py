@@ -1,10 +1,10 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+from contracts.authentication import NorthboundContext
 import asyncio
 import hashlib
 import json
 import logging
 import time
-from dataclasses import dataclass
 from os.path import basename
 from typing import Any, Dict, List, Optional
 
@@ -53,13 +53,6 @@ from nexent.multi_modal.utils import parse_s3_url
 logger = logging.getLogger("northbound_service")
 
 
-@dataclass
-class NorthboundContext:
-    request_id: str
-    tenant_id: str
-    user_id: str
-    authorization: str
-    token_id: int = 0
 
 
 def _build_northbound_file_descriptor(

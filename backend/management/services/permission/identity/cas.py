@@ -19,13 +19,10 @@ from consts.const import CAS_CA_BUNDLE, CAS_CALLBACK_BASE_URL, CAS_DEFAULT_ROLE,
 from management.db.identity.cas_session import create_cas_session, revoke_cas_session_by_index, revoke_cas_sessions_by_user_id
 from management.db.identity.oauth_account import get_oauth_account_by_provider
 from management.db.identity.user_tenant import get_user_tenant_by_user_id, upsert_user_tenant
-from management.services.permission.identity.oauth import (
-    create_or_update_oauth_account,
-    find_supabase_user_id_by_email,
-)
+from management.services.permission.identity.oauth import create_or_update_oauth_account, find_supabase_user_id_by_email
 from management.services.skill.transfer import init_skill_list_for_tenant
 from management.services.tool.configuration import init_tool_list_for_tenant
-from management.services.permission.identity.authentication_helpers import calculate_expires_at, generate_session_jwt, get_supabase_admin_client
+from gateway.authentication.identity import calculate_expires_at, generate_session_jwt, get_supabase_admin_client
 
 logger = logging.getLogger(__name__)
 

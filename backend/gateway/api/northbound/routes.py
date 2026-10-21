@@ -1,6 +1,8 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 from contracts.exceptions import ConversationNotFoundError, ForbiddenError, LimitExceededError, RuntimeServiceTimeoutError, RuntimeServiceUnavailableError, RuntimeUpstreamError, TenantResourceLimitError, UnauthorizedError, NotFoundException, UnauthorizedError, ValidationError, tenant_resource_limit_error_payload
 from contracts.models import ApiKeyTargetRequest, ApiUserBatchCreateRequest, GenerateTitleRequest, ToolParamsRequest
+from gateway.authentication.dependencies import get_northbound_context as _get_northbound_context
+from contracts.authentication import NorthboundContext
 import logging
 from http import HTTPStatus
 from typing import Any, Dict, List, Optional
@@ -29,7 +31,6 @@ from contracts.exceptions import (
     tenant_resource_limit_error_payload,
 )
 from contracts.models import ApiKeyTargetRequest, ApiUserBatchCreateRequest, GenerateTitleRequest, ToolParamsRequest
-from management.db.identity.token import log_token_usage
 from management.db.identity.user_tenant import get_user_role_by_tenant
 from management.services.permission.api_keys import (
     create_api_users_batch,
@@ -38,7 +39,6 @@ from management.services.permission.api_keys import (
 )
 from management.services.monitor.audit import record_security_event
 from services.northbound_service import (
-    NorthboundContext,
     get_conversation_history,
     list_conversations,
     start_streaming_chat,
@@ -52,11 +52,7 @@ from services.northbound_service import (
     upload_files_for_northbound,
 )
 
-from management.services.permission.identity.authentication_helpers import (
-    get_user_and_tenant_by_access_key,
-    get_user_language,
-    validate_bearer_token,
-)
+from gateway.authentication.identity import get_user_language
 
 from management.utils.file_http import build_content_disposition_header
 
@@ -82,85 +78,6 @@ def _resolve_proxy_download_filename(presigned_url: str, content_disposition: st
     return filename or "download"
 
 
-async def _get_northbound_context(request: Request) -> NorthboundContext:
-    """
-    Build northbound context from request.
-
-    Authentication: Bearer Token (API Key) in Authorization header
-    - Authorization: Bearer <access_key>
-
-    The user_id and tenant_id are derived from the access_key by querying
-    user_token_info_t and user_tenant_t tables.
-
-    Optional headers:
-    - X-Request-Id: Request ID, generated if not provided
-    """
-    # 1. Validate Bearer Token and extract access_key
-    try:
-        auth_header = request.headers.get("Authorization")
-        is_valid, token_info = validate_bearer_token(auth_header)
-
-        if not is_valid or not token_info:
-            raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail="Invalid or missing bearer token")
-
-        # Extract access_key from the token
-        access_key = auth_header.replace("Bearer ", "") if auth_header.startswith("Bearer ") else auth_header
-
-        # Get user_id and tenant_id from access_key
-        user_tenant_info = get_user_and_tenant_by_access_key(access_key)
-        resolved_user_id = user_tenant_info.get("user_id")
-        resolved_tenant_id = user_tenant_info.get("tenant_id")
-        token_id = user_tenant_info.get("token_id")
-
-    except HTTPException:
-        raise
-    except LimitExceededError as e:
-        logging.error(f"Too Many Requests: rate limit exceeded: {str(e)}", exc_info=e)
-        raise HTTPException(status_code=HTTPStatus.TOO_MANY_REQUESTS, detail="Too Many Requests: rate limit exceeded")
-    except UnauthorizedError as e:
-        raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(e))
-    except Exception as e:
-        logging.error(f"Failed to validate bearer token: {str(e)}", exc_info=e)
-        raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail="Unauthorized: invalid API key")
-
-    if not resolved_user_id:
-        raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail="Missing user information for this access key")
-
-    if not resolved_tenant_id:
-        raise HTTPException(
-            status_code=HTTPStatus.BAD_REQUEST, detail="Missing tenant information for this access key"
-        )
-
-    request_id = request.headers.get("X-Request-Id") or str(uuid.uuid4())
-
-    path = request.url.path
-    service_logs_usage = (
-        path == "/nb/v1/chat/run"
-        or path.startswith("/nb/v1/chat/stop/")
-        or (path.startswith("/nb/v1/conversations/") and path.endswith("/title"))
-    )
-    if token_id and token_id > 0 and not service_logs_usage:
-        try:
-            log_token_usage(
-                token_id=token_id,
-                call_function_name=request.url.path,
-                related_id=None,
-                created_by=resolved_user_id,
-                metadata={"method": request.method, "request_id": request_id},
-            )
-        except Exception as exc:
-            logging.warning("Failed to log northbound API key usage: %s", exc)
-
-    # Get authorization header if present, otherwise use a placeholder
-    auth_header_value = request.headers.get("Authorization", "Bearer placeholder")
-
-    return NorthboundContext(
-        request_id=request_id,
-        tenant_id=resolved_tenant_id,
-        user_id=resolved_user_id,
-        authorization=auth_header_value,
-        token_id=token_id,
-    )
 
 
 @router.get("/health")

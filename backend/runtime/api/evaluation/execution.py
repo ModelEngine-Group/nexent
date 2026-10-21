@@ -16,7 +16,7 @@ from contracts.evaluation_status import EvalRunStatus
 from contracts.exceptions import AppException
 from management.db.evaluation.runs import claim_agent_evaluation_run, get_agent_evaluation
 from infrastructure.concurrency import runtime_thread_manager
-from management.services.permission.identity.authentication_helpers import verify_internal_runtime_jwt
+from gateway.authentication.identity import verify_internal_runtime_jwt
 
 
 logger = logging.getLogger("agent_evaluation_runtime_app")

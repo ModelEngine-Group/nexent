@@ -39,8 +39,8 @@ sys.modules["management.db.a2a.repository"] = MagicMock()
 
 auth_utils_mock = MagicMock()
 auth_utils_mock.get_current_user_info = MagicMock(return_value=("user_1", "tenant_1", None))
-sys.modules["management.services.permission.identity.authentication_helpers"] = auth_utils_mock
-sys.modules["management.services.permission.identity.authentication_helpers"] = auth_utils_mock
+sys.modules["gateway.authentication.identity"] = auth_utils_mock
+sys.modules["gateway.authentication.identity"] = auth_utils_mock
 
 from contracts.error_code import RuntimeMetadataValidationCode
 from contracts.exceptions import AppException, RuntimeMetadataValidationError

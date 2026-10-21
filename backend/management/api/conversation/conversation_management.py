@@ -41,7 +41,7 @@ from management.services.conversation.service import (
     update_message_opinion_service,
     get_message_id_by_index_impl,
 )
-from management.services.permission.identity.authentication_helpers import get_current_user_id, get_current_user_info
+from gateway.authentication.identity import get_current_user_id, get_current_user_info
 
 router = APIRouter(prefix="/conversation")
 

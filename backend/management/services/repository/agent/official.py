@@ -768,6 +768,7 @@ async def _index_binary_docs(
                 model_id=embedding_model_id,
                 authorization=authorization,
             ),
+            tenant_id=tenant_id,
         )
 
 

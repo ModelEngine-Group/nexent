@@ -38,7 +38,7 @@ from management.services.file.service import (
     upload_files_impl,
 )
 from management.services.monitor.audit import AUDIT_DETAIL_LIST_LIMIT, record_security_event
-from management.services.permission.identity.authentication_helpers import get_current_user_id
+from gateway.authentication.identity import get_current_user_id
 from management.services.knowledge_base.ingestion import trigger_data_process
 from infrastructure.ingestion.errors import classify_ingestion_exception
 
@@ -187,7 +187,7 @@ async def process_files(
         authorization=authorization,
     )
 
-    process_result = await trigger_data_process(files, process_params)
+    process_result = await trigger_data_process(files, process_params, tenant_id=tenant_id)
 
     def persist_submit_failure(file_details: dict, error: object):
         """Persist a durable task-submit failure without hiding other batch results."""

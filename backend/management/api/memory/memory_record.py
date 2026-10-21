@@ -40,7 +40,7 @@ from management.services.memory.records import (
     get_memory_record_service,
 )
 from management.services.memory.retrieval import get_memory_retrieval_service
-from management.services.permission.identity.authentication_helpers import get_current_user_id
+from gateway.authentication.identity import get_current_user_id
 
 
 logger = logging.getLogger("memory_record_app")

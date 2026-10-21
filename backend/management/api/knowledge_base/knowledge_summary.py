@@ -10,7 +10,7 @@ from contracts.models import ChangeSummaryRequest
 from contracts.exceptions import TokenExpiredError
 from management.utils.knowledge_permission import require_knowledge_base_edit_permission
 from management.services.knowledge_base.service import ElasticSearchService, get_vector_db_core
-from management.services.permission.identity.authentication_helpers import get_current_user_id, get_current_user_info
+from gateway.authentication.identity import get_current_user_id, get_current_user_info
 from management.services.configuration.tenant.settings import tenant_config_manager
 
 router = APIRouter(prefix="/summary")

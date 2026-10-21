@@ -3,6 +3,7 @@
 from contracts.models import AgentInfoRequest, AgentIDRequest, ConversationResponse, AgentImportRequest, SkillConflictCheckRequest, AgentNameBatchCheckRequest, AgentNameBatchRegenerateRequest, VersionPublishRequest, VersionListResponse, VersionDetailResponse, VersionStatusRequest, CurrentVersionResponse, VersionCompareRequest, VersionUpdateRequest, TagAssignmentFilter, WorkbenchCapabilityPreviewRequest
 from contracts.exceptions import AgentNotFoundError, AgentRelationValidationError, ForbiddenError, SkillDuplicateError, AppException, TenantResourceLimitError, tenant_resource_limit_error_payload, ValidationError, WorkbenchError
 import json
+from contracts.authentication import AuthenticatedIdentity
 import logging
 from http import HTTPStatus
 from urllib.parse import quote
@@ -93,11 +94,7 @@ from management.services.agent.versions import (
     compare_versions_impl,
     list_published_agents_impl,
 )
-from management.services.permission.identity.authentication_helpers import (
-    get_current_user_info,
-    get_current_user_id,
-    verify_internal_runtime_jwt,
-)
+from gateway.authentication.identity import get_current_user_info, get_current_user_id, verify_internal_runtime_jwt
 
 agent_config_router = APIRouter(prefix="/agent")
 
@@ -287,7 +284,7 @@ async def update_agent_info_api(
         "patch_keys": sorted(request.model_dump(exclude_unset=True, exclude_none=True))[:AUDIT_DETAIL_LIST_LIMIT],
     }
     try:
-        result = await update_agent_info_impl(request, authorization)
+        result = await update_agent_info_impl(request, AuthenticatedIdentity(*get_current_user_id(authorization)))
         record_security_event(
             "agent_update", request=http_request, user_id=user_id, tenant_id=tenant_id, details=audit_details
         )
@@ -478,7 +475,7 @@ async def export_agent_api(
     except Exception:
         user_id, tenant_id = None, None
     try:
-        result = await export_agent_with_skills_impl(request.agent_id, authorization)
+        result = await export_agent_with_skills_impl(request.agent_id, AuthenticatedIdentity(*get_current_user_id(authorization)))
         record_security_event(
             "agent_export",
             request=http_request,
@@ -536,13 +533,13 @@ async def import_agent_api(
             agent_id_mapping = await import_agent_with_skills_impl(
                 request.agent_info,
                 request.skills,
-                authorization,
+                AuthenticatedIdentity(*get_current_user_id(authorization)),
                 force_import=request.force_import,
                 skill_resolutions=request.skill_resolutions,
             )
         else:
             agent_id_mapping = await import_agent_impl(
-                request.agent_info, authorization, force_import=request.force_import
+                request.agent_info, AuthenticatedIdentity(*get_current_user_id(authorization)), force_import=request.force_import
             )
         record_security_event(
             "agent_import", request=http_request, user_id=user_id, tenant_id=tenant_id, details=audit_details
@@ -581,7 +578,7 @@ async def check_skills_api(
         return {
             "skill_conflicts": check_skill_conflicts_impl(
                 request.skill_names,
-                authorization,
+                AuthenticatedIdentity(*get_current_user_id(authorization)),
             )
         }
     except Exception as exc:
@@ -612,7 +609,7 @@ async def check_agent_name_batch_api(request: AgentNameBatchCheckRequest, author
     Batch check whether agent name/display_name conflicts exist in the tenant.
     """
     try:
-        return await check_agent_name_conflict_batch_impl(request, authorization)
+        return await check_agent_name_conflict_batch_impl(request, AuthenticatedIdentity(*get_current_user_id(authorization)))
     except ValueError as e:
         raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail=str(e))
     except Exception as e:
@@ -628,7 +625,7 @@ async def regenerate_agent_name_batch_api(
     Batch regenerate agent name/display_name using LLM or suffix fallback.
     """
     try:
-        return await regenerate_agent_name_batch_impl(request, authorization)
+        return await regenerate_agent_name_batch_impl(request, AuthenticatedIdentity(*get_current_user_id(authorization)))
     except ValueError as e:
         raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail=str(e))
     except Exception as e:

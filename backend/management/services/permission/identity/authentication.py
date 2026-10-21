@@ -6,19 +6,11 @@ from typing import Optional, Any, Tuple, Dict, List
 from management.db.identity.token import create_token as create_token_record, generate_access_key, list_tokens_by_user as list_tokens_by_user_record, delete_token as delete_token_record
 
 import aiohttp
-from fastapi import Header
 from supabase import Client
 from pydantic import EmailStr
 
-from management.services.permission.identity.authentication_helpers import (
-    get_supabase_client,
-    get_supabase_admin_client,
-    delete_supabase_user,
-    calculate_expires_at,
-    get_jwt_expiry_seconds,
-    ensure_cas_session_active_from_authorization,
-    resolve_tenant_id_from_user_tenant_record,
-)
+from management.services.permission.identity.provider import get_supabase_client, get_supabase_admin_client, delete_supabase_user
+from gateway.authentication.identity import calculate_expires_at, get_jwt_expiry_seconds, ensure_cas_session_active_from_authorization, resolve_tenant_id_from_user_tenant_record
 from consts.const import INVITE_CODE, SUPABASE_URL, SUPABASE_KEY, ASSET_OWNER_TENANT_ID, ASSET_OWNER_INVITE_CODE_TYPE, ASSET_OWNER_ROLE, ASSET_OWNER_SIGNUP_USE_OAUTH_DETAIL
 
 from management.services.permission.asset_owner import (
@@ -64,60 +56,12 @@ def get_provider_username(user_id: str, provider: str) -> Optional[str]:
     return None
 
 
-def set_auth_token_to_client(client: Client, token: str) -> None:
-    """Set token to client"""
-    jwt_token = token.replace(
-        "Bearer ", "") if token.startswith("Bearer ") else token
-
-    try:
-        # Only set access_token
-        client.auth.access_token = jwt_token
-    except Exception as e:
-        logging.error(f"Set access token failed: {str(e)}")
 
 
-def get_authorized_client(authorization: Optional[str] = Header(None)) -> Client:
-    """Get token from authorization header and create authorized supabase client"""
-    client = get_supabase_client()
-    if authorization:
-        token = authorization.replace("Bearer ", "") if authorization.startswith(
-            "Bearer ") else authorization
-        set_auth_token_to_client(client, token)
-    return client
 
 
-def get_current_user_from_client(client: Client, token: Optional[str] = None) -> Optional[Any]:
-    """Get current user from client using provided JWT, return user object or None"""
-    try:
-        # Prefer explicitly passing the JWT to avoid relying on client-side session state
-        if token:
-            jwt_token = token.replace(
-                "Bearer ", "") if token.startswith("Bearer ") else token
-            user_response = client.auth.get_user(jwt_token)
-        else:
-            user_response = client.auth.get_user()
-
-        if user_response and getattr(user_response, "user", None):
-            return user_response.user
-        return None
-    except Exception as e:
-        logging.error(f"Get current user failed: {str(e)}")
-        return None
 
 
-def validate_token(token: str) -> Tuple[bool, Optional[Any]]:
-    """Validate token function, return (is valid, user object)"""
-    client = get_supabase_client()
-    set_auth_token_to_client(client, token)
-    try:
-        user = get_current_user_from_client(client, token)
-        if user:
-            ensure_cas_session_active_from_authorization(token)
-            return True, user
-        return False, None
-    except Exception as e:
-        logging.error(f"Token validation failed: {str(e)}")
-        return False, None
 
 
 def extend_session(client: Client, refresh_token: str) -> Optional[dict]:
@@ -387,7 +331,9 @@ async def signin_user(email: EmailStr,
 
 
 async def refresh_user_token(authorization, refresh_token: str):
-    client = get_authorized_client(authorization)
+    client = get_supabase_client()
+    if authorization:
+        client.auth.access_token = authorization
     session_info = extend_session(client, refresh_token)
     if not session_info:
         logging.error("Refresh token failed, the token may have expired")
@@ -398,27 +344,6 @@ async def refresh_user_token(authorization, refresh_token: str):
     return session_info
 
 
-async def get_session_by_authorization(authorization):
-    # Extract clean token from authorization header
-    clean_token = authorization.replace(
-        "Bearer ", "") if authorization.startswith("Bearer ") else authorization
-
-    # Use the unified token validation function
-    is_valid, user = validate_token(clean_token)
-    if is_valid and user:
-        user_role = "user"  # Default role
-        if user.user_metadata and 'role' in user.user_metadata:
-            user_role = user.user_metadata['role']
-        return {
-            "user": {
-                "id": user.id,
-                "email": user.email,
-                "role": user_role
-            }
-        }
-    else:
-        # Use domain-specific exception for invalid/expired token
-        raise UnauthorizedError("Session is invalid or expired")
 
 
 async def get_user_info(user_id: str) -> Optional[Dict[str, Any]]:

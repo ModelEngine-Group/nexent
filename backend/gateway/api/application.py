@@ -36,7 +36,7 @@ from gateway.api.knowledge_base.routes import router as northbound_knowledge_rou
 
 
 
-from services.northbound_service import NorthboundContext
+from contracts.authentication import NorthboundContext
 from management.services.agent.a2a.service import (
     a2a_server_service,
     EndpointNotFoundError,

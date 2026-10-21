@@ -21,28 +21,9 @@ from contracts.exceptions import (
 )
 from contracts.oauth_providers import get_all_provider_definitions
 from management.db.identity.oauth_account import get_oauth_account_by_provider
-from management.services.permission.identity.oauth import (
-    complete_pending_oauth_account,
-    create_or_update_oauth_account,
-    ensure_user_tenant_exists,
-    exchange_code_for_provider_token,
-    find_supabase_user_id_by_email,
-    generate_pending_oauth_token,
-    get_authorize_url,
-    get_enabled_providers,
-    get_oauth_config,
-    get_pending_oauth_info,
-    get_provider_user_info,
-    list_linked_accounts,
-    parse_state,
-    unlink_account,
-)
-from management.services.permission.identity.authentication_helpers import (
-    calculate_expires_at,
-    generate_session_jwt,
-    get_current_user_id,
-    get_supabase_admin_client,
-)
+from management.services.permission.identity.oauth import complete_pending_oauth_account, create_or_update_oauth_account, ensure_user_tenant_exists, exchange_code_for_provider_token, find_supabase_user_id_by_email, generate_pending_oauth_token, get_authorize_url, get_enabled_providers, get_oauth_config, get_pending_oauth_info, get_provider_user_info, list_linked_accounts, unlink_account
+from gateway.authentication.oauth import parse_state, parse_pending_oauth_token
+from gateway.authentication.identity import calculate_expires_at, generate_session_jwt, get_current_user_id, get_supabase_admin_client
 from management.services.monitor.audit import record_security_event
 
 logger = logging.getLogger(__name__)
@@ -281,7 +262,7 @@ async def get_pending(
     pending_token: Optional[str] = Header(None, alias="X-OAuth-Pending-Token"),
 ):
     try:
-        pending = get_pending_oauth_info(pending_token or "")
+        pending = get_pending_oauth_info(parse_pending_oauth_token(pending_token or ""))
         return JSONResponse(
             status_code=HTTPStatus.OK,
             content={"message": "success", "data": pending},
@@ -306,7 +287,7 @@ async def complete(
     try:
         request_data = OAuthCompleteRequest(**(await request.json()))
         result = await complete_pending_oauth_account(
-            pending_token=pending_token or "",
+            pending_identity=parse_pending_oauth_token(pending_token or ""),
             email=str(request_data.email) if request_data.email else None,
             password=request_data.password,
             invite_code=request_data.invite_code,

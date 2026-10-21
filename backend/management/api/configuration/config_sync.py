@@ -12,7 +12,7 @@ from contracts.models import GlobalConfig
 from contracts.exceptions import TokenExpiredError
 from management.services.monitor.audit import record_security_event
 from management.services.configuration.tenant.service import save_config_impl, load_config_impl
-from management.services.permission.identity.authentication_helpers import get_current_user_id, get_current_user_info
+from gateway.authentication.identity import get_current_user_id, get_current_user_info
 
 router = APIRouter(prefix="/config")
 logger = logging.getLogger("config_sync_app")

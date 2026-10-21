@@ -51,7 +51,7 @@ def _make_client(mocker, role: str, granted_permissions: set) -> TestClient:
         _sys.modules["management.services.knowledge_base.service"] = services_vdb_mod
 
     from management.api.model.model_managment import router
-    from permissions.depends import authenticate
+    from gateway.authentication.dependencies import authenticate
     from permissions.models import CurrentUser
 
     mocker.patch(

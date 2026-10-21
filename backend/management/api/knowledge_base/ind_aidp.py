@@ -15,7 +15,7 @@ from management.services.knowledge_base.providers.aidp import (
     fetch_ind_aidp_image_impl,
     fetch_ind_aidp_knowledge_bases_impl,
 )
-from management.services.permission.identity.authentication_helpers import get_current_user_id
+from gateway.authentication.identity import get_current_user_id
 
 router = APIRouter(prefix="/ind-aidp", tags=["independent-aidp"])
 

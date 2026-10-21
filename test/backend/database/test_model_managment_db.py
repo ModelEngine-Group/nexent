@@ -35,7 +35,7 @@ utils_mock.auth_utils.get_current_user_id = MagicMock(return_value=("test_user_i
 
 # Register mocked utils module in sys.modules
 sys.modules['utils'] = utils_mock
-sys.modules['management.services.permission.identity.authentication_helpers'] = utils_mock.auth_utils
+sys.modules['gateway.authentication.identity'] = utils_mock.auth_utils
 
 # Provide a stub for the `boto3` module so that it can be imported safely even
 # if the testing environment does not have it available.

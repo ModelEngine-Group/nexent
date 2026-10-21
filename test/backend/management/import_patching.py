@@ -16,7 +16,8 @@ SPLIT_MODULES = (
         "data_process.services.conversion",
     ),
     (
-        "management.services.permission.identity.authentication_helpers",
+        "gateway.authentication.identity", "gateway.authentication.internal", "gateway.authentication.oauth",
+        "management.services.permission.identity.provider",
         "infrastructure.security.internal_tokens", "infrastructure.security.signatures",
     ),
     ("management.services.monitor.audit", "management.utils.request_context"),

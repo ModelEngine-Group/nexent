@@ -103,7 +103,7 @@ auth_utils_mock.get_jwt_expiry_seconds = MagicMock(return_value=3600)
 auth_utils_mock.calculate_expires_at = MagicMock(return_value=1735689600)
 auth_utils_mock.get_supabase_admin_client = MagicMock()
 auth_utils_mock.generate_session_jwt = MagicMock(return_value="eyJ.mock.jwt.token")
-sys.modules["management.services.permission.identity.authentication_helpers"] = auth_utils_mock
+sys.modules["gateway.authentication.identity"] = auth_utils_mock
 
 oauth_service_mock = MagicMock()
 oauth_service_mock.parse_state = MagicMock(
@@ -875,6 +875,18 @@ class TestCallbackEmailFallback(unittest.TestCase):
 
 
 class TestCompleteOAuth(unittest.TestCase):
+    def setUp(self):
+        self.pending_identity = {"provider": "github", "provider_user_id": "provider-user", "provider_email": "", "provider_username": "octocat"}
+
+        def verify(token):
+            if token != "pending.jwt":
+                raise _OAuthLinkError("expired")
+            return self.pending_identity
+
+        parser = patch("management.api.identity.oauth.parse_pending_oauth_token", side_effect=verify)
+        parser.start()
+        self.addCleanup(parser.stop)
+
     def test_pending_returns_provider_info(self):
         pending_info = {
             "provider": "github",
@@ -930,7 +942,7 @@ class TestCompleteOAuth(unittest.TestCase):
         self.assertEqual(data["data"]["user"]["id"], "new-user")
         self.assertEqual(data["data"]["session"]["expires_in_seconds"], 3600)
         complete_mock.assert_awaited_once_with(
-            pending_token="pending.jwt",
+            pending_identity=self.pending_identity,
             email="new@example.com",
             password="secret1",
             invite_code="ABC123",

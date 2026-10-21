@@ -34,7 +34,7 @@ if _sdk_dir not in sys.path:
     sys.path.insert(0, _sdk_dir)
 
 _canonical_backend_packages = {}
-for _namespace in ("management", "infrastructure", "runtime", "contracts", "data_process"):
+for _namespace in ("management", "infrastructure", "runtime", "contracts", "data_process", "gateway"):
     _namespace_path = Path(_backend_dir) / _namespace
     _canonical_backend_packages[_namespace] = str(_namespace_path)
     for _initializer in _namespace_path.rglob("__init__.py"):
@@ -224,7 +224,7 @@ def tmp_path():
 def install_supabase_mock():
     """Install a structured supabase package mock into ``sys.modules``.
 
-    ``management.services.permission.identity.authentication_helpers`` imports ``from supabase.lib.client_options
+    ``gateway.authentication.identity`` imports ``from supabase.lib.client_options
     import SyncClientOptions`` at module load time. Test files that simply
     replace ``sys.modules['supabase']`` with a bare ``MagicMock`` cause that
     import to fail (the mock has no ``.lib.client_options`` attribute),
@@ -268,7 +268,7 @@ def _supabase_mock():
     Module-level ``sys.modules['supabase']`` overrides in test files
     (e.g. ``sys.modules['supabase'] = MagicMock()``) strip out the
     structured attributes (``lib``, ``lib.client_options``,
-    ``SyncClientOptions``) that ``management.services.permission.identity.authentication_helpers`` resolves at
+    ``SyncClientOptions``) that ``gateway.authentication.identity`` resolves at
     import time. The module-level install below covers collection, but
     any test that re-mocks ``supabase`` after collection needs the
     structured attributes re-installed before its test body runs.
@@ -278,7 +278,7 @@ def _supabase_mock():
 
 
 # Install a sane supabase mock at collection time so test modules that
-# import ``management.services.permission.identity.authentication_helpers`` (directly or transitively) succeed
+# import ``gateway.authentication.identity`` (directly or transitively) succeed
 # during pytest's collection phase, before any test fixture has had a
 # chance to run. The ``_supabase_mock`` autouse fixture above re-runs the
 # install before each test body in case individual test modules

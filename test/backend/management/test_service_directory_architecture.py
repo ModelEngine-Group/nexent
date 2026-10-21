@@ -152,7 +152,7 @@ MIGRATED_MODULES = {
     'permission/api_keys.py',
     'permission/asset_owner.py',
     'permission/identity/authentication.py',
-    'permission/identity/authentication_helpers.py',
+    'permission/identity/provider.py',
     'permission/identity/cas.py',
     'permission/identity/display.py',
     'permission/identity/groups.py',

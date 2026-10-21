@@ -38,7 +38,7 @@ from management.services.agent.a2a.catalog import (
 from management.services.agent.a2a.service import a2a_server_service
 from management.db.a2a import repository as a2a_agent_db
 from management.services.agent.authorization import require_external_relation_edit
-from management.services.permission.identity.authentication_helpers import get_current_user_info
+from gateway.authentication.identity import get_current_user_info
 from infrastructure.serialization.runtime_metadata import (
     validate_runtime_metadata,
 )

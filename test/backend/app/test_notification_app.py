@@ -14,7 +14,7 @@ backend_dir = os.path.abspath(os.path.join(current_dir, "../../../backend"))
 sys.path.insert(0, backend_dir)
 
 sys.modules.setdefault("management.services.notification.service", MagicMock())
-sys.modules.setdefault("management.services.permission.identity.authentication_helpers", MagicMock())
+sys.modules.setdefault("gateway.authentication.identity", MagicMock())
 
 from management.api.notification.notification import router
 from contracts.exceptions import NotFoundException, UnauthorizedError

@@ -87,9 +87,10 @@ from management.services.model.capacity import (
 from management.services.model.reasoning import (
     get_model_reasoning_capability,
 )
-from permissions.depends import authenticate, require
+from gateway.authentication.dependencies import authenticate
+from permissions.depends import require
 from permissions.models import CurrentUser
-from management.services.permission.identity.authentication_helpers import get_current_user_id
+from gateway.authentication.identity import get_current_user_id
 from contracts.exceptions import TokenExpiredError, ModelProviderError
 from nexent.core.concurrency import run_blocking
 from management.db.model.repository import get_model_by_model_id

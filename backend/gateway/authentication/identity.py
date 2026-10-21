@@ -1,21 +1,61 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
+"""Gateway-owned session, API-key and provider authentication adapters."""
+
+import hashlib
+import hmac
 import logging
 import time
-import hmac
-import hashlib
 from datetime import datetime, timedelta
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
-import jwt
 import httpx
-from fastapi import Request
-from supabase import create_client
-from supabase.lib.client_options import SyncClientOptions
-
-from consts.const import ASSET_OWNER_ROLE, ASSET_OWNER_TENANT_ID, DEFAULT_TENANT_ID, DEFAULT_USER_ID, IS_SPEED_MODE, SUPABASE_JWT_SECRET, SUPABASE_URL, SUPABASE_KEY, SERVICE_ROLE_KEY, DEBUG_JWT_EXPIRE_SECONDS, JWT_EXPIRY_SECONDS, LANGUAGE
-from contracts.exceptions import LimitExceededError, UnauthorizedError, TokenExpiredError
-from management.db.identity.user_tenant import get_user_tenant_by_user_id
+import jwt
+from consts.const import (
+    ASSET_OWNER_ROLE,
+    ASSET_OWNER_TENANT_ID,
+    DEBUG_JWT_EXPIRE_SECONDS,
+    DEFAULT_TENANT_ID,
+    DEFAULT_USER_ID,
+    IS_SPEED_MODE,
+    JWT_EXPIRY_SECONDS,
+    LANGUAGE,
+    SERVICE_ROLE_KEY,
+    SUPABASE_JWT_SECRET,
+    SUPABASE_KEY,
+    SUPABASE_URL,
+)
+from contracts.authentication import OAUTH_PENDING_PURPOSE
+from contracts.exceptions import (
+    LimitExceededError,
+    TokenExpiredError,
+    UnauthorizedError,
+)
+from fastapi import Header, Request
+from gateway.authentication.credentials import extract_bearer_token
+from gateway.authentication.internal import verify_internal_runtime_jwt
+from infrastructure.security.internal_tokens import (
+    INTERNAL_RUNTIME_JWT_AUDIENCE,
+    INTERNAL_RUNTIME_JWT_ISSUER,
+    INTERNAL_RUNTIME_JWT_SCOPE,
+    INTERNAL_RUNTIME_JWT_TTL_SECONDS,
+    generate_internal_runtime_jwt,
+)
+from infrastructure.security.signatures import (
+    TIMESTAMP_VALIDITY_WINDOW,
+    calculate_hmac_signature,
+    validate_timestamp,
+)
 from management.db.identity.token import get_token_by_access_key
+from management.db.identity.user_tenant import get_user_tenant_by_user_id
+from management.services.permission.identity.provider import (
+    delete_supabase_user,
+    get_supabase_admin_client,
+    get_supabase_client,
+)
+from management.utils.request_context import get_user_language
+from supabase import Client, create_client
+from supabase.lib.client_options import SyncClientOptions
 
 # Module logger
 logger = logging.getLogger(__name__)
@@ -33,10 +73,6 @@ MOCK_JWT_SECRET_KEY = "nexent-mock-jwt-secret"
 # ---------------------------------------------------------------------------
 
 # Validity window in seconds for X-Timestamp header.
-
-
-
-
 
 
 def extract_aksk_headers(headers: Dict[str, str]) -> Tuple[str, str, str]:
@@ -73,8 +109,7 @@ def verify_aksk_signature(
     if access_key != expected_access_key:
         return False
 
-    expected_sig = calculate_hmac_signature(
-        secret_key, access_key, timestamp, body)
+    expected_sig = calculate_hmac_signature(secret_key, access_key, timestamp, body)
     return hmac.compare_digest(expected_sig, signature)
 
 
@@ -133,11 +168,10 @@ def validate_bearer_token(authorization: Optional[str]) -> Tuple[bool, Optional[
         return False, None
 
     # Extract token from "Bearer <token>" format
-    token = (
-        authorization.replace("Bearer ", "")
-        if authorization.startswith("Bearer ")
-        else authorization
-    )
+    try:
+        token = extract_bearer_token(authorization)
+    except UnauthorizedError:
+        return False, None
 
     if not token:
         logger.warning("Empty bearer token")
@@ -152,7 +186,7 @@ def validate_bearer_token(authorization: Optional[str]) -> Tuple[bool, Optional[
             )
             return True, token_info
         else:
-            logger.warning(f"Invalid or inactive token: {token[:20]}...")
+            logger.warning("Invalid or inactive token")
             return False, None
     except Exception as e:
         logger.error(f"Error validating bearer token: {str(e)}")
@@ -215,77 +249,6 @@ def resolve_tenant_id_from_user_tenant_record(user_tenant: Dict[str, Any]) -> st
     return DEFAULT_TENANT_ID
 
 
-def _build_supabase_options() -> SyncClientOptions:
-    """Build ClientOptions for the server-side Supabase client.
-
-    Two things matter here:
-
-    1. ``httpx.Client`` is built with ``trust_env=False`` and ``proxy=None``
-       so Supabase always talks to ``SUPABASE_URL`` directly and does not
-       pick up the Windows system proxy (e.g. Clash on 127.0.0.1:7897),
-       which would otherwise hang local GoTrue calls until timeout.
-
-    2. ``auto_refresh_token=False`` and ``persist_session=False`` disable
-       the supabase-py background refresh tick. The refresh tick calls
-       ``/auth/v1/token?grant_type=refresh_token`` whenever the in-memory
-       session is close to expiry, which is *not* what we want on the
-       backend: the new ``refresh_token`` is rotated server-side but the
-       caller (frontend / BFF) never learns about it. The next frontend
-       refresh attempt then sends the now-consumed ``refresh_token`` and
-       Supabase rejects it with ``refresh_token_already_used``. Keeping
-       the client passive means every refresh must flow through the
-       explicit ``/api/user/refresh_token`` endpoint, which has full
-       ownership of the rotated tokens and updates the cookies atomically.
-    """
-    http_client = httpx.Client(
-        trust_env=False,
-        proxy=None,
-        timeout=httpx.Timeout(30.0, connect=10.0),
-        follow_redirects=True,
-    )
-    return SyncClientOptions(
-        httpx_client=http_client,
-        auto_refresh_token=False,
-        persist_session=False,
-    )
-
-
-def get_supabase_client():
-    """Get Supabase client instance with regular key (user-context operations)."""
-    try:
-        return create_client(SUPABASE_URL, SUPABASE_KEY, options=_build_supabase_options())
-    except Exception as e:
-        logging.error(f"Failed to create Supabase client: {str(e)}")
-        return None
-
-
-def get_supabase_admin_client():
-    """Get Supabase client instance with service role key for admin operations."""
-    try:
-        return create_client(SUPABASE_URL, SERVICE_ROLE_KEY, options=_build_supabase_options())
-    except Exception as e:
-        logging.error(f"Failed to create Supabase admin client: {str(e)}")
-        return None
-
-
-def delete_supabase_user(user_id: str) -> bool:
-    """Delete an auth user during rollback of a failed local registration."""
-    if not user_id:
-        return False
-
-    try:
-        admin_client = get_supabase_admin_client()
-        if not admin_client or not hasattr(admin_client.auth, "admin"):
-            logger.warning("Supabase admin client unavailable while rolling back user %s", user_id)
-            return False
-        admin_client.auth.admin.delete_user(user_id)
-        logger.info("Rolled back Supabase user %s after failed registration", user_id)
-        return True
-    except Exception as exc:
-        logger.error("Failed to roll back Supabase user %s: %s", user_id, exc)
-        return False
-
-
 def get_jwt_expiry_seconds(token: str) -> int:
     """
     Get expiration time from JWT token (seconds)
@@ -302,10 +265,7 @@ def get_jwt_expiry_seconds(token: str) -> int:
             # 10 years in seconds
             return 10 * 365 * 24 * 60 * 60
         # Ensure token is pure JWT, remove possible Bearer prefix
-        jwt_token = (
-            token.replace("Bearer ", "") if token.startswith(
-                "Bearer ") else token
-        )
+        jwt_token = extract_bearer_token(token)
 
         # If debug expiration time is set, return directly for quick debugging
         if DEBUG_JWT_EXPIRE_SECONDS > 0:
@@ -384,20 +344,26 @@ def _decode_jwt_token(authorization: str) -> dict:
 
     try:
         # Format authorization header
-        token = (
-            authorization.replace("Bearer ", "")
-            if authorization.startswith("Bearer ")
-            else authorization
-        )
+        token = extract_bearer_token(authorization)
 
         # Decode and verify JWT (signature + expiration)
         # verify_aud=False: allow tokens with aud claim (e.g. test JWT, Supabase) without strict audience check
-        return jwt.decode(
+        claims = jwt.decode(
             token,
             SUPABASE_JWT_SECRET,
             algorithms=["HS256"],
             options={"verify_exp": True, "verify_aud": False},
         )
+        audience = claims.get("aud")
+        audiences = audience if isinstance(audience, list) else [audience]
+        if (
+            claims.get("iss") == INTERNAL_RUNTIME_JWT_ISSUER
+            or INTERNAL_RUNTIME_JWT_AUDIENCE in audiences
+            or claims.get("scope") == INTERNAL_RUNTIME_JWT_SCOPE
+            or claims.get("purpose") == OAUTH_PENDING_PURPOSE
+        ):
+            raise TokenExpiredError("Invalid session credential policy")
+        return claims
     except jwt.ExpiredSignatureError:
         logging.warning("Token expired")
         raise TokenExpiredError("Token has expired")
@@ -422,16 +388,14 @@ def _extract_user_id_from_jwt_token(authorization: str) -> Optional[str]:
     return decoded.get("sub")
 
 
-def extract_session_id_from_authorization(authorization: Optional[str]) -> Optional[str]:
+def extract_session_id_from_authorization(
+    authorization: Optional[str],
+) -> Optional[str]:
     """Extract the sid claim without enforcing token validity, for idempotent logout."""
     if not authorization:
         return None
     try:
-        token = (
-            authorization.replace("Bearer ", "")
-            if authorization.startswith("Bearer ")
-            else authorization
-        )
+        token = extract_bearer_token(authorization)
         decoded = jwt.decode(token, options={"verify_signature": False})
         sid = decoded.get("sid")
         return str(sid) if sid else None
@@ -451,7 +415,7 @@ def ensure_cas_session_active_from_authorization(authorization: Optional[str]) -
         raise TokenExpiredError("CAS session has expired or been revoked")
 
 
-def get_current_user_id(authorization: Optional[str] = None) -> tuple[str, str]:
+def _resolve_session_user(authorization: Optional[str] = None) -> tuple[str, str]:
     """
     Get current user ID and tenant ID from authorization token
 
@@ -463,8 +427,7 @@ def get_current_user_id(authorization: Optional[str] = None) -> tuple[str, str]:
     """
     # In speed mode, allow unauthenticated access with default user for demo/dev
     if IS_SPEED_MODE:
-        logging.debug(
-            "Speed mode detected - returning default user ID and tenant ID")
+        logging.debug("Speed mode detected - returning default user ID and tenant ID")
         return DEFAULT_USER_ID, DEFAULT_TENANT_ID
 
     # In normal mode, missing auth header means unauthorized - return 401, not default user
@@ -517,32 +480,11 @@ def get_current_user_context(
     if not user_role:
         raise TokenExpiredError("User role not found")
 
-    return user_id, resolve_tenant_id_from_user_tenant_record(user_tenant_record), user_role
-
-
-def get_user_language(request: Request = None) -> str:
-    """
-    Get user language preference from request
-
-    Args:
-        request: FastAPI request object, used to get cookie
-
-    Returns:
-        str: Language code ('zh' or 'en'), default to 'zh'
-    """
-    default_language = LANGUAGE["ZH"]
-
-    # Read language setting from cookie
-    if request:
-        try:
-            if hasattr(request, "cookies") and request.cookies:
-                cookie_locale = request.cookies.get("NEXT_LOCALE")
-                if cookie_locale and cookie_locale in [LANGUAGE["ZH"], LANGUAGE["EN"]]:
-                    return cookie_locale
-        except (AttributeError, TypeError) as e:
-            logging.warning(f"Error reading language from cookies: {e}")
-
-    return default_language
+    return (
+        user_id,
+        resolve_tenant_id_from_user_tenant_record(user_tenant_record),
+        user_role,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -589,10 +531,6 @@ def generate_session_jwt(
     return jwt.encode(payload, SUPABASE_JWT_SECRET, algorithm="HS256")
 
 
-
-
-
-
 def get_current_user_info(
     authorization: Optional[str] = None, request: Request = None
 ) -> tuple[str, str, str]:
@@ -610,17 +548,81 @@ def get_current_user_info(
     language = get_user_language(request)
     return user_id, tenant_id, language
 
-from infrastructure.security.internal_tokens import (
-    generate_internal_runtime_jwt,
-    verify_internal_runtime_jwt,
-    INTERNAL_RUNTIME_JWT_ISSUER,
-    INTERNAL_RUNTIME_JWT_AUDIENCE,
-    INTERNAL_RUNTIME_JWT_SCOPE,
-    INTERNAL_RUNTIME_JWT_TTL_SECONDS,
-)
 
-from infrastructure.security.signatures import (
-    calculate_hmac_signature,
-    validate_timestamp,
-    TIMESTAMP_VALIDITY_WINDOW,
-)
+def set_auth_token_to_client(client: Client, token: str) -> None:
+    """Set token to client"""
+    jwt_token = extract_bearer_token(token)
+
+    try:
+        # Only set access_token
+        client.auth.access_token = jwt_token
+    except Exception as e:
+        logging.error(f"Set access token failed: {str(e)}")
+
+
+def get_authorized_client(authorization: Optional[str] = Header(None)) -> Client:
+    """Get token from authorization header and create authorized supabase client"""
+    client = get_supabase_client()
+    if authorization:
+        token = extract_bearer_token(authorization)
+        set_auth_token_to_client(client, token)
+    return client
+
+
+def get_current_user_from_client(
+    client: Client, token: Optional[str] = None
+) -> Optional[Any]:
+    """Get current user from client using provided JWT, return user object or None"""
+    try:
+        # Prefer explicitly passing the JWT to avoid relying on client-side session state
+        if token:
+            jwt_token = extract_bearer_token(token)
+            user_response = client.auth.get_user(jwt_token)
+        else:
+            user_response = client.auth.get_user()
+
+        if user_response and getattr(user_response, "user", None):
+            return user_response.user
+        return None
+    except Exception as e:
+        logging.error(f"Get current user failed: {str(e)}")
+        return None
+
+
+def validate_token(token: str) -> Tuple[bool, Optional[Any]]:
+    """Validate token function, return (is valid, user object)"""
+    client = get_supabase_client()
+    set_auth_token_to_client(client, token)
+    try:
+        user = get_current_user_from_client(client, token)
+        if user:
+            ensure_cas_session_active_from_authorization(token)
+            return True, user
+        return False, None
+    except Exception as e:
+        logging.error(f"Token validation failed: {str(e)}")
+        return False, None
+
+
+async def get_session_by_authorization(authorization):
+    # Extract clean token from authorization header
+    clean_token = extract_bearer_token(authorization)
+
+    # Use the unified token validation function
+    is_valid, user = validate_token(clean_token)
+    if is_valid and user:
+        user_role = "user"  # Default role
+        if user.user_metadata and "role" in user.user_metadata:
+            user_role = user.user_metadata["role"]
+        return {"user": {"id": user.id, "email": user.email, "role": user_role}}
+    else:
+        # Use domain-specific exception for invalid/expired token
+        raise UnauthorizedError("Session is invalid or expired")
+
+
+def get_current_user_id(authorization: Optional[str] = None) -> tuple[str, str]:
+    """Compatibility tuple over the shared gateway identity contract."""
+    from gateway.authentication.policies import authenticate_identity
+
+    principal = authenticate_identity(authorization)
+    return principal.user_id, principal.tenant_id

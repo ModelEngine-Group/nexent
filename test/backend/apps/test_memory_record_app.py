@@ -104,10 +104,10 @@ sys.modules["nexent.memory"] = memory_pkg
 
 
 # Stub auth utils
-auth_utils_mod = types.ModuleType("management.services.permission.identity.authentication_helpers")
+auth_utils_mod = types.ModuleType("gateway.authentication.identity")
 auth_utils_mod.get_current_user_id = MagicMock(return_value=("u1", "t1"))
-sys.modules["management.services.permission.identity.authentication_helpers"] = auth_utils_mod
-sys.modules["management.services.permission.identity.authentication_helpers"] = auth_utils_mod
+sys.modules["gateway.authentication.identity"] = auth_utils_mod
+sys.modules["gateway.authentication.identity"] = auth_utils_mod
 
 
 # Stub exceptions

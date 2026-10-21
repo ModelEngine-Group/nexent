@@ -1,6 +1,7 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 from contracts.exceptions import NoInviteCodeException, IncorrectInviteCodeException, UserRegistrationException, AppException, UnauthorizedError, TenantResourceLimitError, ValidationError, tenant_resource_limit_error_payload
 from contracts.error_code import ErrorCode
+from gateway.authentication.credentials import extract_bearer_token
 import logging
 
 from dotenv import load_dotenv
@@ -25,17 +26,11 @@ from contracts.exceptions import (
 )
 from contracts.error_code import ErrorCode
 from management.services.permission.identity.cas import build_logout_url, CasAuthenticationError
-from management.services.permission.identity.authentication import get_authorized_client, validate_token, \
-    check_auth_service_health, signup_user_with_invitation, signin_user, refresh_user_token, \
-    get_session_by_authorization, get_user_info, create_token, list_tokens_by_user, delete_token, \
-    update_password, get_provider_username
+from gateway.authentication.identity import get_authorized_client, validate_token, get_session_by_authorization
+from management.services.permission.identity.authentication import check_auth_service_health, signup_user_with_invitation, signin_user, refresh_user_token, get_user_info, create_token, list_tokens_by_user, delete_token, update_password, get_provider_username
 from management.services.permission.identity.users import delete_user_and_cleanup
 from management.services.monitor.audit import record_security_event
-from management.services.permission.identity.authentication_helpers import (
-    extract_session_id_from_authorization,
-    get_current_user_context,
-    get_current_user_id,
-)
+from gateway.authentication.identity import extract_session_id_from_authorization, get_current_user_context, get_current_user_id
 
 
 load_dotenv()
@@ -150,7 +145,7 @@ async def user_refresh_token(request: Request):
         refresh_token = session_data.get("refresh_token")
         if not refresh_token:
             raise ValueError("No refresh token provided")
-        session_info = await refresh_user_token(authorization, refresh_token)
+        session_info = await refresh_user_token(extract_bearer_token(authorization), refresh_token)
         return JSONResponse(
             status_code=HTTPStatus.OK,
             content={"message": "Token refresh successful", "data": {"session": session_info}},
@@ -305,7 +300,7 @@ async def revoke_user_account(request: Request):
         user_id, tenant_id = get_current_user_id(authorization)
 
         # Determine role via token validation
-        is_valid, user = validate_token(authorization.replace("Bearer ", ""))
+        is_valid, user = validate_token(authorization)
         if not is_valid or not user:
             raise UnauthorizedError("User not logged in or session invalid")
 

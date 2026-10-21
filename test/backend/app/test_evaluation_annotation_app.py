@@ -4,7 +4,7 @@
 Directly invoke each async endpoint, patching the 8
 ``management.db.evaluation.annotation`` helpers plus the lazily-imported
 ``management.db.evaluation.runs.count_active_runs_using_schema`` and the
-``management.services.permission.identity.authentication_helpers`` identity resolver.  ``consts`` and the two database
+``gateway.authentication.identity`` identity resolver.  ``consts`` and the two database
 modules are stubbed at ``sys.modules`` level (idempotent
 ``_register_package`` registration); the app module is loaded with
 ``spec_from_file_location`` so the FastAPI decorators run against the real
@@ -105,9 +105,9 @@ def _install_stubs():
     )
     _db_pkg.agent_evaluation_db = _aedb_mod
 
-    # ---- management.services.permission.identity.authentication_helpers ------------------------------------------------
+    # ---- gateway.authentication.identity ------------------------------------------------
     _utils_pkg = _register_package("utils")
-    _au_mod = mk_mod("management.services.permission.identity.authentication_helpers", get_current_user_id=MagicMock(name="get_current_user_id"))
+    _au_mod = mk_mod("gateway.authentication.identity", get_current_user_id=MagicMock(name="get_current_user_id"))
     _utils_pkg.auth_utils = _au_mod
     return _ErrorCode, _AppException, _UnauthorizedError
 
@@ -133,7 +133,7 @@ def bundle():
     for n, m in db_impls.items():
         setattr(_eadb, n, m)
     sys.modules["management.db.evaluation.runs"].count_active_runs_using_schema = in_use
-    sys.modules["management.services.permission.identity.authentication_helpers"].get_current_user_id = auth
+    sys.modules["gateway.authentication.identity"].get_current_user_id = auth
 
     if MODULE_UNDER_TEST in sys.modules:
         del sys.modules[MODULE_UNDER_TEST]

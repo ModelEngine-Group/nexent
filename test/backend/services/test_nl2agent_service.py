@@ -1,5 +1,6 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
+from contracts.authentication import AuthenticatedIdentity
 import asyncio
 import json
 import sys
@@ -1661,307 +1662,101 @@ async def test_validate_agent_generation_complete_requires_generated_name(mocker
     assert exc_info.value.failed_fields == ["name"]
 
 
-@pytest.mark.parametrize("query,clarification_required", [
-    ("Build an agent that summarizes weather risks.", "false"),
-    ("只关闭重试，不更改其他配置。", "true"),
-])
+@pytest.mark.parametrize('query,clarification_required', [('Build an agent that summarizes weather risks.', 'false'), ('只关闭重试，不更改其他配置。', 'true')])
 @pytest.mark.asyncio
 async def test_build_run_info_is_ephemeral(mocker, query, clarification_required):
     """UT-BE-NCR-014 and UT-BE-NCR-015: verified headers and attachments."""
-    default_model = {
-        "model_factory": "openai",
-        "model_name": "gpt-4o",
-        "context_window_tokens": 32768,
-    }
-    capacity_snapshot = {"capacity_fingerprint": "capacity-fingerprint"}
+    default_model = {'model_factory': 'openai', 'model_name': 'gpt-4o', 'context_window_tokens': 32768}
+    capacity_snapshot = {'capacity_fingerprint': 'capacity-fingerprint'}
     resolved_capacity_snapshot = MagicMock(context_window_tokens=32768)
     context_budget_snapshot = _context_budget_snapshot()
-    join_query = mocker.patch(
-        "services.nl2agent_service.join_minio_file_description_to_query",
-        new_callable=AsyncMock,
-        return_value="final query",
-    )
-    mocker.patch(
-        "services.nl2agent_service.create_model_config_list",
-        new_callable=AsyncMock,
-        return_value=[],
-    )
-    get_model_config = mocker.patch(
-        "services.nl2agent_service.tenant_config_manager.get_model_config",
-        return_value=default_model,
-    )
-    resolve_input_budget = mocker.patch(
-        "services.nl2agent_service._resolve_input_budget",
-        return_value=(32768, capacity_snapshot, resolved_capacity_snapshot),
-    )
-    resolve_context_budget = mocker.patch(
-        "services.nl2agent_service._resolve_context_budget",
-        return_value=context_budget_snapshot,
-    )
-    mocker.patch(
-        "services.nl2agent_service.get_tenant_local_mcp_server",
-        return_value="http://local-mcp:5011",
-    )
-    get_current_user = mocker.patch(
-        "services.nl2agent_service.get_current_user_id",
-        return_value=("user-a", "tenant-a"),
-    )
-    verified_context = ContextItemInput(
-        id="system:nl2agent_bound_resources",
-        type=ContextItemType.SYSTEM,
-        content={"text": "verified draft state"},
-        source=("database:agent_bindings",),
-    )
-    build_verified_context = mocker.patch(
-        "services.nl2agent_service._build_verified_bound_resources_context",
-        new_callable=AsyncMock,
-        return_value=verified_context,
-    )
-    request = NL2AgentRunRequest(
-        query=query,
-        agent_id=42,
-        history=[
-            HistoryItem(
-                role="user",
-                content="Build an agent that summarizes weather risks.",
-            ),
-            HistoryItem(
-                role="assistant",
-                content="I found matching weather tools.",
-            ),
-        ],
-    )
-
-    run_info = await build_nl2agent_run_info(
-        request,
-        "tenant-a",
-        "en",
-        "Bearer tenant-token",
-    )
-
-    assert run_info.query == "final query"
-    assert run_info.agent_config.name == "__nl2agent_runtime__"
+    join_query = mocker.patch('services.nl2agent_service.join_minio_file_description_to_query', new_callable=AsyncMock, return_value='final query')
+    mocker.patch('services.nl2agent_service.create_model_config_list', new_callable=AsyncMock, return_value=[])
+    get_model_config = mocker.patch('services.nl2agent_service.tenant_config_manager.get_model_config', return_value=default_model)
+    resolve_input_budget = mocker.patch('services.nl2agent_service._resolve_input_budget', return_value=(32768, capacity_snapshot, resolved_capacity_snapshot))
+    resolve_context_budget = mocker.patch('services.nl2agent_service._resolve_context_budget', return_value=context_budget_snapshot)
+    mocker.patch('services.nl2agent_service.get_tenant_local_mcp_server', return_value='http://local-mcp:5011')
+    verified_context = ContextItemInput(id='system:nl2agent_bound_resources', type=ContextItemType.SYSTEM, content={'text': 'verified draft state'}, source=('database:agent_bindings',))
+    build_verified_context = mocker.patch('services.nl2agent_service._build_verified_bound_resources_context', new_callable=AsyncMock, return_value=verified_context)
+    request = NL2AgentRunRequest(query=query, agent_id=42, history=[HistoryItem(role='user', content='Build an agent that summarizes weather risks.'), HistoryItem(role='assistant', content='I found matching weather tools.')])
+    run_info = await build_nl2agent_run_info(request, 'tenant-a', 'en', 'Bearer tenant-token', identity=AuthenticatedIdentity('user-a', 'tenant-a'))
+    assert run_info.query == 'final query'
+    assert run_info.agent_config.name == '__nl2agent_runtime__'
     assert run_info.agent_config.context_manager_config.token_threshold == 24000
     assert run_info.agent_config.context_manager_config.effective_input_limit_tokens == 30000
     assert run_info.agent_config.context_manager_config.compaction_target_tokens == 18000
     assert run_info.agent_config.capacity_snapshot == capacity_snapshot
-    assert (
-        run_info.agent_config.context_budget_snapshot
-        == context_budget_snapshot
-    )
+    assert run_info.agent_config.context_budget_snapshot == context_budget_snapshot
     assert run_info.capacity_snapshot == capacity_snapshot
     assert run_info.context_budget_snapshot == context_budget_snapshot
-    assert run_info.history[0].content == (
-        "Build an agent that summarizes weather risks."
-    )
+    assert run_info.history[0].content == 'Build an agent that summarizes weather risks.'
     assert len(run_info.context_input.items) == 3
     prompt_context = run_info.context_input.items[0]
-    assert prompt_context.id == "system:nl2agent_prompt"
+    assert prompt_context.id == 'system:nl2agent_prompt'
     assert prompt_context.type == ContextItemType.SYSTEM
-    assert "### Role" in prompt_context.content["text"]
+    assert '### Role' in prompt_context.content['text']
     assert run_info.context_input.items[1] == verified_context
     history_item = run_info.context_input.items[2]
-    assert history_item.type.value == "conversation_turn"
-    assert history_item.content == {
-        "user_message": "Build an agent that summarizes weather risks.",
-        "assistant_final_answer": "I found matching weather tools.",
-        "attachments": [],
-        "user_message_id": -1,
-        "assistant_message_id": -2,
-    }
-    assert history_item.metadata == {"layout_order": 0}
-    assert run_info.mcp_host == [
-        {
-                "url": "http://local-mcp:5011",
-            "transport": "sse",
-            "httpx_client_factory": create_httpx_client,
-            "bypass_proxy": True,
-            "headers": {
-                "Authorization": "Bearer tenant-token",
-                NL2AGENT_AGENT_ID_HEADER: "42",
-                NL2AGENT_POLICY_CLARIFICATION_HEADER: clarification_required,
-                "X-Tenant-ID": "tenant-a",
-                "X-Nexent-Internal-Token": TOKEN,
-            },
-        }
-    ]
+    assert history_item.type.value == 'conversation_turn'
+    assert history_item.content == {'user_message': 'Build an agent that summarizes weather risks.', 'assistant_final_answer': 'I found matching weather tools.', 'attachments': [], 'user_message_id': -1, 'assistant_message_id': -2}
+    assert history_item.metadata == {'layout_order': 0}
+    assert run_info.mcp_host == [{'url': 'http://local-mcp:5011', 'transport': 'sse', 'httpx_client_factory': create_httpx_client, 'bypass_proxy': True, 'headers': {'Authorization': 'Bearer tenant-token', NL2AGENT_AGENT_ID_HEADER: '42', NL2AGENT_POLICY_CLARIFICATION_HEADER: clarification_required, 'X-Tenant-ID': 'tenant-a', 'X-Nexent-Internal-Token': TOKEN}}]
     assert run_info.sandbox_config is None
     assert run_info.redis_client is None
     assert run_info.enable_planning is False
     assert run_info.observer.enable_nl2a_wrapper is True
     assert isinstance(run_info.observer, _Nl2AgentBoundaryObserver)
     assert run_info.observer._boundary_stop_event is run_info.stop_event
-    join_query.assert_awaited_once_with(
-        minio_files=None,
-        query=query,
-        history=request.history,
-        language="en",
-    )
-    get_model_config.assert_called_once_with(
-        key="LLM_ID",
-        tenant_id="tenant-a",
-    )
+    join_query.assert_awaited_once_with(minio_files=None, query=query, history=request.history, language='en')
+    get_model_config.assert_called_once_with(key='LLM_ID', tenant_id='tenant-a')
     resolve_input_budget.assert_called_once_with(default_model)
-    resolve_context_budget.assert_called_once_with(
-        capacity_snapshot=resolved_capacity_snapshot,
-        tenant_id="tenant-a",
-        agent_requested_output_tokens=None,
-        request_requested_output_tokens=None,
-    )
-    get_current_user.assert_called_once_with("Bearer tenant-token")
-    build_verified_context.assert_awaited_once_with(
-        agent_id=42,
-        tenant_id="tenant-a",
-        user_id="user-a",
-    )
+    resolve_context_budget.assert_called_once_with(capacity_snapshot=resolved_capacity_snapshot, tenant_id='tenant-a', agent_requested_output_tokens=None, request_requested_output_tokens=None)
+    build_verified_context.assert_awaited_once_with(agent_id=42, tenant_id='tenant-a', user_id='user-a')
 
 
 @pytest.mark.asyncio
 async def test_build_run_info_rejects_request_action_agent_mismatch(mocker):
-    mocker.patch(
-        "services.nl2agent_service.join_minio_file_description_to_query",
-        new_callable=AsyncMock,
-        return_value="structured action",
-    )
-    mocker.patch(
-        "services.nl2agent_service.create_model_config_list",
-        new_callable=AsyncMock,
-        return_value=[],
-    )
-    build_verified_context = mocker.patch(
-        "services.nl2agent_service._build_verified_bound_resources_context",
-        new_callable=AsyncMock,
-    )
-    request = NL2AgentRunRequest(
-        agent_id=42,
-        query=json.dumps(
-            {
-                "type": "nl2agent_card_action",
-                "subtype": "requirement_clarification",
-                "agent_id": 43,
-                "action": "submit",
-                "result": {"answers": []},
-            }
-        ),
-    )
-
+    mocker.patch('services.nl2agent_service.join_minio_file_description_to_query', new_callable=AsyncMock, return_value='structured action')
+    mocker.patch('services.nl2agent_service.create_model_config_list', new_callable=AsyncMock, return_value=[])
+    build_verified_context = mocker.patch('services.nl2agent_service._build_verified_bound_resources_context', new_callable=AsyncMock)
+    request = NL2AgentRunRequest(agent_id=42, query=json.dumps({'type': 'nl2agent_card_action', 'subtype': 'requirement_clarification', 'agent_id': 43, 'action': 'submit', 'result': {'answers': []}}))
     with pytest.raises(Nl2AgentDraftSaveError) as exc_info:
-        await build_nl2agent_run_info(
-            request,
-            tenant_id="tenant-a",
-            language="en",
-            authorization="Bearer tenant-token",
-        )
-
-    assert exc_info.value.code == "agent_context_mismatch"
+        await build_nl2agent_run_info(request, tenant_id='tenant-a', language='en', authorization='Bearer tenant-token', identity=AuthenticatedIdentity('user-a', 'tenant-a'))
+    assert exc_info.value.code == 'agent_context_mismatch'
     build_verified_context.assert_not_awaited()
 
 
 @pytest.mark.asyncio
 async def test_build_run_info_rejects_card_action_without_agent_id(mocker):
-    build_verified_context = mocker.patch(
-        "services.nl2agent_service._build_verified_bound_resources_context",
-        new_callable=AsyncMock,
-    )
-    request = NL2AgentRunRequest(
-        agent_id=42,
-        query=json.dumps(
-            {
-                "type": "nl2agent_card_action",
-                "subtype": "requirement_clarification",
-                "action": "submit",
-                "result": {"answers": []},
-            }
-        ),
-    )
-
+    build_verified_context = mocker.patch('services.nl2agent_service._build_verified_bound_resources_context', new_callable=AsyncMock)
+    request = NL2AgentRunRequest(agent_id=42, query=json.dumps({'type': 'nl2agent_card_action', 'subtype': 'requirement_clarification', 'action': 'submit', 'result': {'answers': []}}))
     with pytest.raises(Nl2AgentDraftSaveError) as exc_info:
-        await build_nl2agent_run_info(
-            request,
-            tenant_id="tenant-a",
-            language="en",
-            authorization="Bearer tenant-token",
-        )
-
-    assert exc_info.value.code == "agent_context_mismatch"
+        await build_nl2agent_run_info(request, tenant_id='tenant-a', language='en', authorization='Bearer tenant-token', identity=AuthenticatedIdentity('user-a', 'tenant-a'))
+    assert exc_info.value.code == 'agent_context_mismatch'
     build_verified_context.assert_not_awaited()
 
 
 @pytest.mark.asyncio
 async def test_build_run_info_rejects_authenticated_tenant_mismatch(mocker):
-    mocker.patch(
-        "services.nl2agent_service.get_current_user_id",
-        return_value=("user-a", "tenant-b"),
-    )
-    build_verified_context = mocker.patch(
-        "services.nl2agent_service._build_verified_bound_resources_context",
-        new_callable=AsyncMock,
-    )
-
-    with pytest.raises(PermissionError, match="tenant mismatch"):
-        await build_nl2agent_run_info(
-            NL2AgentRunRequest(query="Update this Agent", agent_id=42),
-            tenant_id="tenant-a",
-            language="en",
-            authorization="Bearer tenant-token",
-        )
-
+    build_verified_context = mocker.patch('services.nl2agent_service._build_verified_bound_resources_context', new_callable=AsyncMock)
+    with pytest.raises(PermissionError, match='tenant mismatch'):
+        await build_nl2agent_run_info(NL2AgentRunRequest(query='Update this Agent', agent_id=42), tenant_id='tenant-a', language='en', authorization='Bearer tenant-token', identity=AuthenticatedIdentity('user-a', 'tenant-b'))
     build_verified_context.assert_not_awaited()
 
 
 @pytest.mark.asyncio
 async def test_build_run_info_falls_back_without_capacity_snapshot(mocker):
-    mocker.patch(
-        "services.nl2agent_service.join_minio_file_description_to_query",
-        new_callable=AsyncMock,
-        return_value="Build a writing assistant",
-    )
+    mocker.patch('services.nl2agent_service.join_minio_file_description_to_query', new_callable=AsyncMock, return_value='Build a writing assistant')
     model_configs = []
-    mocker.patch(
-        "services.nl2agent_service.create_model_config_list",
-        new_callable=AsyncMock,
-        return_value=model_configs,
-    )
-    mocker.patch(
-        "services.nl2agent_service.tenant_config_manager.get_model_config",
-        return_value={"model_name": "tenant-default"},
-    )
-    capacity_snapshot = {"capacity_fingerprint": "legacy-capacity"}
-    mocker.patch(
-        "services.nl2agent_service._resolve_input_budget",
-        return_value=(8192, capacity_snapshot, None),
-    )
-    mocker.patch(
-        "services.nl2agent_service._resolve_context_budget",
-        return_value=None,
-    )
-    mocker.patch(
-        "services.nl2agent_service.get_tenant_local_mcp_server",
-        return_value="http://local-mcp:5011/base/",
-    )
-    mocker.patch(
-        "services.nl2agent_service.get_current_user_id",
-        return_value=("user-a", "tenant-a"),
-    )
-    verified_context = ContextItemInput(
-        id="system:nl2agent_bound_resources",
-        type=ContextItemType.SYSTEM,
-        content={"text": "verified draft state"},
-        source=("database:agent_bindings",),
-    )
-    mocker.patch(
-        "services.nl2agent_service._build_verified_bound_resources_context",
-        new_callable=AsyncMock,
-        return_value=verified_context,
-    )
-
-    run_info = await build_nl2agent_run_info(
-        NL2AgentRunRequest(query="Build a writing assistant", agent_id=42),
-        tenant_id="tenant-a",
-        language="en",
-        authorization=None,
-    )
-
+    mocker.patch('services.nl2agent_service.create_model_config_list', new_callable=AsyncMock, return_value=model_configs)
+    mocker.patch('services.nl2agent_service.tenant_config_manager.get_model_config', return_value={'model_name': 'tenant-default'})
+    capacity_snapshot = {'capacity_fingerprint': 'legacy-capacity'}
+    mocker.patch('services.nl2agent_service._resolve_input_budget', return_value=(8192, capacity_snapshot, None))
+    mocker.patch('services.nl2agent_service._resolve_context_budget', return_value=None)
+    mocker.patch('services.nl2agent_service.get_tenant_local_mcp_server', return_value='http://local-mcp:5011/base/')
+    verified_context = ContextItemInput(id='system:nl2agent_bound_resources', type=ContextItemType.SYSTEM, content={'text': 'verified draft state'}, source=('database:agent_bindings',))
+    mocker.patch('services.nl2agent_service._build_verified_bound_resources_context', new_callable=AsyncMock, return_value=verified_context)
+    run_info = await build_nl2agent_run_info(NL2AgentRunRequest(query='Build a writing assistant', agent_id=42), tenant_id='tenant-a', language='en', authorization=None, identity=AuthenticatedIdentity('user-a', 'tenant-a'))
     context_config = run_info.agent_config.context_manager_config
     assert context_config.token_threshold == 8192
     assert context_config.context_window_tokens == 8192
@@ -1972,24 +1767,11 @@ async def test_build_run_info_falls_back_without_capacity_snapshot(mocker):
     assert run_info.history == []
     assert len(run_info.context_input.items) == 2
     prompt_context = run_info.context_input.items[0]
-    assert prompt_context.id == "system:nl2agent_prompt"
+    assert prompt_context.id == 'system:nl2agent_prompt'
     assert prompt_context.type == ContextItemType.SYSTEM
-    assert "### Role" in prompt_context.content["text"]
+    assert '### Role' in prompt_context.content['text']
     assert run_info.context_input.items[1] == verified_context
-    assert run_info.mcp_host == [
-        {
-                "url": "http://local-mcp:5011/base/",
-            "transport": "sse",
-            "httpx_client_factory": create_httpx_client,
-            "bypass_proxy": True,
-            "headers": {
-                NL2AGENT_AGENT_ID_HEADER: "42",
-                NL2AGENT_POLICY_CLARIFICATION_HEADER: "false",
-                "X-Tenant-ID": "tenant-a",
-                "X-Nexent-Internal-Token": TOKEN,
-            },
-        }
-    ]
+    assert run_info.mcp_host == [{'url': 'http://local-mcp:5011/base/', 'transport': 'sse', 'httpx_client_factory': create_httpx_client, 'bypass_proxy': True, 'headers': {NL2AGENT_AGENT_ID_HEADER: '42', NL2AGENT_POLICY_CLARIFICATION_HEADER: 'false', 'X-Tenant-ID': 'tenant-a', 'X-Nexent-Internal-Token': TOKEN}}]
 
 
 @pytest.mark.asyncio
@@ -1997,102 +1779,30 @@ async def test_create_stream_wraps_sdk_chunks_and_stops_run(mocker):
     """UT-BE-NCR-017: preserve Agent event order and stop semantics."""
     run_info = MagicMock()
     run_info.stop_event = MagicMock()
-    build_run_info = mocker.patch(
-        "services.nl2agent_service.build_nl2agent_run_info",
-        new_callable=AsyncMock,
-        return_value=run_info,
-    )
+    build_run_info = mocker.patch('services.nl2agent_service.build_nl2agent_run_info', new_callable=AsyncMock, return_value=run_info)
 
     async def fake_agent_run(received_run_info, *, thread_manager):
         assert received_run_info is run_info
         assert thread_manager is not None
-        yield json.dumps({"type": "tool", "content": "call"})
-        yield json.dumps(
-            {
-                "type": "nl2a",
-                "content": json.dumps(
-                    {
-                        "status": "success",
-                        "recommendation_count": 0,
-                        "recommendations": [],
-                    }
-                ),
-            }
-        )
-        yield json.dumps({"type": "execution_logs", "content": "must be hidden"})
-        yield json.dumps({"type": "nl2a", "content": "must also be hidden"})
-
-    mocker.patch(
-        "services.nl2agent_service.agent_run",
-        side_effect=fake_agent_run,
-    )
-    request = NL2AgentRunRequest(query="Build a weather agent", agent_id=42)
-
-    stream = await create_nl2agent_stream(
-        request,
-        "tenant-a",
-        "en",
-        "Bearer tenant-token",
-    )
+        yield json.dumps({'type': 'tool', 'content': 'call'})
+        yield json.dumps({'type': 'nl2a', 'content': json.dumps({'status': 'success', 'recommendation_count': 0, 'recommendations': []})})
+        yield json.dumps({'type': 'execution_logs', 'content': 'must be hidden'})
+        yield json.dumps({'type': 'nl2a', 'content': 'must also be hidden'})
+    mocker.patch('services.nl2agent_service.agent_run', side_effect=fake_agent_run)
+    request = NL2AgentRunRequest(query='Build a weather agent', agent_id=42)
+    stream = await create_nl2agent_stream(request, 'tenant-a', 'en', 'Bearer tenant-token', identity=AuthenticatedIdentity('user-a', 'tenant-a'))
     chunks = [chunk async for chunk in stream]
-
-    build_run_info.assert_awaited_once_with(
-        request=request,
-        tenant_id="tenant-a",
-        language="en",
-        authorization="Bearer tenant-token",
-    )
-    assert chunks == [
-        'data: {"type": "tool", "content": "call"}\n\n',
-        (
-            'data: {"type": "nl2a", '
-            '"content": "{\\"status\\": \\"success\\", '
-            '\\"recommendation_count\\": 0, \\"recommendations\\": []}"}\n\n'
-        ),
-    ]
+    build_run_info.assert_awaited_once_with(request=request, tenant_id='tenant-a', language='en', authorization='Bearer tenant-token', identity=AuthenticatedIdentity('user-a', 'tenant-a'))
+    assert chunks == ['data: {"type": "tool", "content": "call"}\n\n', 'data: {"type": "nl2a", "content": "{\\"status\\": \\"success\\", \\"recommendation_count\\": 0, \\"recommendations\\": []}"}\n\n']
     run_info.stop_event.set.assert_called_once_with()
 
 
 @pytest.mark.asyncio
-async def test_create_stream_yields_process_chunks_without_waiting_for_later_output(
-    mocker,
-):
+async def test_create_stream_yields_process_chunks_without_waiting_for_later_output(mocker):
     run_info = MagicMock()
     run_info.stop_event = MagicMock()
-    mocker.patch(
-        "services.nl2agent_service.build_nl2agent_run_info",
-        new_callable=AsyncMock,
-        return_value=run_info,
-    )
-    process_chunks = [
-        {"type": "step_count", "content": "1"},
-        {"type": "model_output_thinking", "content": "reason"},
-        {"type": "model_output_deep_thinking", "content": "deeper reason"},
-        {"type": "model_output_code", "content": "code"},
-        {"type": "parse", "content": "parsed"},
-        {"type": "tool", "content": "call"},
-        {"type": "execution_logs", "content": "observation"},
-        {
-            "type": "nl2a_state",
-            "content": json.dumps(
-                {
-                    "event": "agent_draft_fields_saved",
-                    "agent_id": 42,
-                    "updated_fields": ["duty_prompt"],
-                }
-            ),
-        },
-        {
-            "type": "nl2a_state",
-            "content": json.dumps(
-                {
-                    "event": "agent_generation_completed",
-                    "agent_id": 42,
-                }
-            ),
-        },
-        {"type": "final_answer", "content": "plain answer"},
-    ]
+    mocker.patch('services.nl2agent_service.build_nl2agent_run_info', new_callable=AsyncMock, return_value=run_info)
+    process_chunks = [{'type': 'step_count', 'content': '1'}, {'type': 'model_output_thinking', 'content': 'reason'}, {'type': 'model_output_deep_thinking', 'content': 'deeper reason'}, {'type': 'model_output_code', 'content': 'code'}, {'type': 'parse', 'content': 'parsed'}, {'type': 'tool', 'content': 'call'}, {'type': 'execution_logs', 'content': 'observation'}, {'type': 'nl2a_state', 'content': json.dumps({'event': 'agent_draft_fields_saved', 'agent_id': 42, 'updated_fields': ['duty_prompt']})}, {'type': 'nl2a_state', 'content': json.dumps({'event': 'agent_generation_completed', 'agent_id': 42})}, {'type': 'final_answer', 'content': 'plain answer'}]
     release_next = [asyncio.Event() for _ in process_chunks]
 
     async def gated_agent_run(_run_info, *, thread_manager):
@@ -2100,99 +1810,47 @@ async def test_create_stream_yields_process_chunks_without_waiting_for_later_out
         for payload, gate in zip(process_chunks, release_next, strict=True):
             yield json.dumps(payload)
             await gate.wait()
-
-    mocker.patch(
-        "services.nl2agent_service.agent_run",
-        side_effect=gated_agent_run,
-    )
-    stream = await create_nl2agent_stream(
-        NL2AgentRunRequest(query="Build an assistant", agent_id=42),
-        "tenant-a",
-        "en",
-        None,
-    )
-
+    mocker.patch('services.nl2agent_service.agent_run', side_effect=gated_agent_run)
+    stream = await create_nl2agent_stream(NL2AgentRunRequest(query='Build an assistant', agent_id=42), 'tenant-a', 'en', None, identity=AuthenticatedIdentity('user-a', 'tenant-a'))
     for expected, gate in zip(process_chunks, release_next, strict=True):
         chunk = await asyncio.wait_for(anext(stream), timeout=0.5)
-        assert json.loads(chunk.removeprefix("data: ").strip()) == expected
+        assert json.loads(chunk.removeprefix('data: ').strip()) == expected
         gate.set()
-
     with pytest.raises(StopAsyncIteration):
         await anext(stream)
     run_info.stop_event.set.assert_called_once_with()
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize(
-    "content",
-    [
-        "The configuration still needs user input.",
-        "Run Agent Error: Model main_model not found",
-    ],
-)
+@pytest.mark.parametrize('content', ['The configuration still needs user input.', 'Run Agent Error: Model main_model not found'])
 async def test_create_stream_preserves_final_answers_without_fallback(mocker, content):
     run_info = MagicMock()
     run_info.stop_event = MagicMock()
-    mocker.patch(
-        "services.nl2agent_service.build_nl2agent_run_info",
-        new_callable=AsyncMock,
-        return_value=run_info,
-    )
+    mocker.patch('services.nl2agent_service.build_nl2agent_run_info', new_callable=AsyncMock, return_value=run_info)
 
     async def final_answer_agent_run(_run_info, *, thread_manager):
         assert thread_manager is not None
-        yield json.dumps({"type": "final_answer", "content": content})
-
-    mocker.patch(
-        "services.nl2agent_service.agent_run",
-        side_effect=final_answer_agent_run,
-    )
-    stream = await create_nl2agent_stream(
-        NL2AgentRunRequest(query="Build an assistant", agent_id=42),
-        "tenant-a",
-        "en",
-        None,
-    )
-
+        yield json.dumps({'type': 'final_answer', 'content': content})
+    mocker.patch('services.nl2agent_service.agent_run', side_effect=final_answer_agent_run)
+    stream = await create_nl2agent_stream(NL2AgentRunRequest(query='Build an assistant', agent_id=42), 'tenant-a', 'en', None, identity=AuthenticatedIdentity('user-a', 'tenant-a'))
     chunks = [chunk async for chunk in stream]
-
     assert len(chunks) == 1
-    assert json.loads(chunks[0].removeprefix("data: ").strip()) == {
-        "type": "final_answer",
-        "content": content,
-    }
+    assert json.loads(chunks[0].removeprefix('data: ').strip()) == {'type': 'final_answer', 'content': content}
 
 
 @pytest.mark.asyncio
 async def test_create_stream_ends_without_synthesizing_nl2a_fallback(mocker):
     run_info = MagicMock()
     run_info.stop_event = MagicMock()
-    mocker.patch(
-        "services.nl2agent_service.build_nl2agent_run_info",
-        new_callable=AsyncMock,
-        return_value=run_info,
-    )
+    mocker.patch('services.nl2agent_service.build_nl2agent_run_info', new_callable=AsyncMock, return_value=run_info)
 
     async def no_action_agent_run(_run_info, *, thread_manager):
         assert thread_manager is not None
-        yield json.dumps({"type": "model_output_thinking", "content": "reason"})
-
-    mocker.patch(
-        "services.nl2agent_service.agent_run",
-        side_effect=no_action_agent_run,
-    )
-    stream = await create_nl2agent_stream(
-        NL2AgentRunRequest(query="Build an assistant", agent_id=42),
-        "tenant-a",
-        "en",
-        None,
-    )
-
+        yield json.dumps({'type': 'model_output_thinking', 'content': 'reason'})
+    mocker.patch('services.nl2agent_service.agent_run', side_effect=no_action_agent_run)
+    stream = await create_nl2agent_stream(NL2AgentRunRequest(query='Build an assistant', agent_id=42), 'tenant-a', 'en', None, identity=AuthenticatedIdentity('user-a', 'tenant-a'))
     chunks = [chunk async for chunk in stream]
-
-    assert [json.loads(chunk.removeprefix("data: ").strip()) for chunk in chunks] == [
-        {"type": "model_output_thinking", "content": "reason"}
-    ]
+    assert [json.loads(chunk.removeprefix('data: ').strip()) for chunk in chunks] == [{'type': 'model_output_thinking', 'content': 'reason'}]
 
 
 @pytest.mark.asyncio
@@ -2200,39 +1858,21 @@ async def test_create_stream_hides_runtime_errors_and_stops_run(mocker):
     """UT-BE-NCR-018: runtime failures are redacted and terminate once."""
     run_info = MagicMock()
     run_info.stop_event = MagicMock()
-    mocker.patch(
-        "services.nl2agent_service.build_nl2agent_run_info",
-        new_callable=AsyncMock,
-        return_value=run_info,
-    )
+    mocker.patch('services.nl2agent_service.build_nl2agent_run_info', new_callable=AsyncMock, return_value=run_info)
 
     async def failing_agent_run(_run_info, *, thread_manager):
         assert thread_manager is not None
         if False:
-            yield "unreachable"
-        raise RuntimeError("private provider credentials")
-
-    mocker.patch(
-        "services.nl2agent_service.agent_run",
-        side_effect=failing_agent_run,
-    )
-
-    stream = await create_nl2agent_stream(
-        NL2AgentRunRequest(query="Build an assistant", agent_id=42),
-        "tenant-a",
-        "en",
-        "Bearer tenant-token",
-    )
+            yield 'unreachable'
+        raise RuntimeError('private provider credentials')
+    mocker.patch('services.nl2agent_service.agent_run', side_effect=failing_agent_run)
+    stream = await create_nl2agent_stream(NL2AgentRunRequest(query='Build an assistant', agent_id=42), 'tenant-a', 'en', 'Bearer tenant-token', identity=AuthenticatedIdentity('user-a', 'tenant-a'))
     chunks = [chunk async for chunk in stream]
-
     assert len(chunks) == 1
-    payload = json.loads(chunks[0].removeprefix("data: ").strip())
-    assert payload == {
-        "type": "error",
-        "content": "NL2Agent execution failed.",
-    }
-    assert "credentials" not in chunks[0]
-    assert "tenant-token" not in chunks[0]
+    payload = json.loads(chunks[0].removeprefix('data: ').strip())
+    assert payload == {'type': 'error', 'content': 'NL2Agent execution failed.'}
+    assert 'credentials' not in chunks[0]
+    assert 'tenant-token' not in chunks[0]
     run_info.stop_event.set.assert_called_once_with()
 
 
@@ -2241,30 +1881,15 @@ async def test_create_stream_propagates_cancellation_and_stops_run(mocker):
     """UT-BE-NCR-019: cancellation stops the specialized Agent run."""
     run_info = MagicMock()
     run_info.stop_event = MagicMock()
-    mocker.patch(
-        "services.nl2agent_service.build_nl2agent_run_info",
-        new_callable=AsyncMock,
-        return_value=run_info,
-    )
+    mocker.patch('services.nl2agent_service.build_nl2agent_run_info', new_callable=AsyncMock, return_value=run_info)
 
     async def cancelled_agent_run(_run_info, *, thread_manager):
         assert thread_manager is not None
         if False:
-            yield "unreachable"
+            yield 'unreachable'
         raise asyncio.CancelledError
-
-    mocker.patch(
-        "services.nl2agent_service.agent_run",
-        side_effect=cancelled_agent_run,
-    )
-
-    stream = await create_nl2agent_stream(
-        NL2AgentRunRequest(query="Build an assistant", agent_id=42),
-        "tenant-a",
-        "en",
-        None,
-    )
+    mocker.patch('services.nl2agent_service.agent_run', side_effect=cancelled_agent_run)
+    stream = await create_nl2agent_stream(NL2AgentRunRequest(query='Build an assistant', agent_id=42), 'tenant-a', 'en', None, identity=AuthenticatedIdentity('user-a', 'tenant-a'))
     with pytest.raises(asyncio.CancelledError):
         await anext(stream)
-
     run_info.stop_event.set.assert_called_once_with()

@@ -25,14 +25,14 @@ from management.services.file.service import (
     get_file_stream_impl,
     check_file_access,
 )
-from services.northbound_service import NorthboundContext
+from contracts.authentication import NorthboundContext
 from management.services.knowledge_base.task_state import get_redis_service
 from management.services.knowledge_base.service import (
     ElasticSearchService,
     KnowledgeBaseNeedsModelConfigError,
     get_vector_db_core,
 )
-from management.services.permission.identity.authentication_helpers import generate_session_jwt
+from gateway.authentication.identity import generate_session_jwt
 from management.services.knowledge_base.ingestion import trigger_data_process
 
 from management.utils.file_http import build_content_disposition_header
@@ -417,7 +417,7 @@ async def upload_files(
                 index_name=index_name,
                 authorization=internal_jwt,
             )
-            process_result = await trigger_data_process(files, process_params)
+            process_result = await trigger_data_process(files, process_params, tenant_id=ctx.tenant_id)
 
             if process_result is None or (
                 isinstance(process_result, dict) and process_result.get("status") == "error"

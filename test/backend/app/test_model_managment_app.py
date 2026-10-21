@@ -51,7 +51,7 @@ def client(mocker):
 
     # Import after mocking (only backend path is required by app imports)
     from management.api.model.model_managment import router
-    from permissions.depends import authenticate
+    from gateway.authentication.dependencies import authenticate
     from permissions.models import CurrentUser
 
     # Grant all model permissions so existing business-logic tests pass
@@ -2067,7 +2067,7 @@ def test_model_endpoints_return_401_on_token_expired(client, auth_header, mocker
     such handler, so emulate the same mapping here.
     """
     from fastapi import HTTPException as FastAPIHTTPException
-    from permissions.depends import authenticate
+    from gateway.authentication.dependencies import authenticate
 
     def _expired_user():
         raise FastAPIHTTPException(

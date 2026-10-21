@@ -11,7 +11,7 @@ from starlette.responses import JSONResponse
 
 from contracts.exceptions import NotFoundException, UnauthorizedError
 from management.services.notification.service import list_notifications, mark_notifications_read
-from management.services.permission.identity.authentication_helpers import get_current_user_id
+from gateway.authentication.identity import get_current_user_id
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/notifications", tags=["notifications"])

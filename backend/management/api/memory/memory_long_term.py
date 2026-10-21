@@ -12,7 +12,7 @@ from management.db.identity.user_tenant import get_user_tenant_by_user_id
 from management.services.memory.long_term import (
     LongTermMemoryConflict, LongTermMemoryError, get_memory_long_term_service,
 )
-from management.services.permission.identity.authentication_helpers import get_current_user_id
+from gateway.authentication.identity import get_current_user_id
 
 router = APIRouter(prefix="/memory/long-term", tags=["long-term-memory"])
 Scope = Literal["tenant", "user"]

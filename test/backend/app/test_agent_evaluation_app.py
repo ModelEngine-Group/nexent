@@ -97,14 +97,14 @@ for _name in (
     "database",
     "management.db.evaluation.runs",
     "utils",
-    "management.services.permission.identity.authentication_helpers",
+    "gateway.authentication.identity",
 ):
     _register_package(_name)
 sys.modules["management.services.evaluation.runs"] = MagicMock(name="agent_eval_svc")
 sys.modules["management.services.evaluation.reporting.report"] = MagicMock(name="report_svc")
 sys.modules["management.services.agent.runtime_client"] = MagicMock(name="runtime_proxy_svc")
 sys.modules["management.db.evaluation.runs"] = MagicMock(name="agent_eval_db")
-sys.modules["management.services.permission.identity.authentication_helpers"] = MagicMock(name="auth_utils")
+sys.modules["gateway.authentication.identity"] = MagicMock(name="auth_utils")
 
 # Load the target module via spec so its ``from X import Y`` lookups hit the
 # stubs above.
@@ -691,7 +691,7 @@ class TestSafeExtractors:
     def test_language_from_request(self, monkeypatch):
         request = MagicMock()
         monkeypatch.setattr(
-            sys.modules["management.services.permission.identity.authentication_helpers"],
+            sys.modules["gateway.authentication.identity"],
             "parse_language_from_request",
             MagicMock(return_value="en"),
         )
@@ -700,7 +700,7 @@ class TestSafeExtractors:
     def test_language_fallback_on_error(self, monkeypatch):
         request = MagicMock()
         monkeypatch.setattr(
-            sys.modules["management.services.permission.identity.authentication_helpers"],
+            sys.modules["gateway.authentication.identity"],
             "parse_language_from_request",
             MagicMock(side_effect=RuntimeError("boom")),
         )

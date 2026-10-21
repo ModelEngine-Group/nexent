@@ -468,7 +468,7 @@ class TestRefreshToken:
             data = response.json()
             assert data["message"] == "Token refresh successful"
             assert "session" in data["data"]
-            mock_refresh.assert_called_once_with("Bearer old_token", "old_refresh_token")
+            mock_refresh.assert_called_once_with("old_token", "old_refresh_token")
 
     def test_refresh_token_no_authorization(self):
         """Test token refresh without authorization header"""

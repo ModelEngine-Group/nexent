@@ -53,7 +53,7 @@ from nexent.memory.providers.retry import (
 from management.services.memory.providers.service import MemoryExternalProviderService
 from management.services.memory.providers.configuration import MemoryProviderConfigService
 from management.services.memory.providers.plugins import PluginLoader
-from management.services.permission.identity.authentication_helpers import get_current_user_id
+from gateway.authentication.identity import get_current_user_id
 
 
 logger = logging.getLogger("memory_provider_app")
