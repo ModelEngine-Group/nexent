@@ -48,19 +48,26 @@ def test_contracts_do_not_depend_on_backend_implementations():
             assert not any(module == prefix or module.startswith(prefix + ".") for module in modules for prefix in forbidden), path
 
 
-def test_production_imports_do_not_reference_removed_packages():
-    for root in (BACKEND, ROOT / "sdk"):
-        for path in iter_project_python_files(root):
-            for node in ast.walk(ast.parse(path.read_text(encoding="utf-8-sig"))):
-                modules = []
-                if isinstance(node, ast.Import):
-                    modules = [alias.name for alias in node.names]
-                elif isinstance(node, ast.ImportFrom) and not node.level:
-                    modules = [node.module or ""]
-                assert not any(
-                    module.removeprefix("backend.").split(".")[0] in {"apps", "database"}
-                    for module in modules
-                ), path
+@pytest.mark.parametrize("source_root", ["backend", "sdk", "test"])
+def test_project_imports_do_not_reference_removed_packages(source_root):
+    for path in iter_project_python_files(ROOT / source_root):
+        for node in ast.walk(ast.parse(path.read_text(encoding="utf-8-sig"))):
+            modules = []
+            if isinstance(node, ast.Import):
+                modules = [alias.name for alias in node.names]
+            elif isinstance(node, ast.ImportFrom) and not node.level:
+                modules = [node.module or ""]
+            elif isinstance(node, ast.Call) and node.args:
+                function = node.func
+                name = function.attr if isinstance(function, ast.Attribute) else getattr(function, "id", "")
+                argument = node.args[0]
+                if name in {"import_module", "__import__"} and isinstance(argument, ast.Constant):
+                    if isinstance(argument.value, str):
+                        modules = [argument.value]
+            assert not any(
+                module.removeprefix("backend.").split(".")[0] in {"apps", "database"}
+                for module in modules
+            ), path
 
 
 def test_shared_helpers_do_not_import_database_clients():

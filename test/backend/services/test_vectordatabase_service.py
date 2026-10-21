@@ -483,8 +483,6 @@ backend_module = importlib.import_module('backend')
 sys.modules['backend'] = backend_module
 # Set backend.utils as attribute so imports like 'from backend.utils.xxx import yyy' work
 setattr(backend_module, 'utils', backend_utils_mock)
-backend_database_module = importlib.import_module('backend.database')
-sys.modules['backend.database'] = backend_database_module
 backend_database_client_module = importlib.import_module('management.db.client')
 sys.modules['management.db.client'] = backend_database_client_module
 from test.common.database_stubs import install_serialization_stub

@@ -480,8 +480,6 @@ sys.modules["management.services.model.resolver"] = model_resolver_module
 import importlib  # noqa: E402
 backend_module = importlib.import_module('backend')
 sys.modules['backend'] = backend_module
-backend_database_module = importlib.import_module('backend.database')
-sys.modules['backend.database'] = backend_database_module
 backend_database_client_module = importlib.import_module(
     'management.db.client')
 sys.modules['management.db.client'] = backend_database_client_module

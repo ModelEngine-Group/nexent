@@ -44,14 +44,13 @@ from test.common.database_stubs import install_serialization_stub
 install_serialization_stub(sys.modules["management.db.client"])
 from test.common.database_stubs import install_serialization_stub
 install_serialization_stub(sys.modules["management.db.client"])
-database_package = sys.modules.get('database') or importlib.import_module('database')
+database_package = importlib.import_module('management.db')
 setattr(database_package, 'client', database_client_module)
 database_model_management_module = types.ModuleType('management.db.model.repository')
 database_model_management_module.get_model_by_model_id = MagicMock()
 database_model_management_module.get_model_id_by_display_name = MagicMock()
 database_model_management_module.get_model_records = MagicMock(return_value=[])
 sys.modules['management.db.model.repository'] = database_model_management_module
-setattr(database_package, 'model_management_db', database_model_management_module)
 backend_database_client_module = sys.modules.get('management.db.client')
 if backend_database_client_module is not None and not hasattr(backend_database_client_module, 'minio_client'):
     backend_database_client_module.minio_client = minio_client_mock

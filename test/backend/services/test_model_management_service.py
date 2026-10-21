@@ -51,12 +51,12 @@ install_serialization_stub(sys.modules["management.db.client"])
 
 # Ensure parent package exposes the submodule attribute for import machinery
 try:
-    backend_database_pkg = importlib.import_module("backend.database")
+    backend_database_pkg = importlib.import_module("management.db")
     setattr(backend_database_pkg, "client", backend_db_client_mod)
 except Exception:
-    # If backend.database is not importable yet, defer to sys.modules injection
-    if "backend.database" in sys.modules:
-        setattr(sys.modules["backend.database"],
+    # If the package is already stubbed, attach the client to that package.
+    if "management.db" in sys.modules:
+        setattr(sys.modules["management.db"],
                 "client", backend_db_client_mod)
 
 # Also stub management.db.client.MinioClient in case modules import without the 'backend.' prefix
