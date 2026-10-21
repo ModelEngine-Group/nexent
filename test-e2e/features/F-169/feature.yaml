@@ -10,7 +10,10 @@ feature:
   business_rules:
   - rule_id: F-169-RULE-01
     description: trace/span/metrics exporter enabled/disabled/failure no-crash; by default omit Elasticsearch search, indices.stats, indices.get_settings, indices.get_alias, bulk, indices.exists and indices.delete reports and the exact knowledge.process.submit and knowledge.upload.batch span names. MONITORING_EXCLUDED_ELASTICSEARCH_OPERATIONS and MONITORING_EXCLUDED_SPAN_NAMES replace the respective comma-separated exact-match list; unset retains defaults and explicit empty disables that filter. Trim entries, ignore empty tokens and duplicates, preserve Elasticsearch database scoping, other business spans and Chinese built-in Agent runtime display names.
+  - rule_id: F-169-RULE-02
+    description: The first named main Agent owns a trace-ID-scoped name inherited by newly created same-trace spans and synchronized to recording HTTP ancestors, including across sequential main runs in one trace. Child node names and identities remain unchanged. Early child export batches retain the main trace name; concurrent and detached traces do not share names. Langfuse runtime acceptance checks both named and empty-name filters for the same new trace ID, separately from producer UT.
   required_test_stages:
   - D1
+  - D3
   source:
     notes: Migrated from V5 01_代码功能清单 without changing the functional description.

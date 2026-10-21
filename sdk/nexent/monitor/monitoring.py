@@ -53,6 +53,7 @@ from .span_filter_config import (
     DEFAULT_EXCLUDED_SPAN_NAMES,
     normalize_span_exclusions,
 )
+from .trace_name import TRACE_NAME_ATTRIBUTE, agent_trace_name_scope
 
 logger = logging.getLogger(__name__)
 
@@ -893,24 +894,26 @@ class MonitoringManager:
             )
             trace_name = (agent_metadata.agent_display_name or "").strip() or (agent_metadata.agent_name or "").strip()
             if trace_name:
-                # Only the main run may name the trace; children retain their own Agent names.
-                attributes["langfuse.trace.name"] = trace_name
+                # The main Agent owns the trace name; children retain their own node identities.
+                attributes[TRACE_NAME_ATTRIBUTE] = trace_name
+            parent_span = self.get_current_span()
             try:
                 with self.trace_operation(
                     operation_name,
                     OPENINFERENCE_SPAN_KIND_AGENT,
                     **attributes,
                 ) as span:
-                    self.add_span_event(f"{operation_name}.started")
-                    try:
-                        yield span
-                        self.add_span_event(f"{operation_name}.completed")
-                    except Exception as error:
-                        self.add_span_event(f"{operation_name}.error", {
-                            "error.type": type(error).__name__,
-                            "error.message": str(error),
-                        })
-                        raise
+                    with agent_trace_name_scope(span, trace_name, parent_span):
+                        self.add_span_event(f"{operation_name}.started")
+                        try:
+                            yield span
+                            self.add_span_event(f"{operation_name}.completed")
+                        except Exception as error:
+                            self.add_span_event(f"{operation_name}.error", {
+                                "error.type": type(error).__name__,
+                                "error.message": str(error),
+                            })
+                            raise
             finally:
                 _monitoring_agent_run_active.reset(active_token)
 

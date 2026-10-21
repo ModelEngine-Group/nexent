@@ -11,6 +11,7 @@ from elastic_transport import (
     TransportApiResponse,
 )
 from elasticsearch import _otel
+from opentelemetry.context import Context
 from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
 
 from nexent.monitor import monitoring
@@ -153,7 +154,7 @@ def test_ut_sdk_trace_022_processor_preserves_lifecycle(mocker):
     delegate.force_flush.return_value = True
     processor = MonitoringSpanProcessor(delegate)
     span = mocker.Mock(attributes={})
-    context = mocker.sentinel.context
+    context = Context()
     processor.on_start(span, parent_context=context)
     processor.on_end(span)
     assert processor.force_flush(timeout_millis=42)

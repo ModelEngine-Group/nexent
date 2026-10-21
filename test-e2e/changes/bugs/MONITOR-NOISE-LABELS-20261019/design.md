@@ -1,4 +1,4 @@
-# Design — monitoring export noise and built-in display names
+# Design — monitoring exclusions, display names and trace-name propagation
 
 ## Context and scope
 
@@ -52,6 +52,26 @@ do not alter the provider's release manifest or persisted display name: existing
 tenants must not encounter same-revision provisioning drift. Bootstrap presentation
 is outside this monitoring-name fix. Existing trace naming consumes these runtime labels.
 
+For an Agent run with a resolved name, freeze the main Agent's trace name in an
+independent context bound to its OpenTelemetry trace ID. New spans in that trace
+inherit `langfuse.trace.name`, including model/tool/subagent spans exported before
+the main run ends. Child `agent.name`, display name, span name and parentage remain
+their own. Sync the name to the current recording parent and recording HTTP server
+ancestors when the main run starts. Track server ancestors only through context-local
+weak references, cleaned at span end; do not introduce a process-wide trace cache,
+delay exports or rewrite ended spans. Ignore spans from a different trace ID even
+when they start inside a copied Agent context. Reset the name binding on normal and
+exceptional exits. Missing names and disabled telemetry retain their existing behavior.
+If one trace contains sequential main runs, its first resolved trace name remains
+the owner; later runs keep their own Agent identities without changing that name.
+
+The reported Langfuse page showed the same trace ID through both empty and named
+filters, while its `agent.run` carried the correct name and its HTTP root did not.
+This establishes inconsistent naming/query visibility, not duplicate execution or
+a proven Langfuse storage implementation detail. The fix closes the observed
+producer metadata gap. It cannot rename already-exported pre-run spans or historical
+Langfuse rows; live ingestion/filter behavior requires separate runtime proof.
+
 ## Current acceptance
 
 - AC-001: All four filtered operations are absent from exported spans on success
@@ -82,6 +102,19 @@ is outside this monitoring-name fix. Existing trace naming consumes these runtim
   The real manager/provider/batch-export path applies those values while preserving
   exact matching, Elasticsearch database scoping, retained parents and exporter
   lifecycle. Missing optional OpenTelemetry dependencies still degrade safely.
+- AC-009 (trace-name follow-up): A named main Agent propagates its trace name to
+  newly started same-trace model/tool/subagent spans and recording HTTP ancestors,
+  including an ancestor above an intermediate span and managed-worker execution.
+  First child batches exported while the main run is open already carry the name.
+  Retain child identities, parentage, error behavior, filters and delegate lifecycle.
+  Concurrent requests and explicitly detached traces cannot inherit another name;
+  completed and exceptional runs leave no naming state for subsequent runs.
+  Sequential main runs within one trace retain its first resolved name.
+- AC-010 (runtime follow-up): In a disposable deployment containing this fix,
+  one controlled named Agent call retains one trace ID and its expected business
+  output. Check Langfuse while the run is active and after ingestion: the trace
+  belongs to its main Agent's name, and the empty-name filter must not match that
+  trace. Do not claim this external acceptance from in-memory exporter UT.
 
 ## Traditional UT + D1-D5 responsibilities
 
@@ -92,11 +125,15 @@ is outside this monitoring-name fix. Existing trace naming consumes these runtim
 | F-169 / AC-004 | Reuse trace-name and direct SDK display-name tests | UT-SDK-014 regression only | N/A | N/A | N/A | N/A | Existing trace propagation assertions; no duplicate formal component Case |
 | F-169 / AC-005,006 | Strengthen existing client/export tests and exercise actual knowledge decorators with controlled resource/metric boundaries | UT-SDK-014 regression only; no duplicate Case | N/A | N/A | N/A | N/A | Filter rules change; storage, transport and ingestion business behavior remain unchanged |
 | F-169 / AC-007,008 | Add SDK configuration/real batch-export assertions and isolated backend environment/bootstrap tests; reuse default filter regressions | UT-SDK-014 unchanged parser regression; no duplicate Case | N/A | N/A | N/A | N/A | Bounded configuration/export rule; existing environment-file forwarding remains unchanged; no live ingestion, model, browser or deployment contract change |
+| F-169-RULE-02 / AC-009 | Strengthen trace-name and sandbox assertions; exercise real processor/managed-thread propagation and early batch flushes | UT-SDK-014 parser regression only; no duplicate D1 | N/A | MON-D3-TRACE-NAME-001 for external acceptance | N/A | N/A | Existing UT proved only the main span's attribute and explicitly excluded child attributes; new unit proof closes propagation gaps without claiming external ingestion behavior |
+| F-169-RULE-02 / AC-010 | UT proves producer metadata only | No new Case | N/A | MON-D3-TRACE-NAME-001, manual controlled runtime check | N/A | N/A | Langfuse ingestion and its version-specific name-filter UI require real runtime evidence beyond SDK UT; no deployment is implied by this code change |
 
 The formal `UT-SDK-014/test.py` checks parser robustness and signal-specific OTLP
 endpoints. Its execution does not establish current filtering or localization
 acceptance, nor does it certify all of its historical written acceptance obligations.
-No formal Case is added or relabeled. Existing UT supplies the required unit proof.
+Existing UT supplies the required unit proof without a duplicate D1. The distinct
+manual D3 `MON-D3-TRACE-NAME-001` checks real ingestion/filter consistency and is
+blocked until a disposable updated deployment and controlled profile are available.
 
 ## Acceptance traceability
 
@@ -107,6 +144,8 @@ No formal Case is added or relabeled. Existing UT supplies the required unit pro
 | AC-004 | Existing Agent run trace naming | `test/sdk/core/agents/observability/test_trace_name.py`, `test_agent_display_name.py` | No new Case; unit boundary | Real in-memory trace assertions: included in 131 passing UT | PASS |
 | AC-005,006 | SDK span export filtering | `test/sdk/core/agents/observability/test_elasticsearch_spans.py`, `test/backend/utils/test_monitoring_knowledge_filter.py`; existing knowledge telemetry and trace-name regressions | UT-SDK-014 regression only | Follow-up reproduction: 24 failed, 28 passed; after fix: 91 passed | PASS |
 | AC-007,008 | Backend constants/bootstrap; SDK configuration and span processor | `test/sdk/core/agents/observability/test_monitoring_exclusions.py`, `test/backend/utils/test_monitoring_exclusions.py`; existing monitoring and default filter regressions | UT-SDK-014 regression only | 44 focused configuration UT included in 135 current exporter/configuration regressions; separately 21 backend and 96 legacy SDK monitoring UT | PASS |
+| AC-009 | SDK main-run naming context and span processor | `test_trace_name_propagation.py`, strengthened trace-name/sandbox tests, existing run-context/identity/filter regressions | UT-SDK-014 unchanged regression only | Real providers, FastAPI middleware, managed workers, early flush and isolation assertions included in 190 passing UT; 96 legacy SDK and 21 backend monitoring UT passed separately | PASS |
+| AC-010 | Deployed SDK -> Collector -> Langfuse ingestion and filters | Not established by UT | MON-D3-TRACE-NAME-001 | Requires a disposable deployment with this implementation and an approved controlled Agent/provider profile | BLOCKED |
 
 ## Verification evidence
 
@@ -265,3 +304,77 @@ No formal Case was added or modified: the existing parser Case adds no new
 exclusion-list proof beyond these UT. `UT-SDK-014` remains **BLOCKED** by the
 previously recorded missing machine-local `config/daily.env`; no repeated run or
 formal runtime PASS is claimed while that prerequisite is unchanged.
+
+## Consistent trace-name propagation — 2026-10-21
+
+The reported trace matched both empty and named filters, with a named `agent.run`
+and an unnamed HTTP root. The prior UT asserted only one named span, explicitly
+excluding all children. Existing formal `UT-SDK-014` exercises configuration
+parsing rather than Langfuse ingestion. These are separate proof gaps: strengthen
+UT for the producer rule and add a manual D3 for real runtime/filter acceptance.
+
+The dependency-free `trace_name.py` keeps the main name in a trace-ID-scoped
+`ContextVar`, independent of mutable Agent metadata. The processor copies it to
+new same-trace spans before delegate callbacks. Main-run setup updates recording
+HTTP ancestors tracked by weak context-local references, including through managed
+workers. A named parent covers request-cleanup spans after the main scope resets.
+Sequential main runs in one trace retain its first resolved name and their own
+Agent identities. There is no process-wide name cache or delayed batch export.
+No backend environment, HTTP API, deployment or historical telemetry is changed.
+
+Regression evidence and assertion review:
+
+- The initial focused run of `test_trace_name_propagation.py` and
+  `test_trace_name.py` reported **10 failed, 7 passed**. Eight failures exercised
+  missing child/HTTP names; two were test fixture errors caused by a no-op global
+  tracer after intentionally patching the provider setter. Correcting the fixture
+  to use the configured provider and implementing propagation yielded **17 passed**.
+- The sequential-main regression failed before resolving the scope name from the
+  processor's inherited name. It now checks every span retains the first name,
+  while both runs keep their distinct `agent.name`, display name and parentage.
+- `test_first_batch_and_http_ancestor_already_have_main_name[False/True]` forces
+  a real batch flush while the main run is open. Only the ended model/native-tool
+  children have exported, both with the main name even when a child supplied a
+  conflicting name. Final assertions cover HTTP/intermediate/cleanup parentage,
+  error status and preserved child identity.
+- The real FastAPI/TestClient test uses actual instrumentation and managed workers
+  for two named requests, asserting the four-node tree and isolated names.
+  The nested-worker test verifies context copying into both Agent and model lanes.
+- Detached/new-request and interleaved-async tests check different trace IDs never
+  receive another trace's name, including exceptional scope exit and unnamed next
+  calls. Existing subagent and sandbox tests now require inherited trace names
+  while preserving operation names, Agent metadata and parent relationships.
+- A broader run initially reported **1 failed, 188 passed** because the processor
+  lifecycle test supplied a sentinel instead of an OpenTelemetry context. Replacing
+  it with a real empty `Context` retains assertions that all delegate lifecycle
+  calls and their arguments are forwarded unchanged.
+
+Final traditional UT commands (Python 3.11.9):
+
+```sh
+.venv/bin/python -m pytest test/sdk/core/agents/observability test/backend/utils/test_monitoring_exclusions.py test/backend/utils/test_monitoring_knowledge_filter.py test/backend/utils/test_knowledge_telemetry.py -q
+# 190 passed in 9.43s
+
+.venv/bin/python -m pytest test/sdk/monitor/test_monitoring.py -q
+# 96 passed in 0.48s
+
+.venv/bin/python -m pytest test/backend/utils/test_monitoring.py -q
+# 21 passed in 0.49s
+```
+
+Legacy SDK monitoring tests run separately because their conftest replaces OTel
+modules. The real-provider UT isolate external exporters with an in-memory sink;
+no real provider/model invocation, Collector ingestion or Langfuse-filter PASS is
+claimed. `MON-D3-TRACE-NAME-001` remains **BLOCKED**, as does the previously
+recorded parser Case prerequisite. New metadata affects future spans; already
+exported pre-run spans and historical records are not renamed.
+
+Design-phase validation passed before implementation and again for the sequential
+trace-ownership clarification. Copyright checks passed for all eight changed/new
+Python files. Applicable backend configuration/thread-lifecycle, SPEC bugfix,
+verification, traditional UT and formal test-asset rules were used; no thread
+ownership or lifecycle implementation was changed.
+Implementation-phase asset generation and the subsequent read-only validation
+both passed with `--require-ut-change MONITOR-NOISE-LABELS-20261019`.
+`git diff --check` passed. Ruff remains unavailable in the configured environment;
+no lint PASS is claimed.
