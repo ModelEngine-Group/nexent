@@ -1,3 +1,5 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 "use client";
 import {
   useState,
@@ -1500,47 +1502,61 @@ function EvaluatorsTab() {
                 </Flex>
               }
             >
-              <Flex vertical gap={8}>
+              <Flex vertical gap={4}>
                 <Text className="text-xs" type="secondary">
                   {t("agentEvaluation.evaluatorAiGenHint")}
                 </Text>
                 <Input.TextArea
                   rows={3}
                   maxLength={500}
-                  showCount
+                  aria-describedby="evaluator-generation-description-count"
                   value={genDesc}
                   onChange={(e) => setGenDesc(e.target.value)}
                   placeholder={t("agentEvaluation.evaluatorAiGenPlaceholder")}
                 />
-                <Flex gap={8} align="center" wrap>
-                  <Text className="text-xs" style={{ whiteSpace: "nowrap" }}>
-                    {t("agentEvaluation.aiGenModel")}
-                  </Text>
-                  <Select
-                    style={{ width: 200 }}
-                    value={genModel}
-                    onChange={setGenModel}
-                    options={availableLlmModels.map((m) => ({
-                      label: m.displayName || m.name,
-                      value: m.id,
-                    }))}
-                  />
-                  <Text className="text-xs" style={{ whiteSpace: "nowrap" }}>
-                    {t("agentEvaluation.aiGenAgent")}
-                  </Text>
-                  <Select
-                    style={{ width: 180 }}
-                    value={genAgent}
-                    onChange={setGenAgent}
-                    allowClear
-                    placeholder={t("agentEvaluation.genSelectAgent")}
-                    options={agents.map((a: any) => ({
-                      label: a.display_name || a.name,
-                      value: a.agent_id,
-                    }))}
-                  />
+                <Text
+                  id="evaluator-generation-description-count"
+                  className="block min-h-4 text-right text-xs leading-4"
+                  type="secondary"
+                >
+                  {genDesc.length} / 500
+                </Text>
+                <div className="-mt-1 flex flex-wrap items-end gap-2">
+                  <Flex align="center" gap={6} className="min-w-[180px] flex-1">
+                    <Text className="shrink-0 text-xs">
+                      {t("agentEvaluation.aiGenModel")}
+                    </Text>
+                    <Select
+                      style={{ minWidth: 0, flex: 1 }}
+                      aria-label={t("agentEvaluation.aiGenModel")}
+                      value={genModel}
+                      onChange={setGenModel}
+                      options={availableLlmModels.map((m) => ({
+                        label: m.displayName || m.name,
+                        value: m.id,
+                      }))}
+                    />
+                  </Flex>
+                  <Flex align="center" gap={6} className="min-w-[180px] flex-1">
+                    <Text className="shrink-0 text-xs">
+                      {t("agentEvaluation.aiGenAgent")}
+                    </Text>
+                    <Select
+                      style={{ minWidth: 0, flex: 1 }}
+                      aria-label={t("agentEvaluation.aiGenAgent")}
+                      value={genAgent}
+                      onChange={setGenAgent}
+                      allowClear
+                      placeholder={t("agentEvaluation.genSelectAgent")}
+                      options={agents.map((a: any) => ({
+                        label: a.display_name || a.name,
+                        value: a.agent_id,
+                      }))}
+                    />
+                  </Flex>
                   <Button
                     type="primary"
+                    className="shrink-0"
                     icon={<Zap className="size-4" />}
                     loading={busy}
                     onClick={async () => {
@@ -1593,7 +1609,7 @@ function EvaluatorsTab() {
                   >
                     {t("agentEvaluation.aiGenerate")}
                   </Button>
-                </Flex>
+                </div>
               </Flex>
             </Card>
             {/* Manual edit section */}

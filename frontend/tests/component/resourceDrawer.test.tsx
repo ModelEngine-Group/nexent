@@ -47,37 +47,27 @@ describe("ResourceDrawer", () => {
       expect(refresh).toHaveBeenCalledTimes(disabled || loading ? 0 : 1);
     }
   );
-  it("hides tag management by default and places the configured action beside refresh", () => {
-    const manage = vi.fn();
-    const props = {
-      open: true,
-      title: "Resources",
-      listTitle: "Results",
-      onClose: vi.fn(),
-      onRefresh: vi.fn(),
-      children: <p>Results</p>,
-    };
-    const view = render(<ResourceDrawer {...props} />);
-    expect(screen.queryByRole("button", { name: "管理标签" })).toBeNull();
-    view.rerender(
-      <ResourceDrawer {...props} tagManagement={{ onClick: manage }} />
+  it("does not expose tag management and retains the list refresh action", () => {
+    const refresh = vi.fn();
+    render(
+      <ResourceDrawer
+        open
+        title="Resources"
+        listTitle="Results"
+        onClose={vi.fn()}
+        onRefresh={refresh}
+      >
+        <p>Results</p>
+      </ResourceDrawer>
     );
+    expect(
+      screen.queryByRole("button", { name: /管理标签|标签管理/ })
+    ).toBeNull();
     const heading = document.querySelector(
       '[data-picker-part="list-heading"]'
     ) as HTMLElement;
-    const action = within(heading).getByRole("button", { name: "管理标签" });
-    expect(action.nextElementSibling).toBe(
-      within(heading).getByRole("button", { name: "刷新" })
-    );
-    fireEvent.click(action);
-    expect(manage).toHaveBeenCalledOnce();
-    view.rerender(
-      <ResourceDrawer
-        {...props}
-        tagManagement={{ onClick: manage, disabled: true }}
-      />
-    );
-    expect(screen.getByRole("button", { name: "管理标签" })).toBeDisabled();
+    fireEvent.click(within(heading).getByRole("button", { name: "刷新" }));
+    expect(refresh).toHaveBeenCalledOnce();
   });
   it("forwards page navigation using the supplied page size", () => {
     const page = vi.fn();

@@ -1,4 +1,4 @@
-﻿{
+{
   "toolConfig.deepseek.onlyHighQuality": "High-quality results only",
   "workbench.genericAgentName": "Agent Workbench",
   "workbench.landingGreeting": "Hi, I'm Nexent. What can I help you with?",
@@ -5469,6 +5469,7 @@
   "tagManagement.action.disable": "Disable",
   "tagManagement.action.addTags": "Add Tags",
   "tagManagement.action.editTags": "Edit Tags",
+  "tagManagement.action.confirm": "Confirm",
   "tagManagement.action.save": "Save",
   "tagManagement.action.manageDefinitions": "Tag Management",
   "tagManagement.form.keys": "Tag keys",
@@ -6213,5 +6214,12 @@
   "workbench.controls.mineTab": "Mine",
   "workbench.controls.repositoryTab": "Repository",
   "workbench.import.precheckTitle": "Import precheck",
-  "workbench.import.importAndSelect": "Import and select"
+  "workbench.import.importAndSelect": "Import and select",
+  "tenantResources.tabs.tags": "Tags",
+  "tagManagement.library": "Tag library",
+  "tagManagement.libraries.default_resource": "Resource tags",
+  "tagManagement.libraries.knowledge_content": "Knowledge content tags",
+  "tagManagement.currentTenantOnly": "Tag management is available for your signed-in tenant. Please select that tenant.",
+  "tagManagement.empty.noLibraries": "No tag libraries",
+  "tagManagement.empty.noDefinitions": "No tags"
 }
