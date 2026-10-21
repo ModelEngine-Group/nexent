@@ -1,4 +1,4 @@
-{
+﻿{
   "toolConfig.deepseek.onlyHighQuality": "High-quality results only",
   "workbench.genericAgentName": "Agent Workbench",
   "workbench.landingGreeting": "Hi, I'm Nexent. What can I help you with?",
@@ -4606,7 +4606,7 @@
   "nl2agent.requirementClarification.submitted": "Submitted",
   "nl2agent.requirementClarification.submittedSummary": "Requirements submitted",
   "nl2agent.resourceBinding.title": "Bind installed resources",
-  "nl2agent.resourceBinding.description": "Installed resources matching the Agent requirements.",
+  "nl2agent.resourceBinding.description": "Select and configure matching resources, then bind them together.",
   "nl2agent.resourceBinding.matches": "Matches",
   "nl2agent.resourceBinding.recommended": "Recommended",
   "nl2agent.resourceBinding.optional": "Optional",
@@ -6221,5 +6221,27 @@
   "tagManagement.libraries.knowledge_content": "Knowledge content tags",
   "tagManagement.currentTenantOnly": "Tag management is available for your signed-in tenant. Please select that tenant.",
   "tagManagement.empty.noLibraries": "No tag libraries",
-  "tagManagement.empty.noDefinitions": "No tags"
+  "tagManagement.empty.noDefinitions": "No tags",
+  "nl2agent.resourceBinding.typeKnowledge": "Knowledge",
+  "nl2agent.resourceBinding.typeTool": "Tool",
+  "nl2agent.resourceBinding.typeSkill": "Skill",
+  "nl2agent.resourceBinding.selectKnowledge": "Select knowledge bases",
+  "nl2agent.resourceBinding.knowledgeHint": "Select the knowledge bases this Agent can search.",
+  "nl2agent.resourceBinding.knowledgeUnavailable": "Unavailable knowledge base; please reselect",
+  "nl2agent.resourceBinding.knowledgeLoading": "Loading knowledge bases...",
+  "nl2agent.resourceBinding.knowledgeLoadFailed": "Failed to load knowledge bases. Please retry.",
+  "nl2agent.resourceBinding.knowledgeRequired": "Select at least one knowledge base (up to 10 for AIDP).",
+  "nl2agent.resourceBinding.knowledgeTitle": "Knowledge search",
+  "nl2agent.resourceBinding.pendingResources": "Resources to bind",
+  "nl2agent.resourceBinding.boundResources": "Bound resources",
+  "nl2agent.resourceBinding.selectedCountLabel": "Selected",
+  "nl2agent.resourceBinding.itemsUnit": "items",
+  "nl2agent.resourceBinding.noPending": "No resources awaiting binding.",
+  "nl2agent.resourceBinding.collapse": "Collapse",
+  "nl2agent.resourceBinding.expand": "Expand",
+  "nl2agent.resourceBinding.associatedKnowledge": "Associated knowledge bases:",
+  "nl2agent.resourceBinding.recommendedKnowledge": "Recommended knowledge bases:",
+  "nl2agent.resourceBinding.knowledgeNone": "None",
+  "nl2agent.resourceBinding.knowledgeDescription": "Search selected knowledge bases for relevant information and supporting references.",
+  "nl2agent.resourceBinding.selectedKnowledge": "Selected knowledge bases:"
 }
