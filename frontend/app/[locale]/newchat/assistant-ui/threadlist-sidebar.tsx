@@ -53,6 +53,7 @@ interface ThreadListSidebarProps extends SidebarProps {
   serverConversationIds?: ReadonlyMap<string, string>;
   onPrepareNewConversation?: () => void;
   onNewConversation?: () => void | Promise<void>;
+  onHistoryAgentSelected?: (agentId: number) => void;
   onRenameSuccess?: RenameSuccessHandler;
   onAgentSelected?: (agent: Agent) => void;
   newChatDesign?: boolean;
@@ -72,6 +73,7 @@ export function ThreadListSidebar({
   onPrepareNewConversation,
   onNewConversation,
   onAgentSelected,
+  onHistoryAgentSelected,
   onRenameSuccess,
   newChatDesign = false,
   collapseToHeader = false,
@@ -93,7 +95,10 @@ export function ThreadListSidebar({
   const [conversationSearch, setConversationSearch] = useState("");
   const [legacySearchQuery, setLegacySearchQuery] = useState("");
   const floatingToolbarRef = useRef<HTMLDivElement>(null);
-  const [dockedExpandLeft, setDockedExpandLeft] = useState<number | null>(null);
+  const [dockedExpandPosition, setDockedExpandPosition] = useState<{
+    left: number;
+    top: number;
+  } | null>(null);
   useEffect(() => {
     if (
       !isCollapsed ||
@@ -105,8 +110,12 @@ export function ThreadListSidebar({
     if (!page) return;
     const updateDockPosition = () => {
       const bounds = page.getBoundingClientRect();
-      setDockedExpandLeft(
-        bounds.width <= 1034 ? Math.max(0, bounds.left) : null
+      const toolbarTop =
+        floatingToolbarRef.current?.getBoundingClientRect().top;
+      setDockedExpandPosition(
+        bounds.width <= 1034 && toolbarTop !== undefined
+          ? { left: Math.max(0, bounds.left), top: toolbarTop + 4 }
+          : null
       );
     };
     const observer = new ResizeObserver(updateDockPosition);
@@ -136,12 +145,12 @@ export function ThreadListSidebar({
           (!newChatDesign || selectedAgent) && toolbarStyles.toolbar
         )}
       >
-        {(!newChatDesign || selectedAgent) && dockedExpandLeft !== null ? (
+        {(!newChatDesign || selectedAgent) && dockedExpandPosition !== null ? (
           createPortal(
             <div
               data-docked-agent-expand
-              className="fixed top-3 z-40"
-              style={{ left: dockedExpandLeft }}
+              className="fixed z-40"
+              style={dockedExpandPosition}
             >
               <ConversationExpandButton compact />
             </div>,
@@ -455,6 +464,7 @@ export function ThreadListSidebar({
                 )}
               >
                 <ThreadList
+                  onHistoryAgentSelected={onHistoryAgentSelected}
                   activeThreadId={activeThreadId}
                   generatedTitles={generatedTitles}
                   serverConversationIds={serverConversationIds}

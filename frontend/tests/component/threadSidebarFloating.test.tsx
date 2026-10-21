@@ -188,10 +188,18 @@ test("narrow Agent chat docks its expand action outside the clipped conversation
     const page = container.querySelector("[data-agent-chat-page]")!;
     const bounds = vi.spyOn(page, "getBoundingClientRect");
     bounds.mockReturnValue({ width: 900, left: 240 } as DOMRect);
+    const toolbar = container.querySelector("[data-floating-sidebar-trigger]")!;
+    vi.spyOn(toolbar, "getBoundingClientRect").mockReturnValue({
+      top: 72,
+    } as DOMRect);
     act(() => notifyResize?.());
     const docked = document.querySelector("[data-docked-agent-expand]")!;
     expect(page.contains(docked)).toBe(false);
-    expect(docked).toHaveStyle({ left: "240px" });
+    expect(docked).toHaveStyle({ left: "240px", top: "76px" });
+    // Both targets keep the icon center at toolbar top + 16px.
+    expect(Number.parseFloat((docked as HTMLElement).style.top) + 12).toBe(
+      72 + 16
+    );
     expect(
       screen.getByRole("button", { name: "chat.sidebar.expand" })
     ).toHaveClass("!size-6");

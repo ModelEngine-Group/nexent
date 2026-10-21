@@ -1,0 +1,35 @@
+schema_version: '1.0'
+change:
+  change_id: CHAT-HISTORY-REENTRY-20261021
+  change_type: bugfix
+  bug_id: CHAT-HISTORY-REENTRY-20261021
+  title: Restore repeated Agent history entry and stable expand icon height
+  description: Explicitly restore the selected Agent on every history activation and retain the floating expand icon vertical center when docking.
+  observed_behavior: Reopening the same cached conversation can leave discovery visible; docking changes the icon vertical center and ignores the page top offset.
+  expected_behavior: Repeated history activation restores the Agent chat without starting a conversation; docking changes horizontal position only.
+  escaped_stage: D4
+  coverage_gap:
+    type: unknown_baseline
+    description: Existing sidebar UT checks layout and callbacks but omits repeated history selection and docking vertical coordinates.
+  feature_contract_changed: false
+  traditional_ut:
+    decision: strengthen
+    reason: Frontend-only regression; Python UT and API stages are irrelevant. Extend trigger and floating sidebar component checks.
+    behaviors:
+    - Reopen the same history after returning to discovery repeatedly.
+    - Resolve metadata and fallback bindings, preserve invalid metadata and cancelled activation behavior.
+    - Preserve the expand icon vertical center with a nonzero page offset when docking.
+    test_selectors:
+    - frontend/tests/component/historyThreadTrigger.test.tsx
+    - frontend/tests/component/threadSidebarFloating.test.tsx
+  affected_features:
+    existing: [CHAT-SIDEBAR]
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing: [CHAT-SIDEBAR-D4-002]
+    added: []
+    modified: []
+    retired: []
+  notes: Reuse D4-002 navigation and resize journey as regression-only. Focused local browser checks cover repeated entry; full manual mobile journey remains pending. Design notes are in nexent-doc/docs/Developing/nav-conversation-sidebar-collapse/design.md.

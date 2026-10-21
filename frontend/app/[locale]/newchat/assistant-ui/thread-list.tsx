@@ -1,6 +1,7 @@
 // Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
 "use client";
+import { HistoryThreadTrigger } from "./history-thread-trigger";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
   Tooltip,
@@ -555,6 +556,7 @@ interface ThreadListProps {
   serverConversationIds?: ReadonlyMap<string, string>;
   activeThreadId?: string;
   generatedTitles?: ReadonlyMap<string, string>;
+  onHistoryAgentSelected?: (agentId: number) => void;
   onRenameSuccess?: RenameSuccessHandler;
   searchQuery?: string;
   newChatDesign?: boolean;
@@ -565,6 +567,7 @@ export const ThreadList: FC<ThreadListProps> = ({
   activeThreadId,
   generatedTitles,
   serverConversationIds,
+  onHistoryAgentSelected,
   onRenameSuccess,
   searchQuery = "",
   newChatDesign = false,
@@ -654,6 +657,7 @@ export const ThreadList: FC<ThreadListProps> = ({
           visibleThreadIds={visibleThreadIds}
           completedConversations={completedConversations}
           generatedTitles={generatedTitles}
+          onHistoryAgentSelected={onHistoryAgentSelected}
           onRenameSuccess={onRenameSuccess}
           searchQuery={searchQuery}
           newChatDesign={newChatDesign}
@@ -696,6 +700,7 @@ interface ThreadListItemsProps {
   activeThreadId?: string;
   completedConversations: Set<string>;
   generatedTitles?: ReadonlyMap<string, string>;
+  onHistoryAgentSelected?: (agentId: number) => void;
   onRenameSuccess?: RenameSuccessHandler;
   searchQuery?: string;
   newChatDesign: boolean;
@@ -754,6 +759,7 @@ const ThreadListItems: FC<ThreadListItemsProps> = ({
   visibleThreadIds,
   completedConversations,
   generatedTitles,
+  onHistoryAgentSelected,
   onRenameSuccess,
   searchQuery = "",
   newChatDesign,
@@ -790,12 +796,19 @@ const ThreadListItems: FC<ThreadListItemsProps> = ({
           <ThreadListItem
             completedConversations={completedConversations}
             generatedTitles={generatedTitles}
+            onHistoryAgentSelected={onHistoryAgentSelected}
             onRenameSuccess={onRenameSuccess}
             newChatDesign={newChatDesign}
           />
         );
       },
-    [completedConversations, generatedTitles, newChatDesign, onRenameSuccess]
+    [
+      completedConversations,
+      generatedTitles,
+      newChatDesign,
+      onRenameSuccess,
+      onHistoryAgentSelected,
+    ]
   );
 
   const TimeGroupThreadListItem = useMemo<FC>(
@@ -805,12 +818,18 @@ const ThreadListItems: FC<ThreadListItemsProps> = ({
           <ThreadListItem
             completedConversations={completedConversations}
             generatedTitles={generatedTitles}
+            onHistoryAgentSelected={onHistoryAgentSelected}
             onRenameSuccess={onRenameSuccess}
             variant="time"
           />
         );
       },
-    [completedConversations, generatedTitles, onRenameSuccess]
+    [
+      completedConversations,
+      generatedTitles,
+      onRenameSuccess,
+      onHistoryAgentSelected,
+    ]
   );
 
   // Workbench (and legacy) sidebar: recency buckets (Today / Last 7 Days /
@@ -823,6 +842,7 @@ const ThreadListItems: FC<ThreadListItemsProps> = ({
             <ThreadListItem
               completedConversations={completedConversations}
               generatedTitles={generatedTitles}
+              onHistoryAgentSelected={onHistoryAgentSelected}
               onRenameSuccess={onRenameSuccess}
             />
           )}
@@ -876,6 +896,7 @@ const ThreadListItems: FC<ThreadListItemsProps> = ({
             <ThreadListItem
               completedConversations={completedConversations}
               generatedTitles={generatedTitles}
+              onHistoryAgentSelected={onHistoryAgentSelected}
               onRenameSuccess={onRenameSuccess}
               newChatDesign
             />
@@ -1331,6 +1352,7 @@ const ThreadListSkeleton: FC = () => {
 interface ThreadListItemProps {
   completedConversations: Set<string>;
   generatedTitles?: ReadonlyMap<string, string>;
+  onHistoryAgentSelected?: (agentId: number) => void;
   onRenameSuccess?: RenameSuccessHandler;
   newChatDesign?: boolean;
 }
@@ -1359,6 +1381,7 @@ const ThreadListItem: FC<
 > = ({
   completedConversations,
   generatedTitles,
+  onHistoryAgentSelected,
   onRenameSuccess,
   newChatDesign = false,
   variant = "agent",
@@ -1381,6 +1404,7 @@ const ThreadListItem: FC<
       <ThreadListItemContent
         completedConversations={completedConversations}
         generatedTitles={generatedTitles}
+        onHistoryAgentSelected={onHistoryAgentSelected}
         onRenameSuccess={onRenameSuccess}
         variant={variant}
         newChatDesign={newChatDesign}
@@ -1392,6 +1416,7 @@ const ThreadListItem: FC<
 interface ThreadListItemContentProps {
   completedConversations: Set<string>;
   generatedTitles?: ReadonlyMap<string, string>;
+  onHistoryAgentSelected?: (agentId: number) => void;
   onRenameSuccess?: RenameSuccessHandler;
   variant?: "agent" | "time";
   newChatDesign: boolean;
@@ -1400,6 +1425,7 @@ interface ThreadListItemContentProps {
 const ThreadListItemContent: FC<ThreadListItemContentProps> = ({
   completedConversations,
   generatedTitles,
+  onHistoryAgentSelected,
   onRenameSuccess,
   variant = "agent",
   newChatDesign,
@@ -1519,7 +1545,8 @@ const ThreadListItemContent: FC<ThreadListItemContentProps> = ({
       );
     }
     return (
-      <ThreadListItemPrimitive.Trigger
+      <HistoryThreadTrigger
+        onAgentSelected={onHistoryAgentSelected}
         className={cn(
           variant === "time"
             ? "flex h-full min-w-0 flex-1 items-center gap-2 text-left text-sm leading-[22px] text-[#595959] group-hover/item:text-[#191919] group-focus-within/item:text-[#191919] group-data-[active=true]/item:text-[#191919]"
@@ -1570,7 +1597,7 @@ const ThreadListItemContent: FC<ThreadListItemContentProps> = ({
             {formatRelativeTime(lastMessageAt, t)}
           </span>
         )}
-      </ThreadListItemPrimitive.Trigger>
+      </HistoryThreadTrigger>
     );
   };
 

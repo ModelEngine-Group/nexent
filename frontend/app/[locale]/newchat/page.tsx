@@ -968,6 +968,17 @@ const HomeContent: FC<{
     setSelectedAgent,
   ]);
 
+  const handleHistoryAgentSelected = useCallback(
+    (agentId: number) => {
+      shouldRestoreAgentRef.current = true;
+      const agent = agents.find(
+        (candidate) => Number(candidate.id) === agentId
+      );
+      if (agent) setSelectedAgent(agent);
+    },
+    [agents, setSelectedAgent]
+  );
+
   const handleAgentSelectedFromLanding = useCallback(
     async (agent: Agent) => {
       shouldRestoreAgentRef.current = true;
@@ -998,6 +1009,7 @@ const HomeContent: FC<{
       <div className="shrink-0 h-full">
         <ConversationSidebarProvider className="w-auto h-full">
           <ThreadListSidebar
+            onHistoryAgentSelected={handleHistoryAgentSelected}
             collapseToFloatingButton
             newChatDesign
             activeThreadId={selectedAgent ? runtimeMainThreadId : undefined}
