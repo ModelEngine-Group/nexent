@@ -37,9 +37,18 @@ import type {
   TagValue,
 } from "@/types/tagManagement";
 
+import styles from "./TagDefinitionManagementPanel.module.css";
+
 interface TagDefinitionManagementPanelProps {
   bucketId: number;
   canManage: boolean;
+  /**
+   * Pins the table's scroll body to the height `scroll.y` already asks for.
+   * The body is otherwise only as tall as the rows it currently holds, so a
+   * host that sizes itself to the panel, such as a dialog, would resize on
+   * every keystroke that filters rows out.
+   */
+  stableTableHeight?: boolean;
 }
 
 interface DefinitionFormValues {
@@ -55,6 +64,7 @@ interface ValueFormValues {
 export default function TagDefinitionManagementPanel({
   bucketId,
   canManage,
+  stableTableHeight = false,
 }: TagDefinitionManagementPanelProps) {
   const { t } = useTranslation("common");
   const { message } = App.useApp();
@@ -555,82 +565,86 @@ export default function TagDefinitionManagementPanel({
           setDefinitionPage(1);
         }}
       />
-      <Table
-        rowKey="definition_id"
-        dataSource={filteredDefinitions}
-        columns={columns}
-        loading={loading}
-        locale={{
-          emptyText: hasDefinitionSearch
-            ? t("tagManagement.empty.noMatchingDefinitions")
-            : t("tagManagement.empty.noDefinitions"),
-        }}
-        size="small"
-        expandable={{
-          rowExpandable: (definition) =>
-            definition.selection_mode !== "no_value",
-          expandedRowKeys,
-          onExpand: handleExpandToggle,
-          expandedRowRender: (definition) => {
-            // Only a value-only match narrows the inner rows: a row the user can
-            // already see keeps all of its values when it is opened.
-            const match = definitionSearchMatches?.get(
-              definition.definition_id
-            );
-            const matchedValueIds =
-              match && !match.definitionMatched ? match.matchedValueIds : null;
-            const values = definition.values ?? [];
-            return (
-              <div className="p-2">
-                <div className="mb-2 flex items-center gap-2">
-                  {matchedValueIds && (
-                    <Typography.Text type="secondary" className="text-xs">
-                      {t("tagManagement.hint.matchedValues")}
-                    </Typography.Text>
-                  )}
-                  {canManage && (
-                    <Button
-                      className="ml-auto"
-                      size="small"
-                      onClick={() => {
-                        valueForm.resetFields();
-                        setValueModal({
-                          open: true,
-                          definition,
-                          editingValue: null,
-                        });
-                      }}
-                    >
-                      {t("tagManagement.action.addValue")}
-                    </Button>
-                  )}
+      <div className={stableTableHeight ? styles.stableTableHeight : undefined}>
+        <Table
+          rowKey="definition_id"
+          dataSource={filteredDefinitions}
+          columns={columns}
+          loading={loading}
+          locale={{
+            emptyText: hasDefinitionSearch
+              ? t("tagManagement.empty.noMatchingDefinitions")
+              : t("tagManagement.empty.noDefinitions"),
+          }}
+          size="small"
+          expandable={{
+            rowExpandable: (definition) =>
+              definition.selection_mode !== "no_value",
+            expandedRowKeys,
+            onExpand: handleExpandToggle,
+            expandedRowRender: (definition) => {
+              // Only a value-only match narrows the inner rows: a row the user can
+              // already see keeps all of its values when it is opened.
+              const match = definitionSearchMatches?.get(
+                definition.definition_id
+              );
+              const matchedValueIds =
+                match && !match.definitionMatched
+                  ? match.matchedValueIds
+                  : null;
+              const values = definition.values ?? [];
+              return (
+                <div className="p-2">
+                  <div className="mb-2 flex items-center gap-2">
+                    {matchedValueIds && (
+                      <Typography.Text type="secondary" className="text-xs">
+                        {t("tagManagement.hint.matchedValues")}
+                      </Typography.Text>
+                    )}
+                    {canManage && (
+                      <Button
+                        className="ml-auto"
+                        size="small"
+                        onClick={() => {
+                          valueForm.resetFields();
+                          setValueModal({
+                            open: true,
+                            definition,
+                            editingValue: null,
+                          });
+                        }}
+                      >
+                        {t("tagManagement.action.addValue")}
+                      </Button>
+                    )}
+                  </div>
+                  <Table
+                    rowKey="value_id"
+                    dataSource={
+                      matchedValueIds
+                        ? values.filter((value) =>
+                            matchedValueIds.includes(value.value_id)
+                          )
+                        : values
+                    }
+                    columns={valueColumns(definition)}
+                    size="small"
+                    pagination={false}
+                    scroll={{ x: 650 }}
+                  />
                 </div>
-                <Table
-                  rowKey="value_id"
-                  dataSource={
-                    matchedValueIds
-                      ? values.filter((value) =>
-                          matchedValueIds.includes(value.value_id)
-                        )
-                      : values
-                  }
-                  columns={valueColumns(definition)}
-                  size="small"
-                  pagination={false}
-                  scroll={{ x: 650 }}
-                />
-              </div>
-            );
-          },
-        }}
-        pagination={{
-          current: definitionPage,
-          pageSize: 10,
-          size: "small",
-          onChange: setDefinitionPage,
-        }}
-        scroll={{ x: 1060, y: 500 }}
-      />
+              );
+            },
+          }}
+          pagination={{
+            current: definitionPage,
+            pageSize: 10,
+            size: "small",
+            onChange: setDefinitionPage,
+          }}
+          scroll={{ x: 1060, y: 500 }}
+        />
+      </div>
 
       <Modal
         title={

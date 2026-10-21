@@ -114,10 +114,16 @@ beforeEach(() => {
 
 let view: ReturnType<typeof render>;
 
-function renderPanel() {
+function renderPanel({
+  stableTableHeight = false,
+}: { stableTableHeight?: boolean } = {}) {
   view = render(
     <App>
-      <TagDefinitionManagementPanel bucketId={1} canManage />
+      <TagDefinitionManagementPanel
+        bucketId={1}
+        canManage
+        stableTableHeight={stableTableHeight}
+      />
     </App>
   );
   return view;
@@ -307,4 +313,29 @@ it("lets the user collapse a row the search opened", async () => {
   await user.click(expandIcon);
 
   await waitFor(() => expect(renderedText()).not.toContain("Cache"));
+});
+
+it("pins the table body a dialog sizes itself against", async () => {
+  renderPanel({ stableTableHeight: true });
+  await screen.findByText("关键词");
+
+  // The scroll body is only as tall as the rows it currently holds, so a search
+  // that filters rows out would otherwise shrink the whole dialog on every
+  // keystroke. jsdom does not lay the table out, so this pins the wiring: the
+  // panel carries the class whose rule fixes the body at the 500px scroll.y
+  // already asks for.
+  const region = view.container.querySelector('[class*="stableTableHeight"]');
+  expect(region).not.toBeNull();
+  expect(region?.querySelector(".ant-table-body")).toBeInTheDocument();
+});
+
+it("leaves an embedded panel its natural height", async () => {
+  renderPanel();
+  await screen.findByText("关键词");
+
+  // The resource management page embeds the same panel without a dialog around
+  // it, and there the table keeps growing with its rows.
+  expect(
+    view.container.querySelector('[class*="stableTableHeight"]')
+  ).toBeNull();
 });

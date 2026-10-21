@@ -38,6 +38,7 @@ export default function TagDefinitionManagementModal({
           key={bucketId}
           bucketId={bucketId}
           canManage={canManage}
+          stableTableHeight
         />
       )}
     </Modal>
