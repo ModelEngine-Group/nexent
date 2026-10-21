@@ -5,6 +5,8 @@ import { expect, test } from "vitest";
 import { useSidebar } from "@/components/ui/sidebar";
 import { WorkbenchConversationLayout } from "@/features/workbench/components/WorkbenchConversationLayout";
 
+import { WorkbenchLoadingBoundary } from "@/features/workbench/components/WorkbenchLoadingBoundary";
+
 function Conversation() {
   const { state, toggleSidebar } = useSidebar();
   return <button onClick={toggleSidebar}>{state}</button>;
@@ -56,3 +58,44 @@ test("expanded sidebar also survives repeated conversation loading cycles", () =
     ).toBeInTheDocument();
   }
 });
+
+test.each([
+  "conversationReady",
+  "modelsLoading",
+  "bootstrapLoading",
+  "resourcesResolving",
+] as const)(
+  "keeps collapsed state through the actual loading boundary: %s",
+  (pending) => {
+    const settled = {
+      conversationReady: true,
+      modelsLoading: false,
+      bootstrapLoading: false,
+      resourcesResolving: false,
+    };
+    function Layout({ loading }: { loading: boolean }) {
+      const flags = {
+        ...settled,
+        [pending]: pending === "conversationReady" ? !loading : loading,
+      };
+      return (
+        <WorkbenchConversationLayout ready>
+          <WorkbenchLoadingBoundary {...flags}>
+            <Conversation />
+          </WorkbenchLoadingBoundary>
+        </WorkbenchConversationLayout>
+      );
+    }
+    const { rerender } = render(<Layout loading={false} />);
+    fireEvent.click(screen.getByRole("button", { name: "expanded" }));
+    for (let attempt = 0; attempt < 2; attempt++) {
+      rerender(<Layout loading />);
+      expect(screen.queryByRole("button")).toBeNull();
+      expect(screen.getByRole("status")).toBeInTheDocument();
+      rerender(<Layout loading={false} />);
+      expect(
+        screen.getByRole("button", { name: "collapsed" })
+      ).toBeInTheDocument();
+    }
+  }
+);

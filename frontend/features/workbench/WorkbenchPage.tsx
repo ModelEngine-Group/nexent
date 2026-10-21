@@ -1402,7 +1402,7 @@ const HomeContent: FC = () => {
   };
 
   const content = (
-    <WorkbenchConversationLayout ready={ready}>
+    <>
       <div className="shrink-0 h-full">
         <ThreadListSidebar
           collapseToFloatingButton
@@ -1648,17 +1648,19 @@ const HomeContent: FC = () => {
           onSelect={(agent) => void handleAgentSelectedFromLanding(agent)}
         />
       </div>
-    </WorkbenchConversationLayout>
+    </>
   );
 
   return (
-    <WorkbenchLoadingBoundary
-      conversationReady={ready}
-      modelsLoading={isLoadingModels}
-      bootstrapLoading={isLoadingWorkbenchBootstrap}
-      resourcesResolving={workbenchState.resolving}
-    >
-      {content}
-    </WorkbenchLoadingBoundary>
+    <WorkbenchConversationLayout ready>
+      <WorkbenchLoadingBoundary
+        conversationReady={ready}
+        modelsLoading={isLoadingModels}
+        bootstrapLoading={isLoadingWorkbenchBootstrap}
+        resourcesResolving={workbenchState.resolving}
+      >
+        {content}
+      </WorkbenchLoadingBoundary>
+    </WorkbenchConversationLayout>
   );
 };

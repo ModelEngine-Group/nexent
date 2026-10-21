@@ -19,9 +19,11 @@ change:
     - Reopen the same history after returning to discovery repeatedly.
     - Resolve metadata and fallback bindings, preserve invalid metadata and cancelled activation behavior.
     - Preserve the expand icon vertical center with a nonzero page offset when docking.
+    - Preserve Workbench collapse through conversation, model, bootstrap and resource loading boundaries.
     test_selectors:
     - frontend/tests/component/historyThreadTrigger.test.tsx
     - frontend/tests/component/threadSidebarFloating.test.tsx
+    - frontend/tests/component/workbenchConversationLayout.test.tsx
   affected_features:
     existing: [CHAT-SIDEBAR]
     added: []
