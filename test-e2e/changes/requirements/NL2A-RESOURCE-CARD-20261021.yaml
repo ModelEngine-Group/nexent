@@ -35,6 +35,7 @@ change:
     - test/backend/services/test_nl2agent_service.py
     - test/backend/services/test_nl2agent_resource_provider_policy.py
     - test/backend/management/test_management_relocation.py
+    - test/backend/management/test_service_directory_architecture.py
   notes: SPEC docs/Developing/chat-nl2agent-resource-card. Additive recommendation
     metadata; existing binding routes reused; no schema migration or runtime/provider
     invocation changes.
