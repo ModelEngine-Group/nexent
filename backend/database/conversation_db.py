@@ -205,7 +205,9 @@ def create_conversation(conversation_title: str, user_id: Optional[str] = None,
                         chat_mode: Optional[str] = None,
                         knowledge_scope: Optional[Dict[str, Any]] = None,
                         runtime_metadata: Optional[Dict[str, Any]] = None,
-                        workbench_config: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+                        workbench_config: Optional[Dict[str, Any]] = None,
+                        model_parameter_preferences: Optional[Dict[str, Any]] = None,
+                        selected_model_id: Optional[int] = None) -> Dict[str, Any]:
     """
     Create a new conversation record
 
@@ -236,6 +238,11 @@ def create_conversation(conversation_title: str, user_id: Optional[str] = None,
         if workbench_config is not None:
             data["workbench_config"] = deepcopy(workbench_config)
             data["workbench_config_version"] = 1
+        if selected_model_id is not None:
+            data["selected_model_id"] = selected_model_id
+        if model_parameter_preferences:
+            data["model_parameter_preferences"] = deepcopy(model_parameter_preferences)
+            data["model_parameter_preferences_version"] = 1
         if user_id:
             data = add_creation_tracking(data, user_id)
 
@@ -843,7 +850,7 @@ def resolve_conversation_runtime_metadata(
 def _assert_workbench_topology(record, config: Dict[str, Any]) -> None:
     """Keep entrypoint and creation workflows stable while allowing chat mounts to change."""
     current = record.workbench_config
-    if not isinstance(current, dict) or current.get("schema_version") != 3:
+    if not isinstance(current, dict) or current.get("schema_version") != 4:
         raise WorkbenchError("WORKBENCH_CONVERSATION_REQUIRED", status_code=409)
     creation_modes = {"skill_create", "agent_create"}
     if current.get("mode") in creation_modes or config.get("mode") in creation_modes:

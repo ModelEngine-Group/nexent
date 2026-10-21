@@ -263,10 +263,12 @@ mock_nexent_core_utils_module.prompt_template_utils = mock_prompt_template_utils
 mock_nexent_core_utils_module.tools_common_message = mock_tools_common_message_module
 
 mock_nexent_core_models_module = types.ModuleType("nexent.core.models")
+mock_nexent_core_models_module.__path__ = [str(SDK_SOURCE_ROOT / "nexent" / "core" / "models")]
 mock_nexent_core_models_module.OpenAILongContextModel = MagicMock()
 mock_nexent_core_models_module.OpenAIVLModel = MagicMock()
 
 mock_nexent_core_module = types.ModuleType("nexent.core")
+mock_nexent_core_module.__path__ = [str(SDK_SOURCE_ROOT / "nexent" / "core")]
 mock_nexent_core_module.utils = mock_nexent_core_utils_module
 mock_nexent_core_module.models = mock_nexent_core_models_module
 mock_nexent_core_module.MessageObserver = _MockMessageObserver
@@ -336,6 +338,7 @@ module_mocks = {
     "nexent.core.management.services.agent.prompt": mock_prompt_template_utils_module,
     "nexent.core.utils.tools_common_message": mock_tools_common_message_module,
     "nexent.core.models": mock_nexent_core_models_module,
+    "sdk.nexent.core.models": mock_nexent_core_models_module,
     "nexent.storage": mock_nexent_storage_module,
     "nexent.multi_modal": mock_nexent_multi_modal_module,
     "nexent.multi_modal.load_save_object": mock_nexent_load_save_module,
@@ -6013,7 +6016,7 @@ class TestWrapToolMonitoringInvocation:
 
         with patch.object(nexent_agent, "get_monitoring_manager", return_value=mm):
             wrapped = _wrap_tool_with_monitoring(tool, "agent_async")
-            result = asyncio.get_event_loop().run_until_complete(
+            result = asyncio.run(
                 wrapped.forward(q="world")
             )
 
@@ -6070,7 +6073,7 @@ class TestWrapToolMonitoringInvocation:
 
         with patch.object(nexent_agent, "get_monitoring_manager", return_value=mm):
             wrapped = _wrap_tool_with_monitoring(async_func, "agent_ac")
-            result = asyncio.get_event_loop().run_until_complete(
+            result = asyncio.run(
                 wrapped(val=5)
             )
 

@@ -2493,11 +2493,11 @@ class TestRunStreamRealExecution:
         agent.model = MagicMock(side_effect=terminal)
 
         action_step = MagicMock(model_output=None)
-        with pytest.raises(module.ModelOutputProtocolError) as exc_info:
+        with pytest.raises(module.ModelInvocationTerminalError) as exc_info:
             next(agent._step_stream(action_step))
 
-        assert exc_info.value.reason == module.ProtocolErrorReason.EMPTY_VISIBLE_CONTENT
-        assert exc_info.value.__cause__ is terminal
+        assert exc_info.value is terminal
+        agent.model.assert_called_once()
 
     def test_step_stream_closed_protocol_omits_legacy_provider_stop_sequences(
         self, monkeypatch
@@ -3232,18 +3232,17 @@ class TestRunStreamRealExecution:
         agent.observer.rollback_model_attempt.assert_not_called()
         assert response.model_attempt_commit_deferred is False
 
-    def test_oc_034_disabled_adapter_empty_content_finishes_with_hint(self):
+    def test_adapter_empty_exhaustion_stays_terminal_without_protocol_repair(self):
         agent, action_step, _response = self._create_cmsr_007_step_agent("unused")
         agent.observer.lang = "zh"
         agent.model.side_effect = core_agent_module.ModelInvocationTerminalError(
             core_agent_module.ModelErrorCode.EMPTY_RESPONSE_EXHAUSTED, 1
         )
 
-        with pytest.raises(core_agent_module.RuntimeFinalAnswer) as exc_info:
+        with pytest.raises(core_agent_module.ModelInvocationTerminalError) as exc_info:
             list(agent._step_stream(action_step))
 
-        assert exc_info.value.source == "empty_model_output"
-        assert exc_info.value.answer == "*模型返回了空内容。*"
+        assert exc_info.value.error_code == core_agent_module.ModelErrorCode.EMPTY_RESPONSE_EXHAUSTED
         agent.model.assert_called_once()
         agent.observer.commit_model_attempt.assert_not_called()
         agent.observer.rollback_model_attempt.assert_not_called()
