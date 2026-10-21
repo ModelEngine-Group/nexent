@@ -36,7 +36,17 @@ import {
 } from "@/const/modelConfig";
 import log from "@/lib/logger";
 
+const mapOutletStateFromApi = (model: Record<string, unknown>) => ({
+  profileSchemaVersion: model.profile_schema_version as number | undefined,
+  configRevision: model.config_revision as number | undefined,
+  migrationStatus: model.migration_status as ModelOption["migrationStatus"],
+  migrationReviewRequired: model.migration_review_required as boolean | undefined,
+  migrationDetails: model.migration_details as ModelOption["migrationDetails"],
+  migrationDiagnostic: model.migration_diagnostic as ModelOption["migrationDiagnostic"],
+});
+
 const mapCapacityFieldsFromApi = (model: any) => ({
+  ...mapOutletStateFromApi(model),
   contextWindowTokens: model.context_window_tokens,
   maxInputTokens: model.max_input_tokens,
   maxOutputTokens: model.max_output_tokens,
@@ -1153,6 +1163,7 @@ export const modelService = {
           apiUrl: model.base_url || "",
           displayName: model.display_name || model.model_name || model.name,
           connect_status: model.connect_status as ModelConnectStatus,
+          ...mapOutletStateFromApi(model),
           ...mapInferenceParamsFromApi(model),
           reasoningCapability: model.reasoning_capability ?? undefined,
         }));

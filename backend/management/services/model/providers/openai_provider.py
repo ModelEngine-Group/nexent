@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """Generic OpenAI-compatible provider.
 
 Used as the fallback for any provider that is not covered by a dedicated
@@ -38,7 +40,7 @@ class OpenAICompatibleProvider(AbstractModelProvider):
             if not url.endswith("/models"):
                 url = f"{url}/models"
 
-            headers = {"Authorization": f"Bearer {model_api_key}"}
+            headers = {"Authorization": f"Bearer {model_api_key.strip()}"} if model_api_key.strip() else {}
 
             async with httpx.AsyncClient(verify=ssl_verify, timeout=30) as client:
                 response = await client.get(url, headers=headers)

@@ -45,12 +45,19 @@ def project_agent_models(
             if available_records and available_records[0][1] is not None
             else None
         )
+    fields = {"model_ids": available_model_ids, "model_names": names, "model_name": legacy_name}
+    overrides = agent.get("model_params_override")
+    if isinstance(overrides, dict):
+        from nexent.core.model_service.compatibility.agent_parameters import read_agent_parameter_entry
+
+        current = dict(overrides)
+        for model_id, record in records:
+            if (record and record.get("model_type") in {"llm", "chat"}
+                    and record.get("profile_schema_version") is not None and str(model_id) in current):
+                current[str(model_id)] = read_agent_parameter_entry(current[str(model_id)])
+        fields["model_params_override"] = current
     return AgentModelProjection(
-        fields={
-            "model_ids": available_model_ids,
-            "model_names": names,
-            "model_name": legacy_name,
-        },
+        fields=fields,
         deleted_model_ids=frozenset(configured_model_ids) - frozenset(model_ids),
         availability_model_ids=model_ids,
     )
