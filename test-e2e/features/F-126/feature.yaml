@@ -10,6 +10,9 @@ feature:
   business_rules:
   - rule_id: F-126-RULE-01
     description: pause/resume/run now/history
+  - rule_id: F-126-RULE-02
+    description: Only CHAT user messages consume the ordinary conversation quota; scheduled and run-now messages
+      remain executable at the limit.
   required_test_stages:
   - D2
   source:

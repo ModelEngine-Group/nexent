@@ -396,6 +396,7 @@ async def _stream_agent_chunks(
                 user_id=user_id,
                 tenant_id=tenant_id,
                 status="streaming",
+                message_source=getattr(agent_request, "_message_source", "CHAT"),
             )
         except Exception as msg_exc:
             logger.error(

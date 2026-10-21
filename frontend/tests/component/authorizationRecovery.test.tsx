@@ -24,10 +24,11 @@ const state = vi.hoisted(() => ({
   speed: false,
   authenticated: true,
   hideHome: true,
+  pathname: "/zh",
 }));
 vi.mock("next/navigation", () => {
   const router = { replace: state.replace, push: state.push };
-  return { useRouter: () => router, usePathname: () => "/zh" };
+  return { useRouter: () => router, usePathname: () => state.pathname };
 });
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({
@@ -62,14 +63,19 @@ vi.mock("@/hooks/group/useGroupList", () => ({
 
 const clients: QueryClient[] = [];
 function PermissionsProbe() {
-  const { permissions, isAuthzReady } = useAuthorizationContext();
+  const { permissions, isAuthzReady, isAuthorized, canAccessRoute } =
+    useAuthorizationContext();
   return (
-    <output data-testid="permissions">
+    <output
+      data-testid="permissions"
+      data-authorized={isAuthorized}
+      data-workbench={canAccessRoute("/workbench")}
+    >
       {isAuthzReady ? permissions.join(",") : "pending"}
     </output>
   );
 }
-function renderHome() {
+function renderHome(showHome = true) {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false, gcTime: Infinity } },
   });
@@ -77,7 +83,7 @@ function renderHome() {
   render(
     <QueryClientProvider client={client}>
       <AuthorizationProvider>
-        <Homepage />
+        {showHome && <Homepage />}
         <PermissionsProbe />
       </AuthorizationProvider>
     </QueryClientProvider>
@@ -113,6 +119,7 @@ beforeEach(() => {
   state.speed = false;
   state.authenticated = true;
   state.hideHome = true;
+  state.pathname = "/zh";
 });
 afterEach(() => {
   for (const client of clients.splice(0)) client.clear();
@@ -218,4 +225,53 @@ test("guest entry ignores an unrelated authorization request error", async () =>
   await waitFor(() => expect(state.request).toHaveBeenCalled());
   expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   expect(state.replace).toHaveBeenCalledWith("/workbench");
+});
+
+test.each([
+  { routes: ["/chat"], allowed: false },
+  { routes: ["/chat", "/newchat"], allowed: false },
+  { routes: ["/newchat"], allowed: false },
+  { routes: ["/workbench"], allowed: true },
+  { routes: ["/chat", "/workbench"], allowed: true },
+])(
+  "Workbench requires an explicit grant: $routes",
+  async ({ routes, allowed }) => {
+    state.pathname = "/zh/workbench";
+    state.request.mockResolvedValueOnce(response(routes));
+    renderHome(false);
+    await waitFor(() =>
+      expect(screen.getByTestId("permissions")).toHaveTextContent(
+        "resource:manage"
+      )
+    );
+    expect(screen.getByTestId("permissions")).toHaveAttribute(
+      "data-workbench",
+      String(allowed)
+    );
+    expect(screen.getByTestId("permissions")).toHaveAttribute(
+      "data-authorized",
+      String(allowed)
+    );
+    if (allowed) {
+      expect(state.replace).not.toHaveBeenCalled();
+    } else {
+      await waitFor(() => expect(state.replace).toHaveBeenCalledWith("/"));
+    }
+  }
+);
+
+test.each([
+  { pathname: "/en/evaluation/run-1", routes: ["/evaluation"] },
+  { pathname: "/zh/share/shared-1", routes: ["/newchat"] },
+])("preserves authorization for $pathname", async ({ pathname, routes }) => {
+  state.pathname = pathname;
+  state.request.mockResolvedValueOnce(response(routes));
+  renderHome(false);
+  await waitFor(() =>
+    expect(screen.getByTestId("permissions")).toHaveAttribute(
+      "data-authorized",
+      "true"
+    )
+  );
+  expect(state.replace).not.toHaveBeenCalled();
 });
