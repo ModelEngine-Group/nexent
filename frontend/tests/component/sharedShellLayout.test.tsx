@@ -122,13 +122,13 @@ test("pin state reserves240px and unpin restores64px without losing page content
   const contentLayout = container.querySelector(
     ".ant-layout-content"
   )!.parentElement!;
-  expect(sider).toHaveStyle({ width: "64px" });
+  expect(sider).toHaveStyle({ width: "64px", zIndex: 30 });
   expect(contentLayout).toHaveStyle({ marginLeft: "64px" });
   fireEvent.click(screen.getByRole("button", { name: "pin" }));
   expect(sider).toHaveStyle({ width: "240px" });
   expect(contentLayout).toHaveStyle({ marginLeft: "240px" });
   expect(screen.getByText("page content")).toBeVisible();
   fireEvent.click(screen.getByRole("button", { name: "unpin" }));
-  expect(sider).toHaveStyle({ width: "64px" });
+  expect(sider).toHaveStyle({ width: "64px", zIndex: 30 });
   expect(contentLayout).toHaveStyle({ marginLeft: "64px" });
 });

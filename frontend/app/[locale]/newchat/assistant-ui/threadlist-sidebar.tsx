@@ -114,7 +114,7 @@ export function ThreadListSidebar({
         floatingToolbarRef.current?.getBoundingClientRect().top;
       setDockedExpandPosition(
         bounds.width <= 1034 && toolbarTop !== undefined
-          ? { left: Math.max(0, bounds.left), top: toolbarTop + 4 }
+          ? { left: Math.max(0, bounds.left) + 4, top: toolbarTop + 4 }
           : null
       );
     };
@@ -137,6 +137,7 @@ export function ThreadListSidebar({
       <div
         ref={floatingToolbarRef}
         data-floating-sidebar-trigger
+        data-expand-docked={dockedExpandPosition !== null || undefined}
         data-collapsed-agent-toolbar={
           !newChatDesign || selectedAgent ? "" : undefined
         }
@@ -149,7 +150,7 @@ export function ThreadListSidebar({
           createPortal(
             <div
               data-docked-agent-expand
-              className="fixed z-40"
+              className="fixed z-20"
               style={dockedExpandPosition}
             >
               <ConversationExpandButton compact />

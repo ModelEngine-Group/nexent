@@ -4,6 +4,11 @@
   container: agent-chat / inline-size;
 }
 
+/* Reserve a narrow gutter only while the compact expand control is docked. */
+.page:has([data-expand-docked="true"]) {
+  padding-left: 32px;
+}
+
 .discovery [data-active="true"]:not(:hover) {
   background-color: transparent;
 }

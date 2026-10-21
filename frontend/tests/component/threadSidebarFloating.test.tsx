@@ -195,7 +195,9 @@ test("narrow Agent chat docks its expand action outside the clipped conversation
     act(() => notifyResize?.());
     const docked = document.querySelector("[data-docked-agent-expand]")!;
     expect(page.contains(docked)).toBe(false);
-    expect(docked).toHaveStyle({ left: "240px", top: "76px" });
+    expect(docked).toHaveClass("z-20");
+    expect(toolbar).toHaveAttribute("data-expand-docked", "true");
+    expect(docked).toHaveStyle({ left: "244px", top: "76px" });
     // Both targets keep the icon center at toolbar top + 16px.
     expect(Number.parseFloat((docked as HTMLElement).style.top) + 12).toBe(
       72 + 16
