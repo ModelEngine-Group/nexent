@@ -9,6 +9,7 @@ from typing import Optional
 from fastapi import APIRouter, Body, Depends, File, Header, HTTPException, Query, Request, UploadFile
 from fastapi.encoders import jsonable_encoder
 from nexent.core.concurrency import run_blocking
+from nexent.core.model_service.profiles.parameter_schema import ParameterValidationError
 from starlette.responses import JSONResponse, Response, StreamingResponse
 
 from consts.const import ASSET_OWNER_TENANT_ID, ENABLE_AGENT_WORKBENCH
@@ -356,6 +357,13 @@ async def nl2agent_run_api(
         _, tenant_id, language = get_current_user_info(
             authorization, http_request
         )
+        if nl2agent_request.conversation_id is not None:
+            from services.conversation_model_preferences_service import read_model_preferences
+            preference_user, _ = get_current_user_id(authorization)
+            saved = await run_blocking("creator-model-preferences", read_model_preferences, nl2agent_request.conversation_id, preference_user)
+            nl2agent_request.__dict__["_runtime_model_parameter_preferences"] = saved["model_parameter_preferences"]
+            if nl2agent_request.model_id is None:
+                nl2agent_request.model_id = saved.get("selected_model_id")
         stream = await create_nl2agent_stream(
             request=nl2agent_request,
             tenant_id=tenant_id,
@@ -370,6 +378,8 @@ async def nl2agent_run_api(
                 query=nl2agent_request.query,
                 minio_files=nl2agent_request.minio_files,
                 workbench_config=nl2agent_request.workbench_config,
+                model_parameter_preferences=nl2agent_request.model_parameter_preferences,
+                selected_model_id=nl2agent_request.model_id,
                 agent_id=nl2agent_request.agent_id,
                 user_id=user_id,
                 tenant_id=tenant_id,
@@ -547,6 +557,9 @@ async def update_agent_info_api(
                               user_id=user_id, tenant_id=tenant_id,
                               details=audit_details)
         return result or {}
+    except ParameterValidationError as exc:
+        raise HTTPException(status_code=HTTPStatus.UNPROCESSABLE_ENTITY,
+                            detail={"code": exc.category, "field": exc.path}) from None
     except AgentRelationValidationError as exc:
         raise HTTPException(
             status_code=HTTPStatus.BAD_REQUEST, detail=str(exc)

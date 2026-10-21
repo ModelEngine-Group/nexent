@@ -1734,6 +1734,7 @@ async def test_build_run_info_is_ephemeral(mocker):
         "Bearer tenant-token",
     )
 
+    assert run_info.tenant_id == "tenant-a"
     assert run_info.query == "final query"
     assert run_info.agent_config.name == "__nl2agent_runtime__"
     assert run_info.agent_config.context_manager_config.token_threshold == 24000

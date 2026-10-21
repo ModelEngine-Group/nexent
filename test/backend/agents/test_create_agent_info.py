@@ -8,6 +8,9 @@ from pathlib import Path
 from contextlib import ExitStack
 from unittest.mock import AsyncMock, MagicMock, patch, Mock, PropertyMock, ANY
 
+# Load the real compatibility helpers before this fixture replaces SDK model packages.
+import nexent.core.model_service.compatibility.legacy_config
+
 from test.common.test_mocks import bootstrap_test_env
 
 env_state = bootstrap_test_env()
@@ -321,6 +324,7 @@ sys.modules['management.services.model.adapter'] = _create_stub_module(
     "management.services.model.adapter",
     get_llm_adapter=MagicMock(return_value="stub_llm_adapter"),
     get_vlm_adapter=MagicMock(return_value="stub_vlm_adapter"),
+    restore_model_snapshot=MagicMock(return_value=None),
 )
 sys.modules['management.services.configuration.user.memory'] = MagicMock()
 sys.modules['management.services.memory.providers.service'] = _create_stub_module(
@@ -353,6 +357,8 @@ sys.modules['nexent.memory'].models = sys.modules['nexent.memory.models']
 
 # Create nested modules for nexent.core to satisfy imports safely
 sys.modules['nexent.core'] = _create_stub_module("nexent.core")
+# Keep the new pure model-service compatibility utilities available to this legacy fixture.
+sys.modules['nexent.core'].__path__ = [str(TEST_ROOT.parent / "sdk" / "nexent" / "core")]
 _concurrency_mod = _create_stub_module("nexent.core.concurrency")
 
 
@@ -4048,12 +4054,12 @@ class TestCreateModelConfigList:
     def test_reasoning_helpers_filter_model_fields_and_resolve_effort(self):
         module = create_agent_info_module
 
-        assert module._is_thinking_enabled(None) is False
-        assert module._is_thinking_enabled({"enable_thinking": True}) is True
-        assert module._is_thinking_enabled({"enable_thinking": False}) is False
-        assert module._is_thinking_enabled({"reasoning_effort": "high"}) is True
+        assert module.legacy_thinking_enabled(None) is False
+        assert module.legacy_thinking_enabled({"enable_thinking": True}) is True
+        assert module.legacy_thinking_enabled({"enable_thinking": False}) is False
+        assert module.legacy_thinking_enabled({"reasoning_effort": "high"}) is True
 
-        assert module._build_extra_body({
+        assert module.legacy_extra_body({
             "enable_thinking": True,
             "reasoning_effort": "high",
             "temperature": 0.2,
@@ -4061,26 +4067,26 @@ class TestCreateModelConfigList:
         }) == {"enable_thinking": True, "temperature": 0.2, "top_k": 4}
 
         supported = {"status": "supported", "levels": ["low", "high"], "default": "high"}
-        assert module._resolve_model_reasoning_effort(
+        assert module.legacy_reasoning_effort(
             {"enable_thinking": True, "reasoning_effort": "low"}, supported
         ) == "low"
-        assert module._resolve_model_reasoning_effort(
+        assert module.legacy_reasoning_effort(
             {"enable_thinking": True, "reasoning_effort": "medium"}, supported
         ) == "high"
-        assert module._resolve_model_reasoning_effort(
+        assert module.legacy_reasoning_effort(
             {"enable_thinking": True}, {"status": "supported", "levels": [], "default": None}
         ) is None
-        assert module._resolve_model_reasoning_effort(
+        assert module.legacy_reasoning_effort(
             {"enable_thinking": True}, {"status": "unsupported"}
         ) is None
-        assert module._resolve_model_reasoning_effort(
+        assert module.legacy_reasoning_effort(
             {"enable_thinking": True, "reasoning_effort": "high"},
             {"status": "unsupported"},
         ) == "high"
-        assert module._resolve_model_reasoning_effort(
+        assert module.legacy_reasoning_effort(
             {"enable_thinking": True, "reasoning_effort": "auto"}, supported
         ) is None
-        assert module._resolve_model_reasoning_effort(
+        assert module.legacy_reasoning_effort(
             {"enable_thinking": False, "reasoning_effort": "high"}, supported
         ) is None
 
@@ -4088,20 +4094,20 @@ class TestCreateModelConfigList:
             "status": "supported",
             "controls": [{"type": "budget_tokens", "min": 128, "max": 32768}],
         }
-        assert module._resolve_model_reasoning_budget(
+        assert module.legacy_reasoning_budget(
             {"enable_thinking": True, "reasoning_budget_tokens": 64},
             budget_capability,
         ) == 128
-        assert module._resolve_model_reasoning_budget(
+        assert module.legacy_reasoning_budget(
             {"enable_thinking": True, "reasoning_budget_tokens": 65536},
             budget_capability,
         ) == 32768
-        assert module._resolve_model_reasoning_budget(
+        assert module.legacy_reasoning_budget(
             {"enable_thinking": True, "reasoning_budget_tokens": 4096},
             {"status": "supported", "controls": []},
         ) == 4096
         for value in (True, 0, -1, "4096"):
-            assert module._resolve_model_reasoning_budget(
+            assert module.legacy_reasoning_budget(
                 {"enable_thinking": True, "reasoning_budget_tokens": value},
                 budget_capability,
             ) is None
@@ -4422,7 +4428,14 @@ class RuntimeModelStub(types.SimpleNamespace):
 
 
 class TestCreateAgentRunInfo:
-    """Tests for the create_agent_run_info function"""
+    """Tests for the create_agent_run_info orchestration boundary."""
+
+    @pytest.fixture(autouse=True)
+    def mock_profile_binding(self):
+        # These orchestration tests supply sentinel model/config values. Profile
+        # binding itself is exercised with real profiles in its service suite.
+        with patch("services.agent_model_parameters.bind_agent_model_profiles"):
+            yield
 
     @pytest.mark.asyncio
     async def test_create_agent_run_info_applies_reasoning_overrides(self):
@@ -4552,63 +4565,6 @@ class TestCreateAgentRunInfo:
 
         assert selected.reasoning_budget_tokens == 4096
 
-    @pytest.mark.asyncio
-    async def test_create_agent_run_info_validates_request_budget(self):
-        selected = RuntimeModelStub(
-            cite_name="selected",
-            enable_thinking=True,
-            reasoning_effort=None,
-            reasoning_budget_tokens=None,
-            reasoning_capability={
-                "status": "supported",
-                "levels": [],
-                "controls": [{"type": "budget_tokens", "min": 128, "max": 32768}],
-            },
-            extra_body=None,
-        )
-        common_patches = [
-            patch(
-                "backend.agents.create_agent_info.join_minio_file_description_to_query",
-                new_callable=AsyncMock,
-                return_value="processed_query",
-            ),
-            patch(
-                "backend.agents.create_agent_info.create_model_config_list",
-                new_callable=AsyncMock,
-                return_value=[selected],
-            ),
-            patch(
-                "backend.agents.create_agent_info.create_agent_config",
-                new_callable=AsyncMock,
-                return_value=types.SimpleNamespace(model_name="selected", sandbox_policy=None),
-            ),
-            patch("backend.agents.create_agent_info.search_agent_info_by_agent_id", return_value={}),
-            patch(
-                "backend.agents.create_agent_info.get_remote_mcp_server_list",
-                new_callable=AsyncMock,
-                return_value=[],
-            ),
-            patch("backend.agents.create_agent_info.filter_mcp_servers_and_tools", return_value=[]),
-            patch("backend.agents.create_agent_info.urljoin", return_value="http://nexent.mcp/sse"),
-            patch("backend.agents.create_agent_info.threading"),
-        ]
-        with ExitStack() as stack:
-            for item in common_patches:
-                stack.enter_context(item)
-            await create_agent_run_info(
-                agent_id="agent-1",
-                minio_files=[],
-                query="query",
-                history=[],
-                user_id="user-1",
-                tenant_id="tenant-1",
-                language="zh",
-                is_debug=True,
-                reasoning_budget_tokens=4096,
-            )
-
-        assert mock_agent_run_info.call_args.kwargs["model_config_list"][0].reasoning_budget_tokens == 4096
-        assert selected.reasoning_budget_tokens is None
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize(
@@ -4686,118 +4642,7 @@ class TestCreateAgentRunInfo:
         assert selected.enable_thinking is expected_enabled
         assert selected.reasoning_effort == expected_effort
 
-    @pytest.mark.asyncio
-    @pytest.mark.parametrize(
-        "model_config",
-        [
-            None,
-            RuntimeModelStub(cite_name="selected", enable_thinking=True, reasoning_capability=None),
-            RuntimeModelStub(
-                cite_name="selected",
-                enable_thinking=True,
-                reasoning_capability={"status": "supported", "levels": ["low"]},
-            ),
-        ],
-    )
-    async def test_create_agent_run_info_rejects_invalid_reasoning_effort(self, model_config):
-        with patch(
-            "backend.agents.create_agent_info.join_minio_file_description_to_query",
-            new_callable=AsyncMock,
-            return_value="processed_query",
-        ), patch(
-            "backend.agents.create_agent_info.create_model_config_list",
-            new_callable=AsyncMock,
-            return_value=[] if model_config is None else [model_config],
-        ), patch(
-            "backend.agents.create_agent_info.create_agent_config",
-            new_callable=AsyncMock,
-            return_value=types.SimpleNamespace(model_name="selected"),
-        ), patch(
-            "backend.agents.create_agent_info.search_agent_info_by_agent_id",
-            return_value={},
-        ):
-            with pytest.raises(RunModelControlsError, match="model_"):
-                await create_agent_run_info(
-                    agent_id="agent-1",
-                    minio_files=[],
-                    query="query",
-                    history=[],
-                    user_id="user-1",
-                    tenant_id="tenant-1",
-                    language="zh",
-                    is_debug=True,
-                    reasoning_effort="high",
-                )
 
-    @pytest.mark.asyncio
-    @pytest.mark.parametrize(
-        "reasoning_effort, expected_effort, capability",
-        [
-            (
-                "high",
-                "high",
-                {"status": "supported", "levels": ["low", "high"]},
-            ),
-            (
-                "auto",
-                None,
-                {"status": "supported", "levels": ["low", "high"]},
-            ),
-        ],
-    )
-    async def test_create_agent_run_info_accepts_valid_reasoning_effort(
-        self, reasoning_effort, expected_effort, capability
-    ):
-        selected = RuntimeModelStub(
-            cite_name="selected",
-            enable_thinking=True,
-            reasoning_effort=None,
-            reasoning_capability=capability,
-            extra_body=None,
-        )
-        with patch(
-            "backend.agents.create_agent_info.join_minio_file_description_to_query",
-            new_callable=AsyncMock,
-            return_value="processed_query",
-        ), patch(
-            "backend.agents.create_agent_info.create_model_config_list",
-            new_callable=AsyncMock,
-            return_value=[selected],
-        ), patch(
-            "backend.agents.create_agent_info.create_agent_config",
-            new_callable=AsyncMock,
-            return_value=types.SimpleNamespace(model_name="selected", sandbox_policy=None),
-        ), patch(
-            "backend.agents.create_agent_info.search_agent_info_by_agent_id",
-            return_value={},
-        ), patch(
-            "backend.agents.create_agent_info.get_remote_mcp_server_list",
-            new_callable=AsyncMock,
-            return_value=[],
-        ), patch(
-            "backend.agents.create_agent_info.filter_mcp_servers_and_tools",
-            return_value=[],
-        ), patch(
-            "backend.agents.create_agent_info.urljoin",
-            return_value="http://nexent.mcp/sse",
-        ), patch(
-            "backend.agents.create_agent_info.threading"
-        ) as threading_mock:
-            threading_mock.Event.return_value = "stop_event"
-            await create_agent_run_info(
-                agent_id="agent-1",
-                minio_files=[],
-                query="query",
-                history=[],
-                user_id="user-1",
-                tenant_id="tenant-1",
-                language="zh",
-                is_debug=True,
-                reasoning_effort=reasoning_effort,
-            )
-
-        assert mock_agent_run_info.call_args.kwargs["model_config_list"][0].reasoning_effort == expected_effort
-        assert selected.reasoning_effort is None
 
     @pytest.mark.asyncio
     async def test_create_agent_run_info_success(self):
@@ -8522,6 +8367,24 @@ class TestBuildSecurityHeaders:
         ):
             assert _select_agent_model_id([7, 8], None, "tenant") == 8
             assert _select_agent_model_id([7, 8], 9, "tenant") == 9
+
+
+def test_saved_outlet_agent_window_bounds_inherited_limits_without_fallback():
+    """AC-PARAM-LAYERS: pass a consistent smaller window to the budget resolver."""
+    model = {"model_id": 42, "model_name": "model", "model_factory": "custom",
+             "profile_schema_version": 1, "context_window_tokens": 200000,
+             "max_input_tokens": 180000, "max_output_tokens": 32000,
+             "default_max_output_tokens": 2048}
+    snapshot = MockModelCapacitySnapshot(context_window_tokens=64000, provider_input_limit_tokens=61952)
+    with patch("backend.agents.create_agent_info.resolve_capacity", return_value=snapshot) as resolver:
+        budget, monitoring, actual = _resolve_input_budget(model, {"context_window_tokens": 64000})
+    assert actual is snapshot and budget == 61952
+    assert resolver.call_args.kwargs["operator_overrides"] == {
+        "context_window_tokens": 64000, "max_input_tokens": 64000,
+        "max_output_tokens": 32000, "default_output_reserve_tokens": 2048}
+    assert model["context_window_tokens"] == 200000
+    assert monitoring["context_window_tokens"] == 64000
+
 
 class TestDeepSeekRuntimeLanguage:
     @pytest.mark.asyncio

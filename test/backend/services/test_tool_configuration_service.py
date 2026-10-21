@@ -485,6 +485,11 @@ sys.modules['backend.database'] = backend_database_module
 backend_database_client_module = importlib.import_module(
     'backend.database.client')
 sys.modules['backend.database.client'] = backend_database_client_module
+# Tool configuration owns the gateway collaborator, not its model-service internals.
+gateway_stub = types.ModuleType('management.services.model.adapter')
+gateway_stub.get_llm_adapter = MagicMock()
+gateway_stub.get_vlm_adapter = MagicMock()
+sys.modules[gateway_stub.__name__] = gateway_stub
 backend_services_module = importlib.import_module(
     'management.services.tool.configuration')
 # Ensure services package can resolve tool_configuration_service for patching
