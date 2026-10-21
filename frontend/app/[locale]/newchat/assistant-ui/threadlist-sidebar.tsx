@@ -10,7 +10,6 @@ import {
 } from "lucide-react";
 import { WorkbenchPinHistorySync } from "./workbench-pin-history-sync";
 import { useEffect, useRef, useState } from "react";
-import { createPortal } from "react-dom";
 import { message, Typography } from "antd";
 import { StandardInput } from "@/components/common/StandardInput";
 import { StandardButton } from "@/components/common/StandardButton";
@@ -95,10 +94,7 @@ export function ThreadListSidebar({
   const [conversationSearch, setConversationSearch] = useState("");
   const [legacySearchQuery, setLegacySearchQuery] = useState("");
   const floatingToolbarRef = useRef<HTMLDivElement>(null);
-  const [dockedExpandPosition, setDockedExpandPosition] = useState<{
-    left: number;
-    top: number;
-  } | null>(null);
+  const [isNarrowToolbar, setIsNarrowToolbar] = useState(false);
   useEffect(() => {
     if (
       !isCollapsed ||
@@ -110,13 +106,7 @@ export function ThreadListSidebar({
     if (!page) return;
     const updateDockPosition = () => {
       const bounds = page.getBoundingClientRect();
-      const toolbarTop =
-        floatingToolbarRef.current?.getBoundingClientRect().top;
-      setDockedExpandPosition(
-        bounds.width <= 1034 && toolbarTop !== undefined
-          ? { left: Math.max(0, bounds.left) + 4, top: toolbarTop + 4 }
-          : null
-      );
+      setIsNarrowToolbar(bounds.width <= 1034);
     };
     const observer = new ResizeObserver(updateDockPosition);
     observer.observe(page);
@@ -137,7 +127,8 @@ export function ThreadListSidebar({
       <div
         ref={floatingToolbarRef}
         data-floating-sidebar-trigger
-        data-expand-docked={dockedExpandPosition !== null || undefined}
+        style={{ left: 12 }}
+        data-expand-gutter={isNarrowToolbar || undefined}
         data-collapsed-agent-toolbar={
           !newChatDesign || selectedAgent ? "" : undefined
         }
@@ -146,20 +137,7 @@ export function ThreadListSidebar({
           (!newChatDesign || selectedAgent) && toolbarStyles.toolbar
         )}
       >
-        {(!newChatDesign || selectedAgent) && dockedExpandPosition !== null ? (
-          createPortal(
-            <div
-              data-docked-agent-expand
-              className="fixed z-20"
-              style={dockedExpandPosition}
-            >
-              <ConversationExpandButton compact />
-            </div>,
-            document.body
-          )
-        ) : (
-          <ConversationExpandButton />
-        )}
+        <ConversationExpandButton />
         {(!newChatDesign || selectedAgent) && (
           <>
             <TooltipIconButton

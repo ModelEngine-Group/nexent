@@ -4,9 +4,9 @@
   container: agent-chat / inline-size;
 }
 
-/* Reserve a narrow gutter only while the compact expand control is docked. */
-.page:has([data-expand-docked="true"]) {
-  padding-left: 32px;
+/* Keep the original 32px control at a 12px inset, clear of the replies. */
+.page:has([data-expand-gutter="true"]) {
+  padding-left: 56px;
 }
 
 .discovery [data-active="true"]:not(:hover) {
@@ -14,6 +14,7 @@
 }
 
 .toolbar {
+  left: 12px;
   /* ThreadView caps its centered message viewport at 922px. */
   max-width: max(32px, calc((100cqw - 922px) / 2 - 24px));
 }
@@ -41,11 +42,5 @@
 @container agent-chat (max-width: 1106px) {
   .compose {
     display: none;
-  }
-}
-
-@container agent-chat (max-width: 1034px) {
-  .toolbar {
-    left: 0;
   }
 }

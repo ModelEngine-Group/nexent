@@ -160,7 +160,7 @@ test("Workbench places title and search above its full-width new-conversation bu
   ).toBe(false);
 });
 
-test("narrow Agent chat docks its expand action outside the clipped conversation and restores it on widening", () => {
+test("narrow Agent chat retains the original expand position and reserves a content gutter", () => {
   let notifyResize: (() => void) | undefined;
   const originalResizeObserver = window.ResizeObserver;
   window.ResizeObserver = class {
@@ -193,25 +193,21 @@ test("narrow Agent chat docks its expand action outside the clipped conversation
       top: 72,
     } as DOMRect);
     act(() => notifyResize?.());
-    const docked = document.querySelector("[data-docked-agent-expand]")!;
-    expect(page.contains(docked)).toBe(false);
-    expect(docked).toHaveClass("z-20");
-    expect(toolbar).toHaveAttribute("data-expand-docked", "true");
-    expect(docked).toHaveStyle({ left: "244px", top: "76px" });
-    // Both targets keep the icon center at toolbar top + 16px.
-    expect(Number.parseFloat((docked as HTMLElement).style.top) + 12).toBe(
-      72 + 16
-    );
+    expect(toolbar).toHaveAttribute("data-expand-gutter", "true");
+    expect(toolbar).toHaveClass("left-3", "top-3");
+    expect(
+      page.contains(screen.getByRole("button", { name: "chat.sidebar.expand" }))
+    ).toBe(true);
     expect(
       screen.getByRole("button", { name: "chat.sidebar.expand" })
-    ).toHaveClass("!size-6");
+    ).toHaveClass("!size-8");
     fireEvent.click(
       screen.getByRole("button", { name: "chat.sidebar.expand" })
     );
     expect(sidebar.toggleSidebar).toHaveBeenCalledTimes(1);
     bounds.mockReturnValue({ width: 1600, left: 240 } as DOMRect);
     act(() => notifyResize?.());
-    expect(document.querySelector("[data-docked-agent-expand]")).toBeNull();
+    expect(toolbar).not.toHaveAttribute("data-expand-gutter");
     expect(
       page.contains(screen.getByRole("button", { name: "chat.sidebar.expand" }))
     ).toBe(true);

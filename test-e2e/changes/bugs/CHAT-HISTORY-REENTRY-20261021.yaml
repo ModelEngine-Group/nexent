@@ -18,8 +18,8 @@ change:
     behaviors:
     - Reopen the same history after returning to discovery repeatedly.
     - Resolve metadata and fallback bindings, preserve invalid metadata and cancelled activation behavior.
-    - Preserve the expand icon vertical center with a nonzero page offset when docking.
-    - Keep the docked expand control below the primary navigation hover layer, with a dedicated narrow gutter and symmetric horizontal button inset.
+    - Keep the original expand button position and size when width decreases, with a reserved gutter.
+    - Keep floating expand controls below the primary navigation hover layer.
     - Preserve Workbench collapse through conversation, model, bootstrap and resource loading boundaries.
     test_selectors:
     - frontend/tests/component/historyThreadTrigger.test.tsx
