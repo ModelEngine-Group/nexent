@@ -117,27 +117,26 @@ it("renders knowledge as an icon-free list by default with descriptive metadata"
   expect(row?.querySelector(".lucide-database, img, .ant-avatar")).toBeNull();
 });
 
-it("opens configurable tag management without committing knowledge selection", () => {
+it("retains filtering and draft selection without a tag management entry", () => {
   const confirm = vi.fn();
   render(
     <KnowledgeDrawer
       open
       onClose={vi.fn()}
       onConfirm={confirm}
-      enableTagManagement
-      knowledgeBases={[{ ...knowledgeBases[0], permission: "READ_ONLY" }]}
+      knowledgeBases={knowledgeBases}
     />
   );
-  fireEvent.click(screen.getByRole("button", { name: "管理标签" }));
-  expect(screen.getAllByRole("dialog")).toHaveLength(2);
-  expect(document.querySelector(".ant-modal-title")).toHaveTextContent(
-    "管理标签"
-  );
   expect(
-    screen
-      .getAllByRole("button", { name: "管理标签" })
-      .some((button) => button.hasAttribute("disabled"))
-  ).toBe(true);
+    screen.queryByRole("button", { name: /管理标签|标签管理/ })
+  ).toBeNull();
+  expect(
+    screen.getByRole("button", { name: "repository.tagFilter.button" })
+  ).toBeInTheDocument();
+  const option = screen.getByRole("option", { name: "Handbook" });
+  fireEvent.click(option);
+  expect(option).toHaveAttribute("aria-selected", "true");
+  expect(screen.getAllByRole("dialog")).toHaveLength(1);
   expect(confirm).not.toHaveBeenCalled();
 });
 

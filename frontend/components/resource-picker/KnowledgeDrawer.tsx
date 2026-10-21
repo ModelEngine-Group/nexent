@@ -33,7 +33,6 @@ import { useResourceTagFilter } from "@/hooks/useResourceTagFilter";
 import { ResourceTagFilterControl } from "./ResourceTagFilterControl";
 import { ResourceAssignedTags } from "./ResourceAssignedTags";
 import { useResourceTagAssignments } from "@/hooks/useResourceTagAssignments";
-import { ResourceTagManagementModal } from "./ResourceTagManagementModal";
 
 import styles from "./ResourcePickerDrawer.module.css";
 
@@ -103,8 +102,6 @@ export interface KnowledgeDrawerProps {
   isAidpSearch?: boolean;
   /** Refresh action (wired to the drawer's refresh button). */
   onRefresh?: () => void;
-  onOpenManageTags?: () => void;
-  enableTagManagement?: boolean;
   // Embedding-model compatibility inputs for nexent-source validation.
   toolMultimodal?: boolean | null;
   currentEmbeddingModel?: string | null;
@@ -126,8 +123,6 @@ export function KnowledgeDrawer({
   maxSelect,
   isAidpSearch = false,
   onRefresh,
-  onOpenManageTags,
-  enableTagManagement = false,
   toolMultimodal = null,
   currentEmbeddingModel = null,
   currentMultiEmbeddingModel = null,
@@ -135,12 +130,6 @@ export function KnowledgeDrawer({
   currentMultiEmbeddingModelId = null,
 }: KnowledgeDrawerProps) {
   const { t } = useTranslation("common");
-  const [tagManagementOpen, setTagManagementOpen] = useState(false);
-  const [previousOpen, setPreviousOpen] = useState(open);
-  if (previousOpen !== open) {
-    setPreviousOpen(open);
-    if (!open) setTagManagementOpen(false);
-  }
   const { user } = useAuthorizationContext();
   const tenantId = user?.tenantId ?? null;
 
@@ -541,13 +530,6 @@ export function KnowledgeDrawer({
           />
         }
         listTitle={t("resourcePicker.list.knowledge", "知识库列表")}
-        tagManagement={
-          onOpenManageTags || enableTagManagement
-            ? {
-                onClick: onOpenManageTags ?? (() => setTagManagementOpen(true)),
-              }
-            : undefined
-        }
         total={filteredKbs.length}
         page={page}
         onPageChange={setPage}
@@ -658,23 +640,6 @@ export function KnowledgeDrawer({
           </ResourceCollection>
         )}
       </ResourceDrawer>
-
-      {tagManagementOpen && (
-        <ResourceTagManagementModal
-          resourceType="knowledge_base"
-          resources={knowledgeBases.map((kb) => ({
-            id: kb.id,
-            name: kb.display_name || kb.name,
-            canEdit: kb.permission === "EDIT",
-          }))}
-          definitions={resourceTags.definitions}
-          onClose={() => {
-            setTagManagementOpen(false);
-            resourceTags.retry();
-          }}
-          onSaved={() => resourceTags.retry()}
-        />
-      )}
 
       {/* Model-mismatch confirmation modal */}
       <KnowledgeModelMismatchModal
