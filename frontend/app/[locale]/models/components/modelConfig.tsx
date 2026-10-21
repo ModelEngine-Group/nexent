@@ -1,3 +1,5 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import {
   forwardRef,
   useEffect,
@@ -30,6 +32,7 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { MODEL_TYPES, MODEL_STATUS } from "@/const/modelConfig";
 import { useConfig, CONFIG_QUERY_KEY } from "@/hooks/useConfig";
 import { usePermission } from "@/hooks/permission/usePermission";
+import { updateModelOutlet } from "@/services/modelProfileService";
 import { modelService, ModelError } from "@/services/modelService";
 import { loadMemoryConfig } from "@/services/memoryService";
 import {
@@ -40,6 +43,7 @@ import {
 import log from "@/lib/logger";
 
 import { ModelAddDialog } from "./model/ModelAddDialog";
+import { ModelOutletEditDialog } from "./model/ModelOutletEditDialog";
 import { ModelEditDialog } from "./model/ModelEditDialog";
 import { ModelSlotSelect, buildModelSlots } from "./model/ModelSlotSelect";
 import { ModelLibraryList } from "./model/ModelLibraryList";
@@ -322,12 +326,14 @@ export const ModelConfigSection = forwardRef<
         try {
           // Partial update: only api_key + base_url are sent; the backend
           // leaves every other field untouched.
-          await modelService.updateSingleModel({
-            currentDisplayName: m.displayName,
-            url: patch.url,
-            apiKey: patch.apiKey,
-            source: m.source,
-          });
+          if (m.type === "llm" && m.profileSchemaVersion && m.configRevision) {
+            await updateModelOutlet(m.id, { expected_revision: m.configRevision,
+              connection: { base_url: patch.url }, ...(patch.apiKey ? { api_key: patch.apiKey } : {}) });
+          } else {
+            await modelService.updateSingleModel({
+              currentDisplayName: m.displayName, url: patch.url, apiKey: patch.apiKey, source: m.source,
+            });
+          }
         } catch (e: any) {
           failed += 1;
           log.error("batch update model failed", m.displayName, e);
@@ -1138,6 +1144,7 @@ export const ModelConfigSection = forwardRef<
 
             {/* -------------------- Model library list (v0 redesign) -------------------- */}
             <ModelLibraryList
+              onReviewed={() => { void loadModelLists(true); }}
               models={models}
               defaultSlotMap={defaultSlotMap}
               onCheck={verifyOneModel}
@@ -1160,7 +1167,7 @@ export const ModelConfigSection = forwardRef<
                 queryKey: CONFIG_QUERY_KEY,
               });
               await loadModelLists(true);
-              if (newModel && newModel.name && newModel.type) {
+              if (newModel && newModel.name && newModel.type && !newModel.connectionChecked) {
                 setTimeout(() => {
                   verifyOneModel(newModel.name, newModel.type);
                 }, 100);
@@ -1181,7 +1188,9 @@ export const ModelConfigSection = forwardRef<
           />
 
           {/* v2.6.1: per-model edit dialog (v0 design, single-page form) */}
-          {editingCardModel && (
+          {editingCardModel && editingCardModel.type === "llm" && editingCardModel.profileSchemaVersion ? (
+            <ModelOutletEditDialog modelId={editingCardModel.id} onClose={() => setEditingCardModel(null)} onSuccess={async () => { setEditingCardModel(null); await loadModelLists(true); }} />
+          ) : editingCardModel && (
             <ModelEditDialog
               key={editingCardModel.id}
               model={editingCardModel}

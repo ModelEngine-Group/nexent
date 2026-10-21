@@ -1,0 +1,33 @@
+schema_version: '1.0'
+change:
+  change_id: SESSION-MODEL-UNIFY-20261020
+  change_type: requirement
+  requirement_id: SESSION-MODEL-UNIFY-20261020
+  title: Unify Workbench and ordinary Agent conversation model parameters
+  description: Replace temporary generation controls with profile preferences, preserve shared UI and migrate saved Workbench values.
+  affected_features:
+    existing: [CHAT-MODEL-CONTROLS, BE-MODEL-OUTLET-PERSISTENCE]
+    added: []
+    modified: [CHAT-MODEL-CONTROLS]
+    retired: []
+  affected_cases:
+    existing: [MOP-D3-001]
+    added: [CHAT-MODEL-CONTROLS-D5-001]
+    modified: [CHAT-MODEL-CONTROLS-D2-001, CHAT-MODEL-CONTROLS-D2-002, CHAT-MODEL-CONTROLS-D3-001, CHAT-MODEL-CONTROLS-D3-002, CHAT-MODEL-CONTROLS-D4-001, CHAT-MODEL-CONTROLS-D4-002, CHAT-MODEL-CONTROLS-D4-003]
+    retired: []
+  feature_contract_changed: true
+  traditional_ut:
+    decision: strengthen
+    reason: Selection, preference validation, CAS and root isolation already have UT; replace removed parallel DTO assertions and strengthen first-turn drafts, migration and shared paths.
+    behaviors:
+    - Empty stop is retried once within the physical request budget and never cascades into protocol repair
+    - Debug controls use canonical drafts without changing Agent or outlet definitions
+    - Both conversation modes use the same editor and canonical preference format
+    - First-turn intent persists with the correct conversation mode and survives rejection
+    - Root-only merging preserves child Agents and profile defaults
+    - Invalid values, permissions and CAS conflicts prevent downstream writes or runs
+    test_selectors:
+    - test/backend/services/test_run_model_controls.py
+    - test/backend/services/test_conversation_model_preferences_service.py
+    - test/backend/agents/test_workbench_generation_overlay.py
+  notes: User approved implementation after confirming both entrypoints are Agent conversations. Existing formal cases are retained; no new D1 duplicates UT. Runtime, browser and migration proof are distinct from unit execution.

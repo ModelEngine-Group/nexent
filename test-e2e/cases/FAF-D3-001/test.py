@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """FAF-D3-001: exercise the deployed Agent with its configured real model."""
 
 import argparse
@@ -120,7 +122,7 @@ def main():
     if args.run:
         fixture = json.loads((args.evidence / "fixtures.json").read_text(encoding="utf-8"))[args.run]
         body = {"query": "请按职责执行本次最终回答展示验收。", "agent_id": fixture["agent_id"],
-                "version_no": fixture["version_no"], "history": [], "generation_config": {"deep_thinking": False}, "is_debug": False}
+                "version_no": fixture["version_no"], "history": [], "model_parameter_preferences": {}, "is_debug": False}
         response = client.post(args.base + "/api/agent/run", json=body, stream=True, timeout=(30, 240))
         response.raise_for_status()
         conversation = response.headers.get("conversation_id")

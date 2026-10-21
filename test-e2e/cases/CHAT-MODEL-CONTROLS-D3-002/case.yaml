@@ -30,6 +30,9 @@ case:
     - order: 3
       action: Start delayed B generation, cancel it, select C and retry with existing retry/conversation identifiers; deliver a delayed old B event after C starts.
       expected: B stops, C receives the new immutable controls/capacity and only C events update the active turn; no extra logical user turn or late B draft write overwrites C. Native retry preserves existing immutable branch rows at one message index and respects worker-drain admission; creator retry reuses its saved user ID. Old SSE is consumed after C starts and delayed provider responses are released after C where admission allows it.
+    - order: 4
+      action: Return empty normal-stop responses with strict protocol repair both enabled and disabled; optionally return a visible answer on the second request.
+      expected: Exactly two identical physical requests; success recovers once, persistent empty ends with error without protocol repair or another Agent step.
   expected_results:
     - Explicit failure never becomes another model run and keeps recoverable valid state.
     - Provider failure and cancellation unlock the appropriate controls while retaining existing terminal/error protocols and committed valid draft state.
@@ -43,6 +46,11 @@ case:
   execution:
     profiles: [{name: mock, required_services: [model-provider, http-fixture]}]
   acceptance:
+    - id: AC-03
+      description: Empty stop has one retry in the unified model layer and never cascades into semantic protocol repair.
+      steps: [4]
+      expected_results: [1, 2]
+      forbidden_side_effects: [1, 2]
     - id: AC-01
       description: Model loss and stream failure recover without fallback or unauthorized state changes.
       steps: [1, 2]

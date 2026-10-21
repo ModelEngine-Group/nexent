@@ -15,7 +15,7 @@ import uvicorn
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from apps import agent_app, skill_app
+from apps import agent_app, skill_app, conversation_management_app
 from model_controls.database import database_fixture
 from model_controls.provider import Provider
 from services import nl2agent_service as nl2agent_service
@@ -61,18 +61,30 @@ class RuntimeFixture:
         if "agent" in path:
             body["agent_id"] = self.agent_id
         if generation is not None:
-            body["generation_config"] = generation
+            from model_controls.profiles import preference_values
+            body["model_parameter_preferences"] = {str(model_id): preference_values(generation)}
         if workbench:
-            config = {"schema_version": 3, "mode": "agent_create" if "nl2agent" in path else
-                      "skill_create" if "nl2skill" in path else "generic_chat", "model_id": model_id,
-                      "generation_config": generation or {"deep_thinking": True, "thinking_effort": "auto"},
+            config = {"schema_version": 4, "mode": "agent_create" if "nl2agent" in path else
+                      "skill_create" if "nl2skill" in path else "generic_chat",
                       "agent_mounts": [], "skill_mounts": []}
             if "nl2" in path:
                 body["workbench_config"] = config
                 body["persist_history"] = True
             else:
                 body.update(entrypoint="workbench", workbench=config)
-        return self.client.post(path, json=body, headers={"Authorization": "Bearer fixture-creator"})
+        headers = {"Authorization": "Bearer fixture-creator"}
+        if body.get("conversation_id") and body.get("model_parameter_preferences"):
+            preferences = body.pop("model_parameter_preferences")[str(model_id)]
+            endpoint = f"/api/conversation/{body['conversation_id']}/model_preferences"
+            saved = self.client.get(endpoint, headers=headers)
+            assert saved.status_code == 200, saved.text
+            selected = self.client.patch(endpoint, headers=headers, json={
+                "selected_model_id": model_id, "expected_version": saved.json()["data"]["version"]})
+            assert selected.status_code == 200, selected.text
+            patched = self.client.patch(endpoint + f"/{model_id}", headers=headers, json={
+                "parameter_values": preferences, "expected_version": selected.json()["data"]["version"]})
+            assert patched.status_code == 200, patched.text
+        return self.client.post(path, json=body, headers=headers)
 
     def draft(self):
         from sqlalchemy import select
@@ -81,6 +93,19 @@ class RuntimeFixture:
             row = session.scalars(select(AgentInfo).where(AgentInfo.agent_id == self.agent_id, AgentInfo.version_no == 0)).one()
             return {"description": row.description, "model_ids": list(row.model_ids), "model_params_override": row.model_params_override,
                     "business_logic_model_id": row.business_logic_model_id}
+
+    def set_outlet_defaults(self, label, values):
+        from database.db_models import ModelRecord
+        from management.services.model.adapter import restore_model_snapshot
+        from nexent.core.model_service.profiles.outlet_storage import encode_resolved_model_profile
+        from nexent.core.model_service.registry import model_service_references
+        with self.storage["sessions"]() as session:
+            record = session.get(ModelRecord, self.models[label])
+            row = {column.name: getattr(record, column.name) for column in record.__table__.columns}
+            profile = restore_model_snapshot(row, row["tenant_id"])
+            profile = profile.model_copy(update={"parameter_values": values(profile.parameter_values)})
+            for key, value in encode_resolved_model_profile(profile, registered_references=model_service_references()).items():
+                setattr(record, key, value)
 
     def model_records(self):
         from sqlalchemy import select
@@ -116,7 +141,9 @@ def runtime_fixture(monkeypatch):
             from permissions import rbac
             old_permissions, old_initialized = rbac._ROLE_PERMISSIONS.copy(), rbac._INITIALIZED
             rbac.init_rbac()
-            monkeypatch.setattr(nl2agent_service, "get_tenant_local_mcp_server", lambda _: mcp_url)
+            for module in (nl2agent_service, nl2skill_service, create_agent_info):
+                if hasattr(module, "get_tenant_local_mcp_server"):
+                    monkeypatch.setattr(module, "get_tenant_local_mcp_server", lambda _: mcp_url)
             monkeypatch.setattr(agent_app, "ENABLE_AGENT_WORKBENCH", True)
             monkeypatch.setattr(skill_app, "ENABLE_AGENT_WORKBENCH", True)
             from management.services.agent import execution as ordinary
@@ -152,6 +179,7 @@ def runtime_fixture(monkeypatch):
             app = FastAPI()
             app.include_router(agent_app.agent_runtime_router, prefix="/api")
             app.include_router(skill_app.skill_creator_router, prefix="/api")
+            app.include_router(conversation_management_app.router, prefix="/api")
             with TestClient(app) as http:
                 try:
                     yield RuntimeFixture(storage, provider, http, runs)

@@ -1,0 +1,51 @@
+schema_version: '1.0'
+stage: D5
+module: CHAT-MESSAGE
+case:
+  case_id: CHAT-MODEL-CONTROLS-D5-001
+  feature_id: CHAT-MODEL-CONTROLS
+  requirement_ids: [SESSION-MODEL-UNIFY-20261020]
+  business_rule_ids: [CHAT-MODEL-CONTROLS-RULE-003]
+  title: Migrate Workbench model settings into shared conversation preferences
+  type: DEPLOYMENT
+  priority: P0
+  status: active
+  automation: automated
+  objective: Prove actual PostgreSQL data upgrade preserves explicit values and unrelated conversation state.
+  preconditions: [Disposable UUID-owned PostgreSQL database, Historical v3 Workbench declarations and new preference columns]
+  test_data:
+    configuration: Non-secret synthetic conversation rows with zero/false values, budgets, existing preferences and resource mounts.
+  steps:
+  - order: 1
+    action: Execute the production migration on representative historical and ordinary conversation rows.
+    expected: Old values become canonical per-model preferences, existing new values win, inactive degrees disappear, and unrelated state remains identical.
+  - order: 2
+    action: Execute the migration again and compare every persisted field including revisions and timestamps.
+    expected: No row changes on repetition.
+  - order: 3
+    action: Supply historical settings without a model identity and attempt the upgrade.
+    expected: Upgrade fails explicitly and leaves all original settings unchanged rather than assigning them to an arbitrary model.
+  expected_results:
+  - Exact converted values, root selection, mounts and message fixtures survive without two editable parameter stores.
+  - Repeated migration is idempotent including audit and revision fields.
+  - Missing identity does not discard historical configuration.
+  forbidden_side_effects:
+  - No production database, provider request or credential in evidence.
+  - No modification of published Agents, existing messages or unrelated resources.
+  risk_type: DEPLOYMENT
+  risk: Historical session settings may be lost, misassigned or applied twice during upgrade.
+  condition: [Actual PostgreSQL with representative historical Workbench settings]
+  metrics: [Value mismatch count, Unrelated-state mismatch count, Repeat-update count]
+  thresholds: [All mismatch counts are zero, Repeat-update count is zero]
+  recovery_expectations: [Ambiguous identity fails without mutating the historical settings]
+  acceptance:
+  - id: AC-01
+    description: Historical settings convert exactly without changing unrelated state.
+    steps: [1]
+    expected_results: [1]
+    forbidden_side_effects: [1, 2]
+  - id: AC-02
+    description: Repetition is idempotent and ambiguous identity cannot cause data loss.
+    steps: [2, 3]
+    expected_results: [2, 3]
+    forbidden_side_effects: [1, 2]

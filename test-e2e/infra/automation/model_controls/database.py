@@ -44,14 +44,18 @@ def database_fixture(monkeypatch, provider):
         raise
 
     @contextmanager
-    def sessions():
+    def sessions(existing=None):
+        if existing is not None:
+            yield existing
+            return
         with Session(engine) as session, session.begin():
             yield session
 
     original_session = client.get_db_session
     # Conversation DAC resolves this table lazily; load it before session routing.
     import importlib
-    importlib.import_module("database.user_tenant_db")
+    for module_name in ("database.user_tenant_db", "database.model_outlet_db", "database.conversation_model_preferences_db"):
+        importlib.import_module(module_name)
     for name, module in list(sys.modules.items()):
         if name.startswith("database.") and getattr(module, "get_db_session", None) is original_session:
             monkeypatch.setattr(module, "get_db_session", sessions)
@@ -79,6 +83,13 @@ def database_fixture(monkeypatch, provider):
                 )
                 session.add(record)
                 session.flush()
+                from model_controls.profiles import frozen_fixture_profile
+                from nexent.core.model_service.profiles.outlet_storage import encode_resolved_model_profile
+                from nexent.core.model_service.registry import model_service_references
+                row = {column.name: getattr(record, column.name) for column in record.__table__.columns}
+                profile = frozen_fixture_profile(row, BUDGET if "budget" in label else CAPABILITY)
+                for key, value in encode_resolved_model_profile(profile, registered_references=model_service_references()).items():
+                    setattr(record, key, value)
                 models[label] = record.model_id
             session.add(db_models.TenantConfig(
                 tenant_id=tenant, user_id=owner, config_key=MODEL_CONFIG_MAPPING["llm"],
@@ -90,8 +101,8 @@ def database_fixture(monkeypatch, provider):
                 tenant_id=tenant, enabled=True, provide_run_summary=False, is_main_agent=True,
                 group_ids="[]", ingroup_permission="PRIVATE", created_by=owner, updated_by=owner,
                 duty_prompt="Complete the fixture task.", allow_chat_metadata=False,
-                constraint_prompt="", few_shots_prompt="", example_questions=[], greeting_message="",
-                model_params_override={str(value): {"extra_params": {}, **({"temperature": 0.56} if key == "selected-B" else {})}
+                example_questions=[], greeting_message="",
+                model_params_override={str(value): {"parameter_values": {**({"temperature": 0.56} if key == "selected-B" else {})}}
                                        for key, value in list(models.items())[:3]},
             )
             session.add(actor)
@@ -103,7 +114,7 @@ def database_fixture(monkeypatch, provider):
                 tenant_id=tenant, model_ids=[models["business-C"]], max_steps=1, enabled=True,
                 is_main_agent=False, provide_run_summary=False, group_ids="[]", ingroup_permission="PRIVATE",
                 created_by=owner, updated_by=owner, duty_prompt="Return the fixture result.",
-                constraint_prompt="", few_shots_prompt="", example_questions=[], greeting_message="",
+                example_questions=[], greeting_message="",
             )
             session.add(child)
             session.flush()
@@ -119,7 +130,7 @@ def database_fixture(monkeypatch, provider):
                     model_ids=[models["default-A"]], max_steps=3, enabled=True, tenant_id=tenant,
                     is_main_agent=True, provide_run_summary=False, group_ids="[]", ingroup_permission="READ_ONLY",
                     created_by=owner, updated_by=owner, duty_prompt="Complete fixture tasks.",
-                    constraint_prompt="", few_shots_prompt="", example_questions=[], greeting_message="",
+                    example_questions=[], greeting_message="",
                 ))
                 session.flush()
             for typ, sub in [("agent", "create"), ("skill", "create"), ("agent", "read"), ("agent", "use")]:
