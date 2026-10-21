@@ -169,7 +169,7 @@ def test_activity_page_uses_time_and_id_boundary_and_last_visible_cursor(session
     assert "anon_1.activity_time < %(activity_time_1)s" in sql
     assert "anon_1.activity_time = %(activity_time_2)s AND anon_1.conversation_id < %(conversation_id_1)s" in sql
     assert "ORDER BY anon_1.activity_time DESC, anon_1.conversation_id DESC" in sql
-    assert compiled.params["activity_time_1"] == compiled.params["activity_time_2"] == moment
+    assert compiled.params["activity_time_1"] == compiled.params["activity_time_2"] == moment.replace(tzinfo=None)
     assert compiled.params["conversation_id_1"] == 42
     assert compiled.params["created_by_1"] == "owner" and compiled.params["delete_flag_1"] == "N"
     limit_parameter = re.search(r"LIMIT %\((\w+)\)s", sql).group(1)
@@ -197,3 +197,25 @@ def test_exhausted_activity_cursor_retains_scope_counts_without_another_cursor(s
     sql = str(session.execute.call_args_list[1].args[0].compile(dialect=postgresql.dialect()))
     assert "created_by" in sql and "delete_flag" in sql
     assert "activity_time <" not in sql and "LIMIT" not in sql
+
+
+def test_activity_storage_clock_and_fallback_are_naive_utc(session):
+    assert db.ConversationRecord.last_activity_time.type.timezone is False
+    db.create_conversation_message(message(), "owner", message_source=MessageSource.AUTOMATION)
+    touch = session.execute.call_args_list[-1].args[0].compile(dialect=postgresql.dialect())
+    assert "greatest(" in str(touch) and "timezone(" in str(touch)
+    assert "UTC" in touch.params.values()
+    fallback = str(db._activity_time_expression().compile(dialect=postgresql.dialect()))
+    assert "coalesce(" in fallback and "create_time" in fallback and "timezone(" not in fallback
+
+
+def test_naive_utc_cursor_never_uses_the_process_timezone():
+    class StoredTime(datetime):
+        def astimezone(self, tz=None):
+            assert self.tzinfo is not None, "Naive storage time must be assigned UTC first"
+            return super().astimezone(tz)
+
+    moment = StoredTime(2026, 10, 21, 2, 3, 4, 123456)
+    assert decode_activity_cursor(encode_activity_cursor(moment, 42)) == (
+        datetime(2026, 10, 21, 2, 3, 4, 123456, tzinfo=timezone.utc), 42,
+    )

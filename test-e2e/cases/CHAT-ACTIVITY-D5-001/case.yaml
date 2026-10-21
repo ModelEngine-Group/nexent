@@ -6,6 +6,7 @@ case:
   feature_id: CHAT-SIDEBAR
   requirement_ids:
   - CHAT-AUTOMATION-ACTIVITY-20261020
+  - CHAT-ACTIVITY-TIMESTAMP-20261021
   business_rule_ids:
   - CHAT-SIDEBAR-RULE-004
   title: Additive activity and message-source migration preserves mixed legacy conversations
@@ -38,11 +39,15 @@ case:
     action: Repeat migration and query defaults, activity, indexes and row preservation.
     expected: Second application is idempotent; normal defaults and existing rows are preserved; no new business
       table is introduced.
+  - order: 3
+    action: Apply and replay the revised migration under UTC, Asia/Shanghai and America/New_York to both fresh legacy fixtures and an already-deployed activity column with time zone and its old index.
+    expected: Activity has timestamp without time zone type; converted UTC instants and microseconds, sources and unrelated audit values remain unchanged; the replacement index uses the same naive fallback as list queries.
   expected_results:
   - Only explicit automation message identities are classified; last visible message time is backfilled, not administrative
     update time.
   - Second application is idempotent; normal defaults and existing rows are preserved; no new business table is
     introduced.
+  - Fresh and previously deployed schemas preserve UTC activity and subsecond precision across connection timezones, with matching indexes and repeatable conversion.
   forbidden_side_effects:
   - No production data/schema mutation, quota bypass by ordinary requests, loss of composer/stream state or changes
     to unrelated histories.
@@ -73,6 +78,11 @@ case:
     - 2
     forbidden_side_effects:
     - 1
+  - id: AC-03
+    description: Fresh and old activity schemas migrate to a naive UTC timestamp without shifting values across database timezones.
+    steps: [3]
+    expected_results: [3]
+    forbidden_side_effects: [1]
   risk: Legacy migration and idempotency
   metrics:
   - All assertions pass

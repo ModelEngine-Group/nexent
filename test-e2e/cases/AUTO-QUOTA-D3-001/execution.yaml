@@ -10,6 +10,8 @@ acceptance_bindings:
   - test_mixed_source_quota_activity_and_cursor
   AC-02:
   - test_mixed_source_quota_activity_and_cursor
+  AC-03:
+  - test_mixed_source_quota_activity_and_cursor
 preparation:
   families: []
   anchors: false

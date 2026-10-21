@@ -112,7 +112,7 @@ def probe(monkeypatch):
                 session.add(ConversationRecord(
                     conversation_id=identity, conversation_title="New Conversation",
                     created_by=owner, updated_by=owner, delete_flag="N", workbench_config={},
-                    last_activity_time=previous, update_time=previous.replace(tzinfo=None),
+                    last_activity_time=previous.replace(tzinfo=None), update_time=previous.replace(tzinfo=None),
                 ))
             session.add(ConversationMessage(
                 message_id=100, conversation_id=1, message_index=1, message_role="assistant",

@@ -10,6 +10,8 @@ acceptance_bindings:
   - test_additive_migration_and_repeatability
   AC-02:
   - test_additive_migration_and_repeatability
+  AC-03:
+  - test_additive_migration_and_repeatability
 preparation:
   families: []
   anchors: false

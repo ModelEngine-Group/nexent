@@ -286,10 +286,10 @@ def create_conversation(conversation_title: str, user_id: Optional[str] = None,
 
 
 def _activity_time_expression():
-    """Use UTC creation for empty or pre-backfill conversations."""
+    """Use naive UTC creation for empty or pre-backfill conversations."""
     return func.coalesce(
         ConversationRecord.last_activity_time,
-        func.timezone("UTC", ConversationRecord.create_time),
+        ConversationRecord.create_time,
     )
 
 
@@ -302,7 +302,9 @@ def _touch_conversation_activity(session, conversation_id: int, user_id: Optiona
     if user_id:
         statement = statement.where(ConversationRecord.created_by == user_id)
     session.execute(statement.values(
-        last_activity_time=func.greatest(ConversationRecord.last_activity_time, func.clock_timestamp()),
+        last_activity_time=func.greatest(
+            ConversationRecord.last_activity_time, func.timezone("UTC", func.clock_timestamp()),
+        ),
         update_time=func.clock_timestamp(),
         **({"updated_by": user_id} if user_id else {}),
     ))
@@ -1190,6 +1192,7 @@ def get_conversation_list_page(
         statement = select(rows).order_by(rows.c.activity_time.desc(), rows.c.conversation_id.desc())
         if boundary:
             moment, identity = boundary
+            moment = moment.replace(tzinfo=None)
             statement = statement.where(or_(
                 rows.c.activity_time < moment,
                 and_(rows.c.activity_time == moment, rows.c.conversation_id < identity),

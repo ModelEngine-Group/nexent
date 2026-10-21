@@ -73,8 +73,8 @@ class ConversationRecord(TableBase):
         comment="Monotonic title revision; every stored rename advances it independently of activity",
     )
     last_activity_time = Column(
-        TIMESTAMP(timezone=True), nullable=True,
-        comment="Last committed visible message activity in UTC; NULL falls back to conversation creation",
+        TIMESTAMP(timezone=False), nullable=True,
+        comment="Last committed visible message activity as a UTC timestamp; NULL falls back to conversation creation",
     )
     agent_id = Column(Integer, doc="Agent ID used by the latest run in this conversation")
     chat_mode = Column(

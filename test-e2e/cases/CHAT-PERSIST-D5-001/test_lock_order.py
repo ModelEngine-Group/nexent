@@ -44,7 +44,7 @@ class Contention:
         self.pids = {}
         self.trace = []
         self.after_lock = None
-        self.original_activity = datetime.now(timezone.utc) - timedelta(days=1)
+        self.original_activity = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=1)
 
     @contextmanager
     def session(self):

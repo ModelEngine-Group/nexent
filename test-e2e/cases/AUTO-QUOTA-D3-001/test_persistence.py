@@ -26,6 +26,7 @@ from consts.exceptions import AppException
 from consts.model import MessageRequest, MessageUnit
 from contracts.conversation import MessageSource, encode_activity_cursor
 from database import conversation_db as db
+from database import workbench_pin_db as pins
 from database.client import db_client
 from database.db_models import (
     ConversationMessage, ConversationMessageUnit, ConversationRecord,
@@ -35,8 +36,8 @@ from management.services.automation.conversation import AutomationConversationAd
 from management.services.conversation.service import save_message
 
 
-@pytest.fixture
-def persistence(monkeypatch):
+@pytest.fixture(params=["UTC", "Asia/Shanghai", "America/New_York"])
+def persistence(monkeypatch, request):
     schema = "auto_activity_" + uuid4().hex
     engine = db_client.engine.execution_options(schema_translate_map={"nexent": schema})
     with engine.begin() as connection:
@@ -48,9 +49,11 @@ def persistence(monkeypatch):
         @contextmanager
         def sessions():
             with Session(engine) as session, session.begin():
+                session.execute(text("SELECT set_config('TimeZone', :zone, true)"), {"zone": request.param})
                 yield session
 
         monkeypatch.setattr(db, "get_db_session", sessions)
+        monkeypatch.setattr(pins, "get_db_session", sessions)
         monkeypatch.setattr(db, "MAX_CONVERSATION_TURNS", 100)
         monkeypatch.setattr(routes, "get_current_user_id", lambda token: ("owner", "tenant"))
         now = datetime.now(timezone.utc)
@@ -61,7 +64,7 @@ def persistence(monkeypatch):
                     conversation_id=identity, conversation_title=f"History {identity}",
                     workbench_config={}, created_by=owner, updated_by=owner, delete_flag="N",
                     create_time=created.replace(tzinfo=None), update_time=now.replace(tzinfo=None),
-                    last_activity_time=created,
+                    last_activity_time=None if identity == 2 else created.replace(tzinfo=None),
                 ))
         app = FastAPI()
         app.include_router(routes.router, prefix="/api")
@@ -106,12 +109,13 @@ def test_mixed_source_quota_activity_and_cursor(persistence):
         ).group_by(ConversationMessage.message_source)).all())
         assert grouped == {"CHAT": 100, "AUTOMATION": 3}
         current = session.get(ConversationRecord, 1).last_activity_time
-        assert current > now
+        assert current.tzinfo is None
+        assert now.replace(tzinfo=None) < current <= datetime.now(timezone.utc).replace(tzinfo=None)
     placeholder = db.create_conversation_message(
         {"conversation_id": 1, "message_idx": 207, "role": "assistant", "content": ""},
         "owner", status="streaming", message_source=MessageSource.AUTOMATION,
     )
-    assert db.get_conversation(1, "owner")["last_activity_time"] == current.isoformat()
+    assert db.get_conversation(1, "owner")["last_activity_time"] == current.isoformat() + "Z"
     db.persist_assistant_run_batch(
         placeholder, 1, "completed answer", "completed", [], [], [], [], [], "owner", "tenant",
     )
@@ -121,7 +125,7 @@ def test_mixed_source_quota_activity_and_cursor(persistence):
         session.execute(update(ConversationRecord).where(ConversationRecord.conversation_id == 2).values(
             conversation_title="administrative rename", update_time=func.now(),
         ))
-    assert db.get_conversation(1, "owner")["last_activity_time"] == answered.isoformat()
+    assert db.get_conversation(1, "owner")["last_activity_time"] == answered.isoformat() + "Z"
     params = {"today_start_ms": int((now - timedelta(hours=1)).timestamp() * 1000),
               "week_start_ms": int((now - timedelta(days=7)).timestamp() * 1000),
               "conversation_type": "workbench", "limit": 1}
@@ -160,3 +164,34 @@ def test_mixed_source_quota_activity_and_cursor(persistence):
     with sessions() as session:
         assert session.get(ConversationRecord, 1).last_activity_time == answered
         assert session.scalar(select(func.count()).select_from(ConversationMessage)) == 104
+
+
+    # An explicit activity and a NULL fallback share the same UTC tie boundary.
+    with sessions() as session:
+        fallback = session.get(ConversationRecord, 2).create_time
+        session.add(ConversationRecord(
+            conversation_id=4, conversation_title="Tied history", workbench_config={},
+            created_by="owner", updated_by="owner", delete_flag="N",
+            create_time=fallback, update_time=fallback, last_activity_time=fallback,
+        ))
+        session.get(ConversationRecord, 1).workbench_pinned_at = now
+        session.get(ConversationRecord, 2).workbench_pinned_at = now - timedelta(seconds=1)
+    pinned = {row["conversation_id"]: row for row in pins.list_workbench_pins("owner", "tenant")}
+    assert pinned[1]["last_activity_time"] == int(answered.replace(tzinfo=timezone.utc).timestamp() * 1000)
+    assert pinned[2]["last_activity_time"] == int(fallback.replace(tzinfo=timezone.utc).timestamp() * 1000)
+    identities = []
+    cursor = None
+    for _ in range(3):
+        page_params = {**params, **({"cursor": cursor} if cursor else {})}
+        response = client.get("/api/conversation/list", params=page_params)
+        assert response.status_code == 200, response.text
+        page = response.json()["data"]
+        assert page["metadata"] == {"total": 3, "today": 1, "last_7_days": 0, "older": 2}
+        identities.extend(row["conversation_id"] for row in page["items"])
+        cursor = page["next_cursor"]
+    assert identities == [1, 4, 2] and cursor is None
+    assert [row["conversation_id"] for row in db.get_conversation_list("owner")] == identities
+    legacy_cursor = encode_activity_cursor(fallback.replace(tzinfo=timezone.utc), 4)
+    tail = client.get("/api/conversation/list", params={**params, "cursor": legacy_cursor}).json()["data"]
+    assert [row["conversation_id"] for row in tail["items"]] == [2]
+    assert tail["items"][0]["last_activity_time"] == pinned[2]["last_activity_time"]

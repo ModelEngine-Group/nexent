@@ -121,3 +121,16 @@ def test_database_update_failure_propagates_without_returning_success(session):
     with pytest.raises(RuntimeError, match="controlled database failure"):
         pins.set_workbench_pin(42, True, "user", "tenant")
     assert session.execute.call_count == 2
+
+
+def test_naive_utc_activity_epoch_never_uses_the_process_timezone(session):
+    class StoredTime(datetime):
+        def timestamp(self):
+            assert self.tzinfo is not None, "Naive storage time must be assigned UTC first"
+            return super().timestamp()
+
+    record = conversation()
+    record.last_activity_time = StoredTime(2026, 10, 1, 0, 0, 0, 123456)
+    session.execute.return_value = [result_row(record)]
+    result = pins.list_workbench_pins("user", "tenant")
+    assert result[0]["last_activity_time"] == int(STAMP.timestamp() * 1000) + 123
