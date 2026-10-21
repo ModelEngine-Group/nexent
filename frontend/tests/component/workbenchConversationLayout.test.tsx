@@ -1,7 +1,8 @@
 // Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
+import { useEffect } from "react";
 import { fireEvent, render, screen } from "@testing-library/react";
-import { expect, test } from "vitest";
+import { expect, test, vi } from "vitest";
 import { useSidebar } from "@/components/ui/sidebar";
 import { WorkbenchConversationLayout } from "@/features/workbench/components/WorkbenchConversationLayout";
 
@@ -99,3 +100,41 @@ test.each([
     }
   }
 );
+
+test("conversation loading leaves sidebar mounted and preserves its local search", () => {
+  const mounted = vi.fn();
+  function SidebarProbe() {
+    useEffect(() => {
+      mounted();
+    }, []);
+    return <input aria-label="history search" defaultValue="" />;
+  }
+  function Page({ ready }: { ready: boolean }) {
+    return (
+      <WorkbenchConversationLayout ready>
+        <SidebarProbe />
+        <WorkbenchLoadingBoundary
+          conversationReady={ready}
+          modelsLoading={false}
+          bootstrapLoading={false}
+          resourcesResolving={false}
+        >
+          <Conversation />
+        </WorkbenchLoadingBoundary>
+      </WorkbenchConversationLayout>
+    );
+  }
+  const { rerender } = render(<Page ready />);
+  fireEvent.change(screen.getByRole("textbox", { name: "history search" }), {
+    target: { value: "saved search" },
+  });
+  for (let attempt = 0; attempt < 2; attempt++) {
+    rerender(<Page ready={false} />);
+    expect(screen.getByRole("textbox", { name: "history search" })).toHaveValue(
+      "saved search"
+    );
+    expect(screen.queryByRole("button")).toBeNull();
+    rerender(<Page ready />);
+  }
+  expect(mounted).toHaveBeenCalledOnce();
+});

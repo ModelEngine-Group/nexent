@@ -1417,250 +1417,257 @@ const HomeContent: FC = () => {
         />
       </div>
 
-      <div className="flex min-h-0 flex-1 min-w-0 flex-col">
-        <div className="min-h-0 flex-1">
-          <Chat
-            showConversationTitle={false}
-            generatedTitle={
-              activeThreadId ? generatedTitles.get(activeThreadId) : undefined
-            }
-            conversationId={
-              activeConversationId && Number(activeConversationId) > 0
-                ? Number(activeConversationId)
-                : undefined
-            }
-            isLoadingAgents={isLoadingAgents}
-            interactionContent={
-              <>
-                {workbenchState.config.mode === "skill_create" &&
-                  skillDraft.complete && (
-                    <SkillCreationResultCard
-                      payload={buildSkillSavePayload(skillDraft)}
-                      saved={
-                        savedSkillName !== null &&
-                        savedSkillName ===
-                          buildSkillSavePayload(skillDraft)?.name
-                      }
-                      onSave={handleSaveSkill}
-                    />
-                  )}
-              </>
-            }
-            selectedAgent={null}
-            modelSelectionScope="tenant"
-            fallbackAgentName={t("workbench.genericAgentName", "智能体工作台")}
-            landingContent={<WorkbenchGreeting />}
-            selectedModelId={effectiveWorkbenchConfig.model_id?.toString()}
-            deepThinking={
-              effectiveWorkbenchConfig.generation_config.deep_thinking
-            }
-            onDeepThinkingChange={(enabled) =>
-              void handleThinkingChange({ deep_thinking: enabled })
-            }
-            thinkingEffort={
-              effectiveWorkbenchConfig.generation_config.thinking_effort
-            }
-            onThinkingEffortChange={(effort) =>
-              void handleThinkingChange({ thinking_effort: effort })
-            }
-            showModelSelector={true}
-            reasoningBudgetTokens={
-              effectiveWorkbenchConfig.generation_config
-                .reasoning_budget_tokens ?? 0
-            }
-            onReasoningBudgetTokensChange={(budget) =>
-              void handleThinkingChange({
-                reasoning_budget_tokens: budget,
-                thinking_effort: "auto",
-              })
-            }
-            modelParameterSettings={{
-              scopeKey: `${user?.tenantId ?? ""}:${user?.id ?? ""}:${activeThreadId ?? "new"}:${effectiveWorkbenchConfig.model_id ?? "default"}:${modelSettingsRevision}`,
-              value: {
-                temperature:
-                  effectiveWorkbenchConfig.generation_config.temperature ??
-                  undefined,
-                top_p:
-                  effectiveWorkbenchConfig.generation_config.top_p ?? undefined,
-              },
-              defaultValue: DEFAULT_MODEL_PARAMETER_VALUES,
-              disabled: isThreadRunning || isSavingModel,
-              onChange: (value) =>
-                void handleThinkingChange({
-                  temperature: value.temperature,
-                  top_p: value.top_p,
-                }),
-            }}
-            onModelChange={(id) => void handleModelChange(id)}
-            onAgentSelected={handleAgentSelectedFromLanding}
-            chatMode={chatMode}
-            onChatModeChange={handleChatModeChange}
-            composerTools={
-              <>
-                <ComposerAttachment />
-                <ComposerDictation configured={isDictationConfigured} />
-              </>
-            }
-            knowledgeScope={isCreating ? null : knowledgeScope}
-            knowledgePreview={isCreating ? null : knowledgePreview}
-            knowledgeCapabilities={isCreating ? null : knowledgeCapabilities}
-            onKnowledgeScopeChange={
-              isCreating ? undefined : handleKnowledgeScopeChange
-            }
-            runtimeMetadata={runtimeMetadata}
-            onRuntimeMetadataChange={handleRuntimeMetadataChange}
-            readOnly={
-              !workbenchSendability.canSend ||
-              isSavingModel ||
-              (workbenchState.config.mode === "agent_create" &&
-                isAgentCreationAwaitingDraft(
-                  activeThread?.remoteId,
-                  !!creationAgent,
-                  !!(
-                    activeThreadId &&
-                    recoverableCreationThreads.has(activeThreadId)
-                  )
-                )) ||
-              (workbenchState.config.mode === "agent_create" &&
-                nl2AgentComposerDisabled)
-            }
-            readOnlyReason={
-              isSavingModel
-                ? t("ui.localization.savingModel")
-                : !isCreating && effectiveWorkbenchConfig.model_id == null
-                  ? isLoadingModels
-                    ? t("ui.localization.loadingModels")
-                    : t("ui.localization.noModels")
-                  : workbenchSendability.reason
-            }
-            skillFiles={
-              workbenchState.config.mode === "skill_create" &&
-              Object.keys(skillDraft.files).length > 0
-                ? Object.entries(skillDraft.files).map(([path, content]) => ({
-                    path,
-                    content,
-                  }))
-                : undefined
-            }
-            workbenchResources={
-              isCreating
-                ? undefined
-                : {
-                    agentName:
-                      selectedAgent?.display_name || selectedAgent?.name,
-                    agents: workbenchState.config.agent_mounts.map((mount) => {
-                      const agent = agents.find(
-                        (item) => Number(item.id) === mount.agent_id
-                      );
-                      return {
-                        id: mount.agent_id,
-                        name:
-                          agent?.display_name ||
-                          agent?.name ||
-                          `#${mount.agent_id}`,
-                        remove: () => void removeMountedAgent(mount.agent_id),
-                      };
-                    }),
-                    onSelectAgent: () => setAgentPickerOpen(true),
-                    onRemoveAgent: () =>
-                      void changeAgentTopology(runtime, () =>
-                        applyAgentMounts([])
-                      ).catch((error) => message.error(error.message)),
-                    skills: workbenchState.config.skill_mounts.map((mount) => ({
-                      id: mount.skill_id,
-                      name:
-                        workbenchState.skillNames[mount.skill_id] ||
-                        `#${mount.skill_id}`,
-                    })),
-                  }
-            }
-            onRemoveWorkbenchSkill={handleRemoveWorkbenchSkill}
-            onOpenWorkbenchSkillPicker={() => setSkillPickerOpen(true)}
-            workbenchPresentation={{
-              mode: workbenchState.config.mode,
-              onExitCreation: () => void changeCreationMode("generic_chat"),
-              actions: (
-                <CreationActions
-                  canCreateAgent={hasPermission("agent:create")}
-                  canCreateSkill={hasPermission("skill:create")}
-                  mode={workbenchState.config.mode}
-                  onExit={() => void changeCreationMode("generic_chat")}
-                  disabled={isThreadRunning}
-                  onSelect={(mode) => void changeCreationMode(mode)}
-                />
-              ),
-            }}
-          />
-        </div>
-        <SkillPicker
-          disabled={isThreadRunning}
-          open={skillPickerOpen}
-          selected={workbenchState.config.skill_mounts}
-          onCancel={() => setSkillPickerOpen(false)}
-          onConfirm={handleReplaceWorkbenchSkills}
-        />
-        <AgentPicker
-          disabled={isThreadRunning}
-          open={agentPickerOpen}
-          agents={agents}
-          selectedId={selectedAgent?.id}
-          selectedIds={workbenchState.config.agent_mounts.map((mount) =>
-            String(mount.agent_id)
-          )}
-          onCancel={() => setAgentPickerOpen(false)}
-          multiple={true}
-          onConfirm={async (selected) => {
-            if (runtime.thread.getState().isRunning)
-              throw new Error(
-                t("workbench.controls.waitForReply", "请等待当前回复完成")
-              );
-            const current = workbenchState.config.agent_mounts;
-            if (
-              current.length === selected.length &&
-              selected.every((agent) =>
-                current.some(
-                  (mount) =>
-                    mount.agent_id === Number(agent.id) &&
-                    mount.version_no === agent.current_version_no
-                )
-              )
-            )
-              return;
-            if (selected.length > 8)
-              throw new Error(t("ui.localization.agentLimit"));
-            const previews = await Promise.all(
-              selected.map((agent) =>
-                previewWorkbenchAgent(
-                  Number(agent.id),
-                  agent.current_version_no
-                )
-              )
-            );
-            await changeAgentTopology(runtime, () =>
-              applyAgentMounts(
-                previews.map((preview) => ({
-                  agent_id: preview.agent_id,
-                  version_no: preview.version_no,
-                }))
-              )
-            );
-          }}
-          onSelect={(agent) => void handleAgentSelectedFromLanding(agent)}
-        />
-      </div>
-    </>
-  );
-
-  return (
-    <WorkbenchConversationLayout ready>
       <WorkbenchLoadingBoundary
         conversationReady={ready}
         modelsLoading={isLoadingModels}
         bootstrapLoading={isLoadingWorkbenchBootstrap}
         resourcesResolving={workbenchState.resolving}
       >
-        {content}
+        <div className="flex min-h-0 flex-1 min-w-0 flex-col">
+          <div className="min-h-0 flex-1">
+            <Chat
+              showConversationTitle={false}
+              generatedTitle={
+                activeThreadId ? generatedTitles.get(activeThreadId) : undefined
+              }
+              conversationId={
+                activeConversationId && Number(activeConversationId) > 0
+                  ? Number(activeConversationId)
+                  : undefined
+              }
+              isLoadingAgents={isLoadingAgents}
+              interactionContent={
+                <>
+                  {workbenchState.config.mode === "skill_create" &&
+                    skillDraft.complete && (
+                      <SkillCreationResultCard
+                        payload={buildSkillSavePayload(skillDraft)}
+                        saved={
+                          savedSkillName !== null &&
+                          savedSkillName ===
+                            buildSkillSavePayload(skillDraft)?.name
+                        }
+                        onSave={handleSaveSkill}
+                      />
+                    )}
+                </>
+              }
+              selectedAgent={null}
+              modelSelectionScope="tenant"
+              fallbackAgentName={t(
+                "workbench.genericAgentName",
+                "智能体工作台"
+              )}
+              landingContent={<WorkbenchGreeting />}
+              selectedModelId={effectiveWorkbenchConfig.model_id?.toString()}
+              deepThinking={
+                effectiveWorkbenchConfig.generation_config.deep_thinking
+              }
+              onDeepThinkingChange={(enabled) =>
+                void handleThinkingChange({ deep_thinking: enabled })
+              }
+              thinkingEffort={
+                effectiveWorkbenchConfig.generation_config.thinking_effort
+              }
+              onThinkingEffortChange={(effort) =>
+                void handleThinkingChange({ thinking_effort: effort })
+              }
+              showModelSelector={true}
+              reasoningBudgetTokens={
+                effectiveWorkbenchConfig.generation_config
+                  .reasoning_budget_tokens ?? 0
+              }
+              onReasoningBudgetTokensChange={(budget) =>
+                void handleThinkingChange({
+                  reasoning_budget_tokens: budget,
+                  thinking_effort: "auto",
+                })
+              }
+              modelParameterSettings={{
+                scopeKey: `${user?.tenantId ?? ""}:${user?.id ?? ""}:${activeThreadId ?? "new"}:${effectiveWorkbenchConfig.model_id ?? "default"}:${modelSettingsRevision}`,
+                value: {
+                  temperature:
+                    effectiveWorkbenchConfig.generation_config.temperature ??
+                    undefined,
+                  top_p:
+                    effectiveWorkbenchConfig.generation_config.top_p ??
+                    undefined,
+                },
+                defaultValue: DEFAULT_MODEL_PARAMETER_VALUES,
+                disabled: isThreadRunning || isSavingModel,
+                onChange: (value) =>
+                  void handleThinkingChange({
+                    temperature: value.temperature,
+                    top_p: value.top_p,
+                  }),
+              }}
+              onModelChange={(id) => void handleModelChange(id)}
+              onAgentSelected={handleAgentSelectedFromLanding}
+              chatMode={chatMode}
+              onChatModeChange={handleChatModeChange}
+              composerTools={
+                <>
+                  <ComposerAttachment />
+                  <ComposerDictation configured={isDictationConfigured} />
+                </>
+              }
+              knowledgeScope={isCreating ? null : knowledgeScope}
+              knowledgePreview={isCreating ? null : knowledgePreview}
+              knowledgeCapabilities={isCreating ? null : knowledgeCapabilities}
+              onKnowledgeScopeChange={
+                isCreating ? undefined : handleKnowledgeScopeChange
+              }
+              runtimeMetadata={runtimeMetadata}
+              onRuntimeMetadataChange={handleRuntimeMetadataChange}
+              readOnly={
+                !workbenchSendability.canSend ||
+                isSavingModel ||
+                (workbenchState.config.mode === "agent_create" &&
+                  isAgentCreationAwaitingDraft(
+                    activeThread?.remoteId,
+                    !!creationAgent,
+                    !!(
+                      activeThreadId &&
+                      recoverableCreationThreads.has(activeThreadId)
+                    )
+                  )) ||
+                (workbenchState.config.mode === "agent_create" &&
+                  nl2AgentComposerDisabled)
+              }
+              readOnlyReason={
+                isSavingModel
+                  ? t("ui.localization.savingModel")
+                  : !isCreating && effectiveWorkbenchConfig.model_id == null
+                    ? isLoadingModels
+                      ? t("ui.localization.loadingModels")
+                      : t("ui.localization.noModels")
+                    : workbenchSendability.reason
+              }
+              skillFiles={
+                workbenchState.config.mode === "skill_create" &&
+                Object.keys(skillDraft.files).length > 0
+                  ? Object.entries(skillDraft.files).map(([path, content]) => ({
+                      path,
+                      content,
+                    }))
+                  : undefined
+              }
+              workbenchResources={
+                isCreating
+                  ? undefined
+                  : {
+                      agentName:
+                        selectedAgent?.display_name || selectedAgent?.name,
+                      agents: workbenchState.config.agent_mounts.map(
+                        (mount) => {
+                          const agent = agents.find(
+                            (item) => Number(item.id) === mount.agent_id
+                          );
+                          return {
+                            id: mount.agent_id,
+                            name:
+                              agent?.display_name ||
+                              agent?.name ||
+                              `#${mount.agent_id}`,
+                            remove: () =>
+                              void removeMountedAgent(mount.agent_id),
+                          };
+                        }
+                      ),
+                      onSelectAgent: () => setAgentPickerOpen(true),
+                      onRemoveAgent: () =>
+                        void changeAgentTopology(runtime, () =>
+                          applyAgentMounts([])
+                        ).catch((error) => message.error(error.message)),
+                      skills: workbenchState.config.skill_mounts.map(
+                        (mount) => ({
+                          id: mount.skill_id,
+                          name:
+                            workbenchState.skillNames[mount.skill_id] ||
+                            `#${mount.skill_id}`,
+                        })
+                      ),
+                    }
+              }
+              onRemoveWorkbenchSkill={handleRemoveWorkbenchSkill}
+              onOpenWorkbenchSkillPicker={() => setSkillPickerOpen(true)}
+              workbenchPresentation={{
+                mode: workbenchState.config.mode,
+                onExitCreation: () => void changeCreationMode("generic_chat"),
+                actions: (
+                  <CreationActions
+                    canCreateAgent={hasPermission("agent:create")}
+                    canCreateSkill={hasPermission("skill:create")}
+                    mode={workbenchState.config.mode}
+                    onExit={() => void changeCreationMode("generic_chat")}
+                    disabled={isThreadRunning}
+                    onSelect={(mode) => void changeCreationMode(mode)}
+                  />
+                ),
+              }}
+            />
+          </div>
+          <SkillPicker
+            disabled={isThreadRunning}
+            open={skillPickerOpen}
+            selected={workbenchState.config.skill_mounts}
+            onCancel={() => setSkillPickerOpen(false)}
+            onConfirm={handleReplaceWorkbenchSkills}
+          />
+          <AgentPicker
+            disabled={isThreadRunning}
+            open={agentPickerOpen}
+            agents={agents}
+            selectedId={selectedAgent?.id}
+            selectedIds={workbenchState.config.agent_mounts.map((mount) =>
+              String(mount.agent_id)
+            )}
+            onCancel={() => setAgentPickerOpen(false)}
+            multiple={true}
+            onConfirm={async (selected) => {
+              if (runtime.thread.getState().isRunning)
+                throw new Error(
+                  t("workbench.controls.waitForReply", "请等待当前回复完成")
+                );
+              const current = workbenchState.config.agent_mounts;
+              if (
+                current.length === selected.length &&
+                selected.every((agent) =>
+                  current.some(
+                    (mount) =>
+                      mount.agent_id === Number(agent.id) &&
+                      mount.version_no === agent.current_version_no
+                  )
+                )
+              )
+                return;
+              if (selected.length > 8)
+                throw new Error(t("ui.localization.agentLimit"));
+              const previews = await Promise.all(
+                selected.map((agent) =>
+                  previewWorkbenchAgent(
+                    Number(agent.id),
+                    agent.current_version_no
+                  )
+                )
+              );
+              await changeAgentTopology(runtime, () =>
+                applyAgentMounts(
+                  previews.map((preview) => ({
+                    agent_id: preview.agent_id,
+                    version_no: preview.version_no,
+                  }))
+                )
+              );
+            }}
+            onSelect={(agent) => void handleAgentSelectedFromLanding(agent)}
+          />
+        </div>
       </WorkbenchLoadingBoundary>
-    </WorkbenchConversationLayout>
+    </>
+  );
+
+  return (
+    <WorkbenchConversationLayout ready>{content}</WorkbenchConversationLayout>
   );
 };

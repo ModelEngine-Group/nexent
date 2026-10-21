@@ -20,6 +20,7 @@ change:
     - Resolve metadata and fallback bindings, preserve invalid metadata and cancelled activation behavior.
     - Keep the original expand button position and size when width decreases, with a reserved gutter.
     - Keep floating expand controls below the primary navigation hover layer.
+    - Keep the Workbench history sidebar mounted with its search state while a conversation loads.
     - Preserve Workbench collapse through conversation, model, bootstrap and resource loading boundaries.
     test_selectors:
     - frontend/tests/component/historyThreadTrigger.test.tsx
