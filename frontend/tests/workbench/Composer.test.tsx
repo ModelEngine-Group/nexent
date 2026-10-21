@@ -733,7 +733,10 @@ it.each(["skill_create", "agent_create"] as const)(
     );
     const input = container.querySelector("fieldset");
     const examples = screen.getByRole("region", {
-      name: mode === "skill_create" ? "Skill 创建示例" : "Agent创建示例",
+      name:
+        mode === "skill_create"
+          ? "workbench.creationExamples.skillSectionLabel"
+          : "workbench.creationExamples.agentSectionLabel",
     });
     expect(input).not.toBeNull();
     expect(
