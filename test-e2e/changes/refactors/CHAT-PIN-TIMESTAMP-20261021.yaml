@@ -33,8 +33,10 @@ change:
     - test/backend/apps/test_workbench_pins_app.py
     - test/backend/services/test_workbench_pin_service.py
   notes: >-
-    Baseline 98c2fded0. Migration 004 is present on remote develop and must remain immutable.
-    Add versioned migration 009 with an idempotent UTC conversion of the existing column, preserving NULLs, precision, index and audit fields.
+    Initial baseline 98c2fded0 retained merged migration 004 and added versioned migration 009 for UTC type conversion.
+    In the follow-up on d8e270a24, the user confirms that 004 has not been released to production and requests removal
+    of unreleased-version compatibility. Under that explicit scope, revise 004 to declare UTC TIMESTAMP directly and delete 009.
+    Supported replay preserves existing native values, NULLs, precision, index and audit fields; earlier TIMESTAMPTZ trial databases need separate preparation.
     Keep explicit UTC ISO strings at the API boundary. Reuse the existing automation/activity design with a pin follow-up.
     Scope is the conversation table; unrelated scheduler and other business timestamp columns are not modified. No deployment is included.
 
@@ -42,3 +44,6 @@ change:
     Ten pin migration, three pin API and twenty-eight adjacent PostgreSQL variants pass; original 004 matches remote develop byte-for-byte.
     Native UTC storage, explicit UTC wire instants, microseconds, NULLs, tie ordering, index plans and replay are asserted across three database timezones.
     Strict formal validation, copyright, whitespace and changed-statement coverage checks pass; disposable schemas are removed.
+    Those verification totals describe the original implementation. The simplification follow-up revises CHAT-SIDEBAR-D5-001
+    to prove direct native creation and NULL/populated replay in three session timezones, reusing pin/activity UT and
+    AUTO-QUOTA-D3-001 runtime regression proof. Current receipts are maintained outside Git.

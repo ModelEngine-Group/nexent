@@ -5,23 +5,6 @@ ALTER TABLE nexent.conversation_message_t
 ALTER TABLE nexent.conversation_record_t
     ADD COLUMN IF NOT EXISTS last_activity_time TIMESTAMP;
 
--- Preserve UTC instants on installations that applied the pre-merge column type.
-DO $activity_timestamp$
-BEGIN
-    IF EXISTS (
-        SELECT 1 FROM pg_attribute
-        WHERE attrelid = 'nexent.conversation_record_t'::regclass
-          AND attname = 'last_activity_time'
-          AND atttypid = 'timestamp with time zone'::regtype
-    ) THEN
-        DROP INDEX IF EXISTS nexent.idx_conversation_activity_order;
-        ALTER TABLE nexent.conversation_record_t
-            ALTER COLUMN last_activity_time TYPE TIMESTAMP
-            USING last_activity_time AT TIME ZONE 'UTC';
-    END IF;
-END;
-$activity_timestamp$;
-
 COMMENT ON COLUMN nexent.conversation_message_t.message_source IS
     'Trusted message origin: CHAT consumes the ordinary user-turn quota; AUTOMATION is exempt';
 COMMENT ON COLUMN nexent.conversation_record_t.last_activity_time IS

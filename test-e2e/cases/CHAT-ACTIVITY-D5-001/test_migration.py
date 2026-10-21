@@ -14,8 +14,8 @@ from shared.postgres import postgres_sql
 @pytest.mark.case_id("CHAT-ACTIVITY-D5-001")
 @pytest.mark.stage("D5")
 @pytest.mark.parametrize("zone", ["UTC", "Asia/Shanghai", "America/New_York"])
-@pytest.mark.parametrize("previously_deployed", [False, True])
-def test_additive_migration_and_repeatability(zone, previously_deployed):
+@pytest.mark.parametrize("existing_activity", [False, True])
+def test_additive_migration_and_repeatability(zone, existing_activity):
     schema = "activity_migration_" + uuid4().hex
     root = Path(__file__).resolve().parents[3]
     migration = root / "deploy/sql/migrations/v2.7.1_007_conversation_activity_and_source.sql"
@@ -39,27 +39,27 @@ def test_additive_migration_and_repeatability(zone, previously_deployed):
             INSERT INTO {schema}.conversation_message_t VALUES
                 (1,1,'user','manual','N','2026-03-01'),
                 (2,1,'user','automation','N','2026-04-01'),
-                (3,1,'assistant','answer','N','2026-04-02'),
+                (3,1,'assistant','answer','N','2026-04-02 00:00:00.123456'),
                 (4,1,'user','deleted','Y','2026-10-01'),
                 (5,1,'assistant','','N','2026-10-02');
             INSERT INTO {schema}.conversation_message_unit_t VALUES (2,'automation_prompt');
             INSERT INTO {schema}.agent_automation_run_t VALUES (1,2,3);
         """)
-        if previously_deployed:
+        if existing_activity:
             postgres_sql(f"""
-                ALTER TABLE {schema}.conversation_record_t ADD COLUMN last_activity_time TIMESTAMPTZ;
+                ALTER TABLE {schema}.conversation_record_t ADD COLUMN last_activity_time TIMESTAMP;
                 UPDATE {schema}.conversation_record_t SET last_activity_time =
-                    TIMESTAMPTZ '2026-04-02 00:00:00.123456+00' WHERE conversation_id=1;
+                    TIMESTAMP '2026-04-03 12:34:56.654321' WHERE conversation_id=1;
                 CREATE INDEX idx_conversation_activity_order ON {schema}.conversation_record_t
-                    (created_by, (COALESCE(last_activity_time, create_time AT TIME ZONE 'UTC')) DESC, conversation_id DESC)
+                    (created_by, (COALESCE(last_activity_time, create_time)) DESC, conversation_id DESC)
                     WHERE delete_flag='N';
             """)
         audit_query = f"SELECT conversation_id,created_by,delete_flag,create_time,update_time FROM {schema}.conversation_record_t ORDER BY conversation_id;"
         audits = postgres_sql(audit_query)
-        prior_epoch = postgres_sql(f"SELECT extract(epoch FROM last_activity_time) FROM {schema}.conversation_record_t WHERE conversation_id=1;") if previously_deployed else None
+        prior_epoch = postgres_sql(f"SELECT extract(epoch FROM last_activity_time) FROM {schema}.conversation_record_t WHERE conversation_id=1;") if existing_activity else None
         postgres_sql(sql)
         assert postgres_sql(f"SELECT data_type FROM information_schema.columns WHERE table_schema='{schema}' AND table_name='conversation_record_t' AND column_name='last_activity_time';").strip() == "timestamp without time zone"
-        if previously_deployed:
+        if existing_activity:
             assert postgres_sql(f"SELECT extract(epoch FROM last_activity_time) FROM {schema}.conversation_record_t WHERE conversation_id=1;") == prior_epoch
         def snapshot():
             return postgres_sql(f"""
@@ -70,7 +70,7 @@ def test_additive_migration_and_repeatability(zone, previously_deployed):
         expected = snapshot()
         assert "1\tCHAT" in expected and "2\tAUTOMATION" in expected and "3\tAUTOMATION" in expected
         assert "4\tCHAT" in expected and "5\tCHAT" in expected
-        assert ("1\t2026-04-02 00:00:00.123456" if previously_deployed else "1\t2026-04-02 00:00:00") in expected
+        assert ("1\t2026-04-03 12:34:56.654321" if existing_activity else "1\t2026-04-02 00:00:00.123456") in expected
         assert "2\t2026-02-01 00:00:00" in expected
         postgres_sql(sql)
         assert snapshot() == expected

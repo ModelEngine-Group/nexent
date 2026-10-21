@@ -33,10 +33,18 @@ change:
   notes: >-
     Baseline 8b880ad5f. The user explicitly changed the earlier TIMESTAMPTZ decision for this PR's activity field.
     Migration 007 is not present on remote develop and may be revised; merged SQL remains immutable.
-    Keep a guarded conversion for already-deployed pre-merge timestamptz data, rebuilding its dependent index before type conversion.
+    The initial implementation included a guarded conversion of pre-merge timestamptz activity data.
+    Follow-up on baseline d8e270a24 removes that development-only compatibility path at the user's request:
+    latest remote develop cd1cb04f5 has neither migration 007 nor its activity column. Supported states are a first-time
+    upgrade and an existing UTC TIMESTAMP column; unconverted pre-merge trial databases require separate preparation.
+    A subsequent user instruction confirms that merged pin migration 004 has not been released to production:
+    declare its field as TIMESTAMP directly and remove unreleased migration 009 rather than retaining trial-version conversion.
     Public cursor encoding remains timezone-aware for old cursor compatibility; only storage and SQL comparisons become naive UTC.
     Reuse the existing automation/activity design. No global timestamp, scheduler, pin-column type, frontend or deployment changes.
 
     Verification: three new regression UT fail before the change; 355 relevant UT pass after it.
     Six fresh/upgrade migration variants, three quota/activity/session-timezone variants, eight deletion and eleven title regression variants pass.
     Strict formal validation, copyright, whitespace and changed-statement coverage checks pass; fixture schemas are removed.
+    The simplification follow-up reuses activity and pin UT without artificial unit edits. Its changed deployment
+    contract is proved by CHAT-ACTIVITY-D5-001; CHAT-SIDEBAR-D5-001 and AUTO-QUOTA-D3-001 are regression selections.
+    Initial verification totals above are historical; current execution receipts are maintained outside Git.

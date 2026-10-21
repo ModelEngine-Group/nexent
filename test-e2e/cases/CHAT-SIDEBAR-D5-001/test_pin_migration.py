@@ -16,7 +16,6 @@ from shared.postgres import postgres_url
 pytestmark = [pytest.mark.case_id("CHAT-SIDEBAR-D5-001"), pytest.mark.stage("D5")]
 ROOT = Path(__file__).resolve().parents[3]
 MIGRATION = ROOT / "deploy/sql/migrations/v2.7.1_004_workbench_pin_timestamp.sql"
-FOLLOWUP = ROOT / "deploy/sql/migrations/v2.7.1_009_workbench_pin_utc_timestamp.sql"
 
 
 @pytest.fixture(params=["UTC", "Asia/Shanghai", "America/New_York"])
@@ -50,11 +49,10 @@ def schema(engine):
             assert connection.scalar(text("SELECT count(*) FROM pg_namespace WHERE nspname=:schema"), {"schema":name}) == 0
 
 
-def migrate(name, engine, followup=True):
+def migrate(name, engine):
     with engine.begin() as connection:
-        for path in (MIGRATION, FOLLOWUP) if followup else (MIGRATION,):
-            sql = path.read_text(encoding="utf-8").replace("nexent.", name + ".").replace("'nexent'", repr(name))
-            connection.exec_driver_sql(sql)
+        sql = MIGRATION.read_text(encoding="utf-8").replace("nexent.", name + ".").replace("'nexent'", repr(name))
+        connection.exec_driver_sql(sql)
 
 
 def snapshot(name, engine):
@@ -79,20 +77,20 @@ def test_direct_pin_field_and_index_preserve_existing_conversations(schema, engi
     assert snapshot(schema, engine) == before
 
 
-@pytest.mark.parametrize("previously_deployed", [False, True])
-def test_repeat_deployment_preserves_current_pin_and_activity(schema, engine, previously_deployed):
+@pytest.mark.parametrize("populated", [False, True])
+def test_repeat_deployment_preserves_current_pin_and_activity(schema, engine, populated):
     before = snapshot(schema, engine)
-    migrate(schema, engine, followup=not previously_deployed)
-    value = "TIMESTAMPTZ '2026-10-16 08:00:00.123456+08'" if previously_deployed else "TIMESTAMP '2026-10-16 00:00:00.123456'"
+    migrate(schema, engine)
     with engine.begin() as connection:
-        connection.execute(text(f"UPDATE {schema}.conversation_record_t SET workbench_pinned_at={value} WHERE conversation_id IN (1,2)"))
+        if populated:
+            connection.execute(text(f"UPDATE {schema}.conversation_record_t SET workbench_pinned_at=TIMESTAMP '2026-10-16 00:00:00.123456' WHERE conversation_id IN (1,2)"))
         pins_before = connection.execute(text(f"SELECT conversation_id,extract(epoch FROM workbench_pinned_at) FROM {schema}.conversation_record_t ORDER BY conversation_id")).all()
     migrate(schema, engine)
     migrate(schema, engine)
     with engine.connect() as connection:
         assert connection.execute(text(f"SELECT conversation_id,extract(epoch FROM workbench_pinned_at) FROM {schema}.conversation_record_t ORDER BY conversation_id")).all() == pins_before
-        assert connection.scalar(text(f"SELECT workbench_pinned_at FROM {schema}.conversation_record_t WHERE conversation_id=1")) == datetime(2026, 10, 16, microsecond=123456)
-        assert connection.scalars(text(f"SELECT conversation_id FROM {schema}.conversation_record_t WHERE workbench_pinned_at IS NOT NULL ORDER BY workbench_pinned_at DESC,conversation_id DESC")).all() == [2, 1]
+        assert connection.scalar(text(f"SELECT workbench_pinned_at FROM {schema}.conversation_record_t WHERE conversation_id=1")) == (datetime(2026, 10, 16, microsecond=123456) if populated else None)
+        assert connection.scalars(text(f"SELECT conversation_id FROM {schema}.conversation_record_t WHERE workbench_pinned_at IS NOT NULL ORDER BY workbench_pinned_at DESC,conversation_id DESC")).all() == ([2, 1] if populated else [])
         assert connection.scalar(text("SELECT data_type FROM information_schema.columns WHERE table_schema=:schema AND table_name='conversation_record_t' AND column_name='workbench_pinned_at'"), {"schema":schema}) == "timestamp without time zone"
         assert connection.scalar(text("SELECT count(*) FROM information_schema.columns WHERE table_schema=:schema AND table_name='conversation_record_t' AND column_name='workbench_pinned_at'"), {"schema":schema}) == 1
         assert connection.scalar(text("SELECT count(*) FROM pg_indexes WHERE schemaname=:schema AND indexname='idx_conversation_workbench_pin_order'"), {"schema":schema}) == 1
@@ -107,6 +105,7 @@ def test_repeat_deployment_preserves_current_pin_and_activity(schema, engine, pr
 def test_catalog_does_not_create_a_separate_pin_table_or_retain_compatibility_sql():
     migrations = MIGRATION.parent
     assert not (migrations / "v2.7.1_003_workbench_history_pins.sql").exists()
+    assert not (migrations / "v2.7.1_009_workbench_pin_utc_timestamp.sql").exists()
     sql = MIGRATION.read_text(encoding="utf-8").lower()
     assert "alter table nexent.conversation_record_t" in sql
     assert "add column if not exists workbench_pinned_at" in sql
