@@ -106,7 +106,21 @@ export function getTagSearchPredicates(
 }
 
 /**
- * Resolve the definition ids a management-table search should display.
+ * How one definition responds to a management-table search.
+ */
+export interface TagDefinitionSearchMatch {
+  /**
+   * True when the keyword matched text the row already shows on its own: the
+   * localized name or the raw key.
+   */
+  definitionMatched: boolean;
+  /** Ids of the values whose display or normalized text matched. */
+  matchedValueIds: number[];
+}
+
+/**
+ * Resolve the definitions a management-table search should display, together
+ * with how each of them matched.
  *
  * The table renders localized names, while the backend only stores the raw key,
  * so a keyword such as "关键" never reaches the database. Matching therefore
@@ -114,27 +128,38 @@ export function getTagSearchPredicates(
  * additionally covers every value of the definition regardless of its status so
  * that a row visible in the expanded table can be found by its own values.
  *
+ * Returning the match details keeps the presentation decision with the caller:
+ * a name or key hit is already visible in the row itself, while a value-only hit
+ * has to open the row to show what matched.
+ *
  * Returns null when the search is empty, which lets callers skip filtering
  * entirely.
  */
-export function getMatchingTagDefinitionIds(
+export function getTagSearchMatches(
   definitions: TagDefinition[] | null | undefined,
   search: string,
   t: TFunction
-): Set<number> | null {
+): Map<number, TagDefinitionSearchMatch> | null {
   const keyword = search.trim().toLocaleLowerCase();
   if (!keyword) return null;
 
-  const matched = new Set<number>();
+  const matches = new Map<number, TagDefinitionSearchMatch>();
   (definitions ?? []).forEach((definition) => {
-    if (containsKeyword(getDefinitionSearchTexts(definition, t), keyword)) {
-      matched.add(definition.definition_id);
-      return;
-    }
-    const hasMatchingValue = (definition.values ?? []).some((value) =>
-      containsKeyword(getValueSearchTexts(definition, value, t), keyword)
+    const definitionMatched = containsKeyword(
+      getDefinitionSearchTexts(definition, t),
+      keyword
     );
-    if (hasMatchingValue) matched.add(definition.definition_id);
+    const matchedValueIds = (definition.values ?? [])
+      .filter((value) =>
+        containsKeyword(getValueSearchTexts(definition, value, t), keyword)
+      )
+      .map((value) => value.value_id);
+    if (definitionMatched || matchedValueIds.length > 0) {
+      matches.set(definition.definition_id, {
+        definitionMatched,
+        matchedValueIds,
+      });
+    }
   });
-  return matched;
+  return matches;
 }

@@ -17,6 +17,7 @@ const { translations } = vi.hoisted(() => ({
     "tagManagement.systemDefinition.keywords": "关键词",
     "tagManagement.empty.noDefinitions": "暂无标签",
     "tagManagement.empty.noMatchingDefinitions": "没有匹配的标签定义",
+    "tagManagement.hint.matchedValues": "仅显示匹配搜索的标签值",
   } as Record<string, string>,
 }));
 
@@ -111,31 +112,46 @@ beforeEach(() => {
   ]);
 });
 
+let view: ReturnType<typeof render>;
+
 function renderPanel() {
-  return render(
+  view = render(
     <App>
       <TagDefinitionManagementPanel bucketId={1} canManage />
     </App>
   );
+  return view;
 }
 
 async function searchFor(keyword: string) {
   const user = userEvent.setup();
   const input = screen.getByPlaceholderText("tagManagement.form.searchTags");
   await user.clear(input);
-  await user.type(input, keyword);
+  if (keyword) await user.type(input, keyword);
   return input;
+}
+
+/**
+ * Highlighting wraps the matched fragment of a cell in <mark>, so a searched
+ * name or value is split across text nodes. Assertions therefore read the text
+ * of the whole panel instead of a single text node, and skip subtrees rc-table
+ * keeps mounted with display:none once a row has been collapsed again.
+ */
+function collectVisibleText(node: Node): string {
+  if (node instanceof HTMLElement && node.style.display === "none") return "";
+  if (node.nodeType === Node.TEXT_NODE) return node.textContent ?? "";
+  return Array.from(node.childNodes).map(collectVisibleText).join("");
+}
+
+function renderedText(): string {
+  return collectVisibleText(view.container);
 }
 
 async function expectVisibleNames(visible: string[], hidden: string[]) {
   await waitFor(() =>
-    visible.forEach((name) =>
-      expect(screen.getByText(name)).toBeInTheDocument()
-    )
+    visible.forEach((name) => expect(renderedText()).toContain(name))
   );
-  hidden.forEach((name) =>
-    expect(screen.queryByText(name)).not.toBeInTheDocument()
-  );
+  hidden.forEach((name) => expect(renderedText()).not.toContain(name));
 }
 
 it("shows every definition before a search starts", async () => {
@@ -202,4 +218,93 @@ it("keeps the empty-library message when there is nothing to search", async () =
 
   expect(await screen.findByText("暂无标签")).toBeInTheDocument();
   expect(screen.queryByText("没有匹配的标签定义")).not.toBeInTheDocument();
+});
+
+it("opens a row that matched only through one of its values and lists just that value", async () => {
+  renderPanel();
+  await screen.findByText("关键词");
+
+  await searchFor("cache");
+
+  // "Cache" only exists in the expanded table, so the row has to open for the
+  // match to be visible, and it must not drag the other value along with it.
+  await waitFor(() => expect(renderedText()).toContain("Cache"));
+  expect(renderedText()).not.toContain("Legacy");
+  expect(renderedText()).not.toContain("Department");
+
+  // A disabled value still selects its row and narrows the inner list to itself.
+  await searchFor("legacy");
+
+  await waitFor(() => expect(renderedText()).toContain("Legacy"));
+  expect(renderedText()).not.toContain("Cache");
+});
+
+it("keeps a row that matched by its own name or key collapsed", async () => {
+  renderPanel();
+  await screen.findByText("关键词");
+
+  await searchFor("关键");
+
+  await expectVisibleNames(["关键词"], []);
+  expect(renderedText()).not.toContain("Cache");
+  expect(renderedText()).not.toContain("Legacy");
+
+  await searchFor("keywords");
+
+  await expectVisibleNames(["keywords"], []);
+  expect(renderedText()).not.toContain("Cache");
+  expect(renderedText()).not.toContain("Legacy");
+});
+
+it("highlights the matched fragment of a name and of a value", async () => {
+  renderPanel();
+  await screen.findByText("关键词");
+
+  await searchFor("关键");
+
+  await waitFor(() =>
+    expect(view.container.querySelector("mark")?.textContent).toBe("关键")
+  );
+  expect(renderedText()).toContain("关键词");
+
+  await searchFor("cac");
+
+  await waitFor(() => expect(renderedText()).toContain("Cache"));
+  expect(
+    Array.from(view.container.querySelectorAll("mark")).map(
+      (mark) => mark.textContent
+    )
+  ).toEqual(["Cac"]);
+});
+
+it("restores the collapsed rows and the full value list when the search is cleared", async () => {
+  renderPanel();
+  await screen.findByText("关键词");
+
+  await searchFor("cache");
+  await waitFor(() => expect(renderedText()).toContain("Cache"));
+  expect(renderedText()).not.toContain("Legacy");
+
+  await searchFor("");
+
+  await waitFor(() => expect(renderedText()).toContain("Region"));
+  expect(renderedText()).toContain("关键词");
+  expect(renderedText()).not.toContain("Cache");
+  expect(renderedText()).not.toContain("Legacy");
+});
+
+it("lets the user collapse a row the search opened", async () => {
+  renderPanel();
+  await screen.findByText("关键词");
+
+  await searchFor("cache");
+  await waitFor(() => expect(renderedText()).toContain("Cache"));
+
+  const user = userEvent.setup();
+  const expandIcon = view.container.querySelector(
+    ".ant-table-row-expand-icon"
+  ) as HTMLElement;
+  await user.click(expandIcon);
+
+  await waitFor(() => expect(renderedText()).not.toContain("Cache"));
 });

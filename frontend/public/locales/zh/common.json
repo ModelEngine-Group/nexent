@@ -5454,6 +5454,7 @@
   "tagManagement.empty.noActiveDefinitions": "暂无启用的标签定义",
   "tagManagement.empty.noMatchingDefinitions": "没有匹配的标签定义",
   "tagManagement.filter.ariaLabel": "按 {{definition}} 筛选",
+  "tagManagement.hint.matchedValues": "仅显示匹配搜索的标签值",
   "repository.tagFilter.button": "标签筛选",
   "repository.tagFilter.placeholder": "选择标签",
   "repository.tagFilter.clear": "清除标签筛选",
