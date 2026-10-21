@@ -33,9 +33,7 @@ import {
   AgentSkillCapability,
   AgentToolCapability,
 } from "./components/agent-capability";
-import AgentRunPolicy, {
-  AgentProtocolRepairOption,
-} from "./components/agent-run-policy";
+import AgentRunPolicy from "./components/agent-run-policy";
 import AgentGuide from "./components/agent-guide";
 import AgentDeployment from "./components/agent-deployment";
 import CollaborativeAgent from "./components/collaborative-agent";
@@ -772,7 +770,6 @@ export default function AgentConfig({
               width={800}
             >
               <div ref={guardrailSectionRef} className="flex flex-col gap-4">
-                <AgentProtocolRepairOption />
                 <div className="flex items-center justify-between">
                   <span className="text-base font-medium">
                     {t("agent.config.section.guardrail.title")}

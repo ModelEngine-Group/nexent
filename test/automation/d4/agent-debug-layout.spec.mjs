@@ -1,3 +1,5 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import {
   makeDraft,
   fulfillEditorReadFixture,
@@ -17,10 +19,12 @@ const repositoryRoot = path.resolve(
 );
 const baseUrl = process.env.NEXENT_E2E_BASE_URL ?? "http://127.0.0.1:3000";
 const messages = JSON.parse(
-  fs.readFileSync(
-    path.join(repositoryRoot, "frontend/public/locales/zh/common.json"),
-    "utf8",
-  ),
+  fs
+    .readFileSync(
+      path.join(repositoryRoot, "frontend/public/locales/zh/common.json"),
+      "utf8",
+    )
+    .replace(/^\uFEFF/, ""),
 );
 const label = (key) => {
   if (typeof messages[key] !== "string")
@@ -221,25 +225,27 @@ test("AGENT-DEBUG-D4-001 measured draft debug and preserved chat controls", asyn
     );
     await expect(
       panel.getByTestId("agent-debug-welcome").locator("h1"),
-    ).toHaveCSS("font-size", "36px");
+    ).toHaveCSS("font-size", "28px");
     await expect(
       panel.getByTestId("agent-debug-welcome").locator("h1"),
     ).toHaveCSS("font-weight", "700");
     await expect(
       panel.getByTestId("agent-debug-welcome").locator("h1"),
-    ).toHaveCSS("line-height", "54px");
-    await expect(panel.locator(".agent-debug-greeting")).toHaveCSS(
-      "font-size",
-      "16px",
-    );
+    ).toHaveCSS("line-height", "36px");
+    await expect(
+      panel.getByTestId("agent-debug-welcome").locator("p").first(),
+    ).toHaveCSS("font-size", "16px");
     const suggestions = panel.getByTestId("agent-debug-suggestions");
+    await expect(
+      panel
+        .getByTestId("agent-debug-welcome")
+        .getByTestId("agent-debug-suggestions"),
+    ).toBeVisible();
+    await expect(panel.locator(".agent-debug-question-scroll")).toHaveCount(0);
     expect(
       (await box(suggestions.getByRole("button").first())).height,
     ).toBeCloseTo(46, 0);
-    await expect(suggestions.locator(".agent-debug-question-list")).toHaveCSS(
-      "gap",
-      "8px",
-    );
+    await expect(suggestions.getByRole("list")).toHaveCSS("gap", "12px");
     const composer = panel.locator("fieldset").first();
     expect((await box(composer)).height).toBeCloseTo(164, 0);
     expect((await box(composer)).width).toBeCloseTo(440, 0);
