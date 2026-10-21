@@ -1,8 +1,11 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 "use client";
 
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Checkbox, Form, Radio, Select, Switch, Row, Col, Tooltip } from "antd";
+import { Checkbox, Form, Radio, Select, Switch, Row, Col } from "antd";
+import { AgentSettingHint } from "./agent-setting-hint";
 
 import { useAgentStore } from "@/stores/agentStore";
 import { useGroupList } from "@/hooks/group/useGroupList";
@@ -23,7 +26,12 @@ export function AgentDeploymentOptions({
 
   return (
     <>
-      <Tooltip title={t("agent.deployment.isMainAgentTooltip")}>
+      <AgentSettingHint
+        label={t(
+          highFidelity ? "agent.highFidelity.mainAgent" : "agent.isMainAgent"
+        )}
+        hint={t("agent.deployment.isMainAgentTooltip")}
+      >
         <Checkbox
           checked={editedAgent.is_main_agent ?? false}
           disabled={isReadOnly}
@@ -35,8 +43,15 @@ export function AgentDeploymentOptions({
             highFidelity ? "agent.highFidelity.mainAgent" : "agent.isMainAgent"
           )}
         </Checkbox>
-      </Tooltip>
-      <Tooltip title={t("agent.deployment.a2aEnabledTooltip")}>
+      </AgentSettingHint>
+      <AgentSettingHint
+        label={t(
+          highFidelity
+            ? "agent.highFidelity.a2a"
+            : "agent.deployment.a2aEnabled"
+        )}
+        hint={t("agent.deployment.a2aEnabledTooltip")}
+      >
         <Checkbox
           checked={editedAgent.is_a2a ?? false}
           disabled={isReadOnly}
@@ -48,7 +63,7 @@ export function AgentDeploymentOptions({
               : "agent.deployment.a2aEnabled"
           )}
         </Checkbox>
-      </Tooltip>
+      </AgentSettingHint>
     </>
   );
 }

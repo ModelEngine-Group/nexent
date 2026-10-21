@@ -10,7 +10,7 @@ from typing import Any, Literal
 
 from fastmcp.server.dependencies import get_http_request
 from nexent.core.agents.agent_model import ToolConfig
-from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
+from pydantic import BaseModel, ConfigDict, Field, StrictBool, ValidationError, model_validator
 
 from consts.exceptions import UnauthorizedError
 from management.services.permission.identity.authentication_helpers import get_current_user_id
@@ -60,6 +60,7 @@ NL2A_MCP_LEGACY_TOOL_NAMES = (
     NL2A_WRAPPER_NAME,
 )
 NL2AGENT_AGENT_ID_HEADER = "X-Nexent-NL2Agent-Agent-ID"
+NL2AGENT_POLICY_CLARIFICATION_HEADER = "X-Nexent-NL2Agent-Policy-Clarification-Required"
 SEARCH_INSTALLED_MCP_TOOLS_DESCRIPTION = (
     "Search the current tenant's installed and available MCP tools using keywords. "
     "Returns JSON text ordered by relevance. Decode the result with json.loads "
@@ -97,7 +98,11 @@ NL2A_WRAPPER_DESCRIPTION = (
 SAVE_AGENT_DRAFT_FIELDS_DESCRIPTION = (
     "Partially update the current tenant's existing ordinary agent draft. "
     "Always pass the current agent_id and only whitelisted fields, never null. "
-    "Allowed fields: name, display_name, description, duty_prompt, greeting_message, example_questions. "
+    "Allowed fields: name, display_name, description, duty_prompt, greeting_message, example_questions, "
+    "enable_protocol_repair_retry. "
+    "enable_protocol_repair_retry must be a boolean: explicit true enables strict output validation and silent "
+    "protocol repair for the target Agent, false disables it; omit it unless requested. "
+    "It does not control model-service retries or the NL2Agent creator itself. "
     "duty_prompt is the only business prompt and contains responsibilities, constraints and examples. "
     "greeting_message and example_questions are separate conversation settings; "
     "example_questions must be a list of strings, never a newline-delimited string. "
@@ -119,7 +124,7 @@ _NL2AGENT_PROMPT_FIELDS = frozenset(
 )
 _NL2AGENT_FINAL_PROMPT_BATCH = frozenset({"greeting_message", "example_questions"})
 _NL2AGENT_DRAFT_SYNC_FIELDS = frozenset(
-    {"name", "display_name", "description", *_NL2AGENT_PROMPT_FIELDS}
+    {"name", "display_name", "description", "enable_protocol_repair_retry", *_NL2AGENT_PROMPT_FIELDS}
 )
 NL2A_SUBTYPES = Literal[
     "requirement_clarification",
@@ -383,6 +388,7 @@ class AgentDraftFields(BaseModel):
     )
     display_name: str | None = Field(default=None, min_length=1, max_length=100)
     description: str | None = None
+    enable_protocol_repair_retry: StrictBool | None = None
     duty_prompt: str | None = Field(default=None, description="Complete business prompt including constraints and examples.")
     greeting_message: str | None = None
     example_questions: list[str] | None = Field(
@@ -446,6 +452,7 @@ class SaveAgentDraftFieldsError(BaseModel):
     updated_fields: list[str] = Field(default_factory=list)
     code: Literal[
         "invalid_agent_fields",
+        "policy_clarification_required",
         "agent_not_found",
         "agent_not_draft",
         "agent_deleted",
@@ -670,6 +677,7 @@ def create_nl2agent_mcp_tool_configs() -> list[ToolConfig]:
                         for field_name, field_type in {
                             "name": "str",
                             "description": "str",
+                            "enable_protocol_repair_retry": "bool",
                             "duty_prompt": "str",
                             "greeting_message": "str",
                             "example_questions": "list[str]",
@@ -1166,6 +1174,17 @@ async def save_agent_draft_fields(
 
         authorization = get_http_request().headers.get("Authorization")
         user_id, tenant_id = get_current_user_id(authorization)
+        if (
+            payload.fields.enable_protocol_repair_retry is not None
+            and get_http_request().headers.get(NL2AGENT_POLICY_CLARIFICATION_HEADER) == "true"
+        ):
+            return _serialize_agent_draft_save_result(
+                SaveAgentDraftFieldsError(
+                    agent_id=resolved_agent_id,
+                    code="policy_clarification_required",
+                    retryable=False,
+                )
+            )
         result = save_agent_draft_fields_impl(
             agent_id=resolved_agent_id,
             fields=payload.fields,

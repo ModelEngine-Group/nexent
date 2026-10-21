@@ -4,9 +4,8 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
-import { App, Button, Empty, Spin } from "antd";
+import { App, Empty, Spin } from "antd";
 import { useTranslation } from "react-i18next";
-import { Tag } from "lucide-react";
 import { parseMcpReviewDeepLinkParams } from "@/lib/notificationNavigation";
 import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
 import { USER_ROLES } from "@/const/auth";
@@ -24,13 +23,11 @@ import { useMcpCommunityBrowser } from "@/hooks/mcpTools/useMcpCommunityBrowser"
 import { useMcpCommunityReview } from "@/hooks/mcpTools/useMcpCommunityReview";
 import { useMcpCommunityQuickAdd } from "@/hooks/mcpTools/useMcpCommunityQuickAdd";
 import { useMyCommunityMcp } from "@/hooks/mcpTools/useMyCommunityMcp";
-import { useTagLibraries } from "@/hooks/useTagManagement";
 import { deleteCommunityMcpTool } from "@/services/mcpToolsService";
 import RepositoryTagFilter from "@/components/tag/RepositoryTagFilter";
 import { REPOSITORY_PAGE_SIZE } from "@/const/resource";
 import ResourceCardGrid from "@/components/resource/ResourceCardGrid";
 import McpCommunityRequestError from "./components/add/community/McpCommunityRequestError";
-import TagDefinitionManagementModal from "@/components/tag/TagDefinitionManagementModal";
 import McpToolsSearchFilterBar from "./components/McpToolsSearchFilterBar";
 import RepositoryMcpCard from "./components/RepositoryMcpCard";
 import AddMcpServiceModal from "./components/add/AddMcpServiceModal";
@@ -159,10 +156,6 @@ export function useMcpSpaceController() {
     McpToolsServicesTab.REPOSITORY
   );
   const [showAddModal, setShowAddModal] = useState(false);
-  const [tagManagementOpen, setTagManagementOpen] = useState(false);
-  const { data: tagLibraries } = useTagLibraries();
-  const defaultLibrary =
-    tagLibraries?.find((lib) => lib.bucket_key === "default_resource") ?? null;
   const [selectedLocal, setSelectedLocal] = useState<McpServiceItem | null>(
     null
   );
@@ -301,17 +294,6 @@ export function useMcpSpaceController() {
     (s) => (s.reviewStatus || "pending") === "pending"
   ).length;
 
-  const searchActions =
-    tab === McpToolsServicesTab.MINE ? (
-      <Button
-        className="flex h-11 shrink-0 items-center gap-1.5"
-        icon={<Tag className="size-4" />}
-        onClick={() => setTagManagementOpen(true)}
-      >
-        {t("mcpTools.tagManagement")}
-      </Button>
-    ) : null;
-
   const onReviewed = async () => {
     await Promise.all([
       reviewBrowser.refetch(),
@@ -376,14 +358,6 @@ export function useMcpSpaceController() {
         open={showAddModal}
         onClose={() => setShowAddModal(false)}
       />
-
-      <TagDefinitionManagementModal
-        open={tagManagementOpen}
-        onClose={() => setTagManagementOpen(false)}
-        bucketId={defaultLibrary?.bucket_id ?? 0}
-        bucketName={defaultLibrary?.bucket_name ?? ""}
-        canManage={true}
-      />
     </>
   );
 
@@ -398,7 +372,7 @@ export function useMcpSpaceController() {
       browser: repositoryBrowser,
       localServices: localList.services,
       isAdmin,
-      actions: searchActions,
+      actions: null,
       onSelect: setSelectedRepository,
       onInstall: quickAdd.open,
       onOffline: handleRepositoryOffline,
@@ -406,7 +380,7 @@ export function useMcpSpaceController() {
     mineProps: {
       localList,
       myPublished,
-      actions: searchActions,
+      actions: null,
       reviewDeepLink,
       onReviewDeepLinkConsumed: handleReviewDeepLinkConsumed,
       onAdd: openAddModal,

@@ -2474,7 +2474,8 @@ class TestCreateAgentConfig:
         assert config.policy_layers["platform"]["processing_mode"] == "passthrough"
 
     @pytest.mark.asyncio
-    async def test_create_agent_config_basic(self):
+    @pytest.mark.parametrize("protocol_repair", [False, True])
+    async def test_create_agent_config_basic(self, protocol_repair):
         """UT-BE-DPR-010: basic agent keeps parallel tool's bilingual metadata."""
         # Reset module-level mock - parallel_executor appends an extra
         # ToolConfig call after create_tool_config_list returns.  Both
@@ -2503,7 +2504,7 @@ class TestCreateAgentConfig:
                 "max_steps": 5,
                 "model_ids": [123],
                 "provide_run_summary": True,
-                "enable_protocol_repair_retry": False,
+                "enable_protocol_repair_retry": protocol_repair,
             }
             mock_query_sub.return_value = []
             mock_create_tools.return_value = []
@@ -2537,7 +2538,7 @@ class TestCreateAgentConfig:
                 provide_run_summary=True,
                 allow_chat_metadata=False,
                 worker_agents=[],
-                enable_protocol_repair_retry=False,
+                enable_protocol_repair_retry=protocol_repair,
                 external_a2a_agents=[],
                 context_manager_config=ANY,
                 context_items=ANY,

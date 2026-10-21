@@ -109,16 +109,10 @@ const SOURCE_TABS: { key: string; labelKey: string; sourceValue: string }[] = [
 export interface ToolDrawerProps {
   open: boolean;
   onClose: () => void;
-  onOpenManageLabels?: () => void;
   currentAgentId?: number;
 }
 
-export function ToolDrawer({
-  open,
-  onClose,
-  onOpenManageLabels,
-  currentAgentId,
-}: ToolDrawerProps) {
+export function ToolDrawer({ open, onClose, currentAgentId }: ToolDrawerProps) {
   const { t } = useTranslation("common");
   const { message } = App.useApp();
   const { confirm } = useConfirmModal();
@@ -524,9 +518,6 @@ export function ToolDrawer({
         width="min(768px, 100vw)"
         bodyClassName={cn(styles.drawer, styles.tool)}
         title={t("resourcePicker.addTool", "添加工具")}
-        tagManagement={
-          onOpenManageLabels ? { onClick: onOpenManageLabels } : undefined
-        }
         open={open}
         searchPlaceholder={t("toolPool.searchToolsPlaceholder")}
         tagFilter={

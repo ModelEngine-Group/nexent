@@ -38,6 +38,7 @@ from database.agent_db import is_system_agent
 from management.services.permission.identity.display import enrich_cas_usernames
 from management.db.serialization import convert_string_to_list
 from consts.agent_unavailable_reasons import AgentUnavailableReason
+from management.services.agent.a2a.validation import validate_a2a_agent_name
 
 logger = logging.getLogger("agent_version_service")
 
@@ -103,6 +104,8 @@ def publish_version_impl(
         raise ValueError("Agent draft not found")
 
     publish_as_a2a = bool(agent_draft.get("is_a2a", False))
+    if publish_as_a2a:
+        validate_a2a_agent_name(agent_draft.get("name") or f"Agent-{agent_id}")
 
     # Calculate new version number
     new_version_no = get_next_version_no(agent_id, tenant_id)

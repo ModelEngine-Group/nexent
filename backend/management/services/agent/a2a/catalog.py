@@ -14,6 +14,7 @@ import aiohttp
 from database import a2a_agent_db
 from database.a2a_agent_db import PROTOCOL_HTTP_JSON, PROTOCOL_JSONRPC
 from infrastructure.http.a2a import A2AHttpClient, A2AHttpStatusError, build_a2a_headers
+from management.services.agent.a2a.validation import validate_a2a_agent_name
 
 logger = logging.getLogger(__name__)
 
@@ -90,7 +91,7 @@ class A2AClientService:
                 url_hash = hashlib.md5(url.encode()).hexdigest()[:8]
                 agent_id = f"{name.lower().replace(' ', '-')}-{url_hash}"
 
-            name = card.get("name", agent_id)
+            name = validate_a2a_agent_name(card.get("name", agent_id))
             description = card.get("description", "")
 
             # Extract endpoint URL - prioritize supportedInterfaces (A2A v1.0 standard)
@@ -227,6 +228,11 @@ class A2AClientService:
         Returns:
             Discovered agent info or None.
         """
+        try:
+            validate_a2a_agent_name(agent_name)
+        except ValueError as exc:
+            raise AgentDiscoveryError(str(exc)) from exc
+
         # Import Nacos client (lazy import to avoid hard dependency)
         try:
             from infrastructure.discovery.nacos import NacosClient
@@ -550,6 +556,11 @@ class A2AClientService:
                 new_supported_interfaces = card.get("supportedInterfaces")
                 new_url = self._extract_agent_url(card) if new_supported_interfaces is None else None
                 new_name = card.get("name")
+                if new_name is not None:
+                    try:
+                        validate_a2a_agent_name(new_name)
+                    except ValueError as exc:
+                        raise AgentDiscoveryError(str(exc)) from exc
                 new_description = card.get("description")
 
                 # The selected protocol and its endpoint must survive incomplete Card refreshes.

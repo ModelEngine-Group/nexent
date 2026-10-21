@@ -3,12 +3,14 @@
 "use client";
 
 import type { ReactNode } from "react";
+import { cn } from "@/lib/utils";
 
 interface AgentWelcomeProps {
   title: string;
   greeting?: string;
   icon?: ReactNode;
   children?: ReactNode;
+  className?: string;
 }
 
 export function AgentWelcome({
@@ -16,9 +18,15 @@ export function AgentWelcome({
   greeting,
   icon,
   children,
+  className,
 }: AgentWelcomeProps) {
   return (
-    <div className="mx-auto flex h-full min-h-0 w-full max-w-[890px] flex-col justify-center gap-32 px-4 py-4 text-[#191919]">
+    <div
+      className={cn(
+        "mx-auto flex h-full min-h-0 w-full max-w-[890px] flex-col justify-center gap-32 px-4 py-4 text-[#191919]",
+        className
+      )}
+    >
       <div className="flex shrink-0 flex-col items-center gap-4 text-center">
         <div className="flex items-center justify-center gap-4">
           {icon}

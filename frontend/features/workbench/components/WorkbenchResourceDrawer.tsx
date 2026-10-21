@@ -38,7 +38,7 @@ export function WorkbenchResourceDrawer({
   pagination?: ReactNode;
   picker?: Omit<
     ResourceDrawerProps,
-    "children" | "open" | "title" | "onClose" | "onConfirm" | "tagManagement"
+    "children" | "open" | "title" | "onClose" | "onConfirm"
   >;
 }) {
   const { t } = useTranslation();
@@ -54,7 +54,6 @@ export function WorkbenchResourceDrawer({
           title={title}
           width="min(768px, 100vw)"
           disabled={disabled}
-          tagManagement={undefined}
           onClose={() => {
             if (!saving) onCancel();
           }}

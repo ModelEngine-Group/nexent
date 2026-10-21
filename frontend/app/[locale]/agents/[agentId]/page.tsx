@@ -177,6 +177,9 @@ function AgentSetupContent({
   };
   const currentAgentId = useAgentStore((state) => state.currentAgentId);
   const draftIconUrl = useAgentStore((state) => state.editedAgent?.icon_url);
+  const draftDescription = useAgentStore(
+    (state) => state.editedAgent?.description
+  );
   const resetAgentStore = useAgentStore((state) => state.reset);
   const { user } = useAuthorizationContext();
   const tenantId = user?.tenantId ?? null;
@@ -429,6 +432,7 @@ function AgentSetupContent({
                 ref={nl2AgentChatPanelRef}
                 key={`${currentAgentId ?? "unselected"}-${sessionGeneration}`}
                 agentId={currentAgentId}
+                agentDescription={draftDescription ?? agentInfo?.description}
                 showOptimizationSuggestions={showOptimizationSuggestions}
                 disabled={
                   isComposerDisabled ||

@@ -30,6 +30,7 @@ import { useCreatorModelControls } from "@/features/model-controls/useCreatorMod
 import { AgentWelcome } from "@/components/agent/agent-welcome";
 import { CardSuggestion } from "@/components/agent/agent-suggestion";
 import { NL2AGENT_DEFAULT_SUGGESTIONS } from "@/const/nl2agent";
+import { AGENT_CREATION_EXAMPLES } from "@/const/agentCreationExamples";
 
 const NL2AGENT_DISPLAY_BASE: Agent = {
   id: "__nl2agent_runtime__",
@@ -43,7 +44,9 @@ const NL2AGENT_DISPLAY_BASE: Agent = {
 
 export interface Nl2AgentChatPanelProps {
   agentId?: number | null;
+  agentDescription?: string | null;
   disabled?: boolean;
+  /** Controls visibility in both creation and optimization modes. */
   showOptimizationSuggestions?: boolean;
   onStateEvent?: (event: Nl2AgentStateEvent) => void;
   onStopped?: (agentId: number) => void;
@@ -62,6 +65,7 @@ export const Nl2AgentChatPanel = forwardRef<
 >(function Nl2AgentChatPanel(
   {
     agentId = null,
+    agentDescription,
     disabled = false,
     showOptimizationSuggestions = true,
     onStateEvent,
@@ -153,19 +157,22 @@ export const Nl2AgentChatPanel = forwardRef<
   );
 
   const assistantTitle = t("agentConfig.button.generationAssistant");
+  const isOptimization = Boolean(agentDescription?.trim());
   const welcomeSuggestions = useMemo<readonly AgentSuggestionItem[]>(
     () =>
       showOptimizationSuggestions
-        ? NL2AGENT_DEFAULT_SUGGESTIONS.map(
-            ({ id, titleKey, descriptionKey, promptKey }) => ({
-              id,
-              title: t(titleKey),
-              description: t(descriptionKey),
-              prompt: t(promptKey),
-            })
-          )
+        ? (isOptimization
+            ? NL2AGENT_DEFAULT_SUGGESTIONS
+            : AGENT_CREATION_EXAMPLES
+          ).map((suggestion) => ({
+            id: suggestion.id,
+            title: t(suggestion.titleKey),
+            description: t(suggestion.descriptionKey),
+            prompt: t(suggestion.promptKey),
+            icon: "icon" in suggestion ? suggestion.icon : undefined,
+          }))
         : [],
-    [showOptimizationSuggestions, t]
+    [showOptimizationSuggestions, isOptimization, t]
   );
   const nl2AgentDisplay: Agent = {
     ...NL2AGENT_DISPLAY_BASE,
@@ -179,7 +186,13 @@ export const Nl2AgentChatPanel = forwardRef<
   return (
     <AssistantRuntimeProvider runtime={runtime}>
       <TooltipProvider>
-        <div className="h-full w-full">
+        <div
+          className="h-full w-full [&>div]:!bg-transparent"
+          style={{
+            background:
+              "radial-gradient(ellipse at 0% 100%, #66ebff1a, transparent 48%), radial-gradient(ellipse at 100% 100%, #7a66ff12, transparent 48%), radial-gradient(ellipse at 80% 85%, #669fff0f, transparent 48%), #fff",
+          }}
+        >
           <Thread
             agent={nl2AgentDisplay}
             generatedTitle={assistantTitle}
