@@ -32,6 +32,11 @@ feature:
       conversation without document navigation or runtime replacement. New and
       unsaved conversations remove stale conversation parameters; unrelated query
       parameters and hashes remain. Reload restores the selected saved conversation.
+  - rule_id: CHAT-SIDEBAR-RULE-006
+    description: Assistant finalization locks its owned live conversation before
+      the message. Concurrent single or batch deletion follows conversation-first
+      ordering, with batch conversation locks ordered by ID. Finalization cannot
+      write after deletion wins; activity and message finalization remain atomic.
   required_test_stages:
   - D1
   - D4

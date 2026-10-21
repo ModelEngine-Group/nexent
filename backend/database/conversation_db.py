@@ -451,6 +451,18 @@ def persist_assistant_run_batch(
     conversation_id = int(conversation_id)
 
     with get_db_session() as session:
+        # Match deletion's conversation-before-message lock order and reject
+        # finalization if deletion committed while this locking read waited.
+        conversation = session.scalar(
+            select(ConversationRecord.conversation_id).where(
+                ConversationRecord.conversation_id == conversation_id,
+                ConversationRecord.created_by == user_id,
+                ConversationRecord.delete_flag == "N",
+            ).with_for_update()
+        )
+        if conversation is None:
+            raise ValueError("Conversation does not exist or is not accessible")
+
         parent = session.execute(
             select(ConversationMessage).where(
                 ConversationMessage.message_id == message_id,
@@ -1473,7 +1485,7 @@ def delete_conversations_batch(conversation_ids: List[int], user_id: Optional[st
                 ConversationRecord.conversation_id.in_(ids),
                 ConversationRecord.created_by == user_id,
                 ConversationRecord.delete_flag == 'N'
-            )
+            ).order_by(asc(ConversationRecord.conversation_id)).with_for_update()
         ).all()
         owned_ids = [row[0] for row in owned_rows]
         if not owned_ids:
