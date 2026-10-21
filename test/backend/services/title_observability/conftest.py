@@ -80,7 +80,7 @@ def runtime(service, monkeypatch, mocker):
     mocker.patch.object(service, "get_llm_adapter_from_config", return_value=adapter)
     save = mocker.patch.object(service, "rename_conversation", side_effect=persist)
     mocker.patch.object(service, "get_conversation", return_value={
-        "conversation_title": "New Conversation", "update_time": None,
+        "conversation_title": "New Conversation", "title_version": 0,
     })
 
     def app():
