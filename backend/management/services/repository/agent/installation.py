@@ -2,20 +2,11 @@
 
 from typing import Any, Dict, List, Optional
 
-from consts.agent_repository import STATUS_SHARED
+from contracts.agent_repository import STATUS_SHARED
 from consts.const import SYSTEM_TENANT_ID
-from consts.model import (
-    AgentRepositorySnapshot,
-    KnowledgeBaseResolution,
-    SkillResolution,
-)
-from database.agent_db import delete_agent_by_id
-from database.agent_repository_db import (
-    get_agent_repository_by_id,
-    increment_agent_repository_downloads,
-    list_agent_repository_summaries,
-    soft_delete_agent_repository_record,
-)
+from contracts.models import AgentRepositorySnapshot, KnowledgeBaseResolution, SkillResolution
+from management.db.agent.repository import delete_agent_by_id
+from management.db.agent.catalog import get_agent_repository_by_id, increment_agent_repository_downloads, list_agent_repository_summaries, soft_delete_agent_repository_record
 from management.services.agent.service import (
     import_agent_impl,
     import_agent_with_skills_impl,

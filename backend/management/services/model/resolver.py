@@ -4,9 +4,9 @@
 import logging
 from typing import Any, Optional
 
-from consts.model import ModelConnectStatusEnum
+from contracts.models import ModelConnectStatusEnum
 from contracts.model import ModelDescriptor
-from database.model_management_db import get_model_by_model_id, get_model_records
+from management.db.model.repository import get_model_by_model_id, get_model_records
 from management.services.model.adapter import build_adapter_fresh
 from management.services.configuration.tenant.settings import tenant_config_manager
 
@@ -149,7 +149,7 @@ def get_rerank_model(tenant_id: str, model_name: Optional[str] = None):
         return None
 
 from typing import Optional
-from database.model_management_db import get_model_by_model_id
+from management.db.model.repository import get_model_by_model_id
 from management.services.configuration.tenant.settings import tenant_config_manager
 
 
@@ -164,5 +164,5 @@ from management.services.configuration.tenant.settings import tenant_config_mana
 
 
 from typing import Optional
-from database.model_management_db import get_model_by_model_id
+from management.db.model.repository import get_model_by_model_id
 from management.services.configuration.tenant.settings import tenant_config_manager

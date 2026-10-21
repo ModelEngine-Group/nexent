@@ -24,16 +24,16 @@ sys.modules.setdefault("sqlalchemy.orm", MagicMock())
 sys.modules.setdefault("sqlalchemy.dialects", MagicMock())
 sys.modules.setdefault("sqlalchemy.dialects.postgresql", MagicMock())
 
-sys.modules.setdefault("database.skill_db", MagicMock())
-sys.modules.setdefault("database.knowledge_db", MagicMock())
-sys.modules.setdefault("database.model_management_db", MagicMock())
-sys.modules.setdefault("database.remote_mcp_db", MagicMock())
-sys.modules.setdefault("database.tool_db", MagicMock())
-sys.modules.setdefault("database.group_db", MagicMock())
-sys.modules.setdefault("database.user_tenant_db", MagicMock())
-sys.modules.setdefault("database.client", MagicMock())
+sys.modules.setdefault("management.db.skill.repository", MagicMock())
+sys.modules.setdefault("management.db.knowledge_base.repository", MagicMock())
+sys.modules.setdefault("management.db.model.repository", MagicMock())
+sys.modules.setdefault("management.db.mcp.remote", MagicMock())
+sys.modules.setdefault("management.db.tool.repository", MagicMock())
+sys.modules.setdefault("management.db.identity.group", MagicMock())
+sys.modules.setdefault("management.db.identity.user_tenant", MagicMock())
+sys.modules.setdefault("management.db.client", MagicMock())
 
-_consts_model = types.ModuleType("consts.model")
+_consts_model = types.ModuleType("contracts.models")
 
 
 class _RepositoryImportRequirementType(str):
@@ -86,7 +86,7 @@ _consts_model.RepositoryImportRequirementType = _RepositoryImportRequirementType
 _consts_model.RepositoryImportRequirementItem = _RepositoryImportRequirementItem
 _consts_model.RepositoryImportPrecheckResponse = _RepositoryImportPrecheckResponse
 _consts_model.ToolSourceEnum = _ToolSourceEnum
-sys.modules["consts.model"] = _consts_model
+sys.modules["contracts.models"] = _consts_model
 
 # Keep model availability real while isolating adapter construction and config.
 sys.modules.setdefault("management.services.model.adapter", MagicMock())

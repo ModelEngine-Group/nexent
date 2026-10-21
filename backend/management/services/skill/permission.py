@@ -4,16 +4,11 @@
 
 from typing import Any, Dict, Optional
 
-from consts.const import (
-    CAN_EDIT_ALL_USER_ROLES,
-    PERMISSION_EDIT,
-    PERMISSION_PRIVATE,
-    PERMISSION_READ,
-)
-from consts.exceptions import ForbiddenError
-from database.group_db import query_group_ids_by_user
-from database.user_tenant_db import get_user_tenant_by_user_id
-from management.db.serialization import convert_list_to_string
+from consts.const import CAN_EDIT_ALL_USER_ROLES, PERMISSION_EDIT, PERMISSION_PRIVATE, PERMISSION_READ
+from contracts.exceptions import ForbiddenError
+from management.db.identity.group import query_group_ids_by_user
+from management.db.identity.user_tenant import get_user_tenant_by_user_id
+from management.utils.serialization import convert_list_to_string
 
 _SKILL_ACCESS_UPDATE_FORBIDDEN_MESSAGE = "Not authorized to update skill access"
 

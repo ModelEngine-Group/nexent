@@ -20,8 +20,8 @@ SERVICE_PATH = os.path.join(BACKEND_ROOT, "ext_components", "aidp", "services", 
 if BACKEND_ROOT not in sys.path:
     sys.path.insert(0, BACKEND_ROOT)
 
-from consts.error_code import ErrorCode
-from consts.exceptions import AppException
+from contracts.error_code import ErrorCode
+from contracts.exceptions import AppException
 
 
 @pytest.fixture

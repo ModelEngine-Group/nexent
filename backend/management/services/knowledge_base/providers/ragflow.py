@@ -5,8 +5,8 @@ from typing import Any, Dict
 
 import httpx
 
-from consts.error_code import ErrorCode
-from consts.exceptions import AppException
+from contracts.error_code import ErrorCode
+from contracts.exceptions import AppException
 from nexent.utils.http_client_manager import http_client_manager
 
 logger = logging.getLogger("ragflow_service")

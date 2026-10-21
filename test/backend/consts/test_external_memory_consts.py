@@ -1,6 +1,8 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """Contract tests for external-memory runtime configuration."""
 
-from backend.consts import const
+import backend.consts.const as const
 
 
 def test_ac_p3_36_ingest_has_no_deployment_master_switch():

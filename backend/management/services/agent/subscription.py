@@ -22,40 +22,12 @@ from agents.agent_run_manager import (
     AgentRunConcurrencyExceededError,
     agent_run_manager,
 )
-from consts.const import (
-    DEFAULT_EN_TITLE,
-    DEFAULT_ZH_TITLE,
-    ENABLE_AGENT_WORKBENCH,
-    LANGUAGE,
-    MESSAGE_ROLE,
-    RUNTIME_AGENT_ID_MAX_CONCURRENT_RUNS,
-    STREAM_STATUS_EVENT,
-)
-from consts.error_code import (
-    ErrorCode,
-    RuntimeMetadataValidationCode,
-)
-from consts.exceptions import (
-    AppException,
-    ConversationNotFoundError,
-    ForbiddenError,
-    RuntimeCapacityExceededError,
-    RuntimeMetadataValidationError,
-    RuntimeMetadataVersionConflict,
-    RuntimeQueueTimeoutError,
-    ValidationError,
-    WorkbenchError,
-)
-from consts.model import (
-    AgentRequest,
-    ConversationKnowledgeScopeRequest,
-)
-from database.agent_db import (
-    search_agent_info_by_agent_id,
-)
-from database.conversation_db import (
-    resolve_conversation_runtime_metadata,
-)
+from consts.const import DEFAULT_EN_TITLE, DEFAULT_ZH_TITLE, ENABLE_AGENT_WORKBENCH, LANGUAGE, MESSAGE_ROLE, RUNTIME_AGENT_ID_MAX_CONCURRENT_RUNS, STREAM_STATUS_EVENT
+from contracts.error_code import ErrorCode, RuntimeMetadataValidationCode
+from contracts.exceptions import AppException, ConversationNotFoundError, ForbiddenError, RuntimeCapacityExceededError, RuntimeMetadataValidationError, RuntimeMetadataVersionConflict, RuntimeQueueTimeoutError, ValidationError, WorkbenchError
+from contracts.models import AgentRequest, ConversationKnowledgeScopeRequest
+from management.db.agent.repository import search_agent_info_by_agent_id
+from management.db.conversation.repository import resolve_conversation_runtime_metadata
 from fastapi import (
     Request,
 )
@@ -301,7 +273,7 @@ async def run_agent_stream(
             if requested_workbench is None and isinstance(
                 conversation.get("workbench_config"), dict
             ):
-                from consts.model import WorkbenchSessionConfig
+                from contracts.models import WorkbenchSessionConfig
 
                 requested_workbench = WorkbenchSessionConfig.model_validate(
                     conversation["workbench_config"]

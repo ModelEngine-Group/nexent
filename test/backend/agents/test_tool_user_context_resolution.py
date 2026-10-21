@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """Tests for authenticated user-context resolution at the backend boundary."""
 
 import sys
@@ -19,15 +21,15 @@ def _agent_config(*, tool_sources=(), has_external_a2a=False, worker_agents=()):
 
 
 def _install_database_stubs(monkeypatch, *, tenant_record=None, user_record=None, groups=None):
-    tenant_config_db = types.ModuleType("database.tenant_config_db")
+    tenant_config_db = types.ModuleType("management.db.configuration.tenant")
     tenant_config_db.get_single_config_info = Mock(return_value=tenant_record)
-    user_tenant_db = types.ModuleType("database.user_tenant_db")
+    user_tenant_db = types.ModuleType("management.db.identity.user_tenant")
     user_tenant_db.get_user_tenant_in_tenant = Mock(return_value=user_record)
-    group_db = types.ModuleType("database.group_db")
+    group_db = types.ModuleType("management.db.identity.group")
     group_db.query_groups_by_user = Mock(return_value=groups)
-    monkeypatch.setitem(sys.modules, "database.tenant_config_db", tenant_config_db)
-    monkeypatch.setitem(sys.modules, "database.user_tenant_db", user_tenant_db)
-    monkeypatch.setitem(sys.modules, "database.group_db", group_db)
+    monkeypatch.setitem(sys.modules, "management.db.configuration.tenant", tenant_config_db)
+    monkeypatch.setitem(sys.modules, "management.db.identity.user_tenant", user_tenant_db)
+    monkeypatch.setitem(sys.modules, "management.db.identity.group", group_db)
     return tenant_config_db, user_tenant_db, group_db
 
 

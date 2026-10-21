@@ -1,8 +1,10 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """Save local KB permissions before optionally synchronizing changed metadata."""
 
 import logging
 
-from consts.exceptions import AppException
+from contracts.exceptions import AppException
 from ext_components.aidp.consts.aidp_exceptions import AidpKbNotFoundError
 from ext_components.aidp.services import aidp_permission_service as perms
 from ext_components.aidp.services.aidp_access_service import (

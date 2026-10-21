@@ -8,13 +8,8 @@ import pytest
 from nexent.core.agents.agent_model import AgentConfig, ModelConfig
 from pydantic import ValidationError
 
-from consts.exceptions import ForbiddenError, RunModelControlsError
-from consts.model import (
-    AgentRequest,
-    NL2AgentRunRequest,
-    NL2SkillRunRequest,
-    RuntimeGenerationOverrides,
-)
+from contracts.exceptions import ForbiddenError, RunModelControlsError
+from contracts.models import AgentRequest, NL2AgentRunRequest, NL2SkillRunRequest, RuntimeGenerationOverrides
 from management.services.model import run_controls
 
 EFFORTS = ["none", "minimal", "low", "medium", "high", "xhigh", "max"]
@@ -135,7 +130,7 @@ def test_creator_alias_preserves_independent_models_and_real_record(mocker):
 def test_native_selection_preserves_agent_version_and_tenant(mocker, version_no, current, expected):
     request = AgentRequest(agent_id=42, query="fixture", model_id=9, version_no=version_no)
     catalog = mocker.patch.object(run_controls, "validate_selected_model")
-    published = mocker.patch("database.agent_db.query_current_version_no", return_value=current)
+    published = mocker.patch("management.db.agent.repository.query_current_version_no", return_value=current)
     lookup = Mock(return_value={"model_ids": [9]})
     run_controls.validate_agent_model_selection(request, "tenant", lookup)
     catalog.assert_called_once_with(9, "tenant")

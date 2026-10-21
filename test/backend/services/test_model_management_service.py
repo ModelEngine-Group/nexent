@@ -15,7 +15,7 @@ if backend_dir not in sys.path:
     sys.path.insert(0, backend_dir)
 
 
-# Stub external modules required by consts.model before importing services
+# Stub external modules required by contracts.models before importing services
 if "nexent" not in sys.modules:
     sys.modules["nexent"] = mock.MagicMock()
 if "nexent.core" not in sys.modules:
@@ -31,13 +31,13 @@ if "nexent.core.agents.agent_model" not in sys.modules:
     agent_model_mod.ToolConfig = ToolConfig
     sys.modules["nexent.core.agents.agent_model"] = agent_model_mod
 
-# Stub boto3 used by backend.database.client
+# Stub boto3 used by management.db.client
 if "boto3" not in sys.modules:
     sys.modules["boto3"] = mock.MagicMock()
 
-# Provide stub modules for backend.database.client and database.client so that
+# Provide stub modules for management.db.client and management.db.client so that
 # patching MinioClient does not import the real client module (which pulls SQLAlchemy).
-backend_db_client_mod = types.ModuleType("backend.database.client")
+backend_db_client_mod = types.ModuleType("management.db.client")
 
 
 class _MinioClient:  # minimal stub
@@ -45,7 +45,9 @@ class _MinioClient:  # minimal stub
 
 
 backend_db_client_mod.MinioClient = _MinioClient
-sys.modules["backend.database.client"] = backend_db_client_mod
+sys.modules["management.db.client"] = backend_db_client_mod
+from test.common.database_stubs import install_serialization_stub
+install_serialization_stub(sys.modules["management.db.client"])
 
 # Ensure parent package exposes the submodule attribute for import machinery
 try:
@@ -57,16 +59,20 @@ except Exception:
         setattr(sys.modules["backend.database"],
                 "client", backend_db_client_mod)
 
-# Also stub database.client.MinioClient in case modules import without the 'backend.' prefix
-database_client_mod = types.ModuleType("database.client")
+# Also stub management.db.client.MinioClient in case modules import without the 'backend.' prefix
+database_client_mod = types.ModuleType("management.db.client")
 database_client_mod.MinioClient = _MinioClient
-sys.modules["database.client"] = database_client_mod
+sys.modules["management.db.client"] = database_client_mod
+from test.common.database_stubs import install_serialization_stub
+install_serialization_stub(sys.modules["management.db.client"])
+from test.common.database_stubs import install_serialization_stub
+install_serialization_stub(sys.modules["management.db.client"])
 
 if "database" in sys.modules:
     setattr(sys.modules["database"], "client", database_client_mod)
 
-# Stub consts.model to avoid deep dependencies
-consts_model_mod = types.ModuleType("consts.model")
+# Stub contracts.models to avoid deep dependencies
+consts_model_mod = types.ModuleType("contracts.models")
 
 
 class _EnumItem:
@@ -100,7 +106,7 @@ class _ProcessParams:
 
 
 def _infer_model_type_from_name(model_name: str) -> str:
-    """Mock implementation mirroring the real consts.model._infer_model_type_from_name."""
+    """Mock implementation mirroring the real contracts.models._infer_model_type_from_name."""
     if not model_name:
         return "llm"
     name = model_name.lower()
@@ -145,7 +151,7 @@ consts_model_mod.ModelConnectStatusEnum = _ModelConnectStatusEnum
 consts_model_mod.ToolValidateRequest = _ToolValidateRequest
 consts_model_mod.ProcessParams = _ProcessParams
 consts_model_mod._infer_model_type_from_name = _infer_model_type_from_name
-sys.modules["consts.model"] = consts_model_mod
+sys.modules["contracts.models"] = consts_model_mod
 if "consts" not in sys.modules:
     sys.modules["consts"] = types.ModuleType("consts")
 
@@ -197,8 +203,8 @@ class _Func:
 sqlalchemy_sql_mod.func = _Func()
 sys.modules["sqlalchemy.sql"] = sqlalchemy_sql_mod
 
-# Stub consts.provider used by service
-consts_provider_mod = types.ModuleType("consts.provider")
+# Stub contracts.provider used by service
+consts_provider_mod = types.ModuleType("contracts.provider")
 
 
 class _ProviderEnum:
@@ -215,7 +221,7 @@ consts_provider_mod.DASHSCOPE_REALTIME_BASE_URL = "wss://dashscope.aliyuncs.com/
 consts_provider_mod.DASHSCOPE_STT_BASE_URL = consts_provider_mod.DASHSCOPE_REALTIME_BASE_URL
 consts_provider_mod.TOKENPONY_BASE_URL = "https://api.tokenpony.cn/v1/"
 consts_provider_mod.MODEL_ENGINE_URL_MARKER = "open/router"
-sys.modules["consts.provider"] = consts_provider_mod
+sys.modules["contracts.provider"] = consts_provider_mod
 
 # Stub management.services.model.provider used by service
 services_provider_mod = types.ModuleType("management.services.model.provider")
@@ -335,11 +341,11 @@ async def _save_upload_file(*args, **kwargs):
 utils_file_mgmt_mod.save_upload_file = _save_upload_file
 sys.modules["management.services.file.upload"] = utils_file_mgmt_mod
 
-# Stub database.model_management_db to avoid importing heavy DB client
+# Stub management.db.model.repository to avoid importing heavy DB client
 database_mod = types.ModuleType("database")
 database_mod.__path__ = []
-db_mm_mod = types.ModuleType("database.model_management_db")
-db_attachment_mod = types.ModuleType("database.attachment_db")
+db_mm_mod = types.ModuleType("management.db.model.repository")
+db_attachment_mod = types.ModuleType("management.db.file.attachment")
 
 
 def _noop(*args, **kwargs):
@@ -388,7 +394,7 @@ def _get_model_by_model_id(model_id: int, tenant_id: str):
 db_mm_mod.get_model_by_model_id = _get_model_by_model_id
 db_mm_mod.update_model_record = _noop
 sys.modules["database"] = database_mod
-sys.modules["database.model_management_db"] = db_mm_mod
+sys.modules["management.db.model.repository"] = db_mm_mod
 for _attachment_func in [
     "copy_file",
     "delete_file",
@@ -403,11 +409,11 @@ for _attachment_func in [
     "upload_fileobj",
 ]:
     setattr(db_attachment_mod, _attachment_func, _noop)
-sys.modules["database.attachment_db"] = db_attachment_mod
+sys.modules["management.db.file.attachment"] = db_attachment_mod
 setattr(database_mod, "attachment_db", db_attachment_mod)
 
-# Stub database.tenant_config_db required by management.services.configuration.tenant.settings
-db_tenant_cfg_mod = types.ModuleType("database.tenant_config_db")
+# Stub management.db.configuration.tenant required by management.services.configuration.tenant.settings
+db_tenant_cfg_mod = types.ModuleType("management.db.configuration.tenant")
 
 
 def _delete_config_by_tenant_config_id(*args, **kwargs):
@@ -440,7 +446,7 @@ db_tenant_cfg_mod.get_single_config_info = _get_single_config_info
 db_tenant_cfg_mod.insert_config = _insert_config
 db_tenant_cfg_mod.update_config_by_tenant_config_id = _update_config_by_tenant_config_id
 db_tenant_cfg_mod.update_config_by_tenant_config_id_and_data = _update_config_by_tenant_config_id_and_data
-sys.modules["database.tenant_config_db"] = db_tenant_cfg_mod
+sys.modules["management.db.configuration.tenant"] = db_tenant_cfg_mod
 
 # Stub management.services.knowledge_base.service to avoid heavy imports
 services_vdb_mod = types.ModuleType("management.services.knowledge_base.service")
@@ -502,7 +508,7 @@ def import_svc(module="management"):
     """Import service under MinioClient patch to avoid real initialization."""
     minio_client_mock = mock.MagicMock()
     sys.modules["database"] = database_mod
-    sys.modules["database.model_management_db"] = db_mm_mod
+    sys.modules["management.db.model.repository"] = db_mm_mod
     setattr(database_mod, "model_management_db", db_mm_mod)
     sys.modules.pop("management.services.model.management", None)
     sys.modules.pop("management.services.model.management", None)
@@ -514,7 +520,7 @@ def import_svc(module="management"):
     sampling_module = importlib.util.module_from_spec(sampling_spec)
     sampling_spec.loader.exec_module(sampling_module)
     sys.modules["nexent.core.models.sampling"] = sampling_module
-    with mock.patch("backend.database.client.MinioClient", return_value=minio_client_mock):
+    with mock.patch("management.db.client.MinioClient", return_value=minio_client_mock):
         svc = importlib.import_module("management.services.model." + module)
     return svc
 

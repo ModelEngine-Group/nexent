@@ -373,7 +373,7 @@ class TestCollectStreamText:
     @pytest.mark.asyncio
     async def test_runtime_error_body_read_failure_still_closes_stream(self, caplog):
         """Test runtime error body failures are logged and resources are closed."""
-        from consts.exceptions import RuntimeUpstreamError
+        from contracts.exceptions import RuntimeUpstreamError
         from management.services.agent.a2a.service import A2AServerService
 
         class FailingBodyIterator:
@@ -590,7 +590,7 @@ class TestHandleMessageSend:
     @pytest.mark.asyncio
     async def test_handle_message_send_maps_runtime_timeout_to_a2a_failure(self):
         """Runtime transport failures remain A2A protocol failures without local fallback."""
-        from backend.consts.exceptions import RuntimeServiceTimeoutError
+        from contracts.exceptions import RuntimeServiceTimeoutError
         from management.services.agent.a2a.service import A2AServerService
 
         service = A2AServerService()

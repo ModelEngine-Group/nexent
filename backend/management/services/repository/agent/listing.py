@@ -4,46 +4,16 @@ import logging
 import uuid
 from typing import Any, Collection, Dict, FrozenSet, List, Optional, Tuple
 
-from consts.agent_repository import (
-    OWNERSHIP_ALL,
-    OWNERSHIP_CREATED,
-    OWNERSHIP_OTHERS,
-    STATUS_NOT_SHARED,
-    STATUS_PENDING_REVIEW,
-    STATUS_REJECTED,
-    STATUS_SHARED,
-    VALID_OWNERSHIP_FILTERS,
-    VALID_REPOSITORY_STATUSES,
-)
+from contracts.agent_repository import OWNERSHIP_ALL, OWNERSHIP_CREATED, OWNERSHIP_OTHERS, STATUS_NOT_SHARED, STATUS_PENDING_REVIEW, STATUS_REJECTED, STATUS_SHARED, VALID_OWNERSHIP_FILTERS, VALID_REPOSITORY_STATUSES
 from consts.const import SYSTEM_TENANT_ID
-from consts.exceptions import UnauthorizedError
-from consts.model import (
-    AgentRepositorySnapshot,
-    KnowledgeBaseResolution,
-    SkillResolution,
-)
-from consts.notification import (
-    EVENT_TYPE_REPOSITORY_REVIEW_PENDING,
-    RESOURCE_TYPE_AGENT_REPOSITORY,
-)
-from database.agent_db import delete_agent_by_id, search_agent_info_by_agent_id
-from database.agent_repository_db import (
-    fetch_draft_agent_mine_metadata,
-    get_agent_repository_by_agent_id,
-    get_agent_repository_by_id,
-    increment_agent_repository_downloads,
-    insert_agent_repository_record,
-    list_agent_repository_by_agent_ids,
-    list_agent_repository_summaries,
-    reset_agent_repository_status,
-    soft_delete_agent_repository_record,
-    sum_agent_repository_downloads_by_agent_ids,
-    update_agent_repository_by_id,
-    update_agent_repository_status_by_id,
-)
-from database.agent_version_db import search_version_by_version_no
-from database.tag_management_db import TagManagementDB
-from database.user_tenant_db import get_user_tenant_by_user_id
+from contracts.exceptions import UnauthorizedError
+from contracts.models import AgentRepositorySnapshot, KnowledgeBaseResolution, SkillResolution
+from contracts.notification import EVENT_TYPE_REPOSITORY_REVIEW_PENDING, RESOURCE_TYPE_AGENT_REPOSITORY
+from management.db.agent.repository import delete_agent_by_id, search_agent_info_by_agent_id
+from management.db.agent.catalog import fetch_draft_agent_mine_metadata, get_agent_repository_by_agent_id, get_agent_repository_by_id, increment_agent_repository_downloads, insert_agent_repository_record, list_agent_repository_by_agent_ids, list_agent_repository_summaries, reset_agent_repository_status, soft_delete_agent_repository_record, sum_agent_repository_downloads_by_agent_ids, update_agent_repository_by_id, update_agent_repository_status_by_id
+from management.db.agent.version import search_version_by_version_no
+from management.db.tag.repository import TagManagementDB
+from management.db.identity.user_tenant import get_user_tenant_by_user_id
 from management.services.agent.icon import read_icon_image, upload_icon_image
 from management.services.agent.service import (
     collect_skill_zip_entries,
@@ -762,4 +732,4 @@ def _order_listings_by_publish_time(
 
 from datetime import datetime
 
-from database.agent_db import batch_get_agent_main_flags
+from management.db.agent.repository import batch_get_agent_main_flags

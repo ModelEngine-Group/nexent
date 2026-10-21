@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """D2 error-contract test for the agent runtime overload endpoints.
 
 Verifies that ``POST /agent/run`` and
@@ -12,11 +14,8 @@ import pytest
 import httpx
 from fastapi import FastAPI
 
-from apps.agent_app import agent_runtime_router
-from consts.exceptions import (
-    RuntimeCapacityExceededError,
-    RuntimeQueueTimeoutError,
-)
+from runtime.api.agent.execution import agent_runtime_router
+from contracts.exceptions import RuntimeCapacityExceededError, RuntimeQueueTimeoutError
 
 
 def _build_app() -> FastAPI:
@@ -70,7 +69,7 @@ _SCENARIOS = [
 @pytest.mark.case_id("API-AUTO-7CBDF5C068165594")
 @pytest.mark.asyncio
 async def test_runtime_overload_error_contract(monkeypatch) -> None:
-    import apps.agent_app as agent_app
+    from management.api.agent import agent as agent_app
 
     transport = httpx.ASGITransport(app=_build_app())
 

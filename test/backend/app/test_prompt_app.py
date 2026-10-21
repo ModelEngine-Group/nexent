@@ -23,7 +23,7 @@ auth_utils_stub.get_current_user_info = MagicMock()
 sys.modules["management.services.permission.identity.authentication_helpers"] = auth_utils_stub
 sys.modules["management.services.permission.identity.authentication_helpers"] = auth_utils_stub
 
-from apps.prompt_app import router
+from management.api.prompt.prompt import router
 
 
 app = FastAPI()
@@ -33,9 +33,9 @@ client = TestClient(app)
 
 @pytest.mark.parametrize("description", ["", " ", "\t\r\n", "\u3000", " \t\n\u3000 "])
 def test_generate_prompt_rejects_blank_description(description, mocker):
-    generate = mocker.patch("apps.prompt_app.gen_system_prompt_streamable", return_value=iter(()))
+    generate = mocker.patch("management.api.prompt.prompt.gen_system_prompt_streamable", return_value=iter(()))
     authenticate = mocker.patch(
-        "apps.prompt_app.get_current_user_info", return_value=("user-1", "tenant-1", "en")
+        "management.api.prompt.prompt.get_current_user_info", return_value=("user-1", "tenant-1", "en")
     )
 
     for _ in range(2):
@@ -52,8 +52,8 @@ def test_generate_prompt_rejects_blank_description(description, mocker):
 @pytest.mark.parametrize("description", ["Answer questions", " \tAnswer questions\n\u3000"])
 def test_generate_prompt_preserves_valid_description_and_sse(description, mocker):
     event = 'data: {"success": true, "data": {"type": "duty", "content": "Answer", "is_complete": true}}\n\n'
-    generate = mocker.patch("apps.prompt_app.gen_system_prompt_streamable", return_value=iter([event]))
-    mocker.patch("apps.prompt_app.get_current_user_info", return_value=("user-1", "tenant-1", "en"))
+    generate = mocker.patch("management.api.prompt.prompt.gen_system_prompt_streamable", return_value=iter([event]))
+    mocker.patch("management.api.prompt.prompt.get_current_user_info", return_value=("user-1", "tenant-1", "en"))
     payload = {
         "task_description": description, "agent_id": 1, "model_id": 2,
         "tool_ids": [10], "sub_agent_ids": [20], "knowledge_base_display_names": ["kb-a"],
@@ -70,8 +70,8 @@ def test_generate_prompt_preserves_valid_description_and_sse(description, mocker
     )
 
 
-@patch("apps.prompt_app.get_current_user_info")
-@patch("apps.prompt_app.PromptOptimizationService")
+@patch("management.api.prompt.prompt.get_current_user_info")
+@patch("management.api.prompt.prompt.PromptOptimizationService")
 def test_optimize_prompt_section_api_success(mock_service_cls, mock_get_current_user_info):
     """Test /prompt/optimize returns optimized content with X-Prompt-Source header"""
     mock_get_current_user_info.return_value = ("user-1", "tenant-1", "en")
@@ -115,8 +115,8 @@ def test_optimize_prompt_section_api_success(mock_service_cls, mock_get_current_
     mock_svc_instance.optimize.assert_called_once()
 
 
-@patch("apps.prompt_app.get_current_user_info")
-@patch("apps.prompt_app.PromptOptimizationService")
+@patch("management.api.prompt.prompt.get_current_user_info")
+@patch("management.api.prompt.prompt.PromptOptimizationService")
 def test_optimize_prompt_section_api_with_mode(mock_service_cls, mock_get_current_user_info):
     """Test /prompt/optimize accepts mode/start_pos/end_pos parameters"""
     mock_get_current_user_info.return_value = ("user-1", "tenant-1", "zh")
@@ -156,8 +156,8 @@ def test_optimize_prompt_section_api_with_mode(mock_service_cls, mock_get_curren
     assert call_args[0][0].end_pos == 20
 
 
-@patch("apps.prompt_app.get_current_user_info")
-@patch("apps.prompt_app.PromptOptimizationService")
+@patch("management.api.prompt.prompt.get_current_user_info")
+@patch("management.api.prompt.prompt.PromptOptimizationService")
 def test_optimize_prompt_section_api_nexent_capability_error(mock_service_cls, mock_get_current_user_info):
     """Test /prompt/optimize returns 400 when NexentCapabilityError is raised"""
     mock_get_current_user_info.return_value = ("user-1", "tenant-1", "en")
@@ -189,8 +189,8 @@ def test_optimize_prompt_section_api_nexent_capability_error(mock_service_cls, m
     assert "general" in data["message"]
 
 
-@patch("apps.prompt_app.get_current_user_info")
-@patch("apps.prompt_app.PromptOptimizationService")
+@patch("management.api.prompt.prompt.get_current_user_info")
+@patch("management.api.prompt.prompt.PromptOptimizationService")
 def test_optimize_badcase_api_success(mock_service_cls, mock_get_current_user_info):
     """Test /prompt/optimize/badcase returns optimized content with X-Prompt-Source header"""
     mock_get_current_user_info.return_value = ("user-1", "tenant-1", "zh")
@@ -236,8 +236,8 @@ def test_optimize_badcase_api_success(mock_service_cls, mock_get_current_user_in
     mock_svc_instance.optimize_badcase.assert_called_once()
 
 
-@patch("apps.prompt_app.get_current_user_info")
-@patch("apps.prompt_app.PromptOptimizationService")
+@patch("management.api.prompt.prompt.get_current_user_info")
+@patch("management.api.prompt.prompt.PromptOptimizationService")
 def test_optimize_badcase_api_nexent_capability_error(mock_service_cls, mock_get_current_user_info):
     """Test /prompt/optimize/badcase returns 400 when NexentCapabilityError is raised"""
     mock_get_current_user_info.return_value = ("user-1", "tenant-1", "zh")

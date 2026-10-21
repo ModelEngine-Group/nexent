@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 from __future__ import annotations
 
 import os
@@ -28,9 +30,9 @@ def _apply_db_environment():
 
 _apply_db_environment()
 
-from database.agent_evaluation_db import reap_stale_runs  # noqa: E402
-from database.client import get_db_session  # noqa: E402
-from database.db_models import AgentEvaluation, AgentEvaluationCase  # noqa: E402
+from management.db.evaluation.runs import reap_stale_runs
+from management.db.client import get_db_session
+from management.db.models import AgentEvaluation, AgentEvaluationCase
 
 
 def _naive_utc(delta_minutes):

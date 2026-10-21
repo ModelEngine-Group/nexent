@@ -22,12 +22,12 @@ _MODULE_PATCH_NAMES = [
     'sqlalchemy.dialects',
     'sqlalchemy.dialects.postgresql',
     'sqlalchemy.sql',
-    'database.agent_db',
-    'database.tool_db',
-    'database.model_management_db',
-    'database.knowledge_db',
-    'database.client',
-    'database.db_models',
+    'management.db.agent.repository',
+    'management.db.tool.repository',
+    'management.db.model.repository',
+    'management.db.knowledge_base.repository',
+    'management.db.client',
+    'management.db.models',
     'management.services.model.invocation',
     'management.services.agent.prompt',
     'management.services.agent.service',
@@ -159,8 +159,8 @@ sys.modules['sqlalchemy.sql'] = MagicMock()
 # DO NOT mock consts - import real ones
 # The backend path is already in sys.path via sys.path.insert above
 
-from consts.error_code import ErrorCode
-from consts.exceptions import AppException
+from contracts.error_code import ErrorCode
+from contracts.exceptions import AppException
 from consts.const import ENABLE_JIUWEN_SDK
 
 # Mock boto3 and minio client before importing the module under test
@@ -184,16 +184,22 @@ minio_client_mock._ensure_bucket_exists = MagicMock()
 minio_client_mock.client = MagicMock()
 
 # Mock database submodules BEFORE importing prompt_service
-sys.modules['database.agent_db'] = MagicMock()
-sys.modules['database.tool_db'] = MagicMock()
-sys.modules['database.model_management_db'] = MagicMock()
-sys.modules['database.knowledge_db'] = MagicMock()
+sys.modules['management.db.agent.repository'] = MagicMock()
+sys.modules['management.db.tool.repository'] = MagicMock()
+sys.modules['management.db.model.repository'] = MagicMock()
+sys.modules['management.db.knowledge_base.repository'] = MagicMock()
 mock_database_client = MagicMock()
 mock_database_client.MinioClient.return_value = minio_client_mock
 mock_database_client.minio_client = minio_client_mock
-sys.modules['database.client'] = mock_database_client
-sys.modules['backend.database.client'] = mock_database_client
-sys.modules['database.db_models'] = MagicMock()
+sys.modules['management.db.client'] = mock_database_client
+from test.common.database_stubs import install_serialization_stub
+install_serialization_stub(sys.modules["management.db.client"])
+from test.common.database_stubs import install_serialization_stub
+install_serialization_stub(sys.modules["management.db.client"])
+sys.modules['management.db.client'] = mock_database_client
+from test.common.database_stubs import install_serialization_stub
+install_serialization_stub(sys.modules["management.db.client"])
+sys.modules['management.db.models'] = MagicMock()
 
 from jinja2 import StrictUndefined
 
@@ -1145,8 +1151,8 @@ class TestPromptService(unittest.TestCase):
     @patch('management.services.agent.prompt_generation.generate_and_save_system_prompt_impl')
     def test_gen_system_prompt_streamable_with_app_exception(self, mock_generate_impl):
         """Test gen_system_prompt_streamable handles AppException and returns error through SSE"""
-        from consts.error_code import ErrorCode
-        from consts.exceptions import AppException
+        from contracts.error_code import ErrorCode
+        from contracts.exceptions import AppException
 
         # Setup - mock generate_and_save_system_prompt_impl to raise AppException
         mock_generate_impl.side_effect = AppException(

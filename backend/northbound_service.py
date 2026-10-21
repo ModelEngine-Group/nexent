@@ -8,7 +8,7 @@ import uvicorn
 from dotenv import load_dotenv
 
 
-from apps.northbound_base_app import northbound_app
+from gateway.api.application import northbound_app
 from infrastructure.logging import get_uvicorn_logging_config
 
 

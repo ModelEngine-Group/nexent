@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import types
 import importlib.machinery
 import pytest
@@ -27,22 +29,14 @@ minio_mock._ensure_bucket_exists = MagicMock()
 minio_mock.client = MagicMock()
 patch('nexent.storage.storage_client_factory.create_storage_client_from_config', return_value=storage_client_mock).start()
 patch('nexent.storage.minio_config.MinIOStorageConfig.validate', lambda self: None).start()
-patch('backend.database.client.MinioClient', return_value=minio_mock).start()
-patch('database.client.MinioClient', return_value=minio_mock).start()
-patch('backend.database.client.minio_client', minio_mock).start()
+patch('management.db.client.MinioClient', return_value=minio_mock).start()
+patch('management.db.client.MinioClient', return_value=minio_mock).start()
+patch('management.db.client.minio_client', minio_mock).start()
 patch('elasticsearch.Elasticsearch', return_value=MagicMock()).start()
 
 # Import exception classes
-from consts.exceptions import (
-    NoInviteCodeException,
-    IncorrectInviteCodeException,
-    UserRegistrationException,
-    UnauthorizedError,
-    AppException,
-    TenantResourceLimitError,
-    ValidationError,
-)
-from consts.error_code import ErrorCode
+from contracts.exceptions import NoInviteCodeException, IncorrectInviteCodeException, UserRegistrationException, UnauthorizedError, AppException, TenantResourceLimitError, ValidationError
+from contracts.error_code import ErrorCode
 from supabase_auth.errors import AuthApiError, AuthWeakPasswordError
 
 # Import the modules we need
@@ -52,7 +46,7 @@ from fastapi import FastAPI
 from fastapi import HTTPException
 
 # Create a test client with a fresh FastAPI app
-from apps.user_management_app import router
+from management.api.identity.user_management import router
 
 app = FastAPI()
 app.include_router(router)
@@ -70,7 +64,7 @@ class MockUser:
 class TestServiceHealth:
     """Test service health endpoint"""
 
-    @patch('apps.user_management_app.check_auth_service_health')
+    @patch('management.api.identity.user_management.check_auth_service_health')
     def test_service_health_available(self, mock_health_check):
         """Test when auth service is available"""
         mock_health_check.return_value = True
@@ -82,7 +76,7 @@ class TestServiceHealth:
         assert data["message"] == "Auth service is available"
         mock_health_check.assert_called_once()
 
-    @patch('apps.user_management_app.check_auth_service_health')
+    @patch('management.api.identity.user_management.check_auth_service_health')
     def test_service_health_unavailable(self, mock_health_check):
         """Test when auth service is unavailable"""
         mock_health_check.side_effect = ConnectionError("Connection failed")
@@ -94,7 +88,7 @@ class TestServiceHealth:
         assert data["detail"] == "Auth service is unavailable"
         mock_health_check.assert_called_once()
 
-    @patch('apps.user_management_app.check_auth_service_health')
+    @patch('management.api.identity.user_management.check_auth_service_health')
     def test_service_health_exception(self, mock_health_check):
         """Test when health check raises exception"""
         mock_health_check.side_effect = Exception("Connection error")
@@ -112,7 +106,7 @@ class TestUserSignup:
 
     def test_signup_success_regular_user(self):
         """Test successful regular user registration"""
-        with patch('apps.user_management_app.signup_user_with_invitation') as mock_signup:
+        with patch('management.api.identity.user_management.signup_user_with_invitation') as mock_signup:
             mock_signup.return_value = {"user_id": "123", "email": "test@example.com"}
 
             response = client.post(
@@ -137,7 +131,7 @@ class TestUserSignup:
 
     def test_signup_success_regular_user_with_auto_login_false(self):
         """Test successful regular user registration with auto_login=false"""
-        with patch('apps.user_management_app.signup_user_with_invitation') as mock_signup:
+        with patch('management.api.identity.user_management.signup_user_with_invitation') as mock_signup:
             mock_signup.return_value = {"user_id": "123", "email": "test@example.com"}
 
             response = client.post(
@@ -171,7 +165,7 @@ class TestUserSignup:
         ],
     )
     def test_signup_requires_non_empty_invite_code(self, payload):
-        with patch("apps.user_management_app.signup_user_with_invitation") as mock_signup:
+        with patch("management.api.identity.user_management.signup_user_with_invitation") as mock_signup:
             response = client.post("/user/signup", json=payload)
 
         assert response.status_code == HTTPStatus.UNPROCESSABLE_ENTITY
@@ -179,7 +173,7 @@ class TestUserSignup:
 
     def test_signup_success_admin_user(self):
         """Test successful admin user registration"""
-        with patch('apps.user_management_app.signup_user_with_invitation') as mock_signup:
+        with patch('management.api.identity.user_management.signup_user_with_invitation') as mock_signup:
             mock_signup.return_value = {"user_id": "123", "email": "admin@example.com"}
 
             response = client.post(
@@ -204,7 +198,7 @@ class TestUserSignup:
 
     def test_signup_success_admin_user_with_auto_login_false(self):
         """Test successful admin user registration with auto_login=false (tenant management scenario)"""
-        with patch('apps.user_management_app.signup_user_with_invitation') as mock_signup:
+        with patch('management.api.identity.user_management.signup_user_with_invitation') as mock_signup:
             mock_signup.return_value = {"user_id": "123", "email": "admin@example.com"}
 
             response = client.post(
@@ -229,7 +223,7 @@ class TestUserSignup:
 
     def test_signup_no_invite_code_exception(self):
         """Test registration fails due to missing invite code"""
-        with patch('apps.user_management_app.signup_user_with_invitation') as mock_signup:
+        with patch('management.api.identity.user_management.signup_user_with_invitation') as mock_signup:
             mock_signup.side_effect = NoInviteCodeException("No invite code configured")
 
             response = client.post(
@@ -247,7 +241,7 @@ class TestUserSignup:
 
     def test_signup_incorrect_invite_code_exception(self):
         """Test registration fails due to incorrect invite code"""
-        with patch('apps.user_management_app.signup_user_with_invitation') as mock_signup:
+        with patch('management.api.identity.user_management.signup_user_with_invitation') as mock_signup:
             mock_signup.side_effect = IncorrectInviteCodeException("Invalid invite code")
 
             response = client.post(
@@ -265,7 +259,7 @@ class TestUserSignup:
 
     def test_signup_validation_error_returns_400(self):
         """Test registration rejected by ASSET_OWNER feature flag returns 400."""
-        with patch("apps.user_management_app.signup_user_with_invitation") as mock_signup:
+        with patch("management.api.identity.user_management.signup_user_with_invitation") as mock_signup:
             mock_signup.side_effect = ValidationError("ASSET_OWNER feature is not enabled")
 
             response = client.post(
@@ -282,7 +276,7 @@ class TestUserSignup:
 
     def test_signup_tenant_limit_returns_standard_429_payload(self):
         """Test registration returns the structured tenant quota response."""
-        with patch("apps.user_management_app.signup_user_with_invitation") as mock_signup:
+        with patch("management.api.identity.user_management.signup_user_with_invitation") as mock_signup:
             mock_signup.side_effect = TenantResourceLimitError(
                 "Tenant user limit reached: maximum 10000 users per tenant",
                 resource="users",
@@ -306,7 +300,7 @@ class TestUserSignup:
 
     def test_signup_registration_service_exception(self):
         """Test registration fails due to service error"""
-        with patch('apps.user_management_app.signup_user_with_invitation') as mock_signup:
+        with patch('management.api.identity.user_management.signup_user_with_invitation') as mock_signup:
             mock_signup.side_effect = UserRegistrationException("Service error")
 
             response = client.post(
@@ -324,7 +318,7 @@ class TestUserSignup:
 
     def test_signup_email_already_exists(self):
         """Test registration fails due to email already existing"""
-        with patch('apps.user_management_app.signup_user_with_invitation') as mock_signup:
+        with patch('management.api.identity.user_management.signup_user_with_invitation') as mock_signup:
             mock_signup.side_effect = AuthApiError("Email already exists", 400, "email_exists")
 
             response = client.post(
@@ -342,7 +336,7 @@ class TestUserSignup:
 
     def test_signup_weak_password(self):
         """Test registration fails due to weak password"""
-        with patch('apps.user_management_app.signup_user_with_invitation') as mock_signup:
+        with patch('management.api.identity.user_management.signup_user_with_invitation') as mock_signup:
             mock_signup.side_effect = AuthWeakPasswordError("Password too weak", 400, ["Password is too weak"])
 
             response = client.post(
@@ -360,7 +354,7 @@ class TestUserSignup:
 
     def test_signup_unknown_error(self):
         """Test registration fails due to unknown error"""
-        with patch('apps.user_management_app.signup_user_with_invitation') as mock_signup:
+        with patch('management.api.identity.user_management.signup_user_with_invitation') as mock_signup:
             mock_signup.side_effect = Exception("Unknown error")
 
             response = client.post(
@@ -382,7 +376,7 @@ class TestUserSignin:
 
     def test_signin_validation_error_returns_400(self):
         """Test login rejected by ASSET_OWNER feature flag returns 400."""
-        with patch("apps.user_management_app.signin_user") as mock_signin:
+        with patch("management.api.identity.user_management.signin_user") as mock_signin:
             mock_signin.side_effect = ValidationError("ASSET_OWNER feature is not enabled")
 
             response = client.post(
@@ -398,7 +392,7 @@ class TestUserSignin:
 
     def test_signin_success(self):
         """Test successful user login"""
-        with patch('apps.user_management_app.signin_user') as mock_signin:
+        with patch('management.api.identity.user_management.signin_user') as mock_signin:
             mock_signin.return_value = {
                 "message": "Login successful",
                 "data": {"access_token": "token123", "user_id": "123"}
@@ -423,7 +417,7 @@ class TestUserSignin:
 
     def test_signin_invalid_credentials(self):
         """Test login with invalid credentials"""
-        with patch('apps.user_management_app.signin_user') as mock_signin:
+        with patch('management.api.identity.user_management.signin_user') as mock_signin:
             mock_signin.side_effect = AuthApiError("Invalid credentials", 400, "invalid_credentials")
 
             response = client.post(
@@ -440,7 +434,7 @@ class TestUserSignin:
 
     def test_signin_unknown_error(self):
         """Test login with unknown error"""
-        with patch('apps.user_management_app.signin_user') as mock_signin:
+        with patch('management.api.identity.user_management.signin_user') as mock_signin:
             mock_signin.side_effect = Exception("Database error")
 
             response = client.post(
@@ -461,7 +455,7 @@ class TestRefreshToken:
 
     def test_refresh_token_success(self):
         """Test successful token refresh"""
-        with patch('apps.user_management_app.refresh_user_token') as mock_refresh:
+        with patch('management.api.identity.user_management.refresh_user_token') as mock_refresh:
             mock_refresh.return_value = {"access_token": "new_token", "refresh_token": "new_refresh"}
 
             response = client.post(
@@ -501,7 +495,7 @@ class TestRefreshToken:
 
     def test_refresh_token_error(self):
         """Test token refresh with error"""
-        with patch('apps.user_management_app.refresh_user_token') as mock_refresh:
+        with patch('management.api.identity.user_management.refresh_user_token') as mock_refresh:
             mock_refresh.side_effect = Exception("Refresh failed")
 
             response = client.post(
@@ -518,7 +512,7 @@ class TestRefreshToken:
 class TestLogout:
     """Test logout endpoint"""
 
-    @patch('apps.user_management_app.get_authorized_client')
+    @patch('management.api.identity.user_management.get_authorized_client')
     def test_logout_success(self, mock_get_client):
         """Test successful logout"""
         mock_client = MagicMock()
@@ -543,7 +537,7 @@ class TestLogout:
         data = response.json()
         assert data["message"] == "Logout successful"
 
-    @patch('apps.user_management_app.get_authorized_client')
+    @patch('management.api.identity.user_management.get_authorized_client')
     def test_logout_signout_error_ignored(self, mock_get_client):
         """Test logout ignores sign_out errors and still succeeds"""
         mock_client = MagicMock()
@@ -561,10 +555,10 @@ class TestLogout:
         mock_get_client.assert_called_once_with("Bearer token")
         mock_client.auth.sign_out.assert_called_once()
 
-    @patch('database.cas_session_db.revoke_cas_session_by_session_id')
-    @patch('apps.user_management_app.build_logout_url')
-    @patch('apps.user_management_app.extract_session_id_from_authorization')
-    @patch('apps.user_management_app.get_authorized_client')
+    @patch('management.db.identity.cas_session.revoke_cas_session_by_session_id')
+    @patch('management.api.identity.user_management.build_logout_url')
+    @patch('management.api.identity.user_management.extract_session_id_from_authorization')
+    @patch('management.api.identity.user_management.get_authorized_client')
     def test_logout_returns_cas_logout_url_for_cas_session(
         self,
         mock_get_client,
@@ -595,10 +589,10 @@ class TestLogout:
         mock_build_logout_url.assert_called_once_with()
         mock_client.auth.sign_out.assert_called_once()
 
-    @patch('database.cas_session_db.revoke_cas_session_by_session_id')
-    @patch('apps.user_management_app.build_logout_url')
-    @patch('apps.user_management_app.extract_session_id_from_authorization')
-    @patch('apps.user_management_app.get_authorized_client')
+    @patch('management.db.identity.cas_session.revoke_cas_session_by_session_id')
+    @patch('management.api.identity.user_management.build_logout_url')
+    @patch('management.api.identity.user_management.extract_session_id_from_authorization')
+    @patch('management.api.identity.user_management.get_authorized_client')
     def test_logout_does_not_return_cas_logout_url_when_not_configured(
         self,
         mock_get_client,
@@ -624,7 +618,7 @@ class TestLogout:
         mock_build_logout_url.assert_called_once_with()
         mock_client.auth.sign_out.assert_called_once()
 
-    @patch('apps.user_management_app.get_authorized_client')
+    @patch('management.api.identity.user_management.get_authorized_client')
     def test_logout_error(self, mock_get_client):
         """Test logout with error"""
         mock_get_client.side_effect = Exception("Logout error")
@@ -642,7 +636,7 @@ class TestLogout:
 class TestGetSession:
     """Test get session endpoint"""
 
-    @patch('apps.user_management_app.get_session_by_authorization')
+    @patch('management.api.identity.user_management.get_session_by_authorization')
     def test_get_session_success(self, mock_get_session):
         """Test successful session retrieval"""
         mock_get_session.return_value = {
@@ -671,7 +665,7 @@ class TestGetSession:
         assert data["message"] == "User not logged in"
         assert data["data"] is None
 
-    @patch('apps.user_management_app.get_session_by_authorization')
+    @patch('management.api.identity.user_management.get_session_by_authorization')
     def test_get_session_invalid(self, mock_get_session):
         """Test session retrieval with invalid session"""
         mock_get_session.side_effect = UnauthorizedError("Invalid session")
@@ -685,7 +679,7 @@ class TestGetSession:
         data = response.json()
         assert data["detail"] == "User not logged in or session invalid"
 
-    @patch('apps.user_management_app.get_session_by_authorization')
+    @patch('management.api.identity.user_management.get_session_by_authorization')
     def test_get_session_error(self, mock_get_session):
         """Test session retrieval with general error"""
         mock_get_session.side_effect = Exception("Database error")
@@ -703,7 +697,7 @@ class TestGetSession:
 class TestGetCurrentUserId:
     """Test get current user ID endpoint"""
 
-    @patch('apps.user_management_app.validate_token')
+    @patch('management.api.identity.user_management.validate_token')
     def test_get_user_id_success_valid_token(self, mock_validate):
         """Test successful user ID retrieval with valid token"""
         mock_user = MockUser("user123", "test@example.com")
@@ -720,7 +714,7 @@ class TestGetCurrentUserId:
         assert data["data"]["user_id"] == "user123"
         mock_validate.assert_called_once_with("Bearer token")
 
-    @patch('apps.user_management_app.validate_token')
+    @patch('management.api.identity.user_management.validate_token')
     def test_get_user_id_token_validation_failed_returns_401(self, mock_validate):
         """Test that when token validation fails, return 401 (no fallback to parse token)"""
         mock_validate.return_value = (False, None)
@@ -735,7 +729,7 @@ class TestGetCurrentUserId:
         assert "User not logged in or session invalid" in data["detail"]
         mock_validate.assert_called_once_with("Bearer expired_token")
 
-    @patch('apps.user_management_app.validate_token')
+    @patch('management.api.identity.user_management.validate_token')
     def test_get_user_id_invalid_session(self, mock_validate):
         """Test user ID retrieval with invalid session returns 401"""
         mock_validate.return_value = (False, None)
@@ -758,7 +752,7 @@ class TestGetCurrentUserId:
         assert data["message"] == "User not logged in"
         assert data["data"]["user_id"] is None
 
-    @patch('apps.user_management_app.validate_token')
+    @patch('management.api.identity.user_management.validate_token')
     def test_get_user_id_error(self, mock_validate):
         """Test user ID retrieval with general error"""
         mock_validate.side_effect = Exception("Token validation error")
@@ -776,8 +770,8 @@ class TestGetCurrentUserId:
 class TestCurrentUserInfo:
     """Test /current_user_info endpoint"""
 
-    @patch('apps.user_management_app.validate_token')
-    @patch('apps.user_management_app.get_user_info', new_callable=AsyncMock)
+    @patch('management.api.identity.user_management.validate_token')
+    @patch('management.api.identity.user_management.get_user_info', new_callable=AsyncMock)
     def test_current_user_info_success(self, mock_get_user_info, mock_validate_token):
         """Test successful current user info retrieval"""
         # Setup mock user for token validation
@@ -817,10 +811,10 @@ class TestCurrentUserInfo:
         assert data["data"]["user"]["accessibleRoutes"] == ["chat", "agents"]
         mock_get_user_info.assert_called_once_with("user123")
 
-    @patch('apps.user_management_app.extract_session_id_from_authorization')
-    @patch('apps.user_management_app.get_provider_username')
-    @patch('apps.user_management_app.validate_token')
-    @patch('apps.user_management_app.get_user_info', new_callable=AsyncMock)
+    @patch('management.api.identity.user_management.extract_session_id_from_authorization')
+    @patch('management.api.identity.user_management.get_provider_username')
+    @patch('management.api.identity.user_management.validate_token')
+    @patch('management.api.identity.user_management.get_user_info', new_callable=AsyncMock)
     def test_current_user_info_marks_cas_user(
         self,
         mock_get_user_info,
@@ -866,8 +860,8 @@ class TestCurrentUserInfo:
         assert data["message"] == "User not logged in"
         assert data["data"] is None
 
-    @patch('apps.user_management_app.validate_token')
-    @patch('apps.user_management_app.get_user_info', new_callable=AsyncMock)
+    @patch('management.api.identity.user_management.validate_token')
+    @patch('management.api.identity.user_management.get_user_info', new_callable=AsyncMock)
     def test_current_user_info_user_not_found(self, mock_get_user_info, mock_validate_token):
         """Test current user info when user is not found"""
         # Setup mock user for token validation
@@ -885,8 +879,8 @@ class TestCurrentUserInfo:
         data = response.json()
         assert "User not logged in or session invalid" in data["detail"]
 
-    @patch('apps.user_management_app.validate_token')
-    @patch('apps.user_management_app.get_user_info', new_callable=AsyncMock)
+    @patch('management.api.identity.user_management.validate_token')
+    @patch('management.api.identity.user_management.get_user_info', new_callable=AsyncMock)
     def test_current_user_info_error(self, mock_get_user_info, mock_validate_token):
         """Test current user info with error"""
         # Setup mock user for token validation
@@ -908,9 +902,9 @@ class TestCurrentUserInfo:
 class TestRevokeUserAccount:
     """Tests for the /user/revoke endpoint"""
 
-    @patch('apps.user_management_app.delete_user_and_cleanup', new_callable=AsyncMock)
-    @patch('apps.user_management_app.validate_token')
-    @patch('apps.user_management_app.get_current_user_id')
+    @patch('management.api.identity.user_management.delete_user_and_cleanup', new_callable=AsyncMock)
+    @patch('management.api.identity.user_management.validate_token')
+    @patch('management.api.identity.user_management.get_current_user_id')
     def test_revoke_success_regular_user(self, mock_get_ids, mock_validate, mock_revoke):
         mock_get_ids.return_value = ("user123", "tenant456")
         user = MagicMock()
@@ -926,8 +920,8 @@ class TestRevokeUserAccount:
         mock_revoke.assert_awaited_once_with(
             user_id="user123", tenant_id="tenant456")
 
-    @patch('apps.user_management_app.validate_token')
-    @patch('apps.user_management_app.get_current_user_id')
+    @patch('management.api.identity.user_management.validate_token')
+    @patch('management.api.identity.user_management.get_current_user_id')
     def test_revoke_forbidden_admin(self, mock_get_ids, mock_validate):
         mock_get_ids.return_value = ("admin123", "tenant456")
         user = MagicMock()
@@ -946,8 +940,8 @@ class TestRevokeUserAccount:
         assert response.status_code == HTTPStatus.UNAUTHORIZED
         assert response.json()["detail"] == "No authorization token provided"
 
-    @patch('apps.user_management_app.validate_token')
-    @patch('apps.user_management_app.get_current_user_id')
+    @patch('management.api.identity.user_management.validate_token')
+    @patch('management.api.identity.user_management.get_current_user_id')
     def test_revoke_invalid_session(self, mock_get_ids, mock_validate):
         mock_get_ids.return_value = ("user123", "tenant456")
         mock_validate.return_value = (False, None)
@@ -959,9 +953,9 @@ class TestRevokeUserAccount:
         assert response.json()[
             "detail"] == "User not logged in or session invalid"
 
-    @patch('apps.user_management_app.delete_user_and_cleanup', new_callable=AsyncMock)
-    @patch('apps.user_management_app.validate_token')
-    @patch('apps.user_management_app.get_current_user_id')
+    @patch('management.api.identity.user_management.delete_user_and_cleanup', new_callable=AsyncMock)
+    @patch('management.api.identity.user_management.validate_token')
+    @patch('management.api.identity.user_management.get_current_user_id')
     def test_revoke_error(self, mock_get_ids, mock_validate, mock_revoke):
         mock_get_ids.return_value = ("user123", "tenant456")
         user = MagicMock()
@@ -979,10 +973,10 @@ class TestRevokeUserAccount:
 class TestIntegration:
     """Integration tests for user management flow"""
 
-    @patch('apps.user_management_app.signup_user_with_invitation')
-    @patch('apps.user_management_app.signin_user')
-    @patch('apps.user_management_app.get_session_by_authorization')
-    @patch('apps.user_management_app.get_authorized_client')
+    @patch('management.api.identity.user_management.signup_user_with_invitation')
+    @patch('management.api.identity.user_management.signin_user')
+    @patch('management.api.identity.user_management.get_session_by_authorization')
+    @patch('management.api.identity.user_management.get_authorized_client')
     def test_complete_user_flow(self, mock_get_client, mock_get_session, mock_signin, mock_signup):
         """Test complete user registration and authentication flow"""
         # 1. Register user
@@ -1068,8 +1062,8 @@ class TestDataValidation:
 class TestCreateTokenEndpoint:
     """Tests for POST /tokens endpoint."""
 
-    @patch('apps.user_management_app.create_token')
-    @patch('apps.user_management_app.get_current_user_id')
+    @patch('management.api.identity.user_management.create_token')
+    @patch('management.api.identity.user_management.get_current_user_id')
     def test_create_token_success(self, mock_get_user_id, mock_create_token):
         """Test successful token creation."""
         mock_get_user_id.return_value = ("user-123", "tenant-456")
@@ -1089,8 +1083,8 @@ class TestCreateTokenEndpoint:
         assert data["message"] == "success"
         assert data["data"]["token_id"] == 1
 
-    @patch('apps.user_management_app.create_token')
-    @patch('apps.user_management_app.get_current_user_id')
+    @patch('management.api.identity.user_management.create_token')
+    @patch('management.api.identity.user_management.get_current_user_id')
     def test_create_token_no_authorization(self, mock_get_user_id, mock_create_token):
         """Test token creation without authorization header."""
         response = client.post("/user/tokens")
@@ -1099,7 +1093,7 @@ class TestCreateTokenEndpoint:
         data = response.json()
         assert "No authorization header" in data["detail"]
 
-    @patch('apps.user_management_app.get_current_user_id')
+    @patch('management.api.identity.user_management.get_current_user_id')
     def test_create_token_missing_user_id(self, mock_get_user_id):
         """Test token creation when user_id is missing from JWT."""
         mock_get_user_id.return_value = (None, None)
@@ -1113,8 +1107,8 @@ class TestCreateTokenEndpoint:
         data = response.json()
         assert "missing user_id" in data["detail"]
 
-    @patch('apps.user_management_app.create_token')
-    @patch('apps.user_management_app.get_current_user_id')
+    @patch('management.api.identity.user_management.create_token')
+    @patch('management.api.identity.user_management.get_current_user_id')
     def test_create_token_exception(self, mock_get_user_id, mock_create_token):
         """Test token creation with exception."""
         mock_get_user_id.return_value = ("user-123", "tenant-456")
@@ -1131,8 +1125,8 @@ class TestCreateTokenEndpoint:
 class TestListTokensEndpoint:
     """Tests for GET /tokens endpoint."""
 
-    @patch('apps.user_management_app.list_tokens_by_user')
-    @patch('apps.user_management_app.get_current_user_context')
+    @patch('management.api.identity.user_management.list_tokens_by_user')
+    @patch('management.api.identity.user_management.get_current_user_context')
     def test_list_tokens_success(self, mock_get_user_context, mock_list_tokens):
         """Test successful token listing."""
         mock_get_user_context.return_value = ("user-123", "tenant-456", "USER")
@@ -1152,7 +1146,7 @@ class TestListTokensEndpoint:
         assert len(data["data"]) == 2
         mock_list_tokens.assert_called_once_with("user-123", "USER")
 
-    @patch('apps.user_management_app.get_current_user_id')
+    @patch('management.api.identity.user_management.get_current_user_id')
     def test_list_tokens_no_authorization(self, mock_get_user_id):
         """Test token listing without authorization header."""
         response = client.get("/user/tokens?user_id=user-123")
@@ -1161,7 +1155,7 @@ class TestListTokensEndpoint:
         data = response.json()
         assert "No authorization header" in data["detail"]
 
-    @patch('apps.user_management_app.get_current_user_context')
+    @patch('management.api.identity.user_management.get_current_user_context')
     def test_list_tokens_forbidden_other_user(self, mock_get_user_context):
         """Test listing tokens for a different user is forbidden."""
         mock_get_user_context.return_value = ("user-123", "tenant-456", "USER")
@@ -1175,8 +1169,8 @@ class TestListTokensEndpoint:
         data = response.json()
         assert "cannot list tokens for other users" in data["detail"]
 
-    @patch('apps.user_management_app.list_tokens_by_user')
-    @patch('apps.user_management_app.get_current_user_context')
+    @patch('management.api.identity.user_management.list_tokens_by_user')
+    @patch('management.api.identity.user_management.get_current_user_context')
     def test_list_tokens_empty(self, mock_get_user_context, mock_list_tokens):
         """Test listing tokens when user has none."""
         mock_get_user_context.return_value = ("user-123", "tenant-456", "DEV")
@@ -1191,8 +1185,8 @@ class TestListTokensEndpoint:
         data = response.json()
         assert data["data"] == []
 
-    @patch('apps.user_management_app.list_tokens_by_user')
-    @patch('apps.user_management_app.get_current_user_context')
+    @patch('management.api.identity.user_management.list_tokens_by_user')
+    @patch('management.api.identity.user_management.get_current_user_context')
     def test_list_tokens_exception(self, mock_get_user_context, mock_list_tokens):
         """Test token listing with exception."""
         mock_get_user_context.return_value = ("user-123", "tenant-456", "USER")
@@ -1209,8 +1203,8 @@ class TestListTokensEndpoint:
 class TestDeleteTokenEndpoint:
     """Tests for DELETE /tokens/{token_id} endpoint."""
 
-    @patch('apps.user_management_app.delete_token')
-    @patch('apps.user_management_app.get_current_user_id')
+    @patch('management.api.identity.user_management.delete_token')
+    @patch('management.api.identity.user_management.get_current_user_id')
     def test_delete_token_success(self, mock_get_user_id, mock_delete_token):
         """Test successful token deletion."""
         mock_get_user_id.return_value = ("user-123", "tenant-456")
@@ -1226,7 +1220,7 @@ class TestDeleteTokenEndpoint:
         assert data["message"] == "success"
         assert data["data"]["token_id"] == 1
 
-    @patch('apps.user_management_app.get_current_user_id')
+    @patch('management.api.identity.user_management.get_current_user_id')
     def test_delete_token_no_authorization(self, mock_get_user_id):
         """Test token deletion without authorization header."""
         response = client.delete("/user/tokens/1")
@@ -1235,8 +1229,8 @@ class TestDeleteTokenEndpoint:
         data = response.json()
         assert "No authorization header" in data["detail"]
 
-    @patch('apps.user_management_app.delete_token')
-    @patch('apps.user_management_app.get_current_user_id')
+    @patch('management.api.identity.user_management.delete_token')
+    @patch('management.api.identity.user_management.get_current_user_id')
     def test_delete_token_not_found(self, mock_get_user_id, mock_delete_token):
         """Test deleting non-existent token."""
         mock_get_user_id.return_value = ("user-123", "tenant-456")
@@ -1251,8 +1245,8 @@ class TestDeleteTokenEndpoint:
         data = response.json()
         assert "not found" in data["detail"]
 
-    @patch('apps.user_management_app.delete_token')
-    @patch('apps.user_management_app.get_current_user_id')
+    @patch('management.api.identity.user_management.delete_token')
+    @patch('management.api.identity.user_management.get_current_user_id')
     def test_delete_token_exception(self, mock_get_user_id, mock_delete_token):
         """Test token deletion with exception."""
         mock_get_user_id.return_value = ("user-123", "tenant-456")
@@ -1269,8 +1263,8 @@ class TestDeleteTokenEndpoint:
 class TestUpdatePasswordEndpoint:
     """Tests for PUT /password endpoint."""
 
-    @patch('apps.user_management_app.update_password', new_callable=AsyncMock)
-    @patch('apps.user_management_app.get_current_user_id')
+    @patch('management.api.identity.user_management.update_password', new_callable=AsyncMock)
+    @patch('management.api.identity.user_management.get_current_user_id')
     def test_update_password_success(self, mock_get_user_id, mock_update_password):
         """Test successful password update."""
         mock_get_user_id.return_value = ("user-123", "tenant-456")
@@ -1294,8 +1288,8 @@ class TestUpdatePasswordEndpoint:
             new_password="NewPass456"
         )
 
-    @patch('apps.user_management_app.update_password', new_callable=AsyncMock)
-    @patch('apps.user_management_app.get_current_user_id')
+    @patch('management.api.identity.user_management.update_password', new_callable=AsyncMock)
+    @patch('management.api.identity.user_management.get_current_user_id')
     def test_update_password_invalid_old_password(self, mock_get_user_id, mock_update_password):
         """Test password update with incorrect old password."""
         mock_get_user_id.return_value = ("user-123", "tenant-456")
@@ -1313,8 +1307,8 @@ class TestUpdatePasswordEndpoint:
 
         assert exc_info.value.error_code == ErrorCode.PROFILE_INVALID_CREDENTIALS
 
-    @patch('apps.user_management_app.update_password', new_callable=AsyncMock)
-    @patch('apps.user_management_app.get_current_user_id')
+    @patch('management.api.identity.user_management.update_password', new_callable=AsyncMock)
+    @patch('management.api.identity.user_management.get_current_user_id')
     def test_update_password_weak_password(self, mock_get_user_id, mock_update_password):
         """Test password update with weak password."""
         mock_get_user_id.return_value = ("user-123", "tenant-456")
@@ -1332,8 +1326,8 @@ class TestUpdatePasswordEndpoint:
 
         assert exc_info.value.error_code == ErrorCode.PROFILE_PASSWORD_WEAK
 
-    @patch('apps.user_management_app.update_password', new_callable=AsyncMock)
-    @patch('apps.user_management_app.get_current_user_id')
+    @patch('management.api.identity.user_management.update_password', new_callable=AsyncMock)
+    @patch('management.api.identity.user_management.get_current_user_id')
     def test_update_password_same_as_old(self, mock_get_user_id, mock_update_password):
         """Test password update with new password same as old."""
         mock_get_user_id.return_value = ("user-123", "tenant-456")
@@ -1351,8 +1345,8 @@ class TestUpdatePasswordEndpoint:
 
         assert exc_info.value.error_code == ErrorCode.PROFILE_PASSWORD_SAME_AS_OLD
 
-    @patch('apps.user_management_app.update_password', new_callable=AsyncMock)
-    @patch('apps.user_management_app.get_current_user_id')
+    @patch('management.api.identity.user_management.update_password', new_callable=AsyncMock)
+    @patch('management.api.identity.user_management.get_current_user_id')
     def test_update_password_unexpected_error(self, mock_get_user_id, mock_update_password):
         """Test password update with unexpected error."""
         mock_get_user_id.return_value = ("user-123", "tenant-456")

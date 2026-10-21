@@ -4,14 +4,8 @@ import asyncio
 from contextlib import AsyncExitStack
 
 from consts.const import MCP_REQUEST_TIMEOUT_SECONDS
-from consts.exceptions import MCPConnectionError, McpNotFoundError, McpValidationError
-from database.remote_mcp_db import (
-    get_mcp_authorization_token_by_name_and_url,
-    get_mcp_custom_headers_by_name_and_url,
-    get_mcp_record_by_id_and_tenant,
-    update_mcp_record_status_by_id,
-    update_mcp_status_by_name_and_url,
-)
+from contracts.exceptions import MCPConnectionError, McpNotFoundError, McpValidationError
+from management.db.mcp.remote import get_mcp_authorization_token_by_name_and_url, get_mcp_custom_headers_by_name_and_url, get_mcp_record_by_id_and_tenant, update_mcp_record_status_by_id, update_mcp_status_by_name_and_url
 from fastmcp import Client
 from fastmcp.client.transports import SSETransport, StreamableHttpTransport
 from infrastructure.http.client import create_httpx_client

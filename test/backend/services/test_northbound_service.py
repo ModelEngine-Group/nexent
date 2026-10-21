@@ -48,7 +48,7 @@ class RuntimeMetadataValidationError(ValueError):
         super().__init__(message)
 
 
-# Mock consts.exceptions
+# Mock contracts.exceptions
 class LimitExceededError(Exception):
     pass
 
@@ -68,7 +68,7 @@ class RuntimeUpstreamError(Exception):
     pass
 
 
-consts_exceptions_mod = types.ModuleType("consts.exceptions")
+consts_exceptions_mod = types.ModuleType("contracts.exceptions")
 consts_exceptions_mod.LimitExceededError = LimitExceededError
 consts_exceptions_mod.UnauthorizedError = UnauthorizedError
 consts_exceptions_mod.ConversationNotFoundError = ConversationNotFoundError
@@ -77,14 +77,14 @@ consts_exceptions_mod.RuntimeServiceUnavailableError = RuntimeServiceUnavailable
 consts_exceptions_mod.RuntimeUpstreamError = RuntimeUpstreamError
 consts_exceptions_mod.AppException = AppException
 consts_exceptions_mod.RuntimeMetadataValidationError = RuntimeMetadataValidationError
-sys.modules["consts.exceptions"] = consts_exceptions_mod
-sys.modules["backend.consts.exceptions"] = consts_exceptions_mod
+sys.modules["contracts.exceptions"] = consts_exceptions_mod
+sys.modules["contracts.exceptions"] = consts_exceptions_mod
 
-consts_error_code_mod = types.ModuleType("consts.error_code")
+consts_error_code_mod = types.ModuleType("contracts.error_code")
 consts_error_code_mod.ErrorCode = ErrorCode
 consts_error_code_mod.RuntimeMetadataValidationCode = RuntimeMetadataValidationCode
-sys.modules["consts.error_code"] = consts_error_code_mod
-sys.modules["backend.consts.error_code"] = consts_error_code_mod
+sys.modules["contracts.error_code"] = consts_error_code_mod
+sys.modules["contracts.error_code"] = consts_error_code_mod
 
 # Mock consts.const
 consts_const_mod = types.ModuleType("consts.const")
@@ -110,24 +110,30 @@ consts_package.error_code = consts_error_code_mod
 sys.modules["consts"] = consts_package
 
 # Mock database modules
-db_client_mod = types.ModuleType("database.client")
+db_client_mod = types.ModuleType("management.db.client")
 db_client_mod.get_db_session = MagicMock()
 db_client_mod.as_dict = MagicMock()
-sys.modules["database.client"] = db_client_mod
-sys.modules["backend.database.client"] = db_client_mod
+sys.modules["management.db.client"] = db_client_mod
+from test.common.database_stubs import install_serialization_stub
+install_serialization_stub(sys.modules["management.db.client"])
+from test.common.database_stubs import install_serialization_stub
+install_serialization_stub(sys.modules["management.db.client"])
+sys.modules["management.db.client"] = db_client_mod
+from test.common.database_stubs import install_serialization_stub
+install_serialization_stub(sys.modules["management.db.client"])
 
 db_package = types.ModuleType("database")
 db_package.client = db_client_mod
 sys.modules["database"] = db_package
 
 # Mock token_db
-token_db_mod = types.ModuleType("database.token_db")
+token_db_mod = types.ModuleType("management.db.identity.token")
 token_db_mod.log_token_usage = MagicMock(return_value=1)
 token_db_mod.get_latest_usage_metadata = MagicMock(return_value={"query": "test"})
-sys.modules["database.token_db"] = token_db_mod
+sys.modules["management.db.identity.token"] = token_db_mod
 
 # Mock conversation_db
-conversation_db_mod = types.ModuleType("database.conversation_db")
+conversation_db_mod = types.ModuleType("management.db.conversation.repository")
 conversation_db_mod.get_conversation_list = MagicMock(return_value=[
     {"conversation_id": "1", "title": "Test"}
 ])
@@ -135,19 +141,19 @@ conversation_db_mod.get_conversation_messages = MagicMock(return_value=[
     {"message_role": "user", "message_content": "Hello"}
 ])
 conversation_db_mod.get_source_searches_by_message = MagicMock(return_value=[])
-sys.modules["database.conversation_db"] = conversation_db_mod
+sys.modules["management.db.conversation.repository"] = conversation_db_mod
 
-knowledge_db_mod = types.ModuleType("database.knowledge_db")
+knowledge_db_mod = types.ModuleType("management.db.knowledge_base.repository")
 knowledge_db_mod.get_knowledge_info_by_tenant_id = MagicMock(return_value=[])
-sys.modules["database.knowledge_db"] = knowledge_db_mod
+sys.modules["management.db.knowledge_base.repository"] = knowledge_db_mod
 
 # Mock attachment_db
-attachment_db_mod = types.ModuleType("database.attachment_db")
+attachment_db_mod = types.ModuleType("management.db.file.attachment")
 attachment_db_mod.build_s3_url = MagicMock(return_value="s3://bucket/file")
 attachment_db_mod.get_file_url = MagicMock(return_value={"success": True, "url": "https://proxy.example/file"})
 attachment_db_mod.get_file_size_from_minio = MagicMock(return_value=0)
 attachment_db_mod._build_mcp_presigned_url = MagicMock(side_effect=lambda url: url)
-sys.modules["database.attachment_db"] = attachment_db_mod
+sys.modules["management.db.file.attachment"] = attachment_db_mod
 
 # Mock nexent.multi_modal.utils
 nexent_utils_mod = types.ModuleType("nexent.multi_modal.utils")
@@ -264,7 +270,7 @@ services_package.knowledge_scope_service = knowledge_scope_service_mod
 services_package.vectordatabase_service = vectordatabase_service_mod
 sys.modules["services"] = services_package
 
-# Mock consts.model - create stub classes
+# Mock contracts.models - create stub classes
 class AgentRequestStub:
     def __init__(self, **kwargs):
         for k, v in kwargs.items():
@@ -273,10 +279,10 @@ class AgentRequestStub:
 class ToolParamsRequestStub:
     pass
 
-consts_model_mod = types.ModuleType("consts.model")
+consts_model_mod = types.ModuleType("contracts.models")
 consts_model_mod.AgentRequest = AgentRequestStub
 consts_model_mod.ToolParamsRequest = ToolParamsRequestStub
-sys.modules["consts.model"] = consts_model_mod
+sys.modules["contracts.models"] = consts_model_mod
 
 # Now import the module under test
 from services import northbound_service as ns

@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """Exercise the production request model and route without external services."""
 import ast
 from pathlib import Path
@@ -18,7 +20,7 @@ ROOT = Path(__file__).resolve().parents[4]
 
 class PromptValidationTests(unittest.TestCase):
     def setUp(self):
-        model_source = ROOT / "backend/consts/model.py"
+        model_source = ROOT / "backend/contracts/models.py"
         model_node = next(n for n in ast.parse(model_source.read_text(encoding="utf-8")).body
                           if isinstance(n, ast.ClassDef) and n.name == "GeneratePromptRequest")
         namespace = {"BaseModel": BaseModel, "Field": Field, "field_validator": field_validator,
@@ -30,7 +32,7 @@ class PromptValidationTests(unittest.TestCase):
                           "get_current_user_info": self.identity,
                           "gen_system_prompt_streamable": self.generation,
                           "logger": Mock()})
-        route_source = ROOT / "backend/apps/prompt_app.py"
+        route_source = ROOT / "backend/management/api/prompt/prompt.py"
         route = next(n for n in ast.parse(route_source.read_text(encoding="utf-8")).body
                      if isinstance(n, ast.AsyncFunctionDef) and n.name == "generate_and_save_system_prompt_api")
         route.decorator_list = []

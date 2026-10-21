@@ -1,9 +1,11 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import asyncio
 from typing import Dict, List
 
 import httpx
 from consts.const import DEFAULT_LLM_MAX_TOKENS
-from consts.provider import DASHSCOPE_GET_URL
+from contracts.provider import DASHSCOPE_GET_URL
 from management.services.model.providers.base import (
     AbstractModelProvider,
     _classify_provider_error,

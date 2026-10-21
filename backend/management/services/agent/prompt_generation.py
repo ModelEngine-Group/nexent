@@ -18,23 +18,22 @@ from nexent.core.tools.parallel_executor import ParallelExecutorTool
 from nexent.core.concurrency import ManagedExecution, ManagedTaskSpec
 
 from consts.const import LANGUAGE, ENABLE_JIUWEN_SDK
-from consts.tool_labels import PARALLEL_EXECUTOR_TOOL_NAME
-from consts.error_code import ErrorCode
-from consts.error_message import ErrorMessage
-from consts.exceptions import AppException
-from consts.model import AgentInfoRequest
-from database.agent_db import search_agent_info_by_agent_id, query_all_agent_info_by_tenant_id, \
-    query_sub_agents_id_list
-from database.model_management_db import get_model_by_model_id
-from database.knowledge_db import get_knowledge_name_map_by_index_names
-from database.tool_db import query_tools_by_ids, query_tool_instances_by_id
+from contracts.tool_labels import PARALLEL_EXECUTOR_TOOL_NAME
+from contracts.error_code import ErrorCode
+from contracts.error_message import ErrorMessage
+from contracts.exceptions import AppException
+from contracts.models import AgentInfoRequest
+from management.db.agent.repository import search_agent_info_by_agent_id, query_all_agent_info_by_tenant_id, query_sub_agents_id_list
+from management.db.model.repository import get_model_by_model_id
+from management.db.knowledge_base.repository import get_knowledge_name_map_by_index_names
+from management.db.tool.repository import query_tools_by_ids, query_tool_instances_by_id
 from management.services.agent.service import get_enable_tool_id_by_agent_id
 from management.services.agent.naming import (
     check_agent_value_duplicate,
     generate_unique_agent_value,
     regenerate_agent_value,
 )
-from database.agent_db import update_agent
+from management.db.agent.repository import update_agent
 from management.services.agent.prompt import load_default_generation_prompt
 from infrastructure.concurrency import config_thread_manager
 from management.services.model.invocation import call_llm_for_system_prompt

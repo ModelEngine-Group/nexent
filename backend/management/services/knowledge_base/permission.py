@@ -6,9 +6,9 @@ import logging
 from typing import List, Optional
 
 from consts.const import ASSET_OWNER_TENANT_ID, IS_SPEED_MODE, PERMISSION_EDIT
-from database.group_db import query_group_ids_by_user
-from database.knowledge_db import get_knowledge_record
-from database.user_tenant_db import get_user_tenant_by_user_id
+from management.db.identity.group import query_group_ids_by_user
+from management.db.knowledge_base.repository import get_knowledge_record
+from management.db.identity.user_tenant import get_user_tenant_by_user_id
 from permissions.dac import ResourceAccessControl
 from permissions.models import Resource
 

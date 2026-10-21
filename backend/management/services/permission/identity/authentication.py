@@ -3,12 +3,7 @@
 import logging
 from typing import Optional, Any, Tuple, Dict, List
 
-from database.token_db import (
-    create_token as create_token_record,
-    generate_access_key,
-    list_tokens_by_user as list_tokens_by_user_record,
-    delete_token as delete_token_record,
-)
+from management.db.identity.token import create_token as create_token_record, generate_access_key, list_tokens_by_user as list_tokens_by_user_record, delete_token as delete_token_record
 
 import aiohttp
 from fastapi import Header
@@ -24,37 +19,23 @@ from management.services.permission.identity.authentication_helpers import (
     ensure_cas_session_active_from_authorization,
     resolve_tenant_id_from_user_tenant_record,
 )
-from consts.const import (
-    INVITE_CODE,
-    SUPABASE_URL,
-    SUPABASE_KEY,
-    ASSET_OWNER_TENANT_ID,
-    ASSET_OWNER_INVITE_CODE_TYPE,
-    ASSET_OWNER_ROLE,
-    ASSET_OWNER_SIGNUP_USE_OAUTH_DETAIL,
-)
+from consts.const import INVITE_CODE, SUPABASE_URL, SUPABASE_KEY, ASSET_OWNER_TENANT_ID, ASSET_OWNER_INVITE_CODE_TYPE, ASSET_OWNER_ROLE, ASSET_OWNER_SIGNUP_USE_OAUTH_DETAIL
 
 from management.services.permission.asset_owner import (
     filter_accessible_routes_for_asset_owner_feature,
     require_asset_owner_enabled,
 )
-from consts.exceptions import (
-    NoInviteCodeException,
-    IncorrectInviteCodeException,
-    UserRegistrationException,
-    UnauthorizedError,
-    TenantResourceLimitError,
-    ValidationError,
-)
-from consts.error_code import ErrorCode
-from consts.exceptions import AppException
+from contracts.exceptions import NoInviteCodeException, IncorrectInviteCodeException, UserRegistrationException, UnauthorizedError, TenantResourceLimitError, ValidationError
+from contracts.error_code import ErrorCode
+from contracts.exceptions import AppException
 
-from database.model_management_db import create_model_record
-from database.user_tenant_db import insert_user_tenant, get_user_tenant_by_user_id
-from database.oauth_account_db import list_oauth_accounts_by_user_id
-from database.group_db import query_group_ids_by_user
-from database.client import as_dict, get_db_session
-from database.db_models import RolePermission
+from management.db.model.repository import create_model_record
+from management.db.identity.user_tenant import insert_user_tenant, get_user_tenant_by_user_id
+from management.db.identity.oauth_account import list_oauth_accounts_by_user_id
+from management.db.identity.group import query_group_ids_by_user
+from management.utils.orm import as_dict
+from management.db.client import get_db_session
+from management.db.models import RolePermission
 from management.services.permission.identity.invitations import use_invitation_code, check_invitation_available, get_invitation_by_code
 from management.services.permission.identity.groups import add_user_to_groups
 from management.services.tool.configuration import init_tool_list_for_tenant
@@ -275,7 +256,7 @@ async def signup_user_with_invitation(email: EmailStr,
                     try:
                         # Convert group_ids from string to list if needed
                         if isinstance(group_ids, str):
-                            from management.db.serialization import convert_string_to_list
+                            from management.utils.serialization import convert_string_to_list
                             group_ids = convert_string_to_list(group_ids)
 
                         if group_ids:
@@ -564,8 +545,8 @@ def create_token(user_id: str) -> Dict[str, Any]:
     Returns:
         Dictionary containing the API token information including token_id.
     """
-    from database.client import get_db_session
-    from database.token_db import soft_delete_tokens_by_user
+    from management.db.client import get_db_session
+    from management.db.identity.token import soft_delete_tokens_by_user
 
     access_key = generate_access_key()
     with get_db_session() as session:

@@ -1,7 +1,7 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """Tests for tenant-scoped local MCP endpoint construction."""
 
-from consts import const
+import consts.const as const
 from management.services.mcp.addressing import get_tenant_local_mcp_server
 
 

@@ -180,7 +180,7 @@ consts_const_mock.CAN_EDIT_ALL_USER_ROLES = {"ADMIN"}
 consts_const_mock.PERMISSION_EDIT = "EDIT"
 consts_const_mock.PERMISSION_PRIVATE = "PRIVATE"
 consts_const_mock.PERMISSION_READ = "READ_ONLY"
-consts_exceptions_mock = types.ModuleType('consts.exceptions')
+consts_exceptions_mock = types.ModuleType('contracts.exceptions')
 
 class SkillException(Exception):
     pass
@@ -199,7 +199,7 @@ consts_exceptions_mock.SkillDuplicateError = type('SkillDuplicateError', (Except
 
 sys.modules['consts'] = consts_mock
 sys.modules['consts.const'] = consts_const_mock
-sys.modules['consts.exceptions'] = consts_exceptions_mock
+sys.modules['contracts.exceptions'] = consts_exceptions_mock
 
 # Skill deletion invokes tag cleanup after the skill record is removed.  Keep
 # this SkillService unit suite isolated from the tag service's separate graph.
@@ -267,7 +267,7 @@ utils_mock.__path__ = [os.path.abspath(os.path.join(os.path.dirname(__file__), "
 utils_prompt_template_utils_mock = types.ModuleType('management.services.agent.prompt')
 utils_prompt_template_utils_mock.get_nl2skill_prompt_template = MagicMock(return_value={"system_prompt": "", "user_prompt": ""})
 utils_content_classifier_utils_mock = types.ModuleType('management.services.skill.classifier')
-utils_str_utils_mock = types.ModuleType('management.db.serialization')
+utils_str_utils_mock = types.ModuleType('management.utils.serialization')
 utils_str_utils_mock.convert_list_to_string = MagicMock(
     side_effect=lambda items: "" if items is None else ",".join(str(item) for item in items)
 )
@@ -286,31 +286,31 @@ sys.modules['utils'] = utils_mock
 
 sys.modules['management.services.agent.prompt'] = utils_prompt_template_utils_mock
 sys.modules['management.services.skill.classifier'] = utils_content_classifier_utils_mock
-sys.modules['management.db.serialization'] = utils_str_utils_mock
+sys.modules['management.utils.serialization'] = utils_str_utils_mock
 sys.modules['management.services.skill.naming'] = utils_skill_import_utils_mock
 
 # Set up database mocks
 database_mock = types.ModuleType('database')
 database_mock.__path__ = [os.path.abspath(os.path.join(os.path.dirname(__file__), "../../../backend/database"))]
-database_client_mock = types.ModuleType('database.client')
+database_client_mock = types.ModuleType('management.db.client')
 database_client_mock.get_db_session = MagicMock()
 database_client_mock.as_dict = MagicMock()
 database_client_mock.filter_property = MagicMock()
 
-database_db_models_mock = types.ModuleType('database.db_models')
+database_db_models_mock = types.ModuleType('management.db.models')
 database_db_models_mock.SkillInfo = MagicMock()
 database_db_models_mock.KnowledgeRecord = MagicMock()
 database_db_models_mock.KnowledgeFileLifecycle = MagicMock()
 database_db_models_mock.KnowledgeStorageObject = MagicMock()
-database_group_db_mock = types.ModuleType('database.group_db')
+database_group_db_mock = types.ModuleType('management.db.identity.group')
 database_group_db_mock.query_group_ids_by_user = MagicMock(return_value=[])
-database_user_tenant_db_mock = types.ModuleType('database.user_tenant_db')
+database_user_tenant_db_mock = types.ModuleType('management.db.identity.user_tenant')
 database_user_tenant_db_mock.get_user_tenant_by_user_id = MagicMock(
     return_value={"user_role": "DEV"}
 )
 
 # Create mock skill_db module with functions
-database_skill_db_mock = types.ModuleType('database.skill_db')
+database_skill_db_mock = types.ModuleType('management.db.skill.repository')
 
 def mock_create_or_update_skill_by_skill_info(skill_info, tenant_id, user_id, version_no=0):
     return {"skill_instance_id": 1, "skill_id": 1, "agent_id": 1, "enabled": True}
@@ -394,11 +394,15 @@ database_mock.skill_db = database_skill_db_mock
 database_mock.db_models = database_db_models_mock
 
 sys.modules['database'] = database_mock
-sys.modules['database.client'] = database_client_mock
-sys.modules['database.skill_db'] = database_skill_db_mock
-sys.modules['database.db_models'] = database_db_models_mock
-sys.modules['database.group_db'] = database_group_db_mock
-sys.modules['database.user_tenant_db'] = database_user_tenant_db_mock
+sys.modules['management.db.client'] = database_client_mock
+from test.common.database_stubs import install_serialization_stub
+install_serialization_stub(sys.modules["management.db.client"])
+from test.common.database_stubs import install_serialization_stub
+install_serialization_stub(sys.modules["management.db.client"])
+sys.modules['management.db.skill.repository'] = database_skill_db_mock
+sys.modules['management.db.models'] = database_db_models_mock
+sys.modules['management.db.identity.group'] = database_group_db_mock
+sys.modules['management.db.identity.user_tenant'] = database_user_tenant_db_mock
 setattr(database_mock, 'skill_db', database_skill_db_mock)
 
 # Mock nexent.core.agents.run_agent for create_skill_from_request
@@ -437,10 +441,10 @@ from management.services.skill.service import (
     _remove_local_skill_config_yaml,
     get_skill_manager,
 )
-import management.services.skill.files as skill_files
-import management.services.skill.permission as skill_permission
-import management.services.skill.params as skill_params
-import management.services.skill.transfer as skill_transfer
+from management.services.skill import files as skill_files
+from management.services.skill import permission as skill_permission
+from management.services.skill import params as skill_params
+from management.services.skill import transfer as skill_transfer
 
 # The full suite may import this module before the local ``consts`` stubs above
 # are installed.  Pin the module-level safety root to the test-owned directory
@@ -1555,7 +1559,7 @@ class TestSkillServiceGetEnabledSkillsForAgent:
 
     def test_get_enabled_skills_for_agent_returns_list(self):
         """Test getting enabled skills for agent returns list."""
-        from database import skill_db as skill_db_module
+        from management.db.skill import repository as skill_db_module
         original_func = getattr(skill_db_module, 'search_skills_for_agent', None)
 
         if original_func is not None:
@@ -1581,11 +1585,11 @@ class TestSkillServiceGetEnabledSkillsForAgent:
             finally:
                 setattr(skill_db_module, 'search_skills_for_agent', original_func)
         else:
-            pytest.skip("database.skill_db module not fully available")
+            pytest.skip("management.db.skill.repository module not fully available")
 
     def test_get_enabled_skills_for_agent_empty(self):
         """Test getting enabled skills when none exist."""
-        from database import skill_db as skill_db_module
+        from management.db.skill import repository as skill_db_module
         original_func = getattr(skill_db_module, 'search_skills_for_agent', None)
 
         if original_func is not None:
@@ -1600,7 +1604,7 @@ class TestSkillServiceGetEnabledSkillsForAgent:
             finally:
                 setattr(skill_db_module, 'search_skills_for_agent', original_func)
         else:
-            pytest.skip("database.skill_db module not fully available")
+            pytest.skip("management.db.skill.repository module not fully available")
 
 
 class TestSkillServiceBuildSkillsSummary:
@@ -1720,7 +1724,7 @@ class TestSkillServiceSkillInstances:
 
     def test_create_or_update_skill_instance_success(self):
         """Test creating/updating skill instance."""
-        from database import skill_db as skill_db_module
+        from management.db.skill import repository as skill_db_module
         original_func = getattr(skill_db_module, 'create_or_update_skill_by_skill_info', None)
 
         mock_result = {
@@ -1749,11 +1753,11 @@ class TestSkillServiceSkillInstances:
                 setattr(skill_db_module, 'create_or_update_skill_by_skill_info', original_func)
         else:
             # Skip if real module not available
-            pytest.skip("database.skill_db module not fully available")
+            pytest.skip("management.db.skill.repository module not fully available")
 
     def test_list_skill_instances_returns_list(self):
         """Test listing skill instances returns list."""
-        from database import skill_db as skill_db_module
+        from management.db.skill import repository as skill_db_module
         original_func = getattr(skill_db_module, 'query_skill_instances_by_agent_id', None)
 
         if original_func is not None:
@@ -1771,11 +1775,11 @@ class TestSkillServiceSkillInstances:
             finally:
                 setattr(skill_db_module, 'query_skill_instances_by_agent_id', original_func)
         else:
-            pytest.skip("database.skill_db module not fully available")
+            pytest.skip("management.db.skill.repository module not fully available")
 
     def test_get_skill_instance_returns_none_when_not_found(self):
         """Test getting skill instance returns None when not found."""
-        from database import skill_db as skill_db_module
+        from management.db.skill import repository as skill_db_module
         original_func = getattr(skill_db_module, 'query_skill_instance_by_id', None)
 
         if original_func is not None:
@@ -1791,7 +1795,7 @@ class TestSkillServiceSkillInstances:
             finally:
                 setattr(skill_db_module, 'query_skill_instance_by_id', original_func)
         else:
-            pytest.skip("database.skill_db module not fully available")
+            pytest.skip("management.db.skill.repository module not fully available")
 
 
 class TestSkillServiceOverlayParams:
@@ -2218,7 +2222,7 @@ class TestParseYamlFallbackPyyamlErrorPaths:
 
     def test_invalid_yaml_raises_skill_exception(self):
         from management.services.skill.service import _parse_yaml_fallback_pyyaml
-        from consts.exceptions import SkillException
+        from contracts.exceptions import SkillException
         try:
             _parse_yaml_fallback_pyyaml("invalid: yaml: : :")
             assert False, "Should have raised"
@@ -2238,7 +2242,7 @@ class TestParseSkillParamsFromConfigBytesErrorPaths:
 
     def test_json_non_dict_raises_exception(self):
         from management.services.skill.service import _parse_skill_params_from_config_bytes
-        from consts.exceptions import SkillException
+        from contracts.exceptions import SkillException
         try:
             _parse_skill_params_from_config_bytes(b'["list", "not", "dict"]')
             assert False, "Should have raised"
@@ -2379,7 +2383,7 @@ allowed-tools:
         service.skill_manager = mock_manager
         service._overlay_params_from_local_config_yaml = lambda x: x
 
-        from consts.exceptions import SkillException
+        from contracts.exceptions import SkillException
         try:
             service.create_skill_from_file(zip_buffer.getvalue(), file_type="zip")
             assert False, "Should have raised"
@@ -2438,7 +2442,7 @@ name: existing_skill
         service = SkillService()
         service.skill_manager = mock_manager
 
-        from consts.exceptions import SkillException
+        from contracts.exceptions import SkillException
         try:
             service.create_skill_from_file(zip_buffer.getvalue(), file_type="zip")
             assert False, "Should have raised"
@@ -2581,7 +2585,7 @@ description: Updated via ZIP
 
         service = create_test_service()
 
-        from consts.exceptions import SkillException
+        from contracts.exceptions import SkillException
         try:
             service.update_skill_from_file("nonexistent", b"---\nname: x\n---", tenant_id="test-tenant")
             assert False, "Should have raised"
@@ -2603,7 +2607,7 @@ class TestSkillServiceErrorHandling:
 
         service = create_test_service()
 
-        from consts.exceptions import SkillException
+        from contracts.exceptions import SkillException
         try:
             service.list_skills(tenant_id="test-tenant")
             assert False, "Should have raised"
@@ -2620,7 +2624,7 @@ class TestSkillServiceErrorHandling:
 
         service = create_test_service()
 
-        from consts.exceptions import SkillException
+        from contracts.exceptions import SkillException
         try:
             service.get_skill("any_skill", tenant_id="test-tenant")
             assert False, "Should have raised"
@@ -2637,7 +2641,7 @@ class TestSkillServiceErrorHandling:
 
         service = create_test_service()
 
-        from consts.exceptions import SkillException
+        from contracts.exceptions import SkillException
         try:
             service.get_skill_by_id(1, tenant_id="test-tenant")
             assert False, "Should have raised"
@@ -2653,7 +2657,7 @@ class TestSkillServiceErrorHandling:
         service = SkillService(tenant_id="test-tenant")
         service.skill_manager = mock_manager
 
-        from consts.exceptions import SkillException
+        from contracts.exceptions import SkillException
         try:
             service.load_skill_directory("any_skill")
             assert False, "Should have raised"
@@ -2669,7 +2673,7 @@ class TestSkillServiceErrorHandling:
         service = SkillService(tenant_id="test-tenant")
         service.skill_manager = mock_manager
 
-        from consts.exceptions import SkillException
+        from contracts.exceptions import SkillException
         try:
             service.get_skill_scripts("any_skill")
             assert False, "Should have raised"
@@ -2686,7 +2690,7 @@ class TestSkillServiceErrorHandling:
 
         service = create_test_service()
 
-        from consts.exceptions import SkillException
+        from contracts.exceptions import SkillException
         try:
             service.get_skill_content("any_skill")
             assert False, "Should have raised"
@@ -2703,7 +2707,7 @@ class TestSkillServiceErrorHandling:
 
         service = create_test_service()
 
-        from consts.exceptions import SkillException
+        from contracts.exceptions import SkillException
         try:
             service.build_skills_summary()
             assert False, "Should have raised"
@@ -2729,7 +2733,7 @@ class TestSkillServiceCreateSkillErrorPaths:
         service._resolve_local_skills_dir_for_overlay = MagicMock(return_value=TEST_LOCAL_SKILLS_DIR)
 
         with patch('os.path.isfile', return_value=True):
-            from consts.exceptions import SkillException
+            from contracts.exceptions import SkillException
             try:
                 service.create_skill({"name": "local_conflict"})
                 assert False, "Should have raised"
@@ -3060,7 +3064,7 @@ class TestGetEnabledSkillsForAgentEdgeCases:
     """Test get_enabled_skills_for_agent edge cases."""
 
     def test_get_enabled_skills_skill_not_in_repo(self, mocker):
-        from database import skill_db as skill_db_module
+        from management.db.skill import repository as skill_db_module
         original_func = getattr(skill_db_module, 'search_skills_for_agent', None)
 
         if original_func is not None:
@@ -3084,7 +3088,7 @@ class TestGetEnabledSkillsForAgentEdgeCases:
             finally:
                 setattr(skill_db_module, 'search_skills_for_agent', original_func)
         else:
-            pytest.skip("database.skill_db module not fully available")
+            pytest.skip("management.db.skill.repository module not fully available")
 
 
 # ===== Tooltip Functions Tests =====
@@ -3268,7 +3272,7 @@ class TestGetSkillScripts:
         service = SkillService()
         service.skill_manager = mock_manager
 
-        from consts.exceptions import SkillException
+        from contracts.exceptions import SkillException
         try:
             service.get_skill_scripts("nonexistent")
             assert False, "Should have raised"
@@ -3283,7 +3287,7 @@ class TestSkillInstanceMethods:
     """Test skill instance methods."""
 
     def test_create_or_update_skill_instance_returns_dict(self):
-        from database import skill_db as skill_db_module
+        from management.db.skill import repository as skill_db_module
         original_func = getattr(skill_db_module, 'create_or_update_skill_by_skill_info', None)
 
         if original_func is not None:
@@ -3301,10 +3305,10 @@ class TestSkillInstanceMethods:
             finally:
                 setattr(skill_db_module, 'create_or_update_skill_by_skill_info', original_func)
         else:
-            pytest.skip("database.skill_db module not fully available")
+            pytest.skip("management.db.skill.repository module not fully available")
 
     def test_list_skill_instances_returns_empty(self):
-        from database import skill_db as skill_db_module
+        from management.db.skill import repository as skill_db_module
         original_func = getattr(skill_db_module, 'query_skill_instances_by_agent_id', None)
 
         if original_func is not None:
@@ -3316,7 +3320,7 @@ class TestSkillInstanceMethods:
             finally:
                 setattr(skill_db_module, 'query_skill_instances_by_agent_id', original_func)
         else:
-            pytest.skip("database.skill_db module not fully available")
+            pytest.skip("management.db.skill.repository module not fully available")
 
 
 # ===== Path Traversal Protection Tests =====
@@ -3860,7 +3864,7 @@ class TestSkillServiceCreateFromMdWithInvalidParse:
         service.skill_manager = mock_manager
 
         content = b"invalid content"
-        from consts.exceptions import SkillException
+        from contracts.exceptions import SkillException
         try:
             service.create_skill_from_file(content, skill_name=None)
             assert False, "Should have raised"
@@ -4028,7 +4032,7 @@ class TestSkillServiceCreateFromZipWithBadZipFile:
         service = SkillService()
         service.skill_manager = mock_manager
 
-        from consts.exceptions import SkillException
+        from contracts.exceptions import SkillException
         try:
             service.create_skill_from_file(b"not a zip file", file_type="zip")
             assert False, "Should have raised"
@@ -4066,7 +4070,7 @@ description: Some content
         service = SkillService()
         service.skill_manager = mock_manager
 
-        from consts.exceptions import SkillException
+        from contracts.exceptions import SkillException
         try:
             service.create_skill_from_file(zip_buffer.getvalue(), file_type="zip")
             assert False, "Should have raised"
@@ -4439,7 +4443,7 @@ class TestSkillServiceDeleteError:
         service = SkillService(tenant_id="test-tenant")
         service.skill_manager = mock_manager
 
-        from consts.exceptions import SkillException
+        from contracts.exceptions import SkillException
         try:
             service.delete_skill("to_delete", tenant_id="test-tenant")
             assert False, "Should have raised"
@@ -4590,7 +4594,7 @@ class TestSkillServiceGetSkillFileContentError:
 
         with patch('os.path.isfile', return_value=True):
             with patch('builtins.open', side_effect=IOError("Read error")):
-                from consts.exceptions import SkillException
+                from contracts.exceptions import SkillException
                 try:
                     service.get_skill_file_content("test_skill", "file.txt")
                     assert False, "Should have raised"
@@ -4609,7 +4613,7 @@ class TestSkillServiceLoadSkillDirectoryError:
         service = SkillService()
         service.skill_manager = mock_manager
 
-        from consts.exceptions import SkillException
+        from contracts.exceptions import SkillException
         try:
             service.load_skill_directory("test_skill")
             assert False, "Should have raised"
@@ -4645,7 +4649,7 @@ class TestSkillServiceGetSkillScriptsError:
         service = SkillService()
         service.skill_manager = mock_manager
 
-        from consts.exceptions import SkillException
+        from contracts.exceptions import SkillException
         try:
             service.get_skill_scripts("nonexistent")
             assert False, "Should have raised"
@@ -4664,7 +4668,7 @@ class TestSkillServiceGetEnabledSkillsForAgentError:
         )
 
         service = SkillService()
-        from consts.exceptions import SkillException
+        from contracts.exceptions import SkillException
         try:
             service.get_enabled_skills_for_agent(agent_id=1, tenant_id="tenant1")
             assert False, "Should have raised"
@@ -4684,7 +4688,7 @@ class TestSkillServiceBuildSkillsSummaryError:
 
         service = create_test_service()
 
-        from consts.exceptions import SkillException
+        from contracts.exceptions import SkillException
         try:
             service.build_skills_summary(tenant_id="test-tenant")
             assert False, "Should have raised"
@@ -4704,7 +4708,7 @@ class TestSkillServiceGetSkillContentError:
 
         service = create_test_service()
 
-        from consts.exceptions import SkillException
+        from contracts.exceptions import SkillException
         try:
             service.get_skill_content("any_skill", tenant_id="test-tenant")
             assert False, "Should have raised"
@@ -4723,7 +4727,7 @@ class TestSkillServiceGetSkillFileTreeError:
         service = SkillService()
         service.skill_manager = mock_manager
 
-        from consts.exceptions import SkillException
+        from contracts.exceptions import SkillException
         try:
             service.get_skill_file_tree("test_skill")
             assert False, "Should have raised"
@@ -4736,7 +4740,7 @@ class TestSkillServiceListSkillInstances:
 
     def test_list_skill_instances(self):
         """Test listing skill instances."""
-        from database import skill_db as skill_db_module
+        from management.db.skill import repository as skill_db_module
         original_func = getattr(skill_db_module, 'query_skill_instances_by_agent_id', None)
 
         if original_func is not None:
@@ -4750,7 +4754,7 @@ class TestSkillServiceListSkillInstances:
             finally:
                 setattr(skill_db_module, 'query_skill_instances_by_agent_id', original_func)
         else:
-            pytest.skip("database.skill_db module not fully available")
+            pytest.skip("management.db.skill.repository module not fully available")
 
 
 class TestSkillServiceGetSkillInstance:
@@ -4758,7 +4762,7 @@ class TestSkillServiceGetSkillInstance:
 
     def test_get_skill_instance_found(self):
         """Test getting skill instance when found."""
-        from database import skill_db as skill_db_module
+        from management.db.skill import repository as skill_db_module
         original_func = getattr(skill_db_module, 'query_skill_instance_by_id', None)
 
         if original_func is not None:
@@ -4773,7 +4777,7 @@ class TestSkillServiceGetSkillInstance:
             finally:
                 setattr(skill_db_module, 'query_skill_instance_by_id', original_func)
         else:
-            pytest.skip("database.skill_db module not fully available")
+            pytest.skip("management.db.skill.repository module not fully available")
 
 
 class TestSkillServiceCreateOrUpdateSkillInstance:
@@ -4781,7 +4785,7 @@ class TestSkillServiceCreateOrUpdateSkillInstance:
 
     def test_create_or_update_skill_instance(self):
         """Test creating/updating skill instance."""
-        from database import skill_db as skill_db_module
+        from management.db.skill import repository as skill_db_module
         original_func = getattr(skill_db_module, 'create_or_update_skill_by_skill_info', None)
 
         if original_func is not None:
@@ -4799,7 +4803,7 @@ class TestSkillServiceCreateOrUpdateSkillInstance:
             finally:
                 setattr(skill_db_module, 'create_or_update_skill_by_skill_info', original_func)
         else:
-            pytest.skip("database.skill_db module not fully available")
+            pytest.skip("management.db.skill.repository module not fully available")
 
 
 class TestUploadZipFilesWithZipError:
@@ -5153,7 +5157,7 @@ class TestParamsDictToStorableWithInvalidData:
             def __repr__(self):
                 raise ValueError("Cannot serialize")
 
-        from consts.exceptions import SkillException
+        from contracts.exceptions import SkillException
         try:
             _params_dict_to_storable({"key": BadJson()})
             assert False, "Should have raised"
@@ -5254,7 +5258,7 @@ class TestSkillServiceCreateSkillErrorPaths:
         service._resolve_local_skills_dir_for_overlay = MagicMock(return_value=None)
         service._overlay_params_from_local_config_yaml = lambda x: x
 
-        from consts.exceptions import SkillException
+        from contracts.exceptions import SkillException
         try:
             service.create_skill({"name": "new_skill"})
             assert False, "Should have raised"
@@ -5273,7 +5277,7 @@ class TestSkillServiceCreateSkillFromFileZipError:
         service = SkillService()
         service.skill_manager = mock_manager
 
-        from consts.exceptions import SkillException
+        from contracts.exceptions import SkillException
         try:
             service.create_skill_from_file(b"PK\x03\x04not a valid zip content", file_type="zip")
             assert False, "Should have raised"
@@ -5306,7 +5310,7 @@ description: Exists
         service = SkillService()
         service.skill_manager = mock_manager
 
-        from consts.exceptions import SkillException
+        from contracts.exceptions import SkillException
         try:
             service.create_skill_from_file(zip_buffer.getvalue(), file_type="zip")
             assert False, "Should have raised"
@@ -5326,7 +5330,7 @@ class TestSkillServiceUpdateSkillFromFileNotFound:
 
         service = create_test_service()
 
-        from consts.exceptions import SkillException
+        from contracts.exceptions import SkillException
         try:
             service.update_skill_from_file("nonexistent", b"---\nname: x\n---", tenant_id="test-tenant")
             assert False, "Should have raised"
@@ -5354,7 +5358,7 @@ class TestSkillServiceUpdateFromMdInvalidParse:
         service = SkillService()
         service.skill_manager = mock_manager
 
-        from consts.exceptions import SkillException
+        from contracts.exceptions import SkillException
         try:
             service._save_skill_upload(b"invalid content", "existing", kind="md", update=True, tenant_id=None, user_id=None)
             assert False, "Should have raised"
@@ -5382,7 +5386,7 @@ name: skill
 
         service = SkillService()
 
-        from consts.exceptions import SkillException
+        from contracts.exceptions import SkillException
         try:
             service.update_skill_from_file(
                 "nonexistent",
@@ -5571,7 +5575,7 @@ class TestSkillServiceDeleteSkillRmtreeError:
 
         with patch('os.path.exists', return_value=True):
             with patch('shutil.rmtree', side_effect=Exception("rmtree error")):
-                from consts.exceptions import SkillException
+                from contracts.exceptions import SkillException
                 try:
                     service.delete_skill("to_delete", tenant_id="test-tenant")
                     assert False, "Should have raised"
@@ -5880,7 +5884,7 @@ class TestUpdateSkillListAsync:
                 patch('management.services.skill.files.CONTAINER_SKILLS_PATH', TEST_LOCAL_SKILLS_DIR), \
                 patch('os.path.isfile', return_value=False), \
                 patch('os.path.isdir', return_value=False), \
-                patch('database.skill_db.upsert_scanned_skills', create=True) as mock_upsert:
+                patch('management.db.skill.repository.upsert_scanned_skills', create=True) as mock_upsert:
             await skill_service.update_skill_list(
                 tenant_id="test-tenant",
                 user_id="test-user"

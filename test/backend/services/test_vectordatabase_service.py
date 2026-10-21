@@ -110,7 +110,7 @@ setattr(nexent_memory_module, 'memory_service', memory_service_module)
 embedding_model_module = types.ModuleType('nexent.core.models.embedding_model')
 
 
-consts_exceptions_mod = types.ModuleType("consts.exceptions")
+consts_exceptions_mod = types.ModuleType("contracts.exceptions")
 
 
 class AppException(Exception):
@@ -162,7 +162,7 @@ consts_exceptions_mod.TenantResourceLimitError = TenantResourceLimitError
 # Use real consts.const/scheduler (env vars are configured in test/conftest.py)
 consts_pkg = importlib.import_module("consts")
 consts_const_mod = importlib.import_module("consts.const")
-consts_scheduler_mod = importlib.import_module("consts.scheduler")
+consts_scheduler_mod = importlib.import_module("contracts.scheduler")
 
 # The shared test bootstrap can load a reduced consts stub before this module.
 # Supply the knowledge-base service constants required by the refactored module.
@@ -181,10 +181,10 @@ if not hasattr(consts_const_mod, "VectorDatabaseType"):
 
 sys.modules["consts"] = consts_pkg
 sys.modules["consts.const"] = consts_const_mod
-sys.modules["consts.exceptions"] = consts_exceptions_mod
-sys.modules["consts.model"] = MagicMock()
-sys.modules["consts.scheduler"] = consts_scheduler_mod
-sys.modules["consts.error_code"] = MagicMock()
+sys.modules["contracts.exceptions"] = consts_exceptions_mod
+sys.modules["contracts.models"] = MagicMock()
+sys.modules["contracts.scheduler"] = consts_scheduler_mod
+sys.modules["contracts.error_code"] = MagicMock()
 
 
 class _VectorDatabaseCore:
@@ -336,7 +336,7 @@ nexent_multi_modal_module.utils = multi_modal_utils_module
 sys.modules['nexent.multi_modal'] = nexent_multi_modal_module
 sys.modules['nexent.multi_modal.utils'] = multi_modal_utils_module
 
-# Mock psycopg2 before backend.database.client is imported
+# Mock psycopg2 before management.db.client is imported
 sys.modules['psycopg2'] = MagicMock()
 sys.modules['psycopg2.pool'] = MagicMock()
 sys.modules['psycopg2.extras'] = MagicMock()
@@ -417,12 +417,12 @@ backend_utils_mock.__path__ = []  # Empty __path__ makes it a namespace package
 sys.modules['backend.utils'] = backend_utils_mock
 
 # Create a mock document_vector_utils module with required functions
-document_vector_utils_mock = types.ModuleType('backend.management.services.knowledge_base.summary')
+document_vector_utils_mock = types.ModuleType('management.services.knowledge_base.summary')
 document_vector_utils_mock.process_documents_for_clustering = MagicMock(return_value=([], []))
 document_vector_utils_mock.kmeans_cluster_documents = MagicMock(return_value=[])
 document_vector_utils_mock.summarize_clusters_map_reduce = MagicMock(return_value="test summary")
 document_vector_utils_mock.merge_cluster_summaries = MagicMock(return_value="merged summary")
-sys.modules['backend.management.services.knowledge_base.summary'] = document_vector_utils_mock
+sys.modules['management.services.knowledge_base.summary'] = document_vector_utils_mock
 sys.modules['management.services.knowledge_base.summary'] = document_vector_utils_mock
 setattr(sys.modules['utils'], 'document_vector_utils', document_vector_utils_mock)
 setattr(sys.modules['backend.utils'], 'document_vector_utils', document_vector_utils_mock)
@@ -438,11 +438,11 @@ sys.modules['management.services.file.upload'] = file_management_utils_mock
 setattr(sys.modules['utils'], 'file_management_utils', file_management_utils_mock)
 setattr(sys.modules['backend.utils'], 'file_management_utils', file_management_utils_mock)
 
-str_utils_mock = types.ModuleType('management.db.serialization')
+str_utils_mock = types.ModuleType('management.utils.serialization')
 str_utils_mock.convert_list_to_string = lambda items: ",".join(str(item) for item in items) if items else ""
 str_utils_mock.convert_string_to_list = lambda s: [int(x.strip()) for x in s.split(',') if x.strip().isdigit()] if s and s.strip() else []
-sys.modules['management.db.serialization'] = str_utils_mock
-sys.modules['management.db.serialization'] = str_utils_mock
+sys.modules['management.utils.serialization'] = str_utils_mock
+sys.modules['management.utils.serialization'] = str_utils_mock
 setattr(sys.modules['utils'], 'str_utils', str_utils_mock)
 setattr(sys.modules['backend.utils'], 'str_utils', str_utils_mock)
 
@@ -485,15 +485,17 @@ sys.modules['backend'] = backend_module
 setattr(backend_module, 'utils', backend_utils_mock)
 backend_database_module = importlib.import_module('backend.database')
 sys.modules['backend.database'] = backend_database_module
-backend_database_client_module = importlib.import_module('backend.database.client')
-sys.modules['backend.database.client'] = backend_database_client_module
+backend_database_client_module = importlib.import_module('management.db.client')
+sys.modules['management.db.client'] = backend_database_client_module
+from test.common.database_stubs import install_serialization_stub
+install_serialization_stub(sys.modules["management.db.client"])
 
 # Storage deletion tests isolate Agent previews and binding persistence.
 # Their actual implementations are covered in focused app/database tests.
 for module_name, functions in {
-    "database.agent_db": ("query_knowledge_binding_agents",),
-    "database.tool_db": ("remove_tool_knowledge_references",),
-    "database.conversation_db": ("remove_conversation_knowledge_bindings",),
+    "management.db.agent.repository": ("query_knowledge_binding_agents",),
+    "management.db.tool.repository": ("remove_tool_knowledge_references",),
+    "management.db.conversation.repository": ("remove_conversation_knowledge_bindings",),
 }.items():
     boundary_module = types.ModuleType(module_name)
     for function_name in functions:
@@ -3728,7 +3730,7 @@ class TestElasticSearchService(unittest.TestCase):
 
         self.assertIn("Health check failed", str(context.exception))
 
-    @patch('database.model_management_db.get_model_by_model_id')
+    @patch('management.db.model.repository.get_model_by_model_id')
     def test_summary_index_name(self, mock_get_model_by_model_id):
         """
         Test generating a summary for an index.
@@ -3747,11 +3749,11 @@ class TestElasticSearchService(unittest.TestCase):
         }
 
         # Mock the new Map-Reduce functions
-        with patch('backend.management.services.knowledge_base.summary.process_documents_for_clustering') as mock_process_docs, \
-                patch('backend.management.services.knowledge_base.clustering.kmeans_cluster_documents') as mock_cluster, \
-                patch('backend.management.services.knowledge_base.summary.summarize_clusters_map_reduce') as mock_summarize, \
-                patch('backend.management.services.knowledge_base.summary.merge_cluster_summaries') as mock_merge, \
-                patch('database.model_management_db.get_model_by_model_id') as mock_get_model_internal:
+        with patch('management.services.knowledge_base.summary.process_documents_for_clustering') as mock_process_docs, \
+                patch('management.services.knowledge_base.clustering.kmeans_cluster_documents') as mock_cluster, \
+                patch('management.services.knowledge_base.summary.summarize_clusters_map_reduce') as mock_summarize, \
+                patch('management.services.knowledge_base.summary.merge_cluster_summaries') as mock_merge, \
+                patch('management.db.model.repository.get_model_by_model_id') as mock_get_model_internal:
 
             # Mock return values
             mock_process_docs.return_value = (
@@ -3831,10 +3833,10 @@ class TestElasticSearchService(unittest.TestCase):
         2. The exception message contains "No documents found in index"
         """
         # Mock the new Map-Reduce functions
-        with patch('backend.management.services.knowledge_base.summary.process_documents_for_clustering') as mock_process_docs, \
-                patch('backend.management.services.knowledge_base.clustering.kmeans_cluster_documents'), \
-                patch('backend.management.services.knowledge_base.summary.summarize_clusters_map_reduce'), \
-                patch('backend.management.services.knowledge_base.summary.merge_cluster_summaries'):
+        with patch('management.services.knowledge_base.summary.process_documents_for_clustering') as mock_process_docs, \
+                patch('management.services.knowledge_base.clustering.kmeans_cluster_documents'), \
+                patch('management.services.knowledge_base.summary.summarize_clusters_map_reduce'), \
+                patch('management.services.knowledge_base.summary.merge_cluster_summaries'):
             # Mock return empty document_samples
             mock_process_docs.return_value = (
                 {},  # Empty document_samples
@@ -3871,10 +3873,10 @@ class TestElasticSearchService(unittest.TestCase):
         2. The summary generation still works correctly
         """
         # Mock the new Map-Reduce functions
-        with patch('backend.management.services.knowledge_base.summary.process_documents_for_clustering') as mock_process_docs, \
-                patch('backend.management.services.knowledge_base.clustering.kmeans_cluster_documents') as mock_cluster, \
-                patch('backend.management.services.knowledge_base.summary.summarize_clusters_map_reduce') as mock_summarize, \
-                patch('backend.management.services.knowledge_base.summary.merge_cluster_summaries') as mock_merge:
+        with patch('management.services.knowledge_base.summary.process_documents_for_clustering') as mock_process_docs, \
+                patch('management.services.knowledge_base.clustering.kmeans_cluster_documents') as mock_cluster, \
+                patch('management.services.knowledge_base.summary.summarize_clusters_map_reduce') as mock_summarize, \
+                patch('management.services.knowledge_base.summary.merge_cluster_summaries') as mock_merge:
 
             # Mock return values
             mock_process_docs.return_value = (
@@ -3935,10 +3937,10 @@ class TestElasticSearchService(unittest.TestCase):
         2. The error status is properly formatted
         """
         # Mock the new Map-Reduce functions
-        with patch('backend.management.services.knowledge_base.summary.process_documents_for_clustering') as mock_process_docs, \
-                patch('backend.management.services.knowledge_base.clustering.kmeans_cluster_documents') as mock_cluster, \
-                patch('backend.management.services.knowledge_base.summary.summarize_clusters_map_reduce') as mock_summarize, \
-                patch('backend.management.services.knowledge_base.summary.merge_cluster_summaries') as mock_merge:
+        with patch('management.services.knowledge_base.summary.process_documents_for_clustering') as mock_process_docs, \
+                patch('management.services.knowledge_base.clustering.kmeans_cluster_documents') as mock_cluster, \
+                patch('management.services.knowledge_base.summary.summarize_clusters_map_reduce') as mock_summarize, \
+                patch('management.services.knowledge_base.summary.merge_cluster_summaries') as mock_merge:
 
             # Mock return values
             mock_process_docs.return_value = (
@@ -3989,10 +3991,10 @@ class TestElasticSearchService(unittest.TestCase):
         2. The sample_doc_count parameter is passed correctly to process_documents_for_clustering
         """
         # Test with batch_size=1000 -> sample_count should be min(200, 200) = 200
-        with patch('backend.management.services.knowledge_base.summary.process_documents_for_clustering') as mock_process_docs, \
-                patch('backend.management.services.knowledge_base.clustering.kmeans_cluster_documents') as mock_cluster, \
-                patch('backend.management.services.knowledge_base.summary.summarize_clusters_map_reduce') as mock_summarize, \
-                patch('backend.management.services.knowledge_base.summary.merge_cluster_summaries') as mock_merge:
+        with patch('management.services.knowledge_base.summary.process_documents_for_clustering') as mock_process_docs, \
+                patch('management.services.knowledge_base.clustering.kmeans_cluster_documents') as mock_cluster, \
+                patch('management.services.knowledge_base.summary.summarize_clusters_map_reduce') as mock_summarize, \
+                patch('management.services.knowledge_base.summary.merge_cluster_summaries') as mock_merge:
 
             # Mock return values
             mock_process_docs.return_value = (
@@ -4034,10 +4036,10 @@ class TestElasticSearchService(unittest.TestCase):
             self.assertEqual(call_args.kwargs['sample_doc_count'], 200)
 
         # Test with batch_size=50 -> sample_count should be min(10, 200) = 10
-        with patch('backend.management.services.knowledge_base.summary.process_documents_for_clustering') as mock_process_docs, \
-                patch('backend.management.services.knowledge_base.clustering.kmeans_cluster_documents') as mock_cluster, \
-                patch('backend.management.services.knowledge_base.summary.summarize_clusters_map_reduce') as mock_summarize, \
-                patch('backend.management.services.knowledge_base.summary.merge_cluster_summaries') as mock_merge:
+        with patch('management.services.knowledge_base.summary.process_documents_for_clustering') as mock_process_docs, \
+                patch('management.services.knowledge_base.clustering.kmeans_cluster_documents') as mock_cluster, \
+                patch('management.services.knowledge_base.summary.summarize_clusters_map_reduce') as mock_summarize, \
+                patch('management.services.knowledge_base.summary.merge_cluster_summaries') as mock_merge:
 
             # Mock return values
             mock_process_docs.return_value = (
@@ -5288,7 +5290,8 @@ class TestRethrowOrPlain(unittest.TestCase):
     def test_get_vector_db_core_datamate_type(self, mock_datamate_core, mock_tenant_config_manager):
         """get_vector_db_core returns DataMateCore for DATAMATE type."""
         from management.services.knowledge_base.service import get_vector_db_core
-        from consts.const import VectorDatabaseType, DATAMATE_URL
+        from contracts.storage import VectorDatabaseType
+        from consts.const import DATAMATE_URL
 
         # Setup mocks
         mock_tenant_config_manager.get_app_config.return_value = DATAMATE_URL
@@ -5307,7 +5310,8 @@ class TestRethrowOrPlain(unittest.TestCase):
     def test_get_vector_db_core_datamate_success(self, mock_datamate_core, mock_tenant_config_manager):
         """get_vector_db_core returns DataMateCore when DATAMATE type with valid tenant_id and configured URL."""
         from management.services.knowledge_base.service import get_vector_db_core
-        from consts.const import VectorDatabaseType, DATAMATE_URL
+        from contracts.storage import VectorDatabaseType
+        from consts.const import DATAMATE_URL
 
         # Setup mocks
         mock_tenant_config_manager.get_app_config.return_value = "https://datamate.example.com"
@@ -5329,7 +5333,7 @@ class TestRethrowOrPlain(unittest.TestCase):
     def test_get_vector_db_core_datamate_no_url_configured(self, mock_tenant_config_manager):
         """get_vector_db_core raises ValueError when DATAMATE type with tenant_id but no URL configured."""
         from management.services.knowledge_base.service import get_vector_db_core
-        from consts.const import VectorDatabaseType
+        from contracts.storage import VectorDatabaseType
 
         # Setup mock to return None (no URL configured)
         mock_tenant_config_manager.get_app_config.return_value = None
@@ -5346,7 +5350,7 @@ class TestRethrowOrPlain(unittest.TestCase):
     def test_get_vector_db_core_datamate_no_tenant_id(self):
         """get_vector_db_core raises ValueError when DATAMATE type without tenant_id."""
         from management.services.knowledge_base.service import get_vector_db_core
-        from consts.const import VectorDatabaseType
+        from contracts.storage import VectorDatabaseType
 
         # Execute and Assert
         with self.assertRaises(ValueError) as exc:
@@ -5823,10 +5827,10 @@ class TestRethrowOrPlain(unittest.TestCase):
             def __iter__(self):
                 raise RuntimeError("stream failure")
 
-        with patch('backend.management.services.knowledge_base.summary.process_documents_for_clustering') as mock_process_docs, \
-                patch('backend.management.services.knowledge_base.clustering.kmeans_cluster_documents') as mock_cluster, \
-                patch('backend.management.services.knowledge_base.summary.summarize_clusters_map_reduce') as mock_summarize, \
-                patch('backend.management.services.knowledge_base.summary.merge_cluster_summaries', return_value=BadIterable()):
+        with patch('management.services.knowledge_base.summary.process_documents_for_clustering') as mock_process_docs, \
+                patch('management.services.knowledge_base.clustering.kmeans_cluster_documents') as mock_cluster, \
+                patch('management.services.knowledge_base.summary.summarize_clusters_map_reduce') as mock_summarize, \
+                patch('management.services.knowledge_base.summary.merge_cluster_summaries', return_value=BadIterable()):
             mock_process_docs.return_value = (
                 {"doc1": {"chunks": [{"content": "x"}]}},
                 {"doc1": MagicMock()}
@@ -7101,7 +7105,7 @@ class TestCoverageImprovement(unittest.TestCase):
         """Test create_chunk handles exception from vdb_core.create_chunk (lines 1858-1861)."""
         mock_get_record.return_value = {"embedding_model_id": 1, "tenant_id": "tenant-1"}
         self.mock_vdb_core.create_chunk.side_effect = Exception("ES error")
-        from consts.model import ChunkCreateRequest
+        from contracts.models import ChunkCreateRequest
         with self.assertRaises(Exception) as ctx:
             ElasticSearchService.create_chunk(
                 index_name="test-index",
@@ -7120,7 +7124,7 @@ class TestCoverageImprovement(unittest.TestCase):
     # Tests for update_chunk exception (lines 1899-1902)
     def test_update_chunk_vdb_exception(self):
         """Test update_chunk handles exception from vdb_core (lines 1899-1902)."""
-        from consts.model import ChunkUpdateRequest
+        from contracts.models import ChunkUpdateRequest
         self.mock_vdb_core.update_chunk.side_effect = Exception("ES error")
         with self.assertRaises(Exception) as ctx:
             ElasticSearchService.update_chunk(
@@ -7441,7 +7445,7 @@ class TestCoverageImprovement(unittest.TestCase):
         """Test create_chunk handles exception when getting knowledge record (lines 1812-1813)."""
         mock_get_record.side_effect = Exception("DB error")
         self.mock_vdb_core.create_chunk.return_value = {"id": "chunk-1"}
-        from consts.model import ChunkCreateRequest
+        from contracts.models import ChunkCreateRequest
         with patch('management.services.knowledge_base.service.get_embedding_model_by_id',
                    return_value=(MagicMock(), 1)):
             result = ElasticSearchService.create_chunk(
@@ -7466,7 +7470,7 @@ class TestCoverageImprovement(unittest.TestCase):
         mock_model.get_embeddings.side_effect = Exception("Embedding service error")
         mock_get_model.return_value = (mock_model, 1)
         self.mock_vdb_core.create_chunk.return_value = {"id": "chunk-1"}
-        from consts.model import ChunkCreateRequest
+        from contracts.models import ChunkCreateRequest
         result = ElasticSearchService.create_chunk(
             index_name="test-index",
             chunk_request=ChunkCreateRequest(chunk_id="c1", content="test"),
@@ -7482,7 +7486,7 @@ class TestCoverageImprovement(unittest.TestCase):
     # Tests for update_chunk - empty payload (line 1890)
     def test_update_chunk_empty_payload(self):
         """Test update_chunk raises when no update fields supplied (line 1890)."""
-        from consts.model import ChunkUpdateRequest
+        from contracts.models import ChunkUpdateRequest
         # Mock _build_chunk_payload to return empty dict
         with patch.object(ElasticSearchService, '_build_chunk_payload', return_value={}):
             with self.assertRaises(Exception) as ctx:
@@ -8103,7 +8107,7 @@ class TestCoverageImprovement(unittest.TestCase):
         self.assertIn("embedding model", str(ctx.exception).lower())
 
 
-import management.services.knowledge_base.permission as kb_permission
+from management.services.knowledge_base import permission as kb_permission
 
 
 def _patch_kb_permission_context(
@@ -8113,7 +8117,7 @@ def _patch_kb_permission_context(
     user_group_ids=None,
     speed_mode=False,
 ):
-    import management.services.knowledge_base.permission as vdb_service
+    from management.services.knowledge_base import permission as vdb_service
 
     monkeypatch.setattr(vdb_service, "get_knowledge_record", lambda _filters: record)
     monkeypatch.setattr(
@@ -9156,7 +9160,7 @@ async def test_finalize_document_delete_retries_when_fence_clear_raises(monkeypa
 
 @pytest.mark.asyncio
 async def test_retry_document_delete_stops_after_success(monkeypatch):
-    import management.services.knowledge_base.deletion as service_module
+    from management.services.knowledge_base import deletion as service_module
 
     monkeypatch.setattr(
         ElasticSearchService, "_finalize_document_delete",
@@ -9261,7 +9265,7 @@ async def test_finalize_document_delete_legacy_path_passes_request_user_to_marke
 
 @pytest.mark.asyncio
 async def test_retry_document_delete_retries_after_exception(monkeypatch):
-    import management.services.knowledge_base.deletion as service_module
+    from management.services.knowledge_base import deletion as service_module
 
     finalize = AsyncMock(side_effect=[RuntimeError("temporary"), {"status": "success"}])
     monkeypatch.setattr(ElasticSearchService, "_finalize_document_delete", finalize)
@@ -9279,7 +9283,7 @@ async def test_retry_document_delete_retries_after_exception(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_retry_document_delete_propagates_cancellation(monkeypatch):
-    import management.services.knowledge_base.deletion as service_module
+    from management.services.knowledge_base import deletion as service_module
 
     monkeypatch.setattr(
         ElasticSearchService, "_finalize_document_delete",
@@ -9297,7 +9301,7 @@ async def test_retry_document_delete_propagates_cancellation(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_schedule_document_delete_retry_avoids_duplicate_running_task(monkeypatch):
-    import management.services.knowledge_base.deletion as service_module
+    from management.services.knowledge_base import deletion as service_module
 
     running = SimpleNamespace(done=lambda: False)
     key = "already-scheduled"
@@ -9314,7 +9318,7 @@ async def test_schedule_document_delete_retry_avoids_duplicate_running_task(monk
 
 @pytest.mark.asyncio
 async def test_schedule_document_delete_retry_creates_task_when_not_running(monkeypatch):
-    import management.services.knowledge_base.deletion as service_module
+    from management.services.knowledge_base import deletion as service_module
 
     created = []
 
@@ -9475,7 +9479,7 @@ async def test_delete_document_by_scope_supports_legacy_lookup(monkeypatch):
 
 def test_delete_documents_releases_storage_charge_after_minio_delete(monkeypatch):
     """Successful MinIO deletion also reconciles the tenant storage ledger."""
-    import management.services.knowledge_base.deletion as deletion_module
+    from management.services.knowledge_base import deletion as deletion_module
 
     vdb_core = MagicMock()
     vdb_core.delete_documents.return_value = 3
@@ -9562,7 +9566,7 @@ def test_knowledge_base_delete_guard_wraps_lifecycle_read_error(monkeypatch):
 @pytest.mark.asyncio
 async def test_full_delete_knowledge_base_cleans_lifecycle_rows_and_fences(monkeypatch):
     """A successful KB deletion hard-deletes lifecycle rows and clears file fences."""
-    import management.services.knowledge_base.deletion as deletion_module
+    from management.services.knowledge_base import deletion as deletion_module
 
     rows = [
         {"file_id": "fid-1", "status": "DELETE_REQUESTED"},

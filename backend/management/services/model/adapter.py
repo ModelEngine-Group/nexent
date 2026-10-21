@@ -10,7 +10,7 @@ import logging
 from typing import Any, Dict, Optional
 
 from consts.const import MODEL_CONFIG_MAPPING
-from database.model_management_db import get_model_by_model_id
+from management.db.model.repository import get_model_by_model_id
 from management.services.model.names import get_model_name_from_config
 from nexent import MessageObserver
 from nexent.core.gateway import (

@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """Unit tests for MCP community request models and content validators."""
 
 import sys
@@ -7,7 +9,7 @@ from unittest.mock import MagicMock
 import pytest
 from pydantic import ValidationError
 
-# Stub optional SDK deps and agent model imports used by consts.model.
+# Stub optional SDK deps and agent model imports used by contracts.models.
 sys.modules.setdefault("boto3", MagicMock())
 sys.modules.setdefault("botocore", MagicMock())
 sys.modules.setdefault("botocore.client", MagicMock())
@@ -21,13 +23,7 @@ sys.modules.setdefault("nexent.core", MagicMock())
 sys.modules.setdefault("nexent.core.agents", MagicMock())
 sys.modules["nexent.core.agents.agent_model"] = _agent_model_mod
 
-from backend.consts.model import (
-    CommunityPublishRequest,
-    CommunityReviewActionRequest,
-    CommunityStatusUpdateRequest,
-    CommunityUpdateRequest,
-    SkillRepositoryListingCreateRequest,
-)
+from contracts.models import CommunityPublishRequest, CommunityReviewActionRequest, CommunityStatusUpdateRequest, CommunityUpdateRequest, SkillRepositoryListingCreateRequest
 
 
 @pytest.mark.parametrize(

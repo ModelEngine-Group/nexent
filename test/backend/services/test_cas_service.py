@@ -13,9 +13,9 @@ sys.path.insert(0, backend_dir)
 _MODULES_TO_RESTORE = [
     "consts",
     "consts.const",
-    "database.cas_session_db",
-    "database.oauth_account_db",
-    "database.user_tenant_db",
+    "management.db.identity.cas_session",
+    "management.db.identity.oauth_account",
+    "management.db.identity.user_tenant",
     "management.services.permission.identity.oauth",
     "management.services.skill.transfer",
     "management.services.tool.configuration",
@@ -53,9 +53,9 @@ consts_mock.const.LOCAL_SESSION_MAX_AGE_SECONDS = 3600
 sys.modules["consts"] = consts_mock
 sys.modules["consts.const"] = consts_mock.const
 
-sys.modules["database.cas_session_db"] = MagicMock()
-sys.modules["database.oauth_account_db"] = MagicMock()
-sys.modules["database.user_tenant_db"] = MagicMock()
+sys.modules["management.db.identity.cas_session"] = MagicMock()
+sys.modules["management.db.identity.oauth_account"] = MagicMock()
+sys.modules["management.db.identity.user_tenant"] = MagicMock()
 sys.modules["management.services.permission.identity.oauth"] = MagicMock()
 sys.modules["management.services.skill.transfer"] = MagicMock()
 sys.modules["management.services.tool.configuration"] = MagicMock()

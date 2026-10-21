@@ -39,22 +39,9 @@ sys.modules['management.services.skill.transfer'] = MagicMock()
 
 from management.services.permission import asset_owner as asset_owner_visibility_mock
 
-from consts.exceptions import (
-    NoInviteCodeException,
-    IncorrectInviteCodeException,
-    UserRegistrationException,
-    UnauthorizedError,
-    AppException,
-    TenantResourceLimitError,
-    ValidationError,
-)
-from consts.error_code import ErrorCode
-from consts.const import (
-    ASSET_OWNER_ROLE,
-    ASSET_OWNER_SIGNUP_USE_OAUTH_DETAIL,
-    ASSET_OWNER_INVITE_CODE_TYPE,
-    ASSET_OWNER_TENANT_ID,
-)
+from contracts.exceptions import NoInviteCodeException, IncorrectInviteCodeException, UserRegistrationException, UnauthorizedError, AppException, TenantResourceLimitError, ValidationError
+from contracts.error_code import ErrorCode
+from consts.const import ASSET_OWNER_ROLE, ASSET_OWNER_SIGNUP_USE_OAUTH_DETAIL, ASSET_OWNER_INVITE_CODE_TYPE, ASSET_OWNER_TENANT_ID
 
 ASSET_OWNER_RESOURCES_ROUTE = "/asset-owner-resources"
 
@@ -64,21 +51,25 @@ storage_client_mock = MagicMock()
 minio_client_mock = MagicMock()
 patch('nexent.storage.storage_client_factory.create_storage_client_from_config', return_value=storage_client_mock).start()
 patch('nexent.storage.minio_config.MinIOStorageConfig.validate', lambda self: None).start()
-patch('backend.database.client.MinioClient', return_value=minio_client_mock).start()
+patch('management.db.client.MinioClient', return_value=minio_client_mock).start()
 
 # Stub database modules used by user_management_service to avoid loading real SQLAlchemy client
-_db_client_stub = types.ModuleType("database.client")
+_db_client_stub = types.ModuleType("management.db.client")
 _db_client_stub.get_db_session = MagicMock()
 _db_client_stub.as_dict = MagicMock()
 _db_client_stub.MinioClient = MagicMock(return_value=minio_client_mock)
-sys.modules["database.client"] = _db_client_stub
-sys.modules["database.token_db"] = MagicMock()
-sys.modules["database.model_management_db"] = MagicMock()
-sys.modules["database.user_tenant_db"] = MagicMock()
-sys.modules["database.group_db"] = MagicMock()
-sys.modules["database.db_models"] = MagicMock()
+sys.modules["management.db.client"] = _db_client_stub
+from test.common.database_stubs import install_serialization_stub
+install_serialization_stub(sys.modules["management.db.client"])
+from test.common.database_stubs import install_serialization_stub
+install_serialization_stub(sys.modules["management.db.client"])
+sys.modules["management.db.identity.token"] = MagicMock()
+sys.modules["management.db.model.repository"] = MagicMock()
+sys.modules["management.db.identity.user_tenant"] = MagicMock()
+sys.modules["management.db.identity.group"] = MagicMock()
+sys.modules["management.db.models"] = MagicMock()
 
-with patch('backend.database.client.MinioClient', return_value=minio_client_mock):
+with patch('management.db.client.MinioClient', return_value=minio_client_mock):
     from management.services.permission.identity.authentication import (
         set_auth_token_to_client,
         get_authorized_client,
@@ -1024,7 +1015,7 @@ class TestSignupUserWithInvitation(unittest.IsolatedAsyncioTestCase):
 
     async def test_signup_user_with_weak_password(self):
         """Test signup with weak password raises AppException (line 143)"""
-        from consts.error_code import ErrorCode
+        from contracts.error_code import ErrorCode
 
         with self.assertRaises(AppException) as context:
             await signup_user_with_invitation("test@example.com", "weak", invite_code="VALID123")
@@ -1720,8 +1711,8 @@ class TestFormatRolePermissions(unittest.TestCase):
 class TestCreateToken(unittest.IsolatedAsyncioTestCase):
     """Tests for create_token function in user_management_service."""
 
-    @patch('database.token_db.soft_delete_tokens_by_user')
-    @patch('database.client.get_db_session')
+    @patch('management.db.identity.token.soft_delete_tokens_by_user')
+    @patch('management.db.client.get_db_session')
     @patch('management.services.permission.identity.authentication.create_token_record')
     @patch('management.services.permission.identity.authentication.generate_access_key')
     def test_create_token_success(
@@ -1976,7 +1967,7 @@ class TestAssetOwnerUserManagement(unittest.IsolatedAsyncioTestCase):
     def test_format_role_permissions_excludes_asset_owner_route_when_disabled(
         self, mock_filter_routes,
     ):
-        import management.services.permission.asset_owner as aov
+        from management.services.permission import asset_owner as aov
 
         mock_filter_routes.side_effect = aov.filter_accessible_routes_for_asset_owner_feature
         from management.services.permission.identity.authentication import format_role_permissions

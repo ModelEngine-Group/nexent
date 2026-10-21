@@ -9,7 +9,7 @@ from unittest.mock import MagicMock
 
 # First mock the consts package to avoid ModuleNotFoundError.
 # ``consts`` must be a real package-like module (i.e. carry ``__path__``) so
-# that child imports such as ``from consts.exceptions import ...`` resolve
+# that child imports such as ``from contracts.exceptions import ...`` resolve
 # through sys.modules instead of failing with "not a package". ``const``
 # stays a MagicMock so tests can attach whatever constants they need.
 from types import ModuleType
@@ -32,7 +32,7 @@ consts_mock.const.DEFAULT_TENANT_ID = "default_tenant"
 consts_mock.const.TENANT_ID = "tenant_id"
 
 # Provide the exceptions submodule used by tenant_config_db at import time.
-consts_exceptions_mock = ModuleType("consts.exceptions")
+consts_exceptions_mock = ModuleType("contracts.exceptions")
 
 
 class TenantResourceLimitError(Exception):
@@ -44,9 +44,9 @@ consts_exceptions_mock.TenantResourceLimitError = TenantResourceLimitError
 # Add the mocked consts module to sys.modules
 sys.modules['consts'] = consts_mock
 sys.modules['consts.const'] = consts_mock.const
-sys.modules['consts.exceptions'] = consts_exceptions_mock
+sys.modules['contracts.exceptions'] = consts_exceptions_mock
 
-exceptions_mock = types.ModuleType("consts.exceptions")
+exceptions_mock = types.ModuleType("contracts.exceptions")
 
 
 class MockTenantResourceLimitError(Exception):
@@ -54,7 +54,7 @@ class MockTenantResourceLimitError(Exception):
 
 
 exceptions_mock.TenantResourceLimitError = MockTenantResourceLimitError
-sys.modules['consts.exceptions'] = exceptions_mock
+sys.modules['contracts.exceptions'] = exceptions_mock
 
 # Mock utils module
 utils_mock = MagicMock()
@@ -75,8 +75,14 @@ client_mock.as_dict = MagicMock()
 client_mock.filter_property = MagicMock()
 
 # Add the mocked client module to sys.modules
-sys.modules['database.client'] = client_mock
-sys.modules['backend.database.client'] = client_mock
+sys.modules['management.db.client'] = client_mock
+from test.common.database_stubs import install_serialization_stub
+install_serialization_stub(sys.modules["management.db.client"])
+from test.common.database_stubs import install_serialization_stub
+install_serialization_stub(sys.modules["management.db.client"])
+sys.modules['management.db.client'] = client_mock
+from test.common.database_stubs import install_serialization_stub
+install_serialization_stub(sys.modules["management.db.client"])
 
 # Mock db_models module
 db_models_mock = MagicMock()
@@ -96,8 +102,8 @@ class MockTenantConfig:
         self.update_time = kwargs.get('update_time', '2024-01-01 00:00:00')
 
 # Add the mocked db_models module to sys.modules
-sys.modules['database.db_models'] = db_models_mock
-sys.modules['backend.database.db_models'] = db_models_mock
+sys.modules['management.db.models'] = db_models_mock
+sys.modules['management.db.models'] = db_models_mock
 
 # Mock sqlalchemy module
 sqlalchemy_mock = MagicMock()
@@ -113,19 +119,7 @@ sys.modules['sqlalchemy'] = sqlalchemy_mock
 sys.modules['sqlalchemy.exc'] = sqlalchemy_mock.exc
 
 # Now we can safely import the module under test
-from backend.database.tenant_config_db import (
-    get_all_configs_by_tenant_id,
-    get_configs_by_tenant_id_and_keys,
-    get_tenant_config_info,
-    get_single_config_info,
-    insert_config,
-    delete_config_by_tenant_config_id,
-    delete_config,
-    update_config_by_tenant_config_id,
-    update_config_by_tenant_config_id_and_data,
-    get_all_tenant_ids,
-    create_tenant_with_default_group,
-)
+from management.db.configuration.tenant import get_all_configs_by_tenant_id, get_configs_by_tenant_id_and_keys, get_tenant_config_info, get_single_config_info, insert_config, delete_config_by_tenant_config_id, delete_config, update_config_by_tenant_config_id, update_config_by_tenant_config_id_and_data, get_all_tenant_ids, create_tenant_with_default_group
 
 
 def test_get_configs_by_tenant_id_and_keys_success(monkeypatch, mock_session):
@@ -142,7 +136,7 @@ def test_get_configs_by_tenant_id_and_keys_success(monkeypatch, mock_session):
     mock_ctx = MagicMock()
     mock_ctx.__enter__.return_value = session
     mock_ctx.__exit__.return_value = None
-    monkeypatch.setattr("backend.database.tenant_config_db.get_db_session", lambda: mock_ctx)
+    monkeypatch.setattr("management.db.configuration.tenant.get_db_session", lambda: mock_ctx)
 
     result = get_configs_by_tenant_id_and_keys(
         "test_tenant",
@@ -155,7 +149,7 @@ def test_get_configs_by_tenant_id_and_keys_success(monkeypatch, mock_session):
 def test_get_configs_by_tenant_id_and_keys_empty_keys(monkeypatch):
     """Avoid opening a database session when no keys are requested."""
     get_db_session = MagicMock()
-    monkeypatch.setattr("backend.database.tenant_config_db.get_db_session", get_db_session)
+    monkeypatch.setattr("management.db.configuration.tenant.get_db_session", get_db_session)
 
     assert get_configs_by_tenant_id_and_keys("test_tenant", []) == {}
     get_db_session.assert_not_called()
@@ -194,7 +188,7 @@ def test_get_all_configs_by_tenant_id_success(monkeypatch, mock_session):
     mock_ctx = MagicMock()
     mock_ctx.__enter__.return_value = session
     mock_ctx.__exit__.return_value = None
-    monkeypatch.setattr("backend.database.tenant_config_db.get_db_session", lambda: mock_ctx)
+    monkeypatch.setattr("management.db.configuration.tenant.get_db_session", lambda: mock_ctx)
 
     result = get_all_configs_by_tenant_id("test_tenant")
 
@@ -216,7 +210,7 @@ def test_get_all_configs_by_tenant_id_empty(monkeypatch, mock_session):
     mock_ctx = MagicMock()
     mock_ctx.__enter__.return_value = session
     mock_ctx.__exit__.return_value = None
-    monkeypatch.setattr("backend.database.tenant_config_db.get_db_session", lambda: mock_ctx)
+    monkeypatch.setattr("management.db.configuration.tenant.get_db_session", lambda: mock_ctx)
 
     result = get_all_configs_by_tenant_id("test_tenant")
 
@@ -239,7 +233,7 @@ def test_get_tenant_config_info_success(monkeypatch, mock_session):
     mock_ctx = MagicMock()
     mock_ctx.__enter__.return_value = session
     mock_ctx.__exit__.return_value = None
-    monkeypatch.setattr("backend.database.tenant_config_db.get_db_session", lambda: mock_ctx)
+    monkeypatch.setattr("management.db.configuration.tenant.get_db_session", lambda: mock_ctx)
 
     result = get_tenant_config_info("test_tenant", "test_user", "test_key")
 
@@ -259,7 +253,7 @@ def test_get_tenant_config_info_not_found(monkeypatch, mock_session):
     mock_ctx = MagicMock()
     mock_ctx.__enter__.return_value = session
     mock_ctx.__exit__.return_value = None
-    monkeypatch.setattr("backend.database.tenant_config_db.get_db_session", lambda: mock_ctx)
+    monkeypatch.setattr("management.db.configuration.tenant.get_db_session", lambda: mock_ctx)
 
     result = get_tenant_config_info("test_tenant", "test_user", "test_key")
 
@@ -282,7 +276,7 @@ def test_get_single_config_info_success(monkeypatch, mock_session):
     mock_ctx = MagicMock()
     mock_ctx.__enter__.return_value = session
     mock_ctx.__exit__.return_value = None
-    monkeypatch.setattr("backend.database.tenant_config_db.get_db_session", lambda: mock_ctx)
+    monkeypatch.setattr("management.db.configuration.tenant.get_db_session", lambda: mock_ctx)
 
     result = get_single_config_info("test_tenant", "test_key")
 
@@ -301,7 +295,7 @@ def test_get_single_config_info_not_found(monkeypatch, mock_session):
     mock_ctx = MagicMock()
     mock_ctx.__enter__.return_value = session
     mock_ctx.__exit__.return_value = None
-    monkeypatch.setattr("backend.database.tenant_config_db.get_db_session", lambda: mock_ctx)
+    monkeypatch.setattr("management.db.configuration.tenant.get_db_session", lambda: mock_ctx)
 
     result = get_single_config_info("test_tenant", "test_key")
 
@@ -317,7 +311,7 @@ def test_insert_config_success(monkeypatch, mock_session):
     mock_ctx = MagicMock()
     mock_ctx.__enter__.return_value = session
     mock_ctx.__exit__.return_value = None
-    monkeypatch.setattr("backend.database.tenant_config_db.get_db_session", lambda: mock_ctx)
+    monkeypatch.setattr("management.db.configuration.tenant.get_db_session", lambda: mock_ctx)
 
     insert_data = {
         "tenant_id": "test_tenant",
@@ -343,7 +337,7 @@ def test_insert_config_failure(monkeypatch, mock_session):
     mock_ctx = MagicMock()
     mock_ctx.__enter__.return_value = session
     mock_ctx.__exit__.return_value = None
-    monkeypatch.setattr("backend.database.tenant_config_db.get_db_session", lambda: mock_ctx)
+    monkeypatch.setattr("management.db.configuration.tenant.get_db_session", lambda: mock_ctx)
 
     insert_data = {
         "tenant_id": "test_tenant",
@@ -373,7 +367,7 @@ def test_delete_config_by_tenant_config_id_success(monkeypatch, mock_session):
     mock_ctx = MagicMock()
     mock_ctx.__enter__.return_value = session
     mock_ctx.__exit__.return_value = None
-    monkeypatch.setattr("backend.database.tenant_config_db.get_db_session", lambda: mock_ctx)
+    monkeypatch.setattr("management.db.configuration.tenant.get_db_session", lambda: mock_ctx)
 
     result = delete_config_by_tenant_config_id(123)
 
@@ -394,7 +388,7 @@ def test_delete_config_by_tenant_config_id_failure(monkeypatch, mock_session):
     mock_ctx = MagicMock()
     mock_ctx.__enter__.return_value = session
     mock_ctx.__exit__.return_value = None
-    monkeypatch.setattr("backend.database.tenant_config_db.get_db_session", lambda: mock_ctx)
+    monkeypatch.setattr("management.db.configuration.tenant.get_db_session", lambda: mock_ctx)
 
     result = delete_config_by_tenant_config_id(123)
 
@@ -417,7 +411,7 @@ def test_delete_config_success(monkeypatch, mock_session):
     mock_ctx = MagicMock()
     mock_ctx.__enter__.return_value = session
     mock_ctx.__exit__.return_value = None
-    monkeypatch.setattr("backend.database.tenant_config_db.get_db_session", lambda: mock_ctx)
+    monkeypatch.setattr("management.db.configuration.tenant.get_db_session", lambda: mock_ctx)
 
     result = delete_config("test_tenant", "test_user", "test_key", "test_value")
 
@@ -438,7 +432,7 @@ def test_delete_config_failure(monkeypatch, mock_session):
     mock_ctx = MagicMock()
     mock_ctx.__enter__.return_value = session
     mock_ctx.__exit__.return_value = None
-    monkeypatch.setattr("backend.database.tenant_config_db.get_db_session", lambda: mock_ctx)
+    monkeypatch.setattr("management.db.configuration.tenant.get_db_session", lambda: mock_ctx)
 
     result = delete_config("test_tenant", "test_user", "test_key", "test_value")
 
@@ -461,7 +455,7 @@ def test_update_config_by_tenant_config_id_success(monkeypatch, mock_session):
     mock_ctx = MagicMock()
     mock_ctx.__enter__.return_value = session
     mock_ctx.__exit__.return_value = None
-    monkeypatch.setattr("backend.database.tenant_config_db.get_db_session", lambda: mock_ctx)
+    monkeypatch.setattr("management.db.configuration.tenant.get_db_session", lambda: mock_ctx)
 
     result = update_config_by_tenant_config_id(123, "new_value")
 
@@ -482,7 +476,7 @@ def test_update_config_by_tenant_config_id_failure(monkeypatch, mock_session):
     mock_ctx = MagicMock()
     mock_ctx.__enter__.return_value = session
     mock_ctx.__exit__.return_value = None
-    monkeypatch.setattr("backend.database.tenant_config_db.get_db_session", lambda: mock_ctx)
+    monkeypatch.setattr("management.db.configuration.tenant.get_db_session", lambda: mock_ctx)
 
     result = update_config_by_tenant_config_id(123, "new_value")
 
@@ -505,7 +499,7 @@ def test_update_config_by_tenant_config_id_and_data_success(monkeypatch, mock_se
     mock_ctx = MagicMock()
     mock_ctx.__enter__.return_value = session
     mock_ctx.__exit__.return_value = None
-    monkeypatch.setattr("backend.database.tenant_config_db.get_db_session", lambda: mock_ctx)
+    monkeypatch.setattr("management.db.configuration.tenant.get_db_session", lambda: mock_ctx)
 
     update_data = {"config_value": "new_value", "updated_by": "test_user"}
     result = update_config_by_tenant_config_id_and_data(123, update_data)
@@ -527,7 +521,7 @@ def test_update_config_by_tenant_config_id_and_data_failure(monkeypatch, mock_se
     mock_ctx = MagicMock()
     mock_ctx.__enter__.return_value = session
     mock_ctx.__exit__.return_value = None
-    monkeypatch.setattr("backend.database.tenant_config_db.get_db_session", lambda: mock_ctx)
+    monkeypatch.setattr("management.db.configuration.tenant.get_db_session", lambda: mock_ctx)
 
     update_data = {"config_value": "new_value", "updated_by": "test_user"}
     result = update_config_by_tenant_config_id_and_data(123, update_data)
@@ -558,7 +552,7 @@ def test_get_all_tenant_ids_success(monkeypatch, mock_session):
     mock_ctx = MagicMock()
     mock_ctx.__enter__.return_value = session
     mock_ctx.__exit__.return_value = None
-    monkeypatch.setattr("backend.database.tenant_config_db.get_db_session", lambda: mock_ctx)
+    monkeypatch.setattr("management.db.configuration.tenant.get_db_session", lambda: mock_ctx)
 
     result = get_all_tenant_ids()
 
@@ -583,7 +577,7 @@ def test_get_all_tenant_ids_empty(monkeypatch, mock_session):
     mock_ctx = MagicMock()
     mock_ctx.__enter__.return_value = session
     mock_ctx.__exit__.return_value = None
-    monkeypatch.setattr("backend.database.tenant_config_db.get_db_session", lambda: mock_ctx)
+    monkeypatch.setattr("management.db.configuration.tenant.get_db_session", lambda: mock_ctx)
 
     result = get_all_tenant_ids()
 
@@ -598,7 +592,7 @@ def test_database_error_handling(monkeypatch, mock_session):
     mock_ctx = MagicMock()
     mock_ctx.__enter__.return_value = session
     mock_ctx.__exit__.return_value = None
-    monkeypatch.setattr("backend.database.tenant_config_db.get_db_session", lambda: mock_ctx)
+    monkeypatch.setattr("management.db.configuration.tenant.get_db_session", lambda: mock_ctx)
 
     with pytest.raises(MockSQLAlchemyError, match="Database error"):
         get_all_configs_by_tenant_id("test_tenant")
@@ -606,7 +600,7 @@ def test_database_error_handling(monkeypatch, mock_session):
 
 def test_insert_tenant_id_config_rejects_platform_tenant_limit(monkeypatch, mock_session):
     """Writing a new tenant identity is rejected at the platform tenant limit."""
-    import backend.database.tenant_config_db as module
+    from management.db.configuration import tenant as module
 
     class ResourceLimitError(Exception):
         pass
@@ -628,7 +622,7 @@ def test_insert_tenant_id_config_rejects_platform_tenant_limit(monkeypatch, mock
 @pytest.mark.parametrize("current_count, should_reject", [(0, False), (1, True), (2, True)])
 def test_tenant_limit_boundaries(monkeypatch, mock_session, current_count, should_reject):
     """Tenant identity creation is allowed below the cap and rejected at or above it."""
-    import backend.database.tenant_config_db as module
+    from management.db.configuration import tenant as module
 
     class ResourceLimitError(Exception):
         pass
@@ -652,7 +646,7 @@ def test_tenant_limit_boundaries(monkeypatch, mock_session, current_count, shoul
 
 def test_create_tenant_with_default_group_rejects_platform_tenant_limit(monkeypatch, mock_session):
     """Atomic tenant creation rejects the platform cap before adding records."""
-    import backend.database.tenant_config_db as module
+    from management.db.configuration import tenant as module
 
     class ResourceLimitError(Exception):
         pass

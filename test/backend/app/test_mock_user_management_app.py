@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import types
 
 import pytest
@@ -25,14 +27,14 @@ sys.modules['boto3'] = boto3_module
 storage_client_mock = MagicMock()
 patch('nexent.storage.storage_client_factory.create_storage_client_from_config', return_value=storage_client_mock).start()
 patch('nexent.storage.minio_config.MinIOStorageConfig.validate', lambda self: None).start()
-patch('backend.database.client.MinioClient', return_value=minio_client_mock).start()
+patch('management.db.client.MinioClient', return_value=minio_client_mock).start()
 
 from fastapi.testclient import TestClient
 from http import HTTPStatus
 from fastapi import FastAPI, HTTPException
 
 # Create a test client with a fresh FastAPI app
-from apps.mock_user_management_app import router
+from management.api.identity.mock_user_management import router
 
 app = FastAPI()
 app.include_router(router)
@@ -50,7 +52,7 @@ class TestServiceHealth:
         data = response.json()
         assert data["message"] == "Auth service is available"
 
-    @patch('apps.mock_user_management_app.JSONResponse', side_effect=Exception("Simulated error"))
+    @patch('management.api.identity.mock_user_management.JSONResponse', side_effect=Exception("Simulated error"))
     def test_service_health_exception_path(self, mock_json_response):
         """Test service health exception handling path"""
         response = client.get("/user/service_health")
@@ -115,7 +117,7 @@ class TestUserSignup:
         assert "expires_at" in session
         assert "expires_in_seconds" in session
 
-    @patch('apps.mock_user_management_app.JSONResponse', side_effect=Exception("Test exception"))
+    @patch('management.api.identity.mock_user_management.JSONResponse', side_effect=Exception("Test exception"))
     def test_signup_exception_handling(self, mock_json_response):
         """Test signup exception handling"""
         response = client.post(
@@ -151,7 +153,7 @@ class TestUserSignin:
         assert data["data"]["user"]["email"] == "test@example.com"
         assert data["data"]["session"]["access_token"] == "mock_access_token"
 
-    @patch('apps.mock_user_management_app.JSONResponse', side_effect=Exception("Signin error"))
+    @patch('management.api.identity.mock_user_management.JSONResponse', side_effect=Exception("Signin error"))
     def test_signin_exception_handling(self, mock_json_response):
         """Test signin exception handling"""
         response = client.post(
@@ -187,7 +189,7 @@ class TestRefreshToken:
         assert "mock_refresh_token_" in session["refresh_token"]
         assert session["expires_in_seconds"] == 315360000
 
-    @patch('apps.mock_user_management_app.datetime')
+    @patch('management.api.identity.mock_user_management.datetime')
     def test_refresh_token_with_new_timestamp(self, mock_datetime):
         """Test refresh token generates new timestamp"""
         from datetime import datetime, timedelta
@@ -209,7 +211,7 @@ class TestRefreshToken:
         assert str(expected_timestamp) in session["access_token"]
         assert str(expected_timestamp) in session["refresh_token"]
 
-    @patch('apps.mock_user_management_app.JSONResponse', side_effect=Exception("Time error"))
+    @patch('management.api.identity.mock_user_management.JSONResponse', side_effect=Exception("Time error"))
     def test_refresh_token_exception_handling(self, mock_json_response):
         """Test refresh token exception handling"""
         response = client.post(
@@ -236,7 +238,7 @@ class TestLogout:
         data = response.json()
         assert data["message"] == "Logout successful"
 
-    @patch('apps.mock_user_management_app.JSONResponse', side_effect=Exception("Logout error"))
+    @patch('management.api.identity.mock_user_management.JSONResponse', side_effect=Exception("Logout error"))
     def test_logout_exception_handling(self, mock_json_response):
         """Test logout exception handling"""
         response = client.post("/user/logout")
@@ -263,7 +265,7 @@ class TestGetSession:
         assert data["data"]["user"]["email"] == "mock@example.com"
         assert data["data"]["user"]["role"] == "admin"
 
-    @patch('apps.mock_user_management_app.JSONResponse', side_effect=Exception("Session error"))
+    @patch('management.api.identity.mock_user_management.JSONResponse', side_effect=Exception("Session error"))
     def test_get_session_exception_handling(self, mock_json_response):
         """Test session retrieval exception handling"""
         response = client.get("/user/session")
@@ -288,7 +290,7 @@ class TestGetCurrentUserId:
         assert data["message"] == "Get user ID successfully"
         assert data["data"]["user_id"] == "user_id"
 
-    @patch('apps.mock_user_management_app.JSONResponse', side_effect=Exception("User ID error"))
+    @patch('management.api.identity.mock_user_management.JSONResponse', side_effect=Exception("User ID error"))
     def test_get_user_id_exception_handling(self, mock_json_response):
         """Test user ID retrieval exception handling"""
         response = client.get("/user/current_user_id")
@@ -457,7 +459,7 @@ class TestMockDataConsistency:
 class TestGetCurrentUserInfo:
     """Test get current user info endpoint"""
 
-    @patch('apps.mock_user_management_app.get_user_info', new_callable=AsyncMock)
+    @patch('management.api.identity.mock_user_management.get_user_info', new_callable=AsyncMock)
     def test_get_user_info_success(self, mock_get_user_info):
         """Test successful user information retrieval"""
         # Setup mock to return valid user info
@@ -488,7 +490,7 @@ class TestGetCurrentUserInfo:
         assert data["data"]["user"]["tenant_id"] == "tenant_id"
         mock_get_user_info.assert_called_once_with("user_id")
 
-    @patch('apps.mock_user_management_app.get_user_info', new_callable=AsyncMock)
+    @patch('management.api.identity.mock_user_management.get_user_info', new_callable=AsyncMock)
     def test_get_user_info_not_found(self, mock_get_user_info):
         """Test user information not found (returns None)"""
         # Setup mock to return None (user not found)
@@ -504,10 +506,10 @@ class TestGetCurrentUserInfo:
         assert "User not logged in or session invalid" in data["detail"]
         mock_get_user_info.assert_called_once_with("user_id")
 
-    @patch('apps.mock_user_management_app.get_user_info', new_callable=AsyncMock)
+    @patch('management.api.identity.mock_user_management.get_user_info', new_callable=AsyncMock)
     def test_get_user_info_unauthorized_error(self, mock_get_user_info):
         """Test UnauthorizedError exception handling"""
-        from consts.exceptions import UnauthorizedError
+        from contracts.exceptions import UnauthorizedError
         
         # Setup mock to raise UnauthorizedError
         mock_get_user_info.side_effect = UnauthorizedError("User information not found")
@@ -522,7 +524,7 @@ class TestGetCurrentUserInfo:
         assert "User not logged in or session invalid" in data["detail"]
         mock_get_user_info.assert_called_once_with("user_id")
 
-    @patch('apps.mock_user_management_app.get_user_info', new_callable=AsyncMock)
+    @patch('management.api.identity.mock_user_management.get_user_info', new_callable=AsyncMock)
     def test_get_user_info_general_exception(self, mock_get_user_info):
         """Test general exception handling"""
         # Setup mock to raise a general exception
@@ -538,7 +540,7 @@ class TestGetCurrentUserInfo:
         assert "Get user information failed" in data["detail"]
         mock_get_user_info.assert_called_once_with("user_id")
 
-    @patch('apps.mock_user_management_app.get_user_info', new_callable=AsyncMock)
+    @patch('management.api.identity.mock_user_management.get_user_info', new_callable=AsyncMock)
     def test_get_user_info_response_structure(self, mock_get_user_info):
         """Test complete response structure"""
         mock_user_info = {
@@ -578,4 +580,4 @@ class TestGetCurrentUserInfo:
 
 
 if __name__ == "__main__":
-    pytest.main([__file__, "-v", "--cov=apps.mock_user_management_app", "--cov-report=term-missing"]) 
+    pytest.main([__file__, "-v", "--cov=management.api.identity.mock_user_management", "--cov-report=term-missing"])

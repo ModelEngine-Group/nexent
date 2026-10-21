@@ -19,18 +19,14 @@ import logging
 from dataclasses import dataclass
 from typing import Any, Callable, Dict, Optional
 
-from database import agent_automation_db
+from management.db.automation import repository as agent_automation_db
 from nexent.core.agents.agent_model import ToolConfig
 from nexent.core.concurrency import ManagedTaskSpec, get_current_thread_manager
 from nexent.core.tools.create_scheduled_task_tool import (
     CreateScheduledTaskProposalTool,
 )
 
-from consts.exceptions import (
-    AgentAutomationError,
-    AutomationConversationAlreadyBoundError,
-    AutomationScheduleInvalidError,
-)
+from contracts.exceptions import AgentAutomationError, AutomationConversationAlreadyBoundError, AutomationScheduleInvalidError
 from management.services.automation.service import agent_automation_facade
 from contracts.automation import AutomationProposalCreateRequest
 from management.services.automation.prompt import detect_instruction_language

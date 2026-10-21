@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """Unit tests for ``evaluator_db`` versioning / CLONE / in-use guards.
 
 Targets
@@ -16,7 +18,7 @@ Targets
 * ``publish_evaluator`` – first-publish sets ``version_group_id``.
 
 All tests drive the logic by injecting a MagicMock ``session`` through the
-``database.client.get_db_session`` context-manager helper (a pattern borrowed
+``management.db.client.get_db_session`` context-manager helper (a pattern borrowed
 from the existing ``test_agent_evaluation_service`` suite).  A dedicated
 ``_SessionHarness`` helper class wires the common ``session.query(...)`` chain
 to return configurable mock rows so each branch path can be exercised with
@@ -80,7 +82,7 @@ def _register_package(name: str) -> types.ModuleType:
 #    no undo)
 # ---------------------------------------------------------------------------
 
-MODULE_UNDER_TEST = "database.evaluator_db"
+MODULE_UNDER_TEST = "management.db.evaluation.evaluator"
 
 
 def _install_stubs():
@@ -110,10 +112,10 @@ def _install_stubs():
             "AGENT_EVALUATION_EVALUATOR_IN_USE": "AGENT_EVALUATION_EVALUATOR_IN_USE",
         },
     )
-    _ec_mod = mk_mod("consts.error_code", ErrorCode=_Err)
+    _ec_mod = mk_mod("contracts.error_code", ErrorCode=_Err)
     _consts_pkg.error_code = _ec_mod
     _ERS = type("ERS", (), {"PENDING": "PENDING", "RUNNING": "RUNNING"})
-    _es_mod = mk_mod("consts.evaluation_status", EvalRunStatus=_ERS)
+    _es_mod = mk_mod("contracts.evaluation_status", EvalRunStatus=_ERS)
     _consts_pkg.evaluation_status = _es_mod
 
     class _AppException(Exception):
@@ -123,12 +125,12 @@ def _install_stubs():
             self.message = msg
             self.extra = extra
 
-    _ex_mod = mk_mod("consts.exceptions", AppException=_AppException)
+    _ex_mod = mk_mod("contracts.exceptions", AppException=_AppException)
     _consts_pkg.exceptions = _ex_mod
 
-    # database.client.get_db_session – wired lazily by the harness per test.
+    # management.db.client.get_db_session – wired lazily by the harness per test.
     _db_pkg = _register_package("database")
-    _dc_mod = mk_mod("database.client")
+    _dc_mod = mk_mod("management.db.client")
     _dc_mod.get_db_session = None  # patched per test
     _db_pkg.client = _dc_mod
 
@@ -136,7 +138,7 @@ def _install_stubs():
     _EvalCls = type("Evaluator", (), {})
     _AgentEvalCls = type("AgentEvaluation", (), {})
     db_mod = mk_mod(
-        "database.db_models",
+        "management.db.models",
         Evaluator=_EvalCls,
         AgentEvaluation=_AgentEvalCls,
     )
@@ -154,10 +156,10 @@ def evaluator_mod():
     The module-under-test is loaded by ``importlib.util.spec_from_file_location``
     because: (1) the ``database`` package on ``sys.path`` has a real
     ``__init__.py`` that pulls in SQLAlchemy-heavy imports; (2) we need
-    ``database.client`` and ``database.db_models`` to resolve to our stubs
+    ``management.db.client`` and ``management.db.models`` to resolve to our stubs
     instead of the real implementations.  Using ``spec_from_file_location``
     lets us skip the ``database`` package-import step and still satisfy the
-    ``from database.client import get_db_session`` line in the module.
+    ``from management.db.client import get_db_session`` line in the module.
 
     Stubs are pre-installed at module-collection time (see ``_install_stubs``
     above) and captured in ``_INSTALLED`` — no ``monkeypatch`` undo is needed
@@ -183,7 +185,7 @@ def evaluator_mod():
         except AttributeError:
             pass
 
-    _src = backend_root / "database" / "evaluator_db.py"
+    _src = backend_root / 'management' / 'db' / 'evaluation' / 'evaluator.py'
     _spec = _ilu.spec_from_file_location(MODULE_UNDER_TEST, str(_src))
     assert _spec is not None and _spec.loader is not None, (
         f"cannot locate evaluator_db.py at {_src}"
@@ -345,10 +347,10 @@ class _SessionHarness:
     def __init__(self, evaluator_mod):
         self.evaluator_mod = evaluator_mod
         # Install stub ORM classes onto the module so they are picked up
-        # by the lazy `from database.db_models import X` inside session cm.
+        # by the lazy `from management.db.models import X` inside session cm.
         self.EvaluatorCls, self.AgentEvalCls = _build_stub_orm_classes()
         try:
-            import database.db_models as _dm
+            from management.db import models as _dm
 
             _dm.Evaluator = self.EvaluatorCls
             _dm.AgentEvaluation = self.AgentEvalCls
@@ -618,9 +620,9 @@ class _SessionHarness:
         """Patch ``evaluator_mod.get_db_session`` to yield our harness session.
 
         The patch targets the import-time binding inside the module under test
-        rather than ``database.client`` because Python's ``from X import Y``
+        rather than ``management.db.client`` because Python's ``from X import Y``
         statement copies the reference at import time, so a later assignment
-        to ``database.client.get_db_session`` would be invisible to the
+        to ``management.db.client.get_db_session`` would be invisible to the
         already-loaded module.
         """
         sess = self.build_session()
@@ -632,9 +634,9 @@ class _SessionHarness:
         target = self.evaluator_mod
         old = getattr(target, "get_db_session", None)
         target.get_db_session = _fake_cm
-        # Also keep database.client patched for any nested code path
+        # Also keep management.db.client patched for any nested code path
         try:
-            import database.client as _client
+            from management.db import client as _client
 
             _client_old = getattr(_client, "get_db_session", None)
             _client.get_db_session = _fake_cm
@@ -646,7 +648,7 @@ class _SessionHarness:
             if old is not None:
                 target.get_db_session = old
             try:
-                import database.client as _client2
+                from management.db import client as _client2
 
                 if _client_old is not None:
                     _client2.get_db_session = _client_old

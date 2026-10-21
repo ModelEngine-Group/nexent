@@ -36,14 +36,14 @@ class _OAuthCompleteRequest:
 
 
 consts_model_mock.OAuthCompleteRequest = _OAuthCompleteRequest
-sys.modules["consts.model"] = consts_model_mock
+sys.modules["contracts.models"] = consts_model_mock
 
 oauth_providers_mock = MagicMock()
 oauth_providers_mock.get_all_provider_definitions.return_value = {
     "github": MagicMock(),
     "wechat": MagicMock(),
 }
-sys.modules["consts.oauth_providers"] = oauth_providers_mock
+sys.modules["contracts.oauth_providers"] = oauth_providers_mock
 
 
 class _OAuthProviderError(Exception):
@@ -74,19 +74,25 @@ exceptions_mock.tenant_resource_limit_error_payload = lambda error: {
     "message": str(error),
     "details": error.details,
 }
-sys.modules["consts.exceptions"] = exceptions_mock
+sys.modules["contracts.exceptions"] = exceptions_mock
 
 sys.modules["database"] = MagicMock()
 database_oauth_mock = MagicMock()
 database_oauth_mock.get_oauth_account_by_provider = MagicMock(return_value=None)
 database_oauth_mock.get_soft_deleted_oauth_account = MagicMock(return_value=None)
-sys.modules["database.oauth_account_db"] = database_oauth_mock
-sys.modules["database.user_tenant_db"] = MagicMock()
-sys.modules["database.client"] = MagicMock()
-sys.modules["database.db_models"] = MagicMock()
+sys.modules["management.db.identity.oauth_account"] = database_oauth_mock
+sys.modules["management.db.identity.user_tenant"] = MagicMock()
+sys.modules["management.db.client"] = MagicMock()
+from test.common.database_stubs import install_serialization_stub
+install_serialization_stub(sys.modules["management.db.client"])
+from test.common.database_stubs import install_serialization_stub
+install_serialization_stub(sys.modules["management.db.client"])
+sys.modules["management.db.models"] = MagicMock()
 sys.modules["backend.database"] = MagicMock()
-sys.modules["backend.database.client"] = MagicMock()
-sys.modules["backend.database.db_models"] = MagicMock()
+sys.modules["management.db.client"] = MagicMock()
+from test.common.database_stubs import install_serialization_stub
+install_serialization_stub(sys.modules["management.db.client"])
+sys.modules["management.db.models"] = MagicMock()
 sys.modules["utils"] = MagicMock()
 sys.modules["utils.token_encryption"] = MagicMock()
 sys.modules["management.services.configuration.tenant.settings"] = MagicMock()
@@ -123,7 +129,7 @@ oauth_service_mock.get_oauth_config = MagicMock(
 )
 sys.modules["services"] = MagicMock()
 sys.modules["management.services.permission.identity.oauth"] = oauth_service_mock
-# apps.oauth_app imports management.services.monitor.audit; the blanket `services` MagicMock
+# management.api.identity.oauth imports management.services.monitor.audit; the blanket `services` MagicMock
 # above is not a package, so the audit submodule must be pre-registered.
 sys.modules["management.services.monitor.audit"] = MagicMock()
 
@@ -144,15 +150,15 @@ patch(
 patch(
     "nexent.storage.minio_config.MinIOStorageConfig.validate", lambda self: None
 ).start()
-patch("database.client.MinioClient", return_value=minio_mock).start()
-patch("database.client.MinioClient", return_value=minio_mock).start()
-patch("database.client.minio_client", minio_mock).start()
+patch("management.db.client.MinioClient", return_value=minio_mock).start()
+patch("management.db.client.MinioClient", return_value=minio_mock).start()
+patch("management.db.client.minio_client", minio_mock).start()
 
 from fastapi.testclient import TestClient
 from fastapi import FastAPI
 from http import HTTPStatus
 
-from apps.oauth_app import router
+from management.api.identity.oauth import router
 
 app = FastAPI()
 app.include_router(router)
@@ -256,7 +262,7 @@ class TestLink(unittest.TestCase):
 
         self.assertEqual(response.status_code, HTTPStatus.UNAUTHORIZED)
 
-    @patch("apps.oauth_app.get_current_user_id")
+    @patch("management.api.identity.oauth.get_current_user_id")
     def test_returns_401_for_invalid_token(self, mock_get_user):
         mock_get_user.side_effect = _UnauthorizedError("Invalid token")
 
@@ -342,7 +348,7 @@ class TestCallback(unittest.TestCase):
 
         auth_utils_mock.generate_session_jwt.return_value = "eyJ.mock.jwt.token"
 
-        with patch("apps.oauth_app.JWT_EXPIRY_SECONDS", 5432):
+        with patch("management.api.identity.oauth.JWT_EXPIRY_SECONDS", 5432):
             response = client.get("/user/oauth/callback?provider=github&code=valid_code")
 
         if response.status_code != HTTPStatus.OK:
@@ -670,7 +676,7 @@ class TestGetAccounts(unittest.TestCase):
 
         self.assertEqual(response.status_code, HTTPStatus.UNAUTHORIZED)
 
-    @patch("apps.oauth_app.get_current_user_id")
+    @patch("management.api.identity.oauth.get_current_user_id")
     def test_returns_401_for_invalid_token(self, mock_get_user):
         mock_get_user.side_effect = _UnauthorizedError("Invalid token")
 
@@ -707,7 +713,7 @@ class TestDeleteAccount(unittest.TestCase):
 
         self.assertEqual(response.status_code, HTTPStatus.UNAUTHORIZED)
 
-    @patch("apps.oauth_app.get_current_user_id")
+    @patch("management.api.identity.oauth.get_current_user_id")
     def test_returns_400_when_account_not_found(self, mock_get_user):
         mock_get_user.return_value = ("user-1", "t-1")
         oauth_service_mock.unlink_account.side_effect = _OAuthLinkError(
@@ -877,7 +883,7 @@ class TestCompleteOAuth(unittest.TestCase):
             "email_required": True,
         }
 
-        with patch("apps.oauth_app.get_pending_oauth_info", return_value=pending_info):
+        with patch("management.api.identity.oauth.get_pending_oauth_info", return_value=pending_info):
             response = client.get(
                 "/user/oauth/pending",
                 headers={"X-OAuth-Pending-Token": "pending.jwt"},
@@ -888,7 +894,7 @@ class TestCompleteOAuth(unittest.TestCase):
 
     def test_pending_returns_401_when_missing_or_invalid(self):
         with patch(
-            "apps.oauth_app.get_pending_oauth_info",
+            "management.api.identity.oauth.get_pending_oauth_info",
             side_effect=_OAuthLinkError("expired"),
         ):
             response = client.get("/user/oauth/pending")
@@ -908,7 +914,7 @@ class TestCompleteOAuth(unittest.TestCase):
             }
         )
 
-        with patch("apps.oauth_app.complete_pending_oauth_account", new=complete_mock):
+        with patch("management.api.identity.oauth.complete_pending_oauth_account", new=complete_mock):
             response = client.post(
                 "/user/oauth/complete",
                 headers={"X-OAuth-Pending-Token": "pending.jwt"},
@@ -937,7 +943,7 @@ class TestCompleteOAuth(unittest.TestCase):
             )
         )
 
-        with patch("apps.oauth_app.complete_pending_oauth_account", new=complete_mock):
+        with patch("management.api.identity.oauth.complete_pending_oauth_account", new=complete_mock):
             response = client.post(
                 "/user/oauth/complete",
                 headers={"X-OAuth-Pending-Token": "pending.jwt"},
@@ -961,7 +967,7 @@ class TestCompleteOAuth(unittest.TestCase):
             )
         )
 
-        with patch("apps.oauth_app.complete_pending_oauth_account", new=complete_mock):
+        with patch("management.api.identity.oauth.complete_pending_oauth_account", new=complete_mock):
             response = client.post(
                 "/user/oauth/complete",
                 headers={"X-OAuth-Pending-Token": "pending.jwt"},

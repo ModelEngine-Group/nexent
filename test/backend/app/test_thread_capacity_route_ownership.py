@@ -1,12 +1,14 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 from pathlib import Path
 
-_BACKEND_APPS = Path(__file__).resolve().parents[3] / "backend" / "apps"
+_BACKEND = Path(__file__).resolve().parents[3] / "backend"
 
 
 def test_tc_tlm_021_service_apps_own_process_local_thread_capacity_route():
-    config_source = (_BACKEND_APPS / "config_app.py").read_text(encoding="utf-8")
-    runtime_source = (_BACKEND_APPS / "runtime_app.py").read_text(encoding="utf-8")
-    northbound_source = (_BACKEND_APPS / "northbound_base_app.py").read_text(
+    config_source = (_BACKEND / "management/api/application.py").read_text(encoding="utf-8")
+    runtime_source = (_BACKEND / "runtime/api/application.py").read_text(encoding="utf-8")
+    northbound_source = (_BACKEND / "gateway/api/application.py").read_text(
         encoding="utf-8"
     )
 

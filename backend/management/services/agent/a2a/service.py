@@ -12,13 +12,13 @@ from datetime import datetime, timezone
 from typing import Any, AsyncIterator, Dict, List, Optional
 from uuid import uuid4
 
-from database import a2a_agent_db
-from database.a2a_agent_db import PROTOCOL_HTTP_JSON, PROTOCOL_JSONRPC
-from database.client import get_db_session
-from consts.a2a_models import A2AAgentCard, A2AAgentCapabilities, A2AAgentProvider
+from management.db.a2a import repository as a2a_agent_db
+from contracts.persistence.a2a_repository import PROTOCOL_HTTP_JSON, PROTOCOL_JSONRPC
+from management.db.client import get_db_session
+from contracts.a2a_models import A2AAgentCard, A2AAgentCapabilities, A2AAgentProvider
 from consts.const import NORTHBOUND_EXTERNAL_URL
-from consts.exceptions import RuntimeUpstreamError
-from consts.model import AgentRequest
+from contracts.exceptions import RuntimeUpstreamError
+from contracts.models import AgentRequest
 from management.services.agent.a2a.adapter import A2AAgentAdapter, A2AExecutionContext
 from management.services.agent.a2a.validation import validate_a2a_agent_name
 from management.services.agent.runtime_client import forward_agent_run
@@ -287,7 +287,7 @@ class A2AServerService:
         # Update card overrides without changing enabled state
         from datetime import datetime, timezone
         with get_db_session() as session:
-            from database.db_models import A2AServerAgent
+            from management.db.models import A2AServerAgent
             agent = session.query(A2AServerAgent).filter(
                 A2AServerAgent.agent_id == agent_id,
                 A2AServerAgent.tenant_id == tenant_id,
@@ -379,7 +379,7 @@ class A2AServerService:
         if not server_agent.get("is_enabled"):
             raise EndpointNotFoundError(f"Endpoint {endpoint_id} is not enabled")
 
-        from database.agent_db import search_agent_info_by_agent_id
+        from management.db.agent.repository import search_agent_info_by_agent_id
         agent_info = search_agent_info_by_agent_id(
             agent_id=server_agent["agent_id"],
             tenant_id=server_agent["tenant_id"]

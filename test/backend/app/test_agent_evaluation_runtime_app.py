@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """Tests for runtime-owned evaluation dispatch."""
 
 from unittest.mock import AsyncMock, MagicMock
@@ -5,15 +7,11 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 from fastapi import HTTPException
 
-import apps.agent_evaluation_runtime_app as runtime_app
-from apps.agent_evaluation_runtime_app import (
-    EvaluationRunRequest,
-    TrialRunRequest,
-    dispatch_evaluation_run_api,
-    trial_run_evaluation_api,
-)
-from consts.evaluation_status import EvalRunStatus
-from consts.exceptions import AppException
+from runtime.api.evaluation import execution as runtime_app
+from contracts.api.runtime_evaluation_execution import EvaluationRunRequest, TrialRunRequest
+from runtime.api.evaluation.execution import dispatch_evaluation_run_api, trial_run_evaluation_api
+from contracts.evaluation_status import EvalRunStatus
+from contracts.exceptions import AppException
 
 
 @pytest.mark.asyncio

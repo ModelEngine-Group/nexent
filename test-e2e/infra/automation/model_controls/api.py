@@ -9,9 +9,12 @@ from fastapi import FastAPI, Header, HTTPException
 from fastapi.responses import StreamingResponse
 from fastapi.testclient import TestClient
 
-from apps import agent_app, skill_app
+from management.api.agent import agent as agent_app
+from runtime.api.agent import execution as agent_app_execution
+from management.api.skill import skill as skill_app
+from runtime.api.skill import creation as skill_app_creation
 from agents import create_agent_info
-from consts.exceptions import ForbiddenError
+from contracts.exceptions import ForbiddenError
 from management.services.model import run_controls
 from nexent.core.agents.agent_model import AgentConfig
 from permissions import depends, rbac
@@ -44,8 +47,8 @@ class ApiFixture:
 
 def api_fixture(monkeypatch):
     app = FastAPI()
-    app.include_router(agent_app.agent_runtime_router, prefix="/api")
-    app.include_router(skill_app.skill_creator_router, prefix="/api")
+    app.include_router(agent_app_execution.agent_runtime_router, prefix="/api")
+    app.include_router(skill_app_creation.skill_creator_router, prefix="/api")
     records = {}
     for index, label in enumerate(["effort", "budget", "plain", "unavailable", "foreign", "embedding"], start=1):
         records[label] = {"model_id": index, "model_name": label, "model_repo": "", "display_name": label,

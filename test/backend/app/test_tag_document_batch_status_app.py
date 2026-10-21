@@ -1,9 +1,10 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
 import asyncio
 
 import pytest
-from apps import tag_management_app as tag_app
-from consts.model import TagDocumentBatchStatusRequest
+from management.api.tag import tag_management as tag_app
+from contracts.models import TagDocumentBatchStatusRequest
 
 AUTHORIZATION = "Bearer auth-token"
 

@@ -19,13 +19,13 @@ from enum import Enum
 from typing import Any, Protocol, TypeVar
 
 from consts.const import PERMISSION_EDIT, PERMISSION_READ
-from database.agent_db import search_agent_info_by_agent_id
-from database.agent_repository_db import get_agent_repository_by_id
-from database.knowledge_db import get_knowledge_record
-from database.market_mcp_db import get_mcp_market_record_by_id
-from database.remote_mcp_db import get_mcp_record_by_id_and_tenant
-from database.skill_db import get_skill_by_id
-from database.tool_db import query_all_tools
+from management.db.agent.repository import search_agent_info_by_agent_id
+from management.db.agent.catalog import get_agent_repository_by_id
+from management.db.knowledge_base.repository import get_knowledge_record
+from management.db.mcp.market import get_mcp_market_record_by_id
+from management.db.mcp.remote import get_mcp_record_by_id_and_tenant
+from management.db.skill.repository import get_skill_by_id
+from management.db.tool.repository import query_all_tools
 from management.services.permission.asset_owner import resolve_agent_list_permission
 from management.services.mcp.service import get_remote_mcp_server_list
 

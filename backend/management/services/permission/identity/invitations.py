@@ -8,28 +8,15 @@ import string
 from datetime import datetime
 from typing import Optional, Dict, Any, List
 
-from database.invitation_db import (
-    query_invitation_by_code,
-    query_invitation_by_id,
-    add_invitation,
-    modify_invitation,
-    add_invitation_record,
-    count_invitation_usage,
-    query_invitations_with_pagination,
-    remove_invitation
-)
-from database.user_tenant_db import get_user_tenant_by_user_id
-from database.group_db import query_group_ids_by_user
-from database.role_permission_db import check_role_permission
-from consts.const import (
-    ASSET_OWNER_TENANT_ID,
-    ASSET_OWNER_INVITE_CODE_TYPE,
-    ENABLE_ASSET_OWNER_ROLE,
-)
-from consts.exceptions import NotFoundException, UnauthorizedError, DuplicateError
+from management.db.identity.invitation import query_invitation_by_code, query_invitation_by_id, add_invitation, modify_invitation, add_invitation_record, count_invitation_usage, query_invitations_with_pagination, remove_invitation
+from management.db.identity.user_tenant import get_user_tenant_by_user_id
+from management.db.identity.group import query_group_ids_by_user
+from management.db.identity.role_permission import check_role_permission
+from consts.const import ASSET_OWNER_TENANT_ID, ASSET_OWNER_INVITE_CODE_TYPE, ENABLE_ASSET_OWNER_ROLE
+from contracts.exceptions import NotFoundException, UnauthorizedError, DuplicateError
 from management.services.permission.identity.groups import get_tenant_default_group_id
 from management.services.permission.asset_owner import require_asset_owner_enabled
-from management.db.serialization import convert_string_to_list
+from management.utils.serialization import convert_string_to_list
 
 logger = logging.getLogger(__name__)
 

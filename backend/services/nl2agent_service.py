@@ -30,22 +30,13 @@ from agents.create_agent_info import (
     join_minio_file_description_to_query,
 )
 from agents.nl2agent_agent import create_nl2agent_agent_config
-from consts.const import (
-    TOKEN,
-    ENABLE_AIDP_KNOWLEDGE,
-    LOCAL_MCP_SERVER,
-    MCP_REQUEST_TIMEOUT_SECONDS,
-    MODEL_CONFIG_MAPPING,
-)
+from consts.const import TOKEN, ENABLE_AIDP_KNOWLEDGE, LOCAL_MCP_SERVER, MCP_REQUEST_TIMEOUT_SECONDS, MODEL_CONFIG_MAPPING
 from management.services.mcp.addressing import get_tenant_local_mcp_server
-from consts.model import HistoryItem, NL2AgentRunRequest, ToolSourceEnum
-from database.agent_db import (
-    query_all_agent_info_by_tenant_id,
-    update_agent_draft_fields,
-)
-from database.skill_db import query_enabled_skill_instances
-from database.tool_db import query_all_enabled_tool_instances, query_all_tools
-from consts.exceptions import AgentDraftEditError
+from contracts.models import HistoryItem, NL2AgentRunRequest, ToolSourceEnum
+from management.db.agent.repository import query_all_agent_info_by_tenant_id, update_agent_draft_fields
+from management.db.skill.repository import query_enabled_skill_instances
+from management.db.tool.repository import query_all_enabled_tool_instances, query_all_tools
+from contracts.exceptions import AgentDraftEditError
 from management.services.agent.authorization import require_agent_draft_edit
 from infrastructure.concurrency import runtime_thread_manager
 from management.services.model.run_controls import resolve_creator_model, preflight_turn_controls

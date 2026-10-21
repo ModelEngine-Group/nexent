@@ -88,9 +88,9 @@ sys.modules['management.services.knowledge_base.service'] = vectordatabase_servi
 sys.modules['management.services.knowledge_base.task_state'] = types.ModuleType('management.services.knowledge_base.task_state')
 sys.modules['management.services.permission.identity.groups'] = types.ModuleType('management.services.permission.identity.groups')
 
-# knowledge_summary_app only needs this request model from consts.model. Keeping
+# knowledge_summary_app only needs this request model from contracts.models. Keeping
 # it local avoids importing unrelated EmailStr models and optional validators.
-consts_model_mock = types.ModuleType('consts.model')
+consts_model_mock = types.ModuleType('contracts.models')
 
 
 class ChangeSummaryRequest(BaseModel):
@@ -98,7 +98,7 @@ class ChangeSummaryRequest(BaseModel):
 
 
 consts_model_mock.ChangeSummaryRequest = ChangeSummaryRequest
-sys.modules['consts.model'] = consts_model_mock
+sys.modules['contracts.models'] = consts_model_mock
 
 # Mock utils modules used by knowledge_summary_app to avoid deep DB/storage import chains
 utils_auth_utils_mock = types.ModuleType('management.services.permission.identity.authentication_helpers')
@@ -118,8 +118,8 @@ sys.modules['management.services.configuration.tenant.settings'] = utils_config_
 from fastapi.testclient import TestClient
 from fastapi import FastAPI
 from fastapi import HTTPException
-from apps import permission_utils
-from apps.knowledge_summary_app import router
+from management.utils import knowledge_permission as permission_utils
+from management.api.knowledge_base.knowledge_summary import router
 
 # Create a test app and client
 app = FastAPI()
@@ -181,9 +181,9 @@ def test_permission_utils_maps_permission_error_to_403(monkeypatch):
 class TestAutoSummary:
     """Test auto summary generation endpoint"""
 
-    @patch('apps.knowledge_summary_app.ElasticSearchService')
-    @patch('apps.knowledge_summary_app.get_vector_db_core')
-    @patch('apps.knowledge_summary_app.get_current_user_info')
+    @patch('management.api.knowledge_base.knowledge_summary.ElasticSearchService')
+    @patch('management.api.knowledge_base.knowledge_summary.get_vector_db_core')
+    @patch('management.api.knowledge_base.knowledge_summary.get_current_user_info')
     def test_auto_summary_success(self, mock_user_info, mock_vdb_core, mock_service_class, test_data):
         """Test successful auto summary generation"""
         mock_vdb_core_instance = MagicMock()
@@ -211,10 +211,10 @@ class TestAutoSummary:
         assert call_kwargs['language'] == mock_user_info_value[2]
         assert call_kwargs['model_id'] == 1
 
-    @patch('apps.knowledge_summary_app.ElasticSearchService')
-    @patch('apps.knowledge_summary_app.get_vector_db_core')
-    @patch('apps.knowledge_summary_app.get_current_user_info')
-    @patch('apps.knowledge_summary_app.require_knowledge_base_edit_permission')
+    @patch('management.api.knowledge_base.knowledge_summary.ElasticSearchService')
+    @patch('management.api.knowledge_base.knowledge_summary.get_vector_db_core')
+    @patch('management.api.knowledge_base.knowledge_summary.get_current_user_info')
+    @patch('management.api.knowledge_base.knowledge_summary.require_knowledge_base_edit_permission')
     def test_auto_summary_forbidden_for_read_only(
         self,
         mock_require_permission,
@@ -245,9 +245,9 @@ class TestAutoSummary:
         )
         mock_service_class.assert_not_called()
 
-    @patch('apps.knowledge_summary_app.ElasticSearchService')
-    @patch('apps.knowledge_summary_app.get_vector_db_core')
-    @patch('apps.knowledge_summary_app.get_current_user_info')
+    @patch('management.api.knowledge_base.knowledge_summary.ElasticSearchService')
+    @patch('management.api.knowledge_base.knowledge_summary.get_vector_db_core')
+    @patch('management.api.knowledge_base.knowledge_summary.get_current_user_info')
     def test_auto_summary_without_model_id(self, mock_user_info, mock_vdb_core, mock_service_class, test_data):
         """Test successful auto summary generation without model_id parameter"""
         mock_vdb_core_instance = MagicMock()
@@ -273,9 +273,9 @@ class TestAutoSummary:
         assert call_kwargs['batch_size'] == 500
         assert call_kwargs['model_id'] is None
 
-    @patch('apps.knowledge_summary_app.ElasticSearchService')
-    @patch('apps.knowledge_summary_app.get_vector_db_core')
-    @patch('apps.knowledge_summary_app.get_current_user_info')
+    @patch('management.api.knowledge_base.knowledge_summary.ElasticSearchService')
+    @patch('management.api.knowledge_base.knowledge_summary.get_vector_db_core')
+    @patch('management.api.knowledge_base.knowledge_summary.get_current_user_info')
     def test_auto_summary_exception(self, mock_user_info, mock_vdb_core, mock_service_class, test_data):
         """Test auto summary generation with exception"""
         mock_vdb_core_instance = MagicMock()
@@ -299,10 +299,10 @@ class TestAutoSummary:
         assert "text/event-stream" in response.headers["content-type"]
         assert "Knowledge base summary generation failed" in response.text
 
-    @patch('apps.knowledge_summary_app.ElasticSearchService')
-    @patch('apps.knowledge_summary_app.get_vector_db_core')
-    @patch('apps.knowledge_summary_app.get_current_user_info')
-    @patch('apps.knowledge_summary_app.tenant_config_manager')
+    @patch('management.api.knowledge_base.knowledge_summary.ElasticSearchService')
+    @patch('management.api.knowledge_base.knowledge_summary.get_vector_db_core')
+    @patch('management.api.knowledge_base.knowledge_summary.get_current_user_info')
+    @patch('management.api.knowledge_base.knowledge_summary.tenant_config_manager')
     def test_auto_summary_uses_tenant_llm_id(
         self, mock_config_manager, mock_user_info, mock_vdb_core, mock_service_class, test_data
     ):
@@ -332,10 +332,10 @@ class TestAutoSummary:
         call_kwargs = mock_service_instance.summary_index_name.call_args.kwargs
         assert call_kwargs['model_id'] == 5
 
-    @patch('apps.knowledge_summary_app.ElasticSearchService')
-    @patch('apps.knowledge_summary_app.get_vector_db_core')
-    @patch('apps.knowledge_summary_app.get_current_user_info')
-    @patch('apps.knowledge_summary_app.tenant_config_manager')
+    @patch('management.api.knowledge_base.knowledge_summary.ElasticSearchService')
+    @patch('management.api.knowledge_base.knowledge_summary.get_vector_db_core')
+    @patch('management.api.knowledge_base.knowledge_summary.get_current_user_info')
+    @patch('management.api.knowledge_base.knowledge_summary.tenant_config_manager')
     def test_auto_summary_tenant_config_no_llm_id(
         self, mock_config_manager, mock_user_info, mock_vdb_core, mock_service_class, test_data
     ):
@@ -363,10 +363,10 @@ class TestAutoSummary:
         call_kwargs = mock_service_instance.summary_index_name.call_args.kwargs
         assert call_kwargs['model_id'] is None
 
-    @patch('apps.knowledge_summary_app.ElasticSearchService')
-    @patch('apps.knowledge_summary_app.get_vector_db_core')
-    @patch('apps.knowledge_summary_app.get_current_user_info')
-    @patch('apps.knowledge_summary_app.tenant_config_manager')
+    @patch('management.api.knowledge_base.knowledge_summary.ElasticSearchService')
+    @patch('management.api.knowledge_base.knowledge_summary.get_vector_db_core')
+    @patch('management.api.knowledge_base.knowledge_summary.get_current_user_info')
+    @patch('management.api.knowledge_base.knowledge_summary.tenant_config_manager')
     def test_auto_summary_tenant_config_exception(
         self, mock_config_manager, mock_user_info, mock_vdb_core, mock_service_class, test_data
     ):
@@ -396,8 +396,8 @@ class TestAutoSummary:
 class TestChangeSummary:
     """Test change summary endpoint"""
 
-    @patch('apps.knowledge_summary_app.ElasticSearchService')
-    @patch('apps.knowledge_summary_app.get_current_user_id')
+    @patch('management.api.knowledge_base.knowledge_summary.ElasticSearchService')
+    @patch('management.api.knowledge_base.knowledge_summary.get_current_user_id')
     def test_change_summary_success(self, mock_get_user_id, mock_service_class, test_data):
         """Test successful summary update"""
         mock_get_user_id.return_value = test_data["user_id"]
@@ -431,9 +431,9 @@ class TestChangeSummary:
             user_id=test_data["user_id"][0]
         )
 
-    @patch('apps.knowledge_summary_app.ElasticSearchService')
-    @patch('apps.knowledge_summary_app.get_current_user_id')
-    @patch('apps.permission_utils.ElasticSearchService.require_knowledge_base_edit_permission')
+    @patch('management.api.knowledge_base.knowledge_summary.ElasticSearchService')
+    @patch('management.api.knowledge_base.knowledge_summary.get_current_user_id')
+    @patch('management.utils.knowledge_permission.ElasticSearchService.require_knowledge_base_edit_permission')
     def test_change_summary_forbidden_for_read_only(
         self,
         mock_require_permission,
@@ -463,8 +463,8 @@ class TestChangeSummary:
         )
         mock_service_class.return_value.change_summary.assert_not_called()
 
-    @patch('apps.knowledge_summary_app.ElasticSearchService')
-    @patch('apps.knowledge_summary_app.get_current_user_id')
+    @patch('management.api.knowledge_base.knowledge_summary.ElasticSearchService')
+    @patch('management.api.knowledge_base.knowledge_summary.get_current_user_id')
     def test_change_summary_exception(self, mock_get_user_id, mock_service_class, test_data):
         """Test summary update with exception"""
         mock_get_user_id.return_value = test_data["user_id"]
@@ -487,7 +487,7 @@ class TestChangeSummary:
 class TestGetSummary:
     """Test get summary endpoint"""
 
-    @patch('apps.knowledge_summary_app.ElasticSearchService')
+    @patch('management.api.knowledge_base.knowledge_summary.ElasticSearchService')
     def test_get_summary_success(self, mock_service_class, test_data):
         """Test successful summary retrieval"""
         expected_response = {
@@ -509,7 +509,7 @@ class TestGetSummary:
             index_name=test_data["index_name"]
         )
 
-    @patch('apps.knowledge_summary_app.ElasticSearchService')
+    @patch('management.api.knowledge_base.knowledge_summary.ElasticSearchService')
     def test_get_summary_exception(self, mock_service_class, test_data):
         """Test summary retrieval with exception"""
         mock_service_instance = MagicMock()
@@ -524,9 +524,9 @@ class TestGetSummary:
 class TestTokenExpired:
     """Expired tokens must map to 401 on summary endpoints."""
 
-    @patch('apps.knowledge_summary_app.get_current_user_info')
+    @patch('management.api.knowledge_base.knowledge_summary.get_current_user_info')
     def test_auto_summary_token_expired(self, mock_user_info, test_data):
-        from consts.exceptions import TokenExpiredError
+        from contracts.exceptions import TokenExpiredError
 
         mock_user_info.side_effect = TokenExpiredError("expired")
 
@@ -538,9 +538,9 @@ class TestTokenExpired:
         assert response.status_code == 401
         assert "expired" in response.json()["detail"]
 
-    @patch('apps.knowledge_summary_app.get_current_user_id')
+    @patch('management.api.knowledge_base.knowledge_summary.get_current_user_id')
     def test_change_summary_token_expired(self, mock_user_id, test_data):
-        from consts.exceptions import TokenExpiredError
+        from contracts.exceptions import TokenExpiredError
 
         mock_user_id.side_effect = TokenExpiredError("expired")
 

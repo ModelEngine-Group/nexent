@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """D5 fault-recovery and deployment special matrix."""
 
 from __future__ import annotations
@@ -329,7 +331,7 @@ _REL06_WORKER_LOG_RE = re.compile(
 
 def _rel06_expected_topology() -> tuple[dict[str, tuple[str, int]], list[str]]:
     """Recompute backend/data_process_service.py::_build_worker_configs from const.py defaults."""
-    text = (repo_root() / "backend" / "consts" / "const.py").read_text(encoding="utf-8")
+    text = (repo_root() / "backend" / 'consts' / 'const.py').read_text(encoding="utf-8")
     dp = int(re.search(r'DP_PART_PROCESSOR_COUNT = int\(os\.getenv\("DP_PART_PROCESSOR_COUNT", "(\d+)"\)\)', text).group(1))
     actor_cpus = int(re.search(r'RAY_ACTOR_NUM_CPUS = int\(os\.getenv\("RAY_ACTOR_NUM_CPUS", "(\d+)"\)\)', text).group(1))
     queues = re.search(r'QUEUES = os\.getenv\(\s*"QUEUES",\s*"([^"]+)",', text).group(1).split(",")

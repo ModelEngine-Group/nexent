@@ -1,8 +1,10 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 from types import SimpleNamespace
 
 import pytest
-from consts.exceptions import TagManagementConflictError
-from database.tag_management_db import TagManagementDB
+from contracts.exceptions import TagManagementConflictError
+from management.db.tag.repository import TagManagementDB
 
 
 def _value_rows(value_ids: list[int]):
@@ -94,7 +96,7 @@ def test_over_capacity_replacement_rejects_before_deleting_prior_rows(monkeypatc
     prior_rows = [SimpleNamespace(value_id=9001), SimpleNamespace(value_id=9002)]
     session = _Session(prior_rows)
     monkeypatch.setattr(
-        "database.tag_management_db.get_db_session", lambda: _SessionContext(session)
+        "management.db.tag.repository.get_db_session", lambda: _SessionContext(session)
     )
     monkeypatch.setattr(
         TagManagementDB,
@@ -124,7 +126,7 @@ def test_replacement_preserves_unchanged_assignments_and_only_adds_new_values(mo
     ]
     session = _Session(prior_rows)
     monkeypatch.setattr(
-        "database.tag_management_db.get_db_session", lambda: _SessionContext(session)
+        "management.db.tag.repository.get_db_session", lambda: _SessionContext(session)
     )
     monkeypatch.setattr(
         TagManagementDB,

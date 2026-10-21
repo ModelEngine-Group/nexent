@@ -4,7 +4,7 @@
 from collections import defaultdict
 from typing import Any
 
-from database.tag_management_db import TagManagementDB
+from management.db.tag.repository import TagManagementDB
 
 
 def project_authorized_resource_tags(

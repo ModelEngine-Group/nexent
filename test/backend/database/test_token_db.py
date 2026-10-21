@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import sys
 import os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../.."))
@@ -33,8 +35,14 @@ client_mock.get_db_session = MagicMock()
 client_mock.as_dict = MagicMock()
 client_mock.filter_property = MagicMock()
 
-sys.modules['database.client'] = client_mock
-sys.modules['backend.database.client'] = client_mock
+sys.modules['management.db.client'] = client_mock
+from test.common.database_stubs import install_serialization_stub
+install_serialization_stub(sys.modules["management.db.client"])
+from test.common.database_stubs import install_serialization_stub
+install_serialization_stub(sys.modules["management.db.client"])
+sys.modules['management.db.client'] = client_mock
+from test.common.database_stubs import install_serialization_stub
+install_serialization_stub(sys.modules["management.db.client"])
 
 
 # Create mock classes that work with SQLAlchemy query
@@ -157,13 +165,13 @@ db_models_mock = MagicMock()
 db_models_mock.UserTokenInfo = MockUserTokenInfo
 db_models_mock.UserTokenUsageLog = MockUserTokenUsageLog
 db_models_mock.UserTenant = MagicMock()
-sys.modules['database.db_models'] = db_models_mock
-sys.modules['backend.database.db_models'] = db_models_mock
+sys.modules['management.db.models'] = db_models_mock
+sys.modules['management.db.models'] = db_models_mock
 
 # Mock exceptions
 exceptions_mock = MagicMock()
-sys.modules['consts.exceptions'] = exceptions_mock
-sys.modules['backend.consts.exceptions'] = exceptions_mock
+sys.modules['contracts.exceptions'] = exceptions_mock
+sys.modules['contracts.exceptions'] = exceptions_mock
 
 # Mock sqlalchemy
 sqlalchemy_mock = MagicMock()
@@ -177,7 +185,7 @@ sys.modules['sqlalchemy.orm'] = sqlalchemy_mock.orm
 
 
 # Import the module under test
-from backend.database import token_db
+from management.db.identity import token as token_db
 
 
 class MockQuery:

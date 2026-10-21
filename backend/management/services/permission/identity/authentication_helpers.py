@@ -12,23 +12,10 @@ from fastapi import Request
 from supabase import create_client
 from supabase.lib.client_options import SyncClientOptions
 
-from consts.const import (
-    ASSET_OWNER_ROLE,
-    ASSET_OWNER_TENANT_ID,
-    DEFAULT_TENANT_ID,
-    DEFAULT_USER_ID,
-    IS_SPEED_MODE,
-    SUPABASE_JWT_SECRET,
-    SUPABASE_URL,
-    SUPABASE_KEY,
-    SERVICE_ROLE_KEY,
-    DEBUG_JWT_EXPIRE_SECONDS,
-    JWT_EXPIRY_SECONDS,
-    LANGUAGE,
-)
-from consts.exceptions import LimitExceededError, UnauthorizedError, TokenExpiredError
-from database.user_tenant_db import get_user_tenant_by_user_id
-from database.token_db import get_token_by_access_key
+from consts.const import ASSET_OWNER_ROLE, ASSET_OWNER_TENANT_ID, DEFAULT_TENANT_ID, DEFAULT_USER_ID, IS_SPEED_MODE, SUPABASE_JWT_SECRET, SUPABASE_URL, SUPABASE_KEY, SERVICE_ROLE_KEY, DEBUG_JWT_EXPIRE_SECONDS, JWT_EXPIRY_SECONDS, LANGUAGE
+from contracts.exceptions import LimitExceededError, UnauthorizedError, TokenExpiredError
+from management.db.identity.user_tenant import get_user_tenant_by_user_id
+from management.db.identity.token import get_token_by_access_key
 
 # Module logger
 logger = logging.getLogger(__name__)
@@ -99,9 +86,7 @@ def validate_aksk_authentication(
 
     Returns True when valid, otherwise raises domain exceptions.
     """
-    from consts.exceptions import (
-        SignatureValidationError,
-    )  # imported lazily for test-time stubbing
+    from contracts.exceptions import SignatureValidationError
 
     try:
         access_key, ts, sig = extract_aksk_headers(headers)
@@ -460,7 +445,7 @@ def ensure_cas_session_active_from_authorization(authorization: Optional[str]) -
     if not session_id:
         return
 
-    from database.cas_session_db import is_cas_session_active
+    from management.db.identity.cas_session import is_cas_session_active
 
     if not is_cas_session_active(str(session_id)):
         raise TokenExpiredError("CAS session has expired or been revoked")

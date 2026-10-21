@@ -49,15 +49,19 @@ setattr(nexent_storage_module, "minio_config", nexent_minio_config_module)
 # imports mem0 at module load time.
 
 # Stub database modules used by invitation_service to avoid loading real SQLAlchemy client
-_db_client_stub = types.ModuleType("database.client")
+_db_client_stub = types.ModuleType("management.db.client")
 _db_client_stub.get_db_session = MagicMock()
 _db_client_stub.as_dict = MagicMock()
 _db_client_stub.MinioClient = MagicMock()
-sys.modules["database.client"] = _db_client_stub
-sys.modules["database.invitation_db"] = MagicMock()
-sys.modules["database.user_tenant_db"] = MagicMock()
-sys.modules["database.group_db"] = MagicMock()
-sys.modules["database.role_permission_db"] = MagicMock()
+sys.modules["management.db.client"] = _db_client_stub
+from test.common.database_stubs import install_serialization_stub
+install_serialization_stub(sys.modules["management.db.client"])
+from test.common.database_stubs import install_serialization_stub
+install_serialization_stub(sys.modules["management.db.client"])
+sys.modules["management.db.identity.invitation"] = MagicMock()
+sys.modules["management.db.identity.user_tenant"] = MagicMock()
+sys.modules["management.db.identity.group"] = MagicMock()
+sys.modules["management.db.identity.role_permission"] = MagicMock()
 
 # Patch storage factory and MinIO config validation to avoid errors during initialization
 # These patches must be started before any imports that use MinioClient
@@ -77,7 +81,7 @@ setattr(_services_pkg, "asset_owner_visibility", _asset_owner_visibility_stub)
 setattr(_services_pkg, "group_service", sys.modules["management.services.permission.identity.groups"])
 
 from consts.const import ASSET_OWNER_INVITE_CODE_TYPE, ASSET_OWNER_TENANT_ID
-from consts.exceptions import NotFoundException, UnauthorizedError, DuplicateError
+from contracts.exceptions import NotFoundException, UnauthorizedError, DuplicateError
 from management.services.permission.identity.invitations import (
     create_invitation_code,
     update_invitation_code,

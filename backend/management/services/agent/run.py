@@ -20,16 +20,9 @@ from agents.create_agent_info import (
 from agents.preprocess_manager import (
     preprocess_manager,
 )
-from consts.const import (
-    LANGUAGE,
-    MESSAGE_ROLE,
-)
-from consts.exceptions import (
-    MemoryPreparationException,
-)
-from consts.model import (
-    AgentRequest,
-)
+from consts.const import LANGUAGE, MESSAGE_ROLE
+from contracts.exceptions import MemoryPreparationException
+from contracts.models import AgentRequest
 from management.services.agent.context import (
     build_agent_run_context,
     build_authorized_context_input,

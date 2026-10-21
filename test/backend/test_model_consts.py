@@ -3,7 +3,7 @@
 import pytest
 from pydantic import ValidationError
 
-from backend.consts import model as model_consts
+from backend.contracts import models as model_consts
 
 
 def test_model_connect_status_enum_defaults_and_get_value():

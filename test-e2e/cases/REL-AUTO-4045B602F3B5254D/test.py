@@ -5,15 +5,16 @@ from datetime import datetime, timedelta
 
 import pytest
 
-from consts.task_recovery import CONFIG_SERVICE_NAME
+from contracts.task_recovery import CONFIG_SERVICE_NAME
 
 
 @pytest.mark.case_id('REL-AUTO-4045B602F3B5254D')
 @pytest.mark.stage('D5')
 def test_interrupted_upload_delete_failure_degrades_to_recovery(monkeypatch):
-    from database import attachment_db, client as client_db
-    from database import knowledge_file_lifecycle_db as lifecycle_db
-    from database.db_models import KnowledgeFileLifecycle
+    from management.db.file import attachment as attachment_db
+    from management.db import client as client_db
+    from management.db.knowledge_base import file_lifecycle as lifecycle_db
+    from management.db.models import KnowledgeFileLifecycle
     from management.recovery import (
         UPLOAD_RECOVERY_GRACE_SECONDS,
         fail_interrupted_uploads,

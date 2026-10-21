@@ -3,8 +3,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from consts.exceptions import ValidationError, WorkbenchError
-from consts.model import WorkbenchSessionConfig
+from contracts.exceptions import ValidationError, WorkbenchError
+from contracts.models import WorkbenchSessionConfig
 from management.services.agent import workbench as workbench_service
 
 

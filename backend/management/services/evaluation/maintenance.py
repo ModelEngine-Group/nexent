@@ -8,13 +8,9 @@ import time
 
 from nexent.core.concurrency import ManagedThreadSpec, ThreadManager
 
-from database.agent_evaluation_db import (
-    cleanup_aged_evaluations,
-    list_dispatchable_pending_runs,
-    reap_stale_runs,
-)
-from database.client import get_db_session
-from database.db_models import AgentEvaluation
+from management.db.evaluation.runs import cleanup_aged_evaluations, list_dispatchable_pending_runs, reap_stale_runs
+from management.db.client import get_db_session
+from management.db.models import AgentEvaluation
 
 
 logger = logging.getLogger(__name__)

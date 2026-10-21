@@ -10,14 +10,14 @@ from enum import Enum
 # Ensure backend modules can be imported and avoid real MinIO init
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../../backend"))
 
-# Stub consts.model for MemoryAgentShareMode
-consts_model = types.ModuleType("consts.model")
+# Stub contracts.models for MemoryAgentShareMode
+consts_model = types.ModuleType("contracts.models")
 class MemoryAgentShareMode(str, Enum):
     ALWAYS = "always"
     ASK = "ask"
     NEVER = "never"
 consts_model.MemoryAgentShareMode = MemoryAgentShareMode
-sys.modules["consts.model"] = consts_model
+sys.modules["contracts.models"] = consts_model
 
 # Stub consts.const values used by service
 consts_const = types.ModuleType("consts.const")
@@ -60,8 +60,8 @@ agent_model_mod.MemoryUserConfig = MemoryUserConfig
 agent_model_mod.MemoryContext = MemoryContext
 sys.modules["nexent.core.agents.agent_model"] = agent_model_mod
 
-# Fake out database.client to prevent boto3/MinIO side effects and provide needed APIs
-fake_client = types.ModuleType("database.client")
+# Fake out management.db.client to prevent boto3/MinIO side effects and provide needed APIs
+fake_client = types.ModuleType("management.db.client")
 
 def _filter_property(data, model_class):
     try:
@@ -104,11 +104,15 @@ def _get_db_session(db_session=None):
 
 fake_client.filter_property = _filter_property
 fake_client.get_db_session = _get_db_session
-sys.modules["database.client"] = fake_client
+sys.modules["management.db.client"] = fake_client
+from test.common.database_stubs import install_serialization_stub
+install_serialization_stub(sys.modules["management.db.client"])
+from test.common.database_stubs import install_serialization_stub
+install_serialization_stub(sys.modules["management.db.client"])
 sys.modules['boto3'] = MagicMock()
 
-# Stub database.memory_config_db to avoid importing SQLAlchemy models at import time
-memcfg_db = types.ModuleType("database.memory_config_db")
+# Stub management.db.memory.config to avoid importing SQLAlchemy models at import time
+memcfg_db = types.ModuleType("management.db.memory.config")
 
 def _noop(*args, **kwargs):
     return True
@@ -121,7 +125,7 @@ memcfg_db.get_memory_config_info = _return_empty_list
 memcfg_db.insert_config = _noop
 memcfg_db.delete_config_by_config_id = _noop
 memcfg_db.update_config_by_id = _noop
-sys.modules["database.memory_config_db"] = memcfg_db
+sys.modules["management.db.memory.config"] = memcfg_db
 
 # Stub utils.memory_utils to ensure import works even if not patched
 utils_memory_utils = types.ModuleType("utils.memory_utils")

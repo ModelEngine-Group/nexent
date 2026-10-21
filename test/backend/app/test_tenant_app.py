@@ -8,13 +8,7 @@ import sys
 import os
 
 # Import exception classes and models
-from consts.exceptions import (
-    ForbiddenError,
-    NotFoundException,
-    TenantResourceLimitError,
-    ValidationError,
-    UnauthorizedError,
-)
+from contracts.exceptions import ForbiddenError, NotFoundException, TenantResourceLimitError, ValidationError, UnauthorizedError
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
@@ -23,7 +17,7 @@ from unittest.mock import MagicMock, AsyncMock, patch
 
 
 # Import exceptions
-from consts.exceptions import NotFoundException, ValidationError, UnauthorizedError
+from contracts.exceptions import NotFoundException, ValidationError, UnauthorizedError
 
 # Add path for correct imports
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../../backend"))
@@ -44,8 +38,8 @@ minio_mock.client = MagicMock()
 
 patch('nexent.storage.storage_client_factory.create_storage_client_from_config', return_value=storage_client_mock).start()
 patch('nexent.storage.minio_config.MinIOStorageConfig.validate', lambda self: None).start()
-patch('backend.database.client.MinioClient', return_value=minio_mock).start()
-patch('database.client.MinioClient', return_value=minio_mock).start()
+patch('management.db.client.MinioClient', return_value=minio_mock).start()
+patch('management.db.client.MinioClient', return_value=minio_mock).start()
 patch('elasticsearch.Elasticsearch', return_value=MagicMock()).start()
 
 
@@ -81,7 +75,7 @@ _audit_service = importlib.util.module_from_spec(_audit_spec)
 _audit_spec.loader.exec_module(_audit_service)
 sys.modules["management.services.monitor.audit"] = _audit_service
 
-from apps.tenant_app import router
+from management.api.identity.tenant import router
 
 app = FastAPI()
 app.include_router(router)

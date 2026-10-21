@@ -1,5 +1,5 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
-"""Unit tests for ``apps.evaluator_app``.
+"""Unit tests for ``management.api.evaluation.evaluator``.
 
 Directly invoke each async endpoint function with the FastAPI
 ``Query/Header/Body`` defaults replaced by explicit values, patching the
@@ -33,7 +33,7 @@ _BACKEND_DIR = _REPO_ROOT / "backend"
 if str(_BACKEND_DIR) not in sys.path:
     sys.path.insert(0, str(_BACKEND_DIR))
 
-MODULE_UNDER_TEST = "apps.evaluator_app"
+MODULE_UNDER_TEST = "management.api.evaluation.evaluator"
 
 _IMPL_NAMES = [
     "create_evaluator_impl",
@@ -90,10 +90,10 @@ def _install_stubs():
         pass
 
     _consts_pkg = _register_package("consts")
-    _ec_mod = mk_mod("consts.error_code", ErrorCode=_ErrorCode)
+    _ec_mod = mk_mod("contracts.error_code", ErrorCode=_ErrorCode)
     _consts_pkg.error_code = _ec_mod
     _ex_mod = mk_mod(
-        "consts.exceptions",
+        "contracts.exceptions",
         AppException=_AppException,
         UnauthorizedError=_UnauthorizedError,
     )
@@ -139,7 +139,7 @@ def bundle():
     if hasattr(apps_pkg, "evaluator_app"):
         delattr(apps_pkg, "evaluator_app")
 
-    src = _BACKEND_DIR / "apps" / "evaluator_app.py"
+    src = _BACKEND_DIR / 'management' / 'api' / 'evaluation' / 'evaluator.py'
     spec = _ilu.spec_from_file_location(MODULE_UNDER_TEST, str(src))
     assert spec is not None and spec.loader is not None, f"cannot locate {src}"
     mod = _ilu.module_from_spec(spec)

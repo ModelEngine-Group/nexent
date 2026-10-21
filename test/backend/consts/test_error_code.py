@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """
 Unit tests for Error Code definitions.
 
@@ -5,7 +7,7 @@ Tests the ErrorCode enum and ERROR_CODE_HTTP_STATUS mapping
 to ensure error codes are properly defined and mapped.
 """
 import pytest
-from backend.consts.error_code import ErrorCode, ERROR_CODE_HTTP_STATUS
+from contracts.error_code import ErrorCode, ERROR_CODE_HTTP_STATUS
 
 
 class TestErrorCodeEnum:

@@ -55,7 +55,7 @@ db_models_mock.AgentRelation = MagicMock()
 db_models_mock.AgentVersion = MagicMock()
 
 # Create a mock database module to satisfy imports
-# This is needed because agent_version_db.py uses "from database.client import ..."
+# This is needed because agent_version_db.py uses "from management.db.client import ..."
 database_mock = MagicMock()
 database_mock.client = client_mock
 database_mock.db_models = db_models_mock
@@ -63,44 +63,21 @@ database_mock.db_models = db_models_mock
 # Add the mocked modules to sys.modules (order matters!)
 # database module must be added before its submodules
 sys.modules['database'] = database_mock
-sys.modules['database.client'] = client_mock
-sys.modules['database.db_models'] = db_models_mock
-sys.modules['backend.database.client'] = client_mock
-sys.modules['backend.database.db_models'] = db_models_mock
+sys.modules['management.db.client'] = client_mock
+from test.common.database_stubs import install_serialization_stub
+install_serialization_stub(sys.modules["management.db.client"])
+from test.common.database_stubs import install_serialization_stub
+install_serialization_stub(sys.modules["management.db.client"])
+sys.modules['management.db.models'] = db_models_mock
+sys.modules['management.db.client'] = client_mock
+from test.common.database_stubs import install_serialization_stub
+install_serialization_stub(sys.modules["management.db.client"])
+sys.modules['management.db.models'] = db_models_mock
 
 # Now we can safely import the module being tested
-import backend.database.agent_version_db as agent_version_db_module
-from backend.database.agent_version_db import (
-    search_version_by_version_no,
-    search_version_by_id,
-    query_version_list,
-    query_current_version_no,
-    query_agent_snapshot,
-    query_agent_draft,
-    insert_version,
-    update_version_status,
-    update_version,
-    update_agent_current_version,
-    insert_agent_snapshot,
-    insert_tool_snapshot,
-    insert_relation_snapshot,
-    update_agent_snapshot,
-    delete_agent_snapshot,
-    delete_tool_snapshot,
-    delete_relation_snapshot,
-    delete_skill_snapshot,
-    query_skill_instances_snapshot,
-    insert_skill_snapshot,
-    get_next_version_no,
-    delete_version,
-    batch_search_version_names,
-    batch_query_current_version_nos,
-    SOURCE_TYPE_NORMAL,
-    SOURCE_TYPE_ROLLBACK,
-    STATUS_RELEASED,
-    STATUS_DISABLED,
-    STATUS_ARCHIVED,
-)
+from management.db.agent import version as agent_version_db_module
+from management.db.agent.version import search_version_by_version_no, search_version_by_id, query_version_list, query_current_version_no, query_agent_snapshot, query_agent_draft, insert_version, update_version_status, update_version, update_agent_current_version, insert_agent_snapshot, insert_tool_snapshot, insert_relation_snapshot, update_agent_snapshot, delete_agent_snapshot, delete_tool_snapshot, delete_relation_snapshot, delete_skill_snapshot, query_skill_instances_snapshot, insert_skill_snapshot, get_next_version_no, delete_version, batch_search_version_names, batch_query_current_version_nos
+from contracts.persistence.agent_version import SOURCE_TYPE_NORMAL, SOURCE_TYPE_ROLLBACK, STATUS_RELEASED, STATUS_DISABLED, STATUS_ARCHIVED
 
 
 class MockAgentVersion:
@@ -1414,7 +1391,7 @@ def test_query_skill_instances_snapshot_success(monkeypatch, mock_session):
     monkeypatch.setattr(agent_version_db_module, "get_db_session", lambda: mock_ctx)
     monkeypatch.setattr(agent_version_db_module, "as_dict", mock_as_dict)
 
-    from backend.database.agent_version_db import query_skill_instances_snapshot
+    from management.db.agent.version import query_skill_instances_snapshot
     result = query_skill_instances_snapshot(agent_id=1, tenant_id="tenant1", version_no=1)
 
     assert len(result) == 2
@@ -1436,7 +1413,7 @@ def test_query_skill_instances_snapshot_empty(monkeypatch, mock_session):
     monkeypatch.setattr(agent_version_db_module, "get_db_session", lambda: mock_ctx)
     monkeypatch.setattr(agent_version_db_module, "as_dict", mock_as_dict)
 
-    from backend.database.agent_version_db import query_skill_instances_snapshot
+    from management.db.agent.version import query_skill_instances_snapshot
     result = query_skill_instances_snapshot(agent_id=999, tenant_id="tenant1", version_no=1)
 
     assert result == []
@@ -1456,7 +1433,7 @@ def test_insert_skill_snapshot_success(monkeypatch, mock_session):
     monkeypatch.setattr(agent_version_db_module, "get_db_session", lambda: mock_ctx)
     monkeypatch.setattr(agent_version_db_module, "as_dict", mock_as_dict)
 
-    from backend.database.agent_version_db import insert_skill_snapshot
+    from management.db.agent.version import insert_skill_snapshot
     skill_data = {
         "skill_id": 1,
         "agent_id": 1,
@@ -1486,7 +1463,7 @@ def test_delete_skill_snapshot_success(monkeypatch, mock_session):
     monkeypatch.setattr(agent_version_db_module, "get_db_session", lambda: mock_ctx)
     monkeypatch.setattr(agent_version_db_module, "as_dict", mock_as_dict)
 
-    from backend.database.agent_version_db import delete_skill_snapshot
+    from management.db.agent.version import delete_skill_snapshot
     result = delete_skill_snapshot(
         agent_id=1,
         tenant_id="tenant1",
@@ -1514,7 +1491,7 @@ def test_delete_skill_snapshot_without_deleted_by(monkeypatch, mock_session):
     monkeypatch.setattr(agent_version_db_module, "get_db_session", lambda: mock_ctx)
     monkeypatch.setattr(agent_version_db_module, "as_dict", mock_as_dict)
 
-    from backend.database.agent_version_db import delete_skill_snapshot
+    from management.db.agent.version import delete_skill_snapshot
     result = delete_skill_snapshot(
         agent_id=1,
         tenant_id="tenant1",
@@ -1541,7 +1518,7 @@ def test_delete_skill_snapshot_not_found(monkeypatch, mock_session):
     monkeypatch.setattr(agent_version_db_module, "get_db_session", lambda: mock_ctx)
     monkeypatch.setattr(agent_version_db_module, "as_dict", mock_as_dict)
 
-    from backend.database.agent_version_db import delete_skill_snapshot
+    from management.db.agent.version import delete_skill_snapshot
     result = delete_skill_snapshot(
         agent_id=999,
         tenant_id="tenant1",

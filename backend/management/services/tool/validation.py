@@ -7,29 +7,12 @@ from contextlib import AsyncExitStack
 from typing import Any, Dict, Optional
 from urllib.parse import urljoin
 
-from consts.const import (
-    AIDP_API_KEY,
-    AIDP_SERVER_URL,
-    AIDP_TENANT_ID,
-    DATA_PROCESS_SERVICE,
-    LOCAL_MCP_SERVER,
-    MCP_REQUEST_TIMEOUT_SECONDS,
-    RUNTIME_MCP_TOOL_TIMEOUT_SECONDS,
-    TOKEN,
-)
-from consts.exceptions import (
-    MCPConnectionError,
-    NotFoundException,
-    ToolExecutionException,
-)
-from consts.model import ToolSourceEnum, ToolValidateRequest
-from database.client import minio_client
-from database.knowledge_db import get_knowledge_name_map_by_index_names
-from database.remote_mcp_db import (
-    get_mcp_authorization_token_by_name_and_url,
-    get_mcp_custom_headers_by_name_and_url,
-    get_mcp_server_by_name_and_tenant,
-)
+from consts.const import AIDP_API_KEY, AIDP_SERVER_URL, AIDP_TENANT_ID, DATA_PROCESS_SERVICE, LOCAL_MCP_SERVER, MCP_REQUEST_TIMEOUT_SECONDS, RUNTIME_MCP_TOOL_TIMEOUT_SECONDS, TOKEN
+from contracts.exceptions import MCPConnectionError, NotFoundException, ToolExecutionException
+from contracts.models import ToolSourceEnum, ToolValidateRequest
+from management.db.client import minio_client
+from management.db.knowledge_base.repository import get_knowledge_name_map_by_index_names
+from management.db.mcp.remote import get_mcp_authorization_token_by_name_and_url, get_mcp_custom_headers_by_name_and_url, get_mcp_server_by_name_and_tenant
 from fastmcp import Client
 from management.services.file.service import validate_urls_access
 from management.services.knowledge_base.service import (

@@ -30,8 +30,8 @@ from management.services.knowledge_base.providers.ragflow import (  # noqa: E402
     _format_dataset_item,
     fetch_ragflow_datasets_impl,
 )
-from consts.error_code import ErrorCode  # noqa: E402
-from consts.exceptions import AppException  # noqa: E402
+from contracts.error_code import ErrorCode
+from contracts.exceptions import AppException
 
 
 # ---------------------------------------------------------------------------

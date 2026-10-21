@@ -1,0 +1,182 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+"""Internal runtime endpoints for agent-evaluation execution."""
+
+from contracts.evaluation_status import EvalRunStatus
+from contracts.exceptions import AppException
+from contracts.api.runtime_evaluation_execution import EvaluationRunRequest, TrialRunRequest
+import logging
+from http import HTTPStatus
+from typing import Annotated
+
+from fastapi import APIRouter, Header, HTTPException
+from nexent.core.concurrency import ManagedTaskSpec
+from pydantic import BaseModel, Field
+
+from contracts.evaluation_status import EvalRunStatus
+from contracts.exceptions import AppException
+from management.db.evaluation.runs import claim_agent_evaluation_run, get_agent_evaluation
+from infrastructure.concurrency import runtime_thread_manager
+from management.services.permission.identity.authentication_helpers import verify_internal_runtime_jwt
+
+
+logger = logging.getLogger("agent_evaluation_runtime_app")
+router = APIRouter(prefix="/agent-evaluations/internal")
+
+
+def _load_evaluation_executor():
+    """Load the evaluation service only when a runtime run is dispatched."""
+    from management.services.evaluation.runs import execute_agent_evaluation_run
+
+    return execute_agent_evaluation_run
+
+
+def _load_trial_executor():
+    """Load the trial executor only when Runtime receives a trial request."""
+    from management.services.evaluation.runs import trial_run_evaluator_impl
+
+    return trial_run_evaluator_impl
+
+
+@router.post("/trial-run", include_in_schema=False)
+async def trial_run_evaluation_api(
+    payload: TrialRunRequest,
+    authorization: Annotated[str | None, Header()] = None,
+):
+    """Run one ad-hoc evaluation in the Runtime process."""
+    try:
+        user_id, tenant_id = verify_internal_runtime_jwt(authorization)
+    except Exception as exc:
+        logger.warning("Rejected unauthenticated trial evaluation: %s", exc)
+        raise HTTPException(
+            status_code=HTTPStatus.UNAUTHORIZED,
+            detail="Invalid internal runtime authorization",
+        ) from exc
+
+    trial_run_evaluator_impl = _load_trial_executor()
+    return await trial_run_evaluator_impl(
+        tenant_id=tenant_id,
+        user_id=user_id,
+        agent_id=payload.agent_id,
+        agent_version_no=payload.agent_version_no,
+        query=payload.query,
+        judge_model_id=payload.judge_model_id,
+        evaluator_ids=payload.evaluator_ids,
+        language=payload.language,
+    )
+
+
+@router.post("/run", include_in_schema=False, status_code=HTTPStatus.ACCEPTED)
+async def dispatch_evaluation_run_api(
+    payload: EvaluationRunRequest,
+    authorization: Annotated[str | None, Header()] = None,
+):
+    """Start evaluation execution in the runtime process.
+
+    The database claim is conditional on ``PENDING`` so a retry cannot start
+    the same run twice.  The runtime process owns the worker thread and the
+    sandbox volume used by ``prepare_agent_run``.
+    """
+    try:
+        user_id, tenant_id = verify_internal_runtime_jwt(authorization)
+    except Exception as exc:
+        logger.warning("Rejected unauthenticated evaluation dispatch: %s", exc)
+        raise HTTPException(
+            status_code=HTTPStatus.UNAUTHORIZED,
+            detail="Invalid internal runtime authorization",
+        ) from exc
+
+    try:
+        run = get_agent_evaluation(
+            agent_evaluation_id=payload.agent_evaluation_id,
+            tenant_id=tenant_id,
+        )
+    except AppException as exc:
+        raise HTTPException(
+            status_code=HTTPStatus.NOT_FOUND,
+            detail=str(exc),
+        ) from exc
+    if not run:
+        raise HTTPException(
+            status_code=HTTPStatus.NOT_FOUND,
+            detail="Agent evaluation run not found",
+        )
+
+    status = run.get("status")
+    if status in (EvalRunStatus.COMPLETED, EvalRunStatus.FAILED):
+        return {
+            "accepted": False,
+            "already_finished": True,
+            "status": status,
+            "agent_evaluation_id": payload.agent_evaluation_id,
+        }
+
+    if status == EvalRunStatus.PENDING:
+        claimed = claim_agent_evaluation_run(
+            agent_evaluation_id=payload.agent_evaluation_id,
+            tenant_id=tenant_id,
+            updated_by=user_id,
+        )
+        if not claimed:
+            # Another runtime request won the conditional update.  It owns the
+            # run, so this request is an idempotent success rather than a 409.
+            latest = get_agent_evaluation(
+                agent_evaluation_id=payload.agent_evaluation_id,
+                tenant_id=tenant_id,
+            )
+            if latest and latest.get("status") == EvalRunStatus.RUNNING:
+                return {
+                    "accepted": True,
+                    "already_running": True,
+                    "agent_evaluation_id": payload.agent_evaluation_id,
+                }
+            raise HTTPException(
+                status_code=HTTPStatus.CONFLICT,
+                detail="Agent evaluation run is no longer pending",
+            )
+    elif status == EvalRunStatus.RUNNING:
+        return {
+            "accepted": True,
+            "already_running": True,
+            "agent_evaluation_id": payload.agent_evaluation_id,
+        }
+    else:
+        raise HTTPException(
+            status_code=HTTPStatus.CONFLICT,
+            detail=f"Unsupported evaluation status: {status}",
+        )
+
+    try:
+        execute_agent_evaluation_run = _load_evaluation_executor()
+        runtime_thread_manager.submit(
+            "evaluation",
+            ManagedTaskSpec(
+                task_name="agent-evaluation-dispatch",
+                owner="runtime",
+                run_id=str(payload.agent_evaluation_id),
+            ),
+            execute_agent_evaluation_run,
+            tenant_id,
+            user_id,
+            payload.agent_evaluation_id,
+            run.get("judge_model_id"),
+        )
+    except Exception as exc:
+        logger.exception(
+            "Failed to submit evaluation run to runtime pool: run_id=%s",
+            payload.agent_evaluation_id,
+        )
+        raise HTTPException(
+            status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
+            detail="Failed to submit agent evaluation run",
+        ) from exc
+
+    logger.info(
+        "Dispatched evaluation run to runtime: run_id=%s tenant=%s user=%s",
+        payload.agent_evaluation_id,
+        tenant_id,
+        user_id,
+    )
+    return {
+        "accepted": True,
+        "agent_evaluation_id": payload.agent_evaluation_id,
+    }

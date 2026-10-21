@@ -12,7 +12,7 @@ from fastmcp.server.dependencies import get_http_request
 from nexent.core.agents.agent_model import ToolConfig
 from pydantic import BaseModel, ConfigDict, Field, StrictBool, ValidationError, model_validator
 
-from consts.exceptions import UnauthorizedError
+from contracts.exceptions import UnauthorizedError
 from management.services.permission.identity.authentication_helpers import get_current_user_id
 
 logger = logging.getLogger(__name__)
@@ -855,7 +855,7 @@ async def search_installed_resources(
         )
 
     try:
-        from consts.exceptions import AgentDraftEditError
+        from contracts.exceptions import AgentDraftEditError
         from management.services.agent.authorization import require_agent_draft_edit
         from services.nl2agent_service import search_installed_resources_impl
 
@@ -907,7 +907,7 @@ async def search_uninstalled_resources(
         )
 
     try:
-        from consts.exceptions import AgentDraftEditError
+        from contracts.exceptions import AgentDraftEditError
         from management.services.agent.authorization import require_agent_draft_edit
         from services.nl2agent_service import search_uninstalled_resources_impl
 
@@ -960,7 +960,7 @@ async def recommend_resources(
         )
 
     try:
-        from consts.exceptions import AgentDraftEditError
+        from contracts.exceptions import AgentDraftEditError
         from management.services.agent.authorization import require_agent_draft_edit
         from services.nl2agent_service import (
             Nl2AgentResourceError,
@@ -1011,7 +1011,7 @@ async def nl2a_wrapper(
 ) -> str:
     """Return the NL2Agent JSON template selected by subtype in its wrapper."""
 
-    from consts.exceptions import AgentDraftEditError
+    from contracts.exceptions import AgentDraftEditError
     from management.services.agent.authorization import require_agent_draft_edit
 
     try:

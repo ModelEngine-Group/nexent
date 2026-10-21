@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """Resolve the current AIDP catalog and Nexent user permissions consistently."""
 
 from __future__ import annotations
@@ -11,8 +13,8 @@ from concurrent.futures import Future
 from dataclasses import dataclass
 from typing import Any, Callable, TypeVar
 
-from consts.error_code import ErrorCode
-from consts.exceptions import AppException
+from contracts.error_code import ErrorCode
+from contracts.exceptions import AppException
 from ext_components.aidp.services import aidp_permission_service
 from ext_components.aidp.services.aidp_service import fetch_all_aidp_knowledge_bases_impl
 

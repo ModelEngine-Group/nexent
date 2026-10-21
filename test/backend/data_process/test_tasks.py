@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """Focused tests for the Celery parser task boundary."""
 
 
@@ -10,7 +12,7 @@ def _configure_celery_environment(monkeypatch):
     monkeypatch.setenv("REDIS_URL", broker_url)
     monkeypatch.setenv("REDIS_BACKEND_URL", backend_url)
 
-    from consts import const as constants
+    import consts.const as constants
 
     monkeypatch.setattr(constants, "REDIS_URL", broker_url)
     monkeypatch.setattr(constants, "REDIS_BACKEND_URL", backend_url)

@@ -1,5 +1,7 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """
-Unit tests for backend/apps/mcp_management_app.py
+Unit tests for backend/management/api/mcp/mcp_management.py
 
 Tests community/registry management REST API endpoints including the review
 workflow, tenant isolation, and download tracking.
@@ -20,21 +22,19 @@ minio_mock.client = MagicMock()
 patch('nexent.storage.storage_client_factory.create_storage_client_from_config',
       return_value=storage_client_mock).start()
 patch('nexent.storage.minio_config.MinIOStorageConfig.validate', lambda self: None).start()
-patch('backend.database.client.MinioClient', return_value=minio_mock).start()
-patch('database.client.MinioClient', return_value=minio_mock).start()
-patch('backend.database.client.minio_client', minio_mock).start()
+patch('management.db.client.MinioClient', return_value=minio_mock).start()
+patch('management.db.client.MinioClient', return_value=minio_mock).start()
+patch('management.db.client.minio_client', minio_mock).start()
 patch('elasticsearch.Elasticsearch', return_value=MagicMock()).start()
 
-from backend.consts.exceptions import (
-    McpNotFoundError, McpValidationError, McpNameConflictError, UnauthorizedError,
-)
+from contracts.exceptions import McpNotFoundError, McpValidationError, McpNameConflictError, UnauthorizedError
 from fastapi.testclient import TestClient
 from fastapi import FastAPI
 from http import HTTPStatus
 
-from apps.mcp_management_app import router
+from management.api.mcp.mcp_management import router
 
-import apps.mcp_management_app as mgmt_app
+from management.api.mcp import mcp_management as mgmt_app
 mgmt_app.McpNotFoundError = McpNotFoundError
 mgmt_app.McpValidationError = McpValidationError
 mgmt_app.McpNameConflictError = McpNameConflictError
@@ -54,8 +54,8 @@ AUTH_HEADER = {"Authorization": "Bearer test_token"}
 class TestCommunityList:
     """Test GET /mcp-tools/community/list"""
 
-    @patch('apps.mcp_management_app.get_current_user_info')
-    @patch('apps.mcp_management_app.list_community_mcp_services')
+    @patch('management.api.mcp.mcp_management.get_current_user_info')
+    @patch('management.api.mcp.mcp_management.list_community_mcp_services')
     def test_list_success(self, mock_list, mock_auth):
         """Test successful community list retrieval (tenant-scoped)."""
         mock_auth.return_value = ("uid", "tid", "en")
@@ -68,8 +68,8 @@ class TestCommunityList:
             transport_type=None, cursor=None, limit=30,
         )
 
-    @patch('apps.mcp_management_app.get_current_user_info')
-    @patch('apps.mcp_management_app.list_community_mcp_services')
+    @patch('management.api.mcp.mcp_management.get_current_user_info')
+    @patch('management.api.mcp.mcp_management.list_community_mcp_services')
     def test_list_with_tag_filter(self, mock_list, mock_auth):
         """Test community list with tag and transport type filters."""
         mock_auth.return_value = ("uid", "tid", "en")
@@ -80,8 +80,8 @@ class TestCommunityList:
         )
         assert resp.status_code == HTTPStatus.OK
 
-    @patch('apps.mcp_management_app.get_current_user_info')
-    @patch('apps.mcp_management_app.list_community_mcp_services')
+    @patch('management.api.mcp.mcp_management.get_current_user_info')
+    @patch('management.api.mcp.mcp_management.list_community_mcp_services')
     def test_list_with_offset_pagination(self, mock_list, mock_auth):
         """Test community list forwards offset pagination parameters."""
         mock_auth.return_value = ("uid", "tid", "en")
@@ -104,16 +104,16 @@ class TestCommunityList:
             transport_type=None, cursor=None, page=2, limit=6,
         )
 
-    @patch('apps.mcp_management_app.get_current_user_info')
-    @patch('apps.mcp_management_app.list_community_mcp_services')
+    @patch('management.api.mcp.mcp_management.get_current_user_info')
+    @patch('management.api.mcp.mcp_management.list_community_mcp_services')
     def test_list_unauthorized(self, mock_list, mock_auth):
         """Test community list returns 401 on UnauthorizedError."""
         mock_auth.side_effect = UnauthorizedError("unauthorized")
         resp = client.get("/mcp-tools/community/list", headers=AUTH_HEADER)
         assert resp.status_code == HTTPStatus.UNAUTHORIZED
 
-    @patch('apps.mcp_management_app.get_current_user_info')
-    @patch('apps.mcp_management_app.list_community_mcp_services')
+    @patch('management.api.mcp.mcp_management.get_current_user_info')
+    @patch('management.api.mcp.mcp_management.list_community_mcp_services')
     def test_list_server_error(self, mock_list, mock_auth):
         """Test community list returns 500 on unexpected error."""
         mock_auth.return_value = ("uid", "tid", "en")
@@ -129,8 +129,8 @@ class TestCommunityList:
 class TestCommunityTagStats:
     """Test GET /mcp-tools/community/tags/stats"""
 
-    @patch('apps.mcp_management_app.get_current_user_info')
-    @patch('apps.mcp_management_app.list_community_mcp_tag_stats')
+    @patch('management.api.mcp.mcp_management.get_current_user_info')
+    @patch('management.api.mcp.mcp_management.list_community_mcp_tag_stats')
     def test_tag_stats(self, mock_stats, mock_auth):
         """Test community tag statistics retrieval (tenant-scoped)."""
         mock_auth.return_value = ("uid", "tid", "en")
@@ -140,16 +140,16 @@ class TestCommunityTagStats:
         assert resp.json()["data"][0]["tag"] == "python"
         mock_stats.assert_called_once_with(tenant_id="tid")
 
-    @patch('apps.mcp_management_app.get_current_user_info')
-    @patch('apps.mcp_management_app.list_community_mcp_tag_stats')
+    @patch('management.api.mcp.mcp_management.get_current_user_info')
+    @patch('management.api.mcp.mcp_management.list_community_mcp_tag_stats')
     def test_tag_stats_unauthorized(self, mock_stats, mock_auth):
         """Test tag stats returns 401 on UnauthorizedError."""
         mock_auth.side_effect = UnauthorizedError("unauthorized")
         resp = client.get("/mcp-tools/community/tags/stats", headers=AUTH_HEADER)
         assert resp.status_code == HTTPStatus.UNAUTHORIZED
 
-    @patch('apps.mcp_management_app.get_current_user_info')
-    @patch('apps.mcp_management_app.list_community_mcp_tag_stats')
+    @patch('management.api.mcp.mcp_management.get_current_user_info')
+    @patch('management.api.mcp.mcp_management.list_community_mcp_tag_stats')
     def test_tag_stats_server_error(self, mock_stats, mock_auth):
         """Test tag stats returns 500 on unexpected error."""
         mock_auth.return_value = ("uid", "tid", "en")
@@ -165,8 +165,8 @@ class TestCommunityTagStats:
 class TestCommunityReviewList:
     """Test GET /mcp-tools/community/review/list"""
 
-    @patch('apps.mcp_management_app.get_current_user_info')
-    @patch('apps.mcp_management_app.list_community_mcp_review_services')
+    @patch('management.api.mcp.mcp_management.get_current_user_info')
+    @patch('management.api.mcp.mcp_management.list_community_mcp_review_services')
     def test_list_reviews(self, mock_list, mock_auth):
         """Test listing review submissions."""
         mock_auth.return_value = ("uid", "tid", "en")
@@ -175,8 +175,8 @@ class TestCommunityReviewList:
         assert resp.status_code == HTTPStatus.OK
         assert resp.json()["status"] == "success"
 
-    @patch('apps.mcp_management_app.get_current_user_info')
-    @patch('apps.mcp_management_app.list_community_mcp_review_services')
+    @patch('management.api.mcp.mcp_management.get_current_user_info')
+    @patch('management.api.mcp.mcp_management.list_community_mcp_review_services')
     def test_list_reviews_with_status_filter(self, mock_list, mock_auth):
         """Test listing reviews filtered by status."""
         mock_auth.return_value = ("uid", "tid", "en")
@@ -187,8 +187,8 @@ class TestCommunityReviewList:
         )
         assert resp.status_code == HTTPStatus.OK
 
-    @patch('apps.mcp_management_app.get_current_user_info')
-    @patch('apps.mcp_management_app.list_community_mcp_review_services')
+    @patch('management.api.mcp.mcp_management.get_current_user_info')
+    @patch('management.api.mcp.mcp_management.list_community_mcp_review_services')
     def test_list_reviews_unauthorized(self, mock_list, mock_auth):
         """Test listing reviews returns 401 on UnauthorizedError."""
         mock_auth.return_value = ("uid", "tid", "en")
@@ -196,8 +196,8 @@ class TestCommunityReviewList:
         resp = client.get("/mcp-tools/community/review/list", headers=AUTH_HEADER)
         assert resp.status_code == HTTPStatus.UNAUTHORIZED
 
-    @patch('apps.mcp_management_app.get_current_user_info')
-    @patch('apps.mcp_management_app.list_community_mcp_review_services')
+    @patch('management.api.mcp.mcp_management.get_current_user_info')
+    @patch('management.api.mcp.mcp_management.list_community_mcp_review_services')
     def test_list_reviews_server_error(self, mock_list, mock_auth):
         """Test listing reviews returns 500 on unexpected error."""
         mock_auth.return_value = ("uid", "tid", "en")
@@ -213,8 +213,8 @@ class TestCommunityReviewList:
 class TestCommunityReviewApprove:
     """Test POST /mcp-tools/community/review/approve"""
 
-    @patch('apps.mcp_management_app.get_current_user_info')
-    @patch('apps.mcp_management_app.approve_community_mcp_service')
+    @patch('management.api.mcp.mcp_management.get_current_user_info')
+    @patch('management.api.mcp.mcp_management.approve_community_mcp_service')
     def test_approve_success(self, mock_approve, mock_auth):
         """Test successful review approval."""
         mock_auth.return_value = ("uid", "tid", "en")
@@ -229,8 +229,8 @@ class TestCommunityReviewApprove:
             tenant_id="tid", user_id="uid", market_id=1, content=None,
         )
 
-    @patch('apps.mcp_management_app.get_current_user_info')
-    @patch('apps.mcp_management_app.approve_community_mcp_service')
+    @patch('management.api.mcp.mcp_management.get_current_user_info')
+    @patch('management.api.mcp.mcp_management.approve_community_mcp_service')
     def test_approve_not_found(self, mock_approve, mock_auth):
         """Test approval fails when review is not found."""
         mock_auth.return_value = ("uid", "tid", "en")
@@ -242,8 +242,8 @@ class TestCommunityReviewApprove:
         )
         assert resp.status_code == HTTPStatus.NOT_FOUND
 
-    @patch('apps.mcp_management_app.get_current_user_info')
-    @patch('apps.mcp_management_app.approve_community_mcp_service')
+    @patch('management.api.mcp.mcp_management.get_current_user_info')
+    @patch('management.api.mcp.mcp_management.approve_community_mcp_service')
     def test_approve_unauthorized(self, mock_approve, mock_auth):
         """Test approval returns 401 on UnauthorizedError."""
         mock_auth.return_value = ("uid", "tid", "en")
@@ -255,8 +255,8 @@ class TestCommunityReviewApprove:
         )
         assert resp.status_code == HTTPStatus.UNAUTHORIZED
 
-    @patch('apps.mcp_management_app.get_current_user_info')
-    @patch('apps.mcp_management_app.approve_community_mcp_service')
+    @patch('management.api.mcp.mcp_management.get_current_user_info')
+    @patch('management.api.mcp.mcp_management.approve_community_mcp_service')
     def test_approve_server_error(self, mock_approve, mock_auth):
         """Test approval returns 500 on unexpected error."""
         mock_auth.return_value = ("uid", "tid", "en")
@@ -276,8 +276,8 @@ class TestCommunityReviewApprove:
 class TestCommunityReviewReject:
     """Test POST /mcp-tools/community/review/reject"""
 
-    @patch('apps.mcp_management_app.get_current_user_info')
-    @patch('apps.mcp_management_app.reject_community_mcp_service')
+    @patch('management.api.mcp.mcp_management.get_current_user_info')
+    @patch('management.api.mcp.mcp_management.reject_community_mcp_service')
     def test_reject_success(self, mock_reject, mock_auth):
         """Test successful review rejection."""
         mock_auth.return_value = ("uid", "tid", "en")
@@ -289,8 +289,8 @@ class TestCommunityReviewReject:
         assert resp.status_code == HTTPStatus.OK
         assert resp.json()["status"] == "success"
 
-    @patch('apps.mcp_management_app.get_current_user_info')
-    @patch('apps.mcp_management_app.reject_community_mcp_service')
+    @patch('management.api.mcp.mcp_management.get_current_user_info')
+    @patch('management.api.mcp.mcp_management.reject_community_mcp_service')
     def test_reject_not_found(self, mock_reject, mock_auth):
         """Test rejection fails when review is not found."""
         mock_auth.return_value = ("uid", "tid", "en")
@@ -302,8 +302,8 @@ class TestCommunityReviewReject:
         )
         assert resp.status_code == HTTPStatus.NOT_FOUND
 
-    @patch('apps.mcp_management_app.get_current_user_info')
-    @patch('apps.mcp_management_app.reject_community_mcp_service')
+    @patch('management.api.mcp.mcp_management.get_current_user_info')
+    @patch('management.api.mcp.mcp_management.reject_community_mcp_service')
     def test_reject_unauthorized(self, mock_reject, mock_auth):
         """Test rejection returns 401 on UnauthorizedError."""
         mock_auth.return_value = ("uid", "tid", "en")
@@ -315,8 +315,8 @@ class TestCommunityReviewReject:
         )
         assert resp.status_code == HTTPStatus.UNAUTHORIZED
 
-    @patch('apps.mcp_management_app.get_current_user_info')
-    @patch('apps.mcp_management_app.reject_community_mcp_service')
+    @patch('management.api.mcp.mcp_management.get_current_user_info')
+    @patch('management.api.mcp.mcp_management.reject_community_mcp_service')
     def test_reject_server_error(self, mock_reject, mock_auth):
         """Test rejection returns 500 on unexpected error."""
         mock_auth.return_value = ("uid", "tid", "en")
@@ -336,8 +336,8 @@ class TestCommunityReviewReject:
 class TestCommunityPublish:
     """Test POST /mcp-tools/community/publish"""
 
-    @patch('apps.mcp_management_app.get_current_user_info')
-    @patch('apps.mcp_management_app.publish_community_mcp_service')
+    @patch('management.api.mcp.mcp_management.get_current_user_info')
+    @patch('management.api.mcp.mcp_management.publish_community_mcp_service')
     def test_publish_success(self, mock_publish, mock_auth):
         """Test successful publishing creates a review and returns review_id."""
         mock_auth.return_value = ("uid", "tid", "en")
@@ -350,8 +350,8 @@ class TestCommunityPublish:
         assert resp.status_code == HTTPStatus.OK
         assert resp.json()["data"]["market_id"] == 42
 
-    @patch('apps.mcp_management_app.get_current_user_info')
-    @patch('apps.mcp_management_app.publish_community_mcp_service')
+    @patch('management.api.mcp.mcp_management.get_current_user_info')
+    @patch('management.api.mcp.mcp_management.publish_community_mcp_service')
     def test_publish_not_found(self, mock_publish, mock_auth):
         """Test publishing fails when source MCP record is not found."""
         mock_auth.return_value = ("uid", "tid", "en")
@@ -363,8 +363,8 @@ class TestCommunityPublish:
         }, headers=AUTH_HEADER)
         assert resp.status_code == HTTPStatus.NOT_FOUND
 
-    @patch('apps.mcp_management_app.get_current_user_info')
-    @patch('apps.mcp_management_app.publish_community_mcp_service')
+    @patch('management.api.mcp.mcp_management.get_current_user_info')
+    @patch('management.api.mcp.mcp_management.publish_community_mcp_service')
     def test_publish_name_conflict(self, mock_publish, mock_auth):
         """Test publishing fails on name conflict."""
         mock_auth.return_value = ("uid", "tid", "en")
@@ -376,8 +376,8 @@ class TestCommunityPublish:
         }, headers=AUTH_HEADER)
         assert resp.status_code == HTTPStatus.BAD_REQUEST
 
-    @patch('apps.mcp_management_app.get_current_user_info')
-    @patch('apps.mcp_management_app.publish_community_mcp_service')
+    @patch('management.api.mcp.mcp_management.get_current_user_info')
+    @patch('management.api.mcp.mcp_management.publish_community_mcp_service')
     def test_publish_validation_error(self, mock_publish, mock_auth):
         """Test publishing fails with validation error."""
         mock_auth.return_value = ("uid", "tid", "en")
@@ -389,8 +389,8 @@ class TestCommunityPublish:
         }, headers=AUTH_HEADER)
         assert resp.status_code == HTTPStatus.BAD_REQUEST
 
-    @patch('apps.mcp_management_app.get_current_user_info')
-    @patch('apps.mcp_management_app.publish_community_mcp_service')
+    @patch('management.api.mcp.mcp_management.get_current_user_info')
+    @patch('management.api.mcp.mcp_management.publish_community_mcp_service')
     def test_publish_unauthorized(self, mock_publish, mock_auth):
         """Test publishing returns 401 on UnauthorizedError."""
         mock_auth.return_value = ("uid", "tid", "en")
@@ -402,8 +402,8 @@ class TestCommunityPublish:
         }, headers=AUTH_HEADER)
         assert resp.status_code == HTTPStatus.UNAUTHORIZED
 
-    @patch('apps.mcp_management_app.get_current_user_info')
-    @patch('apps.mcp_management_app.publish_community_mcp_service')
+    @patch('management.api.mcp.mcp_management.get_current_user_info')
+    @patch('management.api.mcp.mcp_management.publish_community_mcp_service')
     def test_publish_server_error(self, mock_publish, mock_auth):
         """Test publishing returns 500 on unexpected error."""
         mock_auth.return_value = ("uid", "tid", "en")
@@ -423,8 +423,8 @@ class TestCommunityPublish:
 class TestCommunityUpdate:
     """Test PUT /mcp-tools/community/update"""
 
-    @patch('apps.mcp_management_app.get_current_user_info')
-    @patch('apps.mcp_management_app.update_community_mcp_service')
+    @patch('management.api.mcp.mcp_management.get_current_user_info')
+    @patch('management.api.mcp.mcp_management.update_community_mcp_service')
     def test_update_success(self, mock_update, mock_auth):
         """Test successful community MCP service update (using market_id)."""
         mock_auth.return_value = ("uid", "tid", "en")
@@ -435,8 +435,8 @@ class TestCommunityUpdate:
         }, headers=AUTH_HEADER)
         assert resp.status_code == HTTPStatus.OK
 
-    @patch('apps.mcp_management_app.get_current_user_info')
-    @patch('apps.mcp_management_app.update_community_mcp_service')
+    @patch('management.api.mcp.mcp_management.get_current_user_info')
+    @patch('management.api.mcp.mcp_management.update_community_mcp_service')
     def test_update_not_found(self, mock_update, mock_auth):
         """Test update fails when market record is not found."""
         mock_auth.return_value = ("uid", "tid", "en")
@@ -448,8 +448,8 @@ class TestCommunityUpdate:
         }, headers=AUTH_HEADER)
         assert resp.status_code == HTTPStatus.NOT_FOUND
 
-    @patch('apps.mcp_management_app.get_current_user_info')
-    @patch('apps.mcp_management_app.update_community_mcp_service')
+    @patch('management.api.mcp.mcp_management.get_current_user_info')
+    @patch('management.api.mcp.mcp_management.update_community_mcp_service')
     def test_update_validation_error(self, mock_update, mock_auth):
         """Test update fails with validation error."""
         mock_auth.return_value = ("uid", "tid", "en")
@@ -461,8 +461,8 @@ class TestCommunityUpdate:
         }, headers=AUTH_HEADER)
         assert resp.status_code == HTTPStatus.BAD_REQUEST
 
-    @patch('apps.mcp_management_app.get_current_user_info')
-    @patch('apps.mcp_management_app.update_community_mcp_service')
+    @patch('management.api.mcp.mcp_management.get_current_user_info')
+    @patch('management.api.mcp.mcp_management.update_community_mcp_service')
     def test_update_name_conflict(self, mock_update, mock_auth):
         """Test update fails on name conflict."""
         mock_auth.return_value = ("uid", "tid", "en")
@@ -474,8 +474,8 @@ class TestCommunityUpdate:
         }, headers=AUTH_HEADER)
         assert resp.status_code == HTTPStatus.BAD_REQUEST
 
-    @patch('apps.mcp_management_app.get_current_user_info')
-    @patch('apps.mcp_management_app.update_community_mcp_service')
+    @patch('management.api.mcp.mcp_management.get_current_user_info')
+    @patch('management.api.mcp.mcp_management.update_community_mcp_service')
     def test_update_unauthorized(self, mock_update, mock_auth):
         """Test update returns 401 on UnauthorizedError."""
         mock_auth.return_value = ("uid", "tid", "en")
@@ -487,8 +487,8 @@ class TestCommunityUpdate:
         }, headers=AUTH_HEADER)
         assert resp.status_code == HTTPStatus.UNAUTHORIZED
 
-    @patch('apps.mcp_management_app.get_current_user_info')
-    @patch('apps.mcp_management_app.update_community_mcp_service')
+    @patch('management.api.mcp.mcp_management.get_current_user_info')
+    @patch('management.api.mcp.mcp_management.update_community_mcp_service')
     def test_update_server_error(self, mock_update, mock_auth):
         """Test update returns 500 on unexpected error."""
         mock_auth.return_value = ("uid", "tid", "en")
@@ -508,16 +508,16 @@ class TestCommunityUpdate:
 class TestCommunityDelete:
     """Test DELETE /mcp-tools/community/delete"""
 
-    @patch('apps.mcp_management_app.get_current_user_info')
-    @patch('apps.mcp_management_app.delete_community_mcp_service')
+    @patch('management.api.mcp.mcp_management.get_current_user_info')
+    @patch('management.api.mcp.mcp_management.delete_community_mcp_service')
     def test_delete_success(self, mock_delete, mock_auth):
         """Test successful deletion of a market MCP service."""
         mock_auth.return_value = ("uid", "tid", "en")
         resp = client.delete("/mcp-tools/community/delete?market_id=1", headers=AUTH_HEADER)
         assert resp.status_code == HTTPStatus.OK
 
-    @patch('apps.mcp_management_app.get_current_user_info')
-    @patch('apps.mcp_management_app.delete_community_mcp_service')
+    @patch('management.api.mcp.mcp_management.get_current_user_info')
+    @patch('management.api.mcp.mcp_management.delete_community_mcp_service')
     def test_delete_not_found(self, mock_delete, mock_auth):
         """Test deletion fails when record is not found."""
         mock_auth.return_value = ("uid", "tid", "en")
@@ -525,8 +525,8 @@ class TestCommunityDelete:
         resp = client.delete("/mcp-tools/community/delete?market_id=999", headers=AUTH_HEADER)
         assert resp.status_code == HTTPStatus.NOT_FOUND
 
-    @patch('apps.mcp_management_app.get_current_user_info')
-    @patch('apps.mcp_management_app.delete_community_mcp_service')
+    @patch('management.api.mcp.mcp_management.get_current_user_info')
+    @patch('management.api.mcp.mcp_management.delete_community_mcp_service')
     def test_delete_unauthorized(self, mock_delete, mock_auth):
         """Test deletion returns 401 on UnauthorizedError."""
         mock_auth.return_value = ("uid", "tid", "en")
@@ -534,8 +534,8 @@ class TestCommunityDelete:
         resp = client.delete("/mcp-tools/community/delete?market_id=1", headers=AUTH_HEADER)
         assert resp.status_code == HTTPStatus.UNAUTHORIZED
 
-    @patch('apps.mcp_management_app.get_current_user_info')
-    @patch('apps.mcp_management_app.delete_community_mcp_service')
+    @patch('management.api.mcp.mcp_management.get_current_user_info')
+    @patch('management.api.mcp.mcp_management.delete_community_mcp_service')
     def test_delete_server_error(self, mock_delete, mock_auth):
         """Test deletion returns 500 on unexpected error."""
         mock_auth.return_value = ("uid", "tid", "en")
@@ -551,8 +551,8 @@ class TestCommunityDelete:
 class TestCommunityMine:
     """Test GET /mcp-tools/community/mine"""
 
-    @patch('apps.mcp_management_app.get_current_user_info')
-    @patch('apps.mcp_management_app.list_my_community_mcp_services')
+    @patch('management.api.mcp.mcp_management.get_current_user_info')
+    @patch('management.api.mcp.mcp_management.list_my_community_mcp_services')
     def test_list_mine(self, mock_list, mock_auth):
         """Test listing of current user's published community services."""
         mock_auth.return_value = ("uid", "tid", "en")
@@ -562,16 +562,16 @@ class TestCommunityMine:
         assert resp.json()["status"] == "success"
         mock_list.assert_called_once_with(tenant_id="tid", user_id="uid")
 
-    @patch('apps.mcp_management_app.get_current_user_info')
-    @patch('apps.mcp_management_app.list_my_community_mcp_services')
+    @patch('management.api.mcp.mcp_management.get_current_user_info')
+    @patch('management.api.mcp.mcp_management.list_my_community_mcp_services')
     def test_list_mine_unauthorized(self, mock_list, mock_auth):
         """Test my community list returns 401 on UnauthorizedError."""
         mock_auth.side_effect = UnauthorizedError("unauthorized")
         resp = client.get("/mcp-tools/community/mine", headers=AUTH_HEADER)
         assert resp.status_code == HTTPStatus.UNAUTHORIZED
 
-    @patch('apps.mcp_management_app.get_current_user_info')
-    @patch('apps.mcp_management_app.list_my_community_mcp_services')
+    @patch('management.api.mcp.mcp_management.get_current_user_info')
+    @patch('management.api.mcp.mcp_management.list_my_community_mcp_services')
     def test_list_mine_server_error(self, mock_list, mock_auth):
         """Test my community list returns 500 on unexpected error."""
         mock_auth.return_value = ("uid", "tid", "en")
@@ -587,8 +587,8 @@ class TestCommunityMine:
 class TestCommunityDownload:
     """Test POST /mcp-tools/community/{market_id}/download"""
 
-    @patch('apps.mcp_management_app.get_current_user_info')
-    @patch('apps.mcp_management_app.increment_mcp_market_download_count')
+    @patch('management.api.mcp.mcp_management.get_current_user_info')
+    @patch('management.api.mcp.mcp_management.increment_mcp_market_download_count')
     def test_download_success(self, mock_inc, mock_auth):
         """Test successful download count increment."""
         mock_auth.return_value = ("uid", "tid", "en")
@@ -597,16 +597,16 @@ class TestCommunityDownload:
         assert resp.json()["status"] == "success"
         mock_inc.assert_called_once_with(1)
 
-    @patch('apps.mcp_management_app.get_current_user_info')
-    @patch('apps.mcp_management_app.increment_mcp_market_download_count')
+    @patch('management.api.mcp.mcp_management.get_current_user_info')
+    @patch('management.api.mcp.mcp_management.increment_mcp_market_download_count')
     def test_download_unauthorized(self, mock_inc, mock_auth):
         """Test download returns 401 on UnauthorizedError."""
         mock_auth.side_effect = UnauthorizedError("unauthorized")
         resp = client.post("/mcp-tools/community/1/download", headers=AUTH_HEADER)
         assert resp.status_code == HTTPStatus.UNAUTHORIZED
 
-    @patch('apps.mcp_management_app.get_current_user_info')
-    @patch('apps.mcp_management_app.increment_mcp_market_download_count')
+    @patch('management.api.mcp.mcp_management.get_current_user_info')
+    @patch('management.api.mcp.mcp_management.increment_mcp_market_download_count')
     def test_download_server_error(self, mock_inc, mock_auth):
         """Test download returns 500 on unexpected error."""
         mock_auth.return_value = ("uid", "tid", "en")
@@ -622,8 +622,8 @@ class TestCommunityDownload:
 class TestCreateCommunity:
     """Test POST /mcp-tools/community"""
 
-    @patch('apps.mcp_management_app.get_current_user_info')
-    @patch('apps.mcp_management_app.publish_community_mcp_service')
+    @patch('management.api.mcp.mcp_management.get_current_user_info')
+    @patch('management.api.mcp.mcp_management.publish_community_mcp_service')
     def test_create_success(self, mock_publish, mock_auth):
         """Test successful community MCP creation."""
         mock_auth.return_value = ("uid", "tid", "en")
@@ -636,8 +636,8 @@ class TestCreateCommunity:
         assert resp.status_code == HTTPStatus.OK
         assert resp.json()["data"]["market_id"] == 42
 
-    @patch('apps.mcp_management_app.get_current_user_info')
-    @patch('apps.mcp_management_app.publish_community_mcp_service')
+    @patch('management.api.mcp.mcp_management.get_current_user_info')
+    @patch('management.api.mcp.mcp_management.publish_community_mcp_service')
     def test_create_not_found(self, mock_publish, mock_auth):
         """Test create fails when source MCP not found."""
         mock_auth.return_value = ("uid", "tid", "en")
@@ -648,8 +648,8 @@ class TestCreateCommunity:
         }, headers=AUTH_HEADER)
         assert resp.status_code == HTTPStatus.NOT_FOUND
 
-    @patch('apps.mcp_management_app.get_current_user_info')
-    @patch('apps.mcp_management_app.publish_community_mcp_service')
+    @patch('management.api.mcp.mcp_management.get_current_user_info')
+    @patch('management.api.mcp.mcp_management.publish_community_mcp_service')
     def test_create_validation_error(self, mock_publish, mock_auth):
         """Test create fails with validation error."""
         mock_auth.return_value = ("uid", "tid", "en")
@@ -660,8 +660,8 @@ class TestCreateCommunity:
         }, headers=AUTH_HEADER)
         assert resp.status_code == HTTPStatus.BAD_REQUEST
 
-    @patch('apps.mcp_management_app.get_current_user_info')
-    @patch('apps.mcp_management_app.publish_community_mcp_service')
+    @patch('management.api.mcp.mcp_management.get_current_user_info')
+    @patch('management.api.mcp.mcp_management.publish_community_mcp_service')
     def test_create_name_conflict(self, mock_publish, mock_auth):
         """Test create fails on name conflict."""
         mock_auth.return_value = ("uid", "tid", "en")
@@ -672,8 +672,8 @@ class TestCreateCommunity:
         }, headers=AUTH_HEADER)
         assert resp.status_code == HTTPStatus.BAD_REQUEST
 
-    @patch('apps.mcp_management_app.get_current_user_info')
-    @patch('apps.mcp_management_app.publish_community_mcp_service')
+    @patch('management.api.mcp.mcp_management.get_current_user_info')
+    @patch('management.api.mcp.mcp_management.publish_community_mcp_service')
     def test_create_unauthorized(self, mock_publish, mock_auth):
         """Test create returns 401 on UnauthorizedError."""
         mock_auth.return_value = ("uid", "tid", "en")
@@ -684,8 +684,8 @@ class TestCreateCommunity:
         }, headers=AUTH_HEADER)
         assert resp.status_code == HTTPStatus.UNAUTHORIZED
 
-    @patch('apps.mcp_management_app.get_current_user_info')
-    @patch('apps.mcp_management_app.publish_community_mcp_service')
+    @patch('management.api.mcp.mcp_management.get_current_user_info')
+    @patch('management.api.mcp.mcp_management.publish_community_mcp_service')
     def test_create_server_error(self, mock_publish, mock_auth):
         """Test create returns 500 on unexpected error."""
         mock_auth.return_value = ("uid", "tid", "en")
@@ -706,8 +706,8 @@ class TestUpdateCommunityByMarketId:
 
     COMMON_BODY = {"market_id": 1, "name": "x", "description": "d", "tags": [], "registry_json": None}
 
-    @patch('apps.mcp_management_app.get_current_user_info')
-    @patch('apps.mcp_management_app.update_community_mcp_service')
+    @patch('management.api.mcp.mcp_management.get_current_user_info')
+    @patch('management.api.mcp.mcp_management.update_community_mcp_service')
     def test_update_success(self, mock_update, mock_auth):
         """Test successful update by market_id."""
         mock_auth.return_value = ("uid", "tid", "en")
@@ -718,8 +718,8 @@ class TestUpdateCommunityByMarketId:
         assert resp.status_code == HTTPStatus.OK
         assert resp.json()["status"] == "success"
 
-    @patch('apps.mcp_management_app.get_current_user_info')
-    @patch('apps.mcp_management_app.update_community_mcp_service')
+    @patch('management.api.mcp.mcp_management.get_current_user_info')
+    @patch('management.api.mcp.mcp_management.update_community_mcp_service')
     def test_update_not_found(self, mock_update, mock_auth):
         """Test update by market_id fails when record not found."""
         mock_auth.return_value = ("uid", "tid", "en")
@@ -730,8 +730,8 @@ class TestUpdateCommunityByMarketId:
         }, headers=AUTH_HEADER)
         assert resp.status_code == HTTPStatus.NOT_FOUND
 
-    @patch('apps.mcp_management_app.get_current_user_info')
-    @patch('apps.mcp_management_app.update_community_mcp_service')
+    @patch('management.api.mcp.mcp_management.get_current_user_info')
+    @patch('management.api.mcp.mcp_management.update_community_mcp_service')
     def test_update_validation_error(self, mock_update, mock_auth):
         """Test update by market_id fails with validation error."""
         mock_auth.return_value = ("uid", "tid", "en")
@@ -741,8 +741,8 @@ class TestUpdateCommunityByMarketId:
         }, headers=AUTH_HEADER)
         assert resp.status_code == HTTPStatus.BAD_REQUEST
 
-    @patch('apps.mcp_management_app.get_current_user_info')
-    @patch('apps.mcp_management_app.update_community_mcp_service')
+    @patch('management.api.mcp.mcp_management.get_current_user_info')
+    @patch('management.api.mcp.mcp_management.update_community_mcp_service')
     def test_update_name_conflict(self, mock_update, mock_auth):
         """Test update by market_id fails on name conflict."""
         mock_auth.return_value = ("uid", "tid", "en")
@@ -752,8 +752,8 @@ class TestUpdateCommunityByMarketId:
         }, headers=AUTH_HEADER)
         assert resp.status_code == HTTPStatus.BAD_REQUEST
 
-    @patch('apps.mcp_management_app.get_current_user_info')
-    @patch('apps.mcp_management_app.update_community_mcp_service')
+    @patch('management.api.mcp.mcp_management.get_current_user_info')
+    @patch('management.api.mcp.mcp_management.update_community_mcp_service')
     def test_update_unauthorized(self, mock_update, mock_auth):
         """Test update by market_id returns 401 on UnauthorizedError."""
         mock_auth.return_value = ("uid", "tid", "en")
@@ -763,8 +763,8 @@ class TestUpdateCommunityByMarketId:
         }, headers=AUTH_HEADER)
         assert resp.status_code == HTTPStatus.UNAUTHORIZED
 
-    @patch('apps.mcp_management_app.get_current_user_info')
-    @patch('apps.mcp_management_app.update_community_mcp_service')
+    @patch('management.api.mcp.mcp_management.get_current_user_info')
+    @patch('management.api.mcp.mcp_management.update_community_mcp_service')
     def test_update_server_error(self, mock_update, mock_auth):
         """Test update by market_id returns 500 on unexpected error."""
         mock_auth.return_value = ("uid", "tid", "en")
@@ -782,8 +782,8 @@ class TestUpdateCommunityByMarketId:
 class TestDeleteCommunityByMarketId:
     """Test DELETE /mcp-tools/community/{market_id}"""
 
-    @patch('apps.mcp_management_app.get_current_user_info')
-    @patch('apps.mcp_management_app.delete_community_mcp_service')
+    @patch('management.api.mcp.mcp_management.get_current_user_info')
+    @patch('management.api.mcp.mcp_management.delete_community_mcp_service')
     def test_delete_success(self, mock_delete, mock_auth):
         """Test successful RESTful deletion by market_id."""
         mock_auth.return_value = ("uid", "tid", "en")
@@ -791,8 +791,8 @@ class TestDeleteCommunityByMarketId:
         assert resp.status_code == HTTPStatus.OK
         assert resp.json()["status"] == "success"
 
-    @patch('apps.mcp_management_app.get_current_user_info')
-    @patch('apps.mcp_management_app.delete_community_mcp_service')
+    @patch('management.api.mcp.mcp_management.get_current_user_info')
+    @patch('management.api.mcp.mcp_management.delete_community_mcp_service')
     def test_delete_not_found(self, mock_delete, mock_auth):
         """Test RESTful deletion fails when record not found."""
         mock_auth.return_value = ("uid", "tid", "en")
@@ -800,8 +800,8 @@ class TestDeleteCommunityByMarketId:
         resp = client.delete("/mcp-tools/community/999", headers=AUTH_HEADER)
         assert resp.status_code == HTTPStatus.NOT_FOUND
 
-    @patch('apps.mcp_management_app.get_current_user_info')
-    @patch('apps.mcp_management_app.delete_community_mcp_service')
+    @patch('management.api.mcp.mcp_management.get_current_user_info')
+    @patch('management.api.mcp.mcp_management.delete_community_mcp_service')
     def test_delete_unauthorized(self, mock_delete, mock_auth):
         """Test RESTful deletion returns 401 on UnauthorizedError."""
         mock_auth.return_value = ("uid", "tid", "en")
@@ -809,8 +809,8 @@ class TestDeleteCommunityByMarketId:
         resp = client.delete("/mcp-tools/community/1", headers=AUTH_HEADER)
         assert resp.status_code == HTTPStatus.UNAUTHORIZED
 
-    @patch('apps.mcp_management_app.get_current_user_info')
-    @patch('apps.mcp_management_app.delete_community_mcp_service')
+    @patch('management.api.mcp.mcp_management.get_current_user_info')
+    @patch('management.api.mcp.mcp_management.delete_community_mcp_service')
     def test_delete_server_error(self, mock_delete, mock_auth):
         """Test RESTful deletion returns 500 on unexpected error."""
         mock_auth.return_value = ("uid", "tid", "en")
@@ -826,8 +826,8 @@ class TestDeleteCommunityByMarketId:
 class TestChangeCommunityStatus:
     """Test PATCH /mcp-tools/community/{market_id}/status"""
 
-    @patch('apps.mcp_management_app.get_current_user_info')
-    @patch('apps.mcp_management_app.change_mcp_market_status')
+    @patch('management.api.mcp.mcp_management.get_current_user_info')
+    @patch('management.api.mcp.mcp_management.change_mcp_market_status')
     def test_change_status_success(self, mock_change, mock_auth):
         """Test successful status change."""
         mock_auth.return_value = ("uid", "tid", "en")
@@ -837,8 +837,8 @@ class TestChangeCommunityStatus:
         assert resp.status_code == HTTPStatus.OK
         assert resp.json()["status"] == "success"
 
-    @patch('apps.mcp_management_app.get_current_user_info')
-    @patch('apps.mcp_management_app.change_mcp_market_status')
+    @patch('management.api.mcp.mcp_management.get_current_user_info')
+    @patch('management.api.mcp.mcp_management.change_mcp_market_status')
     def test_change_status_not_found(self, mock_change, mock_auth):
         """Test status change fails when record not found."""
         mock_auth.return_value = ("uid", "tid", "en")
@@ -848,8 +848,8 @@ class TestChangeCommunityStatus:
         }, headers=AUTH_HEADER)
         assert resp.status_code == HTTPStatus.NOT_FOUND
 
-    @patch('apps.mcp_management_app.get_current_user_info')
-    @patch('apps.mcp_management_app.change_mcp_market_status')
+    @patch('management.api.mcp.mcp_management.get_current_user_info')
+    @patch('management.api.mcp.mcp_management.change_mcp_market_status')
     def test_change_status_name_conflict(self, mock_change, mock_auth):
         """Test status change fails on name conflict."""
         mock_auth.return_value = ("uid", "tid", "en")
@@ -859,8 +859,8 @@ class TestChangeCommunityStatus:
         }, headers=AUTH_HEADER)
         assert resp.status_code == HTTPStatus.BAD_REQUEST
 
-    @patch('apps.mcp_management_app.get_current_user_info')
-    @patch('apps.mcp_management_app.change_mcp_market_status')
+    @patch('management.api.mcp.mcp_management.get_current_user_info')
+    @patch('management.api.mcp.mcp_management.change_mcp_market_status')
     def test_change_status_unauthorized(self, mock_change, mock_auth):
         """Test status change returns 401 on UnauthorizedError."""
         mock_auth.return_value = ("uid", "tid", "en")
@@ -870,8 +870,8 @@ class TestChangeCommunityStatus:
         }, headers=AUTH_HEADER)
         assert resp.status_code == HTTPStatus.UNAUTHORIZED
 
-    @patch('apps.mcp_management_app.get_current_user_info')
-    @patch('apps.mcp_management_app.change_mcp_market_status')
+    @patch('management.api.mcp.mcp_management.get_current_user_info')
+    @patch('management.api.mcp.mcp_management.change_mcp_market_status')
     def test_change_status_invalid_value(self, mock_change, mock_auth):
         """Test status change returns 400 on invalid status value."""
         mock_auth.return_value = ("uid", "tid", "en")
@@ -881,8 +881,8 @@ class TestChangeCommunityStatus:
         }, headers=AUTH_HEADER)
         assert resp.status_code == HTTPStatus.BAD_REQUEST
 
-    @patch('apps.mcp_management_app.get_current_user_info')
-    @patch('apps.mcp_management_app.change_mcp_market_status')
+    @patch('management.api.mcp.mcp_management.get_current_user_info')
+    @patch('management.api.mcp.mcp_management.change_mcp_market_status')
     def test_change_status_server_error(self, mock_change, mock_auth):
         """Test status change returns 500 on unexpected error."""
         mock_auth.return_value = ("uid", "tid", "en")
@@ -900,8 +900,8 @@ class TestChangeCommunityStatus:
 class TestMcpMarketAuditEntries:
     """Security audit entries emitted by MCP marketplace endpoints."""
 
-    @patch('apps.mcp_management_app.get_current_user_info')
-    @patch('apps.mcp_management_app.change_mcp_market_status', new_callable=AsyncMock)
+    @patch('management.api.mcp.mcp_management.get_current_user_info')
+    @patch('management.api.mcp.mcp_management.change_mcp_market_status', new_callable=AsyncMock)
     def test_status_update_emits_audit_entry_without_content(self, mock_change, mock_auth, caplog):
         """Successful status change records market_id/status, not review text."""
         import logging
@@ -922,8 +922,8 @@ class TestMcpMarketAuditEntries:
         assert '"status":"approved"' in messages[0]
         assert "secret review text" not in messages[0]
 
-    @patch('apps.mcp_management_app.get_current_user_info')
-    @patch('apps.mcp_management_app.increment_mcp_market_download_count')
+    @patch('management.api.mcp.mcp_management.get_current_user_info')
+    @patch('management.api.mcp.mcp_management.increment_mcp_market_download_count')
     def test_download_emits_audit_entry(self, mock_incr, mock_auth, caplog):
         """Successful install records who downloaded which market listing."""
         import logging

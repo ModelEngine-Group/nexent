@@ -8,11 +8,11 @@ import pytest
 sys.path.insert(0, __import__("os").path.join(__import__("os").path.dirname(__file__), "../../.."))
 
 database_pkg = types.ModuleType("database")
-config_db_mod = types.ModuleType("database.memory_provider_config_db")
+config_db_mod = types.ModuleType("management.db.memory.provider_config")
 config_db_mod.disable_provider_config = MagicMock(name="disable_provider_config")
 database_pkg.memory_provider_config_db = config_db_mod
 sys.modules["database"] = database_pkg
-sys.modules["database.memory_provider_config_db"] = config_db_mod
+sys.modules["management.db.memory.provider_config"] = config_db_mod
 
 consts_pkg = types.ModuleType("consts")
 consts_mod = types.ModuleType("consts.const")

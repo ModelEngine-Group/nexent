@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 '''D2 contract test for POST /tasks chain enqueue.
 
 Covers the endpoint contract introduced when create_task switched to calling
@@ -37,13 +39,13 @@ def _valid_payload() -> dict:
 def test_post_tasks_chain_enqueue_contract(monkeypatch):
     from fastapi import FastAPI
     from fastapi.testclient import TestClient
-    from consts import const
+    import consts.const as const
 
     # This route contract stubs enqueue; it must never require a live broker.
     # Patch canonical configuration before importing the Celery task package.
     monkeypatch.setattr(const, 'REDIS_URL', 'memory://')
     monkeypatch.setattr(const, 'REDIS_BACKEND_URL', 'cache+memory://')
-    from apps.data_process_app import router
+    from data_process.api.tasks.routes import router
 
     app = FastAPI()
     app.include_router(router)
@@ -59,7 +61,7 @@ def test_post_tasks_chain_enqueue_contract(monkeypatch):
 
     # Success path: non-empty chain id -> HTTP 201 and non-empty task_id.
     monkeypatch.setattr(
-        'apps.data_process_app.submit_process_forward_chain',
+        'data_process.api.tasks.routes.submit_process_forward_chain',
         lambda **kwargs: chain_id,
     )
     response = client.post('/tasks', json=payload)
@@ -76,7 +78,7 @@ def test_post_tasks_chain_enqueue_contract(monkeypatch):
         return chain_id
 
     monkeypatch.setattr(
-        'apps.data_process_app.submit_process_forward_chain',
+        'data_process.api.tasks.routes.submit_process_forward_chain',
         recording_submit,
     )
     response = client.post('/tasks', json=payload)
@@ -91,7 +93,7 @@ def test_post_tasks_chain_enqueue_contract(monkeypatch):
     # Failure path: empty task_id -> HTTP 503 with the fixed detail string,
     # and the response body does not leak internal stack traces or secrets.
     monkeypatch.setattr(
-        'apps.data_process_app.submit_process_forward_chain',
+        'data_process.api.tasks.routes.submit_process_forward_chain',
         lambda **kwargs: '',
     )
     response = client.post('/tasks', json=payload)

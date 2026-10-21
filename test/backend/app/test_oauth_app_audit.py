@@ -19,7 +19,7 @@ backend_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../../
 sys.path.insert(0, backend_dir)
 
 _STUBBED_MODULES = ["management.services.monitor.audit", "management.services.permission.identity.oauth",
-                    "database.oauth_account_db", "apps.oauth_app"]
+                    "management.db.identity.oauth_account", "management.api.identity.oauth"]
 _ORIGINAL_MODULES = {name: sys.modules.get(name) for name in _STUBBED_MODULES}
 
 # A previously collected legacy file may replace the `services` package with a
@@ -35,17 +35,17 @@ sys.modules["management.services.monitor.audit"] = _audit_service
 # Import-time isolation: the provider client and the account store reach
 # external services that these audit assertions do not exercise.
 sys.modules["management.services.permission.identity.oauth"] = MagicMock()
-sys.modules["database.oauth_account_db"] = MagicMock()
+sys.modules["management.db.identity.oauth_account"] = MagicMock()
 # Rebuild the app module against the collaborators above instead of reusing one
 # a legacy file already imported against its own stubs.
-sys.modules.pop("apps.oauth_app", None)
+sys.modules.pop("management.api.identity.oauth", None)
 
 from http import HTTPStatus  # noqa: E402
 
 from fastapi import FastAPI  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
 
-import apps.oauth_app as oauth_app_module  # noqa: E402
+from management.api.identity import oauth as oauth_app_module
 
 for _name, _module in _ORIGINAL_MODULES.items():
     if _module is None:

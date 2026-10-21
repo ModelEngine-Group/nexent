@@ -12,11 +12,11 @@ from unittest.mock import MagicMock, patch
 import numpy as np
 import pytest
 
-# Mock consts module before patching backend.database.client to avoid ImportError
-# backend.database.client imports from consts.const, so we need to mock it first
+# Mock consts module before patching management.db.client to avoid ImportError
+# management.db.client imports from consts.const, so we need to mock it first
 consts_mock = MagicMock()
 consts_const_mock = MagicMock()
-# Set required constants that backend.database.client might use
+# Set required constants that management.db.client might use
 consts_const_mock.MINIO_ENDPOINT = "http://localhost:9000"
 consts_const_mock.MINIO_ACCESS_KEY = "test_access_key"
 consts_const_mock.MINIO_SECRET_KEY = "test_secret_key"
@@ -32,16 +32,16 @@ consts_const_mock.MESSAGE_ROLE = {"USER": "user", "ASSISTANT": "assistant", "SYS
 consts_const_mock.THINK_START_PATTERN = "<think>"
 consts_const_mock.THINK_END_PATTERN = "</think>"
 consts_mock.const = consts_const_mock
-# Mock consts.error_code and consts.exceptions
+# Mock contracts.error_code and contracts.exceptions
 consts_error_code_mock = MagicMock()
 consts_error_code_mock.ErrorCode = MagicMock()
 consts_exceptions_mock = MagicMock()
 consts_exceptions_mock.AppException = Exception
 sys.modules['consts'] = consts_mock
 sys.modules['consts.const'] = consts_const_mock
-sys.modules['consts.error_code'] = consts_error_code_mock
-sys.modules['consts.exceptions'] = consts_exceptions_mock
-sys.modules['consts.model'] = consts_mock.model
+sys.modules['contracts.error_code'] = consts_error_code_mock
+sys.modules['contracts.exceptions'] = consts_exceptions_mock
+sys.modules['contracts.models'] = consts_mock.model
 
 # Add backend to path before patching backend modules
 current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -54,10 +54,10 @@ storage_client_mock = MagicMock()
 minio_client_mock = MagicMock()
 patch('nexent.storage.storage_client_factory.create_storage_client_from_config', return_value=storage_client_mock).start()
 patch('nexent.storage.minio_config.MinIOStorageConfig.validate', lambda self: None).start()
-patch('backend.database.client.MinioClient', return_value=minio_client_mock).start()
+patch('management.db.client.MinioClient', return_value=minio_client_mock).start()
 
-from backend.management.services.knowledge_base.clustering import calculate_document_embedding, auto_determine_k, kmeans_cluster_documents, analyze_cluster_coherence, merge_duplicate_documents_in_clusters
-from backend.management.services.knowledge_base.summary import extract_representative_chunks_smart, summarize_document, summarize_cluster, summarize_clusters_map_reduce, merge_cluster_summaries, get_documents_from_es, process_documents_for_clustering
+from management.services.knowledge_base.clustering import calculate_document_embedding, auto_determine_k, kmeans_cluster_documents, analyze_cluster_coherence, merge_duplicate_documents_in_clusters
+from management.services.knowledge_base.summary import extract_representative_chunks_smart, summarize_document, summarize_cluster, summarize_clusters_map_reduce, merge_cluster_summaries, get_documents_from_es, process_documents_for_clustering
 
 
 class TestDocumentEmbedding:
@@ -256,8 +256,8 @@ class TestSummarizeDocument:
 
     def test_summarize_document_with_model_success(self):
         """Test document summarization when model config exists and LLM returns value"""
-        with patch('backend.management.services.knowledge_base.summary.get_model_by_model_id') as mock_get_model, \
-             patch('backend.management.services.knowledge_base.summary.call_llm_for_system_prompt') as mock_llm:
+        with patch('management.services.knowledge_base.summary.get_model_by_model_id') as mock_get_model, \
+             patch('management.services.knowledge_base.summary.call_llm_for_system_prompt') as mock_llm:
             mock_get_model.return_value = {"id": 1}
             mock_llm.return_value = "Generated summary\n"
 
@@ -302,8 +302,8 @@ class TestSummarizeCluster:
 
     def test_summarize_cluster_with_model_success(self):
         """Test cluster summarization when model config exists and LLM returns value"""
-        with patch('backend.management.services.knowledge_base.summary.get_model_by_model_id') as mock_get_model, \
-             patch('backend.management.services.knowledge_base.summary.call_llm_for_system_prompt') as mock_llm:
+        with patch('management.services.knowledge_base.summary.get_model_by_model_id') as mock_get_model, \
+             patch('management.services.knowledge_base.summary.call_llm_for_system_prompt') as mock_llm:
             mock_get_model.return_value = {"id": 1}
             mock_llm.return_value = "Cluster summary text  "
 
@@ -341,8 +341,8 @@ class TestSummarizeClustersMapReduce:
         }
         clusters = {0: ['doc1', 'doc2']}
 
-        with patch('backend.management.services.knowledge_base.summary.summarize_document') as mock_summarize_doc, \
-             patch('backend.management.services.knowledge_base.summary.summarize_cluster') as mock_summarize_cluster:
+        with patch('management.services.knowledge_base.summary.summarize_document') as mock_summarize_doc, \
+             patch('management.services.knowledge_base.summary.summarize_cluster') as mock_summarize_cluster:
 
             mock_summarize_doc.return_value = "Document summary"
             mock_summarize_cluster.return_value = "Cluster summary"
@@ -368,8 +368,8 @@ class TestSummarizeClustersMapReduce:
         }
         clusters = {0: ['doc1']}
 
-        with patch('backend.management.services.knowledge_base.summary.summarize_document') as mock_summarize_doc, \
-             patch('backend.management.services.knowledge_base.summary.summarize_cluster') as mock_summarize_cluster:
+        with patch('management.services.knowledge_base.summary.summarize_document') as mock_summarize_doc, \
+             patch('management.services.knowledge_base.summary.summarize_cluster') as mock_summarize_cluster:
 
             mock_summarize_doc.return_value = ""
             mock_summarize_cluster.return_value = "Mock cluster summary"
@@ -489,7 +489,7 @@ class TestProcessDocumentsForClustering:
             }
         }
 
-        with patch('backend.management.services.knowledge_base.summary.calculate_document_embedding') as mock_calc_embedding:
+        with patch('management.services.knowledge_base.summary.calculate_document_embedding') as mock_calc_embedding:
             mock_calc_embedding.return_value = np.array([1.0, 2.0, 3.0])
 
             documents, embeddings = process_documents_for_clustering(

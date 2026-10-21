@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """One PostgreSQL execution contract shared by D1, D2, D3 and D5.
 
 The fixed suite runs beside the deployed Nexent containers.  SQL therefore
@@ -111,7 +113,7 @@ def postgres_url(*, database: str | None = None) -> str:
 def apply_product_postgres_env() -> PostgresTarget:
     """Populate the environment consumed by Nexent's database modules.
 
-    Call this before importing ``consts.const`` or ``database.client`` because
+    Call this before importing ``consts.const`` or ``management.db.client`` because
     those product modules resolve their connection constants at import time.
     """
     target = postgres_target()

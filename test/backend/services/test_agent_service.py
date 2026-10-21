@@ -24,7 +24,7 @@ from fastapi import Request
 @pytest.mark.asyncio
 async def test_get_agent_info_impl_hides_system_agent_before_capability_reads(monkeypatch):
     """UT-BE-SAL-010: ordinary detail lookup must not disclose a system Agent."""
-    from backend.management.services.agent import service as agent_service
+    from management.services.agent import service as agent_service
 
     monkeypatch.setattr(
         agent_service,
@@ -53,7 +53,7 @@ async def test_get_agent_info_impl_hides_system_agent_before_capability_reads(mo
 @pytest.mark.asyncio
 async def test_export_agent_with_skills_rejects_system_agent_before_skill_reads(monkeypatch):
     """UT-BE-SAL-010 and UT-BE-SAL-011: reject before Skill reads."""
-    from backend.management.services.agent import transfer as agent_service
+    from management.services.agent import transfer as agent_service
 
     monkeypatch.setattr(
         agent_transfer_backend,
@@ -231,40 +231,46 @@ sys.modules["boto3"] = MagicMock()
 sys.modules["elasticsearch"] = MagicMock()
 
 # Mock database submodules (do not replace the parent `database` package to avoid breaking other tests)
-sys.modules["database.agent_db"] = MagicMock()
-sys.modules["database.tool_db"] = MagicMock()
-sys.modules["database.remote_mcp_db"] = MagicMock()
-sys.modules["database.agent_version_db"] = MagicMock()
-sys.modules["database.group_db"] = MagicMock()
-sys.modules["database.user_tenant_db"] = MagicMock()
-sys.modules["database.model_management_db"] = MagicMock()
+sys.modules["management.db.agent.repository"] = MagicMock()
+sys.modules["management.db.tool.repository"] = MagicMock()
+sys.modules["management.db.mcp.remote"] = MagicMock()
+sys.modules["management.db.agent.version"] = MagicMock()
+sys.modules["management.db.identity.group"] = MagicMock()
+sys.modules["management.db.identity.user_tenant"] = MagicMock()
+sys.modules["management.db.model.repository"] = MagicMock()
 
 # Mock a2a_agent_db (referenced by agent_service.py)
-sys.modules["database.a2a_agent_db"] = MagicMock()
-sys.modules["database.skill_db"] = MagicMock()
+sys.modules["management.db.a2a.repository"] = MagicMock()
+sys.modules["management.db.skill.repository"] = MagicMock()
 
 # Mock conversation_db and db_models (newly imported by agent_service.py for
 # runtime metadata support) so the real sqlalchemy-based modules are not loaded
 # during collection - the pre-existing sqlalchemy stub conflicts with
 # sqlalchemy.dialects.postgresql.
-sys.modules["database.conversation_db"] = MagicMock()
-sys.modules["database.db_models"] = MagicMock()
+sys.modules["management.db.conversation.repository"] = MagicMock()
+sys.modules["management.db.models"] = MagicMock()
 
 # Mock conversation_db and db_models (newly imported by agent_service.py for
 # runtime metadata support) so the real sqlalchemy-based modules are not loaded
 # during collection - the pre-existing sqlalchemy stub conflicts with
 # sqlalchemy.dialects.postgresql.
-sys.modules["database.conversation_db"] = MagicMock()
-sys.modules["database.db_models"] = MagicMock()
+sys.modules["management.db.conversation.repository"] = MagicMock()
+sys.modules["management.db.models"] = MagicMock()
 
-# Stub database.client early so real DB modules are not loaded during import
+# Stub management.db.client early so real DB modules are not loaded during import
 _mock_db_client = MagicMock()
 _mock_db_client.get_db_session = MagicMock()
 _mock_db_client.as_dict = MagicMock()
 _mock_db_client.MinioClient = MagicMock()
 _mock_db_client.db_client = MagicMock()
-sys.modules["database.client"] = _mock_db_client
-sys.modules["backend.database.client"] = _mock_db_client
+sys.modules["management.db.client"] = _mock_db_client
+from test.common.database_stubs import install_serialization_stub
+install_serialization_stub(sys.modules["management.db.client"])
+from test.common.database_stubs import install_serialization_stub
+install_serialization_stub(sys.modules["management.db.client"])
+sys.modules["management.db.client"] = _mock_db_client
+from test.common.database_stubs import install_serialization_stub
+install_serialization_stub(sys.modules["management.db.client"])
 
 # Mock services submodules
 services_module = types.ModuleType("services")
@@ -447,7 +453,7 @@ def mock_convert_list_to_string(items):
         return ""
     return ",".join(str(item) for item in items)
 
-    import management.services.agent.service as agent_service
+    from management.services.agent import service as agent_service
     from management.services.agent.service import update_agent_info_impl
     from management.services.agent.service import list_all_agent_info_impl
     from management.services.agent.service import get_agent_info_impl
@@ -479,15 +485,10 @@ def mock_convert_list_to_string(items):
         apply_duplicate_name_availability_rules as _apply_duplicate_name_availability_rules,
     )
     from nexent.core.agents.prompt.meta import render_name_template as _render_prompt_template
-    from consts.model import (
-        ExportAndImportAgentInfo,
-        ExportAndImportDataFormat,
-        MCPInfo,
-        AgentRequest,
-    )
+    from contracts.models import ExportAndImportAgentInfo, ExportAndImportDataFormat, MCPInfo, AgentRequest
 
     # Ensure db_client is set to our mock after import
-    import backend.database.client as db_client_module
+    from management.db import client as db_client_module
 
     db_client_module.db_client = mock_postgres_client
 
@@ -560,9 +561,9 @@ sys.modules["nexent.core.models.rerank_model"] = rerank_module
 # Don't mock agent_model yet, we need to import ToolConfig first
 sys.modules["nexent.memory"] = MagicMock()
 sys.modules["nexent.memory.memory_service"] = MagicMock()
-sys.modules["management.db.serialization"] = MagicMock()
-sys.modules["management.db.serialization"].convert_list_to_string = mock_convert_list_to_string
-sys.modules["management.db.serialization"].convert_string_to_list = lambda s: (
+sys.modules["management.utils.serialization"] = MagicMock()
+sys.modules["management.utils.serialization"].convert_list_to_string = mock_convert_list_to_string
+sys.modules["management.utils.serialization"].convert_string_to_list = lambda s: (
     s.split(",") if s else []
 )
 
@@ -576,12 +577,7 @@ sys.modules["infrastructure.observability.bootstrap"] = MagicMock()
 # =============================================================================
 
 from nexent.core.agents.agent_model import ToolConfig
-from backend.consts.model import (
-    AgentNameBatchCheckItem,
-    AgentNameBatchCheckRequest,
-    AgentNameBatchRegenerateItem,
-    AgentNameBatchRegenerateRequest,
-)
+from contracts.models import AgentNameBatchCheckItem, AgentNameBatchCheckRequest, AgentNameBatchRegenerateItem, AgentNameBatchRegenerateRequest
 
 # Set up mock for nexent.monitor
 monitoring_manager_mock = MagicMock()
@@ -644,7 +640,9 @@ mock_backend_database_client.PostgresClient = MagicMock(
 mock_backend_database_client.get_db_session = mock_get_db_session
 mock_backend_database_client.MinioClient = MagicMock(return_value=minio_client_mock)
 mock_backend_database_client.db_client = mock_postgres_client
-sys.modules["backend.database.client"] = mock_backend_database_client
+sys.modules["management.db.client"] = mock_backend_database_client
+from test.common.database_stubs import install_serialization_stub
+install_serialization_stub(sys.modules["management.db.client"])
 
 # Mock storage client factory
 sys.modules[
@@ -654,29 +652,29 @@ sys.modules[
 # Other test modules may have imported the production model module before this
 # file installs its lightweight SDK types. Reload it against this file's
 # ``MockToolConfig`` so model validation uses one consistent class identity.
-sys.modules.pop("consts.model", None)
+sys.modules.pop("contracts.models", None)
 if hasattr(sys.modules.get("consts"), "model"):
     delattr(sys.modules["consts"], "model")
 
 # Now import backend modules
 # Load the consolidated context after its external collaborators are isolated.
 sys.modules.pop("management.services.agent.context", None)
-import management.services.agent.context as agent_context
+from management.services.agent import context as agent_context
 agent_context.build_authorized_context_input = (
     lambda agent_run_info, historical_context=None: MockContextInput(
         items=tuple(agent_run_info.agent_config.context_items or ())
     )
 )
 
-import management.services.agent.naming as naming_service
-import management.services.agent.management as agent_management
-import management.services.agent.run as agent_run_service
-import management.services.agent.service as agent_service
-import management.services.agent.execution as agent_execution
-import management.services.agent.subscription as agent_subscription
-import management.services.agent.transfer as agent_transfer
-import backend.management.services.agent.transfer as agent_transfer_backend
-import management.services.agent.run as agent_run
+from management.services.agent import naming as naming_service
+from management.services.agent import management as agent_management
+from management.services.agent import service as agent_service
+from management.services.agent import execution as agent_execution
+from management.services.agent import subscription as agent_subscription
+from management.services.agent import transfer as agent_transfer
+from management.services.agent import transfer as agent_transfer_backend
+from management.services.agent import run as agent_run
+from management.services.agent import run as agent_run_service
 from management.services.agent.icon import ICON_MAX_BYTES
 from management.services.agent.service import update_agent_info_impl
 from management.services.agent.service import list_all_agent_info_impl
@@ -721,12 +719,7 @@ from management.services.agent.read import (
     apply_duplicate_name_availability_rules as _apply_duplicate_name_availability_rules,
 )
 from nexent.core.agents.prompt.meta import render_name_template as _render_prompt_template
-from consts.model import (
-    ExportAndImportAgentInfo,
-    ExportAndImportDataFormat,
-    MCPInfo,
-    AgentRequest,
-)
+from contracts.models import ExportAndImportAgentInfo, ExportAndImportDataFormat, MCPInfo, AgentRequest
 
 # =============================================================================
 # Setup and teardown for each test
@@ -1001,7 +994,7 @@ async def test_update_agent_info_impl_success(
     # Setup
     mock_get_current_user_info.return_value = ("test_user", "test_tenant", "en")
 
-    # Create a mock AgentInfoRequest object since consts.model is mocked
+    # Create a mock AgentInfoRequest object since contracts.models is mocked
     request = MagicMock()
     request.agent_id = 123
     request.model_id = None
@@ -1167,7 +1160,7 @@ async def test_update_agent_info_impl_exception_handling(
     mock_get_current_user_info.return_value = ("test_user", "test_tenant", "en")
     mock_update_agent.side_effect = Exception("Update failed")
 
-    # Create a mock AgentInfoRequest object since consts.model is mocked
+    # Create a mock AgentInfoRequest object since contracts.models is mocked
     request = MagicMock()
     request.agent_id = 123
     request.model_id = None
@@ -1191,7 +1184,7 @@ async def test_update_agent_info_impl_reraises_agent_quota_error(
     mock_get_current_user_info, mock_update_agent
 ):
     """Agent quota errors must pass through without generic error wrapping."""
-    from consts.exceptions import TenantResourceLimitError
+    from contracts.exceptions import TenantResourceLimitError
 
     mock_get_current_user_info.return_value = ("test_user", "test_tenant", "en")
     limit_error = TenantResourceLimitError(
@@ -4373,7 +4366,7 @@ async def test_list_all_agent_info_impl_user_permission_read_only(
     mock_query_groups.return_value = [1]  # User is in group 1, so can see both agents
 
     # Mock convert_string_to_list to handle both empty strings and comma-separated values
-    # This should match the actual implementation in management.db.serialization
+    # This should match the actual implementation in management.utils.serialization
     def convert_side_effect(x):
         if not x or (isinstance(x, str) and x.strip() == ""):
             return []
@@ -4459,7 +4452,7 @@ async def test_list_all_agent_info_impl_group_filtering(
     mock_query_groups.return_value = [1, 2]  # User is in groups 1 and 2
 
     # Mock convert_string_to_list to handle both empty strings and comma-separated values
-    # This should match the actual implementation in management.db.serialization
+    # This should match the actual implementation in management.utils.serialization
     def convert_side_effect(x):
         if not x or (isinstance(x, str) and x.strip() == ""):
             return []
@@ -9051,7 +9044,7 @@ async def test_import_agent_impl_dfs_import_order(monkeypatch):
     )
 
     # Skip MCP handling by providing no mcp_info and making update_tool_list a no-op
-    from consts.model import ExportAndImportAgentInfo, ExportAndImportDataFormat
+    from contracts.models import ExportAndImportAgentInfo, ExportAndImportDataFormat
 
     root_agent = ExportAndImportAgentInfo(
         agent_id=1,
@@ -9176,7 +9169,7 @@ async def test_check_agent_name_conflict_batch_impl_detects_conflicts(monkeypatc
         raising=False,
     )
 
-    from consts.model import AgentNameBatchCheckItem, AgentNameBatchCheckRequest
+    from contracts.models import AgentNameBatchCheckItem, AgentNameBatchCheckRequest
 
     request = AgentNameBatchCheckRequest(
         items=[
@@ -9361,10 +9354,7 @@ async def test_regenerate_agent_name_batch_impl_no_model(monkeypatch):
         raising=False,
     )
 
-    from consts.model import (
-        AgentNameBatchRegenerateItem,
-        AgentNameBatchRegenerateRequest,
-    )
+    from contracts.models import AgentNameBatchRegenerateItem, AgentNameBatchRegenerateRequest
 
     request = AgentNameBatchRegenerateRequest(
         items=[AgentNameBatchRegenerateItem(agent_id=1, name="dup", display_name="Dup")]
@@ -11427,12 +11417,7 @@ async def test_get_agent_info_impl_asset_owner_role_gets_edit(
     mock_skill_service,
 ):
     """ASSET_OWNER role creator retains EDIT on ASSET_OWNER-scoped agent detail."""
-    from consts.const import (
-        ASSET_OWNER_ROLE,
-        ASSET_OWNER_TENANT_ID,
-        PERMISSION_EDIT,
-        PERMISSION_READ,
-    )
+    from consts.const import ASSET_OWNER_ROLE, ASSET_OWNER_TENANT_ID, PERMISSION_EDIT, PERMISSION_READ
 
     agent_info = {
         "agent_id": 99,
@@ -11613,7 +11598,7 @@ def test_get_agent_by_name_impl_success(mock_search, mock_query_versions):
 @patch("management.services.agent.management.search_agent_id_by_agent_name")
 def test_get_agent_by_name_impl_not_found(mock_search, mock_query_versions):
     """An expected Agent lookup miss retains its domain exception."""
-    from consts.exceptions import AgentNotFoundError
+    from contracts.exceptions import AgentNotFoundError
 
     lookup_error = AgentNotFoundError("agent not found")
     mock_search.side_effect = lookup_error
@@ -11752,7 +11737,7 @@ async def test_update_agent_info_impl_skill_update_exception(
     mock_get_user, mock_query_skills, mock_create_skill
 ):
     """Test that exception in skill update is raised as ValueError."""
-    from backend.consts.model import AgentInfoRequest
+    from contracts.models import AgentInfoRequest
 
     mock_get_user.return_value = ("user_1", "tenant_1", "en")
 
@@ -12010,7 +11995,7 @@ async def test_export_agent_with_skills_impl_with_zip(
     """Test export_agent_with_skills_impl returns ZIP when agent has skills."""
     from management.services.agent.service import export_agent_with_skills_impl
     from management.services.agent import transfer as ag_svc
-    from consts.model import SkillZipEntry
+    from contracts.models import SkillZipEntry
     import io
     import zipfile
 
@@ -12139,7 +12124,7 @@ async def test_import_agent_with_skills_impl_reuses_existing_skills(mock_get_use
     """A use-existing resolution links the existing skill instead of failing."""
     from management.services.agent.service import import_agent_with_skills_impl
     from management.services.agent import transfer as ag_svc
-    from consts.model import SkillResolution
+    from contracts.models import SkillResolution
 
     mock_get_user_info.return_value = ("user_123", "tenant_abc", "en")
 
@@ -12184,7 +12169,7 @@ async def test_import_agent_with_skills_impl_duplicate_raises_by_default(mock_ge
     """Default behaviour still hard-gates duplicate skill names."""
     from management.services.agent.service import import_agent_with_skills_impl
     from management.services.agent import transfer as ag_svc
-    from consts.exceptions import SkillDuplicateError
+    from contracts.exceptions import SkillDuplicateError
 
     mock_get_user_info.return_value = ("user_123", "tenant_abc", "en")
 
@@ -12254,7 +12239,7 @@ async def test_import_agent_with_skills_impl_resolves_existing_and_renamed_per_a
     mock_get_user_info,
 ):
     """Use-existing and renamed skills should link to their original owning agents."""
-    from consts.model import SkillResolution
+    from contracts.models import SkillResolution
     from management.services.agent.service import import_agent_with_skills_impl
     from management.services.agent import transfer as ag_svc
 
@@ -12374,7 +12359,7 @@ async def test_update_agent_info_impl_related_agent_query_error(
 ):
     """Test update_agent_info_impl handles related agent query error."""
     from management.services.agent.service import update_agent_info_impl
-    from backend.consts.model import AgentInfoRequest
+    from contracts.models import AgentInfoRequest
 
     mock_get_user.return_value = ("user_1", "tenant_1", "en")
 
@@ -12422,7 +12407,7 @@ async def test_update_agent_info_impl_related_external_agents(
     """Test update_agent_info_impl handles external agent relations."""
     from management.services.agent.service import update_agent_info_impl
     from management.services.agent import service as ag_svc
-    from backend.consts.model import AgentInfoRequest
+    from contracts.models import AgentInfoRequest
 
     mock_get_user.return_value = ("user_1", "tenant_1", "en")
     mock_query_sub.return_value = []
@@ -12479,7 +12464,7 @@ async def test_update_agent_info_impl_external_agent_remove_relation(
     """Test that external agent relation can be removed."""
     from management.services.agent.service import update_agent_info_impl
     from management.services.agent import service as ag_svc
-    from backend.consts.model import AgentInfoRequest
+    from contracts.models import AgentInfoRequest
 
     mock_get_user.return_value = ("user_1", "tenant_1", "en")
     mock_query_sub.return_value = []
@@ -12538,7 +12523,7 @@ async def test_update_agent_info_impl_external_agent_relation_exists(
     """Test that existing external agent relation is skipped (no exception)."""
     from management.services.agent.service import update_agent_info_impl
     from management.services.agent import service as ag_svc
-    from backend.consts.model import AgentInfoRequest
+    from contracts.models import AgentInfoRequest
 
     mock_get_user.return_value = ("user_1", "tenant_1", "en")
     mock_query_sub.return_value = []
@@ -12599,7 +12584,7 @@ async def test_update_agent_info_impl_external_agent_relation_exists(
 async def test_import_agent_impl_already_imported(mock_get_user):
     """Test import_agent_impl handles already-imported agent (continue path)."""
     from management.services.agent.service import import_agent_impl
-    from backend.consts.model import ExportAndImportDataFormat, ExportAndImportAgentInfo
+    from contracts.models import ExportAndImportDataFormat, ExportAndImportAgentInfo
 
     mock_get_user.return_value = ("user_1", "tenant_1", "en")
 
@@ -12657,7 +12642,7 @@ async def test_update_agent_info_impl_skill_unselected(
 ):
     """Test that unselected skills are disabled (lines 952-954)."""
     from management.services.agent.service import update_agent_info_impl
-    from backend.consts.model import AgentInfoRequest
+    from contracts.models import AgentInfoRequest
 
     mock_get_user.return_value = ("user_1", "tenant_1", "en")
 
@@ -12715,7 +12700,7 @@ async def test_update_agent_info_impl_persists_structured_skill_config(
     mock_get_valid_skill_ids,
 ):
     """The main agent save persists per-agent skill values in the same transaction flow."""
-    from backend.consts.model import AgentInfoRequest, AgentSkillInstanceRequest
+    from contracts.models import AgentInfoRequest, AgentSkillInstanceRequest
     from management.services.agent.service import update_agent_info_impl
 
     mock_get_user.return_value = ("user_1", "tenant_1", "en")
@@ -12787,8 +12772,8 @@ async def test_update_agent_info_impl_rejects_unavailable_skill_id(
     mock_get_valid_skill_ids,
 ):
     """Updating with a skill id that does not exist must raise a domain error, not 500."""
-    from backend.consts.model import AgentInfoRequest, AgentSkillInstanceRequest
-    from consts.exceptions import AppException
+    from contracts.models import AgentInfoRequest, AgentSkillInstanceRequest
+    from contracts.exceptions import AppException
     from management.services.agent.service import update_agent_info_impl
 
     mock_get_user.return_value = ("user_1", "tenant_1", "en")
@@ -12866,7 +12851,7 @@ async def test_generate_stream_unexpected_exception():
 async def test_import_agent_impl_continue_path(mock_get_user):
     """Test import_agent_impl handles continue in DFS loop."""
     from management.services.agent.service import import_agent_impl
-    from backend.consts.model import ExportAndImportDataFormat, ExportAndImportAgentInfo
+    from contracts.models import ExportAndImportDataFormat, ExportAndImportAgentInfo
 
     mock_get_user.return_value = ("user_1", "tenant_1", "en")
 
@@ -12931,7 +12916,7 @@ async def test_import_agent_impl_continue_path(mock_get_user):
 async def test_import_agent_by_agent_id_tool_param_error(mock_query_tools, mock_create):
     """Test import_agent_by_agent_id raises error for invalid tool param."""
     from management.services.agent.service import import_agent_by_agent_id
-    from backend.consts.model import ExportAndImportAgentInfo
+    from contracts.models import ExportAndImportAgentInfo
 
     mock_tool = MagicMock()
     mock_tool.class_name = "TestTool"
@@ -12978,7 +12963,7 @@ async def test_import_agent_by_agent_id_tool_param_error(mock_query_tools, mock_
 async def test_import_agent_by_agent_id_invalid_max_steps():
     """Test import_agent_by_agent_id raises error for invalid max_steps."""
     from management.services.agent.service import import_agent_by_agent_id
-    from backend.consts.model import ExportAndImportAgentInfo
+    from contracts.models import ExportAndImportAgentInfo
 
     mock_agent_info = MagicMock(spec=ExportAndImportAgentInfo)
     mock_agent_info.agent_id = 1
@@ -13011,7 +12996,7 @@ async def test_import_agent_by_agent_id_invalid_max_steps():
 async def test_import_agent_by_agent_id_invalid_name():
     """Test import_agent_by_agent_id raises error for invalid agent name."""
     from management.services.agent.service import import_agent_by_agent_id
-    from backend.consts.model import ExportAndImportAgentInfo
+    from contracts.models import ExportAndImportAgentInfo
 
     mock_agent_info = MagicMock(spec=ExportAndImportAgentInfo)
     mock_agent_info.agent_id = 1
@@ -13049,7 +13034,7 @@ async def test_import_agent_by_agent_id_publish_version_error(
 ):
     """Test import_agent_by_agent_id handles publish_version_impl exception."""
     from management.services.agent.service import import_agent_by_agent_id
-    from backend.consts.model import ExportAndImportAgentInfo
+    from contracts.models import ExportAndImportAgentInfo
 
     mock_agent_info = MagicMock(spec=ExportAndImportAgentInfo)
     mock_agent_info.agent_id = 1
@@ -13137,7 +13122,7 @@ async def test_update_agent_info_impl_external_agent_list_error(mock_get_user):
     """Test update_agent_info_impl handles external agent list error."""
     from management.services.agent.service import update_agent_info_impl
     from management.services.agent import service as ag_svc
-    from backend.consts.model import AgentInfoRequest
+    from contracts.models import AgentInfoRequest
 
     mock_get_user.return_value = ("user_1", "tenant_1", "en")
 
@@ -13185,8 +13170,8 @@ async def test_update_agent_info_impl_example_questions_exceed_limit(
     mock_get_current_user_info,
 ):
     """Test update_agent_info_impl raises AppException when example_questions exceeds 6 items."""
-    from consts.error_code import ErrorCode
-    from consts.exceptions import AppException
+    from contracts.error_code import ErrorCode
+    from contracts.exceptions import AppException
 
     mock_get_current_user_info.return_value = ("test_user", "test_tenant", "en")
 
@@ -13220,7 +13205,7 @@ async def test_export_agent_dict_impl_uses_pinned_sub_agent_versions(
 ):
     """BFS export should enqueue sub-agents with their pinned version numbers."""
     from management.services.agent.service import export_agent_dict_impl
-    from consts.model import ExportAndImportAgentInfo
+    from contracts.models import ExportAndImportAgentInfo
 
     root_agent = ExportAndImportAgentInfo(
         agent_id=1,
@@ -14288,7 +14273,7 @@ async def test_stream_agent_chunks_error_during_stream(mock_stream):
     from management.services.agent.execution import (
         _stream_agent_chunks,
     )
-    from consts.model import AgentRequest
+    from contracts.models import AgentRequest
 
     # Create a generator that raises an error
     async def error_generator():
@@ -14374,7 +14359,7 @@ async def test_stream_agent_chunks_captures_final_answer(mock_stream):
     from management.services.agent.execution import (
         _stream_agent_chunks,
     )
-    from consts.model import AgentRequest
+    from contracts.models import AgentRequest
 
     # Create a generator with final answer
     async def chunk_generator():
@@ -21150,9 +21135,7 @@ def test_is_agent_running_returns_false_when_run_is_missing(mocker):
 @pytest.mark.asyncio
 async def test_import_agent_with_skills_rejects_parameters_before_dependency_writes(mocker):
     from management.services.agent import transfer as management
-    from consts.exceptions import (
-        AgentToolImportError,
-    )
+    from contracts.exceptions import AgentToolImportError
 
     mocker.patch.object(agent_transfer, "get_current_user_info", return_value=("user", "tenant", "en"))
     mocker.patch.object(agent_transfer, "query_all_tools", return_value=[{

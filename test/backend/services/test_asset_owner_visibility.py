@@ -12,15 +12,10 @@ _REPO_ROOT = Path(__file__).resolve().parents[3]
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
-from consts.const import (
-    ASSET_OWNER_ROLE,
-    ASSET_OWNER_TENANT_ID,
-    PERMISSION_EDIT,
-    PERMISSION_READ,
-)
+from consts.const import ASSET_OWNER_ROLE, ASSET_OWNER_TENANT_ID, PERMISSION_EDIT, PERMISSION_READ
 
 PROMPTS_HIDDEN_FLAG = "prompts_hidden"
-from consts.exceptions import ValidationError
+from contracts.exceptions import ValidationError
 from management.services.permission import asset_owner as aov
 
 ASSET_OWNER_RESOURCES_ROUTE = aov.ASSET_OWNER_RESOURCES_ROUTE

@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """D5 reliability: startup recovery for interrupted no-set evaluation runs.
 
 A no-set evaluation run (``evaluation_set_id == 0``) builds its temporary cases
@@ -17,13 +19,10 @@ from __future__ import annotations
 
 import pytest
 
-from consts.evaluation_status import EvalCaseStatus, EvalRunStatus
-from database.agent_evaluation_db import (
-    fail_interrupted_no_set_runs_on_startup,
-    list_dispatchable_pending_runs,
-)
-from database.client import get_db_session
-from database.db_models import AgentEvaluation, AgentEvaluationCase
+from contracts.evaluation_status import EvalCaseStatus, EvalRunStatus
+from management.db.evaluation.runs import fail_interrupted_no_set_runs_on_startup, list_dispatchable_pending_runs
+from management.db.client import get_db_session
+from management.db.models import AgentEvaluation, AgentEvaluationCase
 
 
 ERROR_MESSAGE = "Server restarted before evaluation execution started"

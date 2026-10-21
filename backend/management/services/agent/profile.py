@@ -5,8 +5,8 @@
 import logging
 from typing import Any, Dict, List, Optional, Tuple
 
-from database.agent_db import query_sub_agent_relations, search_agent_info_by_agent_id
-from database.tool_db import search_tools_for_sub_agent
+from management.db.agent.repository import query_sub_agent_relations, search_agent_info_by_agent_id
+from management.db.tool.repository import search_tools_for_sub_agent
 from management.services.skill.service import SkillService
 from nexent.core.agents.prompt.evaluation import (
     format_agent_profile_context as compose_agent_profile_context,
@@ -107,9 +107,9 @@ def _fetch_knowledge_bases(
     if not kb_index_names:
         return []
     try:
-        from database.client import get_db_session
-        from database.db_models import KnowledgeRecord
-        from database.knowledge_db import get_knowledge_name_map_by_index_names
+        from management.db.client import get_db_session
+        from management.db.models import KnowledgeRecord
+        from management.db.knowledge_base.repository import get_knowledge_name_map_by_index_names
 
         name_map = get_knowledge_name_map_by_index_names(kb_index_names, tenant_id)
         with get_db_session() as session:

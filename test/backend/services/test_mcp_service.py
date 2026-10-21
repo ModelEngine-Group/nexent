@@ -169,11 +169,11 @@ stub_backend.database = types.ModuleType("backend.database")
 sys.modules['backend'] = stub_backend
 sys.modules['backend.database'] = stub_backend.database
 
-# Stub database.outer_api_tool_db
-stub_outer_api_tool_db = types.ModuleType("database.outer_api_tool_db")
+# Stub management.db.tool.outer_api
+stub_outer_api_tool_db = types.ModuleType("management.db.tool.outer_api")
 stub_outer_api_tool_db.query_available_openapi_services = MagicMock()
-sys.modules['database.outer_api_tool_db'] = stub_outer_api_tool_db
-sys.modules['backend.database.outer_api_tool_db'] = stub_outer_api_tool_db
+sys.modules['management.db.tool.outer_api'] = stub_outer_api_tool_db
+sys.modules['management.db.tool.outer_api'] = stub_outer_api_tool_db
 
 # Stub the managed concurrency boundary used by the MCP entrypoint.
 stub_nexent = types.ModuleType("nexent")

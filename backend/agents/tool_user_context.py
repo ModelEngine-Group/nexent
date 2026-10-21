@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """Resolve authenticated caller identity for tool-side authorization."""
 
 import logging
@@ -25,9 +27,9 @@ def agent_tree_needs_user_context(agent_config: AgentConfig) -> bool:
 
 def build_tool_user_context(user_id: str, tenant_id: str) -> dict[str, Any]:
     """Build a tenant-scoped identity snapshot without blocking a run on lookup errors."""
-    from database.group_db import query_groups_by_user
-    from database.tenant_config_db import get_single_config_info
-    from database.user_tenant_db import get_user_tenant_in_tenant
+    from management.db.identity.group import query_groups_by_user
+    from management.db.configuration.tenant import get_single_config_info
+    from management.db.identity.user_tenant import get_user_tenant_in_tenant
 
     user_context: dict[str, Any] = {
         "tenant_id": str(tenant_id or ""),

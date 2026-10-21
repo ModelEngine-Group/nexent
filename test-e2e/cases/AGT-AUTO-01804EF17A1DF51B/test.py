@@ -13,7 +13,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from consts.model import HistoryItem, NL2AgentRunRequest
+from contracts.models import HistoryItem, NL2AgentRunRequest
 from nexent.core.agents.agent_model import AgentConfig
 from nexent.core.agents.context import ContextItemInput, ContextItemType
 from nexent.core.models.capacity_budget import ContextBudgetSnapshot
@@ -61,7 +61,7 @@ def _make_context_budget_snapshot(**overrides):
 
 def _patch_dependencies(monkeypatch, *, input_budget, capacity_monitoring, resolved_capacity_snapshot, context_budget_snapshot):
     from services import nl2agent_service as nl2agent_service
-    from consts import const
+    import consts.const as const
 
     monkeypatch.setattr(nl2agent_service, 'LOCAL_MCP_SERVER', 'http://localhost:9999')
     # Runtime collaborators read the canonical constant, not this service alias.

@@ -13,29 +13,13 @@ from fastapi.responses import StreamingResponse
 from nexent.core.concurrency import ManagedTaskSpec
 
 
-from consts.const import (
-    AIDP_API_KEY,
-    AIDP_SERVER_URL,
-    ASSET_OWNER_TENANT_ID,
-    NORTHBOUND_IDEMPOTENCY_TTL_SECONDS,
-    NORTHBOUND_RATE_LIMIT_ENABLED,
-    NORTHBOUND_RATE_LIMIT_PER_MINUTE,
-)
-from consts.exceptions import (
-    AppException,
-    RuntimeMetadataValidationError,
-    LimitExceededError,
-    RuntimeServiceTimeoutError,
-    RuntimeServiceUnavailableError,
-    RuntimeUpstreamError,
-    UnauthorizedError,
-    ConversationNotFoundError,
-)
-from consts.error_code import ErrorCode, RuntimeMetadataValidationCode
-from consts.model import AgentRequest, ToolParamsRequest
-from database.knowledge_db import get_knowledge_info_by_tenant_id
-from database.conversation_db import get_conversation_list, get_conversation_messages
-from database.token_db import get_latest_usage_metadata, log_token_usage
+from consts.const import AIDP_API_KEY, AIDP_SERVER_URL, ASSET_OWNER_TENANT_ID, NORTHBOUND_IDEMPOTENCY_TTL_SECONDS, NORTHBOUND_RATE_LIMIT_ENABLED, NORTHBOUND_RATE_LIMIT_PER_MINUTE
+from contracts.exceptions import AppException, RuntimeMetadataValidationError, LimitExceededError, RuntimeServiceTimeoutError, RuntimeServiceUnavailableError, RuntimeUpstreamError, UnauthorizedError, ConversationNotFoundError
+from contracts.error_code import ErrorCode, RuntimeMetadataValidationCode
+from contracts.models import AgentRequest, ToolParamsRequest
+from management.db.knowledge_base.repository import get_knowledge_info_by_tenant_id
+from management.db.conversation.repository import get_conversation_list, get_conversation_messages
+from management.db.identity.token import get_latest_usage_metadata, log_token_usage
 from management.services.agent.service import (
     get_agent_by_name_impl,
 )
@@ -63,7 +47,7 @@ from infrastructure.serialization.runtime_metadata import (
     validate_runtime_metadata,
 )
 from management.services.file.service import upload_to_minio, resolve_minio_upload_folder, validate_urls_access
-from database.attachment_db import get_file_url, get_file_size_from_minio
+from management.db.file.attachment import get_file_url, get_file_size_from_minio
 from nexent.multi_modal.utils import parse_s3_url
 
 logger = logging.getLogger("northbound_service")
@@ -168,7 +152,7 @@ def _normalize_northbound_attachments(
     1. List of S3 URL strings (backward compatible): ["s3://nexent/...", "/nexent/...", "attachments/..."]
     2. List of attachment objects (full metadata): [{"object_name": "...", "name": "...", ...}]
     """
-    from database.attachment_db import _build_mcp_presigned_url
+    from management.db.file.attachment import _build_mcp_presigned_url
 
     if attachments is None:
         return None

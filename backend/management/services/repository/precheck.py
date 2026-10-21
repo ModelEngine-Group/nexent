@@ -6,28 +6,15 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Optional, Set, Tuple
 
-from consts.model import (
-    ModelConnectStatusEnum,
-    RepositoryImportPrecheckResponse,
-    RepositoryImportRequirementItem,
-    ToolSourceEnum,
-)
+from contracts.models import ModelConnectStatusEnum, RepositoryImportPrecheckResponse, RepositoryImportRequirementItem, ToolSourceEnum
 from management.services.model.resolver import is_model_available
-from database import skill_db
-from database.knowledge_db import (
-    get_knowledge_name_map_by_index_names,
-    get_knowledge_record,
-)
-from database.model_management_db import (
-    get_model_by_model_id,
-    get_model_id_by_display_name,
-)
-from database.remote_mcp_db import get_mcp_server_by_name_and_tenant
-from database.tool_db import query_all_tools
+from management.db.skill import repository as skill_db
+from management.db.knowledge_base.repository import get_knowledge_name_map_by_index_names, get_knowledge_record
+from management.db.model.repository import get_model_by_model_id, get_model_id_by_display_name
+from management.db.mcp.remote import get_mcp_server_by_name_and_tenant
+from management.db.tool.repository import query_all_tools
 from management.services.skill.naming import generate_available_copy_skill_name
-from consts.exceptions import (
-    AgentToolImportError,
-)
+from contracts.exceptions import AgentToolImportError
 from management.services.agent.policy import validate_import_tool_params
 
 _KB_TOOL_CLASS_NAMES = frozenset({

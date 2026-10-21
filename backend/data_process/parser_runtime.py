@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """Process-local parser runtime used by the Celery prefork children."""
 
 from __future__ import annotations
@@ -11,14 +13,7 @@ from collections.abc import Iterable
 from io import BytesIO
 from typing import Any
 
-from consts.const import (
-    DEFAULT_EXPECTED_CHUNK_SIZE,
-    DEFAULT_MAXIMUM_CHUNK_SIZE,
-    DP_PARSE_THREADS_PER_PROCESS,
-    DP_PRELOAD_MODELS,
-    TABLE_TRANSFORMER_MODEL_PATH,
-    UNSTRUCTURED_DEFAULT_MODEL_INITIALIZE_PARAMS_JSON_PATH,
-)
+from consts.const import DEFAULT_EXPECTED_CHUNK_SIZE, DEFAULT_MAXIMUM_CHUNK_SIZE, DP_PARSE_THREADS_PER_PROCESS, DP_PRELOAD_MODELS, TABLE_TRANSFORMER_MODEL_PATH, UNSTRUCTURED_DEFAULT_MODEL_INITIALIZE_PARAMS_JSON_PATH
 
 
 logger = logging.getLogger("data_process.parser_runtime")
@@ -135,7 +130,7 @@ class ParserRuntime:
             process_params["task_id"] = task_id
         if model_id and tenant_id:
             try:
-                from database.model_management_db import get_model_by_model_id
+                from management.db.model.repository import get_model_by_model_id
 
                 record = get_model_by_model_id(model_id=model_id, tenant_id=tenant_id)
                 if record:
@@ -157,7 +152,7 @@ class ParserRuntime:
             with open(source, "rb") as source_file:
                 return source_file.read()
         if source_type == "minio":
-            from database.attachment_db import get_file_stream
+            from management.db.file.attachment import get_file_stream
 
             stream = get_file_stream(source)
             if stream is None:
@@ -230,7 +225,7 @@ class ParserRuntime:
 
     @staticmethod
     def _append_image_chunks(source: str, chunks: list[dict[str, Any]], images_info: list[dict[str, Any]]) -> None:
-        from database.attachment_db import build_s3_url, upload_fileobj
+        from management.db.file.attachment import build_s3_url, upload_fileobj
 
         for index, image_data in enumerate(images_info):
             if not isinstance(image_data, dict) or "image_bytes" not in image_data:

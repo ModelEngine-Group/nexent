@@ -6,24 +6,10 @@ Group service for managing groups and group memberships.
 import logging
 from typing import Any, Dict, List, Optional, Union
 
-from database.group_db import (
-    query_groups,
-    query_groups_by_tenant,
-    add_group,
-    modify_group,
-    remove_group,
-    add_user_to_group,
-    remove_user_from_group,
-    query_group_users,
-    query_groups_by_user,
-    query_group_ids_by_user,
-    check_user_in_group,
-    count_group_users,
-    check_group_name_exists
-)
-from database.user_tenant_db import get_user_tenant_by_user_id
-from database.tenant_config_db import get_single_config_info, insert_config, update_config_by_tenant_config_id
-from consts.exceptions import NotFoundException, UnauthorizedError, ValidationError
+from management.db.identity.group import query_groups, query_groups_by_tenant, add_group, modify_group, remove_group, add_user_to_group, remove_user_from_group, query_group_users, query_groups_by_user, query_group_ids_by_user, check_user_in_group, count_group_users, check_group_name_exists
+from management.db.identity.user_tenant import get_user_tenant_by_user_id
+from management.db.configuration.tenant import get_single_config_info, insert_config, update_config_by_tenant_config_id
+from contracts.exceptions import NotFoundException, UnauthorizedError, ValidationError
 from consts.const import DEFAULT_GROUP_ID
 from management.services.permission.identity.tenants import get_tenant_info
 from management.services.permission.identity.display import enrich_cas_usernames

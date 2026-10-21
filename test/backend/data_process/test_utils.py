@@ -336,14 +336,14 @@ def test_document_lifecycle_and_delete_fence_helpers(monkeypatch):
     from backend.data_process import utils
 
     transitions = []
-    lifecycle = types.ModuleType("database.knowledge_file_lifecycle_db")
+    lifecycle = types.ModuleType("management.db.knowledge_base.file_lifecycle")
     lifecycle.get_file_record = lambda **kwargs: (
         {"file_id": "fid", "status": "PROCESSING"}
         if kwargs.get("file_id") == "fid"
         else {"file_id": "source-fid", "status": "PROCESSING"}
     )
     lifecycle.transition_file_record = lambda file_id, **kwargs: transitions.append((file_id, kwargs))
-    monkeypatch.setitem(sys.modules, "database.knowledge_file_lifecycle_db", lifecycle)
+    monkeypatch.setitem(sys.modules, "management.db.knowledge_base.file_lifecycle", lifecycle)
 
     utils.update_file_lifecycle(
         file_id="fid", tenant_id="tenant", index_name="idx", source="source", status="FORWARDING", stage="FORWARD"

@@ -106,7 +106,7 @@ def test_apply_workbench_runtime_plan_attaches_all_runtime_overrides(monkeypatch
 async def test_prepare_agent_run_forwards_workbench_runtime_state(
     monkeypatch, stored_generation
 ):
-    from consts.model import WorkbenchGenerationConfig
+    from contracts.models import WorkbenchGenerationConfig
 
     request = _request()
     request.__dict__["_runtime_knowledge_context"] = {"policy": "strict"}
@@ -187,7 +187,7 @@ async def test_prepare_agent_run_forwards_workbench_runtime_state(
 @pytest.mark.asyncio
 async def test_run_agent_stream_resolves_and_persists_existing_workbench(monkeypatch):
     from fastapi import Request
-    from consts.model import WorkbenchSessionConfig
+    from contracts.models import WorkbenchSessionConfig
 
     canonical = WorkbenchSessionConfig.model_validate(
         {
@@ -286,7 +286,7 @@ async def test_run_agent_stream_resolves_and_persists_existing_workbench(monkeyp
 @pytest.mark.asyncio
 async def test_run_agent_stream_rejects_disabled_workbench_entrypoint(monkeypatch):
     from fastapi import Request
-    from consts.model import WorkbenchSessionConfig
+    from contracts.models import WorkbenchSessionConfig
 
     workbench = WorkbenchSessionConfig.model_validate(
         {"mode": "single_agent_chat", "agent_mounts": [{"agent_id": 7}]}
@@ -357,7 +357,7 @@ async def test_run_agent_stream_rejects_conversation_entrypoint_mismatch(monkeyp
 @pytest.mark.asyncio
 async def test_run_agent_stream_rejects_stale_metadata_version(monkeypatch):
     from fastapi import Request
-    from consts.model import WorkbenchSessionConfig
+    from contracts.models import WorkbenchSessionConfig
 
     workbench = WorkbenchSessionConfig.model_validate(
         {"mode": "single_agent_chat", "agent_mounts": [{"agent_id": 7}]}

@@ -17,16 +17,10 @@ import redis
 from celery import states
 from PIL import Image
 
-from consts.const import (
-    CLIP_MODEL_PATH,
-    IMAGE_FILTER,
-    MAX_CONCURRENT_CONVERSIONS,
-    REDIS_BACKEND_URL,
-    REDIS_URL,
-)
-from consts.error_code import ErrorCode
-from consts.exceptions import AppException, OfficeConversionException
-from consts.model import BatchTaskRequest
+from consts.const import CLIP_MODEL_PATH, IMAGE_FILTER, MAX_CONCURRENT_CONVERSIONS, REDIS_BACKEND_URL, REDIS_URL
+from contracts.error_code import ErrorCode
+from contracts.exceptions import AppException, OfficeConversionException
+from contracts.models import BatchTaskRequest
 from data_process.app import app as celery_app
 from data_process.tasks import submit_process_forward_chain
 from data_process.utils import (
@@ -34,13 +28,7 @@ from data_process.utils import (
     get_task_info,
 )
 from data_process.utils import get_task_details as get_task_details_info
-from database.attachment_db import (
-    delete_file,
-    file_exists,
-    get_file_size_from_minio,
-    get_file_stream,
-    upload_file,
-)
+from management.db.file.attachment import delete_file, file_exists, get_file_size_from_minio, get_file_stream, upload_file
 from management.services.file.upload import convert_office_to_pdf
 from infrastructure.ingestion.errors import classify_ingestion_exception
 

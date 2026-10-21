@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import os
 from pathlib import Path
 import subprocess
@@ -5,15 +7,7 @@ import sys
 
 import pytest
 
-from backend.consts.const import (
-    MAX_KNOWLEDGE_BASES_PER_TENANT,
-    MAX_KNOWLEDGE_BASES_PER_USER,
-    MAX_KNOWLEDGE_FILE_SIZE_MB,
-    MAX_PRIVILEGED_KNOWLEDGE_BASES_PER_USER,
-    RUNTIME_AGENT_ID_MAX_CONCURRENT_RUNS,
-    RUNTIME_AGENT_THREAD_MAX_WORKERS,
-    RUNTIME_MCP_TOOL_TIMEOUT_SECONDS,
-)
+from backend.consts.const import MAX_KNOWLEDGE_BASES_PER_TENANT, MAX_KNOWLEDGE_BASES_PER_USER, MAX_KNOWLEDGE_FILE_SIZE_MB, MAX_PRIVILEGED_KNOWLEDGE_BASES_PER_USER, RUNTIME_AGENT_ID_MAX_CONCURRENT_RUNS, RUNTIME_AGENT_THREAD_MAX_WORKERS, RUNTIME_MCP_TOOL_TIMEOUT_SECONDS
 
 
 def test_knowledge_resource_defaults_match_deployment_example():

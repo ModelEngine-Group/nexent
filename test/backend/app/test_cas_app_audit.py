@@ -36,7 +36,7 @@ LOGOUT_REQUEST_XML = """
 """
 
 # Import-time isolation: the CAS client talks to an external CAS server.
-_STUBBED_MODULES = ["management.services.permission.identity.cas", "apps.cas_app"]
+_STUBBED_MODULES = ["management.services.permission.identity.cas", "management.api.identity.cas"]
 _ORIGINAL_MODULES = {name: sys.modules.get(name) for name in _STUBBED_MODULES}
 
 cas_service_stub = MagicMock()
@@ -47,14 +47,14 @@ cas_service_stub.revoke_from_logout_request = MagicMock(return_value=CAS_LOGOUT_
 sys.modules["management.services.permission.identity.cas"] = cas_service_stub
 # Rebuild the app module against the stub above instead of reusing one a legacy
 # file already imported against its own stubs.
-sys.modules.pop("apps.cas_app", None)
+sys.modules.pop("management.api.identity.cas", None)
 
 from http import HTTPStatus  # noqa: E402
 
 from fastapi import FastAPI  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
 
-from apps.cas_app import router  # noqa: E402
+from management.api.identity.cas import router
 
 for _name, _module in _ORIGINAL_MODULES.items():
     if _module is None:

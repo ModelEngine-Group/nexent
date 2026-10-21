@@ -23,8 +23,8 @@ current_dir = os.path.dirname(os.path.abspath(__file__))
 backend_dir = os.path.abspath(os.path.join(current_dir, "../../../backend"))
 sys.path.append(backend_dir)
 
-from consts.error_code import ErrorCode
-from consts.exceptions import AppException, QuotaExceededError
+from contracts.error_code import ErrorCode
+from contracts.exceptions import AppException, QuotaExceededError
 
 # Patch environment variables before any imports that might use them
 # Environment variables are now configured in conftest.py
@@ -41,8 +41,8 @@ minio_mock._ensure_bucket_exists = MagicMock()
 minio_mock.client = MagicMock()
 patch('nexent.storage.storage_client_factory.create_storage_client_from_config', return_value=storage_client_mock).start()
 patch('nexent.storage.minio_config.MinIOStorageConfig.validate', lambda self: None).start()
-patch('backend.database.client.MinioClient', return_value=minio_mock).start()
-patch('backend.database.client.minio_client', minio_mock).start()
+patch('management.db.client.MinioClient', return_value=minio_mock).start()
+patch('management.db.client.minio_client', minio_mock).start()
 
 # Stub Elasticsearch service module to avoid initializing real client during import
 services_stub = types.ModuleType('services')
@@ -115,14 +115,14 @@ list_files_impl = file_management_service.list_files_impl
 def setup_patches():
     """Setup global patches for the test module"""
     patches = [
-        patch('backend.database.client.db_client', MagicMock()),
-        patch('backend.database.attachment_db.minio_client', minio_mock),
-        patch('backend.database.attachment_db.upload_fileobj', MagicMock()),
-        patch('backend.database.attachment_db.get_file_url', MagicMock()),
-        patch('backend.database.attachment_db.get_content_type', MagicMock()),
-        patch('backend.database.attachment_db.get_file_stream', MagicMock()),
-        patch('backend.database.attachment_db.delete_file', MagicMock()),
-        patch('backend.database.attachment_db.list_files', MagicMock()),
+        patch('management.db.client.db_client', MagicMock()),
+        patch('management.db.file.attachment.minio_client', minio_mock),
+        patch('management.db.file.attachment.upload_fileobj', MagicMock()),
+        patch('management.db.file.attachment.get_file_url', MagicMock()),
+        patch('management.db.file.attachment.get_content_type', MagicMock()),
+        patch('management.db.file.attachment.get_file_stream', MagicMock()),
+        patch('management.db.file.attachment.delete_file', MagicMock()),
+        patch('management.db.file.attachment.list_files', MagicMock()),
         patch_import_context('management.services.file.service.create_file_records',
               side_effect=_stub_create_file_records),
         patch_import_context('management.services.file.service.transition_file_record',
@@ -1251,7 +1251,7 @@ class TestDeleteFileImpl:
 
     @pytest.mark.asyncio
     async def test_delete_kb_source_requires_same_tenant_ledger_and_releases_charge(self):
-        ledger_module = types.ModuleType("database.knowledge_storage_object_db")
+        ledger_module = types.ModuleType("management.db.knowledge_base.storage_object")
         ledger_module.get_storage_object = MagicMock(return_value={"storage_object_id": 1})
         storage_module = types.ModuleType("management.services.knowledge_base.storage")
         storage_module.resolve_storage_reference = MagicMock(
@@ -1263,7 +1263,7 @@ class TestDeleteFileImpl:
         storage_module.release_storage_charge = MagicMock(return_value=True)
 
         with patch.dict(sys.modules, {
-            "database.knowledge_storage_object_db": ledger_module,
+            "management.db.knowledge_base.storage_object": ledger_module,
             "management.services.knowledge_base.storage": storage_module,
         }), patch_import_context(
             "management.services.file.service.delete_file",
@@ -1289,7 +1289,7 @@ class TestDeleteFileImpl:
 
     @pytest.mark.asyncio
     async def test_delete_kb_source_denies_missing_or_cross_tenant_ledger(self):
-        ledger_module = types.ModuleType("database.knowledge_storage_object_db")
+        ledger_module = types.ModuleType("management.db.knowledge_base.storage_object")
         ledger_module.get_storage_object = MagicMock(return_value=None)
         storage_module = types.ModuleType("management.services.knowledge_base.storage")
         storage_module.resolve_storage_reference = MagicMock(
@@ -1301,7 +1301,7 @@ class TestDeleteFileImpl:
         storage_module.release_storage_charge = MagicMock()
 
         with patch.dict(sys.modules, {
-            "database.knowledge_storage_object_db": ledger_module,
+            "management.db.knowledge_base.storage_object": ledger_module,
             "management.services.knowledge_base.storage": storage_module,
         }), patch_import_context(
             "management.services.file.service.delete_file",
@@ -2666,7 +2666,7 @@ class TestResolvePreviewFile:
     async def test_file_too_large_raises_exception(self):
         """Files exceeding FILE_PREVIEW_SIZE_LIMIT raise FileTooLargeException."""
         from management.services.file.service import resolve_preview_file, FILE_PREVIEW_SIZE_LIMIT
-        from consts.exceptions import FileTooLargeException
+        from contracts.exceptions import FileTooLargeException
 
         oversized = FILE_PREVIEW_SIZE_LIMIT + 1
         with patch_import_context('management.services.file.service.file_exists', return_value=True), \
@@ -2680,7 +2680,7 @@ class TestResolvePreviewFile:
     async def test_unsupported_file_type_raises_exception(self):
         """Unsupported content types raise UnsupportedFileTypeException."""
         from management.services.file.service import resolve_preview_file
-        from consts.exceptions import UnsupportedFileTypeException
+        from contracts.exceptions import UnsupportedFileTypeException
 
         with patch_import_context('management.services.file.service.file_exists', return_value=True), \
              patch_import_context('management.services.file.service.get_file_size_from_minio', return_value=1024), \
@@ -2696,7 +2696,7 @@ class TestResolvePreviewFile:
     async def test_missing_direct_preview_file_raises_not_found(self):
         """Missing direct-preview file should raise NotFoundException instead of resolving as empty."""
         from management.services.file.service import resolve_preview_file
-        from consts.exceptions import NotFoundException
+        from contracts.exceptions import NotFoundException
 
         with patch_import_context('management.services.file.service.file_exists', return_value=False):
             with pytest.raises(NotFoundException) as exc_info:
@@ -2732,7 +2732,7 @@ class TestGetPreviewStream:
     def test_raises_not_found_when_stream_is_none(self):
         """Raises NotFoundException when no-range stream source returns None."""
         from management.services.file.service import get_preview_stream
-        from consts.exceptions import NotFoundException
+        from contracts.exceptions import NotFoundException
 
         with patch_import_context('management.services.file.service.get_file_stream_raw', return_value=None):
             with pytest.raises(NotFoundException) as exc_info:
@@ -2860,7 +2860,7 @@ class TestConvertOfficeToCachedPdf:
     async def test_http_error_re_raises_exception(self):
         """Non-200 HTTP response from data-process raises a sanitized OfficeConversionException."""
         from management.services.file.service import _convert_office_to_cached_pdf
-        from consts.exceptions import OfficeConversionException
+        from contracts.exceptions import OfficeConversionException
 
         mock_response = MagicMock()
         mock_response.status_code = 503
@@ -2891,7 +2891,7 @@ class TestConvertOfficeToCachedPdf:
     async def test_copy_failure_re_raises_and_cleans_up_temp(self):
         """copy_file failure raises a sanitized OfficeConversionException and cleans up temp file."""
         from management.services.file.service import _convert_office_to_cached_pdf
-        from consts.exceptions import OfficeConversionException
+        from contracts.exceptions import OfficeConversionException
 
         mock_response = MagicMock()
         mock_response.status_code = 200
@@ -2925,7 +2925,7 @@ class TestConvertOfficeToCachedPdf:
     async def test_office_conversion_exception_passthrough(self):
         """Existing OfficeConversionException should be re-raised without wrapping."""
         from management.services.file.service import _convert_office_to_cached_pdf
-        from consts.exceptions import OfficeConversionException
+        from contracts.exceptions import OfficeConversionException
 
         mock_client = AsyncMock()
         mock_client.post = AsyncMock(side_effect=OfficeConversionException("upstream conversion failed"))
@@ -2952,7 +2952,7 @@ class TestConvertOfficeToCachedPdf:
     async def test_non_office_exception_is_wrapped(self):
         """Unexpected exceptions should be wrapped as OfficeConversionException with cause."""
         from management.services.file.service import _convert_office_to_cached_pdf
-        from consts.exceptions import OfficeConversionException
+        from contracts.exceptions import OfficeConversionException
 
         mock_client = AsyncMock()
         mock_client.post = AsyncMock(side_effect=RuntimeError("network broken"))
@@ -2980,7 +2980,7 @@ class TestConvertOfficeToCachedPdf:
     async def test_reuses_existing_lock_for_same_object(self):
         """If a lock for object_name already exists, it is reused."""
         import asyncio as _asyncio
-        import management.services.file.service as _svc
+        from management.services.file import service as _svc
         from management.services.file.service import _convert_office_to_cached_pdf
 
         existing_lock = _asyncio.Lock()

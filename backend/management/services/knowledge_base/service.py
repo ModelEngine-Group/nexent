@@ -18,15 +18,9 @@ import uuid
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
-from consts.const import (
-    LANGUAGE,
-)
-from consts.model import ChunkCreateRequest, ChunkUpdateRequest
-from database.knowledge_db import (
-    get_knowledge_record,
-    update_knowledge_record,
-    update_last_summary_time,
-)
+from consts.const import LANGUAGE
+from contracts.models import ChunkCreateRequest, ChunkUpdateRequest
+from management.db.knowledge_base.repository import get_knowledge_record, update_knowledge_record, update_last_summary_time
 from fastapi import Body, Depends, Path, Query
 from fastapi.responses import StreamingResponse
 from management.services.knowledge_base.common import (

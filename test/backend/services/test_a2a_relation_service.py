@@ -4,9 +4,9 @@
 import pytest
 
 from test.backend.services import test_agent_service as legacy
-from consts.exceptions import AgentNotFoundError, ForbiddenError
+from contracts.exceptions import AgentNotFoundError, ForbiddenError
 from management.services.agent import authorization as service
-from consts.exceptions import AgentDraftEditError
+from contracts.exceptions import AgentDraftEditError
 
 
 @pytest.mark.parametrize("code, error", [

@@ -1,0 +1,317 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+import logging
+from contextlib import asynccontextmanager
+from http import HTTPStatus
+
+from fastapi import APIRouter, File, Form, Header, HTTPException, UploadFile
+from fastapi.responses import JSONResponse
+
+from contracts.exceptions import OfficeConversionException
+from contracts.models import BatchTaskRequest, ConvertStateRequest, TaskRequest
+from data_process.parse_tasks import load_chunks_from_redis
+from data_process.tasks import process_sync, submit_process_forward_chain
+from data_process.utils import get_task_details as get_task_details_util
+from data_process.services.tasks import get_data_process_service
+
+
+logger = logging.getLogger("data_process.app")
+
+# Use shared service instance
+service = get_data_process_service()
+
+
+@asynccontextmanager
+async def lifespan(app: APIRouter):
+    # Startup
+    try:
+        await service.start()
+        yield
+    finally:
+        # Shutdown
+        await service.stop()
+
+
+router = APIRouter(prefix="/tasks", lifespan=lifespan)
+
+
+@router.post("")
+async def create_task(request: TaskRequest, authorization: str | None = Header(None)):
+    """
+    Create a new data processing task (Process → Forward chain)
+
+    Returns task ID immediately. Processing happens in the background.
+    Tasks are forwarded to Elasticsearch when complete.
+    """
+    logger.info(f"Creating task with source_type: {request.source_type}, model_id: {request.embedding_model_id}")
+    task_id = submit_process_forward_chain(
+        source=request.source,
+        source_type=request.source_type,
+        chunking_strategy=request.chunking_strategy,
+        index_name=request.index_name,
+        original_filename=request.original_filename,
+        authorization=authorization,
+        embedding_model_id=request.embedding_model_id,
+        tenant_id=request.tenant_id,
+        file_id=getattr(request, "file_id", None),
+        telemetry_context=getattr(request, "telemetry_context", {}) or {},
+    )
+    if not task_id:
+        raise HTTPException(
+            status_code=HTTPStatus.SERVICE_UNAVAILABLE,
+            detail="Failed to enqueue data processing task",
+        )
+    return JSONResponse(status_code=HTTPStatus.CREATED, content={"task_id": task_id})
+
+
+@router.post("/process")
+async def process_sync_endpoint(
+    source: str = Form(...),
+    source_type: str = Form(...),
+    chunking_strategy: str = Form("basic"),
+    timeout: int = Form(30),
+):
+    """
+    Process a file synchronously and return extracted text immediately
+
+    This endpoint provides real-time file processing for immediate text extraction.
+    Uses high-priority processing queue for fast response.
+
+    Parameters:
+        source: File path, URL, or text content to process
+        source_type: Type of source ("local", "minio")
+        chunking_strategy: Strategy for chunking the document
+        timeout: Maximum time to wait for processing (seconds)
+
+    Returns:
+        JSON object containing extracted text and metadata
+    """
+    try:
+        # Use the synchronous process task with high priority
+        task_result = process_sync.apply_async(
+            kwargs={"source": source, "source_type": source_type, "chunking_strategy": chunking_strategy},
+            priority=0,  # High priority for real-time processing
+            queue="parse_q",
+        )
+        # Wait for the result with timeout
+        result = task_result.get(timeout=timeout)
+        chunks = load_chunks_from_redis(result["chunks_key"])
+        text = "\n\n".join(str(chunk.get("content", "")) for chunk in chunks)
+        return JSONResponse(
+            status_code=HTTPStatus.OK,
+            content={
+                "success": True,
+                "task_id": task_result.id,
+                "source": source,
+                "text": text,
+                "chunks": chunks,
+                "chunks_count": result["chunks_count"],
+                "processing_time": result["processing_time"],
+                "text_length": result["text_length"],
+            },
+        )
+    except HTTPException:
+        # Preserve explicit HTTP errors
+        raise
+    except Exception as e:
+        logger.error(f"Error in synchronous processing: {e!s}")
+        raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=f"Error processing file: {e!s}")
+
+
+@router.post("/batch")
+async def create_batch_tasks(request: BatchTaskRequest, authorization: str | None = Header(None)):
+    """
+    Create multiple data processing tasks at once (individual Process → Forward chains)
+
+    Returns list of task IDs immediately. Each file gets its own task for better status tracking.
+    Processing happens in the background for each file independently.
+    """
+    try:
+        submission_result = await service.create_batch_tasks_impl(authorization=authorization, request=request)
+        return JSONResponse(status_code=HTTPStatus.CREATED, content=submission_result)
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error creating batch tasks: {e!s}")
+        raise HTTPException(
+            status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=f"Failed to create batch tasks: {e!s}"
+        )
+
+
+@router.get("/load_image")
+async def load_image(url: str):
+    """
+    Load an image from URL and return it as base64 encoded data
+
+    Parameters:
+        url: Image URL to load
+
+    Returns:
+        JSON object containing base64 encoded image data and content type
+    """
+    try:
+        # Use the service to load the image
+        image = await service.load_image(url)
+
+        if image is None:
+            raise HTTPException(
+                status_code=HTTPStatus.NOT_FOUND, detail="Failed to load image or image format not supported"
+            )
+
+        image_data, content_type = await service.convert_to_base64(image)
+        return JSONResponse(
+            status_code=HTTPStatus.OK, content={"success": True, "base64": image_data, "content_type": content_type}
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error loading image: {e!s}")
+        raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=f"Error loading image: {e!s}")
+
+
+@router.get("")
+async def list_tasks():
+    """Get a list of all tasks with their basic status information"""
+    tasks = await service.get_all_tasks()
+
+    task_responses = []
+    for task in tasks:
+        task_responses.append(
+            {
+                "id": task["id"],
+                "task_name": task["task_name"],
+                "index_name": task["index_name"],
+                "path_or_url": task["path_or_url"],
+                "original_filename": task["original_filename"],
+                "status": task["status"],
+                "created_at": task["created_at"],
+                "updated_at": task["updated_at"],
+                "error": task["error"],
+            }
+        )
+
+    return JSONResponse(status_code=HTTPStatus.OK, content={"tasks": task_responses})
+
+
+@router.get("/indices/{index_name}")
+async def get_index_tasks(index_name: str):
+    """
+    Get all active tasks for a specific index
+
+    Returns tasks that are being processed or waiting to be processed
+    """
+    import time
+
+    start = time.time()
+    try:
+        result = await service.get_index_tasks(index_name)
+        logger.info(f"[get_index_tasks] index={index_name}, tasks={len(result)}, duration={time.time() - start:.3f}s")
+        return result
+    except Exception as e:
+        logger.error(f"[get_index_tasks] error: {e}")
+        raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=str(e))
+
+
+@router.get("/{task_id}/details")
+async def get_task_details(task_id: str):
+    """Get detailed information about a task, including results"""
+    task = await get_task_details_util(task_id)
+    if not task:
+        raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail="Task not found")
+    return task
+
+
+@router.post("/filter_important_image")
+async def filter_important_image(
+    image_url: str = Form(...),
+    positive_prompt: str = Form("an important image"),
+    negative_prompt: str = Form("an unimportant image"),
+):
+    """
+    Check if an image is important
+
+    Uses AI to determine image importance based on provided prompts.
+    Returns importance score and confidence level.
+    """
+    try:
+        result = await service.filter_important_image(
+            image_url=image_url, positive_prompt=positive_prompt, negative_prompt=negative_prompt
+        )
+        return JSONResponse(status_code=HTTPStatus.OK, content=result)
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error processing image: {e!s}")
+        raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=f"Error processing image: {e!s}")
+
+
+@router.post("/process_text_file")
+async def process_text_file(file: UploadFile = File(...), chunking_strategy: str = Form("basic")):
+    """
+    Transfer the uploaded file to text content using SDK DataProcessCore
+
+    This interface is specifically used for file-to-text conversion, supporting multiple file formats including PDF, Word, Excel, etc.
+    Uses DataProcessCore from SDK for direct in-memory processing.
+
+    Returns a JSON object containing the extracted text and metadata.
+    """
+    try:
+        logger.info(f"Processing uploaded file: {file.filename} using SDK DataProcessCore")
+
+        file_content = await file.read()
+        filename = file.filename or "unknown_file"
+
+        result = await service.process_uploaded_text_file(
+            file_content=file_content,
+            filename=filename,
+            chunking_strategy=chunking_strategy,
+        )
+        return JSONResponse(content=result)
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception(f"Error processing uploaded file {file.filename}: {e!s}")
+        raise HTTPException(
+            status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=f"An error occurred while processing the file: {e!s}"
+        )
+
+
+@router.post("/convert_state")
+async def convert_state(request: ConvertStateRequest):
+    """
+    Convert process state to forward state
+
+    This endpoint converts a process state string to a forward state string.
+    """
+    try:
+        result = service.convert_celery_states_to_custom(
+            process_celery_state=request.process_state or "", forward_celery_state=request.forward_state or ""
+        )
+        return JSONResponse(status_code=HTTPStatus.OK, content={"state": result})
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error converting state: {e!s}")
+        raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=f"Error converting state: {e!s}")
+
+
+@router.post("/convert_to_pdf")
+async def convert_office_to_pdf(object_name: str = Form(...), pdf_object_name: str = Form(...)):
+    """
+    Convert an Office document stored in MinIO to PDF.
+
+    Parameters:
+        object_name: Source Office file path in MinIO
+        pdf_object_name: Destination PDF path in MinIO
+    """
+    try:
+        await service.convert_office_to_pdf_impl(
+            object_name=object_name,
+            pdf_object_name=pdf_object_name,
+        )
+        return JSONResponse(status_code=HTTPStatus.OK, content={"success": True})
+    except OfficeConversionException as exc:
+        logger.error(f"Office conversion failed for '{object_name}': {exc}")
+        raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=str(exc))
+    except Exception as exc:
+        logger.error(f"Unexpected error during conversion for '{object_name}': {exc}")
+        raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=f"Office conversion failed: {exc}")

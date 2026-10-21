@@ -174,7 +174,7 @@ class AutomationResponse(BaseModel):
 
 from dataclasses import dataclass
 
-from consts.const import LANGUAGE
+from contracts.localization import LANGUAGE
 
 
 @dataclass(frozen=True)

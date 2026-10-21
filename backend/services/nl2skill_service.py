@@ -24,8 +24,8 @@ from agents.create_agent_info import (
 from agents.nl2skill_agent import create_nl2skill_agent_config
 from management.services.agent.context import build_authorized_context_input
 from consts.const import LANGUAGE, MODEL_CONFIG_MAPPING
-from consts.model import HistoryItem, NL2SkillRunRequest
-from database.model_management_db import get_model_by_model_id
+from contracts.models import HistoryItem, NL2SkillRunRequest
+from management.db.model.repository import get_model_by_model_id
 from management.services.configuration.tenant.settings import tenant_config_manager
 from management.services.model.names import get_model_name_from_config
 from management.services.skill.stream_parser import SkillStreamParser

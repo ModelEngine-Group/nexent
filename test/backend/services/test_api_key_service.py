@@ -7,7 +7,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from management.services.permission import api_keys as api_key_service
-from consts.exceptions import ForbiddenError, NotFoundException, ValidationError
+from contracts.exceptions import ForbiddenError, NotFoundException, ValidationError
 
 
 @pytest.mark.parametrize(

@@ -17,34 +17,14 @@ from typing import Dict, List, Optional
 
 from agents.create_agent_info import create_tool_config_list
 from consts.const import MODEL_CONFIG_MAPPING
-from consts.exceptions import ForbiddenError, SkillDuplicateError
-from consts.model import (
-    ExportAndImportAgentInfo,
-    ExportAndImportDataFormat,
-    MCPInfo,
-    SkillInstanceInfoRequest,
-    SkillResolution,
-    SkillZipEntry,
-    ToolInstanceInfoRequest,
-)
-from database import skill_db
-from database.agent_db import (
-    create_agent,
-    insert_related_agent,
-    is_system_agent,
-    query_all_agent_info_by_tenant_id,
-    query_sub_agent_relations,
-    query_sub_agents_id_list,
-    resolve_sub_agent_version_no,
-    search_agent_info_by_agent_id,
-)
-from database.group_db import query_group_ids_by_user
-from database.model_management_db import (
-    get_model_by_model_id,
-    get_model_id_by_display_name,
-)
-from database.remote_mcp_db import get_mcp_server_by_name_and_tenant
-from database.tool_db import create_or_update_tool_by_tool_info, query_all_tools
+from contracts.exceptions import ForbiddenError, SkillDuplicateError
+from contracts.models import ExportAndImportAgentInfo, ExportAndImportDataFormat, MCPInfo, SkillInstanceInfoRequest, SkillResolution, SkillZipEntry, ToolInstanceInfoRequest
+from management.db.skill import repository as skill_db
+from management.db.agent.repository import create_agent, insert_related_agent, is_system_agent, query_all_agent_info_by_tenant_id, query_sub_agent_relations, query_sub_agents_id_list, resolve_sub_agent_version_no, search_agent_info_by_agent_id
+from management.db.identity.group import query_group_ids_by_user
+from management.db.model.repository import get_model_by_model_id, get_model_id_by_display_name
+from management.db.mcp.remote import get_mcp_server_by_name_and_tenant
+from management.db.tool.repository import create_or_update_tool_by_tool_info, query_all_tools
 from fastapi import Header
 from management.services.agent.naming import (
     check_agent_value_duplicate,
@@ -55,7 +35,7 @@ from management.services.agent.versions import publish_version_impl
 from management.services.permission.identity.authentication_helpers import get_current_user_info
 from management.services.configuration.tenant.settings import tenant_config_manager
 from management.services.skill.naming import generate_available_copy_skill_name
-from management.db.serialization import convert_list_to_string
+from management.utils.serialization import convert_list_to_string
 
 logger = logging.getLogger(__name__)
 

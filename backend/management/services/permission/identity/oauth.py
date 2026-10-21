@@ -12,35 +12,12 @@ from urllib.parse import urlencode, quote
 import jwt
 from pydantic import EmailStr, TypeAdapter, ValidationError as PydanticValidationError
 
-from consts.const import (
-    ASSET_OWNER_INVITE_CODE_TYPE,
-    ASSET_OWNER_ROLE,
-    ASSET_OWNER_TENANT_ID,
-    DEFAULT_TENANT_ID,
-    OAUTH_CALLBACK_BASE_URL,
-    OAUTH_LOGIN_MODE,
-    OAUTH_SSL_VERIFY,
-    OAUTH_CA_BUNDLE,
-    SUPABASE_JWT_SECRET,
-    JWT_EXPIRY_SECONDS,
-)
-from consts.exceptions import OAuthLinkError, OAuthProviderError, TenantResourceLimitError
+from consts.const import ASSET_OWNER_INVITE_CODE_TYPE, ASSET_OWNER_ROLE, ASSET_OWNER_TENANT_ID, DEFAULT_TENANT_ID, OAUTH_CALLBACK_BASE_URL, OAUTH_LOGIN_MODE, OAUTH_SSL_VERIFY, OAUTH_CA_BUNDLE, SUPABASE_JWT_SECRET, JWT_EXPIRY_SECONDS
+from contracts.exceptions import OAuthLinkError, OAuthProviderError, TenantResourceLimitError
 from management.services.permission.asset_owner import require_asset_owner_enabled
-from consts.oauth_providers import (
-    get_all_provider_definitions,
-    get_provider_definition,
-    is_provider_enabled,
-)
-from database.oauth_account_db import (
-    delete_oauth_account,
-    get_oauth_account_by_provider,
-    get_soft_deleted_oauth_account,
-    insert_oauth_account,
-    list_oauth_accounts_by_user_id,
-    reactivate_oauth_account,
-    update_oauth_account_tokens,
-)
-from database.user_tenant_db import get_user_tenant_by_user_id, insert_user_tenant
+from contracts.oauth_providers import get_all_provider_definitions, get_provider_definition, is_provider_enabled
+from management.db.identity.oauth_account import delete_oauth_account, get_oauth_account_by_provider, get_soft_deleted_oauth_account, insert_oauth_account, list_oauth_accounts_by_user_id, reactivate_oauth_account, update_oauth_account_tokens
+from management.db.identity.user_tenant import get_user_tenant_by_user_id, insert_user_tenant
 
 logger = logging.getLogger(__name__)
 
@@ -493,7 +470,7 @@ async def complete_pending_oauth_account(
     invitation_result = use_invitation_code(normalized_invite_code, supabase_user_id)
     group_ids = invitation_result.get("group_ids", [])
     if isinstance(group_ids, str):
-        from management.db.serialization import convert_string_to_list
+        from management.utils.serialization import convert_string_to_list
 
         group_ids = convert_string_to_list(group_ids)
     if group_ids and not is_asset_owner_registration:

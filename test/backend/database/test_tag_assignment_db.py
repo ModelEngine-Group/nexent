@@ -1,8 +1,10 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 from types import SimpleNamespace
 
 import pytest
-from consts.exceptions import TagManagementConflictError, ValidationError
-from database.tag_management_db import TagManagementDB
+from contracts.exceptions import TagManagementConflictError, ValidationError
+from management.db.tag.repository import TagManagementDB
 
 
 def test_replacement_validation_rejects_more_than_100_values_before_mutation():

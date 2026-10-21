@@ -10,42 +10,19 @@ import shutil
 import uuid
 from typing import Any, Dict, List, Optional
 
-from database import skill_db
-from database.tenant_config_db import (
-    create_tenant_with_default_group,
-    get_single_config_info,
-    insert_config,
-    update_config_by_tenant_config_id,
-    get_all_tenant_ids,
-    delete_config_by_tenant_config_id,
-    get_all_configs_by_tenant_id,
-)
-from database.user_tenant_db import get_users_by_tenant_id, soft_delete_users_by_tenant_id
+from management.db.skill import repository as skill_db
+from management.db.configuration.tenant import create_tenant_with_default_group, get_single_config_info, insert_config, update_config_by_tenant_config_id, get_all_tenant_ids, delete_config_by_tenant_config_id, get_all_configs_by_tenant_id
+from management.db.identity.user_tenant import get_users_by_tenant_id, soft_delete_users_by_tenant_id
 from management.services.permission.identity.users import delete_user_and_cleanup
-from database.group_db import query_groups_by_tenant, remove_group
-from database.model_management_db import get_model_records, delete_model_record
-from database.knowledge_db import get_knowledge_info_by_tenant_id, delete_knowledge_record
-from database.agent_db import query_all_agent_info_by_tenant_id, delete_agent_by_id, delete_agent_relationship
-from database.remote_mcp_db import get_mcp_records_by_tenant, delete_mcp_record_by_name_and_url
-from database.invitation_db import query_invitations_by_tenant, remove_invitation
-from database.tool_db import delete_tools_by_agent_id
-from consts.const import (
-    ASSET_OWNER_TENANT_ID,
-    CONTAINER_SKILLS_PATH,
-    DEFAULT_GROUP_ID,
-    DEFAULT_TENANT_ID,
-    TENANT_ID,
-    TENANT_NAME,
-    IS_SPEED_MODE,
-    ENABLE_AGENT_WORKBENCH,
-)
-from consts.exceptions import (
-    ForbiddenError,
-    NotFoundException,
-    TenantResourceLimitError,
-    UserRegistrationException,
-    ValidationError,
-)
+from management.db.identity.group import query_groups_by_tenant, remove_group
+from management.db.model.repository import get_model_records, delete_model_record
+from management.db.knowledge_base.repository import get_knowledge_info_by_tenant_id, delete_knowledge_record
+from management.db.agent.repository import query_all_agent_info_by_tenant_id, delete_agent_by_id, delete_agent_relationship
+from management.db.mcp.remote import get_mcp_records_by_tenant, delete_mcp_record_by_name_and_url
+from management.db.identity.invitation import query_invitations_by_tenant, remove_invitation
+from management.db.tool.repository import delete_tools_by_agent_id
+from consts.const import ASSET_OWNER_TENANT_ID, CONTAINER_SKILLS_PATH, DEFAULT_GROUP_ID, DEFAULT_TENANT_ID, TENANT_ID, TENANT_NAME, IS_SPEED_MODE, ENABLE_AGENT_WORKBENCH
+from contracts.exceptions import ForbiddenError, NotFoundException, TenantResourceLimitError, UserRegistrationException, ValidationError
 from management.services.skill.transfer import install_skills_from_zip_for_tenant
 from management.services.agent.system import (
     ensure_workbench_main_agent,

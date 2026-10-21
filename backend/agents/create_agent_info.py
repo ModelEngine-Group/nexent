@@ -37,7 +37,7 @@ from nexent.core.tools.parallel_executor import ParallelExecutorTool
 from nexent.core.agents.nexent_agent import get_local_python_authorized_imports
 from nexent.memory import models as memory_models
 
-from consts.capability_profiles import CATALOG as CAPABILITY_CATALOG
+from contracts.capability_profiles import CATALOG as CAPABILITY_CATALOG
 
 from management.services.file.service import validate_urls_access
 from management.services.model.resolver import get_rerank_model, is_model_available
@@ -49,21 +49,17 @@ from management.services.knowledge_base.service import (
 from management.services.mcp.service import get_remote_mcp_server_list
 from management.services.memory.providers.service import get_memory_external_provider_service
 
-from database.a2a_agent_db import PROTOCOL_JSONRPC
+from contracts.persistence.a2a_repository import PROTOCOL_JSONRPC
 from management.services.configuration.user.memory import build_memory_context
 from management.services.knowledge_base.providers.aidp import create_ind_aidp_image_url_builder
 from management.services.model.adapter import get_llm_adapter, get_vlm_adapter
-from database.agent_db import (
-    search_agent_info_by_agent_id,
-    query_sub_agent_relations,
-    resolve_sub_agent_version_no,
-)
-from database.agent_version_db import query_current_version_no, update_agent_snapshot
-from database import skill_db
-from database.tool_db import query_tools_by_ids, search_tools_for_sub_agent
-from database.model_management_db import get_model_records, get_model_by_model_id
-from database.knowledge_db import get_knowledge_name_map_by_index_names
-from database.client import minio_client
+from management.db.agent.repository import search_agent_info_by_agent_id, query_sub_agent_relations, resolve_sub_agent_version_no
+from management.db.agent.version import query_current_version_no, update_agent_snapshot
+from management.db.skill import repository as skill_db
+from management.db.tool.repository import query_tools_by_ids, search_tools_for_sub_agent
+from management.db.model.repository import get_model_records, get_model_by_model_id
+from management.db.knowledge_base.repository import get_knowledge_name_map_by_index_names
+from management.db.client import minio_client
 from management.services.model.names import add_repo_to_name
 from management.services.agent.prompt import (
     load_agent_prompt_bundle,
@@ -87,34 +83,10 @@ from management.services.agent.context import (
 from infrastructure.http.client import create_httpx_client
 from management.services.mcp.addressing import get_tenant_local_mcp_server
 from infrastructure.redis import get_redis_client
-from consts.const import (
-    AGENT_WORKSPACE_ROOT,
-    NEXENT_SANDBOX_WORKSPACE_MODE,
-    NEXENT_SANDBOX_CONTAINER_WORKSPACE_ROOT,
-    NEXENT_SANDBOX_FAILURE_POLICY,
-    AIDP_API_KEY,
-    AIDP_SERVER_URL,
-    AIDP_TENANT_ID,
-    DATA_PROCESS_SERVICE,
-    LANGUAGE,
-    LLM_INCLUDE_LOGPROBS,
-    MODEL_RESPONSE_DIAGNOSTIC_CHUNKS,
-    LOCAL_MCP_SERVER,
-    MCP_REQUEST_TIMEOUT_SECONDS,
-    TOKEN,
-    MINIO_DEFAULT_BUCKET,
-    MODEL_CONFIG_MAPPING,
-    NEXENT_SANDBOX_DEFAULT_LEVEL,
-    NEXENT_SANDBOX_WORKSPACE_VOLUME,
-    NEXENT_TOOL_FASTPATH_ALLOWED_TOOLS,
-    NEXENT_TOOL_FASTPATH_ENABLED,
-    RUNTIME_MCP_CLOSE_TIMEOUT_SECONDS,
-    RUNTIME_MCP_TOOL_TIMEOUT_SECONDS,
-    RUNTIME_PARALLEL_EXECUTOR_TIMEOUT_SECONDS,
-)
-from consts.model import ToolParamsRequest
-from consts.exceptions import ValidationError, WorkbenchError
-from consts.tool_labels import SYSTEM_MANAGED_TOOL_NAMES
+from consts.const import AGENT_WORKSPACE_ROOT, NEXENT_SANDBOX_WORKSPACE_MODE, NEXENT_SANDBOX_CONTAINER_WORKSPACE_ROOT, NEXENT_SANDBOX_FAILURE_POLICY, AIDP_API_KEY, AIDP_SERVER_URL, AIDP_TENANT_ID, DATA_PROCESS_SERVICE, LANGUAGE, LLM_INCLUDE_LOGPROBS, MODEL_RESPONSE_DIAGNOSTIC_CHUNKS, LOCAL_MCP_SERVER, MCP_REQUEST_TIMEOUT_SECONDS, TOKEN, MINIO_DEFAULT_BUCKET, MODEL_CONFIG_MAPPING, NEXENT_SANDBOX_DEFAULT_LEVEL, NEXENT_SANDBOX_WORKSPACE_VOLUME, NEXENT_TOOL_FASTPATH_ALLOWED_TOOLS, NEXENT_TOOL_FASTPATH_ENABLED, RUNTIME_MCP_CLOSE_TIMEOUT_SECONDS, RUNTIME_MCP_TOOL_TIMEOUT_SECONDS, RUNTIME_PARALLEL_EXECUTOR_TIMEOUT_SECONDS
+from contracts.models import ToolParamsRequest
+from contracts.exceptions import ValidationError, WorkbenchError
+from contracts.tool_labels import SYSTEM_MANAGED_TOOL_NAMES
 
 from .tool_user_context import resolve_tool_user_context
 
@@ -1008,7 +980,7 @@ def _get_external_a2a_agents(
         List of ExternalA2AAgentConfig for external A2A sub-agents
     """
     try:
-        from database import a2a_agent_db
+        from management.db.a2a import repository as a2a_agent_db
 
         external_agents = a2a_agent_db.query_external_sub_agents(
             local_agent_id=agent_id,
@@ -2803,7 +2775,7 @@ async def create_agent_run_info(
         from management.services.model.run_controls import overlay_root_model
         selected_config = next((m for m in model_list if m.cite_name == agent_config.model_name), None)
         if selected_config is None:
-            from consts.exceptions import RunModelControlsError
+            from contracts.exceptions import RunModelControlsError
             raise RunModelControlsError("model_not_available")
         legacy = {}
         if reasoning_effort is not None:

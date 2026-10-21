@@ -9,11 +9,11 @@ import sys
 import os
 from unittest.mock import MagicMock, patch
 
-# Mock consts module before patching backend.database.client to avoid ImportError
-# backend.database.client imports from consts.const, so we need to mock it first
+# Mock consts module before patching management.db.client to avoid ImportError
+# management.db.client imports from consts.const, so we need to mock it first
 consts_mock = MagicMock()
 consts_const_mock = MagicMock()
-# Set required constants that backend.database.client might use
+# Set required constants that management.db.client might use
 consts_const_mock.MINIO_ENDPOINT = "http://localhost:9000"
 consts_const_mock.MINIO_ACCESS_KEY = "test_access_key"
 consts_const_mock.MINIO_SECRET_KEY = "test_secret_key"
@@ -29,16 +29,16 @@ consts_const_mock.MESSAGE_ROLE = {"USER": "user", "ASSISTANT": "assistant", "SYS
 consts_const_mock.THINK_START_PATTERN = "<think>"
 consts_const_mock.THINK_END_PATTERN = "</think>"
 consts_mock.const = consts_const_mock
-# Mock consts.error_code and consts.exceptions
+# Mock contracts.error_code and contracts.exceptions
 consts_error_code_mock = MagicMock()
 consts_error_code_mock.ErrorCode = MagicMock()
 consts_exceptions_mock = MagicMock()
 consts_exceptions_mock.AppException = Exception
 sys.modules['consts'] = consts_mock
 sys.modules['consts.const'] = consts_const_mock
-sys.modules['consts.error_code'] = consts_error_code_mock
-sys.modules['consts.exceptions'] = consts_exceptions_mock
-sys.modules['consts.model'] = consts_mock.model
+sys.modules['contracts.error_code'] = consts_error_code_mock
+sys.modules['contracts.exceptions'] = consts_exceptions_mock
+sys.modules['contracts.models'] = consts_mock.model
 
 # Add backend to path before patching backend modules
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', 'backend'))
@@ -49,7 +49,7 @@ storage_client_mock = MagicMock()
 minio_client_mock = MagicMock()
 patch('nexent.storage.storage_client_factory.create_storage_client_from_config', return_value=storage_client_mock).start()
 patch('nexent.storage.minio_config.MinIOStorageConfig.validate', lambda self: None).start()
-patch('backend.database.client.MinioClient', return_value=minio_client_mock).start()
+patch('management.db.client.MinioClient', return_value=minio_client_mock).start()
 
 from management.services.knowledge_base.summary import merge_cluster_summaries
 

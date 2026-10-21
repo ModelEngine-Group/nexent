@@ -15,12 +15,12 @@ import httpx
 from nexent.utils.http_client_manager import http_client_manager
 
 from consts.const import AIDP_TENANT_ID
-from consts.error_code import ErrorCode
-from consts.exceptions import AppException
-from database.agent_db import query_knowledge_binding_agents
-from database.client import get_db_session
-from database.conversation_db import remove_conversation_knowledge_bindings
-from database.tool_db import remove_tool_knowledge_references
+from contracts.error_code import ErrorCode
+from contracts.exceptions import AppException
+from management.db.agent.repository import query_knowledge_binding_agents
+from management.db.client import get_db_session
+from management.db.conversation.repository import remove_conversation_knowledge_bindings
+from management.db.tool.repository import remove_tool_knowledge_references
 
 
 logger = logging.getLogger("aidp_service")

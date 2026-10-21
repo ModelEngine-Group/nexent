@@ -5,54 +5,19 @@ from collections import deque
 from typing import Optional
 from uuid import uuid4
 
-from consts.agent_unavailable_reasons import AgentUnavailableReason
+from contracts.agent_unavailable_reasons import AgentUnavailableReason
 from consts.const import CAN_EDIT_ALL_USER_ROLES, LANGUAGE, MODEL_CONFIG_MAPPING
-from consts.error_code import ErrorCode
-from consts.exceptions import (
-    AgentNotFoundError,
-    AgentRelationValidationError,
-    AppException,
-    ForbiddenError,
-    TenantResourceLimitError,
-)
-from consts.model import (
-    AgentInfoRequest,
-    AgentNameBatchCheckRequest,
-    AgentNameBatchRegenerateRequest,
-    SkillInstanceInfoRequest,
-    ToolInstanceInfoRequest,
-)
-from database import a2a_agent_db, skill_db
-from database.a2a_agent_db import query_external_sub_agents
-from database.agent_db import (
-    batch_search_agent_display_names,
-    create_agent,
-    is_system_agent,
-    query_all_agent_info_by_tenant_id,
-    query_sub_agent_relations,
-    query_sub_agents_id_list,
-    search_agent_info_by_agent_id,
-    update_agent,
-    update_agent_icon,
-    update_related_agents,
-)
-from database.agent_version_db import (
-    batch_query_current_version_nos,
-    batch_search_version_names,
-    query_current_version_no,
-)
-from database.model_management_db import (
-    get_model_by_model_id,
-)
-from database.tool_db import (
-    create_or_update_tool_by_tool_info,
-    query_all_enabled_tool_instances,
-    query_tool_instances_by_agent_id,
-    query_tool_instances_by_id,  # noqa: F401 - compatibility patch point
-    query_tools_by_ids,
-    search_tools_for_sub_agent,
-)
-from database.user_tenant_db import get_user_tenant_by_user_id
+from contracts.error_code import ErrorCode
+from contracts.exceptions import AgentNotFoundError, AgentRelationValidationError, AppException, ForbiddenError, TenantResourceLimitError
+from contracts.models import AgentInfoRequest, AgentNameBatchCheckRequest, AgentNameBatchRegenerateRequest, SkillInstanceInfoRequest, ToolInstanceInfoRequest
+from management.db.a2a import repository as a2a_agent_db
+from management.db.skill import repository as skill_db
+from management.db.a2a.repository import query_external_sub_agents
+from management.db.agent.repository import batch_search_agent_display_names, create_agent, is_system_agent, query_all_agent_info_by_tenant_id, query_sub_agent_relations, query_sub_agents_id_list, search_agent_info_by_agent_id, update_agent, update_agent_icon, update_related_agents
+from management.db.agent.version import batch_query_current_version_nos, batch_search_version_names, query_current_version_no
+from management.db.model.repository import get_model_by_model_id
+from management.db.tool.repository import create_or_update_tool_by_tool_info, query_all_enabled_tool_instances, query_tool_instances_by_agent_id, query_tool_instances_by_id, query_tools_by_ids, search_tools_for_sub_agent
+from management.db.identity.user_tenant import get_user_tenant_by_user_id
 from fastapi import Header
 from management.services.agent.icon import (
     read_icon_image,
@@ -84,7 +49,7 @@ from management.services.conversation.service import (
 from management.services.permission.identity.display import enrich_cas_usernames
 from management.services.permission.identity.authentication_helpers import get_current_user_info
 from management.services.configuration.tenant.settings import tenant_config_manager
-from management.db.serialization import convert_list_to_string, convert_string_to_list
+from management.utils.serialization import convert_list_to_string, convert_string_to_list
 
 # Monitoring utilities: bind Agent metadata once at the request boundary.
 

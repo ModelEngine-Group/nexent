@@ -6,8 +6,8 @@ from typing import Any, Dict, List, Optional
 from sqlalchemy.exc import IntegrityError
 
 from consts.const import AGENT_AUTOMATION_DEFAULT_TIMEOUT_SECONDS, AGENT_AUTOMATION_MIN_INTERVAL_SECONDS
-from database import agent_automation_db
-from database.conversation_db import get_conversation
+from management.db.automation import repository as agent_automation_db
+from management.db.conversation.repository import get_conversation
 from management.services.conversation.service import (
     create_new_conversation,
     update_conversation_agent_id_service,
@@ -15,13 +15,7 @@ from management.services.conversation.service import (
 from management.services.automation import agent_identity as agent_identity_adapter
 from management.services.automation.capabilities import resolve_agent_capabilities, validate_bindings_available
 from management.services.automation.conversation import automation_conversation_adapter
-from consts.exceptions import (
-    AutomationCapabilityBindingInvalidError,
-    AutomationCapabilityNotReadyError,
-    AutomationConversationAlreadyBoundError,
-    AutomationNotFoundError,
-    AutomationScheduleInvalidError,
-)
+from contracts.exceptions import AutomationCapabilityBindingInvalidError, AutomationCapabilityNotReadyError, AutomationConversationAlreadyBoundError, AutomationNotFoundError, AutomationScheduleInvalidError
 from management.services.automation.intent import AutomationIntentContext, automation_intent_analyzer
 from contracts.automation import (
     AutomationProposalConfirmRequest,

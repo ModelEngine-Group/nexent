@@ -10,7 +10,7 @@ from typing import Dict, List, Any, Optional
 
 from consts.const import DATAMATE_URL
 from management.services.configuration.tenant.settings import tenant_config_manager
-from database.knowledge_db import upsert_knowledge_record, get_knowledge_info_by_tenant_and_source, delete_knowledge_record
+from management.db.knowledge_base.repository import upsert_knowledge_record, get_knowledge_info_by_tenant_and_source, delete_knowledge_record
 from nexent.vector_database.datamate_core import DataMateCore
 from nexent.core.concurrency import run_blocking
 from consts.const import MODEL_ENGINE_ENABLED

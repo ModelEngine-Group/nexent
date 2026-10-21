@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """
 Unit tests for ``backend.consts.const``'s version-resolution helpers.
 
@@ -24,11 +26,7 @@ from pathlib import Path
 
 import pytest
 
-from backend.consts.const import (
-    _collect_version_candidates,
-    _read_version_from,
-    _resolve_app_version,
-)
+from backend.consts.const import _collect_version_candidates, _read_version_from, _resolve_app_version
 
 
 def _str_path(p):
@@ -99,7 +97,7 @@ class TestCollectVersionCandidates:
         assert os.path.normpath("/opt/nexent/VERSION") in candidates
 
         # Local layout is derived from this module's parents[2] + "VERSION".
-        from backend.consts import const as const_module
+        import backend.consts.const as const_module
 
         expected_local = (
             Path(const_module.__file__).resolve().parents[2] / "VERSION"
@@ -225,7 +223,7 @@ class TestResolveAppVersion:
         # local repo-root VERSION file, and assert that the helper picks
         # up the real on-disk version. This guards the integration between
         # the candidate enumeration and the parsing layer.
-        from backend.consts import const as const_module
+        import backend.consts.const as const_module
 
         local_path = Path(const_module.__file__).resolve().parents[2] / "VERSION"
 

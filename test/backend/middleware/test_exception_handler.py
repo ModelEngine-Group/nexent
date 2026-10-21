@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """
 Unit tests for Exception Handler Middleware.
 
@@ -24,8 +26,8 @@ from backend.middleware.exception_handler import (
     create_error_response,
     create_success_response,
 )
-from consts.exceptions import AppException
-from consts.error_code import ErrorCode, ERROR_CODE_HTTP_STATUS
+from contracts.exceptions import AppException
+from contracts.error_code import ErrorCode, ERROR_CODE_HTTP_STATUS
 from unittest.mock import patch, MagicMock, AsyncMock, Mock
 
 
@@ -62,9 +64,9 @@ for p in critical_patches:
 # Patch MinioClient class to return mock instance when instantiated
 # This prevents real initialization during module import
 patches = [
-    patch('backend.database.client.MinioClient', return_value=minio_mock),
-    patch('database.client.MinioClient', return_value=minio_mock),
-    patch('backend.database.client.minio_client', minio_mock),
+    patch('management.db.client.MinioClient', return_value=minio_mock),
+    patch('management.db.client.MinioClient', return_value=minio_mock),
+    patch('management.db.client.minio_client', minio_mock),
 ]
 
 for p in patches:
@@ -73,10 +75,10 @@ for p in patches:
 # Combine all patches for cleanup
 all_patches = critical_patches + patches
 
-# Now safe to import modules that use database.client
+# Now safe to import modules that use management.db.client
 # After import, we can patch get_db_session if needed
 try:
-    from backend.database import client as db_client_module
+    from management.db import client as db_client_module
     # Patch get_db_session after module is imported
     db_session_patch = patch.object(
         db_client_module, 'get_db_session', return_value=Mock())
@@ -85,7 +87,7 @@ try:
 except ImportError:
     # If import fails, try patching the path directly (may trigger import)
     db_session_patch = patch(
-        'backend.database.client.get_db_session', return_value=Mock())
+        'management.db.client.get_db_session', return_value=Mock())
     db_session_patch.start()
     all_patches.append(db_session_patch)
 

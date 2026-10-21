@@ -1,5 +1,5 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
-"""Unit tests for ``backend.apps.evaluation_set_app``."""
+"""Unit tests for ``management.api.evaluation.evaluation_set``."""
 
 import io
 import json
@@ -121,13 +121,13 @@ if _adapters_pkg is None or not getattr(_adapters_pkg, "__path__", None):
 # class keeps these tests faithful to production behaviour.
 # ---------------------------------------------------------------------------
 def _exc(error_code, message):
-    from consts.exceptions import AppException
+    from contracts.exceptions import AppException
 
     return AppException(error_code, message)
 
 
 def _code(name):
-    from consts.error_code import ErrorCode
+    from contracts.error_code import ErrorCode
 
     return getattr(ErrorCode, name)
 
@@ -144,7 +144,7 @@ def client():
     from fastapi import FastAPI
     from middleware.exception_handler import ExceptionHandlerMiddleware
 
-    from backend.apps.evaluation_set_app import router
+    from management.api.evaluation.evaluation_set import router
 
     app = FastAPI()
     app.add_middleware(ExceptionHandlerMiddleware)
@@ -161,7 +161,7 @@ def _mock_service_impl(service_module, **impl_overrides):
         create_evaluation_set_from_cases, ...,
     )``, so the names live on the app module itself.
     """
-    from backend.apps import evaluation_set_app
+    from management.api.evaluation import evaluation_set as evaluation_set_app
 
     # Default mocks for each public service function.
     defaults = {
@@ -564,7 +564,7 @@ class TestCreateValidation:
         evaluation_set_app.create_empty_evaluation_set.assert_not_called()
 
     def test_401_on_unauthorized(self, client):
-        from consts.exceptions import UnauthorizedError
+        from contracts.exceptions import UnauthorizedError
 
         evaluation_set_app = _mock_service_impl(None)
         evaluation_set_app.get_current_user_id = MagicMock(
@@ -588,9 +588,9 @@ class TestUploadErrorPaths:
         # the AppException propagates).
         import asyncio
 
-        from consts.exceptions import AppException
+        from contracts.exceptions import AppException
 
-        from backend.apps.evaluation_set_app import upload_evaluation_set_api
+        from management.api.evaluation.evaluation_set import upload_evaluation_set_api
 
         evaluation_set_app = _mock_service_impl(None)
         _mock_auth(evaluation_set_app)
@@ -905,7 +905,7 @@ class TestAppExceptionPropagation:
 
 
 def _app_mod():
-    from backend.apps import evaluation_set_app
+    from management.api.evaluation import evaluation_set as evaluation_set_app
 
     return evaluation_set_app
 
@@ -1055,7 +1055,7 @@ class TestGenerateCasesAsync:
         # The generate endpoint has no dedicated UnauthorizedError handler, so
         # the legacy UnauthorizedError falls through to the generic handler and
         # is wrapped as SYSTEM_INTERNAL_ERROR (500).
-        from consts.exceptions import UnauthorizedError
+        from contracts.exceptions import UnauthorizedError
 
         evaluation_set_app = _mock_service_impl(None)
         evaluation_set_app.get_current_user_id = MagicMock(

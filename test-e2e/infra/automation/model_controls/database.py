@@ -12,7 +12,8 @@ from sqlalchemy.schema import CreateSchema, DropSchema
 
 from agents import create_agent_info
 from consts.const import MODEL_CONFIG_MAPPING
-from database import client, db_models
+from management.db import client as client
+from management.db import models as db_models
 from model_controls.api import CAPABILITY, BUDGET
 
 
@@ -51,7 +52,7 @@ def database_fixture(monkeypatch, provider):
     original_session = client.get_db_session
     # Conversation DAC resolves this table lazily; load it before session routing.
     import importlib
-    importlib.import_module("database.user_tenant_db")
+    importlib.import_module("management.db.identity.user_tenant")
     for name, module in list(sys.modules.items()):
         if name.startswith("database.") and getattr(module, "get_db_session", None) is original_session:
             monkeypatch.setattr(module, "get_db_session", sessions)

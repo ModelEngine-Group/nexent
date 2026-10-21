@@ -5,11 +5,11 @@
 import threading
 from unittest.mock import AsyncMock, MagicMock
 
-import apps.vectordatabase_app as local_app
+from management.api.knowledge_base import vectordatabase as local_app
 import ext_components.aidp.apps.aidp_mgmt_app as aidp_app
 import pytest
-from apps.app_factory import register_exception_handlers
-from consts.exceptions import TokenExpiredError
+from management.utils.app_factory import register_exception_handlers
+from contracts.exceptions import TokenExpiredError
 from ext_components.aidp.consts.aidp_exceptions import (
     AidpKbNotFoundError,
     AidpKbPermissionDeniedError,

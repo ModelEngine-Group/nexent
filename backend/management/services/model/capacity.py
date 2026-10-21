@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import json
 import logging
 import re
@@ -5,11 +7,7 @@ import threading
 import time
 from typing import Any, Dict, Mapping, Optional
 
-from consts.const import (
-    CAPACITY_SUGGESTION_ENABLED,
-    CAPACITY_VISIBILITY_ENABLED,
-    NEXENT_LITELLM_JSON,
-)
+from consts.const import CAPACITY_SUGGESTION_ENABLED, CAPACITY_VISIBILITY_ENABLED, NEXENT_LITELLM_JSON
 from contracts.model import (
     CapabilityProfileLike,
     CapacitySuggestionConfidence,
@@ -18,7 +16,7 @@ from contracts.model import (
     CapacitySuggestionResult,
     ProfileKey,
 )
-from database.model_management_db import get_model_records
+from management.db.model.repository import get_model_records
 from management.services.model.names import add_repo_to_name
 
 logger = logging.getLogger(__name__)
@@ -266,7 +264,7 @@ def pick_provider(
 
 
 def _get_default_catalog() -> Mapping[ProfileKey, CapabilityProfileLike]:
-    from consts.capability_profiles import CATALOG
+    from contracts.capability_profiles import CATALOG
 
     return CATALOG
 

@@ -1,44 +1,6 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 from test.backend.management.import_patching import set_import_attribute
-from backend.consts.exceptions import (
-    AppException,
-    AgentRunException,
-    LimitExceededError,
-    MCPConnectionError,
-    MCPNameIllegal,
-    McpNotFoundError,
-    McpValidationError,
-    McpNameConflictError,
-    McpPortConflictError,
-    MemoryPreparationException,
-    NoInviteCodeException,
-    IncorrectInviteCodeException,
-    OfficeConversionException,
-    UnsupportedFileTypeException,
-    FileTooLargeException,
-    UserRegistrationException,
-    TimeoutException,
-    SignatureValidationError,
-    UnauthorizedError,
-    TokenExpiredError,
-    ValidationError,
-    NotFoundException,
-    MEConnectionException,
-    VoiceServiceException,
-    VoiceConfigException,
-    STTConnectionException,
-    TTSConnectionException,
-    ToolExecutionException,
-    MCPContainerError,
-    DuplicateError,
-    DataMateConnectionError,
-    SkillDuplicateError,
-    SkillException,
-    OAuthProviderError,
-    OAuthLinkError,
-    TaskNotFoundError,
-    UnsupportedOperationError,
-)
+from contracts.exceptions import AppException, AgentRunException, LimitExceededError, MCPConnectionError, MCPNameIllegal, McpNotFoundError, McpValidationError, McpNameConflictError, McpPortConflictError, MemoryPreparationException, NoInviteCodeException, IncorrectInviteCodeException, OfficeConversionException, UnsupportedFileTypeException, FileTooLargeException, UserRegistrationException, TimeoutException, SignatureValidationError, UnauthorizedError, TokenExpiredError, ValidationError, NotFoundException, MEConnectionException, VoiceServiceException, VoiceConfigException, STTConnectionException, TTSConnectionException, ToolExecutionException, MCPContainerError, DuplicateError, DataMateConnectionError, SkillDuplicateError, SkillException, OAuthProviderError, OAuthLinkError, TaskNotFoundError, UnsupportedOperationError
 import time
 import sys
 import os
@@ -59,7 +21,7 @@ sys.path.insert(0, str(_REPO_ROOT / "sdk"))
 # ---------------------------------------------------------------------------
 # Pre-mock heavy dependencies BEFORE importing the module under test.
 # This avoids side-effects such as Minio/S3 network calls that are triggered
-# during import time of database.client when auth_utils is imported.
+# during import time of management.db.client when auth_utils is imported.
 # ---------------------------------------------------------------------------
 
 # Stub `nexent.storage.*` modules early so unittest.mock.patch does not import the real
@@ -86,11 +48,12 @@ sys.modules["nexent.storage"] = _nexent_storage_mod
 sys.modules["nexent.storage.storage_client_factory"] = _nexent_storage_factory_mod
 sys.modules["nexent.storage.minio_config"] = _nexent_minio_config_mod
 
-# Stub `backend.database.client` early so patch() can resolve the target even when
+# Stub `management.db.client` early so patch() can resolve the target even when
 # backend/ and backend/database/ are namespace packages (no __init__.py).
 _backend_mod = sys.modules.get("backend") or types.ModuleType("backend")
+_backend_mod.__path__ = [str(Path(__file__).resolve().parents[3] / "backend")]
 _backend_database_mod = types.ModuleType("backend.database")
-_backend_database_client_mod = types.ModuleType("backend.database.client")
+_backend_database_client_mod = types.ModuleType("management.db.client")
 _backend_database_client_mod.MinioClient = MagicMock()
 
 _backend_mod.database = _backend_database_mod
@@ -98,7 +61,9 @@ _backend_database_mod.client = _backend_database_client_mod
 
 sys.modules["backend"] = _backend_mod
 sys.modules["backend.database"] = _backend_database_mod
-sys.modules["backend.database.client"] = _backend_database_client_mod
+sys.modules["management.db.client"] = _backend_database_client_mod
+from test.common.database_stubs import install_serialization_stub
+install_serialization_stub(sys.modules["management.db.client"])
 
 # Patch storage factory and MinIO config validation to avoid errors during initialization
 # These patches must be started before any imports that use MinioClient
@@ -106,7 +71,7 @@ storage_client_mock = MagicMock()
 minio_client_mock = MagicMock()
 patch('nexent.storage.storage_client_factory.create_storage_client_from_config', return_value=storage_client_mock).start()
 patch('nexent.storage.minio_config.MinIOStorageConfig.validate', lambda self: None).start()
-patch('backend.database.client.MinioClient', return_value=minio_client_mock).start()
+patch('management.db.client.MinioClient', return_value=minio_client_mock).start()
 
 # Stub out the database package hierarchy expected by auth_utils
 sys.modules['database'] = MagicMock()
@@ -115,9 +80,9 @@ sys.modules['database'] = MagicMock()
 mock_minio_class = MagicMock()
 mock_minio_class.return_value = MagicMock()
 
-# Provide a lightweight module for database.client with the attributes used
+# Provide a lightweight module for management.db.client with the attributes used
 # by auth_utils so that any direct attribute access works as expected.
-db_client_stub = types.ModuleType("database.client")
+db_client_stub = types.ModuleType("management.db.client")
 db_client_stub.MinioClient = mock_minio_class
 db_client_stub.get_db_session = MagicMock()
 db_client_stub.as_dict = MagicMock()
@@ -127,14 +92,18 @@ mock_minio_instance = MagicMock()
 db_client_stub.minio_client = mock_minio_instance
 db_client_stub.db_client = MagicMock()
 
-sys.modules['database.client'] = db_client_stub
+sys.modules['management.db.client'] = db_client_stub
+from test.common.database_stubs import install_serialization_stub
+install_serialization_stub(sys.modules["management.db.client"])
+from test.common.database_stubs import install_serialization_stub
+install_serialization_stub(sys.modules["management.db.client"])
 
-# Stub database.user_tenant_db to avoid real DB interactions
-sys.modules['database.user_tenant_db'] = MagicMock(
+# Stub management.db.identity.user_tenant to avoid real DB interactions
+sys.modules['management.db.identity.user_tenant'] = MagicMock(
     get_user_tenant_by_user_id=MagicMock(return_value=None))
 
-# Stub database.token_db to avoid real DB interactions (used by auth_utils)
-sys.modules['database.token_db'] = MagicMock(
+# Stub management.db.identity.token to avoid real DB interactions (used by auth_utils)
+sys.modules['management.db.identity.token'] = MagicMock(
     get_token_by_access_key=MagicMock(return_value=None))
 
 # Mock consts.const but provide real LANGUAGE values for tests.
@@ -142,7 +111,7 @@ sys.modules['database.token_db'] = MagicMock(
 # ``LimitExceededError`` classes on the mock so tests that catch them can
 # still match; we also expose ``AppException`` and other exception classes
 # used by sibling test files so that imports like
-# ``from consts.exceptions import AppException`` succeed later in the
+# ``from contracts.exceptions import AppException`` succeed later in the
 # pytest run. ``run_all_test.py`` runs every test file in a separate
 # pytest process, so this mock is only visible inside this test file.
 consts_const_mock = MagicMock()
@@ -153,9 +122,9 @@ consts_const_mock.IS_SPEED_MODE = False
 sys.modules['consts.const'] = consts_const_mock
 
 # Mock exceptions module with real exception classes. All known exception
-# classes from ``backend.consts.exceptions`` are imported above and re-
+# classes from ``contracts.exceptions`` are imported above and re-
 # exported on the mock below, so any code (in this file or in modules it
-# imports) that does ``from consts.exceptions import SomeException`` still
+# imports) that does ``from contracts.exceptions import SomeException`` still
 # gets a real class rather than a MagicMock. ``run_all_test.py`` runs
 # every test file in a separate pytest process, so this mock only affects
 # this file's own session.
@@ -200,7 +169,7 @@ for _exc_name in (
     "UnsupportedOperationError",
 ):
     setattr(consts_exceptions_mock, _exc_name, locals()[_exc_name])
-sys.modules['consts.exceptions'] = consts_exceptions_mock
+sys.modules['contracts.exceptions'] = consts_exceptions_mock
 sys.modules['nexent'] = MagicMock()
 sys.modules['nexent.core'] = MagicMock()
 sys.modules['nexent.core.agents'] = MagicMock()
@@ -678,7 +647,7 @@ def test_get_current_user_id_rejects_revoked_cas_session(monkeypatch):
     set_import_attribute(monkeypatch, au, "SUPABASE_URL", "http://localhost:54321")
     set_import_attribute(monkeypatch, au, "get_user_tenant_by_user_id",
                         lambda u: {"tenant_id": "tenant-a"})
-    sys.modules["database.cas_session_db"] = MagicMock(
+    sys.modules["management.db.identity.cas_session"] = MagicMock(
         is_cas_session_active=MagicMock(return_value=False)
     )
 

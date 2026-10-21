@@ -10,14 +10,10 @@ from fastapi.testclient import TestClient
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../../backend"))
 
-from apps import agent_automation_app
-from apps.app_factory import create_app
-from consts.exceptions import UnauthorizedError
-from consts.exceptions import (
-    AgentAutomationError,
-    AutomationConversationAlreadyBoundError,
-    AutomationNotFoundError,
-)
+from management.api.automation import agent_automation as agent_automation_app
+from management.utils.app_factory import create_app
+from contracts.exceptions import UnauthorizedError
+from contracts.exceptions import AgentAutomationError, AutomationConversationAlreadyBoundError, AutomationNotFoundError
 from contracts.automation import (
     AutomationProposalPatchRequest,
     AutomationTaskPatchRequest,

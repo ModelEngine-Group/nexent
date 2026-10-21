@@ -8,7 +8,7 @@ from uuid import uuid4
 import pytest
 from sqlalchemy import text
 
-from database.client import db_client
+from management.db.client import db_client
 
 pytestmark = [pytest.mark.case_id("CHAT-SIDEBAR-D5-001"), pytest.mark.stage("D5")]
 ROOT = Path(__file__).resolve().parents[3]

@@ -1,6 +1,5 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 import os
-from enum import Enum
 from pathlib import Path
 from dotenv import load_dotenv
 
@@ -29,9 +28,6 @@ TEST_PCM_PATH = os.path.join(os.path.dirname(
 
 
 # Vector database providers
-class VectorDatabaseType(str, Enum):
-    ELASTICSEARCH = "elasticsearch"
-    DATAMATE = "datamate"
 
 
 # Elasticsearch Configuration
@@ -612,10 +608,10 @@ TOOL_TYPE_MAPPING = {
 }
 
 # Default Language Configuration
-LANGUAGE = {
-    "ZH": "zh",
-    "EN": "en"
-}
+try:
+    from backend.contracts.localization import LANGUAGE
+except ModuleNotFoundError:
+    from contracts.localization import LANGUAGE
 
 # Message Role Constants
 MESSAGE_ROLE = {

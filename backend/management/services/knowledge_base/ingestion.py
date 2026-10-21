@@ -7,8 +7,8 @@ from typing import List
 
 import httpx
 from consts.const import DATA_PROCESS_SERVICE
-from consts.model import ProcessParams
-from database.knowledge_db import get_knowledge_record
+from contracts.models import ProcessParams
+from management.db.knowledge_base.repository import get_knowledge_record
 from management.services.permission.identity.authentication_helpers import get_current_user_id
 from infrastructure.ingestion.errors import classify_ingestion_exception
 from infrastructure.observability.knowledge import (

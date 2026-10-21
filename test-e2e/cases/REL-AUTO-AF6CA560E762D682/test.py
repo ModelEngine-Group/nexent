@@ -8,10 +8,10 @@ import httpx
 import pytest
 from nexent.core.concurrency import ManagerState
 
-import apps.config_app as config_app
-import management.services.evaluation.maintenance as evaluation_maintenance
-import management.services.memory.dreaming.scheduler as memory_dreaming_scheduler
-import management.recovery as startup_recovery
+from management.api import application as config_app
+from management.services.evaluation import maintenance as evaluation_maintenance
+from management.services.memory.dreaming import scheduler as memory_dreaming_scheduler
+from management import recovery as startup_recovery
 
 
 class _Snapshot:
@@ -116,7 +116,7 @@ async def test_config_lifespan_recovery_order_failure_tolerance_and_shutdown(mon
             assert manager.state is not ManagerState.CREATED
             assert getattr(manager.state, 'value', None) == 'running'
             assert captured['set_default_arg'] is manager
-            assert manager.run_calls == [('control-io', 'recover-config-tasks', 'apps.config_app')]
+            assert manager.run_calls == [('control-io', 'recover-config-tasks', 'management.api.application')]
             assert calls.index('recover_config_tasks') < calls.index('eval_start') < calls.index('upload_cleanup')
             assert captured['eval_start_arg'] is manager
             assert captured['upload_service_name'] == config_app.CONFIG_SERVICE_NAME

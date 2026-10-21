@@ -8,10 +8,10 @@ import pytest
 from nexent.core.agents.prompt import AgentPromptComposer
 from nexent.core.prompts import load_prompt
 
-from backend.management.services.agent.prompt import (
+from management.services.agent.prompt import (
     load_agent_prompt_bundle,
 )
-from backend.management.services.agent.context import (
+from management.services.agent.context import (
     build_context_inputs,
 )
 

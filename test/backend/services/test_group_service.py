@@ -1,7 +1,7 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 import types
 import importlib.machinery
-from consts.exceptions import NotFoundException, UnauthorizedError, ValidationError
+from contracts.exceptions import NotFoundException, UnauthorizedError, ValidationError
 import sys
 import pytest
 from unittest.mock import patch, MagicMock
@@ -22,7 +22,7 @@ patch('nexent.storage.storage_client_factory.create_storage_client_from_config',
       return_value=storage_client_mock).start()
 patch('nexent.storage.minio_config.MinIOStorageConfig.validate',
       lambda self: None).start()
-patch('backend.database.client.MinioClient',
+patch('management.db.client.MinioClient',
       return_value=minio_client_mock).start()
 
 

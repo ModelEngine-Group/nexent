@@ -7,8 +7,8 @@ import logging
 from datetime import datetime, timedelta, timezone
 from typing import Any, Protocol
 
-from database import document_tag_projection_db
-from database.tag_management_db import TagManagementDB
+from management.db.tag import projection as document_tag_projection_db
+from management.db.tag.repository import TagManagementDB
 from management.services.tag.resources import (
     AIDP_DOCUMENT_PROVIDER,
     KNOWLEDGE_CONTENT_LIBRARY_CODE,

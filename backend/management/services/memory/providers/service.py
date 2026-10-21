@@ -14,8 +14,8 @@ import time
 from contextlib import nullcontext
 from typing import Any, Dict, List, Optional, Union
 
-from database import memory_provider_config_db
-from consts import const as consts
+from management.db.memory import provider_config as memory_provider_config_db
+import consts.const as consts
 from nexent.memory.models import (
     MemoryIngestRequest,
     MemoryIngestResult,

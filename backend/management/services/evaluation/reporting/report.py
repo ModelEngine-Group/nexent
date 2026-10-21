@@ -22,13 +22,10 @@ from reportlab.platypus import (
     TableStyle,
 )
 
-from consts.evaluation_report_labels import get_report_labels
-from database.agent_evaluation_db import get_agent_evaluation
-from database.evaluation_annotation_db import (
-    list_annotation_schemas,
-    list_annotations_by_evaluation_id,
-)
-from database.evaluator_db import get_evaluator
+from contracts.evaluation_report_labels import get_report_labels
+from management.db.evaluation.runs import get_agent_evaluation
+from management.db.evaluation.annotation import list_annotation_schemas, list_annotations_by_evaluation_id
+from management.db.evaluation.evaluator import get_evaluator
 from management.services.evaluation.runs import (
     _load_all_evaluation_cases,
     get_evaluation_stats_impl,

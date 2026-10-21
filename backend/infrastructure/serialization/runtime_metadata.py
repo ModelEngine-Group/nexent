@@ -8,8 +8,8 @@ import json
 import math
 from typing import Any, Dict, Mapping
 
-from consts.exceptions import RuntimeMetadataValidationError
-from consts.error_code import RuntimeMetadataValidationCode
+from contracts.exceptions import RuntimeMetadataValidationError
+from contracts.error_code import RuntimeMetadataValidationCode
 
 
 from contracts.runtime import MAX_RUNTIME_METADATA_BYTES

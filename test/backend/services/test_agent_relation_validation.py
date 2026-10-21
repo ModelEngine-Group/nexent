@@ -5,8 +5,8 @@
 import pytest
 
 from test.backend.services import test_agent_service as legacy
-from consts.exceptions import AgentNotFoundError, AgentRelationValidationError
-from consts.model import AgentInfoRequest
+from contracts.exceptions import AgentNotFoundError, AgentRelationValidationError
+from contracts.models import AgentInfoRequest
 from management.services.agent import service
 
 

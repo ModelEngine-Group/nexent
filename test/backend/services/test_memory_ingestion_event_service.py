@@ -15,15 +15,15 @@ sys.modules["consts.const"] = consts_const
 sys.modules["consts"] = types.ModuleType("consts")
 
 database_pkg = types.ModuleType("database")
-event_log_db = types.ModuleType("database.memory_external_ingest_event_log_db")
+event_log_db = types.ModuleType("management.db.memory.external_ingest_event_log")
 event_log_db.insert_event_log = MagicMock(name="insert_event_log")
-param_db_mod = types.ModuleType("database.memory_provider_config_param_db")
+param_db_mod = types.ModuleType("management.db.memory.provider_config_param")
 param_db_mod.get_params = MagicMock(name="get_params")
 database_pkg.memory_external_ingest_event_log_db = event_log_db
 database_pkg.memory_provider_config_param_db = param_db_mod
 sys.modules["database"] = database_pkg
-sys.modules["database.memory_external_ingest_event_log_db"] = event_log_db
-sys.modules["database.memory_provider_config_param_db"] = param_db_mod
+sys.modules["management.db.memory.external_ingest_event_log"] = event_log_db
+sys.modules["management.db.memory.provider_config_param"] = param_db_mod
 
 nexent_pkg = types.ModuleType("nexent")
 memory_pkg = types.ModuleType("nexent.memory")

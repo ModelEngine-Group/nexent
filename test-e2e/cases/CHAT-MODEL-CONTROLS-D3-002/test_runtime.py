@@ -10,7 +10,7 @@ from concurrent.futures import ThreadPoolExecutor, CancelledError, wait
 import pytest
 from sqlalchemy import select, update, func
 
-from database.db_models import ModelRecord, ConversationRecord, ConversationMessage
+from management.db.models import ModelRecord, ConversationRecord, ConversationMessage
 from model_controls.runtime import runtime_fixture
 
 pytestmark = [pytest.mark.case_id("CHAT-MODEL-CONTROLS-D3-002"), pytest.mark.stage("D3")]

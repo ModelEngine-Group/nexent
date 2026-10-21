@@ -2,7 +2,7 @@
 """D2 contract test for /user/current_user_info auth_provider and username serialization.
 
 Locks the serialization contract introduced at
-backend/apps/user_management_app.py:238-241 and
+backend/management/api/identity/user_management.py:238-241 and
 backend/management/services/permission/identity/authentication.py:63-79:
 
 * data.user.auth_provider is always a string in {local, cas}.

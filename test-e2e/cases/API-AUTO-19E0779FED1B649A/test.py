@@ -13,8 +13,8 @@ _ORDINARY_LOCAL_TOOL = 'read_file'
 @pytest.mark.case_id(CASE_ID)
 @pytest.mark.stage('D2')
 def test_tool_list_is_user_selectable_deployment_control(monkeypatch):
-    import management.services.tool.configuration as svc
-    from consts import const
+    from management.services.tool import configuration as svc
+    import consts.const as const
 
     selectable = svc._get_user_selectability
 

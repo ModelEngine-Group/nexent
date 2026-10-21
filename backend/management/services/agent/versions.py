@@ -4,40 +4,16 @@ import logging
 from typing import Optional, Tuple, List, Dict, Any
 from sqlalchemy import update
 
-from database.client import get_db_session, as_dict
-from database.db_models import AgentInfo, ToolInstance, AgentRelation
-from database.agent_version_db import (
-    search_version_by_version_no,
-    query_version_list,
-    query_current_version_no,
-    query_agent_snapshot,
-    query_agent_draft,
-    insert_version,
-    update_version_status,
-    update_version,
-    update_agent_current_version,
-    insert_agent_snapshot,
-    insert_tool_snapshot,
-    insert_relation_snapshot,
-    insert_skill_snapshot,
-    delete_agent_snapshot,
-    delete_tool_snapshot,
-    delete_relation_snapshot,
-    delete_skill_snapshot,
-    restore_agent_draft,
-    get_next_version_no,
-    delete_version,
-    SOURCE_TYPE_NORMAL,
-    SOURCE_TYPE_ROLLBACK,
-    STATUS_RELEASED,
-    STATUS_DISABLED,
-    STATUS_ARCHIVED,
-)
-from database.model_management_db import get_model_by_model_id, get_valid_model_ids
-from database.agent_db import is_system_agent
+from management.db.client import get_db_session
+from management.utils.orm import as_dict
+from management.db.models import AgentInfo, ToolInstance, AgentRelation
+from management.db.agent.version import search_version_by_version_no, query_version_list, query_current_version_no, query_agent_snapshot, query_agent_draft, insert_version, update_version_status, update_version, update_agent_current_version, insert_agent_snapshot, insert_tool_snapshot, insert_relation_snapshot, insert_skill_snapshot, delete_agent_snapshot, delete_tool_snapshot, delete_relation_snapshot, delete_skill_snapshot, restore_agent_draft, get_next_version_no, delete_version
+from contracts.persistence.agent_version import SOURCE_TYPE_NORMAL, SOURCE_TYPE_ROLLBACK, STATUS_RELEASED, STATUS_DISABLED, STATUS_ARCHIVED
+from management.db.model.repository import get_model_by_model_id, get_valid_model_ids
+from management.db.agent.repository import is_system_agent
 from management.services.permission.identity.display import enrich_cas_usernames
-from management.db.serialization import convert_string_to_list
-from consts.agent_unavailable_reasons import AgentUnavailableReason
+from management.utils.serialization import convert_string_to_list
+from contracts.agent_unavailable_reasons import AgentUnavailableReason
 from management.services.agent.a2a.validation import validate_a2a_agent_name
 
 logger = logging.getLogger("agent_version_service")
@@ -147,7 +123,7 @@ def publish_version_impl(
         insert_relation_snapshot(rel_snapshot)
 
     # Get skill instances from draft (version_no=0)
-    from database import skill_db as skill_db_module
+    from management.db.skill import repository as skill_db_module
     skills_draft = skill_db_module.query_skill_instances_by_agent_id(
         agent_id=agent_id,
         tenant_id=tenant_id,
@@ -185,7 +161,7 @@ def publish_version_impl(
     a2a_agent_info = None
     a2a_agent_card = None
     if publish_as_a2a:
-        from database.a2a_agent_db import create_server_agent, get_server_agent_by_agent_id
+        from management.db.a2a.repository import create_server_agent, get_server_agent_by_agent_id
         existing_a2a = get_server_agent_by_agent_id(agent_id, tenant_id)
         logger.info(f"Creating/updating A2A Server agent for agent_id={agent_id}")
         agent_name = agent_draft.get("name") or f"Agent-{agent_id}"
@@ -326,7 +302,7 @@ def get_version_detail_impl(
     result['sub_agent_relations'] = _build_sub_agent_relations(relations_snapshot)
 
     # Get skill instances for this version (from ag_skill_instance_t with version_no)
-    from database import skill_db as skill_db_module
+    from management.db.skill import repository as skill_db_module
     skills_snapshot = skill_db_module.query_skill_instances_by_agent_id(
         agent_id=agent_id,
         tenant_id=tenant_id,
@@ -455,7 +431,7 @@ def rollback_version_impl(
         raise ValueError("Agent draft not found")
 
     # Get skill snapshots for target version
-    from database import skill_db as skill_db_module
+    from management.db.skill import repository as skill_db_module
     target_skills = skill_db_module.query_skill_instances_by_agent_id(
         agent_id=agent_id,
         tenant_id=tenant_id,
@@ -771,7 +747,7 @@ def _get_version_detail_or_draft(
     Returns structured agent info similar to get_version_detail_impl.
     """
     _ensure_system_agent_hidden(agent_id, tenant_id)
-    from database import skill_db as skill_db_module
+    from management.db.skill import repository as skill_db_module
 
     result: Dict[str, Any] = {}
 
@@ -859,18 +835,16 @@ async def list_published_agents_impl(
         list[dict]: List of published agent info
     """
     try:
-        from database.agent_db import (
-            query_all_agent_info_by_tenant_id,
-        )
+        from management.db.agent.repository import query_all_agent_info_by_tenant_id
         from consts.const import CAN_EDIT_ALL_USER_ROLES
-        from database.user_tenant_db import get_user_tenant_by_user_id
-        from database.group_db import query_group_ids_by_user
-        from database.model_management_db import get_model_by_model_id
+        from management.db.identity.user_tenant import get_user_tenant_by_user_id
+        from management.db.identity.group import query_group_ids_by_user
+        from management.db.model.repository import get_model_by_model_id
         from management.services.agent.read import (
             check_agent_availability, apply_duplicate_name_availability_rules,
         )
         from management.services.permission.asset_owner import resolve_agent_list_permission
-        from database.agent_version_db import query_agent_snapshot, query_version_list
+        from management.db.agent.version import query_agent_snapshot, query_version_list
 
         # Get user role for permission check
         user_tenant_record = get_user_tenant_by_user_id(user_id) or {}

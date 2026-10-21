@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """
 Nexent LLM Performance Monitoring System
 
@@ -2743,8 +2745,8 @@ class MonitoringRecordBuffer:
             if os.path.exists(backend_path) and backend_path not in sys.path:
                 sys.path.insert(0, backend_path)
 
-            from database.client import get_monitoring_db_session
-            from database.db_models import ModelMonitoringRecord
+            from management.db.client import get_monitoring_db_session
+            from management.db.models import ModelMonitoringRecord
         except ImportError as e:
             logger.debug(
                 f"Monitoring buffer: backend database not available: {e}")

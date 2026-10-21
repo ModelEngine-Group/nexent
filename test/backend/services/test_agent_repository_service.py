@@ -38,33 +38,33 @@ _agent_repo_db_mock.increment_agent_repository_downloads = MagicMock(return_valu
 _agent_repo_db_mock.sum_agent_repository_downloads_by_agent_ids = MagicMock(return_value={})
 _agent_repo_db_mock.fetch_draft_agent_mine_metadata = MagicMock(return_value={})
 _agent_repo_db_mock.list_agent_repository_by_agent_ids = MagicMock(return_value=[])
-sys.modules["database.agent_repository_db"] = _agent_repo_db_mock
+sys.modules["management.db.agent.catalog"] = _agent_repo_db_mock
 
 _user_tenant_db_mock = MagicMock()
 _user_tenant_db_mock.get_user_tenant_by_user_id = MagicMock()
-sys.modules["database.user_tenant_db"] = _user_tenant_db_mock
+sys.modules["management.db.identity.user_tenant"] = _user_tenant_db_mock
 
 _agent_db_mock = MagicMock()
 _agent_db_mock.search_agent_info_by_agent_id = MagicMock()
 _agent_db_mock.batch_get_agent_main_flags = MagicMock(return_value={})
-sys.modules["database.agent_db"] = _agent_db_mock
+sys.modules["management.db.agent.repository"] = _agent_db_mock
 
 _agent_version_db_mock = MagicMock()
 _agent_version_db_mock.search_version_by_version_no = MagicMock()
-sys.modules["database.agent_version_db"] = _agent_version_db_mock
+sys.modules["management.db.agent.version"] = _agent_version_db_mock
 
 _tag_management_db_mock = MagicMock()
-sys.modules["database.tag_management_db"] = _tag_management_db_mock
+sys.modules["management.db.tag.repository"] = _tag_management_db_mock
 
 # Additional DB mocks required because agent_repository_service imports
 # repository_import_precheck → skill_service, which depends on these modules.
-sys.modules.setdefault("database.skill_db", MagicMock())
-sys.modules.setdefault("database.group_db", MagicMock())
-sys.modules.setdefault("database.client", MagicMock())
-sys.modules.setdefault("database.knowledge_db", MagicMock())
-sys.modules.setdefault("database.model_management_db", MagicMock())
-sys.modules.setdefault("database.remote_mcp_db", MagicMock())
-sys.modules.setdefault("database.tool_db", MagicMock())
+sys.modules.setdefault("management.db.skill.repository", MagicMock())
+sys.modules.setdefault("management.db.identity.group", MagicMock())
+sys.modules.setdefault("management.db.client", MagicMock())
+sys.modules.setdefault("management.db.knowledge_base.repository", MagicMock())
+sys.modules.setdefault("management.db.model.repository", MagicMock())
+sys.modules.setdefault("management.db.mcp.remote", MagicMock())
+sys.modules.setdefault("management.db.tool.repository", MagicMock())
 sys.modules.setdefault("management.services.model.adapter", MagicMock())
 sys.modules.setdefault("management.services.configuration.tenant.settings", MagicMock())
 
@@ -144,7 +144,7 @@ _consts_model_mock.ModelConnectStatusEnum = _ModelConnectStatusEnum
 _consts_model_mock.ToolSourceEnum = _ToolSourceEnum
 _consts_model_mock.RepositoryImportRequirementItem = _RepositoryImportRequirementItem
 _consts_model_mock.RepositoryImportPrecheckResponse = _RepositoryImportPrecheckResponse
-sys.modules["consts.model"] = _consts_model_mock
+sys.modules["contracts.models"] = _consts_model_mock
 
 _agent_service_mock = MagicMock()
 _agent_service_mock.collect_skill_zip_entries = MagicMock(return_value=[])
@@ -172,8 +172,8 @@ _notification_service_mock = MagicMock()
 sys.modules["management.services.notification.service"] = _notification_service_mock
 
 from consts.const import ASSET_OWNER_TENANT_ID
-from consts.exceptions import UnauthorizedError
-from consts.notification import EVENT_TYPE_REPOSITORY_REVIEW_PENDING, RESOURCE_TYPE_AGENT_REPOSITORY
+from contracts.exceptions import UnauthorizedError
+from contracts.notification import EVENT_TYPE_REPOSITORY_REVIEW_PENDING, RESOURCE_TYPE_AGENT_REPOSITORY
 
 from management.services.repository.agent import listing as ars
 

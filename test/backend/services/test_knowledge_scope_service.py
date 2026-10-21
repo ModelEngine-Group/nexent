@@ -5,8 +5,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from backend.consts.model import ConversationKnowledgeScopeRequest, ToolParamsRequest
-from consts.exceptions import ValidationError
+from contracts.models import ConversationKnowledgeScopeRequest, ToolParamsRequest
+from contracts.exceptions import ValidationError
 from management.services.knowledge_base.scope import (
     ResolvedKnowledgeScope,
     STATIC_SCOPE_PATTERN,

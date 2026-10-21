@@ -26,7 +26,7 @@ class MockModule(mock.MagicMock):
 
 # Mock required heavy modules before any import of the service occurs.
 sys.modules['database'] = MockModule()
-sys.modules['database.model_management_db'] = MockModule()
+sys.modules['management.db.model.repository'] = MockModule()
 sys.modules['utils'] = MockModule()
 sys.modules['management.services.configuration.tenant.settings'] = MockModule()
 sys.modules['consts'] = MockModule()

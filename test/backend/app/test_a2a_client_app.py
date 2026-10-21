@@ -1,5 +1,5 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
-"""Unit tests for backend.apps.a2a_client_app runtime metadata chat flow."""
+"""Unit tests for management.api.a2a.a2a_client runtime metadata chat flow."""
 import sys
 import types
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -35,20 +35,17 @@ server_service_mock = MagicMock()
 server_service_mock.a2a_server_service = MagicMock()
 sys.modules["management.services.agent.a2a.service"] = server_service_mock
 
-sys.modules["database.a2a_agent_db"] = MagicMock()
+sys.modules["management.db.a2a.repository"] = MagicMock()
 
 auth_utils_mock = MagicMock()
 auth_utils_mock.get_current_user_info = MagicMock(return_value=("user_1", "tenant_1", None))
 sys.modules["management.services.permission.identity.authentication_helpers"] = auth_utils_mock
 sys.modules["management.services.permission.identity.authentication_helpers"] = auth_utils_mock
 
-from consts.error_code import RuntimeMetadataValidationCode  # noqa: E402
-from consts.exceptions import (  # noqa: E402
-    AppException,
-    RuntimeMetadataValidationError,
-)
+from contracts.error_code import RuntimeMetadataValidationCode
+from contracts.exceptions import AppException, RuntimeMetadataValidationError
 
-from apps.a2a_client_app import router  # noqa: E402
+from management.api.a2a.a2a_client import router
 
 app = FastAPI()
 app.include_router(router)
@@ -68,7 +65,7 @@ CHAT_URL = "/a2a/client/agents/7/chat"
 @pytest.fixture(autouse=True)
 def _patch_auth():
     """Stub identity resolution so tests focus on the chat endpoint logic."""
-    with patch("apps.a2a_client_app.get_current_user_info", return_value=("user_1", "tenant_1", None)):
+    with patch("management.api.a2a.a2a_client.get_current_user_info", return_value=("user_1", "tenant_1", None)):
         yield
 
 
@@ -76,7 +73,7 @@ def _patch_auth():
 def _mock_call_agent():
     """Default successful external agent call."""
     with patch(
-        "apps.a2a_client_app.a2a_client_service.call_agent",
+        "management.api.a2a.a2a_client.a2a_client_service.call_agent",
         new=AsyncMock(return_value={"reply": "hello"}),
     ) as mock_call:
         yield mock_call
@@ -121,7 +118,7 @@ def test_chat_with_metadata_embeds_metadata(_mock_call_agent):
 def test_chat_metadata_too_large_returns_413(_mock_call_agent):
     """METADATA_TOO_LARGE validation errors map to HTTP 413."""
     with patch(
-        "apps.a2a_client_app.validate_runtime_metadata",
+        "management.api.a2a.a2a_client.validate_runtime_metadata",
         side_effect=RuntimeMetadataValidationError(
             RuntimeMetadataValidationCode.METADATA_TOO_LARGE,
             "too large",
@@ -138,7 +135,7 @@ def test_chat_metadata_too_large_returns_413(_mock_call_agent):
 def test_chat_metadata_invalid_returns_422(_mock_call_agent):
     """Other validation errors map to HTTP 422."""
     with patch(
-        "apps.a2a_client_app.validate_runtime_metadata",
+        "management.api.a2a.a2a_client.validate_runtime_metadata",
         side_effect=RuntimeMetadataValidationError(
             RuntimeMetadataValidationCode.INVALID_METADATA_TYPE,
             "must be object",
@@ -180,7 +177,7 @@ def test_chat_empty_message_returns_400():
 def test_chat_agent_call_error_returns_400():
     """AgentCallError is mapped to HTTP 400."""
     with patch(
-        "apps.a2a_client_app.a2a_client_service.call_agent",
+        "management.api.a2a.a2a_client.a2a_client_service.call_agent",
         new=AsyncMock(side_effect=_AgentCallError("boom")),
     ):
         resp = _chat()
@@ -190,7 +187,7 @@ def test_chat_agent_call_error_returns_400():
 def test_chat_agent_discovery_error_returns_404():
     """AgentDiscoveryError is mapped to HTTP 404."""
     with patch(
-        "apps.a2a_client_app.a2a_client_service.call_agent",
+        "management.api.a2a.a2a_client.a2a_client_service.call_agent",
         new=AsyncMock(side_effect=_AgentDiscoveryError("not found")),
     ):
         resp = _chat()
@@ -200,7 +197,7 @@ def test_chat_agent_discovery_error_returns_404():
 def test_chat_generic_error_returns_500():
     """Unexpected errors are mapped to HTTP 500."""
     with patch(
-        "apps.a2a_client_app.a2a_client_service.call_agent",
+        "management.api.a2a.a2a_client.a2a_client_service.call_agent",
         new=AsyncMock(side_effect=RuntimeError("unexpected")),
     ):
         resp = _chat()

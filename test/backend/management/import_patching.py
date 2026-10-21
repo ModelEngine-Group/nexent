@@ -19,7 +19,7 @@ SPLIT_MODULES = (
         "management.services.permission.identity.authentication_helpers",
         "infrastructure.security.internal_tokens", "infrastructure.security.signatures",
     ),
-    ("management.services.monitor.audit", "management.api.permission.request_context"),
+    ("management.services.monitor.audit", "management.utils.request_context"),
     ("management.services.notification.service", "management.services.repository.review_notifications"),
     tuple("management.services.evaluation." + name for name in (
         "runs", "execution", "scoring", "case_generation", "analysis", "queries", "common")),

@@ -7,7 +7,7 @@ from dataclasses import FrozenInstanceError
 import pytest
 from sqlalchemy.exc import IntegrityError
 
-from consts.model import AgentInfoRequest
+from contracts.models import AgentInfoRequest
 from contracts.agent import WORKBENCH_OFFICIAL_SKILL_NAMES
 
 from management.services.agent.system import (

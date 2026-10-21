@@ -21,8 +21,8 @@ class MockModule(mock.MagicMock):
 
 _MOCKED_MODULE_NAMES = (
     "database",
-    "database.client",
-    "database.model_management_db",
+    "management.db.client",
+    "management.db.model.repository",
     "utils",
     "management.services.permission.identity.authentication_helpers",
     "management.services.configuration.tenant.settings",
@@ -30,8 +30,8 @@ _MOCKED_MODULE_NAMES = (
     "management.services.model.names",
     "consts",
     "consts.const",
-    "consts.model",
-    "consts.provider",
+    "contracts.models",
+    "contracts.provider",
     "nexent",
     "nexent.core",
     "nexent.core.agents",
@@ -53,8 +53,12 @@ _SAVED_MODULES = {
 
 # Mock required modules before any imports occur
 sys.modules['database'] = MockModule()
-sys.modules['database.client'] = MockModule()
-sys.modules['database.model_management_db'] = MockModule()
+sys.modules['management.db.client'] = MockModule()
+from test.common.database_stubs import install_serialization_stub
+install_serialization_stub(sys.modules["management.db.client"])
+from test.common.database_stubs import install_serialization_stub
+install_serialization_stub(sys.modules["management.db.client"])
+sys.modules['management.db.model.repository'] = MockModule()
 sys.modules['utils'] = MockModule()
 sys.modules['management.services.permission.identity.authentication_helpers'] = MockModule()
 sys.modules['management.services.configuration.tenant.settings'] = MockModule()
@@ -66,8 +70,8 @@ consts_const_module.LOCALHOST_IP = "127.0.0.1"
 consts_const_module.LOCALHOST_NAME = "localhost"
 consts_const_module.DOCKER_INTERNAL_HOST = "host.docker.internal"
 sys.modules['consts.const'] = consts_const_module
-sys.modules['consts.model'] = MockModule()
-sys.modules['consts.provider'] = MockModule()
+sys.modules['contracts.models'] = MockModule()
+sys.modules['contracts.provider'] = MockModule()
 
 # Mock nexent packages and modules with proper hierarchy
 sys.modules['nexent'] = MockModule()

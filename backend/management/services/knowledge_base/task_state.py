@@ -7,12 +7,7 @@ from typing import Any, Dict, List, Optional, Set, Tuple
 
 import redis
 
-from consts.const import (
-    REDIS_BACKEND_URL,
-    REDIS_ERROR_INFO_SCAN_COUNT,
-    REDIS_ERROR_INFO_TTL_SECONDS,
-    REDIS_URL,
-)
+from consts.const import REDIS_BACKEND_URL, REDIS_ERROR_INFO_SCAN_COUNT, REDIS_ERROR_INFO_TTL_SECONDS, REDIS_URL
 
 
 logger = logging.getLogger(__name__)

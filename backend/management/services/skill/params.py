@@ -13,11 +13,8 @@ from io import StringIO
 from typing import Any, Dict, List, Optional, Tuple
 
 import yaml
-from consts.exceptions import SkillException
-from management.db.skill_params import (
-    split_string_inline_comment,
-    strip_params_comments_for_db,
-)
+from contracts.exceptions import SkillException
+from management.utils.skill_params import split_string_inline_comment, strip_params_comments_for_db
 from management.services.skill.files import (
     _normalize_zip_entry_path,
     _read_zip_member,

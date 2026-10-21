@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """Permission resolution and runtime whitelist helpers for AIDP KBs (v7.1).
 
 This module composes three inputs to decide whether a user may act on a
@@ -30,8 +32,8 @@ from dataclasses import dataclass
 from typing import Any, Iterable, Sequence
 
 from consts.const import CAN_EDIT_ALL_USER_ROLES
-from database import group_db as group_db_module
-from database import user_tenant_db as user_tenant_db_module
+from management.db.identity import group as group_db_module
+from management.db.identity import user_tenant as user_tenant_db_module
 from ext_components.aidp.consts.aidp_exceptions import (
     AidpGroupValidationError,
     AidpKbConflictError,

@@ -7,8 +7,8 @@ from uuid import UUID
 
 import pytest
 
-from consts.exceptions import ForbiddenError
-from database import attachment_db
+from contracts.exceptions import ForbiddenError
+from management.db.file import attachment as attachment_db
 from management.services.agent import service as agent_service
 
 PNG = b"\x89PNG\r\n\x1a\n" + b"\x00" * 16

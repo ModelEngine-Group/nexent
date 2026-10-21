@@ -57,21 +57,21 @@ class TestConfigAppIntegration:
 
     def test_config_app_can_import_app_factory(self):
         """Test that we can import create_app from app_factory."""
-        from backend.apps.app_factory import create_app
+        from management.utils.app_factory import create_app
         app = create_app()
         assert isinstance(app, FastAPI)
         assert app.root_path == "/api"
 
     def test_config_app_title(self):
         """Test that create_app works with config app title."""
-        from backend.apps.app_factory import create_app
+        from management.utils.app_factory import create_app
         app = create_app(title="Nexent Config API", description="Configuration APIs")
         assert app.title == "Nexent Config API"
         assert app.description == "Configuration APIs"
 
     def test_config_app_default_cors_config(self):
         """Test that config app has correct CORS configuration."""
-        from backend.apps.app_factory import create_app
+        from management.utils.app_factory import create_app
         app = create_app()
 
         cors_middleware = None
@@ -110,11 +110,11 @@ class TestConfigAppRouterConfiguration:
 
                 return register
 
-        app_factory_module = types.ModuleType("apps.app_factory")
+        app_factory_module = types.ModuleType("management.utils.app_factory")
         app_factory_module.create_app = (
             lambda **kwargs: RecordingApp(kwargs.get("lifespan"))
         )
-        monkeypatch.setitem(sys.modules, "apps.app_factory", app_factory_module)
+        monkeypatch.setitem(sys.modules, "management.utils.app_factory", app_factory_module)
 
         api_key_router = APIRouter(prefix="/api-keys")
 
@@ -127,52 +127,52 @@ class TestConfigAppRouterConfiguration:
             return {}
 
         router_modules = {
-            "apps.agent_app": {"agent_config_router": APIRouter()},
-            "apps.agent_repository_app": {"agent_repository_router": APIRouter()},
-            "apps.skill_repository_app": {"skill_repository_router": APIRouter()},
-            "apps.config_sync_app": {"router": APIRouter()},
-            "apps.datamate_app": {"router": APIRouter()},
-            "apps.vectordatabase_app": {"router": APIRouter()},
-            "apps.dify_app": {"router": APIRouter()},
-            "apps.idata_app": {"router": APIRouter()},
-            "apps.ragflow_app": {"router": APIRouter()},
-            "apps.file_management_app": {"file_management_config_router": APIRouter()},
-            "apps.image_app": {"router": APIRouter()},
-            "apps.knowledge_summary_app": {"router": APIRouter()},
-            "apps.mock_user_management_app": {"router": APIRouter()},
-            "apps.model_managment_app": {"router": APIRouter()},
-            "apps.oauth_app": {"router": APIRouter()},
-            "apps.prompt_app": {"router": APIRouter()},
-            "apps.mcp_management_app": {"router": APIRouter()},
-            "apps.remote_mcp_app": {"router": APIRouter()},
-            "apps.skill_app": {"router": APIRouter()},
-            "apps.tenant_config_app": {"router": APIRouter()},
-            "apps.tool_config_app": {"router": APIRouter()},
-            "apps.user_management_app": {"router": APIRouter()},
-            "apps.voice_app": {"voice_config_router": APIRouter()},
-            "apps.tenant_app": {"router": APIRouter()},
-            "apps.group_app": {"router": APIRouter()},
-            "apps.user_app": {"router": APIRouter()},
-            "apps.api_key_app": {"router": api_key_router},
-            "apps.invitation_app": {"router": APIRouter()},
-            "apps.notification_app": {"router": APIRouter()},
-            "apps.a2a_client_app": {"router": APIRouter()},
-            "apps.monitoring_app": {"router": APIRouter()},
-            "apps.a2a_server_app": {"router": APIRouter()},
-            "apps.haotian_app": {"router": APIRouter()},
-            "apps.ind_aidp_app": {"router": APIRouter()},
-            "apps.evaluation_set_app": {"router": APIRouter()},
-            "apps.agent_evaluation_app": {"router": APIRouter()},
-            "apps.evaluator_app": {"router": APIRouter()},
-            "apps.evaluation_annotation_app": {"router": APIRouter()},
-            "apps.cas_app": {"router": APIRouter()},
-            "apps.memory_config_app": {"router": APIRouter()},
-            "apps.memory_record_app": {"router": APIRouter()},
-            "apps.memory_long_term_app": {"router": APIRouter()},
-            "apps.memory_dreaming_app": {"router": APIRouter()},
-            "apps.memory_provider_app": {"router": APIRouter()},
-            "apps.tag_management_app": {"router": APIRouter()},
-            "apps.quota_app": {
+            "management.api.agent.agent": {"agent_config_router": APIRouter()},
+            "management.api.agent.agent_repository": {"agent_repository_router": APIRouter()},
+            "management.api.skill.skill_repository": {"skill_repository_router": APIRouter()},
+            "management.api.configuration.config_sync": {"router": APIRouter()},
+            "management.api.knowledge_base.datamate": {"router": APIRouter()},
+            "management.api.knowledge_base.vectordatabase": {"router": APIRouter()},
+            "management.api.knowledge_base.dify": {"router": APIRouter()},
+            "management.api.knowledge_base.idata": {"router": APIRouter()},
+            "management.api.knowledge_base.ragflow": {"router": APIRouter()},
+            "management.api.file.file_management": {"file_management_config_router": APIRouter()},
+            "management.api.file.image": {"router": APIRouter()},
+            "management.api.knowledge_base.knowledge_summary": {"router": APIRouter()},
+            "management.api.identity.mock_user_management": {"router": APIRouter()},
+            "management.api.model.model_managment": {"router": APIRouter()},
+            "management.api.identity.oauth": {"router": APIRouter()},
+            "management.api.prompt.prompt": {"router": APIRouter()},
+            "management.api.mcp.mcp_management": {"router": APIRouter()},
+            "management.api.mcp.remote_mcp": {"router": APIRouter()},
+            "management.api.skill.skill": {"router": APIRouter()},
+            "management.api.configuration.tenant_config": {"router": APIRouter()},
+            "management.api.tool.tool_config": {"router": APIRouter()},
+            "management.api.identity.user_management": {"router": APIRouter()},
+            "management.api.voice.voice": {"voice_config_router": APIRouter()},
+            "management.api.identity.tenant": {"router": APIRouter()},
+            "management.api.identity.group": {"router": APIRouter()},
+            "management.api.identity.user": {"router": APIRouter()},
+            "management.api.identity.api_key": {"router": api_key_router},
+            "management.api.identity.invitation": {"router": APIRouter()},
+            "management.api.notification.notification": {"router": APIRouter()},
+            "management.api.a2a.a2a_client": {"router": APIRouter()},
+            "management.api.monitoring.monitoring": {"router": APIRouter()},
+            "management.api.a2a.a2a_server": {"router": APIRouter()},
+            "management.api.knowledge_base.haotian": {"router": APIRouter()},
+            "management.api.knowledge_base.ind_aidp": {"router": APIRouter()},
+            "management.api.evaluation.evaluation_set": {"router": APIRouter()},
+            "management.api.evaluation.agent_evaluation": {"router": APIRouter()},
+            "management.api.evaluation.evaluator": {"router": APIRouter()},
+            "management.api.evaluation.evaluation_annotation": {"router": APIRouter()},
+            "management.api.identity.cas": {"router": APIRouter()},
+            "management.api.memory.memory_config": {"router": APIRouter()},
+            "management.api.memory.memory_record": {"router": APIRouter()},
+            "management.api.memory.memory_long_term": {"router": APIRouter()},
+            "management.api.memory.memory_dreaming": {"router": APIRouter()},
+            "management.api.memory.memory_provider": {"router": APIRouter()},
+            "management.api.tag.tag_management": {"router": APIRouter()},
+            "management.api.knowledge_base.quota": {
                 "tenant_quota_router": APIRouter(),
                 "platform_quota_router": APIRouter(),
                 "personal_quota_router": APIRouter(),
@@ -185,9 +185,9 @@ class TestConfigAppRouterConfiguration:
             monkeypatch.setitem(sys.modules, module_name, module)
 
         retired_router = APIRouter(prefix="/prompt-template")
-        retired_module = types.ModuleType("apps.prompt_template_app")
+        retired_module = types.ModuleType("management.api.prompt.prompt_template")
         retired_module.router = retired_router
-        monkeypatch.setitem(sys.modules, "apps.prompt_template_app", retired_module)
+        monkeypatch.setitem(sys.modules, "management.api.prompt.prompt_template", retired_module)
 
         const_module = types.ModuleType("consts.const")
         const_module.AIDP_API_KEY = ""
@@ -237,7 +237,7 @@ class TestConfigAppRouterConfiguration:
             thread_lifecycle_module,
         )
 
-        module_path = Path(backend_dir) / "apps" / "config_app.py"
+        module_path = Path(backend_dir) / 'management' / 'api' / 'application.py'
         spec = importlib.util.spec_from_file_location("isolated_config_app", module_path)
         config_app = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(config_app)
@@ -331,7 +331,7 @@ class TestConfigAppRouterConfiguration:
 
     def test_create_app_with_multiple_routers(self):
         """Test that create_app can include multiple routers."""
-        from backend.apps.app_factory import create_app
+        from management.utils.app_factory import create_app
         from fastapi import APIRouter
 
         app = create_app()
@@ -355,7 +355,7 @@ class TestConfigAppRouterConfiguration:
 
     def test_router_path_prefixes(self):
         """Test router path prefix patterns."""
-        from backend.apps.app_factory import create_app
+        from management.utils.app_factory import create_app
         from fastapi import APIRouter
 
         app = create_app()
@@ -376,7 +376,7 @@ class TestConfigAppExceptionHandling:
 
     def test_http_exception_handler_config(self):
         """Test HTTPException handler configuration."""
-        from backend.apps.app_factory import create_app, register_exception_handlers
+        from management.utils.app_factory import create_app, register_exception_handlers
         from fastapi import HTTPException
 
         app = create_app()
@@ -394,7 +394,7 @@ class TestConfigAppExceptionHandling:
 
     def test_exception_handlers_registered(self):
         """Test that exception handlers are properly registered."""
-        from backend.apps.app_factory import create_app, register_exception_handlers
+        from management.utils.app_factory import create_app, register_exception_handlers
         from fastapi import HTTPException
 
         app = create_app()
@@ -411,26 +411,26 @@ class TestConfigAppMonitoring:
 
     def test_monitoring_can_be_enabled(self):
         """Test that monitoring can be enabled for config app."""
-        from backend.apps.app_factory import create_app
+        from management.utils.app_factory import create_app
 
         app = create_app(enable_monitoring=True)
         assert isinstance(app, FastAPI)
 
     def test_monitoring_can_be_disabled(self):
         """Test that monitoring can be disabled for config app."""
-        from backend.apps.app_factory import create_app
+        from management.utils.app_factory import create_app
 
         app = create_app(enable_monitoring=False)
         assert isinstance(app, FastAPI)
 
     def test_monitoring_import_failure_handled(self):
         """Test that monitoring import failure is handled gracefully."""
-        from backend.apps.app_factory import create_app
+        from management.utils.app_factory import create_app
         from unittest.mock import patch
 
         # Test with monitoring enabled but module not available
         with patch.dict('sys.modules', {'infrastructure.observability.bootstrap': None}):
-            with patch('backend.apps.app_factory.logger') as mock_logger:
+            with patch('management.utils.app_factory.logger') as mock_logger:
                 app = create_app(enable_monitoring=True)
                 assert app is not None
 
@@ -446,7 +446,7 @@ class TestConfigAppSpeedMode:
     def test_speed_mode_conditional(self):
         """Test speed mode conditional logic."""
         from consts.const import IS_SPEED_MODE
-        from backend.apps.app_factory import create_app
+        from management.utils.app_factory import create_app
 
         # App should work regardless of speed mode
         app = create_app()
@@ -483,7 +483,7 @@ class TestConfigAppMiddlewareStack:
 
     def test_middleware_stack_exists(self):
         """Test that middleware stack exists."""
-        from backend.apps.app_factory import create_app
+        from management.utils.app_factory import create_app
 
         app = create_app()
         assert hasattr(app, 'user_middleware')
@@ -491,7 +491,7 @@ class TestConfigAppMiddlewareStack:
 
     def test_cors_middleware_present(self):
         """Test that CORS middleware is present."""
-        from backend.apps.app_factory import create_app
+        from management.utils.app_factory import create_app
 
         app = create_app()
 
@@ -505,7 +505,7 @@ class TestConfigAppMiddlewareStack:
 
     def test_middleware_order(self):
         """Test middleware order is preserved."""
-        from backend.apps.app_factory import create_app
+        from management.utils.app_factory import create_app
 
         app = create_app()
         middleware_count = len(app.user_middleware)
@@ -519,7 +519,7 @@ class TestConfigAppRoutes:
 
     def test_route_with_path_parameters(self):
         """Test routes with path parameters."""
-        from backend.apps.app_factory import create_app
+        from management.utils.app_factory import create_app
         from fastapi import APIRouter
 
         app = create_app()
@@ -537,7 +537,7 @@ class TestConfigAppRoutes:
 
     def test_route_with_query_parameters(self):
         """Test routes with query parameters."""
-        from backend.apps.app_factory import create_app
+        from management.utils.app_factory import create_app
         from fastapi import APIRouter
 
         app = create_app()
@@ -556,7 +556,7 @@ class TestConfigAppRoutes:
 
     def test_route_with_post_body(self):
         """Test routes with POST body."""
-        from backend.apps.app_factory import create_app
+        from management.utils.app_factory import create_app
         from fastapi import APIRouter
         from pydantic import BaseModel
 
@@ -584,7 +584,7 @@ class TestConfigAppErrorResponses:
 
     def test_404_error_format(self):
         """Test 404 error response format."""
-        from backend.apps.app_factory import create_app, register_exception_handlers
+        from management.utils.app_factory import create_app, register_exception_handlers
 
         app = create_app()
         register_exception_handlers(app)
@@ -596,7 +596,7 @@ class TestConfigAppErrorResponses:
 
     def test_500_error_format(self):
         """Test 500 error response format."""
-        from backend.apps.app_factory import create_app, register_exception_handlers
+        from management.utils.app_factory import create_app, register_exception_handlers
 
         app = create_app()
         register_exception_handlers(app)
@@ -617,7 +617,7 @@ class TestConfigAppVersioning:
 
     def test_root_path_configuration(self):
         """Test root path configuration."""
-        from backend.apps.app_factory import create_app
+        from management.utils.app_factory import create_app
 
         app = create_app(root_path="/api")
         assert app.root_path == "/api"
@@ -627,7 +627,7 @@ class TestConfigAppVersioning:
 
     def test_custom_root_path_with_routes(self):
         """Test custom root path with routes."""
-        from backend.apps.app_factory import create_app
+        from management.utils.app_factory import create_app
         from fastapi import APIRouter
 
         app = create_app(root_path="/api")

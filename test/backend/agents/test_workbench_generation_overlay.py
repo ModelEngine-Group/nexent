@@ -9,7 +9,7 @@ from agents.create_agent_info import (
     _materialize_runtime_skill_snapshot,
     apply_root_generation_overlay,
 )
-from consts.model import WorkbenchGenerationConfig
+from contracts.models import WorkbenchGenerationConfig
 from nexent.core.agents.agent_model import AgentConfig, ModelConfig
 
 EFFORT_CAPABILITY = {"status": "supported", "control": "effort", "levels": ["none", "minimal", "low", "medium", "high", "xhigh", "max"]}

@@ -8,11 +8,11 @@ from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
 from pydantic import ValidationError
 
-from apps import tag_management_app
-from consts.exceptions import ValidationError as DomainValidationError
-from consts.model import ToolTagAssignmentBatchRequest
-from database.tag_management_db import TagManagementDB
-from database.tool_db import query_tenant_tools_by_ids
+from management.api.tag import tag_management as tag_management_app
+from contracts.exceptions import ValidationError as DomainValidationError
+from contracts.models import ToolTagAssignmentBatchRequest
+from management.db.tag.repository import TagManagementDB
+from management.db.tool.repository import query_tenant_tools_by_ids
 from management.services.tag.library import TagManagementService
 from management.services.tag.resources import AuthenticatedCaller
 
@@ -78,7 +78,7 @@ def test_tool_lookup_uses_one_tenant_scoped_in_query(monkeypatch):
     query.all.return_value = []
     context = MagicMock()
     context.__enter__.return_value = session
-    monkeypatch.setattr("database.tool_db.get_db_session", lambda: context)
+    monkeypatch.setattr("management.db.tool.repository.get_db_session", lambda: context)
     assert query_tenant_tools_by_ids("tenant-a", [1, 2]) == []
     session.query.assert_called_once()
     query.all.assert_called_once()
@@ -99,7 +99,7 @@ def test_assignment_batch_uses_one_query_and_preserves_empty_resources(monkeypat
     query.all.return_value = [(SimpleNamespace(resource_id="2"), definition, value)]
     context = MagicMock()
     context.__enter__.return_value = session
-    monkeypatch.setattr("database.tag_management_db.get_db_session", lambda: context)
+    monkeypatch.setattr("management.db.tag.repository.get_db_session", lambda: context)
     binding = MagicMock()
     monkeypatch.setattr(TagManagementDB, "_get_active_resource_binding", binding)
     result = TagManagementDB.list_resource_assignments_batch("tenant-a", "tool", ["1", "2"], "default_resource")

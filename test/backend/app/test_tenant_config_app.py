@@ -16,12 +16,16 @@ database_client_mock = MagicMock()
 database_client_mock.MinioClient = MagicMock()
 database_client_mock.get_db_session = MagicMock()
 database_client_mock.db_client = MagicMock()
-sys.modules['database.client'] = database_client_mock
+sys.modules['management.db.client'] = database_client_mock
+from test.common.database_stubs import install_serialization_stub
+install_serialization_stub(sys.modules["management.db.client"])
+from test.common.database_stubs import install_serialization_stub
+install_serialization_stub(sys.modules["management.db.client"])
 
 botocore_client_mock = MagicMock()
 sys.modules['botocore.client'] = botocore_client_mock
 
-sys.modules['database.tenant_config_db'] = MagicMock()
+sys.modules['management.db.configuration.tenant'] = MagicMock()
 
 # Create mock functions
 mock_get_current_user_id = MagicMock()
@@ -50,10 +54,10 @@ sys.modules['consts.const'] = const_mock
 # Now import FastAPI components and the router
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-from apps.tenant_config_app import router
+from management.api.configuration.tenant_config import router
 
 # Import the module to directly replace functions
-import apps.tenant_config_app as tenant_app
+from management.api.configuration import tenant_config as tenant_app
 
 class TestTenantConfigApp(unittest.TestCase):
     @classmethod

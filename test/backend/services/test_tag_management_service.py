@@ -4,11 +4,7 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
-from consts.exceptions import (
-    TagManagementConflictError,
-    TagManagementNotFoundError,
-    ValidationError,
-)
+from contracts.exceptions import TagManagementConflictError, TagManagementNotFoundError, ValidationError
 from management.services.tag.library import TagManagementService
 from management.services.tag.resources import AuthenticatedCaller
 from sqlalchemy.exc import DBAPIError, IntegrityError
@@ -383,7 +379,7 @@ def test_batch_status_respects_limit_and_encoding(monkeypatch):
         _encode_document_resource_id("local", "kb-1", "doc-1")
     ]
     monkeypatch.setattr(
-        "database.document_tag_projection_db.list_projection_states_for_knowledge_base",
+        "management.db.tag.projection.list_projection_states_for_knowledge_base",
         lambda *a, **k: {"doc-1": {"status": "synced", "version": 1, "tag_count": 0}},
     )
 

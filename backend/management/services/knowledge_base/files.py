@@ -8,12 +8,12 @@ from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
 from consts.const import ASSET_OWNER_ATTACHMENTS_PREFIX
-from consts.error_code import ErrorCode
-from consts.exceptions import AppException
-from database.attachment_db import delete_file, file_exists
-from database.knowledge_db import get_knowledge_record
-from database.knowledge_file_lifecycle_db import list_file_records
-from database.knowledge_storage_object_db import list_committed_storage_objects
+from contracts.error_code import ErrorCode
+from contracts.exceptions import AppException
+from management.db.file.attachment import delete_file, file_exists
+from management.db.knowledge_base.repository import get_knowledge_record
+from management.db.knowledge_base.file_lifecycle import list_file_records
+from management.db.knowledge_base.storage_object import list_committed_storage_objects
 from fastapi import Depends, Path, Query
 from management.services.knowledge_base.common import get_vector_db_core, logger
 from management.services.knowledge_base.status import get_all_files_status

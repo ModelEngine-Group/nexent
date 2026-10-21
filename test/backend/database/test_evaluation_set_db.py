@@ -1,4 +1,6 @@
-"""Unit tests for ``backend.database.evaluation_set_db``."""
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
+"""Unit tests for ``management.db.evaluation.sets``."""
 
 import sys
 from pathlib import Path
@@ -20,7 +22,7 @@ sys.modules.setdefault("botocore.exceptions", MagicMock())
 
 @pytest.fixture
 def session_factory():
-    from backend.database import evaluation_set_db
+    from management.db.evaluation import sets as evaluation_set_db
 
     session = MagicMock(name="session")
     cm = MagicMock()
@@ -71,7 +73,7 @@ def _has_delete_flag_n_filter(q):
 
 class TestCreateEvaluationSet:
     def test_adds_record_and_returns_dict(self, session_factory, monkeypatch):
-        from backend.database import evaluation_set_db
+        from management.db.evaluation import sets as evaluation_set_db
 
         session, _ = session_factory
         monkeypatch.setattr(evaluation_set_db, "as_dict",
@@ -96,7 +98,7 @@ class TestCreateEvaluationSet:
 
 class TestUpdateCaseCount:
     def test_invokes_update(self, session_factory):
-        from backend.database import evaluation_set_db
+        from management.db.evaluation import sets as evaluation_set_db
 
         session, _ = session_factory
         q = _wire_chain(session)
@@ -117,7 +119,7 @@ class TestUpdateCaseCount:
 
 class TestListEvaluationSets:
     def test_returns_dict_list(self, session_factory, monkeypatch):
-        from backend.database import evaluation_set_db
+        from management.db.evaluation import sets as evaluation_set_db
 
         session, _ = session_factory
         q = _wire_chain(session, all_rows=[MagicMock(name="r1"), MagicMock(name="r2")])
@@ -138,8 +140,8 @@ class TestListEvaluationSets:
 
 class TestGetEvaluationSet:
     def test_raises_when_not_found(self, session_factory):
-        from consts.exceptions import AppException
-        from backend.database import evaluation_set_db
+        from contracts.exceptions import AppException
+        from management.db.evaluation import sets as evaluation_set_db
 
         session, _ = session_factory
         _wire_chain(session, first=None)
@@ -150,7 +152,7 @@ class TestGetEvaluationSet:
             )
 
     def test_returns_as_dict(self, session_factory, monkeypatch):
-        from backend.database import evaluation_set_db
+        from management.db.evaluation import sets as evaluation_set_db
 
         session, _ = session_factory
         _wire_chain(session, first=MagicMock(name="rec"))
@@ -169,7 +171,7 @@ class TestGetEvaluationSet:
 
 class TestInsertCases:
     def test_inserts_each_case(self, session_factory):
-        from backend.database import evaluation_set_db
+        from management.db.evaluation import sets as evaluation_set_db
 
         session, _ = session_factory
         cases = [
@@ -192,7 +194,7 @@ class TestInsertCases:
 
 class TestListCases:
     def test_returns_list(self, session_factory, monkeypatch):
-        from backend.database import evaluation_set_db
+        from management.db.evaluation import sets as evaluation_set_db
 
         session, _ = session_factory
         _wire_chain(session, all_rows=[MagicMock(name="r1")])
@@ -207,7 +209,7 @@ class TestListCases:
 
     def test_filters_out_deleted_cases(self, session_factory):
         """Soft-deleted (delete_flag='Y') cases must not be listed."""
-        from backend.database import evaluation_set_db
+        from management.db.evaluation import sets as evaluation_set_db
 
         session, _ = session_factory
         q = _wire_chain(session, all_rows=[])
@@ -224,7 +226,7 @@ class TestListCases:
 class TestCountEvaluationSetCases:
     def test_filters_out_deleted_cases(self, session_factory):
         """count must ignore soft-deleted (delete_flag='Y') cases."""
-        from backend.database import evaluation_set_db
+        from management.db.evaluation import sets as evaluation_set_db
 
         session, _ = session_factory
         q = _wire_chain(session, count=5)
@@ -239,7 +241,7 @@ class TestCountEvaluationSetCases:
 
 class TestGetEvaluationSetCasesAll:
     def test_returns_all_cases(self, session_factory, monkeypatch):
-        from backend.database import evaluation_set_db
+        from management.db.evaluation import sets as evaluation_set_db
 
         session, _ = session_factory
         _wire_chain(session, all_rows=[MagicMock(name="r1"), MagicMock(name="r2")])
@@ -253,7 +255,7 @@ class TestGetEvaluationSetCasesAll:
 
     def test_filters_out_deleted_cases(self, session_factory, monkeypatch):
         """Soft-deleted (delete_flag='Y') cases must not be exported."""
-        from backend.database import evaluation_set_db
+        from management.db.evaluation import sets as evaluation_set_db
 
         session, _ = session_factory
         q = _wire_chain(session, all_rows=[])
@@ -272,7 +274,7 @@ class TestGetEvaluationSetCasesAll:
 
 class TestSoftDelete:
     def test_marks_deleted(self, session_factory):
-        from backend.database import evaluation_set_db
+        from management.db.evaluation import sets as evaluation_set_db
 
         session, _ = session_factory
         q = _wire_chain(session, update_rows=1)
@@ -287,8 +289,8 @@ class TestSoftDelete:
         assert updates["updated_by"] == "u1"
 
     def test_raises_when_not_found(self, session_factory):
-        from consts.exceptions import AppException
-        from backend.database import evaluation_set_db
+        from contracts.exceptions import AppException
+        from management.db.evaluation import sets as evaluation_set_db
 
         session, _ = session_factory
         _wire_chain(session, update_rows=0)
@@ -305,7 +307,7 @@ class TestSoftDelete:
 
 class TestCountEvaluationSets:
     def test_counts_rows(self, session_factory):
-        from backend.database import evaluation_set_db
+        from management.db.evaluation import sets as evaluation_set_db
 
         session, _ = session_factory
         _wire_chain(session, count=7)
@@ -320,7 +322,7 @@ class TestCountEvaluationSets:
 
 class TestListCasesWithQuery:
     def test_filters_by_query(self, session_factory, monkeypatch):
-        from backend.database import evaluation_set_db
+        from management.db.evaluation import sets as evaluation_set_db
 
         session, _ = session_factory
         q = _wire_chain(session, all_rows=[MagicMock(name="r1")])
@@ -336,7 +338,7 @@ class TestListCasesWithQuery:
 
 class TestCountCasesWithQuery:
     def test_filters_by_query(self, session_factory):
-        from backend.database import evaluation_set_db
+        from management.db.evaluation import sets as evaluation_set_db
 
         session, _ = session_factory
         q = _wire_chain(session, count=3)
@@ -354,7 +356,7 @@ class TestCountCasesWithQuery:
 
 class TestBatchDeleteCases:
     def test_empty_list_returns_zero(self, session_factory):
-        from backend.database import evaluation_set_db
+        from management.db.evaluation import sets as evaluation_set_db
 
         session, _ = session_factory
         assert evaluation_set_db.batch_delete_evaluation_set_cases(
@@ -363,7 +365,7 @@ class TestBatchDeleteCases:
         assert not session.query.called
 
     def test_deletes_rows(self, session_factory):
-        from backend.database import evaluation_set_db
+        from management.db.evaluation import sets as evaluation_set_db
 
         session, _ = session_factory
         q = _wire_chain(session)
@@ -383,7 +385,7 @@ class TestBatchDeleteCases:
 
 class TestHardDeleteEvaluationSet:
     def test_deletes_cases_and_set(self, session_factory):
-        from backend.database import evaluation_set_db
+        from management.db.evaluation import sets as evaluation_set_db
 
         session, _ = session_factory
         q = _wire_chain(session)
@@ -401,7 +403,7 @@ class TestStartupRecovery:
     def test_interrupted_generation_keeps_baseline_and_deletes_appended_cases(
         self, session_factory
     ):
-        from backend.database import evaluation_set_db
+        from management.db.evaluation import sets as evaluation_set_db
 
         session, _ = session_factory
         evaluation_set = SimpleNamespace(
@@ -432,7 +434,7 @@ class TestStartupRecovery:
     def test_interrupted_generation_without_appended_cases_skips_delete(
         self, session_factory
     ):
-        from backend.database import evaluation_set_db
+        from management.db.evaluation import sets as evaluation_set_db
 
         session, _ = session_factory
         evaluation_set = SimpleNamespace(
@@ -460,7 +462,7 @@ class TestStartupRecovery:
     def test_cleans_virtual_sets_that_were_never_linked_to_a_run(
         self, session_factory
     ):
-        from backend.database import evaluation_set_db
+        from management.db.evaluation import sets as evaluation_set_db
 
         session, _ = session_factory
         referenced_query = MagicMock(name="referenced_query")
@@ -486,7 +488,7 @@ class TestStartupRecovery:
     def test_cleanup_virtual_sets_skips_delete_when_none_are_orphaned(
         self, session_factory
     ):
-        from backend.database import evaluation_set_db
+        from management.db.evaluation import sets as evaluation_set_db
 
         session, _ = session_factory
         referenced_query = MagicMock(name="referenced_query")
@@ -502,7 +504,7 @@ class TestStartupRecovery:
     def test_materializes_virtual_set_and_links_pending_run_in_one_session(
         self, session_factory
     ):
-        from backend.database import evaluation_set_db
+        from management.db.evaluation import sets as evaluation_set_db
 
         session, _ = session_factory
         run = SimpleNamespace(
@@ -544,7 +546,7 @@ class TestStartupRecovery:
     def test_materialize_virtual_set_rejects_missing_pending_run(
         self, session_factory
     ):
-        from backend.database import evaluation_set_db
+        from management.db.evaluation import sets as evaluation_set_db
 
         session, _ = session_factory
         query = MagicMock(name="run_query")
@@ -571,7 +573,7 @@ class TestStartupRecovery:
 
 class TestListCaseTurnOrders:
     def test_returns_turn_orders(self, session_factory):
-        from backend.database import evaluation_set_db
+        from management.db.evaluation import sets as evaluation_set_db
 
         session, _ = session_factory
         _wire_chain(session, all_rows=[(1,), (None,), (2,)])
@@ -582,7 +584,7 @@ class TestListCaseTurnOrders:
         assert orders == [1, 2]
 
     def test_excludes_case_ids(self, session_factory):
-        from backend.database import evaluation_set_db
+        from management.db.evaluation import sets as evaluation_set_db
 
         session, _ = session_factory
         q = _wire_chain(session, all_rows=[(1,)])
@@ -595,7 +597,7 @@ class TestListCaseTurnOrders:
 
 class TestGetCaseIdsBySession:
     def test_returns_case_ids(self, session_factory):
-        from backend.database import evaluation_set_db
+        from management.db.evaluation import sets as evaluation_set_db
 
         session, _ = session_factory
         _wire_chain(session, all_rows=[(1,), (2,)])
@@ -612,14 +614,14 @@ class TestGetCaseIdsBySession:
 
 class TestGetCasesByIds:
     def test_empty_list_returns_empty(self, session_factory):
-        from backend.database import evaluation_set_db
+        from management.db.evaluation import sets as evaluation_set_db
 
         session, _ = session_factory
         assert evaluation_set_db.get_cases_by_ids([], tenant_id="t1") == []
         assert not session.query.called
 
     def test_fetches_by_ids(self, session_factory, monkeypatch):
-        from backend.database import evaluation_set_db
+        from management.db.evaluation import sets as evaluation_set_db
 
         session, _ = session_factory
         _wire_chain(session, all_rows=[MagicMock(name="r1")])
@@ -630,7 +632,7 @@ class TestGetCasesByIds:
         assert len(cases) == 1
 
     def test_filters_by_evaluation_set(self, session_factory, monkeypatch):
-        from backend.database import evaluation_set_db
+        from management.db.evaluation import sets as evaluation_set_db
 
         session, _ = session_factory
         q = _wire_chain(session, all_rows=[])

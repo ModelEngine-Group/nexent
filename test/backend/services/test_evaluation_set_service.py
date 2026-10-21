@@ -107,13 +107,13 @@ _services_pkg = _register_package("services")
 _services_pkg.__path__ = [str(_BACKEND_DIR / "services")]
 
 _consts_pkg = _register_package("consts")
-_consts_model_module = types.ModuleType("consts.model")
+_consts_model_module = types.ModuleType("contracts.models")
 _consts_model_module.AgentRequest = MagicMock()
-sys.modules["consts.model"] = _consts_model_module
+sys.modules["contracts.models"] = _consts_model_module
 _consts_pkg.model = _consts_model_module
 
-# ── consts.error_code stub with all enumerators referenced by service ──
-_consts_error_code_module = types.ModuleType("consts.error_code")
+# ── contracts.error_code stub with all enumerators referenced by service ──
+_consts_error_code_module = types.ModuleType("contracts.error_code")
 
 
 class _ErrorCode:
@@ -132,17 +132,17 @@ class _ErrorCode:
 
 
 _consts_error_code_module.ErrorCode = _ErrorCode
-sys.modules["consts.error_code"] = _consts_error_code_module
+sys.modules["contracts.error_code"] = _consts_error_code_module
 _consts_pkg.error_code = _consts_error_code_module
 
-# ── consts.evaluation_limits stub ──
-_consts_limits_module = types.ModuleType("consts.evaluation_limits")
+# ── contracts.evaluation_limits stub ──
+_consts_limits_module = types.ModuleType("contracts.evaluation_limits")
 _consts_limits_module.MAX_CASES_PER_SET = 10000
-sys.modules["consts.evaluation_limits"] = _consts_limits_module
+sys.modules["contracts.evaluation_limits"] = _consts_limits_module
 _consts_pkg.evaluation_limits = _consts_limits_module
 
-# ── consts.evaluation_status stub ──
-_consts_status_module = types.ModuleType("consts.evaluation_status")
+# ── contracts.evaluation_status stub ──
+_consts_status_module = types.ModuleType("contracts.evaluation_status")
 
 
 class _EvalRunStatus:
@@ -154,11 +154,11 @@ class _EvalRunStatus:
 
 
 _consts_status_module.EvalRunStatus = _EvalRunStatus
-sys.modules["consts.evaluation_status"] = _consts_status_module
+sys.modules["contracts.evaluation_status"] = _consts_status_module
 _consts_pkg.evaluation_status = _consts_status_module
 
-# ── consts.exceptions stub (real Exception subclass so try/except works) ──
-_consts_exceptions_module = types.ModuleType("consts.exceptions")
+# ── contracts.exceptions stub (real Exception subclass so try/except works) ──
+_consts_exceptions_module = types.ModuleType("contracts.exceptions")
 
 class _AppException(Exception):
     def __init__(self, error_code=None, message=None, details=None, *args, **kwargs):
@@ -169,7 +169,7 @@ class _AppException(Exception):
 
 
 _consts_exceptions_module.AppException = _AppException
-sys.modules["consts.exceptions"] = _consts_exceptions_module
+sys.modules["contracts.exceptions"] = _consts_exceptions_module
 _consts_pkg.exceptions = _consts_exceptions_module
 
 # ── consts.const stub (env switches + AIDP credentials) ──
@@ -187,28 +187,32 @@ sys.modules["ext_components.aidp.services.aidp_service"] = MagicMock()
 
 _db_pkg = _register_package("database")
 _db_client_module = MagicMock()
-sys.modules["database.client"] = _db_client_module
+sys.modules["management.db.client"] = _db_client_module
+from test.common.database_stubs import install_serialization_stub
+install_serialization_stub(sys.modules["management.db.client"])
+from test.common.database_stubs import install_serialization_stub
+install_serialization_stub(sys.modules["management.db.client"])
 _db_pkg.client = _db_client_module
 
 _db_models_module = MagicMock()
-sys.modules["database.db_models"] = _db_models_module
+sys.modules["management.db.models"] = _db_models_module
 _db_pkg.db_models = _db_models_module
 
 _agent_version_db_mock = MagicMock()
 _agent_version_db_mock.query_version_list = MagicMock()
-sys.modules["database.agent_version_db"] = _agent_version_db_mock
+sys.modules["management.db.agent.version"] = _agent_version_db_mock
 _db_pkg.agent_version_db = _agent_version_db_mock
 
 _evaluation_set_db_mock = MagicMock()
 _evaluation_set_db_mock.soft_delete_evaluation_set = MagicMock()
 _evaluation_set_db_mock.hard_delete_evaluation_set = MagicMock()
-sys.modules["database.evaluation_set_db"] = _evaluation_set_db_mock
+sys.modules["management.db.evaluation.sets"] = _evaluation_set_db_mock
 _db_pkg.evaluation_set_db = _evaluation_set_db_mock
 
-# ── database.knowledge_db stub ──
+# ── management.db.knowledge_base.repository stub ──
 _knowledge_db_mock = MagicMock()
 _knowledge_db_mock.get_index_name_by_knowledge_name = MagicMock()
-sys.modules["database.knowledge_db"] = _knowledge_db_mock
+sys.modules["management.db.knowledge_base.repository"] = _knowledge_db_mock
 _db_pkg.knowledge_db = _knowledge_db_mock
 
 # ── utils package + sub-module stubs referenced by evaluation_set_service ──
@@ -259,7 +263,11 @@ def service_module(monkeypatch):
     # service module reads at call time.
     db_client_mock = MagicMock()
     db_client_mock.get_db_session = MagicMock(return_value=_SessionCtx())
-    sys.modules["database.client"] = db_client_mock
+    sys.modules["management.db.client"] = db_client_mock
+    from test.common.database_stubs import install_serialization_stub
+    install_serialization_stub(sys.modules["management.db.client"])
+    from test.common.database_stubs import install_serialization_stub
+    install_serialization_stub(sys.modules["management.db.client"])
     _db_pkg.client = db_client_mock
 
     from management.services.evaluation import sets as evaluation_set_service
@@ -1724,7 +1732,7 @@ class TestHandleGenerationFailure:
             def __ge__(self, other):
                 return True
 
-        sys.modules["database.db_models"].EvaluationSetCase.create_time = _CreateTime()
+        sys.modules["management.db.models"].EvaluationSetCase.create_time = _CreateTime()
         monkeypatch.setattr(service, "_update_generation_status", MagicMock())
         session = MagicMock()
         monkeypatch.setattr(service, "get_db_session", lambda: _ctx(session))
@@ -1739,7 +1747,7 @@ class TestHandleGenerationFailure:
             def __ge__(self, other):
                 return True
 
-        sys.modules["database.db_models"].EvaluationSetCase.create_time = _CreateTime()
+        sys.modules["management.db.models"].EvaluationSetCase.create_time = _CreateTime()
         monkeypatch.setattr(service, "_update_generation_status", MagicMock())
         session = MagicMock()
         session.query.return_value.filter.return_value.delete.side_effect = RuntimeError("x")

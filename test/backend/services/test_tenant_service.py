@@ -24,15 +24,10 @@ patch('nexent.storage.storage_client_factory.create_storage_client_from_config',
       return_value=storage_client_mock).start()
 patch('nexent.storage.minio_config.MinIOStorageConfig.validate',
       lambda self: None).start()
-patch('backend.database.client.MinioClient',
+patch('management.db.client.MinioClient',
       return_value=minio_client_mock).start()
 
-from consts.exceptions import (
-    ForbiddenError,
-    NotFoundException,
-    TenantResourceLimitError,
-    ValidationError,
-)
+from contracts.exceptions import ForbiddenError, NotFoundException, TenantResourceLimitError, ValidationError
 from management.services.permission.identity.tenants import (
     backfill_workbench_main_agents,
     get_tenant_info,

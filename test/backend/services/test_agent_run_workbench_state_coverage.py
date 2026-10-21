@@ -43,7 +43,7 @@ def _configure_early_workbench_run(monkeypatch, canonical, conversation):
 @pytest.mark.asyncio
 async def test_existing_workbench_commits_config_and_metadata_atomically(monkeypatch):
     from fastapi import Request
-    from consts.model import WorkbenchSessionConfig
+    from contracts.models import WorkbenchSessionConfig
 
     canonical = WorkbenchSessionConfig.model_validate(
         {"mode": "single_agent_chat", "agent_mounts": [{"agent_id": 7}]}
@@ -103,7 +103,7 @@ async def test_existing_workbench_commits_config_and_metadata_atomically(monkeyp
 @pytest.mark.asyncio
 async def test_new_workbench_conversation_persists_canonical_config(monkeypatch):
     from fastapi import Request
-    from consts.model import WorkbenchSessionConfig
+    from contracts.models import WorkbenchSessionConfig
 
     canonical = WorkbenchSessionConfig.model_validate(
         {"mode": "single_agent_chat", "agent_mounts": [{"agent_id": 7}]}
@@ -135,7 +135,7 @@ async def test_workbench_run_requires_configuration_after_request_normalization(
     monkeypatch,
 ):
     from fastapi import Request
-    from consts.model import WorkbenchSessionConfig
+    from contracts.models import WorkbenchSessionConfig
 
     canonical = WorkbenchSessionConfig.model_validate(
         {"mode": "single_agent_chat", "agent_mounts": [{"agent_id": 7}]}

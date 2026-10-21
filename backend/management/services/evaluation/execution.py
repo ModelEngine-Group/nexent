@@ -2,11 +2,11 @@
 
 from typing import Any
 
-from consts.error_code import ErrorCode
-from consts.evaluation_limits import DEFAULT_PASS_THRESHOLD
-from consts.evaluation_status import EvalCaseStatus, EvalPassStatus, EvalRunStatus
-from consts.exceptions import AppException
-from consts.model import AgentRequest
+from contracts.error_code import ErrorCode
+from contracts.evaluation_limits import DEFAULT_PASS_THRESHOLD
+from contracts.evaluation_status import EvalCaseStatus, EvalPassStatus, EvalRunStatus
+from contracts.exceptions import AppException
+from contracts.models import AgentRequest
 
 try:
     from adapters.jiuwen_sdk_adapter import JiuwenSDKAdapter
@@ -20,21 +20,12 @@ from datetime import datetime
 from statistics import mean
 
 from adapters.exception import JiuwenSDKUnavailableError
-from consts.evaluation_limits import MAX_TURNS_PER_SESSION
-from database.agent_evaluation_db import (
-    create_agent_evaluation_cases,
-    get_agent_evaluation,
-    list_agent_evaluation_cases,
-    update_agent_evaluation_case_result,
-    update_agent_evaluation_status,
-)
-from database.client import get_db_session
-from database.db_models import ModelRecord
-from database.evaluation_set_db import (
-    get_evaluation_set_cases_all,
-    materialize_virtual_evaluation_set_for_run,
-)
-from database.evaluator_db import get_evaluator
+from contracts.evaluation_limits import MAX_TURNS_PER_SESSION
+from management.db.evaluation.runs import create_agent_evaluation_cases, get_agent_evaluation, list_agent_evaluation_cases, update_agent_evaluation_case_result, update_agent_evaluation_status
+from management.db.client import get_db_session
+from management.db.models import ModelRecord
+from management.db.evaluation.sets import get_evaluation_set_cases_all, materialize_virtual_evaluation_set_for_run
+from management.db.evaluation.evaluator import get_evaluator
 from infrastructure.concurrency import runtime_thread_manager
 from management.services.agent.service import prepare_agent_run
 from management.services.evaluation.common import (

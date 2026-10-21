@@ -1,4 +1,6 @@
-"""Unit tests for backend.apps.api_key_app endpoints."""
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
+"""Unit tests for management.api.identity.api_key endpoints."""
 from http import HTTPStatus
 from unittest.mock import patch
 
@@ -6,8 +8,8 @@ import pytest
 from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
 
-from apps.api_key_app import router
-from consts.exceptions import ForbiddenError, NotFoundException, UnauthorizedError, ValidationError
+from management.api.identity.api_key import router
+from contracts.exceptions import ForbiddenError, NotFoundException, UnauthorizedError, ValidationError
 
 
 app = FastAPI()
@@ -16,8 +18,8 @@ client = TestClient(app)
 
 
 class TestApiKeyEndpoints:
-    @patch("apps.api_key_app.list_tenant_api_keys")
-    @patch("apps.api_key_app.get_current_user_context")
+    @patch("management.api.identity.api_key.list_tenant_api_keys")
+    @patch("management.api.identity.api_key.get_current_user_context")
     def test_list_api_keys_passes_paging_and_requester_context(self, mock_context, mock_list):
         mock_context.return_value = ("admin-1", "tenant-1", "ADMIN")
         mock_list.return_value = {"items": [{"user_id": "user-1"}], "total": 1}
@@ -38,8 +40,8 @@ class TestApiKeyEndpoints:
             sort_order="asc",
         )
 
-    @patch("apps.api_key_app.refresh_user_api_key")
-    @patch("apps.api_key_app.get_current_user_context")
+    @patch("management.api.identity.api_key.refresh_user_api_key")
+    @patch("management.api.identity.api_key.get_current_user_context")
     def test_refresh_api_key_uses_email_target(self, mock_context, mock_refresh):
         mock_context.return_value = ("admin-1", "tenant-1", "ADMIN")
         mock_refresh.return_value = {"api_key": "nexent-new-key"}
@@ -60,8 +62,8 @@ class TestApiKeyEndpoints:
             email="api.user@example.com",
         )
 
-    @patch("apps.api_key_app.revoke_user_api_keys")
-    @patch("apps.api_key_app.get_current_user_context")
+    @patch("management.api.identity.api_key.revoke_user_api_keys")
+    @patch("management.api.identity.api_key.get_current_user_context")
     def test_revoke_api_key_uses_user_id_target(self, mock_context, mock_revoke):
         mock_context.return_value = ("admin-1", "tenant-1", "ADMIN")
         mock_revoke.return_value = {"revoked_count": 2}
@@ -81,8 +83,8 @@ class TestApiKeyEndpoints:
             email=None,
         )
 
-    @patch("apps.api_key_app.list_tenant_api_keys", side_effect=UnauthorizedError("invalid token"))
-    @patch("apps.api_key_app.get_current_user_context")
+    @patch("management.api.identity.api_key.list_tenant_api_keys", side_effect=UnauthorizedError("invalid token"))
+    @patch("management.api.identity.api_key.get_current_user_context")
     def test_list_api_keys_maps_service_authorization_error(self, mock_context, _):
         mock_context.return_value = ("admin-1", "tenant-1", "ADMIN")
 
@@ -91,8 +93,8 @@ class TestApiKeyEndpoints:
         assert response.status_code == HTTPStatus.UNAUTHORIZED
         assert response.json()["detail"] == "invalid token"
 
-    @patch("apps.api_key_app.refresh_user_api_key", side_effect=NotFoundException("user missing"))
-    @patch("apps.api_key_app.get_current_user_context")
+    @patch("management.api.identity.api_key.refresh_user_api_key", side_effect=NotFoundException("user missing"))
+    @patch("management.api.identity.api_key.get_current_user_context")
     def test_refresh_api_key_maps_missing_user_error(self, mock_context, _):
         mock_context.return_value = ("admin-1", "tenant-1", "ADMIN")
 
@@ -127,7 +129,7 @@ class TestApiKeyEndpoints:
     ],
 )
 def test_map_error_maps_domain_exceptions_to_http_status(exception, expected_status):
-    from apps.api_key_app import _map_error
+    from management.api.identity.api_key import _map_error
 
     with pytest.raises(HTTPException) as raised:
         _map_error(exception)
@@ -136,7 +138,7 @@ def test_map_error_maps_domain_exceptions_to_http_status(exception, expected_sta
 
 
 def test_map_error_reraises_unexpected_exception():
-    from apps.api_key_app import _map_error
+    from management.api.identity.api_key import _map_error
 
     unexpected = RuntimeError("database unavailable")
     with pytest.raises(RuntimeError, match="database unavailable"):

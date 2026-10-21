@@ -2,18 +2,8 @@
 import logging
 from typing import Optional, Any
 
-from consts.const import (
-    AVATAR_URI,
-    CUSTOM_ICON_URL,
-    DATAMATE_URL,
-    DEFAULT_GROUP_ID,
-    ICON_TYPE,
-    ICON_KEY,
-    MODEL_CONFIG_MAPPING,
-    MODEL_ENGINE_ENABLED,
-    TENANT_NAME
-)
-from database.model_management_db import get_model_id_by_display_name, get_model_records
+from consts.const import AVATAR_URI, CUSTOM_ICON_URL, DATAMATE_URL, DEFAULT_GROUP_ID, ICON_TYPE, ICON_KEY, MODEL_CONFIG_MAPPING, MODEL_ENGINE_ENABLED, TENANT_NAME
+from management.db.model.repository import get_model_id_by_display_name, get_model_records
 from management.services.configuration.tenant.settings import get_env_key, safe_value, tenant_config_manager
 from management.services.model.names import get_model_name_from_config
 

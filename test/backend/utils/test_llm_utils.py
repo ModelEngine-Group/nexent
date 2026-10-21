@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import os
 import sys
 import types
@@ -107,8 +109,8 @@ sys.modules["nexent.core.models"] = models_mod
 nexent_core_pkg = types.ModuleType("nexent.core")
 nexent_core_pkg.__path__ = [os.path.join(_sdk_nexent_path, "core")]
 sys.modules["nexent.core"] = nexent_core_pkg
-# Stub nexent.core.agents.agent_model: backend/consts/model.py (reached via
-# database.model_management_db) imports AgentVerificationConfig/ToolConfig from
+# Stub nexent.core.agents.agent_model: backend/contracts/models.py (reached via
+# management.db.model.repository) imports AgentVerificationConfig/ToolConfig from
 # it at module level, and the empty __path__ above blocks the real SDK package.
 agents_pkg = types.ModuleType("nexent.core.agents")
 agents_pkg.__path__ = []
@@ -143,9 +145,9 @@ gateway_mod.registry = registry_mod
 # ``from nexent import MessageObserver`` at model_gateway_service import time.
 nexent_module.MessageObserver = observer_mod.MessageObserver
 
-# Ensure backend.database.client modules exist before patching
-import backend.database.client  # noqa: E402,F401
-import database.client  # noqa: E402,F401
+# Ensure management.db.client modules exist before patching
+import management.db.client
+import management.db.client
 
 from management.services.model.invocation import call_llm_for_system_prompt, _process_thinking_tokens
 
@@ -221,8 +223,8 @@ class TestCallLLMForSystemPrompt:
         )
 
     def test_call_llm_for_system_prompt_exception(self, mocker: MockFixture):
-        from consts.error_code import ErrorCode
-        from consts.exceptions import AppException
+        from contracts.error_code import ErrorCode
+        from contracts.exceptions import AppException
 
         mock_get_model_by_id = mocker.patch('management.services.model.invocation.get_model_by_model_id')
         mock_adapter = mocker.patch('management.services.model.invocation.get_llm_adapter_from_config')
@@ -946,8 +948,8 @@ class TestAdditionalLLMUtilsTests:
         mock_llm_instance.client.chat.completions.create.side_effect = Exception("LLM error")
         mock_llm_instance._prepare_completion_kwargs.return_value = {}
 
-        from consts.error_code import ErrorCode
-        from consts.exceptions import AppException
+        from contracts.error_code import ErrorCode
+        from contracts.exceptions import AppException
 
         with pytest.raises(AppException) as exc_info:
             call_llm_for_system_prompt(
@@ -986,8 +988,8 @@ class TestCallLLMForSystemPromptErrorHandling:
 
     def test_error_401_api_key_invalid(self, mocker: MockFixture):
         """Test error handling for 401 status code - API key invalid."""
-        from consts.error_code import ErrorCode
-        from consts.exceptions import AppException
+        from contracts.error_code import ErrorCode
+        from contracts.exceptions import AppException
 
         mock_llm_instance = self._create_mock_llm_setup(mocker)
         mock_llm_instance.client.chat.completions.create.side_effect = Exception(
@@ -1001,8 +1003,8 @@ class TestCallLLMForSystemPromptErrorHandling:
 
     def test_error_unauthorized_lowercase(self, mocker: MockFixture):
         """Test error handling for 'unauthorized' in error message."""
-        from consts.error_code import ErrorCode
-        from consts.exceptions import AppException
+        from contracts.error_code import ErrorCode
+        from contracts.exceptions import AppException
 
         mock_llm_instance = self._create_mock_llm_setup(mocker)
         mock_llm_instance.client.chat.completions.create.side_effect = Exception(
@@ -1016,8 +1018,8 @@ class TestCallLLMForSystemPromptErrorHandling:
 
     def test_error_api_key_in_message(self, mocker: MockFixture):
         """Test error handling for 'api key' in error message."""
-        from consts.error_code import ErrorCode
-        from consts.exceptions import AppException
+        from contracts.error_code import ErrorCode
+        from contracts.exceptions import AppException
 
         mock_llm_instance = self._create_mock_llm_setup(mocker)
         mock_llm_instance.client.chat.completions.create.side_effect = Exception(
@@ -1031,8 +1033,8 @@ class TestCallLLMForSystemPromptErrorHandling:
 
     def test_error_403_forbidden(self, mocker: MockFixture):
         """Test error handling for 403 status code - no permission."""
-        from consts.error_code import ErrorCode
-        from consts.exceptions import AppException
+        from contracts.error_code import ErrorCode
+        from contracts.exceptions import AppException
 
         mock_llm_instance = self._create_mock_llm_setup(mocker)
         mock_llm_instance.client.chat.completions.create.side_effect = Exception(
@@ -1046,8 +1048,8 @@ class TestCallLLMForSystemPromptErrorHandling:
 
     def test_error_forbidden_lowercase(self, mocker: MockFixture):
         """Test error handling for 'forbidden' in error message."""
-        from consts.error_code import ErrorCode
-        from consts.exceptions import AppException
+        from contracts.error_code import ErrorCode
+        from contracts.exceptions import AppException
 
         mock_llm_instance = self._create_mock_llm_setup(mocker)
         mock_llm_instance.client.chat.completions.create.side_effect = Exception(
@@ -1061,8 +1063,8 @@ class TestCallLLMForSystemPromptErrorHandling:
 
     def test_error_404_not_found(self, mocker: MockFixture):
         """Test error handling for 404 status code - model not found."""
-        from consts.error_code import ErrorCode
-        from consts.exceptions import AppException
+        from contracts.error_code import ErrorCode
+        from contracts.exceptions import AppException
 
         mock_llm_instance = self._create_mock_llm_setup(mocker)
         mock_llm_instance.client.chat.completions.create.side_effect = Exception(
@@ -1076,8 +1078,8 @@ class TestCallLLMForSystemPromptErrorHandling:
 
     def test_error_not_found_lowercase(self, mocker: MockFixture):
         """Test error handling for 'not found' in error message."""
-        from consts.error_code import ErrorCode
-        from consts.exceptions import AppException
+        from contracts.error_code import ErrorCode
+        from contracts.exceptions import AppException
 
         mock_llm_instance = self._create_mock_llm_setup(mocker)
         mock_llm_instance.client.chat.completions.create.side_effect = Exception(
@@ -1091,8 +1093,8 @@ class TestCallLLMForSystemPromptErrorHandling:
 
     def test_error_429_rate_limit(self, mocker: MockFixture):
         """Test error handling for 429 status code - rate limit exceeded."""
-        from consts.error_code import ErrorCode
-        from consts.exceptions import AppException
+        from contracts.error_code import ErrorCode
+        from contracts.exceptions import AppException
 
         mock_llm_instance = self._create_mock_llm_setup(mocker)
         mock_llm_instance.client.chat.completions.create.side_effect = Exception(
@@ -1106,8 +1108,8 @@ class TestCallLLMForSystemPromptErrorHandling:
 
     def test_error_rate_limit_lowercase(self, mocker: MockFixture):
         """Test error handling for 'rate limit' in error message."""
-        from consts.error_code import ErrorCode
-        from consts.exceptions import AppException
+        from contracts.error_code import ErrorCode
+        from contracts.exceptions import AppException
 
         mock_llm_instance = self._create_mock_llm_setup(mocker)
         mock_llm_instance.client.chat.completions.create.side_effect = Exception(
@@ -1121,8 +1123,8 @@ class TestCallLLMForSystemPromptErrorHandling:
 
     def test_error_500_service_unavailable(self, mocker: MockFixture):
         """Test error handling for 500 status code - service unavailable."""
-        from consts.error_code import ErrorCode
-        from consts.exceptions import AppException
+        from contracts.error_code import ErrorCode
+        from contracts.exceptions import AppException
 
         mock_llm_instance = self._create_mock_llm_setup(mocker)
         mock_llm_instance.client.chat.completions.create.side_effect = Exception(
@@ -1136,8 +1138,8 @@ class TestCallLLMForSystemPromptErrorHandling:
 
     def test_error_502_service_unavailable(self, mocker: MockFixture):
         """Test error handling for 502 status code - bad gateway."""
-        from consts.error_code import ErrorCode
-        from consts.exceptions import AppException
+        from contracts.error_code import ErrorCode
+        from contracts.exceptions import AppException
 
         mock_llm_instance = self._create_mock_llm_setup(mocker)
         mock_llm_instance.client.chat.completions.create.side_effect = Exception(
@@ -1151,8 +1153,8 @@ class TestCallLLMForSystemPromptErrorHandling:
 
     def test_error_503_service_unavailable(self, mocker: MockFixture):
         """Test error handling for 503 status code - service unavailable."""
-        from consts.error_code import ErrorCode
-        from consts.exceptions import AppException
+        from contracts.error_code import ErrorCode
+        from contracts.exceptions import AppException
 
         mock_llm_instance = self._create_mock_llm_setup(mocker)
         mock_llm_instance.client.chat.completions.create.side_effect = Exception(
@@ -1166,8 +1168,8 @@ class TestCallLLMForSystemPromptErrorHandling:
 
     def test_error_504_service_unavailable(self, mocker: MockFixture):
         """Test error handling for 504 status code - gateway timeout."""
-        from consts.error_code import ErrorCode
-        from consts.exceptions import AppException
+        from contracts.error_code import ErrorCode
+        from contracts.exceptions import AppException
 
         mock_llm_instance = self._create_mock_llm_setup(mocker)
         mock_llm_instance.client.chat.completions.create.side_effect = Exception(
@@ -1181,8 +1183,8 @@ class TestCallLLMForSystemPromptErrorHandling:
 
     def test_error_connection_error(self, mocker: MockFixture):
         """Test error handling for connection error."""
-        from consts.error_code import ErrorCode
-        from consts.exceptions import AppException
+        from contracts.error_code import ErrorCode
+        from contracts.exceptions import AppException
 
         mock_llm_instance = self._create_mock_llm_setup(mocker)
         mock_llm_instance.client.chat.completions.create.side_effect = Exception(
@@ -1196,8 +1198,8 @@ class TestCallLLMForSystemPromptErrorHandling:
 
     def test_error_timeout(self, mocker: MockFixture):
         """Test error handling for timeout error."""
-        from consts.error_code import ErrorCode
-        from consts.exceptions import AppException
+        from contracts.error_code import ErrorCode
+        from contracts.exceptions import AppException
 
         mock_llm_instance = self._create_mock_llm_setup(mocker)
         mock_llm_instance.client.chat.completions.create.side_effect = Exception(
@@ -1211,8 +1213,8 @@ class TestCallLLMForSystemPromptErrorHandling:
 
     def test_error_connection_refused(self, mocker: MockFixture):
         """Test error handling for connection refused error."""
-        from consts.error_code import ErrorCode
-        from consts.exceptions import AppException
+        from contracts.error_code import ErrorCode
+        from contracts.exceptions import AppException
 
         mock_llm_instance = self._create_mock_llm_setup(mocker)
         mock_llm_instance.client.chat.completions.create.side_effect = Exception(
@@ -1226,8 +1228,8 @@ class TestCallLLMForSystemPromptErrorHandling:
 
     def test_error_generic_unmapped_error(self, mocker: MockFixture):
         """Test error handling for generic unmapped errors."""
-        from consts.error_code import ErrorCode
-        from consts.exceptions import AppException
+        from contracts.error_code import ErrorCode
+        from contracts.exceptions import AppException
 
         mock_llm_instance = self._create_mock_llm_setup(mocker)
         mock_llm_instance.client.chat.completions.create.side_effect = Exception(
@@ -1329,8 +1331,8 @@ class TestCallLLMForSystemPromptErrorHandling:
 
     def test_error_empty_message(self, mocker: MockFixture):
         """Test error handling for exception with empty message."""
-        from consts.error_code import ErrorCode
-        from consts.exceptions import AppException
+        from contracts.error_code import ErrorCode
+        from contracts.exceptions import AppException
 
         mock_llm_instance = self._create_mock_llm_setup(mocker)
         mock_llm_instance.client.chat.completions.create.side_effect = Exception()
@@ -1383,8 +1385,8 @@ class TestCallLLMForSystemPromptRetry:
 
     def test_transient_503_exhausts_then_unavailable(self, mocker: MockFixture):
         """Exhausting retries on 503 must surface MODEL_SERVICE_UNAVAILABLE."""
-        from consts.error_code import ErrorCode
-        from consts.exceptions import AppException
+        from contracts.error_code import ErrorCode
+        from contracts.exceptions import AppException
 
         mock_llm_instance = self._create_mock_llm_setup(mocker)
         mock_llm_instance.client = MagicMock()
@@ -1399,8 +1401,8 @@ class TestCallLLMForSystemPromptRetry:
 
     def test_non_retryable_401_fails_immediately(self, mocker: MockFixture):
         """A 401 must not be retried; it fails on the first attempt."""
-        from consts.error_code import ErrorCode
-        from consts.exceptions import AppException
+        from contracts.error_code import ErrorCode
+        from contracts.exceptions import AppException
 
         mock_llm_instance = self._create_mock_llm_setup(mocker)
         calls = {"n": 0}

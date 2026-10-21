@@ -6,7 +6,7 @@ import pytest
 from smolagents.memory import AgentMemory
 
 import services.nl2skill_service as service
-from consts.model import NL2SkillRunRequest
+from contracts.models import NL2SkillRunRequest
 from nexent.core.agents.context import ContextManager, ContextManagerConfig
 from nexent.core.agents.run_agent import _get_authorized_history
 

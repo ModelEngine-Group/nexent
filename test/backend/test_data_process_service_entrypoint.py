@@ -101,9 +101,9 @@ def test_parse_arguments_exposes_supported_service_flags(service_module, monkeyp
 
 
 def test_create_app_registers_data_process_router(service_module, monkeypatch):
-    app_module = types.ModuleType("apps.data_process_app")
+    app_module = types.ModuleType("data_process.api.tasks.routes")
     app_module.router = object()
-    monkeypatch.setitem(sys.modules, "apps.data_process_app", app_module)
+    monkeypatch.setitem(sys.modules, "data_process.api.tasks.routes", app_module)
 
     app = service_module.create_app()
 

@@ -11,12 +11,8 @@ from zoneinfo import ZoneInfo
 from nexent.core.concurrency import run_blocking
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
-from consts.const import (
-    AGENT_AUTOMATION_MIN_INTERVAL_SECONDS,
-    MESSAGE_ROLE,
-    MODEL_CONFIG_MAPPING,
-)
-from database.model_management_db import get_model_by_model_id
+from consts.const import AGENT_AUTOMATION_MIN_INTERVAL_SECONDS, MESSAGE_ROLE, MODEL_CONFIG_MAPPING
+from management.db.model.repository import get_model_by_model_id
 from nexent.core.agents.prompt.auxiliary import compose_auxiliary_prompt
 
 from management.services.automation.intent_parser import has_automation_schedule_signal, parse_automation_intent

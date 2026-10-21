@@ -16,10 +16,7 @@ from unittest.mock import Mock, AsyncMock, patch
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../../backend"))
 
-from consts.exceptions import (
-    VoiceServiceException,
-    TTSConnectionException,
-)
+from contracts.exceptions import VoiceServiceException, TTSConnectionException
 
 
 class MockSTTModel:

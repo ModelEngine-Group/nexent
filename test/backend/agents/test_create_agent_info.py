@@ -18,7 +18,7 @@ consts_const.NEXENT_TOOL_FASTPATH_ALLOWED_TOOLS = (
     "KnowledgeBaseSearchTool", "ReadSkillMdTool", "ReadSkillConfigTool", "AidpSearchTool",
 )
 
-# Mock consts.model module with HistoryItem class
+# Mock contracts.models module with HistoryItem class
 from typing import List, Optional, Dict, Any
 from pydantic import BaseModel
 
@@ -62,7 +62,7 @@ class ToolExecutionException(Exception):
     pass
 
 
-consts_model_module = types.ModuleType("consts.model")
+consts_model_module = types.ModuleType("contracts.models")
 consts_model_module.HistoryItem = HistoryItem
 
 
@@ -79,14 +79,14 @@ class MockToolParamsRequest(BaseModel):
 consts_model_module.HistoryItem = HistoryItem
 consts_model_module.AgentToolParamsRequest = MockAgentToolParamsRequest
 consts_model_module.ToolParamsRequest = MockToolParamsRequest
-sys.modules["consts.model"] = consts_model_module
-sys.modules["consts.capability_profiles"] = types.ModuleType(
-    "consts.capability_profiles"
+sys.modules["contracts.models"] = consts_model_module
+sys.modules["contracts.capability_profiles"] = types.ModuleType(
+    "contracts.capability_profiles"
 )
-sys.modules["consts.capability_profiles"].CATALOG = {}
+sys.modules["contracts.capability_profiles"].CATALOG = {}
 
-# Mock consts.exceptions module with ValidationError
-consts_exceptions_module = types.ModuleType("consts.exceptions")
+# Mock contracts.exceptions module with ValidationError
+consts_exceptions_module = types.ModuleType("contracts.exceptions")
 consts_exceptions_module.ValidationError = ValidationError
 consts_exceptions_module.WorkbenchError = WorkbenchError
 class RunModelControlsError(ValueError):
@@ -98,9 +98,9 @@ consts_exceptions_module.RunModelControlsError = RunModelControlsError
 consts_exceptions_module.MCPConnectionError = MCPConnectionError
 consts_exceptions_module.NotFoundException = NotFoundException
 consts_exceptions_module.ToolExecutionException = ToolExecutionException
-sys.modules["consts.exceptions"] = consts_exceptions_module
+sys.modules["contracts.exceptions"] = consts_exceptions_module
 
-consts_tool_labels_module = types.ModuleType("consts.tool_labels")
+consts_tool_labels_module = types.ModuleType("contracts.tool_labels")
 consts_tool_labels_module.SYSTEM_MANAGED_TOOL_NAMES = frozenset({
     "store_memory",
     "search_memory",
@@ -108,7 +108,7 @@ consts_tool_labels_module.SYSTEM_MANAGED_TOOL_NAMES = frozenset({
     "upload_to_s3",
     "parallel_executor",
 })
-sys.modules["consts.tool_labels"] = consts_tool_labels_module
+sys.modules["contracts.tool_labels"] = consts_tool_labels_module
 
 # Also add model and exceptions to consts module attributes
 consts_module = sys.modules.get("consts")
@@ -119,7 +119,7 @@ if consts_module:
     setattr(
         consts_module,
         "capability_profiles",
-        sys.modules["consts.capability_profiles"],
+        sys.modules["contracts.capability_profiles"],
     )
 
 # Also add model to consts module attributes (with AgentToolParamsRequest and ToolParamsRequest)
@@ -189,15 +189,21 @@ client_mock.get_db_session = MagicMock()
 client_mock.as_dict = MagicMock()
 
 # Add the mocked client module to sys.modules
-sys.modules['backend.database.client'] = client_mock
-sys.modules['database.client'] = _create_stub_module(
-    "database.client",
+sys.modules['management.db.client'] = client_mock
+from test.common.database_stubs import install_serialization_stub
+install_serialization_stub(sys.modules["management.db.client"])
+sys.modules['management.db.client'] = _create_stub_module(
+    "management.db.client",
     minio_client=MagicMock(),
     postgres_client=MagicMock(),
     db_client=MagicMock(),
     get_db_session=MagicMock(),
     as_dict=MagicMock(),
 )
+from test.common.database_stubs import install_serialization_stub
+install_serialization_stub(sys.modules["management.db.client"])
+from test.common.database_stubs import install_serialization_stub
+install_serialization_stub(sys.modules["management.db.client"])
 
 # Mock external dependencies before imports
 mock_message_observer = MagicMock()
@@ -277,21 +283,21 @@ sys.modules['management.services.mcp.service'] = MagicMock()
 database_module = _create_stub_module("database")
 sys.modules['database'] = database_module
 skill_db_stub = MagicMock()
-sys.modules['database.skill_db'] = skill_db_stub
+sys.modules['management.db.skill.repository'] = skill_db_stub
 database_module.skill_db = skill_db_stub
-sys.modules['database.agent_db'] = MagicMock()
-sys.modules['database.tool_db'] = MagicMock()
-sys.modules['database.model_management_db'] = MagicMock()
-sys.modules['database.agent_version_db'] = MagicMock()
+sys.modules['management.db.agent.repository'] = MagicMock()
+sys.modules['management.db.tool.repository'] = MagicMock()
+sys.modules['management.db.model.repository'] = MagicMock()
+sys.modules['management.db.agent.version'] = MagicMock()
 a2a_agent_db_stub = _create_stub_module(
-    "database.a2a_agent_db",
+    "management.db.a2a.repository",
     PROTOCOL_JSONRPC="JSONRPC",
     query_external_sub_agents=MagicMock(return_value=[]),
 )
-sys.modules['database.a2a_agent_db'] = a2a_agent_db_stub
+sys.modules['management.db.a2a.repository'] = a2a_agent_db_stub
 database_module.a2a_agent_db = a2a_agent_db_stub
-sys.modules['database.knowledge_db'] = MagicMock()
-sys.modules['database.knowledge_db'].get_knowledge_name_map_by_index_names = MagicMock()
+sys.modules['management.db.knowledge_base.repository'] = MagicMock()
+sys.modules['management.db.knowledge_base.repository'].get_knowledge_name_map_by_index_names = MagicMock()
 sys.modules['management.services.knowledge_base.service'] = MagicMock()
 sys.modules['management.services.model.resolver'] = MagicMock()
 # Configure ElasticSearchService.filter_accessible_indices as a pass-through so that
@@ -664,14 +670,14 @@ def test_ut_be_dpr_007_prompt_runtime_flags_follow_backend_configuration(
     assert verification.enabled is verification_enabled
     assert is_local is expected_local
 
-# Import HistoryItem for testing (from mocked consts.model)
-HistoryItem = sys.modules["consts.model"].HistoryItem
+# Import HistoryItem for testing (from mocked contracts.models)
+HistoryItem = sys.modules["contracts.models"].HistoryItem
 
-# Import ValidationError for testing (from mocked consts.exceptions)
-ValidationError = sys.modules["consts.exceptions"].ValidationError
+# Import ValidationError for testing (from mocked contracts.exceptions)
+ValidationError = sys.modules["contracts.exceptions"].ValidationError
 
 # Import ToolParamsRequest for testing
-ToolParamsRequest = sys.modules["consts.model"].ToolParamsRequest
+ToolParamsRequest = sys.modules["contracts.models"].ToolParamsRequest
 
 # Import constants for testing
 from consts.const import MODEL_CONFIG_MAPPING
@@ -6243,12 +6249,12 @@ class TestGetExternalA2AAgents:
             },
         ]
 
-        with patch('database.a2a_agent_db.query_external_sub_agents', return_value=mock_query_result):
+        with patch('management.db.a2a.repository.query_external_sub_agents', return_value=mock_query_result):
             with patch('backend.agents.create_agent_info._build_external_agent_config') as mock_build:
                 result = _get_external_a2a_agents(agent_id=1, tenant_id="tenant_1", version_no=1)
 
                 assert len(result) == 2
-                from database.a2a_agent_db import query_external_sub_agents
+                from management.db.a2a.repository import query_external_sub_agents
                 query_external_sub_agents.assert_called_once_with(
                     local_agent_id=1, tenant_id="tenant_1", version_no=1
                 )
@@ -6271,7 +6277,7 @@ class TestGetExternalA2AAgents:
             },
         ]
 
-        with patch('database.a2a_agent_db.query_external_sub_agents', return_value=mock_query_result):
+        with patch('management.db.a2a.repository.query_external_sub_agents', return_value=mock_query_result):
             with patch('backend.agents.create_agent_info._build_external_agent_config') as mock_build:
                 result = _get_external_a2a_agents(agent_id=1, tenant_id="tenant_1")
 
@@ -6280,7 +6286,7 @@ class TestGetExternalA2AAgents:
 
     def test_get_external_a2a_agents_empty_db_response(self):
         """Test case for empty database response"""
-        with patch('database.a2a_agent_db.query_external_sub_agents', return_value=[]):
+        with patch('management.db.a2a.repository.query_external_sub_agents', return_value=[]):
             with patch('backend.agents.create_agent_info._build_external_agent_config') as mock_build:
                 result = _get_external_a2a_agents(agent_id=1, tenant_id="tenant_1")
 
@@ -6298,7 +6304,7 @@ class TestGetExternalA2AAgents:
             },
         ]
 
-        with patch('database.a2a_agent_db.query_external_sub_agents', return_value=mock_query_result):
+        with patch('management.db.a2a.repository.query_external_sub_agents', return_value=mock_query_result):
             with patch('backend.agents.create_agent_info._extract_url_from_card') as mock_extract:
                 with patch('backend.agents.create_agent_info._build_external_agent_config') as mock_build:
                     result = _get_external_a2a_agents(agent_id=1, tenant_id="tenant_1")
@@ -6322,7 +6328,7 @@ class TestGetExternalA2AAgents:
             },
         ]
 
-        with patch('database.a2a_agent_db.query_external_sub_agents', return_value=mock_query_result):
+        with patch('management.db.a2a.repository.query_external_sub_agents', return_value=mock_query_result):
             with patch('backend.agents.create_agent_info._extract_url_from_card', return_value="http://card-jsonrpc.com") as mock_extract:
                 with patch('backend.agents.create_agent_info._build_external_agent_config') as mock_build:
                     result = _get_external_a2a_agents(agent_id=1, tenant_id="tenant_1")
@@ -6333,7 +6339,7 @@ class TestGetExternalA2AAgents:
 
     def test_get_external_a2a_agents_exception_handling(self):
         """Test case for exception handling"""
-        with patch('database.a2a_agent_db.query_external_sub_agents', side_effect=Exception("Database error")):
+        with patch('management.db.a2a.repository.query_external_sub_agents', side_effect=Exception("Database error")):
             with patch('backend.agents.create_agent_info.logger') as mock_logger:
                 result = _get_external_a2a_agents(agent_id=1, tenant_id="tenant_1")
 

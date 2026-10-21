@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 from __future__ import annotations
 
 import logging
@@ -6,9 +8,9 @@ from datetime import datetime
 import pytest
 from sqlalchemy import delete, insert, select
 
-from database.client import get_db_session
-from database.db_models import ModelRecord
-from database.model_management_db import fail_detecting_models_on_startup
+from management.db.client import get_db_session
+from management.db.models import ModelRecord
+from management.db.model.repository import fail_detecting_models_on_startup
 
 CASE_ID = 'REL-AUTO-D7FD61217390A8EE'
 TENANT_ID = 'rel_auto_d7fd61217390a8ee_test'
@@ -31,7 +33,7 @@ def test_rel_auto_d7fd61217390a8ee_fail_detecting_models_on_startup(caplog):
         'C3': ('not_detected', 'N'),
     }
 
-    logger = logging.getLogger('database.model_management_db')
+    logger = logging.getLogger('management.db.model.repository')
     caplog.set_level(logging.DEBUG, logger=logger.name)
 
     def clear(session):

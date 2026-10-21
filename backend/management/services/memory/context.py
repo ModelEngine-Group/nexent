@@ -27,16 +27,7 @@ from nexent.memory.models import (
 from nexent.memory.retrieval.pipeline import RetrievalPipeline
 from nexent.memory.policy import MemoryRetrievalPolicy
 
-from consts.const import (
-    AGENT_SHORT_TERM_HALF_LIFE_DAYS,
-    MMR_CANDIDATE_TOP_K,
-    MMR_DUPLICATE_THRESHOLD,
-    MMR_FINAL_TOP_K,
-    MMR_LAMBDA,
-    MEMORY_TOKEN_BUDGET,
-    W_AGENT_SHORT_TERM,
-    W_EXTERNAL,
-)
+from consts.const import AGENT_SHORT_TERM_HALF_LIFE_DAYS, MMR_CANDIDATE_TOP_K, MMR_DUPLICATE_THRESHOLD, MMR_FINAL_TOP_K, MMR_LAMBDA, MEMORY_TOKEN_BUDGET, W_AGENT_SHORT_TERM, W_EXTERNAL
 
 from management.services.memory.records import (
     _compute_content_embedding,

@@ -1,14 +1,11 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """Unit tests for conversation knowledge-scope models."""
 
 import pytest
 from pydantic import ValidationError
 
-from consts.model import (
-    AidpKnowledgeScopeRequest,
-    ConversationKnowledgeScopeRequest,
-    ConversationKnowledgeScopeUpdateRequest,
-    LocalKnowledgeScopeRequest,
-)
+from contracts.models import AidpKnowledgeScopeRequest, ConversationKnowledgeScopeRequest, ConversationKnowledgeScopeUpdateRequest, LocalKnowledgeScopeRequest
 
 
 def test_local_defaults_to_inherit_with_no_ids():

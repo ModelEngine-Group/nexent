@@ -5,7 +5,7 @@ from unittest.mock import patch
 
 import pytest
 
-import management.services.knowledge_base.storage as storage_service
+from management.services.knowledge_base import storage as storage_service
 
 KnowledgeStorageContext = storage_service.KnowledgeStorageContext
 commit_uploaded_object = storage_service.commit_uploaded_object

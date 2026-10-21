@@ -15,7 +15,10 @@ import uvicorn
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from apps import agent_app, skill_app
+from management.api.agent import agent as agent_app
+from runtime.api.agent import execution as agent_app_execution
+from management.api.skill import skill as skill_app
+from runtime.api.skill import creation as skill_app_creation
 from model_controls.database import database_fixture
 from model_controls.provider import Provider
 from services import nl2agent_service as nl2agent_service
@@ -76,7 +79,7 @@ class RuntimeFixture:
 
     def draft(self):
         from sqlalchemy import select
-        from database.db_models import AgentInfo
+        from management.db.models import AgentInfo
         with self.storage["sessions"]() as session:
             row = session.scalars(select(AgentInfo).where(AgentInfo.agent_id == self.agent_id, AgentInfo.version_no == 0)).one()
             return {"description": row.description, "model_ids": list(row.model_ids), "model_params_override": row.model_params_override,
@@ -84,7 +87,7 @@ class RuntimeFixture:
 
     def model_records(self):
         from sqlalchemy import select
-        from database.db_models import ModelRecord
+        from management.db.models import ModelRecord
         with self.storage["sessions"]() as session:
             return {row.model_id: (row.model_name, row.base_url, row.temperature, row.top_p, row.extra_params)
                     for row in session.scalars(select(ModelRecord))}
@@ -150,8 +153,8 @@ def runtime_fixture(monkeypatch):
 
             provider.responder = respond
             app = FastAPI()
-            app.include_router(agent_app.agent_runtime_router, prefix="/api")
-            app.include_router(skill_app.skill_creator_router, prefix="/api")
+            app.include_router(agent_app_execution.agent_runtime_router, prefix="/api")
+            app.include_router(skill_app_creation.skill_creator_router, prefix="/api")
             with TestClient(app) as http:
                 try:
                     yield RuntimeFixture(storage, provider, http, runs)

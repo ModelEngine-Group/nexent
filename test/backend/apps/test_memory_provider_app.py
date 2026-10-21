@@ -16,13 +16,13 @@ sys.modules["consts.const"] = consts_const
 sys.modules["consts"] = types.ModuleType("consts")
 
 database_pkg = types.ModuleType("database")
-config_db_mod = types.ModuleType("database.memory_provider_config_db")
-param_db_mod = types.ModuleType("database.memory_provider_config_param_db")
+config_db_mod = types.ModuleType("management.db.memory.provider_config")
+param_db_mod = types.ModuleType("management.db.memory.provider_config_param")
 database_pkg.memory_provider_config_db = config_db_mod
 database_pkg.memory_provider_config_param_db = param_db_mod
 sys.modules["database"] = database_pkg
-sys.modules["database.memory_provider_config_db"] = config_db_mod
-sys.modules["database.memory_provider_config_param_db"] = param_db_mod
+sys.modules["management.db.memory.provider_config"] = config_db_mod
+sys.modules["management.db.memory.provider_config_param"] = param_db_mod
 
 nexent_pkg = types.ModuleType("nexent")
 memory_pkg = types.ModuleType("nexent.memory")
@@ -132,7 +132,7 @@ auth_utils_mod = types.ModuleType("management.services.permission.identity.authe
 auth_utils_mod.get_current_user_id = MagicMock(return_value=("u1", "t1"))
 sys.modules["management.services.permission.identity.authentication_helpers"] = auth_utils_mod
 
-from apps import memory_provider_app
+from management.api.memory import memory_provider as memory_provider_app
 
 
 @pytest.fixture

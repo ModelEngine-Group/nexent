@@ -28,24 +28,24 @@ def stub_project_modules(monkeypatch, tmp_path):
     setattr(const_mod, "LIBREOFFICE_PROFILE_DIR", str(tmp_path / "lo-profile"))
     sys.modules["consts.const"] = const_mod
 
-    # consts.model
-    model_mod = types.ModuleType("consts.model")
+    # contracts.models
+    model_mod = types.ModuleType("contracts.models")
     setattr(model_mod, "ProcessParams", _ProcessParams)
-    sys.modules["consts.model"] = model_mod
+    sys.modules["contracts.models"] = model_mod
 
-    # database.attachment_db
-    attach_mod = types.ModuleType("database.attachment_db")
+    # management.db.file.attachment
+    attach_mod = types.ModuleType("management.db.file.attachment")
     setattr(attach_mod, "get_file_size_from_minio", lambda object_name, bucket=None: 777)
-    sys.modules["database.attachment_db"] = attach_mod
+    sys.modules["management.db.file.attachment"] = attach_mod
 
-    # database.knowledge_db
-    knowledge_mod = types.ModuleType("database.knowledge_db")
+    # management.db.knowledge_base.repository
+    knowledge_mod = types.ModuleType("management.db.knowledge_base.repository")
     setattr(
         knowledge_mod,
         "get_knowledge_record",
         lambda query=None: {"embedding_model_id": 42, "index_name": (query or {}).get("index_name")},
     )
-    sys.modules["database.knowledge_db"] = knowledge_mod
+    sys.modules["management.db.knowledge_base.repository"] = knowledge_mod
 
     # Ensure parent package exists
     if "database" not in sys.modules:
@@ -75,9 +75,9 @@ def fmu(monkeypatch, request):
     # Import after stubbing collaborators
     names = request.function.__code__.co_names
     if "trigger_data_process" in names or "_data_process_error_result" in names:
-        from backend.management.services.knowledge_base import ingestion as fmu
+        from management.services.knowledge_base import ingestion as fmu
     elif "get_all_files_status" in names or "_convert_to_custom_state_local" in names:
-        from backend.management.services.knowledge_base import status as fmu
+        from management.services.knowledge_base import status as fmu
     else:
         from management.services.file import upload as fmu
     return fmu

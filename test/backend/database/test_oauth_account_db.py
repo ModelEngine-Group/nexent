@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import sys
 import os
 import unittest
@@ -23,7 +25,7 @@ consts_mock.const.DEFAULT_TENANT_ID = "default-tenant"
 sys.modules["consts"] = consts_mock
 sys.modules["consts.const"] = consts_mock.const
 
-sys.modules["consts.exceptions"] = MagicMock()
+sys.modules["contracts.exceptions"] = MagicMock()
 sys.modules["boto3"] = MagicMock()
 
 sqlalchemy_mock = MagicMock()
@@ -43,25 +45,18 @@ client_mock.MinioClient = MagicMock()
 client_mock.PostgresClient = MagicMock()
 client_mock.db_client = MagicMock()
 client_mock.filter_property = MagicMock()
-sys.modules["database.client"] = client_mock
+sys.modules["management.db.client"] = client_mock
+from test.common.database_stubs import install_serialization_stub
+install_serialization_stub(sys.modules["management.db.client"])
+from test.common.database_stubs import install_serialization_stub
+install_serialization_stub(sys.modules["management.db.client"])
 
 db_models_mock = MagicMock()
 db_models_mock.UserOAuthAccount = MagicMock()
 db_models_mock.TableBase = MagicMock()
-sys.modules["database.db_models"] = db_models_mock
+sys.modules["management.db.models"] = db_models_mock
 
-from database.oauth_account_db import (
-    count_oauth_accounts_by_user_id,
-    delete_oauth_account,
-    get_oauth_account_by_provider,
-    get_soft_deleted_oauth_account,
-    insert_oauth_account,
-    list_oauth_accounts_by_user_id,
-    reactivate_oauth_account,
-    rebind_oauth_account,
-    soft_delete_all_oauth_accounts_by_user_id,
-    update_oauth_account_tokens,
-)
+from management.db.identity.oauth_account import count_oauth_accounts_by_user_id, delete_oauth_account, get_oauth_account_by_provider, get_soft_deleted_oauth_account, insert_oauth_account, list_oauth_accounts_by_user_id, reactivate_oauth_account, rebind_oauth_account, soft_delete_all_oauth_accounts_by_user_id, update_oauth_account_tokens
 
 
 def _make_mock_session():

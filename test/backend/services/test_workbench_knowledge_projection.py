@@ -5,7 +5,7 @@ from copy import deepcopy
 
 import pytest
 
-from consts.exceptions import WorkbenchConfigVersionConflict
+from contracts.exceptions import WorkbenchConfigVersionConflict
 from management.services.conversation import service as service
 
 

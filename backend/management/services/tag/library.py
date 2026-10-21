@@ -6,16 +6,12 @@ import logging
 from uuid import uuid4
 
 from consts.const import PERMISSION_EDIT, PERMISSION_READ, TAG_DOCUMENT_PROJECTION_ENABLED
-from consts.exceptions import (
-    TagManagementConflictError,
-    TagManagementNotFoundError,
-    ValidationError,
-)
-from database.tag_management_db import TagManagementDB
-from database.agent_db import query_agent_info_by_ids
-from database.tool_db import query_tenant_tools_by_ids
-from database.skill_db import get_skills_for_tag_read
-from database.knowledge_db import get_knowledge_records_for_tag_read
+from contracts.exceptions import TagManagementConflictError, TagManagementNotFoundError, ValidationError
+from management.db.tag.repository import TagManagementDB
+from management.db.agent.repository import query_agent_info_by_ids
+from management.db.tool.repository import query_tenant_tools_by_ids
+from management.db.skill.repository import get_skills_for_tag_read
+from management.db.knowledge_base.repository import get_knowledge_records_for_tag_read
 from management.services.knowledge_base.permission import resolve_knowledge_base_permissions
 from management.services.permission.asset_owner import resolve_agent_list_permission
 from management.services.tag.resources import (
@@ -571,7 +567,7 @@ class TagManagementService:
             encoded_ids = [resource_id for resource_id in encoded_ids if resource_id in filtered]
         states = {}
         try:
-            from database import document_tag_projection_db
+            from management.db.tag import projection as document_tag_projection_db
 
             states = document_tag_projection_db.list_projection_states_for_knowledge_base(
                 caller.authenticated_tenant_id,

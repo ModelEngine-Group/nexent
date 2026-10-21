@@ -28,6 +28,8 @@ database_pkg.memory_record_db = MagicMock(name="memory_record_db")
 database_pkg.model_management_db = MagicMock(name="model_management_db")
 sys.modules["database"] = database_pkg
 sys.modules["backend.database"] = database_pkg
+sys.modules["management.db.memory.record"] = database_pkg.memory_record_db
+sys.modules["management.db.model.repository"] = database_pkg.model_management_db
 
 
 # ---------------------------------------------------------------------------
@@ -491,7 +493,7 @@ def test_create_memory_agent_embedding_compute_failure_degrades_gracefully(servi
 
 
 def test_resolve_tenant_embedding_model_uses_configured_model(monkeypatch):
-    tenant_config_db = types.ModuleType("database.tenant_config_db")
+    tenant_config_db = types.ModuleType("management.db.configuration.tenant")
     tenant_config_db.get_single_config_info = MagicMock(
         return_value={"config_value": "42"}
     )
@@ -507,7 +509,7 @@ def test_resolve_tenant_embedding_model_uses_configured_model(monkeypatch):
     }
     monkeypatch.setitem(
         sys.modules,
-        "database.tenant_config_db",
+        "management.db.configuration.tenant",
         tenant_config_db,
     )
     monkeypatch.setitem(sys.modules, "management.services.configuration.tenant.settings", config_utils)
@@ -523,13 +525,13 @@ def test_resolve_tenant_embedding_model_uses_configured_model(monkeypatch):
 
 
 def test_resolve_tenant_embedding_model_requires_active_config(monkeypatch):
-    tenant_config_db = types.ModuleType("database.tenant_config_db")
+    tenant_config_db = types.ModuleType("management.db.configuration.tenant")
     tenant_config_db.get_single_config_info = MagicMock(return_value={})
     config_utils = types.ModuleType("management.services.configuration.tenant.settings")
     config_utils.tenant_config_manager = MagicMock()
     monkeypatch.setitem(
         sys.modules,
-        "database.tenant_config_db",
+        "management.db.configuration.tenant",
         tenant_config_db,
     )
     monkeypatch.setitem(sys.modules, "management.services.configuration.tenant.settings", config_utils)
@@ -544,7 +546,7 @@ def test_resolve_tenant_embedding_model_requires_active_config(monkeypatch):
 def test_resolve_tenant_embedding_model_lookup_exception(monkeypatch):
     # ``_resolve_tenant_embedding_model_info`` swallows DB/config lookup
     # exceptions and returns ``None``.
-    tenant_config_db = types.ModuleType("database.tenant_config_db")
+    tenant_config_db = types.ModuleType("management.db.configuration.tenant")
 
     def _raise(*_args, **_kwargs):
         raise RuntimeError("config db down")
@@ -554,7 +556,7 @@ def test_resolve_tenant_embedding_model_lookup_exception(monkeypatch):
     config_utils.tenant_config_manager = MagicMock()
     monkeypatch.setitem(
         sys.modules,
-        "database.tenant_config_db",
+        "management.db.configuration.tenant",
         tenant_config_db,
     )
     monkeypatch.setitem(sys.modules, "management.services.configuration.tenant.settings", config_utils)
@@ -567,7 +569,7 @@ def test_resolve_tenant_embedding_model_lookup_exception(monkeypatch):
 
 def test_resolve_tenant_embedding_model_missing_model_config(monkeypatch):
     # Active EMBEDDING_ID but no resolvable model config.
-    tenant_config_db = types.ModuleType("database.tenant_config_db")
+    tenant_config_db = types.ModuleType("management.db.configuration.tenant")
     tenant_config_db.get_single_config_info = MagicMock(
         return_value={"config_value": "42"}
     )
@@ -576,7 +578,7 @@ def test_resolve_tenant_embedding_model_missing_model_config(monkeypatch):
     config_utils.tenant_config_manager.get_model_config.return_value = None
     monkeypatch.setitem(
         sys.modules,
-        "database.tenant_config_db",
+        "management.db.configuration.tenant",
         tenant_config_db,
     )
     monkeypatch.setitem(sys.modules, "management.services.configuration.tenant.settings", config_utils)
@@ -589,7 +591,7 @@ def test_resolve_tenant_embedding_model_missing_model_config(monkeypatch):
 
 def test_resolve_tenant_embedding_model_incomplete_config(monkeypatch):
     # Missing base_url / dimension causes the function to bail out.
-    tenant_config_db = types.ModuleType("database.tenant_config_db")
+    tenant_config_db = types.ModuleType("management.db.configuration.tenant")
     tenant_config_db.get_single_config_info = MagicMock(
         return_value={"config_value": "42"}
     )
@@ -602,7 +604,7 @@ def test_resolve_tenant_embedding_model_incomplete_config(monkeypatch):
     }
     monkeypatch.setitem(
         sys.modules,
-        "database.tenant_config_db",
+        "management.db.configuration.tenant",
         tenant_config_db,
     )
     monkeypatch.setitem(sys.modules, "management.services.configuration.tenant.settings", config_utils)
@@ -614,7 +616,7 @@ def test_resolve_tenant_embedding_model_incomplete_config(monkeypatch):
 
 
 def test_resolve_tenant_embedding_model_invalid_dimension(monkeypatch):
-    tenant_config_db = types.ModuleType("database.tenant_config_db")
+    tenant_config_db = types.ModuleType("management.db.configuration.tenant")
     tenant_config_db.get_single_config_info = MagicMock(
         return_value={"config_value": "42"}
     )
@@ -627,7 +629,7 @@ def test_resolve_tenant_embedding_model_invalid_dimension(monkeypatch):
     }
     monkeypatch.setitem(
         sys.modules,
-        "database.tenant_config_db",
+        "management.db.configuration.tenant",
         tenant_config_db,
     )
     monkeypatch.setitem(sys.modules, "management.services.configuration.tenant.settings", config_utils)
@@ -640,7 +642,7 @@ def test_resolve_tenant_embedding_model_invalid_dimension(monkeypatch):
 
 def test_resolve_tenant_embedding_model_default_api_key(monkeypatch):
     # When api_key is missing, the function falls back to ``sk-no-api-key``.
-    tenant_config_db = types.ModuleType("database.tenant_config_db")
+    tenant_config_db = types.ModuleType("management.db.configuration.tenant")
     tenant_config_db.get_single_config_info = MagicMock(
         return_value={"config_value": "42"}
     )
@@ -656,7 +658,7 @@ def test_resolve_tenant_embedding_model_default_api_key(monkeypatch):
     }
     monkeypatch.setitem(
         sys.modules,
-        "database.tenant_config_db",
+        "management.db.configuration.tenant",
         tenant_config_db,
     )
     monkeypatch.setitem(sys.modules, "management.services.configuration.tenant.settings", config_utils)
@@ -668,10 +670,10 @@ def test_resolve_tenant_embedding_model_default_api_key(monkeypatch):
 
 
 def test_is_tenant_embedding_configured(monkeypatch):
-    tenant_config_db = types.ModuleType("database.tenant_config_db")
+    tenant_config_db = types.ModuleType("management.db.configuration.tenant")
     monkeypatch.setitem(
         sys.modules,
-        "database.tenant_config_db",
+        "management.db.configuration.tenant",
         tenant_config_db,
     )
 

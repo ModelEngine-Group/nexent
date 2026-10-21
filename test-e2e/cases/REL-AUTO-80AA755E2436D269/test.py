@@ -13,8 +13,8 @@ import logging
 
 import pytest
 
-from consts.error_code import ErrorCode
-from consts.exceptions import AppException
+from contracts.error_code import ErrorCode
+from contracts.exceptions import AppException
 
 
 TENANT_ID = 'tenant-d5-failopen'
@@ -34,8 +34,8 @@ ES_STORE_SIZE_BYTES = int(1.5 * GB)
 @pytest.mark.case_id('REL-AUTO-80AA755E2436D269')
 @pytest.mark.stage('D5')
 def test_es_stats_fail_open_source_ledger_quota(monkeypatch, caplog):
-    import management.services.knowledge_base.service as kb_service
-    import management.services.knowledge_base.quota as quota_service
+    from management.services.knowledge_base import service as kb_service
+    from management.services.knowledge_base import quota as quota_service
     from management.services.knowledge_base.quota import QuotaService
 
     quota_service._usage_cache.clear()

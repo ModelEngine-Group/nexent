@@ -14,7 +14,7 @@ from test.backend.services import test_agent_service as legacy
 async def test_model_preflight_rejection_precedes_conversation_writes(
     monkeypatch, rejected_stage
 ):
-    from consts.exceptions import RunModelControlsError
+    from contracts.exceptions import RunModelControlsError
     from management.services.model import run_controls
 
     subscription = legacy.agent_subscription

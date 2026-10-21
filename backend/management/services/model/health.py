@@ -4,8 +4,8 @@ from typing import Optional
 
 import httpx
 from consts.const import DOCKER_INTERNAL_HOST, LOCALHOST_IP, LOCALHOST_NAME
-from consts.model import ModelConnectStatusEnum
-from database.model_management_db import get_model_by_display_name, update_model_record
+from contracts.models import ModelConnectStatusEnum
+from management.db.model.repository import get_model_by_display_name, update_model_record
 from management.services.model.adapter import build_adapter_fresh
 from management.services.model.probe import (
     _embedding_url_candidates,

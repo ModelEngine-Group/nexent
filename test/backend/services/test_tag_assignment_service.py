@@ -1,6 +1,6 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 import pytest
-from consts.exceptions import TagManagementNotFoundError
+from contracts.exceptions import TagManagementNotFoundError
 from management.services.tag.library import TagManagementService
 from management.services.tag.resources import (
     AuthenticatedCaller,

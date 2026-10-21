@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 from http import HTTPStatus
 from unittest.mock import AsyncMock, MagicMock
 
@@ -5,7 +7,7 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from apps import conversation_share_app
+from management.api.conversation import conversation_share as conversation_share_app
 
 
 app = FastAPI()
@@ -27,11 +29,11 @@ def test_parse_range_header():
 
 def test_create_conversation_share_endpoint_success(mocker):
     mock_get_user = mocker.patch(
-        "apps.conversation_share_app.get_current_user_id",
+        "management.api.conversation.conversation_share.get_current_user_id",
         return_value=("user_1", "tenant_1"),
     )
     mock_create = mocker.patch(
-        "apps.conversation_share_app.create_share_snapshot_service",
+        "management.api.conversation.conversation_share.create_share_snapshot_service",
         return_value={
             "share_id": "share_token",
             "conversation_id": 7,
@@ -68,11 +70,11 @@ def test_create_conversation_share_endpoint_success(mocker):
 
 def test_create_conversation_share_endpoint_defaults_to_legacy_renderer(mocker):
     mocker.patch(
-        "apps.conversation_share_app.get_current_user_id",
+        "management.api.conversation.conversation_share.get_current_user_id",
         return_value=("user_1", "tenant_1"),
     )
     mock_create = mocker.patch(
-        "apps.conversation_share_app.create_share_snapshot_service",
+        "management.api.conversation.conversation_share.create_share_snapshot_service",
         return_value={"share_id": "share_token"},
     )
 
@@ -84,11 +86,11 @@ def test_create_conversation_share_endpoint_defaults_to_legacy_renderer(mocker):
 
 def test_create_conversation_share_endpoint_value_error(mocker):
     mocker.patch(
-        "apps.conversation_share_app.get_current_user_id",
+        "management.api.conversation.conversation_share.get_current_user_id",
         return_value=("user_1", "tenant_1"),
     )
     mocker.patch(
-        "apps.conversation_share_app.create_share_snapshot_service",
+        "management.api.conversation.conversation_share.create_share_snapshot_service",
         side_effect=ValueError("Conversation is not accessible"),
     )
 
@@ -100,14 +102,14 @@ def test_create_conversation_share_endpoint_value_error(mocker):
 
 def test_create_conversation_share_endpoint_unexpected_error(mocker):
     mocker.patch(
-        "apps.conversation_share_app.get_current_user_id",
+        "management.api.conversation.conversation_share.get_current_user_id",
         return_value=("user_1", "tenant_1"),
     )
     mocker.patch(
-        "apps.conversation_share_app.create_share_snapshot_service",
+        "management.api.conversation.conversation_share.create_share_snapshot_service",
         side_effect=RuntimeError("db down"),
     )
-    mock_logger = mocker.patch("apps.conversation_share_app.logger")
+    mock_logger = mocker.patch("management.api.conversation.conversation_share.logger")
 
     response = client.post("/share/conversation/7", json={"mode": "all"})
 
@@ -118,7 +120,7 @@ def test_create_conversation_share_endpoint_unexpected_error(mocker):
 
 def test_get_conversation_share_endpoint_success(mocker):
     mock_get = mocker.patch(
-        "apps.conversation_share_app.get_share_snapshot_service",
+        "management.api.conversation.conversation_share.get_share_snapshot_service",
         return_value={"share_id": "share_token", "snapshot": {"message": []}},
     )
 
@@ -131,7 +133,7 @@ def test_get_conversation_share_endpoint_success(mocker):
 
 def test_get_conversation_share_endpoint_not_found(mocker):
     mocker.patch(
-        "apps.conversation_share_app.get_share_snapshot_service",
+        "management.api.conversation.conversation_share.get_share_snapshot_service",
         side_effect=ValueError("Share not found"),
     )
 
@@ -143,14 +145,14 @@ def test_get_conversation_share_endpoint_not_found(mocker):
 
 def test_download_share_asset_endpoint_success(mocker):
     mocker.patch(
-        "apps.conversation_share_app.get_share_asset_service",
+        "management.api.conversation.conversation_share.get_share_asset_service",
         return_value={
             "object_name": "attachments/user_1/report.pdf",
             "filename": "report.pdf",
         },
     )
     mocker.patch(
-        "apps.conversation_share_app.get_file_stream_impl",
+        "management.api.conversation.conversation_share.get_file_stream_impl",
         new_callable=AsyncMock,
         return_value=(iter([b"abc"]), "application/pdf"),
     )
@@ -166,7 +168,7 @@ def test_download_share_asset_endpoint_success(mocker):
 
 def test_download_share_asset_endpoint_not_found(mocker):
     mocker.patch(
-        "apps.conversation_share_app.get_share_asset_service",
+        "management.api.conversation.conversation_share.get_share_asset_service",
         side_effect=ValueError("Share asset not found"),
     )
 
@@ -178,14 +180,14 @@ def test_download_share_asset_endpoint_not_found(mocker):
 
 def test_preview_share_asset_endpoint_full_content(mocker):
     mocker.patch(
-        "apps.conversation_share_app.get_share_asset_service",
+        "management.api.conversation.conversation_share.get_share_asset_service",
         return_value={
             "object_name": "attachments/user_1/report.pdf",
             "filename": "report.pdf",
         },
     )
     mocker.patch(
-        "apps.conversation_share_app.resolve_preview_file",
+        "management.api.conversation.conversation_share.resolve_preview_file",
         new_callable=AsyncMock,
         return_value=("attachments/user_1/report.pdf", "application/pdf", 6),
     )
@@ -193,7 +195,7 @@ def test_preview_share_asset_endpoint_full_content(mocker):
     stream.iter_chunks.return_value = iter([b"abcdef"])
     stream.close = MagicMock()
     mock_get_stream = mocker.patch(
-        "apps.conversation_share_app.get_preview_stream",
+        "management.api.conversation.conversation_share.get_preview_stream",
         return_value=stream,
     )
 
@@ -208,11 +210,11 @@ def test_preview_share_asset_endpoint_full_content(mocker):
 
 def test_preview_share_asset_endpoint_partial_content(mocker):
     mocker.patch(
-        "apps.conversation_share_app.get_share_asset_service",
+        "management.api.conversation.conversation_share.get_share_asset_service",
         return_value={"object_name": "attachments/user_1/report.pdf"},
     )
     mocker.patch(
-        "apps.conversation_share_app.resolve_preview_file",
+        "management.api.conversation.conversation_share.resolve_preview_file",
         new_callable=AsyncMock,
         return_value=("attachments/user_1/report.pdf", "application/pdf", 10),
     )
@@ -220,7 +222,7 @@ def test_preview_share_asset_endpoint_partial_content(mocker):
     stream.iter_chunks.return_value = iter([b"cde"])
     stream.close = MagicMock()
     mock_get_stream = mocker.patch(
-        "apps.conversation_share_app.get_preview_stream",
+        "management.api.conversation.conversation_share.get_preview_stream",
         return_value=stream,
     )
 
@@ -238,11 +240,11 @@ def test_preview_share_asset_endpoint_partial_content(mocker):
 
 def test_preview_share_asset_endpoint_invalid_range(mocker):
     mocker.patch(
-        "apps.conversation_share_app.get_share_asset_service",
+        "management.api.conversation.conversation_share.get_share_asset_service",
         return_value={"object_name": "attachments/user_1/report.pdf"},
     )
     mocker.patch(
-        "apps.conversation_share_app.resolve_preview_file",
+        "management.api.conversation.conversation_share.resolve_preview_file",
         new_callable=AsyncMock,
         return_value=("attachments/user_1/report.pdf", "application/pdf", 10),
     )
@@ -258,11 +260,11 @@ def test_preview_share_asset_endpoint_invalid_range(mocker):
 
 def test_preview_share_asset_endpoint_resolve_file_error(mocker):
     mocker.patch(
-        "apps.conversation_share_app.get_share_asset_service",
+        "management.api.conversation.conversation_share.get_share_asset_service",
         return_value={"object_name": "attachments/user_1/report.pdf"},
     )
     mocker.patch(
-        "apps.conversation_share_app.resolve_preview_file",
+        "management.api.conversation.conversation_share.resolve_preview_file",
         new_callable=AsyncMock,
         side_effect=conversation_share_app.UnsupportedFileTypeException("unsupported"),
     )
@@ -274,10 +276,10 @@ def test_preview_share_asset_endpoint_resolve_file_error(mocker):
 
 def test_create_conversation_share_endpoint_token_expired(mocker):
     """Expired token maps to 401 instead of falling through to 500."""
-    from consts.exceptions import TokenExpiredError
+    from contracts.exceptions import TokenExpiredError
 
     mocker.patch(
-        "apps.conversation_share_app.get_current_user_id",
+        "management.api.conversation.conversation_share.get_current_user_id",
         side_effect=TokenExpiredError("expired"),
     )
 

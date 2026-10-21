@@ -107,16 +107,16 @@ vectordb_service_module.KnowledgeBaseNeedsModelConfigError = KnowledgeBaseNeedsM
 vectordb_service_module.get_vector_db_core = MagicMock()
 sys.modules["management.services.knowledge_base.service"] = vectordb_service_module
 
-# database.knowledge_db - stub used by northbound_knowledge_app
+# management.db.knowledge_base.repository - stub used by northbound_knowledge_app
 database_pkg = types.ModuleType("database")
 database_pkg.__path__ = [os.path.join(backend_dir, "database")]
 sys.modules["database"] = database_pkg
 
-knowledge_db_module = types.ModuleType("database.knowledge_db")
+knowledge_db_module = types.ModuleType("management.db.knowledge_base.repository")
 knowledge_db_module.get_index_name_by_knowledge_name = MagicMock(
     side_effect=lambda name, tenant_id: f"resolved_{name}"
 )
-sys.modules["database.knowledge_db"] = knowledge_db_module
+sys.modules["management.db.knowledge_base.repository"] = knowledge_db_module
 
 # ---------------------------------------------------------------------------
 # BLOCK 2: Mock minimal consts modules needed by apps layer
@@ -125,14 +125,14 @@ consts_module = types.ModuleType("consts")
 consts_module.__path__ = [os.path.join(backend_dir, "consts")]
 sys.modules['consts'] = consts_module
 
-# consts.model - only exceptions and AgentRequest needed by apps
+# contracts.models - only exceptions and AgentRequest needed by apps
 class HybridSearchRequest(BaseModel):
     query: str = Field(..., min_length=1)
     index_names: list = Field(..., min_length=1)
     top_k: int = Field(10, ge=1, le=100)
     weight_accurate: float = Field(0.5, ge=0.0, le=1.0)
 
-consts_model_module = types.ModuleType("consts.model")
+consts_model_module = types.ModuleType("contracts.models")
 consts_model_module.LimitExceededError = type("LimitExceededError", (Exception,), {})
 consts_model_module.UnauthorizedError = type("UnauthorizedError", (Exception,), {})
 consts_model_module.SignatureValidationError = type("SignatureValidationError", (Exception,), {})
@@ -140,10 +140,10 @@ consts_model_module.AgentRequest = type("AgentRequest", (), {})
 consts_model_module.ProcessParams = type("ProcessParams", (), {})
 consts_model_module.HybridSearchRequest = HybridSearchRequest
 consts_module.model = consts_model_module
-sys.modules['consts.model'] = consts_model_module
+sys.modules['contracts.models'] = consts_model_module
 
-# consts.exceptions
-consts_exceptions_module = types.ModuleType("consts.exceptions")
+# contracts.exceptions
+consts_exceptions_module = types.ModuleType("contracts.exceptions")
 consts_exceptions_module.AppException = type("AppException", (Exception,), {})
 consts_exceptions_module.LimitExceededError = consts_model_module.LimitExceededError
 consts_exceptions_module.UnauthorizedError = consts_model_module.UnauthorizedError
@@ -154,7 +154,7 @@ consts_exceptions_module.NotFoundException = type("NotFoundException", (Exceptio
 consts_exceptions_module.UnsupportedFileTypeException = type("UnsupportedFileTypeException", (Exception,), {})
 consts_exceptions_module.FileTooLargeException = type("FileTooLargeException", (Exception,), {})
 consts_module.exceptions = consts_exceptions_module
-sys.modules['consts.exceptions'] = consts_exceptions_module
+sys.modules['contracts.exceptions'] = consts_exceptions_module
 
 # consts.const - stub used by northbound_knowledge_app
 consts_const_module = types.ModuleType("consts.const")
@@ -218,14 +218,14 @@ sys.modules["management.services.agent.run_state"] = runtime_state_module
 # ---------------------------------------------------------------------------
 # BLOCK 3: Mock remaining dependencies referenced by northbound_app
 # ---------------------------------------------------------------------------
-# Mock apps.northbound_app - provides the _get_northbound_context helper
+# Mock gateway.api.northbound.routes - provides the _get_northbound_context helper
 northbound_app_router = APIRouter()
 
 @northbound_app_router.get("/dummy")
 async def _dummy_route():
     return {"msg": "ok"}
 
-northbound_app_module = types.ModuleType("apps.northbound_app")
+northbound_app_module = types.ModuleType("gateway.api.northbound.routes")
 northbound_app_module.router = northbound_app_router
 
 # _get_northbound_context helper used by a2a endpoints
@@ -240,21 +240,21 @@ async def _get_northbound_context_fake(request):
     )
 
 northbound_app_module._get_northbound_context = _get_northbound_context_fake
-sys.modules['apps.northbound_app'] = northbound_app_module
+sys.modules['gateway.api.northbound.routes'] = northbound_app_module
 
-# Mock apps.file_management_app - used by northbound_knowledge_app
-file_management_app_module = types.ModuleType("apps.file_management_app")
+# Mock management.api.file.file_management - used by northbound_knowledge_app
+file_management_app_module = types.ModuleType("management.api.file.file_management")
 file_management_app_module.build_content_disposition_header = MagicMock(
     return_value='attachment; filename="file.txt"'
 )
-sys.modules["apps.file_management_app"] = file_management_app_module
+sys.modules["management.api.file.file_management"] = file_management_app_module
 
-# Mock apps.app_factory (imported by northbound_base_app)
-app_factory_module = types.ModuleType("apps.app_factory")
+# Mock management.utils.app_factory (imported by northbound_base_app)
+app_factory_module = types.ModuleType("management.utils.app_factory")
 
 # Import real register_exception_handlers to apply to the app
 try:
-    from apps.app_factory import register_exception_handlers as _real_register_exception_handlers
+    from management.utils.app_factory import register_exception_handlers as _real_register_exception_handlers
 except Exception:
     _real_register_exception_handlers = None
 
@@ -277,7 +277,7 @@ def register_exception_handlers(app):
 
 app_factory_module.register_exception_handlers = register_exception_handlers
 app_factory_module.create_app = None  # placeholder
-sys.modules['apps.app_factory'] = app_factory_module
+sys.modules['management.utils.app_factory'] = app_factory_module
 
 # Provide a real create_app function that returns a FastAPI app
 def _create_app_impl(title, description="", version="1.0.0", root_path="/api",
@@ -311,10 +311,10 @@ def _create_app_impl(title, description="", version="1.0.0", root_path="/api",
 
 app_factory_module.create_app = _create_app_impl
 
-database_a2a_module = types.ModuleType("database.a2a_agent_db")
+database_a2a_module = types.ModuleType("management.db.a2a.repository")
 database_a2a_module.PROTOCOL_HTTP_JSON = "http+json"
 database_a2a_module.PROTOCOL_JSONRPC = "jsonrpc"
-sys.modules['database.a2a_agent_db'] = database_a2a_module
+sys.modules['management.db.a2a.repository'] = database_a2a_module
 
 # Mock management.services.permission.identity.authentication_helpers (referenced by northbound_app._get_northbound_context)
 auth_utils_module = types.ModuleType("management.services.permission.identity.authentication_helpers")
@@ -340,8 +340,9 @@ async def _async_iter(items):
 # ---------------------------------------------------------------------------
 # SAFE TO IMPORT THE TARGET MODULE
 # ---------------------------------------------------------------------------
-import apps.northbound_base_app as northbound_base_app_module  # noqa: E402
-from apps.northbound_base_app import A2AServerSettings, northbound_app as app  # noqa: E402
+from gateway.api import application as northbound_base_app_module
+from contracts.api.gateway_application import A2AServerSettings
+from gateway.api.application import northbound_app as app
 from fastapi import HTTPException  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
 

@@ -6,7 +6,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
 if TYPE_CHECKING:
-    from consts.model import ToolParamsRequest
+    from contracts.models import ToolParamsRequest
 
 
 @dataclass

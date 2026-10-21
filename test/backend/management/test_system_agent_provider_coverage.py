@@ -5,7 +5,7 @@ from unittest.mock import MagicMock
 import pytest
 from sqlalchemy.exc import IntegrityError
 
-from consts.exceptions import WorkbenchAgentError
+from contracts.exceptions import WorkbenchAgentError
 from management.services.agent import system as module
 
 

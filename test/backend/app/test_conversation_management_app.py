@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import os
 import sys
 import types
@@ -8,8 +10,8 @@ import pytest
 from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
 
-from consts.error_code import ErrorCode
-from consts.exceptions import AppException, ValidationError
+from contracts.error_code import ErrorCode
+from contracts.exceptions import AppException, ValidationError
 
 # Dynamically determine the backend path
 current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -35,25 +37,13 @@ minio_mock._ensure_bucket_exists = MagicMock()
 minio_mock.client = MagicMock()
 patch('nexent.storage.storage_client_factory.create_storage_client_from_config', return_value=storage_client_mock).start()
 patch('nexent.storage.minio_config.MinIOStorageConfig.validate', lambda self: None).start()
-patch('backend.database.client.MinioClient', return_value=minio_mock).start()
-patch('database.client.MinioClient', return_value=minio_mock).start()
-patch('backend.database.client.minio_client', minio_mock).start()
+patch('management.db.client.MinioClient', return_value=minio_mock).start()
+patch('management.db.client.MinioClient', return_value=minio_mock).start()
+patch('management.db.client.minio_client', minio_mock).start()
 patch('elasticsearch.Elasticsearch', return_value=MagicMock()).start()
 
 # Import target endpoints with all external dependencies patched
-from backend.apps.conversation_management_app import (
-    create_new_conversation_endpoint,
-    list_conversations_endpoint,
-    rename_conversation_endpoint,
-    delete_conversation_endpoint,
-    delete_conversations_batch_endpoint,
-    get_conversation_history_endpoint,
-    get_sources_endpoint,
-    generate_conversation_title_endpoint,
-    update_opinion_endpoint,
-    get_message_id_endpoint,
-    router,
-)
+from management.api.conversation.conversation_management import create_new_conversation_endpoint, list_conversations_endpoint, rename_conversation_endpoint, delete_conversation_endpoint, delete_conversations_batch_endpoint, get_conversation_history_endpoint, get_sources_endpoint, generate_conversation_title_endpoint, update_opinion_endpoint, get_message_id_endpoint, router
 
 
 # -----------------------------
@@ -63,19 +53,19 @@ from backend.apps.conversation_management_app import (
 @pytest.fixture
 def conversation_mocks():
     """Provide fresh mocks for each conversation management test"""
-    with patch('backend.apps.conversation_management_app.get_current_user_id') as mock_get_current_user_id, \
-            patch('backend.apps.conversation_management_app.create_new_conversation') as mock_create_new_conv, \
-            patch('backend.apps.conversation_management_app.get_conversation_list_page') as mock_get_conv_list, \
-            patch('backend.apps.conversation_management_app.rename_conversation_service') as mock_rename_conv, \
-            patch('backend.apps.conversation_management_app.logging') as mock_logging, \
-            patch('backend.apps.conversation_management_app.delete_conversation_service') as mock_delete_conv, \
-            patch('backend.apps.conversation_management_app.delete_conversations_batch_service') as mock_delete_batch, \
-            patch('backend.apps.conversation_management_app.get_conversation_history_service') as mock_history_service, \
-            patch('backend.apps.conversation_management_app.get_sources_service') as mock_sources_service, \
-            patch('backend.apps.conversation_management_app.generate_conversation_title_service') as mock_generate_title_service, \
-            patch('backend.apps.conversation_management_app.update_message_opinion_service') as mock_update_opinion_service, \
-            patch('backend.apps.conversation_management_app.get_message_id_by_index_impl') as mock_get_msg_id_impl, \
-            patch('backend.apps.conversation_management_app.get_current_user_info') as mock_get_user_info:
+    with patch('management.api.conversation.conversation_management.get_current_user_id') as mock_get_current_user_id, \
+            patch('management.api.conversation.conversation_management.create_new_conversation') as mock_create_new_conv, \
+            patch('management.api.conversation.conversation_management.get_conversation_list_page') as mock_get_conv_list, \
+            patch('management.api.conversation.conversation_management.rename_conversation_service') as mock_rename_conv, \
+            patch('management.api.conversation.conversation_management.logging') as mock_logging, \
+            patch('management.api.conversation.conversation_management.delete_conversation_service') as mock_delete_conv, \
+            patch('management.api.conversation.conversation_management.delete_conversations_batch_service') as mock_delete_batch, \
+            patch('management.api.conversation.conversation_management.get_conversation_history_service') as mock_history_service, \
+            patch('management.api.conversation.conversation_management.get_sources_service') as mock_sources_service, \
+            patch('management.api.conversation.conversation_management.generate_conversation_title_service') as mock_generate_title_service, \
+            patch('management.api.conversation.conversation_management.update_message_opinion_service') as mock_update_opinion_service, \
+            patch('management.api.conversation.conversation_management.get_message_id_by_index_impl') as mock_get_msg_id_impl, \
+            patch('management.api.conversation.conversation_management.get_current_user_info') as mock_get_user_info:
 
         yield {
             'get_current_user_id': mock_get_current_user_id,
@@ -361,7 +351,7 @@ async def test_rename_conversation_success(conversation_mocks):
 
 @pytest.mark.asyncio
 async def test_automatic_fallback_rename_returns_false_without_claiming_a_write(conversation_mocks):
-    from consts.model import RenameRequest
+    from contracts.models import RenameRequest
 
     conversation_mocks['get_current_user_id'].return_value = ("user", "tenant")
     conversation_mocks['rename_conversation'].return_value = False
@@ -495,7 +485,7 @@ async def test_delete_conversations_batch_failure(conversation_mocks):
 @pytest.mark.asyncio
 async def test_delete_conversations_batch_token_expired(conversation_mocks):
     """Expired token on batch delete maps to 401."""
-    from consts.exceptions import TokenExpiredError
+    from contracts.exceptions import TokenExpiredError
 
     conversation_mocks['get_current_user_id'].side_effect = TokenExpiredError(
         "expired")
@@ -681,7 +671,7 @@ async def test_update_opinion_failure(conversation_mocks):
 @pytest.mark.asyncio
 @pytest.mark.parametrize("route", ["opinion", "lookup"])
 async def test_missing_message_returns_404(conversation_mocks, route):
-    from consts.exceptions import ConversationNotFoundError
+    from contracts.exceptions import ConversationNotFoundError
 
     request_obj = MagicMock(message_id=123, opinion="Y", conversation_id=1, message_index=0)
     if route == "opinion":
@@ -735,7 +725,7 @@ async def test_get_message_id_failure(conversation_mocks):
 @pytest.mark.asyncio
 async def test_conversation_endpoints_token_expired(conversation_mocks):
     """Every conversation management endpoint maps an expired token to 401."""
-    from consts.exceptions import TokenExpiredError
+    from contracts.exceptions import TokenExpiredError
 
     request_obj = MagicMock()
     request_obj.title = "t"
@@ -764,7 +754,7 @@ async def test_conversation_endpoints_token_expired(conversation_mocks):
 @pytest.mark.asyncio
 async def test_generate_conversation_title_token_expired(conversation_mocks):
     """Expired token on title generation maps to 401."""
-    from consts.exceptions import TokenExpiredError
+    from contracts.exceptions import TokenExpiredError
 
     request_obj = MagicMock()
     request_obj.conversation_id = 1
@@ -783,8 +773,8 @@ async def test_generate_conversation_title_token_expired(conversation_mocks):
 @pytest.mark.asyncio
 async def test_update_conversation_knowledge_scope_token_expired(conversation_mocks):
     """Expired token on knowledge-scope update maps to 401."""
-    from backend.apps.conversation_management_app import update_conversation_knowledge_scope_endpoint
-    from consts.exceptions import TokenExpiredError
+    from management.api.conversation.conversation_management import update_conversation_knowledge_scope_endpoint
+    from contracts.exceptions import TokenExpiredError
 
     request_obj = MagicMock()
     request_obj.scope = None

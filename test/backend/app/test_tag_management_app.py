@@ -6,25 +6,9 @@ import pytest
 from fastapi import HTTPException
 from pydantic import ValidationError as PydanticValidationError
 
-from apps import tag_management_app as tag_app
-from consts.exceptions import (
-    TagManagementConflictError,
-    TagManagementNotFoundError,
-    ValidationError,
-)
-from consts.model import (
-    AgentTagAssignmentBatchRequest,
-    KnowledgeTagAssignmentBatchRequest,
-    SkillTagAssignmentBatchRequest,
-    TagDefinitionCreateRequest,
-    TagDefinitionUpdateRequest,
-    TagHTTPConflictResponse,
-    TagOrderUpdateRequest,
-    TagStatusUpdateRequest,
-    TagValueCreateRequest,
-    TagValueUpdateRequest,
-    ToolTagAssignmentBatchRequest,
-)
+from management.api.tag import tag_management as tag_app
+from contracts.exceptions import TagManagementConflictError, TagManagementNotFoundError, ValidationError
+from contracts.models import AgentTagAssignmentBatchRequest, KnowledgeTagAssignmentBatchRequest, SkillTagAssignmentBatchRequest, TagDefinitionCreateRequest, TagDefinitionUpdateRequest, TagHTTPConflictResponse, TagOrderUpdateRequest, TagStatusUpdateRequest, TagValueCreateRequest, TagValueUpdateRequest, ToolTagAssignmentBatchRequest
 
 AUTHORIZATION = "Bearer auth-token"
 

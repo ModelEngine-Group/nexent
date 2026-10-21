@@ -7,7 +7,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-from consts.exceptions import TenantResourceLimitError
+from contracts.exceptions import TenantResourceLimitError
 
 test_dir = os.path.dirname(__file__)
 backend_dir = os.path.abspath(os.path.join(test_dir, "../../../backend"))
@@ -58,7 +58,7 @@ cas_service_mock.revoke_from_logout_request = MagicMock(
 )
 sys.modules["management.services.permission.identity.cas"] = cas_service_mock
 
-from apps.cas_app import router  # noqa: E402
+from management.api.identity.cas import router
 
 for _name, _module in _ORIGINAL_MODULES.items():
     if _module is None:

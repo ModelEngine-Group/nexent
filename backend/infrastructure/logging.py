@@ -5,14 +5,7 @@ import os
 from logging.handlers import TimedRotatingFileHandler
 from pathlib import Path
 
-from consts.const import (
-    IS_DEBUG,
-    LOG_BACKUP_COUNT,
-    LOG_DIR,
-    LOG_LEVEL,
-    LOG_MAX_BYTES,
-    LOG_ROTATION_INTERVAL,
-)
+from consts.const import IS_DEBUG, LOG_BACKUP_COUNT, LOG_DIR, LOG_LEVEL, LOG_MAX_BYTES, LOG_ROTATION_INTERVAL
 
 
 class ColorFormatter(logging.Formatter):

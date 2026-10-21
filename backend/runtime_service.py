@@ -15,7 +15,7 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-from apps.runtime_app import app
+from runtime.api.application import app
 from infrastructure.logging import (
     configure_elasticsearch_logging,
     get_uvicorn_logging_config,

@@ -14,10 +14,10 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 from sqlalchemy.schema import CreateSchema, DropSchema
 
-from apps import workbench_pins_app as routes
-from database import workbench_pin_db
-from database.client import db_client
-from database.db_models import ConversationRecord
+from management.api.conversation import workbench_pins as routes
+from management.db.conversation import pins as workbench_pin_db
+from management.db.client import db_client
+from management.db.models import ConversationRecord
 
 
 @pytest.fixture
