@@ -9,7 +9,7 @@ feature:
   description: 'SDK与基础设施 / Monitor: trace/span/metrics exporter enabled/disabled/failure no-crash'
   business_rules:
   - rule_id: F-169-RULE-01
-    description: trace/span/metrics exporter enabled/disabled/failure no-crash; omit Elasticsearch search, indices.stats, indices.get_settings and indices.get_alias reports while retaining business spans and Chinese built-in Agent runtime display names
+    description: trace/span/metrics exporter enabled/disabled/failure no-crash; by default omit Elasticsearch search, indices.stats, indices.get_settings, indices.get_alias, bulk, indices.exists and indices.delete reports and the exact knowledge.process.submit and knowledge.upload.batch span names. MONITORING_EXCLUDED_ELASTICSEARCH_OPERATIONS and MONITORING_EXCLUDED_SPAN_NAMES replace the respective comma-separated exact-match list; unset retains defaults and explicit empty disables that filter. Trim entries, ignore empty tokens and duplicates, preserve Elasticsearch database scoping, other business spans and Chinese built-in Agent runtime display names.
   required_test_stages:
   - D1
   source:

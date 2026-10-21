@@ -3,15 +3,15 @@ change:
   change_id: MONITOR-NOISE-LABELS-20261019
   change_type: bugfix
   bug_id: MONITOR-NOISE-LABELS-20261019
-  title: Filter Elasticsearch monitoring noise and localize built-in Agent trace names
-  description: Extend the existing export filter and set Chinese display names on request-scoped Workbench and NL2Skill configurations.
-  observed_behavior: Elasticsearch search, indices.stats and indices.get_settings spans dominate monitoring; built-in runs appear as Nexent Workbench and __skill_creator__.
-  expected_behavior: Omit these Elasticsearch spans alongside indices.get_alias; retain business tool spans and other database operations. Workbench and NL2Skill traces use 智能工作台 and 技能创建助手 while executable identifiers and published snapshots remain unchanged.
+  title: Filter selected Elasticsearch and knowledge-ingestion monitoring noise and localize built-in Agent trace names
+  description: Extend the existing export filter and set Chinese display names on request-scoped Workbench and NL2Skill configurations. The October 21 follow-up also suppresses bulk, indices.exists, indices.delete, knowledge.process.submit and knowledge.upload.batch, and allows each exclusion list to be replaced or disabled through environment configuration.
+  observed_behavior: The initial Elasticsearch noise and English Agent labels were corrected; the reported bulk, indices.exists, indices.delete and two knowledge-ingestion span names remain outside the original filter.
+  expected_behavior: By default omit Elasticsearch search, indices.stats, indices.get_settings, indices.get_alias, bulk, indices.exists and indices.delete spans, plus the exact knowledge.process.submit and knowledge.upload.batch span names. MONITORING_EXCLUDED_ELASTICSEARCH_OPERATIONS and MONITORING_EXCLUDED_SPAN_NAMES replace the respective comma-separated list; unset retains defaults, explicit empty disables the respective filter, and entries are trimmed and deduplicated. Retain exact matching, database scoping, other operations and business tools. Workbench and NL2Skill traces use 智能工作台 and 技能创建助手 while executable identifiers and published snapshots remain unchanged.
   escaped_stage: production
   feature_contract_changed: true
   coverage_gap:
     type: missing_assertion
-    description: Existing UT explicitly retains Elasticsearch search and lacks Chinese built-in runtime display assertions. The existing formal exporter Case tests configuration parsing only and is selected solely for regression.
+    description: Original tests retained Elasticsearch search and lacked Chinese labels; the October 21 follow-up additionally needs success/error assertions for three more Elasticsearch calls and both knowledge-ingestion decorators. The existing formal exporter Case tests configuration parsing only and is selected solely for regression.
   affected_features:
     existing: [F-078]
     added: []
@@ -25,13 +25,21 @@ change:
   traditional_ut:
     decision: strengthen
     behaviors:
-      - Filter the four Elasticsearch operations on success and failure without changing requests, responses or errors.
-      - Retain other Elasticsearch operations, non-Elasticsearch spans, Agent runs and business search tools with their parent relationships.
+      - Filter the seven selected Elasticsearch operations on success and failure without changing requests, responses or errors.
+      - Suppress the two exact knowledge-ingestion span names for root and nested synchronous/asynchronous calls while preserving return values and exceptions.
+      - Retain other Elasticsearch operations, non-Elasticsearch spans, other knowledge spans, Agent runs and business search tools with their parent relationships.
       - Provide Chinese built-in runtime display names for legacy and missing Workbench labels without mutating published snapshots or child identities.
       - Preserve NL2Skill's executable name and existing runtime options while adding its Chinese display name.
+      - Preserve exclusion defaults when unset, replace each list independently when configured, and disable the respective filter with an empty value; normalize comma-separated entries and reject invalid SDK list types.
+      - Forward backend environment values through both bootstrap import paths into actual SDK batch-export filtering without introducing SDK environment reads or requiring optional OpenTelemetry dependencies.
     reason: Strengthen existing production-path exporter UT and configuration UT; existing generic display-name tracing UT proves propagation. No new formal Case duplicates these bounded rules; UT-SDK-014 remains a separate configuration regression.
     test_selectors:
       - test/sdk/core/agents/observability/test_elasticsearch_spans.py
+      - test/sdk/core/agents/observability/test_monitoring_exclusions.py
+      - test/backend/utils/test_monitoring_exclusions.py
+      - test/backend/utils/test_monitoring.py
+      - test/backend/utils/test_monitoring_knowledge_filter.py
+      - test/backend/utils/test_knowledge_telemetry.py
       - test/sdk/core/agents/observability/test_trace_name.py
       - test/sdk/core/agents/observability/test_agent_display_name.py
       - test/backend/services/test_workbench_monitoring_labels.py

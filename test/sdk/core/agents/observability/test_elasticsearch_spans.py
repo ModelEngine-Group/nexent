@@ -43,17 +43,19 @@ def test_ut_sdk_trace_022_alias_lookup_is_not_exported(telemetry, mocker, fails)
     response = TransportApiResponse(meta, {"documents": {}, ".system": {}})
     transport = mocker.patch.object(client.client.transport, "perform_request", side_effect=[
         RuntimeError("unavailable") if fails else response, TransportApiResponse(meta, None),
+        TransportApiResponse(meta, {}),
     ])
     try:
         with telemetry.tracer.start_as_current_span("agent.run"):
             assert client.get_user_indices("documents*") == ([] if fails else ["documents"])
             assert client.check_index_exists("documents")
-        assert transport.call_count == 2
+            client.client.indices.refresh(index="documents")
+        assert transport.call_count == 3
         assert transport.call_args_list[0].args[:2] == ("GET", "/documents*/_alias")
         assert telemetry.provider.force_flush(timeout_millis=1000)
         spans = {s.name: s for s in telemetry.exporter.get_finished_spans()}
-        assert set(spans) == {"agent.run", "indices.exists"}
-        assert spans["indices.exists"].parent.span_id == spans["agent.run"].context.span_id
+        assert set(spans) == {"agent.run", "indices.refresh"}
+        assert spans["indices.refresh"].parent.span_id == spans["agent.run"].context.span_id
     finally:
         client.client.close()
 
@@ -73,6 +75,9 @@ def test_ut_sdk_trace_022_other_operations_are_retained(telemetry, attributes):
     ("search", "/documents/_search"),
     ("indices.stats", "/documents/_stats"),
     ("indices.get_settings", "/documents/_settings"),
+    ("bulk", "/documents/_bulk"),
+    ("indices.exists", "/documents"),
+    ("indices.delete", "/documents"),
 ])
 @pytest.mark.parametrize("fails", [False, True])
 def test_noisy_elasticsearch_operations_execute_without_export(telemetry, mocker, operation, path, fails):
@@ -89,13 +94,17 @@ def test_noisy_elasticsearch_operations_execute_without_export(telemetry, mocker
     )
     target = client.client.indices if operation.startswith("indices.") else client.client
     request = getattr(target, operation.rsplit(".", 1)[-1])
+    request_kwargs = {"index": "documents"}
+    if operation == "bulk":
+        request_kwargs["operations"] = [{"index": {"_id": "1"}}, {"text": "test"}]
     try:
         with telemetry.tracer.start_as_current_span("agent.run"):
             if fails:
                 with pytest.raises(RuntimeError, match="unavailable"):
-                    request(index="documents")
+                    request(**request_kwargs)
             else:
-                assert request(index="documents").body == body
+                result = request(**request_kwargs)
+                assert result.body == (True if operation == "indices.exists" else body)
             with telemetry.tracer.start_as_current_span("agent.tool.search", attributes={"tool.name": "search"}):
                 pass
             with telemetry.tracer.start_as_current_span("model.generate"):
@@ -111,13 +120,26 @@ def test_noisy_elasticsearch_operations_execute_without_export(telemetry, mocker
         client.client.close()
 
 
-@pytest.mark.parametrize("operation", ["search", "indices.stats", "indices.get_settings", "indices.get_alias"])
+@pytest.mark.parametrize("operation", [
+    "search", "indices.stats", "indices.get_settings", "indices.get_alias", "bulk", "indices.exists", "indices.delete",
+])
 @pytest.mark.parametrize("database", [None, "postgresql"])
 def test_filtered_names_from_other_sources_remain_exported(telemetry, operation, database):
     attributes = {"db.operation": operation}
     if database:
         attributes["db.system"] = database
     with telemetry.tracer.start_as_current_span(operation, attributes=attributes):
+        pass
+    assert telemetry.provider.force_flush(timeout_millis=1000)
+    span, = telemetry.exporter.get_finished_spans()
+    assert span.name == operation
+
+
+@pytest.mark.parametrize("operation", [
+    "knowledge.process", "knowledge.minio.upload", "knowledge.process.submit.extra", "knowledge.upload.batch.extra",
+])
+def test_other_knowledge_spans_remain_exported(telemetry, operation):
+    with telemetry.tracer.start_as_current_span(operation, attributes={"ingestion.stage": "test"}):
         pass
     assert telemetry.provider.force_flush(timeout_millis=1000)
     span, = telemetry.exporter.get_finished_spans()
