@@ -20,7 +20,6 @@ export interface AidpKbDetail {
   chunk_overlap_num?: number | null;
   topk?: number | null;
   similarity?: number | null;
-  rerank_model?: string | null;
   vlm_model?: string | null;
   llm_model_name?: string | null;
   is_exist_graph?: boolean | null;
@@ -38,6 +37,8 @@ export interface AidpDocumentItem {
   file_type?: string;
   created_at?: string;
   updated_at?: string;
+  /** Ingested-file delete status: 0 = ingested, 1 = deleting, 2 = delete failed. */
+  file_status?: number | null;
   /** Numeric code or uppercase stage name (history rows only). */
   status?: string | number | null;
   /** Terminal failure code reported by the history endpoint. */
@@ -231,6 +232,8 @@ export interface AidpUpdateKbPayload {
   name?: string;
   description?: string;
   chunk_mode?: number;
+  chunk_token_num?: number;
+  chunk_overlap_num?: number;
   topk?: number;
   /** Caption (VLM) generation toggle; 1 enabled, 0 disabled. */
   caption_enable?: number;

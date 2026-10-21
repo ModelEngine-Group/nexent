@@ -177,6 +177,7 @@ MIGRATED_MODULES = {
     'skill/permission.py',
     'skill/prompt.py',
     'skill/service.py',
+    'skill/stream_parser.py',
     'skill/transfer.py',
     'tag/library.py',
     'tag/projection.py',

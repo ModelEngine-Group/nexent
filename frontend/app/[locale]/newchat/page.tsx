@@ -248,12 +248,27 @@ const HomeContent: FC<{
     useState<ConversationKnowledgeScope | null>(null);
   const [knowledgePreview, setKnowledgePreview] =
     useState<KnowledgeScopeEffectivePreview | null>(null);
-  const [knowledgeCapabilities, setKnowledgeCapabilities] =
-    useState<KnowledgeCapabilities | null>(null);
   const { enableAidpKnowledge } = useDeployment();
   // Observe the composer's catalog updates without starting another list request.
   const { dataUpdatedAt: knowledgeCatalogUpdatedAt } =
     useComposerKnowledgeBases(false, enableAidpKnowledge);
+  const knowledgeCapabilityKey = JSON.stringify([
+    selectedAgent?.id,
+    selectedAgent?.current_version_no,
+    enableAidpKnowledge,
+    knowledgeCatalogUpdatedAt,
+  ]);
+  const [knowledgeCapabilityState, setKnowledgeCapabilityState] = useState<{
+    key: string;
+    value: KnowledgeCapabilities | null;
+  }>({ key: knowledgeCapabilityKey, value: null });
+  if (knowledgeCapabilityState.key !== knowledgeCapabilityKey) {
+    setKnowledgeCapabilityState({ key: knowledgeCapabilityKey, value: null });
+  }
+  const knowledgeCapabilities =
+    knowledgeCapabilityState?.key === knowledgeCapabilityKey
+      ? knowledgeCapabilityState.value
+      : null;
   const [runtimeMetadata, setRuntimeMetadata] = useState<
     Record<string, unknown>
   >({});
@@ -394,7 +409,6 @@ const HomeContent: FC<{
 
   useEffect(() => {
     if (!selectedAgent?.id) {
-      setKnowledgeCapabilities(null);
       return;
     }
 
@@ -403,10 +417,22 @@ const HomeContent: FC<{
     void conversationService
       .getKnowledgeCapabilities(Number(selectedAgent.id), versionNo)
       .then((capabilities) => {
-        if (!cancelled) setKnowledgeCapabilities(capabilities);
+        if (!cancelled) {
+          const matches =
+            capabilities?.agent_id === Number(selectedAgent.id) &&
+            (versionNo === undefined || capabilities.version_no === versionNo);
+          setKnowledgeCapabilityState({
+            key: knowledgeCapabilityKey,
+            value: matches ? capabilities : null,
+          });
+        }
       })
       .catch((error) => {
-        if (!cancelled) setKnowledgeCapabilities(null);
+        if (!cancelled)
+          setKnowledgeCapabilityState({
+            key: knowledgeCapabilityKey,
+            value: null,
+          });
         log.error(
           "[HomeContent] Failed to load knowledge capabilities:",
           error
@@ -416,7 +442,7 @@ const HomeContent: FC<{
     return () => {
       cancelled = true;
     };
-  }, [selectedAgent, knowledgeCatalogUpdatedAt]);
+  }, [selectedAgent, knowledgeCapabilityKey]);
 
   useEffect(() => {
     if (!activeThreadId) {

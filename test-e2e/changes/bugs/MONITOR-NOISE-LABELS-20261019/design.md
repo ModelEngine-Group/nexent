@@ -121,3 +121,25 @@ read-only check both passed.
 The separate `UT-SDK-014` runner could not start because the existing machine-local
 test home's `config/daily.env` is missing. Its prior PASS remains historical
 evidence; no new formal Case execution PASS is claimed for this merge.
+
+## Merge verification — 2026-10-21
+
+Merged `origin/develop` at `d7f5955da` into `dev/monitor-name`. The sole textual
+conflict was copyright-header whitespace in `backend/agents/nl2skill_agent.py`.
+Retain `display_name="技能创建助手"` together with upstream's empty-prompt
+validation, explicit prompt templates and request-scoped system context items.
+The auto-merged NL2Skill configuration test retains both the Chinese display-name
+assertion and upstream's context-item assertions.
+
+- The seven-file monitoring/Workbench/NL2Skill UT command recorded above passed:
+  **131 passed in 3.43s**.
+- Additional upstream regression selection:
+  `.venv/bin/python -m pytest test/backend/services/test_nl2skill_prompt.py test/backend/services/test_nl2skill_continuation.py test/backend/services/test_nl2skill_stream.py -q`:
+  **49 passed in 3.56s**. These check localized prompt/context construction,
+  empty inputs, request isolation, continuation history and stream/retry behavior.
+- Implementation-phase formal-asset generation and subsequent read-only validation
+  with `--require-ut-change MONITOR-NOISE-LABELS-20261019` both passed.
+- Copyright validation for the resolved Python file and branch-difference
+  whitespace validation against `origin/develop` passed.
+- The former machine-local formal test-home configuration remains unavailable;
+  no formal Case runtime execution or deployed-model acceptance is claimed.

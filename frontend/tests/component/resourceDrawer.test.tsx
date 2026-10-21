@@ -16,26 +16,37 @@ vi.mock("react-i18next", () => ({
 }));
 
 describe("ResourceDrawer", () => {
-  it("disables refresh and exposes its busy state while discovery is running", () => {
-    const refresh = vi.fn();
-    render(
-      <ResourceDrawer
-        open
-        title="Tools"
-        listTitle="Results"
-        onClose={vi.fn()}
-        onRefresh={refresh}
-        refreshLoading
-      >
-        <p>Results</p>
-      </ResourceDrawer>
-    );
-    const button = screen.getByRole("button", { name: "刷新" });
-    expect(button).toBeDisabled();
-    expect(button).toHaveAttribute("aria-busy", "true");
-    fireEvent.click(button);
-    expect(refresh).not.toHaveBeenCalled();
-  });
+  it.each([
+    [false, false],
+    [true, false],
+    [false, true],
+    [true, true],
+  ])(
+    "honors refresh disabled=%s and loading=%s independently",
+    (disabled, loading) => {
+      const refresh = vi.fn();
+      render(
+        <ResourceDrawer
+          open
+          title="Tools"
+          listTitle="Results"
+          onClose={vi.fn()}
+          onRefresh={refresh}
+          refreshDisabled={disabled}
+          refreshLoading={loading}
+        >
+          <p>Results</p>
+        </ResourceDrawer>
+      );
+      const button = screen.getByRole("button", { name: "刷新" });
+      if (disabled || loading) expect(button).toBeDisabled();
+      else expect(button).toBeEnabled();
+      expect(button).toHaveAttribute("aria-busy", String(loading));
+      expect(button.querySelector(".animate-spin") !== null).toBe(loading);
+      fireEvent.click(button);
+      expect(refresh).toHaveBeenCalledTimes(disabled || loading ? 0 : 1);
+    }
+  );
   it("hides tag management by default and places the configured action beside refresh", () => {
     const manage = vi.fn();
     const props = {
