@@ -781,11 +781,14 @@ const ThreadView: FC<ThreadViewProps> = ({
   const aui = useAui();
   const suggestions = welcomeSuggestions?.length
     ? welcomeSuggestions.slice(0, 4)
-    : (agent.example_questions || []).slice(0, 4).map((question, index) => ({
-        id: `question-${index}`,
-        title: question,
-        prompt: question,
-      }));
+    : (agent.example_questions || [])
+        .filter((question) => question.trim())
+        .slice(0, 4)
+        .map((question, index) => ({
+          id: `question-${index}`,
+          title: question,
+          prompt: question,
+        }));
 
   return (
     <ThreadPrimitive.Root
