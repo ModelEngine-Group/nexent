@@ -1,4 +1,4 @@
-﻿{
+{
   "toolConfig.deepseek.onlyHighQuality": "仅优质内容",
   "workbench.genericAgentName": "智能体工作台",
   "workbench.landingGreeting": "你好，我是 Nexent，需要我帮你做什么？",
@@ -5409,6 +5409,7 @@
   "tagManagement.action.disable": "停用",
   "tagManagement.action.addTags": "添加标签",
   "tagManagement.action.editTags": "编辑标签",
+  "tagManagement.action.confirm": "确认",
   "tagManagement.action.save": "保存",
   "tagManagement.action.manageDefinitions": "标签管理",
   "tagManagement.form.keys": "标签 Key",
@@ -6213,5 +6214,12 @@
   "workbench.controls.mineTab": "我的",
   "workbench.controls.repositoryTab": "仓库",
   "workbench.import.precheckTitle": "导入预检",
-  "workbench.import.importAndSelect": "导入并选择"
+  "workbench.import.importAndSelect": "导入并选择",
+  "tenantResources.tabs.tags": "标签",
+  "tagManagement.library": "标签库",
+  "tagManagement.libraries.default_resource": "资源标签",
+  "tagManagement.libraries.knowledge_content": "知识内容标签",
+  "tagManagement.currentTenantOnly": "标签管理仅支持当前登录租户，请选择当前租户。",
+  "tagManagement.empty.noLibraries": "暂无标签库",
+  "tagManagement.empty.noDefinitions": "暂无标签"
 }
