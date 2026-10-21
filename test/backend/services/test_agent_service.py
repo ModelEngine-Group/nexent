@@ -83,7 +83,7 @@ email_validator_mock.validate_email = mock_validate_email
 sys.modules["email_validator"] = email_validator_mock
 
 try:
-    import pydantic.networks as pydantic_networks
+    from pydantic import networks as pydantic_networks
 
     original_package_version = pydantic_networks.version
     pydantic_networks.version = lambda package_name: (
@@ -10651,6 +10651,7 @@ async def test_run_agent_background_consumes_stream_and_returns_assistant_messag
         "assistant_message_id": 123,
         "chunks": 2,
     }
+    assert request._message_source == "AUTOMATION"
     mock_save_messages.assert_not_called()
 
 
@@ -16464,7 +16465,7 @@ class TestBuildSandboxPolicy:
         assert "agent_type" in params
 
     def test_build_sandbox_policy_includes_configurable_host_tool_timeout(self):
-        import consts.const as const_module
+        from consts import const as const_module
         from management.services.agent.service import build_sandbox_policy
 
         with (

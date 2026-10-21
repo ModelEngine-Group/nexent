@@ -184,6 +184,7 @@ class ResourceCandidate(BaseModel):
     description: str = ""
     requirement_ids: list[str] = Field(min_length=1)
     score: float = Field(ge=0, le=1)
+    knowledge_queries: list[str] = Field(default_factory=list, max_length=32)
 
     @model_validator(mode="after")
     def validate_requirement_ids(self) -> "ResourceCandidate":
@@ -268,6 +269,16 @@ class ResourceInstallationOption(BaseModel):
     config: dict[str, Any] | list[dict[str, Any]]
 
 
+class KnowledgeBaseRecommendation(BaseModel):
+    """Canonical authorized knowledge metadata and its provider binding value."""
+
+    model_config = ConfigDict(extra="forbid")
+    id: str
+    binding_value: str
+    name: str
+    score: float = Field(ge=0, le=1)
+
+
 class RecommendedResource(BaseModel):
     """Frozen card-facing resource detail boundary (implemented in PR2)."""
 
@@ -275,6 +286,8 @@ class RecommendedResource(BaseModel):
     candidate: ResourceCandidate
     recommendation: Literal["recommended", "optional"]
     is_bound: bool = False
+    knowledge_recommendations: list[KnowledgeBaseRecommendation] = Field(default_factory=list)
+    knowledge_bound_values: list[str] = Field(default_factory=list)
     form_kind: Literal[
         "TOOL_CONFIG",
         "SKILL_CONFIG",

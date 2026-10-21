@@ -1,5 +1,4 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
-
 """
 Nexent LLM Performance Monitoring System
 
@@ -48,6 +47,13 @@ from contextlib import contextmanager
 from contextvars import ContextVar
 from typing import Any, Dict, List, Optional, Callable, TypeVar, cast, Iterator
 from dataclasses import dataclass, field
+
+from .span_filter_config import (
+    DEFAULT_EXCLUDED_ELASTICSEARCH_OPERATIONS,
+    DEFAULT_EXCLUDED_SPAN_NAMES,
+    normalize_span_exclusions,
+)
+from .trace_name import TRACE_NAME_ATTRIBUTE, agent_trace_name_scope
 
 logger = logging.getLogger(__name__)
 
@@ -417,9 +423,17 @@ class MonitoringConfig:
     trace_content_mode: str = DEFAULT_TRACE_CONTENT_MODE
     trace_max_chars: int = DEFAULT_TRACE_MAX_CHARS
     trace_max_items: int = DEFAULT_TRACE_MAX_ITEMS
+    excluded_elasticsearch_operations: List[str] | str = field(
+        default_factory=lambda: list(DEFAULT_EXCLUDED_ELASTICSEARCH_OPERATIONS)
+    )
+    excluded_span_names: List[str] | str = field(
+        default_factory=lambda: list(DEFAULT_EXCLUDED_SPAN_NAMES)
+    )
 
     def __post_init__(self):
         """Validate configuration and adjust based on OpenTelemetry availability."""
+        self.excluded_elasticsearch_operations = normalize_span_exclusions(self.excluded_elasticsearch_operations)
+        self.excluded_span_names = normalize_span_exclusions(self.excluded_span_names)
         self.provider = (self.provider or "otlp").strip().lower()
         if self.provider not in SUPPORTED_PROVIDERS:
             logger.warning(
@@ -604,7 +618,11 @@ class MonitoringManager:
                 )
                 from .span_processor import MonitoringSpanProcessor
 
-                self._tracer_provider.add_span_processor(MonitoringSpanProcessor(span_processor))
+                self._tracer_provider.add_span_processor(MonitoringSpanProcessor(
+                    span_processor,
+                    excluded_elasticsearch_operations=self._config.excluded_elasticsearch_operations,
+                    excluded_span_names=self._config.excluded_span_names,
+                ))
 
             metric_readers = []
             if self._config.export_metrics:
@@ -876,24 +894,26 @@ class MonitoringManager:
             )
             trace_name = (agent_metadata.agent_display_name or "").strip() or (agent_metadata.agent_name or "").strip()
             if trace_name:
-                # Only the main run may name the trace; children retain their own Agent names.
-                attributes["langfuse.trace.name"] = trace_name
+                # The main Agent owns the trace name; children retain their own node identities.
+                attributes[TRACE_NAME_ATTRIBUTE] = trace_name
+            parent_span = self.get_current_span()
             try:
                 with self.trace_operation(
                     operation_name,
                     OPENINFERENCE_SPAN_KIND_AGENT,
                     **attributes,
                 ) as span:
-                    self.add_span_event(f"{operation_name}.started")
-                    try:
-                        yield span
-                        self.add_span_event(f"{operation_name}.completed")
-                    except Exception as error:
-                        self.add_span_event(f"{operation_name}.error", {
-                            "error.type": type(error).__name__,
-                            "error.message": str(error),
-                        })
-                        raise
+                    with agent_trace_name_scope(span, trace_name, parent_span):
+                        self.add_span_event(f"{operation_name}.started")
+                        try:
+                            yield span
+                            self.add_span_event(f"{operation_name}.completed")
+                        except Exception as error:
+                            self.add_span_event(f"{operation_name}.error", {
+                                "error.type": type(error).__name__,
+                                "error.message": str(error),
+                            })
+                            raise
             finally:
                 _monitoring_agent_run_active.reset(active_token)
 

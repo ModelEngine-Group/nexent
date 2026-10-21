@@ -20,6 +20,7 @@ def create_nl2skill_agent_config(
 
     return AgentConfig(
         name=NL2SKILL_NAME,
+        display_name="技能创建助手",
         description="Ephemeral natural-language skill builder",
         # A non-empty mapping disables CodeAgent's default English templates.
         # Keep the rendered prompt in context_items to preserve literal Jinja syntax.

@@ -29,6 +29,7 @@ def _reset_captured():
 
 # Stub sqlalchemy with minimal API used by conversation_db
 sa_mod = types.ModuleType("sqlalchemy")
+sa_mod.and_ = MagicMock(name="and_")
 sa_mod.asc = MagicMock(name="asc")
 sa_mod.desc = MagicMock(name="desc")
 sa_mod.func = MagicMock(name="func")
@@ -120,7 +121,9 @@ db_models_mod = types.ModuleType("management.db.models")
 
 class ConversationRecord:
     conversation_id = MagicMock(name="ConversationRecord.conversation_id")
+    last_activity_time = MagicMock(name="ConversationRecord.last_activity_time")
     conversation_title = MagicMock(name="ConversationRecord.conversation_title")
+    title_version = MagicMock(name="ConversationRecord.title_version")
     agent_id = MagicMock(name="ConversationRecord.agent_id")
     chat_mode = MagicMock(name="ConversationRecord.chat_mode")
     workbench_config = MagicMock(name="ConversationRecord.workbench_config")
@@ -136,6 +139,7 @@ class ConversationRecord:
 class ConversationMessage:
     message_id = MagicMock(name="ConversationMessage.message_id")
     message_index = MagicMock(name="ConversationMessage.message_index")
+    message_source = MagicMock(name="ConversationMessage.message_source")
     message_role = MagicMock(name="ConversationMessage.message_role")
     message_content = MagicMock(name="ConversationMessage.message_content")
     unit_index = MagicMock(name="ConversationMessage.unit_index")
@@ -1184,6 +1188,7 @@ def test_persist_assistant_run_batch_uses_one_transaction(monkeypatch):
         MagicMock(),
         MagicMock(),
         proposal_result,
+        MagicMock(),
     ]
     ctx = MagicMock()
     ctx.__enter__.return_value = session
@@ -1234,7 +1239,7 @@ def test_persist_assistant_run_batch_uses_one_transaction(monkeypatch):
     session_factory.assert_called_once_with()
     ctx.__enter__.assert_called_once()
     ctx.__exit__.assert_called_once()
-    assert session.execute.call_count == 5
+    assert session.execute.call_count == 6
     source_row = session.execute.call_args_list[2].args[1][0]
     assert source_row["aidp_metadata"] == {"count": 0, "enabled": False, "nested": {"tags": [0, False]}}
     assert source_row["aidp_source_reference"] == {"chunk_id": "chunk-first", "retrieval_source": "vector"}
@@ -1413,7 +1418,7 @@ def test_persist_assistant_run_batch_rejects_missing_automation_proposal(monkeyp
     proposal_result = MagicMock()
     proposal_result.scalar_one_or_none.return_value = None
     session = MagicMock()
-    session.execute.side_effect = [parent_result, unit_result, proposal_result]
+    session.execute.side_effect = [parent_result, unit_result, proposal_result, MagicMock()]
     ctx = MagicMock()
     ctx.__enter__.return_value = session
     ctx.__exit__.return_value = None
@@ -1489,7 +1494,7 @@ def test_persist_assistant_run_batch_initializes_empty_proposal_task(monkeypatch
     proposal_result = MagicMock()
     proposal_result.scalar_one_or_none.return_value = proposal
     session = MagicMock()
-    session.execute.side_effect = [parent_result, unit_result, proposal_result]
+    session.execute.side_effect = [parent_result, unit_result, proposal_result, MagicMock()]
     ctx = MagicMock()
     ctx.__enter__.return_value = session
     ctx.__exit__.return_value = None
@@ -1840,7 +1845,7 @@ def test_get_conversation_list_applies_pagination_with_stable_order(monkeypatch,
 
     assert result == []
     desc_mock.assert_has_calls([
-        call(ConversationRecord.create_time),
+        call(sa_mod.func.coalesce.return_value),
         call(ConversationRecord.conversation_id),
     ])
     stmt.limit.assert_called_once_with(10)
@@ -1899,6 +1904,7 @@ def test_get_conversation_list_page_returns_rows_and_metadata_from_one_query(
             chat_mode="execution",
             create_time=2000,
             update_time=2100,
+            last_activity_time=2100,
             total=30,
             today=3,
             last_7_days=7,
@@ -1924,8 +1930,10 @@ def test_get_conversation_list_page_returns_rows_and_metadata_from_one_query(
                 "chat_mode": "execution",
                 "create_time": 2000,
                 "update_time": 2100,
+                "last_activity_time": 2100,
             }
         ],
+        "next_cursor": None,
         "metadata": {"total": 30, "today": 3, "last_7_days": 7, "older": 20},
     }
     session.execute.assert_called_once()
@@ -1964,6 +1972,7 @@ def test_get_conversation_list_page_supports_unpaginated_empty_result(
 
     assert result == {
         "items": [],
+        "next_cursor": None,
         "metadata": {"total": 0, "today": 0, "last_7_days": 0, "older": 0},
     }
     session.execute.assert_called_once()
@@ -1996,7 +2005,11 @@ def test_conversation_page_filters_origin_before_pagination(
     )
 
     session, ctx = mock_session_ctx
-    session.execute.return_value = []
+    count_result = MagicMock()
+    count_result.one.return_value = types.SimpleNamespace(
+        total=12, today=2, last_7_days=4, older=6,
+    )
+    session.execute.side_effect = [[], count_result]
     monkeypatch.setattr(conversation_db, "get_db_session", lambda: ctx)
     column = conversation_db.ConversationRecord.workbench_config
     column.reset_mock()
@@ -2007,8 +2020,11 @@ def test_conversation_page_filters_origin_before_pagination(
     )
 
     getattr(column, predicate).assert_called_once_with(None)
-    session.execute.assert_called_once()
+    assert session.execute.call_count == 2
     assert result["items"] == []
+    assert result["metadata"] == {
+        "total": 12, "today": 2, "last_7_days": 4, "older": 6,
+    }
 
 
 def test_update_conversation_agent_id_success(monkeypatch, mock_session_ctx):

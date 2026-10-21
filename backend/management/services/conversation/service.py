@@ -3,6 +3,8 @@
 import json
 import logging
 
+from contracts.conversation import MessageSource
+
 from management.services.agent.context import (
     strip_current_time_prefix,
 )
@@ -28,7 +30,7 @@ monitoring_manager = get_monitoring_manager()
 
 
 def save_message(request: MessageRequest, user_id: str, tenant_id: str,
-                  status: str = 'completed') -> int:
+                  status: str = 'completed', *, message_source: MessageSource = MessageSource.CHAT) -> int:
     """
     Insert only the ConversationMessage row for a new message.
 
@@ -79,7 +81,9 @@ def save_message(request: MessageRequest, user_id: str, tenant_id: str,
         'content': string_content or "",
         'minio_files': message_data.get('minio_files'),
     }
-    return create_conversation_message(message_data_copy, user_id, status=status)
+    return create_conversation_message(
+        message_data_copy, user_id, status=status, message_source=message_source,
+    )
 
 
 def save_message_unit(message_id: int, conversation_id: int, unit_index: int,
@@ -261,7 +265,9 @@ def save_conversation_user(request: AgentRequest, user_id: str, tenant_id: str) 
         minio_files=request.minio_files,
     )
     save_message(
-        conversation_req, user_id=user_id, tenant_id=tenant_id)
+        conversation_req, user_id=user_id, tenant_id=tenant_id,
+        message_source=MessageSource(getattr(request, "_message_source", MessageSource.CHAT)),
+    )
 
 
 def save_conversation_assistant(request: AgentRequest, messages: List[str], user_id: str, tenant_id: str):
@@ -640,7 +646,7 @@ def rename_conversation_service(conversation_id: int, name: str, user_id: str,
             if initial["conversation_title"] not in {DEFAULT_EN_TITLE, DEFAULT_ZH_TITLE}:
                 return False
             snapshot = {"conversation_title": initial["conversation_title"],
-                        "update_time": initial["update_time"]}
+                        "title_version": initial["title_version"]}
             return rename_conversation(conversation_id, name, user_id, expected_snapshot=snapshot)
         success = rename_conversation(conversation_id, name, user_id)
         if not success:
@@ -1138,7 +1144,7 @@ async def generate_conversation_title_service(conversation_id: int, question: st
         if initial is None:
             raise ConversationNotFoundError("Conversation does not exist or has been deleted")
         snapshot = {"conversation_title": initial["conversation_title"],
-                    "update_time": initial["update_time"]}
+                    "title_version": initial["title_version"]}
         # Call LLM to generate title from question in a separate thread to avoid blocking
         title = await run_blocking(
             "conversation-title",

@@ -85,6 +85,7 @@ async def list_conversations_endpoint(
     offset: Annotated[int, Query(ge=0)] = 0,
     limit: Annotated[Optional[int], Query(ge=1, le=100)] = None,
     conversation_type: Annotated[Optional[str], Query(pattern="^(agent_chat|workbench)$")] = None,
+    cursor: Annotated[Optional[str], Query(max_length=512)] = None,
 ):
     """
     Get all conversation list
@@ -106,8 +107,11 @@ async def list_conversations_endpoint(
             limit=limit,
             offset=offset,
             **({"conversation_type": conversation_type} if conversation_type is not None else {}),
+            **({"cursor": cursor} if cursor is not None else {}),
         )
         return ConversationResponse(code=0, message="success", data=conversations)
+    except ValueError as exc:
+        raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail=str(exc)) from exc
     except TokenExpiredError as e:
         logging.warning("Session expired")
         raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(e))

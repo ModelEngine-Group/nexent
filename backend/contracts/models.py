@@ -10,6 +10,7 @@ from pydantic import (
     ConfigDict,
     EmailStr,
     Field,
+    PrivateAttr,
     StrictBool,
     StrictInt,
     field_validator,
@@ -1017,6 +1018,8 @@ def reject_legacy_agent_fields(value):
 
 
 class AgentRequest(BaseModel):
+    # Internal provenance is never accepted from serialized client requests.
+    _message_source: str = PrivateAttr(default="CHAT")
     query: str
     conversation_id: Optional[int] = None
     history: Optional[List[HistoryItem]] = None

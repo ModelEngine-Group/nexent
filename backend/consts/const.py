@@ -719,6 +719,14 @@ MONITORING_FASTAPI_EXCLUDED_URLS = os.getenv(
     "MONITORING_FASTAPI_EXCLUDED_URLS", "")
 MONITORING_FASTAPI_EXCLUDE_SPANS = os.getenv(
     "MONITORING_FASTAPI_EXCLUDE_SPANS", "receive,send")
+# Explicit empty values disable the respective export filter.
+MONITORING_EXCLUDED_ELASTICSEARCH_OPERATIONS = os.getenv(
+    "MONITORING_EXCLUDED_ELASTICSEARCH_OPERATIONS",
+    "search,indices.stats,indices.get_settings,indices.get_alias,bulk,indices.exists,indices.delete",
+)
+MONITORING_EXCLUDED_SPAN_NAMES = os.getenv(
+    "MONITORING_EXCLUDED_SPAN_NAMES", "knowledge.process.submit,knowledge.upload.batch"
+)
 MONITORING_PROJECT_NAME = os.getenv("MONITORING_PROJECT_NAME", "")
 MONITORING_DASHBOARD_URL = os.getenv("MONITORING_DASHBOARD_URL", "")
 MONITORING_DASHBOARD_ALLOWED_ROLES = os.getenv(

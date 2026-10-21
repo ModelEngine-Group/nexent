@@ -441,11 +441,7 @@ def resolve_workbench_config(
         agent_id=system_ref.agent_id,
         version_no=system_ref.version_no,
         invocation_name="workbench_main",
-        display_name=str(
-            snapshot.get("display_name")
-            or snapshot.get("name")
-            or "Nexent Workbench"
-        ),
+        display_name="智能工作台",
         origin="SYSTEM",
     )
     child_mounts = tuple(child_identities)

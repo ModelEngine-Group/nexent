@@ -4,6 +4,7 @@ import logging
 from typing import Any, Dict, List, Optional
 
 from contracts.models import HistoryItem, MessageRequest, MessageUnit
+from contracts.conversation import MessageSource
 from management.services.conversation.service import (
     get_conversation_history_service,
     save_message,
@@ -92,7 +93,9 @@ class AutomationConversationAdapter:
             role="user",
             message=[MessageUnit(type="string", content=prompt)],
         )
-        message_id = save_message(request, user_id, tenant_id)
+        message_id = save_message(
+            request, user_id, tenant_id, message_source=MessageSource.AUTOMATION,
+        )
         save_message_unit(
             message_id=message_id,
             conversation_id=conversation_id,

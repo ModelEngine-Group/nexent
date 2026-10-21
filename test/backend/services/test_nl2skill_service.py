@@ -11,7 +11,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from contracts.models import NL2SkillRunRequest
-import services.nl2skill_service as nl2skill_service
+from services import nl2skill_service as nl2skill_service
 from services.nl2skill_service import (
     _assemble_draft_content,
     _convert_history,
@@ -29,6 +29,8 @@ from agents.nl2skill_agent import NL2SKILL_NAME, create_nl2skill_agent_config
 def test_create_nl2skill_agent_config_sets_ephemeral_runtime_options():
     config = create_nl2skill_agent_config("system", "model")
     assert config.name == NL2SKILL_NAME
+    assert config.name == "__skill_creator__"
+    assert config.display_name == "技能创建助手"
     assert config.model_name == "model"
     assert config.instructions is None
     assert config.context_items[0].content["text"] == "system"

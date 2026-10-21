@@ -37,7 +37,7 @@ def session(monkeypatch):
 
 def conversation(stamp=STAMP):
     return SimpleNamespace(conversation_id=42, conversation_title="History", agent_id=3,
-                           workbench_pinned_at=stamp, created_by="user", update_time=STAMP)
+                           workbench_pinned_at=stamp, created_by="user", update_time=STAMP, last_activity_time=None)
 
 
 def result_row(record):
@@ -48,7 +48,7 @@ def test_list_serializes_metadata_and_filters_owned_active_workbench_pins(sessio
     session.execute.return_value = [result_row(conversation())]
     assert pins.list_workbench_pins("user", "tenant") == [{
         "conversation_id": 42, "conversation_title": "History", "agent_id": 3,
-        "create_time": 1234, "update_time": 4567, "pinned_at": STAMP.isoformat(),
+        "create_time": 1234, "update_time": 4567, "last_activity_time": 1234, "pinned_at": STAMP.isoformat(),
     }]
     query = sql(session.execute.call_args.args[0])
     for predicate in ("created_by = 'user'", "workbench_config IS NOT NULL",
@@ -97,7 +97,7 @@ def test_pin_transitions_are_idempotent_and_preserve_activity(session, pinned, s
         assert "conversation_id = 42" in sql(writes[0]) and "created_by = 'user'" in sql(writes[0])
     if pinned and changes:
         clock = sql(session.scalar.call_args_list[1].args[0])
-        assert "greatest(clock_timestamp()," in clock
+        assert "greatest(timezone('UTC', clock_timestamp())," in clock
         assert "max(nexent.conversation_record_t.workbench_pinned_at)" in clock
         assert "INTERVAL '1 microsecond'" in clock and "created_by = 'user'" in clock
     assert record.update_time == STAMP
@@ -121,3 +121,34 @@ def test_database_update_failure_propagates_without_returning_success(session):
     with pytest.raises(RuntimeError, match="controlled database failure"):
         pins.set_workbench_pin(42, True, "user", "tenant")
     assert session.execute.call_count == 2
+
+
+def test_naive_utc_activity_epoch_never_uses_the_process_timezone(session):
+    class StoredTime(datetime):
+        def timestamp(self):
+            assert self.tzinfo is not None, "Naive storage time must be assigned UTC first"
+            return super().timestamp()
+
+    record = conversation()
+    record.last_activity_time = StoredTime(2026, 10, 1, 0, 0, 0, 123456)
+    session.execute.return_value = [result_row(record)]
+    result = pins.list_workbench_pins("user", "tenant")
+    assert result[0]["last_activity_time"] == int(STAMP.timestamp() * 1000) + 123
+
+
+
+def test_conversation_time_columns_all_use_native_timestamp():
+    assert not [column.name for column in pins.ConversationRecord.__table__.columns
+                if getattr(column.type, "timezone", False)]
+
+
+def test_naive_pin_iso_response_explicitly_uses_utc(session):
+    class StoredTime(datetime):
+        def isoformat(self, *args, **kwargs):
+            assert self.tzinfo is not None, "Native pin storage must be assigned UTC before serialization"
+            return super().isoformat(*args, **kwargs)
+
+    record = conversation(StoredTime(2026, 10, 21, 2, 3, 4, 123456))
+    session.execute.return_value = [result_row(record)]
+    result = pins.list_workbench_pins("user", "tenant")
+    assert result[0]["pinned_at"] == "2026-10-21T02:03:04.123456+00:00"

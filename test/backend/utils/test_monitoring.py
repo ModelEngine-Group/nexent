@@ -26,6 +26,8 @@ for name, value in {
     "MONITORING_FASTAPI_INCLUDED_URLS": "",
     "MONITORING_FASTAPI_EXCLUDED_URLS": "",
     "MONITORING_FASTAPI_EXCLUDE_SPANS": "receive,send",
+    "MONITORING_EXCLUDED_ELASTICSEARCH_OPERATIONS": "search",
+    "MONITORING_EXCLUDED_SPAN_NAMES": "knowledge.process.submit",
     "MONITORING_TRACE_CONTENT_MODE": "summary",
     "MONITORING_TRACE_MAX_CHARS": "4000",
     "MONITORING_TRACE_MAX_ITEMS": "20",
@@ -176,7 +178,7 @@ class TestMonitoringUtilsModule:
 
     def test_module_attributes(self):
         """Test that the module has correct attributes."""
-        import infrastructure.observability.bootstrap as monitoring_module
+        from infrastructure.observability import bootstrap as monitoring_module
 
         assert hasattr(monitoring_module, 'monitoring_manager')
         assert hasattr(monitoring_module, '__all__')
@@ -251,7 +253,7 @@ class TestMonitoringUtilsModule:
     def test_module_uses_backend_constants_when_top_level_import_is_unavailable(self, monkeypatch):
         """The module should support imports from the backend package namespace."""
         import importlib
-        import infrastructure.observability.bootstrap as monitoring_module
+        from infrastructure.observability import bootstrap as monitoring_module
 
         backend_consts = types.ModuleType("backend.consts.const")
         for name, value in {
@@ -268,6 +270,8 @@ class TestMonitoringUtilsModule:
             "MONITORING_FASTAPI_INCLUDED_URLS": "",
             "MONITORING_FASTAPI_EXCLUDED_URLS": "",
             "MONITORING_FASTAPI_EXCLUDE_SPANS": "receive,send",
+            "MONITORING_EXCLUDED_ELASTICSEARCH_OPERATIONS": "search",
+            "MONITORING_EXCLUDED_SPAN_NAMES": "knowledge.process.submit",
             "MONITORING_TRACE_CONTENT_MODE": "summary",
             "MONITORING_TRACE_MAX_CHARS": "4000",
             "MONITORING_TRACE_MAX_ITEMS": "20",
