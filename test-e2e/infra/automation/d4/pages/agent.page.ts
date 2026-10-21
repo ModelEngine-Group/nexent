@@ -8,13 +8,15 @@ export class AgentPage {
 
   async open(): Promise<void> {
     await this.page.goto(appPath("/agents"), { waitUntil: "domcontentloaded" });
-    await expect(this.page.getByRole("button", { name: /^(新建|创建智能体)$/ }).first()).toBeVisible();
+    await expect(this.page.getByRole("button", { name: /^(新建|新建智能体|创建智能体)$/ }).first()).toBeVisible();
   }
 
   async create(displayName: string, variableName: string): Promise<number> {
-    await this.page.getByRole("button", { name: /^(新建|创建智能体)$/ }).first().click();
+    await this.page.getByRole("button", { name: /^(新建|新建智能体|创建智能体)$/ }).first().click();
     const modal = this.page.getByRole("dialog", { name: "创建智能体" });
-    await modal.getByLabel("智能体名称", { exact: true }).fill(displayName);
+    const nameInput = modal.getByRole("textbox");
+    await expect(nameInput).toHaveCount(1);
+    await nameInput.fill(displayName);
     const responsePromise = this.page.waitForResponse((r) => r.url().includes("/api/agent/update") && r.request().method() === "POST");
     await modal.getByRole("button", { name: "创建", exact: true }).click();
     const response = await responsePromise;
@@ -48,9 +50,9 @@ export class AgentPage {
     // A newly-created Agent opens both the Ant Tour mask and the intelligent
     // generation panel. They are product guidance, not part of manual config,
     // and the Tour mask intentionally intercepts all config pointer events.
-    const skipTour = this.page.getByRole("button", { name: "全部跳过", exact: true });
-    await skipTour.waitFor({ state: "visible", timeout: 5000 }).catch(() => undefined);
-    if (await skipTour.isVisible()) await skipTour.click();
+    const skipGuide = this.page.getByRole("button", { name: "全部跳过", exact: true });
+    await skipGuide.waitFor({ state: "visible", timeout: 5000 }).catch(() => undefined);
+    if (await skipGuide.isVisible()) await skipGuide.click();
     const tourClose = this.page.locator(".ant-tour-close").first();
     await tourClose.waitFor({ state: "visible", timeout: 5000 }).catch(() => undefined);
     if (await tourClose.isVisible().catch(() => false)) await tourClose.click();
@@ -80,7 +82,7 @@ export class AgentPage {
 
   async setDescription(description: string): Promise<void> {
     await this.openSection("基础信息");
-    const input = this.page.getByPlaceholder("请输入智能体描述");
+    const input = this.page.getByRole("textbox", { name: "智能体描述", exact: true });
     await input.fill(description);
     const responsePromise = this.page.waitForResponse((r) => r.url().includes("/api/agent/update") && r.request().method() === "POST");
     await input.blur();
@@ -92,6 +94,15 @@ export class AgentPage {
     await this.openBasic();
     await this.openSection("基础信息");
     const author = this.page.getByPlaceholder("请输入作者名称", { exact: true });
+    if ((await author.count()) === 0) {
+      const id = Number(new URL(this.page.url()).pathname.split("/").at(-1));
+      const response = await this.page.request.post("/api/agent/search_info", { data: { agent_id: id, version_no: 0 } });
+      expect(response.ok()).toBeTruthy();
+      const row = await response.json();
+      const persisted = String(row.author ?? "").trim();
+      expect(persisted).not.toBe("");
+      return persisted;
+    }
     await expect(author).toBeVisible();
     let persisted = (await author.inputValue()).trim();
     if (!persisted) {
@@ -345,6 +356,20 @@ export class AgentPage {
 
   async selectModel(displayName: string): Promise<void> {
     const section = await this.openSection("模型与提示词");
+    const addEntry = section.getByTestId("agent-model-add-entry");
+    if (await addEntry.count()) {
+      await addEntry.click();
+      const drawer = this.page.getByRole("dialog", { name: "添加模型", exact: true });
+      const choice = drawer.getByRole("checkbox", { name: displayName, exact: true });
+      await expect(choice).toBeVisible();
+      if (!(await choice.isChecked())) await choice.click();
+      const saved = this.page.waitForResponse(r => r.url().includes("/api/agent/update") && r.request().method() === "POST" && Array.isArray(r.request().postDataJSON()?.model_ids) && r.request().postDataJSON().model_ids.length > 0);
+      await drawer.getByRole("button", { name: "确认", exact: true }).click();
+      expect((await saved).ok()).toBeTruthy();
+      await expect(drawer).toBeHidden();
+      await expect(section.getByTestId(/^agent-selected-model-/).filter({ hasText: displayName })).toBeVisible();
+      return;
+    }
     // When a default model is already selected Ant Select does not render its
     // placeholder. Scope the combobox to the role/model section instead.
     const selector = section.getByRole("combobox").first();
@@ -413,6 +438,14 @@ export class AgentPage {
 
   async setPrompts(values: { duty?: string; constraint?: string; fewShots?: string }): Promise<void> {
     await this.openSection("模型与提示词");
+    const primary = this.page.locator("#agent-primary-prompt");
+    if ((await primary.count()) && values.duty !== undefined) {
+      await primary.fill(values.duty);
+      const saved = this.page.waitForResponse(r => r.url().includes("/api/agent/update") && r.request().method() === "POST" && r.request().postDataJSON()?.duty_prompt === values.duty);
+      await primary.blur();
+      expect((await saved).ok()).toBeTruthy();
+      if (values.constraint === undefined && values.fewShots === undefined) return;
+    }
     for (const [tab, placeholder, value] of [
       ["智能体角色", "请输入智能体的角色、职责和能力", values.duty],
       ["使用要求", "请输入此智能体的使用要求或约束条件", values.constraint],
@@ -439,7 +472,7 @@ export class AgentPage {
     const updated = this.page.waitForResponse(
       (response) => response.request().method() === "POST" && response.url().includes("/api/agent/update"),
     );
-    await modal.getByRole("button", { name: "创建", exact: true }).click();
+    await modal.getByRole("button", { name: /确\s*定/ }).click();
     const response = await updated;
     if (!response.ok()) throw new Error(`expanded duty prompt autosave returned ${response.status()}`);
     await expect(this.page.getByPlaceholder(/请输入智能体的角色、职责和能力/)).toHaveValue(content);
@@ -691,32 +724,35 @@ export class AgentPage {
   }
 
   async publish(): Promise<Locator> {
-    await this.page.getByRole("button", { name: "发布", exact: true }).click();
+    await this.page.getByTestId("agent-config-header").getByRole("button", { name: "发布", exact: true }).click();
     const modal = this.page.locator("[role='dialog']:visible").filter({ hasText: /版本名称/ });
     await expect(modal).toBeVisible();
     return modal;
   }
 
-  async publishVersion(versionName: string, releaseNote: string): Promise<void> {
+  async publishVersion(versionName: string, releaseNote: string, options: { expectPublication?: boolean } = {}): Promise<void> {
     const editorUrl = this.page.url();
     const modal = await this.publish();
     await modal.getByPlaceholder("请输入版本名称").fill(versionName);
     await modal.getByPlaceholder("请输入发布说明（可选）").fill(releaseNote);
-    const published = this.page.waitForResponse(
-      (response) => response.request().method() === "POST" && /\/api\/agent\/\d+\/publish(?:\?|$)/.test(response.url()),
-    );
-    // The current product uses an Ant form submit button. Its accessible name
-    // is not stable while the dialog animates, but the submit contract is.
-    const submit = modal.locator("button[type='submit']");
+    const submit = modal.getByRole("button", { name: "发布", exact: true });
     await expect(submit).toBeVisible();
     await expect(submit).toBeEnabled();
-    await submit.click();
-    const response = await published;
+    const [response] = await Promise.all([
+      this.page.waitForResponse(response => response.request().method() === "POST" && /\/api\/agent\/\d+\/publish(?:\?|$)/.test(response.url())),
+      submit.click(),
+    ]);
     if (!response.ok()) throw new Error(`agent publish returned ${response.status()}`);
     await expect(modal).toBeHidden();
+    if (options.expectPublication) {
+      const expected = new URL(editorUrl);
+      await expect(this.page).toHaveURL(url => url.origin === expected.origin && url.pathname === expected.pathname);
+      await expect(this.page.getByRole("button", { name: "智能体发布", exact: true })).toHaveAttribute("aria-pressed", "true");
+      await expect(this.page.getByTestId("agent-publication-content")).toBeVisible();
+    }
     // Publish may return to the warehouse. Resume the same owned Agent's
     // editor before checking the current-version tag and editing its Draft.
-    if (this.page.url() !== editorUrl) {
+    if (new URL(this.page.url()).pathname !== new URL(editorUrl).pathname) {
       await this.page.goto(editorUrl, { waitUntil: "domcontentloaded" });
       await this.dismissCreationGuidance();
     }

@@ -35,12 +35,14 @@ const agent: AgentDraft = {
 function setup(
   readOnly: boolean,
   agentId: number | null = 42,
-  displayedAgent: AgentDraft = agent
+  displayedAgent: AgentDraft = agent,
+  publicationVisible = false
 ) {
   const callbacks = {
     onConfigure: vi.fn(),
     onDebug: vi.fn(),
     onPublish: vi.fn(),
+    onPublication: vi.fn(),
     onManualUnlock: vi.fn(),
   };
   const { container } = render(
@@ -50,7 +52,8 @@ function setup(
         agent={displayedAgent}
         agentId={agentId}
         readOnly={readOnly}
-        debugVisible
+        debugVisible={!publicationVisible}
+        publicationVisible={publicationVisible}
         canManualUnlock={false}
         {...callbacks}
       />
@@ -60,6 +63,29 @@ function setup(
 }
 
 describe("AgentConfigHeader workflow navigation", () => {
+  it("opens the publication tab without publishing in read-only mode", () => {
+    const callbacks = setup(true);
+    const publication = screen.getByRole("button", {
+      name: "agent.highFidelity.publishMode",
+    });
+    expect(publication).toBeEnabled();
+    fireEvent.click(publication);
+    expect(callbacks.onPublication).toHaveBeenCalledTimes(1);
+    expect(callbacks.onPublish).not.toHaveBeenCalled();
+  });
+  it("selects only the publication tab when its empty page is shown", () => {
+    setup(false, 42, agent, true);
+    for (const [name, pressed] of [
+      ["agent.highFidelity.publishMode", "true"],
+      ["agent.highFidelity.configureMode", "false"],
+      ["agent.highFidelity.debugMode", "false"],
+    ]) {
+      expect(screen.getByRole("button", { name })).toHaveAttribute(
+        "aria-pressed",
+        pressed
+      );
+    }
+  });
   it("returns to configure inside a disabled Form while retaining read-only protections", () => {
     const callbacks = setup(true);
     const configure = screen.getByRole("button", {
@@ -100,6 +126,7 @@ describe("AgentConfigHeader workflow navigation", () => {
     const callbacks = setup(false, null);
     for (const name of [
       "agent.highFidelity.debugMode",
+      "agent.highFidelity.publishMode",
       "agent.config.button.publish",
     ]) {
       const button = screen.getByRole("button", { name });
