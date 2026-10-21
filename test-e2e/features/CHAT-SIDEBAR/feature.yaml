@@ -37,6 +37,11 @@ feature:
       the message. Concurrent single or batch deletion follows conversation-first
       ordering, with batch conversation locks ordered by ID. Finalization cannot
       write after deletion wins; activity and message finalization remain atomic.
+  - rule_id: CHAT-SIDEBAR-RULE-007
+    description: Automatic titles use an owned live title revision, independent of
+      message activity and unrelated audit updates. Every stored rename advances
+      that revision, including same-title renames, so manual changes and the first
+      successful competing title save win without holding locks during model calls.
   required_test_stages:
   - D1
   - D4

@@ -1368,6 +1368,7 @@ def rename_conversation(conversation_id: int, new_title: str, user_id: Optional[
         # Prepare update data with UTF-8 encoding for title
         update_data = {
             "conversation_title": new_title,
+            "title_version": ConversationRecord.title_version + 1,
             "update_time": func.current_timestamp()
         }
         update_data = db_client.clean_string_values(update_data)
@@ -1380,12 +1381,12 @@ def rename_conversation(conversation_id: int, new_title: str, user_id: Optional[
             ConversationRecord.delete_flag == 'N'
         )
         if expected_snapshot is not None:
-            # One atomic conditional UPDATE, not a read/check/write race. Audit
-            # time also detects an explicit rename back to the original title.
+            # Title revisions detect same-title and rename-back changes without
+            # treating unrelated activity or audit updates as rename conflicts.
             stmt = stmt.where(
                 ConversationRecord.created_by == user_id,
                 ConversationRecord.conversation_title == expected_snapshot["conversation_title"],
-                ConversationRecord.update_time == expected_snapshot["update_time"],
+                ConversationRecord.title_version == expected_snapshot["title_version"],
             )
         stmt = stmt.values(update_data)
 

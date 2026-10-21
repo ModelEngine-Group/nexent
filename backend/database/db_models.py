@@ -68,6 +68,10 @@ class ConversationRecord(TableBase):
     conversation_id = Column(Integer, Sequence(
         "conversation_record_t_conversation_id_seq", schema=SCHEMA), primary_key=True, nullable=False)
     conversation_title = Column(String(100), doc="Conversation title")
+    title_version = Column(
+        Integer, nullable=False, server_default=text("0"),
+        comment="Monotonic title revision; every stored rename advances it independently of activity",
+    )
     last_activity_time = Column(
         TIMESTAMP(timezone=True), nullable=True,
         comment="Last committed visible message activity in UTC; NULL falls back to conversation creation",

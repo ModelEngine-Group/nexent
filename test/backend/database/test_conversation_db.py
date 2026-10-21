@@ -117,6 +117,7 @@ class ConversationRecord:
     conversation_id = MagicMock(name="ConversationRecord.conversation_id")
     last_activity_time = MagicMock(name="ConversationRecord.last_activity_time")
     conversation_title = MagicMock(name="ConversationRecord.conversation_title")
+    title_version = MagicMock(name="ConversationRecord.title_version")
     agent_id = MagicMock(name="ConversationRecord.agent_id")
     chat_mode = MagicMock(name="ConversationRecord.chat_mode")
     workbench_config = MagicMock(name="ConversationRecord.workbench_config")

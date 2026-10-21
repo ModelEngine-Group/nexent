@@ -680,7 +680,7 @@ def rename_conversation_service(conversation_id: int, name: str, user_id: str,
             if initial["conversation_title"] not in {DEFAULT_EN_TITLE, DEFAULT_ZH_TITLE}:
                 return False
             snapshot = {"conversation_title": initial["conversation_title"],
-                        "update_time": initial["update_time"]}
+                        "title_version": initial["title_version"]}
             return rename_conversation(conversation_id, name, user_id, expected_snapshot=snapshot)
         success = rename_conversation(conversation_id, name, user_id)
         if not success:
@@ -1178,7 +1178,7 @@ async def generate_conversation_title_service(conversation_id: int, question: st
         if initial is None:
             raise ConversationNotFoundError("Conversation does not exist or has been deleted")
         snapshot = {"conversation_title": initial["conversation_title"],
-                    "update_time": initial["update_time"]}
+                    "title_version": initial["title_version"]}
         # Call LLM to generate title from question in a separate thread to avoid blocking
         title = await run_blocking(
             "conversation-title",

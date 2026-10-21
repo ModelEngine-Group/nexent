@@ -11,3 +11,4 @@
 - D5 [CHAT-ACTIVITY-D5-001](../../cases/CHAT-ACTIVITY-D5-001/case.yaml) · active
 - D5 [CHAT-PERSIST-D5-001](../../cases/CHAT-PERSIST-D5-001/case.yaml) · active
 - D5 [CHAT-SIDEBAR-D5-001](../../cases/CHAT-SIDEBAR-D5-001/case.yaml) · active
+- D5 [CHAT-TITLE-D5-001](../../cases/CHAT-TITLE-D5-001/case.yaml) · active
