@@ -6,7 +6,68 @@ from unittest.mock import MagicMock
 import httpx
 import pytest
 
-from nexent.core.models.openai_llm import OpenAIModel
+from nexent.core.models.openai_llm import OpenAIModel, _MiniMaxChatMessage
+
+
+@pytest.mark.parametrize("history_format", ["object", "dict", "json"])
+@pytest.mark.parametrize("model_id", ["MiniMax-M3.1-Flash", "MiniMax-M3", "MiniMax-M2.7", "team/custom-text"])
+def test_parsed_tool_arguments_are_json_strings(model_id, history_format):
+    captured = []
+
+    def handle(request):
+        captured.append(json.loads(request.content))
+        return httpx.Response(200, json={
+            "id": "test", "object": "chat.completion", "created": 0, "model": model_id,
+            "choices": [{"index": 0, "message": {"role": "assistant", "content": "done"}, "finish_reason": "stop"}],
+            "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
+        })
+
+    model = OpenAIModel(model_id=model_id, api_base="https://api.minimax.io/v1", api_key="test-only",
+                        model_factory="minimax", observer=MagicMock(),
+                        client_kwargs={"http_client": httpx.Client(transport=httpx.MockTransport(handle))})
+    original_string = '{ "q" : "keep whitespace" }'
+    assistant = _MiniMaxChatMessage.from_dict({
+        "role": "assistant", "content": "checking two sources",
+        "tool_calls": [
+            {"id": "a", "type": "function", "function": {"name": "lookup", "arguments": '{"q":"中文","nested":{"ok":true},"items":[1,null]}'}},
+            {"id": "b", "type": "function", "function": {"name": "lookup", "arguments": original_string}},
+        ],
+    })
+    assistant.reasoning_content = "compare both results"
+    model.parse_tool_calls(assistant)
+    parsed = copy.deepcopy(assistant.tool_calls[0].function.arguments)
+    assert isinstance(parsed, dict)
+    # A mixed history must not re-encode already serialized arguments.
+    assistant.tool_calls[1].function.arguments = original_string
+    before = assistant.model_dump_json()
+    history_message = assistant
+    if history_format == "dict":
+        history_message = assistant.dict()
+    elif history_format == "json":
+        history_message = json.loads(before)
+    history_before = copy.deepcopy(history_message)
+    try:
+        model.generate([
+            {"role": "user", "content": "compare"}, history_message,
+            {"role": "tool", "tool_call_id": "a", "content": "first"},
+            {"role": "tool", "tool_call_id": "b", "content": "second"},
+            {"role": "assistant", "content": "ready", "reasoning_content": "checked"},
+            {"role": "user", "content": "continue"},
+        ])
+        wire = captured[-1]
+        assert wire["model"] == model_id
+        calls = wire["messages"][1]["tool_calls"]
+        assert isinstance(calls[0]["function"]["arguments"], str)
+        assert json.loads(calls[0]["function"]["arguments"]) == parsed
+        assert calls[1]["function"]["arguments"] == original_string
+        assert wire["messages"][1]["reasoning_content"] == "compare both results"
+        assert wire["messages"][2]["tool_call_id"] == "a"
+        assert wire["messages"][3]["tool_call_id"] == "b"
+        assert wire["messages"][4]["reasoning_content"] == "checked"
+        assert history_message == history_before
+        assert assistant.model_dump_json() == before
+    finally:
+        model.client.close()
 
 
 @pytest.mark.parametrize("stream", [False, True])

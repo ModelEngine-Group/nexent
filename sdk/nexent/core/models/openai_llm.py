@@ -49,6 +49,10 @@ def _tool_call_dict(tool_call):
         call = tool_call.model_dump(exclude_none=True)
     # smolagents adds a schema-only description field to function calls.
     call["function"].pop("description", None)
+    # parse_tool_calls() decodes arguments for execution; the API needs JSON text.
+    arguments = call["function"].get("arguments")
+    if not isinstance(arguments, str):
+        call["function"]["arguments"] = json.dumps(arguments, ensure_ascii=False)
     return call
 
 
