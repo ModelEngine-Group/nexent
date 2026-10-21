@@ -7,7 +7,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
-from services.nl2agent_knowledge_service import (
+from management.services.knowledge_base.recommendation import (
     load_visible_knowledge,
     merge_selection,
     rank_knowledge,

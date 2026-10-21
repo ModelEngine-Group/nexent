@@ -75,7 +75,7 @@ from management.services.agent.context import (
 )
 from infrastructure.http.client import create_httpx_client
 
-from services.nl2agent_knowledge_service import (
+from management.services.knowledge_base.recommendation import (
     MANAGED_KNOWLEDGE_NAMES, load_visible_knowledge, merge_selection, rank_knowledge, selection_values,
 )
 

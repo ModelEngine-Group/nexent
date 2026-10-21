@@ -21,6 +21,7 @@ change:
   traditional_ut:
     decision: add
     behaviors:
+    - Keep knowledge recommendation implementation under canonical management knowledge-base ownership.
     - Classify managed knowledge versus ordinary Tool/Skill.
     - Parse and serialize local/AIDP selections including empty and invalid input.
     - Permission-visible minus direct bindings, metadata matching/fallback, local/AIDP
@@ -33,6 +34,7 @@ change:
     - test/backend/services/test_nl2agent_knowledge_service.py
     - test/backend/services/test_nl2agent_service.py
     - test/backend/services/test_nl2agent_resource_provider_policy.py
+    - test/backend/management/test_management_relocation.py
   notes: SPEC docs/Developing/chat-nl2agent-resource-card. Additive recommendation
     metadata; existing binding routes reused; no schema migration or runtime/provider
     invocation changes.
