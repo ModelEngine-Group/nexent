@@ -12,13 +12,13 @@ class MessageSource(str, Enum):
     AUTOMATION = "AUTOMATION"
 
 
-def activity_time_as_utc(activity: datetime) -> datetime:
+def conversation_time_as_utc(value: datetime) -> datetime:
     """Interpret naive storage values as UTC and normalize aware instants."""
-    return activity.replace(tzinfo=timezone.utc) if activity.tzinfo is None else activity.astimezone(timezone.utc)
+    return value.replace(tzinfo=timezone.utc) if value.tzinfo is None else value.astimezone(timezone.utc)
 
 
 def encode_activity_cursor(activity: datetime, conversation_id: int) -> str:
-    value = [activity_time_as_utc(activity).isoformat(), conversation_id]
+    value = [conversation_time_as_utc(activity).isoformat(), conversation_id]
     return base64.urlsafe_b64encode(json.dumps(value).encode()).decode().rstrip("=")
 
 

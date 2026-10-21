@@ -6,6 +6,7 @@ case:
   feature_id: CHAT-SIDEBAR
   requirement_ids:
   - WB-PIN-SYNC-20261016
+  - CHAT-PIN-TIMESTAMP-20261021
   business_rule_ids:
   - CHAT-SIDEBAR-RULE-003
   title: Workbench personal pin schema uses only the existing conversation table
@@ -23,7 +24,7 @@ case:
   - order: 1
     action: Apply the personal pin SQL to an existing conversation table with active, deleted and Agent-chat
       rows.
-    expected: A nullable timezone-aware pin timestamp, column comment and ordered partial index are added;
+    expected: A nullable UTC timestamp without time zone, column comment and ordered partial index are present after the original and follow-up migrations;
       existing conversation data is unchanged and no separate pin table is created.
   - order: 2
     action: Set a current personal pin timestamp and repeat the same SQL.
@@ -32,18 +33,22 @@ case:
   - order: 3
     action: Inspect the versioned migration catalog used by deployment.
     expected: The old separate-table SQL is absent, no remaining migration creates that table, and the
-      new SQL contains no compatibility/backfill/drop sequence.
+      merged migration remains unchanged; the follow-up only converts the existing column and its comment without separate-table backfill or deletion.
+  - order: 4
+    action: Apply and replay the follow-up to NULL and populated historical pin values under UTC, Asia/Shanghai and America/New_York sessions.
+    expected: UTC instants, microseconds, pin order, partial index and unrelated conversation/audit fields are retained; subsequent replay does not shift timestamps.
   expected_results:
   - Personal pin schema is added directly to the existing conversation table without creating a separate
     table or changing existing conversation data.
   - Repeat execution preserves current pin values and keeps exactly one field and index.
+  - Historical timezone-aware pin values become native UTC timestamps without changing their instants or losing NULLs and precision across database timezones.
   forbidden_side_effects:
   - No changes outside disposable schemas; no separate pin table creation, legacy backfill or deletion
     SQL; no conversation activity/content mutation.
   risk_type: RELIABILITY
-  risk: Unnecessary legacy migrations could create obsolete tables or overwrite current personal pin values.
+  risk: Timestamp conversion could shift pin instants, lose precision or NULLs, reset current personal pins or invalidate the existing index.
   condition:
-  - The feature has not shipped to production; deployment uses the simplified migration catalog.
+  - Original pin column and index may already be deployed; only the follow-up converts the existing column.
   metrics:
   - Column type/nullability/comment, index definition, migration catalog and conversation snapshots.
   thresholds:
@@ -68,3 +73,8 @@ case:
     - 2
     forbidden_side_effects:
     - 1
+  - id: AC-03
+    description: Fresh and historical pin schemas retain UTC instants, precision, order and indexes across database timezones.
+    steps: [4]
+    expected_results: [3]
+    forbidden_side_effects: [1]

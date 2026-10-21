@@ -106,8 +106,8 @@ class ConversationRecord(TableBase):
         doc="Canonical schema-v3 Workbench conversation declaration",
     )
     workbench_pinned_at = Column(
-        TIMESTAMP(timezone=True), nullable=True,
-        comment="Personal Workbench pin time; NULL means unpinned; independent of conversation activity",
+        TIMESTAMP(timezone=False), nullable=True,
+        comment="Personal Workbench pin time as a UTC timestamp; NULL means unpinned; independent of conversation activity",
     )
     workbench_config_version = Column(
         Integer,

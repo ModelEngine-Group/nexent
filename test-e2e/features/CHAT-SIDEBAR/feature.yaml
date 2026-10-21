@@ -15,7 +15,9 @@ feature:
       repinning moves first. Workbench rows show localized relative times when timestamps
       are available; recency/search/rename/paging
       and Agent-chat pins are preserved. Failed saves do not report success; drafts
-      and inaccessible/non-Workbench conversations cannot be pinned.
+      and inaccessible/non-Workbench conversations cannot be pinned. Pin times use
+      UTC TIMESTAMP storage and explicit UTC ISO responses independently of the
+      database or application timezone.
   - rule_id: CHAT-SIDEBAR-RULE-001
     description: Persisted conversations remain visible; unsent drafts stay hidden;
       rename propagates normalized title and remote identity; batch deletion resolves

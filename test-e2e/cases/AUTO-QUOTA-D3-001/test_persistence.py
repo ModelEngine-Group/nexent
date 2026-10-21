@@ -174,8 +174,8 @@ def test_mixed_source_quota_activity_and_cursor(persistence):
             created_by="owner", updated_by="owner", delete_flag="N",
             create_time=fallback, update_time=fallback, last_activity_time=fallback,
         ))
-        session.get(ConversationRecord, 1).workbench_pinned_at = now
-        session.get(ConversationRecord, 2).workbench_pinned_at = now - timedelta(seconds=1)
+        session.get(ConversationRecord, 1).workbench_pinned_at = now.replace(tzinfo=None)
+        session.get(ConversationRecord, 2).workbench_pinned_at = now.replace(tzinfo=None) - timedelta(seconds=1)
     pinned = {row["conversation_id"]: row for row in pins.list_workbench_pins("owner", "tenant")}
     assert pinned[1]["last_activity_time"] == int(answered.replace(tzinfo=timezone.utc).timestamp() * 1000)
     assert pinned[2]["last_activity_time"] == int(fallback.replace(tzinfo=timezone.utc).timestamp() * 1000)

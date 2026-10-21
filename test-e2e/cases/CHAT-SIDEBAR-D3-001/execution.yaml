@@ -10,6 +10,8 @@ acceptance_bindings:
   - test_authenticated_postgres_pin_persistence
   AC-02:
   - test_authenticated_postgres_pin_persistence
+  AC-03:
+  - test_authenticated_postgres_pin_persistence
 preparation:
   families: []
   anchors: false
