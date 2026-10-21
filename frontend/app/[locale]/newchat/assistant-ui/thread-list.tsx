@@ -1522,7 +1522,7 @@ const ThreadListItemContent: FC<ThreadListItemContentProps> = ({
       <ThreadListItemPrimitive.Trigger
         className={cn(
           variant === "time"
-            ? "flex h-full min-w-0 flex-1 items-center gap-2 text-left text-sm leading-[22px] text-[#595959] group-data-[active=true]/item:text-[#191919]"
+            ? "flex h-full min-w-0 flex-1 items-center gap-2 text-left text-sm leading-[22px] text-[#595959] group-hover/item:text-[#191919] group-focus-within/item:text-[#191919] group-data-[active=true]/item:text-[#191919]"
             : cn(
                 "flex h-10 min-w-0 flex-1 items-center gap-3 pl-8 pr-3 text-left text-[14px] text-[#595959]"
               ),
