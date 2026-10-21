@@ -165,7 +165,7 @@ export interface ComposerProps {
   disabledReason?: string;
   modelSelectionDisabled?: boolean;
   configurationLayout?: boolean;
-  debugLayout?: boolean;
+  hidePlan?: boolean;
   workbenchPresentation?: import("@/features/workbench/types").WorkbenchComposerPresentation;
   workbenchResources?: import("@/features/workbench/types").WorkbenchResourceControls;
   onRemoveWorkbenchSkill?: (skillId: number) => void;
@@ -315,7 +315,7 @@ export const Composer: FC<ComposerProps> = ({
   disabledReason,
   modelSelectionDisabled,
   configurationLayout = false,
-  debugLayout = false,
+  hidePlan = false,
   workbenchPresentation,
   workbenchResources,
   onRemoveWorkbenchSkill,
@@ -352,15 +352,47 @@ export const Composer: FC<ComposerProps> = ({
       custom: { ...config.custom, ...feedback },
     });
   };
-  const [knowledgeModalOpen, setKnowledgeModalOpen] = useState(false);
   const [skillPickerOpen, setSkillPickerOpen] = useState(false);
   const [conversationSkills, setConversationSkills] = useState<
     Array<WorkbenchSkillMount & { name: string }>
   >([]);
   const { message } = App.useApp();
+  const creationMode =
+    workbenchPresentation?.mode === "skill_create" ||
+    workbenchPresentation?.mode === "agent_create"
+      ? workbenchPresentation.mode
+      : null;
   const { enableAidpKnowledge, isDeploymentReady } = useDeployment();
+  const knowledgeSource = enableAidpKnowledge ? "aidp" : "local";
+  const isWorkbench = Boolean(workbenchPresentation || workbenchResources);
+  const canSelectKnowledge = Boolean(
+    isDeploymentReady &&
+    !creationMode &&
+    onKnowledgeScopeChange &&
+    (isWorkbench || knowledgeCapabilities?.sources[knowledgeSource].enabled)
+  );
+  const knowledgeAccessKey = isWorkbench
+    ? `workbench:${knowledgeSource}:${canSelectKnowledge}`
+    : `${knowledgeCapabilities?.agent_id}:${knowledgeCapabilities?.version_no}:${knowledgeSource}:${canSelectKnowledge}`;
+  const [knowledgeModalState, setKnowledgeModalState] = useState({
+    key: knowledgeAccessKey,
+    open: false,
+  });
+  if (knowledgeModalState.key !== knowledgeAccessKey) {
+    setKnowledgeModalState({ key: knowledgeAccessKey, open: false });
+  }
+  const knowledgeModalOpen =
+    canSelectKnowledge &&
+    knowledgeModalState.key === knowledgeAccessKey &&
+    knowledgeModalState.open;
+  const setKnowledgeModalOpen = (open: boolean) =>
+    setKnowledgeModalState((current) =>
+      current.key === knowledgeAccessKey
+        ? { key: knowledgeAccessKey, open }
+        : current
+    );
   const { data: knowledgeBases = [] } = useComposerKnowledgeBases(
-    conversationResources && isDeploymentReady,
+    conversationResources && canSelectKnowledge,
     enableAidpKnowledge
   );
   const selectedSkillNames = conversationSkills.map((skill) => skill.name);
@@ -372,14 +404,7 @@ export const Composer: FC<ComposerProps> = ({
   const hasAttachments = useAuiState(
     (state) => state.composer.attachments.length > 0
   );
-  const creationMode =
-    workbenchPresentation?.mode === "skill_create" ||
-    workbenchPresentation?.mode === "agent_create"
-      ? workbenchPresentation.mode
-      : null;
-
   const [knowledgeSaving, setKnowledgeSaving] = useState(false);
-  const knowledgeSource = enableAidpKnowledge ? "aidp" : "local";
   const sourceScope = knowledgeScope?.[knowledgeSource];
   const selectedKbIds =
     sourceScope?.mode === "disabled"
@@ -413,7 +438,7 @@ export const Composer: FC<ComposerProps> = ({
     if (
       isRunning ||
       knowledgeSaving ||
-      !isDeploymentReady ||
+      !canSelectKnowledge ||
       !onKnowledgeScopeChange
     )
       return;
@@ -549,19 +574,20 @@ export const Composer: FC<ComposerProps> = ({
     t,
   ]);
 
+  const fieldsetDisabled =
+    disabled && !disabledReason && modelSelectionDisabled !== false;
+
   return (
     <div className="relative w-full min-w-0 font-sans">
       {workbenchPresentation && workbenchPresentation.actions}
       <fieldset
-        disabled={disabled && !disabledReason}
-        aria-disabled={disabled && !disabledReason}
+        disabled={fieldsetDisabled}
+        aria-disabled={fieldsetDisabled}
         className={cn(
           "relative m-0 flex min-w-0 w-full flex-col overflow-visible gap-2 rounded-[20px] border-[0.5px] border-solid border-[#191919]/[0.08] bg-white px-4 pb-4 pt-5 shadow-[0_1px_6px_0_rgba(0,0,0,0.16)]",
-          disabled && !disabledReason && "cursor-not-allowed opacity-60",
+          fieldsetDisabled && "cursor-not-allowed opacity-60",
           configurationLayout &&
-            "min-h-[164px] rounded-[20px] border-[0.5px] border-[#191919]/[0.08] bg-white shadow-[0_1px_6px_rgba(0,0,0,0.16)]",
-          debugLayout &&
-            "min-h-[164px] rounded-[20px] border-0 p-4 outline-[0.5px] outline-[#191919]/[0.08] bg-white shadow-[0_1px_6px_rgba(0,0,0,0.16)]"
+            "min-h-[164px] rounded-[20px] border-[0.5px] border-[#191919]/[0.08] bg-white shadow-[0_1px_6px_rgba(0,0,0,0.16)]"
         )}
       >
         {disabled && disabledReason ? (
@@ -572,7 +598,7 @@ export const Composer: FC<ComposerProps> = ({
         {onChatModeChange &&
           !creationMode &&
           !configurationLayout &&
-          !debugLayout && <PlanView className="-mx-4" />}
+          !hidePlan && <PlanView className="-mx-4" />}
         {configurationLayout && (
           <div className="flex px-4 pt-4">
             <span className="inline-flex items-center gap-1 rounded-full bg-[#669fff]/[0.15] px-2 text-xs leading-[22px] text-[#477bd5]">
@@ -614,7 +640,8 @@ export const Composer: FC<ComposerProps> = ({
             {hasAttachments && <ComposerAttachments className="px-0" />}
             {conversationResources &&
               (selectedSkillNames.length > 0 ||
-                selectedKnowledgeBaseChips.length > 0) && (
+                (canSelectKnowledge &&
+                  selectedKnowledgeBaseChips.length > 0)) && (
                 <div className="flex min-w-0 flex-wrap gap-2 px-2">
                   {selectedSkillNames.map((name) => (
                     <span
@@ -643,36 +670,37 @@ export const Composer: FC<ComposerProps> = ({
                       </button>
                     </span>
                   ))}
-                  {selectedKnowledgeBaseChips.map(({ id, name }) => (
-                    <span
-                      key={id}
-                      className="inline-flex h-7 max-w-60 items-center gap-1 rounded-md border border-[#e5e5e5] bg-[#f7f7f7] px-2 text-xs text-[#191919]"
-                    >
-                      <KnowledgeBookIcon
-                        className="size-3.5 shrink-0 text-[#666]"
-                        aria-hidden
-                      />
-                      <span className="truncate" title={name}>
-                        {name}
-                      </span>
-                      <button
-                        type="button"
-                        disabled={isRunning || knowledgeSaving}
-                        aria-label={`${t("common.delete")} ${name}`}
-                        className="ml-0.5 inline-flex size-4 shrink-0 items-center justify-center rounded text-[#808080] hover:bg-[#e9e9e9] hover:text-[#191919] disabled:cursor-not-allowed"
-                        onClick={() => void toggleKnowledgeBase(id)}
+                  {(canSelectKnowledge ? selectedKnowledgeBaseChips : []).map(
+                    ({ id, name }) => (
+                      <span
+                        key={id}
+                        className="inline-flex h-7 max-w-60 items-center gap-1 rounded-md border border-[#e5e5e5] bg-[#f7f7f7] px-2 text-xs text-[#191919]"
                       >
-                        <X className="size-3" aria-hidden />
-                      </button>
-                    </span>
-                  ))}
+                        <KnowledgeBookIcon
+                          className="size-3.5 shrink-0 text-[#666]"
+                          aria-hidden
+                        />
+                        <span className="truncate" title={name}>
+                          {name}
+                        </span>
+                        <button
+                          type="button"
+                          disabled={isRunning || knowledgeSaving}
+                          aria-label={`${t("common.delete")} ${name}`}
+                          className="ml-0.5 inline-flex size-4 shrink-0 items-center justify-center rounded text-[#808080] hover:bg-[#e9e9e9] hover:text-[#191919] disabled:cursor-not-allowed"
+                          onClick={() => void toggleKnowledgeBase(id)}
+                        >
+                          <X className="size-3" aria-hidden />
+                        </button>
+                      </span>
+                    )
+                  )}
                 </div>
               )}
             {skillFiles ? (
               <LexicalComposerInput
-                placeholder={
-                  configurationLayout ? "" : t("chat.composer.placeholder")
-                }
+                aria-label={t("chat.composer.inputLabel")}
+                placeholder=""
                 className="relative mb-0 max-h-48 min-h-20 w-full bg-transparent px-0 py-0 text-sm text-[#191919] outline-none [&_.aui-lexical-input]:min-h-20 [&_.aui-lexical-input]:outline-none [&_.aui-lexical-placeholder]:pointer-events-none [&_.aui-lexical-placeholder]:absolute [&_.aui-lexical-placeholder]:top-0 [&_.aui-lexical-placeholder]:text-muted-foreground"
                 submitMode="enter"
                 autoFocus
@@ -683,15 +711,11 @@ export const Composer: FC<ComposerProps> = ({
               <div className="flex items-start">
                 <ComposerPrimitive.Input
                   data-workbench-composer
-                  aria-label={t("chat.composer.placeholder")}
-                  placeholder={
-                    configurationLayout ? "" : t("chat.composer.placeholder")
-                  }
+                  aria-label={t("chat.composer.inputLabel")}
+                  placeholder=""
                   className={cn(
                     "max-h-48 min-h-20 min-w-0 w-auto flex-1 resize-none bg-transparent px-0 py-0 text-sm text-[#191919] outline-none placeholder:text-muted-foreground",
-                    configurationLayout && "!min-h-[56px] !px-4",
-                    debugLayout &&
-                      "!mb-0 !min-h-[88px] !px-0 !py-0 !text-base !font-normal !leading-6 !text-[#191919] placeholder:!text-[#191919]/40"
+                    configurationLayout && "!min-h-[56px] !px-4"
                   )}
                   rows={1}
                   submitMode="enter"
@@ -732,12 +756,7 @@ export const Composer: FC<ComposerProps> = ({
                 }}
               />
             )}
-            <div
-              className={cn(
-                "relative flex min-h-8 flex-wrap items-center justify-between gap-2",
-                debugLayout && "!mx-0 !mb-0 !mt-1 !h-10"
-              )}
-            >
+            <div className="relative flex min-h-8 flex-wrap items-center justify-between gap-2">
               <div className="flex min-w-0 flex-wrap items-center gap-1">
                 {!creationMode && onChatModeChange && (
                   <WorkbenchPlanningMenu
@@ -760,7 +779,7 @@ export const Composer: FC<ComposerProps> = ({
                     {t("workbench.controls.agents", "智能体")}
                   </Button>
                 )}
-                {!creationMode && onKnowledgeScopeChange && (
+                {!creationMode && canSelectKnowledge && (
                   <Button
                     type="button"
                     variant="ghost"
@@ -775,24 +794,20 @@ export const Composer: FC<ComposerProps> = ({
                     {t("chat.composer.knowledgeBase")}
                   </Button>
                 )}
-                {!creationMode &&
-                  (onOpenWorkbenchSkillPicker || conversationResources) && (
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="sm"
-                      disabled={isRunning || disabled}
-                      className="h-8 text-sm font-normal text-muted-foreground"
-                      onClick={
-                        onOpenWorkbenchSkillPicker ||
-                        (() => setSkillPickerOpen(true))
-                      }
-                      aria-label={t("chat.composer.skills")}
-                    >
-                      <SkillStackIcon className="size-5" />
-                      {t("chat.composer.skills")}
-                    </Button>
-                  )}
+                {!creationMode && onOpenWorkbenchSkillPicker && (
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    disabled={isRunning || disabled}
+                    className="h-8 text-sm font-normal text-muted-foreground"
+                    onClick={onOpenWorkbenchSkillPicker}
+                    aria-label={t("chat.composer.skills")}
+                  >
+                    <SkillStackIcon className="size-5" />
+                    {t("chat.composer.skills")}
+                  </Button>
+                )}
                 {allowRuntimeMetadata && onRuntimeMetadataChange && (
                   <RuntimeMetadataEditor
                     value={runtimeMetadata}
@@ -801,7 +816,7 @@ export const Composer: FC<ComposerProps> = ({
                   />
                 )}
               </div>
-              <div className="ml-auto flex min-w-0 items-center gap-1">
+              <div className="flex min-w-0 flex-1 items-center justify-end gap-1">
                 {showModelSelector && (
                   <ModelSelector
                     models={models}
@@ -823,25 +838,18 @@ export const Composer: FC<ComposerProps> = ({
                     }}
                     variant="ghost"
                     size="sm"
-                    className={cn(
-                      "min-w-0 text-xs text-muted-foreground [&_[data-slot=model-selector-value]]:text-muted-foreground",
-                      !debugLayout &&
-                        "text-sm font-normal leading-5 [&_[data-slot=model-selector-value]]:text-sm [&_[data-slot=model-selector-value]]:leading-5 [&_[data-slot=model-selector-value]_span]:font-normal",
-                      debugLayout &&
-                        "min-w-0 max-w-[180px] text-base text-[#191919] [&_[data-slot=model-selector-value]]:text-base [&_[data-slot=model-selector-value]]:text-[#191919]"
-                    )}
+                    className="min-w-0 max-w-[280px] text-sm font-normal leading-5 text-muted-foreground [&_[data-slot=model-selector-value]]:text-sm [&_[data-slot=model-selector-value]]:leading-5 [&_[data-slot=model-selector-value]]:text-muted-foreground [&_[data-slot=model-selector-value]_span]:font-normal"
                   />
                 )}
                 {children}
                 <ComposerSendOrCancel
                   onSend={prepareSend}
                   disabled={disabled || knowledgeSaving}
-                  debugLayout={debugLayout}
                 />
               </div>
             </div>
           </ComposerPrimitive.Root>
-          {onKnowledgeScopeChange && (
+          {canSelectKnowledge && (
             <ConversationKnowledgeScopeModal
               presentation="drawer"
               disabled={isRunning || disabled}
@@ -850,6 +858,7 @@ export const Composer: FC<ComposerProps> = ({
               capabilities={knowledgeCapabilities}
               onCancel={() => setKnowledgeModalOpen(false)}
               onConfirm={async (scope, preview) => {
+                if (!canSelectKnowledge) return;
                 await onKnowledgeScopeChange?.(scope, preview);
                 setKnowledgeModalOpen(false);
               }}
@@ -953,8 +962,7 @@ const WorkbenchPlanningMenu: FC<{
 const ComposerSendOrCancel: FC<{
   onSend: () => void;
   disabled?: boolean;
-  debugLayout?: boolean;
-}> = ({ onSend, disabled, debugLayout = false }) => {
+}> = ({ onSend, disabled }) => {
   const { t } = useTranslation();
   const hasText = useAuiState((state) => state.composer.text.trim().length > 0);
 
@@ -974,17 +982,9 @@ const ComposerSendOrCancel: FC<{
               size="icon"
               variant="outline"
               aria-label={t("chat.composer.stopGenerating")}
-              className={cn(
-                "size-8 rounded-full ml-2 border-border bg-background text-primary hover:bg-muted",
-                debugLayout &&
-                  "!ml-0 !size-10 !rounded-full !border-0 !bg-[#191919] !text-white"
-              )}
+              className="size-8 rounded-full ml-2 border-border bg-background text-primary hover:bg-muted"
             >
-              <Square
-                className={
-                  debugLayout ? "size-5 fill-current" : "size-4 fill-current"
-                }
-              />
+              <Square className="size-4 fill-current" />
             </Button>
           </ComposerPrimitive.Cancel>
         </TooltipWrapper>
@@ -998,11 +998,7 @@ const ComposerSendOrCancel: FC<{
           <ComposerPrimitive.Send asChild onClick={onSend}>
             <Button
               size="icon"
-              className={cn(
-                "size-8 ml-0 rounded-md border-0 bg-transparent text-muted-foreground hover:bg-transparent hover:text-foreground disabled:bg-transparent disabled:text-muted-foreground disabled:opacity-50 aria-disabled:bg-transparent aria-disabled:text-muted-foreground [&_svg]:size-4",
-                debugLayout &&
-                  "size-10 rounded-[26px] bg-[#191919] text-white hover:bg-[#191919]/90 disabled:opacity-30 [&_svg]:size-6"
-              )}
+              className="size-8 ml-0 rounded-md border-0 bg-transparent text-muted-foreground hover:bg-transparent hover:text-foreground disabled:bg-transparent disabled:text-muted-foreground disabled:opacity-50 aria-disabled:bg-transparent aria-disabled:text-muted-foreground [&_svg]:size-4"
               disabled={disabled || !hasText}
               aria-label={t("chat.composer.send")}
             >

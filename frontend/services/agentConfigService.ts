@@ -617,8 +617,6 @@ export interface UpdateAgentInfoPayload {
   author?: string;
   author_cas_username?: string | null;
   duty_prompt?: string;
-  constraint_prompt?: string;
-  few_shots_prompt?: string;
   group_ids?: number[];
   model_ids?: number[];
   max_steps?: number;
@@ -1137,8 +1135,6 @@ export const searchAgentInfo = async (
       model_params_override: data.model_params_override ?? null,
       is_main_agent: data.is_main_agent ?? true,
       duty_prompt: data.duty_prompt,
-      constraint_prompt: data.constraint_prompt,
-      few_shots_prompt: data.few_shots_prompt,
       business_description: data.business_description,
       business_logic_model_name: data.business_logic_model_name,
       business_logic_model_id: data.business_logic_model_id,

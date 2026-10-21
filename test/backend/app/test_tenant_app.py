@@ -62,15 +62,12 @@ tenant_service_module.update_tenant_info = MagicMock()
 tenant_service_module.delete_tenant = AsyncMock(return_value=True)
 services_module.tenant_service = tenant_service_module
 
-utils_module = types.ModuleType("utils")
 auth_utils_module = types.ModuleType("management.services.permission.identity.authentication_helpers")
 auth_utils_module.get_current_user_id = MagicMock()
 auth_utils_module.get_current_user_context = MagicMock()
-utils_module.auth_utils = auth_utils_module
 
 sys.modules["services"] = services_module
 sys.modules["management.services.permission.identity.tenants"] = tenant_service_module
-sys.modules["utils"] = utils_module
 sys.modules["management.services.permission.identity.authentication_helpers"] = auth_utils_module
 
 # The `services` stub above is not a package, so the audit submodule is loaded from
@@ -284,7 +281,7 @@ class TestTenantServiceCalls:
         # Import mock services from conftest
         import sys
         self.mock_tenant_service = sys.modules['services'].tenant_service
-        self.mock_utils = sys.modules['utils'].auth_utils
+        self.mock_utils = auth_utils_module
         self.mock_tenant_service.create_tenant.reset_mock(side_effect=True, return_value=True)
         self.mock_tenant_service.get_tenant_info.reset_mock(side_effect=True, return_value=True)
         self.mock_tenant_service.get_tenants_paginated.reset_mock(side_effect=True, return_value=True)
@@ -401,7 +398,7 @@ class TestTenantAuth:
     def setup(self):
         """Set up mocks for each test."""
         import sys
-        self.mock_utils = sys.modules['utils'].auth_utils
+        self.mock_utils = auth_utils_module
         self.mock_utils.get_current_user_id.reset_mock(side_effect=True, return_value=True)
 
     def test_get_current_user_id_is_called(self):
@@ -435,7 +432,7 @@ class TestTenantEndpointExceptionHandling:
         """Set up mocks for each test."""
         import sys
         self.mock_tenant_service = sys.modules['services'].tenant_service
-        self.mock_utils = sys.modules['utils'].auth_utils
+        self.mock_utils = auth_utils_module
         self.mock_tenant_service.create_tenant.reset_mock(side_effect=True, return_value=True)
         self.mock_tenant_service.get_tenant_info.reset_mock(side_effect=True, return_value=True)
         self.mock_tenant_service.get_tenants_paginated.reset_mock(side_effect=True, return_value=True)

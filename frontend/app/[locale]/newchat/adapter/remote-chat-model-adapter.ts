@@ -200,8 +200,6 @@ export interface Nl2aAgentDraftPayload {
   display_name: string;
   description: string;
   duty_prompt: string;
-  constraint_prompt: string;
-  few_shots_prompt: string | null;
   greeting_message: string;
   example_questions: string[];
 }
@@ -273,8 +271,6 @@ export type Nl2aRecommendedResource =
 
 export type Nl2aPromptField =
   | "duty_prompt"
-  | "constraint_prompt"
-  | "few_shots_prompt"
   | "greeting_message"
   | "example_questions";
 
@@ -890,8 +886,6 @@ export function parseNl2AgentState(content: string): Nl2AgentStateEvent | null {
     }
     const promptFields = new Set<Nl2aPromptField>([
       "duty_prompt",
-      "constraint_prompt",
-      "few_shots_prompt",
       "greeting_message",
       "example_questions",
     ]);
@@ -1606,7 +1600,7 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
       delete requestBody.reasoning_effort;
       delete requestBody.reasoning_budget_tokens;
     }
-    if (!workbenchConfig && (!isEphemeralRuntime || isNl2Agent || isNl2Skill)) {
+    if (!workbenchConfig) {
       const modelContext = context.config as
         | {
             deepThinking?: boolean;
@@ -1629,6 +1623,7 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
         };
       }
       if (
+        !isAgentDebug &&
         !isResume &&
         (modelContext?.temperature != null || modelContext?.top_p != null)
       ) {

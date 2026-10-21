@@ -100,8 +100,6 @@ AGENT_DRAFT_FIELD_ORDER = (
     "display_name",
     "description",
     "duty_prompt",
-    "constraint_prompt",
-    "few_shots_prompt",
     "greeting_message",
     "example_questions",
 )
@@ -1276,7 +1274,7 @@ async def validate_agent_generation_complete_impl(
 ) -> None:
     """Verify the final NL2Agent fields directly from persisted database state."""
 
-    draft, facts = await _load_verified_nl2agent_state(
+    draft, _facts = await _load_verified_nl2agent_state(
         agent_id=agent_id,
         tenant_id=tenant_id,
         user_id=user_id,
@@ -1292,8 +1290,6 @@ async def validate_agent_generation_complete_impl(
         raise Nl2AgentCompletionError("draft_fields_incomplete", ["description"])
 
     required_prompt_fields = ["duty_prompt", "greeting_message"]
-    if facts:
-        required_prompt_fields.extend(["constraint_prompt", "few_shots_prompt"])
     missing_prompts = [
         field_name
         for field_name in required_prompt_fields

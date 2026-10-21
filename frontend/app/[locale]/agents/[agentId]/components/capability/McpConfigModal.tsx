@@ -1,3 +1,5 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 "use client";
 
 import { useState, useEffect, type ComponentProps } from "react";
@@ -1000,7 +1002,11 @@ export default function McpConfigModal({
                           }
                           rows={6}
                           disabled={actionsLocked}
-                          style={{ fontFamily: "monospace", fontSize: 12 }}
+                          style={{
+                            fontFamily:
+                              "'HarmonyOS Sans SC', 'Huawei Sans', sans-serif",
+                            fontSize: 12,
+                          }}
                         />
                       </div>
                       <div

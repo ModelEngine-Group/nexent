@@ -1,4 +1,5 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import json
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
@@ -1250,12 +1251,12 @@ async def test_final_prompt_batch_emits_generation_completed_state(mocker):
     [
         (
             {
-                "constraint_prompt": "Use reliable sources.",
+                "duty_prompt": "Use reliable sources.",
                 "greeting_message": "Hello",
                 "example_questions": ["What should I research?"],
             },
             [
-                "constraint_prompt",
+                "duty_prompt",
                 "greeting_message",
                 "example_questions",
             ],
@@ -1266,12 +1267,12 @@ async def test_final_prompt_batch_emits_generation_completed_state(mocker):
         ),
         ({"duty_prompt": "Research the requested topic."}, ["duty_prompt"]),
         (
-            {"constraint_prompt": "Use reliable sources."},
-            ["constraint_prompt"],
+            {"greeting_message": "Hello"},
+            ["greeting_message"],
         ),
         (
-            {"few_shots_prompt": "Question: Example\nAnswer: Example"},
-            ["few_shots_prompt"],
+            {"duty_prompt": "Question: Example\nAnswer: Example", "example_questions": ["Question"]},
+            ["duty_prompt", "example_questions"],
         ),
     ],
 )
@@ -1412,7 +1413,7 @@ async def test_final_prompt_batch_emits_failure_when_database_is_incomplete(mock
         new=AsyncMock(
             side_effect=nl2agent_service.Nl2AgentCompletionError(
                 "prompt_fields_incomplete",
-                ["few_shots_prompt"],
+                ["duty_prompt"],
             )
         ),
     )
@@ -1442,7 +1443,7 @@ async def test_final_prompt_batch_emits_failure_when_database_is_incomplete(mock
     ) == {
         "event": "prompt_generation_failed",
         "agent_id": 42,
-        "failed_fields": ["few_shots_prompt"],
+        "failed_fields": ["duty_prompt"],
     }
 
 

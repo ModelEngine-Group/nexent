@@ -17,6 +17,8 @@ from pydantic import (
 )
 from nexent.core.agents.agent_model import AgentVerificationConfig, ToolConfig
 
+from infrastructure.agent_prompt import normalize_imported_agent_prompt
+
 
 def _validated_context_policy(value: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
     """Validate a partial request/agent policy while preserving its layer shape."""
@@ -1410,8 +1412,6 @@ class AgentInfoRequest(BaseModel):
     is_main_agent: Optional[bool] = None
     provide_run_summary: Optional[bool] = None
     duty_prompt: Optional[str] = None
-    constraint_prompt: Optional[str] = None
-    few_shots_prompt: Optional[str] = None
     enabled: Optional[bool] = None
     business_logic_model_name: Optional[str] = None
     business_logic_model_id: Optional[int] = None
@@ -1531,8 +1531,6 @@ class ExportAndImportAgentInfo(BaseModel):
     verification_config: Optional[Dict[str, Any]] = None
     context_policy: Optional[Dict[str, Any]] = None
     duty_prompt: Optional[str] = None
-    constraint_prompt: Optional[str] = None
-    few_shots_prompt: Optional[str] = None
     enabled: bool
     tools: List[ToolConfig]
     managed_agents: List[int]
@@ -1545,6 +1543,13 @@ class ExportAndImportAgentInfo(BaseModel):
     model_params_override: Optional[Dict[str, Any]] = None
     greeting_message: Optional[str] = None
     example_questions: Optional[List[str]] = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def normalize_business_prompt(cls, values):
+        if isinstance(values, dict):
+            return normalize_imported_agent_prompt(values)
+        return values
 
     @field_validator("context_policy")
     @classmethod

@@ -46,10 +46,10 @@ import {
 import { useAgentStore } from "@/stores/agentStore";
 import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
 import { useAgentInfo } from "@/hooks/agent/useAgentInfo";
+import { useAgentEditorDraft } from "@/hooks/agent/useAgentEditorDraft";
 import { useAgentVersionDetail } from "@/hooks/agent/useAgentVersionDetail";
 import { useAgentVersionList } from "@/hooks/agent/useAgentVersionList";
 import { searchAgentInfo } from "@/services/agentConfigService";
-import { buildAgentUsageGuidePath } from "@/lib/agentUsageGuide";
 import log from "@/lib/logger";
 import { canReturnToAgentEditorReferrer } from "@/lib/agentEditorNavigation";
 import type {
@@ -65,12 +65,6 @@ function resolveDraftFocusTarget(
     updatedFields.includes("example_questions")
   ) {
     return { section: "conversation_guide" };
-  }
-  if (updatedFields.includes("few_shots_prompt")) {
-    return { section: "role_model", promptTab: "few-shots" };
-  }
-  if (updatedFields.includes("constraint_prompt")) {
-    return { section: "role_model", promptTab: "constraint" };
   }
   if (updatedFields.includes("duty_prompt")) {
     return { section: "role_model", promptTab: "duty" };
@@ -151,20 +145,16 @@ function AgentSetupContent({
   onManageVersions: () => void;
 }) {
   const { t } = useTranslation("common");
-  const router = useRouter();
   const searchParams = useSearchParams();
   const workspaceRef = useRef<HTMLDivElement>(null);
-  const { agentId, locale: routeLocale } = useParams<{
-    agentId: string;
-    locale: string;
-  }>();
-  const locale = routeLocale || "en";
+  const { agentId } = useParams<{ agentId: string }>();
   const queryClient = useQueryClient();
   const snapshotRefreshQueue = useRef<Promise<boolean>>(Promise.resolve(true));
   const nl2AgentChatPanelRef = useRef<Nl2AgentChatPanelHandle>(null);
   const actionAreaRef = useRef<HTMLDivElement>(null);
   const [isGenerationVisible, setIsGenerationVisible] = useState(true);
   const [isDebugVisible, setIsDebugVisible] = useState(false);
+  const [isPublicationVisible, setIsPublicationVisible] = useState(false);
   const [isCompareMode, setIsCompareMode] = useState(false);
   const [isDebugFullscreen, setIsDebugFullscreen] = useState(false);
   const [isShowVersionManagePanel, setIsShowVersionManagePanel] =
@@ -349,7 +339,7 @@ function AgentSetupContent({
     if (currentAgentId !== null) synchronizeCompletion(currentAgentId);
   }, [currentAgentId, synchronizeCompletion]);
 
-  const handleAgentPublished = useCallback(() => {
+  const handleAgentPublished = () => {
     if (currentAgentId === null) return;
 
     void Promise.all([
@@ -363,8 +353,10 @@ function AgentSetupContent({
         error,
       });
     });
-    router.push(buildAgentUsageGuidePath(locale, currentAgentId));
-  }, [currentAgentId, locale, queryClient, refetchAgentInfo, router]);
+    closeDebug();
+    setIsGenerationVisible(false);
+    setIsPublicationVisible(true);
+  };
 
   return (
     <div
@@ -391,7 +383,7 @@ function AgentSetupContent({
             showHeader={false}
             title={t("agent.page.panel.nl2agent")}
             className={
-              isGenerationVisible
+              isGenerationVisible && !isPublicationVisible
                 ? isDebugVisible
                   ? "w-[28%] shrink-0 2xl:w-[561px]"
                   : "w-[32%] shrink-0 2xl:w-[561px]"
@@ -532,11 +524,17 @@ function AgentSetupContent({
           >
             <div className="min-h-0 flex-1 overflow-hidden">
               <AgentConfig
+                publicationVisible={isPublicationVisible}
+                onPublication={() => {
+                  closeDebug();
+                  setIsPublicationVisible(true);
+                }}
                 published={Boolean(agentInfo?.current_version_no)}
                 actionAreaRef={actionAreaRef}
                 canManualUnlock={canManualUnlock}
                 onManualUnlock={handleManualUnlock}
                 onToggleDebug={() => {
+                  setIsPublicationVisible(false);
                   if (isDebugVisible) {
                     closeDebug();
                   } else {
@@ -580,6 +578,7 @@ function AgentSetupContent({
                   </div>
                 }
                 onConfigure={() => {
+                  setIsPublicationVisible(false);
                   closeDebug();
                   setIsGenerationVisible(true);
                 }}
@@ -641,11 +640,12 @@ export default function AgentEditor() {
   const isValidAgentId =
     Number.isInteger(requestedAgentId) && requestedAgentId > 0;
   const currentAgentId = useAgentStore((state) => state.currentAgentId);
-  const initialize = useAgentStore((state) => state.initialize);
   const reset = useAgentStore((state) => state.reset);
   const [isVersionManageOpen, setIsVersionManageOpen] = useState(false);
   const isReturningRef = useRef(false);
   const { agentInfo, refetch: refetchAgentInfo } = useAgentInfo(currentAgentId);
+  const { isLoading: isDraftLoading, error: draftLoadError } =
+    useAgentEditorDraft(requestedAgentId);
 
   useEffect(() => {
     if (isReturningRef.current) return;
@@ -654,31 +654,25 @@ export default function AgentEditor() {
       router.replace(`/${locale}/agents`);
       return;
     }
-    if (currentAgentId === requestedAgentId) return;
-
-    void (async () => {
-      const result = await searchAgentInfo(requestedAgentId);
-      if (!result.success || !result.data) {
-        message.error(
-          result.message || t("agentConfig.agents.detailsLoadFailed")
-        );
-        router.replace(`/${locale}/agents`);
-        return;
-      }
-      initialize(result.data);
-    })();
-  }, [
-    currentAgentId,
-    initialize,
-    isValidAgentId,
-    locale,
-    message,
-    requestedAgentId,
-    router,
-    t,
-  ]);
+    if (draftLoadError) {
+      message.error(t("agentConfig.agents.detailsLoadFailed"));
+      router.replace(`/${locale}/agents`);
+    }
+  }, [draftLoadError, isValidAgentId, locale, message, router, t]);
 
   if (!isValidAgentId) return null;
+
+  if (isDraftLoading || draftLoadError) {
+    return (
+      <div
+        className="flex h-full items-center justify-center gap-3"
+        role="status"
+      >
+        <Spin size="large" />
+        <span>{t("common.loading")}</span>
+      </div>
+    );
+  }
 
   return (
     <div className="flex h-full min-h-0 flex-col bg-[var(--navigation-surface)]">

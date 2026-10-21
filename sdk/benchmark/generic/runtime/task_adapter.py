@@ -1,4 +1,6 @@
 # -*- coding: utf-8 -*-
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """Task adapter: bridges Langfuse DatasetItem to NexentAgent execution.
 
 Provides a factory function that creates a Langfuse-compatible task function
@@ -64,8 +66,6 @@ def _get_budget_threshold(agent_run_info: Any, budget_type: str) -> int:
 def make_nexent_task(
     system_prompt: str = "",
     duty_prompt: str = "",
-    constraint_prompt: str = "",
-    few_shots_prompt: str = "",
     max_steps: int = 10,
     temperature: float = 0.1,
     language: str = "en",
@@ -88,8 +88,6 @@ def make_nexent_task(
     Args:
         system_prompt: Custom system prompt (bypasses template engine if set).
         duty_prompt: Duty prompt for template-based system prompt.
-        constraint_prompt: Constraint prompt for template-based system prompt.
-        few_shots_prompt: Few-shot examples prompt.
         max_steps: Max agent execution steps.
         temperature: LLM temperature.
         language: Language for prompts (en/zh).
@@ -164,8 +162,6 @@ def make_nexent_task(
                 query=question,
                 history=[],
                 duty_prompt=duty_prompt,
-                constraint_prompt=constraint_prompt,
-                few_shots_prompt=few_shots_prompt,
                 tools=tools,
                 managed_agents=managed_agents,
                 max_steps=max_steps,

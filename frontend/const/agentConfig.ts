@@ -1,3 +1,5 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 // ========== Agent Configuration Constants ==========
 
 import type { LayoutConfig } from "../types/agentConfig";
@@ -48,8 +50,6 @@ export const TOOL_SOURCE_TYPES = {
 
 export const GENERATE_PROMPT_STREAM_TYPES = {
   DUTY: "duty",
-  CONSTRAINT: "constraint",
-  FEW_SHOTS: "few_shots",
   AGENT_VAR_NAME: "agent_var_name",
   AGENT_DESCRIPTION: "agent_description",
   AGENT_DISPLAY_NAME: "agent_display_name",
@@ -129,8 +129,9 @@ export const TOOL_PARAM_OPTIONS = {
       "hybrid_search",
       "vector_search",
       "full_text_search",
+      "graph_search",
     ],
-    reranking_mode: ["performance", "high_accuracy"],
+    reranking_mode: ["performance", "high_accuracy", "jargon_coverage"],
     multi_modal: [true, false],
     reranking_enable: [true, false],
     rewrite_enable: [true, false],

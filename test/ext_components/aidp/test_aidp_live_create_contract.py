@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """Regression coverage for the AIDP request captured during live integration."""
 import json
 from unittest.mock import MagicMock
@@ -43,9 +45,13 @@ def test_forwarded_create_matches_live_contract(aidp_service_module, mock_aidp_s
         headers={"Authorization": "Bearer mock-aidp-key"},
     ).json()
     assert json.loads(saved["graph_config"]) == graph_config()
-    assert saved["embedding_model"] == "/models/bge-m3"
-    assert saved["topk"] == 10 and saved["is_personal"] == 0
-    assert saved["vlm_model"] == "" and saved["caption_enable"] == 0
+    kms_config = json.loads(saved["kms_config_str"])
+    assert kms_config["embedding_model"] == "/models/bge-m3"
+    assert kms_config["chunk_token_num"] == 512
+    assert kms_config["chunk_overlap_num"] == 51
+    assert kms_config["caption_enable"] == 0
+    assert saved["top_k"] == 10 and saved["is_personal"] == 0
+    assert saved["vlm_model"] == ""
     assert "smartsplit" not in saved
 
 

@@ -20,6 +20,8 @@ interface AgentConfigHeaderProps {
   agentId: number | null;
   readOnly: boolean;
   debugVisible: boolean;
+  publicationVisible?: boolean;
+  onPublication?: () => void;
   canManualUnlock: boolean;
   onConfigure: () => void;
   onDebug: () => void;
@@ -34,6 +36,8 @@ export function AgentConfigHeader({
   agentId,
   readOnly,
   debugVisible,
+  publicationVisible = false,
+  onPublication,
   canManualUnlock,
   onConfigure,
   onDebug,
@@ -128,11 +132,11 @@ export function AgentConfigHeader({
       >
         <Button
           type="text"
-          aria-pressed={!debugVisible}
+          aria-pressed={!debugVisible && !publicationVisible}
           disabled={false}
           onClick={onConfigure}
           className={
-            !debugVisible
+            !debugVisible && !publicationVisible
               ? "!rounded-[4px] !bg-white !text-[#0067d1] !shadow-[0_1px_6px_0_rgba(0,0,0,0.08)]"
               : "!text-[#777777]"
           }
@@ -151,6 +155,19 @@ export function AgentConfigHeader({
           }
         >
           {t("agent.highFidelity.debugMode")}
+        </Button>
+        <Button
+          type="text"
+          aria-pressed={publicationVisible}
+          disabled={agentId === null}
+          onClick={onPublication}
+          className={
+            publicationVisible
+              ? "!rounded-[4px] !bg-white !text-[#0067d1] !shadow-[0_1px_6px_0_rgba(0,0,0,0.08)]"
+              : "!text-[#777777]"
+          }
+        >
+          {t("agent.highFidelity.publishMode")}
         </Button>
       </div>
       <div className="flex shrink-0 items-center gap-2 justify-self-end">

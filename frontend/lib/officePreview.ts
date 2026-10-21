@@ -78,6 +78,8 @@ const TEXT_EXTENSIONS = new Set([
   "conf",
   "sql",
   "srt",
+  "html",
+  "htm",
 ]);
 
 /** Extensions rendered through an `<img>` element. */

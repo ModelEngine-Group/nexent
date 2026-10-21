@@ -44,6 +44,8 @@ import GuardrailConfigContent, {
 } from "./components/advanced/GuardrailConfigContent";
 import KnowledgeBaseConfig from "./components/knowledge-base-search";
 import AgentVersionPubulishModal from "../versions/AgentVersionPubulishModal";
+import { AgentPublication } from "./components/agent-publication";
+import { AgentPublicationEmpty } from "./components/agent-publication-empty";
 import { AgentConfigHeader } from "./components/agent-config-header";
 
 import {
@@ -187,6 +189,8 @@ function ConfigSection({
 }
 
 interface AgentConfigProps {
+  publicationVisible?: boolean;
+  onPublication?: () => void;
   published?: boolean;
   canManualUnlock: boolean;
   onManualUnlock: () => void;
@@ -201,6 +205,8 @@ interface AgentConfigProps {
 }
 
 export default function AgentConfig({
+  publicationVisible = false,
+  onPublication,
   published = false,
   canManualUnlock,
   onManualUnlock,
@@ -505,6 +511,8 @@ export default function AgentConfig({
           agentId={agentId}
           readOnly={isReadOnly}
           debugVisible={debugVisible}
+          publicationVisible={publicationVisible}
+          onPublication={onPublication}
           canManualUnlock={canManualUnlock}
           onConfigure={onConfigure}
           onDebug={handleDebug}
@@ -512,11 +520,25 @@ export default function AgentConfig({
           onManualUnlock={onManualUnlock}
           actionAreaRef={actionAreaRef}
         />
+        {publicationVisible && (
+          <ConfigProvider componentDisabled={false}>
+            {published && agentId !== null ? (
+              <AgentPublication
+                agentId={agentId}
+                agentName={editedAgent.name}
+              />
+            ) : (
+              <AgentPublicationEmpty />
+            )}
+          </ConfigProvider>
+        )}
         <div
           className={
-            debugVisible
-              ? "flex min-h-0 min-w-0 flex-1 gap-5 px-4 pb-5"
-              : "flex min-h-0 min-w-0 flex-1"
+            publicationVisible
+              ? "hidden"
+              : debugVisible
+                ? "flex min-h-0 min-w-0 flex-1 gap-5 px-4 pb-5"
+                : "flex min-h-0 min-w-0 flex-1"
           }
         >
           <div

@@ -1,6 +1,7 @@
 // Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
 import React from "react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { screen, waitFor } from "@testing-library/dom";
 import { render } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
@@ -101,16 +102,19 @@ vi.mock("next/navigation", () => ({
   useParams: vi.fn(() => ({ locale: "zh" })),
 }));
 
-vi.mock("react-i18next", () => ({
-  useTranslation: () => ({
+vi.mock("react-i18next", () => {
+  const translation = {
     t: (key: string, fallback?: string) => fallback ?? key,
     i18n: { language: "zh" },
-  }),
-  initReactI18next: { type: "3rdParty", init: () => {} },
-  I18nextProvider: ({ children }: { children?: React.ReactNode }) => (
-    <>{children}</>
-  ),
-}));
+  };
+  return {
+    useTranslation: () => translation,
+    initReactI18next: { type: "3rdParty", init: () => {} },
+    I18nextProvider: ({ children }: { children?: React.ReactNode }) => (
+      <>{children}</>
+    ),
+  };
+});
 
 vi.mock("@/app/newchat/assistant-ui/chat", () => ({
   Chat: () => <div>workbench chat</div>,
@@ -144,9 +148,10 @@ vi.mock("@/hooks/useConfig", () => ({
   useConfig: () => ({ modelConfig: undefined }),
 }));
 
-vi.mock("@/hooks/model/useModelList", () => ({
-  useModelList: () => ({ availableLlmModels: [], isLoading: false }),
-}));
+vi.mock("@/hooks/model/useModelList", () => {
+  const models = { availableLlmModels: [], isLoading: false };
+  return { useModelList: () => models };
+});
 
 vi.mock("@/services/conversationService", () => ({
   conversationService: {
@@ -232,12 +237,10 @@ describe("workbench new conversation", () => {
     initializeThread.mockReset().mockResolvedValue(undefined);
     updateThreadCustom.mockReset().mockResolvedValue(undefined);
     setRunConfig.mockReset();
-    runtimeMock.threads.getItemById
-      .mockReset()
-      .mockReturnValue({
-        initialize: initializeThread,
-        updateCustom: updateThreadCustom,
-      });
+    runtimeMock.threads.getItemById.mockReset().mockReturnValue({
+      initialize: initializeThread,
+      updateCustom: updateThreadCustom,
+    });
     runtimeMock.threads.getState.mockReset().mockReturnValue({
       mainThreadId: "thread-1",
     });
@@ -257,7 +260,12 @@ describe("workbench new conversation", () => {
 
   it("reloads the conversation list after starting a new conversation", async () => {
     const user = userEvent.setup();
-    render(<WorkbenchPage />);
+    const queryClient = new QueryClient();
+    render(
+      <QueryClientProvider client={queryClient}>
+        <WorkbenchPage />
+      </QueryClientProvider>
+    );
 
     expect(await screen.findByText("workbench sidebar")).toBeInTheDocument();
 

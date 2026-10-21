@@ -1,8 +1,12 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """Tests for filtering and pagination in the standalone AIDP mock server."""
 from __future__ import annotations
 
 import importlib.util
+import json
 import sys
+import time
 from pathlib import Path
 from unittest.mock import AsyncMock
 
@@ -31,9 +35,9 @@ def test_file_listing_filters_before_pagination(mock_aidp_server):
     server = mock_aidp_server
     server._KNOWLEDGE_BASES["kb-1"] = {"kds_name": "测试知识库"}
     server._DOCUMENTS_BY_KB["kb-1"] = [
-        {"file_uuid": "f-1", "file_name": "制度-第一章.pdf", "status": 1},
-        {"file_uuid": "f-2", "file_name": "制度-第二章.pdf", "status": 1},
-        {"file_uuid": "f-3", "file_name": "普通说明.txt", "status": 1},
+        {"file_uuid": "f-1", "file_name": "制度-第一章.pdf", "status": 1, "first_upload_time": time.time()},
+        {"file_uuid": "f-2", "file_name": "制度-第二章.pdf", "status": 1, "first_upload_time": time.time()},
+        {"file_uuid": "f-3", "file_name": "普通说明.txt", "status": 1, "first_upload_time": time.time()},
     ]
     client = TestClient(server.app)
 
@@ -48,6 +52,16 @@ def test_file_listing_filters_before_pagination(mock_aidp_server):
     assert [item["file_uuid"] for item in body["value"]] == ["f-1"]
     assert body["next_link"] is not None
     assert "keyword=%E5%88%B6%E5%BA%A6" in body["next_link"]
+
+    # The live service keeps returning next_link on the last (empty) page.
+    last_page = client.get(
+        "/KnowledgeBase/Tenants/aidp/KnowledgeBases/kb-1/KnowledgeFiles",
+        params={"page": 2, "page_size": 10, "keyword": "制度"},
+        headers={"Authorization": "Bearer mock-aidp-key"},
+    )
+    assert last_page.status_code == 200
+    assert last_page.json()["value"] == []
+    assert last_page.json()["next_link"] is not None
 
 
 def test_kb_metadata_uses_the_dedicated_document_count_endpoint(mock_aidp_server):
@@ -70,8 +84,26 @@ def test_kb_metadata_uses_the_dedicated_document_count_endpoint(mock_aidp_server
 
     assert "document_count" not in listed
     assert "document_count" not in detail
+    assert "update_time" not in detail
+    assert "rerank_model" not in detail
+    assert "embedding_model" not in detail
+    assert "top_k" in detail
+    assert "kms_config_str" in detail
     assert count.status_code == 200
     assert count.json() == {"count": 1}
+
+    filtered = client.post(
+        f"{kb_path}/kb-1/KnowledgeFiles/Count",
+        headers=headers,
+        json={"keyword": "已入库"},
+    )
+    assert filtered.json() == {"count": 1}
+    missing = client.post(
+        f"{kb_path}/kb-1/KnowledgeFiles/Count",
+        headers=headers,
+        json={"keyword": "不存在"},
+    )
+    assert missing.json() == {"count": 0}
 
 
 def test_upload_delay_is_applied_once_per_batch(mock_aidp_server, monkeypatch):
@@ -199,3 +231,147 @@ def test_file_removal_failure_reports_the_file_without_removing_data(mock_aidp_s
     assert response.json()["failed_list"][0]["file_uuid"] == file_uuid
     assert response.json()["failed_list"][0]["code"] == "130501"
     assert server._DOCUMENTS_BY_KB["kb-1"] == [document]
+    assert document["file_status"] == 2
+
+
+def test_file_removal_exposes_the_deleting_state_then_hides_the_row(
+    mock_aidp_server, monkeypatch
+):
+    server = mock_aidp_server
+    server._KNOWLEDGE_BASES["kb-1"] = {"kds_name": "测试知识库"}
+    file_uuid = "00000000-0000-4000-8000-000000000001"
+    server._DOCUMENTS_BY_KB["kb-1"] = [
+        {
+            "file_uuid": file_uuid,
+            "file_name": "制度.pdf",
+            "status": 1,
+            "first_upload_time": time.time(),
+        }
+    ]
+    client = TestClient(server.app)
+    headers = {"Authorization": "Bearer mock-aidp-key"}
+    list_path = "/KnowledgeBase/Tenants/aidp/KnowledgeBases/kb-1/KnowledgeFiles"
+    history_path = "/KnowledgeBase/Tenants/aidp/KnowledgeBases/kb-1/KnowledgeFiles/History"
+
+    monkeypatch.setattr(server, "_FILE_DELETE_SECONDS", 60)
+    removed = client.post(
+        "/KnowledgeBase/Tenants/aidp/KnowledgeBases/kb-1/KnowledgeFiles/Remove",
+        headers=headers,
+        json={"file_uuids": [file_uuid]},
+    )
+    assert removed.status_code == 200
+    assert removed.json()["summary"] == {"total": 1, "success": 1, "failed": 0}
+
+    visible = client.get(list_path, headers=headers).json()["value"]
+    assert visible[0]["file_uuid"] == file_uuid
+    assert visible[0]["file_status"] == 1
+
+    # After the deletion window the row leaves KnowledgeFiles but remains in
+    # the history audit log.
+    server._DOCUMENTS_BY_KB["kb-1"][0]["_deleted_at"] = 0
+    assert client.get(list_path, headers=headers).json()["value"] == []
+    history = client.post(
+        history_path,
+        headers=headers,
+        json={"dir_path": "/aidp/knowledge/kb-1", "page": 1},
+    )
+    assert [item["file_uuid"] for item in history.json()["value"]] == [file_uuid]
+
+
+def test_history_reports_the_filtered_total_and_keeps_next_link(
+    mock_aidp_server,
+):
+    server = mock_aidp_server
+    server._KNOWLEDGE_BASES["kb-1"] = {"kds_name": "测试知识库"}
+    server._DOCUMENTS_BY_KB["kb-1"] = [
+        {"file_uuid": "f-1", "file_name": "制度-第一章.pdf", "status": 1, "first_upload_time": time.time()},
+        {"file_uuid": "f-2", "file_name": "制度-第二章.pdf", "status": 1, "first_upload_time": time.time()},
+        {"file_uuid": "f-3", "file_name": "普通说明.txt", "status": 1, "first_upload_time": time.time()},
+    ]
+    client = TestClient(server.app)
+    headers = {"Authorization": "Bearer mock-aidp-key"}
+
+    response = client.post(
+        "/KnowledgeBase/Tenants/aidp/KnowledgeBases/kb-1/KnowledgeFiles/History",
+        headers=headers,
+        json={
+            "fs_id": "fs-1",
+            "dir_path": "/aidp/knowledge/kb-1",
+            "page": 1,
+            "page_size": 10,
+            "keyword": "制度",
+        },
+    )
+
+    body = response.json()
+    assert [item["file_uuid"] for item in body["value"]] == ["f-1", "f-2"]
+    assert body["total_count"] == 2
+    assert body["total_record_count"] == 2
+    assert body["next_link"] is not None
+
+
+def test_history_total_count_is_page_local(mock_aidp_server):
+    server = mock_aidp_server
+    server._KNOWLEDGE_BASES["kb-1"] = {"kds_name": "测试知识库"}
+    server._DOCUMENTS_BY_KB["kb-1"] = [
+        {"file_uuid": f"f-{index}", "file_name": f"制度-{index}.pdf", "status": 1, "first_upload_time": time.time()}
+        for index in range(3)
+    ]
+    client = TestClient(server.app)
+    headers = {"Authorization": "Bearer mock-aidp-key"}
+    path = "/KnowledgeBase/Tenants/aidp/KnowledgeBases/kb-1/KnowledgeFiles/History"
+
+    first = client.post(
+        path, headers=headers,
+        json={"dir_path": "/aidp/knowledge/kb-1", "page": 1, "page_size": 2},
+    ).json()
+    second = client.post(
+        path, headers=headers,
+        json={"dir_path": "/aidp/knowledge/kb-1", "page": 2, "page_size": 2},
+    ).json()
+
+    assert len(first["value"]) == 2 and first["total_count"] == 2
+    assert len(second["value"]) == 1 and second["total_count"] == 1
+    assert first["total_record_count"] == second["total_record_count"] == 3
+    assert first["next_link"] is not None and second["next_link"] is not None
+
+
+def test_history_total_record_count_is_computed_before_status_filter(mock_aidp_server):
+    server = mock_aidp_server
+    server._KNOWLEDGE_BASES["kb-1"] = {"kds_name": "测试知识库"}
+    now = time.time()
+    server._DOCUMENTS_BY_KB["kb-1"] = [
+        {"file_uuid": "f-1", "file_name": "制度-第一章.pdf", "status": 1, "first_upload_time": now},
+        {"file_uuid": "f-2", "file_name": "制度-第二章.pdf", "status": 3, "first_upload_time": now},
+        {"file_uuid": "f-3", "file_name": "普通说明.txt", "status": 1, "first_upload_time": now},
+    ]
+    client = TestClient(server.app)
+    headers = {"Authorization": "Bearer mock-aidp-key"}
+
+    body = client.post(
+        "/KnowledgeBase/Tenants/aidp/KnowledgeBases/kb-1/KnowledgeFiles/History",
+        headers=headers,
+        json={
+            "dir_path": "/aidp/knowledge/kb-1",
+            "page": 1,
+            "page_size": 10,
+            "keyword": "制度",
+            "status": 1,
+        },
+    ).json()
+
+    assert [item["file_uuid"] for item in body["value"]] == ["f-1"]
+    assert body["total_count"] == 1
+    assert body["total_record_count"] == 2
+
+
+def test_chinese_demo_failure_reasons_are_json_without_top_level_code(
+    mock_aidp_server,
+):
+    docs = mock_aidp_server._DOCUMENTS_BY_KB["aidp-kb-faq"]
+    failed = [doc for doc in docs if doc.get("status") in (3, 5)]
+    assert failed
+    for doc in failed:
+        assert "error_code" not in doc
+        parsed = json.loads(doc["extraction_failure_reason"])
+        assert parsed["error_code"] and parsed["msg"]
