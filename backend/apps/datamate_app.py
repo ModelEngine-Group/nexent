@@ -1,3 +1,4 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 import logging
 from typing import Optional
 
@@ -7,12 +8,12 @@ from fastapi import Body
 from pydantic import BaseModel
 from http import HTTPStatus
 
-from services.datamate_service import (
+from management.services.knowledge_base.providers.datamate import (
     sync_datamate_knowledge_bases_and_create_records,
     fetch_datamate_knowledge_base_file_list,
     check_datamate_connection
 )
-from utils.auth_utils import get_current_user_id
+from management.services.permission.identity.authentication_helpers import get_current_user_id
 from consts.exceptions import DataMateConnectionError, TokenExpiredError
 
 router = APIRouter(prefix="/datamate")

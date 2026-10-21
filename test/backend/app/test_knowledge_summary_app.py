@@ -1,3 +1,4 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """
 Unit tests for knowledge_summary_app module.
 
@@ -84,8 +85,8 @@ vectordatabase_service_mock.get_vector_db_core = mock_get_vector_db_core
 sys.modules['management.services.knowledge_base.service'] = vectordatabase_service_mock
 
 # Mock other services that might be imported
-sys.modules['services.redis_service'] = types.ModuleType('services.redis_service')
-sys.modules['services.group_service'] = types.ModuleType('services.group_service')
+sys.modules['management.services.knowledge_base.task_state'] = types.ModuleType('management.services.knowledge_base.task_state')
+sys.modules['management.services.permission.identity.groups'] = types.ModuleType('management.services.permission.identity.groups')
 
 # knowledge_summary_app only needs this request model from consts.model. Keeping
 # it local avoids importing unrelated EmailStr models and optional validators.
@@ -100,18 +101,18 @@ consts_model_mock.ChangeSummaryRequest = ChangeSummaryRequest
 sys.modules['consts.model'] = consts_model_mock
 
 # Mock utils modules used by knowledge_summary_app to avoid deep DB/storage import chains
-utils_auth_utils_mock = types.ModuleType('utils.auth_utils')
+utils_auth_utils_mock = types.ModuleType('management.services.permission.identity.authentication_helpers')
 utils_auth_utils_mock.get_current_user_id = MagicMock(return_value=("test_user_id", "test_tenant_id"))
 utils_auth_utils_mock.get_current_user_info = MagicMock(return_value=("test_user_id", "test_tenant_id", "en"))
-sys.modules['utils.auth_utils'] = utils_auth_utils_mock
+sys.modules['management.services.permission.identity.authentication_helpers'] = utils_auth_utils_mock
 
-utils_config_utils_mock = types.ModuleType('utils.config_utils')
+utils_config_utils_mock = types.ModuleType('management.services.configuration.tenant.settings')
 mock_tenant_config_manager = MagicMock()
 mock_tenant_config = MagicMock()
 mock_tenant_config.get.return_value = None
 mock_tenant_config_manager.load_config.return_value = mock_tenant_config
 utils_config_utils_mock.tenant_config_manager = mock_tenant_config_manager
-sys.modules['utils.config_utils'] = utils_config_utils_mock
+sys.modules['management.services.configuration.tenant.settings'] = utils_config_utils_mock
 
 # Import the modules we need
 from fastapi.testclient import TestClient
@@ -551,4 +552,3 @@ class TestTokenExpired:
 
         assert response.status_code == 401
         assert "expired" in response.json()["detail"]
-

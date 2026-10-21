@@ -37,7 +37,7 @@ def isolate_binding_cleanup(monkeypatch, _isolated_imports):
 @pytest.fixture(autouse=True)
 def isolate_list_tag_projection(monkeypatch, _isolated_imports):
     """Keep list tests independent from tag persistence, which has its own tests."""
-    module = types.ModuleType("services.resource_tag_projection")
+    module = types.ModuleType("management.services.tag.projection")
     def project_tags(resources, **kwargs):
         assert kwargs["resource_type"] == "knowledge_base"
         assert kwargs["id_field"] == "index_name"
@@ -46,7 +46,7 @@ def isolate_list_tag_projection(monkeypatch, _isolated_imports):
     module.project_authorized_resource_tags = MagicMock(
         side_effect=project_tags
     )
-    monkeypatch.setitem(sys.modules, "services.resource_tag_projection", module)
+    monkeypatch.setitem(sys.modules, "management.services.tag.projection", module)
     return module.project_authorized_resource_tags
 
 # Environment variables are now configured in conftest.py
@@ -185,7 +185,6 @@ sys.modules["consts.exceptions"] = consts_exceptions_mod
 sys.modules["consts.model"] = MagicMock()
 sys.modules["consts.scheduler"] = consts_scheduler_mod
 sys.modules["consts.error_code"] = MagicMock()
-sys.modules["consts.prompt_template"] = MagicMock()
 
 
 class _VectorDatabaseCore:
@@ -343,7 +342,7 @@ sys.modules['psycopg2.pool'] = MagicMock()
 sys.modules['psycopg2.extras'] = MagicMock()
 sys.modules['psycopg2.extensions'] = MagicMock()
 
-# Mock redis before services.redis_service is imported
+# Mock redis before management.services.knowledge_base.task_state is imported
 sys.modules['redis'] = MagicMock()
 sys.modules['redis.client'] = MagicMock()
 sys.modules['redis.connection'] = MagicMock()
@@ -354,7 +353,7 @@ sys.modules['redis.lock'] = MagicMock()
 sys.modules['services'] = _create_package_mock('services')
 
 # Create mock redis_service module
-redis_service_mock = types.ModuleType('services.redis_service')
+redis_service_mock = types.ModuleType('management.services.knowledge_base.task_state')
 redis_service_mock.get_redis_service = MagicMock(return_value=MagicMock(
     is_task_cancelled=MagicMock(return_value=False),
     save_progress_info=MagicMock(return_value=True),
@@ -362,13 +361,13 @@ redis_service_mock.get_redis_service = MagicMock(return_value=MagicMock(
     get_progress_info=MagicMock(return_value=None),
     get_error_info=MagicMock(return_value=None),
 ))
-sys.modules['services.redis_service'] = redis_service_mock
+sys.modules['management.services.knowledge_base.task_state'] = redis_service_mock
 setattr(sys.modules['services'], 'redis_service', redis_service_mock)
 
 # Create mock group_service module
-group_service_mock = types.ModuleType('services.group_service')
+group_service_mock = types.ModuleType('management.services.permission.identity.groups')
 group_service_mock.get_tenant_default_group_id = MagicMock(return_value=1)
-sys.modules['services.group_service'] = group_service_mock
+sys.modules['management.services.permission.identity.groups'] = group_service_mock
 setattr(sys.modules['services'], 'group_service', group_service_mock)
 
 # Create mock asset_owner_visibility module
@@ -376,17 +375,17 @@ def _mock_postprocess_knowledge_visibility(items, caller_role=None, caller_tenan
     return items
 
 
-asset_owner_visibility_mock = types.ModuleType('services.asset_owner_visibility')
+asset_owner_visibility_mock = types.ModuleType('management.services.permission.asset_owner')
 asset_owner_visibility_mock.postprocess_knowledge_visibility = _mock_postprocess_knowledge_visibility
-sys.modules['services.asset_owner_visibility'] = asset_owner_visibility_mock
+sys.modules['management.services.permission.asset_owner'] = asset_owner_visibility_mock
 setattr(sys.modules['services'], 'asset_owner_visibility', asset_owner_visibility_mock)
 
-storage_service_mock = types.ModuleType('services.knowledge_storage_service')
+storage_service_mock = types.ModuleType('management.services.knowledge_base.storage')
 storage_service_mock.release_storage_charge = MagicMock(return_value=True)
 storage_service_mock.resolve_storage_reference = MagicMock(return_value=None)
 storage_service_mock.resolve_storage_object_knowledge = MagicMock(return_value=None)
 sys.modules[
-    'services.knowledge_storage_service'
+    'management.services.knowledge_base.storage'
 ] = storage_service_mock
 setattr(
     sys.modules['services'],
@@ -432,42 +431,42 @@ async def _mock_get_all_files_status(index_name):
     return {}
 
 
-file_management_utils_mock = types.ModuleType('utils.file_management_utils')
+file_management_utils_mock = types.ModuleType('management.services.file.upload')
 file_management_utils_mock.get_all_files_status = _mock_get_all_files_status
 file_management_utils_mock.get_file_size = MagicMock(return_value=0)
-sys.modules['utils.file_management_utils'] = file_management_utils_mock
+sys.modules['management.services.file.upload'] = file_management_utils_mock
 setattr(sys.modules['utils'], 'file_management_utils', file_management_utils_mock)
 setattr(sys.modules['backend.utils'], 'file_management_utils', file_management_utils_mock)
 
-str_utils_mock = types.ModuleType('utils.str_utils')
+str_utils_mock = types.ModuleType('management.db.serialization')
 str_utils_mock.convert_list_to_string = lambda items: ",".join(str(item) for item in items) if items else ""
 str_utils_mock.convert_string_to_list = lambda s: [int(x.strip()) for x in s.split(',') if x.strip().isdigit()] if s and s.strip() else []
-sys.modules['utils.str_utils'] = str_utils_mock
-sys.modules['backend.utils.str_utils'] = str_utils_mock
+sys.modules['management.db.serialization'] = str_utils_mock
+sys.modules['management.db.serialization'] = str_utils_mock
 setattr(sys.modules['utils'], 'str_utils', str_utils_mock)
 setattr(sys.modules['backend.utils'], 'str_utils', str_utils_mock)
 
-storage_key_utils_mock = types.ModuleType('utils.storage_key_utils')
+storage_key_utils_mock = types.ModuleType('management.services.file.preview')
 storage_key_utils_mock.build_preview_pdf_object_key = MagicMock(return_value='preview/test.pdf')
-sys.modules['utils.storage_key_utils'] = storage_key_utils_mock
-sys.modules['backend.utils.storage_key_utils'] = storage_key_utils_mock
+sys.modules['management.services.file.preview'] = storage_key_utils_mock
+sys.modules['management.services.file.preview'] = storage_key_utils_mock
 setattr(sys.modules['utils'], 'storage_key_utils', storage_key_utils_mock)
 setattr(sys.modules['backend.utils'], 'storage_key_utils', storage_key_utils_mock)
 
-config_utils_mock = types.ModuleType('utils.config_utils')
+config_utils_mock = types.ModuleType('management.services.configuration.tenant.settings')
 config_utils_mock.tenant_config_manager = MagicMock()
 config_utils_mock.tenant_config_manager.get_app_config = MagicMock(return_value='')
 config_utils_mock.tenant_config_manager.get_model_config = MagicMock(return_value={})
 config_utils_mock.get_model_name_from_config = MagicMock(return_value='')
-sys.modules['utils.config_utils'] = config_utils_mock
-sys.modules['backend.utils.config_utils'] = config_utils_mock
+sys.modules['management.services.configuration.tenant.settings'] = config_utils_mock
+sys.modules['management.services.configuration.tenant.settings'] = config_utils_mock
 setattr(sys.modules['utils'], 'config_utils', config_utils_mock)
 setattr(sys.modules['backend.utils'], 'config_utils', config_utils_mock)
 
-knowledge_telemetry_mock = types.ModuleType('utils.knowledge_telemetry')
+knowledge_telemetry_mock = types.ModuleType('infrastructure.observability.knowledge')
 knowledge_telemetry_mock.set_span_attributes = MagicMock()
 knowledge_telemetry_mock.trace_knowledge_operation = MagicMock()
-sys.modules['utils.knowledge_telemetry'] = knowledge_telemetry_mock
+sys.modules['infrastructure.observability.knowledge'] = knowledge_telemetry_mock
 setattr(sys.modules['utils'], 'knowledge_telemetry', knowledge_telemetry_mock)
 
 # Shared mock instances for MinIO
@@ -717,7 +716,7 @@ class TestElasticSearchService(unittest.TestCase):
             "index_name": "7-uuid",
             "knowledge_name": "kb1",
         }
-        
+
         # Mock get_embedding_model to return tuple (model, model_id)
         mock_get_embedding.return_value = (None, None)
 
@@ -1287,7 +1286,7 @@ class TestElasticSearchService(unittest.TestCase):
         self.assertEqual(len(result["indices"]), 2)
         self.assertEqual(result["count"], 2)
         self.assertEqual(len(result["indices_info"]), 2)
-        projection = sys.modules["services.resource_tag_projection"].project_authorized_resource_tags
+        projection = sys.modules["management.services.tag.projection"].project_authorized_resource_tags
         projection.assert_called_once()
         assert [row["index_name"] for row in projection.call_args.args[0]] == ["index1", "index2"]
         assert projection.call_args.kwargs["resource_type"] == "knowledge_base"
@@ -3484,12 +3483,12 @@ class TestElasticSearchService(unittest.TestCase):
         mock_get_embedding_by_index.assert_called_once_with(consts_const_mod.DEFAULT_TENANT_ID, "test_index")
 
     def test_apply_document_tag_predicates_keeps_only_matching_documents(self):
-        tag_projection_module = types.ModuleType('services.tag_document_projection')
+        tag_projection_module = types.ModuleType('management.services.knowledge_base.tag_projection')
         tag_projection_module.LOCAL_DOCUMENT_PROVIDER = 'local'
         tag_projection_module.decode_document_resource_id = (
             lambda resource_id: tuple(resource_id.split(':', 2))
         )
-        tag_management_module = types.ModuleType('services.tag_management_service')
+        tag_management_module = types.ModuleType('management.services.tag.library')
         tag_management_module.TagManagementService = type(
             'TagManagementService',
             (),
@@ -3503,8 +3502,8 @@ class TestElasticSearchService(unittest.TestCase):
         with patch.dict(
             sys.modules,
             {
-                'services.tag_document_projection': tag_projection_module,
-                'services.tag_management_service': tag_management_module,
+                'management.services.knowledge_base.tag_projection': tag_projection_module,
+                'management.services.tag.library': tag_management_module,
             },
         ):
             results = ElasticSearchService._apply_document_tag_predicates(
@@ -3609,7 +3608,7 @@ class TestElasticSearchService(unittest.TestCase):
         """Test search_hybrid handles exceptions from vdb_core."""
         # Mock get_embedding_model_by_index_name
         mock_get_embedding_by_index.return_value = (self.mock_embedding, 1, {"status": "ok", "message": "OK"})
-        
+
         self.mock_vdb_core.hybrid_search.side_effect = Exception(
             "Search failed")
 
@@ -3626,7 +3625,7 @@ class TestElasticSearchService(unittest.TestCase):
 
     @patch('management.services.knowledge_base.service.get_embedding_model_by_index_name')
     def test_search_hybrid_weight_accurate_boundary_values(self, mock_get_embedding_by_index):
-        
+
         # Test with weight_accurate = 0.0 (semantic only)
         self.mock_vdb_core.hybrid_search.return_value = [
             {
@@ -6887,7 +6886,7 @@ class TestCoverageImprovement(unittest.TestCase):
         _update_progress("task-1", 5, 10)
 
     @patch('management.services.knowledge_base.files.list_file_records', return_value=[])
-    @patch('services.redis_service.get_redis_service')
+    @patch('management.services.knowledge_base.task_state.get_redis_service')
     def test_full_delete_knowledge_base_list_files_exception(self, mock_get_redis, mock_list_file_records):
         """Test full_delete_knowledge_base when list_files raises (lines 453-457)."""
         mock_vdb_core = MagicMock()
@@ -6917,7 +6916,7 @@ class TestCoverageImprovement(unittest.TestCase):
 
     # Tests for full_delete_knowledge_base - minio deletion exception (lines 487-489)
     @patch('management.services.knowledge_base.files.list_file_records', return_value=[])
-    @patch('services.redis_service.get_redis_service')
+    @patch('management.services.knowledge_base.task_state.get_redis_service')
     def test_full_delete_knowledge_base_minio_deletion_exception(self, mock_get_redis, mock_list_file_records):
         """Test full_delete_knowledge_base when delete_file raises (lines 487-489)."""
         mock_vdb_core = MagicMock()
@@ -7199,7 +7198,7 @@ class TestCoverageImprovement(unittest.TestCase):
 
     # Tests for full_delete_knowledge_base - file without path_or_url (lines 467-471)
     @patch('management.services.knowledge_base.files.list_file_records', return_value=[])
-    @patch('services.redis_service.get_redis_service')
+    @patch('management.services.knowledge_base.task_state.get_redis_service')
     def test_full_delete_knowledge_base_file_without_path_or_url(self, mock_get_redis, mock_list_file_records):
         """Test full_delete_knowledge_base skips file when path_or_url is missing (lines 467-471)."""
         mock_vdb_core = MagicMock()
@@ -7232,7 +7231,7 @@ class TestCoverageImprovement(unittest.TestCase):
 
     # Tests for full_delete_knowledge_base - outer exception (lines 545-548)
     @patch('management.services.knowledge_base.files.list_file_records', return_value=[])
-    @patch('services.redis_service.get_redis_service')
+    @patch('management.services.knowledge_base.task_state.get_redis_service')
     def test_full_delete_knowledge_base_outer_exception(self, mock_get_redis, mock_list_file_records):
         """Test full_delete_knowledge_base raises outer exception (lines 545-548)."""
         mock_vdb_core = MagicMock()

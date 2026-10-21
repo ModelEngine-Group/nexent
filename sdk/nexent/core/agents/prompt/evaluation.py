@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """Render structured Agent profiles for independent evaluation requests."""
 
 from collections.abc import Mapping, Sequence
@@ -153,7 +155,6 @@ def format_agent_profile_context(
     for source, field in (
         ("description", "profile_description"),
         ("duty_prompt", "profile_duty"),
-        ("constraint_prompt", "profile_constraints"),
         ("business_description", "profile_business"),
     ):
         if profile[source]:

@@ -71,11 +71,11 @@ from management.services.agent.read import (
     check_agent_availability,
     project_agent_models,
 )
-from services.asset_owner_visibility import (
+from management.services.permission.asset_owner import (
     resolve_agent_list_permission,
 )
-from services.user_identity_service import enrich_cas_usernames
-from utils.str_utils import (
+from management.services.permission.identity.display import enrich_cas_usernames
+from management.db.serialization import (
     convert_string_to_list,
 )
 
@@ -107,7 +107,7 @@ async def delete_agent_impl(agent_id: int, tenant_id: str, user_id: str):
         delete_tools_by_agent_id(agent_id, tenant_id, user_id)
         skill_db.delete_skills_by_agent_id(agent_id, tenant_id, user_id)
         if is_tenant_owned_agent:
-            from services.tag_management_service import TagManagementService
+            from management.services.tag.library import TagManagementService
 
             TagManagementService.cleanup_resource_assignments(
                 tenant_id, "agent", str(agent_id), user_id

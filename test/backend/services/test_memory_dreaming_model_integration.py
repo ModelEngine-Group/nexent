@@ -1,3 +1,4 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """Real-model acceptance tests for Dreaming semantic compression."""
 
 import os
@@ -5,8 +6,8 @@ import os
 import pytest
 
 from nexent.memory.dreaming import DreamingMemoryUnit, build_user_memory_summary
-from services.memory_dreaming_summarizer import TenantDreamingSummarizer
-from utils.monitoring import monitoring_manager
+from management.services.memory.dreaming.summarizer import TenantDreamingSummarizer
+from infrastructure.observability.bootstrap import monitoring_manager
 
 
 pytestmark = pytest.mark.skipif(

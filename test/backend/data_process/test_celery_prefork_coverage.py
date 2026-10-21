@@ -1,3 +1,4 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """Coverage-focused tests for the Ray-free Celery data-process boundary."""
 
 import asyncio
@@ -750,11 +751,11 @@ def test_worker_ready_bootstrap_and_process_resource_paths(monkeypatch):
     worker.worker_ready_handler()
     assert len(bootstrap_calls) == 2 and all(call["queue"] == "parse_q" for call in bootstrap_calls)
 
-    monitoring = types.ModuleType("utils.monitoring")
+    monitoring = types.ModuleType("infrastructure.observability.bootstrap")
     monitoring.monitoring_manager = types.SimpleNamespace(is_enabled=True)
-    monkeypatch.setitem(sys.modules, "utils.monitoring", monitoring)
+    monkeypatch.setitem(sys.modules, "infrastructure.observability.bootstrap", monitoring)
     worker.setup_worker_process_resources()
-    monkeypatch.setitem(sys.modules, "utils.monitoring", None)
+    monkeypatch.setitem(sys.modules, "infrastructure.observability.bootstrap", None)
     worker.setup_worker_process_resources()
 
     worker.worker_state["start_time"] = 0
@@ -1376,7 +1377,7 @@ def test_worker_exception_paths_and_prefork_runtime_processor_lazy_loading(monke
     monkeypatch.setattr(parse_tasks.parser_bootstrap, "apply_async", lambda **_kwargs: (_ for _ in ()).throw(RuntimeError("dispatch")))
     worker.worker_ready_handler()
 
-    monkeypatch.setitem(sys.modules, "utils.monitoring", None)
+    monkeypatch.setitem(sys.modules, "infrastructure.observability.bootstrap", None)
     monkeypatch.setattr(worker, "QUEUES", "forward_q")
     monkeypatch.setattr(worker, "app", types.SimpleNamespace(worker_main=lambda _args: None))
     monkeypatch.setattr(worker, "_validate_parser_config", lambda: None)

@@ -1,3 +1,4 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """Memory configuration API endpoints for the app layer.
 
 This module exposes HTTP endpoints under the `/memory` prefix for managing
@@ -33,7 +34,7 @@ from consts.const import (
 )
 from consts.model import MemoryAgentShareMode
 from consts.exceptions import UnauthorizedError
-from services.memory_config_service import (
+from management.services.configuration.user.memory import (
     add_disabled_agent_id,
     add_disabled_useragent_id,
     get_user_configs,
@@ -45,12 +46,12 @@ from services.memory_config_service import (
     set_external_provider_top_k,
 )
 from database import memory_dreaming_db
-from services.memory_record_service import (
+from management.services.memory.records import (
     get_tenant_memory_index_name,
     is_tenant_embedding_configured,
 )
-from services.audit_service import record_security_event
-from utils.auth_utils import get_current_user_id
+from management.services.monitor.audit import record_security_event
+from management.services.permission.identity.authentication_helpers import get_current_user_id
 
 logger = logging.getLogger("memory_config_app")
 logger.setLevel(logging.INFO)

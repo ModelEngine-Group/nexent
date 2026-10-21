@@ -34,7 +34,7 @@ from database.tenant_config_db import (
     insert_config,
     update_config_by_tenant_config_id,
 )
-from services.model_runtime_provisioning_service import create_model_record, update_model_record
+from management.services.model.runtime_provisioning import create_model_record, update_model_record
 from management.services.model.names import (
     add_repo_to_name,
     sort_models_by_id,
@@ -1057,7 +1057,7 @@ async def list_models_for_admin(
         paginated_models = normalized_models[start_index:end_index]
 
         # Get tenant name
-        from services.tenant_service import get_tenant_info
+        from management.services.permission.identity.tenants import get_tenant_info
 
         try:
             tenant_info = get_tenant_info(tenant_id)

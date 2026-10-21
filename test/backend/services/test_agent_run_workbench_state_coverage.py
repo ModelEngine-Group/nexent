@@ -15,10 +15,10 @@ _request = base._request
 
 def _configure_early_workbench_run(monkeypatch, canonical, conversation):
     plan = SimpleNamespace(root=SimpleNamespace(identity=SimpleNamespace(agent_id=99)))
-    workbench_module = ModuleType("services.workbench_service")
+    workbench_module = ModuleType("management.services.agent.workbench")
     workbench_module.assert_workbench_version = MagicMock()
     workbench_module.resolve_workbench_config = MagicMock(return_value=(canonical, plan))
-    monkeypatch.setitem(sys.modules, "services.workbench_service", workbench_module)
+    monkeypatch.setitem(sys.modules, "management.services.agent.workbench", workbench_module)
     monkeypatch.setattr(agent_run, "ENABLE_AGENT_WORKBENCH", True)
     monkeypatch.setattr(
         agent_run,

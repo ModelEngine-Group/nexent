@@ -1,3 +1,4 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """
 Tenant management API endpoints
 """
@@ -21,15 +22,15 @@ from consts.exceptions import (
     ValidationError,
     tenant_resource_limit_error_payload,
 )
-from services.audit_service import record_security_event
-from services.tenant_service import (
+from management.services.monitor.audit import record_security_event
+from management.services.permission.identity.tenants import (
     create_tenant,
     get_tenant_info_for_user,
     get_tenants_paginated_for_user,
     update_tenant_info,
     delete_tenant,
 )
-from utils.auth_utils import get_current_user_context, get_current_user_id
+from management.services.permission.identity.authentication_helpers import get_current_user_context, get_current_user_id
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/tenants", tags=["tenants"])

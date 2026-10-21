@@ -1,3 +1,4 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 import logging
 from contextlib import asynccontextmanager
 from http import HTTPStatus
@@ -14,7 +15,7 @@ from consts.model import (
 from data_process.parse_tasks import load_chunks_from_redis
 from data_process.tasks import process_sync, submit_process_forward_chain
 from data_process.utils import get_task_details as get_task_details_util
-from services.data_process_service import get_data_process_service
+from data_process.services.tasks import get_data_process_service
 
 
 logger = logging.getLogger("data_process.app")

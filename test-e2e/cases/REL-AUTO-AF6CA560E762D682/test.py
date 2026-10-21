@@ -1,3 +1,4 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 from __future__ import annotations
 
 import logging
@@ -8,9 +9,9 @@ import pytest
 from nexent.core.concurrency import ManagerState
 
 import apps.config_app as config_app
-import services.evaluation_maintenance as evaluation_maintenance
-import services.memory_dreaming_scheduler as memory_dreaming_scheduler
-import services.startup_recovery_service as startup_recovery
+import management.services.evaluation.maintenance as evaluation_maintenance
+import management.services.memory.dreaming.scheduler as memory_dreaming_scheduler
+import management.recovery as startup_recovery
 
 
 class _Snapshot:

@@ -1,3 +1,4 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 '''D5-SPECIAL: ES vector-store stats failure must fail-open for quota checks.
 
 The durable source-file ledger is the sole quota metric; Elasticsearch physical
@@ -34,8 +35,8 @@ ES_STORE_SIZE_BYTES = int(1.5 * GB)
 @pytest.mark.stage('D5')
 def test_es_stats_fail_open_source_ledger_quota(monkeypatch, caplog):
     import management.services.knowledge_base.service as kb_service
-    import services.quota_service as quota_service
-    from services.quota_service import QuotaService
+    import management.services.knowledge_base.quota as quota_service
+    from management.services.knowledge_base.quota import QuotaService
 
     quota_service._usage_cache.clear()
     caplog.set_level(logging.WARNING)

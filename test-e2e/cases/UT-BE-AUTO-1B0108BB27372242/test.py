@@ -1,10 +1,11 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 from __future__ import annotations
 
 import logging
 
 import pytest
 
-from services.agent_repository_service import (
+from management.services.repository.agent.listing import (
     _normalize_listing_tags,
     _validate_card_fields,
 )

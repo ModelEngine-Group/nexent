@@ -1,0 +1,33 @@
+schema_version: '1.0'
+change:
+  change_id: CHAT-UNUSED-SELECTION-20261019
+  change_type: bugfix
+  bug_id: CHAT-UNUSED-SELECTION-20261019
+  title: Remove unsupported selected count from Agent discovery footer
+  description: Remove the fixed selected-zero label while retaining total count and pagination.
+  observed_behavior: Agent discovery displays a selected count despite having no selection operation.
+  expected_behavior: The footer displays total count and pagination without implying a selection capability.
+  escaped_stage: D4
+  coverage_gap:
+    type: missing_assertion
+    description: Existing discovery coverage does not reject a misleading fixed selected-zero label.
+  feature_contract_changed: false
+  affected_features:
+    existing: []
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing: []
+    added: []
+    modified: []
+    retired: []
+  traditional_ut:
+    decision: exempt
+    behaviors:
+    - No state or event behavior changes; only remove unsupported static count
+    reason: Presentation-only removal of a constant label; no state, request, event handler or pagination behavior changes. Type checking and diff inspection cover this one-line correction without a test mirroring markup.
+  notes: >-
+    Scope is frontend/app/[locale]/newchat/assistant-ui/agent-landing.tsx footer only.
+    AGENT-LIST-VIEWS owns the editor list, not this discovery entry, and is not an affected owner.
+    Referenced sibling document repository is absent. Formal feature ownership for discovery is not inferred from unrelated list coverage.

@@ -20,12 +20,12 @@ from consts.exceptions import (
     UnauthorizedError,
     tenant_resource_limit_error_payload,
 )
-from services.audit_service import record_security_event
-from services.user_service import (
+from management.services.monitor.audit import record_security_event
+from management.services.permission.identity.users import (
     delete_user_and_cleanup, get_users_for_requester, update_user_for_requester
 )
 from database.user_tenant_db import get_user_tenant_by_user_id
-from utils.auth_utils import extract_session_id_from_authorization, get_current_user_context, get_current_user_id
+from management.services.permission.identity.authentication_helpers import extract_session_id_from_authorization, get_current_user_context, get_current_user_id
 
 logger = logging.getLogger("user_app")
 router = APIRouter(prefix="/users", tags=["users"])

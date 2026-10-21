@@ -56,7 +56,7 @@ def api_fixture(monkeypatch):
                           "temperature": 0.43, "top_p": 0.78,
                           "extra_params": {"enable_thinking": True, "reasoning_effort": "medium"}}
     state = ApiFixture(TestClient(app), records, configured=[records["effort"]["model_id"]])
-    from utils.config_utils import tenant_config_manager
+    from management.services.configuration.tenant.settings import tenant_config_manager
     monkeypatch.setattr(tenant_config_manager, "get_model_config", lambda *a, **k: records["effort"])
 
     def authenticate(authorization: str | None = Header(None)):

@@ -4,13 +4,13 @@
 
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
-from datetime import datetime
+from datetime import datetime, timezone
 from uuid import uuid4
 
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.orm import Session
 from sqlalchemy.schema import CreateSchema, DropSchema
 
@@ -20,8 +20,8 @@ from database.client import db_client
 from database.db_models import ConversationRecord
 
 
-@pytest.fixture
-def persistence(monkeypatch):
+@pytest.fixture(params=["UTC", "Asia/Shanghai", "America/New_York"])
+def persistence(monkeypatch, request):
     schema = "wb_pin_test_" + uuid4().hex
     engine = db_client.engine.execution_options(schema_translate_map={"nexent": schema})
     with engine.begin() as connection:
@@ -43,6 +43,7 @@ def persistence(monkeypatch):
         @contextmanager
         def sessions():
             with Session(engine) as session, session.begin():
+                session.execute(text("SELECT set_config('TimeZone', :zone, true)"), {"zone":request.param})
                 yield session
 
         monkeypatch.setattr(workbench_pin_db, "get_db_session", sessions)
@@ -76,6 +77,7 @@ def test_authenticated_postgres_pin_persistence(persistence):
     def ids(items):
         return [item["conversation_id"] for item in items]
 
+    started = datetime.now(timezone.utc).replace(tzinfo=None)
     original = save(first, 1)
     assert save(second, 1) == original
     state = save(first, 2)
@@ -100,6 +102,13 @@ def test_authenticated_postgres_pin_persistence(persistence):
         pins = session.scalars(select(ConversationRecord).where(ConversationRecord.workbench_pinned_at.is_not(None))).all()
         assert {pin.conversation_id for pin in pins} == {1, 2}
         assert all(pin.created_by == "owner" and pin.updated_by == "owner" for pin in pins)
+        now = datetime.now(timezone.utc).replace(tzinfo=None)
+        assert all(pin.workbench_pinned_at.tzinfo is None and started <= pin.workbench_pinned_at <= now for pin in pins)
+        stored = {pin.conversation_id: pin.workbench_pinned_at for pin in pins}
+        for item in state:
+            wire = datetime.fromisoformat(item["pinned_at"])
+            assert wire.tzinfo == timezone.utc
+            assert wire.replace(tzinfo=None) == stored[item["conversation_id"]]
         conversations = session.scalars(select(ConversationRecord)).all()
         assert all(c.conversation_title == f"History {c.conversation_id}" for c in conversations)
         assert all(c.create_time == datetime(2026, 1, 1) and c.update_time == datetime(2026, 1, 2) for c in conversations)

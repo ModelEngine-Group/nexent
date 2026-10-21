@@ -83,32 +83,32 @@ from nexent.memory.models import (
 from nexent.monitor import (
     agent_monitoring_context,
 )
-from services.conversation_management_service import (
+from management.services.conversation.service import (
     persist_assistant_run_batch,
     save_message,
     update_message_status,
 )
-from services.fa_memory_extractor import (
+from management.services.memory.extraction import (
     FaMemoryExtractor,
 )
-from services.memory_backend_adapter import (
+from management.services.memory.provider import (
     _build_ingestion_event_service,
     build_memory_service_for_fa_extraction,
 )
-from services.runtime_state_service import (
+from management.services.agent.run_state import (
     runtime_state_service,
 )
-from services.streaming_channel import (
+from infrastructure.streaming.channels import (
     streaming_channel_manager,
 )
-from services.thread_lifecycle_service import (
+from infrastructure.concurrency import (
     runtime_thread_manager,
 )
-from utils.config_utils import (
+from management.services.configuration.tenant.settings import (
     tenant_config_manager,
 )
 
-from utils.runtime_output import RuntimeOutputState, is_runtime_event
+from infrastructure.runtime_output import RuntimeOutputState, is_runtime_event
 
 logger = logging.getLogger(__name__)
 _channel_cleanup_tasks: set[asyncio.Task[None]] = set()
@@ -405,6 +405,7 @@ async def _stream_agent_chunks(
                 user_id=user_id,
                 tenant_id=tenant_id,
                 status="streaming",
+                message_source=getattr(agent_request, "_message_source", "CHAT"),
             )
         except Exception as msg_exc:
             logger.error(

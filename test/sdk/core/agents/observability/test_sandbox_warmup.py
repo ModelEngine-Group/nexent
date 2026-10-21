@@ -1,3 +1,4 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """SDK-UT-013: sandbox warm-up duration, identity and parentage."""
 
 import threading
@@ -103,7 +104,7 @@ def test_sdk_ut_013_01_lazy_agent_warmups_are_timed_children_of_invocation(spans
         assert span.attributes["agent.id"] == agent_id
         assert span.attributes["user.id"] == "warmup@example.test"
         assert span.attributes["session.id"] == "42"
-        assert "langfuse.trace.name" not in span.attributes
+        assert span.attributes["langfuse.trace.name"] == "主智能体"
         assert "input.value" not in span.attributes
         executor.assert_called_once_with("[0, None]")
     probes = [s for s in spans.exporter.get_finished_spans() if s.name == "warmup-probe"]

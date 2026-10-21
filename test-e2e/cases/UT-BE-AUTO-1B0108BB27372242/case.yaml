@@ -21,7 +21,7 @@ case:
     legacy_asset_declaration: '- 无（纯逻辑校验，不依赖本地固定资产/配置）'
   steps:
   - order: 1
-    action: 直接导入 backend/services/agent_repository_service.py 中的 _normalize_listing_tags 与 _validate_card_fields，构造最小有效输入与必要依赖对象。
+    action: 直接导入 backend/management/services/repository/agent/listing.py 中的 _normalize_listing_tags 与 _validate_card_fields，构造最小有效输入与必要依赖对象。
     expected: _normalize_listing_tags 对合法列表返回去空格、去重、去空后的标签，顺序保持首次出现。
   - order: 2
     action: 对 _normalize_listing_tags 传入合法列表 [" ai ", "coding", "ai", ""]，断言返回去空格、去重、去空后的标签列表 ["ai", "coding"]，顺序保持首次出现。

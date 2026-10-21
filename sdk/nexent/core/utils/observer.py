@@ -1,4 +1,4 @@
-# Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
 import json
 import re
@@ -28,7 +28,9 @@ _ANSI_ESCAPE_PATTERN = re.compile(
 _NL2AGENT_DRAFT_SYNC_FIELDS = frozenset(
     {
         "name",
+        "display_name",
         "description",
+        "enable_protocol_repair_retry",
         "duty_prompt",
         "constraint_prompt",
         "few_shots_prompt",

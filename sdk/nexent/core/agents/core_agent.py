@@ -1305,8 +1305,7 @@ Additional Args:
             additional_args["response_format"] = CODEAGENT_RESPONSE_FORMAT
         if getattr(self.model, "supports_deferred_attempt_commit", False) is True:
             additional_args["_defer_attempt_commit"] = True
-            if legacy_code_action:
-                additional_args["_retry_empty_response"] = False
+            # Empty-stop recovery has its own one-retry bound; protocol repair stays unchanged.
 
         repair_messages = getattr(self, "_protocol_repair_messages", [])
         # Code actions retain their accepted raw stream; final envelopes keep

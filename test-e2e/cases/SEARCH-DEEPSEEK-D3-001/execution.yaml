@@ -1,0 +1,8 @@
+schema_version: '1.0'
+case_id: SEARCH-DEEPSEEK-D3-001
+implementations:
+  - framework: pytest
+    file: test_integration.py
+    selector: test_deepseek_http_sources_and_language
+acceptance_bindings:
+  AC-01: [test_deepseek_http_sources_and_language]

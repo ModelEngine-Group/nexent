@@ -1,3 +1,4 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 import asyncio
 import logging
 import re
@@ -20,12 +21,12 @@ from nexent.core.concurrency import (
     clear_default_thread_manager,
     set_default_thread_manager,
 )
-from services.thread_lifecycle_service import mcp_thread_manager
+from infrastructure.concurrency import mcp_thread_manager
 from tool_collection.mcp.local_mcp_service import (
     LOCAL_MCP_TOOL_NAME_OVERRIDES,
     local_mcp_service,
 )
-from utils.logging_utils import get_uvicorn_logging_config
+from infrastructure.logging import get_uvicorn_logging_config
 
 
 logging.config.dictConfig(get_uvicorn_logging_config(categories=["mcp"]))
@@ -461,7 +462,7 @@ class TenantMCPRouter:
             return
         if authorization:
             try:
-                from utils.auth_utils import get_current_user_id
+                from management.services.permission.identity.authentication_helpers import get_current_user_id
 
                 _, authenticated_tenant_id = get_current_user_id(authorization.decode())
             except Exception:

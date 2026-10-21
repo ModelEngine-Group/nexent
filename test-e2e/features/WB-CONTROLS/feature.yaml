@@ -13,22 +13,39 @@ feature:
     description: Direct controls open draft resource drawers with Mine/Repository and structured filtering; cancel never mounts
       resources.
   - rule_id: WB-CONTROLS-RULE-002
-    description: Above-composer creation actions select isolated modes with matching fill-only recommendations.
+    description: Above-composer creation actions select isolated modes with matching fill-only recommendations. Agent creation displays three localized workflow titles and short descriptions; selecting one fills the complete prompt without sending.
   - rule_id: WB-CONTROLS-RULE-003
     description: Shared advanced settings use temperature 0-2 and top_p 0-1 (step 0.1); untouched/reset values inherit defaults,
       explicit zero survives immutable root-only runtime snapshots, and session/model scopes remain isolated. Explicit sampling
       must not silently disappear on provider retry. Configured Agent/model defaults are displayed as numbers with exact slider
       positions without creating overrides. Null inherits per field through Agent/model configuration to shared SDK defaults
-      temperature 1.0 and top_p 1.0; read-only model-list effective_sampling uses those same defaults without filling stored values.
+      temperature 1.0 and top_p 1.0; read-only model-list effective_sampling uses those same defaults without filling stored
+      values.
   - rule_id: WB-CONTROLS-RULE-004
     description: Both entry points derive available reasoning controls from model capability regardless of saved enablement,
       forwarding supported effort enum values through existing generation paths while preserving other model parameters.
   - rule_id: WB-CONTROLS-RULE-005
-    description: Workbench, newchat and NL2Agent share the white Composer and transparent paper-plane send defaults without presentation opt-ins; supported mode and resource actions are configured independently of appearance. Newchat uses direct bottom-toolbar knowledge and skill controls with the shared resource drawers; composer spacing is optically balanced with extra top padding and a taller input, while muted toolbar and creation labels match in font size.
+    description: Workbench, newchat and NL2Agent share the white Composer and transparent paper-plane send defaults without
+      presentation opt-ins; supported mode and resource actions are configured independently of appearance. Newchat uses a direct
+      bottom-toolbar knowledge control and hides unconnected temporary skill selection; Workbench retains its skill callback.
+      Composer spacing is optically balanced
+      with extra top padding and a taller input, while muted toolbar and creation labels match in font size.
+      All shared composer inputs have no visible placeholder guidance and retain a neutral accessible label.
+      Ordinary-chat knowledge actions and editable mounts require the current Agent version's active-source retrieval
+      capability; absent, pending, failed or stale capabilities and saved scopes cannot expose the picker. Workbench
+      retains its existing independent knowledge entry, and creation modes hide resources.
+  - rule_id: WB-CONTROLS-RULE-006
+    description: Workbench reuses configuration resource controls and knowledge presentation; Agent/Skill tabs remain Mine/Repository,
+      AIDP knowledge selectors hide document/chunk counts across configuration, chat and Workbench; local selectors retain counts.
+      Agent cards and Refresh/Select-all headers match configuration; footers use Close/Confirm only and page sizes default to 10 with exactly 10/20/50, tag management is absent, and AIDP string KDS scope, per-scene local identities and persistence remain intact.
+  - rule_id: WB-CONTROLS-RULE-007
+    description: Workbench shows unified loading until conversation, models, capabilities and resource restoration settle; transient initialization warnings never appear in the composer. Completed empty or failed loads leave loading and expose persistent feedback.
   required_test_stages:
   - D4
   source:
     requirement_ids:
+    - WB-GENERAL-EXAMPLES-20261020
+    - WB-MEDICAL-EXAMPLES-20261019
     - WB-CONTROLS-20261013
     - WB-SHARED-PARAMS-20261014
     - WB-REASONING-CAPABILITY-20261014
@@ -39,5 +56,11 @@ feature:
     - WB-RESOURCE-LISTS-20261015
     - CHAT-SAMPLING-20261016
     - COMPOSER-DEFAULTS-20261018
+    - WB-LOADING-20261019
     - CHAT-SAMPLING-DISPLAY-20261019
+    - WB-SHARED-SELECTORS-20261019
+    - COMPOSER-EMPTY-HINT-20261019
+    - COMPOSER-HIDE-CHAT-SKILL-20261019
+    - COMPOSER-KNOWLEDGE-CAPABILITY-20261020
+    - AIDP-PICKER-HIDE-COUNTS-20261020
     spec_path: ../nexent-doc/nexent/agent-workbench/changes/chat-workbench-resource-controls/proposal.md

@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 from __future__ import annotations
 
 import json
@@ -66,9 +68,6 @@ def assert_complete_draft(snapshot):
     questions = snapshot.get('example_questions')
     assert isinstance(questions, list) and questions and all(
         isinstance(question, str) and question.strip() for question in questions), 'Missing example questions'
-    if any(snapshot.get(field) for field in ('tools', 'skills', 'related_agent_ids')):
-        for field in ('constraint_prompt', 'few_shots_prompt'):
-            assert isinstance(snapshot.get(field), str) and snapshot[field].strip(), f'Missing resource Prompt: {field}'
 
 
 async def _read_agent(identity, agent_id):
@@ -88,9 +87,9 @@ async def _create_draft(identity):
         'name': name,
         'display_name': 'NL2A 最小流程测试 ' + run_id,
         'description': '我是一个根据用户提供的天气文字生成简洁报告的助手。',
-        'duty_prompt': '我负责根据用户直接提供的天气文字生成简洁报告，不查询外部天气。',
-        'constraint_prompt': '仅使用用户提供的数据，不调用外部工具、技能或子智能体。',
-        'few_shots_prompt': '示例：用户提供晴天和二十度信息时，我汇总这些已提供的信息。',
+        'duty_prompt': '我负责根据用户直接提供的天气文字生成简洁报告，不查询外部天气。\n\n约束：仅使用用户提供的数据，不调用外部工具、技能或子智能体。\n\n示例：用户提供晴天和二十度信息时，我汇总这些已提供的信息。',
+        'constraint_prompt': '',
+        'few_shots_prompt': '',
         'greeting_message': '你好，我是天气助手，请告诉我你想查询的城市。',
         'example_questions': ['今天北京的天气怎么样？', '上海明天会下雨吗？'],
         'enabled': True,

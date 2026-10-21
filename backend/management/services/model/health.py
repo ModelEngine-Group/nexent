@@ -1,3 +1,4 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 import logging
 from typing import Optional
 
@@ -12,7 +13,7 @@ from management.services.model.probe import (
 )
 from nexent.core import MessageObserver
 from nexent.monitor import set_monitoring_context, set_monitoring_operation
-from services.voice_service import get_voice_service
+from management.services.model.voice import get_voice_service
 
 logger = logging.getLogger("model_health_service")
 
@@ -29,7 +30,7 @@ EMBEDDING_TYPES = {"embedding", "multi_embedding"}
 
 def update_model_record(*args, **kwargs):
     """Keep health writes synchronized with trusted runtime snapshots."""
-    from services.model_runtime_provisioning_service import update_model_record as persist
+    from management.services.model.runtime_provisioning import update_model_record as persist
 
     return persist(*args, **kwargs)
 

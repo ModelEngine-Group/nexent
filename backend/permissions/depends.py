@@ -1,3 +1,4 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """FastAPI permission dependencies."""
 
 from typing import Callable, Optional
@@ -7,7 +8,7 @@ from fastapi import Depends, Header, HTTPException
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from permissions.models import CurrentUser
 from permissions.rbac import has_permission
-from utils.auth_utils import get_current_user_context
+from management.services.permission.identity.authentication_helpers import get_current_user_context
 
 
 _bearer_scheme = HTTPBearer(auto_error=False)

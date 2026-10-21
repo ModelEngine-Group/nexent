@@ -1,3 +1,4 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """
 Unit tests for app_factory module.
 
@@ -514,7 +515,7 @@ class TestMonitoringImportFailure:
         from unittest.mock import patch, MagicMock
 
         # Mock the monitoring module to raise ImportError
-        with patch.dict('sys.modules', {'utils.monitoring': None}):
+        with patch.dict('sys.modules', {'infrastructure.observability.bootstrap': None}):
             with patch('backend.apps.app_factory.logger') as mock_logger:
                 # Create app with monitoring enabled - import will fail
                 app = create_app(enable_monitoring=True)
@@ -550,7 +551,7 @@ class TestMonitoringImportFailure:
             "No module named 'monitoring'"
         )
 
-        with patch.dict('sys.modules', {'utils.monitoring': mock_module}):
+        with patch.dict('sys.modules', {'infrastructure.observability.bootstrap': mock_module}):
             with patch('backend.apps.app_factory.logger') as mock_logger:
                 app = create_app(enable_monitoring=True)
 

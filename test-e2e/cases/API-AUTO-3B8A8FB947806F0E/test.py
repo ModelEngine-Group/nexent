@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 from __future__ import annotations
 
 import uuid
@@ -42,7 +44,7 @@ def _management_endpoints(kds_id):
         ('PUT', f'/aidp-mgmt/knowledge-bases/{kds_id}', {'json': {'name': 'auth-sweep'}}),
         ('DELETE', f'/aidp-mgmt/knowledge-bases/{kds_id}', {}),
         ('POST', f'/aidp-mgmt/knowledge-bases/{kds_id}/documents', {'files': [('files', ('auth-sweep.txt', b'content', 'text/plain'))]}),
-        ('GET', f'/aidp-mgmt/knowledge-bases/{kds_id}/documents', {}),
+        ('GET', f'/aidp-mgmt/knowledge-bases/{kds_id}/files', {}),
         ('PATCH', f'/aidp-mgmt/aidp-permissions/{kds_id}', {'json': {'ingroup_permission': 'PRIVATE'}}),
         ('GET', '/aidp-mgmt/models', {}),
     ]

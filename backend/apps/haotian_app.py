@@ -1,3 +1,4 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """
 Haotian App Layer
 FastAPI endpoints for Haotian external knowledge base operations.
@@ -13,7 +14,7 @@ from fastapi import APIRouter, Header, HTTPException, Body
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
-from services.haotian_service import (
+from management.services.knowledge_base.providers.haotian import (
     fetch_haotian_knowledge_sets_impl,
     test_haotian_connection_impl,
 )

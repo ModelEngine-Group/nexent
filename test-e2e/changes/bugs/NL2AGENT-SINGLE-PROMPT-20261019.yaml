@@ -1,0 +1,50 @@
+schema_version: '1.0'
+change:
+  change_id: NL2AGENT-SINGLE-PROMPT-20261019
+  change_type: bugfix
+  bug_id: NL2AGENT-SINGLE-PROMPT-20261019
+  title: Adapt NL2Agent generation to the single prompt editor
+  description: Generate responsibilities, constraints and resource examples in duty_prompt
+    and accept that persisted prompt at completion.
+  observed_behavior: Generation saves three separate prompts and completion requires
+    hidden resource prompt fields.
+  expected_behavior: Full generation saves one complete visible prompt, clears legacy
+    sections, and completes without requiring hidden sections.
+  escaped_stage: D3
+  coverage_gap:
+    type: missing_assertion
+    description: Existing UT encodes three prompt stages and requires a hidden few-shot
+      field; strengthen bilingual template and persisted completion assertions.
+  feature_contract_changed: false
+  affected_features:
+    existing:
+    - F-045
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing:
+    - AGT-003
+    added: []
+    modified:
+    - AGT-AUTO-6A6BC7594487E771
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    behaviors:
+    - Both localized templates save one complete prompt, clear legacy fields and advance
+      directly to conversation fields.
+    - Completion accepts empty legacy sections with or without bound resources and
+      rejects an empty visible prompt.
+    - Embedded execution tags remain valid string data and partial updates retain
+      their scope.
+    reason: The changed boundaries are template contracts and database-backed completion
+      validation; real model generation remains a separate D3 regression.
+    test_selectors:
+    - test/backend/agents/test_nl2agent_single_prompt.py
+    - test/backend/agents/test_nl2agent_agent.py
+    - test/backend/services/test_nl2agent_service.py
+  notes: 'Design: nexent-doc/nexent/nl2agent-resource-recommendation-flow/design.md,
+    2026-10-19 single prompt section. Preserve public payloads. D3 execution requires
+    an authorized running stack and machine-local real-model assets; no new formal
+    Case duplicates UT.'

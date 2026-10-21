@@ -1,3 +1,4 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 import logging
 from http import HTTPStatus
 from typing import Any
@@ -11,7 +12,7 @@ from consts.exceptions import AppException, UnauthorizedError
 
 # AppException is caught by global middleware (maps ErrorCode to HTTP status)
 from database.agent_evaluation_db import update_annotation_schema_ids
-from services.agent_evaluation_service import (
+from management.services.evaluation.runs import (
     create_agent_evaluation_run_impl,
     delete_agent_evaluation_run_impl,
     generate_analysis_report_impl,
@@ -20,9 +21,9 @@ from services.agent_evaluation_service import (
     list_agent_evaluation_cases_impl,
     list_agent_evaluations_by_agent_impl,
 )
-from services.evaluation_report_service import generate_agent_evaluation_report_impl
-from services.runtime_proxy_service import forward_agent_evaluation_trial_run
-from utils.auth_utils import get_current_user_id, get_current_user_info
+from management.services.evaluation.reporting.report import generate_agent_evaluation_report_impl
+from management.services.agent.runtime_client import forward_agent_evaluation_trial_run
+from management.services.permission.identity.authentication_helpers import get_current_user_id, get_current_user_info
 
 
 logger = logging.getLogger("agent_evaluation_app")
@@ -638,7 +639,7 @@ def _safe_extract_language(request: Request | None) -> str:
     if request is None:
         return "zh"
     try:
-        from utils.auth_utils import parse_language_from_request
+        from management.services.permission.identity.authentication_helpers import parse_language_from_request
 
         return str(parse_language_from_request(request) or "zh")
     except Exception:

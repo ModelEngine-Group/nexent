@@ -4,12 +4,13 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Tooltip } from "antd";
+import { App, Tooltip } from "antd";
 import { Settings } from "lucide-react";
 import i18n from "i18next";
 
 import { ResourceDrawer } from "./ResourceDrawer";
 import { useToolList } from "@/hooks/agent/useToolList";
+import { useScanToolList } from "@/hooks/agent/useScanToolList";
 import { useMcpServerList } from "@/hooks/mcp/useMcpServerList";
 import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
 import { useAgentStore } from "@/stores/agentStore";
@@ -108,20 +109,16 @@ const SOURCE_TABS: { key: string; labelKey: string; sourceValue: string }[] = [
 export interface ToolDrawerProps {
   open: boolean;
   onClose: () => void;
-  onOpenManageLabels?: () => void;
   currentAgentId?: number;
 }
 
-export function ToolDrawer({
-  open,
-  onClose,
-  onOpenManageLabels,
-  currentAgentId,
-}: ToolDrawerProps) {
+export function ToolDrawer({ open, onClose, currentAgentId }: ToolDrawerProps) {
   const { t } = useTranslation("common");
+  const { message } = App.useApp();
   const { confirm } = useConfirmModal();
 
-  const { selectableTools, invalidate } = useToolList({ enabled: open });
+  const { selectableTools } = useToolList({ enabled: open });
+  const scanTools = useScanToolList();
   const { user } = useAuthorizationContext();
   const tenantId = user?.tenantId || null;
   const { serverList: rawServers } = useMcpServerList({
@@ -521,9 +518,6 @@ export function ToolDrawer({
         width="min(768px, 100vw)"
         bodyClassName={cn(styles.drawer, styles.tool)}
         title={t("resourcePicker.addTool", "添加工具")}
-        tagManagement={
-          onOpenManageLabels ? { onClick: onOpenManageLabels } : undefined
-        }
         open={open}
         searchPlaceholder={t("toolPool.searchToolsPlaceholder")}
         tagFilter={
@@ -550,9 +544,17 @@ export function ToolDrawer({
         onRemoveSelected={removeTool}
         onSelectAll={handleSelectAll}
         allSelected={allVisibleToolsSelected}
+        refreshLoading={scanTools.isPending}
         onRefresh={() => {
-          void invalidate();
-          if (open && pagedTools.length > 0) void toolAssignments.refetch();
+          if (scanTools.isPending) return;
+          scanTools.mutate(undefined, {
+            onSuccess: () => {
+              message.success(t("toolManagement.message.refreshSuccess"));
+            },
+            onError: () => {
+              message.error(t("toolManagement.message.refreshFailedRetry"));
+            },
+          });
         }}
         onPageChange={setPage}
         pageSize={pageSize}

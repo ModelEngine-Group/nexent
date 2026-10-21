@@ -37,7 +37,7 @@ from consts.const import (
     MCP_REQUEST_TIMEOUT_SECONDS,
     MODEL_CONFIG_MAPPING,
 )
-from utils.mcp_url_utils import get_tenant_local_mcp_server
+from management.services.mcp.addressing import get_tenant_local_mcp_server
 from consts.model import HistoryItem, NL2AgentRunRequest, ToolSourceEnum
 from database.agent_db import (
     query_all_agent_info_by_tenant_id,
@@ -45,17 +45,16 @@ from database.agent_db import (
 )
 from database.skill_db import query_enabled_skill_instances
 from database.tool_db import query_all_enabled_tool_instances, query_all_tools
-from services.agent_draft_permission_service import (
-    AgentDraftEditError,
-    require_agent_draft_edit,
-)
-from services.thread_lifecycle_service import runtime_thread_manager
+from consts.exceptions import AgentDraftEditError
+from management.services.agent.authorization import require_agent_draft_edit
+from infrastructure.concurrency import runtime_thread_manager
 from management.services.model.run_controls import resolve_creator_model, preflight_turn_controls
 from tool_collection.mcp.nl2agent_mcp_tools import (
     AgentDraftFields,
     INSTALLED_RESOURCE_SOURCES,
     InstalledMcpToolRecommendation,
     NL2AGENT_AGENT_ID_HEADER,
+    NL2AGENT_POLICY_CLARIFICATION_HEADER,
     NL2A_MCP_LEGACY_TOOL_NAMES,
     NL2A_MCP_TOOL_NAMES,
     RecommendResourcesOutput,
@@ -67,12 +66,12 @@ from tool_collection.mcp.nl2agent_mcp_tools import (
     SEARCH_UNINSTALLED_RESOURCES_NAME,
     UNINSTALLED_RESOURCE_SOURCES,
 )
-from utils.auth_utils import get_current_user_id
-from utils.config_utils import tenant_config_manager
+from management.services.permission.identity.authentication_helpers import get_current_user_id
+from management.services.configuration.tenant.settings import tenant_config_manager
 from management.services.agent.context import (
     build_authorized_context_input,
 )
-from utils.http_client_utils import create_httpx_client
+from infrastructure.http.client import create_httpx_client
 
 logger = logging.getLogger(__name__)
 
@@ -101,9 +100,8 @@ AGENT_DRAFT_FIELD_ORDER = (
     "name",
     "display_name",
     "description",
+    "enable_protocol_repair_retry",
     "duty_prompt",
-    "constraint_prompt",
-    "few_shots_prompt",
     "greeting_message",
     "example_questions",
 )
@@ -472,7 +470,7 @@ async def _load_installed_resource_catalog(
     user_id: str,
 ) -> list[dict[str, Any]]:
     from management.services.skill.service import SkillService
-    from services.tool_configuration_service import list_all_tools
+    from management.services.tool.configuration import list_all_tools
 
     tools = await list_all_tools(tenant_id=tenant_id)
     skills = SkillService(tenant_id=tenant_id).list_visible_skills(
@@ -805,7 +803,7 @@ async def _load_internal_uninstalled_resource_catalog(
     tenant_id: str,
     user_id: str,
 ) -> list[dict[str, Any]]:
-    from services.mcp_management_service import list_community_mcp_services
+    from management.services.repository.mcp.service import list_community_mcp_services
     from services.skill_repository_service import (
         list_skill_repository_listings_impl,
     )
@@ -1169,6 +1167,22 @@ def _parse_nl2agent_card_action_agent_id(query: str) -> int | None:
     return agent_id
 
 
+def _requires_policy_clarification(query: str) -> bool:
+    """Prevent an unspecified retry request from authorizing a policy write."""
+    try:
+        action = json.loads(query)
+    except (TypeError, json.JSONDecodeError):
+        action = None
+    if isinstance(action, dict) and action.get("type") == "nl2agent_card_action":
+        return False
+    normalized = unicodedata.normalize("NFKC", query).casefold()
+    mentions_retry = "重试" in normalized or "retry" in normalized or "retries" in normalized
+    names_policy = any(term in normalized for term in (
+        "协议", "protocol", "静默修复", "silent repair", "enable_protocol_repair_retry",
+    ))
+    return mentions_retry and not names_policy
+
+
 async def _load_verified_nl2agent_state(
     *,
     agent_id: int,
@@ -1248,9 +1262,13 @@ async def _build_verified_bound_resources_context(
         "agent_id": agent_id,
         "draft_fields": (
             {
-                field_name: draft.get(field_name)
+                field_name: (
+                    draft.get(field_name) is True
+                    if field_name == "enable_protocol_repair_retry"
+                    else draft.get(field_name)
+                )
                 for field_name in AGENT_DRAFT_FIELD_ORDER
-                if draft.get(field_name) is not None
+                if field_name == "enable_protocol_repair_retry" or draft.get(field_name) is not None
             }
             if isinstance(draft, dict)
             else {}
@@ -1278,7 +1296,7 @@ async def validate_agent_generation_complete_impl(
 ) -> None:
     """Verify the final NL2Agent fields directly from persisted database state."""
 
-    draft, facts = await _load_verified_nl2agent_state(
+    draft, _facts = await _load_verified_nl2agent_state(
         agent_id=agent_id,
         tenant_id=tenant_id,
         user_id=user_id,
@@ -1294,8 +1312,6 @@ async def validate_agent_generation_complete_impl(
         raise Nl2AgentCompletionError("draft_fields_incomplete", ["description"])
 
     required_prompt_fields = ["duty_prompt", "greeting_message"]
-    if facts:
-        required_prompt_fields.extend(["constraint_prompt", "few_shots_prompt"])
     missing_prompts = [
         field_name
         for field_name in required_prompt_fields
@@ -1415,6 +1431,9 @@ async def build_nl2agent_run_info(
     if authorization:
         mcp_headers["Authorization"] = authorization
     mcp_headers[NL2AGENT_AGENT_ID_HEADER] = str(request.agent_id)
+    mcp_headers[NL2AGENT_POLICY_CLARIFICATION_HEADER] = (
+        "true" if _requires_policy_clarification(request.query) else "false"
+    )
     mcp_headers["X-Tenant-ID"] = str(tenant_id)
     mcp_headers["X-Nexent-Internal-Token"] = TOKEN
     if mcp_headers:

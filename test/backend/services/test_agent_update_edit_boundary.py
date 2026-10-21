@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """All Agent updates must enforce edit authorization before mutation."""
 
 import pytest
@@ -12,7 +14,6 @@ from management.services.agent import service
 def boundary(mocker):
     mocker.patch.object(service, "get_current_user_info", return_value=("user", "tenant", "en"))
     mocker.patch.object(service, "is_system_agent", return_value=False)
-    mocker.patch.object(service, "get_prompt_template_summary", return_value=(None, None))
     mocker.patch.object(service, "build_reasoning_snapshot", return_value=None)
     lookup = mocker.patch.object(service, "search_agent_info_by_agent_id", return_value={"agent_id": 1})
     permission = mocker.patch.object(service, "resolve_agent_list_permission", return_value="EDIT")

@@ -68,6 +68,14 @@ class ConversationRecord(TableBase):
     conversation_id = Column(Integer, Sequence(
         "conversation_record_t_conversation_id_seq", schema=SCHEMA), primary_key=True, nullable=False)
     conversation_title = Column(String(100), doc="Conversation title")
+    title_version = Column(
+        Integer, nullable=False, server_default=text("0"),
+        comment="Monotonic title revision; every stored rename advances it independently of activity",
+    )
+    last_activity_time = Column(
+        TIMESTAMP(timezone=False), nullable=True,
+        comment="Last committed visible message activity as a UTC timestamp; NULL falls back to conversation creation",
+    )
     agent_id = Column(Integer, doc="Agent ID used by the latest run in this conversation")
     chat_mode = Column(
         String(16),
@@ -98,8 +106,8 @@ class ConversationRecord(TableBase):
         doc="Canonical schema-v3 Workbench conversation declaration",
     )
     workbench_pinned_at = Column(
-        TIMESTAMP(timezone=True), nullable=True,
-        comment="Personal Workbench pin time; NULL means unpinned; independent of conversation activity",
+        TIMESTAMP(timezone=False), nullable=True,
+        comment="Personal Workbench pin time as a UTC timestamp; NULL means unpinned; independent of conversation activity",
     )
     workbench_config_version = Column(
         Integer,
@@ -124,6 +132,10 @@ class ConversationMessage(TableBase):
         Integer, doc="Sequence number for frontend display sorting")
     message_role = Column(
         String(30), doc="The role sending the message, such as system, assistant, user")
+    message_source = Column(
+        String(16), nullable=False, server_default=text("'CHAT'"),
+        comment="Trusted message origin: CHAT consumes the ordinary user-turn quota; AUTOMATION is exempt",
+    )
     message_content = Column(String, doc="The complete content of the message")
     minio_files = Column(
         String, doc="Images or documents uploaded by the user on the chat page, stored as a list")
@@ -721,8 +733,6 @@ class AgentInfo(TableBase):
         ARRAY(Integer), doc="List of model IDs, foreign key references to model_record_t.model_id, max 5 models")
     max_steps = Column(Integer, doc="Maximum number of steps")
     duty_prompt = Column(Text, doc="Duty prompt content")
-    constraint_prompt = Column(Text, doc="Constraint prompt content")
-    few_shots_prompt = Column(Text, doc="Few shots prompt content")
     parent_agent_id = Column(Integer, doc="Parent Agent ID")
     tenant_id = Column(String(100), doc="Belonging tenant")
     enabled = Column(Boolean, doc="Enabled")
@@ -735,10 +745,6 @@ class AgentInfo(TableBase):
         String(100), doc="Model name used for business logic prompt generation")
     business_logic_model_id = Column(
         Integer, doc="Model ID used for business logic prompt generation, foreign key reference to model_record_t.model_id")
-    prompt_template_id = Column(
-        Integer, doc="Prompt template ID used for business logic prompt generation")
-    prompt_template_name = Column(String(
-        100), doc="Prompt template name used for business logic prompt generation")
     group_ids = Column(String, doc="Agent group IDs list")
     is_new = Column(Boolean, default=False, doc="Whether this agent is marked as new for the user")
     current_version_no = Column(Integer, nullable=True, doc="Current published version number. NULL means no version published yet")
@@ -774,44 +780,6 @@ class AgentInfo(TableBase):
     greeting_message = Column(Text, doc="Agent greeting message displayed on chat initial screen")
     example_questions = Column(JSONB, doc="List of example questions for starting a conversation with this agent")
     icon_url = Column(String(1024), doc="Object storage key for the agent icon")
-
-
-class PromptTemplate(TableBase):
-    """
-    Prompt template table for user-defined prompt generation templates.
-    """
-    __tablename__ = "ag_prompt_template_t"
-    __table_args__ = (
-        Index(
-            "uq_prompt_template_user_name_active",
-            "tenant_id",
-            "user_id",
-            "template_name",
-            unique=True,
-            postgresql_where=text("delete_flag = 'N'"),
-        ),
-        Index(
-            "idx_ag_prompt_template_t_user",
-            "tenant_id",
-            "user_id",
-            "template_type",
-            postgresql_where=text("delete_flag = 'N'"),
-        ),
-        {"schema": SCHEMA},
-    )
-
-    template_id = Column(Integer, Sequence(
-        "ag_prompt_template_t_template_id_seq", schema=SCHEMA), primary_key=True, nullable=False, autoincrement=True, doc="Prompt template ID")
-    template_name = Column(String(100), nullable=False,
-                           doc="Prompt template name")
-    description = Column(String(500), doc="Prompt template description")
-    template_type = Column(String(50), nullable=False,
-                           default="agent_generate", doc="Prompt template type")
-    tenant_id = Column(String(100), nullable=False, doc="Tenant ID")
-    user_id = Column(String(100), nullable=False, doc="User ID")
-    template_content_zh = Column(
-        JSONB, nullable=False, doc="Chinese prompt template content")
-    template_content_en = Column(JSONB, doc="English prompt template content")
 
 
 class ToolInstance(TableBase):
@@ -1079,7 +1047,7 @@ class MemoryRecord(TableBase):
 
     This is the authoritative store for agent short-term memory, which
     additionally mirrors the content into Elasticsearch (managed by
-    ``services.memory_index_service``).
+    ``management.services.memory.index``).
 
     The isolation contract from ``memory_design.md`` is enforced by the
     database access layer, not by the schema:

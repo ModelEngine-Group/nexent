@@ -1,9 +1,10 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 from types import SimpleNamespace
 
 import pytest
 
-from services.agent_automation import capability_resolver
-from services.agent_automation.models import (
+from management.services.automation import capabilities as capability_resolver
+from contracts.automation import (
     CapabilityBinding,
     CapabilityResolution,
     CapabilityType,

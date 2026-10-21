@@ -87,7 +87,7 @@
 
 .agent-table-container .ant-table-body {
   scrollbar-width: thin;
-  scrollbar-color: #cbd5e1 transparent;
+  scrollbar-color: var(--scrollbar-thumb) transparent;
 }
 
 /* Keep both resize targets accessible beside the fixed actions column. */

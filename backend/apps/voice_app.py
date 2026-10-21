@@ -1,3 +1,4 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 import asyncio
 import logging
 from http import HTTPStatus
@@ -12,7 +13,7 @@ from consts.exceptions import (
     VoiceConfigException,
 )
 from consts.model import VoiceConnectivityRequest, VoiceConnectivityResponse
-from services.voice_service import get_voice_service
+from management.services.model.voice import get_voice_service
 
 logger = logging.getLogger("voice_app")
 

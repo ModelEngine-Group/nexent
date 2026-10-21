@@ -109,9 +109,10 @@ vi.mock(
 vi.mock(
   "../../app/[locale]/agents/[agentId]/components/agent-run-policy",
   () => ({
-    default: () => <div data-testid="run-strategy-content" />,
-    AgentProtocolRepairOption: () => (
-      <div data-testid="protocol-repair-content" />
+    default: () => (
+      <div data-testid="run-strategy-content">
+        <div data-testid="protocol-repair-content" />
+      </div>
     ),
   })
 );
@@ -228,6 +229,12 @@ describe("configuration resource grouping and preserved workflow gates", () => {
         screen.getByTestId(contentId).closest("[data-slot=collapsible-content]")
       ).toHaveAttribute("data-state", index < 6 ? "open" : "closed");
     });
+    const advanced = screen.getByTestId("agent-config-card-advanced");
+    const protocolRepair = screen.getByTestId("protocol-repair-content");
+    expect(advanced).toContainElement(protocolRepair);
+    fireEvent.click(within(advanced).getByRole("button", { expanded: false }));
+    expect(protocolRepair).toBeVisible();
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
     expect(screen.getByTestId("guardrail-content")).not.toBeVisible();
     fireEvent.click(
       screen.getByRole("button", { name: "agent.highFidelity.moreSettings" })
@@ -235,6 +242,9 @@ describe("configuration resource grouping and preserved workflow gates", () => {
     expect(screen.getByRole("dialog")).toContainElement(
       screen.getByTestId("guardrail-content")
     );
+    expect(screen.getByRole("dialog")).not.toContainElement(protocolRepair);
+    expect(screen.getAllByTestId("protocol-repair-content")).toHaveLength(1);
+    expect(protocolRepair).toBeVisible();
     const header = screen.getByTestId("agent-config-header");
     expect(scrollRegion).not.toContainElement(header);
     expect(header).toContainElement(

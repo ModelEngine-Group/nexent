@@ -1,3 +1,4 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 # D3 AGENT-IT integration test for memory pre-search (memory-presearch).
 # Case ID: AGT-AUTO-BCDD880DF58AECED
 #
@@ -141,15 +142,15 @@ def _setup_memory_runtime(monkeypatch, provider):
     monkeypatch.setattr(mod, 'get_memory_external_provider_service', lambda: provider)
 
     monkeypatch.setattr(
-        'services.memory_context_service.get_memory_context_service',
+        'management.services.memory.context.get_memory_context_service',
         lambda: context_service_stub,
     )
     monkeypatch.setattr(
-        'services.memory_backend_adapter.build_memory_service_for_agent',
+        'management.services.memory.provider.build_memory_service_for_agent',
         lambda **kwargs: None,
     )
     monkeypatch.setattr(
-        'services.memory_record_service._resolve_tenant_embedding_model_info',
+        'management.services.memory.records._resolve_tenant_embedding_model_info',
         lambda tenant_id: {'model_id': 1},
     )
     monkeypatch.setattr(

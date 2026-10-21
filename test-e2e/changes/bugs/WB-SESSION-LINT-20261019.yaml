@@ -1,0 +1,44 @@
+schema_version: '1.0'
+change:
+  change_id: WB-SESSION-LINT-20261019
+  change_type: bugfix
+  bug_id: WB-SESSION-LINT-20261019
+  title: Repair Workbench React lifecycle lint without changing session contracts
+  description: Remove render-time ref access and effect-driven derived resets while preserving snapshots and model parameter forwarding.
+  observed_behavior: WorkbenchPage reports 15 React Hooks errors and two unused-variable warnings.
+  expected_behavior: Zero lint diagnostics in the affected code with unchanged conversation identity, snapshots, configuration versions and run payloads.
+  escaped_stage: D1
+  coverage_gap:
+    type: unknown_baseline
+    description: Static lint is the direct defect detector; existing formal browser cases prove scope and run payload regression, not lint or deterministic late-response races.
+  feature_contract_changed: false
+  traditional_ut:
+    decision: strengthen
+    reason: Add targeted frontend lifecycle and scoped-state assertions; reuse existing restore, creation and model serialization UT. No Python product behavior changes.
+    behaviors:
+    - Session switches reset only session-local UI state and retain cached local snapshots.
+    - Late requests and stale callbacks do not overwrite the current conversation.
+    - Server conversation identity, config versions and model run parameters remain unchanged.
+    test_selectors:
+    - frontend/tests/workbench/ConversationScopedState.test.tsx
+    - frontend/tests/workbench/WorkbenchPageLifecycle.test.tsx
+    - frontend/tests/workbench/ConversationRestore.test.ts
+    - frontend/tests/workbench/ConversationResume.test.tsx
+    - frontend/tests/workbench/ConversationModelControls.test.tsx
+    - frontend/tests/workbench/AgentModels.test.ts
+    - frontend/tests/workbench/CreationHistory.test.ts
+    - frontend/tests/workbench/CreationRuntime.test.ts
+    - frontend/tests/workbench/WorkbenchThreadAdapter.test.ts
+    - frontend/tests/workbench/RuntimeEvents.test.ts
+    - frontend/tests/workbench/ModelSamplingMetadata.test.ts
+  affected_features:
+    existing: [WB-CONTROLS, CHAT-MODEL-CONTROLS]
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing: [WB-CONTROLS-D4-003, WB-CONTROLS-D4-004]
+    added: []
+    modified: []
+    retired: []
+  notes: Lightweight design at nexent-doc/docs/Developing/chat-workbench-session-state/design.md. No new formal Case or behavioral contract change. Static lint plus frontend UT prove this repair; existing D4 cases are regression only.

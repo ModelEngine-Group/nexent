@@ -223,15 +223,15 @@ sys.modules["management.services.agent.prompt"] = _utils_prompt_mock
 _utils_pkg.prompt_template_utils = _utils_prompt_mock
 
 # Function-body imports used by the KB / LLM / export helpers.
-sys.modules["utils.evaluation_set_excel_utils"] = MagicMock()
+sys.modules["management.services.evaluation.spreadsheet"] = MagicMock()
 sys.modules["management.services.knowledge_base.service"] = MagicMock()
 sys.modules["management.services.agent.profile"] = MagicMock()
 
 
 @pytest.fixture
 def service_module(monkeypatch):
-    if "services.evaluation_set_service" in sys.modules:
-        del sys.modules["services.evaluation_set_service"]
+    if "management.services.evaluation.sets" in sys.modules:
+        del sys.modules["management.services.evaluation.sets"]
     # Clear the package attribute so the ``from services`` below triggers a
     # fresh import (and therefore repopulates ``sys.modules``). Without this,
     # Python's attribute-on-package lookup returns the previous module object
@@ -262,7 +262,7 @@ def service_module(monkeypatch):
     sys.modules["database.client"] = db_client_mock
     _db_pkg.client = db_client_mock
 
-    from services import evaluation_set_service
+    from management.services.evaluation import sets as evaluation_set_service
 
     # Patch the names bound at module load time so the test exercises the
     # mocked implementations.
@@ -687,7 +687,7 @@ class TestExportEvaluationSet:
             MagicMock(return_value={"name": "my set"}),
         )
         monkeypatch.setattr(service, "get_evaluation_set_cases_all", MagicMock(return_value=[]))
-        excel_mock = sys.modules["utils.evaluation_set_excel_utils"]
+        excel_mock = sys.modules["management.services.evaluation.spreadsheet"]
         excel_mock.build_evaluation_set_export_bytes = MagicMock(return_value=b"xlsx")
 
         filename, payload = service.export_evaluation_set_impl(1, "t1")

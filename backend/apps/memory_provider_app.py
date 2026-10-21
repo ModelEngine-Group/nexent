@@ -1,3 +1,4 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """HTTP endpoints for external memory provider management (Phase 3).
 
 Provides CRUD operations for provider configurations, connectivity testing
@@ -40,10 +41,10 @@ from nexent.memory.providers.retry import (
     NonRetryableProviderError,
     RetryableProviderError,
 )
-from services.memory_external_provider_service import MemoryExternalProviderService
-from services.memory_provider_config_service import MemoryProviderConfigService
-from services.memory_provider_plugin_loader import PluginLoader
-from utils.auth_utils import get_current_user_id
+from management.services.memory.providers.service import MemoryExternalProviderService
+from management.services.memory.providers.configuration import MemoryProviderConfigService
+from management.services.memory.providers.plugins import PluginLoader
+from management.services.permission.identity.authentication_helpers import get_current_user_id
 
 
 logger = logging.getLogger("memory_provider_app")

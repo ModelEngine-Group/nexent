@@ -1,9 +1,11 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """Runtime outlet restoration boundaries without database or provider I/O."""
 
 from unittest.mock import Mock
 
 import pytest
-from services.model_runtime_snapshot_service import restore_runtime_model_snapshot
+from management.services.model.runtime_snapshot import restore_runtime_model_snapshot
 
 
 def test_unmigrated_record_remains_legacy():

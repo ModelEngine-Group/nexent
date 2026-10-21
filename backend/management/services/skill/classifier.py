@@ -110,6 +110,9 @@ class ContentClassifier:
             content_after_tag = self.buffer[gt_pos + 1 :]
             if not content_after_tag and not final:
                 return None
+            # A CRLF separator may itself span two observer chunks.
+            if content_after_tag == "\r" and not final:
+                return None
             if (
                 content_after_tag
                 and not content_after_tag.startswith(("\n", "\r\n"))

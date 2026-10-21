@@ -1,3 +1,5 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 "use client";
 
 import React, { useEffect, useMemo, useState } from "react";
@@ -43,8 +45,6 @@ const { TextArea } = Input;
 
 interface AgentDetail extends Agent {
   duty_prompt?: string;
-  constraint_prompt?: string;
-  few_shots_prompt?: string;
   group_ids?: number[];
 }
 
@@ -85,8 +85,6 @@ export default function AgentList({ tenantId }: { tenantId: string | null }) {
     field:
       | "description"
       | "duty_prompt"
-      | "constraint_prompt"
-      | "few_shots_prompt"
       | null;
     title: string;
     value: string;
@@ -237,8 +235,6 @@ export default function AgentList({ tenantId }: { tenantId: string | null }) {
           display_name: detail.display_name,
           description: detail.description,
           duty_prompt: detail.duty_prompt,
-          constraint_prompt: detail.constraint_prompt,
-          few_shots_prompt: detail.few_shots_prompt,
           group_ids: detail.group_ids || [],
         });
       } else {
@@ -262,7 +258,7 @@ export default function AgentList({ tenantId }: { tenantId: string | null }) {
   // Fullscreen view handlers
   const openFullscreenEdit = (
     field:
-      "description" | "duty_prompt" | "constraint_prompt" | "few_shots_prompt",
+      "description" | "duty_prompt",
     title: string
   ) => {
     const value = form.getFieldValue(field) || "";
@@ -673,80 +669,6 @@ export default function AgentList({ tenantId }: { tenantId: string | null }) {
                           openFullscreenEdit(
                             "duty_prompt",
                             t("systemPrompt.card.duty.title")
-                          )
-                        }
-                        style={{
-                          position: "absolute",
-                          right: 4,
-                          top: 4,
-                          padding: 4,
-                        }}
-                      />
-                    </Tooltip>
-                  </div>
-                </Form.Item>
-              )}
-            </Form.Item>
-
-            <Form.Item noStyle shouldUpdate>
-              {() => (
-                <Form.Item
-                  name="constraint_prompt"
-                  label={t("systemPrompt.card.constraint.title")}
-                >
-                  <div style={{ position: "relative" }}>
-                    <TextArea
-                      value={form.getFieldValue("constraint_prompt")}
-                      placeholder={t("systemPrompt.card.constraint.title")}
-                      autoSize={{ minRows: 5, maxRows: 8 }}
-                      style={{ resize: "none", paddingRight: 32 }}
-                      readOnly
-                    />
-                    <Tooltip title={t("common.fullscreen")}>
-                      <Button
-                        type="text"
-                        icon={<Maximize2 className="h-4 w-4" />}
-                        onClick={() =>
-                          openFullscreenEdit(
-                            "constraint_prompt",
-                            t("systemPrompt.card.constraint.title")
-                          )
-                        }
-                        style={{
-                          position: "absolute",
-                          right: 4,
-                          top: 4,
-                          padding: 4,
-                        }}
-                      />
-                    </Tooltip>
-                  </div>
-                </Form.Item>
-              )}
-            </Form.Item>
-
-            <Form.Item noStyle shouldUpdate>
-              {() => (
-                <Form.Item
-                  name="few_shots_prompt"
-                  label={t("systemPrompt.card.fewShots.title")}
-                >
-                  <div style={{ position: "relative" }}>
-                    <TextArea
-                      value={form.getFieldValue("few_shots_prompt")}
-                      placeholder={t("systemPrompt.card.fewShots.title")}
-                      autoSize={{ minRows: 5, maxRows: 8 }}
-                      style={{ resize: "none", paddingRight: 32 }}
-                      readOnly
-                    />
-                    <Tooltip title={t("common.fullscreen")}>
-                      <Button
-                        type="text"
-                        icon={<Maximize2 className="h-4 w-4" />}
-                        onClick={() =>
-                          openFullscreenEdit(
-                            "few_shots_prompt",
-                            t("systemPrompt.card.fewShots.title")
                           )
                         }
                         style={{

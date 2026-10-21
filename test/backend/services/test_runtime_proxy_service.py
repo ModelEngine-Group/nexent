@@ -1,3 +1,4 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """Tests for northbound-to-runtime HTTP forwarding."""
 
 import json
@@ -11,7 +12,7 @@ from consts.exceptions import (
     RuntimeUpstreamError,
 )
 from consts.model import AgentRequest
-from services import runtime_proxy_service as proxy
+from management.services.agent import runtime_client as proxy
 
 
 class TrackingStream(httpx.AsyncByteStream):

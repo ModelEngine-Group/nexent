@@ -1,3 +1,4 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """
 Northbound API with A2A support.
 
@@ -26,8 +27,8 @@ from nexent.core.concurrency import (
     clear_default_thread_manager,
     set_default_thread_manager,
 )
-from services.thread_lifecycle_service import northbound_thread_manager
-from services.runtime_state_service import runtime_state_service
+from infrastructure.concurrency import northbound_thread_manager
+from management.services.agent.run_state import runtime_state_service
 from .northbound_app import router as northbound_router
 from .northbound_knowledge_app import router as northbound_knowledge_router
 
@@ -42,7 +43,7 @@ class A2AServerSettings(BaseModel):
 
 
 from services.northbound_service import NorthboundContext
-from services.a2a_server_service import (
+from management.services.agent.a2a.service import (
     a2a_server_service,
     EndpointNotFoundError,
     AgentNotEnabledError,
@@ -56,7 +57,7 @@ logger = logging.getLogger("northbound_base_app")
 
 
 async def recover_northbound_tasks_on_startup():
-    from services.startup_recovery_service import (
+    from management.recovery import (
         recover_northbound_tasks,
         schedule_interrupted_upload_cleanup,
     )

@@ -143,8 +143,7 @@ describe("SkillDrawer external selection", () => {
       screen.getByRole("button", { name: "skillManagement.edit.title" })
     ).toBeDisabled();
   });
-  it("keeps configuration independent and places optional tag management in the list header", () => {
-    const manage = vi.fn();
+  it("keeps configuration independent without a tag management entry", () => {
     const configurable = {
       ...skill,
       permission: "EDIT",
@@ -158,14 +157,13 @@ describe("SkillDrawer external selection", () => {
       selectedSkills: [],
       groups: [{ ...groups[0], skills: [configurable] }],
     };
-    const view = render(<SkillDrawer {...props} />);
-    expect(screen.queryByRole("button", { name: "管理标签" })).toBeNull();
-    view.rerender(<SkillDrawer {...props} onOpenManageTags={manage} />);
-    const heading = document.querySelector(
-      '[data-picker-part="list-heading"]'
-    ) as HTMLElement;
-    fireEvent.click(within(heading).getByRole("button", { name: "管理标签" }));
-    expect(manage).toHaveBeenCalledOnce();
+    render(<SkillDrawer {...props} />);
+    expect(
+      screen.queryByRole("button", { name: /管理标签|标签管理/ })
+    ).toBeNull();
+    expect(
+      screen.getByRole("button", { name: "repository.tagFilter.button" })
+    ).toBeInTheDocument();
     const option = screen.getByRole("option", { name: "Alpha skill" });
     expect(within(option).getByText("Team")).toBeInTheDocument();
     expect(option.firstElementChild).toHaveAttribute("data-resource-checkbox");

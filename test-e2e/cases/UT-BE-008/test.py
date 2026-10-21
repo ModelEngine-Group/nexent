@@ -1,3 +1,4 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """D1 backend unit contracts derived from the functional baseline.
 
 These tests import production modules directly and never import Nexent's old
@@ -44,7 +45,7 @@ def _profile(version: str = "2026-01") -> SimpleNamespace:
 @STAGE
 @pytest.mark.case_id("UT-BE-008")
 def test_quota_units_are_exact_and_reject_negative_values() -> None:
-    from services.quota_service import _gb_to_bytes, _mb_to_bytes
+    from management.services.knowledge_base.quota import _gb_to_bytes, _mb_to_bytes
 
     assert _gb_to_bytes(1) == 1024**3
     assert _mb_to_bytes(1) == 1024**2
@@ -53,11 +54,3 @@ def test_quota_units_are_exact_and_reject_negative_values() -> None:
         _gb_to_bytes(-1)
     with pytest.raises(ValueError):
         _mb_to_bytes(-1)
-
-
-
-
-
-
-
-

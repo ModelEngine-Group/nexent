@@ -7,7 +7,7 @@ import logging
 from typing import Any, Dict, Optional
 
 from consts.agent import SAFE_AGENT_STREAM_ERROR_MESSAGE
-from utils.runtime_output import is_runtime_event
+from infrastructure.runtime_output import is_runtime_event
 
 try:
     from consts.agent import (

@@ -4,7 +4,10 @@
 
 import { useQueryClient } from "@tanstack/react-query";
 import { conversationService } from "@/services/conversationService";
-import { workbenchPinsQueryKey } from "@/lib/workbenchPins";
+import {
+  removeDeletedWorkbenchPins,
+  workbenchPinsQueryKey,
+} from "@/lib/workbenchPins";
 import {
   createContext,
   useContext,
@@ -53,6 +56,7 @@ export type WorkbenchSession = {
   isDictationConfigured: boolean;
   workbenchState: WorkbenchState;
   workbenchBootstrap: WorkbenchBootstrap | null;
+  isLoadingWorkbenchBootstrap: boolean;
   onWorkbenchModeChange: (
     mode: "agent_create" | "skill_create" | "generic_chat"
   ) => void;
@@ -101,11 +105,16 @@ export function WorkbenchSessionProvider({
     : undefined;
   const threadListAdapter = useMemo(
     () =>
-      createConversationThreadListAdapter("workbench", pinStorageKey, () =>
-        queryClient.ensureQueryData({
-          queryKey: workbenchPinsQueryKey(pinStorageKey),
-          queryFn: () => conversationService.getWorkbenchPins(),
-        })
+      createConversationThreadListAdapter(
+        "workbench",
+        pinStorageKey,
+        () =>
+          queryClient.ensureQueryData({
+            queryKey: workbenchPinsQueryKey(pinStorageKey),
+            queryFn: () => conversationService.getWorkbenchPins(),
+          }),
+        (conversationId) =>
+          removeDeletedWorkbenchPins(queryClient, [conversationId])
       ),
     [pinStorageKey, queryClient]
   );
@@ -116,6 +125,8 @@ export function WorkbenchSessionProvider({
   );
   const [workbenchBootstrap, setWorkbenchBootstrap] =
     useState<WorkbenchBootstrap | null>(null);
+  const [isLoadingWorkbenchBootstrap, setIsLoadingWorkbenchBootstrap] =
+    useState(true);
   const [requestedThreadId, setRequestedThreadId] = useState<
     string | undefined
   >(undefined);
@@ -132,6 +143,24 @@ export function WorkbenchSessionProvider({
     setRequestedThreadId(threadId || undefined);
   }, []);
 
+  const handleThreadIdChange = useCallback((threadId: string | undefined) => {
+    setRequestedThreadId(threadId);
+    const url = new URL(window.location.href);
+    url.searchParams.delete("thread_id");
+    url.searchParams.delete("conversation_id");
+    if (threadId && /^[1-9]\d*$/.test(threadId)) {
+      url.searchParams.set("conversation_id", threadId);
+    }
+    const nextUrl = `${url.pathname}${url.search}${url.hash}`;
+    if (
+      nextUrl !==
+      `${window.location.pathname}${window.location.search}${window.location.hash}`
+    ) {
+      // Keep the current document and its per-thread composer state mounted.
+      window.history.replaceState(window.history.state, "", nextUrl);
+    }
+  }, []);
+
   useEffect(() => {
     let cancelled = false;
     void fetchWorkbenchBootstrap()
@@ -140,6 +169,9 @@ export function WorkbenchSessionProvider({
       })
       .catch((error) => {
         log.error("[Home] Failed to load Workbench capabilities:", error);
+      })
+      .finally(() => {
+        if (!cancelled) setIsLoadingWorkbenchBootstrap(false);
       });
     return () => {
       cancelled = true;
@@ -152,6 +184,7 @@ export function WorkbenchSessionProvider({
     },
     adapter: threadListAdapter,
     threadId: requestedThreadId,
+    onThreadIdChange: handleThreadIdChange,
   });
 
   const { isLoading: isLoadingAgents, agents } = usePublishedAgentList();
@@ -183,6 +216,7 @@ export function WorkbenchSessionProvider({
     onBack: handleBack,
     workbenchState,
     workbenchBootstrap,
+    isLoadingWorkbenchBootstrap,
     onWorkbenchModeChange: handleWorkbenchModeChange,
     dispatchWorkbench,
     isDictationConfigured: isDictationConfigured(modelConfig?.stt),

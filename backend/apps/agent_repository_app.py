@@ -15,7 +15,7 @@ from consts.model import (
     SkillResolution,
     TagAssignmentFilter,
 )
-from services.agent_repository_service import (
+from management.services.repository.agent.listing import (
     check_repository_import_precheck_impl,
     create_agent_repository_listing_impl,
     delete_official_agent_impl,
@@ -29,9 +29,9 @@ from services.agent_repository_service import (
     update_agent_repository_status_impl,
     upload_agent_repository_icon_impl,
 )
-from services.audit_service import record_security_event
-from services.official_agent_sync_service import sync_official_agents
-from utils.auth_utils import get_current_user_context, get_current_user_id
+from management.services.monitor.audit import record_security_event
+from management.services.repository.agent.sync import sync_official_agents
+from management.services.permission.identity.authentication_helpers import get_current_user_context, get_current_user_id
 from consts.exceptions import (
     AgentToolImportError,
 )

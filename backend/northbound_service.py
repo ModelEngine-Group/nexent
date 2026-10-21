@@ -1,3 +1,4 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 import logging
 import logging.config
 import warnings
@@ -8,7 +9,7 @@ from dotenv import load_dotenv
 
 
 from apps.northbound_base_app import northbound_app
-from utils.logging_utils import get_uvicorn_logging_config
+from infrastructure.logging import get_uvicorn_logging_config
 
 
 warnings.filterwarnings("ignore", category=UserWarning)

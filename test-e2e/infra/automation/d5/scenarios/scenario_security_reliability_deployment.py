@@ -1,3 +1,4 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """D5 main security, reliability and deployment smoke scenarios."""
 
 from __future__ import annotations

@@ -1,3 +1,4 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """The delete-chain fixture configures aliases and later Celery imports alike."""
 from pathlib import Path
 import importlib.util
@@ -24,7 +25,7 @@ class RedisConfigurationTests(unittest.TestCase):
         modules = {
             'data_process': package,
             'data_process.app': SimpleNamespace(app=Mock()),
-            'services.redis_service': SimpleNamespace(get_redis_service=supplier),
+            'management.services.knowledge_base.task_state': SimpleNamespace(get_redis_service=supplier),
             'database.knowledge_file_lifecycle_db': SimpleNamespace(get_file_record=lookup),
         }
         spec = importlib.util.spec_from_file_location(

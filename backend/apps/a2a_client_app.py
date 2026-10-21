@@ -1,3 +1,4 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """
 A2A Client API endpoints.
 
@@ -21,16 +22,16 @@ from consts.exceptions import (
     RuntimeMetadataValidationError,
 )
 
-from services.a2a_client_service import (
+from management.services.agent.a2a.catalog import (
     a2a_client_service,
     AgentCallError,
     AgentDiscoveryError,
 )
-from services.a2a_server_service import a2a_server_service
+from management.services.agent.a2a.service import a2a_server_service
 from database import a2a_agent_db
-from services.a2a_relation_service import require_external_relation_edit
-from utils.auth_utils import get_current_user_info
-from utils.runtime_metadata_utils import (
+from management.services.agent.authorization import require_external_relation_edit
+from management.services.permission.identity.authentication_helpers import get_current_user_info
+from infrastructure.serialization.runtime_metadata import (
     validate_runtime_metadata,
 )
 
@@ -797,7 +798,7 @@ async def test_nacos_connection(
     http_request: Request = None
 ):
     """Test connectivity to Nacos server without saving the configuration."""
-    from utils.nacos_client import NacosClient, NacosConnectionError
+    from infrastructure.discovery.nacos import NacosClient, NacosConnectionError
 
     try:
         get_current_user_info(authorization, http_request)

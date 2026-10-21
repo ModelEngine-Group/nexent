@@ -15,6 +15,7 @@ import { useTranslation } from "react-i18next";
 import Image from "next/image";
 
 import { cn } from "@/lib/utils";
+import { formatModelTokenLabel } from "@/lib/modelTokenLabel";
 import { MODEL_PROVIDER_LOGOS } from "@/const/modelConfig";
 import { useModelList } from "@/hooks/model/useModelList";
 import type { ModelOption } from "@/types/modelConfig";
@@ -34,9 +35,8 @@ function iconColorFor(seed: string): string {
 function toModelItem(model: ModelOption, capabilityTags: string[]): ModelItem {
   const tags: string[] = [];
   const contextTokens = model.contextWindowTokens ?? model.maxInputTokens;
-  if (contextTokens && contextTokens > 0) {
-    tags.push(`${Math.round(contextTokens / 1000)}k`);
-  }
+  const contextLabel = formatModelTokenLabel(contextTokens);
+  if (contextLabel) tags.push(contextLabel);
   tags.push(...capabilityTags);
   return {
     id: String(model.id),

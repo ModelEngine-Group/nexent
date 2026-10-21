@@ -1,3 +1,4 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """Annotation schema management + annotation data API."""
 
 import logging
@@ -21,7 +22,7 @@ from database.evaluation_annotation_db import (
     list_annotation_schemas,
     update_annotation_schema,
 )
-from utils.auth_utils import get_current_user_id
+from management.services.permission.identity.authentication_helpers import get_current_user_id
 
 
 logger = logging.getLogger("evaluation_annotation_app")

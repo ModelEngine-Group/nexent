@@ -8,6 +8,7 @@ from typing import Any
 from sqlalchemy import func, select, text, update
 
 from consts.exceptions import ConversationNotFoundError
+from contracts.conversation import conversation_time_as_utc
 from database.client import get_db_session
 from database.db_models import ConversationRecord
 
@@ -38,7 +39,11 @@ def _list_pins(session, user_id: str) -> list[dict[str, Any]]:
             "agent_id": conversation.agent_id,
             "create_time": int(created_ms),
             "update_time": int(updated_ms),
-            "pinned_at": conversation.workbench_pinned_at.isoformat(),
+            "last_activity_time": (
+                int(conversation_time_as_utc(conversation.last_activity_time).timestamp() * 1000)
+                if conversation.last_activity_time is not None else int(created_ms)
+            ),
+            "pinned_at": conversation_time_as_utc(conversation.workbench_pinned_at).isoformat(),
         }
         for conversation, created_ms, updated_ms in rows
     ]
@@ -74,7 +79,7 @@ def set_workbench_pin(conversation_id: int, pinned: bool, user_id: str, tenant_i
                     *_owned_workbench(user_id),
                 ).scalar_subquery()
                 pinned_at = session.scalar(select(func.greatest(
-                    func.clock_timestamp(), newest + text("INTERVAL '1 microsecond'"),
+                    func.timezone("UTC", func.clock_timestamp()), newest + text("INTERVAL '1 microsecond'"),
                 )))
             session.execute(
                 update(ConversationRecord).where(

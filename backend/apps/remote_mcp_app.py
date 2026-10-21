@@ -1,3 +1,4 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 import logging
 import json
 import asyncio
@@ -32,30 +33,12 @@ from consts.model import (
     TestMcpConnectionRequest,
     ListMcpServicesQuery,
 )
-from services.remote_mcp_service import (
-    get_remote_mcp_server_list,
-    check_mcp_health_and_update_db,
-    delete_mcp_by_container_id,
-    upload_and_start_mcp_image,
-    update_remote_mcp_server_list,
-    attach_mcp_container_permissions,
-    get_mcp_record_by_id,
-    list_mcp_service_tools_by_id,
-    refresh_mcp_service_tool_count,
-    add_mcp_service,
-    add_container_mcp_service,
-    update_mcp_service,
-    update_mcp_service_enabled,
-    delete_mcp_service,
-    check_mcp_service_health,
-    test_mcp_connection,
-    check_container_port_conflict,
-    suggest_container_port,
-)
-from services.tool_configuration_service import get_tool_from_remote_mcp_server
-from services.mcp_container_service import MCPContainerManager
-from services.audit_service import record_security_event
-from utils.auth_utils import get_current_user_info
+from management.services.mcp.service import get_remote_mcp_server_list, check_mcp_health_and_update_db, delete_mcp_by_container_id, upload_and_start_mcp_image, update_remote_mcp_server_list, attach_mcp_container_permissions, get_mcp_record_by_id, list_mcp_service_tools_by_id, refresh_mcp_service_tool_count, add_container_mcp_service, update_mcp_service, update_mcp_service_enabled, delete_mcp_service, check_mcp_service_health, test_mcp_connection, check_container_port_conflict, suggest_container_port
+from management.services.mcp.registration import add_mcp_service
+from management.services.tool.discovery import get_tool_from_remote_mcp_server
+from management.services.mcp.containers import MCPContainerManager
+from management.services.monitor.audit import record_security_event
+from management.services.permission.identity.authentication_helpers import get_current_user_info
 
 router = APIRouter(prefix="/mcp")
 logger = logging.getLogger("remote_mcp_app")

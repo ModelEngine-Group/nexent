@@ -1,3 +1,4 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 import json
 import zipfile
 from pathlib import Path
@@ -6,8 +7,8 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from services import official_agent_bundle_service as bundle_service
-from services.official_agent_bundle_service import (
+from management.services.repository.agent import bundles as bundle_service
+from management.services.repository.agent.bundles import (
     MAX_BUNDLE_BYTES,
     MAX_BUNDLE_FILE_BYTES,
     OfficialAgentBundle,

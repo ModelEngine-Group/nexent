@@ -1,3 +1,5 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 /**
  * Agent generation cache utilities for persisting generation state across agent switches
  * Caches the streaming generation content to localStorage so users can resume viewing
@@ -20,10 +22,6 @@ export interface AgentGenerationCache {
   isGenerating: boolean;
   /** Generated duty prompt */
   dutyPrompt: string;
-  /** Generated constraint prompt */
-  constraintPrompt: string;
-  /** Generated few-shots prompt */
-  fewShotsPrompt: string;
   /** Generated agent name */
   agentName: string;
   /** Generated agent display name */
@@ -45,8 +43,6 @@ const DEFAULT_CACHE: AgentGenerationCache = {
   expiryMs: 30 * 60 * 1000, // 30 minutes
   isGenerating: false,
   dutyPrompt: "",
-  constraintPrompt: "",
-  fewShotsPrompt: "",
   agentName: "",
   agentDisplayName: "",
   agentDescription: "",
@@ -179,7 +175,7 @@ export function setAgentGenerationStatus(
 export function saveGeneratedField<
   K extends keyof Pick<
     AgentGenerationCache,
-    'dutyPrompt' | 'constraintPrompt' | 'fewShotsPrompt' | 'agentName' | 'agentDisplayName' | 'agentDescription' | 'greetingMessage' | 'exampleQuestions'
+    'dutyPrompt' | 'agentName' | 'agentDisplayName' | 'agentDescription' | 'greetingMessage' | 'exampleQuestions'
   >
 >(
   agentId: number,

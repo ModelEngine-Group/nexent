@@ -21,9 +21,9 @@ sys.path.insert(0, backend_dir)
 
 # Load the real sync module before this API test installs shared dependency stubs.
 # Otherwise its MagicMock remains in sys.modules when sync service tests collect.
-importlib.import_module("services.official_agent_sync_service")
-sys.modules.setdefault("services.agent_repository_service", MagicMock())
-sys.modules.setdefault("utils.auth_utils", MagicMock())
+importlib.import_module("management.services.repository.agent.sync")
+sys.modules.setdefault("management.services.repository.agent.listing", MagicMock())
+sys.modules.setdefault("management.services.permission.identity.authentication_helpers", MagicMock())
 
 consts_model = types.ModuleType("consts.model")
 

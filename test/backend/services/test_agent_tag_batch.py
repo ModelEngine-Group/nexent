@@ -11,8 +11,8 @@ from apps import tag_management_app
 from consts.model import AgentTagAssignmentBatchRequest
 from database.agent_db import query_agent_info_by_ids
 from database.tag_management_db import TagManagementDB
-from services.tag_management_service import TagManagementService
-from services.tag_resource_adapters import AuthenticatedCaller
+from management.services.tag.library import TagManagementService
+from management.services.tag.resources import AuthenticatedCaller
 
 
 @pytest.mark.parametrize("ids", [[], [0], [-1], [2**63], list(range(1, 502))])
@@ -45,7 +45,7 @@ def test_agent_batch_preserves_read_permissions_and_never_resolves_individually(
         {"agent_id": 3, "tenant_id": "tenant-a", "created_by": "other", "ingroup_permission": "NONE"},
     ])
     assignments = MagicMock(return_value={"2": [{"value_id": 9}], "1": []})
-    monkeypatch.setattr("services.tag_management_service.query_agent_info_by_ids", agents)
+    monkeypatch.setattr("management.services.tag.library.query_agent_info_by_ids", agents)
     monkeypatch.setattr(TagManagementDB, "list_resource_assignments_batch", assignments)
     monkeypatch.setattr(TagManagementService, "_resolve_assignment_resource", MagicMock(side_effect=AssertionError("N+1")))
     caller = AuthenticatedCaller("reader", "tenant-a", role="USER")

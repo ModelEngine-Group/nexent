@@ -1,6 +1,7 @@
 // Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
 import React from "react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { screen, waitFor } from "@testing-library/dom";
 import { render } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
@@ -232,12 +233,10 @@ describe("workbench new conversation", () => {
     initializeThread.mockReset().mockResolvedValue(undefined);
     updateThreadCustom.mockReset().mockResolvedValue(undefined);
     setRunConfig.mockReset();
-    runtimeMock.threads.getItemById
-      .mockReset()
-      .mockReturnValue({
-        initialize: initializeThread,
-        updateCustom: updateThreadCustom,
-      });
+    runtimeMock.threads.getItemById.mockReset().mockReturnValue({
+      initialize: initializeThread,
+      updateCustom: updateThreadCustom,
+    });
     runtimeMock.threads.getState.mockReset().mockReturnValue({
       mainThreadId: "thread-1",
     });
@@ -257,7 +256,12 @@ describe("workbench new conversation", () => {
 
   it("reloads the conversation list after starting a new conversation", async () => {
     const user = userEvent.setup();
-    render(<WorkbenchPage />);
+    const queryClient = new QueryClient();
+    render(
+      <QueryClientProvider client={queryClient}>
+        <WorkbenchPage />
+      </QueryClientProvider>
+    );
 
     expect(await screen.findByText("workbench sidebar")).toBeInTheDocument();
 

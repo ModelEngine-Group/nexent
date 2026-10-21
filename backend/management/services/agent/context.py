@@ -90,9 +90,7 @@ def _composer(language: str, is_manager: bool, prompt_bundle):
 
 
 def build_context_inputs(
-    duty: Optional[str] = None,
-    constraint: Optional[str] = None,
-    few_shots: Optional[str] = None,
+    duty_prompt: Optional[str] = None,
     language: str = "zh",
     is_manager: bool = True,
     enable_planning: bool = False,
@@ -121,7 +119,7 @@ def build_context_inputs(
     *,
     prompt_bundle,
 ) -> List[ContextItemInput]:
-    """Adapt legacy Backend callers to the SDK-owned prompt composer."""
+    """Compose authorized context from one business prompt and platform resources."""
     composer = _composer(language, is_manager, prompt_bundle)
     arguments = locals().copy()
     arguments.pop("composer")
@@ -162,9 +160,9 @@ def build_agent_run_context(
     request, user_id: str, tenant_id: str, language: str, *, extra_metadata: dict
 ):
     """Preview memory once and bind the metadata shared by both consumers."""
-    from services.memory_config_service import build_memory_context
-    from utils.monitoring import monitoring_manager
-    from utils.monitoring_identity import resolve_monitoring_user_email
+    from management.services.configuration.user.memory import build_memory_context
+    from infrastructure.observability.bootstrap import monitoring_manager
+    from management.services.monitor.identity import resolve_monitoring_user_email
 
     memory = build_memory_context(
         user_id, tenant_id, request.agent_id, skip_query=request.is_debug

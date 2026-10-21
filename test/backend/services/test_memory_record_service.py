@@ -1,4 +1,5 @@
-"""Unit tests for ``backend.services.memory_record_service`` (Phase 2).
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+"""Unit tests for ``management.services.memory.records`` (Phase 2).
 
 The tests stub the database access layer and the ES index service so we
 can verify the service's policy enforcement, idempotency handling, and
@@ -192,9 +193,9 @@ sys.modules["consts.const"] = consts_mod
 
 
 # ---------------------------------------------------------------------------
-# Stub services.memory_index_service
+# Stub management.services.memory.index
 # ---------------------------------------------------------------------------
-memory_index_service_mod = types.ModuleType("services.memory_index_service")
+memory_index_service_mod = types.ModuleType("management.services.memory.index")
 
 
 class MemoryIndexService:
@@ -206,23 +207,23 @@ class MemoryIndexService:
 
 memory_index_service_mod.MemoryIndexService = MemoryIndexService
 memory_index_service_mod.get_memory_index_service = lambda: MemoryIndexService()
-sys.modules["services.memory_index_service"] = memory_index_service_mod
-sys.modules["backend.services.memory_index_service"] = memory_index_service_mod
+sys.modules["management.services.memory.index"] = memory_index_service_mod
+sys.modules["management.services.memory.index"] = memory_index_service_mod
 
 
 # ---------------------------------------------------------------------------
-# Stub services.memory_retrieval_service for app-layer imports.
+# Stub management.services.memory.retrieval for app-layer imports.
 # ---------------------------------------------------------------------------
-memory_retrieval_service_mod = types.ModuleType("services.memory_retrieval_service")
+memory_retrieval_service_mod = types.ModuleType("management.services.memory.retrieval")
 memory_retrieval_service_mod.MemoryRetrievalService = MemoryIndexService
 memory_retrieval_service_mod.get_memory_retrieval_service = lambda: MemoryIndexService()
-sys.modules["services.memory_retrieval_service"] = memory_retrieval_service_mod
+sys.modules["management.services.memory.retrieval"] = memory_retrieval_service_mod
 
 
 # ---------------------------------------------------------------------------
 # Reload the record service so the imports pick up the stubs.
 # ---------------------------------------------------------------------------
-from backend.services import memory_record_service  # noqa: E402
+from management.services.memory import records as memory_record_service  # noqa: E402
 
 
 @pytest.fixture
@@ -494,7 +495,7 @@ def test_resolve_tenant_embedding_model_uses_configured_model(monkeypatch):
     tenant_config_db.get_single_config_info = MagicMock(
         return_value={"config_value": "42"}
     )
-    config_utils = types.ModuleType("utils.config_utils")
+    config_utils = types.ModuleType("management.services.configuration.tenant.settings")
     config_utils.tenant_config_manager = MagicMock()
     config_utils.tenant_config_manager.get_model_config.return_value = {
         "model_name": "embedding-current",
@@ -509,7 +510,7 @@ def test_resolve_tenant_embedding_model_uses_configured_model(monkeypatch):
         "database.tenant_config_db",
         tenant_config_db,
     )
-    monkeypatch.setitem(sys.modules, "utils.config_utils", config_utils)
+    monkeypatch.setitem(sys.modules, "management.services.configuration.tenant.settings", config_utils)
 
     result = memory_record_service._resolve_tenant_embedding_model_info("t1")
 
@@ -524,14 +525,14 @@ def test_resolve_tenant_embedding_model_uses_configured_model(monkeypatch):
 def test_resolve_tenant_embedding_model_requires_active_config(monkeypatch):
     tenant_config_db = types.ModuleType("database.tenant_config_db")
     tenant_config_db.get_single_config_info = MagicMock(return_value={})
-    config_utils = types.ModuleType("utils.config_utils")
+    config_utils = types.ModuleType("management.services.configuration.tenant.settings")
     config_utils.tenant_config_manager = MagicMock()
     monkeypatch.setitem(
         sys.modules,
         "database.tenant_config_db",
         tenant_config_db,
     )
-    monkeypatch.setitem(sys.modules, "utils.config_utils", config_utils)
+    monkeypatch.setitem(sys.modules, "management.services.configuration.tenant.settings", config_utils)
 
     assert (
         memory_record_service._resolve_tenant_embedding_model_info("t1")
@@ -549,14 +550,14 @@ def test_resolve_tenant_embedding_model_lookup_exception(monkeypatch):
         raise RuntimeError("config db down")
 
     tenant_config_db.get_single_config_info = _raise
-    config_utils = types.ModuleType("utils.config_utils")
+    config_utils = types.ModuleType("management.services.configuration.tenant.settings")
     config_utils.tenant_config_manager = MagicMock()
     monkeypatch.setitem(
         sys.modules,
         "database.tenant_config_db",
         tenant_config_db,
     )
-    monkeypatch.setitem(sys.modules, "utils.config_utils", config_utils)
+    monkeypatch.setitem(sys.modules, "management.services.configuration.tenant.settings", config_utils)
 
     assert (
         memory_record_service._resolve_tenant_embedding_model_info("t1")
@@ -570,7 +571,7 @@ def test_resolve_tenant_embedding_model_missing_model_config(monkeypatch):
     tenant_config_db.get_single_config_info = MagicMock(
         return_value={"config_value": "42"}
     )
-    config_utils = types.ModuleType("utils.config_utils")
+    config_utils = types.ModuleType("management.services.configuration.tenant.settings")
     config_utils.tenant_config_manager = MagicMock()
     config_utils.tenant_config_manager.get_model_config.return_value = None
     monkeypatch.setitem(
@@ -578,7 +579,7 @@ def test_resolve_tenant_embedding_model_missing_model_config(monkeypatch):
         "database.tenant_config_db",
         tenant_config_db,
     )
-    monkeypatch.setitem(sys.modules, "utils.config_utils", config_utils)
+    monkeypatch.setitem(sys.modules, "management.services.configuration.tenant.settings", config_utils)
 
     assert (
         memory_record_service._resolve_tenant_embedding_model_info("t1")
@@ -592,7 +593,7 @@ def test_resolve_tenant_embedding_model_incomplete_config(monkeypatch):
     tenant_config_db.get_single_config_info = MagicMock(
         return_value={"config_value": "42"}
     )
-    config_utils = types.ModuleType("utils.config_utils")
+    config_utils = types.ModuleType("management.services.configuration.tenant.settings")
     config_utils.tenant_config_manager = MagicMock()
     config_utils.tenant_config_manager.get_model_config.return_value = {
         "model_name": "embedding-x",
@@ -604,7 +605,7 @@ def test_resolve_tenant_embedding_model_incomplete_config(monkeypatch):
         "database.tenant_config_db",
         tenant_config_db,
     )
-    monkeypatch.setitem(sys.modules, "utils.config_utils", config_utils)
+    monkeypatch.setitem(sys.modules, "management.services.configuration.tenant.settings", config_utils)
 
     assert (
         memory_record_service._resolve_tenant_embedding_model_info("t1")
@@ -617,7 +618,7 @@ def test_resolve_tenant_embedding_model_invalid_dimension(monkeypatch):
     tenant_config_db.get_single_config_info = MagicMock(
         return_value={"config_value": "42"}
     )
-    config_utils = types.ModuleType("utils.config_utils")
+    config_utils = types.ModuleType("management.services.configuration.tenant.settings")
     config_utils.tenant_config_manager = MagicMock()
     config_utils.tenant_config_manager.get_model_config.return_value = {
         "model_name": "embedding-x",
@@ -629,7 +630,7 @@ def test_resolve_tenant_embedding_model_invalid_dimension(monkeypatch):
         "database.tenant_config_db",
         tenant_config_db,
     )
-    monkeypatch.setitem(sys.modules, "utils.config_utils", config_utils)
+    monkeypatch.setitem(sys.modules, "management.services.configuration.tenant.settings", config_utils)
 
     assert (
         memory_record_service._resolve_tenant_embedding_model_info("t1")
@@ -643,7 +644,7 @@ def test_resolve_tenant_embedding_model_default_api_key(monkeypatch):
     tenant_config_db.get_single_config_info = MagicMock(
         return_value={"config_value": "42"}
     )
-    config_utils = types.ModuleType("utils.config_utils")
+    config_utils = types.ModuleType("management.services.configuration.tenant.settings")
     config_utils.tenant_config_manager = MagicMock()
     config_utils.tenant_config_manager.get_model_config.return_value = {
         "model_name": "embedding-x",
@@ -658,7 +659,7 @@ def test_resolve_tenant_embedding_model_default_api_key(monkeypatch):
         "database.tenant_config_db",
         tenant_config_db,
     )
-    monkeypatch.setitem(sys.modules, "utils.config_utils", config_utils)
+    monkeypatch.setitem(sys.modules, "management.services.configuration.tenant.settings", config_utils)
 
     info = memory_record_service._resolve_tenant_embedding_model_info("t1")
     assert info is not None

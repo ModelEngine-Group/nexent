@@ -1,3 +1,4 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """Unit tests for the Celery-prefork data-process service entrypoint."""
 
 import importlib.util
@@ -27,7 +28,7 @@ def service_module(monkeypatch):
             self.routers.append(router)
 
     fastapi.FastAPI = FakeFastAPI
-    logging_utils = types.ModuleType("utils.logging_utils")
+    logging_utils = types.ModuleType("infrastructure.logging")
     logging_utils.configure_logging = MagicMock()
     logging_utils.get_uvicorn_logging_config = MagicMock(return_value={})
     constants = types.ModuleType("consts.const")
@@ -48,7 +49,7 @@ def service_module(monkeypatch):
         "uvicorn": uvicorn,
         "dotenv": dotenv,
         "fastapi": fastapi,
-        "utils.logging_utils": logging_utils,
+        "infrastructure.logging": logging_utils,
         "consts.const": constants,
     }.items():
         monkeypatch.setitem(sys.modules, name, module)

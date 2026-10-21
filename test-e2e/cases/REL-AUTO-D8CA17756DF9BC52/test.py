@@ -1,3 +1,4 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """D5 cancellation and thread-lifecycle contract for NL2Agent streaming."""
 
 from __future__ import annotations

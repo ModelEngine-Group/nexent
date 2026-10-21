@@ -5,7 +5,7 @@ import { screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { expect, it, vi } from "vitest";
 import { render } from "./resourceDrawerTestUtils";
-import { ResourceTagManagementModal } from "@/components/resource-picker/ResourceTagManagementModal";
+import ResourceTagAssignmentModal from "@/components/tag/ResourceTagAssignmentModal";
 import { tagManagementApi } from "@/services/tagManagementService";
 import type { TagAssignment, TagDefinition } from "@/types/tagManagement";
 
@@ -18,9 +18,10 @@ vi.mock("@/services/tagManagementService", () => ({
   tagManagementApi: { getAssignments: vi.fn(), replaceAssignments: vi.fn() },
 }));
 
-it("saves unified assignments only for the editable resource and refreshes its displayed tags", async () => {
+it("saves assignments through the reachable editor and disables readonly tag inputs", async () => {
   const user = userEvent.setup();
   const onSaved = vi.fn();
+  const onClose = vi.fn();
   const definition = {
     definition_id: 8,
     definition_key: "department",
@@ -61,22 +62,19 @@ it("saves unified assignments only for the editable resource and refreshes its d
       };
     }
   );
-  render(
+  const view = render(
     <App>
-      <ResourceTagManagementModal
+      <ResourceTagAssignmentModal
+        open
         resourceType="knowledge_base"
+        resourceId="kb-index"
         definitions={[definition]}
-        onClose={vi.fn()}
+        canEdit
+        onClose={onClose}
         onSaved={onSaved}
-        resources={[
-          { id: "kb-index", name: "Editable knowledge", canEdit: true },
-          { id: "readonly", name: "Read-only knowledge", canEdit: false },
-        ]}
       />
     </App>
   );
-  expect(screen.getAllByRole("button", { name: "管理标签" })[1]).toBeDisabled();
-  await user.click(screen.getAllByRole("button", { name: "管理标签" })[0]);
   await waitFor(() =>
     expect(
       screen
@@ -105,9 +103,36 @@ it("saves unified assignments only for the editable resource and refreshes its d
     )
   );
   await waitFor(() => expect(onSaved).toHaveBeenCalledOnce());
-  expect(
-    await screen.findByLabelText("Department: Finance", {
-      selector: ".ant-tag",
+  expect(onSaved).toHaveBeenCalledWith(
+    expect.objectContaining({
+      resource_id: "kb-index",
+      assignments: [
+        expect.objectContaining({ value_id: 9, display_value: "Finance" }),
+      ],
     })
-  ).toBeInTheDocument();
+  );
+  expect(onClose).toHaveBeenCalledOnce();
+
+  view.rerender(
+    <App>
+      <ResourceTagAssignmentModal
+        open
+        resourceType="knowledge_base"
+        resourceId="readonly"
+        definitions={[definition]}
+        canEdit={false}
+        onClose={onClose}
+        onSaved={onSaved}
+      />
+    </App>
+  );
+  await waitFor(() =>
+    expect(tagManagementApi.getAssignments).toHaveBeenLastCalledWith(
+      "knowledge_base",
+      "readonly",
+      expect.any(Object)
+    )
+  );
+  expect(screen.getByRole("combobox")).toBeDisabled();
+  expect(tagManagementApi.replaceAssignments).toHaveBeenCalledOnce();
 });

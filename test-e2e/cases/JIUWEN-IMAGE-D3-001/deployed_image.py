@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """Qualify an authorized image through the deployed assistant without altering its configuration."""
 
 import json
@@ -7,7 +9,7 @@ import time
 import httpx
 from database.client import get_db_session
 from database.db_models import AgentInfo, ConversationMessage, ConversationRecord
-from utils.auth_utils import generate_session_jwt
+from management.services.permission.identity.authentication_helpers import generate_session_jwt
 
 
 def main():

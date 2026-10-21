@@ -4,6 +4,8 @@ import { createRef, type ReactNode } from "react";
 import { fireEvent, render, screen } from "@testing-library/react";
 import { beforeEach, expect, it, vi } from "vitest";
 import type { ChatModelAdapter } from "@assistant-ui/react";
+import zh from "@/public/locales/zh/common.json";
+import en from "@/public/locales/en/common.json";
 import type { ThreadProps } from "@/app/newchat/assistant-ui/thread";
 import {
   Nl2AgentChatPanel,
@@ -14,6 +16,7 @@ const fixture = vi.hoisted(() => {
   const state = { isRunning: false };
   return {
     state,
+    locale: null as "zh" | "en" | null,
     controls: {
       selectedModelId: "3",
       onModelChange: vi.fn(),
@@ -57,7 +60,17 @@ const fixture = vi.hoisted(() => {
 
 vi.mock("react-i18next", async (importOriginal) => ({
   ...(await importOriginal<typeof import("react-i18next")>()),
-  useTranslation: () => ({ t: (key: string) => key }),
+  useTranslation: () => ({
+    t: (key: string) =>
+      fixture.locale
+        ? ((
+            (fixture.locale === "zh" ? zh : en) as unknown as Record<
+              string,
+              string
+            >
+          )[key] ?? key)
+        : key,
+  }),
 }));
 vi.mock("@assistant-ui/react", () => ({
   AssistantRuntimeProvider: ({ children }: { children: ReactNode }) => children,
@@ -94,12 +107,13 @@ vi.mock("@/app/newchat/assistant-ui/thread", () => ({
 beforeEach(() => {
   vi.clearAllMocks();
   fixture.state.isRunning = false;
+  fixture.locale = null;
   fixture.controls.canCreate = true;
   fixture.controls.canSend = true;
 });
 
 it("keeps tenant model controls connected while shared suggestions only fill input", () => {
-  render(<Nl2AgentChatPanel agentId={42} />);
+  render(<Nl2AgentChatPanel agentId={42} agentDescription="Existing agent" />);
   const props = fixture.thread.mock.calls.at(-1)![0] as ThreadProps;
   expect(props).toMatchObject({
     modelSelectionScope: "tenant",
@@ -132,12 +146,24 @@ it("keeps tenant model controls connected while shared suggestions only fill inp
   expect(fixture.remoteRun).not.toHaveBeenCalled();
 });
 
-it.each(["permission", "disabled", "running"])(
-  "blocks welcome actions when %s",
-  (condition) => {
+it.each(
+  ["", "Existing agent"].flatMap((agentDescription) =>
+    ["permission", "disabled", "running"].map((condition) => ({
+      agentDescription,
+      condition,
+    }))
+  )
+)(
+  "blocks welcome actions when $condition with description '$agentDescription'",
+  ({ agentDescription, condition }) => {
     fixture.controls.canCreate = condition !== "permission";
     fixture.state.isRunning = condition === "running";
-    render(<Nl2AgentChatPanel disabled={condition === "disabled"} />);
+    render(
+      <Nl2AgentChatPanel
+        disabled={condition === "disabled"}
+        agentDescription={agentDescription}
+      />
+    );
     for (const button of screen.getAllByRole("button"))
       expect(button).toBeDisabled();
     const props = fixture.thread.mock.calls.at(-1)![0] as ThreadProps;
@@ -191,4 +217,77 @@ it("blocks invalid-model sends and imperative prompts without a creation target"
   view.rerender(<Nl2AgentChatPanel ref={ref} agentId={null} />);
   ref.current!.sendPrompt("create");
   expect(fixture.runtime.thread.append).not.toHaveBeenCalled();
+});
+
+it.each([undefined, null, "", " \n\t "])(
+  "shows workbench creation examples for description %s",
+  (agentDescription) => {
+    render(
+      <Nl2AgentChatPanel agentId={42} agentDescription={agentDescription} />
+    );
+    expect(screen.getAllByRole("button")).toHaveLength(3);
+    expect(
+      screen.getByText(
+        "workbench.creationExamples.agent.documentOrganizer.title"
+      )
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByText("nl2agent.suggestions.generatePrompts.title")
+    ).not.toBeInTheDocument();
+  }
+);
+
+it.each(["zh", "en"] as const)(
+  "uses current workbench creation copy and complete prompts in %s without sending",
+  (locale) => {
+    fixture.locale = locale;
+    const copy = (locale === "zh" ? zh : en) as unknown as Record<
+      string,
+      string
+    >;
+    render(<Nl2AgentChatPanel agentId={42} />);
+    const keys = ["documentOrganizer", "medicalBriefing", "eventPromotion"];
+    for (const key of keys) {
+      const prefix = `workbench.creationExamples.agent.${key}`;
+      const button = screen.getByRole("button", {
+        name: `${copy[`${prefix}.title`]} ${copy[`${prefix}.description`]}`,
+      });
+      expect(button).not.toHaveTextContent(copy[prefix]);
+      fireEvent.click(button);
+      expect(fixture.runtime.thread.composer.setText).toHaveBeenLastCalledWith(
+        copy[prefix]
+      );
+    }
+    const props = fixture.thread.mock.calls.at(-1)![0] as ThreadProps;
+    expect(props.agent?.example_questions).toEqual(
+      keys.map((key) => copy[`workbench.creationExamples.agent.${key}`])
+    );
+    expect(fixture.runtime.thread.append).not.toHaveBeenCalled();
+    expect(fixture.remoteRun).not.toHaveBeenCalled();
+  }
+);
+
+it("switches examples on description changes while retaining the visibility opt-out", () => {
+  const view = render(<Nl2AgentChatPanel agentId={42} agentDescription="" />);
+  view.rerender(
+    <Nl2AgentChatPanel agentId={42} agentDescription=" Existing agent " />
+  );
+  expect(screen.getAllByRole("button")).toHaveLength(4);
+  expect(
+    screen.getByText("nl2agent.suggestions.generatePrompts.title")
+  ).toBeInTheDocument();
+  view.rerender(<Nl2AgentChatPanel agentId={42} agentDescription="" />);
+  expect(screen.getAllByRole("button")).toHaveLength(3);
+  for (const agentDescription of ["", "Existing agent"]) {
+    view.rerender(
+      <Nl2AgentChatPanel
+        agentId={42}
+        agentDescription={agentDescription}
+        showOptimizationSuggestions={false}
+      />
+    );
+    expect(screen.queryByRole("button")).not.toBeInTheDocument();
+  }
+  expect(fixture.runtime.thread.append).not.toHaveBeenCalled();
+  expect(fixture.runtime.thread.cancelRun).not.toHaveBeenCalled();
 });

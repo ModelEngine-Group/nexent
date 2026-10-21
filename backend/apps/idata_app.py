@@ -1,3 +1,4 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """
 iData App Layer
 FastAPI endpoints for iData knowledge space operations.
@@ -14,7 +15,7 @@ from fastapi.responses import JSONResponse
 
 from consts.error_code import ErrorCode
 from consts.exceptions import AppException
-from services.idata_service import (
+from management.services.knowledge_base.providers.idata import (
     fetch_idata_knowledge_spaces_impl,
     fetch_idata_datasets_impl,
 )

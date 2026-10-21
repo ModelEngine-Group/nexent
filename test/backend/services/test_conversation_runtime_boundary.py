@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """Bind server-saved message boundaries without trusting the client history."""
 from types import SimpleNamespace
 from unittest.mock import Mock
@@ -7,7 +9,7 @@ import pytest
 
 @pytest.mark.parametrize("history", [None, [], [{"role": "user", "content": "Forged old turn"}]])
 def test_user_save_uses_database_index(monkeypatch, history):
-    import services.conversation_management_service as module
+    import management.services.conversation.service as module
     append = Mock(return_value=(401, 10))
     monkeypatch.setattr(module, "append_conversation_user_message", append)
     request = SimpleNamespace(conversation_id=7, query="Current", history=history, minio_files=[])

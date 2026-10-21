@@ -1,3 +1,5 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 "use client";
 
 import { useEffect, useState } from "react";
@@ -84,17 +86,17 @@ export default function AgentRepositoryPage() {
   return (
     <ConfigProvider theme={agentRepositoryTheme}>
       <div className="flex h-full min-h-0 w-full min-w-0 flex-col">
-        <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden [scrollbar-gutter:stable]">
+        <div className="min-h-0 flex-1 overflow-hidden">
           <motion.div
             initial="initial"
             animate="in"
             exit="out"
             variants={pageVariants}
             transition={pageTransition}
-            className="w-full h-full px-4 py-8 sm:px-6 sm:py-10 xl:px-16"
+            className="flex h-full min-h-0 w-full flex-col px-4 py-8 sm:px-6 sm:py-10 xl:px-16"
           >
-            <div className="flex flex-col gap-6">
-              <section className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+            <div className="flex min-h-0 flex-1 flex-col gap-6">
+              <section className="flex shrink-0 flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
                 <div className="flex items-start gap-4">
                   <div className="flex size-14 shrink-0 items-center justify-center rounded-2xl bg-primary/10 text-primary shadow-sm">
                     <Bot className="size-7" />
@@ -113,7 +115,7 @@ export default function AgentRepositoryPage() {
               <Tabs
                 value={tab}
                 onValueChange={(value) => setTab(value as AgentRepositoryTab)}
-                className="w-full"
+                className="w-full shrink-0"
               >
                 <TabsList className="flex h-auto w-full justify-start gap-6 overflow-x-auto rounded-none border-b border-slate-200 bg-transparent p-0 dark:border-slate-700">
                   <TabsTrigger
@@ -157,19 +159,24 @@ export default function AgentRepositoryPage() {
                 </TabsList>
               </Tabs>
 
-              <div hidden={!isRepositoryTab}>
-                <AgentSpace active={isRepositoryTab} />
-              </div>
-              {isAdmin ? (
-                <div hidden={!isReviewTab}>
-                  <ReviewCenter active={isReviewTab} />
+              <div
+                data-testid="repository-tab-content"
+                className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden pr-4 pb-1 pl-px [scrollbar-gutter:stable]"
+              >
+                <div hidden={!isRepositoryTab}>
+                  <AgentSpace active={isRepositoryTab} />
                 </div>
-              ) : null}
-              <div hidden={!isMineTab}>
-                <MyAgent
-                  active={isMineTab}
-                  onTotalChange={setActiveMineCount}
-                />
+                {isAdmin ? (
+                  <div hidden={!isReviewTab}>
+                    <ReviewCenter active={isReviewTab} />
+                  </div>
+                ) : null}
+                <div hidden={!isMineTab}>
+                  <MyAgent
+                    active={isMineTab}
+                    onTotalChange={setActiveMineCount}
+                  />
+                </div>
               </div>
             </div>
           </motion.div>

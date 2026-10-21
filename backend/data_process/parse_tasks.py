@@ -1,3 +1,4 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """Celery tasks that execute CPU-heavy parsing in prefork children.
 
 This module intentionally has no top-level import of the SDK Core or any
@@ -25,11 +26,11 @@ from consts.const import (
     DP_REDIS_CHUNKS_WAIT_TIMEOUT_S,
     REDIS_BACKEND_URL,
 )
-from utils.knowledge_ingestion_errors import (
+from infrastructure.ingestion.errors import (
     ClassifiedIngestionException,
     classify_ingestion_exception,
 )
-from utils.knowledge_telemetry import trace_knowledge_operation
+from infrastructure.observability.knowledge import trace_knowledge_operation
 
 from .app import app
 from .parser_runtime import ensure_parser_runtime, get_parser_runtime

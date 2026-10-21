@@ -41,9 +41,9 @@ from consts.model import (
 )
 from database.role_permission_db import check_role_permission
 from fastapi import APIRouter, Header, HTTPException, Query
-from services.tag_management_service import TagManagementService
-from services.tag_resource_adapters import AuthenticatedCaller
-from utils.auth_utils import get_current_user_context
+from management.services.tag.library import TagManagementService
+from management.services.tag.resources import AuthenticatedCaller
+from management.services.permission.identity.authentication_helpers import get_current_user_context
 
 router = APIRouter(prefix="/tag-libraries", tags=["tag-libraries"])
 TAG_CONFLICT_RESPONSES = {409: {"model": TagHTTPConflictResponse}}

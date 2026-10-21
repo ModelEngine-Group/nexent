@@ -1,3 +1,4 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """FastAPI App layer for model management endpoints.
 
 This module exposes HTTP endpoints under the prefix "/model". It follows the App
@@ -46,7 +47,7 @@ from fastapi.responses import JSONResponse
 from fastapi.encoders import jsonable_encoder
 from http import HTTPStatus
 from typing import Annotated, Any, List, Optional
-from services.audit_service import record_security_event
+from management.services.monitor.audit import record_security_event
 from management.services.model.health import (
     check_model_connectivity,
     verify_model_config_connectivity,
@@ -76,7 +77,7 @@ from management.services.model.reasoning import (
 )
 from permissions.depends import authenticate, require
 from permissions.models import CurrentUser
-from utils.auth_utils import get_current_user_id
+from management.services.permission.identity.authentication_helpers import get_current_user_id
 from consts.exceptions import TokenExpiredError, ModelProviderError
 from nexent.core.concurrency import run_blocking
 from database.model_management_db import get_model_by_model_id

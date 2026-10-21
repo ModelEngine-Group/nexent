@@ -1,8 +1,9 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """Unit tests for bounded Workbench Skill file snapshots."""
 
 import pytest
 
-from services import workbench_service
+from management.services.agent import workbench as workbench_service
 
 
 def test_ut_be_wb_011_capture_freezes_files_and_cleans_temporary_copy(

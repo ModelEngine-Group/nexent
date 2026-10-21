@@ -9,12 +9,12 @@ from unittest.mock import Mock
 
 import pytest
 from nexent.core.agents.agent_model import AgentConfig, ModelConfig
-from services.model_runtime_options_service import compile_model_runtime_profile
-from services.model_runtime_provisioning_service import (
+from management.services.model.runtime_options import compile_model_runtime_profile
+from management.services.model.runtime_provisioning import (
     build_runtime_outlet_snapshot,
     model_source_fingerprint,
 )
-from services.model_runtime_snapshot_service import restore_runtime_model_snapshot
+from management.services.model.runtime_snapshot import restore_runtime_model_snapshot
 
 
 @pytest.fixture

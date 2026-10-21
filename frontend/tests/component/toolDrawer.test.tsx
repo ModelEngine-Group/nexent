@@ -1,6 +1,7 @@
 // Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
 import { fireEvent, screen, waitFor, within } from "@testing-library/react";
+import { App } from "antd";
 import { describe, expect, it, vi } from "vitest";
 import { render, changePageSize } from "./resourceDrawerTestUtils";
 import { ToolDrawer } from "@/components/resource-picker/ToolDrawer";
@@ -27,6 +28,13 @@ const state = vi.hoisted(() => ({
       initParams: [],
     },
   ],
+}));
+vi.mock("@/services/mcpService", () => ({
+  updateToolList: vi.fn(async () => ({
+    success: true,
+    data: {},
+    message: "ok",
+  })),
 }));
 vi.mock("@/services/tagManagementService", () => ({
   tagManagementApi: {
@@ -90,7 +98,11 @@ describe("ToolDrawer shared rows", () => {
       name: `Tool ${String(index + 1).padStart(2, "0")}`,
     }));
     try {
-      render(<ToolDrawer open onClose={vi.fn()} />);
+      render(
+        <App>
+          <ToolDrawer open onClose={vi.fn()} />
+        </App>
+      );
       expect(screen.getAllByRole("option")).toHaveLength(10);
       await waitFor(() =>
         expect(
@@ -133,17 +145,19 @@ describe("ToolDrawer shared rows", () => {
     }
   });
 
-  it("keeps configuration separate from selection and hides optional tag management", async () => {
-    const manage = vi.fn();
+  it("keeps configuration separate from selection without a tag management entry", async () => {
     const props = { open: true, onClose: vi.fn() };
-    const view = render(<ToolDrawer {...props} />);
-    expect(screen.queryByRole("button", { name: "管理标签" })).toBeNull();
-    view.rerender(<ToolDrawer {...props} onOpenManageLabels={manage} />);
-    const heading = document.querySelector(
-      '[data-picker-part="list-heading"]'
-    ) as HTMLElement;
-    fireEvent.click(within(heading).getByRole("button", { name: "管理标签" }));
-    expect(manage).toHaveBeenCalledOnce();
+    render(
+      <App>
+        <ToolDrawer {...props} />
+      </App>
+    );
+    expect(
+      screen.queryByRole("button", { name: /管理标签|标签管理/ })
+    ).toBeNull();
+    expect(
+      screen.getByRole("button", { name: "repository.tagFilter.button" })
+    ).toBeInTheDocument();
     const option = screen.getByRole("option", { name: "Alpha tool" });
     expect(option.firstElementChild).toHaveAttribute("data-resource-checkbox");
     expect(within(option).getByText("Team")).toBeInTheDocument();
@@ -160,7 +174,11 @@ describe("ToolDrawer shared rows", () => {
   });
 
   it("prevents unavailable tools from being selected or configured", () => {
-    render(<ToolDrawer open onClose={vi.fn()} />);
+    render(
+      <App>
+        <ToolDrawer open onClose={vi.fn()} />
+      </App>
+    );
     const option = screen.getByRole("option", { name: "Blocked tool" });
     expect(option).toBeDisabled();
     fireEvent.click(option);

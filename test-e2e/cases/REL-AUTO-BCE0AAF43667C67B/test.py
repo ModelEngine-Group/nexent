@@ -1,3 +1,4 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 from __future__ import annotations
 
 import httpx
@@ -7,9 +8,9 @@ from fastapi.encoders import jsonable_encoder
 from consts.const import NORTHBOUND_THREAD_SHUTDOWN_GRACE_SECONDS
 from consts.task_recovery import NORTHBOUND_SERVICE_NAME
 from nexent.core.concurrency import ManagerState, get_default_thread_manager
-from services import startup_recovery_service
-from services.runtime_state_service import runtime_state_service
-from services.thread_lifecycle_service import northbound_thread_manager
+from management import recovery as startup_recovery_service
+from management.services.agent.run_state import runtime_state_service
+from infrastructure.concurrency import northbound_thread_manager
 
 
 @pytest.mark.asyncio

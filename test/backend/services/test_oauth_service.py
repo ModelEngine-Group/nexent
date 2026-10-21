@@ -1,3 +1,4 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 import sys
 import os
 import unittest
@@ -258,8 +259,8 @@ oauth_providers_mock.GITHUB_PROVIDER = GITHUB_DEF
 oauth_providers_mock.WECHAT_PROVIDER = WECHAT_DEF
 sys.modules["consts.oauth_providers"] = oauth_providers_mock
 
-import services.oauth_service as oauth_service_module
-from services.oauth_service import (
+import management.services.permission.identity.oauth as oauth_service_module
+from management.services.permission.identity.oauth import (
     create_or_update_oauth_account,
     ensure_user_tenant_exists,
     exchange_code_for_provider_token,
@@ -813,7 +814,7 @@ class TestHTTPHelpers(unittest.TestCase):
         mock_cm.__enter__ = MagicMock(return_value=mock_response)
         mock_cm.__exit__ = MagicMock(return_value=False)
         with patch("urllib.request.urlopen", return_value=mock_cm):
-            import services.oauth_service as svc
+            import management.services.permission.identity.oauth as svc
             result = svc._http_post_json("https://test.com/token", {"code": "abc"})
             self.assertEqual(result["access_token"], "test_token")
 
@@ -824,7 +825,7 @@ class TestHTTPHelpers(unittest.TestCase):
         mock_cm.__enter__ = MagicMock(return_value=mock_response)
         mock_cm.__exit__ = MagicMock(return_value=False)
         with patch("urllib.request.urlopen", return_value=mock_cm):
-            import services.oauth_service as svc
+            import management.services.permission.identity.oauth as svc
             result = svc._http_get_json("https://test.com/user")
             self.assertEqual(result["id"], "12345")
 
@@ -835,7 +836,7 @@ class TestHTTPHelpers(unittest.TestCase):
         mock_cm.__enter__ = MagicMock(return_value=mock_response)
         mock_cm.__exit__ = MagicMock(return_value=False)
         with patch("urllib.request.urlopen", return_value=mock_cm) as mock_urlopen:
-            import services.oauth_service as svc
+            import management.services.permission.identity.oauth as svc
             svc._http_post_json("https://test.com/token", {"code": "abc"}, headers={"X-Custom": "value"})
             self.assertTrue(mock_urlopen.called)
 
@@ -846,7 +847,7 @@ class TestHTTPHelpers(unittest.TestCase):
         mock_cm.__enter__ = MagicMock(return_value=mock_response)
         mock_cm.__exit__ = MagicMock(return_value=False)
         with patch("urllib.request.urlopen", return_value=mock_cm):
-            import services.oauth_service as svc
+            import management.services.permission.identity.oauth as svc
             result = svc._http_get_json("https://test.com/user", headers={"Authorization": "Bearer token"})
             self.assertEqual(result["result"], "ok")
 

@@ -1,10 +1,12 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 "use client";
 
 import { Button, Input } from "antd";
 import { Copy, Search } from "lucide-react";
-import type { RefObject } from "react";
 import { useTranslation } from "react-i18next";
 import TagFilterPopover from "@/components/tag/TagFilterPopover";
+import { REPOSITORY_PAGE_SIZE } from "@/const/resource";
 import ResourceCardGrid from "@/components/resource/ResourceCardGrid";
 
 import { SkillRepositoryCard } from "./SkillRepositoryCard";
@@ -28,10 +30,6 @@ export function RepositoryView({
   page,
   total,
   onPageChange,
-  columns,
-  rows,
-  gridHeight,
-  gridRegionRef,
   onRetry,
   onInstall,
   onDetailClick,
@@ -52,10 +50,6 @@ export function RepositoryView({
   page: number;
   total: number;
   onPageChange: (page: number) => void;
-  columns: number;
-  rows: number;
-  gridHeight?: number;
-  gridRegionRef: RefObject<HTMLDivElement | null>;
   onRetry: () => void;
   onInstall: (listing: SkillRepositoryListingItem) => void;
   onDetailClick: (listing: SkillRepositoryListingItem) => void;
@@ -85,7 +79,7 @@ export function RepositoryView({
         />
       </div>
 
-      <div ref={gridRegionRef} className="min-h-0">
+      <div className="min-h-0">
         <AsyncContent
           isLoading={isLoading}
           isError={isError}
@@ -100,9 +94,7 @@ export function RepositoryView({
               page={page}
               total={total}
               onPageChange={onPageChange}
-              columns={columns}
-              rows={rows}
-              gridHeight={gridHeight}
+              pageSize={REPOSITORY_PAGE_SIZE}
               paginateItems={false}
               showToolbar={false}
               renderItem={(listing) => (

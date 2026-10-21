@@ -35,7 +35,7 @@ case:
       kds_id 与初始 kds_name，随后 GET 列表/详情确认权限表存在 ACTIVE 记录且目录可见。
     expected: 更新空 payload 返回 400，不产生半写入，权限表 kds_name 不被覆盖为空。
   - order: 3
-    action: 通过 POST /aidp-mgmt/knowledge-bases/{kds_id}/documents 上传少量测试文档，并调用 GET 列表与 GET 文档列表/计数接口，确保目录、详情、文档计数三类缓存已被填充。
+    action: 通过 POST /aidp-mgmt/knowledge-bases/{kds_id}/documents 上传少量测试文档，并调用 GET 列表与 GET /files 与计数接口，确保目录、详情、文档计数三类缓存已被填充。
     expected: 删除成功后软删除权限生效：列表/详情/计数不再返回该 kds_id，require_permission 走 404。
   - order: 4
     action: 更新：调用 PUT /aidp-mgmt/knowledge-bases/{kds_id}，body 传 {"name":"<RunID>-新名","description":"更新描述"}，记录返回状态码与响应中的 kds_name。

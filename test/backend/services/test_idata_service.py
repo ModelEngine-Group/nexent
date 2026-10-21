@@ -1,3 +1,4 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """
 Unit tests for iData Service Layer.
 
@@ -29,7 +30,7 @@ class TestValidateIdataBaseParams:
 
     def test_validate_idata_base_params_success(self):
         """Test validation with valid parameters."""
-        from backend.services.idata_service import _validate_idata_base_params
+        from management.services.knowledge_base.providers.idata import _validate_idata_base_params
 
         # Should not raise any exception
         _validate_idata_base_params(
@@ -40,7 +41,7 @@ class TestValidateIdataBaseParams:
 
     def test_validate_idata_base_params_empty_api_base(self):
         """Test validation fails when API base is empty."""
-        from backend.services.idata_service import _validate_idata_base_params
+        from management.services.knowledge_base.providers.idata import _validate_idata_base_params
 
         with pytest.raises(Exception) as exc_info:
             _validate_idata_base_params(
@@ -55,7 +56,7 @@ class TestValidateIdataBaseParams:
 
     def test_validate_idata_base_params_none_api_base(self):
         """Test validation fails when API base is None."""
-        from backend.services.idata_service import _validate_idata_base_params
+        from management.services.knowledge_base.providers.idata import _validate_idata_base_params
 
         with pytest.raises(Exception) as exc_info:
             _validate_idata_base_params(
@@ -69,7 +70,7 @@ class TestValidateIdataBaseParams:
 
     def test_validate_idata_base_params_non_string_api_base(self):
         """Test validation fails when API base is not a string."""
-        from backend.services.idata_service import _validate_idata_base_params
+        from management.services.knowledge_base.providers.idata import _validate_idata_base_params
 
         with pytest.raises(Exception) as exc_info:
             _validate_idata_base_params(
@@ -83,7 +84,7 @@ class TestValidateIdataBaseParams:
 
     def test_validate_idata_base_params_invalid_scheme(self):
         """Test validation fails when API base doesn't start with http:// or https://."""
-        from backend.services.idata_service import _validate_idata_base_params
+        from management.services.knowledge_base.providers.idata import _validate_idata_base_params
 
         with pytest.raises(Exception) as exc_info:
             _validate_idata_base_params(
@@ -98,7 +99,7 @@ class TestValidateIdataBaseParams:
 
     def test_validate_idata_base_params_http_scheme(self):
         """Test validation succeeds with http:// scheme."""
-        from backend.services.idata_service import _validate_idata_base_params
+        from management.services.knowledge_base.providers.idata import _validate_idata_base_params
 
         # Should not raise any exception
         _validate_idata_base_params(
@@ -109,7 +110,7 @@ class TestValidateIdataBaseParams:
 
     def test_validate_idata_base_params_https_scheme(self):
         """Test validation succeeds with https:// scheme."""
-        from backend.services.idata_service import _validate_idata_base_params
+        from management.services.knowledge_base.providers.idata import _validate_idata_base_params
 
         # Should not raise any exception
         _validate_idata_base_params(
@@ -120,7 +121,7 @@ class TestValidateIdataBaseParams:
 
     def test_validate_idata_base_params_empty_api_key(self):
         """Test validation fails when API key is empty."""
-        from backend.services.idata_service import _validate_idata_base_params
+        from management.services.knowledge_base.providers.idata import _validate_idata_base_params
 
         with pytest.raises(Exception) as exc_info:
             _validate_idata_base_params(
@@ -135,7 +136,7 @@ class TestValidateIdataBaseParams:
 
     def test_validate_idata_base_params_none_api_key(self):
         """Test validation fails when API key is None."""
-        from backend.services.idata_service import _validate_idata_base_params
+        from management.services.knowledge_base.providers.idata import _validate_idata_base_params
 
         with pytest.raises(Exception) as exc_info:
             _validate_idata_base_params(
@@ -149,7 +150,7 @@ class TestValidateIdataBaseParams:
 
     def test_validate_idata_base_params_non_string_api_key(self):
         """Test validation fails when API key is not a string."""
-        from backend.services.idata_service import _validate_idata_base_params
+        from management.services.knowledge_base.providers.idata import _validate_idata_base_params
 
         with pytest.raises(Exception) as exc_info:
             _validate_idata_base_params(
@@ -163,7 +164,7 @@ class TestValidateIdataBaseParams:
 
     def test_validate_idata_base_params_empty_user_id(self):
         """Test validation fails when user ID is empty."""
-        from backend.services.idata_service import _validate_idata_base_params
+        from management.services.knowledge_base.providers.idata import _validate_idata_base_params
 
         with pytest.raises(Exception) as exc_info:
             _validate_idata_base_params(
@@ -178,7 +179,7 @@ class TestValidateIdataBaseParams:
 
     def test_validate_idata_base_params_none_user_id(self):
         """Test validation fails when user ID is None."""
-        from backend.services.idata_service import _validate_idata_base_params
+        from management.services.knowledge_base.providers.idata import _validate_idata_base_params
 
         with pytest.raises(Exception) as exc_info:
             _validate_idata_base_params(
@@ -192,7 +193,7 @@ class TestValidateIdataBaseParams:
 
     def test_validate_idata_base_params_non_string_user_id(self):
         """Test validation fails when user ID is not a string."""
-        from backend.services.idata_service import _validate_idata_base_params
+        from management.services.knowledge_base.providers.idata import _validate_idata_base_params
 
         with pytest.raises(Exception) as exc_info:
             _validate_idata_base_params(
@@ -210,21 +211,21 @@ class TestNormalizeApiBase:
 
     def test_normalize_api_base_with_trailing_slash(self):
         """Test normalization removes trailing slash."""
-        from backend.services.idata_service import _normalize_api_base
+        from management.services.knowledge_base.providers.idata import _normalize_api_base
 
         result = _normalize_api_base("https://idata.example.com/")
         assert result == "https://idata.example.com"
 
     def test_normalize_api_base_without_trailing_slash(self):
         """Test normalization doesn't change URL without trailing slash."""
-        from backend.services.idata_service import _normalize_api_base
+        from management.services.knowledge_base.providers.idata import _normalize_api_base
 
         result = _normalize_api_base("https://idata.example.com")
         assert result == "https://idata.example.com"
 
     def test_normalize_api_base_multiple_trailing_slashes(self):
         """Test normalization removes multiple trailing slashes."""
-        from backend.services.idata_service import _normalize_api_base
+        from management.services.knowledge_base.providers.idata import _normalize_api_base
 
         result = _normalize_api_base("https://idata.example.com///")
         assert result == "https://idata.example.com"
@@ -235,7 +236,7 @@ class TestMakeIdataRequest:
 
     def test_make_idata_request_success(self):
         """Test successful API request."""
-        from backend.services.idata_service import _make_idata_request
+        from management.services.knowledge_base.providers.idata import _make_idata_request
 
         mock_response = MagicMock()
         mock_response.json.return_value = {"code": "1", "data": []}
@@ -243,7 +244,7 @@ class TestMakeIdataRequest:
 
         mock_client = _create_mock_client(mock_response)
 
-        with patch('backend.services.idata_service.http_client_manager') as mock_manager:
+        with patch('management.services.knowledge_base.providers.idata.http_client_manager') as mock_manager:
             mock_manager.get_sync_client.return_value = mock_client
 
             result = _make_idata_request(
@@ -259,12 +260,12 @@ class TestMakeIdataRequest:
 
     def test_make_idata_request_connection_error(self):
         """Test request error handling."""
-        from backend.services.idata_service import _make_idata_request
+        from management.services.knowledge_base.providers.idata import _make_idata_request
 
         mock_client = MagicMock()
         mock_client.post.side_effect = httpx.RequestError("Connection failed")
 
-        with patch('backend.services.idata_service.http_client_manager') as mock_manager:
+        with patch('management.services.knowledge_base.providers.idata.http_client_manager') as mock_manager:
             mock_manager.get_sync_client.return_value = mock_client
 
             with pytest.raises(Exception) as exc_info:
@@ -281,7 +282,7 @@ class TestMakeIdataRequest:
 
     def test_make_idata_request_http_401_error(self):
         """Test HTTP 401 error handling."""
-        from backend.services.idata_service import _make_idata_request
+        from management.services.knowledge_base.providers.idata import _make_idata_request
 
         mock_response = MagicMock()
         mock_response.status_code = 401
@@ -295,7 +296,7 @@ class TestMakeIdataRequest:
         mock_client.post.return_value = mock_response
         mock_response.raise_for_status.side_effect = mock_http_error
 
-        with patch('backend.services.idata_service.http_client_manager') as mock_manager:
+        with patch('management.services.knowledge_base.providers.idata.http_client_manager') as mock_manager:
             mock_manager.get_sync_client.return_value = mock_client
 
             with pytest.raises(Exception) as exc_info:
@@ -312,7 +313,7 @@ class TestMakeIdataRequest:
 
     def test_make_idata_request_http_403_error(self):
         """Test HTTP 403 error handling."""
-        from backend.services.idata_service import _make_idata_request
+        from management.services.knowledge_base.providers.idata import _make_idata_request
 
         mock_response = MagicMock()
         mock_response.status_code = 403
@@ -326,7 +327,7 @@ class TestMakeIdataRequest:
         mock_client.post.return_value = mock_response
         mock_response.raise_for_status.side_effect = mock_http_error
 
-        with patch('backend.services.idata_service.http_client_manager') as mock_manager:
+        with patch('management.services.knowledge_base.providers.idata.http_client_manager') as mock_manager:
             mock_manager.get_sync_client.return_value = mock_client
 
             with pytest.raises(Exception) as exc_info:
@@ -343,7 +344,7 @@ class TestMakeIdataRequest:
 
     def test_make_idata_request_http_429_error(self):
         """Test HTTP 429 error handling."""
-        from backend.services.idata_service import _make_idata_request
+        from management.services.knowledge_base.providers.idata import _make_idata_request
 
         mock_response = MagicMock()
         mock_response.status_code = 429
@@ -357,7 +358,7 @@ class TestMakeIdataRequest:
         mock_client.post.return_value = mock_response
         mock_response.raise_for_status.side_effect = mock_http_error
 
-        with patch('backend.services.idata_service.http_client_manager') as mock_manager:
+        with patch('management.services.knowledge_base.providers.idata.http_client_manager') as mock_manager:
             mock_manager.get_sync_client.return_value = mock_client
 
             with pytest.raises(Exception) as exc_info:
@@ -374,7 +375,7 @@ class TestMakeIdataRequest:
 
     def test_make_idata_request_http_500_error(self):
         """Test HTTP 500 error handling."""
-        from backend.services.idata_service import _make_idata_request
+        from management.services.knowledge_base.providers.idata import _make_idata_request
 
         mock_response = MagicMock()
         mock_response.status_code = 500
@@ -388,7 +389,7 @@ class TestMakeIdataRequest:
         mock_client.post.return_value = mock_response
         mock_response.raise_for_status.side_effect = mock_http_error
 
-        with patch('backend.services.idata_service.http_client_manager') as mock_manager:
+        with patch('management.services.knowledge_base.providers.idata.http_client_manager') as mock_manager:
             mock_manager.get_sync_client.return_value = mock_client
 
             with pytest.raises(Exception) as exc_info:
@@ -406,7 +407,7 @@ class TestMakeIdataRequest:
 
     def test_make_idata_request_json_decode_error(self):
         """Test JSON decode error handling."""
-        from backend.services.idata_service import _make_idata_request
+        from management.services.knowledge_base.providers.idata import _make_idata_request
 
         mock_response = MagicMock()
         mock_response.raise_for_status = MagicMock()
@@ -414,7 +415,7 @@ class TestMakeIdataRequest:
 
         mock_client = _create_mock_client(mock_response)
 
-        with patch('backend.services.idata_service.http_client_manager') as mock_manager:
+        with patch('management.services.knowledge_base.providers.idata.http_client_manager') as mock_manager:
             mock_manager.get_sync_client.return_value = mock_client
 
             with pytest.raises(Exception) as exc_info:
@@ -435,7 +436,7 @@ class TestParseIdataResponse:
 
     def test_parse_idata_response_success(self):
         """Test successful response parsing."""
-        from backend.services.idata_service import _parse_idata_response
+        from management.services.knowledge_base.providers.idata import _parse_idata_response
 
         result = {
             "code": "1",
@@ -449,7 +450,7 @@ class TestParseIdataResponse:
 
     def test_parse_idata_response_error_code(self):
         """Test response parsing with error code."""
-        from backend.services.idata_service import _parse_idata_response
+        from management.services.knowledge_base.providers.idata import _parse_idata_response
 
         result = {
             "code": "0",
@@ -467,7 +468,7 @@ class TestParseIdataResponse:
 
     def test_parse_idata_response_error_code_no_msg(self):
         """Test response parsing with error code but no message."""
-        from backend.services.idata_service import _parse_idata_response
+        from management.services.knowledge_base.providers.idata import _parse_idata_response
 
         result = {
             "code": "0",
@@ -484,7 +485,7 @@ class TestParseIdataResponse:
 
     def test_parse_idata_response_data_not_list(self):
         """Test response parsing when data is not a list."""
-        from backend.services.idata_service import _parse_idata_response
+        from management.services.knowledge_base.providers.idata import _parse_idata_response
 
         result = {
             "code": "1",
@@ -501,7 +502,7 @@ class TestParseIdataResponse:
 
     def test_parse_idata_response_empty_data(self):
         """Test response parsing with empty data list."""
-        from backend.services.idata_service import _parse_idata_response
+        from management.services.knowledge_base.providers.idata import _parse_idata_response
 
         result = {
             "code": "1",
@@ -518,7 +519,7 @@ class TestFetchIdataKnowledgeSpacesImpl:
 
     def test_fetch_idata_knowledge_spaces_impl_success(self):
         """Test successful fetching of knowledge spaces."""
-        from backend.services.idata_service import fetch_idata_knowledge_spaces_impl
+        from management.services.knowledge_base.providers.idata import fetch_idata_knowledge_spaces_impl
 
         mock_response = MagicMock()
         mock_response.json.return_value = {
@@ -539,7 +540,7 @@ class TestFetchIdataKnowledgeSpacesImpl:
 
         mock_client = _create_mock_client(mock_response)
 
-        with patch('backend.services.idata_service.http_client_manager') as mock_manager:
+        with patch('management.services.knowledge_base.providers.idata.http_client_manager') as mock_manager:
             mock_manager.get_sync_client.return_value = mock_client
 
             result = fetch_idata_knowledge_spaces_impl(
@@ -562,7 +563,7 @@ class TestFetchIdataKnowledgeSpacesImpl:
 
     def test_fetch_idata_knowledge_spaces_impl_with_trailing_slash(self):
         """Test fetching with API base URL that has trailing slash."""
-        from backend.services.idata_service import fetch_idata_knowledge_spaces_impl
+        from management.services.knowledge_base.providers.idata import fetch_idata_knowledge_spaces_impl
 
         mock_response = MagicMock()
         mock_response.json.return_value = {
@@ -574,7 +575,7 @@ class TestFetchIdataKnowledgeSpacesImpl:
 
         mock_client = _create_mock_client(mock_response)
 
-        with patch('backend.services.idata_service.http_client_manager') as mock_manager:
+        with patch('management.services.knowledge_base.providers.idata.http_client_manager') as mock_manager:
             mock_manager.get_sync_client.return_value = mock_client
 
             result = fetch_idata_knowledge_spaces_impl(
@@ -590,7 +591,7 @@ class TestFetchIdataKnowledgeSpacesImpl:
 
     def test_fetch_idata_knowledge_spaces_impl_empty_response(self):
         """Test fetching when API returns empty list."""
-        from backend.services.idata_service import fetch_idata_knowledge_spaces_impl
+        from management.services.knowledge_base.providers.idata import fetch_idata_knowledge_spaces_impl
 
         mock_response = MagicMock()
         mock_response.json.return_value = {
@@ -602,7 +603,7 @@ class TestFetchIdataKnowledgeSpacesImpl:
 
         mock_client = _create_mock_client(mock_response)
 
-        with patch('backend.services.idata_service.http_client_manager') as mock_manager:
+        with patch('management.services.knowledge_base.providers.idata.http_client_manager') as mock_manager:
             mock_manager.get_sync_client.return_value = mock_client
 
             result = fetch_idata_knowledge_spaces_impl(
@@ -615,7 +616,7 @@ class TestFetchIdataKnowledgeSpacesImpl:
 
     def test_fetch_idata_knowledge_spaces_impl_skips_invalid_items(self):
         """Test fetching skips items that are not dicts or missing required fields."""
-        from backend.services.idata_service import fetch_idata_knowledge_spaces_impl
+        from management.services.knowledge_base.providers.idata import fetch_idata_knowledge_spaces_impl
 
         mock_response = MagicMock()
         mock_response.json.return_value = {
@@ -636,7 +637,7 @@ class TestFetchIdataKnowledgeSpacesImpl:
 
         mock_client = _create_mock_client(mock_response)
 
-        with patch('backend.services.idata_service.http_client_manager') as mock_manager:
+        with patch('management.services.knowledge_base.providers.idata.http_client_manager') as mock_manager:
             mock_manager.get_sync_client.return_value = mock_client
 
             result = fetch_idata_knowledge_spaces_impl(
@@ -654,7 +655,7 @@ class TestFetchIdataKnowledgeSpacesImpl:
 
     def test_fetch_idata_knowledge_spaces_impl_validation_error(self):
         """Test fetching with invalid parameters raises validation error."""
-        from backend.services.idata_service import fetch_idata_knowledge_spaces_impl
+        from management.services.knowledge_base.providers.idata import fetch_idata_knowledge_spaces_impl
 
         with pytest.raises(Exception) as exc_info:
             fetch_idata_knowledge_spaces_impl(
@@ -668,7 +669,7 @@ class TestFetchIdataKnowledgeSpacesImpl:
 
     def test_fetch_idata_knowledge_spaces_impl_api_error(self):
         """Test fetching when API returns error code."""
-        from backend.services.idata_service import fetch_idata_knowledge_spaces_impl
+        from management.services.knowledge_base.providers.idata import fetch_idata_knowledge_spaces_impl
 
         mock_response = MagicMock()
         mock_response.json.return_value = {
@@ -680,7 +681,7 @@ class TestFetchIdataKnowledgeSpacesImpl:
 
         mock_client = _create_mock_client(mock_response)
 
-        with patch('backend.services.idata_service.http_client_manager') as mock_manager:
+        with patch('management.services.knowledge_base.providers.idata.http_client_manager') as mock_manager:
             mock_manager.get_sync_client.return_value = mock_client
 
             with pytest.raises(Exception) as exc_info:
@@ -699,7 +700,7 @@ class TestFetchIdataDatasetsImpl:
 
     def test_fetch_idata_datasets_impl_success(self):
         """Test successful fetching of datasets."""
-        from backend.services.idata_service import fetch_idata_datasets_impl
+        from management.services.knowledge_base.providers.idata import fetch_idata_datasets_impl
 
         mock_response = MagicMock()
         mock_response.json.return_value = {
@@ -722,7 +723,7 @@ class TestFetchIdataDatasetsImpl:
 
         mock_client = _create_mock_client(mock_response)
 
-        with patch('backend.services.idata_service.http_client_manager') as mock_manager:
+        with patch('management.services.knowledge_base.providers.idata.http_client_manager') as mock_manager:
             mock_manager.get_sync_client.return_value = mock_client
 
             result = fetch_idata_datasets_impl(
@@ -757,7 +758,7 @@ class TestFetchIdataDatasetsImpl:
 
     def test_fetch_idata_datasets_impl_empty_response(self):
         """Test fetching when API returns empty list."""
-        from backend.services.idata_service import fetch_idata_datasets_impl
+        from management.services.knowledge_base.providers.idata import fetch_idata_datasets_impl
 
         mock_response = MagicMock()
         mock_response.json.return_value = {
@@ -769,7 +770,7 @@ class TestFetchIdataDatasetsImpl:
 
         mock_client = _create_mock_client(mock_response)
 
-        with patch('backend.services.idata_service.http_client_manager') as mock_manager:
+        with patch('management.services.knowledge_base.providers.idata.http_client_manager') as mock_manager:
             mock_manager.get_sync_client.return_value = mock_client
 
             result = fetch_idata_datasets_impl(
@@ -785,7 +786,7 @@ class TestFetchIdataDatasetsImpl:
 
     def test_fetch_idata_datasets_impl_skips_invalid_items(self):
         """Test fetching skips items that are not dicts or missing id."""
-        from backend.services.idata_service import fetch_idata_datasets_impl
+        from management.services.knowledge_base.providers.idata import fetch_idata_datasets_impl
 
         mock_response = MagicMock()
         mock_response.json.return_value = {
@@ -804,7 +805,7 @@ class TestFetchIdataDatasetsImpl:
 
         mock_client = _create_mock_client(mock_response)
 
-        with patch('backend.services.idata_service.http_client_manager') as mock_manager:
+        with patch('management.services.knowledge_base.providers.idata.http_client_manager') as mock_manager:
             mock_manager.get_sync_client.return_value = mock_client
 
             result = fetch_idata_datasets_impl(
@@ -821,7 +822,7 @@ class TestFetchIdataDatasetsImpl:
 
     def test_fetch_idata_datasets_impl_missing_file_count(self):
         """Test fetching handles missing fileCount field."""
-        from backend.services.idata_service import fetch_idata_datasets_impl
+        from management.services.knowledge_base.providers.idata import fetch_idata_datasets_impl
 
         mock_response = MagicMock()
         mock_response.json.return_value = {
@@ -839,7 +840,7 @@ class TestFetchIdataDatasetsImpl:
 
         mock_client = _create_mock_client(mock_response)
 
-        with patch('backend.services.idata_service.http_client_manager') as mock_manager:
+        with patch('management.services.knowledge_base.providers.idata.http_client_manager') as mock_manager:
             mock_manager.get_sync_client.return_value = mock_client
 
             result = fetch_idata_datasets_impl(
@@ -854,7 +855,7 @@ class TestFetchIdataDatasetsImpl:
 
     def test_fetch_idata_datasets_impl_missing_name(self):
         """Test fetching handles missing name field."""
-        from backend.services.idata_service import fetch_idata_datasets_impl
+        from management.services.knowledge_base.providers.idata import fetch_idata_datasets_impl
 
         mock_response = MagicMock()
         mock_response.json.return_value = {
@@ -872,7 +873,7 @@ class TestFetchIdataDatasetsImpl:
 
         mock_client = _create_mock_client(mock_response)
 
-        with patch('backend.services.idata_service.http_client_manager') as mock_manager:
+        with patch('management.services.knowledge_base.providers.idata.http_client_manager') as mock_manager:
             mock_manager.get_sync_client.return_value = mock_client
 
             result = fetch_idata_datasets_impl(
@@ -887,7 +888,7 @@ class TestFetchIdataDatasetsImpl:
 
     def test_fetch_idata_datasets_impl_validation_error_api_base(self):
         """Test fetching with invalid API base raises validation error."""
-        from backend.services.idata_service import fetch_idata_datasets_impl
+        from management.services.knowledge_base.providers.idata import fetch_idata_datasets_impl
 
         with pytest.raises(Exception) as exc_info:
             fetch_idata_datasets_impl(
@@ -902,7 +903,7 @@ class TestFetchIdataDatasetsImpl:
 
     def test_fetch_idata_datasets_impl_validation_error_knowledge_space_id_empty(self):
         """Test fetching with empty knowledge space ID raises validation error."""
-        from backend.services.idata_service import fetch_idata_datasets_impl
+        from management.services.knowledge_base.providers.idata import fetch_idata_datasets_impl
 
         with pytest.raises(Exception) as exc_info:
             fetch_idata_datasets_impl(
@@ -918,7 +919,7 @@ class TestFetchIdataDatasetsImpl:
 
     def test_fetch_idata_datasets_impl_validation_error_knowledge_space_id_none(self):
         """Test fetching with None knowledge space ID raises validation error."""
-        from backend.services.idata_service import fetch_idata_datasets_impl
+        from management.services.knowledge_base.providers.idata import fetch_idata_datasets_impl
 
         with pytest.raises(Exception) as exc_info:
             fetch_idata_datasets_impl(
@@ -933,7 +934,7 @@ class TestFetchIdataDatasetsImpl:
 
     def test_fetch_idata_datasets_impl_validation_error_knowledge_space_id_non_string(self):
         """Test fetching with non-string knowledge space ID raises validation error."""
-        from backend.services.idata_service import fetch_idata_datasets_impl
+        from management.services.knowledge_base.providers.idata import fetch_idata_datasets_impl
 
         with pytest.raises(Exception) as exc_info:
             fetch_idata_datasets_impl(
@@ -948,7 +949,7 @@ class TestFetchIdataDatasetsImpl:
 
     def test_fetch_idata_datasets_impl_with_trailing_slash(self):
         """Test fetching with API base URL that has trailing slash."""
-        from backend.services.idata_service import fetch_idata_datasets_impl
+        from management.services.knowledge_base.providers.idata import fetch_idata_datasets_impl
 
         mock_response = MagicMock()
         mock_response.json.return_value = {
@@ -960,7 +961,7 @@ class TestFetchIdataDatasetsImpl:
 
         mock_client = _create_mock_client(mock_response)
 
-        with patch('backend.services.idata_service.http_client_manager') as mock_manager:
+        with patch('management.services.knowledge_base.providers.idata.http_client_manager') as mock_manager:
             mock_manager.get_sync_client.return_value = mock_client
 
             result = fetch_idata_datasets_impl(

@@ -47,3 +47,36 @@ class WorkbenchReleaseManifest:
     system_revision: str
     persistent_tool_names: tuple[str, ...]
     official_skill_names: tuple[str, ...] = WORKBENCH_OFFICIAL_SKILL_NAMES
+
+
+from typing import Optional as Opt
+
+
+@dataclass
+class OptimizeRequest:
+    """优化请求的统一数据结构"""
+
+    agent_id: int
+    model_id: int
+    task_description: str
+    section_type: str
+    section_title: str
+    current_content: str
+    feedback: str
+    mode: str = "general"
+    start_pos: Opt[int] = None
+    end_pos: Opt[int] = None
+    tool_ids: Opt[list[int]] = None
+    sub_agent_ids: Opt[list[int]] = None
+    knowledge_base_display_names: Opt[list[str]] = None
+
+
+@dataclass
+class OptimizeResult:
+    """优化结果的统一数据结构"""
+
+    optimized_content: str
+    source: str
+    section_type: str = ""
+    section_title: str = ""
+    original_content: str = ""

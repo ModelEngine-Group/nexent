@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """Run inside the deployed backend; report only synthetic outcomes, never credentials."""
 
 import asyncio
@@ -25,10 +27,10 @@ from nexent.core.agents.agent_model import (
 from nexent.core.agents.run_agent import agent_run
 from nexent.core.concurrency import LanePolicy, ThreadManager
 from nexent.core.utils.observer import MessageObserver
-from services.memory_config_service import get_memory_switch
-from services.model_runtime_snapshot_service import restore_runtime_model_snapshot
+from management.services.configuration.user.memory import get_memory_switch
+from management.services.model.runtime_snapshot import restore_runtime_model_snapshot
 from smolagents import Tool
-from utils.auth_utils import generate_session_jwt
+from management.services.permission.identity.authentication_helpers import generate_session_jwt
 
 NATIVE, TEXT, TENANT = int(sys.argv[1]), int(sys.argv[2]), sys.argv[3]
 RESULT = {}

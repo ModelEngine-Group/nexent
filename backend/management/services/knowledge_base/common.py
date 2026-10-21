@@ -32,8 +32,8 @@ from management.services.model.resolver import (
 from nexent.vector_database.base import VectorDatabaseCore
 from nexent.vector_database.datamate_core import DataMateCore
 from nexent.vector_database.elasticsearch_core import ElasticSearchCore
-from services.redis_service import get_redis_service
-from utils.config_utils import tenant_config_manager
+from management.services.knowledge_base.task_state import get_redis_service
+from management.services.configuration.tenant.settings import tenant_config_manager
 
 
 def _update_progress(task_id: str, processed: int, total: int):

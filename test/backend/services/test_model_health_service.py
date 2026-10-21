@@ -1,3 +1,4 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 import os
 import sys
 import types
@@ -23,8 +24,8 @@ _MOCKED_MODULE_NAMES = (
     "database.client",
     "database.model_management_db",
     "utils",
-    "utils.auth_utils",
-    "utils.config_utils",
+    "management.services.permission.identity.authentication_helpers",
+    "management.services.configuration.tenant.settings",
     "utils.memory_utils",
     "management.services.model.names",
     "consts",
@@ -40,7 +41,7 @@ _MOCKED_MODULE_NAMES = (
     "nexent.core.models.rerank_model",
     "nexent.monitor",
     "services",
-    "services.voice_service",
+    "management.services.model.voice",
     "management.services.model.adapter",
 )
 _MISSING_MODULE = object()
@@ -55,8 +56,8 @@ sys.modules['database'] = MockModule()
 sys.modules['database.client'] = MockModule()
 sys.modules['database.model_management_db'] = MockModule()
 sys.modules['utils'] = MockModule()
-sys.modules['utils.auth_utils'] = MockModule()
-sys.modules['utils.config_utils'] = MockModule()
+sys.modules['management.services.permission.identity.authentication_helpers'] = MockModule()
+sys.modules['management.services.configuration.tenant.settings'] = MockModule()
 sys.modules['utils.memory_utils'] = MockModule()
 sys.modules['management.services.model.names'] = MockModule()
 sys.modules['consts'] = MockModule()
@@ -100,7 +101,7 @@ sys.modules['nexent.core.models.rerank_model'] = rerank_module
 
 # Mock services packages
 sys.modules['services'] = MockModule()
-sys.modules['services.voice_service'] = MockModule()
+sys.modules['management.services.model.voice'] = MockModule()
 # model_health_service imports build_adapter_fresh
 # from the real management.services.model.adapter since the gateway bridge landed;
 # the blanket ``services`` mock above shadows it, so expose a mock submodule

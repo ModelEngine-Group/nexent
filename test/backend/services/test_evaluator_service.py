@@ -1,6 +1,6 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
-"""Unit tests for ``services.evaluator_service``.
+"""Unit tests for ``management.services.evaluation.evaluators``.
 
 The module is loaded with ``spec_from_file_location`` while the
 ``consts`` / ``database`` / ``services`` / ``utils`` packages are stubbed
@@ -22,7 +22,7 @@ for _p in (str(_REPO_ROOT), str(_REPO_ROOT / "backend")):
     if _p not in sys.path:
         sys.path.insert(0, _p)
 
-MODULE_UNDER_TEST = "services.evaluator_service"
+MODULE_UNDER_TEST = "management.services.evaluation.evaluators"
 
 _DB_IMPL_NAMES = [
     "create_evaluator",
@@ -79,7 +79,7 @@ def _install_stubs():
 
     _svc = _register_package("services")
     _svc.agent_evaluation_service = _mk_mod(
-        "services.agent_evaluation_service",
+        "management.services.evaluation.runs",
         validate_code_evaluator=MagicMock(name="validate_code_evaluator"),
     )
 
@@ -137,7 +137,7 @@ def bundle():
 
     for n, m in db_impls.items():
         setattr(sys.modules["database.evaluator_db"], n, m)
-    sys.modules["services.agent_evaluation_service"].validate_code_evaluator = code_val
+    sys.modules["management.services.evaluation.runs"].validate_code_evaluator = code_val
     sys.modules["management.services.agent.profile"].fetch_agent_profile = profile
     sys.modules["management.services.agent.profile"].format_agent_profile_context = fmt_profile
     sys.modules["management.services.model.invocation"].call_llm_for_system_prompt = llm
@@ -149,7 +149,7 @@ def bundle():
     if hasattr(svc_pkg, "evaluator_service"):
         delattr(svc_pkg, "evaluator_service")
 
-    src = _REPO_ROOT / "backend" / "services" / "evaluator_service.py"
+    src = _REPO_ROOT / "backend" / "management" / "services" / "evaluation" / "evaluators.py"
     spec = _ilu.spec_from_file_location(MODULE_UNDER_TEST, str(src))
     assert spec is not None and spec.loader is not None, f"cannot locate {src}"
     mod = _ilu.module_from_spec(spec)

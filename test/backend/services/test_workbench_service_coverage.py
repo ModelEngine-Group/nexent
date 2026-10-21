@@ -1,10 +1,11 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 from types import SimpleNamespace
 
 import pytest
 
 from consts.exceptions import ValidationError, WorkbenchError
 from consts.model import WorkbenchSessionConfig
-from services import workbench_service
+from management.services.agent import workbench as workbench_service
 
 
 def _config(**updates):

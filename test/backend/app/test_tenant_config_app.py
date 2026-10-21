@@ -1,3 +1,4 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 import unittest
 import json
 import os
@@ -43,7 +44,7 @@ const_mock.ENABLE_AGENT_WORKBENCH = False
 const_mock.HIDE_HOME_PAGE = False
 
 sys.modules['services.tenant_config_service'] = services_mock
-sys.modules['utils.auth_utils'] = auth_mock
+sys.modules['management.services.permission.identity.authentication_helpers'] = auth_mock
 sys.modules['consts.const'] = const_mock
 
 # Now import FastAPI components and the router

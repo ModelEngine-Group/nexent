@@ -6,7 +6,7 @@ from unittest.mock import Mock
 
 import pytest
 
-from services import user_identity_service as identity
+from management.services.permission.identity import display as identity
 
 
 def test_batch_metadata_preserves_raw_values_and_duplicate_names(monkeypatch):

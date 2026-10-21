@@ -13,7 +13,7 @@ from consts.const import (
 from consts.exceptions import ForbiddenError
 from database.group_db import query_group_ids_by_user
 from database.user_tenant_db import get_user_tenant_by_user_id
-from utils.str_utils import convert_list_to_string
+from management.db.serialization import convert_list_to_string
 
 _SKILL_ACCESS_UPDATE_FORBIDDEN_MESSAGE = "Not authorized to update skill access"
 

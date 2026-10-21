@@ -7,6 +7,7 @@ case:
   requirement_ids:
   - WB-SERVER-PINS-20261014
   - WB-PIN-SYNC-20261016
+  - CHAT-PIN-TIMESTAMP-20261021
   business_rule_ids:
   - CHAT-SIDEBAR-RULE-003
   title: Authenticated Workbench pin API persists ordered state in PostgreSQL
@@ -46,9 +47,13 @@ case:
       malformed or unauthenticated writes.
     expected: Other accounts are isolated; the same owner retains pins across tenant changes; inaccessible histories return 404, malformed inputs
       422 and missing identity 401 without changing confirmed pins.
+  - order: 4
+    action: Repeat the real pin flow under UTC, Asia/Shanghai and America/New_York database sessions and compare stored values with API timestamps.
+    expected: New pin values are naive UTC within the execution clock window; returned ISO timestamps carry explicit UTC and identify the same instant with stable order.
   expected_results:
   - Independent clients receive identical persisted pin state and order.
   - Invalid/unauthorized writes cannot leak or change pins.
+  - UTC storage and explicit UTC wire timestamps remain consistent across database and application timezones.
   forbidden_side_effects:
   - No model invocation or mutation of conversation content, titles, activity, Agent-chat
     state or original schema/data.
@@ -84,3 +89,8 @@ case:
     - 2
     forbidden_side_effects:
     - 1
+  - id: AC-03
+    description: Native UTC pin storage and explicit UTC responses identify the same instant across database timezones.
+    steps: [4]
+    expected_results: [3]
+    forbidden_side_effects: [1]

@@ -62,6 +62,7 @@ import UserList from "./resources/UserList";
 import ApiKeyList from "./resources/ApiKeyList";
 import GroupList from "./resources/GroupList";
 import ModelList from "./resources/ModelList";
+import TagList from "./resources/TagList";
 import KnowledgeList from "./resources/KnowledgeList";
 import InvitationList from "./resources/InvitationList";
 import AgentList from "./resources/AgentList";
@@ -1396,6 +1397,11 @@ export default function UserManageComp() {
                           key: "skills",
                           label: "Skills",
                           children: <SkillList tenantId={tenantId} />,
+                        },
+                        {
+                          key: "tags",
+                          label: t("tenantResources.tabs.tags"),
+                          children: <TagList tenantId={tenantId} />,
                         },
                         {
                           key: "invitations",

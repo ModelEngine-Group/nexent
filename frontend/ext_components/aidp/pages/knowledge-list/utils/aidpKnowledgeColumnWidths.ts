@@ -1,3 +1,5 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 export const AIDP_MIN_COLUMN_WIDTH = 64;
 
 /** Distribute available space proportionally, freezing columns at the minimum. */
@@ -34,11 +36,14 @@ export function resizeAidpColumnPair(
   widths: Record<string, number>,
   leftKey: string,
   rightKey: string,
-  delta: number
+  delta: number,
+  minWidths?: Record<string, number>
 ): Record<string, number> {
+  const leftMin = minWidths?.[leftKey] ?? AIDP_MIN_COLUMN_WIDTH;
+  const rightMin = minWidths?.[rightKey] ?? AIDP_MIN_COLUMN_WIDTH;
   const movement = Math.max(
-    AIDP_MIN_COLUMN_WIDTH - widths[leftKey],
-    Math.min(delta, widths[rightKey] - AIDP_MIN_COLUMN_WIDTH)
+    leftMin - widths[leftKey],
+    Math.min(delta, widths[rightKey] - rightMin)
   );
   return {
     ...widths,

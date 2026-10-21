@@ -1,7 +1,8 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 import json
 
-from services.agent_automation import conversation_adapter as adapter_module
-from services.agent_automation.conversation_adapter import AutomationConversationAdapter
+from management.services.automation import conversation as adapter_module
+from management.services.automation.conversation import AutomationConversationAdapter
 
 
 def test_run_prompt_appends_new_message_to_existing_conversation(monkeypatch):
@@ -28,7 +29,8 @@ def test_run_prompt_appends_new_message_to_existing_conversation(monkeypatch):
         ]}],
     )
 
-    def fake_save_message(request, user_id, tenant_id):
+    def fake_save_message(request, user_id, tenant_id, **kwargs):
+        captured["message_source"] = kwargs.get("message_source")
         captured["request"] = request
         captured["owner"] = (user_id, tenant_id)
         return 31
@@ -56,6 +58,7 @@ def test_run_prompt_appends_new_message_to_existing_conversation(monkeypatch):
     assert captured["request"].conversation_id == 321
     assert captured["request"].message_idx == 4
     assert captured["request"].role == "user"
+    assert captured["message_source"] == "AUTOMATION"
     assert captured["request"].message[0].content == "整理一份项目周报"
     assert captured["owner"] == ("user", "tenant")
     assert captured["units"][0]["unit_type"] == "automation_prompt"
@@ -108,7 +111,7 @@ def test_consecutive_runs_allocate_independent_turn_indexes(monkeypatch):
         lambda *args: [{"message": list(messages)}],
     )
 
-    def fake_save_message(request, user_id, tenant_id):
+    def fake_save_message(request, user_id, tenant_id, **kwargs):
         captured_indexes.append(request.message_idx)
         messages.append({
             "role": request.role,
@@ -149,7 +152,7 @@ def test_first_run_in_empty_conversation_starts_at_zero(monkeypatch):
     monkeypatch.setattr(
         adapter_module,
         "save_message",
-        lambda request, user_id, tenant_id: captured.setdefault("request", request) and 31,
+        lambda request, user_id, tenant_id, **kwargs: captured.setdefault("request", request) and 31,
     )
     monkeypatch.setattr(adapter_module, "save_message_unit", lambda **kwargs: None)
 
@@ -177,7 +180,8 @@ def test_append_proposal_exchange_persists_user_instruction_and_assistant_card(m
         ]}],
     )
 
-    def fake_save_message(request, user_id, tenant_id):
+    def fake_save_message(request, user_id, tenant_id, **kwargs):
+        captured["message_source"] = kwargs.get("message_source")
         captured["requests"].append(request)
         return 30 + len(captured["requests"])
 

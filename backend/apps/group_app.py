@@ -1,3 +1,4 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """
 Group management API endpoints
 """
@@ -20,15 +21,15 @@ from consts.exceptions import (
     ValidationError,
     tenant_resource_limit_error_payload,
 )
-from services.audit_service import record_security_event
-from services.group_service import (
+from management.services.monitor.audit import record_security_event
+from management.services.permission.identity.groups import (
     create_group, get_group_info, update_group, delete_group,
     add_user_to_single_group, remove_user_from_single_group, get_group_users,
     add_user_to_groups, get_tenant_default_group_id, set_tenant_default_group_id,
     get_groups_by_tenant, update_group_members
 )
-from services.tenant_service import get_tenant_info
-from utils.auth_utils import get_current_user_id
+from management.services.permission.identity.tenants import get_tenant_info
+from management.services.permission.identity.authentication_helpers import get_current_user_id
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/groups", tags=["groups"])

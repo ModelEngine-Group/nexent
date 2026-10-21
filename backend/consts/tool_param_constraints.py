@@ -1,7 +1,8 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """Centralized definitions for tool parameter constraints.
 
 These constants are shared by tool configuration validation
-(``backend.services.tool_configuration_service``) and the error message
+(``management.services.tool.configuration``) and the error message
 module (``backend.consts.error_message``).
 """
 

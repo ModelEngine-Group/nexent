@@ -1,3 +1,4 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 from __future__ import annotations
 
 import base64
@@ -290,7 +291,7 @@ async def _exercise_document_tag_projection_state_machine(identity: TestIdentity
         assert idempotent_status['version'] == first_version
         assert idempotent_status['retry_count'] == 0
 
-        from services.tag_document_projection import project_document_assignments
+        from management.services.knowledge_base.tag_projection import project_document_assignments
 
         aidp_status = project_document_assignments(
             identity.tenant_id,
@@ -324,7 +325,7 @@ async def _exercise_document_tag_projection_state_machine(identity: TestIdentity
         assert entry['projection_status'] is not None
         assert entry['projection_status']['status'] == 'synced'
 
-        from services.tag_management_service import TagManagementService
+        from management.services.tag.library import TagManagementService
 
         matched = TagManagementService.filter_document_ids_by_predicates(
             identity.tenant_id,
@@ -374,7 +375,7 @@ async def _exercise_document_tag_projection_state_machine(identity: TestIdentity
         assert abs(observed_backoff.total_seconds() - expected_backoff.total_seconds()) < 5
 
         from database import document_tag_projection_db
-        from services.tag_document_projection import retry_pending_document_projections
+        from management.services.knowledge_base.tag_projection import retry_pending_document_projections
 
         state = document_tag_projection_db.get_projection_state(
             identity.tenant_id, LOCAL_PROVIDER, index_name, failed_document_id
@@ -406,7 +407,7 @@ async def _exercise_document_tag_projection_state_machine(identity: TestIdentity
         assert retried['last_error'] is None
         assert retried['next_attempt_at'] is None
 
-        from services.tag_document_projection import (
+        from management.services.knowledge_base.tag_projection import (
             clear_document_projection,
             clear_projection_states_for_knowledge_base,
             get_document_projection_status,
@@ -436,7 +437,7 @@ async def _exercise_document_tag_projection_state_machine(identity: TestIdentity
         # provider, so clear that ledger entry explicitly. The product DELETE
         # path then cascades real local document tags and projection state.
         try:
-            from services.tag_document_projection import clear_projection_states_for_knowledge_base
+            from management.services.knowledge_base.tag_projection import clear_projection_states_for_knowledge_base
             clear_projection_states_for_knowledge_base(
                 identity.tenant_id, AIDP_PROVIDER, index_name
             )

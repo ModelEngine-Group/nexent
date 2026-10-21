@@ -1,6 +1,7 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 from unittest.mock import patch
 
-from services.agent_reasoning_service import (
+from management.services.agent.reasoning import (
     _resolve_model_reasoning_capability,
     reasoning_snapshot_from_model,
     snapshot_agent_reasoning_config,
@@ -97,7 +98,7 @@ def test_reasoning_snapshot_from_model_ignores_invalid_budget_values():
 
 def test_reasoning_snapshot_from_model_handles_enabled_unknown_capability():
     with patch(
-        "services.agent_reasoning_service.normalize_reasoning_params",
+        "management.services.agent.reasoning.normalize_reasoning_params",
         return_value={"enable_thinking": True},
     ):
         result = reasoning_snapshot_from_model(
@@ -112,7 +113,7 @@ def test_reasoning_snapshot_from_model_handles_enabled_unknown_capability():
 
 def test_snapshot_agent_reasoning_config_adds_auto_for_effort_control():
     with patch(
-        "services.agent_reasoning_service.get_model_by_model_id",
+        "management.services.agent.reasoning.get_model_by_model_id",
         return_value={
             "reasoning_capability": {
                 "status": "supported",
@@ -155,7 +156,7 @@ def test_snapshot_agent_reasoning_config_preserves_explicit_values_and_fills_mis
     }
 
     with patch(
-        "services.agent_reasoning_service.get_model_by_model_id",
+        "management.services.agent.reasoning.get_model_by_model_id",
         side_effect=lambda model_id, tenant_id: model_rows.get(model_id),
     ):
         result = snapshot_agent_reasoning_config(
@@ -180,7 +181,7 @@ def test_snapshot_agent_reasoning_config_preserves_explicit_values_and_fills_mis
 
 def test_snapshot_agent_reasoning_config_removes_effort_when_disabled():
     with patch(
-        "services.agent_reasoning_service.get_model_by_model_id",
+        "management.services.agent.reasoning.get_model_by_model_id",
         return_value={
             "reasoning_capability": {"status": "supported", "levels": ["low", "high"]}
         },
@@ -197,7 +198,7 @@ def test_snapshot_agent_reasoning_config_removes_effort_when_disabled():
 
 def test_snapshot_agent_reasoning_config_preserves_effort_without_toggle():
     with patch(
-        "services.agent_reasoning_service.get_model_by_model_id",
+        "management.services.agent.reasoning.get_model_by_model_id",
         return_value={
             "reasoning_capability": {"status": "supported", "levels": ["low", "high"]}
         },
@@ -219,7 +220,7 @@ def test_snapshot_agent_reasoning_config_uses_existing_map_when_request_is_omitt
         tenant_id="tenant-1",
     ) == existing
     with patch(
-        "services.agent_reasoning_service.get_model_by_model_id",
+        "management.services.agent.reasoning.get_model_by_model_id",
         return_value=None,
     ):
         assert snapshot_agent_reasoning_config(

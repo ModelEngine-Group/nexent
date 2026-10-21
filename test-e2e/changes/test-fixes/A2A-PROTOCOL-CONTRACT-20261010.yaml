@@ -6,7 +6,7 @@ change:
   description: >-
     The user approved adapting CTR-039 to the current product compatibility
     contract without product changes. update_agent_protocol in
-    backend/services/a2a_client_service.py persists protocol configuration without
+    backend/management/services/agent/a2a/catalog.py persists protocol configuration without
     checking advertised Card interfaces. Supersede only CTR-039's unsupported
     GRPC rejection expectation in A2A-PROTOCOL-TIMEOUT-20261009. Preserve actual
     JSONRPC and HTTP+JSON calls, business result total=1283, refresh consistency

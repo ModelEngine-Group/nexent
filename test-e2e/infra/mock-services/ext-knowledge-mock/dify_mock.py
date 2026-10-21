@@ -3,7 +3,7 @@
 """Dify route set (root-mounted, real path shape).
 
 Contract mirrored from:
-  - backend/services/dify_service.py — datasets listing. The service strips a
+  - backend/management/services/knowledge_base/providers/dify.py — datasets listing. The service strips a
     trailing ``/v1`` from the user-supplied base and calls ``{base}/v1/datasets``,
     so the configured base is the plain host root, like a real Dify deployment.
   - sdk/nexent/core/tools/dify_search_tool.py — retrieve and upload-file. The

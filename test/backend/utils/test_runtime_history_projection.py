@@ -4,7 +4,7 @@
 import copy
 import json
 
-from utils.runtime_output import project_runtime_history
+from infrastructure.runtime_output import project_runtime_history
 
 RAW = '<completed_action_history>PRIVATE</completed_action_history><final_answer>[doc](s3://owned/doc.docx)</final_answer>'
 CLEAN = '[doc](s3://owned/doc.docx)'

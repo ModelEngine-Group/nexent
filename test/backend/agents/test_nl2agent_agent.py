@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import ast
 import json
 import re
@@ -127,14 +129,14 @@ def test_build_nl2agent_system_prompt_configures_existing_draft(
     assert description_save < resource_search
 
     code_blocks = re.findall(r"<code>\n(.*?)\n</code>", prompt, re.DOTALL)
-    assert len(code_blocks) == 8
+    assert len(code_blocks) == 9
     for code_block in code_blocks:
         ast.parse(code_block)
 
     few_shots_save = next(
         code_block
         for code_block in code_blocks
-        if 'fields={"few_shots_prompt": few_shots}' in code_block
+        if 'fields={"duty_prompt": prompt}' in code_block
     )
     assert r"\x3ccode>" in few_shots_save
     assert r"\x3c/code>" in few_shots_save
@@ -489,11 +491,10 @@ async def test_create_nl2agent_agent_config_has_only_current_runtime_tools(langu
     save_inputs = json.loads(config.tools[3].inputs)
     assert save_inputs["agent_id"] == "int"
     assert set(save_inputs["fields"]) == {
+        "enable_protocol_repair_retry",
         "name",
         "description",
         "duty_prompt",
-        "constraint_prompt",
-        "few_shots_prompt",
         "greeting_message",
         "example_questions",
     }

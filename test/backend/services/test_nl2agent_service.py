@@ -44,12 +44,13 @@ from services.nl2agent_service import (
 from tool_collection.mcp.nl2agent_mcp_tools import (
     AgentDraftFields,
     NL2AGENT_AGENT_ID_HEADER,
+    NL2AGENT_POLICY_CLARIFICATION_HEADER,
     NL2A_MCP_LEGACY_TOOL_NAMES,
     NL2A_MCP_TOOL_NAMES,
     ResourceCandidate,
     ResourceRequirement,
 )
-from utils.http_client_utils import create_httpx_client
+from infrastructure.http.client import create_httpx_client
 
 
 def _context_budget_snapshot() -> ContextBudgetSnapshot:
@@ -157,7 +158,7 @@ def test_update_agent_draft_changes_only_explicit_fields_and_allows_empty_list(
     mocker,
 ):
     mocker.patch(
-        "services.agent_draft_permission_service.query_agent_records_for_nl2agent",
+        "management.services.agent.authorization.query_agent_records_for_nl2agent",
         return_value=[
             {
                 "agent_id": 22,
@@ -169,7 +170,7 @@ def test_update_agent_draft_changes_only_explicit_fields_and_allows_empty_list(
         ],
     )
     mocker.patch(
-        "services.agent_draft_permission_service.get_user_role_by_tenant",
+        "management.services.agent.authorization.get_user_role_by_tenant",
         return_value="MEMBER",
     )
     update_fields = mocker.patch(
@@ -198,7 +199,7 @@ def test_update_agent_draft_changes_only_explicit_fields_and_allows_empty_list(
 
 def test_update_agent_draft_initializes_generated_name_once(mocker):
     mocker.patch(
-        "services.agent_draft_permission_service.query_agent_records_for_nl2agent",
+        "management.services.agent.authorization.query_agent_records_for_nl2agent",
         return_value=[
             {
                 "agent_id": 22,
@@ -212,7 +213,7 @@ def test_update_agent_draft_initializes_generated_name_once(mocker):
         ],
     )
     mocker.patch(
-        "services.agent_draft_permission_service.get_user_role_by_tenant",
+        "management.services.agent.authorization.get_user_role_by_tenant",
         return_value="MEMBER",
     )
     mocker.patch(
@@ -241,7 +242,7 @@ def test_update_agent_draft_initializes_generated_name_once(mocker):
 
 def test_workbench_placeholder_can_be_named_from_user_requirements_once(mocker):
     mocker.patch(
-        "services.agent_draft_permission_service.query_agent_records_for_nl2agent",
+        "management.services.agent.authorization.query_agent_records_for_nl2agent",
         return_value=[{
             "agent_id": 22, "tenant_id": "tenant-a", "version_no": 0,
             "delete_flag": "N", "created_by": "user-a", "name": None,
@@ -249,7 +250,7 @@ def test_workbench_placeholder_can_be_named_from_user_requirements_once(mocker):
         }],
     )
     mocker.patch(
-        "services.agent_draft_permission_service.get_user_role_by_tenant",
+        "management.services.agent.authorization.get_user_role_by_tenant",
         return_value="MEMBER",
     )
     mocker.patch(
@@ -275,7 +276,7 @@ def test_workbench_placeholder_can_be_named_from_user_requirements_once(mocker):
 
 def test_nl2agent_cannot_rename_existing_display_name(mocker):
     mocker.patch(
-        "services.agent_draft_permission_service.query_agent_records_for_nl2agent",
+        "management.services.agent.authorization.query_agent_records_for_nl2agent",
         return_value=[{
             "agent_id": 22, "tenant_id": "tenant-a", "version_no": 0,
             "delete_flag": "N", "created_by": "user-a", "name": None,
@@ -283,7 +284,7 @@ def test_nl2agent_cannot_rename_existing_display_name(mocker):
         }],
     )
     mocker.patch(
-        "services.agent_draft_permission_service.get_user_role_by_tenant",
+        "management.services.agent.authorization.get_user_role_by_tenant",
         return_value="MEMBER",
     )
     update_fields = mocker.patch("services.nl2agent_service.update_agent_draft_fields")
@@ -319,7 +320,7 @@ def test_update_agent_draft_rejects_overwrite_or_duplicate_generated_name(
     retryable,
 ):
     mocker.patch(
-        "services.agent_draft_permission_service.query_agent_records_for_nl2agent",
+        "management.services.agent.authorization.query_agent_records_for_nl2agent",
         return_value=[
             {
                 "agent_id": 22,
@@ -332,7 +333,7 @@ def test_update_agent_draft_rejects_overwrite_or_duplicate_generated_name(
         ],
     )
     mocker.patch(
-        "services.agent_draft_permission_service.get_user_role_by_tenant",
+        "management.services.agent.authorization.get_user_role_by_tenant",
         return_value="MEMBER",
     )
     mocker.patch(
@@ -407,11 +408,11 @@ def test_update_agent_draft_rejects_invalid_identity_or_permission(
     expected_code,
 ):
     mocker.patch(
-        "services.agent_draft_permission_service.query_agent_records_for_nl2agent",
+        "management.services.agent.authorization.query_agent_records_for_nl2agent",
         return_value=records,
     )
     mocker.patch(
-        "services.agent_draft_permission_service.get_user_role_by_tenant",
+        "management.services.agent.authorization.get_user_role_by_tenant",
         return_value=role,
     )
     update_fields = mocker.patch(
@@ -432,7 +433,7 @@ def test_update_agent_draft_rejects_invalid_identity_or_permission(
 
 def test_agent_draft_database_failures_are_stable_and_retryable(mocker):
     mocker.patch(
-        "services.agent_draft_permission_service.query_agent_records_for_nl2agent",
+        "management.services.agent.authorization.query_agent_records_for_nl2agent",
         return_value=[
             {
                 "agent_id": 22,
@@ -444,7 +445,7 @@ def test_agent_draft_database_failures_are_stable_and_retryable(mocker):
         ],
     )
     mocker.patch(
-        "services.agent_draft_permission_service.get_user_role_by_tenant",
+        "management.services.agent.authorization.get_user_role_by_tenant",
         return_value="MEMBER",
     )
     mocker.patch(
@@ -466,7 +467,7 @@ def test_agent_draft_database_failures_are_stable_and_retryable(mocker):
 
 def test_agent_draft_update_rejects_unexpected_row_count(mocker):
     mocker.patch(
-        "services.agent_draft_permission_service.query_agent_records_for_nl2agent",
+        "management.services.agent.authorization.query_agent_records_for_nl2agent",
         return_value=[
             {
                 "agent_id": 22,
@@ -478,7 +479,7 @@ def test_agent_draft_update_rejects_unexpected_row_count(mocker):
         ],
     )
     mocker.patch(
-        "services.agent_draft_permission_service.get_user_role_by_tenant",
+        "management.services.agent.authorization.get_user_role_by_tenant",
         return_value="MEMBER",
     )
     mocker.patch(
@@ -693,7 +694,7 @@ def test_search_skips_unsearchable_tools_and_sanitizes_malformed_inputs(mocker):
 @pytest.mark.asyncio
 async def test_search_installed_resources_covers_visible_tools_and_skills(mocker):
     mocker.patch(
-        "services.tool_configuration_service.list_all_tools",
+        "management.services.tool.configuration.list_all_tools",
         new=AsyncMock(
             return_value=[
                 {
@@ -861,7 +862,7 @@ async def test_installed_resource_catalog_filters_knowledge_tools_by_deployment(
     expected_knowledge_tools,
 ):
     mocker.patch(
-        "services.tool_configuration_service.list_all_tools",
+        "management.services.tool.configuration.list_all_tools",
         new=AsyncMock(
             return_value=[
                 {
@@ -998,7 +999,7 @@ async def test_search_internal_uninstalled_resources_aggregates_sources_and_excl
         },
     )
     mocker.patch(
-        "services.mcp_management_service.list_community_mcp_services",
+        "management.services.repository.mcp.service.list_community_mcp_services",
         new=AsyncMock(
             return_value={
                 "items": [
@@ -1175,7 +1176,7 @@ async def test_uninstalled_catalog_paginates_and_filters_invalid_entries(mocker,
         ],
     )
     list_community = mocker.patch(
-        "services.mcp_management_service.list_community_mcp_services",
+        "management.services.repository.mcp.service.list_community_mcp_services",
         new=AsyncMock(
             side_effect=[
                 {
@@ -1552,8 +1553,9 @@ async def test_validate_agent_generation_complete_uses_database_state(mocker):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("facts", [[], [{"resource_type": "tool", "resource_id": 7, "name": "search"}]])
 async def test_validate_agent_generation_complete_allows_empty_resource_prompts(
-    mocker,
+    mocker, facts,
 ):
     mocker.patch(
         "services.nl2agent_service._load_verified_nl2agent_state",
@@ -1569,7 +1571,7 @@ async def test_validate_agent_generation_complete_allows_empty_resource_prompts(
                 "greeting_message": "Hello, what should we write?",
                 "example_questions": ["Improve this paragraph"],
             },
-            [],
+            facts,
         ),
     )
 
@@ -1581,8 +1583,9 @@ async def test_validate_agent_generation_complete_allows_empty_resource_prompts(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("duty_prompt", [None, "", "   "])
 async def test_validate_agent_generation_complete_rejects_incomplete_resource_prompts(
-    mocker,
+    mocker, duty_prompt,
 ):
     mocker.patch(
         "services.nl2agent_service._load_verified_nl2agent_state",
@@ -1592,9 +1595,9 @@ async def test_validate_agent_generation_complete_rejects_incomplete_resource_pr
                 "name": "research_assistant",
                 "display_name": "Research Assistant",
                 "description": "Research help",
-                "duty_prompt": "Research sources.",
+                "duty_prompt": duty_prompt,
                 "constraint_prompt": "Use search.",
-                "few_shots_prompt": "",
+                "few_shots_prompt": "A valid legacy example",
                 "greeting_message": "Hello",
                 "example_questions": ["Research this topic"],
             },
@@ -1617,7 +1620,7 @@ async def test_validate_agent_generation_complete_rejects_incomplete_resource_pr
         )
 
     assert exc_info.value.code == "prompt_fields_incomplete"
-    assert exc_info.value.failed_fields == ["few_shots_prompt"]
+    assert exc_info.value.failed_fields == ["duty_prompt"]
 
 
 @pytest.mark.asyncio
@@ -1658,8 +1661,12 @@ async def test_validate_agent_generation_complete_requires_generated_name(mocker
     assert exc_info.value.failed_fields == ["name"]
 
 
+@pytest.mark.parametrize("query,clarification_required", [
+    ("Build an agent that summarizes weather risks.", "false"),
+    ("只关闭重试，不更改其他配置。", "true"),
+])
 @pytest.mark.asyncio
-async def test_build_run_info_is_ephemeral(mocker):
+async def test_build_run_info_is_ephemeral(mocker, query, clarification_required):
     """UT-BE-NCR-014 and UT-BE-NCR-015: verified headers and attachments."""
     default_model = {
         "model_factory": "openai",
@@ -1711,7 +1718,7 @@ async def test_build_run_info_is_ephemeral(mocker):
         return_value=verified_context,
     )
     request = NL2AgentRunRequest(
-        query="Build an agent that summarizes weather risks.",
+        query=query,
         agent_id=42,
         history=[
             HistoryItem(
@@ -1772,6 +1779,7 @@ async def test_build_run_info_is_ephemeral(mocker):
             "headers": {
                 "Authorization": "Bearer tenant-token",
                 NL2AGENT_AGENT_ID_HEADER: "42",
+                NL2AGENT_POLICY_CLARIFICATION_HEADER: clarification_required,
                 "X-Tenant-ID": "tenant-a",
                 "X-Nexent-Internal-Token": TOKEN,
             },
@@ -1785,7 +1793,7 @@ async def test_build_run_info_is_ephemeral(mocker):
     assert run_info.observer._boundary_stop_event is run_info.stop_event
     join_query.assert_awaited_once_with(
         minio_files=None,
-        query="Build an agent that summarizes weather risks.",
+        query=query,
         history=request.history,
         language="en",
     )
@@ -1976,6 +1984,7 @@ async def test_build_run_info_falls_back_without_capacity_snapshot(mocker):
             "bypass_proxy": True,
             "headers": {
                 NL2AGENT_AGENT_ID_HEADER: "42",
+                NL2AGENT_POLICY_CLARIFICATION_HEADER: "false",
                 "X-Tenant-ID": "tenant-a",
                 "X-Nexent-Internal-Token": TOKEN,
             },

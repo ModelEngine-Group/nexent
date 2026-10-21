@@ -26,6 +26,10 @@ feature:
   - rule_id: CMSR-RULE-018
     description: Every rejected model response has correlated content-free diagnostics; bounded model-output previews
       require an explicit short-lived diagnostic opt-in.
+  - rule_id: CMSR-RULE-019
+    description: A completed stop response with no visible body or tool calls may retry once within the shared
+      attempt budget, reusing the immutable request and rolling back failed fragments; cancellation, length,
+      filtering and tool-only output are not retried as empty recovery.
   required_test_stages:
   - D1
   - D2

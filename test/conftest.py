@@ -1,3 +1,4 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """
 Global test configuration for third-party component environment variables.
 
@@ -32,6 +33,15 @@ if _backend_dir not in sys.path:
 if _sdk_dir not in sys.path:
     sys.path.insert(0, _sdk_dir)
 
+_canonical_backend_packages = {}
+for _namespace in ("management", "infrastructure", "runtime", "contracts", "data_process"):
+    _namespace_path = Path(_backend_dir) / _namespace
+    _canonical_backend_packages[_namespace] = str(_namespace_path)
+    for _initializer in _namespace_path.rglob("__init__.py"):
+        _relative = _initializer.parent.relative_to(_namespace_path)
+        _package_name = ".".join((_namespace, *_relative.parts))
+        _canonical_backend_packages[_package_name] = str(_initializer.parent)
+
 
 def _restore_project_package_metadata() -> None:
     """Keep package-level test doubles capable of resolving real submodules."""
@@ -42,10 +52,19 @@ def _restore_project_package_metadata() -> None:
         "utils": os.path.join(_backend_dir, "utils"),
         "nexent": os.path.join(_sdk_dir, "nexent"),
     }
+    package_paths.update(_canonical_backend_packages)
+    active_parents = set()
+    for module_name in tuple(sys.modules):
+        parts = module_name.split(".")
+        for count in range(1, len(parts)):
+            active_parents.add(".".join(parts[:count]))
     for package_name, package_path in package_paths.items():
         package_module = sys.modules.get(package_name)
         if package_module is None:
-            continue
+            if package_name not in active_parents:
+                continue
+            package_module = types.ModuleType(package_name)
+            sys.modules[package_name] = package_module
 
         package_module.__path__ = [package_path]
         package_module.__package__ = package_name
@@ -205,12 +224,12 @@ def tmp_path():
 def install_supabase_mock():
     """Install a structured supabase package mock into ``sys.modules``.
 
-    ``backend.utils.auth_utils`` imports ``from supabase.lib.client_options
+    ``management.services.permission.identity.authentication_helpers`` imports ``from supabase.lib.client_options
     import SyncClientOptions`` at module load time. Test files that simply
     replace ``sys.modules['supabase']`` with a bare ``MagicMock`` cause that
     import to fail (the mock has no ``.lib.client_options`` attribute),
     which in turn makes every test that transitively imports ``auth_utils``
-    (for example anything that imports ``services.user_service``) fail
+    (for example anything that imports ``management.services.permission.identity.users``) fail
     during collection.
 
     This helper installs a package-like mock that exposes the attributes
@@ -249,7 +268,7 @@ def _supabase_mock():
     Module-level ``sys.modules['supabase']`` overrides in test files
     (e.g. ``sys.modules['supabase'] = MagicMock()``) strip out the
     structured attributes (``lib``, ``lib.client_options``,
-    ``SyncClientOptions``) that ``backend.utils.auth_utils`` resolves at
+    ``SyncClientOptions``) that ``management.services.permission.identity.authentication_helpers`` resolves at
     import time. The module-level install below covers collection, but
     any test that re-mocks ``supabase`` after collection needs the
     structured attributes re-installed before its test body runs.
@@ -259,7 +278,7 @@ def _supabase_mock():
 
 
 # Install a sane supabase mock at collection time so test modules that
-# import ``backend.utils.auth_utils`` (directly or transitively) succeed
+# import ``management.services.permission.identity.authentication_helpers`` (directly or transitively) succeed
 # during pytest's collection phase, before any test fixture has had a
 # chance to run. The ``_supabase_mock`` autouse fixture above re-runs the
 # install before each test body in case individual test modules

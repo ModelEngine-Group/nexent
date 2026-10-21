@@ -182,6 +182,7 @@ const RAIL_ITEM_CLASS =
   "group flex h-11 w-full shrink-0 cursor-pointer items-center overflow-hidden rounded-lg border-0 bg-transparent p-0 pr-2 text-left text-[var(--navigation-muted)] transition-colors duration-150 ease-out hover:bg-[var(--navigation-hover)] hover:text-[var(--navigation-foreground)] focus-visible:text-[var(--navigation-foreground)]";
 const RAIL_ICON_CLASS = "h-5 w-5 shrink-0";
 const SELECTED_ITEM_CLASS = "!bg-[var(--navigation-selected)]";
+const ROUTE_PREFETCH_DELAY_MS = 50;
 
 function isRouteAccessible(
   route: RouteConfig,
@@ -215,6 +216,7 @@ export function SideNavigation({ onPinnedChange }: SideNavigationProps = {}) {
   const hovered = useRef(false);
   const popups = useRef({ account: false, notification: false });
   const closeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const routePrefetchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const expand = () => {
     if (closeTimer.current) clearTimeout(closeTimer.current);
     if (suppressExpansion.current) return;
@@ -246,12 +248,16 @@ export function SideNavigation({ onPinnedChange }: SideNavigationProps = {}) {
   useEffect(
     () => () => {
       if (closeTimer.current) clearTimeout(closeTimer.current);
+      if (routePrefetchTimer.current) clearTimeout(routePrefetchTimer.current);
       onPinnedChange?.(false);
     },
     [onPinnedChange]
   );
 
   const [pendingNavigationPath, setPendingNavigationPath] = useState<
+    string | null
+  >(null);
+  const [optimisticSelectedKey, setOptimisticSelectedKey] = useState<
     string | null
   >(null);
 
@@ -280,6 +286,20 @@ export function SideNavigation({ onPinnedChange }: SideNavigationProps = {}) {
   }, [pathname]);
 
   useEffect(() => {
+    if (optimisticSelectedKey && selectedKey === optimisticSelectedKey) {
+      const timeout = setTimeout(() => setOptimisticSelectedKey(null), 0);
+      return () => clearTimeout(timeout);
+    }
+  }, [optimisticSelectedKey, selectedKey]);
+
+  useEffect(() => {
+    if (!optimisticSelectedKey) return;
+
+    const timeout = setTimeout(() => setOptimisticSelectedKey(null), 10000);
+    return () => clearTimeout(timeout);
+  }, [optimisticSelectedKey]);
+
+  useEffect(() => {
     const handleLoginSuccess = () => {
       if (pendingNavigationPath && isAuthenticated) {
         setTimeout(() => {
@@ -305,13 +325,39 @@ export function SideNavigation({ onPinnedChange }: SideNavigationProps = {}) {
     ).sort((a, b) => a.order - b.order);
   }, [accessibleRoutes, enableAgentWorkbench, hideHomePage]);
 
+  const getRouteNavigationPath = (route: RouteConfig) => {
+    const routePath = route.navigationPath || route.path;
+    return `/${locale}${routePath === "/" ? "" : routePath}`;
+  };
+
+  const prefetchRoute = (route: RouteConfig) => {
+    if (selectedKey === route.path) return;
+    if (!isAuthenticated && !isSpeedMode && route.path !== "/") return;
+
+    router.prefetch(getRouteNavigationPath(route));
+  };
+
+  const cancelRoutePrefetch = () => {
+    if (routePrefetchTimer.current) {
+      clearTimeout(routePrefetchTimer.current);
+      routePrefetchTimer.current = null;
+    }
+  };
+
+  const scheduleRoutePrefetch = (route: RouteConfig) => {
+    cancelRoutePrefetch();
+    routePrefetchTimer.current = setTimeout(() => {
+      routePrefetchTimer.current = null;
+      prefetchRoute(route);
+    }, ROUTE_PREFETCH_DELAY_MS);
+  };
+
   const handleRouteClick = (route: RouteConfig) => {
     if (route.isSection) {
       return;
     }
 
-    const routePath = route.navigationPath || route.path;
-    const navigationPath = `/${locale}${routePath === "/" ? "" : routePath}`;
+    const navigationPath = getRouteNavigationPath(route);
 
     if (!isAuthenticated && !isSpeedMode && route.path !== "/") {
       setPendingNavigationPath(navigationPath);
@@ -319,6 +365,7 @@ export function SideNavigation({ onPinnedChange }: SideNavigationProps = {}) {
       return;
     }
 
+    setOptimisticSelectedKey(route.path);
     router.push(navigationPath);
   };
 
@@ -426,16 +473,22 @@ export function SideNavigation({ onPinnedChange }: SideNavigationProps = {}) {
         <div className="flex flex-col gap-2">
           {accessibleMenuItems.map((route) => {
             const Icon = route.Icon;
-            const isSelected = selectedKey === route.path;
+            const isSelected =
+              (optimisticSelectedKey ?? selectedKey) === route.path;
 
             return (
               <button
                 key={route.path}
                 type="button"
                 aria-current={isSelected ? "page" : undefined}
+                aria-busy={optimisticSelectedKey === route.path || undefined}
                 aria-label={t(route.labelKey)}
                 className={`${RAIL_ITEM_CLASS} ${isSelected ? SELECTED_ITEM_CLASS : ""}`}
                 onClick={() => handleRouteClick(route)}
+                onMouseEnter={() => scheduleRoutePrefetch(route)}
+                onMouseLeave={cancelRoutePrefetch}
+                onFocus={() => scheduleRoutePrefetch(route)}
+                onBlur={cancelRoutePrefetch}
               >
                 <span className="flex h-11 w-12 shrink-0 items-center justify-center">
                   <Icon

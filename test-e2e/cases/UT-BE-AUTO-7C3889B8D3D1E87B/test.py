@@ -1,3 +1,4 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 import asyncio
 import logging
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -5,11 +6,11 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from nexent.memory.models import MemoryIngestResult, MemoryIngestUnit
-from services.memory_backend_adapter import (
+from management.services.memory.provider import (
     _backend_store_hook,
     _fanout_external_ingest,
 )
-from services.memory_ingestion_event_service import MemoryIngestionEventService
+from management.services.memory.ingestion import MemoryIngestionEventService
 
 
 CASE_ID = 'UT-BE-AUTO-7C3889B8D3D1E87B'
@@ -36,7 +37,7 @@ def test_ut_be_auto_7c3889b8d3d1e87b(caplog):
     provider_service = MagicMock()
     provider_service._config_service.get_enabled_providers.return_value = []
     with patch(
-        'services.memory_backend_adapter.get_memory_external_provider_service',
+        'management.services.memory.provider.get_memory_external_provider_service',
         return_value=provider_service,
     ), patch.object(
         MemoryIngestionEventService,
@@ -55,7 +56,7 @@ def test_ut_be_auto_7c3889b8d3d1e87b(caplog):
         {'provider_name': 'p2', 'params': {'plugin.api_key': 'sk-LEAK-p2-1234567890'}},
     ]
     with patch(
-        'services.memory_backend_adapter.get_memory_external_provider_service',
+        'management.services.memory.provider.get_memory_external_provider_service',
         return_value=provider_service,
     ), patch.object(
         MemoryIngestionEventService,
@@ -92,7 +93,7 @@ def test_ut_be_auto_7c3889b8d3d1e87b(caplog):
         {'provider_name': 'p3'},
     ]
     with patch(
-        'services.memory_backend_adapter.get_memory_external_provider_service',
+        'management.services.memory.provider.get_memory_external_provider_service',
         return_value=provider_service,
     ), patch.object(
         MemoryIngestionEventService,
@@ -119,10 +120,10 @@ def test_ut_be_auto_7c3889b8d3d1e87b(caplog):
         {'provider_name': 'p1'}
     ]
     with patch(
-        'services.memory_backend_adapter.get_memory_record_service',
+        'management.services.memory.provider.get_memory_record_service',
         return_value=record_service,
     ), patch(
-        'services.memory_backend_adapter.get_memory_external_provider_service',
+        'management.services.memory.provider.get_memory_external_provider_service',
         return_value=provider_service,
     ), patch.object(
         MemoryIngestionEventService,

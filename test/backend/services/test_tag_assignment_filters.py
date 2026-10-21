@@ -1,7 +1,8 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 import pytest
 from consts.model import TagAssignmentFilter
 from database.tag_management_db import TagManagementDB
-from services.tag_management_service import TagManagementService
+from management.services.tag.library import TagManagementService
 
 
 class _Query:

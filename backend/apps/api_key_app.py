@@ -1,3 +1,4 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """Authenticated tenant administration endpoints for API keys."""
 
 import logging
@@ -14,13 +15,13 @@ from consts.exceptions import (
     ValidationError,
 )
 from consts.model import ApiKeyTargetRequest
-from services.api_key_service import (
+from management.services.permission.api_keys import (
     list_tenant_api_keys,
     refresh_user_api_key,
     revoke_user_api_keys,
 )
-from services.audit_service import record_security_event
-from utils.auth_utils import get_current_user_context
+from management.services.monitor.audit import record_security_event
+from management.services.permission.identity.authentication_helpers import get_current_user_context
 
 logger = logging.getLogger("api_key_app")
 router = APIRouter(prefix="/api-keys", tags=["api-keys"])

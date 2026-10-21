@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """Isolated PostgreSQL and real Core/model transport proof for saved CM and history."""
 
 import asyncio
@@ -149,7 +151,7 @@ async def run_context_scenario(monkeypatch, engine, original="smolagents", proto
     )
     from database.db_models import ConversationMessageUnit
     from nexent.core.agents import nexent_agent
-    from services.conversation_management_service import (
+    from management.services.conversation.service import (
         persist_history_summary_candidate,
     )
     from smolagents import Tool

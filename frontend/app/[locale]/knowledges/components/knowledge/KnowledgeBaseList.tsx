@@ -10,7 +10,15 @@ import React, {
 } from "react";
 import { useTranslation } from "react-i18next";
 
-import { Button, InputNumber, Popover, Select, Spin, Tooltip } from "antd";
+import {
+  Button,
+  Dropdown,
+  InputNumber,
+  Popover,
+  Select,
+  Spin,
+  Tooltip,
+} from "antd";
 import {
   SyncOutlined,
   SettingOutlined,
@@ -28,6 +36,7 @@ import {
   FolderOpen,
 } from "lucide-react";
 import { Can } from "@/components/permission/Can";
+import { usePermission } from "@/hooks/permission/usePermission";
 import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
 import { useGroupList } from "@/hooks/group/useGroupList";
 import { KnowledgeBaseEditModal } from "./KnowledgeBaseEditModal";
@@ -258,6 +267,7 @@ const KnowledgeBaseList: React.FC<KnowledgeBaseListProps> = ({
 
   // Get user info for tenant ID
   const { user } = useAuthorizationContext();
+  const { isReady: permissionsReady, can } = usePermission();
   const tenantId = user?.tenantId || null;
   const showPersonalCapacity = user?.role === USER_ROLES.USER;
   const quotaMap = useMemo(() => {
@@ -746,12 +756,6 @@ const KnowledgeBaseList: React.FC<KnowledgeBaseListProps> = ({
           >
             {t("knowledgeBase.button.sync")}
           </StandardButton>
-          <StandardButton
-            onClick={() => setTagManagementOpen(true)}
-            icon={<Tag className="size-4" />}
-          >
-            {t("knowledgeBase.button.tagManagement")}
-          </StandardButton>
           {showDataMateConfig && (
             <StandardButton
               onClick={onDataMateConfig}
@@ -852,87 +856,61 @@ const KnowledgeBaseList: React.FC<KnowledgeBaseListProps> = ({
                       </div>
                     </div>
 
-                    <Popover
-                      trigger="click"
-                      placement="bottomRight"
-                      content={
-                        <div
-                          className="flex flex-col [&>.ant-btn~.ant-btn]:!border-t [&>.ant-btn~.ant-btn]:!border-t-gray-100"
-                          onClick={(event) => event.stopPropagation()}
-                        >
-                          <Can permission="kb:update">
-                            <Tooltip
-                              title={t("knowledgeBase.action.assignTags")}
-                            >
-                              <Button
-                                type="text"
-                                size="small"
-                                className="!w-full !justify-start !rounded-none !text-left"
-                                aria-label={t(
-                                  "knowledgeBase.action.assignTags"
-                                )}
-                                onClick={(event) => {
-                                  event.stopPropagation();
-                                  setAssignTarget({
-                                    indexName: kb.id,
-                                    canEdit: kb.permission !== "READ_ONLY",
-                                  });
-                                }}
-                              >
-                                {t("knowledgeBase.action.assignTags")}
-                              </Button>
-                            </Tooltip>
-                            {(!kb.source ||
-                              kb.source === "nexent" ||
-                              kb.source === "elasticsearch") &&
-                              kb.permission !== "READ_ONLY" && (
-                                <Tooltip title={t("common.edit")}>
-                                  <Button
-                                    type="text"
-                                    size="small"
-                                    className="!w-full !justify-start !rounded-none !text-left"
-                                    aria-label={t("common.edit")}
-                                    onClick={(event) => {
-                                      event.stopPropagation();
-                                      openEditModal(kb);
-                                    }}
-                                  >
-                                    {t("common.edit")}
-                                  </Button>
-                                </Tooltip>
-                              )}
-                          </Can>
-                          <Can permission="kb:delete">
-                            {kb.permission !== "READ_ONLY" && (
-                              <Tooltip title={t("common.delete")}>
-                                <Button
-                                  type="text"
-                                  danger
-                                  size="small"
-                                  className="!w-full !justify-start !rounded-none !text-left"
-                                  aria-label={t("common.delete")}
-                                  onClick={(event) => {
-                                    event.stopPropagation();
-                                    onDelete(kb.id);
-                                  }}
-                                >
-                                  {t("common.delete")}
-                                </Button>
-                              </Tooltip>
-                            )}
-                          </Can>
-                        </div>
-                      }
+                    <Dropdown
+                      trigger={["click"]}
+                      menu={{
+                        items: [
+                          ...(permissionsReady && can("kb:update")
+                            ? [
+                                {
+                                  key: "tags",
+                                  label: t("knowledgeBase.action.assignTags"),
+                                },
+                                ...((!kb.source ||
+                                  kb.source === "nexent" ||
+                                  kb.source === "elasticsearch") &&
+                                kb.permission !== "READ_ONLY"
+                                  ? [{ key: "edit", label: t("common.edit") }]
+                                  : []),
+                              ]
+                            : []),
+                          ...(permissionsReady &&
+                          can("kb:delete") &&
+                          kb.permission !== "READ_ONLY"
+                            ? [
+                                {
+                                  key: "delete",
+                                  label: t("common.delete"),
+                                  danger: true,
+                                },
+                              ]
+                            : []),
+                        ],
+                        onClick: ({ key, domEvent }) => {
+                          domEvent.stopPropagation();
+                          if (key === "tags") {
+                            setAssignTarget({
+                              indexName: kb.id,
+                              canEdit: kb.permission !== "READ_ONLY",
+                            });
+                          } else if (key === "edit") {
+                            openEditModal(kb);
+                          } else if (key === "delete") {
+                            onDelete(kb.id);
+                          }
+                        },
+                      }}
                     >
                       <button
                         type="button"
                         aria-label={t("skillRepository.common.moreActions")}
-                        className="flex size-7 shrink-0 items-center justify-center rounded text-[#777777] hover:bg-gray-100"
+                        className="flex size-6 shrink-0 cursor-pointer items-center justify-center rounded-[4px] text-[#191919] hover:bg-[#f0f0f0]"
                         onClick={(event) => event.stopPropagation()}
+                        onKeyDown={(event) => event.stopPropagation()}
                       >
-                        <MoreHorizontal className="size-4" />
+                        <MoreHorizontal className="size-4" aria-hidden />
                       </button>
-                    </Popover>
+                    </Dropdown>
                   </div>
 
                   <p className="line-clamp-2 text-sm leading-5 text-[#1a1a1a]">

@@ -3,16 +3,16 @@
 /** Translation keys for NL2Agent's default example questions. */
 export const NL2AGENT_DEFAULT_SUGGESTIONS = [
   {
-    id: "generate-prompts",
-    titleKey: "nl2agent.suggestions.generatePrompts.title",
-    descriptionKey: "nl2agent.suggestions.generatePrompts.description",
-    promptKey: "nl2agent.suggestions.generatePrompts.prompt",
-  },
-  {
     id: "recommend-resources",
     titleKey: "nl2agent.suggestions.recommendResources.title",
     descriptionKey: "nl2agent.suggestions.recommendResources.description",
     promptKey: "nl2agent.suggestions.recommendResources.prompt",
+  },
+  {
+    id: "generate-prompts",
+    titleKey: "nl2agent.suggestions.generatePrompts.title",
+    descriptionKey: "nl2agent.suggestions.generatePrompts.description",
+    promptKey: "nl2agent.suggestions.generatePrompts.prompt",
   },
   {
     id: "recommend-knowledge-bases",

@@ -1,3 +1,4 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """Unit tests for backend.apps.a2a_client_app runtime metadata chat flow."""
 import sys
 import types
@@ -28,18 +29,18 @@ client_service_mock = MagicMock()
 client_service_mock.a2a_client_service = MagicMock()
 client_service_mock.AgentCallError = _AgentCallError
 client_service_mock.AgentDiscoveryError = _AgentDiscoveryError
-sys.modules["services.a2a_client_service"] = client_service_mock
+sys.modules["management.services.agent.a2a.catalog"] = client_service_mock
 
 server_service_mock = MagicMock()
 server_service_mock.a2a_server_service = MagicMock()
-sys.modules["services.a2a_server_service"] = server_service_mock
+sys.modules["management.services.agent.a2a.service"] = server_service_mock
 
 sys.modules["database.a2a_agent_db"] = MagicMock()
 
 auth_utils_mock = MagicMock()
 auth_utils_mock.get_current_user_info = MagicMock(return_value=("user_1", "tenant_1", None))
-sys.modules["utils.auth_utils"] = auth_utils_mock
-sys.modules["backend.utils.auth_utils"] = auth_utils_mock
+sys.modules["management.services.permission.identity.authentication_helpers"] = auth_utils_mock
+sys.modules["management.services.permission.identity.authentication_helpers"] = auth_utils_mock
 
 from consts.error_code import RuntimeMetadataValidationCode  # noqa: E402
 from consts.exceptions import (  # noqa: E402

@@ -18,7 +18,7 @@ disjoint, so one port hosts them all):
 | AIDP protocol | `/KnowledgeBase/*`, `/ModelService/*` | Managed AIDP **and** independent AIDP | `Authorization: Bearer mock-aidp-key`, tenant `aidp` |
 
 Root mounting is not cosmetic: the product drops base paths in two places —
-`backend/services/image_service.py` and `ind_aidp_service.py` rebuild AIDP
+`backend/management/services/file/image_proxy.py` and `ind_aidp_service.py` rebuild AIDP
 image URLs from scheme+netloc only, and the SDK's
 `DataMateSearchTool._parse_server_url` rebuilds its base from
 scheme+host+port only — so a path-prefixed base can never work for the AIDP

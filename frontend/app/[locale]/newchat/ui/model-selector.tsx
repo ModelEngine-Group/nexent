@@ -469,7 +469,9 @@ function ModelSelectorValue({
       className={cn("flex min-w-0 items-center gap-2", className)}
     >
       {selectedModel.icon && <ModelIcon>{selectedModel.icon}</ModelIcon>}
-      <span className="truncate font-medium">{selectedModel.name}</span>
+      <span className="truncate font-medium" title={selectedModel.name}>
+        {selectedModel.name}
+      </span>
       {effortName && (
         <span className="shrink-0 text-muted-foreground">{effortName}</span>
       )}

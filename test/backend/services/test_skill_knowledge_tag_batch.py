@@ -11,8 +11,8 @@ from database.skill_db import get_skills_for_tag_read
 from database.knowledge_db import get_knowledge_records_for_tag_read
 from database.tag_management_db import TagManagementDB
 from management.services.knowledge_base import permission
-from services.tag_management_service import TagManagementService
-from services.tag_resource_adapters import AuthenticatedCaller
+from management.services.tag.library import TagManagementService
+from management.services.tag.resources import AuthenticatedCaller
 
 
 @pytest.mark.parametrize("resource,field,valid,invalid", [
@@ -44,7 +44,7 @@ def test_skill_batch_preserves_group_restrictions_and_uses_one_record_read(monke
         {"skill_id": 2, "created_by": "other", "group_ids": [9]},
         {"skill_id": 3, "created_by": "other", "group_ids": []},
     ])
-    monkeypatch.setattr("services.tag_management_service.get_skills_for_tag_read", records)
+    monkeypatch.setattr("management.services.tag.library.get_skills_for_tag_read", records)
     assignments = MagicMock(return_value={"3": [], "1": [{"value_id": 8}]})
     monkeypatch.setattr(TagManagementDB, "list_resource_assignments_batch", assignments)
     caller = AuthenticatedCaller("reader", "tenant-a", role="DEV")
@@ -61,7 +61,7 @@ def test_knowledge_batch_uses_real_access_rules_with_one_context_read(monkeypatc
         {"index_name": "denied", "tenant_id": "tenant-a", "created_by": "other", "group_ids": [8]},
     ]
     record_read = MagicMock(return_value=records)
-    monkeypatch.setattr("services.tag_management_service.get_knowledge_records_for_tag_read", record_read)
+    monkeypatch.setattr("management.services.tag.library.get_knowledge_records_for_tag_read", record_read)
     role = MagicMock(return_value={"tenant_id": "tenant-a", "user_role": "DEV"})
     groups = MagicMock(return_value=[9])
     monkeypatch.setattr(permission, "get_user_tenant_by_user_id", role)

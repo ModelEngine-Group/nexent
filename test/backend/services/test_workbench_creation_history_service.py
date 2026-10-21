@@ -1,8 +1,9 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 import json
 
 import pytest
 
-from services import workbench_creation_history_service as service
+from management.services.conversation import creation_history as service
 
 
 def config(mode):

@@ -1,8 +1,10 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """Explicit native result and lossless envelope persistence unit contracts."""
 
 import json
 import pytest
-from utils.runtime_output import RuntimeOutputState
+from infrastructure.runtime_output import RuntimeOutputState
 from management.services.agent.stream import finalize_buffered_unit_fragments, serialize_stream_unit_content, is_stream_unit_continuation
 
 

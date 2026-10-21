@@ -10,8 +10,8 @@ from fastapi.responses import JSONResponse
 from pydantic import StrictBool
 
 from consts.exceptions import ConversationNotFoundError, TokenExpiredError, UnauthorizedError, ValidationError
-from services.workbench_pin_service import get_workbench_pins, update_workbench_pin
-from utils.auth_utils import get_current_user_id
+from management.services.conversation.pins import get_workbench_pins, update_workbench_pin
+from management.services.permission.identity.authentication_helpers import get_current_user_id
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/conversation")

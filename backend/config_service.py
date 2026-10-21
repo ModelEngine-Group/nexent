@@ -1,3 +1,4 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 import logging
 import logging.config
 import warnings
@@ -15,7 +16,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 from apps.config_app import app
-from utils.logging_utils import (
+from infrastructure.logging import (
     configure_elasticsearch_logging,
     get_uvicorn_logging_config,
 )

@@ -57,10 +57,10 @@ def test_apply_workbench_runtime_plan_attaches_all_runtime_overrides(monkeypatch
     )
 
     knowledge_scope = __import__(
-        "services.knowledge_scope_service", fromlist=["snapshot_runtime_knowledge_tree"]
+        "management.services.knowledge_base.scope", fromlist=["snapshot_runtime_knowledge_tree"]
     )
-    workbench = ModuleType("services.workbench_service")
-    runtime_mount = ModuleType("services.runtime_knowledge_mount")
+    workbench = ModuleType("management.services.agent.workbench")
+    runtime_mount = ModuleType("management.services.knowledge_base.mount")
     snapshot = MagicMock(return_value=knowledge_tree)
     mount = MagicMock(return_value=mounted_tools)
     attach = MagicMock(return_value=attached_plan)
@@ -71,8 +71,8 @@ def test_apply_workbench_runtime_plan_attaches_all_runtime_overrides(monkeypatch
     workbench.attach_runtime_knowledge_tree = attach
     workbench.runtime_skill_snapshot = skill_snapshot
     runtime_mount.mount_knowledge_records = mount
-    monkeypatch.setitem(sys.modules, "services.workbench_service", workbench)
-    monkeypatch.setitem(sys.modules, "services.runtime_knowledge_mount", runtime_mount)
+    monkeypatch.setitem(sys.modules, "management.services.agent.workbench", workbench)
+    monkeypatch.setitem(sys.modules, "management.services.knowledge_base.mount", runtime_mount)
 
     agent_run.apply_workbench_runtime_plan(request, canonical, plan, "tenant-a")
 
@@ -145,10 +145,10 @@ async def test_prepare_agent_run_forwards_workbench_runtime_state(
     monkeypatch.setattr(agent_run, "get_current_run_user_message_id", MagicMock(return_value=None))
     monkeypatch.setattr(agent_run, "build_authorized_context_input", MagicMock(return_value="context"))
     monkeypatch.setattr(agent_run.agent_run_manager, "register_agent_run", register)
-    workbench = ModuleType("services.workbench_service")
+    workbench = ModuleType("management.services.agent.workbench")
     compile_plan = MagicMock(return_value=executable_tree)
     workbench.compile_runtime_mount_plan = compile_plan
-    monkeypatch.setitem(sys.modules, "services.workbench_service", workbench)
+    monkeypatch.setitem(sys.modules, "management.services.agent.workbench", workbench)
 
     result, memory = await agent_run.prepare_agent_run(
         request,
@@ -217,10 +217,10 @@ async def test_run_agent_stream_resolves_and_persists_existing_workbench(monkeyp
         return_value={"workbench_config_version": 3, "runtime_metadata": {"existing": True}}
     )
 
-    workbench = ModuleType("services.workbench_service")
+    workbench = ModuleType("management.services.agent.workbench")
     workbench.assert_workbench_version = MagicMock()
     workbench.resolve_workbench_config = MagicMock(return_value=(canonical, plan))
-    monkeypatch.setitem(sys.modules, "services.workbench_service", workbench)
+    monkeypatch.setitem(sys.modules, "management.services.agent.workbench", workbench)
     monkeypatch.setattr(agent_subscription, "ENABLE_AGENT_WORKBENCH", True)
     monkeypatch.setattr(
         agent_subscription,
@@ -383,10 +383,10 @@ async def test_run_agent_stream_rejects_stale_metadata_version(monkeypatch):
             "runtime_metadata_version": 3,
         },
     )
-    workbench_module = ModuleType("services.workbench_service")
+    workbench_module = ModuleType("management.services.agent.workbench")
     workbench_module.assert_workbench_version = MagicMock()
     workbench_module.resolve_workbench_config = MagicMock()
-    monkeypatch.setitem(sys.modules, "services.workbench_service", workbench_module)
+    monkeypatch.setitem(sys.modules, "management.services.agent.workbench", workbench_module)
 
     with pytest.raises(agent_subscription.AppException) as caught:
         await agent_subscription.run_agent_stream(

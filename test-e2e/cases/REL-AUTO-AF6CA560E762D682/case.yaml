@@ -18,7 +18,7 @@ case:
 
     - ${NEXENT_TEST_HOME}/config/environment.yaml（本地测试环境参数，含 RUNTIME_THREAD_SHUTDOWN_GRACE_SECONDS）
 
-    - 进程级 config_thread_manager（backend/services/thread_lifecycle_service.py:79-115）
+    - 进程级 config_thread_manager（backend/infrastructure/concurrency.py:79-115）
 
     - consts.task_recovery.CONFIG_SERVICE_NAME'
   test_data:
@@ -26,14 +26,14 @@ case:
 
       - ${NEXENT_TEST_HOME}/config/environment.yaml（本地测试环境参数，含 RUNTIME_THREAD_SHUTDOWN_GRACE_SECONDS）
 
-      - 进程级 config_thread_manager（backend/services/thread_lifecycle_service.py:79-115）
+      - 进程级 config_thread_manager（backend/infrastructure/concurrency.py:79-115）
 
       - consts.task_recovery.CONFIG_SERVICE_NAME'
   steps:
   - order: 1
     action: 在本地后端测试环境导入 backend/apps/config_app.py 的 config_lifespan 与 recover_config_tasks_on_startup，令 config_thread_manager
-      处于 ManagerState.CREATED，monkeypatch services.startup_recovery_service.recover_config_tasks / schedule_interrupted_upload_cleanup
-      与 services.evaluation_maintenance.start，记录各调用时间戳以还原顺序。
+      处于 ManagerState.CREATED，monkeypatch management.recovery.recover_config_tasks / schedule_interrupted_upload_cleanup
+      与 management.services.evaluation.maintenance.start，记录各调用时间戳以还原顺序。
     expected: 启动顺序与源码一致：recover_config_tasks 经 control-io lane 执行在前，接着 evaluation_maintenance.start(config_thread_manager)，最后
       schedule_interrupted_upload_cleanup(CONFIG_SERVICE_NAME)，顺序不可颠倒。
   - order: 2
@@ -78,7 +78,7 @@ case:
 
     - ${NEXENT_TEST_HOME}/config/environment.yaml（本地测试环境参数，含 RUNTIME_THREAD_SHUTDOWN_GRACE_SECONDS）
 
-    - 进程级 config_thread_manager（backend/services/thread_lifecycle_service.py:79-115）
+    - 进程级 config_thread_manager（backend/infrastructure/concurrency.py:79-115）
 
     - consts.task_recovery.CONFIG_SERVICE_NAME'
   metrics:

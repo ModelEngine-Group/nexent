@@ -1,3 +1,4 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 import sys
 import types
 import importlib
@@ -63,7 +64,7 @@ patch('elasticsearch.Elasticsearch', return_value=MagicMock()).start()
 # Use additional context manager to ensure MinioClient is properly mocked during import
 with patch('backend.database.client.MinioClient', return_value=minio_client_mock), \
         patch('nexent.storage.minio_config.MinIOStorageConfig', return_value=minio_config_mock):
-    from backend.services.config_sync_service import (
+    from management.services.configuration.tenant.service import (
         handle_model_config,
         save_config_impl,
         load_config_impl,
@@ -77,13 +78,13 @@ with patch('backend.database.client.MinioClient', return_value=minio_client_mock
 @pytest.fixture
 def service_mocks():
     """Create mocks for service layer dependencies"""
-    with patch('backend.services.config_sync_service.tenant_config_manager') as mock_tenant_config_manager, \
-            patch('backend.services.config_sync_service.get_env_key') as mock_get_env_key, \
-            patch('backend.services.config_sync_service.safe_value') as mock_safe_value, \
-            patch('backend.services.config_sync_service.get_model_records') as mock_get_model_records, \
-            patch('backend.services.config_sync_service.get_model_id_by_display_name') as mock_get_model_id, \
-            patch('backend.services.config_sync_service.get_model_name_from_config') as mock_get_model_name, \
-            patch('backend.services.config_sync_service.logger') as mock_logger:
+    with patch('management.services.configuration.tenant.service.tenant_config_manager') as mock_tenant_config_manager, \
+            patch('management.services.configuration.tenant.service.get_env_key') as mock_get_env_key, \
+            patch('management.services.configuration.tenant.service.safe_value') as mock_safe_value, \
+            patch('management.services.configuration.tenant.service.get_model_records') as mock_get_model_records, \
+            patch('management.services.configuration.tenant.service.get_model_id_by_display_name') as mock_get_model_id, \
+            patch('management.services.configuration.tenant.service.get_model_name_from_config') as mock_get_model_name, \
+            patch('management.services.configuration.tenant.service.logger') as mock_logger:
 
         mock_get_model_records.return_value = []
         yield {
@@ -1101,7 +1102,7 @@ class TestLoadConfigImpl:
         tenant_id = "test_tenant_id"
 
         # Mock build_app_config to raise an exception
-        with patch('backend.services.config_sync_service.build_app_config') as mock_build_app_config:
+        with patch('management.services.configuration.tenant.service.build_app_config') as mock_build_app_config:
             mock_build_app_config.side_effect = Exception(
                 "Database connection failed")
 
@@ -1186,8 +1187,8 @@ class TestLoadConfigImpl:
         tenant_id = "test_tenant_id"
 
         # Mock build_app_config to raise an exception
-        with patch('backend.services.config_sync_service.build_app_config') as mock_build_app_config, \
-                patch('backend.services.config_sync_service.build_models_config') as mock_build_models_config:
+        with patch('management.services.configuration.tenant.service.build_app_config') as mock_build_app_config, \
+                patch('management.services.configuration.tenant.service.build_models_config') as mock_build_models_config:
 
             mock_build_app_config.side_effect = Exception("App config failed")
             mock_build_models_config.side_effect = Exception(
@@ -1366,7 +1367,7 @@ class TestBuildAppConfig:
         service_mocks['tenant_config_manager'].get_app_config.side_effect = mock_get_app_config
 
         # Mock MODEL_ENGINE_ENABLED
-        with patch('backend.services.config_sync_service.MODEL_ENGINE_ENABLED', 'false'):
+        with patch('management.services.configuration.tenant.service.MODEL_ENGINE_ENABLED', 'false'):
             # Execute
             result = build_app_config(language, tenant_id)
 
@@ -1407,7 +1408,7 @@ class TestBuildAppConfig:
         service_mocks['tenant_config_manager'].get_app_config.return_value = None
 
         # Mock MODEL_ENGINE_ENABLED
-        with patch('backend.services.config_sync_service.MODEL_ENGINE_ENABLED', 'false'):
+        with patch('management.services.configuration.tenant.service.MODEL_ENGINE_ENABLED', 'false'):
             # Execute
             result = build_app_config(language, tenant_id)
 
@@ -1428,7 +1429,7 @@ class TestBuildAppConfig:
         service_mocks['tenant_config_manager'].get_app_config.return_value = None
 
         # Mock MODEL_ENGINE_ENABLED
-        with patch('backend.services.config_sync_service.MODEL_ENGINE_ENABLED', 'false'):
+        with patch('management.services.configuration.tenant.service.MODEL_ENGINE_ENABLED', 'false'):
             # Execute
             result = build_app_config(language, tenant_id)
 
@@ -1460,7 +1461,7 @@ class TestBuildAppConfig:
         service_mocks['tenant_config_manager'].get_app_config.side_effect = side_effect
 
         # Mock MODEL_ENGINE_ENABLED
-        with patch('backend.services.config_sync_service.MODEL_ENGINE_ENABLED', 'false'):
+        with patch('management.services.configuration.tenant.service.MODEL_ENGINE_ENABLED', 'false'):
             # Execute
             result = build_app_config(language, tenant_id)
 
@@ -1511,7 +1512,7 @@ class TestBuildAppConfig:
         service_mocks['tenant_config_manager'].get_app_config.side_effect = mock_get_app_config
 
         # Mock MODEL_ENGINE_ENABLED
-        with patch('backend.services.config_sync_service.MODEL_ENGINE_ENABLED', 'false'):
+        with patch('management.services.configuration.tenant.service.MODEL_ENGINE_ENABLED', 'false'):
             # Execute
             result = build_app_config(language, tenant_id)
 
@@ -1550,7 +1551,7 @@ class TestBuildAppConfig:
         service_mocks['tenant_config_manager'].get_app_config.side_effect = mock_get_app_config
 
         # Mock MODEL_ENGINE_ENABLED
-        with patch('backend.services.config_sync_service.MODEL_ENGINE_ENABLED', 'false'):
+        with patch('management.services.configuration.tenant.service.MODEL_ENGINE_ENABLED', 'false'):
             # Execute
             result = build_app_config(language, tenant_id)
 
@@ -1582,7 +1583,7 @@ class TestBuildAppConfig:
         service_mocks['tenant_config_manager'].get_app_config.side_effect = mock_get_app_config
 
         # Mock MODEL_ENGINE_ENABLED
-        with patch('backend.services.config_sync_service.MODEL_ENGINE_ENABLED', 'false'):
+        with patch('management.services.configuration.tenant.service.MODEL_ENGINE_ENABLED', 'false'):
             # Execute
             result = build_app_config(language, tenant_id)
 

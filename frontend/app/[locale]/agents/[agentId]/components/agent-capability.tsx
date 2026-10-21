@@ -29,7 +29,6 @@ import SkillBuildModal from "../../components/capability/SkillBuildModal";
 import SelectedSkillManagement from "./capability/SelectedSkillManagement";
 import McpConfigModal from "./capability/McpConfigModal";
 import { ToolDrawer } from "@/components/resource-picker/ToolDrawer";
-import LabelManagementModal from "./capability/tool/LabelManagementModal";
 import { SkillDrawer } from "@/components/resource-picker/SkillDrawer";
 
 const EMPTY_SELECTED_SKILLS: import("@/types/agentConfig").Skill[] = [];
@@ -47,8 +46,7 @@ export function AgentToolCapability({
   const [isMcpModalOpen, setIsMcpModalOpen] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [isToolSelectOpen, setIsToolSelectOpen] = useState(false);
-  const [labelModalOpen, setLabelModalOpen] = useState(false);
-  const { invalidate, availableTools } = useToolList();
+  const { invalidate } = useToolList();
 
   const prepareAgentForMcpDeletion = useCallback(async () => {
     const initialState = useAgentStore.getState();
@@ -190,13 +188,7 @@ export function AgentToolCapability({
       <ToolDrawer
         open={isToolSelectOpen}
         onClose={() => setIsToolSelectOpen(false)}
-        onOpenManageLabels={() => setLabelModalOpen(true)}
         currentAgentId={currentAgentId ?? undefined}
-      />
-      <LabelManagementModal
-        open={labelModalOpen}
-        onClose={() => setLabelModalOpen(false)}
-        availableTools={availableTools}
       />
     </>
   );
@@ -377,7 +369,6 @@ export function AgentSkillCapability({
         selectedSkills={selectedAgentSkills}
         onConfirm={(skills) => useAgentStore.getState().updateSkills(skills)}
         onClose={() => setIsSkillSelectOpen(false)}
-        enableTagManagement={!isReadOnly}
         onEditSkill={handleOpenSkillEditor}
         currentAgentId={currentAgentId ?? undefined}
         isReadOnly={isReadOnly}

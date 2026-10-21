@@ -1,8 +1,9 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """D2 contract test for /user/current_user_info auth_provider and username serialization.
 
 Locks the serialization contract introduced at
 backend/apps/user_management_app.py:238-241 and
-backend/services/user_management_service.py:63-79:
+backend/management/services/permission/identity/authentication.py:63-79:
 
 * data.user.auth_provider is always a string in {local, cas}.
 * data.user.username is serialized only for the CAS branch; the local branch

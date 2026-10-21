@@ -1,3 +1,4 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """Architecture gate for process-owned thread creation and blocking offloads."""
 
 from __future__ import annotations
@@ -12,15 +13,15 @@ SCAN_ROOTS = (REPO_ROOT / "backend", REPO_ROOT / "sdk" / "nexent")
 DEFERRED_PREFIXES = (
     "backend/data_process/",
     "backend/data_process_service.py",
-    "backend/services/data_process_service.py",
-    "backend/services/auto_summary_scheduler.py",
+    "backend/data_process/services/tasks.py",
+    "backend/management/services/knowledge_base/scheduler.py",
 )
 
 # The shared upload recovery helper is also used by Data Process. Its migration
 # stays with the deferred Data Process integration so this SPEC does not change
 # that process's behavior.
 ALLOWED_CALLS = {
-    ("backend/services/startup_recovery_service.py", "asyncio.to_thread"),
+    ("backend/management/recovery.py", "asyncio.to_thread"),
     ("backend/ext_components/aidp/apps/aidp_mgmt_app.py", "asyncio.to_thread"),
     (
         "sdk/nexent/core/concurrency/bounded_executor.py",

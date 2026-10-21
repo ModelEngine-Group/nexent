@@ -82,18 +82,18 @@ sys.modules['backend.database.db_models'] = db_models_mock
 
 utils_skill_params_mock = MagicMock()
 utils_skill_params_mock.strip_params_comments_for_db = lambda x: x
-utils_str_utils_mock = types.ModuleType('utils.str_utils')
+utils_str_utils_mock = types.ModuleType('management.db.serialization')
 utils_str_utils_mock.convert_list_to_string = lambda items: "" if items is None else ",".join(str(item) for item in items)
 utils_str_utils_mock.convert_string_to_list = (
     lambda items: [] if not items else [int(item.strip()) for item in items.split(",") if item.strip().isdigit()]
 )
 sys.modules['utils'] = MagicMock()
-sys.modules['utils.auth_utils'] = MagicMock()
+sys.modules['management.services.permission.identity.authentication_helpers'] = MagicMock()
 sys.modules['management.services.skill.params'] = utils_skill_params_mock
-sys.modules['utils.str_utils'] = utils_str_utils_mock
+sys.modules['management.db.serialization'] = utils_str_utils_mock
 sys.modules['backend.utils'] = MagicMock()
 sys.modules['backend.management.services.skill.params'] = utils_skill_params_mock
-sys.modules['backend.utils.str_utils'] = utils_str_utils_mock
+sys.modules['management.db.serialization'] = utils_str_utils_mock
 
 from backend.database.skill_db import (
     _params_value_for_db,

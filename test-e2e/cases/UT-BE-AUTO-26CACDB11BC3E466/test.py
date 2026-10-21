@@ -1,3 +1,4 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 from __future__ import annotations
 
 import asyncio
@@ -5,7 +6,7 @@ from unittest import mock
 
 import pytest
 
-import services.agent_repository_service as svc
+import management.services.repository.agent.listing as svc
 
 
 CASE_ID = 'UT-BE-AUTO-26CACDB11BC3E466'

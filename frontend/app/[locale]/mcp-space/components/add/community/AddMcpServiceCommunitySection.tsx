@@ -1,3 +1,5 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import { useState } from "react";
 import type { CommunityMcpCard } from "@/types/mcpTools";
 import { useMcpCommunityBrowser } from "@/hooks/mcpTools/useMcpCommunityBrowser";
@@ -41,6 +43,8 @@ export default function AddMcpServiceCommunitySection({
 
         <McpCommunityCardList
           loading={browser.loading}
+          error={browser.error}
+          onRetry={() => void browser.refetch()}
           services={browser.services}
           hasPrevPage={browser.hasPrevPage}
           hasNextPage={browser.hasNextPage}
@@ -59,7 +63,9 @@ export default function AddMcpServiceCommunitySection({
         />
       ) : null}
 
-      {quickAdd.visible ? <CommunityQuickAddModal controller={quickAdd} /> : null}
+      {quickAdd.visible ? (
+        <CommunityQuickAddModal controller={quickAdd} />
+      ) : null}
     </>
   );
 }

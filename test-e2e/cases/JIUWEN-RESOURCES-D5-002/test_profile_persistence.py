@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """Real PostgreSQL migration and management transaction verification in an isolated container."""
 
 import asyncio
@@ -53,12 +55,12 @@ def test_trusted_outlet_postgres_lifecycle(monkeypatch):
         from database.model_management_db import get_model_by_model_id
         from database.model_management_db import update_model_record as update_legacy
         from database.model_runtime_profile_db import provision_runtime_outlet_batch
-        from services.model_runtime_provisioning_service import (
+        from management.services.model.runtime_provisioning import (
             build_runtime_outlet_snapshot,
             create_model_record,
             update_model_record,
         )
-        from services.model_runtime_snapshot_service import (
+        from management.services.model.runtime_snapshot import (
             restore_runtime_model_snapshot,
         )
 

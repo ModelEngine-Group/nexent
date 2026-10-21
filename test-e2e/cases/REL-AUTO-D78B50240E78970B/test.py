@@ -1,3 +1,4 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 from __future__ import annotations
 
 import asyncio
@@ -26,7 +27,7 @@ from database.knowledge_file_lifecycle_db import (
     get_file_record,
     list_uploading_files_created_before,
 )
-from services import startup_recovery_service
+from management import recovery as startup_recovery_service
 
 GRACE_SECONDS = startup_recovery_service.UPLOAD_RECOVERY_GRACE_SECONDS
 OTHER_SERVICE_NAME = 'nexent-other-service'

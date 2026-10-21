@@ -21,7 +21,7 @@ case:
     legacy_asset_declaration: '- 无本地文件资产；使用 pytest mock/fixture 注入 list_oauth_accounts_by_user_id 返回值。'
   steps:
   - order: 1
-    action: 直接导入 backend/services/user_management_service.py 的 get_provider_username，并用测试替身替换 database.oauth_account_db.list_oauth_accounts_by_user_id
+    action: 直接导入 backend/management/services/permission/identity/authentication.py 的 get_provider_username，并用测试替身替换 database.oauth_account_db.list_oauth_accounts_by_user_id
       的返回。
     expected: provider 匹配且 provider_username 非空时，返回 strip 后的非空用户名。
   - order: 2

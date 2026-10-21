@@ -1,3 +1,4 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 import json
 import logging
 from http import HTTPStatus
@@ -22,7 +23,7 @@ from services.skill_repository_service import (
     update_skill_repository_status_impl,
 )
 from starlette.responses import JSONResponse
-from utils.auth_utils import get_current_user_id
+from management.services.permission.identity.authentication_helpers import get_current_user_id
 
 logger = logging.getLogger(__name__)
 skill_repository_router = APIRouter(prefix="/repository/skill")

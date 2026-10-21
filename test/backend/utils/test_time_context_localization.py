@@ -45,9 +45,9 @@ def time_context(monkeypatch):
         "nexent.core.agents.context": {"ContextItemInput": object},
         "nexent.core.agents.context_input": {"ContextInput": object},
         "nexent.monitor": {"AgentRunMetadata": object},
-        "services.memory_config_service": {"build_memory_context": lambda *args, **kwargs: None},
-        "utils.monitoring": {"monitoring_manager": object()},
-        "utils.monitoring_identity": {"resolve_monitoring_user_email": lambda *args: None},
+        "management.services.configuration.user.memory": {"build_memory_context": lambda *args, **kwargs: None},
+        "infrastructure.observability.bootstrap": {"monitoring_manager": object()},
+        "management.services.monitor.identity": {"resolve_monitoring_user_email": lambda *args: None},
     }.items():
         dependency = types.ModuleType(name)
         dependency.__dict__.update(values)

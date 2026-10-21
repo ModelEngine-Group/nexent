@@ -34,8 +34,6 @@ export interface Agent {
   model_name?: string;
   max_steps: number;
   duty_prompt?: string;
-  constraint_prompt?: string;
-  few_shots_prompt?: string;
   parent_agent_id?: number;
   tenant_id: string;
   enabled: boolean;

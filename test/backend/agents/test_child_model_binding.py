@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """Capture child version options before parent request overlays."""
 
 import pytest
@@ -18,7 +20,7 @@ def test_child_and_grandchild_capture_saved_options_without_parent_overlay(mocke
     lookup = mocker.patch.object(service, "search_agent_info_by_agent_id", return_value={
         "model_params_override": {"7": {"temperature": 0.2, "extra_params": {"__custom__": {"saved": 1}}}}})
     mocker.patch.object(service, "get_model_by_model_id", return_value={"display_name": "shared"})
-    compile_profile = mocker.patch("services.model_runtime_options_service.compile_model_runtime_profile",
+    compile_profile = mocker.patch("management.services.model.runtime_options.compile_model_runtime_profile",
                                   return_value=None)
     service._capture_child_model_configs(root, models, "tenant")
     models[0].temperature = 0.9

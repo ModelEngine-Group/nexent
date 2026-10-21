@@ -1,6 +1,8 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 "use client";
 
-import { useEffect, useRef, useState, type RefObject } from "react";
+import { useEffect, useRef, useState } from "react";
 import { App, Button, Dropdown, Input, Popover } from "antd";
 import type { MenuProps } from "antd";
 import { useTranslation } from "react-i18next";
@@ -18,6 +20,7 @@ import {
 } from "lucide-react";
 
 import { CreateNewSkillCard } from "./CreateNewSkillCard";
+import { REPOSITORY_PAGE_SIZE } from "@/const/resource";
 import ResourceCardGrid from "@/components/resource/ResourceCardGrid";
 import ResourceCard from "@/components/resource/ResourceCard";
 import { MineApplyListingModal } from "./MineApplyListingModal";
@@ -87,10 +90,6 @@ export function MineSkillsView({
   page,
   total,
   onPageChange,
-  columns,
-  rows,
-  gridHeight,
-  gridRegionRef,
   onRetry,
   onCreateSkill,
   onEditSkill,
@@ -119,10 +118,6 @@ export function MineSkillsView({
   page: number;
   total: number;
   onPageChange: (page: number) => void;
-  columns: number;
-  rows: number;
-  gridHeight?: number;
-  gridRegionRef: RefObject<HTMLDivElement | null>;
   onRetry: () => void;
   onCreateSkill: () => void;
   onEditSkill: (skill: MyEditableSkillItem) => void;
@@ -236,6 +231,7 @@ export function MineSkillsView({
       return;
     }
 
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- Resolve the review deep link once its skill data is available.
     openReviewModal(skill, repositoryInfo);
     consumedDeepLinkRef.current = reviewDeepLink.skillRepositoryId;
     onReviewDeepLinkConsumed?.();
@@ -342,7 +338,7 @@ export function MineSkillsView({
         </div>
       </div>
 
-      <div ref={gridRegionRef} className="min-h-0">
+      <div className="min-h-0">
         <AsyncContent
           isLoading={isLoading}
           isError={isError}
@@ -357,9 +353,7 @@ export function MineSkillsView({
               page={page}
               total={total}
               onPageChange={onPageChange}
-              columns={columns}
-              rows={rows}
-              gridHeight={gridHeight}
+              pageSize={REPOSITORY_PAGE_SIZE}
               paginateItems={false}
               showToolbar={false}
               renderItem={(skill) =>

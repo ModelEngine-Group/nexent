@@ -1,3 +1,5 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 /**
  * useAgentGeneration hook
  *
@@ -60,8 +62,6 @@ export function useAgentGeneration({
     businessDescription: editedAgent.business_description,
     businessLogicModelId: editedAgent.business_logic_model_id,
     businessLogicModelName: editedAgent.business_logic_model_name,
-    promptTemplateId: editedAgent.prompt_template_id,
-    promptTemplateName: editedAgent.prompt_template_name,
   };
 
   const handleGenerateAgent = useCallback(async () => {
@@ -101,7 +101,6 @@ export function useAgentGeneration({
           agent_id: effectiveAgentId,
           task_description: businessInfo.businessDescription,
           model_id: businessInfo.businessLogicModelId,
-          prompt_template_id: businessInfo.promptTemplateId,
           sub_agent_ids: editedAgent.sub_agent_id_list,
           tool_ids: Array.isArray(editedAgent.tools)
             ? editedAgent.tools.map((tool: any) =>
@@ -128,12 +127,6 @@ export function useAgentGeneration({
           switch (data.type) {
             case GENERATE_PROMPT_STREAM_TYPES.DUTY:
               saveGeneratedField(generationAgentId, 'dutyPrompt', data.content);
-              break;
-            case GENERATE_PROMPT_STREAM_TYPES.CONSTRAINT:
-              saveGeneratedField(generationAgentId, 'constraintPrompt', data.content);
-              break;
-            case GENERATE_PROMPT_STREAM_TYPES.FEW_SHOTS:
-              saveGeneratedField(generationAgentId, 'fewShotsPrompt', data.content);
               break;
             case GENERATE_PROMPT_STREAM_TYPES.AGENT_VAR_NAME:
               // Only save to cache if user hasn't filled in agent name themselves
@@ -206,13 +199,12 @@ export function useAgentGeneration({
 
           // User is still on the same agent, apply the generated content
           // AI-generated fields come from cache, other fields come from editedAgent
+          const dutyPrompt = cached?.dutyPrompt || editedAgent.duty_prompt || "";
           const configUpdates: AgentConfigUpdate = {
             name: cached?.agentName || editedAgent.name || "",
             display_name: cached?.agentDisplayName || editedAgent.display_name || "",
             description: cached?.agentDescription || editedAgent.description || "",
-            duty_prompt: cached?.dutyPrompt || editedAgent.duty_prompt || "",
-            constraint_prompt: cached?.constraintPrompt || editedAgent.constraint_prompt || "",
-            few_shots_prompt: cached?.fewShotsPrompt || editedAgent.few_shots_prompt || "",
+            duty_prompt: dutyPrompt,
             greeting_message: cached?.greetingMessage || editedAgent.greeting_message || "",
             example_questions: cached?.exampleQuestions
               ? (typeof cached.exampleQuestions === "string"

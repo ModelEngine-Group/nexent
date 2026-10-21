@@ -1,19 +1,22 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 "use client";
 
 import { useTranslation } from "react-i18next";
-import { Checkbox, Form, InputNumber, Switch, Row, Col, Tooltip } from "antd";
+import { Checkbox, Form, InputNumber, Switch, Row, Col } from "antd";
 
 import { useAgentStore } from "@/stores/agentStore";
 import { useAgentReadOnly } from "@/hooks/agent/useAgentReadOnly";
 import { DEFAULT_AGENT_VERIFICATION_CONFIG } from "@/types/agentConfig";
 import { AgentDeploymentOptions } from "./agent-deployment";
 import AgentCoreSelector from "./agent-core-selector";
+import { AgentSettingHint } from "./agent-setting-hint";
 
 interface AgentRunPolicyProps {
   highFidelity?: boolean;
 }
 
-export function AgentProtocolRepairOption() {
+function AgentProtocolRepairOption() {
   const { t } = useTranslation("common");
   const editedAgent = useAgentStore((state) => state.editedAgent!);
   const updateAgent = useAgentStore((state) => state.updateAgentConfig);
@@ -21,19 +24,20 @@ export function AgentProtocolRepairOption() {
   const coreUnsupported = editedAgent.agent_core === "jiuwen";
 
   return (
-    <Form.Item
+    <AgentSettingHint
       label={t("agent.runPolicy.protocolRepairRetry")}
-      tooltip={t("agent.runPolicy.protocolRepairRetryHint")}
-      className="!mb-0"
+      hint={t("agent.runPolicy.protocolRepairRetryHint")}
     >
-      <Switch
+      <Checkbox
         checked={editedAgent.enable_protocol_repair_retry ?? false}
         disabled={isReadOnly || coreUnsupported}
-        onChange={(checked) =>
-          updateAgent({ enable_protocol_repair_retry: checked })
+        onChange={(event) =>
+          updateAgent({ enable_protocol_repair_retry: event.target.checked })
         }
-      />
-    </Form.Item>
+      >
+        {t("agent.runPolicy.protocolRepairRetry")}
+      </Checkbox>
+    </AgentSettingHint>
   );
 }
 
@@ -67,9 +71,14 @@ export default function AgentRunPolicy({
           />
         </div>
         <div className="flex flex-col gap-2">
-          <label htmlFor="agent-requested-output-tokens">
-            {t("agentConfig.layout.outputReserve")}
-          </label>
+          <AgentSettingHint
+            label={t("agentConfig.layout.outputReserve")}
+            hint={t("agent.requestedOutputTokens.tooltip")}
+          >
+            <label htmlFor="agent-requested-output-tokens">
+              {t("agentConfig.layout.outputReserve")}
+            </label>
+          </AgentSettingHint>
           <InputNumber
             id="agent-requested-output-tokens"
             min={128}
@@ -94,7 +103,10 @@ export default function AgentRunPolicy({
         >
           {t("agent.highFidelity.runSummary")}
         </Checkbox>
-        <Tooltip title={t("agent.allowChatMetadata.tooltip")}>
+        <AgentSettingHint
+          label={t("agent.highFidelity.chatMetadata")}
+          hint={t("agent.allowChatMetadata.tooltip")}
+        >
           <Checkbox
             checked={editedAgent.allow_chat_metadata ?? false}
             disabled={isReadOnly}
@@ -104,8 +116,11 @@ export default function AgentRunPolicy({
           >
             {t("agent.highFidelity.chatMetadata")}
           </Checkbox>
-        </Tooltip>
-        <Tooltip title={t("agent.runPolicy.selfValidateHint")}>
+        </AgentSettingHint>
+        <AgentSettingHint
+          label={t("agent.highFidelity.selfValidate")}
+          hint={t("agent.runPolicy.selfValidateHint")}
+        >
           <Checkbox
             checked={editedAgent.verification_config?.enabled ?? false}
             disabled={isReadOnly || coreUnsupported}
@@ -121,7 +136,8 @@ export default function AgentRunPolicy({
           >
             {t("agent.highFidelity.selfValidate")}
           </Checkbox>
-        </Tooltip>
+        </AgentSettingHint>
+        <AgentProtocolRepairOption />
         <AgentDeploymentOptions highFidelity />
       </div>
     );

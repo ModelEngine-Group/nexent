@@ -5,11 +5,12 @@ from pathlib import Path
 from dotenv import load_dotenv
 
 try:
-    from backend.utils.config_validation import parse_positive_float, parse_positive_int
-except ModuleNotFoundError:
-    # The production service runs with ``backend`` as the working directory,
-    # where backend-local modules are imported from the top-level package.
-    from utils.config_validation import parse_positive_float, parse_positive_int
+    from infrastructure.config_validation import parse_positive_float, parse_positive_int
+except ModuleNotFoundError as exc:
+    if exc.name != "infrastructure":
+        raise
+    # Repository-root callers import this module through the backend namespace.
+    from backend.infrastructure.config_validation import parse_positive_float, parse_positive_int
 
 # Load environment variables
 # Explicitly sourced deployment variables take precedence over a nearby
@@ -722,6 +723,14 @@ MONITORING_FASTAPI_EXCLUDED_URLS = os.getenv(
     "MONITORING_FASTAPI_EXCLUDED_URLS", "")
 MONITORING_FASTAPI_EXCLUDE_SPANS = os.getenv(
     "MONITORING_FASTAPI_EXCLUDE_SPANS", "receive,send")
+# Explicit empty values disable the respective export filter.
+MONITORING_EXCLUDED_ELASTICSEARCH_OPERATIONS = os.getenv(
+    "MONITORING_EXCLUDED_ELASTICSEARCH_OPERATIONS",
+    "search,indices.stats,indices.get_settings,indices.get_alias,bulk,indices.exists,indices.delete",
+)
+MONITORING_EXCLUDED_SPAN_NAMES = os.getenv(
+    "MONITORING_EXCLUDED_SPAN_NAMES", "knowledge.process.submit,knowledge.upload.batch"
+)
 MONITORING_PROJECT_NAME = os.getenv("MONITORING_PROJECT_NAME", "")
 MONITORING_DASHBOARD_URL = os.getenv("MONITORING_DASHBOARD_URL", "")
 MONITORING_DASHBOARD_ALLOWED_ROLES = os.getenv(
@@ -944,3 +953,13 @@ MEMORY_PROVIDER_PLUGINS_DIR = os.getenv("MEMORY_PROVIDER_PLUGINS_DIR", "")
 
 # Bundled LiteLLM catalog used for model capacity suggestions.
 NEXENT_LITELLM_JSON = os.environ.get("NEXENT_LITELLM_JSON", "/opt/nexent/litellm_models.json")
+
+
+# Exact, operator-verified endpoint/model reasoning transport overrides.
+MODEL_REASONING_WIRE_PROFILES_PATH = os.getenv(
+    "MODEL_REASONING_WIRE_PROFILES_PATH",
+    os.path.join(os.path.dirname(__file__), "..", "configs", "model_reasoning_wire_profiles.json"),
+)
+MODEL_RESPONSE_DIAGNOSTIC_CHUNKS = os.getenv(
+    "NEXENT_MODEL_DIAGNOSTIC_CHUNKS", os.getenv("NEXENT_PROTOCOL_DIAGNOSTIC_CONTENT", "0")
+) == "1"

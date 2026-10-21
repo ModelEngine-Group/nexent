@@ -1,3 +1,4 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """
 Utility functions for Celery tasks
 """
@@ -88,7 +89,7 @@ def is_document_delete_requested(
         return False
 
     try:
-        from services.redis_service import get_redis_service
+        from management.services.knowledge_base.task_state import get_redis_service
 
         # A healthy Redis miss is the normal path. Query PostgreSQL only when
         # Redis is unavailable so regular processing does not add a DB read.
@@ -285,7 +286,7 @@ async def get_task_info(task_id: str) -> dict[str, Any]:
                         # Always try to get latest progress from Redis (real-time updates during vectorization)
                         # Redis progress takes precedence over metadata for active tasks
                         try:
-                            from services.redis_service import get_redis_service
+                            from management.services.knowledge_base.task_state import get_redis_service
                             redis_service = get_redis_service()
                             progress_info = redis_service.get_progress_info(task_id)
                             if progress_info:

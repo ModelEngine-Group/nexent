@@ -54,8 +54,8 @@ _PENDING_TASK_NAMES = ("hang-task-1", "hang-task-2")
 def _install_shutdown_collaborators(monkeypatch, *, raise_thread_shutdown: bool):
     """Patch every shutdown collaborator so the test isolates the ordering contract."""
     import apps.runtime_app as runtime_app
-    from services.thread_lifecycle_service import runtime_thread_manager
-    from services.runtime_state_service import runtime_state_service
+    from infrastructure.concurrency import runtime_thread_manager
+    from management.services.agent.run_state import runtime_state_service
     import management.services.agent.run as agent_run
     import nexent.core.agents.sandbox as sandbox_mod
 

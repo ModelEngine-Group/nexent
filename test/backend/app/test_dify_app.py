@@ -1,3 +1,4 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """
 Unit tests for Dify App Layer.
 
@@ -47,7 +48,7 @@ with patch('nexent.storage.storage_client_factory.create_storage_client_from_con
 
         # Now it's safe to import backend modules
         from backend.apps.dify_app import router, fetch_dify_datasets_api
-        from backend.services.dify_service import fetch_dify_datasets_impl
+        from management.services.knowledge_base.providers.dify import fetch_dify_datasets_impl
 
 
 # Fixtures to replace setUp and tearDown

@@ -242,7 +242,7 @@ def test_preflight_uses_agent_default_and_overrides_without_mutating_catalog(pre
 @pytest.mark.parametrize("default", [{"model_id": 9}, {}, None])
 def test_preflight_resolves_tenant_default_or_rejects_missing_default(mocker, preflight_models, default):
     from consts.const import MODEL_CONFIG_MAPPING
-    from utils.config_utils import tenant_config_manager
+    from management.services.configuration.tenant.settings import tenant_config_manager
 
     catalog, _factory, _bases, roots = preflight_models
     get_default = mocker.patch.object(tenant_config_manager, "get_model_config", return_value=default)

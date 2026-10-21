@@ -16,37 +16,58 @@ vi.mock("react-i18next", () => ({
 }));
 
 describe("ResourceDrawer", () => {
-  it("hides tag management by default and places the configured action beside refresh", () => {
-    const manage = vi.fn();
-    const props = {
-      open: true,
-      title: "Resources",
-      listTitle: "Results",
-      onClose: vi.fn(),
-      onRefresh: vi.fn(),
-      children: <p>Results</p>,
-    };
-    const view = render(<ResourceDrawer {...props} />);
-    expect(screen.queryByRole("button", { name: "管理标签" })).toBeNull();
-    view.rerender(
-      <ResourceDrawer {...props} tagManagement={{ onClick: manage }} />
+  it.each([
+    [false, false],
+    [true, false],
+    [false, true],
+    [true, true],
+  ])(
+    "honors refresh disabled=%s and loading=%s independently",
+    (disabled, loading) => {
+      const refresh = vi.fn();
+      render(
+        <ResourceDrawer
+          open
+          title="Tools"
+          listTitle="Results"
+          onClose={vi.fn()}
+          onRefresh={refresh}
+          refreshDisabled={disabled}
+          refreshLoading={loading}
+        >
+          <p>Results</p>
+        </ResourceDrawer>
+      );
+      const button = screen.getByRole("button", { name: "刷新" });
+      if (disabled || loading) expect(button).toBeDisabled();
+      else expect(button).toBeEnabled();
+      expect(button).toHaveAttribute("aria-busy", String(loading));
+      expect(button.querySelector(".animate-spin") !== null).toBe(loading);
+      fireEvent.click(button);
+      expect(refresh).toHaveBeenCalledTimes(disabled || loading ? 0 : 1);
+    }
+  );
+  it("does not expose tag management and retains the list refresh action", () => {
+    const refresh = vi.fn();
+    render(
+      <ResourceDrawer
+        open
+        title="Resources"
+        listTitle="Results"
+        onClose={vi.fn()}
+        onRefresh={refresh}
+      >
+        <p>Results</p>
+      </ResourceDrawer>
     );
+    expect(
+      screen.queryByRole("button", { name: /管理标签|标签管理/ })
+    ).toBeNull();
     const heading = document.querySelector(
       '[data-picker-part="list-heading"]'
     ) as HTMLElement;
-    const action = within(heading).getByRole("button", { name: "管理标签" });
-    expect(action.nextElementSibling).toBe(
-      within(heading).getByRole("button", { name: "刷新" })
-    );
-    fireEvent.click(action);
-    expect(manage).toHaveBeenCalledOnce();
-    view.rerender(
-      <ResourceDrawer
-        {...props}
-        tagManagement={{ onClick: manage, disabled: true }}
-      />
-    );
-    expect(screen.getByRole("button", { name: "管理标签" })).toBeDisabled();
+    fireEvent.click(within(heading).getByRole("button", { name: "刷新" }));
+    expect(refresh).toHaveBeenCalledOnce();
   });
   it("forwards page navigation using the supplied page size", () => {
     const page = vi.fn();

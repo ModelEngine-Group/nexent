@@ -14,7 +14,9 @@ from sqlalchemy.pool import StaticPool
 
 from apps import group_app, user_app
 from database import user_tenant_db, user_identity_db
-from services import group_service, user_identity_service, user_service
+from management.services.permission.identity import groups as group_service
+from management.services.permission.identity import display as user_identity_service
+from management.services.permission.identity import users as user_service
 
 pytestmark = [pytest.mark.case_id("CAS-DISPLAY-D2-001"), pytest.mark.stage("D2")]
 

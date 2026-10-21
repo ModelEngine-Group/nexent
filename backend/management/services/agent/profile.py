@@ -204,7 +204,6 @@ def fetch_agent_profile(agent_id: int, tenant_id: str) -> Optional[Dict[str, Any
         "name": agent.get("display_name") or agent.get("name") or "",
         "description": (agent.get("description") or "")[:_DESC_AGENT_MAX],
         "duty_prompt": (agent.get("duty_prompt") or "")[:_DUTY_PROMPT_MAX],
-        "constraint_prompt": (agent.get("constraint_prompt") or "")[:_DESC_AGENT_MAX],
         "business_description": (agent.get("business_description") or "")[
             :_DESC_AGENT_MAX
         ],

@@ -53,7 +53,7 @@ export class ChatPage {
     // Landing selection is complete when the discover page is replaced by
     // the conversation view with a usable composer.
     await expect(this.page.getByRole("heading", { name: "发现智能体" })).toBeHidden();
-    await expect(this.page.getByPlaceholder('输入"/"快速引用技能及指令')).toBeVisible();
+    await expect(this.page.locator("[data-workbench-composer], .aui-lexical-input")).toBeVisible();
   }
 
   async selectMode(mode: "规划" | "执行"): Promise<void> {
@@ -64,7 +64,7 @@ export class ChatPage {
 
   async startMessage(prompt: string): Promise<Locator> {
     const before = await this.assistantMessages().count();
-    const composer = this.page.getByPlaceholder('输入"/"快速引用技能及指令');
+    const composer = this.page.locator("[data-workbench-composer], .aui-lexical-input");
     await composer.fill(prompt);
     const runResponse = this.page.waitForResponse(
       (response) => response.request().method() === "POST"
@@ -149,7 +149,7 @@ export class ChatPage {
     }
     // A cancelled message is incomplete, so it has no Completed badge.
     await expect(this.page.locator("button:has(svg.lucide-square)")).toHaveCount(0, { timeout: 120_000 });
-    await expect(this.page.getByPlaceholder('输入"/"快速引用技能及指令')).toBeEditable();
+    await expect(this.page.locator("[data-workbench-composer], .aui-lexical-input")).toBeEditable();
     // Stop acknowledgement precedes persistence/worker finalization. Wait for
     // the owned stream's terminal history before continuing or reconnecting.
     await expect.poll(async () => {
@@ -254,7 +254,7 @@ export class ChatPage {
     });
     await expect(card).toHaveCount(1);
     await card.click();
-    await expect(this.page.getByPlaceholder('输入"/"快速引用技能及指令')).toBeVisible();
+    await expect(this.page.locator("[data-workbench-composer], .aui-lexical-input")).toBeVisible();
   }
 
   threadButton(title: string): Locator {

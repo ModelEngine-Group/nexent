@@ -31,38 +31,39 @@ case:
     expected: Run可轮询到终态且详情可打开。
   - order: 4
     action: 选择1+ Evaluator，检查type/status。
-    expected: /space/evaluators不虚构编辑动作。
+    expected: 评估主流程在 /evaluation 及其详情页完成，不依赖独立旧评估器页面。
   - order: 5
     action: 选择有评测集评测并选择run_id Set，确认query/expected/actual默认Mapping。
-    expected: /space/evaluators不虚构编辑动作。
+    expected: 评估主流程在 /evaluation 及其详情页完成，不依赖独立旧评估器页面。
   - order: 6
     action: 点击【Try it out】，等待真实Agent+Evaluator试运行并检查Trial Result。
-    expected: /space/evaluators不虚构编辑动作。
+    expected: 评估主流程在 /evaluation 及其详情页完成，不依赖独立旧评估器页面。
   - order: 7
     action: 提交正式Run。
-    expected: /space/evaluators不虚构编辑动作。
+    expected: 评估主流程在 /evaluation 及其详情页完成，不依赖独立旧评估器页面。
   - order: 8
     action: 按创建响应的run ID定位新行，检查等待中/运行中或已完成状态。
-    expected: /space/evaluators不虚构编辑动作。
+    expected: 评估主流程在 /evaluation 及其详情页完成，不依赖独立旧评估器页面。
   - order: 9
     action: 等待COMPLETED或明确失败终态。
-    expected: /space/evaluators不虚构编辑动作。
+    expected: 评估主流程在 /evaluation 及其详情页完成，不依赖独立旧评估器页面。
   - order: 10
     action: 成功后点击该run的查看按钮进入/evaluation/{id}。
-    expected: /space/evaluators不虚构编辑动作。
+    expected: 评估主流程在 /evaluation 及其详情页完成，不依赖独立旧评估器页面。
   - order: 11
     action: 检查case结果、score/evaluator输出等满足expected结构。
-    expected: /space/evaluators不虚构编辑动作。
+    expected: 评估主流程在 /evaluation 及其详情页完成，不依赖独立旧评估器页面。
   expected_results:
   - 选择控件与当前页面一致。
   - Try it out真实调用Agent/Evaluator。
   - Run可轮询到终态且详情可打开。
-  - /space/evaluators不虚构编辑动作。
+  - 评估主流程在 /evaluation 及其详情页完成，不依赖独立旧评估器页面。
   forbidden_side_effects: []
   source:
     legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
     legacy_sheet: 03_Playwright_Journey
     legacy_row: 48
+    notes: 2026-10-19 editorial correction of repeated obsolete-page wording; current /evaluation journey, fixed script and acceptance scope are unchanged.
   actor: Nexent browser user
   journey:
   - 打开/evaluation→评测，点击【创建评测】。
@@ -80,7 +81,7 @@ case:
   - 选择控件与当前页面一致。
   - Try it out真实调用Agent/Evaluator。
   - Run可轮询到终态且详情可打开。
-  - /space/evaluators不虚构编辑动作。
+  - 评估主流程在 /evaluation 及其详情页完成，不依赖独立旧评估器页面。
   failure_evidence:
   - '${NEXENT_TEST_HOME}/runs/{run_id}/playwright/PW-EVAL-RUN-01/
 

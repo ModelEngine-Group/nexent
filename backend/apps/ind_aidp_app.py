@@ -1,3 +1,4 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """HTTP endpoints for the independent AIDP search connector."""
 
 from io import BytesIO
@@ -8,12 +9,12 @@ from fastapi import APIRouter, Header, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
-from services.ind_aidp_service import (
+from management.services.knowledge_base.providers.aidp import (
     IndependentAidpServiceError,
     fetch_ind_aidp_image_impl,
     fetch_ind_aidp_knowledge_bases_impl,
 )
-from utils.auth_utils import get_current_user_id
+from management.services.permission.identity.authentication_helpers import get_current_user_id
 
 router = APIRouter(prefix="/ind-aidp", tags=["independent-aidp"])
 

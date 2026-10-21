@@ -80,11 +80,11 @@ from nexent.core.gateway.modality import EmbeddingAdapter
 from nexent.vector_database.base import VectorDatabaseCore
 from permissions.dac import ResourceAccessControl
 from permissions.models import Resource
-from services.asset_owner_visibility import postprocess_knowledge_visibility
-from services.group_service import get_tenant_default_group_id
-from services.redis_service import get_redis_service
-from utils.config_utils import tenant_config_manager
-from utils.str_utils import convert_list_to_string, convert_string_to_list
+from management.services.permission.asset_owner import postprocess_knowledge_visibility
+from management.services.permission.identity.groups import get_tenant_default_group_id
+from management.services.knowledge_base.task_state import get_redis_service
+from management.services.configuration.tenant.settings import tenant_config_manager
+from management.db.serialization import convert_list_to_string, convert_string_to_list
 
 
 class KnowledgeBaseManagementService(KnowledgeBaseFileService):
@@ -873,7 +873,7 @@ class KnowledgeBaseManagementService(KnowledgeBaseFileService):
         indices = [record["index_name"] for record in visible_knowledgebases]
 
         if include_stats:
-            from services.resource_tag_projection import (
+            from management.services.tag.projection import (
                 project_authorized_resource_tags,
             )
 

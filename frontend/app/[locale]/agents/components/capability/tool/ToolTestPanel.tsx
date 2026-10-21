@@ -151,7 +151,7 @@ export default function ToolTestPanel({
   configInvalid = false,
   toolKbType = null,
 }: ToolTestPanelProps) {
-  const { t } = useTranslation("common");
+  const { t, i18n } = useTranslation("common");
   const [form] = Form.useForm();
 
   // Track if form has been initialized (to avoid resetting user input)
@@ -763,7 +763,8 @@ export default function ToolTestPanel({
         toolSource, // Tool source
         tool.usage || "", // Tool usage
         toolParams, // tool input parameters
-        finalConfigs // tool configuration parameters
+        finalConfigs, // tool configuration parameters
+        i18n.language.toLowerCase().startsWith("en") ? "en" : "zh"
       );
 
       // Format the JSON string response

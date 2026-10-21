@@ -12,7 +12,7 @@ from pathlib import Path
 import httpx
 from database.client import get_db_session, minio_client
 from database.db_models import AgentInfo, ConversationMessage, ConversationRecord
-from utils.auth_utils import generate_session_jwt
+from management.services.permission.identity.authentication_helpers import generate_session_jwt
 
 
 def digest(value):
@@ -49,7 +49,7 @@ def main():
                     "provide_run_summary", "enable_protocol_repair_retry", "verification_config", "model_params_override"]
             values = {k: getattr(published, k) for k in keys}
             assert values == {k: getattr(draft, k) for k in keys}, "Draft and published source differ"
-            from services.agent_reasoning_service import snapshot_agent_reasoning_config
+            from management.services.agent.reasoning import snapshot_agent_reasoning_config
 
             # Match the management API's effective reasoning snapshot without writing the source.
             values["model_params_override"] = snapshot_agent_reasoning_config(

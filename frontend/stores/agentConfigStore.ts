@@ -1,3 +1,5 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 /**
  * agentConfigStore
  *
@@ -44,13 +46,9 @@ export type EditableAgent = Pick<
   | "enable_protocol_repair_retry"
   | "tools"
   | "duty_prompt"
-  | "constraint_prompt"
-  | "few_shots_prompt"
   | "business_description"
   | "business_logic_model_name"
   | "business_logic_model_id"
-  | "prompt_template_id"
-  | "prompt_template_name"
   | "verification_config"
   | "sub_agent_id_list"
   | "sub_agent_relations"
@@ -216,13 +214,9 @@ function createEmptyEditableAgent(llmConfig?: {
     tools: [],
     skills: [],
     duty_prompt: "",
-    constraint_prompt: "",
-    few_shots_prompt: "",
     business_description: "",
     business_logic_model_name: llmConfig?.name || "",
     business_logic_model_id: llmConfig?.id || 0,
-    prompt_template_id: 0,
-    prompt_template_name: "system_default",
     verification_config: {
       ...DEFAULT_AGENT_VERIFICATION_CONFIG,
       guardrail_config: { ...DEFAULT_GUARDRAIL_CONFIG },
@@ -259,13 +253,9 @@ const toEditable = (agent: Agent | null): EditableAgent =>
         tools: [...(agent.tools || [])],
         skills: [...(agent.skills || [])],
         duty_prompt: agent.duty_prompt || "",
-        constraint_prompt: agent.constraint_prompt || "",
-        few_shots_prompt: agent.few_shots_prompt || "",
         business_description: agent.business_description || "",
         business_logic_model_name: agent.business_logic_model_name || "",
         business_logic_model_id: agent.business_logic_model_id || 0,
-        prompt_template_id: agent.prompt_template_id ?? 0,
-        prompt_template_name: agent.prompt_template_name || "system_default",
         verification_config: agent.verification_config || {
           ...DEFAULT_AGENT_VERIFICATION_CONFIG,
         },
@@ -398,14 +388,9 @@ const isDirty = (
       editedAgent.allow_chat_metadata !== false ||
       editedAgent.enable_protocol_repair_retry !== false ||
       editedAgent.duty_prompt !== "" ||
-      editedAgent.constraint_prompt !== "" ||
-      editedAgent.few_shots_prompt !== "" ||
       editedAgent.business_description !== "" ||
       editedAgent.business_logic_model_name !== "" ||
       editedAgent.business_logic_model_id !== 0 ||
-      (editedAgent.prompt_template_id ?? 0) !== 0 ||
-      (editedAgent.prompt_template_name || "system_default") !==
-        "system_default" ||
       JSON.stringify(
         editedAgent.verification_config || DEFAULT_AGENT_VERIFICATION_CONFIG
       ) !== JSON.stringify(DEFAULT_AGENT_VERIFICATION_CONFIG) ||
@@ -441,17 +426,11 @@ const isDirty = (
     (baselineAgent.enable_protocol_repair_retry ?? false) !==
       (editedAgent.enable_protocol_repair_retry ?? false) ||
     baselineAgent.duty_prompt !== editedAgent.duty_prompt ||
-    baselineAgent.constraint_prompt !== editedAgent.constraint_prompt ||
-    baselineAgent.few_shots_prompt !== editedAgent.few_shots_prompt ||
     baselineAgent.business_description !== editedAgent.business_description ||
     baselineAgent.business_logic_model_name !==
       editedAgent.business_logic_model_name ||
     baselineAgent.business_logic_model_id !==
       editedAgent.business_logic_model_id ||
-    (baselineAgent.prompt_template_id ?? 0) !==
-      (editedAgent.prompt_template_id ?? 0) ||
-    (baselineAgent.prompt_template_name || "system_default") !==
-      (editedAgent.prompt_template_name || "system_default") ||
     JSON.stringify(
       baselineAgent.verification_config || DEFAULT_AGENT_VERIFICATION_CONFIG
     ) !==
@@ -513,10 +492,6 @@ export const useAgentConfigStore = create<AgentConfigStoreState>(
           const cacheUpdates: Partial<EditableAgent> = {};
 
           if (cached.dutyPrompt) cacheUpdates.duty_prompt = cached.dutyPrompt;
-          if (cached.constraintPrompt)
-            cacheUpdates.constraint_prompt = cached.constraintPrompt;
-          if (cached.fewShotsPrompt)
-            cacheUpdates.few_shots_prompt = cached.fewShotsPrompt;
           if (cached.greetingMessage)
             cacheUpdates.greeting_message = cached.greetingMessage;
           if (cached.exampleQuestions) {

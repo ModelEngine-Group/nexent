@@ -1,3 +1,4 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """D1 backend policy tests for repository, sharing, runtime and memory."""
 
 from __future__ import annotations
@@ -28,7 +29,7 @@ STAGE = pytest.mark.stage("D1")
 @STAGE
 @pytest.mark.case_id("UT-BE-020")
 def test_evaluation_excel_parser_handles_aliases_empty_rows_and_required_query(monkeypatch: pytest.MonkeyPatch) -> None:
-    from utils import evaluation_set_excel_utils as excel
+    from management.services.evaluation import spreadsheet as excel
 
     rows = [
         ("说明", None, None),
@@ -46,13 +47,3 @@ def test_evaluation_excel_parser_handles_aliases_empty_rows_and_required_query(m
     monkeypatch.setattr(excel, "_load_rows", lambda filename, raw: [("answer",), ("only answer",)])
     with pytest.raises(ValueError, match="Missing required column: query"):
         excel.parse_evaluation_cases_from_excel("bad.xlsx", b"fixture")
-
-
-
-
-
-
-
-
-
-

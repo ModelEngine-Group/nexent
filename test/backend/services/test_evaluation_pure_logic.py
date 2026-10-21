@@ -380,12 +380,12 @@ def _install_sys_modules_stubs() -> None:
     _as_mod = _mk_mod("management.services.agent.service", prepare_agent_run=MagicMock())
     _services_pkg.agent_service = _as_mod
     _ess_mod = _mk_mod(
-        "services.evaluation_set_service",
+        "management.services.evaluation.sets",
         resolve_latest_published_version_no=MagicMock(),
     )
     _services_pkg.evaluation_set_service = _ess_mod
     _tls_mod = _mk_mod(
-        "services.thread_lifecycle_service",
+        "infrastructure.concurrency",
         config_thread_manager=MagicMock(),
         runtime_thread_manager=MagicMock(),
     )
@@ -413,7 +413,7 @@ _apply_module_state(_BASE_MODULE_STATE)
 # 4. Fixture – fresh import of the real agent_evaluation_service module
 # ---------------------------------------------------------------------------
 
-SERVICE_PATH = "services.agent_evaluation_service"
+SERVICE_PATH = "management.services.evaluation.runs"
 
 
 @pytest.fixture(scope="module")
