@@ -4,7 +4,7 @@ change:
   change_type: bugfix
   bug_id: CAS-PROFILE-LINKED-ACCOUNTS-20261021
   title: Show linked accounts only when OAuth login is enabled
-  description: Mount the existing linked-account section only after a user is available and OAuth login configuration enables it.
+  description: Mount the linked-account section only after a user is available and OAuth login configuration enables it; pass the resolved providers to the child without a second configuration read.
   observed_behavior: The profile mounts the OAuth section without checking whether OAuth login is enabled, displaying an empty card when OAuth is disabled.
   expected_behavior: Show the card only for a resolved user when OAuth is enabled in button or force mode; hide it during loading, on configuration failure, and when OAuth is disabled, including CAS-only deployments.
   escaped_stage: unknown

@@ -744,7 +744,7 @@ export default function UserProfileComp() {
       {/* OAuth Linked Accounts */}
       {user && isOAuthLoginEnabled && (
         <div className="w-full mt-4">
-          <OAuthAccountsSection />
+          <OAuthAccountsSection providers={oauthConfig?.providers ?? []} />
         </div>
       )}
     </Flex>
