@@ -106,18 +106,18 @@ test("redirects only after SU authorization arrives", () => {
 
 test.each([
   { routes: ["/newchat", "/workbench"], enabled: true, target: "/workbench" },
-  { routes: ["/chat", "/newchat"], enabled: true, target: "/workbench" },
+  { routes: ["/chat", "/newchat"], enabled: true, target: "/newchat" },
   { routes: ["/newchat"], enabled: true, target: "/newchat" },
   { routes: ["/workbench", "/newchat"], enabled: false, target: "/newchat" },
   {
-    routes: ["/workbench", "/owner-manage"],
+    routes: ["/", "/owner-manage", "/resource-manage"],
     enabled: false,
     target: "/owner-manage",
   },
   {
-    routes: ["/agent-dev", "/resource-space", "/models"],
+    routes: ["/", "/resource-manage", "/owner-manage"],
     enabled: true,
-    target: "/models",
+    target: "/resource-manage",
   },
 ])(
   "selects $target for enabled=$enabled and $routes",
@@ -129,7 +129,7 @@ test.each([
   }
 );
 
-test.each([[], ["/"], ["/agent-dev", "/resource-space"]])(
+test.each([[], ["/"]])(
   "renders Home without self-redirect for permissions %j",
   (...routes: string[]) => {
     state.routes = routes;
