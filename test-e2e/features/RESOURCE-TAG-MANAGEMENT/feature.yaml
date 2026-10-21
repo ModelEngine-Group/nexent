@@ -19,6 +19,8 @@ feature:
     description: Loading, empty data and failed requests remain distinguishable. Metadata requests can be retried and successful mutations refresh the list. Other callers of the shared management modal retain its behavior.
   - rule_id: RESOURCE-TAG-MANAGEMENT-RULE-005
     description: Tag and value creation, editing and deletion dialogs use the shared localized Cancel and Confirm labels in both the inline list and management modal.
+  - rule_id: RESOURCE-TAG-MANAGEMENT-RULE-006
+    description: Definition search matches the localized definition name, the raw key and the value display text. A name or key hit stays collapsed with its matched fragment highlighted, a value-only hit opens that row and lists only the matched values, and clearing the search restores the previous rows and the hosting dialog keeps its height during a search.
   required_test_stages: []
   source:
     requirement_ids:

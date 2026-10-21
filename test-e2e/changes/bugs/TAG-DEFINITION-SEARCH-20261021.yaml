@@ -1,0 +1,67 @@
+schema_version: '1.0'
+change:
+  change_id: TAG-DEFINITION-SEARCH-20261021
+  change_type: bugfix
+  bug_id: TAG-DEFINITION-SEARCH-20261021
+  title: Match tag definition search against localized names, keys and values
+  description: >-
+    Search the tag management definition table by the localized name and the raw key it already displays and by
+    value display text, present the result set according to what matched, and keep the hosting dialog height
+    stable while a search filters rows.
+  observed_behavior: >-
+    A definition whose table row renders the localized name of its key, such as keywords rendered as its
+    translated label, cannot be found by that name or by a translated fragment, and text typed into the value
+    column never matches either. Filtered rows also let the management dialog resize on every keystroke.
+  expected_behavior: >-
+    A keyword matches a definition through its rendered localized name, its raw key, or any value display text.
+    The matched fragment is highlighted, a row that matched only through a value opens and lists the matched
+    values, a row that matched through its own name or key stays collapsed, and clearing the search restores the
+    previous rows and values. The management dialog keeps its height while the search filters the table.
+  escaped_stage: D4
+  coverage_gap:
+    type: missing_assertion
+    description: >-
+      The Tags tab component tests asserted that the definition table renders and mutates definitions and values,
+      but never asserted which text a keyword can match or how a filtered result set is presented, so a
+      name-blind and value-blind filter stayed green.
+  feature_contract_changed: true
+  affected_features:
+    existing: []
+    added: []
+    modified: [RESOURCE-TAG-MANAGEMENT]
+    retired: []
+  affected_cases:
+    existing: []
+    added: []
+    modified: []
+    retired: []
+  traditional_ut:
+    decision: add
+    behaviors:
+    - Match a definition by the localized name the table renders, by its raw key and by a value display or normalized value.
+    - Treat a blank search as no filter, report no results honestly and keep the empty-library message.
+    - Open only a row that matched through one of its values, list just those values and keep a name or key hit collapsed.
+    - Highlight the matched fragment of a name and of a value.
+    - Restore the previously collapsed rows and the full value list when the search is cleared, and allow collapsing a row the search opened.
+    - Pin the table body height in the management dialog and leave an embedded panel its natural height.
+    test_selectors:
+    - frontend/tests/component/tagDefinitionSearch.test.tsx
+    reason: >-
+      Focused regression coverage is needed because the existing Tags tab tests never asserted the searchable text
+      or the presentation of a filtered result set. The added component regression exercises the real panel against
+      controlled service responses and covers matching, presentation and dialog height. No formal Case owns this
+      feature and no backend, API or persistence contract changed, so no D1-D5 Case is added.
+  notes: >-
+    Observed on 2026-10-21 in the tag management dialog reachable from resource management. The sibling nexent-doc
+    checkout is absent, so no external SPEC can be reused; the lightweight design is
+    test-e2e/changes/bugs/TAG-DEFINITION-SEARCH-20261021/design.md. Search text is now resolved from the same
+    localized name, raw key and value helpers the table renders, which is why a translated keyword previously
+    never reached the filter. No formal Case references RESOURCE-TAG-MANAGEMENT, so the impact assessment found no
+    existing Case to reuse or strengthen and recorded the behavior as deferred coverage rather than adding a Case
+    whose boundary is already proved by component UT. Evidence: 14 component tests in
+    frontend/tests/component/tagDefinitionSearch.test.tsx pass together with the neighbouring tagLibraryManagement,
+    resourceTagManagement and resourceTagFilter tests; targeted ESLint, Prettier, copyright and diff whitespace
+    checks pass. Type checking is blocked only by pre-existing unrelated diagnostics in the checkout. The dialog
+    height behavior is proved in jsdom through the pinned table body, not by measuring a real browser layout.
+    The separately reported Firefox-only expanded-row icon appearance is an upstream antd table expander and
+    Firefox sub-pixel line rendering difference, not a regression introduced by this change, so it is left as is.
