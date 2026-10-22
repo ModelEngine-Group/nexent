@@ -97,14 +97,31 @@ async def test_api_auto_dde7582ffe405d54(tenant_a_admin, tenant_b_admin):
         async with client('config', token=tenant_a_admin.access_token) as api:
             agent_a = await _create_agent(api, dup_name, tenant_a_admin, dup_display)
             created_a.append(agent_a)
+            # `update_agent_info_impl` guards against duplicate name/display_name
+            # on create by auto-suffixing with a numeric tail
+            # (`generate_unique_agent_value`). A second create with the same
+            # payload therefore lands on `dup_name_<n>`, so the tenant can never
+            # hold two identically named draft agents. Assert that contract
+            # instead of expecting two conflicts.
             agent_b = await _create_agent(api, dup_name, tenant_a_admin, dup_display)
             created_a.append(agent_b)
+
+            existing_names, _ = await _existing_values(api)
+            assert dup_name in existing_names
+            assert any(
+                name == dup_name or name.startswith(f'{dup_name}_')
+                for name in existing_names
+            ), existing_names
+            # The auto-suffixed duplicate proves the create-time guard ran.
+            assert any(name.startswith(f'{dup_name}_') for name in existing_names), existing_names
 
             result = await _check_name(api, [{'name': dup_name, 'display_name': dup_display}])
             assert isinstance(result, list) and len(result) == 1
             assert result[0]['name_conflict'] is True
             assert result[0]['display_name_conflict'] is True
-            assert len(result[0]['conflict_agents']) >= 2
+            # Exactly one live agent still owns the original name; the second
+            # one was renamed on create.
+            assert len(result[0]['conflict_agents']) == 1
             for entry in result[0]['conflict_agents']:
                 assert 'name' in entry and 'display_name' in entry
 

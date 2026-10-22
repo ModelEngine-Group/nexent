@@ -1,4 +1,5 @@
 import { render, screen, cleanup } from '@testing-library/react';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { beforeAll, beforeEach, afterEach, describe, expect, it, vi } from 'vitest';
 import UserProfileComp from '@/app/[locale]/users/components/UserProfileComp';
 import { useAuthenticationContext } from '@/components/providers/AuthenticationProvider';
@@ -111,7 +112,19 @@ function makeUser(overrides: any = {}) {
 
 function renderWithUser(user: any) {
   mocks.useAuthorizationContext.mockReturnValue({ user, groupIds: [] });
-  return render(<UserProfileComp />);
+  // UserProfileComp calls `useQuery` directly (oauthService config), so the tree
+  // must sit under a QueryClientProvider.
+  const queryClient = new QueryClient({
+    defaultOptions: {
+      queries: { retry: false, gcTime: 0 },
+      mutations: { retry: false },
+    },
+  });
+  return render(
+    <QueryClientProvider client={queryClient}>
+      <UserProfileComp />
+    </QueryClientProvider>
+  );
 }
 
 beforeAll(() => {

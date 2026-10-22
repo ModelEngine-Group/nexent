@@ -36,6 +36,7 @@ ES_STORE_SIZE_BYTES = int(1.5 * GB)
 def test_es_stats_fail_open_source_ledger_quota(monkeypatch, caplog):
     import management.services.knowledge_base.service as kb_service
     import management.services.knowledge_base.quota as quota_service
+    import management.services.knowledge_base.usage as usage_service
     from management.services.knowledge_base.quota import QuotaService
 
     quota_service._usage_cache.clear()
@@ -88,6 +89,11 @@ def test_es_stats_fail_open_source_ledger_quota(monkeypatch, caplog):
     monkeypatch.setattr(quota_service, 'get_private_knowledge_info_by_creator', lambda tenant_id, created_by: kb_list())
     monkeypatch.setattr(quota_service, 'get_private_knowledge_info_by_tenant_id', lambda tenant_id: kb_list())
     monkeypatch.setattr(quota_service, 'get_committed_bytes_by_kb', committed_bytes_by_kb)
+    # `QuotaService.get_usage` is implemented in the `usage` mixin module, which
+    # imported `get_tenant_committed_source_bytes` into its *own* namespace. Patch
+    # both modules: `usage` is the one the implementation actually calls, while
+    # `quota` keeps the symbol for the peer helpers asserted below.
+    monkeypatch.setattr(usage_service, 'get_tenant_committed_source_bytes', tenant_committed)
     monkeypatch.setattr(quota_service, 'get_tenant_committed_source_bytes', tenant_committed)
     monkeypatch.setattr(kb_service, 'get_vector_db_core', get_vector_db_core)
 

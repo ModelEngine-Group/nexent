@@ -30,8 +30,9 @@ journey("PW-KB-LOCAL-01", async (context) => {
     preconditions: [
       async () => {
         await loginCurrent(page, "tenant_a_admin");
+        // `knowledge.open()` already asserts the page toolbar is rendered; the
+        // legacy `role=heading` "知识库" node does not exist on this page.
         await knowledge.open();
-        await expect(page.getByRole("heading", { name: "知识库", exact: true })).toBeVisible();
         return "opened the Nexent Local knowledge-base branch";
       },
       async () => {

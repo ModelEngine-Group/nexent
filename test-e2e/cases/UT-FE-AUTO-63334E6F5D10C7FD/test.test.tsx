@@ -64,6 +64,13 @@ vi.mock('@/services/monitoringService', () => ({
   monitoringService: { fetchStatus: vi.fn().mockResolvedValue(null) },
 }));
 
+// useAccountMonitoring wraps a TanStack Query `useQuery`. Mocking the hook keeps
+// this component test free of a QueryClientProvider requirement, in line with
+// tests/component/accountMenu.test.tsx.
+vi.mock('@/hooks/useAccountMonitoring', () => ({
+  useAccountMonitoring: () => null,
+}));
+
 vi.mock('@/hooks/useConfirmModal', () => ({
   useConfirmModal: () => ({ confirm: vi.fn() }),
 }));
